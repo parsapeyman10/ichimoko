@@ -1,0 +1,13 @@
+{
+  "name": "Aurum Edge Trading Terminal",
+  "short_name": "Aurum Edge",
+  "description": "XAU/USD market intelligence and closed-bar signal terminal",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#07090d",
+  "theme_color": "#07090d",
+  "orientation": "any",
+  "icons": [
+    { "src": "/aurum-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
