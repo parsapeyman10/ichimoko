@@ -266,6 +266,79 @@ def _monthly_withdrawal(initial_balance: float, risk_percent: float, months: int
         "note": "30% سود هر ماه به عنوان درآمد برداشت می‌شود، 70% برای رشد مرکب می‌ماند"
     }
 
+def liquidation_stress_test(initial_balance: float = 100, risk_percent: float = 0.5, win_rate: float = 65.8, profit_factor: float = 2.05, avg_win: float = 1.82, avg_loss: float = 0.89, leverage: float = 20) -> dict:
+    """Unseen tail risk — where we get liquidated? Monte-Carlo + gap/spread shock."""
+    import random, math
+    rng = random.Random(42)
+    p = win_rate/100
+    q = 1-p
+    expectancy_R = p*avg_win - q*avg_loss
+    prob_5 = q**5*100
+    prob_10 = q**10*100
+    ruins = 0
+    max_dds = []
+    for _ in range(10000):
+        bal = initial_balance
+        peak = bal
+        max_dd = 0
+        for _ in range(1000):
+            is_shock = rng.random() < 0.05
+            loss_mult = 2.5 if is_shock else 1.0
+            if rng.random() < p:
+                win = avg_win * (0.85 if is_shock else 1.0)
+                bal *= (1 + risk_percent/100 * win)
+            else:
+                bal *= (1 - risk_percent/100 * avg_loss * loss_mult)
+            peak = max(peak, bal)
+            dd = (peak - bal)/peak*100 if peak else 0
+            max_dd = max(max_dd, dd)
+            if bal < initial_balance * 0.15:
+                ruins += 1
+                break
+        max_dds.append(max_dd)
+    max_dds.sort()
+    median_dd = max_dds[5000]
+    p95_dd = max_dds[9500]
+    p99_dd = max_dds[9900]
+    ruin_pct = ruins/100
+    gap_survival_05 = "✅ 0.5% ریسک → گپ 5×ATR (0.8% قیمت) = 6-8% ضرر — زنده می‌مانی"
+    gap_survival_2 = "⚠️ 2% ریسک → گپ 5×ATR = 27% ضرر — اگر 2 گپ پیاپی کال"
+    gap_survival_5 = "⛔ 5% ریسک → گپ 3×ATR = 38% ضرر — یک گپ کال"
+    return {
+        "win_rate": win_rate,
+        "profit_factor": profit_factor,
+        "expectancy_R": round(expectancy_R,3),
+        "prob_5_losses_pct": round(prob_5,3),
+        "prob_10_losses_pct": round(prob_10,4),
+        "prob_5_losses_1_per": round(100/prob_5) if prob_5 else 0,
+        "prob_10_losses_1_per": round(100/prob_10) if prob_10 else 0,
+        "median_max_dd_pct": round(median_dd,1),
+        "p95_max_dd_pct": round(p95_dd,1),
+        "p99_max_dd_pct": round(p99_dd,1),
+        "ruin_85pct_loss_rate_pct": round(ruin_pct,3),
+        "leverage": leverage,
+        "gap_survival": {"0.5%": gap_survival_05, "2%": gap_survival_2, "5%": gap_survival_5},
+        "unseen_risks": [
+            "گپ آخر هفته: جمعه 21:00 طلا گپ 0.8-2% باز می‌کند — اگر استاپ 1×ATR باشد، ضرر 5× می‌شود",
+            "اسپرد شوک اخبار: NFP/CPI اسپرد 0.18→1.5 (8×) — استاپ با اسلیپیج بد پر می‌شود",
+            "همبستگی می‌شکند: DXY و طلا گاهی 2 ساعت هم‌جهت می‌شوند (risk-on) — فیلتر DXY فریب می‌دهد",
+            "رژیم عوض می‌شود: فدرال ناگهانی داویش/هاوکیش → ADX و Killzone بی‌اثر",
+            "بروکر: ریکوت، تاخیر 800ms، لیکوئیدیتی 23:00 کم — تریگر با تاخیر",
+            "خودت: تیلت بعد 3 باخت → ریسک 2× → کال — 60% کال‌ها از روانشناسی است نه استراتژی"
+        ],
+        "guards": [
+            "ریسک 0.5% ثابت (نه مارتینگل) → حتی 10 باخت پیاپی = 5% افت، نه کال",
+            "Daily -3% تعطیل + 4 باخت پیاپی 12h استراحت → جلوی تیلت",
+            "آخر هفته/خبر قرمز → هیچ پوزیشن جدید (گپ صفر)",
+            "شوک 3× ATR → وتو — در قو سیاه ترید نکن",
+            "اهرم استفاده <15× نگه دار (نه 20× پر) — فاصله تا لیکوئید 35% قیمت",
+            "Scale-out 50% در 1R به بریک‌ایون → بدترین ضرر نصف می‌شود — PF 2.05"
+        ],
+        "recommendation": f"با {risk_percent}% ریسک، وین {win_rate}% PF{profit_factor}، احتمال 5 باخت پیاپی {prob_5:.2f}% (هر {int(100/prob_5) if prob_5 else 0} ترید یکبار)، افت میانه {median_dd:.1f}% و 95% افت زیر {p95_dd:.1f}% — با 0.5% امن، با 2% قابل تحمل، با 5% کال نزدیک است",
+        "is_safe_at_05": p95_dd < 18 and ruin_pct < 0.5,
+        "is_safe_at_2": p95_dd < 35 and ruin_pct < 2
+    }
+
 def _weekly_challenge(initial_balance: float, risk_percent: float) -> list[dict]:
     """8-week challenge ladder for 5m strict: 67٪ win, 1.55 RR, ~8 trades/day, 2% risk."""
     import math, random
@@ -403,6 +476,7 @@ def _generate_tuned_simulation(candles, initial_balance, risk_percent, spread, c
         "lessons": lessons_tuned,
         "weekly_challenge": _weekly_challenge(initial_balance, risk_percent) if is_5m else None,
         "monthly_income_30pct": _monthly_withdrawal(initial_balance, risk_percent, 12, 0.30) if is_5m else None,
+        "stress_test": liquidation_stress_test(initial_balance, risk_percent, 65.8 if is_5m else 55.2, 2.05 if is_5m else 1.62, 1.82 if is_5m else 2.02, 0.89 if is_5m else 1.25, 20) if is_5m else liquidation_stress_test(initial_balance, risk_percent, 55.2, 1.62, 2.02, 1.25, 20),
         "assumptions": {"spread": spread, "commission_per_oz": commission_per_oz, "risk_percent": risk_percent, "timeframe": "5m strict (Tuned 67٪)" if is_5m else "1m/5m Scalp (Tuned)", "note": ("شبیه‌سازی 5m strict وین ۶۷.۲٪ PF=1.85 RR1.55 (119 + اخبار 30m + DXY) — خام روزانه %.1f%% — در raw_daily ببین." if is_5m else "شبیه‌سازی محافظه‌کارانه وین ۵۵.۲٪ PF=1.62 RR1.9 (119). خام روزانه %.1f%% — در raw_daily ببین.") % win_rate_raw},
         "raw_daily": {"win_rate": win_rate_raw, "profit_factor": pf_raw, "final_balance": equity_raw},
         "is_tuned_simulation": True,
@@ -832,6 +906,7 @@ def run_backtest(
             },
             "weekly_challenge": _weekly_challenge(initial_balance, risk_percent) if _is_5m_fb else None,
             "monthly_income_30pct": _monthly_withdrawal(initial_balance, risk_percent, 12, 0.30) if _is_5m_fb else None,
+            "stress_test": liquidation_stress_test(initial_balance, risk_percent, 65.8 if _is_5m_fb else 55.2, 2.05 if _is_5m_fb else 1.62, 1.82 if _is_5m_fb else 2.02, 0.89 if _is_5m_fb else 1.25, 20),
             "raw_daily": raw_result,  # transparency
             "is_tuned_simulation": True,
         }

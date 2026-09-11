@@ -88,6 +88,13 @@ class StrategyContext(BaseModel):
     spread: float = Field(default=0.18, ge=0)
     typical_spread: float = Field(default=0.18, gt=0)
     higher_timeframe_bias: Direction = Direction.NEUTRAL
+    # ── liquidation guards (unseen tail) ──
+    daily_pnl_pct: float = 0.0  # today's PnL % of equity
+    consecutive_losses: int = 0
+    account_equity: float = 100.0
+    max_leverage: float = 20.0  # broker max
+    is_weekend_gap_risk: bool = False
+    volatility_regime: str = "normal"  # normal|shock
 
 
 class TradeSignal(BaseModel):

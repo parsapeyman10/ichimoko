@@ -348,6 +348,52 @@ export default function BacktestPanel() {
         </div>
         <div style={{marginTop:6, font:'7px DM Mono', color:'#8a909c'}}>نکته قهار: با 0.5% امن، ماه 6 میانگین برداشت ~$180، ماه 12 ~$420 می‌شود — درآمد صعودی، استرس کم. با 2% چلنج، ماه 3 به بعد $600+ اما افت 18% را تحمل کن.</div>
       </div>}
+      {/* Stress Test — unseen liquidation */}
+      {(stats as any).stress_test && <div style={{padding:12, borderBottom:'1px solid #ef637130', background:'linear-gradient(180deg, #1a0f0f, #0a0c10)'}}>
+        <b style={{fontSize:10, display:'flex', alignItems:'center', gap:6, color:'var(--red)'}}><AlertTriangle size={12}/> تست استرس — کجا کال می‌شیم؟ (10k Monte-Carlo)</b>
+        <div style={{display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(130px,1fr))', gap:8, marginTop:8, font:'8px DM Mono'}}>
+          <div style={{background:'#0a0e12', border:'1px solid #1a2320', borderRadius:6, padding:'8px 8px', textAlign:'center'}}>
+            <span style={{display:'block', color:'#6b7280'}}>5 باخت پیاپی</span>
+            <b style={{display:'block', color:'var(--red)', font:'700 12px DM Mono', marginTop:4}}>{(stats as any).stress_test.prob_5_losses_pct.toFixed(2)}%</b>
+            <small style={{color:'#5a6b65'}}>هر {(stats as any).stress_test.prob_5_losses_1_per} ترید یکبار</small>
+          </div>
+          <div style={{background:'#0a0e12', border:'1px solid #1a2320', borderRadius:6, padding:'8px 8px', textAlign:'center'}}>
+            <span style={{display:'block', color:'#6b7280'}}>10 باخت پیاپی</span>
+            <b style={{display:'block', color:'var(--red)', font:'700 12px DM Mono', marginTop:4}}>{(stats as any).stress_test.prob_10_losses_pct.toFixed(4)}%</b>
+            <small style={{color:'#5a6b65'}}>هر {(stats as any).stress_test.prob_10_losses_1_per?.toLocaleString() ?? '—'} ترید یکبار</small>
+          </div>
+          <div style={{background: (stats as any).stress_test.p95_max_dd_pct < 18 ? '#0a0e12' : '#ef637110', border:'1px solid ' + ((stats as any).stress_test.p95_max_dd_pct < 18 ? '#1a2320' : '#ef637130'), borderRadius:6, padding:'8px 8px', textAlign:'center'}}>
+            <span style={{display:'block', color:'#6b7280'}}>افت 95% (10k run)</span>
+            <b style={{display:'block', color: (stats as any).stress_test.p95_max_dd_pct < 18 ? 'var(--green)' : 'var(--red)', font:'700 12px DM Mono', marginTop:4}}>-{(stats as any).stress_test.p95_max_dd_pct}%</b>
+            <small style={{color:'#5a6b65'}}>میانه {(stats as any).stress_test.median_max_dd_pct}%</small>
+          </div>
+          <div style={{background: (stats as any).stress_test.ruin_85pct_loss_rate_pct < 1 ? '#0a0e12' : '#ef637110', border:'1px solid ' + ((stats as any).stress_test.ruin_85pct_loss_rate_pct < 1 ? '#1a2320' : '#ef637130'), borderRadius:6, padding:'8px 8px', textAlign:'center'}}>
+            <span style={{display:'block', color:'#6b7280'}}>کال 85% (10k)</span>
+            <b style={{display:'block', color: (stats as any).stress_test.ruin_85pct_loss_rate_pct < 0.5 ? 'var(--green)' : 'var(--red)', font:'700 12px DM Mono', marginTop:4}}>{(stats as any).stress_test.ruin_85pct_loss_rate_pct.toFixed(3)}%</b>
+            <small style={{color:'#5a6b65'}}>{(stats as any).stress_test.is_safe_at_05 ? '0.5% امن' : '0.5% خطر'}</small>
+          </div>
+        </div>
+        <div style={{marginTop:8, display:'grid', gridTemplateColumns:'1fr 1fr', gap:8}}>
+          <div style={{background:'#0a0e12', border:'1px solid #1a2320', borderRadius:6, padding:'8px 8px'}}>
+            <b style={{fontSize:8, color:'#c9b896'}}>ریسک‌های ندیده (Unseen):</b>
+            <ul style={{margin:'4px 0 0', paddingRight:14, font:'8px DM Mono', color:'#8a909c', lineHeight:1.6}}>
+              {(stats as any).stress_test.unseen_risks.slice(0,4).map((r:string,i:number)=><li key={i}>{r}</li>)}
+            </ul>
+          </div>
+          <div style={{background:'#28c99b0a', border:'1px solid #28c99b20', borderRadius:6, padding:'8px 8px'}}>
+            <b style={{fontSize:8, color:'var(--green)'}}>سپر ضدکال (Guards):</b>
+            <ul style={{margin:'4px 0 0', paddingRight:14, font:'8px DM Mono', color:'#7af0c8', lineHeight:1.6}}>
+              {(stats as any).stress_test.guards.slice(0,4).map((r:string,i:number)=><li key={i}>{r}</li>)}
+            </ul>
+          </div>
+        </div>
+        <div style={{marginTop:6, font:'7px DM Mono', color:'#c9b896', background:'#f1bc4b0a', border:'1px solid #f1bc4b20', borderRadius:4, padding:'6px 8px'}}>
+          {(stats as any).stress_test.recommendation}
+          <br/><span style={{color:(stats as any).stress_test.is_safe_at_05 ? 'var(--green)' : 'var(--red)'}}>
+            { (stats as any).stress_test.gap_survival["0.5%"]} | { (stats as any).stress_test.gap_survival["2%"]}
+          </span>
+        </div>
+      </div>}
 
       {/* Equity curve */}
       <div style={{ padding: 12 }}>
