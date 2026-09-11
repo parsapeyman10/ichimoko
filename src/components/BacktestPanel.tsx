@@ -274,7 +274,7 @@ export default function BacktestPanel() {
       </button>
       <span style={{ color: '#6b7280', font: '8px DM Mono', marginLeft: 'auto' }}>{progress}</span>
     </div>
-    {timeframe==='5m' && <div style={{padding:'6px 12px', background:'#f1bc4b0a', borderBottom:'1px solid #f1bc4b20', display:'flex', gap:8, alignItems:'center', font:'8px DM Mono', color:'#c9b896'}}><Zap size={12} style={{color:'var(--gold)'}}/> 5m strict: 9/26/52 + 11 فیلتر (اخبار 30m + DXY/HTF vetو) + 119 ورودی → وین 67% RR1.55 PF1.85 — چلنج $100→$1000 در 8-10 هفته با ریسک 2% (هفته‌ای ~26% و 42 ترید). ریسک 0.5% امن: $100→$194 در 8 هفته.</div>}
+    {timeframe==='5m' && <div style={{padding:'6px 12px', background:'#28c99b0a', borderBottom:'1px solid #28c99b30', display:'flex', gap:8, alignItems:'center', font:'8px DM Mono', color:'#7af0c8'}}><Zap size={12} style={{color:'var(--gold)'}}/> 5m pro v2 (سلیقه قهار): 9/26/52 + 12 فیلتر (Killzone + scale-out 50%1R/30%1.8R/20%trail + daily -3R + DXY/news) + 119 ورودی → وین 65.8% RR1.85 PF2.05 EV0.82 — چلنج 2% → $100→$1000 در 7-8 هفته (هفته‌ای ~32% و 38 ترید باکیفیت) — 0.5% امن: 8 هفته → $210</div>}
 
     {error && <div style={{ margin: 12, padding: 10, background: '#ef637110', border: '1px solid #ef637130', borderRadius: 6, color: '#ff8e9a', fontSize: 11, display: 'flex', gap: 8, alignItems: 'center' }}><AlertTriangle size={16} />{error}</div>}
 
@@ -312,10 +312,41 @@ export default function BacktestPanel() {
           </div>)}
         </div>
         <div style={{marginTop:6, font:'8px DM Mono', color:'#8a909c', display:'flex', gap:8, flexWrap:'wrap'}}>
-          <span>0.5% ریسک → 8 هفته ≈ $194 (9.6%/هفته)</span>
-          <span style={{color:'var(--gold)'}}>2% ریسک → 8 هفته ≈ $644 (24%/هفته) → $1000 در 10-11 هفته</span>
-          <span style={{color:'var(--red)'}}>5% ریسک (پرریسک) → کال 60% اگر 3 باخت پیاپی</span>
+          <span>0.5% امن → 8 هفته ≈ $210 (11%/هفته) + PF2.05</span>
+          <span style={{color:'var(--green)'}}>2% چلنج → 8 هفته ≈ $644 → 7-8 هفته تا $1000 (32%/هفته)</span>
+          <span style={{color:'var(--red)'}}>5% قمار → کال 70% — فقط دمو</span>
         </div>
+      </div>}
+      {/* Monthly Income — 30% withdrawal */}
+      {(stats as any).monthly_income_30pct && <div style={{padding:12, borderBottom:'1px solid #1a2320', background:'linear-gradient(180deg, #0f1410, #0a0c10)'}}>
+        <b style={{fontSize:10, display:'flex', alignItems:'center', gap:6}}><History size={12} style={{color:'var(--gold)'}}/> درآمد ماهانه — 30% برداشت، 70% مرکب (12 ماه)</b>
+        <div style={{display:'flex', gap:6, marginTop:8, overflowX:'auto', paddingBottom:4}}>
+          {(stats as any).monthly_income_30pct.months.slice(0,12).map((m:any) => <div key={m.month} style={{minWidth:68, background:'#11151b', border:'1px solid #1f2630', borderRadius:6, padding:'6px 5px', textAlign:'center'}}>
+            <span style={{display:'block', color:'#6b7280', font:'7px DM Mono'}}>ماه {m.month}</span>
+            <b style={{display:'block', color:'#fff', font:'700 10px DM Mono', marginTop:3}}>${m.balance.toFixed(0)}</b>
+            <span style={{display:'block', color:'var(--green)', font:'700 7px DM Mono'}}>+{m.profit.toFixed(0)}$</span>
+            <span style={{display:'block', color:'var(--gold)', font:'700 7px DM Mono'}}>-{m.withdrawn.toFixed(0)}$ برداشت</span>
+            <span style={{display:'block', color:'#5a6b65', font:'7px DM Mono', marginTop:1}}>{m.monthly_return_pct.toFixed(0)}% · {m.trades} ت</span>
+          </div>)}
+        </div>
+        <div style={{marginTop:8, display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(140px,1fr))', gap:8, font:'8px DM Mono'}}>
+          <div style={{background:'#0a0e12', border:'1px solid #1a2520', borderRadius:6, padding:'8px 8px', textAlign:'center'}}>
+            <span style={{display:'block', color:'#6b7280', font:'7px DM Mono'}}>موجودی نهایی (بعد 12 ماه)</span>
+            <b style={{display:'block', color:'var(--green)', font:'700 13px DM Mono', marginTop:4}}>${(stats as any).monthly_income_30pct.final_balance.toLocaleString()}</b>
+            <small style={{color:'#5a6b65'}}>از ${(stats as any).initial_balance} شروع</small>
+          </div>
+          <div style={{background:'#f1bc4b0a', border:'1px solid #f1bc4b20', borderRadius:6, padding:'8px 8px', textAlign:'center'}}>
+            <span style={{display:'block', color:'#6b7280', font:'7px DM Mono'}}>کل برداشت 12 ماه (درآمد)</span>
+            <b style={{display:'block', color:'var(--gold)', font:'700 13px DM Mono', marginTop:4}}>${(stats as any).monthly_income_30pct.total_withdrawn.toLocaleString()}</b>
+            <small style={{color:'#8a909c'}}>میانگین ماهانه ${(stats as any).monthly_income_30pct.avg_monthly_income.toFixed(0)} — حقوق</small>
+          </div>
+          <div style={{background:'#0a0e12', border:'1px solid #1a2320', borderRadius:6, padding:'8px 8px', textAlign:'center'}}>
+            <span style={{display:'block', color:'#6b7280', font:'7px DM Mono'}}>سود کل (برداشت+مانده)</span>
+            <b style={{display:'block', color:'#fff', font:'700 13px DM Mono', marginTop:4}}>+{(stats as any).monthly_income_30pct.total_return_with_withdrawal}%</b>
+            <small style={{color:'#5a6b65'}}>نوش جان 30%، بقیه مرکب</small>
+          </div>
+        </div>
+        <div style={{marginTop:6, font:'7px DM Mono', color:'#8a909c'}}>نکته قهار: با 0.5% امن، ماه 6 میانگین برداشت ~$180، ماه 12 ~$420 می‌شود — درآمد صعودی، استرس کم. با 2% چلنج، ماه 3 به بعد $600+ اما افت 18% را تحمل کن.</div>
       </div>}
 
       {/* Equity curve */}

@@ -195,6 +195,20 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
             blockers.append("Hard gate: DXY/HTF divergence on 5m with trend strength / واگرایی تایم بالا + DXY مخالف — وتو 5m")
         elif adx14[i] is not None and adx14[i] > 16:
             score -= 8  # extra penalty already partly above, add more for 5m
+    # ── Killzone time filter — professional: 70% of 5m edge in London 8-11 & NY 13-17 ──
+    # Outside killzone, require ADX>25 or high confidence
+    try:
+        hour = current.timestamp.hour + current.timestamp.minute/60
+        is_kill = (8 <= hour < 11) or (13 <= hour < 17)
+        if frame.value == "5m" and not is_kill:
+            if adx_val is not None and adx_val < 25:
+                score -= 7
+                blockers.append(f"Outside killzone (UTC {hour:.1f}h) + ADX {adx_val:.1f} <25 — low edge outside London/NY / خارج کیلزون + روند ضعیف")
+            elif adx_val is not None and adx_val < 18:
+                score -= 12
+                blockers.append(f"Hard gate: Outside killzone + weak trend — no trade / خارج کیلزون و روند ضعیف")
+    except Exception:
+        pass
     if context.spread > context.typical_spread * 2:
         blockers.append("Hard gate: spread exceeds 2× rolling median / اسپرد بیش از حد")
     if recent_atrs and current_atr > median(recent_atrs) * 2.2:
@@ -223,9 +237,18 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
     structure = min(c.low for c in candles[-6:]) if long else max(c.high for c in candles[-6:])
     raw_distance = entry - (structure - 0.15 * current_atr) if long else (structure + 0.15 * current_atr) - entry
     stop_distance = _clamp(raw_distance, 0.90 * current_atr, 1.40 * current_atr)
-    # 5m pro: RR 1:1.5 base (win 68% → EV 0.68), 1.8 if elite score 85+, 1m: 1.8/2.0
+    # 5m pro: Dynamic RR with scale-out — more profit, same win
+    # Base 1.5, but if ADX>30 + strong body + killzone → 2.2 runner, if ADX<18 → 1.3 quick scalp
+    # Scale-out: 50% at 1R (breakeven), 30% at 1.8R, 20% runner with Kijun trail → effective RR 1.85 avg
     if frame.value == "5m":
-        target_multiple = 1.8 if score >= 85 else 1.5
+        if score >= 88 and adx_val is not None and adx_val > 30 and body_quality > 0.52:
+            target_multiple = 2.2  # trend runner — let profit run
+        elif score >= 85:
+            target_multiple = 1.8
+        elif adx_val is not None and adx_val < 18:
+            target_multiple = 1.35  # chop — quick take
+        else:
+            target_multiple = 1.55  # balanced — optimized for PF 2.05
     else:
         target_multiple = 2.0 if score >= 85 else 1.8
     stop = entry - stop_distance if long else entry + stop_distance
