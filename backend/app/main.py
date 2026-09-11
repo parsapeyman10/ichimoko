@@ -218,6 +218,20 @@ async def close_journal(entry_id: str, exit_price: float, reason: str = "manual"
 async def journal_stats():
     return journal_svc.stats()
 
+@app.get("/api/v1/risk/stress-test")
+async def stress_test(
+    initial_balance: float = 100,
+    risk_percent: float = 0.5,
+    win_rate: float = 65.8,
+    profit_factor: float = 2.05,
+    leverage: float = 20,
+):
+    """Unseen tail risk — Monte-Carlo 10k runs, gap, spread shock, where we get liquidated?"""
+    from app.services.backtest import liquidation_stress_test
+    avg_win = 1.82 if profit_factor>1.9 else 1.68
+    avg_loss = 0.89 if profit_factor>1.9 else 1.08
+    return liquidation_stress_test(initial_balance, risk_percent, win_rate, profit_factor, avg_win, avg_loss, leverage)
+
 @app.get("/api/v1/backtest/profitability")
 async def profitability(timeframe: Timeframe = Timeframe.M1, limit: int = 200):
     records = list(hub.history[timeframe])

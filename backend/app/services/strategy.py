@@ -209,6 +209,37 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
                 blockers.append(f"Hard gate: Outside killzone + weak trend — no trade / خارج کیلزون و روند ضعیف")
     except Exception:
         pass
+    # ── Unseen liquidation guards — where we get called? ──
+    # 1) Daily loss -3% hard gate, -1.5% penalty
+    if context.daily_pnl_pct <= -3.0:
+        blockers.append(f"Hard gate: Daily loss limit -3% hit ({context.daily_pnl_pct:.1f}%) — stop trading today / حد ضرر روزانه — تعطیل")
+    elif context.daily_pnl_pct <= -1.5 and frame.value == "5m":
+        score -= 8
+        blockers.append(f"Daily drawdown {context.daily_pnl_pct:.1f}% — reduce size 50% tomorrow / افت روزانه")
+    # 2) Tilt: 4 consecutive losses → hard gate, 3 → half size
+    if context.consecutive_losses >= 4:
+        blockers.append(f"Hard gate: {context.consecutive_losses} consecutive losses — cool-down 12h / 4 باخت پیاپی — استراحت")
+    elif context.consecutive_losses == 3:
+        score -= 6
+        blockers.append(f"3 consecutive losses — next trade half size / 3 باخت پیاپی — نیم‌حجم")
+    # 3) Weekend gap risk — جمعه شب پوزیشن نگیریم
+    if context.is_weekend_gap_risk:
+        blockers.append("Hard gate: Weekend gap risk (Fri 21:00+) — no new position / ریسک گپ آخر هفته")
+    # 4) Shock regime — ATR 3× یا vol_regime=shock → veto
+    if context.volatility_regime == "shock" or (recent_atrs and current_atr > median(recent_atrs) * 3.0):
+        blockers.append("Hard gate: Volatility shock 3× ATR — market in black-swan mode / شوک 3 برابری — حالت قو سیاه")
+    # 5) Leverage / liquidation distance check (approx)
+    if context.account_equity and context.account_equity > 0:
+        est_stop_dist = 1.1 * current_atr
+        if est_stop_dist > 0:
+            est_pos_oz = (context.account_equity * 0.005) / est_stop_dist
+            notional = est_pos_oz * current.close
+            lev_used = notional / context.account_equity if context.account_equity else 0
+            if lev_used > context.max_leverage * 0.75:
+                blockers.append(f"Hard gate: Leverage {lev_used:.1f}x > 75% of {context.max_leverage}x — liquidation close / اهرم بالا — نزدیک کال")
+            gap_loss_pct = (5 * current_atr * est_pos_oz) / context.account_equity * 100
+            if gap_loss_pct > 12:
+                blockers.append(f"Hard gate: Gap risk {gap_loss_pct:.1f}% loss on 5×ATR gap — reduce size / ریسک گپ {gap_loss_pct:.0f}%")
     if context.spread > context.typical_spread * 2:
         blockers.append("Hard gate: spread exceeds 2× rolling median / اسپرد بیش از حد")
     if recent_atrs and current_atr > median(recent_atrs) * 2.2:
