@@ -111,3 +111,38 @@ export function nextCandle(last: Candle, intervalMinutes: number, tick: number):
     volume: last.volume + Math.round(Math.random() * 18 * intervalMinutes),
   };
 }
+
+// ─── Complementary indicators (browser-side preview) ──────────────────
+export function rsi(candles: Candle[], period = 7): (number|null)[] {
+  const out: (number|null)[] = Array(candles.length).fill(null);
+  if (candles.length <= period) return out;
+  let gains=0, losses=0;
+  for(let i=1;i<=period;i++){ const d=candles[i].close-candles[i-1].close; if(d>0) gains+=d; else losses+=-d; }
+  let avgG=gains/period, avgL=losses/period;
+  out[period]= avgL===0?100:100-100/(1+avgG/avgL);
+  for(let i=period+1;i<candles.length;i++){ const d=candles[i].close-candles[i-1].close; avgG=(avgG*(period-1)+Math.max(d,0))/period; avgL=(avgL*(period-1)+Math.max(-d,0))/period; out[i]= avgL===0?100:100-100/(1+avgG/avgL); }
+  return out;
+}
+export function atr(candles: Candle[], period=14): (number|null)[] {
+  const out: (number|null)[]=Array(candles.length).fill(null);
+  const tr=[candles[0].high-candles[0].low];
+  for(let i=1;i<candles.length;i++){ const c=candles[i], p=candles[i-1]; tr.push(Math.max(c.high-c.low, Math.abs(c.high-p.close), Math.abs(c.low-p.close))); }
+  if(candles.length<period) return out;
+  let v=tr.slice(0,period).reduce((a,b)=>a+b,0)/period; out[period-1]=v;
+  for(let i=period;i<candles.length;i++){ v=(v*(period-1)+tr[i])/period; out[i]=v; }
+  return out;
+}
+export function macdLine(candles: Candle[]) {
+  const closes=candles.map(c=>c.close);
+  const emaCalc=(p:number)=>{ const k=2/(p+1); let v=closes[0]; return closes.map(c=>v=c*k+v*(1-k)); };
+  const e12=emaCalc(12), e26=emaCalc(26);
+  const line=e12.map((v,i)=>v-e26[i]);
+  const k=2/(9+1); let s=line[25]; const sig=line.map((v,i)=> i<25?null: (s=v*k+s*(1-k), s));
+  const hist=line.map((v,i)=> sig[i]==null?null: v-(sig[i] as number));
+  return { line, sig, hist };
+}
+export function bollinger(candles: Candle[], period=20) {
+  const out:{upper:(number|null)[], lower:(number|null)[], mid:(number|null)[]}={upper:Array(candles.length).fill(null), lower:Array(candles.length).fill(null), mid:Array(candles.length).fill(null)};
+  for(let i=period-1;i<candles.length;i++){ const w=candles.slice(i-period+1,i+1).map(c=>c.close); const m=w.reduce((a,b)=>a+b,0)/period; const sd=Math.sqrt(w.reduce((a,b)=>a+(b-m)**2,0)/period); out.mid[i]=m; out.upper[i]=m+2*sd; out.lower[i]=m-2*sd; }
+  return out;
+}
