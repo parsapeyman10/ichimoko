@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { Activity, TrendingUp, TrendingDown, AlertTriangle, ShieldCheck, BarChart3, Clock3, Zap, DollarSign, History, Target } from 'lucide-react';
+import ForwardTestPanel from './ForwardTestPanel';
 
 type BacktestResult = {
   initial_balance: number;
@@ -154,6 +155,8 @@ export default function BacktestPanel() {
   const [initial, setInitial] = useState(100);
   const [risk, setRisk] = useState(0.5);
   const [timeframe, setTimeframe] = useState<'5m' | '1m'>('5m'); // 5m strict pro default — قهار
+  const [brokerName, setBrokerName] = useState('RoboForex');
+  const [useTrailing, setUseTrailing] = useState(true);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -165,7 +168,7 @@ export default function BacktestPanel() {
       setProgress('ارسال به موتور بک‌تست سرور...');
       let res: Response | null = null;
       try {
-        res = await fetch(`/api/v1/backtest/run?initial_balance=${initial}&risk_percent=${risk}&spread=0.35&timeframe=${timeframe}`, { method: 'GET' });
+        res = await fetch(`/api/v1/backtest/run?initial_balance=${initial}&risk_percent=${risk}&spread=0.35&timeframe=${timeframe}&broker_name=${encodeURIComponent(brokerName)}&use_trailing=${useTrailing}`, { method: 'GET' });
       } catch { /* fallback */ }
       if (res && res.ok) {
         const data = await res.json();
@@ -268,6 +271,21 @@ export default function BacktestPanel() {
         <div style={{ display: 'flex', gap: 6 }}>
           {(['5m','1m'] as const).map(tf => <button key={tf} onClick={()=> setTimeframe(tf)} style={{ minWidth:52, height:30, borderRadius:6, border: timeframe===tf ? '1px solid var(--gold)' : '1px solid #2a303a', background: timeframe===tf ? '#f1bc4b18' : '#11151b', color: timeframe===tf ? 'var(--gold)' : '#8a909c', font:'700 10px DM Mono', cursor:'pointer' }}>{tf} {tf==='5m'?'▲67%':''}</button>)}
         </div>
+      </label>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={{ color: '#8a909c', font: '700 9px Manrope' }}>بروکر $100 دمو</span>
+        <select value={brokerName} onChange={e=> setBrokerName(e.target.value)} style={{ height:30, borderRadius:6, border:'1px solid #2a303a', background:'#11151b', color:'#f1bc4b', font:'700 9px DM Mono', padding:'0 6px' }}>
+          <option value="RoboForex">RoboForex Prime 1:500</option>
+          <option value="Exness">Exness 1:2000</option>
+          <option value="FBS">FBS $140 Bonus</option>
+          <option value="Alpari">Alpari ECN 1:500</option>
+        </select>
+      </label>
+      <label style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems:'center' }}>
+        <span style={{ color: '#8a909c', font: '700 9px Manrope' }}>تریل هوشمند</span>
+        <button onClick={()=> setUseTrailing(!useTrailing)} style={{ height:30, padding:'0 10px', borderRadius:6, border: useTrailing?'1px solid var(--green)':'1px solid #2a303a', background: useTrailing?'#28c99b14':'#11151b', color: useTrailing?'var(--green)':'#6b7280', font:'700 9px Manrope', cursor:'pointer' }}>
+          {useTrailing?'فعال ✓':'خاموش'}
+        </button>
       </label>
       <button onClick={run} disabled={loading} style={{ height: 30, padding: '0 14px', borderRadius: 6, border: '1px solid var(--gold)', background: loading ? '#2a2a2a' : 'linear-gradient(180deg, #f5ca6d, #d9a33c)', color: loading ? '#888' : '#1b160c', font: '800 10px Manrope', cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6, opacity: loading ? 0.7 : 1 }}>
         {loading ? <><Activity size={14} className="spin" /> در حال محاسبه...</> : <><Zap size={14} /> اجرای بک‌تست ۲۶ ساله ({timeframe})</>}
@@ -394,6 +412,8 @@ export default function BacktestPanel() {
           </span>
         </div>
       </div>}
+      {/* Forward Test — تست آینده */}
+      <ForwardTestPanel initial={stats.initial_balance} risk={stats.assumptions.risk_percent} brokerName={brokerName} useTrailing={useTrailing} />
 
       {/* Equity curve */}
       <div style={{ padding: 12 }}>

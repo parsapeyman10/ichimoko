@@ -355,6 +355,52 @@ def should_exit(signal: TradeSignal, candles_since_entry: list[Candle], kijun: f
     # Opposite cross check if we have enough history
     return False, "Position remains valid / پوزیشن معتبر است — نگهداری"
 
+
+def get_trailing_stop(signal: TradeSignal, candles_since_entry: list[Candle], kijun: float, atr: float) -> float | None:
+    """هوشمند تریلینگ — اگر سود کم می‌شود رهاش کن
+    - 1R → SL به ورود (بریک‌اون)
+    - 1.5R → SL به 0.5R سود قفل
+    - بعد → تریل با کیجون -0.15 ATR (فقط اگر ADX>30 و روند قوی)
+    Returns new_stop or None if no update
+    """
+    if not signal.entry or not signal.stop_loss or not candles_since_entry:
+        return None
+    latest = candles_since_entry[-1]
+    long = signal.action == Direction.BUY
+    entry = signal.entry
+    stop_dist = abs(entry - signal.stop_loss)
+    if stop_dist < 0.01:
+        return None
+    # distance from entry — هوشمند: اول 1.5R سپس 1R
+    if long:
+        peak = max(c.high for c in candles_since_entry)
+        profit_R = (peak - entry) / stop_dist
+        cur_price = latest.close
+        if profit_R >= 1.5:
+            locked = entry + 0.5 * stop_dist
+            kijun_stop = (kijun - 0.15 * atr) if kijun else locked
+            candidate = max(locked, kijun_stop) if kijun else locked
+            candidate = min(candidate, cur_price - 0.5 * atr)
+            if candidate != signal.stop_loss and candidate > signal.stop_loss:
+                return round(candidate, 2)
+        if profit_R >= 1.0 and signal.stop_loss < entry:
+            return round(entry, 2)
+    else:
+        peak = min(c.low for c in candles_since_entry)
+        profit_R = (entry - peak) / stop_dist
+        cur_price = latest.close
+        if profit_R >= 1.5:
+            locked = entry - 0.5 * stop_dist
+            kijun_stop = (kijun + 0.15 * atr) if kijun else locked
+            candidate = min(locked, kijun_stop) if kijun else locked
+            candidate = max(candidate, cur_price + 0.5 * atr)
+            if candidate != signal.stop_loss and candidate < signal.stop_loss:
+                return round(candidate, 2)
+        if profit_R >= 1.0 and signal.stop_loss > entry:
+            return round(entry, 2)
+    return None
+
+
 def explain_profitability(candles: list[Candle]) -> dict:
     """Generate profitability guardrails explanation for UI."""
     if len(candles) < 50:

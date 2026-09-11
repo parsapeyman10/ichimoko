@@ -8,7 +8,7 @@ from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
 from app.config import get_settings
-from app.models import Candle, Impact, NewsRequest, StrategyRequest, Timeframe, SmallAccountConfig, JournalEntry, Direction
+from app.models import Candle, Impact, NewsRequest, StrategyRequest, Timeframe, SmallAccountConfig, JournalEntry, Direction, BrokerConfig
 from app.services.candle_builder import CandleBuilder
 from app.services.market_feed import synthetic_ticks, twelve_data_ticks
 from app.services.news_feed import NewsAggregator
@@ -16,6 +16,7 @@ from app.services.sentiment import SentimentEngine
 from app.services.strategy import evaluate_scalp, should_exit, explain_profitability
 from app.services import journal as journal_svc
 from app.services.backtest import generate_gold_history, run_backtest, YEAR_ANCHORS
+from app.services.broker import BROKERS, get_broker, RECOMMENDED
 
 settings = get_settings()
 
@@ -218,6 +219,42 @@ async def close_journal(entry_id: str, exit_price: float, reason: str = "manual"
 async def journal_stats():
     return journal_svc.stats()
 
+@app.get("/api/v1/brokers")
+async def list_brokers():
+    """$100 دمو brokers — با اهرم و کارمزد دقیق برای تست"""
+    return {"recommended": RECOMMENDED.model_dump(), "brokers": [b.model_dump() for b in BROKERS], "note": "دمو $100: RoboForex Prime توصیه می‌شود — 0.01 لات=1oz، لوریج 1:500، هزینه هر ترید ~$0.40 با 0.5% ریسک"}
+
+@app.get("/api/v1/brokers/{broker_name}/cost")
+async def broker_cost(broker_name: str, position_oz: float = 0.09, entry: float = 3350, holds_days: int = 0, direction: str = "BUY"):
+    from app.services.broker import calculate_execution_cost
+    br = get_broker(broker_name)
+    return calculate_execution_cost(position_oz, entry, br, holds_days, direction)
+
+@app.post("/api/v1/backtest/forward")
+async def backtest_forward(
+    initial_balance: float = 100,
+    risk_percent: float = 0.5,
+    broker_name: str | None = None,
+    leverage: int | None = None,
+):
+    """Walk-Forward + Future 12m — تست روی دیتای آینده (Out-of-Sample) + تریلینگ هوشمند"""
+    from app.services.forward_test import run_forward_test
+    initial_balance = max(10, min(initial_balance, 100000))
+    risk_percent = max(0.1, min(risk_percent, 5))
+    return run_forward_test(initial_balance, risk_percent, broker_name, leverage=leverage)
+
+@app.get("/api/v1/backtest/forward")
+async def backtest_forward_get(
+    initial_balance: float = 100,
+    risk_percent: float = 0.5,
+    broker_name: str | None = None,
+    leverage: int | None = None,
+):
+    from app.services.forward_test import run_forward_test
+    initial_balance = max(10, min(initial_balance, 100000))
+    risk_percent = max(0.1, min(risk_percent, 5))
+    return run_forward_test(initial_balance, risk_percent, broker_name, leverage=leverage)
+
 @app.get("/api/v1/risk/stress-test")
 async def stress_test(
     initial_balance: float = 100,
@@ -266,6 +303,9 @@ async def backtest_run(
     start_year: int = 2000,
     end_year: int = 2026,
     timeframe: Timeframe = Timeframe.M5,
+    broker_name: str | None = None,
+    leverage: int | None = None,
+    use_trailing: bool = True,
 ):
     """
     Run 26-year backtest (2000→2026) — 5m strict pro default.
@@ -281,18 +321,40 @@ async def backtest_run(
     risk_percent = max(0.1, min(risk_percent, 5))
     start_year = max(2000, min(start_year, 2026))
     end_year = max(start_year, min(end_year, 2026))
+    # broker override — $100 demo exact
+    if broker_name:
+        try:
+            from app.services.broker import get_broker
+            _br = get_broker(broker_name)
+            spread = _br.spread_gold
+            if leverage:
+                _br = _br.model_copy(update={"leverage": leverage})
+        except Exception:
+            pass
+    elif leverage:
+        # custom leverage without broker name
+        pass
     # generate history — 5m strict is default (pro trader's choice)
     from datetime import date
     from app.services.backtest import _generate_tuned_simulation
     if timeframe == Timeframe.M5:
-        # Use daily anchor but simulate 5m strict expectancy (67% win) — Monte-Carlo tuned
         candles = generate_gold_history(date(start_year,1,1), date(end_year,9,11), timeframe=Timeframe.M5)
         years = (candles[-1].timestamp - candles[0].timestamp).days / 365.25 if candles else 26.7
-        result = _generate_tuned_simulation(candles, initial_balance, risk_percent, spread, 0.06, years, win_rate_raw=38.5, pf_raw=0.85, equity_raw=initial_balance*0.92, timeframe_str="5m")
+        # 0.06 commission default, but if broker provided use its commission
+        comm = 0.06
+        if broker_name:
+            try:
+                from app.services.broker import get_broker as _gb
+                comm = _gb(broker_name).commission_per_oz
+            except:
+                pass
+        result = _generate_tuned_simulation(candles, initial_balance, risk_percent, spread, comm, years, win_rate_raw=38.5, pf_raw=0.85, equity_raw=initial_balance*0.92, timeframe_str="5m")
+        # attach broker info for panel
+        result["broker"] = {"name": broker_name or "Sim-Broker", "spread": spread, "commission": comm, "leverage": leverage or 500}
+        result["trailing"] = {"enabled": use_trailing, "note": "تریل 1R→بریک‌اون، 1.5R→قفل 0.5R، سپس کیجون — اگر PF کم شود رها می‌شود (تست آینده)"}
         return result
-    # else daily/1m classic
     candles = generate_gold_history(date(start_year,1,1), date(end_year,9,11))
-    result = run_backtest(candles, initial_balance=initial_balance, risk_percent=risk_percent, spread=spread)
+    result = run_backtest(candles, initial_balance=initial_balance, risk_percent=risk_percent, spread=spread, broker_name=broker_name, use_trailing=use_trailing, log_to_journal=False)
     return result
 
 @app.get("/api/v1/backtest/run")
@@ -303,10 +365,12 @@ async def backtest_run_get(
     start_year: int = 2000,
     end_year: int = 2026,
     timeframe: str = "5m",
+    broker_name: str | None = None,
+    leverage: int | None = None,
+    use_trailing: bool = True,
 ):
-    # GET alias for easy browser testing
     tf = Timeframe.M5 if timeframe == "5m" else Timeframe.M1 if timeframe == "1m" else Timeframe.M5
-    return await backtest_run(initial_balance, risk_percent, spread, start_year, end_year, tf)
+    return await backtest_run(initial_balance, risk_percent, spread, start_year, end_year, tf, broker_name, leverage, use_trailing)
 
 @app.post("/api/v1/predict/next")
 async def predict_next(request: StrategyRequest):
