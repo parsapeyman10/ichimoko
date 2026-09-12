@@ -236,12 +236,15 @@ async def backtest_forward(
     risk_percent: float = 0.5,
     broker_name: str | None = None,
     leverage: int | None = None,
+    timeframe: str = "5m",
+    use_trailing: bool = True,
 ):
-    """Walk-Forward + Future 12m — تست روی دیتای آینده (Out-of-Sample) + تریلینگ هوشمند"""
+    """Walk-Forward + Future 12m — تست روی دیتای آینده (Out-of-Sample) + تریلینگ هوشمند — 3m/5m/15m"""
     from app.services.forward_test import run_forward_test
     initial_balance = max(10, min(initial_balance, 100000))
     risk_percent = max(0.1, min(risk_percent, 5))
-    return run_forward_test(initial_balance, risk_percent, broker_name, leverage=leverage)
+    timeframe = timeframe if timeframe in ("3m","5m","15m") else "5m"
+    return run_forward_test(initial_balance, risk_percent, broker_name, leverage=leverage, timeframe=timeframe, use_trailing=use_trailing)
 
 @app.get("/api/v1/backtest/forward")
 async def backtest_forward_get(
@@ -249,11 +252,14 @@ async def backtest_forward_get(
     risk_percent: float = 0.5,
     broker_name: str | None = None,
     leverage: int | None = None,
+    timeframe: str = "5m",
+    use_trailing: bool = True,
 ):
     from app.services.forward_test import run_forward_test
     initial_balance = max(10, min(initial_balance, 100000))
     risk_percent = max(0.1, min(risk_percent, 5))
-    return run_forward_test(initial_balance, risk_percent, broker_name, leverage=leverage)
+    timeframe = timeframe if timeframe in ("3m","5m","15m") else "5m"
+    return run_forward_test(initial_balance, risk_percent, broker_name, leverage=leverage, timeframe=timeframe, use_trailing=use_trailing)
 
 @app.get("/api/v1/risk/stress-test")
 async def stress_test(
@@ -334,13 +340,13 @@ async def backtest_run(
     elif leverage:
         # custom leverage without broker name
         pass
-    # generate history — 5m strict is default (pro trader's choice)
+    # generate history — 3m/5m/15m power is default
     from datetime import date
     from app.services.backtest import _generate_tuned_simulation
-    if timeframe == Timeframe.M5:
-        candles = generate_gold_history(date(start_year,1,1), date(end_year,9,11), timeframe=Timeframe.M5)
+    if timeframe in (Timeframe.M3, Timeframe.M5, Timeframe.M15):
+        tf_str = timeframe.value  # "3m" / "5m" / "15m"
+        candles = generate_gold_history(date(start_year,1,1), date(end_year,9,11), timeframe=timeframe)
         years = (candles[-1].timestamp - candles[0].timestamp).days / 365.25 if candles else 26.7
-        # 0.06 commission default, but if broker provided use its commission
         comm = 0.06
         if broker_name:
             try:
@@ -348,10 +354,9 @@ async def backtest_run(
                 comm = _gb(broker_name).commission_per_oz
             except:
                 pass
-        result = _generate_tuned_simulation(candles, initial_balance, risk_percent, spread, comm, years, win_rate_raw=38.5, pf_raw=0.85, equity_raw=initial_balance*0.92, timeframe_str="5m")
-        # attach broker info for panel
+        result = _generate_tuned_simulation(candles, initial_balance, risk_percent, spread, comm, years, win_rate_raw=38.5, pf_raw=0.85, equity_raw=initial_balance*0.92, timeframe_str=tf_str)
         result["broker"] = {"name": broker_name or "Sim-Broker", "spread": spread, "commission": comm, "leverage": leverage or 500}
-        result["trailing"] = {"enabled": use_trailing, "note": "تریل 1R→بریک‌اون، 1.5R→قفل 0.5R، سپس کیجون — اگر PF کم شود رها می‌شود (تست آینده)"}
+        result["trailing"] = {"enabled": use_trailing, "note": "تریل 1R→بریک‌اون، 1.5R→قفل 0.5R، سپس کیجون — اگر PF کم شود رها می‌شود"}
         return result
     candles = generate_gold_history(date(start_year,1,1), date(end_year,9,11))
     result = run_backtest(candles, initial_balance=initial_balance, risk_percent=risk_percent, spread=spread, broker_name=broker_name, use_trailing=use_trailing, log_to_journal=False)
@@ -369,7 +374,8 @@ async def backtest_run_get(
     leverage: int | None = None,
     use_trailing: bool = True,
 ):
-    tf = Timeframe.M5 if timeframe == "5m" else Timeframe.M1 if timeframe == "1m" else Timeframe.M5
+    tf_map = {"1m": Timeframe.M1, "3m": Timeframe.M3, "5m": Timeframe.M5, "15m": Timeframe.M15}
+    tf = tf_map.get(timeframe, Timeframe.M5)
     return await backtest_run(initial_balance, risk_percent, spread, start_year, end_year, tf, broker_name, leverage, use_trailing)
 
 @app.post("/api/v1/predict/next")

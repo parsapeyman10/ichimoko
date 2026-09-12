@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, model_validator
 
 class Timeframe(StrEnum):
     M1 = "1m"
+    M3 = "3m"
     M5 = "5m"
     M15 = "15m"
     H1 = "1h"
@@ -15,6 +16,7 @@ class Timeframe(StrEnum):
     def seconds(self) -> int:
         return {
             "1m": 60,
+            "3m": 180,
             "5m": 300,
             "15m": 900,
             "1h": 3600,
