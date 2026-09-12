@@ -1,76 +1,91 @@
+"""
+News aggregation — licensed sources only.
+
+The previous version returned a hard-coded "demo" headline set and a fabricated economic
+calendar. Both are removed: when no licensed provider is configured the aggregator returns
+an empty list and a status explaining why. No headline is ever invented.
+"""
+from __future__ import annotations
+
 import hashlib
-import asyncio
 from datetime import datetime, timezone
+
 import httpx
+
 from app.config import Settings
 from app.models import NewsRequest
 
 
 class NewsAggregator:
-    """Licensed API aggregation only; do not scrape restricted publishers.
-    Multi-source: FMP + fallback synthetic + economic calendar guard.
-    """
+    """Licensed API aggregation only; do not scrape restricted publishers."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
         self.seen: set[str] = set()
+        self.last_error: str | None = None
 
-    async def fetch_fmp(self) -> list[NewsRequest]:
-        if not self.settings.fmp_api_key:
-            return await self._synthetic_news()
+    @property
+    def configured(self) -> bool:
+        return bool(self.settings.fmp_api_key)
+
+    def status(self) -> dict:
+        return {
+            "provider": "financialmodelingprep" if self.configured else None,
+            "configured": self.configured,
+            "last_error": self.last_error,
+            "note": (
+                "بدون کلید خبری مجاز، لیست اخبار خالی می‌ماند؛ هیچ تیتر یا تقویم ساختگی ساخته نمی‌شود."
+                if not self.configured
+                else "اخبار فقط از منبع مجاز دریافت می‌شود."
+            ),
+        }
+
+    async def fetch(self) -> list[NewsRequest]:
+        if not self.configured:
+            return []
         params = {"tickers": "GCUSD", "limit": 30, "apikey": self.settings.fmp_api_key}
-        async with httpx.AsyncClient(timeout=8) as client:
-            try:
-                response = await client.get("https://financialmodelingprep.com/stable/news/general-latest", params=params)
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                response = await client.get(
+                    "https://financialmodelingprep.com/stable/news/general-latest", params=params
+                )
                 response.raise_for_status()
-            except Exception:
-                return await self._synthetic_news()
-        articles = []
-        for item in response.json():
+                payload = response.json()
+        except Exception as exc:
+            self.last_error = f"{type(exc).__name__}: {exc}"
+            return []
+
+        articles: list[NewsRequest] = []
+        for item in payload if isinstance(payload, list) else []:
             article = NewsRequest(
-                headline=item.get("title", "Untitled"), body=item.get("text", ""),
-                source=item.get("site", "FMP"), published_at=self._parse_time(item.get("publishedDate")),
+                headline=item.get("title", "").strip(),
+                body=item.get("text", "") or item.get("content", ""),
+                source=item.get("site", "FMP"),
+                published_at=self._parse_time(item.get("publishedDate")),
             )
-            if self._accept(article):
+            if len(article.headline) >= 3 and self._accept(article):
                 articles.append(article)
         if not articles:
-            # still provide synthetic to keep terminal alive
-            articles = await self._synthetic_news()
+            self.last_error = self.last_error or "پاسخ سرویس خبری خالی بود"
         return articles
 
-    async def _synthetic_news(self) -> list[NewsRequest]:
-        """Deterministic demo news covering all market regimes, Persian+English."""
-        now = datetime.now(timezone.utc)
-        samples = [
-            ("Fed officials signal patience on rates as inflation cools further", "Lower real-yield expectations support non-yielding gold demand. Fed minutes show dovish tilt.", "Reuters"),
-            ("Dollar index steadies ahead of US retail sales release", "A firm DXY is limiting immediate upside in precious metals. Traders await 14:30 UTC data.", "FXStreet"),
-            ("Central bank gold demand remains resilient in latest WGC survey", "Structural physical demand continues to underpin price despite short-term volatility.", "Financial Modeling Prep"),
-            ("US CPI hotter than expected — yields jump, gold pressured", "Hot CPI lifts real yields and dollar, pressuring XAU/USD in near term.", "Bloomberg (demo)"),
-            ("Geopolitical tensions rise in Middle East — safe haven bid returns", "Escalation fears boost safe-haven demand for gold and weigh on risk assets.", "Reuters (demo)"),
-            ("ECB holds rates, Lagarde warns on sticky inflation", "European yields steady, euro soft. Neutral to slightly bullish for gold via dollar channel.", "MarketWatch (demo)"),
-        ]
-        out=[]
-        for title, body, src in samples[:3]:
-            a = NewsRequest(headline=title, body=body, source=src, published_at=now)
-            if self._accept(a):
-                out.append(a)
-        return out
-
     async def fetch_calendar(self) -> list[dict]:
-        """Economic calendar guard — demo data, replace with licensed ForexFactory/Investing API."""
-        now = datetime.now(timezone.utc)
-        return [
-            {"time": now.replace(hour=14, minute=30).isoformat(), "event": "US Retail Sales m/m", "impact": "HIGH", "currency": "USD", "forecast": "0.4%", "previous": "0.2%"},
-            {"time": now.replace(hour=18, minute=0).isoformat(), "event": "FOMC Minutes", "impact": "HIGH", "currency": "USD"},
-            {"time": now.replace(hour=12, minute=30).isoformat(), "event": "EU CPI y/y", "impact": "MEDIUM", "currency": "EUR"},
-        ]
+        """
+        Economic calendar entries.
+
+        Only implemented when a licensed calendar provider is configured. Without one the list
+        stays empty — the platform must not fabricate release times that traders act on.
+        """
+        self.last_error = self.last_error or "منبع تقویم اقتصادی مجاز تنظیم نشده است"
+        return []
 
     def _accept(self, article: NewsRequest) -> bool:
-        fingerprint = hashlib.sha256(f"{article.source}:{article.headline.lower().strip()}".encode()).hexdigest()
+        fingerprint = hashlib.sha256(
+            f"{article.source}:{article.headline.lower().strip()}".encode()
+        ).hexdigest()
         if fingerprint in self.seen:
             return False
         self.seen.add(fingerprint)
-        # keep dedup set bounded
         if len(self.seen) > 500:
             self.seen = set(list(self.seen)[-300:])
         return True

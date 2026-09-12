@@ -30,7 +30,7 @@ class Tick(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     bid: float
     ask: float
-    provider: str = "synthetic"
+    provider: str = "twelve_data"
 
     @property
     def mid(self) -> float:

@@ -211,7 +211,9 @@ def build_features(candles: list[Candle], context: StrategyContext | None = None
     f["mins_from_ny_open"] = (hour - 13.5) * 60
 
     # ── H: Cross-market proxies (synthetic, but formally defined) ──
-    # DXY proxy: inverse of gold's 20MA slope (when gold up, DXY down) — for demo, derive from EMA20 slope
+    # DXY is NOT available from the free provider: this is a clearly-labelled PROXY derived from
+    # gold's own EMA20 slope. It is a computed feature, not imported dollar data — never present it
+    # to users as a real DXY reading.
     # In production, feed real DXY/Yield via market_feed
     closes = [c.close for c in candles]
     ema20 = ema(candles, 20)[i] if len(candles)>=20 else cur.close

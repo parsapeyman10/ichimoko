@@ -337,7 +337,7 @@ def predict_next(candles: list[Candle], context: StrategyContext | None = None) 
         "expected_value_R_final": round(ev_final, 3),
         "score": round(score, 3),
         "drivers": drivers,
-        "horizon": f"1-2 bars ({tf}) — {'5-10 دقیقه 5m strict (15m/1h/4h + اخبار 30m vetو + DXY همبستگی) — وین 68% هدف' if is_5m else 'رفتار لحظه‌ای تجمع سفارشات + MTF 5m/15m/1h + Behavior + OrderFlow'}",
+        "horizon": f"1-2 bars ({tf}) — {'5-10 دقیقه روی 5m (همگرایی 15m/1h/4h + وتوی خبر 30m) — بدون ادعای نرخ برد' if is_5m else 'رفتار لحظه‌ای تجمع سفارشات + MTF 5m/15m/1h + Behavior + OrderFlow'}",
         "features_used": len(feats),
         "is_actionable": is_actionable,
         "is_actionable_base": bool(ev > 0.12 and conf >= 58 and direction != Direction.NEUTRAL),
@@ -430,7 +430,7 @@ def explain_prediction(candles: list[Candle], context: StrategyContext | None = 
     if mtf_veto:
         base += f" ⛔ وتو MTF: {mtf.get('veto_reasons',[''])[0]} — تراز چندتایم‌فریم می‌گوید صبر."
     elif is_veto:
-        base += f" ⛔ وتو نخبگان: {elite.get('veto_reasons', [''])[0]} — نخبگان ۷۰٪ مواقع همین‌جا صبر می‌کنند."
+        base += f" ⛔ وتو سبک‌ها: {elite.get('veto_reasons', [''])[0]} — این ستاپ تایید نمی‌شود."
     elif consensus != "NEUTRAL" and consensus == pred["expected_direction"] and agreement >= 0.45 and mtf_bias == pred["expected_direction"]:
         base += f" ✓ اجماع {agreement*100:.0f}% نخبگان + MTF {mtf_bias} هم‌جهت — کیفیت {elite.get('quality','')} / {mtf.get('quality','')}"
     elif consensus != "NEUTRAL" and consensus == pred["expected_direction"] and agreement >= 0.45:

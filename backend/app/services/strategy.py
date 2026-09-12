@@ -383,7 +383,7 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
         elif adx_val is not None and adx_val < 18:
             target_multiple = 1.35  # chop — quick take
         else:
-            target_multiple = 1.55  # balanced — optimized for PF 2.05
+            target_multiple = 1.55  # balanced default for 5m
     elif frame.value == "15m":
         if score >= 88 and adx_val is not None and adx_val > 28:
             target_multiple = 2.30

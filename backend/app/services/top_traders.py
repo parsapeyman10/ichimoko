@@ -1,15 +1,18 @@
 """
-Elite Trader Behavior Ensemble — رفتار ۶ تریدر افسانه‌ای
-هر تریدر یک لنز متفاوت به همان ۸۴ ورودی دارد. سوددهی واقعی از «انضباط نخبگان» می‌آید:
-فقط ۲-۴ ترید در روز، فقط Killzone، فقط وقتی ۳+ نخبه هم‌جهت باشند.
+Complementary analysis ensemble — شش سبک تحلیلی روی همان ۸۴ ورودی.
 
-Archetypes (بر اساس استراتژی عمومی منتشرشده، نه داده خصوصی):
-1. ICT / SMC — Michael Huddleston: نقدینگی، FVG، Order Block، Killzone
-2. Trend Institutional — Ed Seykota / Druckenmiller: EMA200، ADX، سوار روند
-3. Quant Mean-Reversion — Jim Simons: بازگشت به میانگین، BB، Z-score
-4. Macro — Soros / Tudor Jones: دلار، بازده، خبر
-5. Scalper Orderflow — Linda Raschke / Bob Volman: حجم، اسپرد، ریزساختار
-6. Supply/Demand — Sam Seiden: سطوح عرضه/تقاضا، premium/discount
+This module is a set of *rules* (archetypes), not a claim about any real person and not a
+performance claim. Each archetype contributes a weighted vote; the result is an advisory
+score, never a promise of profit. Performance is only ever reported from a real-data
+backtest (see services/backtest.py) or the paper journal.
+
+Archetypes:
+1. ict_smc        — نقدینگی، FVG، Order Block، Killzone
+2.  trend         — EMA200، ADX، سوار شدن بر روند
+3.  quant         — بازگشت به میانگین، باند بولینگر، Z-score
+4.  macro         — دلار، بازده، خبر
+5.  scalper       — حجم، اسپرد، ریزساختار
+6.  supply_demand — سطوح عرضه/تقاضا، premium/discount
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -26,7 +29,7 @@ class TraderVote:
     reason: str
     is_veto: bool = False  # if true, this trader says NO_TRADE regardless of direction
 
-# Experience weights — بر اساس سازگاری با XAU/USD 1m/5m (بک‌تست ۲۰۰۰-۲۰۲۶)
+# Fixed starting weights (priors). They are tuning parameters, not measured performance.
 TRADER_WEIGHTS = {
     "ict_smc": 0.24,
     "trend": 0.22,
@@ -37,16 +40,16 @@ TRADER_WEIGHTS = {
 }
 
 TRADERS_META = {
-    "ict_smc": {"name": "ICT / SMC", "full": "Michael Huddleston — Smart Money", "style": "Liquidity Sweep · FVG · Order Block · Killzone", "desc": "شکار استاپ‌ها، ورود پس از جارو نقدینگی در Killzone"},
-    "trend": {"name": "Trend Institutional", "full": "Ed Seykota / Druckenmiller", "style": "EMA200 · ADX · سوار روند، قطع سریع ضرر", "desc": "فقط روند قوی، بگذار سود بدود"},
-    "quant": {"name": "Quant Mean-Reversion", "full": "Jim Simons (Renaissance)", "style": "BB %B · RSI Z · VWAP بازگشت", "desc": "خرید افراط فروش، فروش افراط خرید — فقط وقتی Z>1.5"},
-    "macro": {"name": "Macro", "full": "Soros / Tudor Jones", "style": "DXY · Yield · News · Risk-on", "desc": "وقتی دلار و بازده و خبر هم‌جهت شدند"},
-    "scalper": {"name": "Scalper Orderflow", "full": "Linda Raschke / Volman", "style": "Volume Spike · Spread · Body/Spread", "desc": "حجم انفجاری + اسپرد سالم = مومنتوم لحظه‌ای"},
-    "supply_demand": {"name": "Supply/Demand", "full": "Sam Seiden", "style": "Premium/Discount · Order Block Distance", "desc": "خرید در Discount، فروش در Premium — نه وسط رنج"},
+    "ict_smc": {"name": "ICT / SMC", "full": "Smart Money Concepts (archetype)", "style": "Liquidity Sweep · FVG · Order Block · Killzone", "desc": "شکار استاپ‌ها، ورود پس از جارو نقدینگی در Killzone"},
+    "trend": {"name": "Trend Following", "full": "Institutional trend archetype", "style": "EMA200 · ADX · سوار روند، قطع سریع ضرر", "desc": "فقط روند قوی، بگذار سود بدود"},
+    "quant": {"name": "Quant Mean-Reversion", "full": "Statistical mean-reversion archetype", "style": "BB %B · RSI Z · VWAP بازگشت", "desc": "خرید افراط فروش، فروش افراط خرید — فقط وقتی Z>1.5"},
+    "macro": {"name": "Macro", "full": "Macro / rates & dollar archetype", "style": "DXY · Yield · News · Risk-on", "desc": "وقتی دلار و بازده و خبر هم‌جهت شدند"},
+    "scalper": {"name": "Scalper Orderflow", "full": "Order-flow scalping archetype", "style": "Volume Spike · Spread · Body/Spread", "desc": "حجم انفجاری + اسپرد سالم = مومنتوم لحظه‌ای"},
+    "supply_demand": {"name": "Supply/Demand", "full": "Supply & demand zone archetype", "style": "Premium/Discount · Order Block Distance", "desc": "خرید در Discount، فروش در Premium — نه وسط رنج"},
 }
 
 def _vote_ict(feats: dict[str, float]) -> TraderVote:
-    # ICT: must be in killzone, then look for liquidity sweep + FVG + OB alignment
+    # ICT archetype
     kill = feats.get("killzone_active", 0)
     liq_bear = feats.get("liquidity_sweep_bear", 0)
     liq_bull = feats.get("liquidity_sweep_bull", 0)
@@ -97,7 +100,7 @@ def _vote_quant(feats: dict[str, float]) -> TraderVote:
     rsi = feats.get("rsi7", 50)
     rsi_z = feats.get("rsi7_z", 0)
     stoch = feats.get("stoch_k", 50)
-    # Simons only trades extremes with z-score confirmation
+    # quant archetype
     if bb > 0.88 and rsi > 66 and rsi_z > 1.2 and stoch > 78:
         return TraderVote("quant", TRADERS_META["quant"]["name"], TRADERS_META["quant"]["style"], "SELL", 71, TRADER_WEIGHTS["quant"], f"اشباع صعود BB {bb:.2f} + RSI {rsi:.0f} Z {rsi_z:.1f} — بازگشت به میانگین")
     if bb < 0.12 and rsi < 34 and rsi_z < -1.2 and stoch < 22:
@@ -109,7 +112,7 @@ def _vote_macro(feats: dict[str, float]) -> TraderVote:
     dxy = feats.get("dxy_proxy", 0)
     yld = feats.get("yield_proxy", 0)
     risk = feats.get("risk_on_proxy", 0)
-    # Soros: needs alignment of dollar + yield + news
+    # macro archetype: needs alignment of dollar + yield + news
     # DXY down (negative dxy_proxy means gold up), so dxy_proxy negative = bullish gold? Actually dxy_proxy = -(gold-ema20)/ATR*0.35, so negative when gold up? Wait gold up => DXY down expected => but proxy is synthetic. Simpler: news + dxy + risk alignment
     score = 0
     if news > 0.35: score += 2
@@ -148,7 +151,7 @@ def _vote_supply_demand(feats: dict[str, float]) -> TraderVote:
     ob_dist = feats.get("order_block_dist_atr", 5)
     dist_res = feats.get("dist_to_res_atr", 5)
     dist_sup = feats.get("dist_to_sup_atr", 5)
-    # Sam Seiden: Buy discount near demand, Sell premium near supply
+    # supply/demand archetype: buy discount near demand, sell premium near supply
     if premium < 0.33 and dist_sup < 1.2 and ob_dist < 2.0:
         return TraderVote("supply_demand", TRADERS_META["supply_demand"]["name"], TRADERS_META["supply_demand"]["style"], "BUY", 69, TRADER_WEIGHTS["supply_demand"], f"Discount {premium:.2f} + نزدیک تقاضا ({dist_sup:.1f} ATR) — ارزش خرید")
     if premium > 0.67 and dist_res < 1.2 and ob_dist < 2.0:
@@ -240,8 +243,8 @@ def ensemble(feats: dict[str, float], base_ev: float | None = None, base_directi
         elif consensus != "NEUTRAL" and consensus != base_direction and agreement > 0.38:
             elite_ev_boost = -0.14 - agreement * 0.08  # penalize conflict
 
-    # Profitability insight — what elite behavior improves?
-    # Historically, following 3+ agreement + EV>0.12 + no veto improves PF from ~1.35 to ~1.62
+    # Agreement quality label. It describes agreement between rule sets,
+    # NOT a measured edge: real performance only comes from a real-data backtest.
     quality = "A+"
     if agreement < 0.35 or elite_conf < 58:
         quality = "C — پراکنده"
@@ -252,11 +255,11 @@ def ensemble(feats: dict[str, float], base_ev: float | None = None, base_directi
 
     advisory = ""
     if is_veto:
-        advisory = f"وتو نخبگان: {veto_reasons[0]} — حتی اگر مدل سیگنال دهد، نخبگان ۷۰٪ مواقع صبر می‌کنند."
+        advisory = f"وتو سبک‌ها: {veto_reasons[0]} — حتی اگر مدل سیگنال دهد، این سبک می‌گوید وارد نشو."
     elif consensus != "NEUTRAL" and agreement >= 0.50:
         advisory = f"{agreement*100:.0f}% وزن نخبگان هم‌جهت ({consensus}) — انضباط می‌گوید: فقط همین ستاپ‌ها را بگیر، بقیه را رها کن."
     else:
-        advisory = "عدم اجماع نخبگان — بهترین تریدرها می‌گویند: معامله نکردن هم یک پوزیشن است."
+        advisory = "عدم اجماع سبک‌ها — معامله نکردن هم یک تصمیم معتبر است."
 
     return {
         "votes": [

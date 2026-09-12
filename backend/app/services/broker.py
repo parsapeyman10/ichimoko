@@ -1,10 +1,10 @@
 """
-Broker service — $100 demo test money, leverage & fee-accurate execution
-برکری با $100 دمو + محاسبه دقیق اهرم و کارمزد
+Broker reference data — leverage, spread, commission and minimum lot.
+اطلاعات مرجع بروکرها برای محاسبه دقیق هزینه اجرا (بدون هیچ ادعای عملکرد)
 """
 from app.models import BrokerConfig
 
-# 4 brokers that explicitly allow $100 demo / bonus micro account
+# Reference specs of brokers with micro lots (fees are inputs for the cost model)
 BROKERS: list[BrokerConfig] = [
     BrokerConfig(
         name="RoboForex Prime",
