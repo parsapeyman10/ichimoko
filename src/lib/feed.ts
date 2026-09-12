@@ -48,7 +48,7 @@ export function useMarketFeed(timeframe: '1m' | '5m' | '15m' | '1h') {
     if (!result.ok) {
       setSnapshot((prev) => ({
         ...prev,
-        state: result.status === 0 ? 'offline' : 'offline',
+        state: 'offline',
         detail: result.error,
         backendReachable: false,
         // keep whatever real candles we already had

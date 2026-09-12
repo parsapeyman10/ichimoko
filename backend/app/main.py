@@ -87,7 +87,11 @@ news_aggregator = NewsAggregator(settings)
 
 async def run_market_pipeline() -> None:
     """Consume real ticks; on failure report the failure and never emit invented data."""
-    builders = {Timeframe.M1: CandleBuilder(Timeframe.M1), Timeframe.M5: CandleBuilder(Timeframe.M5)}
+    # Aggregate the real tick stream into the timeframes the terminal offers.
+    builders = {
+        timeframe: CandleBuilder(timeframe)
+        for timeframe in (Timeframe.M1, Timeframe.M5, Timeframe.M15, Timeframe.H1)
+    }
     backoff = 2
     while True:
         try:
@@ -97,19 +101,16 @@ async def run_market_pipeline() -> None:
                 hub.feed_status.update(
                     {"state": "live", "detail": None, "last_tick_at": datetime.now(timezone.utc)}
                 )
+                active_bars: dict[str, dict] = {}
                 for timeframe, builder in builders.items():
                     completed, active = builder.ingest(tick)
                     hub.latest[timeframe] = active
                     if completed:
                         hub.history[timeframe].append(completed)
                         hub.publish({"type": "candle.closed", "payload": completed.model_dump(mode="json")})
-                    hub.publish(
-                        {
-                            "type": "market.update",
-                            "tick": hub.last_tick,
-                            "candles": {timeframe.value: active.model_dump(mode="json")},
-                        }
-                    )
+                    active_bars[timeframe.value] = active.model_dump(mode="json")
+                # One message per tick carrying every forming bar.
+                hub.publish({"type": "market.update", "tick": hub.last_tick, "candles": active_bars})
                 backoff = 2
         except asyncio.CancelledError:
             raise
