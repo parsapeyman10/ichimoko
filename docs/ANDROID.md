@@ -9,24 +9,25 @@ Twelve Data نباشد، اپ وضعیت «آفلاین / بدون کلید» ر
 
 ## ۱) فعال کردن ساخت خودکار APK (یک‌بار برای همیشه)
 
-فایل workflow از قبل در همین مخزن آماده است:
-
-```
-.github/workflows/android.yml
-```
-
-محدودیت: توکن‌های رباتیک GitHub اجازهٔ push کردن فایل‌های داخل `.github/workflows/` را ندارند،
-پس این یک فایل را باید خودت اضافه کنی. سه راه ساده:
+تو فایل `.github/workflows/main.yml` را روی شاخهٔ `main` ساختی (خالی). فقط محتوایش را بگذار:
 
 **راه اول — از رابط وب GitHub (ساده‌ترین، ~۳۰ ثانیه):**
-1. این لینک را باز کن (مسیر فایل از قبل پر شده است):
-   - روی شاخه‌ی این PR: <https://github.com/parsapeyman10/ichimoko/new/arena/01a09520-ichimoko/.github/workflows/android.yml>
-   - یا اگر PR را merge کردی: <https://github.com/parsapeyman10/ichimoko/new/main/.github/workflows/android.yml>
-2. پایین صفحه دکمه‌ی **«…or upload an existing file»** را بزن و فایل
-   [`docs/android-workflow.yml`](android-workflow.yml) را از همین ریپو آپلود کن
-   (یا محتوایش را کپی کن و در ادیتور paste کن).
-3. `Commit changes` → **همین commit خودش build را استارت می‌زند** (مسیر فایل در trigger ورک‌فلو هست)،
-   پس بلافاصله برو تب **Actions** و اجرای **Android APK** را ببین.
+1. این لینک را باز کن (فایل موجود را ادیت می‌کند):
+   <https://github.com/parsapeyman10/ichimoko/edit/main/.github/workflows/main.yml>
+2. محتوای آماده را از فایل [`docs/android-workflow.yml`](android-workflow.yml) کپی کن و در ادیتور
+   paste کن (یا با دکمهٔ **…or upload an existing file** همان فایل را آپلود کن).
+3. `Commit changes` → **بعد از آن، همان لحظه‌ای که PR اندروید merge شود، build خودکار شروع می‌شود**
+   (چون ورک‌فلو روی تغییرات پوشهٔ `android/` در `main` تریگر می‌شود). تب **Actions** → اجرای
+   **Android APK** → پایین صفحه **Artifacts** → `aurum-edge-apk`.
+
+نکته‌ها:
+- نام فایل مهم نیست؛ هم `main.yml` و هم `android.yml` کار می‌کنند. **فقط یکی** را داشته باش،
+  وگرنه هر push دو بار build می‌شود.
+- اگر خواستی قبل از merge هم APK بگیری: PR را باز نگه دار؛ ورک‌فلو روی PRهایی که `android/**` را
+  تغییر می‌دهند هم اجرا می‌شود (اگر برنچ هنوز فایل ورک‌فلو را ندارد، راه مطمئن‌تر این است که محتوای
+  همان فایل را در برنچ PR هم بگذاری).
+- ورک‌فلو اگر روی شاخه‌ای اجرا شود که پوشهٔ `android/` را ندارد، خطا نمی‌دهد؛ در Summary می‌نویسد
+  «اجرا نشد — PR اندروید هنوز merge نشده است».
 
 **راه دوم — با گیت روی کامپیوتر خودت:**
 ```bash

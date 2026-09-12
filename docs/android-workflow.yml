@@ -1,69 +1,131 @@
 name: Android APK
 
+# این ورک‌فلو فقط یک کار مهم دارد: ساخت APK آمادهٔ نصب و گذاشتنش در Artifacts.
+# روی هر push که پوشه android/ را تغییر بدهد (مثل merge همین PR) و روی PRها اجرا می‌شود،
+# و هر وقت خواستی می‌توانی از تب Actions دستی هم اجرا کنی (Run workflow).
 on:
   push:
-    branches: ['**']
+    branches: [main]
     paths:
       - 'android/**'
-      - '.github/workflows/android.yml'
+  pull_request:
+    paths:
+      - 'android/**'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# اگر چند بار پشت‌سرهم اجرا شد، اجراهای قدیمی‌تر لغو می‌شوند تا وقت runner هدر نرود.
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  apk:
     name: Build APK
     runs-on: ubuntu-latest
+    env:
+      # اختیاری: یک secret با نام TD_API_KEY بساز تا APK با کلید Twelve Data ساخته شود.
+      # اگر نگذاری، اپ موقع اولین اجرا کلید را در تب «تنظیمات» می‌پرسد.
+      TD_API_KEY: ${{ secrets.TD_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # اگر این ورک‌فلو دستی روی شاخه‌ای اجرا شود که هنوز android/ ندارد،
+      # به‌جای خطای گنگ، یک پیام روشن در Summary می‌گذاریم و بقیه مراحل رد می‌شوند.
+      - name: Check the Android sources are present
+        id: guard
+        run: |
+          if [ -d android ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "## Android APK — اجرا نشد"
+              echo ""
+              echo "پوشهٔ \`android/\` در این شاخه وجود ندارد (PR اندروید هنوز merge نشده است)."
+              echo "بعد از merge شدن، همین ورک‌فلو خودکار اجرا می‌شود و APK در Artifacts آماده است."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Set up JDK 17
+        if: steps.guard.outputs.ready == 'true'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Set up Gradle
+        if: steps.guard.outputs.ready == 'true'
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
+      # رانرهای GitHub اندروید SDK دارند، ولی برای اطمینان پلتفرم/بیلد‌تولز لازم را هم نصب می‌کنیم.
+      - name: Ensure Android SDK packages
+        if: steps.guard.outputs.ready == 'true'
+        run: |
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          if [ -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
+            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+            "$SDK/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0" > /dev/null 2>&1 || true
+          fi
+
       - name: Build debug + release APK
+        if: steps.guard.outputs.ready == 'true'
         working-directory: android
-        env:
-          # Optional: add a repository secret named TD_API_KEY to ship an APK that already
-          # has a real Twelve Data key baked in. Without it the app asks for the key on first run.
-          TD_API_KEY: ${{ secrets.TD_API_KEY }}
         run: gradle assembleDebug assembleRelease --no-daemon --stacktrace
 
-      - name: Unit tests (engine honesty checks)
-        # Non-blocking on purpose: the APK must still be produced and uploaded even if a test fails,
-        # but the result is visible in the run summary.
+      # تست‌های JVM موتور؛ عمداً non-blocking تا نبود APK به‌خاطر یک تست از دست نرود.
+      - name: Unit tests (engine truth checks)
+        if: steps.guard.outputs.ready == 'true'
         continue-on-error: true
         working-directory: android
         run: gradle testDebugUnitTest --no-daemon --stacktrace
 
+      # نام‌گذاری ساده برای دانلود راحت‌تر.
+      - name: Collect APKs
+        if: steps.guard.outputs.ready == 'true'
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk out/AurumEdge-debug.apk 2>/dev/null || true
+          cp android/app/build/outputs/apk/release/app-release.apk out/AurumEdge-release.apk 2>/dev/null || true
+          ls -la out
+
       - name: Upload APKs
+        if: steps.guard.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: aurum-edge-apk
           if-no-files-found: error
-          path: |
-            android/app/build/outputs/apk/debug/*.apk
-            android/app/build/outputs/apk/release/*.apk
+          retention-days: 30
+          path: out/*.apk
 
       - name: Job summary
-        if: always()
+        if: always() && steps.guard.outputs.ready == 'true'
         run: |
           {
             echo "## Aurum Edge — Android"
             echo ""
-            echo "APKها در بخش Artifacts همین اجرا قابل دانلود هستند (فایل zip شامل debug و release)."
+            echo "APKها در بخش **Artifacts** همین اجرا هستند (فایل zip شامل دو APK):"
             echo ""
-            echo "Release APK با کلید دیباگ امضا شده و روی گوشی قابل نصب است."
+            echo "| فایل | توضیح |"
+            echo "|---|---|"
+            echo "| \`AurumEdge-release.apk\` | نسخهٔ اصلی — روی گوشی نصب می‌شود |"
+            echo "| \`AurumEdge-debug.apk\` | نسخهٔ دیباگ (پکیج جدا: com.aurum.edge.debug) |"
             echo ""
-            echo "تست‌های JVM موتور (تجمیع کندل و تست خارج از نمونه) به‌صورت غیرمسدودکننده اجرا می‌شوند."
-            echo "اگر آن مرحله قرمز شد، APKها همچنان در Artifacts هستند ولی لاگ تست را بفرست تا بررسی شود."
+            echo "Release با کلید دیباگ امضا شده تا بدون keystore روی گوشی نصب شود؛ هنگام نصب اجازهٔ «نصب از منبع ناشناس» را بده."
+            echo ""
+            echo "اگر مرحلهٔ تست موتور قرمز شد، APKها با این حال ساخته شده‌اند؛ لاگ تست را بفرست تا بررسی شود."
+            if [ -n "$TD_API_KEY" ]; then
+              echo ""
+              echo "کلید Twelve Data در این بیلد داخل APK قرار گرفته است (secret TD_API_KEY)."
+            else
+              echo ""
+              echo "کلید Twelve Data داخل APK نیست: اول در تب «تنظیمات» کلید را وارد کن."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
