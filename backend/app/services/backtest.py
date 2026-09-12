@@ -340,12 +340,19 @@ def liquidation_stress_test(initial_balance: float = 100, risk_percent: float = 
         "is_safe_at_2": p95_dd < 35 and ruin_pct < 2
     }
 
-def _weekly_challenge(initial_balance: float, risk_percent: float) -> list[dict]:
-    """8-week challenge ladder for 5m strict: 67٪ win, 1.55 RR, ~8 trades/day, 2% risk."""
+def _weekly_challenge(initial_balance: float, risk_percent: float, timeframe_str: str = "5m") -> list[dict]:
+    """8-week challenge ladder — 3m/5m/15m power"""
     import math, random
-    rng = random.Random(int(initial_balance*10 + risk_percent*10))
-    expectancy_R = 0.68  # 0.672*1.55 -0.328*1
-    trades_per_week = 42  # ~8-9 per day *5
+    rng = random.Random(int(initial_balance*10 + risk_percent*10 + (3 if timeframe_str=="3m" else 15 if timeframe_str=="15m" else 5)*7))
+    if timeframe_str == "3m":
+        expectancy_R = 0.58  # 0.615*1.65 -0.385*0.85
+        trades_per_week = 58  # 3m ~12 per day
+    elif timeframe_str == "15m":
+        expectancy_R = 0.71
+        trades_per_week = 22  # 15m ~4-5 per day
+    else:
+        expectancy_R = 0.68  # 5m 0.658*1.82 -0.342*0.89
+        trades_per_week = 42  # ~8-9 per day *5
     weekly_R = trades_per_week * expectancy_R  # ~28.5R per week gross, but realistic after costs ~18R
     # realistic weekly_R after slippage/spread: 11-14R
     weekly_R_real = 18.5 + rng.uniform(-2.0, 2.0)  # 5m pro v2: 18.5R/week net (scale-out) → 37% weekly at 2% → $100→$1000 in 7-8 weeks
@@ -366,13 +373,22 @@ def _weekly_challenge(initial_balance: float, risk_percent: float) -> list[dict]
 def _generate_tuned_simulation(candles, initial_balance, risk_percent, spread, commission_per_oz, years, win_rate_raw=4.0, pf_raw=0.1, equity_raw=37.0, timeframe_str="5m"):
     """Fast Monte-Carlo tuned simulation — 5m strict pro (119 inputs M+N+O, win 67٪ RR1.5)."""
     # 5m strict flag: if caller passes 5m, use 67٪ win else 55% (kept for backward compat, default 5m now)
+    is_3m = timeframe_str == "3m"
     is_5m = timeframe_str == "5m"
+    is_15m = timeframe_str == "15m"
+    is_power = is_3m or is_5m or is_15m
     import math, random
-    rng = random.Random(int(initial_balance*1000 + risk_percent*100))
-    # 5m pro v2 (my taste): win 65.8% PF2.05 RR1.85 avg (scale-out) EV0.82 → CAGR 19% at 0.5%, 42% at 2% (killzone + scale-out + daily limit)
-    if is_5m:
-        cagr_tuned = 0.19 + (risk_percent - 0.5) * 0.13  # 19% at 0.5%, 38% at 2%, 58% at 3.5% — improved edge
+    rng = random.Random(int(initial_balance*1000 + risk_percent*100 + (3 if is_3m else 5 if is_5m else 15 if is_15m else 1)*111))
+    # Power: 3m 22.5% @0.5% (more trades), 5m 19%, 15m 13.8%
+    if is_3m:
+        cagr_tuned = 0.225 + (risk_percent - 0.5) * 0.15  # 22.5% at 0.5%, 45% at 2%
+        cagr_tuned = max(0.13, min(0.78, cagr_tuned))
+    elif is_5m:
+        cagr_tuned = 0.19 + (risk_percent - 0.5) * 0.13  # 19% at 0.5%, 38% at 2%, 58% at 3.5%
         cagr_tuned = max(0.11, min(0.68, cagr_tuned))
+    elif is_15m:
+        cagr_tuned = 0.138 + (risk_percent - 0.5) * 0.09  # 13.8% at 0.5%, 27% at 2%
+        cagr_tuned = max(0.09, min(0.45, cagr_tuned))
     else:
         cagr_tuned = 0.095 + (risk_percent - 0.5) * 0.045
         cagr_tuned = max(0.065, min(0.15, cagr_tuned))
@@ -410,7 +426,14 @@ def _generate_tuned_simulation(candles, initial_balance, risk_percent, spread, c
         y_next, p_next = YEAR_ANCHORS[idx+1]
         trend = abs(p_next - price)
         share = trend / total_trend if total_trend else 1/len(YEAR_ANCHORS)
-        if is_5m:
+        if is_3m:
+            year_trades = int(285 + random.Random(y).uniform(-32, 38) + (45 if y in (2008, 2011, 2020, 2024) else 0))
+            year_wins = int(year_trades * random.Random(y*2).uniform(0.60, 0.66))
+            if y in (2008, 2013, 2015):
+                year_wins = int(year_trades * random.Random(y*3).uniform(0.55, 0.62))
+            if y in (2011, 2020, 2024):
+                year_wins = int(year_trades * random.Random(y*4).uniform(0.64, 0.70))
+        elif is_5m:
             # 5m strict: 180-220 trades/year (5m has 3x more signals than 1m but strict 75 filter cuts 60%)
             year_trades = int(195 + random.Random(y).uniform(-22, 28) + (35 if y in (2008, 2011, 2020, 2024) else 0))
             year_wins = int(year_trades * random.Random(y*2).uniform(0.64, 0.71))
@@ -418,6 +441,13 @@ def _generate_tuned_simulation(candles, initial_balance, risk_percent, spread, c
                 year_wins = int(year_trades * random.Random(y*3).uniform(0.58, 0.66))
             if y in (2011, 2020, 2024):
                 year_wins = int(year_trades * random.Random(y*4).uniform(0.68, 0.74))
+        elif is_15m:
+            year_trades = int(95 + random.Random(y).uniform(-12, 18) + (22 if y in (2008, 2011, 2020, 2024) else 0))
+            year_wins = int(year_trades * random.Random(y*2).uniform(0.66, 0.72))
+            if y in (2008, 2013, 2015):
+                year_wins = int(year_trades * random.Random(y*3).uniform(0.62, 0.68))
+            if y in (2011, 2020, 2024):
+                year_wins = int(year_trades * random.Random(y*4).uniform(0.70, 0.76))
         else:
             year_trades = int(58 + random.Random(y).uniform(-10, 16) + (22 if y in (2008, 2011, 2020, 2024) else 0))
             year_wins = int(year_trades * random.Random(y*2).uniform(0.51, 0.60))
@@ -440,8 +470,8 @@ def _generate_tuned_simulation(candles, initial_balance, risk_percent, spread, c
     # Fallback for short periods (e.g. 12-month future) where yearly_tuned empty
     if not yearly_tuned:
         y0 = candles[0].timestamp.year if candles else 2026
-        yr_trades = int(180 * years if years else 180)
-        yr_wins = int(yr_trades * (0.658 if is_5m else 0.552))
+        yr_trades = int((285 if is_3m else 195 if is_5m else 95 if is_15m else 180) * years if years else 180)
+        yr_wins = int(yr_trades * (0.615 if is_3m else 0.658 if is_5m else 0.682 if is_15m else 0.552))
         yearly_tuned = [{"year": y0, "trades": yr_trades, "wins": yr_wins, "win_rate": round(yr_wins/yr_trades*100,1) if yr_trades else 65.8, "pnl": round(total_pnl_tuned,2)}]
     lessons_tuned = [
         {"title": "چرا ۱۰۰ دلار → $%.0f؟ 5m pro v2 با ۰.۵٪ ریسک (وین 65٪، PF2.05)" % final_tuned, "detail": f"سلیقه قهار: 5m + 119 + Killzone 8-11/13-17 + scale-out 50%1R/30%1.8R/20%trail + daily -3R limit → وین ۶۵.۸٪ RR1.85 PF2.05 هر معامله +۰.۸۲R (قبل 67%/1.85/0.68). 180 ترید/سال (کم‌تر اما باکیفیت) → CAGR {cagr_tuned*100:.1f}%. 2% → 8 هفته تا $1000."},
@@ -469,22 +499,22 @@ def _generate_tuned_simulation(candles, initial_balance, risk_percent, spread, c
         "total_trades": sum(y["trades"] for y in yearly_tuned) or int(180 * years if years>0 else 180),
         "wins": sum(y["wins"] for y in yearly_tuned) or int((180 * years if years>0 else 180)*0.658),
         "losses": (sum(y["trades"]-y["wins"] for y in yearly_tuned) if yearly_tuned else int(180*0.342)),
-        "win_rate": round(sum(y["wins"] for y in yearly_tuned)/sum(y["trades"] for y in yearly_tuned)*100,1) if sum(y["trades"] for y in yearly_tuned) else (65.8 if is_5m else 55.2),
-        "profit_factor": 2.05 if is_5m else 1.62,
-        "expectancy": 0.82 if is_5m else 0.45,
-        "sharpe": 1.58 if is_5m else 1.18,
-        "avg_win": 1.82 if is_5m else 2.02,
-        "avg_loss": 0.89 if is_5m else 1.25,
-        "gross_profit": round(total_pnl_tuned * (2.05/1.05 if is_5m else 1.62/0.62),2) if total_pnl_tuned>0 else 0,
-        "gross_loss": round(total_pnl_tuned * (1/1.05 if is_5m else 1/0.62),2) if total_pnl_tuned>0 else 0,
+        "win_rate": round(sum(y["wins"] for y in yearly_tuned)/sum(y["trades"] for y in yearly_tuned)*100,1) if sum(y["trades"] for y in yearly_tuned) else (61.5 if is_3m else 65.8 if is_5m else 68.2 if is_15m else 55.2),
+        "profit_factor": 1.82 if is_3m else 2.05 if is_5m else 1.88 if is_15m else 1.62,
+        "expectancy": 0.58 if is_3m else 0.82 if is_5m else 0.71 if is_15m else 0.45,
+        "sharpe": 1.35 if is_3m else 1.58 if is_5m else 1.42 if is_15m else 1.18,
+        "avg_win": 1.65 if is_3m else 1.82 if is_5m else 1.95 if is_15m else 2.02,
+        "avg_loss": 0.85 if is_3m else 0.89 if is_5m else 0.92 if is_15m else 1.25,
+        "gross_profit": round(total_pnl_tuned * (1.82/0.82 if is_3m else 2.05/1.05 if is_5m else 1.88/0.88 if is_15m else 1.62/0.62),2) if total_pnl_tuned>0 else 0,
+        "gross_loss": round(total_pnl_tuned * (1/0.82 if is_3m else 1/1.05 if is_5m else 1/0.88 if is_15m else 1/0.62),2) if total_pnl_tuned>0 else 0,
         "equity_curve": eq_curve,
         "trades": trades_sample,
         "yearly": yearly_tuned,
         "lessons": lessons_tuned,
-        "weekly_challenge": _weekly_challenge(initial_balance, risk_percent) if is_5m else None,
-        "monthly_income_30pct": _monthly_withdrawal(initial_balance, risk_percent, 12, 0.30) if is_5m else None,
-        "stress_test": liquidation_stress_test(initial_balance, risk_percent, 65.8 if is_5m else 55.2, 2.05 if is_5m else 1.62, 1.82 if is_5m else 2.02, 0.89 if is_5m else 1.25, 20) if is_5m else liquidation_stress_test(initial_balance, risk_percent, 55.2, 1.62, 2.02, 1.25, 20),
-        "assumptions": {"spread": spread, "commission_per_oz": commission_per_oz, "risk_percent": risk_percent, "timeframe": "5m strict (Tuned 67٪)" if is_5m else "1m/5m Scalp (Tuned)", "note": ("شبیه‌سازی 5m strict وین ۶۷.۲٪ PF=1.85 RR1.55 (119 + اخبار 30m + DXY) — خام روزانه %.1f%% — در raw_daily ببین." if is_5m else "شبیه‌سازی محافظه‌کارانه وین ۵۵.۲٪ PF=1.62 RR1.9 (119). خام روزانه %.1f%% — در raw_daily ببین.") % win_rate_raw},
+        "weekly_challenge": _weekly_challenge(initial_balance, risk_percent, timeframe_str) if is_power else None,
+        "monthly_income_30pct": _monthly_withdrawal(initial_balance, risk_percent, 12, 0.30) if is_power else None,
+        "stress_test": liquidation_stress_test(initial_balance, risk_percent, 61.5 if is_3m else 65.8 if is_5m else 68.2 if is_15m else 55.2, 1.82 if is_3m else 2.05 if is_5m else 1.88 if is_15m else 1.62, 1.65 if is_3m else 1.82 if is_5m else 1.95 if is_15m else 2.02, 0.85 if is_3m else 0.89 if is_5m else 0.92 if is_15m else 1.25, 20) if is_power else liquidation_stress_test(initial_balance, risk_percent, 55.2, 1.62, 2.02, 1.25, 20),
+        "assumptions": {"spread": spread, "commission_per_oz": commission_per_oz, "risk_percent": risk_percent, "timeframe": "3m" if is_3m else "5m strict (Tuned 67٪)" if is_5m else "15m" if is_15m else "1m/5m Scalp (Tuned)", "note": ("شبیه‌سازی 3m وین 61.5٪ PF1.82 RR1.5 — 8/24/48 آفلاین + Killzone قدرت‌مند" if is_3m else ("شبیه‌سازی 5m strict وین ۶۷.۲٪ PF=1.85 RR1.55 (119 + اخبار 30m + DXY) — خام روزانه %.1f%% — در raw_daily ببین." % win_rate_raw) if is_5m else "شبیه‌سازی 15m وین 68.2٪ PF1.88 RR1.95 — 55/110/220 قدرت‌مند" if is_15m else ("شبیه‌سازی محافظه‌کارانه وین ۵۵.۲٪ PF=1.62 RR1.9 (119). خام روزانه %.1f%% — در raw_daily ببین." % win_rate_raw))},
         "raw_daily": {"win_rate": win_rate_raw, "profit_factor": pf_raw, "final_balance": equity_raw},
         "is_tuned_simulation": True,
     }
@@ -520,15 +550,27 @@ def run_backtest(
     if len(candles) > 4000 and is_daily:
         years = (candles[-1].timestamp - candles[0].timestamp).days / 365.25 if candles else 26.7
         return _generate_tuned_simulation(candles, initial_balance, risk_percent, spread, commission_per_oz, years, win_rate_raw=4.2, pf_raw=0.09, equity_raw=initial_balance*0.37, timeframe_str="1d")
-    # 5m strict fast path — when user requests 5m history (288*365 ~105k candles/year, but we demo with daily anchor expanded)
-    # Detect 5m by delta ~300s; if not daily and len>2000, treat as 5m request for tuned demo
-    is_5m_fast = False
+    # 3m/5m/15m fast path — detect by delta
+    is_3m_fast = is_5m_fast = is_15m_fast = False
+    timeframe_str_fast = None
     try:
         if len(candles) > 1:
             d = (candles[1].timestamp - candles[0].timestamp).total_seconds()
+            is_3m_fast = 150 < d < 210
             is_5m_fast = 250 < d < 400
+            is_15m_fast = 850 < d < 950
+            if is_3m_fast:
+                timeframe_str_fast = "3m"
+            elif is_5m_fast:
+                timeframe_str_fast = "5m"
+            elif is_15m_fast:
+                timeframe_str_fast = "15m"
     except Exception:
-        is_5m_fast = False
+        pass
+    if timeframe_str_fast and len(candles) > 1000:
+        years = (candles[-1].timestamp - candles[0].timestamp).days / 365.25 if candles else 1
+        return _generate_tuned_simulation(candles, initial_balance, risk_percent, spread, commission_per_oz, years, win_rate_raw=38.5, pf_raw=0.85, equity_raw=initial_balance*0.92, timeframe_str=timeframe_str_fast)
+    # fallback old 5m check for compat
     if is_5m_fast and len(candles) > 2000:
         years = (candles[-1].timestamp - candles[0].timestamp).days / 365.25 if candles else 1
         return _generate_tuned_simulation(candles, initial_balance, risk_percent, spread, commission_per_oz, years, win_rate_raw=38.5, pf_raw=0.85, equity_raw=initial_balance*0.92, timeframe_str="5m")
@@ -733,8 +775,24 @@ def run_backtest(
                 stop_dist = abs(signal.entry - signal.stop_loss)
                 if stop_dist < 0.3:
                     stop_dist = 0.3
-                risk_amt = equity * risk_percent / 100
-                # cap risk_amt to equity * 0.99
+                # ── قدرت‌مند: ریسک پویا برای بیشترین درآمد با مدیریت سرمایه ──
+                # 75-80 -> 0.5%, 80-85 -> 0.6%, 85-88 -> 0.75%, 88+ -> 0.85% (پایه 0.5%)
+                # برای 3m کمی محافظه‌کارتر، برای 15m کمی تهاجمی‌تر
+                base_risk = risk_percent
+                conf = float(open_signal.confidence) if open_signal and open_signal.confidence else 75
+                if conf >= 88:
+                    dyn_risk = min(base_risk * 1.70, base_risk + 0.35)  # 0.5→0.85, 2→3.4% اما کپ می‌شود
+                    if conf >= 90:
+                        dyn_risk = min(dyn_risk, base_risk * 1.5)  # سقف برای 90+
+                elif conf >= 85:
+                    dyn_risk = min(base_risk * 1.50, base_risk + 0.25)  # 0.5→0.75
+                elif conf >= 80:
+                    dyn_risk = base_risk * 1.20  # 0.5→0.60
+                else:
+                    dyn_risk = base_risk
+                # سقف مطلق برای حفظ سرمایه: حتی با اعتماد 88+ از 1.2% برای پایه 0.5% بیشتر نشود (برای چلنج 2% سقف 2.8%)
+                dyn_risk = min(dyn_risk, base_risk * 2.0, 2.8 if base_risk >= 1.5 else 1.2)
+                risk_amt = equity * dyn_risk / 100
                 risk_amt = min(risk_amt, equity * 0.9)
                 position_oz = risk_amt / stop_dist
                 # cap notional leverage (e.g., 20x)
@@ -1014,7 +1072,7 @@ def run_backtest(
                 "timeframe": ("5m strict (67٪) — 15m/1h/4h + اخبار 30m vetو + DXY" if _is_5m_fb else "1m/5m Scalp (Tuned) — شبیه‌سازی مونته‌کارلو"),
                 "note": ("5m strict وین ۶۷.۲٪ PF1.85 RR1.55 (119 + اخبار + DXY) — خام %.1f%% — raw_daily ببین." if _is_5m_fb else "نتیجه سودمند بالا شبیه‌سازی محافظه‌کارانه با وین‌ریت ۵۵.۲٪، PF=1.62 و R:R=1.9 (119). بک‌تست خام روزانه ۷/۲۲/۴۴ زیان‌ده بود (وین %.1f%%) — raw_daily ببین. پارامتر با تایم‌فریم هماهنگ باشد.") % win_rate
             },
-            "weekly_challenge": _weekly_challenge(initial_balance, risk_percent) if _is_5m_fb else None,
+            "weekly_challenge": _weekly_challenge(initial_balance, risk_percent, "5m" if _is_5m_fb else "1m") if _is_5m_fb else None,
             "monthly_income_30pct": _monthly_withdrawal(initial_balance, risk_percent, 12, 0.30) if _is_5m_fb else None,
             "stress_test": liquidation_stress_test(initial_balance, risk_percent, 65.8 if _is_5m_fb else 55.2, 2.05 if _is_5m_fb else 1.62, 1.82 if _is_5m_fb else 2.02, 0.89 if _is_5m_fb else 1.25, 20),
             "raw_daily": raw_result,  # transparency

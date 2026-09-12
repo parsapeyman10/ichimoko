@@ -3,7 +3,7 @@ import { Activity, TrendingUp, TrendingDown, AlertTriangle, ShieldCheck, BarChar
 
 type ForwardData = any;
 
-export default function ForwardTestPanel({ initial, risk, brokerName, useTrailing }: { initial: number; risk: number; brokerName?: string; useTrailing?: boolean }) {
+export default function ForwardTestPanel({ initial, risk, brokerName, useTrailing, timeframe }: { initial: number; risk: number; brokerName?: string; useTrailing?: boolean; timeframe?: string }) {
   const [data, setData] = useState<ForwardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [brokerIdx, setBrokerIdx] = useState(0);
@@ -12,7 +12,9 @@ export default function ForwardTestPanel({ initial, risk, brokerName, useTrailin
     setLoading(true);
     try {
       const b = brokerName ? `&broker_name=${encodeURIComponent(brokerName)}` : '';
-      const res = await fetch(`/api/v1/backtest/forward?initial_balance=${initial}&risk_percent=${risk}${b}`);
+      const tf = timeframe ? `&timeframe=${encodeURIComponent(timeframe)}` : '';
+      const tr = typeof useTrailing === 'boolean' ? `&use_trailing=${useTrailing}` : '';
+      const res = await fetch(`/api/v1/backtest/forward?initial_balance=${initial}&risk_percent=${risk}${b}${tf}${tr}`);
       if (res.ok) {
         const j = await res.json();
         setData(j);
@@ -21,7 +23,7 @@ export default function ForwardTestPanel({ initial, risk, brokerName, useTrailin
     setLoading(false);
   };
 
-  useEffect(() => { fetchForward(); }, [initial, risk, brokerName]);
+  useEffect(() => { fetchForward(); }, [initial, risk, brokerName, timeframe, useTrailing]);
 
   if (loading && !data) return <div style={{ padding: 12, textAlign: 'center', color: '#6b7280', font: '8px DM Mono' }}>در حال تست آینده (Walk-Forward) روی دیتای دیده نشده...</div>;
   if (!data) return null;

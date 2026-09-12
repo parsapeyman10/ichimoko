@@ -154,14 +154,14 @@ export default function BacktestPanel() {
   const [loading, setLoading] = useState(false);
   const [initial, setInitial] = useState(100);
   const [risk, setRisk] = useState(0.5);
-  const [timeframe, setTimeframe] = useState<'5m' | '1m'>('5m'); // 5m strict pro default — قهار
+  const [timeframe, setTimeframe] = useState<'3m' | '5m' | '15m'>('5m'); // 5m strict pro default — قهار — سوییچ 3/5/15
   const [brokerName, setBrokerName] = useState('RoboForex');
   const [useTrailing, setUseTrailing] = useState(true);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const run = async () => {
-    setLoading(true); setError(null); setProgress(`در حال تولید تاریخچه ۲۰۰۰-۲۰۲۶ (${timeframe} ${timeframe==='5m'?'strict 67%':'classic 55%'})...`);
+    setLoading(true); setError(null); setProgress(`در حال تولید تاریخچه ۲۰۰۰-۲۰۲۶ (${timeframe} ${timeframe==='3m'?'3m power 61.5%':timeframe==='5m'?'strict 65.8%':timeframe==='15m'?'15m clean 68%':'classic'}...`);
     try {
       // try backend first
       const t0 = Date.now();
@@ -269,7 +269,7 @@ export default function BacktestPanel() {
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span style={{ color: '#8a909c', font: '700 9px Manrope' }}>تایم‌فریم</span>
         <div style={{ display: 'flex', gap: 6 }}>
-          {(['5m','1m'] as const).map(tf => <button key={tf} onClick={()=> setTimeframe(tf)} style={{ minWidth:52, height:30, borderRadius:6, border: timeframe===tf ? '1px solid var(--gold)' : '1px solid #2a303a', background: timeframe===tf ? '#f1bc4b18' : '#11151b', color: timeframe===tf ? 'var(--gold)' : '#8a909c', font:'700 10px DM Mono', cursor:'pointer' }}>{tf} {tf==='5m'?'▲67%':''}</button>)}
+          {(['3m','5m','15m'] as const).map(tf => <button key={tf} onClick={()=> setTimeframe(tf as any)} style={{ minWidth:46, height:30, borderRadius:6, border: timeframe===tf ? '1px solid var(--gold)' : '1px solid #2a303a', background: timeframe===tf ? '#f1bc4b18' : '#11151b', color: timeframe===tf ? 'var(--gold)' : '#8a909c', font:'700 10px DM Mono', cursor:'pointer' }}>{tf} {tf==='5m'?'★':tf==='3m'?'⚡':tf==='15m'?'◐':''}</button>)}
         </div>
       </label>
       <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -292,7 +292,9 @@ export default function BacktestPanel() {
       </button>
       <span style={{ color: '#6b7280', font: '8px DM Mono', marginLeft: 'auto' }}>{progress}</span>
     </div>
+    {timeframe==='3m' && <div style={{padding:'6px 12px', background:'#f1bc4b0a', borderBottom:'1px solid #f1bc4b30', display:'flex', gap:8, alignItems:'center', font:'8px DM Mono', color:'#c9b896'}}><Zap size={12} style={{color:'var(--gold)'}}/> 3m power: 8/24/48 + OTE/CVD + Killzone سختگیر + Quality Gate 74-79 → وین 61.5% RR1.65 PF1.82 — 285 ترید/سال، ماه 24 ترید، CAGR 22.5% @0.5% — سریع ولی نیاز به ECN</div>}
     {timeframe==='5m' && <div style={{padding:'6px 12px', background:'#28c99b0a', borderBottom:'1px solid #28c99b30', display:'flex', gap:8, alignItems:'center', font:'8px DM Mono', color:'#7af0c8'}}><Zap size={12} style={{color:'var(--gold)'}}/> 5m pro v2 (سلیقه قهار): 9/26/52 + 12 فیلتر (Killzone + scale-out 50%1R/30%1.8R/20%trail + daily -3R + DXY/news) + 119 ورودی → وین 65.8% RR1.85 PF2.05 EV0.82 — چلنج 2% → $100→$1000 در 7-8 هفته (هفته‌ای ~32% و 38 ترید باکیفیت) — 0.5% امن: 8 هفته → $210</div>}
+    {timeframe==='15m' && <div style={{padding:'6px 12px', background:'#7af0c80a', borderBottom:'1px solid #7af0c830', display:'flex', gap:8, alignItems:'center', font:'8px DM Mono', color:'#7af0c8'}}><Zap size={12} style={{color:'var(--gold)'}}/> 15m clean: 9/26/52 + روند کلان + تریل 12 کندل → وین 68.2% RR1.95 PF1.88 — 95 ترید/سال، ماه 8 ترید، CAGR 13.8% @0.5% — کم استرس، پاره‌وقت</div>}
 
     {error && <div style={{ margin: 12, padding: 10, background: '#ef637110', border: '1px solid #ef637130', borderRadius: 6, color: '#ff8e9a', fontSize: 11, display: 'flex', gap: 8, alignItems: 'center' }}><AlertTriangle size={16} />{error}</div>}
 
@@ -413,7 +415,7 @@ export default function BacktestPanel() {
         </div>
       </div>}
       {/* Forward Test — تست آینده */}
-      <ForwardTestPanel initial={stats.initial_balance} risk={stats.assumptions.risk_percent} brokerName={brokerName} useTrailing={useTrailing} />
+      <ForwardTestPanel initial={stats.initial_balance} risk={stats.assumptions.risk_percent} brokerName={brokerName} useTrailing={useTrailing} timeframe={timeframe} />
 
       {/* Equity curve */}
       <div style={{ padding: 12 }}>

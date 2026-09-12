@@ -19,11 +19,13 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
         return TradeSignal(action=Direction.NO_TRADE, confidence=0, blockers=["At least 200 closed candles required"])
 
     frame = candles[-1].timeframe
-    # ── 5m strict pro — adapt Ichimoku to timeframe (5m needs slower, less noise) ──
-    if frame.value == "5m":
+    # ── Multi-TF Ichimoku — 3m/5m/15m power tuned ──
+    if frame.value == "3m":
+        t_p, k_p, b_p, disp = 8, 24, 48, 24  # 3m fast but not noisy
+    elif frame.value == "5m":
         t_p, k_p, b_p, disp = 9, 26, 52, 26  # classic 9/26/52 for 5m (higher win, fewer whipsaws)
     elif frame.value == "15m":
-        t_p, k_p, b_p, disp = 9, 26, 52, 26
+        t_p, k_p, b_p, disp = 9, 26, 52, 26  # 15m clean
     elif frame.value in ("1h", "4h", "1d"):
         t_p, k_p, b_p, disp = 9, 26, 52, 26
     else:  # 1m
@@ -189,31 +191,48 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
         # already added -12 above, but make it hard gate for 5m
         if frame.value == "5m":
             blockers.append("Hard gate: high-impact news strongly opposite / خبر قرمز مخالف — وتو")
-    # DXY / HTF strict veto for 5m: if HTF bias opposite and ADX>20, hard gate
-    if frame.value == "5m" and context.higher_timeframe_bias not in (Direction.NEUTRAL, direction):
+    # DXY / HTF strict veto for 3m/5m: if HTF bias opposite and ADX>20, hard gate
+    if frame.value in ("3m","5m") and context.higher_timeframe_bias not in (Direction.NEUTRAL, direction):
         if adx14[i] is not None and adx14[i] > 20:
-            blockers.append("Hard gate: DXY/HTF divergence on 5m with trend strength / واگرایی تایم بالا + DXY مخالف — وتو 5m")
+            blockers.append(f"Hard gate: DXY/HTF divergence on {frame.value} with trend strength / واگرایی تایم بالا + DXY مخالف — وتو {frame.value}")
         elif adx14[i] is not None and adx14[i] > 16:
-            score -= 8  # extra penalty already partly above, add more for 5m
-    # ── Killzone time filter — professional: 70% of 5m edge in London 8-11 & NY 13-17 ──
-    # Outside killzone, require ADX>25 or high confidence
+            score -= 8  # extra penalty already partly above, add more for 3m/5m
+        # 15m also but softer
+    elif frame.value == "15m" and context.higher_timeframe_bias not in (Direction.NEUTRAL, direction):
+        if adx14[i] is not None and adx14[i] > 25:
+            blockers.append("Hard gate: DXY/HTF divergence on 15m — وتو")
+        elif adx14[i] is not None and adx14[i] > 20:
+            score -= 6
+    # ── Killzone time filter — 70% edge in London 8-11 & NY 13-17 — 3m needs stricter ──
     try:
         hour = current.timestamp.hour + current.timestamp.minute/60
         is_kill = (8 <= hour < 11) or (13 <= hour < 17)
-        if frame.value == "5m" and not is_kill:
-            if adx_val is not None and adx_val < 25:
-                score -= 7
-                blockers.append(f"Outside killzone (UTC {hour:.1f}h) + ADX {adx_val:.1f} <25 — low edge outside London/NY / خارج کیلزون + روند ضعیف")
-            elif adx_val is not None and adx_val < 18:
-                score -= 12
-                blockers.append(f"Hard gate: Outside killzone + weak trend — no trade / خارج کیلزون و روند ضعیف")
+        if frame.value in ("3m","5m") and not is_kill:
+            # 3m stricter
+            if frame.value == "3m":
+                if adx_val is not None and adx_val < 27:
+                    score -= 8
+                    blockers.append(f"Outside killzone 3m (UTC {hour:.1f}h) + ADX {adx_val:.1f} <27 — low edge")
+                if adx_val is not None and adx_val < 20:
+                    blockers.append(f"Hard gate: Outside killzone 3m + weak trend — no trade")
+            else: # 5m
+                if adx_val is not None and adx_val < 25:
+                    score -= 7
+                    blockers.append(f"Outside killzone (UTC {hour:.1f}h) + ADX {adx_val:.1f} <25 — low edge outside London/NY / خارج کیلزون + روند ضعیف")
+                elif adx_val is not None and adx_val < 18:
+                    score -= 12
+                    blockers.append(f"Hard gate: Outside killzone + weak trend — no trade / خارج کیلزون و روند ضعیف")
+        elif frame.value == "15m" and not is_kill:
+            if adx_val is not None and adx_val < 20:
+                score -= 5
+                blockers.append(f"Outside killzone 15m + ADX {adx_val:.1f} <20")
     except Exception:
         pass
     # ── Unseen liquidation guards — where we get called? ──
     # 1) Daily loss -3% hard gate, -1.5% penalty
     if context.daily_pnl_pct <= -3.0:
         blockers.append(f"Hard gate: Daily loss limit -3% hit ({context.daily_pnl_pct:.1f}%) — stop trading today / حد ضرر روزانه — تعطیل")
-    elif context.daily_pnl_pct <= -1.5 and frame.value == "5m":
+    elif context.daily_pnl_pct <= -1.5 and frame.value in ("3m","5m"):
         score -= 8
         blockers.append(f"Daily drawdown {context.daily_pnl_pct:.1f}% — reduce size 50% tomorrow / افت روزانه")
     # 2) Tilt: 4 consecutive losses → hard gate, 3 → half size
@@ -248,30 +267,115 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
     candle_range = max(current.high - current.low, 0.01)
     body_quality = abs(current.close - current.open) / candle_range
     volumes = [c.volume for c in candles[-31:-1]]
+    # ── POWER weighting — add OTE + CVD + Killzone bonus ──
+    # Body quality
     if body_quality < 0.35:
         score -= 6
         blockers.append("Weak breakout body / wick rejection risk / بدنه ضعیف کندل")
-    if volumes and current.volume < median(volumes) * 0.60:
-        score -= 7
+    elif body_quality > 0.55:
+        score += 3
+        reasons.append("Strong body quality / بدنه قوی")
+    # Volume — stricter for 3m
+    vol_thresh = 0.70 if frame.value == "3m" else 0.60
+    if volumes and current.volume < median(volumes) * vol_thresh:
+        score -= 7 if frame.value != "3m" else 10
         blockers.append("Low tick-volume participation / حجم معاملات کم")
+    elif volumes and current.volume > median(volumes) * 1.25:
+        score += 4
+        reasons.append("High volume confirmation / حجم بالا تایید")
+    # OTE 62-79% Fib zone — powerful
+    try:
+        swing_high = max(c.high for c in candles[-20:])
+        swing_low = min(c.low for c in candles[-20:])
+        fib_range = swing_high - swing_low
+        if fib_range > 0:
+            ote_low = swing_high - fib_range * 0.79 if long else swing_low + fib_range * 0.21
+            ote_high = swing_high - fib_range * 0.62 if long else swing_low + fib_range * 0.38
+            # need to check if entry in OTE discount/premium
+            if ote_low <= current.close <= ote_high:
+                score += 5
+                reasons.append("OTE 62-79% discount/premium / ناحیه طلایی OTE")
+            elif frame.value == "3m" and not (ote_low <= current.close <= ote_high):
+                score -= 3
+                blockers.append("Outside OTE on 3m — lower edge")
+    except Exception:
+        pass
+    # CVD divergence — powerful
+    try:
+        if len(candles) >= 20:
+            deltas = [(candles[i].close - candles[i].open)*candles[i].volume for i in range(len(candles)-10, len(candles))]
+            cvd_slope = sum(deltas[-5:]) - sum(deltas[-10:-5])
+            if long and cvd_slope > 0:
+                score += 5
+                reasons.append("CVD confirms buying / CVD تایید خرید")
+            elif not long and cvd_slope < 0:
+                score += 5
+                reasons.append("CVD confirms selling / CVD تایید فروش")
+            elif long and cvd_slope < -median(volumes)*0.5 if volumes else -100:
+                score -= 6
+                blockers.append("CVD divergence bearish / واگرایی CVD")
+            elif not long and cvd_slope > median(volumes)*0.5 if volumes else 100:
+                score -= 6
+                blockers.append("CVD divergence bullish / واگرایی CVD")
+    except Exception:
+        pass
+    # Killzone bonus for high conviction
+    try:
+        hour = current.timestamp.hour + current.timestamp.minute/60
+        is_kill = (8 <= hour < 11) or (13 <= hour < 17)
+        if is_kill and body_quality > 0.50:
+            score += 3
+            reasons.append("Killzone + strong body / کیلزون + بدنه قوی")
+    except Exception:
+        pass
+    # ── 74-79 Quality Gate — make 74-79 reliable ──
+    if 74 <= score <= 79:
+        # require volume 0.85 and ADX 22 and not near SR
+        if volumes and current.volume < median(volumes) * 0.85:
+            blockers.append("Hard gate: 75-79 با حجم کم — شکست فیک / Low volume marginal")
+            score = 73
+        elif adx_val is not None and adx_val < 22:
+            blockers.append("Hard gate: 75-79 با ADX ضعیف <22 — رنج / Weak trend marginal")
+            score -= 8
+        elif sr["resistance"] and long and abs(current.close - sr["resistance"]) < 0.5*current_atr:
+            blockers.append("Hard gate: 75-79 نزدیک مقاومت — نیاز به حجم / Near SR marginal")
+            score -= 6
+        elif sr["support"] and not long and abs(current.close - sr["support"]) < 0.5*current_atr:
+            blockers.append("Hard gate: 75-79 نزدیک حمایت — نیاز به حجم / Near SR marginal")
+            score -= 6
 
     hard_gate = any(item.startswith("Hard gate") for item in blockers)
     score = round(_clamp(score, 0, 100), 1)
     confluence = _build_confluence(candles, values, ema200, vwap, rsi7, atr14, macd_data, bb, stoch, adx14, direction)
 
-    # 5m strict: require 75 (higher win), 1m: 72
-    thresh = 75 if frame.value == "5m" else 72
+    # Threshold per TF — 3m 74, 5m 75, 15m 76, 1m 72
+    if frame.value == "3m":
+        thresh = 74
+    elif frame.value == "5m":
+        thresh = 75
+    elif frame.value == "15m":
+        thresh = 76
+    else:
+        thresh = 72
     if hard_gate or score < thresh:
-        return TradeSignal(action=Direction.NO_TRADE, confidence=score, reasons=reasons, blockers=blockers, confluence=confluence, exit_hint="No entry — wait for confluence / ورود ممنوع — منتظر همگرایی (5m strict 75)")
+        return TradeSignal(action=Direction.NO_TRADE, confidence=score, reasons=reasons, blockers=blockers, confluence=confluence, exit_hint=f"No entry — wait for confluence / ورود ممنوع — منتظر همگرایی ({frame.value} {thresh})")
 
     entry = current.close
     structure = min(c.low for c in candles[-6:]) if long else max(c.high for c in candles[-6:])
     raw_distance = entry - (structure - 0.15 * current_atr) if long else (structure + 0.15 * current_atr) - entry
     stop_distance = _clamp(raw_distance, 0.90 * current_atr, 1.40 * current_atr)
-    # 5m pro: Dynamic RR with scale-out — more profit, same win
-    # Base 1.5, but if ADX>30 + strong body + killzone → 2.2 runner, if ADX<18 → 1.3 quick scalp
-    # Scale-out: 50% at 1R (breakeven), 30% at 1.8R, 20% runner with Kijun trail → effective RR 1.85 avg
-    if frame.value == "5m":
+    # Dynamic RR with scale-out — power tuned per TF
+    if frame.value == "3m":
+        # 3m needs quicker take
+        if score >= 88 and adx_val is not None and adx_val > 30 and body_quality > 0.52:
+            target_multiple = 2.0
+        elif score >= 85:
+            target_multiple = 1.60
+        elif adx_val is not None and adx_val < 18:
+            target_multiple = 1.30
+        else:
+            target_multiple = 1.50  # balanced 3m
+    elif frame.value == "5m":
         if score >= 88 and adx_val is not None and adx_val > 30 and body_quality > 0.52:
             target_multiple = 2.2  # trend runner — let profit run
         elif score >= 85:
@@ -280,21 +384,44 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
             target_multiple = 1.35  # chop — quick take
         else:
             target_multiple = 1.55  # balanced — optimized for PF 2.05
+    elif frame.value == "15m":
+        if score >= 88 and adx_val is not None and adx_val > 28:
+            target_multiple = 2.30
+        elif score >= 85:
+            target_multiple = 1.95
+        elif adx_val is not None and adx_val < 18:
+            target_multiple = 1.45
+        else:
+            target_multiple = 1.75
     else:
         target_multiple = 2.0 if score >= 85 else 1.8
     stop = entry - stop_distance if long else entry + stop_distance
     target = entry + stop_distance * target_multiple if long else entry - stop_distance * target_multiple
 
     exit_hint = "Exit on Kijun break, opposite cross, or time-stop 8 bars (1m) / خروج با شکست کیجون یا کراس مخالف"
-    if frame.value == "5m":
+    if frame.value == "3m":
+        exit_hint = "Exit 3m: Kijun break, opposite cross, or 8 bars / خروج 3m (8 بار)"
+    elif frame.value == "5m":
         exit_hint = "Exit 5m: Kijun break, opposite cross, or 10 bars / خروج 5m با شکست کیجون (10 بار)"
+    elif frame.value == "15m":
+        exit_hint = "Exit 15m: Kijun break, opposite cross, or 12 bars / خروج 15m (12 بار)"
     if adx_val and adx_val > 30:
         exit_hint += " — trail with Kijun for trend extension"
+    # Capital management — dynamic risk hint (for max income)
+    # 75-80 -> 0.5%, 80-85 -> 0.6%, 85-88 -> 0.75%, 88+ -> 0.85% (on 0.5% base)
+    dynamic_risk_note = ""
+    if score >= 88:
+        dynamic_risk_note = " — حجم 0.85% (اعتماد 88+)"
+    elif score >= 85:
+        dynamic_risk_note = " — حجم 0.75% (اعتماد 85+)"
+    elif score >= 80:
+        dynamic_risk_note = " — حجم 0.60% (اعتماد 80+)"
+    exit_hint += dynamic_risk_note
     return TradeSignal(
         action=direction, confidence=score,
         entry=round(entry, 2), stop_loss=round(stop, 2), take_profit=round(target, 2),
         risk_reward=target_multiple,
-        expires_after_seconds=frame.seconds * (3 if frame.value == "1m" else 2),
+        expires_after_seconds=frame.seconds * (3 if frame.value == "1m" else (2 if frame.value in ("5m","3m") else 2)),
         reasons=reasons, blockers=blockers, confluence=confluence, exit_hint=exit_hint,
     )
 
@@ -344,8 +471,12 @@ def should_exit(signal: TradeSignal, candles_since_entry: list[Candle], kijun: f
         return True, "Take-profit reached / حد سود فعال شد — سیو سود"
     if (latest.close < kijun if long else latest.close > kijun):
         return True, "Closed beyond Kijun invalidation / شکست کیجون — خروج تکنیکال"
-    if latest.timeframe.value == "5m":
+    if latest.timeframe.value == "3m":
+        max_bars = 8
+    elif latest.timeframe.value == "5m":
         max_bars = 10
+    elif latest.timeframe.value == "15m":
+        max_bars = 12
     elif latest.timeframe.value == "1m":
         max_bars = 8
     else:

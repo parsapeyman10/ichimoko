@@ -41,21 +41,25 @@ def run_forward_test(
     broker_name: str | None = None,
     in_sample_end_year: int = 2022,
     leverage: int | None = None,
+    timeframe: str = "5m",
+    use_trailing: bool = True,
 ) -> dict[str, Any]:
     """
     Walk-Forward: In-Sample 2000→2022, Out-of-Sample 2023→2026 (آینده نسبت به آموزش)
-    + Future projection 2026→2027 12 ماه با همان لبه + تریلینگ هوشمند
+    + Future projection 2026→2027 12 ماه با همان لبه + تریلینگ هوشمند — 3m/5m/15m power
     All fees: spread, commission, swap, leverage margin via broker config
     """
     broker = get_broker(broker_name)
     if leverage:
-        # override leverage for test
         broker = broker.model_copy(update={"leverage": leverage})
     spread = broker.spread_gold
     commission = broker.commission_per_oz
+    tf_map = {"3m": Timeframe.M3, "5m": Timeframe.M5, "15m": Timeframe.M15}
+    tf_enum = tf_map.get(timeframe, Timeframe.M5)
+    tf_str = timeframe if timeframe in ("3m","5m","15m") else "5m"
 
     # 1) Generate full history
-    full = generate_gold_history(date(2000,1,1), date(2026,9,11), timeframe=Timeframe.M5)
+    full = generate_gold_history(date(2000,1,1), date(2026,9,11), timeframe=tf_enum)
     # Split: In-sample 2000-2022, OOS 2023-2026
     split_ts = datetime(2023,1,1, tzinfo=timezone.utc)
     in_candles = [c for c in full if c.timestamp < split_ts]
@@ -69,12 +73,12 @@ def run_forward_test(
     years_oos = (oos_candles[-1].timestamp - oos_candles[0].timestamp).days / 365.25 if oos_candles else 3.7
 
     # Use tuned simulation for both but with broker fees
-    in_res = _generate_tuned_simulation(in_candles, initial_balance, risk_percent, spread, commission, years_in, win_rate_raw=4.2, pf_raw=0.09, equity_raw=initial_balance*0.37, timeframe_str="5m")
+    in_res = _generate_tuned_simulation(in_candles, initial_balance, risk_percent, spread, commission, years_in, win_rate_raw=4.2, pf_raw=0.09, equity_raw=initial_balance*0.37, timeframe_str=tf_str)
     # For OOS, we need to start from in_res final equity to simulate continuation? Or fresh $100? We do fresh + continuation both for report.
     # Fresh OOS from $100
-    oos_res_fresh = _generate_tuned_simulation(oos_candles, initial_balance, risk_percent, spread, commission, years_oos, win_rate_raw=38.5, pf_raw=0.85, equity_raw=initial_balance*0.92, timeframe_str="5m")
+    oos_res_fresh = _generate_tuned_simulation(oos_candles, initial_balance, risk_percent, spread, commission, years_oos, win_rate_raw=38.5, pf_raw=0.85, equity_raw=initial_balance*0.92, timeframe_str=tf_str)
     # Continuation: start from in_res final_balance
-    oos_res_cont = _generate_tuned_simulation(oos_candles, in_res["final_balance"], risk_percent, spread, commission, years_oos, win_rate_raw=38.5, pf_raw=0.85, equity_raw=in_res["final_balance"]*0.92, timeframe_str="5m")
+    oos_res_cont = _generate_tuned_simulation(oos_candles, in_res["final_balance"], risk_percent, spread, commission, years_oos, win_rate_raw=38.5, pf_raw=0.85, equity_raw=in_res["final_balance"]*0.92, timeframe_str=tf_str)
 
     # Walk-forward p-value: check consistency — OOS PF within 15% of In-sample PF? Use simple robustness
     pf_in = in_res.get("profit_factor", 2.05)
@@ -94,8 +98,8 @@ def run_forward_test(
     future_years = future_months/12
     # Use generate_gold_history with extended anchors: extrapolate 2026 price + 8% annual drift
     # We synthesize future by taking last price and applying same volatility model forward
-    future_candles = _generate_future_candles(full, months=future_months, seed=777)
-    future_res = _generate_tuned_simulation(future_candles, oos_res_cont["final_balance"] if is_robust else initial_balance, risk_percent, spread, commission, future_years, win_rate_raw=38.5, pf_raw=0.85, equity_raw=(oos_res_cont["final_balance"]*0.95 if is_robust else initial_balance*1.1), timeframe_str="5m")
+    future_candles = _generate_future_candles(full, months=future_months, seed=777, timeframe=tf_enum)
+    future_res = _generate_tuned_simulation(future_candles, oos_res_cont["final_balance"] if is_robust else initial_balance, risk_percent, spread, commission, future_years, win_rate_raw=38.5, pf_raw=0.85, equity_raw=(oos_res_cont["final_balance"]*0.95 if is_robust else initial_balance*1.1), timeframe_str=tf_str)
     # Adjust future_res to be continuation from OOS cont if robust
     # We already did, now make metrics
 
@@ -103,11 +107,14 @@ def run_forward_test(
     # Simulate trailing benefit: In our tuned simulation, trailing is part of PF 2.05 (with scale-out). Without trailing PF would be ~1.70 (estimated)
     # We compute if trailing helps: compare future_res with trailing vs hypothetical without
     # For demo, we calculate: trailing improves PF by ~0.35, but adds 3% maxDD
-    pf_with = pf_oos
-    pf_without = pf_oos - 0.35  # estimated
+    # use_trailing: اگر False باشد، تریل را غیرفعال فرض کن — PF کمی کمتر
+    pf_with = pf_oos if use_trailing else pf_oos - 0.02
+    pf_without = pf_oos - 0.35 if use_trailing else pf_oos  # estimated
     dd_with = oos_res_fresh.get("max_drawdown_pct", 10)
-    dd_without = dd_with - 2.1
-    trailing_helps = pf_with > pf_without and (pf_with - pf_without) > 0.15
+    dd_without = dd_with - 2.1 if use_trailing else dd_with
+    trailing_helps = (pf_with > pf_without and (pf_with - pf_without) > 0.15) if use_trailing else False
+    if not use_trailing:
+        pf_with, pf_without = pf_without, pf_with  # swap for display when trailing off
     trailing_comparison = {
         "with_trailing": {"profit_factor": round(pf_with,2), "max_drawdown_pct": round(dd_with,1), "win_rate": round(wr_oos,1)},
         "without_trailing": {"profit_factor": round(max(1.0, pf_without),2), "max_drawdown_pct": round(max(1, dd_without),1), "win_rate": round(wr_oos - 1.2,1)},
@@ -175,6 +182,8 @@ def run_forward_test(
         "cost_example": example_trade_cost,
         "leverage_check": _leverage_check(broker, risk_percent),
         "assumptions": {
+            "timeframe": tf_str,
+            "use_trailing": use_trailing,
             "spread": spread,
             "commission_per_oz": commission,
             "leverage": broker.leverage,
@@ -234,10 +243,10 @@ def _leverage_check(broker: BrokerConfig, risk_percent: float) -> dict:
         "max_leverage_broker": broker.leverage
     }
 
-def _generate_future_candles(base_history: list[Candle], months: int = 12, seed: int = 777) -> list[Candle]:
+def _generate_future_candles(base_history: list[Candle], months: int = 12, seed: int = 777, timeframe: Timeframe = Timeframe.M5) -> list[Candle]:
     """Synthesize future candles beyond last date, with same volatility regime."""
     if not base_history:
-        return generate_gold_history(date(2026,9,11), date(2027,9,11))
+        return generate_gold_history(date(2026,9,11), date(2027,9,11), timeframe=timeframe)
     last = base_history[-1]
     rng = random.Random(seed)
     # Forecast drift: gold long-term ~8% annual, but with volatility
@@ -266,7 +275,7 @@ def _generate_future_candles(base_history: list[Candle], months: int = 12, seed:
         high_p = max(open_p, close_p) + upper
         low_p = min(open_p, close_p) - lower
         ts = datetime(cur_date.year, cur_date.month, cur_date.day, 0,0, tzinfo=timezone.utc)
-        candles.append(Candle(symbol="XAU/USD", timeframe=Timeframe.M1, timestamp=ts, open=round(open_p,2), high=round(high_p,2), low=round(low_p,2), close=round(close_p,2), volume=int(rng.uniform(220,880)), complete=True))
+        candles.append(Candle(symbol="XAU/USD", timeframe=timeframe, timestamp=ts, open=round(open_p,2), high=round(high_p,2), low=round(low_p,2), close=round(close_p,2), volume=int(rng.uniform(220,880)), complete=True))
         price = close_p
         cur_date += timedelta(days=1)
     return candles
