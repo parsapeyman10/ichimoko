@@ -1,3 +1,10 @@
+import sys as _sys
+from pathlib import Path as _Path
+# Allow `python backend/app/main.py` direct execution (Windows) —
+# ensures `app` package is found when running as script, not module
+if str(_Path(__file__).resolve().parent.parent) not in _sys.path:
+    _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+
 import asyncio
 import contextlib
 from collections import defaultdict, deque
@@ -512,6 +519,16 @@ async def features_explain(timeframe: Timeframe = Timeframe.M1):
     # top 10 by abs value
     top = sorted(feats.items(), key=lambda x: abs(x[1]), reverse=True)[:15]
     return {"features": feats, "top": top}
+
+
+if __name__ == "__main__":
+    import uvicorn as _uvicorn
+    print("\n✅ Aurum Edge — برای اجرا هر کدام از این‌ها را استفاده کن:")
+    print("  1) uvicorn app.main:app --reload --app-dir backend --host 0.0.0.0 --port 8000")
+    print("  2) python -m uvicorn app.main:app --reload --app-dir backend")
+    print("  3) cd backend && python -m app.main")
+    print("Docs → http://127.0.0.1:8000/docs\n")
+    _uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
 @app.websocket("/ws/v1/market/xauusd")
