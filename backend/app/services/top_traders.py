@@ -113,7 +113,8 @@ def _vote_macro(feats: dict[str, float]) -> TraderVote:
     yld = feats.get("yield_proxy", 0)
     risk = feats.get("risk_on_proxy", 0)
     # macro archetype: needs alignment of dollar + yield + news
-    # DXY down (negative dxy_proxy means gold up), so dxy_proxy negative = bullish gold? Actually dxy_proxy = -(gold-ema20)/ATR*0.35, so negative when gold up? Wait gold up => DXY down expected => but proxy is synthetic. Simpler: news + dxy + risk alignment
+    # dxy_proxy is a labelled gold-derived proxy (see features.py). Alignment of the proxy,
+    # news tone and event risk decides whether the macro archetype votes at all.
     score = 0
     if news > 0.35: score += 2
     elif news < -0.35: score -= 2
