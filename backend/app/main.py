@@ -378,6 +378,17 @@ async def backtest_run_get(
     tf = tf_map.get(timeframe, Timeframe.M5)
     return await backtest_run(initial_balance, risk_percent, spread, start_year, end_year, tf, broker_name, leverage, use_trailing)
 
+@app.get("/api/v1/backtest/trades-ytd")
+async def trades_ytd(
+    timeframe: str = "3m",
+    year: int = 2026,
+):
+    """لیست کامل تریدها از اول سال تا الان — 3m/5m/15m با دلیل برد/باخت + missed"""
+    from app.services.ytd_trades import get_ytd_report
+    timeframe = timeframe if timeframe in ("3m","5m","15m") else "5m"
+    year = max(2000, min(year, 2026))
+    return get_ytd_report(timeframe, year)
+
 @app.post("/api/v1/predict/next")
 async def predict_next(request: StrategyRequest):
     """پیش‌بینی 5m strict — 119 ورودی + 6 نخبه + MTF 5m/15m/1h/4h + اخبار 30m vetو + DXY همبستگی + Behavior/OrderFlow — وین هدف 67% RR1.55 (is_actionable سخت‌گیر 75 امتیاز)"""
