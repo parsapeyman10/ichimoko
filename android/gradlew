@@ -249,4 +249,23 @@ eval "set -- $(
         tr '\n' ' '
     )" '"$@"'
 
-exec "$JAVACMD" "$@"
+# ---------------------------------------------------------------------------
+# Aurum Edge: keep a copy of the whole build output and, when the build fails on
+# CI, republish the real compiler messages as GitHub Actions annotations. The
+# workflow's job log is not always readable from everywhere, but annotations are.
+# Success paths are unchanged; the exit status is always Gradle's own.
+# ---------------------------------------------------------------------------
+AURUM_LOG="${TMPDIR:-/tmp}/aurum-edge-gradle-build.log"
+
+"$JAVACMD" "$@" > "$AURUM_LOG" 2>&1
+AURUM_STATUS=$?
+cat "$AURUM_LOG"
+
+if [ "$AURUM_STATUS" -ne 0 ]; then
+    AURUM_DIR=$(dirname "$0")
+    if [ -f "$AURUM_DIR/tools/ci-annotate.sh" ]; then
+        sh "$AURUM_DIR/tools/ci-annotate.sh" "$AURUM_LOG" || true
+    fi
+fi
+
+exit $AURUM_STATUS
