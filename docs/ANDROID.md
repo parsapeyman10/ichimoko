@@ -22,7 +22,8 @@ Twelve Data نباشد، اپ وضعیت «آفلاین / بدون کلید» ر
 1. برو به `https://github.com/parsapeyman10/ichimoko`
 2. روی شاخهٔ `arena/01a09520-ichimoko` (یا بعد از merge، `main`) فایل
    `.github/workflows/android.yml` را بساز: `Add file → Create new file`
-3. محتوای فایل را از همین پروژه کپی کن (فایلش اینجاست، بازش کن و کل محتوا را paste کن) و
+3. محتوای آماده را از فایل [`docs/android-workflow.yml`](android-workflow.yml) کپی کن (همان محتوا،
+   فقط به‌خاطر محدودیت دسترسی ربات در این مسیر هم گذاشته شده) و در فایل جدید paste کن؛
    `Commit changes` را بزن.
 
 **راه دوم — با گیت روی کامپیوتر خودت:**

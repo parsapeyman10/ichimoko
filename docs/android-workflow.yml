@@ -1,0 +1,59 @@
+name: Android APK
+
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build debug + release APK
+        working-directory: android
+        env:
+          # Optional: add a repository secret named TD_API_KEY to ship an APK that already
+          # has a real Twelve Data key baked in. Without it the app asks for the key on first run.
+          TD_API_KEY: ${{ secrets.TD_API_KEY }}
+        run: gradle assembleDebug assembleRelease --no-daemon --stacktrace
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: aurum-edge-apk
+          if-no-files-found: error
+          path: |
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/apk/release/*.apk
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Aurum Edge — Android"
+            echo ""
+            echo "APKها در بخش Artifacts همین اجرا قابل دانلود هستند (فایل zip شامل debug و release)."
+            echo ""
+            echo "Release APK با کلید دیباگ امضا شده و روی گوشی قابل نصب است."
+          } >> "$GITHUB_STEP_SUMMARY"
