@@ -28,6 +28,8 @@ class SettingsStore(context: Context) {
         riskPercent = prefs.getFloat(KEY_RISK, 0.5f).toDouble(),
         accountBalance = prefs.getFloat(KEY_BALANCE, 100f).toDouble(),
         minConfidence = prefs.getFloat(KEY_MIN_CONF, 72f).toDouble(),
+        spreadPrice = prefs.getFloat(KEY_SPREAD, 0.30f).toDouble(),
+        commissionPerOz = prefs.getFloat(KEY_COMMISSION, 0.05f).toDouble(),
         backgroundMonitor = prefs.getBoolean(KEY_MONITOR, false),
         notifyOnSignal = prefs.getBoolean(KEY_NOTIFY, true),
     )
@@ -41,6 +43,8 @@ class SettingsStore(context: Context) {
             .putFloat(KEY_RISK, next.riskPercent.toFloat())
             .putFloat(KEY_BALANCE, next.accountBalance.toFloat())
             .putFloat(KEY_MIN_CONF, next.minConfidence.toFloat())
+            .putFloat(KEY_SPREAD, next.spreadPrice.toFloat())
+            .putFloat(KEY_COMMISSION, next.commissionPerOz.toFloat())
             .putBoolean(KEY_MONITOR, next.backgroundMonitor)
             .putBoolean(KEY_NOTIFY, next.notifyOnSignal)
             .apply()

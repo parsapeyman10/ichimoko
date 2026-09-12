@@ -46,13 +46,14 @@ import com.aurum.edge.ui.theme.AurumColors
 fun LearnScreen(viewModel: AurumViewModel) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val learn by viewModel.learn.collectAsStateWithLifecycle()
+    val walkForward by viewModel.walkForward.collectAsStateWithLifecycle()
 
     var interval by remember { mutableStateOf(settings.interval) }
     var bars by remember { mutableStateOf(1000) }
     var balance by remember { mutableStateOf(settings.accountBalance.toString()) }
     var risk by remember { mutableStateOf(settings.riskPercent.toString()) }
-    var spread by remember { mutableStateOf("0.30") }
-    var commission by remember { mutableStateOf("0.05") }
+    var spread by remember { mutableStateOf(settings.spreadPrice.toString()) }
+    var commission by remember { mutableStateOf(settings.commissionPerOz.toString()) }
 
     Column(
         modifier = Modifier
@@ -173,6 +174,30 @@ fun LearnScreen(viewModel: AurumViewModel) {
             ) {
                 Text("دانلود دیتای واقعی و اجرای استراتژی", fontWeight = FontWeight.Bold)
             }
+            Button(
+                onClick = {
+                    viewModel.runWalkForward(
+                        interval = interval,
+                        bars = bars,
+                        balance = balance.toDoubleOrNull() ?: settings.accountBalance,
+                        risk = (risk.toDoubleOrNull() ?: settings.riskPercent).coerceIn(0.1, 5.0),
+                        spread = spread.toDoubleOrNull() ?: 0.30,
+                        commission = commission.toDoubleOrNull() ?: 0.05,
+                        threshold = settings.minConfidence,
+                    )
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+            ) {
+                Text("تست خارج از نمونه (۷۰٪ گذشته / ۳۰٪ دیده‌نشده)", fontWeight = FontWeight.Bold)
+            }
+            Text(
+                "در این تست، استراتژی روی نیمه قدیمی سری واقعی اجرا می‌شود و بعد همان قواعد روی نیمه جدیدی که در تنظیم ندیده، سنجیده می‌شود. اگر خارج از نمونه زیان‌ده بود، همان را نشان می‌دهیم.",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 6.dp),
+            )
         }
 
         when (val state = learn) {
@@ -202,6 +227,117 @@ fun LearnScreen(viewModel: AurumViewModel) {
             }
 
             is LearnState.Done -> BacktestReport(state)
+        }
+
+        when (val wf = walkForward) {
+            is WalkForwardState.Idle -> Unit
+            is WalkForwardState.Loading -> SectionCard("در حال اجرای تست خارج از نمونه", wf.step) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CircularProgressIndicator(color = AurumColors.Cyan, strokeWidth = 2.dp, modifier = Modifier.height(20.dp))
+                    Text("هر دو نیمه فقط روی کندل‌های واقعی ارزیابی می‌شوند.", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+                }
+            }
+            is WalkForwardState.Failed -> SectionCard("تست خارج از نمونه اجرا نشد", "خطای منبع داده") {
+                Text(wf.message, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
+            }
+            is WalkForwardState.Done -> WalkForwardReport(wf)
+        }
+    }
+}
+
+@Composable
+private fun HalfReport(label: String, accent: Color, result: com.aurum.edge.engine.Backtester.Result) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = accent, fontWeight = FontWeight.Bold)
+        Text(
+            "  ${formatDateTime(result.fromTime)} → ${formatDateTime(result.toTime)}",
+            style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.TextMuted,
+        )
+    }
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp),
+    ) {
+        StatTile("معاملات", "${result.trades.size}", AurumColors.TextPrimary, Modifier.weight(1f))
+        StatTile("نرخ برد", result.winRate?.let { "${String.format("%.1f", it)}%" } ?: "—", AurumColors.Green, Modifier.weight(1f))
+        StatTile("فاکتور سود", result.profitFactor?.let { String.format("%.2f", it) } ?: "—", AurumColors.Gold, Modifier.weight(1f))
+    }
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp),
+    ) {
+        StatTile("موجودی نهایی", "${formatPrice(result.finalBalance)}$", if (result.netPnl >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
+        StatTile("حداکثر افت", "${String.format("%.1f", result.maxDrawdownPct)}%", AurumColors.Red, Modifier.weight(1f))
+        StatTile("رد‌شده (حداقل لات)", "${result.skippedMinLot}", AurumColors.TextSecondary, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun WalkForwardReport(state: WalkForwardState.Done) {
+    val wf = state.result
+    val outPf = wf.outOfSample.profitFactor ?: 0.0
+    SectionCard(
+        title = "تست خارج از نمونه (Walk-Forward) ${state.interval.label}",
+        subtitle = "${wf.bars} کندل واقعی · تقسیم در ${formatDateTime(wf.splitTime)} · هزینه‌ها در هر دو نیمه یکسان",
+    ) {
+        Text(
+            wf.verdict,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (outPf > 1.0) AurumColors.Green else AurumColors.Red,
+        )
+        HalfReport("داخل نمونه (آموزش)", AurumColors.TextSecondary, wf.inSample)
+        HalfReport("خارج از نمونه (دیده‌نشده)", AurumColors.Gold, wf.outOfSample)
+
+        if (wf.outOfSample.trades.isNotEmpty()) {
+            Text(
+                "معاملات نیمه دیده‌نشده (آخرین ${minOf(wf.outOfSample.trades.size, 10)})",
+                style = MaterialTheme.typography.labelMedium,
+                color = AurumColors.TextPrimary,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+            wf.outOfSample.trades.takeLast(10).reversed().forEach { trade ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        trade.side.name,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (trade.side.name == "BUY") AurumColors.Green else AurumColors.Red,
+                        modifier = Modifier.padding(end = 8.dp),
+                    )
+                    Text(
+                        "${formatPrice(trade.entry)} → ${formatPrice(trade.exit)} · ${trade.exitReason}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        "${if (trade.pnlUsd >= 0) "+" else ""}${formatPrice(trade.pnlUsd)}$",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (trade.pnlUsd >= 0) AurumColors.Green else AurumColors.Red,
+                    )
+                }
+            }
+        } else {
+            Text(
+                "در نیمه دیده‌نشده هیچ معامله‌ای ثبت نشد؛ عدد جعلی برای پر کردن این بخش ساخته نمی‌شود.",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 8.dp),
+            )
         }
     }
 }

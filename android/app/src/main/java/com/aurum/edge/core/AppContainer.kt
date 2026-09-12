@@ -39,6 +39,35 @@ class AppContainer(context: Context) {
         return client.fetchCandles(s.apiKey, s.symbol, interval, outputSize)
     }
 
+    /** Walk-forward on the same downloaded real bars: older half in-sample, newer half unseen. */
+    suspend fun runWalkForward(
+        interval: Interval,
+        outputSize: Int,
+        initialBalance: Double,
+        riskPercent: Double,
+        spreadPrice: Double,
+        commissionPerOz: Double,
+        threshold: Double,
+    ): Backtester.WalkForward {
+        val s = settingsStore.read()
+        val candles = fetchCandles(interval, outputSize)
+        if (candles.size < 400) {
+            throw DataFeedException("برای تست خارج از نمونه حداقل ۴۰۰ کندل واقعی لازم است (${candles.size} کندل دریافت شد)")
+        }
+        return withContext(Dispatchers.Default) {
+            Backtester.walkForward(
+                candles = candles,
+                interval = interval,
+                symbol = s.symbol,
+                initialBalance = initialBalance,
+                riskPercent = riskPercent,
+                spreadPrice = spreadPrice,
+                commissionPerOz = commissionPerOz,
+                threshold = threshold,
+            )
+        }
+    }
+
     /** Honest back-test: the strategy runs over the real bars that were just downloaded. */
     suspend fun runBacktest(
         interval: Interval,

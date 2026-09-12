@@ -38,6 +38,13 @@ jobs:
           TD_API_KEY: ${{ secrets.TD_API_KEY }}
         run: gradle assembleDebug assembleRelease --no-daemon --stacktrace
 
+      - name: Unit tests (engine honesty checks)
+        # Non-blocking on purpose: the APK must still be produced and uploaded even if a test fails,
+        # but the result is visible in the run summary.
+        continue-on-error: true
+        working-directory: android
+        run: gradle testDebugUnitTest --no-daemon --stacktrace
+
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
@@ -56,4 +63,7 @@ jobs:
             echo "APKها در بخش Artifacts همین اجرا قابل دانلود هستند (فایل zip شامل debug و release)."
             echo ""
             echo "Release APK با کلید دیباگ امضا شده و روی گوشی قابل نصب است."
+            echo ""
+            echo "تست‌های JVM موتور (تجمیع کندل و تست خارج از نمونه) به‌صورت غیرمسدودکننده اجرا می‌شوند."
+            echo "اگر آن مرحله قرمز شد، APKها همچنان در Artifacts هستند ولی لاگ تست را بفرست تا بررسی شود."
           } >> "$GITHUB_STEP_SUMMARY"

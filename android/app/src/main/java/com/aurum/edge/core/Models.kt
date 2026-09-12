@@ -98,6 +98,8 @@ data class PaperTrade(
     val pnlUsd: Double? = null,
     val positionOz: Double = 1.0,
     val note: String = "paper روی قیمت واقعی",
+    /** What the multi-timeframe engine said on the phone when this paper trade was opened. */
+    val mtf: MtfSnapshotRecord? = null,
 ) {
     val isOpen: Boolean get() = closedAt == null
 
@@ -111,6 +113,154 @@ data class PaperTrade(
         }
 }
 
+@Serializable
+data class MtfFrameRecord(
+    val interval: String,
+    val bias: String,
+    val strength: Int,
+    val detail: String,
+    val weight: Double,
+)
+
+@Serializable
+data class MtfSnapshotRecord(
+    val baseInterval: String,
+    val bias: String,
+    val alignment: Double,
+    val buyCount: Int,
+    val sellCount: Int,
+    val neutralCount: Int,
+    val veto: Boolean,
+    val advisory: String,
+    val barTime: Long,
+    val frames: List<MtfFrameRecord> = emptyList(),
+    val skippedFrames: List<String> = emptyList(),
+) {
+    companion object {
+        fun from(snapshot: com.aurum.edge.engine.MtfAnalyzer.Snapshot): MtfSnapshotRecord = MtfSnapshotRecord(
+            baseInterval = snapshot.baseInterval.label,
+            bias = snapshot.bias.name,
+            alignment = snapshot.alignment,
+            buyCount = snapshot.buyCount,
+            sellCount = snapshot.sellCount,
+            neutralCount = snapshot.neutralCount,
+            veto = snapshot.veto,
+            advisory = snapshot.advisory,
+            barTime = snapshot.barTime,
+            frames = snapshot.frames.map {
+                MtfFrameRecord(
+                    interval = it.interval.label,
+                    bias = it.bias.name,
+                    strength = it.strength,
+                    detail = it.detail,
+                    weight = it.weight,
+                )
+            },
+            skippedFrames = snapshot.skippedFrames,
+        )
+    }
+}
+
+@Serializable
+data class BacktestTradeRecord(
+    val side: String,
+    val entryTime: Long,
+    val exitTime: Long,
+    val entry: Double,
+    val exit: Double,
+    val positionOz: Double,
+    val pnlUsd: Double,
+    val rMultiple: Double,
+    val exitReason: String,
+)
+
+@Serializable
+data class BacktestRecord(
+    val interval: String,
+    val fromTime: Long,
+    val toTime: Long,
+    val bars: Int,
+    val initialBalance: Double,
+    val finalBalance: Double,
+    val netPnl: Double,
+    val wins: Int,
+    val losses: Int,
+    val winRate: Double? = null,
+    val profitFactor: Double? = null,
+    val expectancyR: Double? = null,
+    val maxDrawdownPct: Double,
+    val feesUsd: Double,
+    val skippedMinLot: Int,
+    val skippedMargin: Int,
+    val spreadPrice: Double,
+    val commissionPerOz: Double,
+    val note: String,
+    val trades: List<BacktestTradeRecord> = emptyList(),
+) {
+    companion object {
+        fun from(result: com.aurum.edge.engine.Backtester.Result): BacktestRecord = BacktestRecord(
+            interval = result.interval.label,
+            fromTime = result.fromTime,
+            toTime = result.toTime,
+            bars = result.bars,
+            initialBalance = result.initialBalance,
+            finalBalance = result.finalBalance,
+            netPnl = result.netPnl,
+            wins = result.wins,
+            losses = result.losses,
+            winRate = result.winRate,
+            profitFactor = result.profitFactor,
+            expectancyR = result.expectancyR,
+            maxDrawdownPct = result.maxDrawdownPct,
+            feesUsd = result.feesUsd,
+            skippedMinLot = result.skippedMinLot,
+            skippedMargin = result.skippedMargin,
+            spreadPrice = result.spreadPrice,
+            commissionPerOz = result.commissionPerOz,
+            note = result.note,
+            trades = result.trades.takeLast(80).map {
+                BacktestTradeRecord(
+                    side = it.side.name,
+                    entryTime = it.entryTime,
+                    exitTime = it.exitTime,
+                    entry = it.entry,
+                    exit = it.exit,
+                    positionOz = it.positionOz,
+                    pnlUsd = it.pnlUsd,
+                    rMultiple = it.rMultiple,
+                    exitReason = it.exitReason,
+                )
+            },
+        )
+    }
+}
+
+@Serializable
+data class WalkForwardRecord(
+    val interval: String,
+    val bars: Int,
+    val splitTime: Long,
+    val splitIndex: Int,
+    val verdict: String,
+    val generatedAt: Long,
+    val inSample: BacktestRecord,
+    val outOfSample: BacktestRecord,
+) {
+    companion object {
+        fun from(result: com.aurum.edge.engine.Backtester.WalkForward, generatedAt: Long = System.currentTimeMillis()): WalkForwardRecord =
+            WalkForwardRecord(
+                interval = result.outOfSample.interval.label,
+                bars = result.bars,
+                splitTime = result.splitTime,
+                splitIndex = result.splitIndex,
+                verdict = result.verdict,
+                generatedAt = generatedAt,
+                inSample = BacktestRecord.from(result.inSample),
+                outOfSample = BacktestRecord.from(result.outOfSample),
+            )
+    }
+}
+
 data class AppSettings(
     val apiKey: String = "",
     val symbol: String = "XAU/USD",
@@ -118,6 +268,9 @@ data class AppSettings(
     val riskPercent: Double = 0.5,
     val accountBalance: Double = 100.0,
     val minConfidence: Double = 72.0,
+    /** Cost assumptions in USD. They must match your broker; every report states them. */
+    val spreadPrice: Double = 0.30,
+    val commissionPerOz: Double = 0.05,
     val backgroundMonitor: Boolean = false,
     val notifyOnSignal: Boolean = true,
 ) {

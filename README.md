@@ -16,7 +16,13 @@ The only training concept in the project is learning from real history:
 - **Backtest** — replays the live strategy over real candles.
 - **Walk-forward** — older part of the real series in-sample, newer part out-of-sample.
 - **Paper journal** — signals generated from real prices, settled later against real prices.
-- **Learning tab in the app** — runs the same real backtest on your phone.
+- **Walk-forward** — older part of the real series in-sample, newer part out-of-sample, with an
+  explicit verdict (kept on the device so the numbers can be re-checked later).
+- **Learning tab in the app** — runs the real backtest **and** the walk-forward split on your phone,
+  then stores the report in the journal tab.
+
+The Android app needs no server: provider access, indicators, the signal engine, multi-timeframe
+aggregation, backtesting, the paper journal and the background monitor all run on the device.
 
 ## Repository map
 

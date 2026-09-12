@@ -259,7 +259,7 @@ class MarketRepository(
         }
         val signal = withContext(Dispatchers.Default) {
             runCatching {
-                SignalEngine.evaluate(bars, current.interval, current.minConfidence)
+                SignalEngine.evaluate(bars, current.interval, current.minConfidence, current.spreadPrice)
             }.getOrNull()
         }
         _state.value = _state.value.copy(

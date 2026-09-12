@@ -2,8 +2,10 @@ package com.aurum.edge.data
 
 import android.content.Context
 import com.aurum.edge.core.Candle
+import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.Signal
+import com.aurum.edge.core.WalkForwardRecord
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,8 +29,17 @@ import java.util.UUID
 class JournalStore(context: Context) {
 
     private val file = File(context.filesDir, "paper_journal.json")
+    private val reportsFile = File(context.filesDir, "walk_forward_reports.json")
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val mutex = Mutex()
+
+    /**
+     * Last walk-forward reports run **on this device**. They are persisted on purpose: a report
+     * that cannot be re-checked later would be exactly the kind of unverifiable claim this app
+     * refuses to make.
+     */
+    private val _reports = MutableStateFlow<List<WalkForwardRecord>>(emptyList())
+    val reports: StateFlow<List<WalkForwardRecord>> = _reports.asStateFlow()
 
     private val _trades = MutableStateFlow<List<PaperTrade>>(emptyList())
     val trades: StateFlow<List<PaperTrade>> = _trades.asStateFlow()
@@ -55,7 +66,33 @@ class JournalStore(context: Context) {
         }
     }
 
-    suspend fun open(signal: Signal, price: Double, balance: Double, riskPercent: Double): PaperTrade {
+    suspend fun loadReports() = withContext(Dispatchers.IO) {
+        val list = if (reportsFile.exists()) {
+            runCatching {
+                json.decodeFromString(ListSerializer(WalkForwardRecord.serializer()), reportsFile.readText())
+            }.getOrDefault(emptyList())
+        } else emptyList()
+        _reports.value = list.sortedByDescending { it.generatedAt }
+    }
+
+    suspend fun saveReport(report: WalkForwardRecord) = withContext(Dispatchers.IO) {
+        val next = (_reports.value + report).sortedByDescending { it.generatedAt }.take(12)
+        _reports.value = next
+        runCatching {
+            val tmp = File(reportsFile.parentFile, reportsFile.name + ".tmp")
+            tmp.writeText(json.encodeToString(ListSerializer(WalkForwardRecord.serializer()), next))
+            if (reportsFile.exists()) reportsFile.delete()
+            tmp.renameTo(reportsFile)
+        }
+    }
+
+    suspend fun open(
+        signal: Signal,
+        price: Double,
+        balance: Double,
+        riskPercent: Double,
+        mtf: MtfSnapshotRecord? = null,
+    ): PaperTrade {
         val stop = signal.stopLoss ?: price
         val stopDistance = kotlin.math.abs(price - stop).takeIf { it > 0.0 } ?: 0.0
         val riskUsd = balance * riskPercent / 100.0
@@ -73,6 +110,7 @@ class JournalStore(context: Context) {
             openedAt = System.currentTimeMillis(),
             positionOz = (kotlin.math.round(oz * 1000) / 1000.0).coerceAtLeast(0.001),
             note = "paper روی قیمت واقعی — ${signal.interval.label}",
+            mtf = mtf,
         )
         mutex.withLock { persist(_trades.value + trade) }
         return trade

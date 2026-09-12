@@ -73,20 +73,25 @@ object Backtester {
         leverage: Int = 100,
         minPositionOz: Double = 1.0,
         threshold: Double = 72.0,
+        /**
+         * First bar the engine may open a trade on. Used by [walkForward] so out-of-sample runs
+         * only trade after the split while their indicators stay warmed by the earlier real bars.
+         */
+        startIndex: Int? = null,
     ): Result {
         val series = SignalEngine.series(candles, interval)
         val bars = series.bars
-        val startIndex = SignalEngine.minBars(interval)
+        val firstIndex = maxOf(SignalEngine.minBars(interval), startIndex ?: 0)
         var balance = initialBalance
         var peak = initialBalance
         var maxDrawdownPct = 0.0
         val trades = mutableListOf<Trade>()
-        val equity = mutableListOf(EquityPoint(bars.firstOrNull()?.time ?: 0L, initialBalance))
+        val equity = mutableListOf(EquityPoint(bars.getOrNull(firstIndex)?.time ?: 0L, initialBalance))
         var skippedMinLot = 0
         var skippedMargin = 0
 
         var open: OpenPosition? = null
-        var index = startIndex
+        var index = firstIndex
 
         while (index < bars.size) {
             val bar = bars[index]
@@ -251,6 +256,88 @@ object Backtester {
             commissionPerOz = commissionPerOz,
             minPositionOz = minPositionOz,
             note = note,
+        )
+    }
+
+    /**
+     * Walk-forward: the older part of the real series is in-sample, the newer part is
+     * out-of-sample. Both halves are settled with the same real bars and the same costs, so the
+     * comparison shows whether the rules still hold on data the tuning never saw. The verdict is
+     * descriptive — the app never promises a result.
+     */
+    data class WalkForward(
+        val inSample: Result,
+        val outOfSample: Result,
+        val splitTime: Long,
+        val splitIndex: Int,
+        val bars: Int,
+        val verdict: String,
+    )
+
+    fun walkForward(
+        candles: List<Candle>,
+        interval: Interval,
+        symbol: String,
+        initialBalance: Double = 100.0,
+        riskPercent: Double = 0.5,
+        spreadPrice: Double = 0.30,
+        commissionPerOz: Double = 0.05,
+        leverage: Int = 100,
+        minPositionOz: Double = 1.0,
+        threshold: Double = 72.0,
+        splitFraction: Double = 0.7,
+    ): WalkForward {
+        val closed = candles.filter { it.closed }
+        val splitIndex = (closed.size * splitFraction.coerceIn(0.3, 0.85)).toInt()
+            .coerceIn(1, maxOf(1, closed.size - 1))
+
+        val inSample = run(
+            candles = closed.take(splitIndex),
+            interval = interval,
+            symbol = symbol,
+            initialBalance = initialBalance,
+            riskPercent = riskPercent,
+            spreadPrice = spreadPrice,
+            commissionPerOz = commissionPerOz,
+            leverage = leverage,
+            minPositionOz = minPositionOz,
+            threshold = threshold,
+        )
+        val outOfSample = run(
+            candles = closed,
+            interval = interval,
+            symbol = symbol,
+            initialBalance = initialBalance,
+            riskPercent = riskPercent,
+            spreadPrice = spreadPrice,
+            commissionPerOz = commissionPerOz,
+            leverage = leverage,
+            minPositionOz = minPositionOz,
+            threshold = threshold,
+            startIndex = splitIndex,
+        )
+
+        val splitTime = closed.getOrNull(splitIndex)?.time ?: 0L
+        val inPf = inSample.profitFactor ?: 0.0
+        val outPf = outOfSample.profitFactor ?: 0.0
+        val verdict = when {
+            outOfSample.trades.isEmpty() ->
+                "خارج از نمونه هیچ معامله‌ای ثبت نشد — برای قضاوت، بازه بلندتری لازم است."
+            outPf > 1.0 && outPf >= inPf * 0.7 ->
+                "خارج از نمونه هم مثبت ماند — شواهد پایداری، نه تضمین سود."
+            outPf > 1.0 ->
+                "خارج از نمونه سودده است ولی ضعیف‌تر از داخل نمونه."
+            else ->
+                "خارج از نمونه زیان‌ده است — با این تنظیمات قابل اتکا نیست."
+        }
+
+        return WalkForward(
+            inSample = inSample,
+            outOfSample = outOfSample,
+            splitTime = splitTime,
+            splitIndex = splitIndex,
+            bars = closed.size,
+            verdict = verdict,
         )
     }
 

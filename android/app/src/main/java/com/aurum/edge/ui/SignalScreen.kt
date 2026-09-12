@@ -12,11 +12,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.core.SignalAction
 import com.aurum.edge.data.MarketState
+import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.ui.components.ConfluenceRow
+import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.SignalSummaryCard
 import com.aurum.edge.ui.components.StatTile
@@ -28,6 +32,7 @@ import kotlin.math.abs
 @Composable
 fun SignalScreen(viewModel: AurumViewModel, market: MarketState) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val mtf by viewModel.mtf.collectAsStateWithLifecycle()
     val signal = market.signal
 
     Column(
@@ -106,6 +111,8 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState) {
             )
         }
 
+        mtf?.let { snapshot -> MtfCard(snapshot) }
+
         SectionCard(
             title = "قواعد اجرا",
             subtitle = "قوانین ثابت موتور — بدون استثنا برای «زنده نگه داشتن» نمایش",
@@ -120,6 +127,88 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState) {
             ).forEach { rule ->
                 Text("• $rule", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary, modifier = Modifier.padding(vertical = 2.dp))
             }
+        }
+    }
+}
+
+@Composable
+private fun MtfCard(snapshot: MtfAnalyzer.Snapshot) {
+    val tone = when {
+        snapshot.veto -> AurumColors.Red
+        snapshot.bias == SignalAction.BUY -> AurumColors.Green
+        snapshot.bias == SignalAction.SELL -> AurumColors.Red
+        else -> AurumColors.TextSecondary
+    }
+    SectionCard(
+        title = "تراز چندتایم‌فریم (محاسبه روی گوشی)",
+        subtitle = "تایم‌فریم‌های بالاتر از همان کندل‌های واقعیِ دریافتی ساخته می‌شوند · آخرین کندل بسته: ${formatTime(snapshot.barTime)}",
+        trailing = {
+            Pill(
+                text = if (snapshot.veto) "وتو" else snapshot.bias.name,
+                color = tone,
+            )
+        },
+    ) {
+        Text(
+            snapshot.advisory,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (snapshot.veto) AurumColors.Red else AurumColors.TextSecondary,
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+        ) {
+            StatTile("هم‌جهتی", "${(snapshot.alignment * 100).toInt()}%", tone, Modifier.weight(1f))
+            StatTile("صعودی", "${snapshot.buyCount}", AurumColors.Green, Modifier.weight(1f))
+            StatTile("نزولی", "${snapshot.sellCount}", AurumColors.Red, Modifier.weight(1f))
+            StatTile("خنثی", "${snapshot.neutralCount}", AurumColors.TextSecondary, Modifier.weight(1f))
+        }
+        snapshot.frames.forEach { frame ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    frame.interval.label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AurumColors.TextPrimary,
+                    modifier = Modifier.weight(0.8f),
+                )
+                Text(
+                    frame.bias.name,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = when (frame.bias) {
+                        SignalAction.BUY -> AurumColors.Green
+                        SignalAction.SELL -> AurumColors.Red
+                        else -> AurumColors.TextMuted
+                    },
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "قدرت ${frame.strength}% · وزن ${(frame.weight * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Gold,
+                    modifier = Modifier.weight(1.6f),
+                )
+            }
+            Text(
+                frame.detail,
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(start = 2.dp),
+            )
+        }
+        if (snapshot.skippedFrames.isNotEmpty()) {
+            Text(
+                "تایم‌فریم‌های ${snapshot.skippedFrames.joinToString("، ")} هنوز تاریخ واقعی کافی ندارند؛ درباره‌شان حدس نمی‌زنیم.",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 8.dp),
+            )
         }
     }
 }

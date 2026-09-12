@@ -45,6 +45,8 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     var balance by remember { mutableStateOf(settings.accountBalance.toString()) }
     var risk by remember { mutableStateOf(settings.riskPercent.toString()) }
     var minConfidence by remember { mutableStateOf(settings.minConfidence.toString()) }
+    var spread by remember { mutableStateOf(settings.spreadPrice.toString()) }
+    var commission by remember { mutableStateOf(settings.commissionPerOz.toString()) }
 
     LaunchedEffect(settings.apiKey) { if (key.isBlank()) key = settings.apiKey }
     LaunchedEffect(settings.symbol) { symbol = settings.symbol }
@@ -150,11 +152,40 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     .fillMaxWidth()
                     .padding(top = 8.dp),
             )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+            ) {
+                OutlinedTextField(
+                    value = spread,
+                    onValueChange = { spread = it },
+                    label = { Text("اسپرد طلا ($)") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+                OutlinedTextField(
+                    value = commission,
+                    onValueChange = { commission = it },
+                    label = { Text("کمیسیون/انس ($)") },
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Text(
+                "این دو عدد از بروکر خودت گرفته می‌شوند و در همه گزارش‌ها (بک‌تست، خارج از نمونه، سیگنال زنده) به‌کار می‌روند.",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 6.dp),
+            )
             Button(
                 onClick = {
                     balance.toDoubleOrNull()?.let(viewModel::saveBalance)
                     risk.toDoubleOrNull()?.let(viewModel::saveRiskPercent)
                     minConfidence.toDoubleOrNull()?.let(viewModel::saveMinConfidence)
+                    spread.toDoubleOrNull()?.let(viewModel::saveSpread)
+                    commission.toDoubleOrNull()?.let(viewModel::saveCommission)
                 },
                 modifier = Modifier
                     .fillMaxWidth()

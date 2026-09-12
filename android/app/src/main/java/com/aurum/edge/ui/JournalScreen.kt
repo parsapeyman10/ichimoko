@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
@@ -32,6 +33,7 @@ import com.aurum.edge.ui.theme.AurumColors
 fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
+    val reports by viewModel.reports.collectAsStateWithLifecycle()
     val livePrice = market.lastPrice
 
     Column(
@@ -99,6 +101,14 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.TextMuted,
                             )
+                            trade.mtf?.let { snapshot ->
+                                Text(
+                                    "تراز چندتایم‌فریم هنگام ورود: ${snapshot.bias} · هم‌جهتی ${(snapshot.alignment * 100).toInt()}%" +
+                                        (if (snapshot.veto) " · وتو داشته" else ""),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AurumColors.Gold,
+                                )
+                            }
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
@@ -126,6 +136,8 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             SectionCard("معاملات بسته‌شده", "تسویه‌شده روی قیمت واقعی") {
                 closed.forEach { trade: PaperTrade -> TradeRow(trade) }
             }
+            reports.firstOrNull()?.let { report -> StoredReportCard(report) }
+
             Button(
                 onClick = viewModel::clearJournal,
                 colors = ButtonDefaults.buttonColors(containerColor = AurumColors.SurfaceAlt, contentColor = AurumColors.TextSecondary),
@@ -174,5 +186,40 @@ private fun TradeRow(trade: PaperTrade) {
                 color = AurumColors.TextMuted,
             )
         }
+    }
+}
+
+/**
+ * The last walk-forward run kept on this device. It is shown with its own date so the numbers can
+ * be re-checked instead of taken on faith.
+ */
+@Composable
+private fun StoredReportCard(report: WalkForwardRecord) {
+    val outPf = report.outOfSample.profitFactor ?: 0.0
+    SectionCard(
+        title = "آخرین تست خارج از نمونه (ذخیره‌شده روی گوشی)",
+        subtitle = "${report.interval} · ${report.bars} کندل واقعی · ${formatDateTime(report.generatedAt)}",
+    ) {
+        Text(
+            report.verdict,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (outPf > 1.0) AurumColors.Green else AurumColors.Red,
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+        ) {
+            StatTile("داخل نمونه PF", report.inSample.profitFactor?.let { String.format("%.2f", it) } ?: "—", AurumColors.TextSecondary, Modifier.weight(1f))
+            StatTile("خارج نمونه PF", report.outOfSample.profitFactor?.let { String.format("%.2f", it) } ?: "—", AurumColors.Gold, Modifier.weight(1f))
+            StatTile("معاملات خارج نمونه", "${report.outOfSample.trades.size}", AurumColors.TextPrimary, Modifier.weight(1f))
+        }
+        Text(
+            "هزینه‌های فرض‌شده: اسپرد ${report.outOfSample.spreadPrice}$ · کمیسیون ${report.outOfSample.commissionPerOz}$ بر انس",
+            style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 8.dp),
+        )
     }
 }
