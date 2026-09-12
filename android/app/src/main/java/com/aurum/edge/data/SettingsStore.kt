@@ -65,6 +65,8 @@ class SettingsStore(context: Context) {
         private const val KEY_RISK = "risk_percent"
         private const val KEY_BALANCE = "balance"
         private const val KEY_MIN_CONF = "min_confidence"
+        private const val KEY_SPREAD = "spread_price"
+        private const val KEY_COMMISSION = "commission_per_oz"
         private const val KEY_MONITOR = "background_monitor"
         private const val KEY_NOTIFY = "notify_signal"
     }
