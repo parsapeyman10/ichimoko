@@ -5,6 +5,10 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+if (System.getenv("GITHUB_ACTIONS") == "true") {
+    println("::warning::aurum trace 4/4 · app build script evaluated")
+}
+
 // Optional: bake a Twelve Data key into the build so the APK ships ready-to-run.
 // Set it as repository secret TD_API_KEY in GitHub Actions, or pass -PtdApiKey=... locally.
 val tdApiKey: String = (project.findProperty("tdApiKey") as String?)

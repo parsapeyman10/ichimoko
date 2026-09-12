@@ -1,3 +1,22 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "AurumEdge"
+include(":app")
+
 // ---------------------------------------------------------------------------------------
 // Aurum Edge — CI diagnostics, step 1.
 //
@@ -12,7 +31,14 @@
 // ---------------------------------------------------------------------------------------
 System.clearProperty("aurum.failedTask")
 
-if (System.getenv("GITHUB_ACTIONS") == "true" && System.getenv("AURUM_DIAGNOSE") != "1") {
+val aurumTrace = System.getenv("GITHUB_ACTIONS") == "true" && System.getenv("AURUM_DIAGNOSE") != "1"
+
+if (aurumTrace) {
+    println("::warning::aurum trace 1/4 · settings evaluated (gradle " + gradle.gradleVersion +
+        ", jvm " + System.getProperty("java.version") + ", sdk " + System.getenv("ANDROID_HOME") + ")")
+}
+
+if (aurumTrace) {
     gradle.addBuildListener(object : org.gradle.BuildListener {
         override fun buildStarted(gradle: org.gradle.api.invocation.Gradle) = Unit
 
@@ -27,7 +53,7 @@ if (System.getenv("GITHUB_ACTIONS") == "true" && System.getenv("AURUM_DIAGNOSE")
             // A failed task is already diagnosed in build.gradle.kts; do not spend the
             // annotation budget twice on the same incident.
             if (System.getProperty("aurum.failedTask") != null) return
-            println("::warning::Aurum diagnostics: the build stopped outside task execution — Gradle reports:")
+            println("::warning::aurum: the build stopped outside task execution — Gradle reports:")
             var cause: Throwable? = failure
             var depth = 0
             while (cause != null && depth < 5) {
@@ -40,6 +66,5 @@ if (System.getenv("GITHUB_ACTIONS") == "true" && System.getenv("AURUM_DIAGNOSE")
             }
         }
     })
+    println("::warning::aurum trace 2/4 · diagnostics listener attached")
 }
-
-pluginManagement {

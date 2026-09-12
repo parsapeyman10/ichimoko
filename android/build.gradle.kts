@@ -7,6 +7,10 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization") version "2.0.21" apply false
 }
 
+if (System.getenv("GITHUB_ACTIONS") == "true") {
+    println("::warning::aurum trace 3/4 · root build script evaluated (gradle " + gradle.gradleVersion + ")")
+}
+
 // ---------------------------------------------------------------------------------------
 // Aurum Edge — CI diagnostics, step 2.
 //
