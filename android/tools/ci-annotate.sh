@@ -27,7 +27,7 @@ awk '
         total = 0
         # 1) Kotlin / Java compiler diagnostics — the richest signal:
         #    e: file:///home/runner/work/repo/repo/android/app/src/main/java/.../Foo.kt:88:5 Unresolved reference: KEY
-        for (i = 1; i <= NR && total < 8; i++) {
+        for (i = 1; i <= NR && total < 6; i++) {
             line = lines[i]
             if (line !~ /^e: file:/) continue
             sub(/^e: file:\/\//, "", line)

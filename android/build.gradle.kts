@@ -8,31 +8,53 @@ plugins {
 }
 
 // ---------------------------------------------------------------------------------------
-// CI diagnostics.
+// Aurum Edge — CI diagnostics, step 2.
 //
-// Actions reports a failed task as a single generic annotation and keeps the real text in a
-// job log that is not reachable from every environment. On GitHub, when a task fails, this
-// hook re-runs that task in a scratch copy of the project through ./gradlew (whose wrapper
-// republishes compiler messages as annotations), so the failure names itself. It never runs
-// for successful builds, never runs inside the diagnostic run itself, and never changes the
-// outcome of the build it belongs to — see android/tools/ci-diagnose.sh.
+// When a task fails on GitHub (a compiler error, a broken resource, a lint failure) the
+// real messages live in a job log that is not reachable from everywhere, and Actions shows
+// only one generic annotation. So the failing task is re-run in a scratch copy of the
+// project through ./gradlew, whose wrapper republishes the compiler diagnostics as
+// annotations; see android/tools/ci-diagnose.sh. The diagnosis never changes this build's
+// own result, never runs when the build succeeds, and cannot recurse into itself.
 // ---------------------------------------------------------------------------------------
 val aurumRoot: String = rootDir.absolutePath
 val aurumDiagnosed = java.util.concurrent.atomic.AtomicBoolean(false)
+
+fun aurumDiagnose(root: String, task: String) {
+    try {
+        val builder = ProcessBuilder("sh", "$root/tools/ci-diagnose.sh", task)
+        builder.redirectErrorStream(true)
+        val process = builder.start()
+        val tail = java.util.ArrayDeque<String>()
+        process.inputStream.bufferedReader().use { reader ->
+            reader.forEachLine { line ->
+                // Lines that are workflow commands go straight through; everything else is
+                // kept as a short tail for the human reading the job log.
+                if (line.startsWith("::")) {
+                    println(line)
+                } else {
+                    tail.addLast(line)
+                    if (tail.size > 40) tail.removeFirst()
+                }
+            }
+        }
+        process.waitFor()
+        tail.forEach { line -> println(line) }
+    } catch (error: Exception) {
+        println("::warning::Aurum diagnostics could not run: ${error.message}")
+    }
+}
 
 if (System.getenv("GITHUB_ACTIONS") == "true" && System.getenv("AURUM_DIAGNOSE") != "1") {
     gradle.taskGraph.addTaskExecutionListener(object : org.gradle.api.execution.TaskExecutionListener {
         override fun beforeTask(task: org.gradle.api.Task) = Unit
 
         override fun afterTask(task: org.gradle.api.Task, state: org.gradle.api.TaskState) {
-            if (state.failure == null || !aurumDiagnosed.compareAndSet(false, true)) return
-            try {
-                val process = ProcessBuilder("sh", "$aurumRoot/tools/ci-diagnose.sh", task.path)
-                process.inheritIO()
-                process.start().waitFor()
-            } catch (error: Exception) {
-                println("::warning::Aurum diagnostics could not run: ${error.message}")
-            }
+            if (state.failure == null) return
+            System.setProperty("aurum.failedTask", task.path)
+            if (!aurumDiagnosed.compareAndSet(false, true)) return
+            println("::warning::Aurum diagnostics: ${task.path} failed — re-running it in a scratch copy to publish the real compiler messages")
+            aurumDiagnose(aurumRoot, task.path)
         }
     })
 }

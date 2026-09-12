@@ -27,8 +27,6 @@ command -v tar >/dev/null 2>&1 || exit 0
     | ( cd "$work/src" && tar -xf - ) 2>/dev/null || exit 0
 
 log="$work/diagnose.log"
-printf '::warning::Aurum diagnostics: re-running %s in a scratch copy so the real compiler error is named\n' "$task"
-
 runner_command() {
     if [ -x "$work/src/gradlew" ]; then
         ( cd "$work/src" && AURUM_DIAGNOSE=1 timeout 900 ./gradlew "$task" --no-daemon --console=plain --stacktrace )
@@ -39,7 +37,7 @@ runner_command() {
 
 runner_command > "$log" 2>&1
 status=$?
-printf '::warning::Aurum diagnostics: scratch build of %s exited with %s\n' "$task" "$status"
+printf '::warning::Aurum diagnostics: scratch build of %s exited with %s — real compiler messages follow\n' "$task" "$status"
 
 sh "$(dirname "$0")/ci-annotate.sh" "$log"
 
