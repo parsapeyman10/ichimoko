@@ -1,7 +1,7 @@
 import sys as _sys
 from pathlib import Path as _Path
-# Allow `python backend/app/main.py` direct execution (Windows) —
-# ensures `app` package is found when running as script, not module
+
+# Allow `python backend/app/main.py` direct execution (Windows)
 if str(_Path(__file__).resolve().parent.parent) not in _sys.path:
     _sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
 
@@ -11,31 +11,53 @@ from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
+
 from app.config import get_settings
-from app.models import Candle, Impact, NewsRequest, StrategyRequest, Timeframe, SmallAccountConfig, JournalEntry, Direction, BrokerConfig
+from app.models import (
+    BrokerConfig,
+    Candle,
+    Impact,
+    JournalEntry,
+    NewsRequest,
+    SmallAccountConfig,
+    StrategyContext,
+    StrategyRequest,
+    Timeframe,
+    TradeSignal,
+)
+from app.services import journal as journal_svc
+from app.services.backtest import run_backtest, stress_test_from_trades
+from app.services.broker import BROKERS, RECOMMENDED, get_broker
 from app.services.candle_builder import CandleBuilder
-from app.services.market_feed import synthetic_ticks, twelve_data_ticks
+from app.services.forward_test import run_forward_test
+from app.services.history import DataUnavailable, load_history
+from app.services.market_feed import market_ticks
 from app.services.news_feed import NewsAggregator
 from app.services.sentiment import SentimentEngine
-from app.services.strategy import evaluate_scalp, should_exit, explain_profitability
-from app.services import journal as journal_svc
-from app.services.backtest import generate_gold_history, run_backtest, YEAR_ANCHORS
-from app.services.broker import BROKERS, get_broker, RECOMMENDED
+from app.services.strategy import evaluate_scalp, explain_profitability
+from app.services.ytd_trades import get_ytd_report
 
 settings = get_settings()
 
 
 class MarketHub:
-    """In-process preview hub. Replace with Redis Streams/NATS between replicas."""
+    """In-process live state for the real feed. Contains provider data only."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.subscribers: set[asyncio.Queue] = set()
         self.history: dict[Timeframe, deque[Candle]] = defaultdict(lambda: deque(maxlen=2000))
         self.latest: dict[Timeframe, Candle] = {}
         self.last_tick: dict[str, Any] | None = None
+        self.feed_status: dict[str, Any] = {
+            "state": "starting",
+            "detail": None,
+            "last_tick_at": None,
+            "provider": "twelve_data",
+        }
 
     def subscribe(self) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=128)
@@ -53,62 +75,80 @@ class MarketHub:
             with contextlib.suppress(asyncio.QueueFull):
                 queue.put_nowait(message)
 
+    def set_status(self, state: str, detail: str | None = None) -> None:
+        self.feed_status.update({"state": state, "detail": detail})
+        self.publish({"type": "feed.status", "status": state, "detail": detail})
+
 
 hub = MarketHub()
 sentiment = SentimentEngine(settings)
+news_aggregator = NewsAggregator(settings)
 
 
 async def run_market_pipeline() -> None:
-    builders = {Timeframe.M1: CandleBuilder(Timeframe.M1), Timeframe.M5: CandleBuilder(Timeframe.M5)}
-    backoff = 1
+    """Consume real ticks; on failure report the failure and never emit invented data."""
+    # Aggregate the real tick stream into the timeframes the terminal offers.
+    builders = {
+        timeframe: CandleBuilder(timeframe)
+        for timeframe in (Timeframe.M1, Timeframe.M5, Timeframe.M15, Timeframe.H1)
+    }
+    backoff = 2
     while True:
         try:
-            source = synthetic_ticks(settings) if settings.use_synthetic_feed else twelve_data_ticks(settings)
-            async for tick in source:
+            hub.set_status("connecting", "اتصال به Twelve Data…")
+            async for tick in market_ticks(settings):
                 hub.last_tick = tick.model_dump(mode="json")
-                candles = {}
+                hub.feed_status.update(
+                    {"state": "live", "detail": None, "last_tick_at": datetime.now(timezone.utc)}
+                )
+                active_bars: dict[str, dict] = {}
                 for timeframe, builder in builders.items():
                     completed, active = builder.ingest(tick)
                     hub.latest[timeframe] = active
-                    candles[timeframe.value] = active.model_dump(mode="json")
                     if completed:
                         hub.history[timeframe].append(completed)
                         hub.publish({"type": "candle.closed", "payload": completed.model_dump(mode="json")})
-                hub.publish({"type": "market.update", "tick": hub.last_tick, "candles": candles})
-                backoff = 1
+                    active_bars[timeframe.value] = active.model_dump(mode="json")
+                # One message per tick carrying every forming bar.
+                hub.publish({"type": "market.update", "tick": hub.last_tick, "candles": active_bars})
+                backoff = 2
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
-            hub.publish({"type": "feed.status", "status": "reconnecting", "detail": type(exc).__name__})
+        except DataUnavailable as exc:
+            hub.set_status("unavailable", str(exc))
             await asyncio.sleep(backoff)
-            backoff = min(backoff * 2, 30)
+            backoff = min(backoff * 2, 60)
+        except Exception as exc:
+            hub.set_status("error", f"{type(exc).__name__}: {exc}")
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 60)
 
 
 async def run_news_pipeline() -> None:
-    """Poll a licensed source, classify concurrently, and emit material alerts."""
-    aggregator = NewsAggregator(settings)
+    """Poll a licensed source, classify concurrently, emit alerts only for real articles."""
     while True:
         try:
-            articles = await aggregator.fetch_fmp()
+            articles = await news_aggregator.fetch()
             if articles:
                 results = await asyncio.gather(*(sentiment.analyze(article) for article in articles[:20]))
                 for article, result in zip(articles, results):
-                    event = {
-                        "type": "news.sentiment", "article": article.model_dump(mode="json"),
-                        "sentiment": result.model_dump(mode="json"),
-                        "alert": result.impact is Impact.HIGH and result.confidence >= 75,
-                    }
-                    hub.publish(event)
+                    hub.publish(
+                        {
+                            "type": "news.sentiment",
+                            "article": article.model_dump(mode="json"),
+                            "sentiment": result.model_dump(mode="json"),
+                            "alert": result.impact is Impact.HIGH and result.confidence >= 75,
+                        }
+                    )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             hub.publish({"type": "news.status", "status": "degraded", "detail": type(exc).__name__})
-        await asyncio.sleep(30)
+        await asyncio.sleep(60)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    journal_svc.seed_demo()
     tasks = [
         asyncio.create_task(run_market_pipeline(), name="market-pipeline"),
         asyncio.create_task(run_news_pipeline(), name="news-pipeline"),
@@ -122,98 +162,163 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="Aurum Edge API", version="0.1.0", default_response_class=ORJSONResponse,
-    description="Real-time XAU/USD market, sentiment, and closed-bar signal service. — سرویس سیگنال طلا با روش‌های مکمل",
+    title="Aurum Edge API",
+    version="1.0.0",
+    default_response_class=ORJSONResponse,
+    description=(
+        "Real-data XAU/USD market, sentiment and closed-bar signal service. "
+        "هیچ داده ساختگی تولید نمی‌شود؛ در نبود دیتای واقعی، خطای صریح برمی‌گردد."
+    ),
     lifespan=lifespan,
 )
 app.add_middleware(
-    CORSMiddleware, allow_origins=settings.allowed_origins,
-    allow_credentials=True, allow_methods=["GET", "POST"], allow_headers=["*"],
+    CORSMiddleware,
+    allow_origins=settings.allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
 )
 
 
+# ─── status ────────────────────────────────────────────────────────────
 @app.get("/api/v1/health")
 async def health():
     return {
-        "status": "ok", "environment": settings.environment,
-        "feed": "synthetic" if settings.use_synthetic_feed else "twelve_data",
-        "subscribers": len(hub.subscribers), "timestamp": datetime.now(timezone.utc),
+        "status": "ok",
+        "environment": settings.environment,
+        "market_data": {
+            "provider": "twelve_data",
+            "configured": settings.has_market_key,
+            "feed_state": hub.feed_status["state"],
+            "detail": hub.feed_status["detail"],
+            "last_tick_at": hub.feed_status["last_tick_at"],
+        },
+        "news": news_aggregator.status(),
+        "subscribers": len(hub.subscribers),
+        "timestamp": datetime.now(timezone.utc),
     }
 
 
+@app.get("/api/v1/data/status")
+async def data_status():
+    """Explicit data-truth endpoint: what is live, what is cached, and what is missing."""
+    per_timeframe = {}
+    for timeframe in Timeframe:
+        records = len(hub.history[timeframe])
+        if timeframe in hub.latest:
+            records += 1
+        per_timeframe[timeframe.value] = {
+            "live_candles": records,
+            "last_bar": hub.latest[timeframe].timestamp if timeframe in hub.latest else None,
+        }
+    return {
+        "provider": "twelve_data",
+        "api_key_configured": settings.has_market_key,
+        "symbol": settings.market_symbol,
+        "feed": hub.feed_status,
+        "timeframes": per_timeframe,
+        "policy": (
+            "فقط داده واقعی منتشر می‌شود. در نبود کلید/اینترنت، اندپوینت‌ها خطا برمی‌گردانند و "
+            "هیچ کندل، قیمت یا خبری ساخته نمی‌شود."
+        ),
+    }
+
+
+# ─── market ────────────────────────────────────────────────────────────
 @app.get("/api/v1/market/{timeframe}/candles", response_model=list[Candle])
 async def candles(timeframe: Timeframe, limit: int = Query(300, ge=1, le=2000)):
     records = list(hub.history[timeframe])
     if timeframe in hub.latest:
         records.append(hub.latest[timeframe])
-    return records[-limit:]
+    if records:
+        return records[-limit:]
+    # Fall back to real provider history (still real data, just fetched on demand).
+    try:
+        fetched = await load_history(settings, timeframe, output_size=limit)
+    except DataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return fetched[-limit:]
 
 
+# ─── news ──────────────────────────────────────────────────────────────
 @app.post("/api/v1/news/analyze")
 async def analyze_news(request: NewsRequest):
-    result = await sentiment.analyze(request)
-    return result
+    return await sentiment.analyze(request)
+
+
+@app.get("/api/v1/news/headlines")
+async def news_headlines():
+    articles = await news_aggregator.fetch()
+    return {
+        "status": news_aggregator.status(),
+        "articles": [a.model_dump(mode="json") for a in articles],
+    }
+
 
 @app.get("/api/v1/news/calendar")
 async def calendar():
-    agg = NewsAggregator(settings)
-    return await agg.fetch_calendar()
+    events = await news_aggregator.fetch_calendar()
+    return {"status": news_aggregator.status(), "events": events}
 
+
+# ─── strategy / risk ───────────────────────────────────────────────────
 @app.post("/api/v1/strategy/evaluate")
 async def evaluate_strategy(request: StrategyRequest):
     signal = evaluate_scalp(request.candles, request.context)
-    # auto-journal if actionable
-    try:
+    with contextlib.suppress(Exception):
         journal_svc.add_signal(signal, request.candles[-1].timeframe)
-    except Exception:
-        pass
     return signal
 
+
 @app.post("/api/v1/strategy/should-exit")
-async def check_exit(signal: dict, candles_since_entry: list[Candle], kijun: float = 3350):
-    # convenience wrapper
-    from app.models import TradeSignal
+async def check_exit(signal: dict, candles_since_entry: list[Candle], kijun: float):
+    from app.services.strategy import should_exit
+
     ts = TradeSignal(**signal)
     do_exit, reason = should_exit(ts, candles_since_entry, kijun)
     return {"should_exit": do_exit, "reason": reason}
 
+
 @app.post("/api/v1/risk/calculate")
 async def risk_calculate(cfg: SmallAccountConfig, entry: float, stop_loss: float):
-    stop_dist = abs(entry - stop_loss)
-    if stop_dist == 0:
-        stop_dist = 1
+    stop_dist = abs(entry - stop_loss) or 1.0
     risk_amount = cfg.balance * cfg.risk_percent / 100
-    # XAU: 1 oz ≈ $3350, 1 lot = 100 oz, 0.01 lot = 1 oz (micro)
-    # For small accounts we calculate in oz directly.
     position_oz = risk_amount / stop_dist
-    # cap by leverage-like notional (e.g., 500x not available for gold retail, use 1:20 conservative)
     notional = position_oz * entry
     lots = position_oz / 100
-    # micro lot check: 0.01 lot = 1 oz, so even $10 with 0.5% risk and $3 stop => 0.016 oz -> needs fractional micro broker
-    is_micro = lots >= 0.01 or position_oz < 1  # many brokers allow 0.01 lot = 1 oz, some allow 0.001
-    warning = None
-    if cfg.balance < 100 and lots < 0.01:
-        warning = "با موجودی کم، از بروکر با لات میکرو 0.01 (1 انس) استفاده کنید. پوزیشن محاسبه شده کسری است اما اکثر بروکرهای طلا 0.01 لات را ساپورت می‌کنند."
-    if notional > cfg.balance * 20:
-        warning = "نشنال پوزیشن بیش از ۲۰ برابر موجودی است — ریسک یا لوریج را کاهش دهید."
+    min_lot_oz = 1.0  # 0.01 lot on gold
+    executable_oz = max(position_oz, min_lot_oz)
+    actual_risk = executable_oz * stop_dist
     return {
         "balance": cfg.balance,
         "risk_percent": cfg.risk_percent,
-        "risk_amount": round(risk_amount,2),
+        "risk_amount": round(risk_amount, 2),
         "entry": entry,
         "stop_loss": stop_loss,
-        "stop_distance": round(stop_dist,2),
-        "position_oz": round(position_oz,3),
-        "position_lots": round(lots,3),
-        "notional": round(notional,2),
-        "is_micro_allowed": is_micro,
-        "warning": warning,
-        "leverage_hint": "برای حساب کوچک: ریسک 0.25%-0.5%، لوریج واقعی طلا را چک کنید (معمولاً 1:20 تا 1:100). هرگز بیش از 1% کل سرمایه ریسک نکنید."
+        "stop_distance": round(stop_dist, 2),
+        "position_oz": round(position_oz, 3),
+        "position_lots": round(lots, 3),
+        "notional": round(notional, 2),
+        "min_lot_oz": min_lot_oz,
+        "executable_oz": round(executable_oz, 3),
+        "executable_risk_usd": round(actual_risk, 2),
+        "executable_risk_pct": round(actual_risk / cfg.balance * 100, 2) if cfg.balance else None,
+        "warning": (
+            f"حجم دقیق {position_oz:.3f} انس زیر حداقل لات بروکر ({min_lot_oz} انس) است؛ "
+            f"کوچک‌ترین معامله ممکن {actual_risk:.2f}$ ریسک دارد "
+            f"({actual_risk / cfg.balance * 100:.2f}% حساب)."
+            if position_oz < min_lot_oz
+            else None
+        ),
     }
 
+
+# ─── journal ───────────────────────────────────────────────────────────
 @app.get("/api/v1/journal")
 async def get_journal(limit: int = Query(50, ge=1, le=200)):
-    return {"entries": [e.model_dump(mode="json") for e in journal_svc.list_entries(limit)], "stats": journal_svc.stats()}
+    entries = journal_svc.list_entries(limit)
+    return {"entries": [e.model_dump(mode="json") for e in entries], "stats": journal_svc.stats()}
+
 
 @app.post("/api/v1/journal/close/{entry_id}")
 async def close_journal(entry_id: str, exit_price: float, reason: str = "manual"):
@@ -222,313 +327,373 @@ async def close_journal(entry_id: str, exit_price: float, reason: str = "manual"
         return {"error": "not found or already closed"}
     return entry
 
+
 @app.get("/api/v1/journal/stats")
 async def journal_stats():
     return journal_svc.stats()
 
+
+# ─── brokers (reference data) ──────────────────────────────────────────
 @app.get("/api/v1/brokers")
 async def list_brokers():
-    """$100 دمو brokers — با اهرم و کارمزد دقیق برای تست"""
-    return {"recommended": RECOMMENDED.model_dump(), "brokers": [b.model_dump() for b in BROKERS], "note": "دمو $100: RoboForex Prime توصیه می‌شود — 0.01 لات=1oz، لوریج 1:500، هزینه هر ترید ~$0.40 با 0.5% ریسک"}
+    return {
+        "recommended": RECOMMENDED.model_dump(),
+        "brokers": [b.model_dump() for b in BROKERS],
+        "note": (
+            "این‌ها مشخصات واقعی بروکرهاست (اسپرد/کمیسیون/حداقل لات). هیچ عملکردی به آن‌ها نسبت "
+            "داده نمی‌شود؛ هزینه‌ها باید با شرایط حساب خودت کنترل شود."
+        ),
+    }
+
 
 @app.get("/api/v1/brokers/{broker_name}/cost")
-async def broker_cost(broker_name: str, position_oz: float = 0.09, entry: float = 3350, holds_days: int = 0, direction: str = "BUY"):
+async def broker_cost(
+    broker_name: str,
+    position_oz: float = 1.0,
+    entry: float = 3350,
+    holds_days: int = 0,
+    direction: str = "BUY",
+):
     from app.services.broker import calculate_execution_cost
-    br = get_broker(broker_name)
-    return calculate_execution_cost(position_oz, entry, br, holds_days, direction)
 
-@app.post("/api/v1/backtest/forward")
-async def backtest_forward(
-    initial_balance: float = 100,
-    risk_percent: float = 0.5,
-    broker_name: str | None = None,
-    leverage: int | None = None,
-    timeframe: str = "5m",
-    use_trailing: bool = True,
-):
-    """Walk-Forward + Future 12m — تست روی دیتای آینده (Out-of-Sample) + تریلینگ هوشمند — 3m/5m/15m"""
-    from app.services.forward_test import run_forward_test
-    initial_balance = max(10, min(initial_balance, 100000))
-    risk_percent = max(0.1, min(risk_percent, 5))
-    timeframe = timeframe if timeframe in ("3m","5m","15m") else "5m"
-    return run_forward_test(initial_balance, risk_percent, broker_name, leverage=leverage, timeframe=timeframe, use_trailing=use_trailing)
+    return calculate_execution_cost(position_oz, entry, get_broker(broker_name), holds_days, direction)
 
-@app.get("/api/v1/backtest/forward")
-async def backtest_forward_get(
-    initial_balance: float = 100,
-    risk_percent: float = 0.5,
-    broker_name: str | None = None,
-    leverage: int | None = None,
-    timeframe: str = "5m",
-    use_trailing: bool = True,
-):
-    from app.services.forward_test import run_forward_test
-    initial_balance = max(10, min(initial_balance, 100000))
-    risk_percent = max(0.1, min(risk_percent, 5))
-    timeframe = timeframe if timeframe in ("3m","5m","15m") else "5m"
-    return run_forward_test(initial_balance, risk_percent, broker_name, leverage=leverage, timeframe=timeframe, use_trailing=use_trailing)
 
-@app.get("/api/v1/risk/stress-test")
-async def stress_test(
-    initial_balance: float = 100,
-    risk_percent: float = 0.5,
-    win_rate: float = 65.8,
-    profit_factor: float = 2.05,
-    leverage: float = 20,
-):
-    """Unseen tail risk — Monte-Carlo 10k runs, gap, spread shock, where we get liquidated?"""
-    from app.services.backtest import liquidation_stress_test
-    avg_win = 1.82 if profit_factor>1.9 else 1.68
-    avg_loss = 0.89 if profit_factor>1.9 else 1.08
-    return liquidation_stress_test(initial_balance, risk_percent, win_rate, profit_factor, avg_win, avg_loss, leverage)
-
-@app.get("/api/v1/backtest/profitability")
-async def profitability(timeframe: Timeframe = Timeframe.M1, limit: int = 200):
-    records = list(hub.history[timeframe])
-    if len(records) < 50 and timeframe in hub.latest:
-        records.append(hub.latest[timeframe])
-    if len(records) < 50:
-        # synthetic fallback for demo
-        from datetime import timedelta
-        import random
-        base = 3358.42
-        now = datetime.now(timezone.utc)
-        records = []
-        for i in range(220):
-            o = base + random.uniform(-2,2)
-            c = o + random.uniform(-1.2,1.2)
-            h = max(o,c)+random.uniform(0.1,0.6)
-            l = min(o,c)-random.uniform(0.1,0.6)
-            records.append(Candle(timeframe=timeframe, timestamp=now - timedelta(minutes=220-i), open=o, high=h, low=l, close=c, volume=random.randint(200,800), complete=True))
-            base = c
-    return explain_profitability(records)
-
-@app.get("/api/v1/backtest/history")
-async def backtest_history():
-    """Yearly gold anchors for charting."""
-    return {"anchors": [{"year": y, "price": p} for y, p in YEAR_ANCHORS]}
-
-@app.post("/api/v1/backtest/run")
-async def backtest_run(
-    initial_balance: float = 100,
-    risk_percent: float = 0.5,
-    spread: float = 0.35,
-    start_year: int = 2000,
-    end_year: int = 2026,
-    timeframe: Timeframe = Timeframe.M5,
-    broker_name: str | None = None,
-    leverage: int | None = None,
-    use_trailing: bool = True,
-):
-    """
-    Run 26-year backtest (2000→2026) — 5m strict pro default.
-    - 5m پایه (9/26/52) + 119 ورودی + 11 شرط (اخبار 30m vetو + DXY/HTF vetو) → وین 67% RR1.55
-    - 1m/1d کلاسیک هم با timeframe=1m/1d قابل اجراست (وین 55%)
-    - initial_balance: $100 example
-    - risk 0.5% micro (2% برای چلنج $100→$1000 در 7 هفته — چلنج پرریسک)
-    Heavy compute: ~9.5k daily candles, ~9k strategy evaluations (5m tuned via Monte-Carlo).
-    """
-    from datetime import date
-    # clamp — allow 5% for challenge mode (قهرمان), but warn in UI that >2% = high ruin risk
-    initial_balance = max(10, min(initial_balance, 100000))
-    risk_percent = max(0.1, min(risk_percent, 5))
-    start_year = max(2000, min(start_year, 2026))
-    end_year = max(start_year, min(end_year, 2026))
-    # broker override — $100 demo exact
+# ─── backtest (real candles only) ──────────────────────────────────────
+async def _backtest_payload(
+    timeframe: str,
+    bars: int,
+    initial_balance: float,
+    risk_percent: float,
+    spread: float,
+    commission_per_oz: float,
+    broker_name: str | None,
+    min_position_oz: float,
+    use_trailing: bool,
+) -> dict:
+    tf = Timeframe(timeframe) if timeframe in {t.value for t in Timeframe} else Timeframe.M5
     if broker_name:
-        try:
-            from app.services.broker import get_broker
-            _br = get_broker(broker_name)
-            spread = _br.spread_gold
-            if leverage:
-                _br = _br.model_copy(update={"leverage": leverage})
-        except Exception:
-            pass
-    elif leverage:
-        # custom leverage without broker name
-        pass
-    # generate history — 3m/5m/15m power is default
-    from datetime import date
-    from app.services.backtest import _generate_tuned_simulation
-    if timeframe in (Timeframe.M3, Timeframe.M5, Timeframe.M15):
-        tf_str = timeframe.value  # "3m" / "5m" / "15m"
-        candles = generate_gold_history(date(start_year,1,1), date(end_year,9,11), timeframe=timeframe)
-        years = (candles[-1].timestamp - candles[0].timestamp).days / 365.25 if candles else 26.7
-        comm = 0.06
-        if broker_name:
-            try:
-                from app.services.broker import get_broker as _gb
-                comm = _gb(broker_name).commission_per_oz
-            except:
-                pass
-        result = _generate_tuned_simulation(candles, initial_balance, risk_percent, spread, comm, years, win_rate_raw=38.5, pf_raw=0.85, equity_raw=initial_balance*0.92, timeframe_str=tf_str)
-        result["broker"] = {"name": broker_name or "Sim-Broker", "spread": spread, "commission": comm, "leverage": leverage or 500}
-        result["trailing"] = {"enabled": use_trailing, "note": "تریل 1R→بریک‌اون، 1.5R→قفل 0.5R، سپس کیجون — اگر PF کم شود رها می‌شود"}
-        return result
-    candles = generate_gold_history(date(start_year,1,1), date(end_year,9,11))
-    result = run_backtest(candles, initial_balance=initial_balance, risk_percent=risk_percent, spread=spread, broker_name=broker_name, use_trailing=use_trailing, log_to_journal=False)
+        broker: BrokerConfig = get_broker(broker_name)
+        spread = broker.spread_gold
+        commission_per_oz = broker.commission_per_oz or commission_per_oz
+    try:
+        candles = await load_history(settings, tf, output_size=bars)
+    except DataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    result = run_backtest(
+        candles,
+        initial_balance=max(10.0, min(initial_balance, 100000.0)),
+        risk_percent=max(0.1, min(risk_percent, 5.0)),
+        spread=spread,
+        commission_per_oz=commission_per_oz,
+        min_position_oz=min_position_oz,
+        use_trailing=use_trailing,
+    )
+    if broker_name:
+        result["broker"] = get_broker(broker_name).model_dump()
     return result
+
 
 @app.get("/api/v1/backtest/run")
 async def backtest_run_get(
+    timeframe: str = "5m",
+    bars: int = Query(1500, ge=220, le=5000),
     initial_balance: float = 100,
     risk_percent: float = 0.5,
-    spread: float = 0.35,
-    start_year: int = 2000,
-    end_year: int = 2026,
-    timeframe: str = "5m",
+    spread: float = 0.30,
+    commission_per_oz: float = 0.05,
+    min_position_oz: float = 1.0,
     broker_name: str | None = None,
-    leverage: int | None = None,
     use_trailing: bool = True,
 ):
-    tf_map = {"1m": Timeframe.M1, "3m": Timeframe.M3, "5m": Timeframe.M5, "15m": Timeframe.M15}
-    tf = tf_map.get(timeframe, Timeframe.M5)
-    return await backtest_run(initial_balance, risk_percent, spread, start_year, end_year, tf, broker_name, leverage, use_trailing)
+    """Replay the live strategy over real candles pulled from Twelve Data."""
+    return await _backtest_payload(
+        timeframe, bars, initial_balance, risk_percent, spread, commission_per_oz, broker_name, min_position_oz, use_trailing
+    )
+
+
+@app.post("/api/v1/backtest/run")
+async def backtest_run_post(
+    timeframe: str = "5m",
+    bars: int = Query(1500, ge=220, le=5000),
+    initial_balance: float = 100,
+    risk_percent: float = 0.5,
+    spread: float = 0.30,
+    commission_per_oz: float = 0.05,
+    min_position_oz: float = 1.0,
+    broker_name: str | None = None,
+    use_trailing: bool = True,
+):
+    return await _backtest_payload(
+        timeframe, bars, initial_balance, risk_percent, spread, commission_per_oz, broker_name, min_position_oz, use_trailing
+    )
+
+
+@app.get("/api/v1/backtest/forward")
+async def backtest_forward(
+    timeframe: str = "5m",
+    bars: int = Query(1500, ge=400, le=5000),
+    split: float = 0.7,
+    initial_balance: float = 100,
+    risk_percent: float = 0.5,
+    spread: float = 0.30,
+    commission_per_oz: float = 0.05,
+    use_trailing: bool = True,
+):
+    """Walk-forward on real candles: older part in-sample, newer part out-of-sample."""
+    try:
+        return await run_forward_test(
+            settings,
+            timeframe=timeframe,
+            output_size=bars,
+            split=split,
+            initial_balance=initial_balance,
+            risk_percent=risk_percent,
+            spread=spread,
+            commission_per_oz=commission_per_oz,
+            use_trailing=use_trailing,
+        )
+    except DataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/backtest/forward")
+async def backtest_forward_post(
+    timeframe: str = "5m",
+    bars: int = Query(1500, ge=400, le=5000),
+    split: float = 0.7,
+    initial_balance: float = 100,
+    risk_percent: float = 0.5,
+    spread: float = 0.30,
+    commission_per_oz: float = 0.05,
+    use_trailing: bool = True,
+):
+    return await backtest_forward(
+        timeframe, bars, split, initial_balance, risk_percent, spread, commission_per_oz, use_trailing
+    )
+
 
 @app.get("/api/v1/backtest/trades-ytd")
-async def trades_ytd(
-    timeframe: str = "3m",
-    year: int = 2026,
-):
-    """لیست کامل تریدها از اول سال تا الان — 3m/5m/15m با دلیل برد/باخت + missed"""
-    from app.services.ytd_trades import get_ytd_report
-    timeframe = timeframe if timeframe in ("3m","5m","15m") else "5m"
-    year = max(2000, min(year, 2026))
-    return get_ytd_report(timeframe, year)
-
-@app.post("/api/v1/predict/next")
-async def predict_next(request: StrategyRequest):
-    """پیش‌بینی 5m strict — 119 ورودی + 6 نخبه + MTF 5m/15m/1h/4h + اخبار 30m vetو + DXY همبستگی + Behavior/OrderFlow — وین هدف 67% RR1.55 (is_actionable سخت‌گیر 75 امتیاز)"""
-    from app.services.predictor import predict_next as _pred, explain_prediction
-    result = explain_prediction(request.candles, request.context)
-    return result
-
-@app.get("/api/v1/predict/next")
-async def predict_next_get(timeframe: Timeframe = Timeframe.M1, limit: int = 220):
-    """GET fallback: از history موجود پیش‌بینی کن (با نخبگان + MTF + Behavior)"""
-    from app.services.predictor import explain_prediction
-    records = list(hub.history[timeframe])
-    if timeframe in hub.latest:
-        records.append(hub.latest[timeframe])
-    if len(records) < 200:
-        return {"error": "Not enough candles, need 200"}
-    ctx = StrategyContext()
-    return explain_prediction(records[-220:], ctx)
-
-@app.post("/api/v1/mtf/analyze")
-async def mtf_analyze(request: StrategyRequest):
-    """تحلیل چندتایم‌فریم بدون نقص — 1m/5m/15m/1h/4h از 200 کندل 1m (resampled)"""
-    from app.services.mtf_analyzer import mtf_from_m1, mtf_confluence, resample_candles
-    from app.services.features import build_features
-    # Use supplied candles as M1 base, resample to HTF
-    mtf = mtf_from_m1(request.candles)
-    # Also include raw features count for context
+async def trades_ytd(timeframe: str = "5m", year: int | None = None):
+    """Real trade list for the requested year, bounded by what the API plan can deliver."""
     try:
-        feats = build_features(request.candles, request.context)
-        mtf_feats = {k: feats[k] for k in feats if k.startswith("mtf_")}
-    except Exception:
-        mtf_feats = {}
-    return {"mtf": mtf, "mtf_features": mtf_feats, "features_used": len(build_features(request.candles, request.context)) if len(request.candles)>=200 else 119}
+        return await get_ytd_report(settings, timeframe=timeframe, year=year)
+    except DataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-@app.get("/api/v1/mtf/status")
-async def mtf_status(timeframe: Timeframe = Timeframe.M1, limit: int = 220):
-    """GET MTF status from history — برای ترمینال (1m → 1h)"""
-    from app.services.mtf_analyzer import mtf_from_m1
+
+@app.get("/api/v1/backtest/profitability")
+async def profitability(timeframe: Timeframe = Timeframe.M5, limit: int = Query(300, ge=50, le=2000)):
+    """Statistical description of the *real* candles currently available."""
     records = list(hub.history[timeframe])
     if timeframe in hub.latest:
         records.append(hub.latest[timeframe])
     if len(records) < 60:
-        return {"error": "Need 60 candles"}
-    # need 200 for full accuracy, but 60 enough for demo
-    # pad if less than 200
-    mtf = mtf_from_m1(records[-220:] if len(records)>=200 else records)
-    return mtf
+        try:
+            records = await load_history(settings, timeframe, output_size=limit)
+        except DataUnavailable as exc:
+            raise HTTPException(
+                status_code=503,
+                detail=f"{exc} — برای این تحلیل حداقل ۶۰ کندل واقعی لازم است.",
+            ) from exc
+    return explain_profitability(records[-limit:])
 
-@app.get("/api/v1/mtf/explain")
-async def mtf_explain(timeframe: Timeframe = Timeframe.M1):
-    """جزئیات MTF + مقایسه با سیگنال جاری"""
-    from app.services.mtf_analyzer import mtf_from_m1
+
+@app.get("/api/v1/backtest/history")
+async def backtest_history(days: int = Query(365, ge=30, le=2000)):
+    """Real daily candles straight from the provider (used for long-range charting)."""
+    try:
+        daily = await load_history(settings, Timeframe.D1, output_size=min(days, 5000))
+    except DataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {
+        "data_source": "twelve_data",
+        "candles": [
+            {"time": c.timestamp.isoformat(), "open": c.open, "high": c.high, "low": c.low, "close": c.close, "volume": c.volume}
+            for c in daily
+        ],
+    }
+
+
+@app.get("/api/v1/risk/stress-test")
+async def stress_test(
+    timeframe: str = "5m",
+    bars: int = Query(1000, ge=400, le=5000),
+    initial_balance: float = 100,
+    spread: float = 0.30,
+    commission_per_oz: float = 0.05,
+    runs: int = Query(5000, ge=500, le=50000),
+):
+    """
+    Risk analysis built by resampling the REAL trades of a real-data backtest.
+    No win-rate assumption is ever injected.
+    """
+    payload = await _backtest_payload(timeframe, bars, initial_balance, 0.5, spread, commission_per_oz, None, 1.0, True)
+    report = stress_test_from_trades(payload.get("trades", []), initial_balance, runs=runs)
+    report["data_source"] = "twelve_data"
+    report["bars_used"] = payload.get("bars")
+    return report
+
+
+@app.post("/api/v1/predict/next")
+async def predict_next(request: StrategyRequest):
     from app.services.predictor import explain_prediction
+
+    return explain_prediction(request.candles, request.context)
+
+
+@app.get("/api/v1/predict/next")
+async def predict_next_get(timeframe: Timeframe = Timeframe.M5, limit: int = 220):
+    from app.services.predictor import explain_prediction
+
     records = list(hub.history[timeframe])
     if timeframe in hub.latest:
         records.append(hub.latest[timeframe])
     if len(records) < 200:
-        return {"error": "Need 200 candles"}
-    mtf = mtf_from_m1(records[-220:])
-    pred = explain_prediction(records[-220:], StrategyContext())
-    return {"mtf": mtf, "prediction": {"direction": pred["expected_direction"], "confidence": pred["confidence"], "ev_final": pred.get("expected_value_R_final"), "is_actionable": pred["is_actionable"]}}
+        try:
+            records = await load_history(settings, timeframe, output_size=limit)
+        except DataUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return explain_prediction(records[-220:], StrategyContext())
+
+
+@app.post("/api/v1/mtf/analyze")
+async def mtf_analyze(request: StrategyRequest):
+    from app.services.features import build_features
+    from app.services.mtf_analyzer import mtf_from_m1
+
+    mtf = mtf_from_m1(request.candles)
+    feats = build_features(request.candles, request.context)
+    return {
+        "mtf": mtf,
+        "mtf_features": {k: v for k, v in feats.items() if k.startswith("mtf_")},
+        "features_used": len(feats),
+    }
+
+
+@app.get("/api/v1/mtf/status")
+async def mtf_status(timeframe: Timeframe = Timeframe.M5, limit: int = 220):
+    from app.services.mtf_analyzer import mtf_from_m1
+
+    records = list(hub.history[timeframe])
+    if timeframe in hub.latest:
+        records.append(hub.latest[timeframe])
+    if len(records) < 60:
+        try:
+            records = await load_history(settings, timeframe, output_size=limit)
+        except DataUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return mtf_from_m1(records[-220:])
+
+
+@app.get("/api/v1/mtf/explain")
+async def mtf_explain(timeframe: Timeframe = Timeframe.M5):
+    from app.services.mtf_analyzer import mtf_from_m1
+    from app.services.predictor import explain_prediction
+
+    records = list(hub.history[timeframe])
+    if timeframe in hub.latest:
+        records.append(hub.latest[timeframe])
+    if len(records) < 200:
+        try:
+            records = await load_history(settings, timeframe, output_size=220)
+        except DataUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+    records = records[-220:]
+    mtf = mtf_from_m1(records)
+    pred = explain_prediction(records, StrategyContext())
+    return {
+        "mtf": mtf,
+        "prediction": {
+            "direction": pred["expected_direction"],
+            "confidence": pred["confidence"],
+            "ev_final": pred.get("expected_value_R_final"),
+            "is_actionable": pred["is_actionable"],
+        },
+    }
+
 
 @app.get("/api/v1/features/list")
 async def features_list():
     from app.services.features import feature_names
-    return {"count": len(feature_names()), "features": feature_names(), "categories": {
-        "A_price_geometry": 13, "B_trend": 18, "C_momentum": 10, "D_volatility": 8,
-        "E_volume": 6, "F_sr": 2, "G_time_human": 8, "H_cross_market": 4, "I_sentiment": 4, "J_microstructure": 3, "K_smart_money_elite": 8, "L_mtf": 10,
-        "M_candle_behavior": 9, "N_ict_full": 8, "O_orderflow_vp": 8
-    }}
+
+    return {"count": len(feature_names()), "features": feature_names()}
+
 
 @app.post("/api/v1/traders/ensemble")
 async def traders_ensemble_post(request: StrategyRequest):
-    """اجماع ۶ نخبه روی همان کندل‌ها — ICT, Trend, Quant, Macro, Scalper, Supply/Demand"""
     from app.services.features import build_features
-    from app.services.top_traders import ensemble as elite_ensemble
     from app.services.predictor import predict_next as base_pred
+    from app.services.top_traders import ensemble as elite_ensemble
+
     feats = build_features(request.candles, request.context)
     base = base_pred(request.candles, request.context)
     elite = elite_ensemble(feats, base_ev=base["expected_value_R"], base_direction=base["expected_direction"])
     return {"base": base, "elite": elite, "features_used": len(feats)}
 
+
 @app.get("/api/v1/traders/ensemble")
-async def traders_ensemble_get(timeframe: Timeframe = Timeframe.M1):
-    """GET اجماع نخبگان از history"""
+async def traders_ensemble_get(timeframe: Timeframe = Timeframe.M5):
     from app.services.features import build_features
-    from app.services.top_traders import ensemble as elite_ensemble
     from app.services.predictor import predict_next as base_pred
+    from app.services.top_traders import ensemble as elite_ensemble
+
     records = list(hub.history[timeframe])
     if timeframe in hub.latest:
         records.append(hub.latest[timeframe])
     if len(records) < 200:
-        return {"error": "Need 200 candles"}
+        try:
+            records = await load_history(settings, timeframe, output_size=220)
+        except DataUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+    records = records[-220:]
     ctx = StrategyContext()
-    feats = build_features(records[-220:], ctx)
-    base = base_pred(records[-220:], ctx)
+    feats = build_features(records, ctx)
+    base = base_pred(records, ctx)
     elite = elite_ensemble(feats, base_ev=base["expected_value_R"], base_direction=base["expected_direction"])
     return {"base": base, "elite": elite, "features_used": len(feats)}
 
+
 @app.get("/api/v1/traders/list")
 async def traders_list():
-    """لیست ۶ نخبه و سبک‌شان"""
+    """The five complementary analysis schools and their fixed weights (no performance claims)."""
     from app.services.top_traders import TRADERS_META, TRADER_WEIGHTS
+
     return {
         "traders": [
-            {"id": k, "name": v["name"], "full": v["full"], "style": v["style"], "desc": v["desc"], "weight": TRADER_WEIGHTS[k]}
-            for k, v in TRADERS_META.items()
+            {
+                "id": key,
+                "name": meta["name"],
+                "full": meta["full"],
+                "style": meta["style"],
+                "desc": meta["desc"],
+                "weight": TRADER_WEIGHTS[key],
+            }
+            for key, meta in TRADERS_META.items()
         ],
-        "philosophy": "نخبگان ۷۰٪ مواقع معامله نمی‌کنند. سود از صبر + اجماع ۳+ نخبه + EV>0.12 + Killzone + اسپرد سالم می‌آید. PF با فیلتر نخبگان از ~1.35 به ~1.62 می‌رود (بک‌تست ۲۰۰۰-۲۰۲۶)."
+        "philosophy": (
+            "این‌ها سبک‌های تحلیلی با وزن‌های ثابت هستند، نه ادعای عملکرد. هیچ عدد بازدهی بدون "
+            "بک‌تست روی دیتای واقعی گزارش نمی‌شود."
+        ),
     }
 
+
 @app.get("/api/v1/features/explain")
-async def features_explain(timeframe: Timeframe = Timeframe.M1):
+async def features_explain(timeframe: Timeframe = Timeframe.M5):
     from app.services.features import build_features
+
     records = list(hub.history[timeframe])
     if timeframe in hub.latest:
         records.append(hub.latest[timeframe])
     if len(records) < 200:
-        return {"error": "Need 200 candles"}
-    feats = build_features(records[-220:], StrategyContext())
-    # top 10 by abs value
-    top = sorted(feats.items(), key=lambda x: abs(x[1]), reverse=True)[:15]
+        try:
+            records = await load_history(settings, timeframe, output_size=220)
+        except DataUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+    records = records[-220:]
+    feats = build_features(records, StrategyContext())
+    top = sorted(feats.items(), key=lambda item: abs(item[1]), reverse=True)[:15]
     return {"features": feats, "top": top}
-
-
-if __name__ == "__main__":
-    import uvicorn as _uvicorn
-    print("\n✅ Aurum Edge — برای اجرا هر کدام از این‌ها را استفاده کن:")
-    print("  1) uvicorn app.main:app --reload --app-dir backend --host 0.0.0.0 --port 8000")
-    print("  2) python -m uvicorn app.main:app --reload --app-dir backend")
-    print("  3) cd backend && python -m app.main")
-    print("Docs → http://127.0.0.1:8000/docs\n")
-    _uvicorn.run(app, host="0.0.0.0", port=8000)
 
 
 @app.websocket("/ws/v1/market/xauusd")
@@ -536,10 +701,15 @@ async def market_socket(websocket: WebSocket):
     await websocket.accept()
     queue = hub.subscribe()
     try:
-        await websocket.send_json({
-            "type": "connected", "symbol": settings.market_symbol,
-            "feed": "synthetic" if settings.use_synthetic_feed else "twelve_data",
-        })
+        await websocket.send_json(
+            {
+                "type": "connected",
+                "symbol": settings.market_symbol,
+                "provider": "twelve_data",
+                "feed_state": hub.feed_status["state"],
+                "detail": hub.feed_status["detail"],
+            }
+        )
         while True:
             message = await queue.get()
             await websocket.send_json(message)
@@ -547,3 +717,12 @@ async def market_socket(websocket: WebSocket):
         pass
     finally:
         hub.unsubscribe(queue)
+
+
+if __name__ == "__main__":
+    import uvicorn as _uvicorn
+
+    print("\n✅ Aurum Edge API — اجرا:")
+    print("   uvicorn app.main:app --reload --app-dir backend --host 0.0.0.0 --port 8000")
+    print("   Docs → http://127.0.0.1:8000/docs\n")
+    _uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -30,7 +30,7 @@ class Tick(BaseModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     bid: float
     ask: float
-    provider: str = "synthetic"
+    provider: str = "twelve_data"
 
     @property
     def mid(self) -> float:
@@ -184,7 +184,6 @@ class BrokerConfig(BaseModel):
     commission_per_oz: float = Field(default=0.06, ge=0, description="Commission per oz per side")
     commission_per_lot: float = Field(default=6.0, ge=0, description="Commission per lot round-trip (for display)")
     min_lot: float = Field(default=0.01, description="Min lot 0.01 = 1oz")
-    demo_balance: float = Field(default=100, description="Demo $100 test money")
     swap_long_per_night: float = Field(default=-0.018, description="Swap long per night % of notional")
     swap_short_per_night: float = Field(default=0.008, description="Swap short per night")
     min_deposit: float = Field(default=10)

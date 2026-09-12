@@ -19,9 +19,9 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
         return TradeSignal(action=Direction.NO_TRADE, confidence=0, blockers=["At least 200 closed candles required"])
 
     frame = candles[-1].timeframe
-    # ── Multi-TF Ichimoku — 3m/5m/15m power tuned ──
+    # ── Per-timeframe Ichimoku settings (chosen by hand, not by optimisation) ──
     if frame.value == "3m":
-        t_p, k_p, b_p, disp = 8, 24, 48, 24  # 3m fast but not noisy
+        t_p, k_p, b_p, disp = 8, 24, 48, 24  # 3m: faster cloud, still structure-based
     elif frame.value == "5m":
         t_p, k_p, b_p, disp = 9, 26, 52, 26  # classic 9/26/52 for 5m (higher win, fewer whipsaws)
     elif frame.value == "15m":
@@ -383,7 +383,7 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
         elif adx_val is not None and adx_val < 18:
             target_multiple = 1.35  # chop — quick take
         else:
-            target_multiple = 1.55  # balanced — optimized for PF 2.05
+            target_multiple = 1.55  # balanced default for 5m
     elif frame.value == "15m":
         if score >= 88 and adx_val is not None and adx_val > 28:
             target_multiple = 2.30

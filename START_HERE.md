@@ -1,14 +1,16 @@
 # 🚀 Aurum Edge — اجرای رابط درست و حسابی (ویندوز)
 
-## مشکلت چه بود؟
-گفتی «نتونستم رابط درست حسابی بالا بیارم» — معمولاً چون **بک‌اند و فرانت‌اند جدا** هستند و باید هر دو روشن باشند. بک‌اند روی `8000` و فرانت روی `5173` — اگر فقط یکی روشن باشد رابط خالی/خطا می‌ده.
+## دو نکتهٔ مهم قبل از شروع
+۱) بک‌اند و فرانت **جدا** هستند و هر دو باید روشن باشند: بک‌اند روی `8000` و فرانت روی `5173`.
+۲) این نسخه **فقط با دیتای واقعی** کار می‌کند. بدون کلید Twelve Data هیچ چارت/سیگنالی ساخته نمی‌شود؛
+به‌جای نسخهٔ دمو، وضعیت «آفلاین / بدون کلید» با آخرین دادهٔ واقعیِ کش‌شده نمایش داده می‌شود.
 
 ## سریع‌ترین راه — یک کلیک
 
 ### PowerShell (توصیه)
 ```powershell
-cd C:\Users\parsa.p\Desktop\git\ichimoko
-git pull origin arena/01a09055-ichimoko   # مهم! فیکس ModuleNotFoundError اینجاست
+cd C:\path\to\ichimoko
+git pull
 .\start.ps1
 # اگر ارور ExecutionPolicy داد:
 powershell -ExecutionPolicy Bypass -File start.ps1
@@ -16,8 +18,8 @@ powershell -ExecutionPolicy Bypass -File start.ps1
 
 ### یا CMD
 ```cmd
-cd C:\Users\parsa.p\Desktop\git\ichimoko
-git pull origin arena/01a09055-ichimoko
+cd C:\path\to\ichimoko
+git pull
 start.bat
 ```
 
@@ -29,7 +31,7 @@ start.bat
 
 **ترمینال ۱ — بک‌اند:**
 ```powershell
-cd C:\Users\parsa.p\Desktop\git\ichimoko
+cd C:\path\to\ichimoko
 pip install -r backend/requirements.txt
 python run.py --reload
 # یا
@@ -38,7 +40,7 @@ uvicorn app.main:app --reload --app-dir backend --host 0.0.0.0 --port 8000
 
 **ترمینال ۲ — فرانت:**
 ```powershell
-cd C:\Users\parsa.p\Desktop\git\ichimoko
+cd C:\path\to\ichimoko
 npm install
 npm run dev
 # برو به http://127.0.0.1:5173
@@ -52,10 +54,21 @@ npm run dev
 4. **ModuleNotFoundError: No module named 'app'؟** یعنی `git pull` نکردی. فیکس در `42c94c9` است.
 5. **صفحه سفید؟** F12 → Console → ارور را بفرست. معمولاً `Failed to fetch /api` یعنی بک‌اند خاموشه.
 
-## تست سریع بعد بالا آمدن
-- http://127.0.0.1:8000/api/v1/backtest/run?timeframe=3m → باید JSON با `final_balance` برگرده
-- http://127.0.0.1:8000/api/v1/backtest/trades-ytd?timeframe=3m → لیست ۱۹۸ ترید
-- داخل رابط: بک‌تست → سوئیچ 3m / 5m / 15m → Forward Test → ژورنال
+## کلید دیتای واقعی (اجباری)
+1. در `backend/.env` این خط را پر کن (کلید رایگان از twelvedata.com):
+   ```
+   AURUM_TWELVE_DATA_API_KEY=کلید-خودت
+   ```
+2. بک‌اند را دوباره اجرا کن. حالا:
+   - http://127.0.0.1:8000/api/v1/data/status → باید `api_key_configured: true` و وضعیت فید را نشان دهد
+   - http://127.0.0.1:8000/api/v1/market/5m/candles?limit=50 → کندل‌های واقعی
+   - داخل رابط: چارت زنده → بک‌تست → Walk-Forward → ژورنال
+
+اگر کلید نباشد یا اینترنت قطع شود، همه‌جا پیام صریح «آفلاین / بدون کلید» دیده می‌شود — نه دیتای ساختگی.
+
+## ساخت اپ اندروید (APK)
+راهنمای کامل: [`docs/ANDROID.md`](docs/ANDROID.md) — APK در GitHub Actions ساخته می‌شود و از بخش
+Artifacts همان اجرا دانلود می‌شود.
 
 اگر باز هم بالا نیومد، همین ۲ تا خروجی رو بفرست:
 ```powershell

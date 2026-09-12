@@ -210,9 +210,11 @@ def build_features(candles: list[Candle], context: StrategyContext | None = None
     # minutes from NY open (13:30 UTC for gold active) — proxy for liquidity
     f["mins_from_ny_open"] = (hour - 13.5) * 60
 
-    # ── H: Cross-market proxies (synthetic, but formally defined) ──
-    # DXY proxy: inverse of gold's 20MA slope (when gold up, DXY down) — for demo, derive from EMA20 slope
-    # In production, feed real DXY/Yield via market_feed
+    # ── H: Cross-market proxies (derived, never presented as real DXY/yield data) ──
+    # DXY is NOT available from the free provider: this is a clearly-labelled PROXY derived from
+    # gold's own EMA20 slope. It is a computed feature, not imported dollar data — never present it
+    # to users as a real DXY reading.
+    # If a real DXY/yield feed is added later, replace these two features with its values.
     closes = [c.close for c in candles]
     ema20 = ema(candles, 20)[i] if len(candles)>=20 else cur.close
     f["dxy_proxy"] = -(cur.close - ema20) / max(atr_v, 0.01) * 0.35  # inverse
@@ -280,7 +282,7 @@ def build_features(candles: list[Candle], context: StrategyContext | None = None
     f["premium_discount"] = (cur.close - lo) / max(hi - lo, 0.01)
     # Killzone active: London 8-11, NY 13-16 golden (highest elite activity)
     f["killzone_active"] = 1.0 if (8 <= hour < 11 or 13 <= hour < 17) else 0.0
-    # Turtle breakout 20: price breaks 20-bar high/low (Dunn/Seykota)
+    # Turtle-style breakout: price breaks the 20-bar high/low
     hi20 = max(c.high for c in candles[i-20:i]) if i>=20 else cur.high
     lo20 = min(c.low for c in candles[i-20:i]) if i>=20 else cur.low
     if cur.close > hi20:
