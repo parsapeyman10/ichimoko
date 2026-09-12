@@ -40,8 +40,9 @@ def resample_candles(candles: list[Candle], target: Timeframe) -> list[Candle]:
         group = buckets[bucket_ts]
         if not group:
             continue
-        # need at least 60% of expected M1s to be considered valid? For simplicity require >= 50%
-        # but for demo len always ~1-15 so keep all
+        # Buckets are built strictly from the M1 candles that actually exist in the feed.
+        # A partially covered bucket is still real data (open/high/low/close of the bars we have);
+        # completeness is reported by the caller instead of inventing the missing minutes.
         o = group[0].open
         h = max(g.high for g in group)
         l = min(g.low for g in group)
