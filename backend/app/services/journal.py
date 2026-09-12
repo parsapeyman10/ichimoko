@@ -75,7 +75,20 @@ def stats() -> dict:
     entries = list_entries(500)
     closed = [e for e in entries if e.status == "CLOSED" and e.pnl is not None]
     if not closed:
-        return {"total": len(entries), "closed": 0, "win_rate": 0, "profit_factor": 0, "total_pnl": 0, "avg_rr": 0}
+        # No settled trades yet: report nothing rather than a fake 0% win rate.
+        return {
+            "total": len(entries),
+            "closed": 0,
+            "open": len([e for e in entries if e.status == "OPEN"]),
+            "wins": 0,
+            "losses": 0,
+            "win_rate": None,
+            "profit_factor": None,
+            "total_pnl_1oz": 0.0,
+            "avg_rr": None,
+            "avg_confidence": None,
+            "note": "هنوز معامله‌ای تسویه نشده است؛ آماری وجود ندارد.",
+        }
     wins = [e for e in closed if e.pnl > 0]
     losses = [e for e in closed if e.pnl <= 0]
     gross_profit = sum(e.pnl for e in wins) if wins else 0
@@ -88,7 +101,7 @@ def stats() -> dict:
         "wins": len(wins),
         "losses": len(losses),
         "win_rate": round(len(wins)/len(closed)*100, 1),
-        "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss else 99.9,
+        "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss else None,
         "total_pnl_1oz": round(total_pnl, 2),  # type: ignore
         "avg_rr": round(sum(e.risk_reward for e in closed)/len(closed), 2),
         "avg_confidence": round(sum(e.confidence for e in closed)/len(closed), 1),

@@ -282,7 +282,7 @@ def build_features(candles: list[Candle], context: StrategyContext | None = None
     f["premium_discount"] = (cur.close - lo) / max(hi - lo, 0.01)
     # Killzone active: London 8-11, NY 13-16 golden (highest elite activity)
     f["killzone_active"] = 1.0 if (8 <= hour < 11 or 13 <= hour < 17) else 0.0
-    # Turtle breakout 20: price breaks 20-bar high/low (Dunn/Seykota)
+    # Turtle-style breakout: price breaks the 20-bar high/low
     hi20 = max(c.high for c in candles[i-20:i]) if i>=20 else cur.high
     lo20 = min(c.low for c in candles[i-20:i]) if i>=20 else cur.low
     if cur.close > hi20:

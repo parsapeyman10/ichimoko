@@ -59,7 +59,7 @@ def _vote_ict(feats: dict[str, float]) -> TraderVote:
     ob_dist = feats.get("order_block_dist_atr", 5)
     # Veto if not killzone -> ICT doesn't trade
     if kill < 0.5:
-        return TraderVote("ict_smc", TRADERS_META["ict_smc"]["name"], TRADERS_META["ict_smc"]["style"], "NEUTRAL", 35, TRADER_WEIGHTS["ict_smc"], "خارج Killzone — ICT معامله نمی‌کند", is_veto=False)
+        return TraderVote("ict_smc", TRADERS_META["ict_smc"]["name"], TRADERS_META["ict_smc"]["style"], "NEUTRAL", 35, TRADER_WEIGHTS["ict_smc"], "خارج Killzone — این سبک معامله نمی‌کند", is_veto=False)
     # Bearish: sweep highs + bearish FVG + premium (>0.65) + close near OB
     bear_score = 0
     if liq_bear > 0.5: bear_score += 2
@@ -84,7 +84,7 @@ def _vote_trend(feats: dict[str, float]) -> TraderVote:
     tk_slope = feats.get("tenkan_slope", 0)
     vwap = feats.get("vwap_dist", 0)
     cloud_bear = feats.get("cloud_bearish", 0)
-    # Seykota rule: ADX must confirm trend, else no trade
+    # trend archetype: ADX must confirm trend, else no trade
     if adx < 17:
         return TraderVote("trend", TRADERS_META["trend"]["name"], TRADERS_META["trend"]["style"], "NEUTRAL", 42, TRADER_WEIGHTS["trend"], f"ADX ضعیف {adx:.0f} — روند بی‌جان", is_veto=False)
     if ema > 0.7 and vwap > 0.5 and tk_spread > 0.25 and tk_slope > 0 and cloud_bear < 0.5:
@@ -93,7 +93,7 @@ def _vote_trend(feats: dict[str, float]) -> TraderVote:
     if ema < -0.7 and vwap < -0.5 and tk_spread < -0.25 and tk_slope < 0 and cloud_bear > 0.5:
         conf = min(88, 62 + int(adx - 17)*2 + int(-ema*6))
         return TraderVote("trend", TRADERS_META["trend"]["name"], TRADERS_META["trend"]["style"], "SELL", conf, TRADER_WEIGHTS["trend"], f"زیر EMA200 ({ema:.1f}) + ADX {adx:.0f} — سوار روند نزولی")
-    return TraderVote("trend", TRADERS_META["trend"]["name"], TRADERS_META["trend"]["style"], "NEUTRAL", 50, TRADER_WEIGHTS["trend"], "روند ناقص — Seykota صبر می‌کند")
+    return TraderVote("trend", TRADERS_META["trend"]["name"], TRADERS_META["trend"]["style"], "NEUTRAL", 50, TRADER_WEIGHTS["trend"], "روند ناقص — این سبک وارد نمی‌شود")
 
 def _vote_quant(feats: dict[str, float]) -> TraderVote:
     bb = feats.get("bb_pctB", 0.5)
@@ -171,8 +171,10 @@ def vote_all(feats: dict[str, float]) -> list[TraderVote]:
 
 def ensemble(feats: dict[str, float], base_ev: float | None = None, base_direction: str | None = None) -> dict[str, Any]:
     """
-    ترکیب وزنی آراء نخبگان + فیلتر انضباطی
-    خروجی: consensus, confidence, veto, elite_score, agreement, advisory
+    Weighted vote of the six rule archetypes over features computed from real closed candles.
+
+    Output: consensus, agreement, quality label, veto reasons, advisory text.
+    Nothing here is measured performance — it is a transparent, deterministic rule ensemble.
     """
     votes = vote_all(feats)
     # Weighted directional score: BUY +1, SELL -1, NEUTRAL 0
@@ -211,7 +213,7 @@ def ensemble(feats: dict[str, float], base_ev: float | None = None, base_directi
     else:
         agreement = neutral_w / max(total_w, 0.01)
 
-    # Elite confidence (0-100) — need strong agreement + high individual confidences
+    # Ensemble confidence (0-100) — agreement + individual confidence
     avg_conf = sum(v.confidence * v.weight for v in votes) / max(sum(v.weight for v in votes), 0.01)
     elite_conf = avg_conf * (0.55 + 0.45 * agreement)  # agreement boosts
     # Veto conditions — elite discipline: 70% of trades filtered out + MTF
@@ -235,11 +237,11 @@ def ensemble(feats: dict[str, float], base_ev: float | None = None, base_directi
 
     is_veto = len(veto_reasons) > 0
 
-    # Elite EV adjustment: if ensemble agrees with base predictor, boost EV; if conflicts, dampen
+    # Advisory EV nudge (hand-tuned prior, not a measured edge): if ensemble agrees with base predictor, boost EV; if conflicts, dampen
     elite_ev_boost = 0.0
     if base_direction and base_ev is not None:
         if consensus == base_direction and consensus != "NEUTRAL" and agreement > 0.42:
-            elite_ev_boost = 0.09 + agreement * 0.12  # +0.14 to +0.21 R boost
+            elite_ev_boost = 0.09 + agreement * 0.12  # heuristic nudge, documented as a prior
         elif consensus != "NEUTRAL" and consensus != base_direction and agreement > 0.38:
             elite_ev_boost = -0.14 - agreement * 0.08  # penalize conflict
 
@@ -257,7 +259,7 @@ def ensemble(feats: dict[str, float], base_ev: float | None = None, base_directi
     if is_veto:
         advisory = f"وتو سبک‌ها: {veto_reasons[0]} — حتی اگر مدل سیگنال دهد، این سبک می‌گوید وارد نشو."
     elif consensus != "NEUTRAL" and agreement >= 0.50:
-        advisory = f"{agreement*100:.0f}% وزن نخبگان هم‌جهت ({consensus}) — انضباط می‌گوید: فقط همین ستاپ‌ها را بگیر، بقیه را رها کن."
+        advisory = f"{agreement*100:.0f}% وزن سبک‌ها هم‌جهت ({consensus}) — فقط همین ستاپ‌ها با فیلترهای دیگر هم‌خوان‌اند."
     else:
         advisory = "عدم اجماع سبک‌ها — معامله نکردن هم یک تصمیم معتبر است."
 
@@ -275,5 +277,5 @@ def ensemble(feats: dict[str, float], base_ev: float | None = None, base_directi
         "elite_ev_boost": round(elite_ev_boost, 3),
         "quality": quality,
         "advisory": advisory,
-        "summary": f"اجماع نخبگان: {consensus} با {agreement*100:.0f}% توافق · وتو: {'بله' if is_veto else 'خیر'} · کیفیت {quality}",
+        "summary": f"اجماع سبک‌ها: {consensus} با {agreement*100:.0f}% توافق · وتو: {'بله' if is_veto else 'خیر'} · کیفیت {quality}",
     }
