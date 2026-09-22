@@ -133,7 +133,7 @@ object MtfAnalyzer {
         val bias = when {
             score >= 2 -> SignalAction.BUY
             score <= -2 -> SignalAction.SELL
-            else -> SignalAction.NEUTRAL
+            else -> SignalAction.NO_TRADE
         }
         val strength = ((abs(score) / 5.0) * 100.0).roundToInt().coerceIn(0, 100)
         val cloudNote = when {
@@ -190,7 +190,7 @@ object MtfAnalyzer {
         val bias = when {
             score > 0.25 -> SignalAction.BUY
             score < -0.25 -> SignalAction.SELL
-            else -> SignalAction.NEUTRAL
+            else -> SignalAction.NO_TRADE
         }
         val matching = frames.filter { it.bias == bias }.sumOf { it.weight }
         val alignment = matching / totalWeight
@@ -198,7 +198,7 @@ object MtfAnalyzer {
         val fast = frames.first()
         val slow = frames.last()
         val veto = frames.size > 1 && slow.strength >= 50 &&
-            fast.bias != SignalAction.NEUTRAL && slow.bias != SignalAction.NEUTRAL && fast.bias != slow.bias
+            fast.bias != SignalAction.NO_TRADE && slow.bias != SignalAction.NO_TRADE && fast.bias != slow.bias
         val vetoReason = if (veto) {
             "تایم ${slow.interval.label} خلاف تایم ${fast.interval.label} است (قدرت ${slow.strength}%) — این واگرایی ورود را تایید نمی‌کند."
         } else {
@@ -207,7 +207,7 @@ object MtfAnalyzer {
 
         val advisory = when {
             veto -> "وتو چندتایم‌فریم: سیگنال تایم پایه با تایم بالاتر هم‌جهت نیست؛ قاعده این است که وارد نشوی."
-            bias == SignalAction.NEUTRAL -> "همگرایی کافی نیست — تایم‌فریم‌ها هم‌جهت نیستند."
+            bias == SignalAction.NO_TRADE -> "همگرایی کافی نیست — تایم‌فریم‌ها هم‌جهت نیستند."
             alignment >= 0.75 -> "${(alignment * 100).roundToInt()}% وزن تایم‌فریم‌ها هم‌جهت (${bias.name}) — تایید چندتایم‌فریمی."
             else -> "هم‌جهتی ضعیف (${(alignment * 100).roundToInt()}%) — تایید کامل نیست."
         }
@@ -220,7 +220,7 @@ object MtfAnalyzer {
             alignment = alignment,
             buyCount = frames.count { it.bias == SignalAction.BUY },
             sellCount = frames.count { it.bias == SignalAction.SELL },
-            neutralCount = frames.count { it.bias == SignalAction.NEUTRAL },
+            neutralCount = frames.count { it.bias == SignalAction.NO_TRADE },
             veto = veto,
             vetoReason = vetoReason,
             advisory = advisory,
