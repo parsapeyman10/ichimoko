@@ -40,8 +40,6 @@ if (aurumTrace) {
 
 if (aurumTrace) {
     gradle.addBuildListener(object : org.gradle.BuildListener {
-        override fun buildStarted(gradle: org.gradle.api.invocation.Gradle) = Unit
-
         override fun settingsEvaluated(settings: org.gradle.api.initialization.Settings) = Unit
 
         override fun projectsLoaded(gradle: org.gradle.api.invocation.Gradle) = Unit
