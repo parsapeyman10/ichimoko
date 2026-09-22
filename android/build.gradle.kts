@@ -51,9 +51,9 @@ fun aurumDiagnose(root: String, task: String) {
 
 if (System.getenv("GITHUB_ACTIONS") == "true" && System.getenv("AURUM_DIAGNOSE") != "1") {
     gradle.taskGraph.addTaskExecutionListener(object : org.gradle.api.execution.TaskExecutionListener {
-        override fun beforeTask(task: org.gradle.api.Task) = Unit
+        override fun beforeExecute(task: org.gradle.api.Task) = Unit
 
-        override fun afterTask(task: org.gradle.api.Task, state: org.gradle.api.TaskState) {
+        override fun afterExecute(task: org.gradle.api.Task, state: org.gradle.api.tasks.TaskState) {
             if (state.failure == null) return
             System.setProperty("aurum.failedTask", task.path)
             if (!aurumDiagnosed.compareAndSet(false, true)) return
