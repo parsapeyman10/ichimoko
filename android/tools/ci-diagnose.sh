@@ -1,5 +1,5 @@
 #!/bin/sh
-# Aurum Edge — CI diagnostics, second stage.
+# Trading — CI diagnostics, second stage.
 #
 # A failed Actions job reaches GitHub as one generic annotation, while the job log itself
 # is served from storage that is not reachable from every environment. The gradlew wrapper

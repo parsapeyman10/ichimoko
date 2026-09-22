@@ -109,7 +109,7 @@ jobs:
         if: always() && steps.guard.outputs.ready == 'true'
         run: |
           {
-            echo "## Aurum Edge — Android"
+            echo "## Trading — Android"
             echo ""
             echo "APKها در بخش **Artifacts** همین اجرا هستند (فایل zip شامل دو APK):"
             echo ""

@@ -162,7 +162,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="Aurum Edge API",
+    title="Trading API",
     version="1.0.0",
     default_response_class=ORJSONResponse,
     description=(
@@ -722,7 +722,7 @@ async def market_socket(websocket: WebSocket):
 if __name__ == "__main__":
     import uvicorn as _uvicorn
 
-    print("\n✅ Aurum Edge API — اجرا:")
+    print("\n✅ Trading API — اجرا:")
     print("   uvicorn app.main:app --reload --app-dir backend --host 0.0.0.0 --port 8000")
     print("   Docs → http://127.0.0.1:8000/docs\n")
     _uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,4 +1,4 @@
-// Aurum Edge — Android (Kotlin + Jetpack Compose)
+// Trading — Android (Kotlin + Jetpack Compose)
 // Root build file: only plugin declarations. Module config lives in app/build.gradle.kts
 plugins {
     id("com.android.application") version "8.7.3" apply false
@@ -12,7 +12,7 @@ if (System.getenv("GITHUB_ACTIONS") == "true") {
 }
 
 // ---------------------------------------------------------------------------------------
-// Aurum Edge — CI diagnostics, step 2.
+// Trading — CI diagnostics, step 2.
 //
 // When a task fails on GitHub (a compiler error, a broken resource, a lint failure) the
 // real messages live in a job log that is not reachable from everywhere, and Actions shows

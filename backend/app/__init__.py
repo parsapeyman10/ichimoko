@@ -1,1 +1,1 @@
-"""Aurum Edge real-time trading intelligence API."""
+"""Trading real-time trading intelligence API."""

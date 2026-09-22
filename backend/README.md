@@ -1,4 +1,4 @@
-# Aurum Edge API
+# Trading API
 
 FastAPI service for XAU/USD analysis on **real provider data only**: normalized candles, indicators,
 strategy evaluation, real-candle backtests, walk-forward, MTF analysis, news sentiment and the paper

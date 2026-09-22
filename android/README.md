@@ -1,4 +1,4 @@
-# AurumEdge — اپ اندروید
+# Trading — اپ اندروید
 
 اپ بومی این پروژه: **Kotlin + Jetpack Compose**، بدون WebView و **بدون سرور**.
 همه‌چیز روی خود گوشی اجرا می‌شود: دریافت دیتای واقعی، اندیکاتورها، موتور سیگنال، تراز چندتایم‌فریم،
@@ -36,7 +36,7 @@ $env:TD_API_KEY="your-key"; .\gradlew.bat assembleRelease
 ### روی GitHub Actions (بدون نصب چیزی)
 
 ورک‌فلوی `Android APK` (فایل `.github/workflows/main.yml`) با هر تغییر در پوشهٔ `android/` روی `main`
-یا روی PR اجرا می‌شود و APKها را در Artifacts می‌گذارد: `AurumEdge-release.apk` و `AurumEdge-debug.apk`.
+یا روی PR اجرا می‌شود و APKها را در Artifacts می‌گذارد: `Trading-release.apk` و `Trading-debug.apk`.
 راهنمای گام‌به‌گام (فارسی): [`../docs/ANDROID.md`](../docs/ANDROID.md).
 
 ## تست‌های JVM

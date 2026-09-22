@@ -1,5 +1,5 @@
 #!/bin/sh
-# Aurum Edge — CI diagnostics.
+# Trading — CI diagnostics.
 #
 # GitHub renders a failed build as one generic annotation ("Process completed with exit
 # code 1") plus a job log. When that log cannot be read from where the automation sits,

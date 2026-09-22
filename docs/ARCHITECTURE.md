@@ -1,4 +1,4 @@
-# Aurum Edge — production architecture
+# Trading — production architecture
 
 > **Scope:** decision-support and paper-trading architecture for XAU/USD on closed 1-minute and 5-minute bars. A mobile phone is not an HFT execution venue. Market ingestion, signal calculation, risk gates, and broker order state must remain server-side. No strategy is profitable by specification; tune only through out-of-sample testing and include spread, commission, financing, rejection, and slippage.
 

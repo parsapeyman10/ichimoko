@@ -14,11 +14,11 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AurumEdge"
+rootProject.name = "Trading"
 include(":app")
 
 // ---------------------------------------------------------------------------------------
-// Aurum Edge — CI diagnostics, step 1.
+// Trading — CI diagnostics, step 1.
 //
 // Actions reports a failed job as a single generic annotation, and the job log lives on
 // storage that is not reachable from every environment. A build that dies *before* any task

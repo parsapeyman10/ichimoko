@@ -250,7 +250,7 @@ eval "set -- $(
     )" '"$@"'
 
 # ---------------------------------------------------------------------------
-# Aurum Edge: keep a copy of the whole build output and, when the build fails on
+# Trading: keep a copy of the whole build output and, when the build fails on
 # CI, republish the real compiler messages as GitHub Actions annotations. The
 # workflow's job log is not always readable from everywhere, but annotations are.
 # Success paths are unchanged; the exit status is always Gradle's own.

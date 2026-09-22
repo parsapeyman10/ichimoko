@@ -1,4 +1,4 @@
-# Aurum Edge
+# Trading
 
 An XAU/USD intelligence workspace that runs on **real market data only** — a native Android app,
 a desktop/mobile web terminal, and a FastAPI engine.
@@ -27,7 +27,7 @@ aggregation, backtesting, the paper journal and the background monitor all run o
 ## Repository map
 
 ```text
-android/                     Native Kotlin + Jetpack Compose app (AurumEdge)
+android/                     Native Kotlin + Jetpack Compose app (Trading)
   app/src/main/java/com/aurum/edge/
     core/                    Models + AppContainer (dependency wiring)
     data/                    Twelve Data client, settings, cache, journal, market repository
