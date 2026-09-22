@@ -215,13 +215,13 @@ fun CandleChart(
                 val cloudPath = Path()
                 var started = false
                 for (i in max(0, firstVisible)..min(lastIndex, lastVisible)) {
-                    val a = ichimoku.spanA.getOrNull(i) ?: continue
+                    val a = ichimoku.senkouA.getOrNull(i) ?: continue
                     if (!started) {
                         cloudPath.moveTo(xOf(i), yOf(a)); started = true
                     } else cloudPath.lineTo(xOf(i), yOf(a))
                 }
                 for (i in min(lastIndex, lastVisible) downTo max(0, firstVisible)) {
-                    val b = ichimoku.spanB.getOrNull(i) ?: continue
+                    val b = ichimoku.senkouB.getOrNull(i) ?: continue
                     cloudPath.lineTo(xOf(i), yOf(b))
                 }
                 if (started) {
