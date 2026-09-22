@@ -150,8 +150,8 @@ fun CandleChart(
                 minPrice = min(minPrice, candles[i].low)
                 maxPrice = max(maxPrice, candles[i].high)
                 if (showIchimoku) {
-                    ichimoku.spanA.getOrNull(i)?.let { minPrice = min(minPrice, it); maxPrice = max(maxPrice, it) }
-                    ichimoku.spanB.getOrNull(i)?.let { minPrice = min(minPrice, it); maxPrice = max(maxPrice, it) }
+                    ichimoku.senkouA.getOrNull(i)?.let { minPrice = min(minPrice, it); maxPrice = max(maxPrice, it) }
+                    ichimoku.senkouB.getOrNull(i)?.let { minPrice = min(minPrice, it); maxPrice = max(maxPrice, it) }
                 }
             }
             if (signal?.stopLoss != null && showLevels) {
