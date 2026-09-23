@@ -90,7 +90,10 @@ fun CryptoScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                             style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
                         Text("اسپرد ${String.format("%.3f", item.spreadPct)}٪ · سهم عرضه ${(item.supplyRatio * 100).toInt()}٪",
                             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                        Text("زمان منبع: CoinGecko ${formatDateTime(item.coingeckoAt)} · Binance ${formatDateTime(item.binanceAt)} · آخرین کندل بسته ${formatDateTime(item.candleAt)}",
+                        Text("شناسهٔ دارایی + جفت Binance با CoinGecko تأیید شد: ${formatDateTime(item.coingeckoPairAt)}",
+                            style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan,
+                            modifier = Modifier.padding(top = 4.dp))
+                        Text("زمان بازار: CoinGecko ${formatDateTime(item.coingeckoAt)} · Binance ${formatDateTime(item.binanceAt)} · آخرین کندل بسته ${formatDateTime(item.candleAt)}",
                             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
                             modifier = Modifier.padding(top = 4.dp))
                         item.link?.let { url ->

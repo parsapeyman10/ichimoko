@@ -29,7 +29,7 @@ FILTERS = {
     "momentum": "۱ساعته CoinGecko: ۰٫۶٪ تا ۴٪؛ ۲۴ساعته: ۲٪ تا ۱۴٪؛ هفتگی: ۱۰٪- تا ۳۵٪",
     "venue": "فقط نماد قابل‌معاملهٔ SPOT/USDT در Binance؛ نه قرارداد شورت و نه نماد اهرمی",
     "freshness": "CoinGecko حداکثر ۵ دقیقه؛ تیکر Binance حداکثر ۲ دقیقه؛ کندل بسته حداکثر ۷۵ دقیقه",
-    "independent_price": "اختلاف قیمت CoinGecko/Binance حداکثر ۱٫۵٪؛ اسپرد دفتر سفارش حداکثر ۰٫۳٪",
+    "independent_price": "شناسهٔ جفت CoinGecko/Binance باید یکسان باشد؛ اختلاف قیمت بازار حداکثر ۱٫۵٪، تیکر جفت حداکثر ۲٪ و اسپرد دفتر سفارش حداکثر ۰٫۳٪",
     "binance_liquidity": "حجم ۲۴ساعته حداقل ۵ میلیون USDT و حداقل ۵۰۰ معامله",
     "completed_candles": "۱۲ کندل بستهٔ ساعتی؛ میانگین حجم ۳ ساعت آخر / ۹ ساعت قبلی ۱٫۸ تا ۸؛ خرید تیکر ۵۴٪ تا ۷۸٪؛ رشد ۳ساعته ۱٪ تا ۸٪",
 }
@@ -98,7 +98,7 @@ def preselect(coins: list, now: datetime) -> list[dict]:
 
 
 def confirm_spot(coin: dict, exchange_info: dict, ticker: dict, book: dict, klines: list,
-                 now: datetime) -> dict | None:
+                 now: datetime, coin_tickers: dict) -> dict | None:
     """All criteria must hold at both providers. Never use a forming hourly candle."""
     code = coin["symbol"].upper()
     symbol = code + "USDT"
@@ -130,6 +130,33 @@ def confirm_spot(coin: dict, exchange_info: dict, ticker: dict, book: dict, klin
     mid = (bid + ask) / 2
     spread = (ask - bid) / mid * 100
     if spread > .3 or abs(mid / price - 1) > .005 or abs(cg_price / price - 1) > .015:
+        return None
+    # Market-level CG price alone does not prove that a symbol refers to this asset on Binance.
+    # CoinGecko's *per-coin* Binance ticker binds the exact coin ID to the venue's base/quote.
+    pair_list = coin_tickers.get("tickers") if isinstance(coin_tickers, dict) else None
+    if not isinstance(pair_list, list):
+        raise ValueError("CoinGecko شناسهٔ جفت بازار را برنگرداند")
+    def valid_pair(item) -> bool:
+        if not isinstance(item, dict):
+            return False
+        market = item.get("market")
+        last = item.get("converted_last")
+        volume_on_pair = item.get("converted_volume")
+        pair_price = _number(last.get("usd")) if isinstance(last, dict) else None
+        pair_volume = _number(volume_on_pair.get("usd")) if isinstance(volume_on_pair, dict) else None
+        pair_spread = _number(item.get("bid_ask_spread_percentage"))
+        return (item.get("base") == code and item.get("target") == "USDT" and
+                item.get("coin_id") == coin["id"] and item.get("target_coin_id") == "tether" and
+                isinstance(market, dict) and market.get("identifier") == "binance" and
+                market.get("has_trading_incentive") is not True and
+                item.get("is_stale") is False and item.get("is_anomaly") is False and
+                _recent_iso(item.get("timestamp"), now, timedelta(minutes=10)) and
+                pair_price is not None and pair_price > 0 and abs(pair_price / price - 1) <= .02 and
+                pair_volume is not None and pair_volume >= 1_000_000 and
+                pair_spread is not None and 0 <= pair_spread <= .5)
+
+    pair = next((item for item in pair_list if valid_pair(item)), None)
+    if pair is None:
         return None
     if len(klines) < 12:
         return None
@@ -170,9 +197,10 @@ def confirm_spot(coin: dict, exchange_info: dict, ticker: dict, book: dict, klin
         "taker_buy_ratio_3h": round(buy_ratio, 3), "spread_pct": round(spread, 3),
         "supply_ratio": round(_number(coin["circulating_supply"]) / _number(coin["max_supply"]), 3),
         "coingecko_at": coin["last_updated"],
+        "coingecko_pair_at": pair["timestamp"],
         "binance_at": datetime.fromtimestamp(float(ticker["closeTime"]) / 1000, timezone.utc).isoformat(),
         "last_closed_candle_at": datetime.fromtimestamp(float(closed[-1][6]) / 1000, timezone.utc).isoformat(),
-        "sources": ["CoinGecko USD markets", "Binance Spot USDT ticker/book/1h klines"],
+        "sources": ["CoinGecko USD markets + coin-ID Binance pair", "Binance Spot USDT ticker/book/1h klines"],
         "link": "https://www.coingecko.com/en/coins/" + coin["id"],
     }
 
@@ -197,7 +225,8 @@ class CryptoScanner:
             raise ValueError("پاسخ دادهٔ بازار بیش از حد بزرگ است")
         return response.json()
 
-    async def _confirm(self, client: httpx.AsyncClient, coin: dict, now: datetime) -> dict | None:
+    async def _confirm(self, client: httpx.AsyncClient, coin: dict, now: datetime,
+                       cg_headers: dict | None) -> dict | None:
         symbol = coin["symbol"].upper() + "USDT"
         try:
             info = await self._fetch_json(client, BINANCE + "/exchangeInfo", params={"symbol": symbol})
@@ -215,12 +244,14 @@ class CryptoScanner:
             raise ValueError("پاسخ قواعد بازار نامعتبر است")
         if not info["symbols"]:
             return None
-        ticker, book, bars = await asyncio.gather(
+        pair, ticker, book, bars = await asyncio.gather(
+            self._fetch_json(client, f"https://api.coingecko.com/api/v3/coins/{coin['id']}/tickers",
+                             params={"exchange_ids": "binance", "order": "volume_desc", "page": 1}, headers=cg_headers),
             self._fetch_json(client, BINANCE + "/ticker/24hr", params={"symbol": symbol}),
             self._fetch_json(client, BINANCE + "/ticker/bookTicker", params={"symbol": symbol}),
             self._fetch_json(client, BINANCE + "/klines", params={"symbol": symbol, "interval": "1h", "limit": 13}),
         )
-        return confirm_spot(coin, info, ticker, book, bars, now)
+        return confirm_spot(coin, info, ticker, book, bars, now, pair)
 
     async def _scan(self) -> None:
         now = datetime.now(timezone.utc)
@@ -238,7 +269,7 @@ class CryptoScanner:
 
                 async def bounded(coin: dict):
                     async with sem:
-                        return await self._confirm(client, coin, now)
+                        return await self._confirm(client, coin, now, headers)
 
                 checked = await asyncio.gather(*(bounded(c) for c in selected))
             self._candidates = sorted((c for c in checked if c), key=lambda c: c["volume_ratio_3h"], reverse=True)
@@ -248,7 +279,12 @@ class CryptoScanner:
         except Exception as exc:
             self._online = False
             self._candidates = []  # NEVER publish stale candidates or imply 'no candidates' on failure
-            self._error = f"دریافت/اعتبارسنجی CoinGecko یا Binance انجام نشد ({type(exc).__name__})"
+            if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (401, 403):
+                self._error = "دسترسی CoinGecko یا Binance رد شد؛ کلید Demo و محدودیت منطقه/ناشر را روی سرور بررسی کنید"
+            elif isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429:
+                self._error = "محدودیت نرخ CoinGecko یا Binance؛ نامزدهای قبلی حذف شدند"
+            else:
+                self._error = f"دریافت/اعتبارسنجی CoinGecko یا Binance انجام نشد ({type(exc).__name__})"
 
     async def snapshot(self) -> dict:
         async with self._lock:

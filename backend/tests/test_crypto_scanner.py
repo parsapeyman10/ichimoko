@@ -25,6 +25,17 @@ def coin(now=NOW):
     }
 
 
+def coin_pair(now=NOW):
+    return {"tickers": [{
+        "base": "DEM", "target": "USDT", "coin_id": "demo-coin", "target_coin_id": "tether",
+        "market": {"identifier": "binance", "has_trading_incentive": False},
+        "is_stale": False, "is_anomaly": False,
+        "converted_last": {"usd": 2.0}, "converted_volume": {"usd": 8_000_000},
+        "bid_ask_spread_percentage": 0.1,
+        "timestamp": (now - timedelta(minutes=2)).isoformat(),
+    }]}
+
+
 def venue(now=NOW):
     code = "DEMUSDT"
     info = {"symbols": [{"symbol": code, "baseAsset": "DEM", "quoteAsset": "USDT",
@@ -57,24 +68,30 @@ def test_strict_market_and_identity_prefilters():
         preselect([], NOW)  # provider error, not a valid empty screen
 
 
-def test_spot_confirmation_requires_closed_hourly_candles_and_cross_source_agreement():
+def test_spot_confirmation_requires_closed_candles_exact_coin_identity_and_price_agreement():
     info, ticker, book, bars = venue()
-    result = confirm_spot(coin(), info, ticker, book, bars, NOW)
+    pair = coin_pair()
+    result = confirm_spot(coin(), info, ticker, book, bars, NOW, pair)
     assert result and result["symbol"] == "DEMUSDT"
     assert result["volume_ratio_3h"] == 3
     assert result["taker_buy_ratio_3h"] == .6
+    assert result["coingecko_pair_at"] == pair["tickers"][0]["timestamp"]
     assert result["last_closed_candle_at"] != datetime.fromtimestamp(bars[-1][6] / 1000, timezone.utc).isoformat()
-    assert confirm_spot(coin(), info, ticker, {**book, "askPrice": "2.02"}, bars, NOW) is None
-    assert confirm_spot({**coin(), "current_price": 2.1}, info, ticker, book, bars, NOW) is None
-    assert confirm_spot(coin(), info, {**ticker, "closeTime": 0}, book, bars, NOW) is None
-    assert confirm_spot(coin(), info, ticker, book, bars[:-4], NOW) is None
+    assert confirm_spot(coin(), info, ticker, {**book, "askPrice": "2.02"}, bars, NOW, pair) is None
+    assert confirm_spot({**coin(), "current_price": 2.1}, info, ticker, book, bars, NOW, pair) is None
+    assert confirm_spot(coin(), info, {**ticker, "closeTime": 0}, book, bars, NOW, pair) is None
+    assert confirm_spot(coin(), info, ticker, book, bars[:-4], NOW, pair) is None
     no_spike = [[*bar] for bar in bars]
     for row in no_spike[-4:-1]:
         row[7] = "400000"
-    assert confirm_spot(coin(), info, ticker, book, no_spike, NOW) is None
+    assert confirm_spot(coin(), info, ticker, book, no_spike, NOW, pair) is None
     assert confirm_spot(coin(), {"symbols": [{**info["symbols"][0], "isSpotTradingAllowed": False}]},
-                        ticker, book, bars, NOW) is None
-    assert confirm_spot(coin(), info, ticker, book, [[*row] for row in bars[:2]] + bars[3:], NOW) is None
+                        ticker, book, bars, NOW, pair) is None
+    assert confirm_spot(coin(), info, ticker, book, [[*row] for row in bars[:2]] + bars[3:], NOW, pair) is None
+    for changed in ({"coin_id": "different-asset"}, {"is_stale": True},
+                    {"converted_last": {"usd": 4}}, {"timestamp": "2020-01-01T00:00:00Z"}):
+        mismatched = {"tickers": [{**pair["tickers"][0], **changed}]}
+        assert confirm_spot(coin(), info, ticker, book, bars, NOW, mismatched) is None
 
 
 def test_public_endpoint_sends_no_order_and_never_returns_stale_candidates(monkeypatch):
@@ -90,7 +107,7 @@ def test_public_endpoint_sends_no_order_and_never_returns_stale_candidates(monke
         requested.append((url, params, headers))
         if "coingecko" in url:
             assert headers == {"x-cg-demo-api-key": "server-only-secret"}
-            return [coin()]
+            return coin_pair() if url.endswith("/tickers") else [coin()]
         if url.endswith("exchangeInfo"):
             return info
         if url.endswith("ticker/24hr"):
@@ -110,7 +127,7 @@ def test_public_endpoint_sends_no_order_and_never_returns_stale_candidates(monke
     assert "secret" not in str(first)
     assert all("POST" not in request[0] for request in requested)
     assert client.get("/api/v1/crypto/candidates").json()["candidates"] == first["candidates"]
-    assert len(requested) == 5  # bounded 120-second cache, no repeated provider calls
+    assert len(requested) == 6  # 2 CG + 4 Binance; bounded cache, no repeated provider calls
 
     async def offline(*args, **kwargs):
         raise httpx.ReadTimeout("provider key should not appear in error")
@@ -158,6 +175,7 @@ def test_unlisted_spot_symbol_is_a_legitimate_empty_scan_but_rate_limits_fail_cl
     failed = client.get("/api/v1/crypto/candidates").json()
     assert failed["status"]["state"] == "unavailable"
     assert failed["candidates"] == []
+    assert "محدودیت نرخ" in failed["status"]["error"]
 
 
 class FixedDatetime(datetime):

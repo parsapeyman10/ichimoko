@@ -37,6 +37,7 @@ data class CryptoCandidate(
     val spreadPct: Double,
     val supplyRatio: Double,
     val coingeckoAt: Long,
+    val coingeckoPairAt: Long,
     val binanceAt: Long,
     val candleAt: Long,
     val link: String?,
@@ -132,10 +133,13 @@ class CryptoRepository(private val settings: SettingsStore, private val scope: C
             val id = obj.text("id")?.takeIf { it.matches(Regex("[a-z0-9-]{2,90}")) } ?: error("شناسه نامعتبر است")
             val symbol = obj.text("symbol")?.takeIf { it.matches(Regex("[A-Z0-9]{2,12}USDT")) } ?: error("نماد نامعتبر است")
             val cg = obj.text("coingecko_at").toMillis()
+            val pair = obj.text("coingecko_pair_at").toMillis()
             val bn = obj.text("binance_at").toMillis()
             val candle = obj.text("last_closed_candle_at").toMillis()
-            if (!fresh(cg, now, 6 * 60_000L) || !fresh(bn, now, 3 * 60_000L) ||
-                !fresh(candle, now, 76 * 60_000L)) error("زمان شواهد نامزد قدیمی است")
+            if (!fresh(cg, now, 6 * 60_000L) || !fresh(pair, now, 11 * 60_000L) ||
+                !fresh(bn, now, 3 * 60_000L) || !fresh(candle, now, 76 * 60_000L)) {
+                error("زمان شواهد نماد یا جفت بازار قدیمی است")
+            }
             val link = obj.text("link")?.takeIf { it == "https://www.coingecko.com/en/coins/$id" }
             return CryptoCandidate(
                 id = id, name = obj.text("name")?.take(80) ?: symbol, symbol = symbol,
@@ -151,7 +155,8 @@ class CryptoRepository(private val settings: SettingsStore, private val scope: C
                 takerBuyRatio3h = obj.positive("taker_buy_ratio_3h"),
                 spreadPct = obj.num("spread_pct"),
                 supplyRatio = obj.positive("supply_ratio"),
-                coingeckoAt = cg!!, binanceAt = bn!!, candleAt = candle!!, link = link,
+                coingeckoAt = cg!!, coingeckoPairAt = pair!!, binanceAt = bn!!,
+                candleAt = candle!!, link = link,
             )
         }
 
