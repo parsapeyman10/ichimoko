@@ -31,11 +31,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.Interval
+import com.aurum.edge.data.FreeHistoryCatalog
+import com.aurum.edge.data.FreeHistoryResult
+import com.aurum.edge.data.FreeHistoryState
 import com.aurum.edge.engine.PerformanceMetrics
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
@@ -52,6 +56,12 @@ fun LearnScreen(viewModel: AurumViewModel) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val learn by viewModel.learn.collectAsStateWithLifecycle()
     val walkForward by viewModel.walkForward.collectAsStateWithLifecycle()
+    val freeHistory by viewModel.freeHistory.collectAsStateWithLifecycle()
+    val uriHandler = LocalUriHandler.current
+    var freeSource by remember { mutableStateOf(FreeHistoryCatalog.choices.first().id) }
+    val csvSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) viewModel.saveFreeHistoryCsv(uri)
+    }
 
     var interval by remember { mutableStateOf(settings.interval) }
     var bars by remember { mutableStateOf(1000) }
@@ -208,6 +218,66 @@ fun LearnScreen(viewModel: AurumViewModel) {
                 color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 6.dp),
             )
+        }
+
+        SectionCard("دریافت خودکار دادهٔ تاریخی", "منابع رایگان مشخص؛ اسپات روزانهٔ طلا ممکن است طرح پولی بخواهد") {
+            Text("ارز: نرخ مرجع ECB؛ طلا: میانگین ماهانهٔ بانک جهانی از DataHub؛ هر دو بدون کلید. سهام آمریکا: کندل روزانهٔ Twelve Data با کلید خواندنی رایگان. اسپات روزانهٔ طلا ممکن است پلن پولی ناشر بخواهد. این سری‌ها برای پژوهش‌اند، نه تیک زنده یا سفارش.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            FreeHistoryCatalog.choices.forEach { choice ->
+                FilterChip(selected = freeSource == choice.id, onClick = { freeSource = choice.id },
+                    label = { Text(choice.title) }, modifier = Modifier.padding(top = 2.dp))
+            }
+            val selected = FreeHistoryCatalog.find(freeSource)!!
+            Text("منبع: ${selected.sourceTitle}", style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.Cyan, modifier = Modifier.padding(top = 4.dp))
+            if (selected.kind == com.aurum.edge.data.FreeHistoryKind.TWELVE_DAILY && !settings.hasKey) {
+                Text("برای سهم، کلید رایگان Twelve Data را در تنظیمات وارد کن؛ برای اسپات روزانهٔ طلا، خودِ کلید کافی نیست و ممکن است دسترسی پولی به Commodities لازم باشد. طلا ماهانه بدون کلید بالاست.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { viewModel.downloadFreeHistory(freeSource) },
+                    enabled = freeHistory !is FreeHistoryState.Loading, modifier = Modifier.weight(1f)) {
+                    Text("دریافت داده")
+                }
+                OutlinedButton(onClick = { runCatching { uriHandler.openUri(selected.sourcePage) } },
+                    modifier = Modifier.weight(1f)) { Text("صفحهٔ منبع") }
+            }
+            if (selected.kind == com.aurum.edge.data.FreeHistoryKind.TWELVE_DAILY) {
+                OutlinedButton(onClick = { runCatching { uriHandler.openUri("https://twelvedata.com/apikey") } },
+                    modifier = Modifier.padding(top = 5.dp)) { Text("دریافت کلید رایگان ناشر") }
+            }
+            when (val state = freeHistory) {
+                is FreeHistoryState.Idle -> Text("نماد را انتخاب کن و «دریافت داده» را بزن؛ فایل واقعی پس از پاسخ منبع ساخته می‌شود.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                is FreeHistoryState.Loading -> Text("در حال دریافت ${state.title}…",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+                is FreeHistoryState.Failed -> Text("دریافت انجام نشد: ${state.message}",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
+                is FreeHistoryState.Done -> {
+                    val data = state.result
+                    if (data.choice.id != freeSource) {
+                        Text("فایل قبلی متعلق به ${data.choice.title} است؛ برای نماد انتخابی دوباره «دریافت داده» را بزن.",
+                            style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+                    } else {
+                        val range = when (data) {
+                            is FreeHistoryResult.Ohlc -> "${data.rows.first().date} تا ${data.rows.last().date} · ${data.rows.size} کندل روزانهٔ بسته · آخرین Close: ${formatPrice(data.rows.last().close)} USD"
+                            is FreeHistoryResult.Rates -> "${data.rows.first().date} تا ${data.rows.last().date} · ${data.rows.size} نرخ مرجع · آخرین: ۱ EUR = ${formatPrice(data.rows.last().rate)} ${data.choice.code.substringAfter('/')}"
+                            is FreeHistoryResult.GoldMonthly -> "${data.rows.first().date} تا ${data.rows.last().date} · ${data.rows.size} ماه واقعی از ۱۹۶۰ · آخرین میانگین: ${formatPrice(data.rows.last().usdPerTroyOunce)} USD/انس"
+                        }
+                        Text("دریافت شد: ${data.choice.title} · $range",
+                            style = MaterialTheme.typography.bodySmall, color = AurumColors.Green,
+                            modifier = Modifier.padding(top = 6.dp))
+                        Text("منبع: ${data.choice.sourceTitle} · دریافت: ${formatDateTime(data.fetchedAt)}؛ نرخ ECB و میانگین ماهانهٔ طلا کندل OHLC نیستند و برای بک‌تست کندلی به کار نمی‌روند.",
+                            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                        OutlinedButton(onClick = {
+                            csvSaver.launch("${data.choice.code.replace('/', '_')}_${data.fetchedAt}.csv")
+                        }, modifier = Modifier.padding(top = 8.dp)) { Text("ذخیرهٔ CSV دادهٔ دریافتی") }
+                    }
+                }
+            }
+            Text("اگر منبع قطع/محدود شود یا تاریخ و هویت نماد مغایر باشد، دادهٔ ساختگی یا کش قدیمی جایگزین نمی‌شود. این دانلود به فید معاملاتی/تاریخچهٔ تأییدشده تزریق نمی‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 6.dp))
         }
 
         SectionCard("ورود فایل/لینک MetaTrader برای پژوهش", "CSV / TSV خروجی MT4 یا MT5؛ هرگز به چارت زنده یا سفارش وصل نمی‌شود") {

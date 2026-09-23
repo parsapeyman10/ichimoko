@@ -1,9 +1,12 @@
 package com.aurum.edge.core
 
 import android.content.Context
+import android.net.Uri
 import com.aurum.edge.data.CandleCache
 import com.aurum.edge.data.CryptoRepository
 import com.aurum.edge.data.DataFeedException
+import com.aurum.edge.data.FreeHistoryDownloader
+import com.aurum.edge.data.FreeHistoryResult
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.MarketRepository
 import com.aurum.edge.data.MetaTraderCsv
@@ -40,10 +43,17 @@ class AppContainer(context: Context) {
     val watch = WatchRepository(SourceFetcher(), quoteHistory, watchSettings, settingsStore, appScope)
     val news = NewsRepository(settingsStore, appScope)
     val crypto = CryptoRepository(settingsStore, appScope)
+    val freeHistory = FreeHistoryDownloader()
     val metaTraderImporter = MetaTraderImporter(appContext)
 
     init {
         market.attach(appScope)
+    }
+
+    suspend fun exportFreeHistory(uri: Uri, result: FreeHistoryResult) = withContext(Dispatchers.IO) {
+        val stream = appContext.contentResolver.openOutputStream(uri, "wt")
+            ?: throw IllegalArgumentException("فایل مقصد برای ذخیره باز نشد")
+        stream.bufferedWriter(Charsets.UTF_8).use { it.write(FreeHistoryDownloader.csv(result)) }
     }
 
     /** Download real candles from the provider (no fallback, throws on failure). */

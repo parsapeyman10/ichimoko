@@ -18,6 +18,8 @@ import com.aurum.edge.core.PaperTicket
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.WalkForwardRecord
+import com.aurum.edge.data.FreeHistoryCatalog
+import com.aurum.edge.data.FreeHistoryState
 import com.aurum.edge.data.JournalStats
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
@@ -80,6 +82,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     private val _learn = MutableStateFlow<LearnState>(LearnState.Idle)
     val learn: StateFlow<LearnState> = _learn.asStateFlow()
+
+    private val _freeHistory = MutableStateFlow<FreeHistoryState>(FreeHistoryState.Idle)
+    val freeHistory: StateFlow<FreeHistoryState> = _freeHistory.asStateFlow()
 
     private val _walkForward = MutableStateFlow<WalkForwardState>(WalkForwardState.Idle)
     val walkForward: StateFlow<WalkForwardState> = _walkForward.asStateFlow()
@@ -385,6 +390,39 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _learn.value = LearnState.Done(result, interval)
             } catch (e: Exception) {
                 _learn.value = LearnState.Failed(e.message ?: "خطا در دریافت داده واقعی")
+            }
+        }
+    }
+
+    /** Automatically fetch fixed-source, read-only history without asking for a CSV URL. */
+    fun downloadFreeHistory(id: String) {
+        val choice = FreeHistoryCatalog.find(id) ?: run {
+            _freeHistory.value = FreeHistoryState.Failed("نمادِ قابل دریافت پیدا نشد")
+            return
+        }
+        if (_freeHistory.value is FreeHistoryState.Loading) return
+        _freeHistory.value = FreeHistoryState.Loading(choice.title)
+        viewModelScope.launch {
+            try {
+                _freeHistory.value = FreeHistoryState.Done(
+                    container.freeHistory.download(id, container.settingsStore.read().apiKey))
+            } catch (e: Exception) {
+                _freeHistory.value = FreeHistoryState.Failed((e.message ?: "دادهٔ منبع دریافت نشد").take(160))
+            }
+        }
+    }
+
+    fun saveFreeHistoryCsv(uri: Uri) {
+        val done = _freeHistory.value as? FreeHistoryState.Done ?: run {
+            _toast.value = "ابتدا دادهٔ واقعی را دریافت کنید"
+            return
+        }
+        viewModelScope.launch {
+            try {
+                container.exportFreeHistory(uri, done.result)
+                _toast.value = "CSV ${done.result.choice.code} از دادهٔ دریافتی در فایل انتخابی ذخیره شد"
+            } catch (e: Exception) {
+                _toast.value = "ذخیرهٔ CSV انجام نشد: ${e.message ?: "فایل مقصد نامعتبر است"}"
             }
         }
     }
