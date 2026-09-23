@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.aurum.edge.MainActivity
@@ -81,14 +82,21 @@ object Notifier {
             .setContentIntent(contentIntent(context))
             .build()
 
+    fun canNotifyVerified(context: Context, customSoundUri: String): Boolean {
+        ensureChannels(context)
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        val channel = if (customSoundUri.isNotBlank() && AlertSoundPlayer.canOpen(context, customSoundUri))
+            CHANNEL_VERIFIED_FILE else CHANNEL_VERIFIED_DEFAULT
+        return NotificationManagerCompat.from(context).areNotificationsEnabled() &&
+            manager.getNotificationChannel(channel)?.importance?.let { it > NotificationManager.IMPORTANCE_NONE } == true
+    }
+
     /** Only after the opportunity is durably saved; posting an alert NEVER opens a trade. */
     fun notifyVerifiedOpportunity(context: Context, item: PaperOpportunity, customSoundUri: String): Boolean {
-        ensureChannels(context)
+        if (!canNotifyVerified(context, customSoundUri)) return false
         val manager = context.getSystemService(NotificationManager::class.java) ?: return false
         val custom = customSoundUri.isNotBlank() && AlertSoundPlayer.canOpen(context, customSoundUri)
         val channel = if (custom) CHANNEL_VERIFIED_FILE else CHANNEL_VERIFIED_DEFAULT
-        if (!NotificationManagerCompat.from(context).areNotificationsEnabled() ||
-            manager.getNotificationChannel(channel)?.importance == NotificationManager.IMPORTANCE_NONE) return false
         val title = when (item.action) {
             SignalAction.BUY -> "فرصت آموزشی خرید XAU/USD · ۹/۹"
             SignalAction.SELL -> "فرصت آموزشی فروش XAU/USD · ۹/۹"
@@ -109,7 +117,13 @@ object Notifier {
             NotificationManagerCompat.from(context).notify(item.key.hashCode(), notification)
             true
         }.getOrDefault(false)
-        if (posted && custom) AlertSoundPlayer.play(context, customSoundUri)
+        // On Android 11+ a user's channel sound choice (including mute) overrides our app clip.
+        val userChoseChannelSound = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            manager.getNotificationChannel(channel)?.hasUserSetSound() == true
+        val channelAllowsAudio = (manager.getNotificationChannel(channel)?.importance ?: 0) >=
+            NotificationManager.IMPORTANCE_DEFAULT
+        if (posted && custom && !userChoseChannelSound && channelAllowsAudio)
+            AlertSoundPlayer.play(context, customSoundUri)
         return posted
     }
 
