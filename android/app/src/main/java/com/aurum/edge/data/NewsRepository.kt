@@ -31,6 +31,13 @@ data class PersianHeadline(
     val impact: String,
     val direction: String,
     val analysisSource: String,
+    val language: String = "fa",
+)
+
+data class NewsSourceStatus(
+    val name: String,
+    val state: String,
+    val feed: String,
 )
 
 data class PersianNewsState(
@@ -42,9 +49,10 @@ data class PersianNewsState(
     val cached: Boolean = false,
     val loading: Boolean = false,
     val error: String? = null,
+    val sources: List<NewsSourceStatus> = emptyList(),
 )
 
-/** HTTPS-only read-only bridge to /api/v1/news/fa. No exchange keys are ever sent. */
+/** HTTPS-only read-only bridge to /api/v1/news/web. No exchange keys are ever sent. */
 class NewsRepository(private val settings: SettingsStore, private val scope: CoroutineScope) {
     private val client = OkHttpClient.Builder()
         .callTimeout(15, TimeUnit.SECONDS).followRedirects(false).build()
@@ -92,10 +100,20 @@ class NewsRepository(private val settings: SettingsStore, private val scope: Cor
                     impact = analysis?.string("impact") ?: "UNKNOWN",
                     direction = analysis?.string("direction") ?: "NEUTRAL",
                     analysisSource = analysis?.string("source") ?: "نامشخص",
+                    language = obj.string("language")?.takeIf { it in setOf("fa", "en") } ?: "fa",
                 )
             }
+            val sources = (status?.get("sources") as? JsonArray).orEmpty().mapNotNull { item ->
+                val obj = item as? JsonObject ?: return@mapNotNull null
+                NewsSourceStatus(obj.string("name") ?: return@mapNotNull null,
+                    obj.string("state") ?: "unavailable", obj.string("feed") ?: "")
+            }
             val online = status?.string("state") == "online" && status?.string("configured") == "true"
-            val gate = if (online && articles.isNotEmpty()) {
+            val checkedAt = root.string("checked_at")?.let {
+                runCatching { OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull()
+            }
+            val fresh = checkedAt != null && System.currentTimeMillis() - checkedAt in 0L..180_000L
+            val gate = if (online && fresh && articles.isNotEmpty()) {
                 runCatching { NewsGate.valueOf(guard?.string("state") ?: "UNKNOWN") }.getOrDefault(NewsGate.UNKNOWN)
             } else NewsGate.UNKNOWN
             // If preferences changed during an in-flight request, discard the old verdict.
@@ -104,9 +122,10 @@ class NewsRepository(private val settings: SettingsStore, private val scope: Cor
                 articles = articles, gate = gate,
                 reason = guard?.string("reason") ?: "وضعیت توقف نامشخص است",
                 provider = status?.string("provider"),
-                lastCheckedAt = System.currentTimeMillis(),
-                cached = status?.string("cached") == "true" || !online,
-                error = status?.string("error"),
+                lastCheckedAt = checkedAt,
+                cached = status?.string("cached") == "true" || !online || !fresh,
+                error = status?.string("error") ?: if (!fresh) "زمان بررسی خبر معتبر یا تازه نیست" else null,
+                sources = sources,
             )
         } catch (e: Exception) {
             if (settings.read().newsBaseUrl == base) _state.value = _state.value.copy(
@@ -118,14 +137,18 @@ class NewsRepository(private val settings: SettingsStore, private val scope: Cor
     }
 
     companion object {
-        /** Reject URLs with credentials, arbitrary paths, cleartext, or non-standard ports. */
-        fun newsUrl(base: String): String? {
+        /** Reject credentials, arbitrary paths/queries, cleartext or non-standard ports. */
+        fun apiUrl(base: String, path: String): String? {
+            if (path !in setOf("news/web", "crypto/candidates")) return null
             val uri = runCatching { URI(base.trim()) }.getOrNull() ?: return null
             if (uri.scheme != "https" || uri.host.isNullOrBlank() || uri.rawUserInfo != null ||
                 uri.port !in listOf(-1, 443) || uri.path !in listOf("", "/") ||
                 uri.rawQuery != null || uri.rawFragment != null) return null
-            return "https://${uri.host}/api/v1/news/fa"
+            return "https://${uri.host}/api/v1/$path"
         }
+
+        fun newsUrl(base: String): String? = apiUrl(base, "news/web")
+        fun cryptoUrl(base: String): String? = apiUrl(base, "crypto/candidates")
     }
 }
 

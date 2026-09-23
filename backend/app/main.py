@@ -39,6 +39,8 @@ from app.services.history import DataUnavailable, load_history
 from app.services.market_feed import market_ticks
 from app.services.news_feed import NewsAggregator
 from app.services.persian_news import PersianNewsFeed
+from app.services.web_news import WebNewsFeed
+from app.services.crypto_scanner import CryptoScanner
 from app.services.sentiment import SentimentEngine
 from app.services.strategy import evaluate_scalp, explain_profitability
 from app.services.ytd_trades import get_ytd_report
@@ -86,6 +88,8 @@ hub = MarketHub()
 sentiment = SentimentEngine(settings)
 news_aggregator = NewsAggregator(settings)
 persian_news = PersianNewsFeed(settings)
+web_news = WebNewsFeed(settings)
+crypto_scanner = CryptoScanner(settings)
 
 
 async def run_market_pipeline() -> None:
@@ -266,8 +270,20 @@ async def calendar():
 
 @app.get("/api/v1/news/fa")
 async def persian_headlines():
-    """Licensed Persian headlines, conservative rule analysis and a fail-closed paper-trade guard."""
+    """Custom licensed Persian feed (kept for backwards compatibility)."""
     return await persian_news.snapshot()
+
+
+@app.get("/api/v1/news/web")
+async def web_headlines():
+    """Public publisher RSS: attributed short excerpts; partial coverage cannot clear the guard."""
+    return await web_news.snapshot()
+
+
+@app.get("/api/v1/crypto/candidates")
+async def crypto_candidates():
+    """Read-only, strict spot-market screening; NOT pump prediction or a trade intent."""
+    return await crypto_scanner.snapshot()
 
 
 # ─── real execution boundary (intentionally disabled until independently audited) ──

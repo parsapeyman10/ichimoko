@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.engine.MtfAnalyzer
@@ -29,7 +30,6 @@ import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.components.formatTime
 import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
-import kotlin.math.abs
 
 @Composable
 fun SignalScreen(viewModel: AurumViewModel, market: MarketState) {
@@ -48,15 +48,17 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState) {
             signal = signal,
             onOpenPaperTrade = { signal?.let(viewModel::openPaperTrade) },
         )
-        SectionCard("توقف بر اساس خبر فارسی", "برای ورود کاغذی؛ سفارش واقعی در این نسخه وجود ندارد") {
+        SectionCard("توقف بر اساس اخبار وب", "برای لانگ/شورت کاغذی؛ سفارش واقعی در این نسخه وجود ندارد") {
             val blocked = settings.pauseOnNews && (news.gate != NewsGate.CLEAR || news.lastCheckedAt == null ||
                 System.currentTimeMillis() - news.lastCheckedAt!! > 180_000L)
-            Text(if (!settings.pauseOnNews) "خاموش است؛ برای استفاده سرور خبر مجاز و سوییچ تنظیمات را فعال کنید."
-                else if (blocked) "ورود کاغذی متوقف: ${news.reason}" else "فقط در فید تنظیم‌شده فعلاً خبر پراثر تازه پیدا نشد.",
+            Text(if (!settings.pauseOnNews) "خاموش است؛ برای استفاده سرور HTTPS خبر و سوییچ تنظیمات را فعال کنید."
+                else if (blocked) "ورود کاغذی متوقف: ${news.reason}" else "فقط در منابع RSS بررسی‌شده فعلاً خبر پراثر تازه پیدا نشد؛ تقویم کامل نیست.",
                 style = MaterialTheme.typography.bodySmall, color = if (blocked) AurumColors.Red else AurumColors.TextSecondary)
             Text("آخرین بررسی: ${relativeTime(news.lastCheckedAt)} · خبر ناقص/قدیمی اجازهٔ ورود نمی‌دهد.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
+
+        PaperTicketSection(viewModel, market)
 
         signal?.let { s ->
             SectionCard(
@@ -72,44 +74,25 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState) {
 
             if (s.isActionable) {
                 SectionCard(
-                    title = "حجم پیشنهادی (بر پایه ریسک واقعی)",
-                    subtitle = "موجودی ${formatPrice(settings.accountBalance)}$ · ریسک ${settings.riskPercent}%",
+                    title = "حجم فرضی سیگنال (همان قواعد برگهٔ کاغذی)",
+                    subtitle = "موجودی ${formatPrice(settings.accountBalance)}$ · سقف ریسک ${settings.riskPercent}%",
                 ) {
-                    val entry = s.entry ?: 0.0
-                    val stop = s.stopLoss ?: 0.0
-                    val stopDistance = abs(entry - stop)
-                    val riskUsd = settings.accountBalance * settings.riskPercent / 100.0
-                    val exactOz = if (stopDistance > 0) riskUsd / stopDistance else 0.0
-                    val minLotOz = 1.0
-                    val executableOz = kotlin.math.max(exactOz, minLotOz)
-                    val actualRisk = executableOz * stopDistance
-                    val actualRiskPercent = if (settings.accountBalance > 0) actualRisk / settings.accountBalance * 100.0 else 0.0
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        StatTile("فاصله استاپ", "${formatPrice(stopDistance)}$", AurumColors.TextPrimary, Modifier.weight(1f))
-                        StatTile("ریسک هدف", "${formatPrice(riskUsd)}$", AurumColors.Gold, Modifier.weight(1f))
-                        StatTile("حجم دقیق", "${String.format("%.3f", exactOz)} oz", AurumColors.TextSecondary, Modifier.weight(1f))
+                    val ticket = runCatching {
+                        PaperOrderRules.preview(s.action, market.symbol, market.lastPrice ?: 0.0,
+                            s.stopLoss ?: 0.0, s.takeProfit ?: 0.0,
+                            settings.accountBalance, settings.riskPercent)
                     }
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 8.dp),
-                    ) {
-                        StatTile("حداقل لات (1 oz)", "${String.format("%.2f", minLotOz)} oz", AurumColors.TextSecondary, Modifier.weight(1f))
-                        StatTile("ریسک اجراشدنی", "${formatPrice(actualRisk)}$", AurumColors.Red, Modifier.weight(1f))
-                        StatTile("درصد واقعی", "${String.format("%.2f", actualRiskPercent)}%", AurumColors.Red, Modifier.weight(1f))
-                    }
-                    Text(
-                        if (exactOz < minLotOz) {
-                            "هشدار صادقانه: با موجودی فعلی، حجم دقیق (${String.format("%.3f", exactOz)} انس) زیر حداقل لات بروکر (0.01 لات = 1 انس) است. پس کوچک‌ترین معامله ممکن ${formatPrice(actualRisk)}$ ریسک دارد که ${String.format("%.2f", actualRiskPercent)}% حساب است. یا موجودی را بیشتر کن یا ریسک را بپذیر — عدد جعلی نشان نمی‌دهیم."
-                        } else {
-                            "حجم محاسبه‌شده با حداقل لات بروکر سازگار است."
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.TextMuted,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
+                    ticket.getOrNull()?.let { draft ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            StatTile("حجم کاغذی", "${String.format("%.6f", draft.quantity)} ${draft.unit}", AurumColors.TextPrimary, Modifier.weight(1f))
+                            StatTile("ریسک تا SL", "${formatPrice(draft.actualRiskUsd)}$", AurumColors.Gold, Modifier.weight(1f))
+                            StatTile("ارزش فرضی", "${formatPrice(draft.notionalUsd)}$", AurumColors.TextSecondary, Modifier.weight(1f))
+                        }
+                        Text("این حجم کسری ممکن است در بروکر قابل اجرا نباشد؛ حداقل لات، مارجین، کارمزد و لغزش هنوز تأیید نشده‌اند.",
+                            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                            modifier = Modifier.padding(top = 8.dp))
+                    } ?: Text("ورود کاغذی با این قیمت/استاپ امکان ندارد: ${ticket.exceptionOrNull()?.message ?: "حجم نامعتبر"}",
+                        style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
                 }
             }
         } ?: SectionCard(

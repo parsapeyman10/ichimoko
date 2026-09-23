@@ -132,21 +132,21 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
 
         WatchSettingsSection(viewModel)
 
-        SectionCard("خبر فارسی و توقف ورود کاغذی", "نیازمند سرور HTTPS و فید فارسی دارای مجوز") {
+        SectionCard("اخبار وب، غربال رمزارز و توقف ورود کاغذی", "نیازمند بک‌اند HTTPS؛ RSS عمومی ناشران و دادهٔ بازار با انتساب منبع") {
             OutlinedTextField(
                 value = newsUrl, onValueChange = { newsUrl = it }, singleLine = true,
                 label = { Text("آدرس سرور API (https://api.example.com)") },
                 modifier = Modifier.fillMaxWidth(),
             )
             Button(onClick = { viewModel.saveNewsBaseUrl(newsUrl) }, modifier = Modifier.padding(top = 8.dp)) {
-                Text("اتصال به اخبار فارسی")
+                Text("اتصال به سرور اخبار و رمزارز")
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("توقف ورود کاغذی هنگام خبر پراثر/عدم دسترسی", Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
                 Switch(checked = settings.pauseOnNews, onCheckedChange = viewModel::setPauseOnNews)
             }
-            Text("تا فعال‌سازی این گزینه و پیکربندی فید واقعی، ژورنال کاغذی مستقل می‌ماند. وقتی روشن است، نبود یا کهنگی خبر جلوی ورود جدید را می‌گیرد؛ خروج‌ها مسدود نمی‌شوند. سفارش واقعی همچنان غیرفعال است.",
+            Text("خوراک‌های IRIB، YJC، اقتصاد۲۴، CoinDesk و BLS روی سرور خوانده می‌شوند؛ پوشش کامل یا حق بازنشر تجاری تضمین نیست. CoinGecko Demo Key اختیاری فقط روی سرور است. با روشن کردن توقف خبر، نبود/کهنگی حتی یک خوراک جلوی ورود تازه را می‌گیرد؛ خروج‌ها مسدود نمی‌شوند. سفارش واقعی غیرفعال است.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 

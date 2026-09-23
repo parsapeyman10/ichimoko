@@ -13,9 +13,13 @@ import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperTrade
+import com.aurum.edge.core.PaperOrderRules
+import com.aurum.edge.core.PaperTicket
 import com.aurum.edge.core.Signal
+import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.data.JournalStats
+import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.NewsRepository
 import com.aurum.edge.data.Quote
@@ -31,6 +35,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
+import kotlin.math.min
 
 sealed interface LearnState {
     data object Idle : LearnState
@@ -60,6 +66,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val watchSettings: StateFlow<Map<String, WatchSelection>> = container.watchSettings.selections
     val watch: StateFlow<WatchState> = container.watch.state
     val news = container.news.state
+    val crypto = container.crypto.state
     private val _watchHistory = MutableStateFlow(WatchHistory())
     val watchHistory: StateFlow<WatchHistory> = _watchHistory.asStateFlow()
     val market = container.market.state
@@ -118,6 +125,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshNews() = container.news.refreshNow()
 
+    fun refreshCrypto() = container.crypto.refreshNow()
+
     fun saveNewsBaseUrl(value: String) {
         val url = value.trim().trimEnd('/')
         if (url.isNotBlank() && NewsRepository.newsUrl(url) == null) {
@@ -126,7 +135,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
         container.settingsStore.update { it.copy(newsBaseUrl = url) }
         container.news.resetAndRefresh()
-        _toast.value = "آدرس سرور خبر ذخیره شد"
+        container.crypto.resetAndRefresh()
+        _toast.value = "آدرس سرور خبر و غربالگر ذخیره شد"
     }
 
     fun setPauseOnNews(enabled: Boolean) {
@@ -211,62 +221,136 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setMonitorFlag(enabled: Boolean) = container.settingsStore.update { it.copy(backgroundMonitor = enabled) }
 
-    fun openPaperTrade(signal: Signal) {
-        val current = market.value
-        val price = current.lastPrice
-        if (price == null || !signal.isActionable || current.signal != signal ||
-            current.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING) || current.showingCachedData ||
-            current.candles.lastOrNull()?.time?.let { System.currentTimeMillis() - it > current.interval.millis * 2 } != false) {
-            _toast.value = "ورود کاغذی متوقف شد: سیگنال یا قیمت تازهٔ همین نماد موجود نیست"
-            return
+    private var paperOpening = false
+
+    /** A price received recently is still not an exchange fill; only a paper ticket can use it. */
+    private fun freshPaperQuote(current: MarketState): String? {
+        val now = System.currentTimeMillis()
+        val received = current.feed.lastSuccessAt
+        val lastBar = current.candles.lastOrNull()?.time
+        return when {
+            current.symbol != settings.value.symbol || current.interval != settings.value.interval ->
+                "نماد یا بازهٔ قیمت با تنظیمات فعلی فرق دارد"
+            current.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING) || current.showingCachedData ->
+                "قیمت زنده نیست؛ ورود/خروج روی کش ممنوع است"
+            current.lastPrice?.let { it.isFinite() && it > 0.0 } != true -> "قیمت معتبر موجود نیست"
+            received == null || now - received !in 0L..90_000L -> "آخرین دریافت قیمت قدیمی است"
+            lastBar == null || now - lastBar !in 0L..min(180_000L, current.interval.millis * 2) ->
+                "کندل این نماد برای ورود خیلی قدیمی است"
+            else -> null
         }
+    }
+
+    private fun entryBlocker(current: MarketState): String? {
+        freshPaperQuote(current)?.let { return it }
         if (settings.value.pauseOnNews) {
-            val newsNow = news.value
-            val checked = newsNow.lastCheckedAt
-            if (newsNow.gate != NewsGate.CLEAR || checked == null ||
+            val checked = news.value.lastCheckedAt
+            if (news.value.gate != NewsGate.CLEAR || checked == null ||
                 System.currentTimeMillis() - checked !in 0L..180_000L) {
-                _toast.value = "ورود کاغذی متوقف شد: خبر پراثر، خبر نامعتبر یا وضعیت خبری نامشخص/قدیمی"
-                return
+                return "خبر پراثر، نامعتبر یا وضعیت خبری نامشخص/قدیمی؛ توقف ورود جدید"
             }
         }
-        val watched = WatchCatalog.find(current.symbol)
-        if (watched != null) {
+        WatchCatalog.find(current.symbol)?.let { watched ->
             val selected = watchSettings.value[current.symbol]
             if (selected != null && SourceComparison.verify(watched, selected.enabledSources,
                     watch.value.quotes[current.symbol].orEmpty()).status == VerificationStatus.CONFLICT) {
-                _toast.value = "ورود متوقف شد: تعارض قیمت منابع"
-                return
+                return "قیمت منابع مستقل با هم تعارض دارد"
             }
         }
+        if (trades.value.any { it.isOpen && it.symbol == current.symbol }) return "برای این نماد یک پوزیشن کاغذی باز است"
+        return null
+    }
+
+    fun previewManualTicket(side: SignalAction, stop: Double?, target: Double?): Result<PaperTicket> = runCatching {
+        val current = market.value
+        entryBlocker(current)?.let { throw IllegalArgumentException(it) }
+        PaperOrderRules.preview(side, current.symbol, current.lastPrice!!,
+            stop ?: throw IllegalArgumentException("حد ضرر را وارد کنید"),
+            target ?: throw IllegalArgumentException("حد سود را وارد کنید"),
+            settings.value.accountBalance, settings.value.riskPercent)
+    }
+
+    fun openPaperTrade(signal: Signal) = submitPaper(signal, manual = false)
+
+    fun openManualPaperTrade(side: SignalAction, stop: Double, target: Double,
+                             expectedPrice: Double, expectedSymbol: String) {
+        val signal = Signal(action = side, confidence = 0.0, stopLoss = stop,
+            takeProfit = target, interval = market.value.interval)
+        submitPaper(signal, manual = true, expectedPrice = expectedPrice, expectedSymbol = expectedSymbol)
+    }
+
+    private fun submitPaper(signal: Signal, manual: Boolean, expectedPrice: Double? = null,
+                            expectedSymbol: String? = null) {
+        if (paperOpening) {
+            _toast.value = "درخواست کاغذی قبلی هنوز ذخیره نشده است"
+            return
+        }
+        fun verified(): Pair<MarketState, Double> {
+            val current = market.value
+            entryBlocker(current)?.let { throw IllegalArgumentException(it) }
+            val price = current.lastPrice!!
+            if (manual) {
+                require(expectedSymbol == current.symbol && expectedPrice != null && expectedPrice.isFinite() &&
+                    expectedPrice > 0.0 && abs(price / expectedPrice - 1.0) <= 0.001) {
+                    "قیمت/نماد نسبت به پیش‌نمایش تغییر کرده است؛ دوباره بررسی کنید"
+                }
+            } else {
+                require(signal.isActionable && current.signal == signal && signal.interval == current.interval &&
+                    signal.entry != null && signal.entry.isFinite() && signal.entry > 0.0 &&
+                    abs(price / signal.entry - 1.0) <= 0.005 && _mtf.value?.veto != true) {
+                    "سیگنال قدیمی، وتوشده یا دور از قیمت تازه است"
+                }
+            }
+            PaperOrderRules.preview(signal.action, current.symbol, price,
+                signal.stopLoss ?: throw IllegalArgumentException("حد ضرر لازم است"),
+                signal.takeProfit ?: throw IllegalArgumentException("حد سود لازم است"),
+                settings.value.accountBalance, settings.value.riskPercent)
+            return current to price
+        }
+        try {
+            verified()
+        } catch (error: Exception) {
+            _toast.value = "ورود کاغذی متوقف: ${error.message ?: "شرایط ورود معتبر نیست"}"
+            return
+        }
+        paperOpening = true
         viewModelScope.launch {
-            val s = container.settingsStore.read()
             try {
+                // Repeat all checks after scheduling; never persist a stale or switched symbol.
+                val (current, price) = verified()
+                val s = container.settingsStore.read()
                 val trade = container.journalStore.open(
-                    signal = signal,
-                    symbol = current.symbol,
-                    price = price,
-                    balance = s.accountBalance,
-                    riskPercent = s.riskPercent,
-                    mtf = _mtf.value?.let { MtfSnapshotRecord.from(it) },
+                    signal = signal, symbol = current.symbol, price = price,
+                    balance = s.accountBalance, riskPercent = s.riskPercent,
+                    mtf = if (manual) null else _mtf.value?.let { MtfSnapshotRecord.from(it) },
+                    manual = manual,
                 )
                 _stats.value = container.journalStore.stats()
-                _toast.value = "پوزیشن کاغذی باز شد: ${trade.action.name} روی قیمت واقعی ${String.format("%.2f", trade.entry)}"
+                _toast.value = "فقط کاغذی: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} ${trade.symbol} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}"
             } catch (e: Exception) {
-                _toast.value = e.message ?: "ورود کاغذی امکان‌پذیر نیست"
+                _toast.value = "ورود کاغذی انجام نشد: ${e.message ?: "ذخیره ممکن نیست"}"
+            } finally {
+                paperOpening = false
             }
         }
     }
 
     fun closePaperTrade(trade: PaperTrade) {
         val current = market.value
-        if (trade.symbol != current.symbol || current.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING) || current.showingCachedData) {
-            _toast.value = "برای بستن کاغذی باید قیمت تازهٔ همان نماد در دسترس باشد"
+        val blocked = freshPaperQuote(current)
+        if (trade.symbol != current.symbol || blocked != null) {
+            _toast.value = "بستن کاغذی متوقف: ${blocked ?: "نماد قیمت با پوزیشن فرق دارد"}"
             return
         }
-        val price = current.lastPrice ?: return
         viewModelScope.launch {
-            container.journalStore.close(trade.id, price, "بستن دستی روی قیمت واقعی")
-            _stats.value = container.journalStore.stats()
+            try {
+                val latest = market.value
+                require(trade.symbol == latest.symbol && freshPaperQuote(latest) == null) { "قیمت خروج تازهٔ همان نماد نیست" }
+                container.journalStore.close(trade.id, latest.lastPrice!!, "بستن دستی روی قیمت دریافتی")
+                _stats.value = container.journalStore.stats()
+            } catch (error: Exception) {
+                _toast.value = "بستن انجام نشد: ${error.message ?: "خطا در ذخیره"}"
+            }
         }
     }
 

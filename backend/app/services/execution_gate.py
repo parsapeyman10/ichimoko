@@ -48,19 +48,22 @@ class VenueAdapter(Protocol):
 
 def preflight(intent: OrderIntent) -> dict:
     """Informational only: no trusted account/quote/consensus/news/identity inputs exist yet."""
+    blockers = [
+        "کلید توقف اجرای واقعی فعال است (هیچ آداپتر سفارش متصل نیست)",
+        "هویت و مجوز مالک حساب روی سرور تأیید نشده است",
+        "مشخصات قرارداد، موجودی و سقف ریسک حساب روی سرور تأیید نشده‌اند",
+        "قیمت تازهٔ سرور و تایید دو منبع مستقل وجود ندارد",
+        "وضعیت خبر/تقویم اقتصادی برای این نماد روی سرور تأیید نشده است",
+        "انبار تراکنشی idempotency و تطبیق وضعیت سفارش بروکر نصب نشده‌اند",
+    ]
+    if intent.venue == Venue.NOBITEX and intent.side == OrderSide.SELL:
+        blockers.append("فروش spot فقط فروش داراییِ موجود است؛ شورت بدون بازار مارجین/مشتقهٔ تأییدشده ممکن نیست")
     return {
         "allowed": False,
         "venue": intent.venue.value,
         "symbol": intent.symbol,
         "idempotency_key": str(intent.idempotency_key),
-        "blockers": [
-            "کلید توقف اجرای واقعی فعال است (هیچ آداپتر سفارش متصل نیست)",
-            "هویت و مجوز مالک حساب روی سرور تأیید نشده است",
-            "مشخصات قرارداد، موجودی و سقف ریسک حساب روی سرور تأیید نشده‌اند",
-            "قیمت تازهٔ سرور و تایید دو منبع مستقل وجود ندارد",
-            "وضعیت خبر/تقویم اقتصادی برای این نماد روی سرور تأیید نشده است",
-            "انبار تراکنشی idempotency و تطبیق وضعیت سفارش بروکر نصب نشده‌اند",
-        ],
+        "blockers": blockers,
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "note": "این پیش‌بررسی، تایید معامله نیست و هیچ درخواستی به بروکر نمی‌فرستد.",
     }

@@ -37,8 +37,14 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val reports by viewModel.reports.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val now = System.currentTimeMillis()
     val livePrice = market.lastPrice?.takeIf {
-        !market.showingCachedData && market.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING)
+        it.isFinite() && it > 0 && !market.showingCachedData &&
+            market.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
+            market.feed.lastSuccessAt?.let { at -> now - at in 0L..90_000L } == true &&
+            market.candles.lastOrNull()?.time?.let { at ->
+                now - at in 0L..minOf(180_000L, market.interval.millis * 2)
+            } == true
     }
 
     Column(
@@ -92,7 +98,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "${trade.symbol} · ${trade.action.name} ${trade.interval.label} · ${String.format("%.3f", trade.positionOz)} oz",
+                                "${trade.symbol} · ${if (trade.action == SignalAction.BUY) "LONG" else "SHORT"} ${trade.interval.label} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (trade.action == SignalAction.BUY) AurumColors.Green else AurumColors.Red,
                             )
@@ -102,7 +108,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                 color = AurumColors.TextMuted,
                             )
                             Text(
-                                formatDateTime(trade.openedAt) + " · امتیاز ${trade.confidence.toInt()}",
+                                formatDateTime(trade.openedAt) + if (trade.note.startsWith("ورود دستی")) " · دستی؛ بدون سیگنال" else " · امتیاز ${trade.confidence.toInt()}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.TextMuted,
                             )

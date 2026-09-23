@@ -38,7 +38,7 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
         NewsGate.UNKNOWN -> AurumColors.Gold
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
-        SectionCard("اخبار فارسی واقعی", "فید مجاز از سرور شما؛ بدون خبر ساختگی یا ترجمهٔ حدسی",
+        SectionCard("اخبار واقعی از وب", "RSS رسمی/عمومی ناشران؛ تیتر و چکیدهٔ کوتاه بدون ترجمه یا محتوای ساختگی",
             trailing = { Pill(state.gate.name, tone) }) {
             Text(state.reason, style = MaterialTheme.typography.bodySmall, color = tone)
             Text("منبع: ${state.provider ?: "پیکربندی نشده"} · آخرین دریافت: ${relativeTime(state.lastCheckedAt)}" +
@@ -50,24 +50,40 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 Button(onClick = viewModel::refreshNews, enabled = !state.loading, modifier = Modifier.weight(1f)) {
                     Text(if (state.loading) "دریافت…" else "تازه‌سازی")
                 }
-                OutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) { Text("تنظیم فید") }
+                OutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) { Text("تنظیم سرور") }
             }
-            Text("توقف بر پایهٔ خبر برای ورودهای کاغذی ${if (settings.pauseOnNews) "روشن" else "خاموش"} است. حتی CLEAR فقط به همین فید اشاره دارد و اجازهٔ ارسال سفارش واقعی نیست.",
+            Text("توقف بر پایهٔ خبر برای ورودهای کاغذی ${if (settings.pauseOnNews) "روشن" else "خاموش"} است. قطع حتی یکی از خوراک‌ها وضعیت را UNKNOWN می‌کند. CLEAR تقویم کامل یا اجازهٔ سفارش واقعی نیست.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
                 modifier = Modifier.padding(top = 6.dp))
         }
+        if (state.sources.isNotEmpty()) {
+            SectionCard("وضعیت منبع‌های ناشر", "فقط تیتر، چکیدهٔ کوتاه، زمان و لینک خودِ ناشر") {
+                state.sources.forEach { source ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("${source.name}: ${if (source.state == "online") "دریافت شد" else "ناموجود"}",
+                            modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
+                            color = if (source.state == "online") AurumColors.Green else AurumColors.Red)
+                        if (source.feed.startsWith("https://")) {
+                            OutlinedButton(onClick = { runCatching { uriHandler.openUri(source.feed) } }) {
+                                Text("خوراک", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                }
+            }
+        }
         if (state.articles.isEmpty()) {
-            SectionCard("تیتر فارسی موجود نیست", "تا پیکربندی فید دارای مجوز یا رفع خطا، چیزی جعل نمی‌شود") {
-                Text("در بک‌اند AURUM_FA_NEWS_RSS_URL و AURUM_FA_NEWS_ALLOWED_HOST را تنظیم کنید و اینجا آدرس HTTPS بک‌اند را وارد کنید.",
+            SectionCard("تیتر موجود نیست", "نبود اتصال یا توقف منبع به معنی نبود خبر نیست") {
+                Text("نشانی HTTPS بک‌اند را در تنظیمات وارد کنید؛ فیدهای عمومی شناخته‌شده روی سرور خوانده می‌شوند. برای استفادهٔ تجاری، شرایط هر ناشر را بررسی کنید.",
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
             }
         }
         state.articles.forEach { item ->
-            SectionCard(item.headline, "${item.source} · انتشار ${formatDateTime(item.publishedAt)}",
+            SectionCard(item.headline, "${item.source} · ${if (item.language == "en") "EN · زبان اصلی" else "FA"} · انتشار ${formatDateTime(item.publishedAt)}",
                 trailing = { Pill(item.impact, if (item.impact == "HIGH") AurumColors.Red else AurumColors.TextMuted) }) {
                 if (item.summary.isNotBlank()) Text(item.summary,
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-                Text("تحلیل محافظه‌کارانه: ${item.direction} · ${item.analysisSource}",
+                Text("برچسب قاعده‌ای برای اثر احتمالی بر طلا (نه سیگنال): ${item.direction} · ${item.analysisSource}",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
                     modifier = Modifier.padding(top = 5.dp))
                 item.link?.let { url ->

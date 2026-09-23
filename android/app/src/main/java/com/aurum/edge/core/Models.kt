@@ -96,12 +96,16 @@ data class PaperTrade(
     val exitPrice: Double? = null,
     val exitReason: String? = null,
     val pnlUsd: Double? = null,
+    /** Historical JSON field name; quantity is in [unit], not necessarily troy ounces. */
     val positionOz: Double = 1.0,
     val note: String = "paper روی قیمت واقعی",
+    /** Empty for older journal records; infer from the symbol on read. */
+    val positionUnit: String = "",
     /** What the multi-timeframe engine said on the phone when this paper trade was opened. */
     val mtf: MtfSnapshotRecord? = null,
 ) {
     val isOpen: Boolean get() = closedAt == null
+    val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }
 
     val riskPerOz: Double get() = kotlin.math.abs(entry - stopLoss)
 

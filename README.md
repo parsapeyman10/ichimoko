@@ -7,7 +7,9 @@ Native Android (Kotlin/Compose), React/Vite web terminal and FastAPI research ba
 ## Current capabilities
 
 - **Android**: chart + Ichimoku/signal/MTF/paper journal/backtest/walk-forward; multi-symbol read-only watchlist (BTC, ETH, XAU, AAPL, USD/IRT, Iranian 18K gold) with per-symbol source selection and per-symbol *read-only* Twelve Data key, independent source prices, `CONFIRMED / CONFLICT / UNVERIFIED / NO_DATA`, paginated local SQLite quote history. Live chart/strategy still uses Twelve Data alone.
-- **Persian news**: optional licensed Persian RSS/Atom through the backend (Android news view); conservative high-impact analysis and opt-in fail-closed pause for **new paper trades**. No feed/license = no headlines and guard `UNKNOWN`; not a full economic calendar.
+- **Two-sided paper tickets**: Android «معامله» now has manual LONG/SHORT with SL/TP preview, confirmation, risk/aggregate-exposure caps, quote freshness and one-open-position-per-symbol; engine BUY/SELL paper entries share the same checks. No live order or broker/spot short is claimed.
+- **Publisher web news**: Android «دیده‌بان ← اخبار وب» shows short, attributed RSS excerpts from IRIB, YJC, Eghtesaad24, CoinDesk and BLS via an HTTPS backend. Missing/stale feeds mean `UNKNOWN`; opt-in news pause blocks **new paper entries only**. The optional licensed `/news/fa` feed remains separate; neither is an economic calendar.
+- **Crypto screen**: new Android «رمزارز» tab, strictly read-only; CoinGecko market/supply/momentum prefilter and Binance Spot volume/book/completed-candle checks with source times, thresholds and honest unavailable/empty states. Candidates are **not** predictions of a pump.
 - **MetaTrader research**: Android file picker or public HTTPS URL for historical MT4/MT5 CSV/TSV (explicit timezone, OHLC and timeframe validation), isolated from live trading and cache. Binary MT5 formats/Bridge not connected.
 - **Reports**: 18 descriptive metrics on Android paper/backtest/out-of-sample reports; backend/web backtest report includes counts by side, average win/loss/duration, streaks and per-trade, **nonannualized** Sharpe. Undefined ratios display `—`.
 - **Execution API boundary**: `/api/v1/execution/status` and `/preflight` explain blockers; `/orders` always returns 503. No trading credential is sent/stored in the APK.
@@ -20,12 +22,13 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 # Put your own AURUM_TWELVE_DATA_API_KEY in .env for web chart/backtests.
-# For licensed Persian news configure AURUM_FA_NEWS_RSS_URL and AURUM_FA_NEWS_ALLOWED_HOST.
+# Public publisher RSS news works without a feed key; CoinGecko Demo key is recommended
+# for the read-only crypto screen: AURUM_COINGECKO_DEMO_API_KEY (never inside the APK).
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 python -m pytest -q
 ```
 
-`GET /api/v1/data/status`, `/api/v1/news/fa`, `/api/v1/execution/status` and `/docs` describe provider readiness. Without a Twelve Data key, market routes return 503 on purpose. News route works independently of a market-data key.
+`GET /api/v1/data/status`, `/api/v1/news/web`, `/api/v1/crypto/candidates`, `/api/v1/execution/status` and `/docs` expose provider readiness. Android news and crypto tabs need this backend deployed over publicly reachable **HTTPS** and its address entered in Settings; `localhost` on the phone is not your PC. Without a Twelve Data key market-candle routes return 503 on purpose; news/scanner work independently of it when their sources are reachable.
 
 ## Run web terminal
 
@@ -44,4 +47,4 @@ cd android
 
 Requires JDK 17 + Android SDK 35. Alternatively use the **Android APK** GitHub Actions workflow (`.github/workflows/main.yml`) for debug and debug-signed “release” **test** APK artifacts; on the current remote workflow JVM tests are non-blocking, so inspect their result separately. The proposed fail-on-test workflow change needs GitHub `workflows` permission to push. Enter the read-only Twelve Data key in the app's Settings after installation; baking even a GitHub Actions secret into an APK would disclose it. Details: [docs/ANDROID.md](docs/ANDROID.md), [android/README.md](android/README.md).
 
-Decision support only, not financial advice. No official TSETMC contract, Nobitex/MT5 integration, Meme Scanner or real order path is claimed ready; live trading requires an independently audited server-side execution system, licensed data/news and user/broker approvals.
+Decision support only, not financial advice. The screen covers a limited liquid spot universe, **not a meme-coin pump detector**. No official TSETMC contract, Nobitex/MT5 order adapter or real order path is claimed ready; live trading requires an independently audited, authenticated execution system, venue rules, permitted data/news and user/broker approvals. CI must compile the changed APK before it can be called installable.

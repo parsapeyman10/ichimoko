@@ -22,6 +22,8 @@ def test_live_order_is_impossible_even_with_a_well_formed_intent():
     check = client.post("/api/v1/execution/preflight", json=INTENT).json()
     assert check["allowed"] is False
     assert any("خبر" in reason for reason in check["blockers"])
+    short = client.post("/api/v1/execution/preflight", json={**INTENT, "side": "SELL"}).json()
+    assert short["allowed"] is False and any("spot" in reason for reason in short["blockers"])
     assert client.post("/api/v1/execution/orders", json=INTENT).status_code == 503
 
 

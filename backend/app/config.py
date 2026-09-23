@@ -24,12 +24,16 @@ class Settings(BaseSettings):
 
     # Optional licensed news / calendar provider
     fmp_api_key: str | None = None
-    # User-provided, licensed Persian RSS/Atom feed. Both URL and exact host are required;
-    # no built-in scraping of publishers or invented/translated headlines.
+    # Legacy /news/fa: user-provided licensed Persian feed with an exact allowed host.
+    # Separate /news/web reads only the publishers' advertised public RSS headlines.
     fa_news_rss_url: str | None = None
     fa_news_allowed_host: str | None = None
     fa_news_source: str = "منبع خبری دارای مجوز"
     news_hold_minutes: int = 45
+
+    # Read-only CoinGecko Demo API key. Keep on server, never ship in an APK.
+    # Public/keyless requests may be rate-limited; provider failures leave the scan unavailable.
+    coingecko_demo_api_key: str | None = None
 
     # Optional NLP stage (only used when a key is configured)
     openai_api_key: str | None = None

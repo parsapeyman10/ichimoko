@@ -37,6 +37,7 @@ class Headline:
     url: str | None
     published_at: datetime | None
     analysis: dict
+    language: str = "fa"
 
     def payload(self) -> dict:
         return {
@@ -47,6 +48,7 @@ class Headline:
             "url": self.url,
             "published_at": self.published_at.isoformat() if self.published_at else None,
             "analysis": self.analysis,
+            "language": self.language,
         }
 
 
@@ -71,26 +73,41 @@ def validated_feed_url(settings: Settings) -> str | None:
     return url
 
 
-def parse_news_xml(raw: bytes, source: str) -> list[Headline]:
+def parse_news_xml(raw: bytes, source: str, *, language: str = "fa",
+                   allowed_host: str | None = None) -> list[Headline]:
+    """Extract only feed-provided titles/excerpts (not article pages or copyrighted full text)."""
     if len(raw) > MAX_FEED_BYTES:
         raise ValueError("پاسخ فید بیش از حد بزرگ است")
-    root = ElementTree.fromstring(raw)
+    if language not in {"fa", "en"}:
+        raise ValueError("زبان خوراک پشتیبانی نمی‌شود")
+    root = ElementTree.fromstring(raw)  # defusedxml rejects entities / expansion
     nodes = [element for element in root.iter() if element.tag.rsplit("}", 1)[-1] in {"item", "entry"}]
     seen: set[str] = set()
     articles: list[Headline] = []
     for node in nodes[:100]:
         values = {child.tag.rsplit("}", 1)[-1]: child for child in node}
-        title = _text(values.get("title"))[:500]
-        if len(title) < 3 or not any("\u0600" <= letter <= "\u06ff" for letter in title):
-            continue  # language policy: do not label an English-only item as Persian
+        title = " ".join(html.unescape(re.sub(r"<[^>]*>", " ", _text(values.get("title")))).split())[:240]
+        if len(title) < 3 or (language == "fa" and not any("\u0600" <= letter <= "\u06ff" for letter in title)):
+            continue  # do not label English-only headlines as Persian
+
         def field(*names: str):
             return next((values[name] for name in names if name in values), None)
 
         summary = re.sub(r"<[^>]*>", " ", _text(field("description", "summary", "content")))
-        summary = " ".join(html.unescape(summary).split())[:800]
+        summary = " ".join(html.unescape(summary).split())[:280]
         link = field("link")
         link_text = _text(link) or (link.get("href", "") if link is not None else "")
-        url = link_text if urlsplit(link_text).scheme == "https" else None
+        parts = urlsplit(link_text)
+        host = (parts.hostname or "").lower()
+        try:
+            safe_port = parts.port in (None, 443)
+        except ValueError:
+            safe_port = False
+        expected = allowed_host.lower() if allowed_host else None
+        url = link_text if (parts.scheme == "https" and not parts.username and not parts.password and
+                            safe_port and (expected is None or
+                                           host in {expected, expected.removeprefix("www."),
+                                                    "www." + expected.removeprefix("www.")})) else None
         published = _parse_date(_text(field("pubDate", "published", "updated")))
         uid = hashlib.sha256(f"{source}:{title}:{url}".encode()).hexdigest()[:20]
         if uid in seen:
@@ -99,7 +116,7 @@ def parse_news_xml(raw: bytes, source: str) -> list[Headline]:
         analysis = SentimentEngine._analyze_rules(
             NewsRequest(headline=title, body=summary, source=source, published_at=published))
         articles.append(Headline(uid, title, summary, source, url, published,
-            analysis.model_dump(mode="json")))
+            analysis.model_dump(mode="json"), language))
         if len(articles) == 30:
             break
     return sorted(articles, key=lambda a: a.published_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)

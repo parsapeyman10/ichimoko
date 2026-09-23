@@ -1,9 +1,12 @@
 package com.aurum.edge.data
 
 import android.content.Context
+import android.util.AtomicFile
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperTrade
+import com.aurum.edge.core.PaperOrderRules
+import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.WalkForwardRecord
 import kotlinx.coroutines.Dispatchers
@@ -46,9 +49,10 @@ class JournalStore(context: Context) {
 
     suspend fun load() = withContext(Dispatchers.IO) {
         mutex.withLock {
-            val list = if (file.exists()) {
+            val list = if (file.exists() || File(file.path + ".bak").exists()) {
                 runCatching {
-                    json.decodeFromString(ListSerializer(PaperTrade.serializer()), file.readText())
+                    json.decodeFromString(ListSerializer(PaperTrade.serializer()),
+                        AtomicFile(file).openRead().bufferedReader().use { it.readText() })
                 }.getOrDefault(emptyList())
             } else emptyList()
             _trades.value = list.sortedByDescending { it.openedAt }
@@ -57,13 +61,16 @@ class JournalStore(context: Context) {
 
     private suspend fun persist(list: List<PaperTrade>) = withContext(Dispatchers.IO) {
         val sorted = list.sortedByDescending { it.openedAt }.take(500)
-        _trades.value = sorted
-        runCatching {
-            val tmp = File(file.parentFile, file.name + ".tmp")
-            tmp.writeText(json.encodeToString(ListSerializer(PaperTrade.serializer()), sorted))
-            if (file.exists()) file.delete()
-            tmp.renameTo(file)
+        val atomic = AtomicFile(file)
+        val stream = atomic.startWrite()
+        try {
+            stream.write(json.encodeToString(ListSerializer(PaperTrade.serializer()), sorted).toByteArray(Charsets.UTF_8))
+            atomic.finishWrite(stream)
+        } catch (error: Exception) {
+            atomic.failWrite(stream)
+            throw error // no toast claiming an entry succeeded if it was not saved
         }
+        _trades.value = sorted
     }
 
     suspend fun loadReports() = withContext(Dispatchers.IO) {
@@ -93,33 +100,38 @@ class JournalStore(context: Context) {
         balance: Double,
         riskPercent: Double,
         mtf: MtfSnapshotRecord? = null,
+        manual: Boolean = false,
     ): PaperTrade {
-        val stop = signal.stopLoss ?: throw IllegalArgumentException("سیگنال حد ضرر ندارد")
-        val target = signal.takeProfit ?: throw IllegalArgumentException("سیگنال حد سود ندارد")
-        require(price.isFinite() && price > 0 && stop.isFinite() && target.isFinite() &&
-            ((signal.action == com.aurum.edge.core.SignalAction.BUY && stop < price && target > price) ||
-                (signal.action == com.aurum.edge.core.SignalAction.SELL && stop > price && target < price))) {
-            "قیمت یا حد ضرر/سود سیگنال معتبر نیست"
-        }
-        val stopDistance = kotlin.math.abs(price - stop)
-        val riskUsd = balance * riskPercent / 100.0
-        val oz = riskUsd / stopDistance
+        val stop = signal.stopLoss ?: throw IllegalArgumentException("حد ضرر وجود ندارد")
+        val target = signal.takeProfit ?: throw IllegalArgumentException("حد سود وجود ندارد")
+        val draft = PaperOrderRules.preview(signal.action, symbol, price, stop, target, balance, riskPercent)
         val trade = PaperTrade(
-            id = UUID.randomUUID().toString().take(8),
+            id = UUID.randomUUID().toString(),
             symbol = symbol,
             interval = signal.interval,
             action = signal.action,
             entry = price,
             stopLoss = stop,
             takeProfit = target,
-            confidence = signal.confidence,
-            riskReward = signal.riskReward ?: 1.8,
+            confidence = if (manual) 0.0 else signal.confidence,
+            riskReward = draft.rewardRisk,
             openedAt = System.currentTimeMillis(),
-            positionOz = (kotlin.math.round(oz * 1000) / 1000.0).coerceAtLeast(0.001),
-            note = "paper روی قیمت واقعی — ${signal.interval.label}",
-            mtf = mtf,
+            positionOz = draft.quantity,
+            positionUnit = draft.unit,
+            note = if (manual) "ورود دستی کاغذی؛ بدون تأیید موتور/بروکر" else "سیگنال کاغذی روی قیمت دریافتی — ${signal.interval.label}",
+            mtf = if (manual) null else mtf,
         )
-        mutex.withLock { persist(_trades.value + trade) }
+        mutex.withLock {
+            // Serialize the check and append. No pyramiding or duplicate position per symbol.
+            require(_trades.value.none { it.isOpen && it.symbol == symbol }) {
+                "برای این نماد پوزیشن کاغذی باز دارید؛ ابتدا آن را ببندید"
+            }
+            val totalRisk = _trades.value.filter { it.isOpen }.sumOf { it.riskPerOz * it.positionOz }
+            require(totalRisk + draft.actualRiskUsd <= balance * 0.05 + 1e-8) {
+                "مجموع ریسک پوزیشن‌های کاغذی از ۵٪ موجودی عبور می‌کند"
+            }
+            persist(_trades.value + trade)
+        }
         return trade
     }
 
@@ -127,20 +139,20 @@ class JournalStore(context: Context) {
      * Mark open trades against the newest real candle.
      * A trade closes only when a real price actually reached its stop or target.
      */
-    suspend fun settle(candle: Candle, symbol: String, observedAt: Long) {
+    suspend fun settle(candle: Candle, symbol: String, observedAt: Long) = mutex.withLock {
         val current = _trades.value
-        if (current.none { it.isOpen }) return
+        if (current.none { it.isOpen }) return@withLock
         var changed = false
         val updated = current.map { t ->
             // A different symbol or a bar opened before this position must never settle it.
             // In particular, caching/replaying historical bars cannot close a new position.
             if (!t.isOpen || t.symbol != symbol || candle.time <= t.openedAt) return@map t
-            val hitStop = if (t.action == com.aurum.edge.core.SignalAction.BUY) {
+            val hitStop = if (t.action == SignalAction.BUY) {
                 candle.low <= t.stopLoss
             } else {
                 candle.high >= t.stopLoss
             }
-            val hitTarget = if (t.action == com.aurum.edge.core.SignalAction.BUY) {
+            val hitTarget = if (t.action == SignalAction.BUY) {
                 candle.high >= t.takeProfit
             } else {
                 candle.low <= t.takeProfit
@@ -148,7 +160,7 @@ class JournalStore(context: Context) {
             if (!hitStop && !hitTarget) return@map t
             // If both were touched inside one bar, assume the stop was hit first (conservative).
             val exit = if (hitStop) t.stopLoss else t.takeProfit
-            val pnlPerOz = if (t.action == com.aurum.edge.core.SignalAction.BUY) {
+            val pnlPerOz = if (t.action == SignalAction.BUY) {
                 exit - t.entry
             } else {
                 t.entry - exit
@@ -161,13 +173,14 @@ class JournalStore(context: Context) {
                 pnlUsd = kotlin.math.round(pnlPerOz * t.positionOz * 100.0) / 100.0,
             )
         }
-        if (changed) mutex.withLock { persist(updated) }
+        if (changed) persist(updated)
     }
 
-    suspend fun close(tradeId: String, price: Double, reason: String) {
+    suspend fun close(tradeId: String, price: Double, reason: String) = mutex.withLock {
+        require(price.isFinite() && price > 0) { "قیمت خروج معتبر نیست" }
         val updated = _trades.value.map { t ->
             if (t.id != tradeId || !t.isOpen) return@map t
-            val pnlPerOz = if (t.action == com.aurum.edge.core.SignalAction.BUY) {
+            val pnlPerOz = if (t.action == SignalAction.BUY) {
                 price - t.entry
             } else {
                 t.entry - price
@@ -179,7 +192,7 @@ class JournalStore(context: Context) {
                 pnlUsd = kotlin.math.round(pnlPerOz * t.positionOz * 100.0) / 100.0,
             )
         }
-        mutex.withLock { persist(updated) }
+        persist(updated)
     }
 
     suspend fun clear() = mutex.withLock { persist(emptyList()) }

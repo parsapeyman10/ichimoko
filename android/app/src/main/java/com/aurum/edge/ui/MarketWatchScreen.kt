@@ -37,14 +37,14 @@ import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
 import kotlinx.coroutines.delay
 
-/** Separate read-only watchlist and licensed Persian news. No quote is sent as an order. */
+/** Separate read-only watchlist and publisher web news. No quote is sent as an order. */
 @Composable
 fun MarketWatchScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
     var newsTab by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(selected = !newsTab, onClick = { newsTab = false }, label = { Text("منابع بازار") })
-            FilterChip(selected = newsTab, onClick = { newsTab = true }, label = { Text("اخبار فارسی") })
+            FilterChip(selected = newsTab, onClick = { newsTab = true }, label = { Text("اخبار وب") })
         }
         if (newsTab) PersianNewsScreen(viewModel, onOpenSettings)
         else WatchPricesScreen(viewModel, onOpenSettings)

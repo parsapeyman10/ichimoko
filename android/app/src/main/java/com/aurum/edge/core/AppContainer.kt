@@ -2,6 +2,7 @@ package com.aurum.edge.core
 
 import android.content.Context
 import com.aurum.edge.data.CandleCache
+import com.aurum.edge.data.CryptoRepository
 import com.aurum.edge.data.DataFeedException
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.MarketRepository
@@ -38,6 +39,7 @@ class AppContainer(context: Context) {
     val quoteHistory = QuoteHistoryStore(appContext)
     val watch = WatchRepository(SourceFetcher(), quoteHistory, watchSettings, settingsStore, appScope)
     val news = NewsRepository(settingsStore, appScope)
+    val crypto = CryptoRepository(settingsStore, appScope)
     val metaTraderImporter = MetaTraderImporter(appContext)
 
     init {
