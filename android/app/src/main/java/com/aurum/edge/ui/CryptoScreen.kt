@@ -34,6 +34,8 @@ fun CryptoScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
     LaunchedEffect(settings.newsBaseUrl) { viewModel.refreshCrypto() }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
+        NobitexTrainingSection(viewModel)
+
         SectionCard(
             title = "رادار رمزارز · فقط نامزدهای غربالگری",
             subtitle = "دادهٔ واقعی CoinGecko + Binance SPOT؛ نه پیش‌بینی پامپ و نه توصیه/سفارش خرید",

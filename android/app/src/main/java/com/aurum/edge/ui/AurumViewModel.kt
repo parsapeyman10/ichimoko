@@ -26,6 +26,10 @@ import com.aurum.edge.data.JournalStats
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.NewsRepository
+import com.aurum.edge.data.NobitexMarket
+import com.aurum.edge.data.NobitexPracticeRules
+import com.aurum.edge.data.NobitexPracticeTrade
+import com.aurum.edge.data.NobitexSnapshot
 import com.aurum.edge.data.Quote
 import com.aurum.edge.data.WatchSelection
 import com.aurum.edge.data.WatchState
@@ -43,6 +47,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.min
+
+sealed interface NobitexState {
+    data object Idle : NobitexState
+    data object Loading : NobitexState
+    data class Done(val snapshot: NobitexSnapshot) : NobitexState
+    data class Failed(val message: String) : NobitexState
+}
 
 sealed interface LearnState {
     data object Idle : LearnState
@@ -73,6 +84,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val watch: StateFlow<WatchState> = container.watch.state
     val news = container.news.state
     val crypto = container.crypto.state
+    private val _nobitex = MutableStateFlow<NobitexState>(NobitexState.Idle)
+    val nobitex: StateFlow<NobitexState> = _nobitex.asStateFlow()
+    val nobitexTrades: StateFlow<List<NobitexPracticeTrade>> = container.nobitexPractice.trades
+    val nobitexJournalError: StateFlow<String?> = container.nobitexPractice.loadError
     private val _watchHistory = MutableStateFlow(WatchHistory())
     val watchHistory: StateFlow<WatchHistory> = _watchHistory.asStateFlow()
     val market = container.verifiedMarket
@@ -113,6 +128,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             runCatching { container.opportunityStore.load() }.onFailure {
                 _toast.value = "تاریخچهٔ فرصت‌ها خوانده نشد؛ فایل قبلی نگه داشته شد و هشدار تکراری متوقف است"
             }
+            runCatching { container.nobitexPractice.load() }.onFailure {
+                _toast.value = "ژورنال تمرین نوبیتکس خوانده نشد؛ فایل برای بازیابی نگه داشته شد"
+            }
             container.journalStore.loadReports()
             _stats.value = container.journalStore.stats()
             container.market.start()
@@ -149,6 +167,85 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun refreshNews() = container.news.refreshNow()
 
     fun refreshCrypto() = container.crypto.refreshNow()
+
+    fun downloadNobitex(market: NobitexMarket, interval: Interval) {
+        if (_nobitex.value == NobitexState.Loading) return
+        _nobitex.value = NobitexState.Loading // old quotes are never used while reconnecting
+        viewModelScope.launch {
+            try {
+                val snapshot = container.nobitexPublic.download(market, interval)
+                _nobitex.value = NobitexState.Done(snapshot)
+                val closed = runCatching { container.nobitexPractice.settle(snapshot) }
+                    .getOrDefault(emptyList())
+                if (closed.isNotEmpty()) _toast.value = "تمرین ${closed.first().id.take(8)} با bid عمومی نوبیتکس کاغذی تسویه شد؛ ژورنال را ببینید"
+            } catch (error: Exception) {
+                _nobitex.value = NobitexState.Failed((error.message ?: "پاسخ دادهٔ عمومی نوبیتکس معتبر نیست").take(180))
+            }
+        }
+    }
+
+    fun openNobitexPractice(market: NobitexMarket, amount: Double, stopPercent: Double,
+                             targetPercent: Double, expectedAsk: Double, expectedQuoteAt: Long) {
+        val current = (_nobitex.value as? NobitexState.Done)?.snapshot
+        if (current?.market != market || current.practiceBlocker() != null) {
+            _toast.value = "تمرین باز نشد؛ قیمت همین نماد را دوباره دریافت و بررسی کنید"
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val snapshot = (_nobitex.value as? NobitexState.Done)?.snapshot
+                    ?: throw IllegalArgumentException("در حال دریافت داده؛ قیمت قبلی معتبر نیست")
+                require(snapshot.market == market && snapshot.quote.receivedAt == expectedQuoteAt) {
+                    "نماد یا زمان قیمت عوض شده است"
+                }
+                val trade = container.nobitexPractice.open(snapshot, amount, stopPercent,
+                    targetPercent, expectedAsk, expectedQuoteAt)
+                _toast.value = "فقط تمرین spot BUY کاغذی: ${trade.id.take(8)}؛ در ژورنال نوبیتکس ثبت شد"
+            } catch (error: Exception) {
+                _toast.value = "تمرین باز نشد: ${error.message ?: "ورود نامعتبر است"}"
+            }
+        }
+    }
+
+    fun closeNobitexPractice(id: String) {
+        val snapshot = (_nobitex.value as? NobitexState.Done)?.snapshot
+        if (snapshot?.practiceBlocker() != null) {
+            _toast.value = "برای بستن تمرین، آمار تازهٔ BTCUSDT را دریافت کنید"
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val fresh = (_nobitex.value as? NobitexState.Done)?.snapshot
+                    ?: throw IllegalArgumentException("دادهٔ بازار در دسترس نیست")
+                val trade = container.nobitexPractice.close(id, fresh)
+                _toast.value = "تمرین ${trade.id.take(8)} فقط کاغذی با نرخ bid مشاهده‌شده بسته شد"
+            } catch (error: Exception) {
+                _toast.value = "بستن تمرین انجام نشد: ${error.message ?: "قیمت معتبر نیست"}"
+            }
+        }
+    }
+
+    fun exportNobitexHistory(uri: Uri, snapshot: NobitexSnapshot) {
+        viewModelScope.launch {
+            try {
+                container.exportNobitexCsv(uri, snapshot)
+                _toast.value = "CSV ${snapshot.market.code} از کندل‌های دریافتی ذخیره شد"
+            } catch (error: Exception) {
+                _toast.value = "ذخیرهٔ CSV انجام نشد: ${error.message ?: "خطای فایل"}"
+            }
+        }
+    }
+
+    fun clearNobitexPractice() {
+        viewModelScope.launch {
+            try {
+                container.nobitexPractice.clear()
+                _toast.value = "فقط تاریخچهٔ تمرین نوبیتکس پاک شد؛ معاملات طلا و کاندیداها تغییر نکردند"
+            } catch (error: Exception) {
+                _toast.value = "پاک کردن تمرین ممکن نیست: ${error.message ?: "فایل قبلی حفظ شد"}"
+            }
+        }
+    }
 
     fun saveNewsBaseUrl(value: String) {
         val url = value.trim().trimEnd('/')

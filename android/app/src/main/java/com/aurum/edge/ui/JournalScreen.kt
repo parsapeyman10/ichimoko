@@ -32,6 +32,8 @@ import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.data.MarketState
+import com.aurum.edge.data.NobitexMarket
+import com.aurum.edge.data.NobitexPracticeTrade
 import com.aurum.edge.engine.PerformanceMetrics
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
@@ -44,12 +46,16 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val opportunities by viewModel.opportunities.collectAsStateWithLifecycle()
     val opportunityError by viewModel.opportunityError.collectAsStateWithLifecycle()
+    val nobitexTrades by viewModel.nobitexTrades.collectAsStateWithLifecycle()
+    val nobitexJournalError by viewModel.nobitexJournalError.collectAsStateWithLifecycle()
+    val nobitexState by viewModel.nobitex.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val reports by viewModel.reports.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val loadError by viewModel.journalError.collectAsStateWithLifecycle()
     var confirmClear by remember { mutableStateOf(false) }
     var confirmOpportunityClear by remember { mutableStateOf(false) }
+    var confirmNobitexClear by remember { mutableStateOf(false) }
     val now = System.currentTimeMillis()
     val livePrice = market.lastPrice?.takeIf {
         it.isFinite() && it > 0 && !market.showingCachedData &&
@@ -187,6 +193,25 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                 modifier = Modifier.padding(horizontal = 12.dp),
             ) { Text("پاک کردن ژورنال") }
         }
+        if (nobitexTrades.isNotEmpty() || nobitexJournalError != null) {
+            val snapshot = (nobitexState as? NobitexState.Done)?.snapshot
+            SectionCard("ژورنال مستقلِ تمرین نوبیتکس · BTCUSDT", "قیمت ask/bid عمومی · سود فرضی USDT، هرگز در آمار دلاری طلا جمع نمی‌شود") {
+                nobitexJournalError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red) }
+                val closedPractice = nobitexTrades.filterNot { it.isOpen }
+                Text("باز ${nobitexTrades.count { it.isOpen }} · بسته ${closedPractice.size} · سود/زیان مشاهده‌ای ${formatPrice(closedPractice.sumOf { it.pnlQuote ?: 0.0 })} USDT",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+                nobitexTrades.take(30).forEach { practice ->
+                    NobitexPracticeRow(practice, snapshot?.takeIf { it.market == NobitexMarket.BTC_USDT &&
+                        it.practiceBlocker() == null && it.quote.receivedAt > practice.openedAt } != null,
+                        onClose = { viewModel.closeNobitexPractice(practice.id) })
+                }
+                Text("SL/TP فقط با bid عمومیِ دریافت‌شدهٔ بعدی بررسی می‌شود؛ بین دو دریافت ممکن است برخورد دیده نشود. کارمزد/لغزش در این حساب تمرینی صفر فرض شده‌اند؛ این عملکرد قابل معامله نیست. برای بستن دستی، در تب رمزارز نرخ تازه بگیر.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                if (nobitexTrades.isNotEmpty()) OutlinedButton(onClick = { confirmNobitexClear = true }) {
+                    Text("پاک کردن فقط تمرین‌های نوبیتکس")
+                }
+            }
+        }
         PerformancePanel(PerformanceMetrics.fromPaper(trades, settings.accountBalance),
             "حداکثر ۵۰۰ معاملهٔ آخر ژورنال · فرض موجودی اولیه ${formatPrice(settings.accountBalance)}$ (در طول تاریخچه ممکن است تغییر کرده باشد)")
         reports.firstOrNull()?.let { report ->
@@ -208,6 +233,11 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
         text = { Text("فقط اعلان‌های ۹/۹ ذخیره‌شده پاک می‌شوند؛ معاملات ژورنال تغییر نمی‌کنند. اگر کندل هنوز تازه باشد ممکن است دوباره هشدار دریافت کنید.") },
         confirmButton = { TextButton(onClick = { viewModel.clearOpportunityHistory(); confirmOpportunityClear = false }) { Text("حذف کاندیداها") } },
         dismissButton = { TextButton(onClick = { confirmOpportunityClear = false }) { Text("انصراف") } })
+    if (confirmNobitexClear) AlertDialog(onDismissRequest = { confirmNobitexClear = false },
+        title = { Text("تمرین‌های نوبیتکس حذف شوند؟") },
+        text = { Text("تمام تمرین‌های باز و بستهٔ BTCUSDT از این گوشی پاک می‌شوند؛ معاملات طلا و هشدارها دست‌نخورده باقی می‌مانند.") },
+        confirmButton = { TextButton(onClick = { viewModel.clearNobitexPractice(); confirmNobitexClear = false }) { Text("حذف تمرین‌ها") } },
+        dismissButton = { TextButton(onClick = { confirmNobitexClear = false }) { Text("انصراف") } })
 }
 
 @Composable
@@ -264,6 +294,27 @@ private fun TradeRow(trade: PaperTrade) {
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
             )
+        }
+    }
+}
+
+@Composable
+private fun NobitexPracticeRow(trade: NobitexPracticeTrade, canClose: Boolean, onClose: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
+        Text("${trade.symbol} · BUY spot فقط کاغذی · شناسهٔ ${trade.id.take(8)} · ${if (trade.isOpen) "باز" else "بسته"}",
+            style = MaterialTheme.typography.bodySmall, color = AurumColors.Cyan)
+        Text("${String.format("%.6f", trade.quantityBtc)} BTC · ورود ask ${formatPrice(trade.entryAsk)} ${trade.quoteUnit} · SL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)}",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextPrimary)
+        Text("شرایط ثبت: ${trade.conditionNote} · قیمت گوشی ${formatDateTime(trade.quoteReceivedAt)} · کندل بسته ${formatDateTime(trade.historyBarTime)} (${trade.historyInterval})",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        Text("ثبت ${formatDateTime(trade.openedAt)} · ارزش فرضی ${formatPrice(trade.notionalQuote)} ${trade.quoteUnit}",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        if (trade.isOpen) {
+            OutlinedButton(onClick = onClose, enabled = canClose) { Text("بستن تمرین با bid تازه") }
+        } else {
+            Text("خروج bid ${formatPrice(trade.exitBid)} · ${formatDateTime(trade.closedAt)} · ${trade.exitReason} · نتیجهٔ فرضی ${formatPrice(trade.pnlQuote)} ${trade.quoteUnit}",
+                style = MaterialTheme.typography.labelSmall,
+                color = if ((trade.pnlQuote ?: 0.0) >= 0) AurumColors.Green else AurumColors.Red)
         }
     }
 }

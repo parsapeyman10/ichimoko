@@ -13,6 +13,9 @@ import com.aurum.edge.data.MetaTraderCsv
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.MetaTraderImporter
 import com.aurum.edge.data.NewsRepository
+import com.aurum.edge.data.NobitexPublicData
+import com.aurum.edge.data.NobitexPracticeStore
+import com.aurum.edge.data.NobitexSnapshot
 import com.aurum.edge.data.PaperAutoTrader
 import com.aurum.edge.data.PaperOpportunityStore
 import com.aurum.edge.data.SettingsStore
@@ -45,6 +48,8 @@ class AppContainer(context: Context) {
     val candleCache = CandleCache(appContext)
     val journalStore = JournalStore(appContext)
     val opportunityStore = PaperOpportunityStore(appContext)
+    val nobitexPublic = NobitexPublicData()
+    val nobitexPractice = NobitexPracticeStore(appContext)
     val client = TwelveDataClient()
     val market = MarketRepository(appContext, client, candleCache, settingsStore, journalStore)
 
@@ -71,6 +76,12 @@ class AppContainer(context: Context) {
         val stream = appContext.contentResolver.openOutputStream(uri, "wt")
             ?: throw IllegalArgumentException("فایل مقصد برای ذخیره باز نشد")
         stream.bufferedWriter(Charsets.UTF_8).use { it.write(FreeHistoryDownloader.csv(result)) }
+    }
+
+    suspend fun exportNobitexCsv(uri: Uri, snapshot: NobitexSnapshot) = withContext(Dispatchers.IO) {
+        val stream = appContext.contentResolver.openOutputStream(uri, "wt")
+            ?: throw IllegalArgumentException("فایل مقصد برای ذخیره باز نشد")
+        stream.bufferedWriter(Charsets.UTF_8).use { it.write(NobitexPublicData.csv(snapshot)) }
     }
 
     /** Download real candles from the provider (no fallback, throws on failure). */
