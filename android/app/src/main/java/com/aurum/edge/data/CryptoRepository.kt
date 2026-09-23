@@ -2,6 +2,7 @@ package com.aurum.edge.data
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -101,7 +102,8 @@ class CryptoRepository(private val settings: SettingsStore, private val scope: C
                 return@withLock
             }
             val now = System.currentTimeMillis()
-            if (!fresh(checkedAt, now, 180_000L)) error("زمان بررسی سرور قدیمی یا نامعتبر است")
+            val verifiedAt = checkedAt ?: error("زمان بررسی سرور نامشخص است")
+            if (!fresh(verifiedAt, now, 180_000L)) error("زمان بررسی سرور قدیمی یا نامعتبر است")
             val filters = (root["filters"] as? JsonObject)?.mapValues { (_, value) ->
                 (value as? JsonPrimitive)?.contentOrNull.orEmpty()
             }.orEmpty()
@@ -116,7 +118,19 @@ class CryptoRepository(private val settings: SettingsStore, private val scope: C
                 "دامنهٔ پاسخ با غربالگر ثابت سازگار نیست"
             }
             _state.value = CryptoScanState(CryptoScanStatus.ONLINE, candidates, filters,
-                scanned, preselected, provider, checkedAt, cached = status.text("cached") == "true")
+                scanned, preselected, provider, verifiedAt, cached = status.text("cached") == "true")
+            // A page left open must not keep displaying once-fresh evidence indefinitely.
+            scope.launch {
+                delay((verifiedAt + 180_001L - System.currentTimeMillis()).coerceAtLeast(0L))
+                mutex.withLock {
+                    val current = _state.value
+                    if (current.status == CryptoScanStatus.ONLINE && current.checkedAt == verifiedAt &&
+                        !fresh(verifiedAt, System.currentTimeMillis(), 180_000L)) {
+                        _state.value = CryptoScanState(status = CryptoScanStatus.UNAVAILABLE,
+                            error = "اعتبار زمانی غربالگری تمام شد؛ برای بررسی دوباره بزنید")
+                    }
+                }
+            }
         } catch (e: Exception) {
             if (settings.read().newsBaseUrl == base) _state.value = CryptoScanState(
                 status = CryptoScanStatus.UNAVAILABLE,
