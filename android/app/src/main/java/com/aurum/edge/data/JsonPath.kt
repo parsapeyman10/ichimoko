@@ -38,8 +38,8 @@ object JsonPath {
         for (match in tokens) {
             current = when {
                 match.groupValues[1].isNotEmpty() -> {
-                    val object = current as? JsonObject
-                    object?.get(match.groupValues[1]) ?: if (current is JsonArray) current else null
+                    val obj = current as? JsonObject
+                    obj?.get(match.groupValues[1]) ?: if (current is JsonArray) current else null
                 }
                 else -> (current as? JsonArray)?.getOrNull(match.groupValues[2].toInt())
             } ?: return null
