@@ -79,7 +79,14 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jsoup:jsoup:1.18.3")
 
-    // JVM unit tests for the pure engine code (aggregation + walk-forward honesty checks).
-    // They never run inside the APK; CI runs them as a non-blocking step.
+    // JVM unit tests for the pure engine code and read-only data validation.
+    // They never run inside the APK; release assembly requires them to pass below.
     testImplementation("junit:junit:4.13.2")
+}
+
+// The published workflow currently makes its separate JVM-test step non-blocking.
+// Enforce a green test suite at the release task itself so it cannot upload an APK
+// after a failed test (including when the workflow patch cannot be pushed).
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    dependsOn("testDebugUnitTest")
 }
