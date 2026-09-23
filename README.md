@@ -42,6 +42,6 @@ cd android
 ./gradlew testDebugUnitTest assembleDebug
 ```
 
-Requires JDK 17 + Android SDK 35. Alternatively run the existing **Android APK** GitHub Actions workflow (`.github/workflows/main.yml`); it runs tests before producing debug and debug-signed “release” **test** APK artifacts. Enter the read-only Twelve Data key in the app's Settings after installation; baking even a GitHub Actions secret into an APK would disclose it. Details: [docs/ANDROID.md](docs/ANDROID.md), [android/README.md](android/README.md).
+Requires JDK 17 + Android SDK 35. Alternatively use the **Android APK** GitHub Actions workflow (`.github/workflows/main.yml`) for debug and debug-signed “release” **test** APK artifacts; on the current remote workflow JVM tests are non-blocking, so inspect their result separately. The proposed fail-on-test workflow change needs GitHub `workflows` permission to push. Enter the read-only Twelve Data key in the app's Settings after installation; baking even a GitHub Actions secret into an APK would disclose it. Details: [docs/ANDROID.md](docs/ANDROID.md), [android/README.md](android/README.md).
 
 Decision support only, not financial advice. No official TSETMC contract, Nobitex/MT5 integration, Meme Scanner or real order path is claimed ready; live trading requires an independently audited server-side execution system, licensed data/news and user/broker approvals.

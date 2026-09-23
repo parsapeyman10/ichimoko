@@ -253,7 +253,8 @@ class MarketRepository(
     private suspend fun persistCache() {
         val current = settings.read()
         if (_state.value.symbol != current.symbol || _state.value.interval != current.interval) return
-        val bars = cachedBars.values.sortedBy { it.time }.map { it.copy(closed = true) }
+        // Do not turn an unfinished live bar into a closed historical candle on restart.
+        val bars = cachedBars.values.sortedBy { it.time }
         if (bars.isNotEmpty()) cache.save(current.symbol, current.interval, bars)
     }
 

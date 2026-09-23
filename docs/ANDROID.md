@@ -16,7 +16,7 @@ cd android
 
 ## ساخت با GitHub Actions
 
-روی تغییرات `android/**` در PR و شاخهٔ اصلی، یا با `Run workflow` در **Actions → Android APK**، تست‌های JVM قبل از APK اجرا می‌شوند. اگر تست/بیلد خطا داد **Artifact ساخته نمی‌شود**؛ لاگ مرحلهٔ `Unit tests, then build debug + release APK` را بررسی کن. در اجرای موفق، `aurum-edge-apk` را از Artifacts دانلود و zip را باز کن؛ دو فایل `AurumEdge-debug.apk` و `AurumEdge-release.apk` دارد.
+روی تغییرات `android/**` در PR و شاخهٔ اصلی، یا با `Run workflow` در **Actions → Android APK**، بیلد و تست انجام می‌شود. **نسخهٔ فعلی منتشرشدهٔ workflow تست‌ها را بعد از بیلد و غیرمسدودکننده اجرا می‌کند**؛ حتماً لاگ `Unit tests (engine truth checks)` و مرحلهٔ ساخت را بررسی کن، حتی اگر Artifact موجود بود. وصلهٔ محلی برای اجباری‌کردن تست‌ها آماده است اما push آن مجوز `workflows` می‌خواهد. در اجرای موفق، `aurum-edge-apk` را از Artifacts دانلود و zip را باز کن؛ دو فایل `AurumEdge-debug.apk` و `AurumEdge-release.apk` دارد.
 
 پس از نصب روی گوشی (Android 8+)، اگر فایل APK را از خارج فروشگاه نصب می‌کنی اجازهٔ «نصب از این منبع» را فقط برای مدیر فایل مورد استفاده بده. کلید داده‌خوانی Twelve Data را **در خود تب تنظیمات برنامه** وارد کن؛ کلید معاملاتی را آنجا وارد نکن. برای دیده‌بان منابع عمومی، کلید چارت لازم نیست. اخبار فارسی نیازمند سرور HTTPS و فید قانونی پیکربندی‌شده است. آدرس `localhost` روی گوشی آدرس سیستم توسعه نیست.
 

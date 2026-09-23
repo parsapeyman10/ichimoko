@@ -19,7 +19,7 @@
 
 1. بک‌اند: `cd backend && python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt && cp .env.example .env && uvicorn app.main:app --host 0.0.0.0 --port 8000`.
 2. `.env`: برای چارت وب `AURUM_TWELVE_DATA_API_KEY`؛ برای خبر فارسی **فید دارای مجوز** در `AURUM_FA_NEWS_RSS_URL` و دامنهٔ دقیقش در `AURUM_FA_NEWS_ALLOWED_HOST`. در نبود فید، اخبار خالی و گیت `UNKNOWN` است.
-3. اندروید: JDK 17 و Android SDK 35؛ `cd android && ./gradlew testDebugUnitTest assembleDebug`. برای APK تستی، workflow موجود در `.github/workflows/main.yml` نیز `testDebugUnitTest` را قبل از ساخت اجرا می‌کند. کلید Twelve Data **در APK کامپایل نمی‌شود**؛ در تنظیمات گوشی وارد می‌شود (فقط داده‌خوانی).
+3. اندروید: JDK 17 و Android SDK 35؛ `cd android && ./gradlew testDebugUnitTest assembleDebug`. برای APK تستی، workflow گیت‌هاب فعلاً تست‌های JVM را **بعد از ساخت و غیرمسدودکننده** اجرا می‌کند؛ اصلاح محلیِ ترتیب/سخت‌گیری workflow به مجوز `workflows` برای push نیاز دارد، بنابراین گزارش تست را در Actions جداگانه بررسی کن. کلید Twelve Data **در APK کامپایل نمی‌شود**؛ در تنظیمات گوشی وارد می‌شود (فقط داده‌خوانی).
 4. در تنظیمات گوشی، کلید Twelve Data چارت را وارد کن؛ در «منابع هر نماد» منابع/کلید خواندنی نماد را تنظیم کن و تب دیده‌بان را باز کن. برای خبر، یک نشانی HTTPS عمومی بک‌اند (`https://api.example.com`) وارد و گزینهٔ توقف ورود کاغذی را فعال کن؛ آدرس `localhost` روی گوشی به کامپیوتر شما اشاره نمی‌کند.
 5. در «یادگیری»، CSV با ستون‌های DATE/TIME/OPEN/HIGH/LOW/CLOSE/TICKVOL و UTC offset سرور بروکر را انتخاب یا URL عمومی HTTPS آن را بده. مشخصات ابزار و اصالت داده را دستی بررسی کن.
 

@@ -148,7 +148,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             ) { Text("پاک کردن ژورنال") }
         }
         PerformancePanel(PerformanceMetrics.fromPaper(trades, settings.accountBalance),
-            "معاملات کاغذی تسویه‌شده · فرض موجودی اولیه ${formatPrice(settings.accountBalance)}$ (در طول تاریخچه ممکن است تغییر کرده باشد)")
+            "حداکثر ۵۰۰ معاملهٔ آخر ژورنال · فرض موجودی اولیه ${formatPrice(settings.accountBalance)}$ (در طول تاریخچه ممکن است تغییر کرده باشد)")
         reports.firstOrNull()?.let { report ->
             StoredReportCard(report)
             PerformanceMetrics.fromStoredReport(report.outOfSample)?.let { performance ->
