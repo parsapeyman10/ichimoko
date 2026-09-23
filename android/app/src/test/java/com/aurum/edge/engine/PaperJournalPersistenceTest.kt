@@ -1,15 +1,26 @@
 package com.aurum.edge.engine
 
+import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.Candle
+import com.aurum.edge.core.ConfluenceItem
+import com.aurum.edge.core.FeedMode
+import com.aurum.edge.core.FeedStatus
+import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.PaperNewsEvidence
 import com.aurum.edge.core.PaperNewsRecord
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.data.JournalStore
+import com.aurum.edge.data.MarketState
+import com.aurum.edge.data.parseWebNews
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import java.time.Instant
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -29,6 +40,44 @@ class PaperJournalPersistenceTest {
         takeProfit = 3010.0, interval = Interval.M5, barTime = 1_800_000_000_000L)
     private val news = PaperNewsRecord("test-model", "BUY", 90.0, 1_800_000_000_100L,
         listOf(PaperNewsEvidence("id", "Publisher", "Gold headline", "https://publisher.example/news", 1_800_000_000_000L)))
+
+    @Test fun backendJsonEightTechnicalChecksNinthAiPaperOpenTickCloseAndReload() = runBlocking {
+        val now = 1_800_000_000_000L
+        val observed = Instant.ofEpochMilli(now)
+        val articleTime = Instant.ofEpochMilli(now - 60_000)
+        val json = """{"status":{"configured":true,"state":"online","sources":[
+            {"name":"Publisher","state":"online","feed":"https://publisher.example/rss"}]},
+            "articles":[{"id":"verified","source":"Publisher","headline":"Gold dollar update",
+                "published_at":"$articleTime","url":"https://publisher.example/news"}],
+            "guard":{"state":"CLEAR"},"checked_at":"$observed",
+            "ai_confluence":{"status":"AVAILABLE","symbol":"XAU/USD","direction":"BUY",
+                "confidence":90,"model":"test-model","checked_at":"$observed",
+                "evidence_ids":["verified"]}}"""
+        val parsed = parseWebNews(Json.parseToJsonElement(json) as JsonObject, now)
+        val bar = now - Interval.M5.millis
+        val technical = signal.copy(barTime = bar,
+            confluence = (1..8).map { ConfluenceItem("فنی $it", true, "fixture") })
+        val verified = NewsConfluence.apply(technical, "XAU/USD", parsed, now)!!
+        val current = MarketState(symbol = "XAU/USD", interval = Interval.M5,
+            candles = listOf(Candle(bar, 3000.0, 3001.0, 2999.0, 3000.0)),
+            lastPrice = 3000.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now), signal = verified)
+        val config = AppSettings(backgroundMonitor = true, autoPaperTrading = true)
+        assertEquals(SignalAction.BUY, verified.action)
+        assertEquals(9, verified.confluence.size)
+        assertNull(PaperAutoRules.blocker(current, config, parsed, now))
+        val file = journalFile()
+        val store = JournalStore(context, file)
+        store.load()
+        val opened = store.open(verified, "XAU/USD", 3000.0, 50_000.0, 0.5,
+            automatic = true, newsEvidence = NewsConfluence.record(parsed))
+        val tick = opened.openedAt + 1000L
+        store.settle(Candle(tick, 3010.0, 3011.0, 3010.0, 3011.0), "XAU/USD", tick)
+        val restored = JournalStore(context, file).also { it.load() }
+        assertEquals(1, restored.stats().total)
+        assertEquals(opened.id, restored.trades.value.single().id)
+        assertEquals("verified", restored.trades.value.single().newsEvidence!!.evidence.single().id)
+        assertFalse(restored.trades.value.single().isOpen)
+    }
 
     @Test fun autoOpenSettlementAndReloadKeepSameTradeAndEvidence() = runBlocking {
         val file = journalFile()
