@@ -1,52 +1,35 @@
-# Trading API
+# Trading API — تحلیل پژوهشی و مرز اجرای امن
 
-FastAPI service for XAU/USD analysis on **real provider data only**: normalized candles, indicators,
-strategy evaluation, real-candle backtests, walk-forward, MTF analysis, news sentiment and the paper
-journal.
+FastAPI برای چارت/بک‌تست XAU/USD از **دادهٔ واقعی Twelve Data**، خبر انگلیسی اختیاری FMP و خبر فارسی RSS/Atom دارای مجوز. اگر دیتای معتبر نبود، خطای ۵۰۳ یا وضعیت صریحِ خالی/نامشخص برگردانده می‌شود؛ شمع و تیتر ساختگی تولید نمی‌شود.
 
-## Data policy
-
-- Prices/candles come from Twelve Data (`AURUM_TWELVE_DATA_API_KEY`). History is cached (memory +
-  disk) so an offline restart can still show the last real bars, clearly marked as cached.
-- News comes from a licensed provider when configured; otherwise the list is empty and the status
-  says why. No headline or economic-calendar entry is ever invented.
-- When the provider is unavailable every data route answers `503` with a Persian explanation.
-  Client apps render that state instead of a fabricated chart.
-- `backend/tests/test_real_data_policy.py` asserts all of the above.
-
-## Environment
-
-All variables use the `AURUM_` prefix — see `.env.example`.
+## راه‌اندازی
 
 ```bash
-AURUM_TWELVE_DATA_API_KEY=...   # required for any market data
-AURUM_FMP_API_KEY=...           # optional: news + calendar
-AURUM_OPENAI_API_KEY=...        # optional: LLM news analysis (falls back to rules)
-AURUM_MARKET_SYMBOL=XAU/USD
-```
-
-## Local development
-
-```bash
+cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-pytest -q
+cp .env.example .env     # کلیدهای خود را فقط در این فایل محلی/Secret Manager بگذار
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+python -m pytest -q
 ```
 
-Useful endpoints:
+- `AURUM_TWELVE_DATA_API_KEY`: برای کندل چارت و بک‌تست بک‌اند. اپ اندروید کلید خواندنی خودش را جداگانه در تنظیمات دستگاه می‌گیرد.
+- `AURUM_FA_NEWS_RSS_URL` + `AURUM_FA_NEWS_ALLOWED_HOST`: URL مجاز HTTPS روی پورت 443 و دامنهٔ دقیق آن. **خودتان مجوز استفاده از فید را تأمین کنید**؛ هیچ فید/تیتر ساختگی یا اسکرپ پیش‌فرض وجود ندارد.
+- `AURUM_FA_NEWS_SOURCE`: نام ناشر برای نمایش؛ `AURUM_NEWS_HOLD_MINUTES`: توقف بعد از انتشار خبر پراثر (پیش‌فرض 45). تحلیل ریسک فارسی فعلاً مبتنی بر واژه‌های محافظه‌کارانه است، نه تقویم کامل.
+- `AURUM_FMP_API_KEY`: تیترهای انگلیسی اختیاری؛ مسیر تقویم اقتصادی فعلاً خالی است. `AURUM_OPENAI_API_KEY`: برای مسیر `/news/analyze` اختیاری است و جای خبر دارای مجوز را نمی‌گیرد.
 
-| Endpoint | Purpose |
+## مسیرهای مهم
+
+| مسیر | کاربرد |
 |---|---|
-| `GET /api/v1/health` | process health |
-| `GET /api/v1/data/status` | key configured? feed state? which timeframes have real bars |
-| `GET /api/v1/market/{tf}/candles` | real candles (503 when the provider is down) |
-| `GET /api/v1/backtest/run` | replay of the live strategy on real candles |
-| `GET /api/v1/backtest/forward` | in-sample vs out-of-sample split of the real series |
-| `GET /api/v1/journal` | paper journal built from real signals |
-| `WS /ws/v1/market/xauusd` | real ticks pushed from the provider |
+| `GET /api/v1/health` و `/api/v1/data/status` | وضعیت فید و کلید داده‌خوانی |
+| `GET /api/v1/market/{tf}/candles` | کندل واقعی؛ در نبود داده 503 |
+| `GET /api/v1/backtest/run` | بک‌تست روی کندل واقعی با گزارش `performance` (۱۸ شاخص و کارمزد؛ Sharpe هر معامله، نه سالانه) |
+| `GET /api/v1/backtest/forward` | تست داخل/خارج نمونه |
+| `GET /api/v1/news/fa` | تیترهای فارسی فید دارای مجوز، تحلیل محافظه‌کارانه و `guard: CLEAR / BLOCKED / UNKNOWN`؛ کش قدیمی/فید قطع‌شده = `UNKNOWN` |
+| `GET /api/v1/execution/status` | Kill switch و اتصال‌نداشتن Nobitex/MT5 |
+| `POST /api/v1/execution/preflight` | دلیل‌های مسدودبودن؛ صرفاً اطلاع‌رسانی، هیچ سفارش صادر نمی‌کند |
+| `POST /api/v1/execution/orders` | **همیشه 503** تا آداپتر، احراز هویت، ریسک و ممیزی واقعی افزوده شوند |
+| `WS /ws/v1/market/xauusd` | تیک‌های واقعی همان نماد بک‌اند |
 
-The in-process `MarketHub` is suitable for a local preview. In production, put normalized events on
-NATS JetStream/Redpanda, make socket gateways stateless consumers, and store completed bars and
-decisions in TimescaleDB; Redis is only hot/reconstructible state.
+بک‌اند فعلی **تک‌نمادی و بدون احراز هویت کاربران** است و برای ترید زنده یا سرویس عمومی آماده نیست. کلید Nobitex، رمز MT5 و توکن Bridge را نه به اپ بده، نه به API فعلی. برنامهٔ اتصال واقعی و موارد ناتمام: [نقشهٔ راه](../docs/ROADMAP_FA.md).

@@ -9,12 +9,8 @@ if (System.getenv("GITHUB_ACTIONS") == "true") {
     println("::warning::aurum trace 4/4 · app build script evaluated")
 }
 
-// Optional: bake a Twelve Data key into the build so the APK ships ready-to-run.
-// Set it as repository secret TD_API_KEY in GitHub Actions, or pass -PtdApiKey=... locally.
-val tdApiKey: String = (project.findProperty("tdApiKey") as String?)
-    ?: System.getenv("TD_API_KEY")
-    ?: ""
-
+// Never bake provider credentials into an APK (even a GitHub Actions secret is extractable).
+// Read-only market keys are entered on the device; trading keys must stay server-side.
 android {
     namespace = "com.aurum.edge"
     compileSdk = 35
@@ -26,7 +22,7 @@ android {
         versionCode = 1
         versionName = "1.0.0"
         resourceConfigurations += listOf("en", "fa")
-        buildConfigField("String", "DEFAULT_TD_API_KEY", "\"$tdApiKey\"")
+        buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
     }
 
     buildTypes {

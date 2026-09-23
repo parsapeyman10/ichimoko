@@ -78,7 +78,10 @@ class SignalMonitorService : Service() {
                     )
                 }
                 val signal = state.signal
-                if (signal != null && signal.isActionable && container.settingsStore.read().notifyOnSignal) {
+                if (signal != null && signal.isActionable && !state.showingCachedData &&
+                    state.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
+                    state.candles.lastOrNull()?.time?.let { System.currentTimeMillis() - it <= state.interval.millis * 2 } == true &&
+                    container.settingsStore.read().notifyOnSignal) {
                     val key = "${signal.action}-${signal.interval.label}-${signal.barTime}"
                     if (key != lastAlertKey) {
                         lastAlertKey = key

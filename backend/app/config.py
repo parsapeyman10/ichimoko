@@ -24,6 +24,12 @@ class Settings(BaseSettings):
 
     # Optional licensed news / calendar provider
     fmp_api_key: str | None = None
+    # User-provided, licensed Persian RSS/Atom feed. Both URL and exact host are required;
+    # no built-in scraping of publishers or invented/translated headlines.
+    fa_news_rss_url: str | None = None
+    fa_news_allowed_host: str | None = None
+    fa_news_source: str = "منبع خبری دارای مجوز"
+    news_hold_minutes: int = 45
 
     # Optional NLP stage (only used when a key is configured)
     openai_api_key: str | None = None

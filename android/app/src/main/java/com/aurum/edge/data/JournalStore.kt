@@ -88,23 +88,30 @@ class JournalStore(context: Context) {
 
     suspend fun open(
         signal: Signal,
+        symbol: String,
         price: Double,
         balance: Double,
         riskPercent: Double,
         mtf: MtfSnapshotRecord? = null,
     ): PaperTrade {
-        val stop = signal.stopLoss ?: price
-        val stopDistance = kotlin.math.abs(price - stop).takeIf { it > 0.0 } ?: 0.0
+        val stop = signal.stopLoss ?: throw IllegalArgumentException("سیگنال حد ضرر ندارد")
+        val target = signal.takeProfit ?: throw IllegalArgumentException("سیگنال حد سود ندارد")
+        require(price.isFinite() && price > 0 && stop.isFinite() && target.isFinite() &&
+            ((signal.action == com.aurum.edge.core.SignalAction.BUY && stop < price && target > price) ||
+                (signal.action == com.aurum.edge.core.SignalAction.SELL && stop > price && target < price))) {
+            "قیمت یا حد ضرر/سود سیگنال معتبر نیست"
+        }
+        val stopDistance = kotlin.math.abs(price - stop)
         val riskUsd = balance * riskPercent / 100.0
-        val oz = if (stopDistance > 0) (riskUsd / stopDistance) else 1.0
+        val oz = riskUsd / stopDistance
         val trade = PaperTrade(
             id = UUID.randomUUID().toString().take(8),
-            symbol = "XAU/USD",
+            symbol = symbol,
             interval = signal.interval,
             action = signal.action,
             entry = price,
             stopLoss = stop,
-            takeProfit = signal.takeProfit ?: price,
+            takeProfit = target,
             confidence = signal.confidence,
             riskReward = signal.riskReward ?: 1.8,
             openedAt = System.currentTimeMillis(),
@@ -120,12 +127,14 @@ class JournalStore(context: Context) {
      * Mark open trades against the newest real candle.
      * A trade closes only when a real price actually reached its stop or target.
      */
-    suspend fun settle(candle: Candle) {
+    suspend fun settle(candle: Candle, symbol: String, observedAt: Long) {
         val current = _trades.value
         if (current.none { it.isOpen }) return
         var changed = false
         val updated = current.map { t ->
-            if (!t.isOpen) return@map t
+            // A different symbol or a bar opened before this position must never settle it.
+            // In particular, caching/replaying historical bars cannot close a new position.
+            if (!t.isOpen || t.symbol != symbol || candle.time <= t.openedAt) return@map t
             val hitStop = if (t.action == com.aurum.edge.core.SignalAction.BUY) {
                 candle.low <= t.stopLoss
             } else {
@@ -146,7 +155,7 @@ class JournalStore(context: Context) {
             }
             changed = true
             t.copy(
-                closedAt = candle.time + 60_000L,
+                closedAt = observedAt,
                 exitPrice = exit,
                 exitReason = if (hitStop) "حد ضرر (قیمت واقعی)" else "حد سود (قیمت واقعی)",
                 pnlUsd = kotlin.math.round(pnlPerOz * t.positionOz * 100.0) / 100.0,

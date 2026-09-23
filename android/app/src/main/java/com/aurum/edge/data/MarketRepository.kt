@@ -55,6 +55,7 @@ class MarketRepository(
     private var scope: CoroutineScope? = null
     private var pollJob: Job? = null
     private var streamJob: Job? = null
+    private var bootstrapJob: Job? = null
     private var cachedBars: MutableMap<Long, Candle> = mutableMapOf()
     private var lastCacheWrite = 0L
 
@@ -63,34 +64,40 @@ class MarketRepository(
     }
 
     fun start() {
+        stop()
         val current = settings.read()
-        _state.value = _state.value.copy(symbol = current.symbol, interval = current.interval)
-        if (!current.hasKey) {
-            _state.value = _state.value.copy(
-                feed = FeedStatus(FeedMode.NO_KEY, "کلید Twelve Data را در تنظیمات وارد کنید — بدون کلید هیچ داده‌ای نمایش داده نمی‌شود"),
-            )
-            return
+        if (_state.value.symbol != current.symbol || _state.value.interval != current.interval) {
+            cachedBars.clear() // never reuse a different instrument's bars or signal
+            _state.value = MarketState(symbol = current.symbol, interval = current.interval)
         }
-        loadCacheThenRefresh()
-        startStream()
-        startPolling()
+        _state.value = _state.value.copy(
+            feed = FeedStatus(if (current.hasKey) FeedMode.CONNECTING else FeedMode.NO_KEY,
+                if (current.hasKey) "در حال دریافت…" else "کلید Twelve Data وارد نشده است"),
+        )
+        loadCacheThenRefresh() // cached real bars are read-only even without the key
+        if (current.hasKey) {
+            startStream()
+            startPolling()
+        }
     }
 
     fun stop() {
         pollJob?.cancel(); pollJob = null
         streamJob?.cancel(); streamJob = null
+        bootstrapJob?.cancel(); bootstrapJob = null
     }
 
     fun restart() {
         stop()
+        cachedBars.clear()
+        val current = settings.read()
+        _state.value = MarketState(symbol = current.symbol, interval = current.interval)
         start()
     }
 
     fun setInterval(interval: Interval) {
         if (_state.value.interval == interval) return
         settings.update { it.copy(interval = interval) }
-        _state.value = _state.value.copy(interval = interval, candles = emptyList(), signal = null)
-        cachedBars = mutableMapOf()
         restart()
     }
 
@@ -101,11 +108,12 @@ class MarketRepository(
 
     private fun loadCacheThenRefresh() {
         val s = scope ?: return
-        s.launch {
+        bootstrapJob = s.launch {
             val current = settings.read()
             val cached = cache.load(current.symbol, current.interval)
+            if (settings.read().symbol != current.symbol || settings.read().interval != current.interval) return@launch
             if (cached.isNotEmpty()) {
-                cachedBars = cached.associateBy { it.time }.toMutableMap()
+                cached.forEach { bar -> if (bar.time !in cachedBars) cachedBars[bar.time] = bar }
                 evaluateAndPublish(showingCache = true)
             }
             refresh()
@@ -125,6 +133,8 @@ class MarketRepository(
         _state.value = _state.value.copy(feed = _state.value.feed.copy(mode = FeedMode.CONNECTING, detail = "دریافت کندل‌های واقعی…"))
         try {
             val fetched = client.fetchCandles(current.apiKey, current.symbol, current.interval, outputSize = 1500)
+            if (settings.read().symbol != current.symbol || settings.read().interval != current.interval ||
+                _state.value.symbol != current.symbol) return
             val periodStart = currentPeriodStart(current.interval)
             fetched.forEach { bar ->
                 // The bar whose period is still open is kept as "forming" and excluded from the engine.
@@ -229,18 +239,20 @@ class MarketRepository(
             persistCache()
         }
         // settle paper trades against real prices as they arrive
-        journal.settle(bar.copy(closed = true))
+        journal.settle(Candle(time = at, open = price, high = price, low = price, close = price), current.symbol, at)
     }
 
     private fun publishOffline(detail: String) {
         _state.value = _state.value.copy(
             feed = _state.value.feed.copy(mode = FeedMode.OFFLINE, detail = detail),
             showingCachedData = _state.value.candles.isNotEmpty(),
+            signal = null, // never advertise an old signal as live during an outage
         )
     }
 
     private suspend fun persistCache() {
         val current = settings.read()
+        if (_state.value.symbol != current.symbol || _state.value.interval != current.interval) return
         val bars = cachedBars.values.sortedBy { it.time }.map { it.copy(closed = true) }
         if (bars.isNotEmpty()) cache.save(current.symbol, current.interval, bars)
     }
@@ -257,7 +269,7 @@ class MarketRepository(
             _state.value = _state.value.copy(candles = emptyList(), lastPrice = null, showingCachedData = false)
             return
         }
-        val signal = withContext(Dispatchers.Default) {
+        val signal = if (showingCache) null else withContext(Dispatchers.Default) {
             runCatching {
                 SignalEngine.evaluate(bars, current.interval, current.minConfidence, current.spreadPrice)
             }.getOrNull()
@@ -266,9 +278,11 @@ class MarketRepository(
             candles = bars,
             lastPrice = lastPrice,
             signal = signal,
-            showingCachedData = showingCache && _state.value.feed.mode == FeedMode.OFFLINE,
+            showingCachedData = showingCache,
         )
-        bars.filter { it.closed }.lastOrNull()?.let { journal.settle(it) }
+        if (!showingCache) bars.filter { it.closed }.lastOrNull()?.let { bar ->
+            journal.settle(bar, current.symbol, bar.time + current.interval.millis)
+        }
     }
 
     private fun currentPeriodStart(interval: Interval): Long {

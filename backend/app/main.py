@@ -34,9 +34,11 @@ from app.services.backtest import run_backtest, stress_test_from_trades
 from app.services.broker import BROKERS, RECOMMENDED, get_broker
 from app.services.candle_builder import CandleBuilder
 from app.services.forward_test import run_forward_test
+from app.services.execution_gate import OrderIntent, preflight as order_preflight, status as execution_status
 from app.services.history import DataUnavailable, load_history
 from app.services.market_feed import market_ticks
 from app.services.news_feed import NewsAggregator
+from app.services.persian_news import PersianNewsFeed
 from app.services.sentiment import SentimentEngine
 from app.services.strategy import evaluate_scalp, explain_profitability
 from app.services.ytd_trades import get_ytd_report
@@ -83,6 +85,7 @@ class MarketHub:
 hub = MarketHub()
 sentiment = SentimentEngine(settings)
 news_aggregator = NewsAggregator(settings)
+persian_news = PersianNewsFeed(settings)
 
 
 async def run_market_pipeline() -> None:
@@ -259,6 +262,30 @@ async def news_headlines():
 async def calendar():
     events = await news_aggregator.fetch_calendar()
     return {"status": news_aggregator.status(), "events": events}
+
+
+@app.get("/api/v1/news/fa")
+async def persian_headlines():
+    """Licensed Persian headlines, conservative rule analysis and a fail-closed paper-trade guard."""
+    return await persian_news.snapshot()
+
+
+# ─── real execution boundary (intentionally disabled until independently audited) ──
+@app.get("/api/v1/execution/status")
+async def get_execution_status():
+    return execution_status()
+
+
+@app.post("/api/v1/execution/preflight")
+async def check_order_preflight(intent: OrderIntent):
+    return order_preflight(intent)
+
+
+@app.post("/api/v1/execution/orders")
+async def submit_real_order(intent: OrderIntent):
+    # No broker signing, network call, account credentials or acceptance of client-provided
+    # 'safe' flags. This endpoint cannot execute even if a malicious client calls it.
+    raise HTTPException(status_code=503, detail="ارسال سفارش واقعی غیرفعال است؛ اتصال احراز هویت‌شده و حسابرسی‌شده نصب نشده است")
 
 
 # ─── strategy / risk ───────────────────────────────────────────────────

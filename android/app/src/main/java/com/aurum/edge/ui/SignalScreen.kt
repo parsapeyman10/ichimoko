@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.data.MarketState
+import com.aurum.edge.data.NewsGate
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.ui.components.ConfluenceRow
 import com.aurum.edge.ui.components.Pill
@@ -26,6 +27,7 @@ import com.aurum.edge.ui.components.SignalSummaryCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.components.formatTime
+import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
 import kotlin.math.abs
 
@@ -33,6 +35,7 @@ import kotlin.math.abs
 fun SignalScreen(viewModel: AurumViewModel, market: MarketState) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val mtf by viewModel.mtf.collectAsStateWithLifecycle()
+    val news by viewModel.news.collectAsStateWithLifecycle()
     val signal = market.signal
 
     Column(
@@ -45,6 +48,15 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState) {
             signal = signal,
             onOpenPaperTrade = { signal?.let(viewModel::openPaperTrade) },
         )
+        SectionCard("توقف بر اساس خبر فارسی", "برای ورود کاغذی؛ سفارش واقعی در این نسخه وجود ندارد") {
+            val blocked = settings.pauseOnNews && (news.gate != NewsGate.CLEAR || news.lastCheckedAt == null ||
+                System.currentTimeMillis() - news.lastCheckedAt!! > 180_000L)
+            Text(if (!settings.pauseOnNews) "خاموش است؛ برای استفاده سرور خبر مجاز و سوییچ تنظیمات را فعال کنید."
+                else if (blocked) "ورود کاغذی متوقف: ${news.reason}" else "فقط در فید تنظیم‌شده فعلاً خبر پراثر تازه پیدا نشد.",
+                style = MaterialTheme.typography.bodySmall, color = if (blocked) AurumColors.Red else AurumColors.TextSecondary)
+            Text("آخرین بررسی: ${relativeTime(news.lastCheckedAt)} · خبر ناقص/قدیمی اجازهٔ ورود نمی‌دهد.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        }
 
         signal?.let { s ->
             SectionCard(

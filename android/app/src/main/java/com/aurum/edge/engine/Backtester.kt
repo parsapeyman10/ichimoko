@@ -36,6 +36,7 @@ object Backtester {
 
     data class Result(
         val symbol: String,
+        val dataSource: String,
         val interval: Interval,
         val fromTime: Long,
         val toTime: Long,
@@ -66,6 +67,7 @@ object Backtester {
         candles: List<Candle>,
         interval: Interval,
         symbol: String,
+        dataSource: String = "Twelve Data (دیتای واقعی)",
         initialBalance: Double = 100.0,
         riskPercent: Double = 0.5,
         spreadPrice: Double = 0.30,
@@ -199,6 +201,8 @@ object Backtester {
             val pnl = (exitFill - pos.entry) * dir * pos.positionOz - fees
             val risk = abs(pos.entry - pos.stopLoss) * pos.positionOz
             balance += pnl
+            peak = maxOf(peak, balance)
+            maxDrawdownPct = maxOf(maxDrawdownPct, (peak - balance) / peak * 100.0)
             trades += Trade(
                 side = pos.side,
                 entryTime = pos.entryTime,
@@ -223,7 +227,7 @@ object Backtester {
         val rList = trades.map { it.rMultiple }
 
         val note = buildString {
-            append("شبیه‌سازی روی ${bars.size} کندل واقعی ${interval.label} دریافت‌شده از Twelve Data")
+            append("بک‌تست روی ${bars.size} کندل ${interval.label} از $dataSource")
             if (skippedMinLot > 0) {
                 append(" — $skippedMinLot سیگنال به‌دلیل حداقل حجم بروکر (0.01 لات = 1 انس) قابل اجرا نبود و رد شد")
             }
@@ -234,6 +238,7 @@ object Backtester {
 
         return Result(
             symbol = symbol,
+            dataSource = dataSource,
             interval = interval,
             fromTime = bars.firstOrNull()?.time ?: 0L,
             toTime = bars.lastOrNull()?.time ?: 0L,

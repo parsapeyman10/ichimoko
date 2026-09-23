@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShowChart
+import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +50,7 @@ import com.aurum.edge.ui.theme.AurumColors
 enum class AurumTab(val label: String, val icon: ImageVector) {
     Chart("چارت", Icons.Filled.ShowChart),
     Signal("سیگنال", Icons.Filled.Bolt),
+    Watch("دیده‌بان", Icons.Filled.ViewList),
     Learn("یادگیری", Icons.Filled.School),
     Journal("ژورنال", Icons.Filled.Bookmarks),
     Settings("تنظیمات", Icons.Filled.Settings),
@@ -91,23 +93,26 @@ fun AurumRoot(viewModel: AurumViewModel) {
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            AppHeader(
-                symbol = market.symbol,
-                price = market.lastPrice,
-                interval = market.interval,
-                lastUpdate = market.feed.lastSuccessAt,
-                onRefresh = { viewModel.refreshNow() },
-            )
-            FeedBanner(
-                status = market.feed,
-                lastPrice = market.lastPrice,
-                lastBarTime = market.candles.lastOrNull()?.time,
-                showingCache = market.showingCachedData,
-            )
+            if (tab != AurumTab.Watch) {
+                AppHeader(
+                    symbol = market.symbol,
+                    price = market.lastPrice,
+                    interval = market.interval,
+                    lastUpdate = market.feed.lastSuccessAt,
+                    onRefresh = { viewModel.refreshNow() },
+                )
+                FeedBanner(
+                    status = market.feed,
+                    lastPrice = market.lastPrice,
+                    lastBarTime = market.candles.lastOrNull()?.time,
+                    showingCache = market.showingCachedData,
+                )
+            }
             Box(modifier = Modifier.fillMaxSize()) {
                 when (tab) {
                     AurumTab.Chart -> ChartScreen(viewModel, market, onOpenSettings = { tab = AurumTab.Settings })
                     AurumTab.Signal -> SignalScreen(viewModel, market)
+                    AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { tab = AurumTab.Settings })
                     AurumTab.Learn -> LearnScreen(viewModel)
                     AurumTab.Journal -> JournalScreen(viewModel, market)
                     AurumTab.Settings -> SettingsScreen(viewModel, settings)

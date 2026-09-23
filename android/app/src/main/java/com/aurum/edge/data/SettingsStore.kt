@@ -32,6 +32,8 @@ class SettingsStore(context: Context) {
         commissionPerOz = prefs.getFloat(KEY_COMMISSION, 0.05f).toDouble(),
         backgroundMonitor = prefs.getBoolean(KEY_MONITOR, false),
         notifyOnSignal = prefs.getBoolean(KEY_NOTIFY, true),
+        newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty(),
+        pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
     )
 
     fun update(transform: (AppSettings) -> AppSettings) {
@@ -47,6 +49,8 @@ class SettingsStore(context: Context) {
             .putFloat(KEY_COMMISSION, next.commissionPerOz.toFloat())
             .putBoolean(KEY_MONITOR, next.backgroundMonitor)
             .putBoolean(KEY_NOTIFY, next.notifyOnSignal)
+            .putString(KEY_NEWS_URL, next.newsBaseUrl.trim())
+            .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
             .apply()
         _settings.value = next
     }
@@ -69,5 +73,7 @@ class SettingsStore(context: Context) {
         private const val KEY_COMMISSION = "commission_per_oz"
         private const val KEY_MONITOR = "background_monitor"
         private const val KEY_NOTIFY = "notify_signal"
+        private const val KEY_NEWS_URL = "news_base_url"
+        private const val KEY_NEWS_PAUSE = "pause_on_news"
     }
 }

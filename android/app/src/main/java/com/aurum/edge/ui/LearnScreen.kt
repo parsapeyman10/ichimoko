@@ -1,5 +1,8 @@
 package com.aurum.edge.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +20,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.Interval
+import com.aurum.edge.engine.PerformanceMetrics
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatDateTime
@@ -54,6 +59,11 @@ fun LearnScreen(viewModel: AurumViewModel) {
     var risk by remember { mutableStateOf(settings.riskPercent.toString()) }
     var spread by remember { mutableStateOf(settings.spreadPrice.toString()) }
     var commission by remember { mutableStateOf(settings.commissionPerOz.toString()) }
+    var mtLink by remember { mutableStateOf("") }
+    var mtSymbol by remember { mutableStateOf(settings.symbol) }
+    var mtTimezone by remember { mutableStateOf("+00:00") }
+    var mtUri by remember { mutableStateOf<Uri?>(null) }
+    val csvPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> mtUri = uri }
 
     Column(
         modifier = Modifier
@@ -200,6 +210,35 @@ fun LearnScreen(viewModel: AurumViewModel) {
             )
         }
 
+        SectionCard("ورود فایل/لینک MetaTrader برای پژوهش", "CSV / TSV خروجی MT4 یا MT5؛ هرگز به چارت زنده یا سفارش وصل نمی‌شود") {
+            Text("منشأ فایل را خودت تأیید کن؛ نام نماد، تایم‌فریم انتخابی بالای صفحه و منطقه زمانی سرور MT باید با فایل یکسان باشند. تنها ۵۰۰۰ کندل آخر تحلیل می‌شود.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = mtSymbol, onValueChange = { mtSymbol = it }, singleLine = true,
+                    label = { Text("نماد فایل") }, modifier = Modifier.weight(1f))
+                OutlinedTextField(value = mtTimezone, onValueChange = { mtTimezone = it }, singleLine = true,
+                    label = { Text("UTC offset") }, modifier = Modifier.weight(1f))
+            }
+            OutlinedTextField(value = mtLink, onValueChange = { mtLink = it }, singleLine = true,
+                label = { Text("لینک عمومی HTTPS فایل CSV (اختیاری)") },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+            OutlinedButton(onClick = { csvPicker.launch(arrayOf("text/*", "application/octet-stream", "application/vnd.ms-excel")) },
+                modifier = Modifier.padding(top = 8.dp)) { Text("انتخاب فایل CSV از گوشی") }
+            mtUri?.let { Text("فایل انتخاب شد: ${it.lastPathSegment?.takeLast(45) ?: "CSV"} (اولویت با فایل)",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan) }
+            Button(onClick = {
+                viewModel.importMetaTrader(mtUri, mtLink, mtSymbol, interval, mtTimezone,
+                    balance.toDoubleOrNull() ?: settings.accountBalance,
+                    risk.toDoubleOrNull() ?: settings.riskPercent,
+                    spread.toDoubleOrNull() ?: settings.spreadPrice,
+                    commission.toDoubleOrNull() ?: settings.commissionPerOz,
+                    settings.minConfidence)
+            }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("بک‌تست پژوهشی روی CSV وارداتی") }
+            Text("فایل باید DATE/TIME/OPEN/HIGH/LOW/CLOSE داشته باشد. قیمت یا نتایج فایل وارداتی توسط ارائه‌دهندهٔ بازار تأیید نشده‌اند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 6.dp))
+        }
+
         when (val state = learn) {
             is LearnState.Idle -> SectionCard("نتیجه‌ای هنوز نیست", "بازه را انتخاب کن و اجرا بزن") {
                 Text(
@@ -209,24 +248,27 @@ fun LearnScreen(viewModel: AurumViewModel) {
                 )
             }
 
-            is LearnState.Loading -> SectionCard("در حال دریافت دیتای واقعی", state.step) {
+            is LearnState.Loading -> SectionCard("در حال بررسی منبع", state.step) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     CircularProgressIndicator(color = AurumColors.Gold, strokeWidth = 2.dp, modifier = Modifier.height(20.dp))
-                    Text("صبر کن — بدون دیتای واقعی هیچ نتیجه‌ای ساخته نمی‌شود.", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+                    Text("بدون کندل معتبر هیچ نتیجه‌ای ساخته نمی‌شود.", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
                 }
             }
 
-            is LearnState.Failed -> SectionCard("اجرا نشد", "خطای منبع داده") {
+            is LearnState.Failed -> SectionCard("اجرا نشد", "خطای دیتای ارائه‌دهنده یا CSV وارداتی") {
                 Text(state.message, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
                 Text(
-                    "این پیام یعنی داده واقعی دریافت نشد. عمداً هیچ نتیجه جایگزینی تولید نمی‌کنیم.",
+                    "بدون کندل معتبر از منبع انتخابی، نتیجه‌ای تولید نمی‌کنیم؛ فایل وارداتی مستقل از فید زنده است.",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
 
-            is LearnState.Done -> BacktestReport(state)
+            is LearnState.Done -> {
+                BacktestReport(state)
+                PerformancePanel(PerformanceMetrics.fromBacktest(state.result), "${state.result.symbol} · ${state.result.dataSource} · هزینه‌های فرض‌شده")
+            }
         }
 
         when (val wf = walkForward) {
@@ -240,7 +282,10 @@ fun LearnScreen(viewModel: AurumViewModel) {
             is WalkForwardState.Failed -> SectionCard("تست خارج از نمونه اجرا نشد", "خطای منبع داده") {
                 Text(wf.message, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
             }
-            is WalkForwardState.Done -> WalkForwardReport(wf)
+            is WalkForwardState.Done -> {
+                WalkForwardReport(wf)
+                PerformancePanel(PerformanceMetrics.fromBacktest(wf.result.outOfSample), "${wf.result.outOfSample.symbol} · خارج از نمونه (۷۰/۳۰)")
+            }
         }
     }
 }
@@ -346,7 +391,7 @@ private fun WalkForwardReport(state: WalkForwardState.Done) {
 private fun BacktestReport(state: LearnState.Done) {
     val result = state.result
     SectionCard(
-        title = "گزارش روی دیتای واقعی ${state.interval.label}",
+        title = "گزارش ${state.interval.label} · ${result.dataSource}",
         subtitle = "${result.bars} کندل · ${formatDateTime(result.fromTime)} تا ${formatDateTime(result.toTime)}",
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -398,7 +443,7 @@ private fun BacktestReport(state: LearnState.Done) {
                 }
             }
             Text(
-                "منحنی سرمایه — فقط از نتایج واقعی همان کندل‌ها",
+                "منحنی سرمایه — فقط از نتایج بک‌تست روی کندل‌های انتخاب‌شده",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 4.dp),
@@ -415,7 +460,7 @@ private fun BacktestReport(state: LearnState.Done) {
     }
 
     if (result.trades.isNotEmpty()) {
-        SectionCard("فهرست معاملات واقعی", "نمایش ${minOf(result.trades.size, 30)} ترید آخر") {
+        SectionCard("فهرست معاملات پژوهشی", "نمایش ${minOf(result.trades.size, 30)} ترید آخر") {
             result.trades.takeLast(30).reversed().forEach { trade ->
                 Row(
                     modifier = Modifier
@@ -457,7 +502,7 @@ private fun BacktestReport(state: LearnState.Done) {
             }
         }
     } else {
-        SectionCard("هیچ معامله‌ای شکل نگرفت", "این هم یک نتیجه واقعی است") {
+        SectionCard("هیچ معامله‌ای شکل نگرفت", "هیچ نتیجه‌ای برای پر کردن آمار ساخته نمی‌شود") {
             Text(
                 "در این بازه، موتور حتی یک سیگنال واجد شرایط پیدا نکرد. نتیجه‌ای ساخته نمی‌شود تا عدد قشنگ‌تری ببینی — بازه بزرگ‌تر یا تایم‌فریم دیگری را امتحان کن.",
                 style = MaterialTheme.typography.bodySmall,

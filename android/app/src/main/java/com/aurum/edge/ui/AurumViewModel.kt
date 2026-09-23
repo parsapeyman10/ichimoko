@@ -1,19 +1,31 @@
 package com.aurum.edge.ui
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.aurum.edge.core.AppContainer
 import com.aurum.edge.core.AppSettings
+import com.aurum.edge.core.FeedMode
+import com.aurum.edge.data.SourceComparison
+import com.aurum.edge.data.VerificationStatus
+import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.data.JournalStats
+import com.aurum.edge.data.NewsGate
+import com.aurum.edge.data.NewsRepository
+import com.aurum.edge.data.Quote
+import com.aurum.edge.data.WatchSelection
+import com.aurum.edge.data.WatchState
 import com.aurum.edge.engine.Backtester
 import com.aurum.edge.engine.MtfAnalyzer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,9 +46,22 @@ sealed interface WalkForwardState {
     data class Failed(val message: String) : WalkForwardState
 }
 
+data class WatchHistory(
+    val symbolId: String = "",
+    val sourceId: String = "",
+    val entries: List<Quote> = emptyList(),
+    val total: Long = 0L,
+    val loading: Boolean = false,
+)
+
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
+    val watchSettings: StateFlow<Map<String, WatchSelection>> = container.watchSettings.selections
+    val watch: StateFlow<WatchState> = container.watch.state
+    val news = container.news.state
+    private val _watchHistory = MutableStateFlow(WatchHistory())
+    val watchHistory: StateFlow<WatchHistory> = _watchHistory.asStateFlow()
     val market = container.market.state
     val trades: StateFlow<List<PaperTrade>> = container.journalStore.trades
 
@@ -66,6 +91,13 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             container.journalStore.loadReports()
             _stats.value = container.journalStore.stats()
             container.market.start()
+            container.watch.loadCached()
+        }
+        viewModelScope.launch {
+            while (isActive) {
+                if (settings.value.pauseOnNews && settings.value.newsBaseUrl.isNotBlank()) container.news.refreshNow()
+                delay(120_000L)
+            }
         }
         viewModelScope.launch {
             container.market.state.collect { state ->
@@ -81,6 +113,76 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun refreshNow() = container.market.refreshNow()
+
+    fun refreshWatch() = container.watch.refreshNow()
+
+    fun refreshNews() = container.news.refreshNow()
+
+    fun saveNewsBaseUrl(value: String) {
+        val url = value.trim().trimEnd('/')
+        if (url.isNotBlank() && NewsRepository.newsUrl(url) == null) {
+            _toast.value = "آدرس HTTPS سرور خبر بدون مسیر و کلید وارد کنید"
+            return
+        }
+        container.settingsStore.update { it.copy(newsBaseUrl = url) }
+        container.news.resetAndRefresh()
+        _toast.value = "آدرس سرور خبر ذخیره شد"
+    }
+
+    fun setPauseOnNews(enabled: Boolean) {
+        container.settingsStore.update { it.copy(pauseOnNews = enabled) }
+        if (enabled) container.news.refreshNow()
+    }
+
+    fun selectWatchSource(symbolId: String, sourceId: String, enabled: Boolean) {
+        container.watchSettings.selectSource(symbolId, sourceId, enabled)
+        if (enabled) container.watch.refreshNow()
+    }
+
+    fun setWatchPreferred(symbolId: String, sourceId: String) = container.watchSettings.setPreferred(symbolId, sourceId)
+
+    fun watchKeyOverride(symbolId: String): String = container.watchSettings.keyOverride(symbolId)
+
+    fun setWatchKeyOverride(symbolId: String, key: String) {
+        container.watchSettings.setKeyOverride(symbolId, key)
+        container.watch.refreshNow()
+        _toast.value = "کلید خواندنی این نماد ذخیره شد"
+    }
+
+    fun showWatchHistory(symbolId: String, sourceId: String) {
+        if (_watchHistory.value.symbolId == symbolId && _watchHistory.value.sourceId == sourceId) {
+            _watchHistory.value = WatchHistory()
+            return
+        }
+        _watchHistory.value = WatchHistory(symbolId, sourceId, loading = true)
+        viewModelScope.launch {
+            val page = container.watch.page(symbolId, sourceId)
+            val total = container.watch.count(symbolId, sourceId)
+            if (_watchHistory.value.symbolId == symbolId && _watchHistory.value.sourceId == sourceId) {
+                _watchHistory.value = WatchHistory(symbolId, sourceId, page, total)
+            }
+        }
+    }
+
+    fun moreWatchHistory() {
+        val current = _watchHistory.value
+        if (current.loading || current.total <= current.entries.size || current.entries.isEmpty()) return
+        _watchHistory.value = current.copy(loading = true)
+        viewModelScope.launch {
+            val next = container.watch.page(current.symbolId, current.sourceId, current.entries.last().ts)
+            if (_watchHistory.value.symbolId == current.symbolId && _watchHistory.value.sourceId == current.sourceId) {
+                _watchHistory.value = current.copy(entries = current.entries + next)
+            }
+        }
+    }
+
+    fun clearWatchHistory() {
+        viewModelScope.launch {
+            container.watch.clearHistory()
+            _watchHistory.value = WatchHistory()
+            _toast.value = "تاریخچهٔ دریافت‌شدهٔ دیده‌بان پاک شد"
+        }
+    }
 
     fun setInterval(interval: Interval) = container.market.setInterval(interval)
 
@@ -110,27 +212,58 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun setMonitorFlag(enabled: Boolean) = container.settingsStore.update { it.copy(backgroundMonitor = enabled) }
 
     fun openPaperTrade(signal: Signal) {
-        val price = market.value.lastPrice
-        if (price == null || !signal.isActionable) {
-            _toast.value = "سیگنال قابل معامله نیست یا قیمت واقعی موجود نیست"
+        val current = market.value
+        val price = current.lastPrice
+        if (price == null || !signal.isActionable || current.signal != signal ||
+            current.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING) || current.showingCachedData ||
+            current.candles.lastOrNull()?.time?.let { System.currentTimeMillis() - it > current.interval.millis * 2 } != false) {
+            _toast.value = "ورود کاغذی متوقف شد: سیگنال یا قیمت تازهٔ همین نماد موجود نیست"
             return
+        }
+        if (settings.value.pauseOnNews) {
+            val newsNow = news.value
+            val checked = newsNow.lastCheckedAt
+            if (newsNow.gate != NewsGate.CLEAR || checked == null ||
+                System.currentTimeMillis() - checked !in 0L..180_000L) {
+                _toast.value = "ورود کاغذی متوقف شد: خبر پراثر، خبر نامعتبر یا وضعیت خبری نامشخص/قدیمی"
+                return
+            }
+        }
+        val watched = WatchCatalog.find(current.symbol)
+        if (watched != null) {
+            val selected = watchSettings.value[current.symbol]
+            if (selected != null && SourceComparison.verify(watched, selected.enabledSources,
+                    watch.value.quotes[current.symbol].orEmpty()).status == VerificationStatus.CONFLICT) {
+                _toast.value = "ورود متوقف شد: تعارض قیمت منابع"
+                return
+            }
         }
         viewModelScope.launch {
             val s = container.settingsStore.read()
-            val trade = container.journalStore.open(
-                signal = signal,
-                price = price,
-                balance = s.accountBalance,
-                riskPercent = s.riskPercent,
-                mtf = _mtf.value?.let { MtfSnapshotRecord.from(it) },
-            )
-            _stats.value = container.journalStore.stats()
-            _toast.value = "پوزیشن کاغذی باز شد: ${trade.action.name} روی قیمت واقعی ${String.format("%.2f", trade.entry)}"
+            try {
+                val trade = container.journalStore.open(
+                    signal = signal,
+                    symbol = current.symbol,
+                    price = price,
+                    balance = s.accountBalance,
+                    riskPercent = s.riskPercent,
+                    mtf = _mtf.value?.let { MtfSnapshotRecord.from(it) },
+                )
+                _stats.value = container.journalStore.stats()
+                _toast.value = "پوزیشن کاغذی باز شد: ${trade.action.name} روی قیمت واقعی ${String.format("%.2f", trade.entry)}"
+            } catch (e: Exception) {
+                _toast.value = e.message ?: "ورود کاغذی امکان‌پذیر نیست"
+            }
         }
     }
 
     fun closePaperTrade(trade: PaperTrade) {
-        val price = market.value.lastPrice ?: return
+        val current = market.value
+        if (trade.symbol != current.symbol || current.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING) || current.showingCachedData) {
+            _toast.value = "برای بستن کاغذی باید قیمت تازهٔ همان نماد در دسترس باشد"
+            return
+        }
+        val price = current.lastPrice ?: return
         viewModelScope.launch {
             container.journalStore.close(trade.id, price, "بستن دستی روی قیمت واقعی")
             _stats.value = container.journalStore.stats()
@@ -168,6 +301,32 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _learn.value = LearnState.Done(result, interval)
             } catch (e: Exception) {
                 _learn.value = LearnState.Failed(e.message ?: "خطا در دریافت داده واقعی")
+            }
+        }
+    }
+
+    /** Imported MT history is research-only: never written to the live chart/candle cache. */
+    fun importMetaTrader(
+        uri: Uri?, link: String?, symbol: String, interval: Interval, timezone: String,
+        balance: Double, risk: Double, spread: Double, commission: Double, threshold: Double,
+    ) {
+        if (!symbol.matches(Regex("[A-Za-z0-9/_-]{3,30}"))) {
+            _learn.value = LearnState.Failed("نام نماد وارداتی معتبر نیست")
+            return
+        }
+        viewModelScope.launch {
+            _learn.value = LearnState.Loading("خواندن CSV متاتریدر برای پژوهش؛ منشأ فایل تأیید نشده است…")
+            try {
+                val csv = when {
+                    uri != null -> container.metaTraderImporter.fromFile(uri)
+                    !link.isNullOrBlank() -> container.metaTraderImporter.fromHttps(link)
+                    else -> throw IllegalArgumentException("فایل یا لینک CSV را انتخاب کنید")
+                }
+                val result = container.runImportedBacktest(csv, symbol, interval, timezone,
+                    balance, risk.coerceIn(0.1, 5.0), spread, commission, threshold)
+                _learn.value = LearnState.Done(result, interval)
+            } catch (e: Exception) {
+                _learn.value = LearnState.Failed(e.message ?: "فایل/لینک متاتریدر قابل تحلیل نیست")
             }
         }
     }

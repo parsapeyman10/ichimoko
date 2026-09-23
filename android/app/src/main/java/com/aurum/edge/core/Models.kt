@@ -177,6 +177,8 @@ data class BacktestTradeRecord(
 @Serializable
 data class BacktestRecord(
     val interval: String,
+    val symbol: String = "XAU/USD",
+    val dataSource: String = "Twelve Data (دیتای واقعی)",
     val fromTime: Long,
     val toTime: Long,
     val bars: Int,
@@ -200,6 +202,8 @@ data class BacktestRecord(
     companion object {
         fun from(result: com.aurum.edge.engine.Backtester.Result): BacktestRecord = BacktestRecord(
             interval = result.interval.label,
+            symbol = result.symbol,
+            dataSource = result.dataSource,
             fromTime = result.fromTime,
             toTime = result.toTime,
             bars = result.bars,
@@ -218,7 +222,7 @@ data class BacktestRecord(
             spreadPrice = result.spreadPrice,
             commissionPerOz = result.commissionPerOz,
             note = result.note,
-            trades = result.trades.takeLast(80).map {
+            trades = result.trades.map {
                 BacktestTradeRecord(
                     side = it.side.name,
                     entryTime = it.entryTime,
@@ -273,6 +277,10 @@ data class AppSettings(
     val commissionPerOz: Double = 0.05,
     val backgroundMonitor: Boolean = false,
     val notifyOnSignal: Boolean = true,
+    /** Optional HTTPS URL of this project's backend (licensed Persian news). */
+    val newsBaseUrl: String = "",
+    /** Applies to NEW paper entries; real orders remain disabled independently. */
+    val pauseOnNews: Boolean = false,
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
 }

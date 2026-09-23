@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,6 +16,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -30,9 +35,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
 import com.aurum.edge.BuildConfig
 import com.aurum.edge.core.AppSettings
+import com.aurum.edge.data.SourceCatalog
+import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.service.SignalMonitorService
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.theme.AurumColors
@@ -42,6 +51,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     val context = LocalContext.current
     var key by remember { mutableStateOf(settings.apiKey) }
     var symbol by remember { mutableStateOf(settings.symbol) }
+    var newsUrl by remember { mutableStateOf(settings.newsBaseUrl) }
     var balance by remember { mutableStateOf(settings.accountBalance.toString()) }
     var risk by remember { mutableStateOf(settings.riskPercent.toString()) }
     var minConfidence by remember { mutableStateOf(settings.minConfidence.toString()) }
@@ -50,6 +60,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
 
     LaunchedEffect(settings.apiKey) { if (key.isBlank()) key = settings.apiKey }
     LaunchedEffect(settings.symbol) { symbol = settings.symbol }
+    LaunchedEffect(settings.newsBaseUrl) { newsUrl = settings.newsBaseUrl }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -80,12 +91,13 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     ) {
         SectionCard(
             title = "منبع دیتای واقعی",
-            subtitle = "Twelve Data — تنها منبع اپ؛ هیچ منبع ساختگی جایگزین نمی‌شود",
+            subtitle = "Twelve Data برای چارت، سیگنال و بک‌تست؛ دیده‌بان پایین منابع جدا دارد",
         ) {
             OutlinedTextField(
                 value = key,
                 onValueChange = { key = it },
                 label = { Text("Twelve Data API Key") },
+                visualTransformation = PasswordVisualTransformation(),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -113,14 +125,29 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 6.dp),
             )
-            if (BuildConfig.DEFAULT_TD_API_KEY.isNotBlank()) {
-                Text(
-                    "این نسخه با کلید پیش‌فرض بیلد شده است؛ می‌توانی کلید خودت را جای آن بگذاری.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.Cyan,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
+            Text("کلید داخل APK قرار نمی‌گیرد و پشتیبان‌گیری خودکار داده‌های اپ غیرفعال است.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan,
+                modifier = Modifier.padding(top = 4.dp))
+        }
+
+        WatchSettingsSection(viewModel)
+
+        SectionCard("خبر فارسی و توقف ورود کاغذی", "نیازمند سرور HTTPS و فید فارسی دارای مجوز") {
+            OutlinedTextField(
+                value = newsUrl, onValueChange = { newsUrl = it }, singleLine = true,
+                label = { Text("آدرس سرور API (https://api.example.com)") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(onClick = { viewModel.saveNewsBaseUrl(newsUrl) }, modifier = Modifier.padding(top = 8.dp)) {
+                Text("اتصال به اخبار فارسی")
             }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("توقف ورود کاغذی هنگام خبر پراثر/عدم دسترسی", Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
+                Switch(checked = settings.pauseOnNews, onCheckedChange = viewModel::setPauseOnNews)
+            }
+            Text("تا فعال‌سازی این گزینه و پیکربندی فید واقعی، ژورنال کاغذی مستقل می‌ماند. وقتی روشن است، نبود یا کهنگی خبر جلوی ورود جدید را می‌گیرد؛ خروج‌ها مسدود نمی‌شوند. سفارش واقعی همچنان غیرفعال است.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
         SectionCard(
@@ -275,5 +302,76 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 modifier = Modifier.padding(top = 8.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun WatchSettingsSection(viewModel: AurumViewModel) {
+    val selections by viewModel.watchSettings.collectAsStateWithLifecycle()
+    var symbolId by remember { mutableStateOf(WatchCatalog.symbols.first().id) }
+    val symbol = WatchCatalog.find(symbolId) ?: return
+    val selected = selections[symbolId] ?: return
+    var key by remember(symbolId) { mutableStateOf(viewModel.watchKeyOverride(symbolId)) }
+    var confirmClear by remember { mutableStateOf(false) }
+
+    SectionCard(
+        title = "منابع هر نماد و کلید جداگانه",
+        subtitle = "فقط خواندنی · هر نماد انتخاب و تاریخچهٔ مستقل دارد",
+    ) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            WatchCatalog.symbols.forEach { item ->
+                FilterChip(selected = symbolId == item.id, onClick = { symbolId = item.id },
+                    label = { Text(item.id) })
+            }
+        }
+        Text("${symbol.label} · ${symbol.unit} · آستانه اختلاف ${symbol.tolerancePct}%",
+            style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
+            modifier = Modifier.padding(vertical = 6.dp))
+        symbol.providerCodes.forEach { (sourceId, code) ->
+            val source = SourceCatalog.find(sourceId) ?: return@forEach
+            val enabled = sourceId in selected.enabledSources
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("${source.title} · $code", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
+                    Text(source.subtitle, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                }
+                Switch(checked = enabled, onCheckedChange = { viewModel.selectWatchSource(symbolId, sourceId, it) })
+            }
+            if (enabled) {
+                OutlinedButton(onClick = { viewModel.setWatchPreferred(symbolId, sourceId) }) {
+                    Text(if (selected.preferredSourceId == sourceId) "✓ قیمت نمایشی از ${source.title}" else "انتخاب ${source.title} برای قیمت نمایشی")
+                }
+            }
+        }
+        if (SourceCatalog.twelveData.id in symbol.providerCodes) {
+            OutlinedTextField(
+                value = key, onValueChange = { key = it }, singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                label = { Text("کلید Twelve Data فقط برای ${symbol.id}") },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            )
+            Text("اگر اینجا خالی باشد، کلید عمومیِ چارت استفاده می‌شود؛ فقط به Twelve Data ارسال می‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            OutlinedButton(onClick = { viewModel.setWatchKeyOverride(symbol.id, key) }) { Text("ذخیره کلید این نماد") }
+        }
+        Text("تاریخچهٔ کامل مشاهدات هر منبع روی همین دستگاه در SQLite نگهداری می‌شود و در دیده‌بان صفحه‌به‌صفحه قابل مشاهده است؛ بک‌فیل تاریخی از سرویس‌دهنده نیست.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+            modifier = Modifier.padding(top = 8.dp))
+        Text("TSETMC هنوز منبع معتبر/قرارداد پایدار ندارد و به عمد قابل انتخاب نیست. API معاملاتی و کلید Nobitex/MT5 را هرگز اینجا وارد نکنید.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+            modifier = Modifier.padding(top = 6.dp))
+        OutlinedButton(onClick = { confirmClear = true }, modifier = Modifier.padding(top = 8.dp)) {
+            Text("پاک کردن تاریخچهٔ دیده‌بان")
+        }
+    }
+    if (confirmClear) {
+        AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("حذف تاریخچهٔ دیده‌بان؟") },
+            text = { Text("تمام قیمت‌های قبلاً دریافت‌شدهٔ همهٔ منابع روی این گوشی حذف می‌شود. این کار قابل بازگشت نیست.") },
+            confirmButton = { TextButton(onClick = { viewModel.clearWatchHistory(); confirmClear = false }) { Text("حذف") } },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("انصراف") } },
+        )
     }
 }

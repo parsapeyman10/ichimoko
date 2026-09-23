@@ -20,9 +20,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.PaperTrade
+import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.data.MarketState
+import com.aurum.edge.engine.PerformanceMetrics
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatDateTime
@@ -34,7 +36,10 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val reports by viewModel.reports.collectAsStateWithLifecycle()
-    val livePrice = market.lastPrice
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val livePrice = market.lastPrice?.takeIf {
+        !market.showingCachedData && market.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING)
+    }
 
     Column(
         modifier = Modifier
@@ -75,7 +80,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
         if (open.isNotEmpty()) {
             SectionCard("پوزیشن‌های باز", "ارزش‌گذاری با آخرین قیمت واقعی دریافتی") {
                 open.forEach { trade ->
-                    val unrealized = livePrice?.let { price ->
+                    val unrealized = livePrice?.takeIf { trade.symbol == market.symbol }?.let { price ->
                         val perOz = if (trade.action == SignalAction.BUY) price - trade.entry else trade.entry - price
                         perOz * trade.positionOz
                     }
@@ -87,7 +92,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                "${trade.action.name} ${trade.interval.label} · ${String.format("%.3f", trade.positionOz)} oz",
+                                "${trade.symbol} · ${trade.action.name} ${trade.interval.label} · ${String.format("%.3f", trade.positionOz)} oz",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (trade.action == SignalAction.BUY) AurumColors.Green else AurumColors.Red,
                             )
@@ -122,7 +127,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                             )
                             OutlinedButton(
                                 onClick = { viewModel.closePaperTrade(trade) },
-                                enabled = livePrice != null,
+                                enabled = livePrice != null && trade.symbol == market.symbol,
                                 modifier = Modifier.padding(top = 4.dp),
                             ) { Text("بستن", style = MaterialTheme.typography.labelSmall) }
                         }
@@ -136,13 +141,21 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             SectionCard("معاملات بسته‌شده", "تسویه‌شده روی قیمت واقعی") {
                 closed.forEach { trade: PaperTrade -> TradeRow(trade) }
             }
-            reports.firstOrNull()?.let { report -> StoredReportCard(report) }
-
             Button(
                 onClick = viewModel::clearJournal,
                 colors = ButtonDefaults.buttonColors(containerColor = AurumColors.SurfaceAlt, contentColor = AurumColors.TextSecondary),
                 modifier = Modifier.padding(horizontal = 12.dp),
             ) { Text("پاک کردن ژورنال") }
+        }
+        PerformancePanel(PerformanceMetrics.fromPaper(trades, settings.accountBalance),
+            "معاملات کاغذی تسویه‌شده · فرض موجودی اولیه ${formatPrice(settings.accountBalance)}$ (در طول تاریخچه ممکن است تغییر کرده باشد)")
+        reports.firstOrNull()?.let { report ->
+            StoredReportCard(report)
+            PerformanceMetrics.fromStoredReport(report.outOfSample)?.let { performance ->
+                PerformancePanel(performance, "آخرین تست خارج از نمونه · ${report.outOfSample.symbol} · ${report.interval}")
+            } ?: SectionCard("گزارش قدیمی ناقص", "در نسخهٔ قبلی تنها بخشی از معاملات ذخیره شده بود") {
+                Text("برای گزارش ۱۸ شاخص دقیق، تست خارج از نمونه را دوباره اجرا کنید.", color = AurumColors.Gold)
+            }
         }
     }
 }
