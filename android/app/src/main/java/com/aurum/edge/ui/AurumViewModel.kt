@@ -1,5 +1,6 @@
 package com.aurum.edge.ui
 
+import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -12,6 +13,7 @@ import com.aurum.edge.data.VerificationStatus
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.MtfSnapshotRecord
+import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.PaperTicket
@@ -30,6 +32,7 @@ import com.aurum.edge.data.WatchState
 import com.aurum.edge.engine.Backtester
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
+import com.aurum.edge.notify.AlertSoundPlayer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -74,6 +77,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val watchHistory: StateFlow<WatchHistory> = _watchHistory.asStateFlow()
     val market = container.verifiedMarket
     val trades: StateFlow<List<PaperTrade>> = container.journalStore.trades
+    val opportunities: StateFlow<List<PaperOpportunity>> = container.opportunityStore.items
+    val opportunityError: StateFlow<String?> = container.opportunityStore.loadError
     val journalError: StateFlow<String?> = container.journalStore.loadError
     val autoPaperStatus: StateFlow<String> = container.autoPaperTrader.status
 
@@ -104,6 +109,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             runCatching { container.journalStore.load() }.onFailure {
                 _toast.value = "ژورنال خوانده نشد؛ فایل قبلی برای بازیابی نگه داشته شد"
+            }
+            runCatching { container.opportunityStore.load() }.onFailure {
+                _toast.value = "تاریخچهٔ فرصت‌ها خوانده نشد؛ فایل قبلی نگه داشته شد و هشدار تکراری متوقف است"
             }
             container.journalStore.loadReports()
             _stats.value = container.journalStore.stats()
@@ -233,6 +241,37 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun saveCommission(value: Double) = container.settingsStore.update { it.copy(commissionPerOz = value.coerceIn(0.0, 5.0)) }
 
     fun setNotifyOnSignal(enabled: Boolean) = container.settingsStore.update { it.copy(notifyOnSignal = enabled) }
+
+    fun selectAlertSound(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val name = withContext(Dispatchers.IO) { AlertSoundPlayer.select(context, uri) }
+                container.settingsStore.update { it.copy(alertSoundUri = uri.toString(), alertSoundName = name) }
+                _toast.value = "صدای هشدار آموزشی: $name؛ برای بررسی «پخش آزمون» را بزنید"
+            } catch (error: Exception) {
+                _toast.value = "صدای فایل انتخاب نشد: ${error.message ?: "دسترسی به فایل برقرار نیست"}"
+            }
+        }
+    }
+
+    fun resetAlertSound() {
+        AlertSoundPlayer.stop()
+        container.settingsStore.update { it.copy(alertSoundUri = "", alertSoundName = "") }
+        _toast.value = "صدای پیش‌فرض اعلان گوشی انتخاب شد"
+    }
+
+    fun testAlertSound(context: Context) {
+        val uri = settings.value.alertSoundUri
+        if (uri.isBlank()) {
+            _toast.value = "برای شنیدن صدای سیستم، تنظیمات اعلان‌های اندروید را بررسی کنید"
+            return
+        }
+        viewModelScope.launch {
+            val queued = withContext(Dispatchers.IO) { AlertSoundPlayer.play(context, uri) }
+            _toast.value = if (queued) "آزمون پخش فایل تا ۱۰ ثانیه؛ بلندی صدا/مزاحم‌نشدن دستگاه را بررسی کنید"
+                else "فایل صوتی دیگر قابل خواندن نیست؛ دوباره انتخاب کنید"
+        }
+    }
 
     fun setMonitorFlag(enabled: Boolean) {
         container.settingsStore.update { it.copy(backgroundMonitor = enabled,
@@ -367,6 +406,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     newsEvidence = newsRecord,
                 )
                 _stats.value = container.journalStore.stats()
+                // Linking is metadata only; a damaged opportunity file must not erase a saved trade.
+                runCatching { container.opportunityStore.linkTrade(trade) }
                 _toast.value = "فقط کاغذی: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} ${trade.symbol} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}"
             } catch (e: Exception) {
                 _toast.value = "ورود کاغذی انجام نشد: ${e.message ?: "ذخیره ممکن نیست"}"
@@ -404,6 +445,17 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _toast.value = "ژورنال کاغذی روی دستگاه پاک شد"
             } catch (e: Exception) {
                 _toast.value = "پاک‌کردن انجام نشد؛ فایل حفظ شد: ${e.message ?: "خطای ذخیره"}"
+            }
+        }
+    }
+
+    fun clearOpportunityHistory() {
+        viewModelScope.launch {
+            try {
+                container.opportunityStore.clear()
+                _toast.value = "فقط تاریخچهٔ کاندیداهای آموزشی پاک شد؛ آمار معامله تغییر نکرد"
+            } catch (error: Exception) {
+                _toast.value = "حذف کاندیدا انجام نشد؛ فایل قبلی حفظ شد: ${error.message ?: "خطای ذخیره"}"
             }
         }
     }

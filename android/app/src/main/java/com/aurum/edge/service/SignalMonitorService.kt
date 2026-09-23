@@ -10,6 +10,12 @@ import androidx.core.app.ServiceCompat
 import androidx.core.app.NotificationManagerCompat
 import com.aurum.edge.AurumApplication
 import com.aurum.edge.core.FeedMode
+import com.aurum.edge.core.MtfSnapshotRecord
+import com.aurum.edge.core.PaperAlertRules
+import com.aurum.edge.core.PaperOpportunity
+import com.aurum.edge.engine.MtfAnalyzer
+import com.aurum.edge.engine.NewsConfluence
+import com.aurum.edge.notify.AlertSoundPlayer
 import com.aurum.edge.notify.Notifier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,7 +37,6 @@ class SignalMonitorService : Service() {
     private var stateJob: Job? = null
     private var journalJob: Job? = null
     private var newsJob: Job? = null
-    private var lastAlertKey: String? = null
     private val notifiedTrades = mutableSetOf<String>()
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -67,7 +72,7 @@ class SignalMonitorService : Service() {
         newsJob?.cancel()
         newsJob = scope.launch {
             while (isActive) {
-                if (container.settingsStore.read().let { it.autoPaperTrading || it.pauseOnNews } &&
+                if (container.settingsStore.read().let { it.autoPaperTrading || it.pauseOnNews || it.notifyOnSignal } &&
                     container.settingsStore.read().newsBaseUrl.isNotBlank()) container.news.refreshNow()
                 delay(60_000L)
             }
@@ -81,6 +86,7 @@ class SignalMonitorService : Service() {
                 container.autoPaperTrader.stopped("ژورنال آسیب‌دیده است؛ ورود خودکار کاغذی متوقف شد")
                 return@launch
             }
+            val alertsAvailable = runCatching { container.opportunityStore.load(); true }.getOrDefault(false)
             container.market.start()
             // Use collect, not collectLatest: never cancel a partially persisted paper entry
             // just because another tick arrives during the atomic journal write.
@@ -99,18 +105,40 @@ class SignalMonitorService : Service() {
                     )
                 }
                 val signal = state.signal
-                if (signal != null && signal.isActionable && !state.showingCachedData &&
-                    state.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
-                    state.candles.lastOrNull()?.time?.let { System.currentTimeMillis() - it <= state.interval.millis * 2 } == true &&
+                if (alertsAvailable && signal?.isActionable == true &&
                     container.settingsStore.read().notifyOnSignal) {
-                    val key = "${signal.action}-${signal.interval.label}-${signal.barTime}"
-                    if (key != lastAlertKey) {
-                        lastAlertKey = key
-                        Notifier.notifySignal(this@SignalMonitorService, signal)
+                    val snapshot = runCatching { MtfAnalyzer.analyze(state.candles, state.interval) }.getOrNull()
+                    val config = container.settingsStore.read()
+                    val headlines = container.news.state.value
+                    if (PaperAlertRules.blocker(state, config, headlines,
+                            container.journalStore.trades.value, snapshot) == null) {
+                        // Re-check after computation: a veto/news/price can change between flows.
+                        val latest = container.verifiedMarket.value
+                        val recentNews = container.news.state.value
+                        val recentConfig = container.settingsStore.read()
+                        if (latest.symbol == state.symbol && latest.signal?.barTime == signal.barTime &&
+                            PaperAlertRules.blocker(latest, recentConfig, recentNews,
+                                container.journalStore.trades.value, snapshot) == null) {
+                            val evidence = NewsConfluence.record(recentNews)
+                            if (evidence != null && snapshot != null) {
+                                val item = PaperOpportunity.from(latest.signal!!, latest.symbol,
+                                    latest.lastPrice!!, MtfSnapshotRecord.from(snapshot), evidence)
+                                if (runCatching { container.opportunityStore.record(item) }.getOrDefault(false)) {
+                                    Notifier.notifyVerifiedOpportunity(this@SignalMonitorService, item,
+                                        recentConfig.alertSoundUri)
+                                }
+                            }
+                        }
                     }
                 }
                 if (container.settingsStore.read().autoPaperTrading) {
                     container.autoPaperTrader.onMarketUpdate(state)
+                    if (alertsAvailable && signal != null) {
+                        container.journalStore.trades.value.firstOrNull {
+                            it.symbol == state.symbol && it.interval == state.interval &&
+                                it.signalBarTime == signal.barTime && it.action == signal.action
+                        }?.let { runCatching { container.opportunityStore.linkTrade(it) } }
+                    }
                 }
             }
         }
@@ -118,9 +146,13 @@ class SignalMonitorService : Service() {
         journalJob?.cancel()
         journalJob = scope.launch {
             try { container.journalStore.load() } catch (_: Exception) { return@launch }
+            val canLink = runCatching { container.opportunityStore.load(); true }.getOrDefault(false)
             // A service restart must not re-notify all old, already closed paper trades.
             notifiedTrades.addAll(container.journalStore.trades.value.filterNot { it.isOpen }.map { it.id })
             container.journalStore.trades.collect { trades ->
+                if (canLink) trades.filter { it.signalBarTime != null }.forEach { trade ->
+                    runCatching { container.opportunityStore.linkTrade(trade) }
+                }
                 trades.filter { !it.isOpen }.forEach { trade ->
                     if (notifiedTrades.add(trade.id)) {
                         Notifier.notifyClosedTrade(this@SignalMonitorService, trade)
@@ -131,10 +163,17 @@ class SignalMonitorService : Service() {
         return START_STICKY
     }
 
+    // Android 15+ limits dataSync foreground services to 6 hours per 24 hours in background.
+    // Never leave a timed-out service running or claim continuous monitoring after it stops.
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        stopSelf()
+    }
+
     override fun onDestroy() {
         val container = (application as AurumApplication).container
         container.settingsStore.update { it.copy(backgroundMonitor = false, autoPaperTrading = false) }
         scope.cancel()
+        AlertSoundPlayer.stop()
         super.onDestroy()
     }
 

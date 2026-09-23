@@ -14,6 +14,7 @@ import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.MetaTraderImporter
 import com.aurum.edge.data.NewsRepository
 import com.aurum.edge.data.PaperAutoTrader
+import com.aurum.edge.data.PaperOpportunityStore
 import com.aurum.edge.data.SettingsStore
 import com.aurum.edge.data.TwelveDataClient
 import com.aurum.edge.data.QuoteHistoryStore
@@ -43,6 +44,7 @@ class AppContainer(context: Context) {
     val settingsStore = SettingsStore(appContext)
     val candleCache = CandleCache(appContext)
     val journalStore = JournalStore(appContext)
+    val opportunityStore = PaperOpportunityStore(appContext)
     val client = TwelveDataClient()
     val market = MarketRepository(appContext, client, candleCache, settingsStore, journalStore)
 

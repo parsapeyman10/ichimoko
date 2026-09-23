@@ -32,6 +32,8 @@ class SettingsStore(context: Context) {
         commissionPerOz = prefs.getFloat(KEY_COMMISSION, 0.05f).toDouble(),
         backgroundMonitor = prefs.getBoolean(KEY_MONITOR, false),
         notifyOnSignal = prefs.getBoolean(KEY_NOTIFY, true),
+        alertSoundUri = prefs.getString(KEY_ALERT_SOUND_URI, "").orEmpty(),
+        alertSoundName = prefs.getString(KEY_ALERT_SOUND_NAME, "").orEmpty(),
         newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty(),
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
         autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
@@ -50,6 +52,8 @@ class SettingsStore(context: Context) {
             .putFloat(KEY_COMMISSION, next.commissionPerOz.toFloat())
             .putBoolean(KEY_MONITOR, next.backgroundMonitor)
             .putBoolean(KEY_NOTIFY, next.notifyOnSignal)
+            .putString(KEY_ALERT_SOUND_URI, next.alertSoundUri)
+            .putString(KEY_ALERT_SOUND_NAME, next.alertSoundName)
             .putString(KEY_NEWS_URL, next.newsBaseUrl.trim())
             .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
             .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
@@ -75,6 +79,8 @@ class SettingsStore(context: Context) {
         private const val KEY_COMMISSION = "commission_per_oz"
         private const val KEY_MONITOR = "background_monitor"
         private const val KEY_NOTIFY = "notify_signal"
+        private const val KEY_ALERT_SOUND_URI = "verified_alert_sound_uri"
+        private const val KEY_ALERT_SOUND_NAME = "verified_alert_sound_name"
         private const val KEY_NEWS_URL = "news_base_url"
         private const val KEY_NEWS_PAUSE = "pause_on_news"
         private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"

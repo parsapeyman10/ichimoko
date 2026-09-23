@@ -128,6 +128,8 @@ data class PaperTrade(
     val autoOpened: Boolean = false,
     val signalBarTime: Long? = null,
     val newsEvidence: PaperNewsRecord? = null,
+    /** Snapshot at the moment the paper position was actually saved; never recompute on read. */
+    val entryConditions: List<PaperConditionRecord> = emptyList(),
 ) {
     val isOpen: Boolean get() = closedAt == null
     val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }
@@ -140,6 +142,51 @@ data class PaperTrade(
             val risk = riskPerOz * positionOz
             return if (risk <= 0.0) null else pnl / risk
         }
+}
+
+@Serializable
+data class PaperConditionRecord(val name: String, val status: String, val detail: String) {
+    companion object {
+        fun from(item: ConfluenceItem) = PaperConditionRecord(item.name, item.status.name, item.detail)
+    }
+}
+
+/** An eligible alert is NOT a trade. Stored separately from paper positions and their statistics. */
+@Serializable
+data class PaperOpportunity(
+    val key: String,
+    val symbol: String,
+    val interval: Interval,
+    val action: SignalAction,
+    val signalBarTime: Long,
+    val priceAtAlert: Double,
+    val stopLoss: Double,
+    val takeProfit: Double,
+    val alertedAt: Long,
+    val conditions: List<PaperConditionRecord>,
+    val mtf: MtfSnapshotRecord,
+    val newsEvidence: PaperNewsRecord,
+    val paperTradeId: String? = null,
+) {
+    companion object {
+        fun from(signal: Signal, symbol: String, price: Double, mtf: MtfSnapshotRecord,
+                 news: PaperNewsRecord, now: Long = System.currentTimeMillis()): PaperOpportunity {
+            require(symbol == "XAU/USD" && signal.isActionable && signal.barTime > 0 &&
+                signal.confluence.take(9).size == 9 &&
+                signal.confluence.take(9).all { it.ok && it.status == ConfluenceStatus.CONFIRMED } &&
+                price.isFinite() && price > 0 && signal.stopLoss != null && signal.takeProfit != null) {
+                "فرصت آموزشی معتبر نیست"
+            }
+            return PaperOpportunity(
+                key = "$symbol|${signal.interval.label}|${signal.barTime}|${signal.action}",
+                symbol = symbol, interval = signal.interval, action = signal.action,
+                signalBarTime = signal.barTime, priceAtAlert = price,
+                stopLoss = signal.stopLoss, takeProfit = signal.takeProfit,
+                alertedAt = now, conditions = signal.confluence.take(9).map(PaperConditionRecord::from),
+                mtf = mtf, newsEvidence = news,
+            )
+        }
+    }
 }
 
 @Serializable
@@ -306,6 +353,9 @@ data class AppSettings(
     val commissionPerOz: Double = 0.05,
     val backgroundMonitor: Boolean = false,
     val notifyOnSignal: Boolean = true,
+    /** Persistable SAF content Uri; blank uses the device's system notification tone. */
+    val alertSoundUri: String = "",
+    val alertSoundName: String = "",
     /** Optional HTTPS URL of this project's backend (licensed Persian news). */
     val newsBaseUrl: String = "",
     /** Applies to NEW paper entries; real orders remain disabled independently. */

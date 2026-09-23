@@ -144,6 +144,9 @@ class JournalStore(context: Context, private val file: File = File(context.files
             autoOpened = automatic,
             signalBarTime = if (manual) null else signal.barTime,
             newsEvidence = if (manual) null else newsEvidence,
+            entryConditions = if (manual) emptyList() else signal.confluence.take(9).map {
+                com.aurum.edge.core.PaperConditionRecord.from(it)
+            },
         )
         mutex.withLock {
             // Serialize the check and append. No pyramiding or duplicate position per symbol.

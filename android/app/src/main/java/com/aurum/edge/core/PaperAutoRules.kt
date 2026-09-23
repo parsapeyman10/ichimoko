@@ -10,7 +10,13 @@ object PaperAutoRules {
     fun blocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
                 now: Long = System.currentTimeMillis()): String? {
         if (!settings.autoPaperTrading) return "معاملهٔ خودکار کاغذی خاموش است"
-        if (!settings.backgroundMonitor) return "برای خودکار کاغذی، پایش پس‌زمینه باید روشن باشد"
+        return opportunityBlocker(market, settings, news, now)
+    }
+
+    /** A 9/9 educational alert can be enabled while automatic paper entry is OFF. */
+    fun opportunityBlocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
+                           now: Long = System.currentTimeMillis()): String? {
+        if (!settings.backgroundMonitor) return "برای هشدار/ورود، پایش پس‌زمینه باید روشن باشد"
         if (market.symbol != settings.symbol || market.interval != settings.interval) return "نماد/بازه عوض شده است"
         if (market.showingCachedData || market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))
             return "فید واقعی زنده نیست؛ کش برای ورود ممنوع"

@@ -25,6 +25,8 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.core.PaperConditionRecord
+import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.SignalAction
@@ -40,11 +42,14 @@ import com.aurum.edge.ui.theme.AurumColors
 @Composable
 fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
+    val opportunities by viewModel.opportunities.collectAsStateWithLifecycle()
+    val opportunityError by viewModel.opportunityError.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val reports by viewModel.reports.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val loadError by viewModel.journalError.collectAsStateWithLifecycle()
     var confirmClear by remember { mutableStateOf(false) }
+    var confirmOpportunityClear by remember { mutableStateOf(false) }
     val now = System.currentTimeMillis()
     val livePrice = market.lastPrice?.takeIf {
         it.isFinite() && it > 0 && !market.showingCachedData &&
@@ -92,6 +97,20 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             }
         }
 
+        if (opportunities.isNotEmpty() || opportunityError != null) {
+            SectionCard("فرصت‌های آموزشی اعلام‌شده · بدون اجرای معامله", "جدا از آمار برد/باخت و پوزیشن؛ ۹/۹ فقط کاندیدای بررسی است") {
+                opportunityError?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = AurumColors.Red) }
+                opportunities.take(30).forEach { item ->
+                    OpportunityRow(item, trades.any { it.id == item.paperTradeId })
+                }
+                if (opportunities.size > 30) Text("۳۰ مورد اخیر از ${opportunities.size} کاندیدای ذخیره‌شده",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                if (opportunities.isNotEmpty()) OutlinedButton(onClick = { confirmOpportunityClear = true }) {
+                    Text("پاک کردن تاریخچهٔ کاندیداها (نه معاملات)")
+                }
+            }
+        }
+
         val open = trades.filter { it.isOpen }
         if (open.isNotEmpty()) {
             SectionCard("پوزیشن‌های باز", "ارزش‌گذاری با آخرین قیمت واقعی دریافتی") {
@@ -134,6 +153,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                     color = AurumColors.Gold,
                                 )
                             }
+                            ConditionDisclosure(trade.id, trade.entryConditions)
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
@@ -180,9 +200,14 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     }
     if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false },
         title = { Text("حذف قطعی ژورنال کاغذی؟") },
-        text = { Text("تمام معاملات کاغذی باز و بسته‌شدهٔ ثبت‌شده روی گوشی پاک می‌شوند؛ بازگشت‌پذیر نیست.") },
+        text = { Text("تمام معاملات کاغذی باز و بسته‌شدهٔ ثبت‌شده روی گوشی پاک می‌شوند؛ بازگشت‌پذیر نیست. تاریخچهٔ کاندیداها جداگانه نگهداری می‌شود.") },
         confirmButton = { TextButton(onClick = { viewModel.clearJournal(); confirmClear = false }) { Text("حذف") } },
         dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("انصراف") } })
+    if (confirmOpportunityClear) AlertDialog(onDismissRequest = { confirmOpportunityClear = false },
+        title = { Text("تاریخچهٔ کاندیداهای آموزشی پاک شود؟") },
+        text = { Text("فقط اعلان‌های ۹/۹ ذخیره‌شده پاک می‌شوند؛ معاملات ژورنال تغییر نمی‌کنند. اگر کندل هنوز تازه باشد ممکن است دوباره هشدار دریافت کنید.") },
+        confirmButton = { TextButton(onClick = { viewModel.clearOpportunityHistory(); confirmOpportunityClear = false }) { Text("حذف کاندیداها") } },
+        dismissButton = { TextButton(onClick = { confirmOpportunityClear = false }) { Text("انصراف") } })
 }
 
 @Composable
@@ -224,6 +249,9 @@ private fun TradeRow(trade: PaperTrade) {
                     }
                 }
             }
+            trade.mtf?.let { Text("MTF هنگام ورود: ${it.bias} · ${(it.alignment * 100).toInt()}٪ هم‌جهتی",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted) }
+            ConditionDisclosure(trade.id, trade.entryConditions)
         }
         Column(horizontalAlignment = Alignment.End) {
             Text(
@@ -237,6 +265,51 @@ private fun TradeRow(trade: PaperTrade) {
                 color = AurumColors.TextMuted,
             )
         }
+    }
+}
+
+@Composable
+private fun OpportunityRow(item: PaperOpportunity, tradeStillSaved: Boolean) {
+    val uriHandler = LocalUriHandler.current
+    Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
+        Text("${item.symbol} ${item.action} · ${item.interval.label} · ${formatDateTime(item.alertedAt)}",
+            style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+        Text("قیمت دریافت‌شده ${formatPrice(item.priceAtAlert)}$ · SL ${formatPrice(item.stopLoss)} · TP ${formatPrice(item.takeProfit)}",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+        Text(when {
+            item.paperTradeId == null -> "فقط کاندیدا؛ اعلان به‌تنهایی پوزیشن کاغذی باز نمی‌کند."
+            tradeStillSaved -> "ورود کاغذی جداگانه ثبت شد · شناسهٔ ${item.paperTradeId.take(8)}"
+            else -> "رکورد معاملهٔ مرتبط بعداً از ژورنال پاک شده است."
+        }, style = MaterialTheme.typography.labelSmall,
+            color = if (tradeStillSaved) AurumColors.Green else AurumColors.TextMuted)
+        Text("کندل ${formatDateTime(item.signalBarTime)} · MTF ${item.mtf.bias} · مدل ${item.newsEvidence.model}",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        ConditionDisclosure(item.key, item.conditions)
+        item.newsEvidence.evidence.forEach { news ->
+            OutlinedButton(onClick = { runCatching { uriHandler.openUri(news.url) } }) {
+                Text("شاهد خبر: ${news.source}", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConditionDisclosure(key: String, conditions: List<PaperConditionRecord>) {
+    if (conditions.isEmpty()) {
+        Text("شرایط ورود برای این رکورد قدیمی/دستی ذخیره نشده‌اند؛ تأیید ۹/۹ ادعا نمی‌شود.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        return
+    }
+    var expanded by remember(key) { mutableStateOf(false) }
+    OutlinedButton(onClick = { expanded = !expanded }) {
+        Text(if (expanded) "بستن شرایط ثبت‌شده" else "نمایش ${conditions.size} شرط هنگام ثبت",
+            style = MaterialTheme.typography.labelSmall)
+    }
+    if (expanded) conditions.forEachIndexed { index, condition ->
+        Text("${index + 1}. ${condition.name} · ${condition.status} · ${condition.detail}",
+            style = MaterialTheme.typography.labelSmall,
+            color = if (condition.status == "CONFIRMED") AurumColors.Green else AurumColors.Red,
+            modifier = Modifier.padding(vertical = 2.dp))
     }
 }
 

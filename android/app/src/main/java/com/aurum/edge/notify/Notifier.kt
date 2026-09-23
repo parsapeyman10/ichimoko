@@ -6,12 +6,13 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.aurum.edge.MainActivity
 import com.aurum.edge.R
+import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
-import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.ui.components.formatPrice
 
@@ -19,6 +20,8 @@ object Notifier {
 
     const val CHANNEL_MONITOR = "aurum_monitor"
     const val CHANNEL_SIGNALS = "aurum_signals"
+    const val CHANNEL_VERIFIED_DEFAULT = "aurum_verified_system_v1"
+    const val CHANNEL_VERIFIED_FILE = "aurum_verified_file_v1"
     const val MONITOR_NOTIFICATION_ID = 4201
 
     fun ensureChannels(context: Context) {
@@ -37,8 +40,23 @@ object Notifier {
         ).apply {
             description = "هشدار سیگنال تاییدشده طلا (فقط دیتای واقعی)"
         }
+        val systemTone = NotificationChannel(
+            CHANNEL_VERIFIED_DEFAULT, "فرصت آموزشی · صدای سیستم", NotificationManager.IMPORTANCE_HIGH,
+        ).apply { description = "تنها شرط‌های ۹/۹ تاییدشده؛ معاملهٔ واقعی نیست" }
+        val fileTone = NotificationChannel(
+            CHANNEL_VERIFIED_FILE, "فرصت آموزشی · فایل صوتی گوشی", NotificationManager.IMPORTANCE_HIGH,
+        ).apply {
+            description = "اعلان بدون صدای سیستمی؛ اپ فقط فایل صوتی انتخابی را کوتاه پخش می‌کند"
+            // Channels are immutable on Android 8+. SystemUI cannot read an app's private SAF
+            // grant, so use a silent channel and play the file in our foreground service instead.
+            setSound(null, AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+        }
         manager.createNotificationChannel(monitor)
         manager.createNotificationChannel(signals)
+        manager.createNotificationChannel(systemTone)
+        manager.createNotificationChannel(fileTone)
     }
 
     private fun contentIntent(context: Context): PendingIntent {
@@ -63,27 +81,36 @@ object Notifier {
             .setContentIntent(contentIntent(context))
             .build()
 
-    fun notifySignal(context: Context, signal: Signal) {
-        val title = when (signal.action) {
-            SignalAction.BUY -> "سیگنال خرید XAU/USD"
-            SignalAction.SELL -> "سیگنال فروش XAU/USD"
-            SignalAction.NO_TRADE -> return
+    /** Only after the opportunity is durably saved; posting an alert NEVER opens a trade. */
+    fun notifyVerifiedOpportunity(context: Context, item: PaperOpportunity, customSoundUri: String): Boolean {
+        ensureChannels(context)
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        val custom = customSoundUri.isNotBlank() && AlertSoundPlayer.canOpen(context, customSoundUri)
+        val channel = if (custom) CHANNEL_VERIFIED_FILE else CHANNEL_VERIFIED_DEFAULT
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled() ||
+            manager.getNotificationChannel(channel)?.importance == NotificationManager.IMPORTANCE_NONE) return false
+        val title = when (item.action) {
+            SignalAction.BUY -> "فرصت آموزشی خرید XAU/USD · ۹/۹"
+            SignalAction.SELL -> "فرصت آموزشی فروش XAU/USD · ۹/۹"
+            SignalAction.NO_TRADE -> return false
         }
-        val text = buildString {
-            append("${signal.interval.label} · امتیاز ${signal.confidence.toInt()}/100")
-            signal.entry?.let { append(" · ورود ${formatPrice(it)}") }
-            signal.stopLoss?.let { append(" · SL ${formatPrice(it)}") }
-            signal.takeProfit?.let { append(" · TP ${formatPrice(it)}") }
-        }
-        val notification = NotificationCompat.Builder(context, CHANNEL_SIGNALS)
+        val text = "${item.interval.label} · قیمت ${formatPrice(item.priceAtAlert)}$ · " +
+            "SL ${formatPrice(item.stopLoss)} · TP ${formatPrice(item.takeProfit)}"
+        val notification = NotificationCompat.Builder(context, channel)
             .setContentTitle(title)
             .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text + "\n" + signal.reasons.take(3).joinToString(" • ")))
+            .setStyle(NotificationCompat.BigTextStyle().bigText("$text\nکاندیدا؛ باز شدن پوزیشن کاغذی یا سفارش واقعی را نشان نمی‌دهد. جزئیات در ژورنال."))
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(contentIntent(context))
             .build()
-        runCatching { NotificationManagerCompat.from(context).notify(signal.barTime.toInt(), notification) }
+        val posted = runCatching {
+            NotificationManagerCompat.from(context).notify(item.key.hashCode(), notification)
+            true
+        }.getOrDefault(false)
+        if (posted && custom) AlertSoundPlayer.play(context, customSoundUri)
+        return posted
     }
 
     fun notifyClosedTrade(context: Context, trade: PaperTrade) {

@@ -1,6 +1,8 @@
 package com.aurum.edge.ui
 
 import android.Manifest
+import android.content.Intent
+import android.provider.Settings
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -43,6 +45,7 @@ import com.aurum.edge.core.AppSettings
 import com.aurum.edge.data.SourceCatalog
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.service.SignalMonitorService
+import com.aurum.edge.notify.Notifier
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.theme.AurumColors
 
@@ -64,6 +67,10 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     LaunchedEffect(settings.apiKey) { if (key.isBlank()) key = settings.apiKey }
     LaunchedEffect(settings.symbol) { symbol = settings.symbol }
     LaunchedEffect(settings.newsBaseUrl) { newsUrl = settings.newsBaseUrl }
+
+    val soundPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) viewModel.selectAlertSound(context, uri)
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -258,14 +265,43 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("اعلان سیگنال", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
-                    Text("هشدار روی همان سیگنالی که در تب «سیگنال» می‌بینی", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                    Text("هشدار فرصت آموزشی ۹/۹", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
+                    Text("فقط با فید تازه، ۸ شرط فنی، خبر AI معتبر، ریسک و تراز مجاز؛ کاندیدا معامله نیست.",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
                 Switch(
                     checked = settings.notifyOnSignal,
                     onCheckedChange = viewModel::setNotifyOnSignal,
                 )
             }
+            Text("هشدار فقط با پایش روشن و اعلان مجاز اندروید کار می‌کند؛ بدون مدل خبر معتبر هیچ آلارمی داده نمی‌شود. خاموش بودن ورود خودکار کاغذی مانع هشدار نیست. محدودیت Android 15 ممکن است پایش پس‌زمینه را پس از ۶ ساعت متوقف کند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            Text("صدای هشدار: ${settings.alertSoundName.ifBlank { "اعلان پیش‌فرض گوشی" }}",
+                modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
+                color = AurumColors.Gold)
+            OutlinedButton(onClick = { soundPicker.launch(arrayOf("audio/*")) },
+                modifier = Modifier.fillMaxWidth()) { Text("انتخاب فایل صوتی از گوشی") }
+            if (settings.alertSoundUri.isNotBlank()) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { viewModel.testAlertSound(context) }, modifier = Modifier.weight(1f)) {
+                        Text("پخش آزمون")
+                    }
+                    OutlinedButton(onClick = viewModel::resetAlertSound, modifier = Modifier.weight(1f)) {
+                        Text("صدای پیش‌فرض")
+                    }
+                }
+            }
+            OutlinedButton(onClick = {
+                val channelId = if (settings.alertSoundUri.isBlank()) Notifier.CHANNEL_VERIFIED_DEFAULT
+                    else Notifier.CHANNEL_VERIFIED_FILE
+                Notifier.ensureChannels(context)
+                runCatching { context.startActivity(Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
+                }) }
+            }, modifier = Modifier.fillMaxWidth()) { Text("تنظیمات اعلان‌های اندروید") }
+            Text("فایل انتخابی با مجوز پایدار روی همین گوشی و حداکثر ۱۰ ثانیه توسط اپ پخش می‌شود، نه توسط کانال سیستم؛ در حالت بی‌صدا/مزاحم‌نشدن یا اگر اعلان‌ها مسدود باشند، شنیدن آلارم تضمین نیست. ابتدا «پخش آزمون» را امتحان کن.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
         SectionCard("ورود خودکار کاغذی · فقط ۹/۹", "پیش‌فرض خاموش؛ بدون بروکر، بدون سفارش واقعی") {
