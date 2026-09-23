@@ -299,7 +299,9 @@ class CryptoScanner:
             return {
                 "status": {
                     "state": "online" if self._online else "unavailable",
-                    "provider": "CoinGecko + Binance Spot",
+                    "provider": "CoinGecko + Binance Spot" if self._preselected and self._online else (
+                        "CoinGecko (پیش‌فیلتر؛ Binance نیازی به بررسی نداشت)" if self._online else
+                        "CoinGecko + Binance Spot (داده نامعتبر)"),
                     "error": self._error,
                     "last_success_at": self._last_success.isoformat() if self._last_success else None,
                     "cached": False,  # only successful in-memory scans <=120s are reused

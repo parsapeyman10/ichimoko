@@ -123,13 +123,8 @@ class TwelveDataClient(
                 }
                 events.forEach { event ->
                     when (event["event"]?.jsonPrimitive?.contentOrNull) {
-                        "price" -> {
-                            val price = event["price"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
-                            if (price != null && price > 0) {
-                                val at = event["timestamp"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
-                                    ?.times(1000L) ?: System.currentTimeMillis()
-                                trySend(PriceTick(price, at))
-                            }
+                        "price" -> parsePriceEvent(event, symbol, System.currentTimeMillis())?.let { tick ->
+                            trySend(tick)
                         }
                         "heartbeat" -> webSocket.send("""{"action":"heartbeat"}""")
                         "error", "disconnect" -> {
@@ -150,6 +145,19 @@ class TwelveDataClient(
         }
         val socket = client.newWebSocket(request, listener)
         awaitClose { runCatching { socket.close(1000, "client closed") } }
+    }
+
+    /** Never relabel another symbol's, timeless, or delayed event as a fresh paper quote. */
+    internal fun parsePriceEvent(event: JsonObject, expectedSymbol: String, receivedAt: Long): PriceTick? {
+        if (event["event"]?.jsonPrimitive?.contentOrNull != "price" ||
+            event["symbol"]?.jsonPrimitive?.contentOrNull?.equals(expectedSymbol, ignoreCase = true) != true) return null
+        val seconds = event["timestamp"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+            ?.takeIf { it > 0 && it <= Long.MAX_VALUE / 1000L } ?: return null
+        val at = seconds * 1000L
+        if ((receivedAt - at) !in -30_000L..90_000L) return null
+        val price = event["price"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it > 0.0 } ?: return null
+        return PriceTick(price, at)
     }
 
     private fun describeError(code: String?, message: String?): String = when (code) {

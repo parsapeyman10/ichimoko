@@ -140,6 +140,20 @@ def test_public_endpoint_sends_no_order_and_never_returns_stale_candidates(monke
     assert "key should not" not in str(failed)
 
 
+def test_no_coins_pass_preselection_does_not_claim_binance_was_contacted(monkeypatch):
+    from app import main
+    scanner = CryptoScanner(Settings())
+    monkeypatch.setattr(main, "crypto_scanner", scanner)
+    async def provider(_client, url, *, params=None, headers=None):
+        assert "coingecko.com/api/v3/coins/markets" in url
+        return [{**coin(datetime.now(timezone.utc)), "market_cap": 20_000_000_000}]
+    monkeypatch.setattr(scanner, "_fetch_json", provider)
+    result = TestClient(main.app).get("/api/v1/crypto/candidates").json()
+    assert result["status"]["state"] == "online"
+    assert result["preselected"] == 0 and result["candidates"] == []
+    assert "Binance نیازی" in result["status"]["provider"]
+
+
 def test_unlisted_spot_symbol_is_a_legitimate_empty_scan_but_rate_limits_fail_closed(monkeypatch):
     from app import main
     scanner = CryptoScanner(Settings(coingecko_demo_api_key=None))

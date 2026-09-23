@@ -187,6 +187,9 @@ class MarketRepository(
                 }
                 try {
                     client.streamPrice(current.apiKey, current.symbol).collect { tick ->
+                        // Ignore an already queued tick when the user changed markets/intervals.
+                        val active = settings.read()
+                        if (active.symbol != current.symbol || active.interval != current.interval) return@collect
                         backoff = 2_000L
                         onTick(tick.price, tick.at)
                     }

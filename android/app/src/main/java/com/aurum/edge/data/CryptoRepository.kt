@@ -109,8 +109,11 @@ class CryptoRepository(private val settings: SettingsStore, private val scope: C
                 val obj = item as? JsonObject ?: error("مدرک نامزد نامعتبر است")
                 parseCandidate(obj, now)
             }
-            val scanned = root.text("scanned")?.toIntOrNull()?.coerceIn(0, 200) ?: error("دامنهٔ اسکن نامشخص است")
-            val preselected = root.text("preselected")?.toIntOrNull()?.coerceIn(0, 12) ?: error("دامنهٔ بررسی نامشخص است")
+            val scanned = root.text("scanned")?.toIntOrNull() ?: error("دامنهٔ اسکن نامشخص است")
+            val preselected = root.text("preselected")?.toIntOrNull() ?: error("دامنهٔ بررسی نامشخص است")
+            require(scanned in 1..200 && preselected in 0..12 && candidates.size <= preselected) {
+                "دامنهٔ پاسخ با غربالگر ثابت سازگار نیست"
+            }
             _state.value = CryptoScanState(CryptoScanStatus.ONLINE, candidates, filters,
                 scanned, preselected, provider, checkedAt)
         } catch (e: Exception) {
@@ -141,6 +144,15 @@ class CryptoRepository(private val settings: SettingsStore, private val scope: C
                 error("زمان شواهد نماد یا جفت بازار قدیمی است")
             }
             val link = obj.text("link")?.takeIf { it == "https://www.coingecko.com/en/coins/$id" }
+            require(obj.positive("market_cap_usd") in 50_000_000.0..5_000_000_000.0 &&
+                obj.positive("volume_24h_usd") >= 15_000_000.0 &&
+                obj.positive("binance_volume_24h_usdt") >= 5_000_000.0 &&
+                obj.num("change_1h_pct") in 0.6..4.0 && obj.num("change_24h_pct") in 2.0..14.0 &&
+                obj.num("change_7d_pct") in -10.0..35.0 &&
+                obj.num("volume_ratio_3h") in 1.8..8.0 &&
+                obj.num("taker_buy_ratio_3h") in 0.54..0.78 &&
+                obj.num("spread_pct") in 0.0..0.3 &&
+                obj.num("supply_ratio") in 0.5..1.01) { "نامزد از شروط ثابت عبور نکرده است" }
             return CryptoCandidate(
                 id = id, name = obj.text("name")?.take(80) ?: symbol, symbol = symbol,
                 priceUsd = obj.positive("price_usd"),
