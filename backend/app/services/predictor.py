@@ -3,9 +3,9 @@ Behavioral Predictor — پیش‌بینی رفتار کندل بعدی
 بهترین و سودمندترین حالت: نه پیش‌بینی قیمت خام، بلکه پیش‌بینی «ارزش مورد انتظار معامله»
 P(TP قبل از SL) با کالیبراسیون و Explainability
 
-معماری پیشنهادی تولید: Ensemble (LightGBM tabular + TCN sequence) -> Platt scaling + Elite + MTF + Behavior + OrderFlow
-دمو فعلی: Distilled Behavioral Expectancy Model — 119 ورودی وزندار + 6 نخبه + MTF 1m/5m/15m/1h + رفتارشناسی کندل + ICT کامل + جریان سفارش، <16ms، بدون نیاز GPU
-شامل K: Elite Smart Money (8) + L: Multi-Timeframe MTF (10) + M: Candle Behavior (9) + N: ICT Full (8) + O: OrderFlow & VolumeProfile (8) — تراز کامل + رفتار بدون نقص
+حالت فعلی: مدل قاعده‌محور وزنی (Distilled Behavioural Expectancy) روی 119 ویژگی که همه از
+کندل‌های واقعیِ بسته محاسبه می‌شوند: MTF (10)، رفتار کندل (9)، ICT (8)، OrderFlow/VP (8) و بقیه.
+خروجی، «ارزش مورد انتظار معامله» است نه وعدهٔ نرخ برد؛ هیچ عدد عملکردی ادعا نمی‌شود.
 """
 from __future__ import annotations
 import math
@@ -14,9 +14,9 @@ from typing import Any
 from app.models import Candle, StrategyContext, Direction
 from app.services.features import build_features, to_vector, feature_names
 
-# ─── Distilled weights — حاصل SHAP روی 1847 معامله بک‌تست + Paper Trading 2024-2026 ───
+# ─── Hand-set weights over the 119 real-candle features ───
 # مثبت = به نفع BUY، منفی = به نفع SELL، قدرمطلق = اهمیت
-# این وزن‌ها نسخه فشرده مدل LightGBM اصلی هستند (AUC 0.66→0.71 می‌رود با M+N+O، Brier 0.19→0.17)
+# این اعداد priors دستی‌اند (نه خروجی آموزش روی دیتای این پروژه) و هیچ ادعای AUC/Brier ندارند.
 WEIGHTS: dict[str, float] = {
     # Trend — مهمترین
     "ema200_dist": 0.92, "price_vs_cloud_top": 0.88, "price_vs_cloud_bottom": 0.88,
@@ -43,7 +43,7 @@ WEIGHTS: dict[str, float] = {
     "spread_vs_typical": -0.44, "body_vs_spread": 0.12,
     # SR
     "dist_to_res_atr": -0.16, "dist_to_sup_atr": 0.16,
-    # Elite Smart Money — وزن بالا چون edge نخبگان اثبات‌شده
+    # Smart-money style features weighted higher by prior, not by measured edge
     "liquidity_sweep_bear": -0.58, "liquidity_sweep_bull": 0.58,
     "fvg_bear": -0.41, "fvg_bull": 0.41,
     "order_block_dist_atr": -0.19,
@@ -198,7 +198,7 @@ def predict_next(candles: list[Candle], context: StrategyContext | None = None) 
     s = prob_buy + prob_sell + prob_neutral
     prob_buy /= s; prob_sell /= s; prob_neutral /= s
 
-    # Expected value: EV = p*RR - (1-p) - cost — 5m pro RR 1.5/1.8 for 68% win
+    # Expected value: EV = p*R - (1-p) - cost, with R from the strategy defaults.
     if is_5m:
         R = 1.55  # base 1.5 + elite boost makes 1.8, avg ~1.6 for EV calc
         cost = 0.06  # 5m less spread drift than 1m
@@ -318,10 +318,10 @@ def predict_next(candles: list[Candle], context: StrategyContext | None = None) 
     ]
 
     # Combined advisory
-    base_advisory = "این پیش‌بینی احتمالی است (EV>0) نه قطعی. فقط وقتی با فیوژن ≥72، نخبگان و MTF هم‌جهت بود وارد شو."
+    base_advisory = "این پیش‌بینی احتمالی است (EV>0) نه قطعی. فقط وقتی با فیوژن ≥72، سبک‌ها و MTF هم‌جهت بود وارد شو."
     parts = [base_advisory]
     if elite.get("advisory"):
-        parts.append(f"نخبگان: {elite['advisory']}")
+        parts.append(f"سبک‌ها: {elite['advisory']}")
     if mtf.get("advisory"):
         parts.append(f"MTF: {mtf['advisory']}")
     combined_advisory = " | ".join(parts)
@@ -337,7 +337,7 @@ def predict_next(candles: list[Candle], context: StrategyContext | None = None) 
         "expected_value_R_final": round(ev_final, 3),
         "score": round(score, 3),
         "drivers": drivers,
-        "horizon": f"1-2 bars ({tf}) — {'5-10 دقیقه 5m strict (15m/1h/4h + اخبار 30m vetو + DXY همبستگی) — وین 68% هدف' if is_5m else 'رفتار لحظه‌ای تجمع سفارشات + MTF 5m/15m/1h + Behavior + OrderFlow'}",
+        "horizon": f"1-2 bars ({tf}) — {'5-10 دقیقه روی 5m (همگرایی 15m/1h/4h + وتوی خبر 30m) — بدون ادعای نرخ برد' if is_5m else 'رفتار لحظه‌ای تجمع سفارشات + MTF 5m/15m/1h + Behavior + OrderFlow'}",
         "features_used": len(feats),
         "is_actionable": is_actionable,
         "is_actionable_base": bool(ev > 0.12 and conf >= 58 and direction != Direction.NEUTRAL),
@@ -422,21 +422,21 @@ def explain_prediction(candles: list[Candle], context: StrategyContext | None = 
     mtf_veto = mtf.get("is_veto", False)
     # base sentence
     if pred["expected_direction"] == "BUY":
-        base = f"مدل با {pred['confidence']:.0f}% احتمال صعود 1-3 کندل بعد را می‌دهد (EV={pred['expected_value_R']:+.2f}R → نخبگان {ev_elite:+.2f}R → MTF {ev_final:+.2f}R). محرک اصلی: {pred['drivers'][0]['label']}."
+        base = f"مدل با {pred['confidence']:.0f}% احتمال صعود 1-3 کندل بعد را می‌دهد (EV={pred['expected_value_R']:+.2f}R → سبک‌ها {ev_elite:+.2f}R → MTF {ev_final:+.2f}R). محرک اصلی: {pred['drivers'][0]['label']}."
     elif pred["expected_direction"] == "SELL":
-        base = f"مدل با {pred['confidence']:.0f}% احتمال نزول را می‌دهد (EV={pred['expected_value_R']:+.2f}R → نخبگان {ev_elite:+.2f}R → MTF {ev_final:+.2f}R). محرک: {pred['drivers'][0]['label']}."
+        base = f"مدل با {pred['confidence']:.0f}% احتمال نزول را می‌دهد (EV={pred['expected_value_R']:+.2f}R → سبک‌ها {ev_elite:+.2f}R → MTF {ev_final:+.2f}R). محرک: {pred['drivers'][0]['label']}."
     else:
         base = f"مدل خنثی است ({pred['prob_neutral']*100:.0f}% ) — رفتار لحظه‌ای انسان‌ها (سفارشات) در حال تعادل است، صبر کن."
     if mtf_veto:
         base += f" ⛔ وتو MTF: {mtf.get('veto_reasons',[''])[0]} — تراز چندتایم‌فریم می‌گوید صبر."
     elif is_veto:
-        base += f" ⛔ وتو نخبگان: {elite.get('veto_reasons', [''])[0]} — نخبگان ۷۰٪ مواقع همین‌جا صبر می‌کنند."
+        base += f" ⛔ وتو سبک‌ها: {elite.get('veto_reasons', [''])[0]} — این ستاپ تایید نمی‌شود."
     elif consensus != "NEUTRAL" and consensus == pred["expected_direction"] and agreement >= 0.45 and mtf_bias == pred["expected_direction"]:
-        base += f" ✓ اجماع {agreement*100:.0f}% نخبگان + MTF {mtf_bias} هم‌جهت — کیفیت {elite.get('quality','')} / {mtf.get('quality','')}"
+        base += f" ✓ اجماع {agreement*100:.0f}% سبک‌ها + MTF {mtf_bias} هم‌جهت — کیفیت {elite.get('quality','')} / {mtf.get('quality','')}"
     elif consensus != "NEUTRAL" and consensus == pred["expected_direction"] and agreement >= 0.45:
-        base += f" ✓ اجماع {agreement*100:.0f}% نخبگان هم‌جهت ({consensus}) — کیفیت {elite.get('quality','')}"
+        base += f" ✓ اجماع {agreement*100:.0f}% سبک‌ها هم‌جهت ({consensus}) — کیفیت {elite.get('quality','')}"
     elif mtf_bias != "NEUTRAL" and mtf_bias == pred["expected_direction"] and mtf.get("alignment",0) >= 0.6:
         base += f" ✓ تایید MTF {mtf_bias} با {(mtf.get('alignment',0)*100):.0f}% تراز"
     elif consensus != "NEUTRAL" and consensus != pred["expected_direction"] and agreement >= 0.42:
-        base += f" ⚠️ تضاد با نخبگان ({consensus} {agreement*100:.0f}%) — انضباط می‌گوید صبر."
+        base += f" ⚠️ تضاد با سبک‌ها ({consensus} {agreement*100:.0f}%) — انضباط می‌گوید صبر."
     return {**pred, "explanation": base}

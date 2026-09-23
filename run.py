@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-One-Click Runner — Aurum Edge
+One-Click Runner — Trading
 یک دکمه همه چیز بالا میاد: بک‌اند (8000) + فرانت (5173)
 
 Usage:
@@ -23,7 +23,7 @@ BACKEND = ROOT / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-parser = argparse.ArgumentParser(description="Aurum Edge One-Click")
+parser = argparse.ArgumentParser(description="Trading One-Click")
 parser.add_argument("--host", default="0.0.0.0")
 parser.add_argument("--port", type=int, default=8000)
 parser.add_argument("--no-browser", action="store_true")

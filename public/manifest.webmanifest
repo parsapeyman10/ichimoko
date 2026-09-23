@@ -1,6 +1,6 @@
 {
-  "name": "Aurum Edge Trading Terminal",
-  "short_name": "Aurum Edge",
+  "name": "Trading Trading Terminal",
+  "short_name": "Trading",
   "description": "XAU/USD market intelligence and closed-bar signal terminal",
   "start_url": "/",
   "display": "standalone",

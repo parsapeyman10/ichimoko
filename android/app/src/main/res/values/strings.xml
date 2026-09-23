@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Trading</string>
+    <string name="monitor_channel_name">پایش سیگنال طلا</string>
+    <string name="monitor_channel_desc">هشدار سیگنال‌های واقعی XAU/USD و وضعیت پوزیشن‌های کاغذی</string>
+    <string name="monitor_title">Trading — پایش زنده</string>
+</resources>

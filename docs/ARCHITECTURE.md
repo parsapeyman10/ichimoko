@@ -1,6 +1,14 @@
-# Aurum Edge — production architecture
+# Trading — production architecture
 
 > **Scope:** decision-support and paper-trading architecture for XAU/USD on closed 1-minute and 5-minute bars. A mobile phone is not an HFT execution venue. Market ingestion, signal calculation, risk gates, and broker order state must remain server-side. No strategy is profitable by specification; tune only through out-of-sample testing and include spread, commission, financing, rejection, and slippage.
+
+## 0. Data policy (non-negotiable)
+
+All market data comes from a real provider (Twelve Data) and all displayed trades/results are
+computed from those candles. When the provider is unreachable or unconfigured, every surface shows
+an explicit offline/no-key state together with the last real cached data. No module may generate
+candles, ticks, prices, headlines, calendars or performance statistics. `backend/tests/test_real_data_policy.py`
+enforces this.
 
 ## 1. Architecture and stack decision
 
@@ -8,9 +16,10 @@
 
 | Layer | Choice | Why |
 |---|---|---|
-| iOS / Android | **React Native + Expo (TypeScript)** | Shared domain/UI code, mature WebView, push notifications, OTA delivery, and excellent web reuse. |
+| Android (implemented) | **Native Kotlin + Jetpack Compose** (`android/`) | Fastest runtime for a chart-heavy terminal, no JS bridge, native foreground service + notifications, and it builds straight to an APK in GitHub Actions. |
+| iOS (optional, not implemented) | SwiftUI, or React Native if one codebase is preferred | Same API contracts as Android. |
 | PC / browser | **React + Vite PWA** (implemented here) | Fast desktop terminal, installable, keyboard/mouse interaction, responsive mobile fallback. |
-| Chart | **TradingView Lightweight Charts** inside WebView/browser | Hardware-accelerated canvas, compact payload, streaming updates. Commercial TradingView Charting Library is needed for a full built-in drawing-tool suite and requires a separate license. |
+| Chart | **TradingView Lightweight Charts** on web, **Compose Canvas** on Android | Both draw only provider candles. The Android chart is a native canvas renderer (candles, Ichimoku cloud, VWAP, EMA200, crosshair, pinch-zoom) with no WebView bridge. |
 | Edge/API | **Python 3.12 + FastAPI + Uvicorn** | Async WebSockets plus direct access to NumPy/FinBERT/backtest tools. Keep CPU/GPU model work off the API event loop. |
 | Event backbone | **NATS JetStream** (or Redpanda/Kafka at larger scale) | Durable subjects, replay, low operational latency, consumer isolation. |
 | Hot state | **Redis Cluster** | Latest quote, bar, signal, idempotency keys, distributed locks, rate limits. |

@@ -1,15 +1,18 @@
 """
-Elite Trader Behavior Ensemble — رفتار ۶ تریدر افسانه‌ای
-هر تریدر یک لنز متفاوت به همان ۸۴ ورودی دارد. سوددهی واقعی از «انضباط نخبگان» می‌آید:
-فقط ۲-۴ ترید در روز، فقط Killzone، فقط وقتی ۳+ نخبه هم‌جهت باشند.
+Complementary analysis ensemble — شش سبک تحلیلی روی همان ۸۴ ورودی.
 
-Archetypes (بر اساس استراتژی عمومی منتشرشده، نه داده خصوصی):
-1. ICT / SMC — Michael Huddleston: نقدینگی، FVG، Order Block، Killzone
-2. Trend Institutional — Ed Seykota / Druckenmiller: EMA200، ADX، سوار روند
-3. Quant Mean-Reversion — Jim Simons: بازگشت به میانگین، BB، Z-score
-4. Macro — Soros / Tudor Jones: دلار، بازده، خبر
-5. Scalper Orderflow — Linda Raschke / Bob Volman: حجم، اسپرد، ریزساختار
-6. Supply/Demand — Sam Seiden: سطوح عرضه/تقاضا، premium/discount
+This module is a set of *rules* (archetypes), not a claim about any real person and not a
+performance claim. Each archetype contributes a weighted vote; the result is an advisory
+score, never a promise of profit. Performance is only ever reported from a real-data
+backtest (see services/backtest.py) or the paper journal.
+
+Archetypes:
+1. ict_smc        — نقدینگی، FVG، Order Block، Killzone
+2.  trend         — EMA200، ADX، سوار شدن بر روند
+3.  quant         — بازگشت به میانگین، باند بولینگر، Z-score
+4.  macro         — دلار، بازده، خبر
+5.  scalper       — حجم، اسپرد، ریزساختار
+6.  supply_demand — سطوح عرضه/تقاضا، premium/discount
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -26,7 +29,7 @@ class TraderVote:
     reason: str
     is_veto: bool = False  # if true, this trader says NO_TRADE regardless of direction
 
-# Experience weights — بر اساس سازگاری با XAU/USD 1m/5m (بک‌تست ۲۰۰۰-۲۰۲۶)
+# Fixed starting weights (priors). They are tuning parameters, not measured performance.
 TRADER_WEIGHTS = {
     "ict_smc": 0.24,
     "trend": 0.22,
@@ -37,16 +40,16 @@ TRADER_WEIGHTS = {
 }
 
 TRADERS_META = {
-    "ict_smc": {"name": "ICT / SMC", "full": "Michael Huddleston — Smart Money", "style": "Liquidity Sweep · FVG · Order Block · Killzone", "desc": "شکار استاپ‌ها، ورود پس از جارو نقدینگی در Killzone"},
-    "trend": {"name": "Trend Institutional", "full": "Ed Seykota / Druckenmiller", "style": "EMA200 · ADX · سوار روند، قطع سریع ضرر", "desc": "فقط روند قوی، بگذار سود بدود"},
-    "quant": {"name": "Quant Mean-Reversion", "full": "Jim Simons (Renaissance)", "style": "BB %B · RSI Z · VWAP بازگشت", "desc": "خرید افراط فروش، فروش افراط خرید — فقط وقتی Z>1.5"},
-    "macro": {"name": "Macro", "full": "Soros / Tudor Jones", "style": "DXY · Yield · News · Risk-on", "desc": "وقتی دلار و بازده و خبر هم‌جهت شدند"},
-    "scalper": {"name": "Scalper Orderflow", "full": "Linda Raschke / Volman", "style": "Volume Spike · Spread · Body/Spread", "desc": "حجم انفجاری + اسپرد سالم = مومنتوم لحظه‌ای"},
-    "supply_demand": {"name": "Supply/Demand", "full": "Sam Seiden", "style": "Premium/Discount · Order Block Distance", "desc": "خرید در Discount، فروش در Premium — نه وسط رنج"},
+    "ict_smc": {"name": "ICT / SMC", "full": "Smart Money Concepts (archetype)", "style": "Liquidity Sweep · FVG · Order Block · Killzone", "desc": "شکار استاپ‌ها، ورود پس از جارو نقدینگی در Killzone"},
+    "trend": {"name": "Trend Following", "full": "Institutional trend archetype", "style": "EMA200 · ADX · سوار روند، قطع سریع ضرر", "desc": "فقط روند قوی، بگذار سود بدود"},
+    "quant": {"name": "Quant Mean-Reversion", "full": "Statistical mean-reversion archetype", "style": "BB %B · RSI Z · VWAP بازگشت", "desc": "خرید افراط فروش، فروش افراط خرید — فقط وقتی Z>1.5"},
+    "macro": {"name": "Macro", "full": "Macro / rates & dollar archetype", "style": "DXY · Yield · News · Risk-on", "desc": "وقتی دلار و بازده و خبر هم‌جهت شدند"},
+    "scalper": {"name": "Scalper Orderflow", "full": "Order-flow scalping archetype", "style": "Volume Spike · Spread · Body/Spread", "desc": "حجم انفجاری + اسپرد سالم = مومنتوم لحظه‌ای"},
+    "supply_demand": {"name": "Supply/Demand", "full": "Supply & demand zone archetype", "style": "Premium/Discount · Order Block Distance", "desc": "خرید در Discount، فروش در Premium — نه وسط رنج"},
 }
 
 def _vote_ict(feats: dict[str, float]) -> TraderVote:
-    # ICT: must be in killzone, then look for liquidity sweep + FVG + OB alignment
+    # ICT archetype
     kill = feats.get("killzone_active", 0)
     liq_bear = feats.get("liquidity_sweep_bear", 0)
     liq_bull = feats.get("liquidity_sweep_bull", 0)
@@ -56,7 +59,7 @@ def _vote_ict(feats: dict[str, float]) -> TraderVote:
     ob_dist = feats.get("order_block_dist_atr", 5)
     # Veto if not killzone -> ICT doesn't trade
     if kill < 0.5:
-        return TraderVote("ict_smc", TRADERS_META["ict_smc"]["name"], TRADERS_META["ict_smc"]["style"], "NEUTRAL", 35, TRADER_WEIGHTS["ict_smc"], "خارج Killzone — ICT معامله نمی‌کند", is_veto=False)
+        return TraderVote("ict_smc", TRADERS_META["ict_smc"]["name"], TRADERS_META["ict_smc"]["style"], "NEUTRAL", 35, TRADER_WEIGHTS["ict_smc"], "خارج Killzone — این سبک معامله نمی‌کند", is_veto=False)
     # Bearish: sweep highs + bearish FVG + premium (>0.65) + close near OB
     bear_score = 0
     if liq_bear > 0.5: bear_score += 2
@@ -81,7 +84,7 @@ def _vote_trend(feats: dict[str, float]) -> TraderVote:
     tk_slope = feats.get("tenkan_slope", 0)
     vwap = feats.get("vwap_dist", 0)
     cloud_bear = feats.get("cloud_bearish", 0)
-    # Seykota rule: ADX must confirm trend, else no trade
+    # trend archetype: ADX must confirm trend, else no trade
     if adx < 17:
         return TraderVote("trend", TRADERS_META["trend"]["name"], TRADERS_META["trend"]["style"], "NEUTRAL", 42, TRADER_WEIGHTS["trend"], f"ADX ضعیف {adx:.0f} — روند بی‌جان", is_veto=False)
     if ema > 0.7 and vwap > 0.5 and tk_spread > 0.25 and tk_slope > 0 and cloud_bear < 0.5:
@@ -90,14 +93,14 @@ def _vote_trend(feats: dict[str, float]) -> TraderVote:
     if ema < -0.7 and vwap < -0.5 and tk_spread < -0.25 and tk_slope < 0 and cloud_bear > 0.5:
         conf = min(88, 62 + int(adx - 17)*2 + int(-ema*6))
         return TraderVote("trend", TRADERS_META["trend"]["name"], TRADERS_META["trend"]["style"], "SELL", conf, TRADER_WEIGHTS["trend"], f"زیر EMA200 ({ema:.1f}) + ADX {adx:.0f} — سوار روند نزولی")
-    return TraderVote("trend", TRADERS_META["trend"]["name"], TRADERS_META["trend"]["style"], "NEUTRAL", 50, TRADER_WEIGHTS["trend"], "روند ناقص — Seykota صبر می‌کند")
+    return TraderVote("trend", TRADERS_META["trend"]["name"], TRADERS_META["trend"]["style"], "NEUTRAL", 50, TRADER_WEIGHTS["trend"], "روند ناقص — این سبک وارد نمی‌شود")
 
 def _vote_quant(feats: dict[str, float]) -> TraderVote:
     bb = feats.get("bb_pctB", 0.5)
     rsi = feats.get("rsi7", 50)
     rsi_z = feats.get("rsi7_z", 0)
     stoch = feats.get("stoch_k", 50)
-    # Simons only trades extremes with z-score confirmation
+    # quant archetype
     if bb > 0.88 and rsi > 66 and rsi_z > 1.2 and stoch > 78:
         return TraderVote("quant", TRADERS_META["quant"]["name"], TRADERS_META["quant"]["style"], "SELL", 71, TRADER_WEIGHTS["quant"], f"اشباع صعود BB {bb:.2f} + RSI {rsi:.0f} Z {rsi_z:.1f} — بازگشت به میانگین")
     if bb < 0.12 and rsi < 34 and rsi_z < -1.2 and stoch < 22:
@@ -109,8 +112,9 @@ def _vote_macro(feats: dict[str, float]) -> TraderVote:
     dxy = feats.get("dxy_proxy", 0)
     yld = feats.get("yield_proxy", 0)
     risk = feats.get("risk_on_proxy", 0)
-    # Soros: needs alignment of dollar + yield + news
-    # DXY down (negative dxy_proxy means gold up), so dxy_proxy negative = bullish gold? Actually dxy_proxy = -(gold-ema20)/ATR*0.35, so negative when gold up? Wait gold up => DXY down expected => but proxy is synthetic. Simpler: news + dxy + risk alignment
+    # macro archetype: needs alignment of dollar + yield + news
+    # dxy_proxy is a labelled gold-derived proxy (see features.py). Alignment of the proxy,
+    # news tone and event risk decides whether the macro archetype votes at all.
     score = 0
     if news > 0.35: score += 2
     elif news < -0.35: score -= 2
@@ -148,7 +152,7 @@ def _vote_supply_demand(feats: dict[str, float]) -> TraderVote:
     ob_dist = feats.get("order_block_dist_atr", 5)
     dist_res = feats.get("dist_to_res_atr", 5)
     dist_sup = feats.get("dist_to_sup_atr", 5)
-    # Sam Seiden: Buy discount near demand, Sell premium near supply
+    # supply/demand archetype: buy discount near demand, sell premium near supply
     if premium < 0.33 and dist_sup < 1.2 and ob_dist < 2.0:
         return TraderVote("supply_demand", TRADERS_META["supply_demand"]["name"], TRADERS_META["supply_demand"]["style"], "BUY", 69, TRADER_WEIGHTS["supply_demand"], f"Discount {premium:.2f} + نزدیک تقاضا ({dist_sup:.1f} ATR) — ارزش خرید")
     if premium > 0.67 and dist_res < 1.2 and ob_dist < 2.0:
@@ -168,8 +172,10 @@ def vote_all(feats: dict[str, float]) -> list[TraderVote]:
 
 def ensemble(feats: dict[str, float], base_ev: float | None = None, base_direction: str | None = None) -> dict[str, Any]:
     """
-    ترکیب وزنی آراء نخبگان + فیلتر انضباطی
-    خروجی: consensus, confidence, veto, elite_score, agreement, advisory
+    Weighted vote of the six rule archetypes over features computed from real closed candles.
+
+    Output: consensus, agreement, quality label, veto reasons, advisory text.
+    Nothing here is measured performance — it is a transparent, deterministic rule ensemble.
     """
     votes = vote_all(feats)
     # Weighted directional score: BUY +1, SELL -1, NEUTRAL 0
@@ -208,7 +214,7 @@ def ensemble(feats: dict[str, float], base_ev: float | None = None, base_directi
     else:
         agreement = neutral_w / max(total_w, 0.01)
 
-    # Elite confidence (0-100) — need strong agreement + high individual confidences
+    # Ensemble confidence (0-100) — agreement + individual confidence
     avg_conf = sum(v.confidence * v.weight for v in votes) / max(sum(v.weight for v in votes), 0.01)
     elite_conf = avg_conf * (0.55 + 0.45 * agreement)  # agreement boosts
     # Veto conditions — elite discipline: 70% of trades filtered out + MTF
@@ -232,16 +238,16 @@ def ensemble(feats: dict[str, float], base_ev: float | None = None, base_directi
 
     is_veto = len(veto_reasons) > 0
 
-    # Elite EV adjustment: if ensemble agrees with base predictor, boost EV; if conflicts, dampen
+    # Advisory EV nudge (hand-tuned prior, not a measured edge): if ensemble agrees with base predictor, boost EV; if conflicts, dampen
     elite_ev_boost = 0.0
     if base_direction and base_ev is not None:
         if consensus == base_direction and consensus != "NEUTRAL" and agreement > 0.42:
-            elite_ev_boost = 0.09 + agreement * 0.12  # +0.14 to +0.21 R boost
+            elite_ev_boost = 0.09 + agreement * 0.12  # heuristic nudge, documented as a prior
         elif consensus != "NEUTRAL" and consensus != base_direction and agreement > 0.38:
             elite_ev_boost = -0.14 - agreement * 0.08  # penalize conflict
 
-    # Profitability insight — what elite behavior improves?
-    # Historically, following 3+ agreement + EV>0.12 + no veto improves PF from ~1.35 to ~1.62
+    # Agreement quality label. It describes agreement between rule sets,
+    # NOT a measured edge: real performance only comes from a real-data backtest.
     quality = "A+"
     if agreement < 0.35 or elite_conf < 58:
         quality = "C — پراکنده"
@@ -252,11 +258,11 @@ def ensemble(feats: dict[str, float], base_ev: float | None = None, base_directi
 
     advisory = ""
     if is_veto:
-        advisory = f"وتو نخبگان: {veto_reasons[0]} — حتی اگر مدل سیگنال دهد، نخبگان ۷۰٪ مواقع صبر می‌کنند."
+        advisory = f"وتو سبک‌ها: {veto_reasons[0]} — حتی اگر مدل سیگنال دهد، این سبک می‌گوید وارد نشو."
     elif consensus != "NEUTRAL" and agreement >= 0.50:
-        advisory = f"{agreement*100:.0f}% وزن نخبگان هم‌جهت ({consensus}) — انضباط می‌گوید: فقط همین ستاپ‌ها را بگیر، بقیه را رها کن."
+        advisory = f"{agreement*100:.0f}% وزن سبک‌ها هم‌جهت ({consensus}) — فقط همین ستاپ‌ها با فیلترهای دیگر هم‌خوان‌اند."
     else:
-        advisory = "عدم اجماع نخبگان — بهترین تریدرها می‌گویند: معامله نکردن هم یک پوزیشن است."
+        advisory = "عدم اجماع سبک‌ها — معامله نکردن هم یک تصمیم معتبر است."
 
     return {
         "votes": [
@@ -272,5 +278,5 @@ def ensemble(feats: dict[str, float], base_ev: float | None = None, base_directi
         "elite_ev_boost": round(elite_ev_boost, 3),
         "quality": quality,
         "advisory": advisory,
-        "summary": f"اجماع نخبگان: {consensus} با {agreement*100:.0f}% توافق · وتو: {'بله' if is_veto else 'خیر'} · کیفیت {quality}",
+        "summary": f"اجماع سبک‌ها: {consensus} با {agreement*100:.0f}% توافق · وتو: {'بله' if is_veto else 'خیر'} · کیفیت {quality}",
     }

@@ -1,10 +1,10 @@
 """
-Broker service — $100 demo test money, leverage & fee-accurate execution
-برکری با $100 دمو + محاسبه دقیق اهرم و کارمزد
+Broker reference data — leverage, spread, commission and minimum lot.
+اطلاعات مرجع بروکرها برای محاسبه دقیق هزینه اجرا (بدون هیچ ادعای عملکرد)
 """
 from app.models import BrokerConfig
 
-# 4 brokers that explicitly allow $100 demo / bonus micro account
+# Reference specs of brokers with micro lots (fees are inputs for the cost model)
 BROKERS: list[BrokerConfig] = [
     BrokerConfig(
         name="RoboForex Prime",
@@ -13,11 +13,10 @@ BROKERS: list[BrokerConfig] = [
         commission_per_oz=0.05,
         commission_per_lot=5.0,
         min_lot=0.01,
-        demo_balance=100,
         swap_long_per_night=-0.018,
         swap_short_per_night=0.006,
         min_deposit=10,
-        description="بهترین برای $100 — لوریج 1:500، اسپرد طلا 0.28، کمیسیون $5/لات، دمو $100 قابل تنظیم، میکرو 0.01 لات = 1oz"
+        description="لوریج 1:500، اسپرد طلا 0.28، کمیسیون $5/لات، حداقل 0.01 لات (1oz) — مناسب حساب کوچک"
     ),
     BrokerConfig(
         name="Exness Standard",
@@ -26,11 +25,10 @@ BROKERS: list[BrokerConfig] = [
         commission_per_oz=0.00,
         commission_per_lot=0.0,
         min_lot=0.01,
-        demo_balance=100,
         swap_long_per_night=-0.015,
         swap_short_per_night=0.004,
         min_deposit=1,
-        description="اسپرد شناور 0.32 بدون کمیسیون، دموی نامحدود $100، لوریج 1:2000 — برای حساب کوچک عالی، سواپ فری اسلامی موجود"
+        description="اسپرد شناور 0.32 بدون کمیسیون، لوریج 1:2000، حداقل 1oz — سواپ فری اسلامی موجود"
     ),
     BrokerConfig(
         name="FBS LevelUp $140 Bonus",
@@ -39,7 +37,6 @@ BROKERS: list[BrokerConfig] = [
         commission_per_oz=0.06,
         commission_per_lot=6.0,
         min_lot=0.01,
-        demo_balance=140,
         swap_long_per_night=-0.022,
         swap_short_per_night=0.008,
         min_deposit=0,
@@ -52,11 +49,10 @@ BROKERS: list[BrokerConfig] = [
         commission_per_oz=0.06,
         commission_per_lot=6.0,
         min_lot=0.01,
-        demo_balance=100,
         swap_long_per_night=-0.02,
         swap_short_per_night=0.007,
         min_deposit=5,
-        description="ECN اسپرد خام 0.25، کمیسیون $6/لات، دمو $100، لوریج 1:500 — اجرای سریع برای اسکالپ 5m"
+        description="ECN اسپرد خام 0.25، کمیسیون $6/لات، لوریج 1:500 — اجرای سریع برای 5m"
     ),
 ]
 

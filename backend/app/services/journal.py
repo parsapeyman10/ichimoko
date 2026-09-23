@@ -75,7 +75,20 @@ def stats() -> dict:
     entries = list_entries(500)
     closed = [e for e in entries if e.status == "CLOSED" and e.pnl is not None]
     if not closed:
-        return {"total": len(entries), "closed": 0, "win_rate": 0, "profit_factor": 0, "total_pnl": 0, "avg_rr": 0}
+        # No settled trades yet: report nothing rather than a fake 0% win rate.
+        return {
+            "total": len(entries),
+            "closed": 0,
+            "open": len([e for e in entries if e.status == "OPEN"]),
+            "wins": 0,
+            "losses": 0,
+            "win_rate": None,
+            "profit_factor": None,
+            "total_pnl_1oz": 0.0,
+            "avg_rr": None,
+            "avg_confidence": None,
+            "note": "هنوز معامله‌ای تسویه نشده است؛ آماری وجود ندارد.",
+        }
     wins = [e for e in closed if e.pnl > 0]
     losses = [e for e in closed if e.pnl <= 0]
     gross_profit = sum(e.pnl for e in wins) if wins else 0
@@ -88,45 +101,9 @@ def stats() -> dict:
         "wins": len(wins),
         "losses": len(losses),
         "win_rate": round(len(wins)/len(closed)*100, 1),
-        "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss else 99.9,
+        "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss else None,
         "total_pnl_1oz": round(total_pnl, 2),  # type: ignore
         "avg_rr": round(sum(e.risk_reward for e in closed)/len(closed), 2),
         "avg_confidence": round(sum(e.confidence for e in closed)/len(closed), 1),
     }
 
-def seed_demo():
-    """Create demo history if empty, to show resume capability."""
-    if _load():
-        return
-    import random
-    from datetime import timedelta
-    now = datetime.now(timezone.utc)
-    demos = [
-        ("BUY", 3348.2, 3344.5, 3355.1, 84, 2.0, 7.2, "Take-profit reached"),
-        ("SELL", 3362.1, 3365.8, 3355.4, 78, 1.8, -3.7, "Stop reached"),
-        ("BUY", 3355.6, 3352.1, 3362.0, 91, 2.0, 6.4, "Take-profit reached"),
-        ("BUY", 3360.3, 3356.9, 3366.8, 74, 1.8, 2.1, "Kijun exit"),
-        ("SELL", 3358.9, 3362.4, 3352.3, 81, 1.8, 6.6, "Take-profit reached"),
-        ("BUY", 3349.1, 3345.6, 3355.8, 69, 1.8, -3.5, "Time stop"),
-        ("SELL", 3352.4, 3356.1, 3345.9, 88, 2.0, 6.5, "Take-profit reached"),
-    ]
-    raw=[]
-    for idx, (act, e, sl, tp, conf, rr, pnl, reason) in enumerate(demos):
-        t = now - timedelta(hours=len(demos)-idx, minutes=random.randint(5,50))
-        raw.append({
-            "id": f"demo{idx+1:02d}",
-            "symbol": "XAU/USD",
-            "timeframe": "1m" if idx%2==0 else "5m",
-            "action": act,
-            "entry": e, "stop_loss": sl, "take_profit": tp,
-            "confidence": conf, "risk_reward": rr,
-            "opened_at": (t).isoformat(),
-            "closed_at": (t+timedelta(minutes=random.randint(3,12))).isoformat(),
-            "exit_price": round(e+pnl if act=="BUY" else e-pnl,2),
-            "exit_reason": reason,
-            "pnl": pnl, "pnl_percent": round(pnl/e*100,3),
-            "status": "CLOSED",
-            "reasons": ["Demo seeded"],
-            "blockers": []
-        })
-    _save(raw)
