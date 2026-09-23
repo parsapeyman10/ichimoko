@@ -52,9 +52,27 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 }
                 OutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) { Text("تنظیم سرور") }
             }
-            Text("توقف بر پایهٔ خبر برای ورودهای کاغذی ${if (settings.pauseOnNews) "روشن" else "خاموش"} است. قطع حتی یکی از خوراک‌ها وضعیت را UNKNOWN می‌کند. CLEAR تقویم کامل یا اجازهٔ سفارش واقعی نیست.",
+            Text("وتوی خبر برای ورود دستی کاغذی ${if (settings.pauseOnNews) "روشن" else "خاموش"} است؛ برای ورود خودکار و سیگنالی شرط AI همیشه الزامی است. قطع یک خوراک UNKNOWN می‌کند. CLEAR تقویم کامل یا اجازهٔ سفارش واقعی نیست.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
                 modifier = Modifier.padding(top = 6.dp))
+        }
+        SectionCard("شرط نهم · تحلیل خودکار خبر با AI", "فقط XAU/USD · نتیجهٔ مدلِ سرور؛ قواعد کلیدواژه‌ای AI محسوب نمی‌شوند") {
+            val ready = state.ai.status == "AVAILABLE" && state.gate == NewsGate.CLEAR && !state.cached && !state.loading
+            Text(if (ready) "جهت پیشنهادی مدل: ${state.ai.direction} · اطمینان ${state.ai.confidence.toInt()}٪"
+                else "UNKNOWN · ${state.ai.reason}",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (ready) AurumColors.Green else AurumColors.Gold)
+            Text("مدل: ${state.ai.model ?: "فعال نیست"} · بررسی ${relativeTime(state.ai.checkedAt)} · برای ورود خودکار باید هشت شرط فنی، تطابق جهت، همهٔ منابع و کنترل خبر هم‌زمان معتبر باشند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            state.ai.evidenceIds.mapNotNull { id -> state.articles.singleOrNull { it.id == id } }.forEach { source ->
+                Text("شاهد: ${source.source} · ${source.headline}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+                source.link?.let { url ->
+                    OutlinedButton(onClick = { runCatching { uriHandler.openUri(url) } }) {
+                        Text("خبر در منبع", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
         }
         if (state.sources.isNotEmpty()) {
             SectionCard("وضعیت منبع‌های ناشر", "فقط تیتر، چکیدهٔ کوتاه، زمان و لینک خودِ ناشر") {

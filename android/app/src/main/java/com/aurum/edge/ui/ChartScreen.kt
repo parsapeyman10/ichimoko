@@ -38,8 +38,11 @@ import com.aurum.edge.ui.components.formatTime
 import com.aurum.edge.ui.theme.AurumColors
 
 @Composable
-fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: () -> Unit) {
+fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: () -> Unit,
+                onOpenJournal: () -> Unit) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val trades by viewModel.trades.collectAsStateWithLifecycle()
+    val autoStatus by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
     var crosshair by remember { mutableStateOf<Candle?>(null) }
 
     if (!settings.hasKey) {
@@ -133,6 +136,28 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
             signal = market.signal,
             onOpenPaperTrade = { market.signal?.let(viewModel::openPaperTrade) },
         )
+
+        SectionCard("معاملهٔ ثبت‌شده یا فقط خطوط سیگنال؟", "خط‌های «طرح ورود/SL/TP» معامله نیستند و به‌تنهایی ژورنال نمی‌سازند") {
+            val sameSymbol = trades.filter { it.symbol == market.symbol }
+            val openCount = sameSymbol.count { it.isOpen }
+            Text("${sameSymbol.count { !it.isOpen }} معاملهٔ کاغذی بسته · $openCount باز، ثبت‌شده در ژورنال برای ${market.symbol}",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (sameSymbol.isEmpty()) AurumColors.Gold else AurumColors.Green)
+            if (settings.autoPaperTrading) {
+                Text("خودکار کاغذی: $autoStatus", style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary)
+            } else {
+                Text("خودکار خاموش است؛ با تأیید خودت در تنظیمات می‌توانی ورود خودکار کاغذی ۹/۹ را روشن کنی. سفارش واقعی وجود ندارد.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            }
+            sameSymbol.firstOrNull()?.let { trade ->
+                Text("آخرین ثبت: ${trade.id.take(8)} · ${if (trade.autoOpened) "خودکار کاغذی" else "کاغذی"} · ${if (trade.isOpen) "باز" else "بسته"}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
+            }
+            Button(onClick = onOpenJournal, modifier = Modifier.padding(top = 5.dp)) {
+                Text("دیدن رکوردهای ژورنال")
+            }
+        }
 
         SectionCard(
             title = "وضعیت دیتا",

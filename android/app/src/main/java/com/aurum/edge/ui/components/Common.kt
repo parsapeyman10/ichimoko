@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aurum.edge.core.ConfluenceItem
+import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.ui.theme.AurumColors
@@ -173,8 +174,16 @@ fun ConfluenceRow(item: ConfluenceItem) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            if (item.ok) "✓" else "✕",
-            color = if (item.ok) AurumColors.Green else AurumColors.Red,
+            when (item.status) {
+                ConfluenceStatus.CONFIRMED -> "✓"
+                ConfluenceStatus.CONFLICT -> "✕"
+                ConfluenceStatus.UNKNOWN -> "؟"
+            },
+            color = when (item.status) {
+                ConfluenceStatus.CONFIRMED -> AurumColors.Green
+                ConfluenceStatus.CONFLICT -> AurumColors.Red
+                ConfluenceStatus.UNKNOWN -> AurumColors.Gold
+            },
             style = MaterialTheme.typography.titleSmall,
             modifier = Modifier.padding(end = 10.dp),
         )

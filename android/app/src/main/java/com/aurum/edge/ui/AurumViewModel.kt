@@ -29,6 +29,7 @@ import com.aurum.edge.data.WatchSelection
 import com.aurum.edge.data.WatchState
 import com.aurum.edge.engine.Backtester
 import com.aurum.edge.engine.MtfAnalyzer
+import com.aurum.edge.engine.NewsConfluence
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -71,8 +72,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val crypto = container.crypto.state
     private val _watchHistory = MutableStateFlow(WatchHistory())
     val watchHistory: StateFlow<WatchHistory> = _watchHistory.asStateFlow()
-    val market = container.market.state
+    val market = container.verifiedMarket
     val trades: StateFlow<List<PaperTrade>> = container.journalStore.trades
+    val journalError: StateFlow<String?> = container.journalStore.loadError
+    val autoPaperStatus: StateFlow<String> = container.autoPaperTrader.status
 
     /** Walk-forward runs made on this device, kept so the numbers can be re-checked later. */
     val reports: StateFlow<List<WalkForwardRecord>> = container.journalStore.reports
@@ -99,11 +102,18 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     init {
         viewModelScope.launch {
-            container.journalStore.load()
+            runCatching { container.journalStore.load() }.onFailure {
+                _toast.value = "ژورنال خوانده نشد؛ فایل قبلی برای بازیابی نگه داشته شد"
+            }
             container.journalStore.loadReports()
             _stats.value = container.journalStore.stats()
             container.market.start()
             container.watch.loadCached()
+        }
+        viewModelScope.launch {
+            // Automatic SL/TP settlement happens in MarketRepository, not in this ViewModel.
+            // Keep totals in sync with the journal flow even while a screen is not open.
+            trades.collect { _stats.value = container.journalStore.stats() }
         }
         viewModelScope.launch {
             while (isActive) {
@@ -224,7 +234,22 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setNotifyOnSignal(enabled: Boolean) = container.settingsStore.update { it.copy(notifyOnSignal = enabled) }
 
-    fun setMonitorFlag(enabled: Boolean) = container.settingsStore.update { it.copy(backgroundMonitor = enabled) }
+    fun setMonitorFlag(enabled: Boolean) {
+        container.settingsStore.update { it.copy(backgroundMonitor = enabled,
+            autoPaperTrading = if (enabled) it.autoPaperTrading else false) }
+        if (!enabled) _toast.value = "پایش پس‌زمینه روشن نشد؛ معاملهٔ خودکار کاغذی خاموش ماند"
+    }
+
+    fun setAutoPaperTrading(enabled: Boolean) {
+        if (enabled && (!settings.value.backgroundMonitor || settings.value.newsBaseUrl.isBlank())) {
+            _toast.value = "برای خودکار کاغذی، پایش و آدرس HTTPS سرور خبر را فعال کنید"
+            return
+        }
+        container.settingsStore.update { it.copy(autoPaperTrading = enabled) }
+        if (enabled) container.news.refreshNow()
+        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ بدون مدل AI و ۹/۹ معتبر هیچ ورودی ثبت نمی‌شود"
+            else "معاملهٔ خودکار کاغذی خاموش شد"
+    }
 
     private var paperOpening = false
 
@@ -305,6 +330,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     abs(price / signal.entry - 1.0) <= 0.005 && _mtf.value?.veto != true) {
                     "سیگنال قدیمی، وتوشده یا دور از قیمت تازه است"
                 }
+                require(NewsConfluence.alignment(current.symbol, signal.action, news.value).status ==
+                    com.aurum.edge.core.ConfluenceStatus.CONFIRMED) {
+                    "شرط نهم خبر AI دیگر معتبر نیست؛ ورود سیگنالی متوقف شد"
+                }
             }
             PaperOrderRules.preview(signal.action, current.symbol, price,
                 signal.stopLoss ?: throw IllegalArgumentException("حد ضرر لازم است"),
@@ -324,11 +353,18 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 // Repeat all checks after scheduling; never persist a stale or switched symbol.
                 val (current, price) = verified()
                 val s = container.settingsStore.read()
+                val newsRecord = if (manual) null else {
+                    val latestNews = news.value
+                    require(NewsConfluence.alignment(current.symbol, signal.action, latestNews).status ==
+                        com.aurum.edge.core.ConfluenceStatus.CONFIRMED) { "خبر AI در لحظهٔ ثبت قدیمی شد" }
+                    NewsConfluence.record(latestNews) ?: error("شواهد خبر قابل ذخیره نیست")
+                }
                 val trade = container.journalStore.open(
                     signal = signal, symbol = current.symbol, price = price,
                     balance = s.accountBalance, riskPercent = s.riskPercent,
                     mtf = if (manual) null else _mtf.value?.let { MtfSnapshotRecord.from(it) },
                     manual = manual,
+                    newsEvidence = newsRecord,
                 )
                 _stats.value = container.journalStore.stats()
                 _toast.value = "فقط کاغذی: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} ${trade.symbol} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}"
@@ -351,8 +387,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             try {
                 val latest = market.value
                 require(trade.symbol == latest.symbol && freshPaperQuote(latest) == null) { "قیمت خروج تازهٔ همان نماد نیست" }
-                container.journalStore.close(trade.id, latest.lastPrice!!, "بستن دستی روی قیمت دریافتی")
+                val closed = container.journalStore.close(trade.id, latest.lastPrice!!, "بستن دستی روی قیمت دریافتی")
                 _stats.value = container.journalStore.stats()
+                _toast.value = "پوزیشن کاغذی ${closed.id.take(8)} با ${closed.pnlUsd} دلار بسته و در ژورنال ذخیره شد"
             } catch (error: Exception) {
                 _toast.value = "بستن انجام نشد: ${error.message ?: "خطا در ذخیره"}"
             }
@@ -361,8 +398,13 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun clearJournal() {
         viewModelScope.launch {
-            container.journalStore.clear()
-            _stats.value = container.journalStore.stats()
+            try {
+                container.journalStore.clear()
+                _stats.value = container.journalStore.stats()
+                _toast.value = "ژورنال کاغذی روی دستگاه پاک شد"
+            } catch (e: Exception) {
+                _toast.value = "پاک‌کردن انجام نشد؛ فایل حفظ شد: ${e.message ?: "خطای ذخیره"}"
+            }
         }
     }
 

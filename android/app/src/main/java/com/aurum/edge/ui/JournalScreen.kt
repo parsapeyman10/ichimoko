@@ -8,14 +8,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -37,6 +43,8 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val reports by viewModel.reports.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val loadError by viewModel.journalError.collectAsStateWithLifecycle()
+    var confirmClear by remember { mutableStateOf(false) }
     val now = System.currentTimeMillis()
     val livePrice = market.lastPrice?.takeIf {
         it.isFinite() && it > 0 && !market.showingCachedData &&
@@ -55,8 +63,10 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     ) {
         SectionCard(
             title = "ژورنال معاملات کاغذی",
-            subtitle = "همه ورود/خروج روی قیمت واقعی بازار ثبت و تسویه می‌شود",
+            subtitle = "فقط پوزیشن‌های کاغذی واقعاً ثبت‌شده؛ خط‌های سیگنال چارت معامله نیستند",
         ) {
+            loadError?.let { Text(it, style = MaterialTheme.typography.bodySmall,
+                color = AurumColors.Red, modifier = Modifier.padding(bottom = 8.dp)) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 StatTile("بسته‌شده", "${stats.total}", AurumColors.TextPrimary, Modifier.weight(1f))
                 StatTile("باز", "${stats.open}", AurumColors.Gold, Modifier.weight(1f))
@@ -72,7 +82,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                 StatTile("فاکتور سود", stats.profitFactor?.let { String.format("%.2f", it) } ?: "—", AurumColors.Gold, Modifier.weight(1f))
                 StatTile("سود خالص", "${formatPrice(stats.netPnl)}$", if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
             }
-            if (stats.total == 0) {
+            if (stats.total == 0 && loadError == null) {
                 Text(
                     "هنوز معامله بسته‌شده‌ای نیست. آمار فقط از نتایج واقعی ساخته می‌شود؛ عدد نمایشی نداریم.",
                     style = MaterialTheme.typography.labelSmall,
@@ -108,10 +118,14 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                 color = AurumColors.TextMuted,
                             )
                             Text(
-                                formatDateTime(trade.openedAt) + if (trade.note.startsWith("ورود دستی")) " · دستی؛ بدون سیگنال" else " · امتیاز ${trade.confidence.toInt()}",
+                                "${formatDateTime(trade.openedAt)} · ${if (trade.autoOpened) "خودکار کاغذی ۹/۹" else if (trade.note.startsWith("ورود دستی")) "دستی؛ بدون سیگنال" else "با تأیید کاربر"} · ${trade.id.take(8)}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.TextMuted,
                             )
+                            trade.newsEvidence?.let { verdict ->
+                                Text("AI ${verdict.model} · ${verdict.direction} · ${verdict.evidence.joinToString { it.source }}",
+                                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+                            }
                             trade.mtf?.let { snapshot ->
                                 Text(
                                     "تراز چندتایم‌فریم هنگام ورود: ${snapshot.bias} · هم‌جهتی ${(snapshot.alignment * 100).toInt()}%" +
@@ -148,7 +162,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                 closed.forEach { trade: PaperTrade -> TradeRow(trade) }
             }
             Button(
-                onClick = viewModel::clearJournal,
+                onClick = { confirmClear = true },
                 colors = ButtonDefaults.buttonColors(containerColor = AurumColors.SurfaceAlt, contentColor = AurumColors.TextSecondary),
                 modifier = Modifier.padding(horizontal = 12.dp),
             ) { Text("پاک کردن ژورنال") }
@@ -164,11 +178,17 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             }
         }
     }
+    if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false },
+        title = { Text("حذف قطعی ژورنال کاغذی؟") },
+        text = { Text("تمام معاملات کاغذی باز و بسته‌شدهٔ ثبت‌شده روی گوشی پاک می‌شوند؛ بازگشت‌پذیر نیست.") },
+        confirmButton = { TextButton(onClick = { viewModel.clearJournal(); confirmClear = false }) { Text("حذف") } },
+        dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("انصراف") } })
 }
 
 @Composable
 private fun TradeRow(trade: PaperTrade) {
     val pnl = trade.pnlUsd ?: 0.0
+    val uriHandler = LocalUriHandler.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -182,16 +202,28 @@ private fun TradeRow(trade: PaperTrade) {
             modifier = Modifier.padding(end = 8.dp),
         )
         Column(modifier = Modifier.weight(1f)) {
+            Text("${trade.symbol} · ${if (trade.autoOpened) "خودکار کاغذی ۹/۹" else "کاغذی"} · ${trade.id.take(8)}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+            Text("باز ${formatDateTime(trade.openedAt)} → بسته ${formatDateTime(trade.closedAt)}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             Text(
                 "${formatPrice(trade.entry)} → ${formatPrice(trade.exitPrice)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextPrimary,
             )
-            Text(
-                "${formatDateTime(trade.closedAt)} · ${trade.exitReason ?: "—"}",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-            )
+            Text("${trade.exitReason ?: "—"} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            trade.newsEvidence?.let { ai ->
+                Text("خبر ${ai.model} · ${formatDateTime(ai.checkedAt)} · ${ai.evidence.joinToString { it.source }}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+                ai.evidence.forEach { evidence ->
+                    Text("${evidence.source}: ${evidence.headline.take(90)}",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                    OutlinedButton(onClick = { runCatching { uriHandler.openUri(evidence.url) } }) {
+                        Text("شاهد در ناشر", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
         }
         Column(horizontalAlignment = Alignment.End) {
             Text(

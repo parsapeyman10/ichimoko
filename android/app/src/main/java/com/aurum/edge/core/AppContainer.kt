@@ -10,8 +10,10 @@ import com.aurum.edge.data.FreeHistoryResult
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.MarketRepository
 import com.aurum.edge.data.MetaTraderCsv
+import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.MetaTraderImporter
 import com.aurum.edge.data.NewsRepository
+import com.aurum.edge.data.PaperAutoTrader
 import com.aurum.edge.data.SettingsStore
 import com.aurum.edge.data.TwelveDataClient
 import com.aurum.edge.data.QuoteHistoryStore
@@ -19,9 +21,16 @@ import com.aurum.edge.data.SourceFetcher
 import com.aurum.edge.data.WatchRepository
 import com.aurum.edge.data.WatchSettingsStore
 import com.aurum.edge.engine.Backtester
+import com.aurum.edge.engine.NewsConfluence
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.withContext
 
 /**
@@ -42,6 +51,12 @@ class AppContainer(context: Context) {
     val quoteHistory = QuoteHistoryStore(appContext)
     val watch = WatchRepository(SourceFetcher(), quoteHistory, watchSettings, settingsStore, appScope)
     val news = NewsRepository(settingsStore, appScope)
+    /** Shared by chart, signal tab, notifications and automatic *paper* entries. Expires on time. */
+    val verifiedMarket: StateFlow<MarketState> = combine(
+        market.state, news.state, flow { while (true) { emit(System.currentTimeMillis()); delay(20_000L) } },
+    ) { raw, headlines, now -> raw.copy(signal = NewsConfluence.apply(raw.signal, raw.symbol, headlines, now)) }
+        .stateIn(appScope, SharingStarted.Eagerly, market.state.value.copy(signal = null))
+    val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore, verifiedMarket)
     val crypto = CryptoRepository(settingsStore, appScope)
     val freeHistory = FreeHistoryDownloader()
     val metaTraderImporter = MetaTraderImporter(appContext)

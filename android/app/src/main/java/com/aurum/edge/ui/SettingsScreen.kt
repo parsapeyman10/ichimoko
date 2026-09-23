@@ -57,6 +57,9 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     var minConfidence by remember { mutableStateOf(settings.minConfidence.toString()) }
     var spread by remember { mutableStateOf(settings.spreadPrice.toString()) }
     var commission by remember { mutableStateOf(settings.commissionPerOz.toString()) }
+    var confirmAuto by remember { mutableStateOf(false) }
+    var confirmJournalClear by remember { mutableStateOf(false) }
+    var autoAfterPermission by remember { mutableStateOf(false) }
 
     LaunchedEffect(settings.apiKey) { if (key.isBlank()) key = settings.apiKey }
     LaunchedEffect(settings.symbol) { symbol = settings.symbol }
@@ -65,21 +68,22 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        if (granted) {
-            SignalMonitorService.start(context)
-            viewModel.setMonitorFlag(true)
-        } else {
-            viewModel.setMonitorFlag(false)
-        }
+        val started = granted && SignalMonitorService.start(context)
+        viewModel.setMonitorFlag(started)
+        if (autoAfterPermission) viewModel.setAutoPaperTrading(started)
+        autoAfterPermission = false
     }
 
-    fun startMonitorIfAllowed() {
+    fun startMonitorIfAllowed(alsoEnableAuto: Boolean = false) {
+        autoAfterPermission = alsoEnableAuto
         val needsPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         if (needsPermission) permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         else {
-            SignalMonitorService.start(context)
-            viewModel.setMonitorFlag(true)
+            val started = SignalMonitorService.start(context)
+            viewModel.setMonitorFlag(started)
+            if (alsoEnableAuto) viewModel.setAutoPaperTrading(started)
+            autoAfterPermission = false
         }
     }
 
@@ -142,11 +146,11 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 Text("اتصال به سرور اخبار و رمزارز")
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("توقف ورود کاغذی هنگام خبر پراثر/عدم دسترسی", Modifier.weight(1f),
+                Text("وتوی خبر برای ورود دستی کاغذی هنگام عدم‌دسترسی", Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
                 Switch(checked = settings.pauseOnNews, onCheckedChange = viewModel::setPauseOnNews)
             }
-            Text("خوراک‌های IRIB، YJC، اقتصاد۲۴، CoinDesk و BLS روی سرور خوانده می‌شوند؛ پوشش کامل یا حق بازنشر تجاری تضمین نیست. CoinGecko Demo Key اختیاری فقط روی سرور است. با روشن کردن توقف خبر، نبود/کهنگی حتی یک خوراک جلوی ورود تازه را می‌گیرد؛ خروج‌ها مسدود نمی‌شوند. سفارش واقعی غیرفعال است.",
+            Text("خوراک‌های IRIB، YJC، اقتصاد۲۴، CoinDesk و BLS روی سرور خوانده می‌شوند؛ پوشش کامل یا حق بازنشر تجاری تضمین نیست. کلید AI و رضایت ناشران فقط روی سرور تنظیم می‌شود. وتوی بالا برای برگهٔ دستی است؛ ورود سیگنالی/خودکار بدون خبر AI معتبر همیشه متوقف است. خروج‌ها مسدود نمی‌شوند؛ سفارش واقعی غیرفعال است.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
@@ -264,6 +268,23 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             }
         }
 
+        SectionCard("ورود خودکار کاغذی · فقط ۹/۹", "پیش‌فرض خاموش؛ بدون بروکر، بدون سفارش واقعی") {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("باز کردن خودکار LONG/SHORT کاغذی پس از ۸ شرط فنی و تأیید خبر AI",
+                    modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                    color = AurumColors.TextPrimary)
+                Switch(checked = settings.autoPaperTrading, onCheckedChange = { enabled ->
+                    if (enabled) confirmAuto = true else viewModel.setAutoPaperTrading(false)
+                })
+            }
+            val autoStatus by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
+            Text(if (settings.autoPaperTrading) autoStatus else "خاموش؛ خطوط روی چارت معامله نیستند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 6.dp))
+            Text("پایش پس‌زمینه، سرور HTTPS و کلید/رضایت مدل روی سرور لازم‌اند. نبود حتی یک شرط، فید ناقص یا خبر پراثر = بدون ورود. نتیجه در ژورنال روی گوشی ذخیره می‌شود؛ خروج با تیک واقعی SL/TP است. مدل و ناشران بازده یا معاملهٔ واقعی را تضمین نمی‌کنند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        }
+
         SectionCard(
             title = "داده‌های محلی",
             subtitle = "کش کندل‌های واقعی و ژورنال معاملات کاغذی",
@@ -274,7 +295,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("پاک کردن کش کندل‌های واقعی") }
             Button(
-                onClick = viewModel::clearJournal,
+                onClick = { confirmJournalClear = true },
                 colors = ButtonDefaults.buttonColors(containerColor = AurumColors.SurfaceAlt, contentColor = AurumColors.TextPrimary),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -302,6 +323,24 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 modifier = Modifier.padding(top = 8.dp),
             )
         }
+    }
+    if (confirmAuto) {
+        AlertDialog(onDismissRequest = { confirmAuto = false },
+            title = { Text("ورود خودکار فقط کاغذی") },
+            text = { Text("هیچ سفارشی به بروکر ارسال نمی‌شود. فقط با ۹ تأیید تازه و مدل AI فعال روی سرور، یک رکورد LONG/SHORT کاغذی در ژورنال ایجاد می‌شود. اگر سرویس/فید قطع شود ورودی تازه نداریم؛ خروجِ پوزیشن باز نیازمند قیمت واقعی است. فعال شود؟") },
+            confirmButton = { TextButton(onClick = {
+                confirmAuto = false
+                if (settings.backgroundMonitor) viewModel.setAutoPaperTrading(true)
+                else startMonitorIfAllowed(alsoEnableAuto = true)
+            }) { Text("فعال‌کردن کاغذی") } },
+            dismissButton = { TextButton(onClick = { confirmAuto = false }) { Text("انصراف") } })
+    }
+    if (confirmJournalClear) {
+        AlertDialog(onDismissRequest = { confirmJournalClear = false },
+            title = { Text("ژورنال کاغذی پاک شود؟") },
+            text = { Text("همهٔ پوزیشن‌های باز و بسته‌شدهٔ ثبت‌شده روی این گوشی حذف می‌شوند. این کار برگشت‌پذیر نیست؛ سیگنال‌های چارت اصلاً معاملهٔ ثبت‌شده نیستند.") },
+            confirmButton = { TextButton(onClick = { viewModel.clearJournal(); confirmJournalClear = false }) { Text("حذف قطعی") } },
+            dismissButton = { TextButton(onClick = { confirmJournalClear = false }) { Text("انصراف") } })
     }
 }
 

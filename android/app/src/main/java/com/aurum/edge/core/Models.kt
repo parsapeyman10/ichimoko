@@ -41,10 +41,13 @@ data class PriceTick(val price: Double, val at: Long)
 
 enum class SignalAction { BUY, SELL, NO_TRADE }
 
+enum class ConfluenceStatus { CONFIRMED, CONFLICT, UNKNOWN }
+
 data class ConfluenceItem(
     val name: String,
     val ok: Boolean,
     val detail: String,
+    val status: ConfluenceStatus = if (ok) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
 )
 
 data class Signal(
@@ -81,6 +84,24 @@ data class FeedStatus(
 )
 
 @Serializable
+data class PaperNewsEvidence(
+    val id: String,
+    val source: String,
+    val headline: String,
+    val url: String,
+    val publishedAt: Long,
+)
+
+@Serializable
+data class PaperNewsRecord(
+    val model: String,
+    val direction: String,
+    val confidence: Double,
+    val checkedAt: Long,
+    val evidence: List<PaperNewsEvidence>,
+)
+
+@Serializable
 data class PaperTrade(
     val id: String,
     val symbol: String,
@@ -103,6 +124,10 @@ data class PaperTrade(
     val positionUnit: String = "",
     /** What the multi-timeframe engine said on the phone when this paper trade was opened. */
     val mtf: MtfSnapshotRecord? = null,
+    /** Defaults keep older journal JSON readable. Auto is always PAPER, never a broker fill. */
+    val autoOpened: Boolean = false,
+    val signalBarTime: Long? = null,
+    val newsEvidence: PaperNewsRecord? = null,
 ) {
     val isOpen: Boolean get() = closedAt == null
     val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }
@@ -285,6 +310,8 @@ data class AppSettings(
     val newsBaseUrl: String = "",
     /** Applies to NEW paper entries; real orders remain disabled independently. */
     val pauseOnNews: Boolean = false,
+    /** Explicit opt-in; automatic orders here are local paper records, never broker orders. */
+    val autoPaperTrading: Boolean = false,
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
 }

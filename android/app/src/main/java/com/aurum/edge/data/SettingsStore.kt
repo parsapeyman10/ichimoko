@@ -34,6 +34,7 @@ class SettingsStore(context: Context) {
         notifyOnSignal = prefs.getBoolean(KEY_NOTIFY, true),
         newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty(),
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
+        autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
     )
 
     fun update(transform: (AppSettings) -> AppSettings) {
@@ -51,6 +52,7 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_NOTIFY, next.notifyOnSignal)
             .putString(KEY_NEWS_URL, next.newsBaseUrl.trim())
             .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
+            .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
             .apply()
         _settings.value = next
     }
@@ -75,5 +77,6 @@ class SettingsStore(context: Context) {
         private const val KEY_NOTIFY = "notify_signal"
         private const val KEY_NEWS_URL = "news_base_url"
         private const val KEY_NEWS_PAUSE = "pause_on_news"
+        private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"
     }
 }

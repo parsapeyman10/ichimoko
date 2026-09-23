@@ -112,7 +112,8 @@ fun AurumRoot(viewModel: AurumViewModel) {
             }
             Box(modifier = Modifier.fillMaxSize()) {
                 when (tab) {
-                    AurumTab.Chart -> ChartScreen(viewModel, market, onOpenSettings = { tab = AurumTab.Settings })
+                    AurumTab.Chart -> ChartScreen(viewModel, market,
+                        onOpenSettings = { tab = AurumTab.Settings }, onOpenJournal = { tab = AurumTab.Journal })
                     AurumTab.Signal -> SignalScreen(viewModel, market)
                     AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { tab = AurumTab.Settings })
                     AurumTab.Crypto -> CryptoScreen(viewModel, onOpenSettings = { tab = AurumTab.Settings })

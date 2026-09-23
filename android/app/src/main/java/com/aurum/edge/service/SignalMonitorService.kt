@@ -16,7 +16,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -28,6 +30,7 @@ class SignalMonitorService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var stateJob: Job? = null
     private var journalJob: Job? = null
+    private var newsJob: Job? = null
     private var lastAlertKey: String? = null
     private val notifiedTrades = mutableSetOf<String>()
 
@@ -54,16 +57,34 @@ class SignalMonitorService : Service() {
             true
         }.getOrElse { false }
         if (!started) {
+            container.settingsStore.update { it.copy(backgroundMonitor = false, autoPaperTrading = false) }
+            container.autoPaperTrader.stopped("سرویس پس‌زمینه شروع نشد؛ ورود خودکار خاموش شد")
             stopSelf()
             return START_NOT_STICKY
         }
 
         container.settingsStore.update { it.copy(backgroundMonitor = true) }
-        container.market.start()
+        newsJob?.cancel()
+        newsJob = scope.launch {
+            while (isActive) {
+                if (container.settingsStore.read().let { it.autoPaperTrading || it.pauseOnNews } &&
+                    container.settingsStore.read().newsBaseUrl.isNotBlank()) container.news.refreshNow()
+                delay(60_000L)
+            }
+        }
 
         stateJob?.cancel()
         stateJob = scope.launch {
-            container.market.state.collectLatest { state ->
+            try {
+                container.journalStore.load()
+            } catch (_: Exception) {
+                container.autoPaperTrader.stopped("ژورنال آسیب‌دیده است؛ ورود خودکار کاغذی متوقف شد")
+                return@launch
+            }
+            container.market.start()
+            // Use collect, not collectLatest: never cancel a partially persisted paper entry
+            // just because another tick arrives during the atomic journal write.
+            container.verifiedMarket.collect { state ->
                 val text = when (state.feed.mode) {
                     FeedMode.LIVE -> "زنده · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
                     FeedMode.POLLING -> "به‌روزرسانی دوره‌ای · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
@@ -88,13 +109,18 @@ class SignalMonitorService : Service() {
                         Notifier.notifySignal(this@SignalMonitorService, signal)
                     }
                 }
+                if (container.settingsStore.read().autoPaperTrading) {
+                    container.autoPaperTrader.onMarketUpdate(state)
+                }
             }
         }
 
         journalJob?.cancel()
         journalJob = scope.launch {
-            container.journalStore.load()
-            container.journalStore.trades.collectLatest { trades ->
+            try { container.journalStore.load() } catch (_: Exception) { return@launch }
+            // A service restart must not re-notify all old, already closed paper trades.
+            notifiedTrades.addAll(container.journalStore.trades.value.filterNot { it.isOpen }.map { it.id })
+            container.journalStore.trades.collect { trades ->
                 trades.filter { !it.isOpen }.forEach { trade ->
                     if (notifiedTrades.add(trade.id)) {
                         Notifier.notifyClosedTrade(this@SignalMonitorService, trade)
@@ -107,7 +133,7 @@ class SignalMonitorService : Service() {
 
     override fun onDestroy() {
         val container = (application as AurumApplication).container
-        container.settingsStore.update { it.copy(backgroundMonitor = false) }
+        container.settingsStore.update { it.copy(backgroundMonitor = false, autoPaperTrading = false) }
         scope.cancel()
         super.onDestroy()
     }
@@ -115,9 +141,9 @@ class SignalMonitorService : Service() {
     companion object {
         const val ACTION_STOP = "com.aurum.edge.STOP_MONITOR"
 
-        fun start(context: Context) {
+        fun start(context: Context): Boolean {
             val intent = Intent(context, SignalMonitorService::class.java)
-            runCatching { context.startForegroundService(intent) }
+            return runCatching { context.startForegroundService(intent); true }.getOrDefault(false)
         }
 
         fun stop(context: Context) {

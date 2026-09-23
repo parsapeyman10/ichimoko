@@ -35,9 +35,11 @@ class Settings(BaseSettings):
     # Public/keyless requests may be rate-limited; provider failures leave the scan unavailable.
     coingecko_demo_api_key: str | None = None
 
-    # Optional NLP stage (only used when a key is configured)
+    # Optional NLP stage (only used when a key is configured). Web RSS titles/excerpts are
+    # NEVER shared with a third party unless the operator explicitly accepts publisher terms.
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
+    ai_news_external_consent: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="AURUM_", extra="ignore")
 

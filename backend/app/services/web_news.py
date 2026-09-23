@@ -1,8 +1,9 @@
 """Web collection from publishers' *own advertised* RSS/Atom feeds.
 
 Only headline, short feed excerpt, publication time and a publisher link are returned. Never
-crawl article HTML, defeat access controls, translate/guess headlines or send RSS to a model.
-A partial/failed feed is visible to readers and cannot clear the optional paper-entry news gate.
+crawl article HTML or defeat access controls. An optional, explicitly consented server-side
+model can assess short headlines/excerpts; unconfigured/failed AI is UNKNOWN, never a rule-based
+'AI' substitute. A partial/failed feed cannot clear either the guard or AI confluence.
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.config import Settings
+from app.services.ai_news import AiNewsAnalyzer
 from app.services.persian_news import Headline, MAX_FEED_BYTES, news_guard, parse_news_xml
 
 
@@ -52,6 +54,7 @@ class WebNewsFeed:
         self._last_success: datetime | None = None
         self._articles: list[Headline] = []
         self._source_status: list[dict] = []
+        self.ai = AiNewsAnalyzer(settings)
 
     async def _request(self, source: WebSource) -> bytes:
         async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
@@ -108,6 +111,7 @@ class WebNewsFeed:
             state = "online" if online_count == len(self.sources) and online_count else (
                 "partial" if online_count else "unavailable")
             guard = news_guard(self._articles, state == "online", now, self.settings.news_hold_minutes)
+            ai_confluence = await self.ai.analyze(self._articles, state, guard, now)
             return {
                 "status": {
                     "provider": "RSS عمومی ناشران (IRIB, YJC, Eghtesaad24, CoinDesk, BLS)",
@@ -120,6 +124,7 @@ class WebNewsFeed:
                 },
                 "articles": [article.payload() for article in self._articles],
                 "guard": guard,
-                "checked_at": now.isoformat(),
-                "notice": "خوراک‌ها تقویم اقتصادی کامل نیستند؛ CLEAR فقط یعنی در همین منابعِ در دسترس خبر پراثر تازه یافت نشد.",
+                "ai_confluence": ai_confluence,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "notice": "خوراک‌ها تقویم اقتصادی کامل نیستند؛ CLEAR فقط یعنی در همین منابعِ در دسترس خبر پراثر تازه یافت نشد. AI بدون کلید/رضایت UNKNOWN است.",
             }

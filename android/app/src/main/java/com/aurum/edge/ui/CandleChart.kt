@@ -280,9 +280,10 @@ fun CandleChart(
                     val labelPaint = Paint(axisPaint).apply { this.color = color.toArgbSafe() }
                     drawContext.canvas.nativeCanvas.drawText("$label ${formatPrice(price)}", 6f, y - 6f, labelPaint)
                 }
-                levelLine(signal.entry, AurumColors.Gold, "ورود")
-                levelLine(signal.stopLoss, AurumColors.Red, "SL")
-                levelLine(signal.takeProfit, AurumColors.Green, "TP")
+                // These are a SIGNAL PLAN, not an executed paper/broker transaction.
+                levelLine(signal.entry, AurumColors.Gold, "طرح ورود")
+                levelLine(signal.stopLoss, AurumColors.Red, "طرح SL")
+                levelLine(signal.takeProfit, AurumColors.Green, "طرح TP")
             }
 
             // ── time axis ─────────────────────────────────────────────────

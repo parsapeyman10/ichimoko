@@ -48,10 +48,10 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState) {
             signal = signal,
             onOpenPaperTrade = { signal?.let(viewModel::openPaperTrade) },
         )
-        SectionCard("توقف بر اساس اخبار وب", "برای لانگ/شورت کاغذی؛ سفارش واقعی در این نسخه وجود ندارد") {
+        SectionCard("خبر وب: شرط نهم سیگنال و وتوی اختیاری دستی", "برای ورود خودکار، خبر AI هم‌جهت همیشه الزامی است؛ سفارش واقعی نداریم") {
             val blocked = settings.pauseOnNews && (news.gate != NewsGate.CLEAR || news.lastCheckedAt == null ||
                 System.currentTimeMillis() - news.lastCheckedAt!! > 180_000L)
-            Text(if (!settings.pauseOnNews) "خاموش است؛ برای استفاده سرور HTTPS خبر و سوییچ تنظیمات را فعال کنید."
+            Text(if (!settings.pauseOnNews) "وتوی ورود دستی خاموش است؛ شرط نهم خبر AI برای ورود سیگنالی/خودکار همچنان لازم است."
                 else if (blocked) "ورود کاغذی متوقف: ${news.reason}" else "فقط در منابع RSS بررسی‌شده فعلاً خبر پراثر تازه پیدا نشد؛ تقویم کامل نیست.",
                 style = MaterialTheme.typography.bodySmall, color = if (blocked) AurumColors.Red else AurumColors.TextSecondary)
             Text("آخرین بررسی: ${relativeTime(news.lastCheckedAt)} · خبر ناقص/قدیمی اجازهٔ ورود نمی‌دهد.",
@@ -62,13 +62,18 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState) {
 
         signal?.let { s ->
             SectionCard(
-                title = "همگرایی ۸ شرط مستقل",
-                subtitle = "حداقل امتیاز قابل معامله: ${settings.minConfidence.toInt()} — کندل ${s.interval.label} · ${formatTime(s.barTime)}",
+                title = "همگرایی ۹ شرط (۸ فنی + خبر AI)",
+                subtitle = "ورود خودکار کاغذی فقط با تأیید هر ۹ شرط؛ امتیاز فنی: ${s.confidence.toInt()} از ۱۰۰ · کندل ${s.interval.label} · ${formatTime(s.barTime)}",
             ) {
                 if (s.confluence.isEmpty()) {
                     Text("داده کافی برای نمایش جزئیات نیست", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
                 } else {
-                    s.confluence.forEach { ConfluenceRow(it) }
+                    s.confluence.take(9).forEach { ConfluenceRow(it) }
+                    if (s.confluence.size > 9) {
+                        Text("کنترل‌های اضافه (امتیاز همگرایی نیستند):", style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextMuted, modifier = Modifier.padding(top = 8.dp))
+                        s.confluence.drop(9).forEach { ConfluenceRow(it) }
+                    }
                 }
             }
 

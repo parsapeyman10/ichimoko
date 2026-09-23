@@ -55,6 +55,10 @@ android {
     packaging {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}")
     }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true // Robolectric: journal AtomicFile + app-private storage
+    }
 }
 
 dependencies {
@@ -82,6 +86,7 @@ dependencies {
     // JVM unit tests for the pure engine code and read-only data validation.
     // They never run inside the APK; release assembly requires them to pass below.
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
 }
 
 // The published workflow currently makes its separate JVM-test step non-blocking.
