@@ -288,7 +288,8 @@ class CryptoScanner:
 
     async def snapshot(self) -> dict:
         async with self._lock:
-            if time.monotonic() - self._last_attempt >= CACHE_SECONDS:
+            refresh = self._last_attempt == 0.0 or time.monotonic() - self._last_attempt >= CACHE_SECONDS
+            if refresh:
                 self._last_attempt = time.monotonic()
                 try:
                     await asyncio.wait_for(self._scan(), timeout=35)
@@ -304,9 +305,9 @@ class CryptoScanner:
                         "CoinGecko + Binance Spot (داده نامعتبر)"),
                     "error": self._error,
                     "last_success_at": self._last_success.isoformat() if self._last_success else None,
-                    "cached": False,  # only successful in-memory scans <=120s are reused
+                    "cached": self._online and not refresh,  # report reuse truthfully, never relabel it as a fresh scan
                 },
-                "checked_at": datetime.now(timezone.utc).isoformat(),
+                "checked_at": (self._last_success if self._online and self._last_success else datetime.now(timezone.utc)).isoformat(),
                 "scanned": self._scanned if self._online else 0,
                 "preselected": self._preselected if self._online else 0,
                 "filters": FILTERS,

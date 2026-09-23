@@ -37,7 +37,9 @@ fun CryptoScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
         SectionCard(
             title = "رادار رمزارز · فقط نامزدهای غربالگری",
             subtitle = "دادهٔ واقعی CoinGecko + Binance SPOT؛ نه پیش‌بینی پامپ و نه توصیه/سفارش خرید",
-            trailing = { Pill(if (state.status == CryptoScanStatus.ONLINE) "دادهٔ تازه" else "نامعتبر/در انتظار",
+            trailing = { Pill(if (state.status == CryptoScanStatus.ONLINE) {
+                if (state.cached) "نتیجهٔ کش‌شده" else "دادهٔ تازه"
+            } else "نامعتبر/در انتظار",
                 if (state.status == CryptoScanStatus.ONLINE) AurumColors.Green else AurumColors.Gold) },
         ) {
             Text("فقط ۲۰۰ دارایی اول CoinGecko بررسی و حداکثر ۱۲ نماد با دادهٔ مستقل Binance تأیید می‌شود. نتیجهٔ خالی، ادعای نبود فرصت در کل بازار نیست.",

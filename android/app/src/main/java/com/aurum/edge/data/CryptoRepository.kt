@@ -53,6 +53,7 @@ data class CryptoScanState(
     val preselected: Int = 0,
     val provider: String = "CoinGecko + Binance Spot",
     val checkedAt: Long? = null,
+    val cached: Boolean = false,
     val error: String? = null,
 )
 
@@ -115,7 +116,7 @@ class CryptoRepository(private val settings: SettingsStore, private val scope: C
                 "دامنهٔ پاسخ با غربالگر ثابت سازگار نیست"
             }
             _state.value = CryptoScanState(CryptoScanStatus.ONLINE, candidates, filters,
-                scanned, preselected, provider, checkedAt)
+                scanned, preselected, provider, checkedAt, cached = status.text("cached") == "true")
         } catch (e: Exception) {
             if (settings.read().newsBaseUrl == base) _state.value = CryptoScanState(
                 status = CryptoScanStatus.UNAVAILABLE,

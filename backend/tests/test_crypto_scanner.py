@@ -126,7 +126,10 @@ def test_public_endpoint_sends_no_order_and_never_returns_stale_candidates(monke
     assert len(first["candidates"]) == 1
     assert "secret" not in str(first)
     assert all("POST" not in request[0] for request in requested)
-    assert client.get("/api/v1/crypto/candidates").json()["candidates"] == first["candidates"]
+    second = client.get("/api/v1/crypto/candidates").json()
+    assert second["candidates"] == first["candidates"]
+    assert first["status"]["cached"] is False and second["status"]["cached"] is True
+    assert first["checked_at"] == second["checked_at"]  # cached data is not a fresh check
     assert len(requested) == 6  # 2 CG + 4 Binance; bounded cache, no repeated provider calls
 
     async def offline(*args, **kwargs):
