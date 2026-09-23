@@ -19,7 +19,7 @@ import org.junit.Test
  */
 class EngineTruthTest {
 
-    private fun fixture(count: Int, interval: Interval, startTime: Long = 1_700_000_000_000L, seed: Int = 42): List<Candle> {
+    private fun fixture(count: Int, interval: Interval, startTime: Long = 1_700_000_100_000L, seed: Int = 42): List<Candle> {
         val random = Random(seed)
         val bars = ArrayList<Candle>(count)
         var price = 3300.0
