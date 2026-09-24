@@ -31,6 +31,7 @@ import com.aurum.edge.data.NobitexMarket
 import com.aurum.edge.data.NobitexPracticeRules
 import com.aurum.edge.data.NobitexPracticeTrade
 import com.aurum.edge.data.NobitexSnapshot
+import com.aurum.edge.data.SpotScan
 import com.aurum.edge.data.Quote
 import com.aurum.edge.data.WatchSelection
 import com.aurum.edge.data.WatchState
@@ -54,6 +55,13 @@ sealed interface NobitexState {
     data object Loading : NobitexState
     data class Done(val snapshot: NobitexSnapshot) : NobitexState
     data class Failed(val message: String) : NobitexState
+}
+
+sealed interface NobitexScanState {
+    data object Idle : NobitexScanState
+    data object Loading : NobitexScanState
+    data class Done(val snapshot: SpotScan) : NobitexScanState
+    data class Failed(val message: String) : NobitexScanState
 }
 
 sealed interface LearnState {
@@ -88,6 +96,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val crypto = container.crypto.state
     private val _nobitex = MutableStateFlow<NobitexState>(NobitexState.Idle)
     val nobitex: StateFlow<NobitexState> = _nobitex.asStateFlow()
+    private val _nobitexScan = MutableStateFlow<NobitexScanState>(NobitexScanState.Idle)
+    val nobitexScan: StateFlow<NobitexScanState> = _nobitexScan.asStateFlow()
     val nobitexTrades: StateFlow<List<NobitexPracticeTrade>> = container.nobitexPractice.trades
     val nobitexJournalError: StateFlow<String?> = container.nobitexPractice.loadError
     private val _watchHistory = MutableStateFlow(WatchHistory())
@@ -171,6 +181,18 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun refreshForexCalendar() = container.forexCalendar.refreshNow()
 
     fun refreshCrypto() = container.crypto.refreshNow()
+
+    fun refreshNobitexScan() {
+        if (_nobitexScan.value == NobitexScanState.Loading) return
+        viewModelScope.launch {
+            _nobitexScan.value = NobitexScanState.Loading // prior response is NOT a live candidate
+            _nobitexScan.value = try {
+                NobitexScanState.Done(container.nobitexSpotScanner.scan())
+            } catch (e: Exception) {
+                NobitexScanState.Failed((e.message ?: "آمار عمومی نوبیتکس در دسترس نیست").take(130))
+            }
+        }
+    }
 
     fun downloadNobitex(market: NobitexMarket, interval: Interval) {
         if (_nobitex.value == NobitexState.Loading) return

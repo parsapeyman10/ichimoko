@@ -96,6 +96,8 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
         }
     }
 
+    NobitexSpotScanSection(viewModel)
+
     current?.let { snapshot ->
         val quote = snapshot.quote
         val unit = if (market == NobitexMarket.BTC_USDT) "USDT" else "ریال (آمار بازار)"

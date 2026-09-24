@@ -16,6 +16,7 @@ import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.MetaTraderImporter
 import com.aurum.edge.data.NewsRepository
 import com.aurum.edge.data.NobitexPublicData
+import com.aurum.edge.data.NobitexSpotScanner
 import com.aurum.edge.data.NobitexPracticeStore
 import com.aurum.edge.data.NobitexSnapshot
 import com.aurum.edge.data.PaperAutoTrader
@@ -51,6 +52,7 @@ class AppContainer(context: Context) {
     val journalStore = JournalStore(appContext)
     val opportunityStore = PaperOpportunityStore(appContext)
     val nobitexPublic = NobitexPublicData()
+    val nobitexSpotScanner = NobitexSpotScanner()
     val nobitexPractice = NobitexPracticeStore(appContext)
     val client = TwelveDataClient()
     val market = MarketRepository(appContext, client, candleCache, settingsStore, journalStore)
