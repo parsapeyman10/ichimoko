@@ -146,7 +146,8 @@ data class IctPriceActionRecord(
             nySession in setOf("LONDON", "NEW_YORK") && nyTime.isNotBlank() &&
             support > 0.0 && resistance > support && atr.isFinite() && atr > 0.0 &&
             supportTouches >= 2 && resistanceTouches >= 2 &&
-            levelsConfirmedAt in 1L until sweepAt && sweepAt < mssAt && mssAt < fvgAt &&
+            levelsConfirmedAt > 0L && levelsConfirmedAt <= sweepAt &&
+            sweepAt < mssAt && mssAt < fvgAt &&
             fvgAt < retestAt && retestAt == barTime && fvgLow.isFinite() && fvgHigh > fvgLow &&
             risk > 0.0 && reward / risk >= 1.5 && reward / risk <= 5.0 &&
             rewardRisk.isFinite() && kotlin.math.abs(reward / risk - rewardRisk) < 1e-6 &&

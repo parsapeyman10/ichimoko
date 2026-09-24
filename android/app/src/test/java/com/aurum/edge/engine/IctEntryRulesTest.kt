@@ -44,6 +44,7 @@ class IctEntryRulesTest {
         assertTrue(IctEntryRules.assess(market, now).allowed)
         val evidence = IctEntryRules.approvedEvidence(market, now)!!
         assertTrue(evidence.matches(verified, market.symbol, market.lastPrice!!))
+        assertEquals(evidence.sweepAt, evidence.levelsConfirmedAt)
         assertEquals(3, evidence.supportTouches)
         assertEquals(IctRangeAnalyzer.ZoneKind.FVG, IctRangeAnalyzer.analyze(market.candles, Interval.M5).buy.fvg?.kind)
         assertFalse(evidence.copy(barTime = bar - Interval.M5.millis).matches(verified, market.symbol, market.lastPrice!!))

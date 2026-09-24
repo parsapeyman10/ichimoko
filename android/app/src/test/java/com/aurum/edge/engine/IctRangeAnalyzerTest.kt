@@ -37,7 +37,8 @@ class IctRangeAnalyzerTest {
         assertEquals(104.10, range.resistance, 0.00001)
         assertTrue(range.supportTouches >= 2)
         assertTrue(range.resistanceTouches >= 2)
-        assertTrue(range.confirmedAt < sweep().time)
+        // All 32 bars influence quantiles/ATR; lines must start only AFTER the 32nd closes.
+        assertEquals(sweep().time, range.confirmedAt)
         assertEquals(State.READY, assessment.buy.state)
         assertEquals(sweep().time, assessment.buy.sweepAt)
         assertEquals(shift().time, assessment.buy.shiftAt)
@@ -89,6 +90,12 @@ class IctRangeAnalyzerTest {
         val noGap = baseline() + sweep() + shift() +
             candle(34, 100.9, 101.3, 100.7, 101.0)
         assertEquals(State.WAIT_FVG, IctRangeAnalyzer.analyze(noGap, Interval.M5).buy.state)
+    }
+
+    @Test fun `retest that loses the FVG cannot be marked ready despite a green candle`() {
+        val lost = candle(35, 100.55, 101.10, 100.45, 100.80)
+        assertEquals(State.WAIT_RETEST,
+            IctRangeAnalyzer.analyze(setup().dropLast(1) + lost, Interval.M5).buy.state)
     }
 
     @Test fun `risk reward and session gate the entire setup`() {

@@ -95,7 +95,7 @@ object IctRangeAnalyzer {
             .filter { it.first != null && it.second.sweepAt != null }
             .maxByOrNull { it.second.sweepAt!! }?.first
         val range = listOf(buy, sell).firstOrNull { it.second.ready }?.first
-            ?: latestSweepRange ?: confirmedRange(bars, last)
+            ?: latestSweepRange ?: confirmedRange(bars, last, interval)
         return Snapshot(lastTime, range, window, buy.second, sell.second)
     }
 
@@ -114,12 +114,11 @@ object IctRangeAnalyzer {
     private fun wellFormed(bars: List<Candle>, interval: Interval): Boolean = bars.withIndex().all { (i, c) ->
         c.time in 1L until 4_102_444_800_000L && c.open.isFinite() && c.high.isFinite() && c.low.isFinite() && c.close.isFinite() &&
             c.low > 0 && c.low <= min(c.open, c.close) && c.high >= max(c.open, c.close) &&
-            (i == 0 || c.time > bars[i - 1].time &&
-                c.time - bars[i - 1].time <= interval.minutes * 120_000L)
+            (i == 0 || c.time - bars[i - 1].time in setOf(interval.millis, interval.millis * 2))
     }
 
     /** Levels are based on repeated, separated wick touches; confirmed only after BOTH exist. */
-    private fun confirmedRange(bars: List<Candle>, endExclusive: Int): Range? {
+    private fun confirmedRange(bars: List<Candle>, endExclusive: Int, interval: Interval): Range? {
         if (endExclusive < RANGE_BARS) return null
         val history = bars.subList(endExclusive - RANGE_BARS, endExclusive)
         val tr = history.indices.drop(1).map { i ->
@@ -140,7 +139,14 @@ object IctRangeAnalyzer {
                     (if (side == Side.BUY) support else resistance)) <= tolerance
             }
             return matched.fold(emptyList()) { kept, index ->
-                if (kept.isEmpty() || index - kept.last() >= 4) kept + index else kept
+                val previous = kept.lastOrNull()
+                // Four bars near a boundary without travelling away are ONE test, not
+                // multiple independent swing reactions to the same level.
+                val rebounded = previous == null || history.subList(previous + 1, index).any { bar ->
+                    if (side == Side.BUY) bar.close >= support + 0.25 * width
+                    else bar.close <= resistance - 0.25 * width
+                }
+                if (previous == null || index - previous >= 4 && rebounded) kept + index else kept
             }
         }
         val lows = touches(Side.BUY)
@@ -152,10 +158,12 @@ object IctRangeAnalyzer {
         val firstMean = history.take(16).map { it.close }.average()
         val secondMean = history.drop(16).map { it.close }.average()
         if (abs(firstMean - secondMean) > 0.30 * width) return null
-        val confirmIndex = max(lows[1], highs[1]) + 1 // one closed bar beyond the second touch
+        val confirmIndex = max(lows[1], highs[1]) + 1 // one CLOSED bar beyond the second touch
         if (confirmIndex >= history.size) return null
+        // The trimmed extrema, ATR and containment use ALL 32 bars: the precise lines
+        // were not knowable at confirmIndex. Never paint them before the last bar closes.
         return Range(support, resistance, atr, lows.size, highs.size,
-            history[confirmIndex].time, history.first().time)
+            history.last().time + interval.millis, history.first().time)
     }
 
     private fun setup(bars: List<Candle>, last: Int, window: Window, side: Side,
@@ -163,8 +171,9 @@ object IctRangeAnalyzer {
         // Rebuild each candidate baseline from bars STRICTLY BEFORE its sweep. A new sweep
         // supersedes an old setup; the last bar cannot retroactively create an earlier range.
         val candidate = (last downTo max(RANGE_BARS, last - MAX_SETUP_BARS)).firstNotNullOfOrNull { i ->
-            val range = confirmedRange(bars, i) ?: return@firstNotNullOfOrNull null
+            val range = confirmedRange(bars, i, interval) ?: return@firstNotNullOfOrNull null
             val c = bars[i]
+            if (range.confirmedAt > c.time) return@firstNotNullOfOrNull null
             val margin = 0.08 * range.atr
             val swept = if (side == Side.BUY) {
                 c.low < range.support - margin && c.close >= range.support && c.close < range.midpoint
@@ -173,7 +182,7 @@ object IctRangeAnalyzer {
             }
             if (swept) i to range else null
         }
-        val fallback = confirmedRange(bars, last)
+        val fallback = confirmedRange(bars, last, interval)
         if (candidate == null) {
             val broken = fallback != null && (bars[last].close < fallback.support - 0.20 * fallback.atr ||
                 bars[last].close > fallback.resistance + 0.20 * fallback.atr)
@@ -228,7 +237,8 @@ object IctRangeAnalyzer {
                        else c.close >= range.resistance - 0.45 * range.width
         val confirmed = if (side == Side.BUY) c.close > c.open && c.close >= range.support + 0.06 * range.atr
                         else c.close < c.open && c.close <= range.resistance - 0.06 * range.atr
-        if ((!overlapsFvg && !overlapsOb) || !discount || !confirmed) {
+        val holdsFvg = if (side == Side.BUY) c.close >= fvg.low else c.close <= fvg.high
+        if ((!overlapsFvg && !overlapsOb) || !discount || !confirmed || !holdsFvg) {
             return result(State.WAIT_RETEST, shift, fvg, ob)
         }
         val stop = if (side == Side.BUY) sweep.low - 0.15 * range.atr else sweep.high + 0.15 * range.atr
