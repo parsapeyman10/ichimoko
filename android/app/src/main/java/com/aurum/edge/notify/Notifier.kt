@@ -15,6 +15,7 @@ import com.aurum.edge.R
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.ui.components.formatPrice
 
 object Notifier {
@@ -91,12 +92,8 @@ object Notifier {
             manager.getNotificationChannel(channel)?.importance?.let { it > NotificationManager.IMPORTANCE_NONE } == true
     }
 
-    /** Only after the opportunity is durably saved; posting an alert NEVER opens a trade. */
+    /** Only after the candidate is durably saved. This alert NEVER claims a trade was opened. */
     fun notifyVerifiedOpportunity(context: Context, item: PaperOpportunity, customSoundUri: String): Boolean {
-        if (!canNotifyVerified(context, customSoundUri)) return false
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
-        val custom = customSoundUri.isNotBlank() && AlertSoundPlayer.canOpen(context, customSoundUri)
-        val channel = if (custom) CHANNEL_VERIFIED_FILE else CHANNEL_VERIFIED_DEFAULT
         val title = when (item.action) {
             SignalAction.BUY -> "فرصت آموزشی خرید XAU/USD · ۹/۹"
             SignalAction.SELL -> "فرصت آموزشی فروش XAU/USD · ۹/۹"
@@ -104,17 +101,44 @@ object Notifier {
         }
         val text = "${item.interval.label} · قیمت ${formatPrice(item.priceAtAlert)}$ · " +
             "SL ${formatPrice(item.stopLoss)} · TP ${formatPrice(item.takeProfit)}"
+        return postVerified(context, item.key.hashCode(), title, text,
+            "$text\nکاندیدا؛ باز شدن پوزیشن کاغذی یا سفارش واقعی را نشان نمی‌دهد. جزئیات در ژورنال.",
+            customSoundUri)
+    }
+
+    /** Caller must pass ONLY the new result of JournalStore.open, after its atomic write succeeds. */
+    fun notifyRecordedAutoEntry(context: Context, trade: PaperTrade, customSoundUri: String): Boolean {
+        if (!trade.autoOpened || !trade.isOpen || trade.symbol != "XAU/USD" ||
+            trade.action == SignalAction.NO_TRADE || (trade.signalBarTime ?: 0L) <= 0L ||
+            trade.newsEvidence?.evidence.isNullOrEmpty() || trade.mtf?.veto != false ||
+            trade.entryConditions.size != 9 ||
+            trade.entryConditions.any { it.status != "CONFIRMED" } ||
+            trade.entryConditions[8].name != NewsConfluence.NEWS_LABEL) return false
+        val side = if (trade.action == SignalAction.BUY) "خرید" else "فروش"
+        val title = "معاملهٔ آموزشی $side ثبت شد · فقط کاغذی"
+        val text = "XAU/USD ${trade.interval.label} · ورود ${formatPrice(trade.entry)}$ · شناسه ${trade.id.take(8)}"
+        return postVerified(context, trade.id.hashCode(), title, text,
+            "$text\nSL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)} · " +
+                "۹/۹ و شواهد خبر در ژورنال ثبت شدند. سفارش واقعی ارسال نشد.", customSoundUri)
+    }
+
+    private fun postVerified(context: Context, id: Int, title: String, text: String,
+                             expanded: String, customSoundUri: String): Boolean {
+        if (!canNotifyVerified(context, customSoundUri)) return false
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        val custom = customSoundUri.isNotBlank() && AlertSoundPlayer.canOpen(context, customSoundUri)
+        val channel = if (custom) CHANNEL_VERIFIED_FILE else CHANNEL_VERIFIED_DEFAULT
         val notification = NotificationCompat.Builder(context, channel)
             .setContentTitle(title)
             .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText("$text\nکاندیدا؛ باز شدن پوزیشن کاغذی یا سفارش واقعی را نشان نمی‌دهد. جزئیات در ژورنال."))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(expanded))
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(contentIntent(context))
             .build()
         val posted = runCatching {
-            NotificationManagerCompat.from(context).notify(item.key.hashCode(), notification)
+            NotificationManagerCompat.from(context).notify(id, notification)
             true
         }.getOrDefault(false)
         // On Android 11+ a user's channel sound choice (including mute) overrides our app clip.

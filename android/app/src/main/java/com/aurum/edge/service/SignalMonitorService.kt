@@ -105,6 +105,7 @@ class SignalMonitorService : Service() {
                     )
                 }
                 val signal = state.signal
+                var newCandidate: PaperOpportunity? = null
                 if (alertsAvailable && signal?.isActionable == true &&
                     container.settingsStore.read().notifyOnSignal) {
                     val snapshot = runCatching { MtfAnalyzer.analyze(state.candles, state.interval) }.getOrNull()
@@ -122,23 +123,33 @@ class SignalMonitorService : Service() {
                             val evidence = NewsConfluence.record(recentNews)
                             if (evidence != null && snapshot != null &&
                                 Notifier.canNotifyVerified(this@SignalMonitorService, recentConfig.alertSoundUri)) {
-                                val item = PaperOpportunity.from(latest.signal!!, latest.symbol,
-                                    latest.lastPrice!!, MtfSnapshotRecord.from(snapshot), evidence)
-                                if (runCatching { container.opportunityStore.record(item) }.getOrDefault(false)) {
-                                    Notifier.notifyVerifiedOpportunity(this@SignalMonitorService, item,
-                                        recentConfig.alertSoundUri)
-                                }
+                                val item = runCatching { PaperOpportunity.from(latest.signal!!, latest.symbol,
+                                    latest.lastPrice!!, MtfSnapshotRecord.from(snapshot), evidence) }.getOrNull()
+                                newCandidate = item
                             }
                         }
                     }
                 }
-                if (container.settingsStore.read().autoPaperTrading) {
-                    container.autoPaperTrader.onMarketUpdate(state)
-                    if (alertsAvailable && signal != null) {
-                        container.journalStore.trades.value.firstOrNull {
-                            it.symbol == state.symbol && it.interval == state.interval &&
-                                it.signalBarTime == signal.barTime && it.action == signal.action
-                        }?.let { runCatching { container.opportunityStore.linkTrade(it) } }
+                // A candidate is NOT an entry. Wait for the atomic journal write before notifying.
+                val autoEnabled = container.settingsStore.read().autoPaperTrading
+                val opened = if (autoEnabled) container.autoPaperTrader.onMarketUpdate(state) else null
+                if (opened != null) {
+                    if (alertsAvailable) runCatching {
+                        newCandidate?.let { container.opportunityStore.record(it) }
+                        container.opportunityStore.linkTrade(opened)
+                    }
+                    val currentSettings = container.settingsStore.read()
+                    if (currentSettings.notifyOnSignal) {
+                        Notifier.notifyRecordedAutoEntry(this@SignalMonitorService, opened,
+                            currentSettings.alertSoundUri)
+                    }
+                } else if (!autoEnabled) {
+                    val candidate = newCandidate
+                    val currentSettings = container.settingsStore.read()
+                    if (candidate != null && currentSettings.notifyOnSignal &&
+                        runCatching { container.opportunityStore.record(candidate) }.getOrDefault(false)) {
+                        Notifier.notifyVerifiedOpportunity(this@SignalMonitorService, candidate,
+                            currentSettings.alertSoundUri)
                     }
                 }
             }

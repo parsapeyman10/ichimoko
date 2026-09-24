@@ -25,11 +25,16 @@ object PaperAutoRules {
         val signal = market.signal ?: return "سیگنال محاسبه نشده است"
         if (!signal.isActionable || signal.entry == null || signal.stopLoss == null || signal.takeProfit == null)
             return "سیگنال ۹/۹ قابل معامله موجود نیست"
-        if (signal.confluence.take(8).size != 8 || signal.confluence.take(8).any { !it.ok } ||
-            signal.confluence.getOrNull(8)?.let { it.name == NewsConfluence.NEWS_LABEL && it.ok } != true)
+        if (signal.confluence.take(8).size != 8 ||
+            signal.confluence.take(8).any { !it.ok || it.status != ConfluenceStatus.CONFIRMED } ||
+            signal.confluence.getOrNull(8)?.let {
+                it.name == NewsConfluence.NEWS_LABEL && it.ok && it.status == ConfluenceStatus.CONFIRMED
+            } != true)
             return "تمام هشت شرط فنی و خبر AI هم‌زمان تأیید نشده‌اند"
         val match = NewsConfluence.alignment(market.symbol, signal.action, news, now)
         if (match.status != ConfluenceStatus.CONFIRMED) return "خبر AI معتبر نیست: ${match.detail}"
+        if (signal.confluence[8].detail != match.detail)
+            return "شواهد خبرِ فعلی با سیگنال یکی نیست؛ منتظر محاسبهٔ دوباره بمانید"
         val lastClosed = market.candles.lastOrNull { it.closed }
         if (lastClosed?.time != signal.barTime || signal.barTime <= 0L ||
             now - (signal.barTime + market.interval.millis) !in 0L..90_000L)

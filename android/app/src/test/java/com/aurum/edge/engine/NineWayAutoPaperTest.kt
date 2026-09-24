@@ -137,6 +137,16 @@ class NineWayAutoPaperTest {
         ).forEachIndexed { idx, input ->
             assertNotNull("market $idx", PaperAutoRules.blocker(input, settings, news, now))
         }
+        assertNotNull(PaperAutoRules.blocker(ready.copy(signal = confirmed.copy(
+            confluence = confirmed.confluence.mapIndexed { index, item ->
+                if (index == 0) item.copy(status = ConfluenceStatus.UNKNOWN) else item
+            })), settings, news, now))
+        assertNotNull(PaperAutoRules.blocker(ready.copy(signal = confirmed.copy(
+            confluence = confirmed.confluence.mapIndexed { index, item ->
+                if (index == 8) item.copy(status = ConfluenceStatus.CONFLICT) else item
+            })), settings, news, now))
+        assertNotNull(PaperAutoRules.blocker(ready, settings,
+            news.copy(ai = news.ai.copy(model = "another-verified-model")), now))
         assertNotNull(PaperAutoRules.blocker(ready, settings.copy(autoPaperTrading = false), news, now))
         assertNotNull(PaperAutoRules.blocker(ready, settings.copy(backgroundMonitor = false), news, now))
         assertNotNull(PaperAutoRules.blocker(ready.copy(symbol = "AAPL"), settings, news, now))

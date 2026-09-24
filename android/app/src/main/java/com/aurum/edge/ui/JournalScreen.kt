@@ -104,7 +104,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
         }
 
         if (opportunities.isNotEmpty() || opportunityError != null) {
-            SectionCard("فرصت‌های آموزشی اعلام‌شده · بدون اجرای معامله", "جدا از آمار برد/باخت و پوزیشن؛ ۹/۹ فقط کاندیدای بررسی است") {
+            SectionCard("فرصت‌های ۹/۹ بررسی‌شده", "بعضی به معاملهٔ کاغذی وصل‌اند؛ خودِ کاندیدا معامله نیست و در آمار محاسبه نمی‌شود") {
                 opportunityError?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = AurumColors.Red) }
                 opportunities.take(30).forEach { item ->
                     OpportunityRow(item, trades.any { it.id == item.paperTradeId })

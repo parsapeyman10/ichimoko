@@ -265,8 +265,8 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("هشدار فرصت آموزشی ۹/۹", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
-                    Text("فقط با فید تازه، ۸ شرط فنی، خبر AI معتبر، ریسک و تراز مجاز؛ کاندیدا معامله نیست.",
+                    Text("هشدار ورود کاغذی / کاندیدای ۹/۹", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
+                    Text("با ورود خودکار روشن: اعلان فقط پس از ثبت موفق معاملهٔ کاغذی؛ با آن خاموش: اعلان کاندیدای ۹/۹ (نه معامله).",
                         style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
                 Switch(
