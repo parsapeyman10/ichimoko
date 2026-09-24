@@ -38,8 +38,13 @@ async def run_forward_test(
         }
 
     split_index = int(len(candles) * min(max(split, 0.3), 0.85))
+    if split_index < 220:
+        return {"error": "دورهٔ آموزشی به حداقل ۲۲۰ کندل واقعی نیاز دارد؛ تقسیم بازه را تغییر دهید", "bars": len(candles)}
+    split_time = candles[split_index].timestamp
+    # Never run the in-sample replay through the unseen tail and then filter just its
+    # trades: that leaks future equity, drawdown, fees, end time and warm-up statistics.
     in_sample = run_backtest(
-        candles,
+        candles[:split_index],
         initial_balance=initial_balance,
         risk_percent=risk_percent,
         spread=spread,
@@ -59,9 +64,8 @@ async def run_forward_test(
     if "error" in in_sample or "error" in out_of_sample:
         return {"error": (in_sample.get("error") or out_of_sample.get("error")), "bar": len(candles)}
 
-    # Restrict each half's trades to its own window for honest statistics.
-    split_time = candles[split_index].timestamp
-    in_sample["trades"] = [t for t in in_sample["trades"] if datetime.fromisoformat(t["entry_time"]) < split_time]
+    # OOS processes the older bars only as indicator warm-up (start_index=split_index).
+    # Expose the actual test window, not those warm-up bars, in its summary and curve.
     out_of_sample["trades"] = [t for t in out_of_sample["trades"] if datetime.fromisoformat(t["entry_time"]) >= split_time]
 
     return {
@@ -69,10 +73,12 @@ async def run_forward_test(
         "symbol": candles[0].symbol,
         "timeframe": tf.value,
         "bars": len(candles),
-        "split": split,
+        "split": split_index / len(candles),
         "split_time": split_time.isoformat(),
-        "in_sample": _metrics(in_sample),
-        "out_of_sample": _metrics(out_of_sample),
+        "in_sample": _metrics(in_sample, bars=split_index, warmup_bars=210,
+                              start=candles[0].timestamp, end=candles[split_index - 1].timestamp),
+        "out_of_sample": _metrics(out_of_sample, bars=len(candles) - split_index,
+                                  warmup_bars=split_index, start=split_time, end=candles[-1].timestamp),
         "out_of_sample_trades": out_of_sample["trades"],
         "stress_test": stress_test_from_trades(out_of_sample["trades"], initial_balance),
         "notes": [
@@ -85,11 +91,16 @@ async def run_forward_test(
     }
 
 
-def _metrics(result: dict[str, Any]) -> dict[str, Any]:
+def _metrics(result: dict[str, Any], *, bars: int, warmup_bars: int,
+             start: datetime, end: datetime) -> dict[str, Any]:
+    curve = [point for point in result["equity_curve"] if point["time"] >= start.isoformat()]
+    if not curve or curve[0]["time"] != start.isoformat():
+        curve.insert(0, {"time": start.isoformat(), "balance": result["initial_balance"]})
     return {
-        "start": result["start"],
-        "end": result["end"],
-        "bars": result["bars"],
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "bars": bars,
+        "warmup_bars": warmup_bars,
         "initial_balance": result["initial_balance"],
         "final_balance": result["final_balance"],
         "total_pnl": result["total_pnl"],
@@ -103,5 +114,5 @@ def _metrics(result: dict[str, Any]) -> dict[str, Any]:
         "max_drawdown_pct": result["max_drawdown_pct"],
         "fees_paid": result["fees_paid"],
         "skipped_min_lot": result["skipped_min_lot"],
-        "equity_curve": result["equity_curve"],
+        "equity_curve": curve,
     }

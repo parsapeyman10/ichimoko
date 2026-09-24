@@ -21,6 +21,12 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** A successful REST download is not proof that the market has a current bar. */
+internal fun hasCurrentRestBar(bars: List<Candle>, interval: Interval, now: Long): Boolean {
+    val last = bars.maxByOrNull { it.time } ?: return false
+    return now - last.time in 0L..(interval.millis + 90_000L)
+}
+
 data class MarketState(
     val symbol: String = "XAU/USD",
     val interval: Interval = Interval.M5,
@@ -130,36 +136,48 @@ class MarketRepository(
             publishOffline("اینترنت دستگاه قطع است — آخرین داده واقعیِ ذخیره‌شده نمایش داده می‌شود")
             return
         }
-        _state.value = _state.value.copy(feed = _state.value.feed.copy(mode = FeedMode.CONNECTING, detail = "دریافت کندل‌های واقعی…"))
+        if (_state.value.feed.mode != FeedMode.LIVE) _state.value = _state.value.copy(
+            feed = _state.value.feed.copy(mode = FeedMode.CONNECTING, detail = "دریافت کندل‌های واقعی…"))
         try {
             val fetched = client.fetchCandles(current.apiKey, current.symbol, current.interval, outputSize = 1500)
             if (settings.read().symbol != current.symbol || settings.read().interval != current.interval ||
                 _state.value.symbol != current.symbol) return
+            val receivedAt = System.currentTimeMillis()
+            val streamRecent = _state.value.feed.mode == FeedMode.LIVE &&
+                _state.value.feed.lastSuccessAt?.let { receivedAt - it in 0L..90_000L } == true
+            val restCurrent = hasCurrentRestBar(fetched, current.interval, receivedAt)
+            if (!restCurrent && streamRecent) return // stale REST must not roll back a recent WS tick
             val periodStart = currentPeriodStart(current.interval)
             fetched.forEach { bar ->
                 // The bar whose period is still open is kept as "forming" and excluded from the engine.
-                if (bar.time >= periodStart) {
-                    cachedBars[bar.time] = bar.copy(closed = false)
-                } else {
-                    cachedBars[bar.time] = bar.copy(closed = true)
-                }
+                // A recent WebSocket tick can be newer than this REST response; do not overwrite it.
+                if (streamRecent && bar.time == periodStart) return@forEach
+                cachedBars[bar.time] = bar.copy(closed = bar.time < periodStart)
             }
-            settings.setLastSync(current.symbol, current.interval, System.currentTimeMillis())
+            settings.setLastSync(current.symbol, current.interval, receivedAt)
             persistCache()
-            evaluateAndPublish(showingCache = false)
-            _state.value = _state.value.copy(
-                feed = FeedStatus(
-                    mode = if (_state.value.feed.mode == FeedMode.LIVE) FeedMode.LIVE else FeedMode.POLLING,
-                    detail = "",
-                    lastSuccessAt = System.currentTimeMillis(),
-                ),
-            )
+            evaluateAndPublish(showingCache = !restCurrent)
+            if (!restCurrent) {
+                publishOffline("آخرین کندل Twelve Data قدیمی است؛ دریافت دوبارهٔ تاریخچه قیمت زنده/مجوز معامله نیست")
+            } else {
+                _state.value = _state.value.copy(
+                    feed = FeedStatus(
+                        mode = if (streamRecent) FeedMode.LIVE else FeedMode.POLLING,
+                        detail = if (streamRecent) "" else "REST: زمان دریافت تازه است؛ زمان آخرین معاملهٔ درون کندل جداگانه منتشر نشده",
+                        lastSuccessAt = if (streamRecent) _state.value.feed.lastSuccessAt else receivedAt,
+                    ),
+                )
+            }
         } catch (e: DataFeedException) {
-            publishOffline(e.message ?: "خطای دریافت داده واقعی")
+            if (!hasRecentStream()) publishOffline(e.message ?: "خطای دریافت داده واقعی")
         } catch (e: Exception) {
-            publishOffline(e.message ?: "خطای نامشخص در دریافت داده")
+            if (!hasRecentStream()) publishOffline(e.message ?: "خطای نامشخص در دریافت داده")
         }
     }
+
+    private fun hasRecentStream(now: Long = System.currentTimeMillis()): Boolean =
+        _state.value.feed.mode == FeedMode.LIVE &&
+            _state.value.feed.lastSuccessAt?.let { now - it in 0L..90_000L } == true
 
     private fun startPolling() {
         pollJob?.cancel()
