@@ -28,8 +28,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.Candle
+import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.Interval
 import com.aurum.edge.data.MarketState
+import com.aurum.edge.engine.IctRangeAnalyzer
 import com.aurum.edge.ui.components.EmptyState
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.SignalSummaryCard
@@ -63,6 +65,9 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
     val shown = crosshair ?: last
     val previousClose = market.candles.dropLast(1).lastOrNull()?.close
     val change = previousClose?.let { shown.close - it }
+    val structure = remember(market.candles, market.interval) {
+        IctRangeAnalyzer.analyze(market.candles, market.interval)
+    }
 
     Column(
         modifier = Modifier
@@ -94,6 +99,7 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
             candles = market.candles,
             interval = market.interval,
             signal = market.signal,
+            structure = structure,
             onCrosshairChange = { crosshair = it },
             modifier = Modifier
                 .fillMaxWidth()
@@ -111,6 +117,51 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
             Legend("Kijun", AurumColors.Purple)
             Legend("VWAP", AurumColors.Gold)
             Legend("EMA200", AurumColors.TextSecondary)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Legend("S حمایت", AurumColors.Green)
+            Legend("R مقاومت", AurumColors.Red)
+            Legend("FVG", AurumColors.Cyan)
+            Legend("OB احتمالی", AurumColors.Purple)
+        }
+
+        SectionCard(
+            title = "حمایت/مقاومت و پرایس‌اکشن ICT",
+            subtitle = "تقریب آموزشی بر پایهٔ OHLC بسته؛ خطوط، سفارش یا معاملهٔ ثبت‌شده نیستند",
+        ) {
+            val level = structure.range
+            if (level == null) {
+                Text("رنجِ دوطرفهٔ تأییدشده یافت نشد؛ سطح قابل اتکا ترسیم/استفاده نمی‌شود.",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+            } else {
+                Text("حمایت ${formatPrice(level.support)} (${level.supportTouches} برخورد جداگانه) · مقاومت ${formatPrice(level.resistance)} (${level.resistanceTouches} برخورد جداگانه)",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.Purple)
+                Text("میانهٔ رنج ${formatPrice(level.midpoint)}؛ لمس حمایت یا خرید در میانهٔ رنج، مجوز ورود نیست.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+            }
+            val selected = listOf(structure.buy, structure.sell).maxByOrNull { it.sweepAt ?: 0L }
+            Text("پنجره: ${structure.window?.label ?: "داده/بازهٔ ناکافی"} · ${structure.window?.localTime ?: "—"} به وقت نیویورک (ساعت رویدادها: دستگاه)",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            Text("BUY: ${ictStatus(structure.buy.state)} · SELL: ${ictStatus(structure.sell.state)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (structure.buy.ready || structure.sell.ready) AurumColors.Gold else AurumColors.TextSecondary)
+            selected?.takeIf { it.sweepAt != null }?.let { setup ->
+                Text("${if (setup.side == IctRangeAnalyzer.Side.BUY) "کف" else "سقف"} جاروب/بازپس‌گرفته: ${setup.sweepAt?.let(::formatTime)} · شکست ساختار MSS: ${setup.shiftAt?.let(::formatTime) ?: "هنوز نه"}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+                Text("FVG سه‌کندلی: ${setup.fvg?.let { "${formatPrice(it.low)}–${formatPrice(it.high)}" } ?: "تأیید نشده"} · اردربلاک احتمالی: ${setup.orderBlock?.let { "${formatPrice(it.low)}–${formatPrice(it.high)}" } ?: "یافت نشد"}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
+                Text("بازآزمایی: ${setup.retestAt?.let(::formatTime) ?: "هنوز نه"} · پاداش/ریسک تا سمت مقابل: ${setup.rewardRisk?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "—"}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            }
+            if (market.showingCachedData || market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING)) {
+                Text("نمایش تحلیل تاریخی/کش؛ ورود یا اعلان زنده از آن مجاز نیست.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+            }
+            Text("حتی «آماده» فقط یک الگوی تقریبی است؛ ورود خودکار paper به قیمت زنده، ۹/۹ از جمله خبر AI، و گیت رنجِ همین کندل نیاز دارد. معاملهٔ واقعی وجود ندارد.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
         Row(
@@ -185,6 +236,19 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
             )
         }
     }
+}
+
+private fun ictStatus(state: IctRangeAnalyzer.State): String = when (state) {
+    IctRangeAnalyzer.State.INVALID_DATA -> "داده/بازه ناکافی یا نامعتبر"
+    IctRangeAnalyzer.State.NO_RANGE -> "رنج تأیید نشده"
+    IctRangeAnalyzer.State.WAIT_SWEEP -> "در انتظار جاروب و بازپس‌گیری"
+    IctRangeAnalyzer.State.BROKEN_RANGE -> "خروج از محدوده"
+    IctRangeAnalyzer.State.WAIT_MSS -> "در انتظار شکست ساختار با حرکت قوی"
+    IctRangeAnalyzer.State.WAIT_FVG -> "در انتظار FVG"
+    IctRangeAnalyzer.State.WAIT_RETEST -> "در انتظار بازآزمایی نزدیک لبهٔ رنج"
+    IctRangeAnalyzer.State.OUTSIDE_SESSION -> "بیرون جلسهٔ مجاز"
+    IctRangeAnalyzer.State.POOR_REWARD_RISK -> "فضای ناکافی تا سطح مقابل"
+    IctRangeAnalyzer.State.READY -> "الگوی تأییدشده؛ نه مجوز معامله"
 }
 
 @Composable
