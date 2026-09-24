@@ -149,7 +149,8 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                 color = AurumColors.TextMuted,
                             )
                             trade.newsEvidence?.let { verdict ->
-                                Text("AI ${verdict.model} · ${verdict.direction} · ${verdict.evidence.joinToString { it.source }}",
+                                Text("AI ${verdict.model} · ${verdict.direction} · ${verdict.evidence.joinToString { it.source }}" +
+                                    " · تقویم ${formatDateTime(verdict.calendarCheckedAt)}",
                                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
                             }
                             trade.mtf?.let { snapshot ->
@@ -273,7 +274,8 @@ private fun TradeRow(trade: PaperTrade) {
             Text("${trade.exitReason ?: "—"} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             trade.newsEvidence?.let { ai ->
-                Text("خبر ${ai.model} · ${formatDateTime(ai.checkedAt)} · ${ai.evidence.joinToString { it.source }}",
+                Text("خبر ${ai.model} · ${formatDateTime(ai.checkedAt)} · ${ai.evidence.joinToString { it.source }}" +
+                    " · بررسی تقویم ${formatDateTime(ai.calendarCheckedAt)}",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
                 ai.evidence.forEach { evidence ->
                     Text("${evidence.source}: ${evidence.headline.take(90)}",
@@ -338,7 +340,8 @@ private fun OpportunityRow(item: PaperOpportunity, tradeStillSaved: Boolean) {
             else -> "رکورد معاملهٔ مرتبط بعداً از ژورنال پاک شده است."
         }, style = MaterialTheme.typography.labelSmall,
             color = if (tradeStillSaved) AurumColors.Green else AurumColors.TextMuted)
-        Text("کندل ${formatDateTime(item.signalBarTime)} · MTF ${item.mtf.bias} · مدل ${item.newsEvidence.model}",
+        Text("کندل ${formatDateTime(item.signalBarTime)} · MTF ${item.mtf.bias} · مدل ${item.newsEvidence.model}" +
+            " · تقویم ${formatDateTime(item.newsEvidence.calendarCheckedAt)}",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         ConditionDisclosure(item.key, item.conditions)
         IctDisclosure(item.key, item.priceAction)

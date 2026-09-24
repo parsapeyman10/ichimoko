@@ -15,6 +15,7 @@ import com.aurum.edge.R
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.data.FOREX_CALENDAR_SOURCE_URL
 import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.ui.components.formatPrice
 
@@ -108,7 +109,9 @@ object Notifier {
         val text = "${item.interval.label} · قیمت ${formatPrice(item.priceAtAlert)}$ · " +
             "SL ${formatPrice(item.stopLoss)} · TP ${formatPrice(item.takeProfit)}"
         if (item.priceAction?.barTime != item.signalBarTime ||
-            item.priceAction?.action != item.action) return false
+            item.priceAction?.action != item.action ||
+            item.newsEvidence.calendarSource != FOREX_CALENDAR_SOURCE_URL ||
+            item.newsEvidence.calendarCheckedAt == null) return false
         return postVerified(context, item.key.hashCode(), title, text,
             "$text\nکاندیدا؛ باز شدن پوزیشن کاغذی یا سفارش واقعی را نشان نمی‌دهد. جزئیات در ژورنال.",
             customSoundUri)
@@ -118,7 +121,9 @@ object Notifier {
     fun notifyRecordedAutoEntry(context: Context, trade: PaperTrade, customSoundUri: String): Boolean {
         if (!trade.autoOpened || !trade.isOpen || trade.symbol != "XAU/USD" ||
             trade.action == SignalAction.NO_TRADE || (trade.signalBarTime ?: 0L) <= 0L ||
-            trade.newsEvidence?.evidence.isNullOrEmpty() || trade.mtf?.veto != false ||
+            trade.newsEvidence?.evidence.isNullOrEmpty() ||
+            trade.newsEvidence?.calendarSource != FOREX_CALENDAR_SOURCE_URL ||
+            trade.newsEvidence?.calendarCheckedAt == null || trade.mtf?.veto != false ||
             trade.entryConditions.size != 9 ||
             trade.entryConditions.any { it.status != "CONFIRMED" } ||
             trade.entryConditions[8].name != NewsConfluence.NEWS_LABEL ||

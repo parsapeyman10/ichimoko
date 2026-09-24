@@ -6,6 +6,7 @@ import com.aurum.edge.core.PaperNewsEvidence
 import com.aurum.edge.core.PaperNewsRecord
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.data.FOREX_CALENDAR_SOURCE_URL
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.PersianNewsState
 import com.aurum.edge.data.PersianHeadline
@@ -28,6 +29,8 @@ object NewsConfluence {
         if (symbol != "XAU/USD") return unknown("این مدل فقط برای XAU/USD ارزیابی می‌شود؛ نماد دیگر تأیید نشده")
         if (action == SignalAction.NO_TRADE) return unknown("ابتدا هشت شرط فنی باید جهت معتبر بدهند")
         if (news.loading || news.cached || news.error != null || news.sources.isEmpty() ||
+            news.sources.none { it.feed == FOREX_CALENDAR_SOURCE_URL && it.state == "online" } ||
+            news.calendarCheckedAt?.let { now - it in 0L..1_200_000L } != true ||
             news.sources.any { it.state != "online" } || news.lastCheckedAt?.let {
                 now - it in 0L..MAX_REVIEW_AGE_MS
             } != true) return unknown("فید/زمان ناشران ناقص، قدیمی یا در حال بررسی است")
@@ -79,6 +82,8 @@ object NewsConfluence {
     fun record(news: PersianNewsState): PaperNewsRecord? {
         val ai = news.ai
         val model = ai.model ?: return null
+        val calendarAt = news.calendarCheckedAt ?: return null
+        if (news.sources.none { it.feed == FOREX_CALENDAR_SOURCE_URL && it.state == "online" }) return null
         val at = ai.checkedAt ?: return null
         val evidence = ai.evidenceIds.map { id ->
             val item = news.articles.singleOrNull { it.id == id } ?: return null
@@ -86,7 +91,8 @@ object NewsConfluence {
                 item.link ?: return null, item.publishedAt ?: return null)
         }
         if (evidence.isEmpty()) return null
-        return PaperNewsRecord(model, ai.direction, ai.confidence, at, evidence)
+        return PaperNewsRecord(model, ai.direction, ai.confidence, at, evidence,
+            calendarSource = FOREX_CALENDAR_SOURCE_URL, calendarCheckedAt = calendarAt)
     }
 
     fun apply(raw: Signal?, symbol: String, news: PersianNewsState,

@@ -22,6 +22,8 @@ import java.util.concurrent.TimeUnit
 
 enum class NewsGate { CLEAR, BLOCKED, UNKNOWN }
 
+internal const val FOREX_CALENDAR_SOURCE_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+
 data class PersianHeadline(
     val id: String,
     val headline: String,
@@ -63,6 +65,8 @@ data class PersianNewsState(
     val loading: Boolean = false,
     val error: String? = null,
     val sources: List<NewsSourceStatus> = emptyList(),
+    /** Server calendar receipt time; separately expires even if RSS/model is refreshed. */
+    val calendarCheckedAt: Long? = null,
     val ai: AiNewsVerdict = AiNewsVerdict(),
 )
 
@@ -158,8 +162,20 @@ internal fun parseWebNews(root: JsonObject, now: Long): PersianNewsState {
         runCatching { OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull()
     }
     val fresh = checkedAt != null && now - checkedAt in 0L..180_000L
-    val gate = if (online && fresh && articles.isNotEmpty()) {
-        runCatching { NewsGate.valueOf(guard?.string("state") ?: "UNKNOWN") }.getOrDefault(NewsGate.UNKNOWN)
+    val calendar = root["calendar"] as? JsonObject
+    val calendarGuard = (calendar?.get("guard") as? JsonObject)?.string("state")
+    val calendarAt = calendar?.string("checked_at")?.let {
+        runCatching { OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull()
+    }
+    val calendarReady = calendar?.string("status") == "online" &&
+        calendar?.string("source") == FOREX_CALENDAR_SOURCE_URL &&
+        calendarGuard in setOf("CLEAR", "BLOCKED") &&
+        calendarAt != null && now - calendarAt in 0L..1_200_000L &&
+        (calendar?.get("events") as? JsonArray)?.any { (it as? JsonObject)?.string("country") == "USD" } == true &&
+        sources.any { it.feed == FOREX_CALENDAR_SOURCE_URL && it.state == "online" }
+    val gate = if (online && fresh && articles.isNotEmpty() && calendarReady) {
+        if (calendarGuard == "BLOCKED") NewsGate.BLOCKED else
+            runCatching { NewsGate.valueOf(guard?.string("state") ?: "UNKNOWN") }.getOrDefault(NewsGate.UNKNOWN)
     } else NewsGate.UNKNOWN
     val aiRoot = root["ai_confluence"] as? JsonObject
     val aiIds = (aiRoot?.get("evidence_ids") as? JsonArray).orEmpty().mapNotNull {
@@ -179,12 +195,17 @@ internal fun parseWebNews(root: JsonObject, now: Long): PersianNewsState {
     )
     return PersianNewsState(
         articles = articles, gate = gate,
-        reason = guard?.string("reason") ?: "وضعیت توقف نامشخص است",
+        reason = if (!calendarReady) "تقویم Forex Factory ناموجود/کهنه است؛ نبود رویداد تأیید نشده" else
+            guard?.string("reason") ?: "وضعیت توقف نامشخص است",
         provider = status?.string("provider"),
         lastCheckedAt = checkedAt,
-        cached = status?.string("cached") == "true" || !online || !fresh,
-        error = status?.string("error") ?: if (!fresh) "زمان بررسی خبر معتبر یا تازه نیست" else null,
-        sources = sources, ai = ai,
+        cached = status?.string("cached") == "true" || !online || !fresh || !calendarReady,
+        error = status?.string("error") ?: when {
+            !fresh -> "زمان بررسی خبر معتبر یا تازه نیست"
+            !calendarReady -> "تقویم Forex Factory تأیید/تازه نیست؛ ورود خودکار مسدود است"
+            else -> null
+        },
+        sources = sources, calendarCheckedAt = calendarAt?.takeIf { calendarReady }, ai = ai,
     )
 }
 

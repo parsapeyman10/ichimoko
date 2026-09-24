@@ -50,14 +50,18 @@ class PaperJournalPersistenceTest {
             candles = IctTestBars.readyAt(s.barTime), lastPrice = 3000.0,
             feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now), signal = s), now)!!
     private val news = PaperNewsRecord("test-model", "BUY", 90.0, 1_800_000_000_100L,
-        listOf(PaperNewsEvidence("id", "Publisher", "Gold headline", "https://publisher.example/news", 1_800_000_000_000L)))
+        listOf(PaperNewsEvidence("id", "Publisher", "Gold headline", "https://publisher.example/news", 1_800_000_000_000L)),
+        calendarSource = "https://nfs.faireconomy.media/ff_calendar_thisweek.json", calendarCheckedAt = 1_800_000_000_100L)
 
     @Test fun backendJsonEightTechnicalChecksNinthAiPaperOpenTickCloseAndReload() = runBlocking {
         val now = 1_800_000_000_000L
         val observed = Instant.ofEpochMilli(now)
         val articleTime = Instant.ofEpochMilli(now - 60_000)
         val json = """{"status":{"configured":true,"state":"online","sources":[
-            {"name":"Publisher","state":"online","feed":"https://publisher.example/rss"}]},
+            {"name":"Publisher","state":"online","feed":"https://publisher.example/rss"},
+            {"name":"Forex Factory","state":"online","feed":"https://nfs.faireconomy.media/ff_calendar_thisweek.json"}]},
+            "calendar":{"status":"online","source":"https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+                "checked_at":"$observed","events":[{"country":"USD"}],"guard":{"state":"CLEAR"}},
             "articles":[{"id":"verified","source":"Publisher","headline":"Gold dollar update",
                 "published_at":"$articleTime","url":"https://publisher.example/news"}],
             "guard":{"state":"CLEAR"},"checked_at":"$observed",

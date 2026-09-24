@@ -99,6 +99,9 @@ data class PaperNewsRecord(
     val confidence: Double,
     val checkedAt: Long,
     val evidence: List<PaperNewsEvidence>,
+    /** Calendar is a schedule only; retain its verified receipt time, never invent an article. */
+    val calendarSource: String? = null,
+    val calendarCheckedAt: Long? = null,
 )
 
 /** Snapshot of an OHLC approximation at the moment a PAPER opportunity/entry was checked. */

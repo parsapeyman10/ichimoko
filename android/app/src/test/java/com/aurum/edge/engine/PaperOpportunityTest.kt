@@ -45,7 +45,9 @@ class PaperOpportunityTest {
         articles = listOf(PersianHeadline("id", "Gold and USD", "", "Publisher",
             "https://publisher.example/article", now - 60_000, "LOW", "BUY", "rules")),
         gate = NewsGate.CLEAR, lastCheckedAt = now,
-        sources = listOf(NewsSourceStatus("Publisher", "online", "https://publisher.example/rss")),
+        sources = listOf(NewsSourceStatus("Publisher", "online", "https://publisher.example/rss"),
+            NewsSourceStatus("Forex Factory", "online", "https://nfs.faireconomy.media/ff_calendar_thisweek.json")),
+        calendarCheckedAt = now,
         ai = AiNewsVerdict("AVAILABLE", "XAU/USD", "BUY", 91.0, "test-model",
             "fixture", now, listOf("id")),
     )

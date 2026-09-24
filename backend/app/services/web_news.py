@@ -17,6 +17,7 @@ import httpx
 
 from app.config import Settings
 from app.services.ai_news import AiNewsAnalyzer
+from app.services.forex_calendar import CALENDAR_URL, ForexCalendarFeed
 from app.services.persian_news import Headline, MAX_FEED_BYTES, news_guard, parse_news_xml
 
 
@@ -46,9 +47,11 @@ WEB_SOURCES = (
 
 
 class WebNewsFeed:
-    def __init__(self, settings: Settings, sources: tuple[WebSource, ...] = WEB_SOURCES):
+    def __init__(self, settings: Settings, sources: tuple[WebSource, ...] = WEB_SOURCES,
+                 calendar: ForexCalendarFeed | None = None):
         self.settings = settings
         self.sources = sources
+        self.calendar = calendar if calendar is not None else ForexCalendarFeed()
         self._lock = asyncio.Lock()
         self._last_attempt = 0.0
         self._last_success: datetime | None = None
@@ -107,24 +110,38 @@ class WebNewsFeed:
                 if self._source_status and all(s["state"] == "online" for s in self._source_status):
                     self._last_success = datetime.now(timezone.utc)
             now = datetime.now(timezone.utc)
+            calendar = await self.calendar.snapshot(hold_minutes=self.settings.news_hold_minutes)
             online_count = sum(s["state"] == "online" for s in self._source_status)
-            state = "online" if online_count == len(self.sources) and online_count else (
-                "partial" if online_count else "unavailable")
-            guard = news_guard(self._articles, state == "online", now, self.settings.news_hold_minutes)
+            all_rss = online_count == len(self.sources) and online_count > 0
+            cal_online = calendar["status"] == "online" and calendar["guard"]["state"] in {"CLEAR", "BLOCKED"}
+            state = "online" if all_rss and cal_online else (
+                "partial" if online_count or cal_online else "unavailable")
+            rss_guard = news_guard(self._articles, all_rss, now, self.settings.news_hold_minutes)
+            cal_guard = calendar["guard"]
+            if rss_guard["state"] == "BLOCKED" or cal_guard["state"] == "BLOCKED":
+                guard = rss_guard if rss_guard["state"] == "BLOCKED" else cal_guard
+            elif state == "online" and rss_guard["state"] == cal_guard["state"] == "CLEAR":
+                guard = {"state": "CLEAR", "reason": "خبر RSS و رویداد USD تقویم هفتگی بررسی شد؛ پوشش کامل تضمین نیست", "until": None}
+            else:
+                guard = {"state": "UNKNOWN", "reason": "فید ناشر یا تقویم Forex Factory کامل/تازه نیست", "until": None}
             ai_confluence = await self.ai.analyze(self._articles, state, guard, now)
+            sources = self._source_status + [{"name": "Forex Factory · تقویم", "feed": CALENDAR_URL,
+                                              "language": "en", "state": calendar["status"],
+                                              "count": len(calendar["events"])}]
             return {
                 "status": {
-                    "provider": "RSS عمومی ناشران (IRIB, YJC, Eghtesaad24, CoinDesk, BLS)",
+                    "provider": "RSS عمومی ناشران + تقویم هفتگی Forex Factory",
                     "configured": True,
                     "state": state,
                     "last_success_at": self._last_success.isoformat() if self._last_success else None,
-                    "error": "دسترسی به بعضی منابع ممکن نیست؛ پوشش کامل تایید نشد" if state != "online" else None,
+                    "error": "دسترسی به بعضی ناشران/تقویم ممکن نیست؛ پوشش کامل تایید نشد" if state != "online" else None,
                     "cached": False,  # failed publishers' earlier items are NEVER reused
-                    "sources": self._source_status,
+                    "sources": sources,
                 },
                 "articles": [article.payload() for article in self._articles],
+                "calendar": calendar,
                 "guard": guard,
                 "ai_confluence": ai_confluence,
                 "checked_at": datetime.now(timezone.utc).isoformat(),
-                "notice": "خوراک‌ها تقویم اقتصادی کامل نیستند؛ CLEAR فقط یعنی در همین منابعِ در دسترس خبر پراثر تازه یافت نشد. AI بدون کلید/رضایت UNKNOWN است.",
+                "notice": "تقویم فقط رویدادهای هفتگیِ منتشرشده است؛ اگر منبع/AI قطع شود خبر UNKNOWN است. رویداد پراثر USD از ۳۰ دقیقه پیش تا دورهٔ توقف پس از آن ورود جدید را می‌بندد.",
             }

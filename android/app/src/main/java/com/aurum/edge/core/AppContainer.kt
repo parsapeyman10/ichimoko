@@ -7,6 +7,7 @@ import com.aurum.edge.data.CryptoRepository
 import com.aurum.edge.data.DataFeedException
 import com.aurum.edge.data.FreeHistoryDownloader
 import com.aurum.edge.data.FreeHistoryResult
+import com.aurum.edge.data.ForexCalendarRepository
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.MarketRepository
 import com.aurum.edge.data.MetaTraderCsv
@@ -58,6 +59,7 @@ class AppContainer(context: Context) {
     val quoteHistory = QuoteHistoryStore(appContext)
     val watch = WatchRepository(SourceFetcher(), quoteHistory, watchSettings, settingsStore, appScope)
     val news = NewsRepository(settingsStore, appScope)
+    val forexCalendar = ForexCalendarRepository(appScope) // public schedule UI; server checks it independently for the AI gate
     /** Shared by chart, signal tab, notifications and automatic *paper* entries. Expires on time. */
     val verifiedMarket: StateFlow<MarketState> = combine(
         market.state, news.state, flow { while (true) { emit(System.currentTimeMillis()); delay(20_000L) } },

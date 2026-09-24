@@ -5,6 +5,15 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.services.persian_news import parse_news_xml
 from app.services.web_news import WebNewsFeed, WebSource
+from app.services.forex_calendar import CALENDAR_URL
+
+
+class HealthyCalendar:
+    async def snapshot(self, hold_minutes=45):
+        now = datetime.now(timezone.utc)
+        return {"status": "online", "source": CALENDAR_URL, "checked_at": now.isoformat(),
+                "events": [{"title": "Example", "country": "USD", "impact": "Low", "at": now.isoformat()}],
+                "guard": {"state": "CLEAR", "reason": "test fixture", "until": None}}
 
 
 def rss(title: str, host: str, time: datetime, summary: str = "متن کوتاه") -> bytes:
@@ -36,7 +45,7 @@ def test_web_news_route_partial_failure_does_not_clear_guard(monkeypatch):
     now = datetime.now(timezone.utc)
     a = WebSource("Verified Publisher", "https://example.com/rss", "en")
     b = WebSource("Other Publisher", "https://other.com/rss", "fa")
-    feed = WebNewsFeed(Settings(), (a, b))
+    feed = WebNewsFeed(Settings(), (a, b), HealthyCalendar())
 
     async def request(source):
         if source == b:
@@ -70,7 +79,7 @@ def test_web_news_route_partial_failure_does_not_clear_guard(monkeypatch):
     feed._last_attempt = 0
     monkeypatch.setattr(feed, "_request", failure)
     offline = client.get("/api/v1/news/web").json()
-    assert offline["status"]["state"] == "unavailable"
+    assert offline["status"]["state"] == "partial"  # calendar works but RSS does not
     assert offline["articles"] == []  # previous successful news is not returned as current
     assert offline["guard"]["state"] == "UNKNOWN"
 
@@ -79,7 +88,7 @@ def test_feed_with_wrong_host_or_stale_date_is_not_an_approved_source(monkeypatc
     from app import main
     now = datetime.now(timezone.utc)
     source = WebSource("Verified Publisher", "https://example.com/rss", "en")
-    feed = WebNewsFeed(Settings(), (source,))
+    feed = WebNewsFeed(Settings(), (source,), HealthyCalendar())
 
     async def bad(_):
         return rss("Markets update", "attacker.example.com", now)
@@ -87,7 +96,7 @@ def test_feed_with_wrong_host_or_stale_date_is_not_an_approved_source(monkeypatc
     monkeypatch.setattr(feed, "_request", bad)
     monkeypatch.setattr(main, "web_news", feed)
     payload = TestClient(main.app).get("/api/v1/news/web").json()
-    assert payload["status"]["state"] == "unavailable"
+    assert payload["status"]["state"] == "partial"  # calendar works but publisher is invalid
     assert payload["articles"] == []
 
     async def old(_):
@@ -96,16 +105,16 @@ def test_feed_with_wrong_host_or_stale_date_is_not_an_approved_source(monkeypatc
     feed._last_attempt = 0
     monkeypatch.setattr(feed, "_request", old)
     older = TestClient(main.app).get("/api/v1/news/web").json()
-    assert older["status"]["state"] == "unavailable"
+    assert older["status"]["state"] == "partial"
     assert older["guard"]["state"] == "UNKNOWN"  # stale publisher ≠ no major news
     assert older["articles"] == []
 
     async def monthly(_):
         return rss("CPI inflation release", "example.com", now - timedelta(days=12))
 
-    feed = WebNewsFeed(Settings(), (WebSource("BLS", "https://example.com/rss", "en", max_age_hours=45 * 24),))
+    feed = WebNewsFeed(Settings(), (WebSource("BLS", "https://example.com/rss", "en", max_age_hours=45 * 24),), HealthyCalendar())
     monkeypatch.setattr(feed, "_request", monthly)
     monkeypatch.setattr(main, "web_news", feed)
     monthly_report = TestClient(main.app).get("/api/v1/news/web").json()
     assert monthly_report["status"]["state"] == "online"
-    assert monthly_report["guard"]["state"] == "CLEAR"  # only this official feed, never calendar
+    assert monthly_report["guard"]["state"] == "CLEAR"  # official feed and calendar checked

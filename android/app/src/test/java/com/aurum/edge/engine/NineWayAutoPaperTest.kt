@@ -38,8 +38,9 @@ class NineWayAutoPaperTest {
         "Publisher", "https://publisher.example/news", now - 60_000L,
         "MEDIUM", "BUY", "rule-label", "en")
     private val news = PersianNewsState(
-        articles = listOf(headline), sources = listOf(NewsSourceStatus("Publisher", "online", "https://publisher.example/rss")),
-        gate = NewsGate.CLEAR, lastCheckedAt = now,
+        articles = listOf(headline), sources = listOf(NewsSourceStatus("Publisher", "online", "https://publisher.example/rss"),
+            NewsSourceStatus("Forex Factory", "online", "https://nfs.faireconomy.media/ff_calendar_thisweek.json")),
+        gate = NewsGate.CLEAR, lastCheckedAt = now, calendarCheckedAt = now,
         ai = AiNewsVerdict("AVAILABLE", "XAU/USD", "BUY", 91.0, "test-model",
             "fixture classification", now, listOf("id1")),
     )
@@ -55,7 +56,10 @@ class NineWayAutoPaperTest {
         val received = Instant.ofEpochMilli(now)
         val payload = """{
             "status":{"configured":true,"state":"online","cached":false,
-                "sources":[{"name":"Publisher","state":"online","feed":"https://publisher.example/rss"}]},
+                "sources":[{"name":"Publisher","state":"online","feed":"https://publisher.example/rss"},
+                    {"name":"Forex Factory","state":"online","feed":"https://nfs.faireconomy.media/ff_calendar_thisweek.json"}]},
+            "calendar":{"status":"online","source":"https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+                "checked_at":"$received","events":[{"country":"USD"}],"guard":{"state":"CLEAR"}},
             "articles":[{"id":"id1","source":"Publisher","headline":"Gold reacts to dollar weakness",
                 "published_at":"$published","url":"https://publisher.example/news","analysis":{"source":"rules"}}],
             "guard":{"state":"CLEAR","reason":"fixture"},
@@ -73,6 +77,16 @@ class NineWayAutoPaperTest {
         assertEquals("id1", NewsConfluence.record(parsed)!!.evidence.single().id)
         val missingAi = parseWebNews(Json.parseToJsonElement(payload.replace("ai_confluence", "not_ai")) as JsonObject, now)
         assertEquals(SignalAction.NO_TRADE, NewsConfluence.apply(raw, "XAU/USD", missingAi, now)!!.action)
+        val withoutCalendar = parseWebNews(Json.parseToJsonElement(payload.replace("\"calendar\":", "\"ignoredCalendar\":")) as JsonObject, now)
+        assertEquals(NewsGate.UNKNOWN, withoutCalendar.gate)
+        assertEquals(SignalAction.NO_TRADE, NewsConfluence.apply(raw, "XAU/USD", withoutCalendar, now)!!.action)
+        val blockedCalendar = parseWebNews(Json.parseToJsonElement(payload.replace(
+            "\"events\":[{\"country\":\"USD\"}],\"guard\":{\"state\":\"CLEAR\"}",
+            "\"events\":[{\"country\":\"USD\"}],\"guard\":{\"state\":\"BLOCKED\"}")) as JsonObject, now)
+        assertEquals(NewsGate.BLOCKED, blockedCalendar.gate)
+        assertEquals(SignalAction.NO_TRADE, NewsConfluence.apply(raw, "XAU/USD", blockedCalendar, now)!!.action)
+        val agedCalendar = parseWebNews(Json.parseToJsonElement(payload) as JsonObject, now + 1_200_001L)
+        assertEquals(NewsGate.UNKNOWN, agedCalendar.gate)
     }
 
     @Test fun everyTechnicalComponentAndNinthNewsMustPassTogether() {

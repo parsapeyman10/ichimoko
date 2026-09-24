@@ -40,7 +40,9 @@ class RecordedPaperEntryAlertTest {
             ConfluenceItem(NewsConfluence.NEWS_LABEL, true, "خبر مدل با شاهد"))
     private val news = PaperNewsRecord("test-model", "BUY", 91.0, signal.barTime,
         listOf(PaperNewsEvidence("news-1", "Publisher", "Gold news",
-            "https://publisher.example/news", signal.barTime)))
+            "https://publisher.example/news", signal.barTime)),
+        calendarSource = "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+        calendarCheckedAt = signal.barTime)
     private val mtf = MtfSnapshotRecord("5m", "BUY", 1.0, 1, 0, 0, false,
         "تأیید", signal.barTime,
         frames = listOf(MtfFrameRecord("5m", "BUY", 80, "تأیید", 1.0)))

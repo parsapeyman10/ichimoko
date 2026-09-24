@@ -8,6 +8,15 @@ from app.config import Settings
 from app.services.ai_news import AiNewsAnalyzer
 from app.services.persian_news import Headline
 from app.services.web_news import WebNewsFeed, WebSource
+from app.services.forex_calendar import CALENDAR_URL
+
+
+class HealthyCalendar:
+    async def snapshot(self, hold_minutes=45):
+        now = datetime.now(timezone.utc)
+        return {"status": "online", "source": CALENDAR_URL, "checked_at": now.isoformat(),
+                "events": [{"title": "Example", "country": "USD", "impact": "Low", "at": now.isoformat()}],
+                "guard": {"state": "CLEAR", "reason": "test fixture", "until": None}}
 
 
 def item(now: datetime, *, headline="Dollar yields fall as gold rises", offset=0) -> Headline:
@@ -81,7 +90,7 @@ def test_model_must_cite_real_publisher_ids_and_not_claim_ai_on_failure(monkeypa
 def test_web_route_exposes_ai_result_only_when_entire_rss_pipeline_valid(monkeypatch):
     from app import main
     now = datetime.now(timezone.utc)
-    feed = WebNewsFeed(enabled(), (WebSource("Verified Publisher", "https://publisher.example/rss", "en"),))
+    feed = WebNewsFeed(enabled(), (WebSource("Verified Publisher", "https://publisher.example/rss", "en"),), HealthyCalendar())
     async def rss(_):
         return ("<rss><channel><item><title>Gold reacts to weaker dollar</title>"
                 "<link>https://publisher.example/news</link>"
@@ -107,6 +116,6 @@ def test_web_route_exposes_ai_result_only_when_entire_rss_pipeline_valid(monkeyp
     feed._last_attempt = 0
     monkeypatch.setattr(feed, "_request", failed)
     new = TestClient(main.app).get("/api/v1/news/web").json()
-    assert new["status"]["state"] == "unavailable"
+    assert new["status"]["state"] == "partial"  # calendar remains online but publisher failed
     assert new["ai_confluence"]["status"] == "UNKNOWN"
     assert new["ai_confluence"]["evidence_ids"] == []

@@ -122,11 +122,12 @@ class JournalStore(context: Context, private val file: File = File(context.files
     ): PaperTrade {
         require(!automatic || (!manual && signal.isActionable && signal.barTime > 0 &&
             newsEvidence != null && newsEvidence.evidence.isNotEmpty() &&
+            newsEvidence.calendarSource == FOREX_CALENDAR_SOURCE_URL && newsEvidence.calendarCheckedAt != null &&
             signal.confluence.size >= 9 && signal.confluence.take(9).all {
                 it.ok && it.status == ConfluenceStatus.CONFIRMED
             } && signal.confluence[8].name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL &&
             mtf != null && !mtf.veto && mtf.barTime == signal.barTime && mtf.frames.isNotEmpty())) {
-            "۹ شرط، خبر AI یا چندتایم‌فریم برای ورود خودکار کاغذی کامل نیست"
+            "۹ شرط، تقویم/خبر AI یا چندتایم‌فریم برای ورود خودکار کاغذی کامل نیست"
         }
         val stop = signal.stopLoss ?: throw IllegalArgumentException("حد ضرر وجود ندارد")
         val target = signal.takeProfit ?: throw IllegalArgumentException("حد سود وجود ندارد")
