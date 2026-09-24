@@ -292,6 +292,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             container.crypto.resetAndRefresh()
             _toast.value = if (url.isBlank()) "سرور خبر جدا شد؛ تیترهای وب در تب خبر بدون سرور قابل دریافت‌اند، ولی هشدار ۹/۹ مسدود است"
                 else "آدرس سرور ذخیره شد؛ پاسخ فید و مدل AI را در تب خبر جداگانه بررسی کنید"
+        }
     }
 
     fun setPauseOnNews(enabled: Boolean) {
