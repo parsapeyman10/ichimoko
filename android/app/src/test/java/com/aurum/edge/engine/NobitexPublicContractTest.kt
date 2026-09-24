@@ -8,6 +8,7 @@ import com.aurum.edge.data.NobitexQuote
 import com.aurum.edge.data.NobitexSnapshot
 import com.aurum.edge.data.parseNobitexHistory
 import com.aurum.edge.data.parseNobitexQuote
+import com.aurum.edge.data.parseNobitexBook
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -32,17 +33,23 @@ class NobitexPublicContractTest {
     private val stats = """{"status":"ok","stats":{"btc-usdt":{"isClosed":false,
         "bestSell":"85498","bestBuy":"85397.1","latest":"85498",
         "dayChange":"-0.31"}},"global":{"binance":{}}}"""
+    private val book = """{"status":"ok","lastUpdate":1790167498000,"lastTradePrice":"85498",
+        "bids":[["85397.1","0.0042"]],"asks":[["85498","0.011"]]}"""
     private fun root(text: String) = Json.parseToJsonElement(text) as JsonObject
 
     @Test fun parsesActualUdfAndStatsSchemaWithoutInventingBarsOrExchangeTimestamp() {
         val bars = parseNobitexHistory(root(history), Interval.M5, now)
         val quote = parseNobitexQuote(root(stats), NobitexMarket.BTC_USDT, now)
+        val orderBook = parseNobitexBook(root(book), NobitexMarket.BTC_USDT, now)
         assertEquals(3, bars.size)
         assertTrue(bars.all { it.closed })
         assertEquals(85_396.1, bars.last().close, 0.0001)
         assertEquals(85_397.1, quote.bestBuy, 0.0001)
         assertEquals(85_498.0, quote.bestSell, 0.0001)
         assertEquals(now, quote.receivedAt)
+        assertEquals(now - 2_000L, orderBook.updatedAt)
+        assertEquals(85_397.1, orderBook.bestBid, 0.0001)
+        assertEquals(85_498.0, orderBook.bestAsk, 0.0001)
         assertNull(NobitexSnapshot(NobitexMarket.BTC_USDT, Interval.M5, bars, quote, now).lastClosed?.takeIf { !it.closed })
         val whileOpen = parseNobitexHistory(root(history), Interval.M5, 1_790_166_950_000L)
         assertTrue(!whileOpen.last().closed)
@@ -64,6 +71,15 @@ class NobitexPublicContractTest {
             NobitexMarket.BTC_USDT, now) }.isFailure)
         assertTrue(runCatching { parseNobitexQuote(root(stats.replace("\"bestSell\":\"85498\"",
             "\"bestSell\":\"85100\"")), NobitexMarket.BTC_USDT, now) }.isFailure)
+        listOf(
+            book.replace("1790167498000", "null"),
+            book.replace("1790167498000", "1790167515000"),
+            book.replace("0.0042", "-1"),
+            book.replace("85397.1", "90000"),
+            book.replace("\"asks\":[[\"85498\",\"0.011\"]]", "\"asks\":[]"),
+        ).forEach { payload ->
+            assertTrue(runCatching { parseNobitexBook(root(payload), NobitexMarket.BTC_USDT, now) }.isFailure)
+        }
     }
 
     @Test fun btcIrtLiveResponsesDisagreeTenfoldSoPracticeAndUnitConversionAreForbidden() {
@@ -81,7 +97,7 @@ class NobitexPublicContractTest {
         assertTrue(NobitexPublicData.csv(snapshot).contains("unverified_BTCIRT_history_unit"))
     }
 
-    @Test fun onlyTwoPublicGetEndpointsAreCalledAndRateIsBounded() = runBlocking {
+    @Test fun onlyThreePublicGetEndpointsAreCalledAndRateIsBounded() = runBlocking {
         val requests = mutableListOf<String>()
         val client = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
             val request = chain.request()
@@ -89,17 +105,39 @@ class NobitexPublicContractTest {
             assertEquals("GET", request.method)
             assertNull(request.header("Authorization"))
             assertEquals("apiv2.nobitex.ir", request.url.host)
-            val payload = if (request.url.encodedPath == "/market/udf/history") history else stats
+            val payload = when (request.url.encodedPath) {
+                "/market/udf/history" -> history
+                "/market/stats" -> stats
+                "/v3/orderbook/BTCUSDT" -> book
+                else -> throw AssertionError("Unexpected endpoint ${request.url.encodedPath}")
+            }
             Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1).code(200).message("OK")
                 .body(payload.toResponseBody("application/json".toMediaType())).build()
         }).build()
         val api = NobitexPublicData(client) { now }
         val snapshot = api.download(NobitexMarket.BTC_USDT, Interval.M5)
-        assertEquals(2, requests.size)
+        assertEquals(3, requests.size)
         assertEquals(3, snapshot.candles.size)
-        assertTrue(requests.all { it.startsWith("GET https://apiv2.nobitex.ir/market/") &&
+        assertEquals(now - 2_000, snapshot.book!!.updatedAt)
+        assertTrue(requests.all { it.startsWith("GET https://apiv2.nobitex.ir/") &&
             it.endsWith("TraderBot/AurumEdge-1.0.0") })
         assertTrue(runCatching { api.download(NobitexMarket.BTC_USDT, Interval.M5) }.isFailure)
-        assertEquals(2, requests.size)
+        assertEquals(3, requests.size)
+    }
+
+    @Test fun unreadableOrderBookKeepsHistoryVisibleButBlocksPractice() = runBlocking {
+        val client = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+            val request = chain.request()
+            val isBook = request.url.encodedPath.startsWith("/v3/orderbook/")
+            val payload = if (request.url.encodedPath == "/market/udf/history") history else stats
+            Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1)
+                .code(if (isBook) 503 else 200).message(if (isBook) "Unavailable" else "OK")
+                .body(payload.toResponseBody("application/json".toMediaType())).build()
+        }).build()
+        val data = NobitexPublicData(client) { now }.download(NobitexMarket.BTC_USDT, Interval.M5)
+        assertEquals(3, data.candles.size)
+        assertNull(data.book)
+        assertNotNull(data.bookError)
+        assertNotNull(data.practiceBlocker(now))
     }
 }

@@ -104,6 +104,11 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
             Text("آمار بازار: ${if (quote.isClosed) "بسته" else "باز"} · تغییر روزانه ${quote.dayChangePct?.let { "${formatPrice(it)}٪" } ?: "نامشخص"} · دریافت روی گوشی: ${formatDateTime(quote.receivedAt)}؛ زمان مستقل قیمت توسط stats داده نشده است.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+            snapshot.book?.let { book ->
+                Text("دفتر سفارش عمومی v3: bid ${formatPrice(book.bestBid)} · ask ${formatPrice(book.bestAsk)} $unit · آخرین به‌روزرسانی خودِ صرافی: ${formatDateTime(book.updatedAt)}",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.Cyan)
+            } ?: Text("دفتر سفارش با timestamp معتبر در دسترس نیست (${snapshot.bookError ?: "پاسخ نامشخص"})؛ کندل/آمار فقط برای مطالعه نمایش داده شده‌اند و تمرین بسته است.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
             snapshot.lastClosed?.let { bar ->
                 Text("آخرین کندل بسته: ${formatDateTime(bar.time)} (زمان آغاز کندل) · Close خام ${formatPrice(bar.close)} ${if (market == NobitexMarket.BTC_IRT) "[واحد تاریخی نامشخص]" else "USDT"}",
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
@@ -128,7 +133,7 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
         }
     }
 
-    SectionCard("تمرین Spot نوبیتکس · فقط BTCUSDT", "BUY کاغذی با ask، خروج فرضی با bid؛ بدون شورت و بدون سفارش واقعی") {
+    SectionCard("تمرین Spot نوبیتکس · فقط BTCUSDT", "BUY کاغذی با ask دفتر سفارش زمان‌دار، خروج فرضی با bid تازه؛ بدون شورت/سفارش واقعی") {
         val blocker = if (current == null) "ابتدا BTCUSDT و کندل‌های معتبرِ تازه را دریافت کنید"
             else current.practiceBlocker()
         journalError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red) }
@@ -150,7 +155,7 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
         if (draft != null) {
             Text("حجم ${String.format("%.6f", draft.quantityBtc)} BTC · ارزش ${formatPrice(draft.notional)} USDT · ریسک تا SL ${formatPrice(draft.riskQuote)} USDT",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
-            Text("قیمت ask ${formatPrice(draft.ask)} · SL ${formatPrice(draft.stop)} · TP ${formatPrice(draft.target)} USDT",
+            Text("ask دفتر سفارش ${formatPrice(draft.ask)} · SL ${formatPrice(draft.stop)} · TP ${formatPrice(draft.target)} USDT",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
         } else if (blocker == null) {
             Text("برگهٔ تمرین نامعتبر: ${preview?.exceptionOrNull()?.message ?: "حدود یا بودجه را بررسی کنید"}",
@@ -166,14 +171,14 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
             modifier = Modifier.fillMaxWidth()) {
             Text(if (open) "تمرین BTCUSDT باز دارید" else "بررسی و تأیید خرید کاغذی Spot")
         }
-        Text("این تمرین دستی است؛ ۸ شرط فنی طلا و خبر AI برای BTCUSDT اعتبارسنجی نشده‌اند. کارمزد، اسلیپیج و حداقل سفارش لحاظ نشده؛ سود/زیان واقعی نیست. SL/TP تنها هنگام دریافت بعدی آمار با bid مشاهده‌شده بررسی می‌شود؛ عبور بین دو دریافت ممکن است دیده نشود. در ژورنال مستقل ثبت و پیگیری می‌شود.",
+        Text("این تمرین دستی است؛ ۸ شرط فنی طلا و خبر AI برای BTCUSDT اعتبارسنجی نشده‌اند. کارمزد، اسلیپیج و حداقل سفارش لحاظ نشده؛ سود/زیان واقعی نیست. SL/TP تنها با bid دفتر سفارشِ دارای timestamp بعد از ثبت بررسی می‌شود؛ عبور بین دو دریافت ممکن است دیده نشود. در ژورنال مستقل ثبت و پیگیری می‌شود.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
     }
 
     pending?.let { request ->
         AlertDialog(onDismissRequest = { pending = null },
             title = { Text("تأیید خرید فقط کاغذی BTCUSDT؟") },
-            text = { Text("${formatPrice(request.amount)} USDT بودجهٔ فرضی · ورود تقریبی ask ${formatPrice(request.ask)} USDT · SL ${formatPrice(request.ask * (1 - request.stopPct / 100))} · TP ${formatPrice(request.ask * (1 + request.targetPct / 100))}.\nهیچ سفارشی به نوبیتکس ارسال نمی‌شود. قیمت هنگام ثبت دوباره چک می‌شود؛ خروج فقط با مشاهدهٔ نرخ bid بعدی است.") },
+            text = { Text("${formatPrice(request.amount)} USDT بودجهٔ فرضی · ورود تقریبی ask دفتر سفارش ${formatPrice(request.ask)} USDT · SL ${formatPrice(request.ask * (1 - request.stopPct / 100))} · TP ${formatPrice(request.ask * (1 + request.targetPct / 100))}.\nهیچ سفارشی به نوبیتکس ارسال نمی‌شود. قیمت هنگام ثبت دوباره چک می‌شود؛ خروج فقط با bid دفتر سفارشِ دارای زمان جدید پس از ورود است.") },
             confirmButton = { TextButton(onClick = {
                 pending = null
                 viewModel.openNobitexPractice(request.market, request.amount, request.stopPct,

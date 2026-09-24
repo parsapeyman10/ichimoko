@@ -30,6 +30,8 @@ data class NobitexPracticeTrade(
     val notionalQuote: Double,
     val openedAt: Long,
     val quoteReceivedAt: Long,
+    /** Nullable only for journals written before exchange-timestamped order-book validation. */
+    val orderBookUpdatedAt: Long? = null,
     val historyBarTime: Long,
     val historyInterval: String,
     val conditionNote: String,
@@ -56,7 +58,7 @@ object NobitexPracticeRules {
             targetPercent / stopPercent in 1.5..5.0) {
             "حد ضرر ۰٫۵ تا ۱۵٪ و نسبت سود/ریسک ۱٫۵ تا ۵ لازم است"
         }
-        val ask = snapshot.quote.bestSell
+        val ask = snapshot.book!!.bestAsk // practiceBlocker required a fresh, cross-checked book
         val quantity = floor(amountUsdt / ask * 1_000_000.0) / 1_000_000.0
         require(quantity.isFinite() && quantity >= 0.000001) { "حجم تمرینی بسیار کوچک است" }
         val stop = ask * (1 - stopPercent / 100.0)
@@ -119,9 +121,10 @@ class NobitexPracticeStore(context: Context,
                      targetPercent: Double, expectedAsk: Double, expectedQuoteAt: Long,
                      now: Long = System.currentTimeMillis()): NobitexPracticeTrade = mutex.withLock {
         check(loaded && _loadError.value == null) { "ژورنال تمرین نوبیتکس آماده نیست" }
+        val book = snapshot.book ?: throw IllegalArgumentException("دفتر سفارش نوبیتکس در دسترس نیست")
         require(snapshot.market == NobitexMarket.BTC_USDT &&
             snapshot.quote.receivedAt == expectedQuoteAt && expectedAsk.isFinite() && expectedAsk > 0 &&
-            kotlin.math.abs(snapshot.quote.bestSell / expectedAsk - 1.0) <= 0.001) {
+            kotlin.math.abs(book.bestAsk / expectedAsk - 1.0) <= 0.001) {
             "قیمت/بازار از پیش‌نمایش تغییر کرده است"
         }
         val preview = NobitexPracticeRules.preview(snapshot, amountUsdt, stopPercent, targetPercent, now)
@@ -134,9 +137,10 @@ class NobitexPracticeStore(context: Context,
             stopLoss = preview.stop, takeProfit = preview.target,
             notionalQuote = preview.notional, openedAt = now,
             quoteReceivedAt = snapshot.quote.receivedAt,
+            orderBookUpdatedAt = book.updatedAt,
             historyBarTime = snapshot.lastClosed!!.time,
             historyInterval = snapshot.interval.label,
-            conditionNote = "ورود دستی spot BUY کاغذی، قیمت ask عمومی؛ ۹ شرط طلا/AI بررسی نشده؛ کارمزد و لغزش لحاظ نشده‌اند",
+            conditionNote = "ورود دستی spot BUY کاغذی با ask دفتر سفارش و زمان مستقل؛ آمار/کندل هم‌خوان؛ ۹ شرط طلا/AI بررسی نشده؛ کارمزد و لغزش لحاظ نشده‌اند",
         )
         persist(_trades.value + trade)
         trade
@@ -145,11 +149,14 @@ class NobitexPracticeStore(context: Context,
     /** Only a later observed public bid can settle SL/TP; historical candles never invent fills. */
     suspend fun settle(snapshot: NobitexSnapshot, now: Long = System.currentTimeMillis()): List<NobitexPracticeTrade> = mutex.withLock {
         if (!loaded || snapshot.practiceBlocker(now) != null) return@withLock emptyList()
-        val bid = snapshot.quote.bestBuy
+        val book = snapshot.book ?: return@withLock emptyList()
+        val bid = book.bestBid
         val closed = mutableListOf<NobitexPracticeTrade>()
         val next = _trades.value.map { trade ->
             if (!trade.isOpen || trade.symbol != snapshot.market.code ||
                 snapshot.quote.receivedAt <= trade.openedAt ||
+                book.updatedAt <= trade.openedAt ||
+                book.updatedAt <= (trade.orderBookUpdatedAt ?: trade.openedAt) ||
                 (bid > trade.stopLoss && bid < trade.takeProfit)) return@map trade
             val result = closeAtBid(trade, bid, now,
                 if (bid <= trade.stopLoss) "عبور قیمت خرید مشاهده‌شده از حد ضرر؛ تسویهٔ کاغذی" else
@@ -167,8 +174,13 @@ class NobitexPracticeStore(context: Context,
         snapshot.practiceBlocker(now)?.let { throw IllegalArgumentException(it) }
         val trade = _trades.value.singleOrNull { it.id == tradeId && it.isOpen && it.symbol == snapshot.market.code }
             ?: throw IllegalArgumentException("تمرین باز همین نماد پیدا نشد")
-        require(snapshot.quote.receivedAt > trade.openedAt) { "برای خروج، آمار تازه‌تری از زمان ورود دریافت کنید" }
-        val result = closeAtBid(trade, snapshot.quote.bestBuy, now, "بستن دستی کاغذی با نرخ bid مشاهده‌شده")
+        val book = snapshot.book!! // practiceBlocker enforced it above
+        require(snapshot.quote.receivedAt > trade.openedAt &&
+            book.updatedAt > trade.openedAt &&
+            book.updatedAt > (trade.orderBookUpdatedAt ?: trade.openedAt)) {
+            "برای خروج، دفتر سفارش تازه‌تری از زمان ورود دریافت کنید"
+        }
+        val result = closeAtBid(trade, book.bestBid, now, "بستن دستی کاغذی با bid دفتر سفارشِ تازه")
         persist(_trades.value.map { if (it.id == tradeId) result else it })
         result
     }

@@ -36,12 +36,23 @@ data class NobitexQuote(
     val receivedAt: Long,
 )
 
+data class NobitexBookTop(
+    val market: NobitexMarket,
+    val bestBid: Double,
+    val bestAsk: Double,
+    /** Exchange-origin timestamp of the public order book, unlike stats' local receipt time. */
+    val updatedAt: Long,
+    val receivedAt: Long,
+)
+
 data class NobitexSnapshot(
     val market: NobitexMarket,
     val interval: Interval,
     val candles: List<Candle>,
     val quote: NobitexQuote,
     val downloadedAt: Long,
+    val book: NobitexBookTop? = null,
+    val bookError: String? = null,
 ) {
     val lastClosed: Candle? get() = candles.lastOrNull { it.closed }
 
@@ -51,14 +62,23 @@ data class NobitexSnapshot(
         if (quote.market != market || quote.isClosed || !quote.latest.isFinite() ||
             quote.receivedAt > now || now - quote.receivedAt > 60_000L)
             return "بازار بسته است یا قیمت آمار نوبیتکس قدیمی شده است"
+        val orderBook = book ?: return "دفتر سفارش با زمان معتبر دریافت نشد؛ تمرین بدون شاهد تازه متوقف است"
+        if (orderBook.market != market || now - orderBook.updatedAt !in 0L..60_000L ||
+            now - orderBook.receivedAt !in 0L..60_000L)
+            return "زمان مستقل دفتر سفارش با ساعت گوشی یا تازگی داده سازگار نیست"
         val bar = lastClosed ?: return "کندل بستهٔ معتبر دریافت نشد"
         if (candles.count { it.closed } < 210 || now - (bar.time + interval.millis) !in 0L..(interval.millis * 2))
             return "برای تمرین، دست‌کم ۲۱۰ کندل و آخرین کندل بستهٔ تازه لازم است"
-        if (quote.bestBuy > quote.bestSell || quote.bestBuy <= 0 || quote.bestSell <= 0 ||
-            (quote.bestSell - quote.bestBuy) / quote.bestSell > 0.02 ||
-            abs(quote.latest / quote.bestSell - 1.0) > 0.05 ||
+        if (!orderBook.bestBid.isFinite() || !orderBook.bestAsk.isFinite() ||
+            orderBook.bestBid <= 0 || orderBook.bestAsk <= 0 ||
+            orderBook.bestBid > orderBook.bestAsk ||
+            (orderBook.bestAsk - orderBook.bestBid) / orderBook.bestAsk > 0.02 ||
+            quote.bestBuy <= 0 || quote.bestSell <= 0 ||
+            abs(quote.bestBuy / orderBook.bestBid - 1.0) > 0.01 ||
+            abs(quote.bestSell / orderBook.bestAsk - 1.0) > 0.01 ||
+            abs(quote.latest / orderBook.bestAsk - 1.0) > 0.05 ||
             abs(bar.close / quote.latest - 1.0) > 0.05)
-            return "قیمت آمار، اسپرد یا کندل‌ها با هم سازگار نیستند"
+            return "آمار، دفتر سفارش، اسپرد یا کندل‌ها با هم سازگار نیستند"
         return null
     }
 }
@@ -113,6 +133,29 @@ internal fun parseNobitexQuote(root: JsonObject, market: NobitexMarket, received
     return NobitexQuote(market, price("latest"), bid, ask, change, closed == "true", receivedAt)
 }
 
+/** V3 order book is public GET and supplies the exchange's lastUpdate (milliseconds). */
+internal fun parseNobitexBook(root: JsonObject, market: NobitexMarket, receivedAt: Long): NobitexBookTop {
+    require(root.primitive("status") == "ok") { "وضعیت دفتر سفارش نوبیتکس نامعتبر است" }
+    val timestamp = root.primitive("lastUpdate")?.toLongOrNull()
+    require(timestamp != null && timestamp in 1_550_000_000_000L..(receivedAt + 5_000L)) {
+        "زمان دفتر سفارش ناموجود یا آینده‌دار است"
+    }
+    fun top(key: String): Double {
+        val levels = root[key] as? JsonArray ?: error("سطوح $key موجود نیست")
+        val level = levels.firstOrNull() as? JsonArray ?: error("سطح $key خالی است")
+        require(level.size == 2) { "ساختار سطح $key نامعتبر است" }
+        val price = (level[0] as? JsonPrimitive)?.content?.toDoubleOrNull()
+        val amount = (level[1] as? JsonPrimitive)?.content?.toDoubleOrNull()
+        require(price != null && price.isFinite() && price > 0 &&
+            amount != null && amount.isFinite() && amount > 0) { "قیمت/حجم دفتر سفارش نامعتبر است" }
+        return price
+    }
+    val bid = top("bids")
+    val ask = top("asks")
+    require(bid <= ask) { "بهترین خرید دفتر سفارش بالاتر از فروش است" }
+    return NobitexBookTop(market, bid, ask, timestamp, receivedAt)
+}
+
 private fun JsonObject.primitive(key: String) = (this[key] as? JsonPrimitive)?.content
 
 class NobitexPublicData(
@@ -143,8 +186,15 @@ class NobitexPublicData(
         val history = get("$prefix/market/udf/history?symbol=${market.code}&resolution=$resolution&to=${now / 1000}&countback=320")
         val candles = parseNobitexHistory(history, interval, clock())
         val stats = get("$prefix/market/stats?srcCurrency=btc&dstCurrency=${market.destination}")
-        val receivedAt = clock()
-        NobitexSnapshot(market, interval, candles, parseNobitexQuote(stats, market, receivedAt), receivedAt)
+        val statsReceivedAt = clock()
+        // Book failure must not erase readable OHLC/stats, but it MUST block spot practice.
+        val bookResult = runCatching {
+            val root = get("$prefix/v3/orderbook/${market.code}")
+            parseNobitexBook(root, market, clock())
+        }
+        val downloadedAt = clock()
+        NobitexSnapshot(market, interval, candles, parseNobitexQuote(stats, market, statsReceivedAt),
+            downloadedAt, bookResult.getOrNull(), bookResult.exceptionOrNull()?.message?.take(140))
     }
 
     private suspend fun get(url: String): JsonObject = withContext(Dispatchers.IO) {
