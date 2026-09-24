@@ -31,7 +31,7 @@ class WatchRetryTest {
 
     @Test fun weakNetworkRecoversOnThirdAttemptWithoutClaimingProviderTimestamp() = runBlocking {
         val (client, calls) = network { n ->
-            if (n < 3) null else "<tr data-market-nameslug='geram18' data-price='240000000'></tr>"
+            if (n < 3) null else "<table><tr data-market-nameslug='geram18' data-price='240000000'></tr></table>"
         }
         val result = SourceFetcher(client) { }.fetchAll(SourceCatalog.tgju,
             listOf(SymbolDef("geram18", "طلا")))
