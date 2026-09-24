@@ -634,6 +634,23 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** Offline historical HistData XAUUSD M1 file, NEVER a market-feed or order source. */
+    fun importHistData(uri: Uri?, balance: Double, risk: Double, spread: Double,
+                       commission: Double, threshold: Double) {
+        if (uri == null) { _learn.value = LearnState.Failed("ابتدا ZIP/CSV ماهانهٔ HistData را از گوشی انتخاب کنید"); return }
+        viewModelScope.launch {
+            _learn.value = LearnState.Loading("خواندن ZIP/CSV ماهانهٔ HistData؛ قیمت BID تاریخی با EST ثابت…")
+            try {
+                val (csv, filename) = container.metaTraderImporter.fromHistData(uri)
+                val result = container.runHistDataBacktest(csv, filename, balance,
+                    risk.coerceIn(0.1, 5.0), spread, commission, threshold)
+                _learn.value = LearnState.Done(result, Interval.M1)
+            } catch (e: Exception) {
+                _learn.value = LearnState.Failed((e.message ?: "فایل HistData قابل تحلیل نیست").take(160))
+            }
+        }
+    }
+
     /** Imported MT history is research-only: never written to the live chart/candle cache. */
     fun importMetaTrader(
         uri: Uri?, link: String?, symbol: String, interval: Interval, timezone: String,

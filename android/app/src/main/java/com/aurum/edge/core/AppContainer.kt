@@ -8,6 +8,7 @@ import com.aurum.edge.data.DataFeedException
 import com.aurum.edge.data.FreeHistoryDownloader
 import com.aurum.edge.data.FreeHistoryResult
 import com.aurum.edge.data.ForexCalendarRepository
+import com.aurum.edge.data.HistDataCsv
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.MarketRepository
 import com.aurum.edge.data.MetaTraderCsv
@@ -110,6 +111,19 @@ class AppContainer(context: Context) {
             spreadPrice = spreadPrice, commissionPerOz = commissionPerOz, threshold = threshold,
         )
     }
+
+    /** HistData monthly CSV is historical BID, never part of Twelve Data live candles or orders. */
+    suspend fun runHistDataBacktest(csv: String, fileName: String, initialBalance: Double,
+                                    riskPercent: Double, spreadPrice: Double,
+                                    commissionPerOz: Double, threshold: Double): Backtester.Result =
+        withContext(Dispatchers.Default) {
+            val imported = HistDataCsv.parse(csv, fileName)
+            Backtester.run(candles = imported.candles, interval = Interval.M1, symbol = "XAU/USD",
+                dataSource = "HistData فایل کاربر $fileName · BID تاریخی · EST ثابت UTC−05:00 · " +
+                    "${imported.candles.size} از ${imported.totalRows} ردیف؛ منشأ فایل مستقل تأیید نشده",
+                initialBalance = initialBalance, riskPercent = riskPercent,
+                spreadPrice = spreadPrice, commissionPerOz = commissionPerOz, threshold = threshold)
+        }
 
     /** Walk-forward on the same downloaded real bars: older half in-sample, newer half unseen. */
     suspend fun runWalkForward(

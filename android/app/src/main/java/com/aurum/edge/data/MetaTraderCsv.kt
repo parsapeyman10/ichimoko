@@ -2,6 +2,7 @@ package com.aurum.edge.data
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.Interval
 import kotlinx.coroutines.Dispatchers
@@ -98,6 +99,18 @@ class MetaTraderImporter(private val context: Context) {
         input.use { String(readLimited(it), Charsets.UTF_8) }
     }
 
+    /** SAF-only ZIP/CSV. A filename is a format hint, never proof of publisher authenticity. */
+    suspend fun fromHistData(uri: Uri): Pair<String, String> = withContext(Dispatchers.IO) {
+        val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }?.takeIf { it.length <= 100 && '/' !in it && '\\' !in it }
+            ?: throw DataFeedException("نام فایل انتخاب‌شده برای بررسی HistData در دسترس نیست")
+        val input = context.contentResolver.openInputStream(uri) ?: throw DataFeedException("فایل HistData خوانده نشد")
+        val bytes = input.use { readLimited(it, 12_000_000) }
+        if (name.endsWith(".zip", ignoreCase = true)) HistDataCsv.unzip(bytes, name)
+        else String(bytes, Charsets.UTF_8) to name
+    }
+
     suspend fun fromHttps(raw: String): String = withContext(Dispatchers.IO) {
         val url = raw.trim().takeIf { it.length <= 2048 }?.toHttpUrlOrNull()
             ?: throw DataFeedException("لینک CSV معتبر نیست")
@@ -122,13 +135,13 @@ class MetaTraderImporter(private val context: Context) {
         }
     }
 
-    private fun readLimited(input: InputStream): ByteArray {
+    private fun readLimited(input: InputStream, limit: Int = 4_000_000): ByteArray {
         val out = ByteArrayOutputStream()
         val buffer = ByteArray(8192)
         while (true) {
             val count = input.read(buffer)
             if (count < 0) break
-            if (out.size() + count > 4_000_000) throw DataFeedException("فایل بیش از ۴ مگابایت است")
+            if (out.size() + count > limit) throw DataFeedException("فایل بیش از سقف اندازهٔ مجاز است")
             out.write(buffer, 0, count)
         }
         return out.toByteArray()

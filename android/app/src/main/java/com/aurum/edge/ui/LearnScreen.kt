@@ -46,6 +46,8 @@ import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.theme.AurumColors
+import java.time.YearMonth
+import java.time.ZoneOffset
 
 /**
  * The ONLY place where "learning" happens: the strategy is replayed over real bars
@@ -74,6 +76,11 @@ fun LearnScreen(viewModel: AurumViewModel) {
     var mtTimezone by remember { mutableStateOf("+00:00") }
     var mtUri by remember { mutableStateOf<Uri?>(null) }
     val csvPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> mtUri = uri }
+    val lastCompleteMonth = remember { YearMonth.now(ZoneOffset.UTC).minusMonths(1) }
+    var histYear by remember { mutableStateOf(lastCompleteMonth.year.toString()) }
+    var histMonth by remember { mutableStateOf(lastCompleteMonth.monthValue.toString()) }
+    var histUri by remember { mutableStateOf<Uri?>(null) }
+    val histPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> histUri = uri }
 
     Column(
         modifier = Modifier
@@ -276,6 +283,42 @@ fun LearnScreen(viewModel: AurumViewModel) {
                 }
             }
             Text("اگر منبع قطع/محدود شود یا تاریخ و هویت نماد مغایر باشد، دادهٔ ساختگی یا کش قدیمی جایگزین نمی‌شود. این دانلود به فید معاملاتی/تاریخچهٔ تأییدشده تزریق نمی‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 6.dp))
+        }
+
+        SectionCard("HistData · طلای XAU/USD تاریخی", "فقط فایل ماهانهٔ M1 و قیمت BID؛ پژوهش، نه فید یا سفارش") {
+            Text("آرشیو ماهانهٔ رسمی را باز کن، فایل ZIP را در مرورگر گوشی دانلود و همین‌جا انتخاب کن؛ URL دلخواه یا کلید لازم نیست. CSV داخل ZIP به‌شکل DAT_ASCII/MT_XAUUSD_M1_YYYYMM است. سال‌های کاملِ چندصد هزارردیفی یا فایل تیک پشتیبانی نمی‌شوند.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = histYear, onValueChange = { histYear = it.take(4) },
+                    label = { Text("سال میلادی") }, singleLine = true, modifier = Modifier.weight(1f))
+                OutlinedTextField(value = histMonth, onValueChange = { histMonth = it.take(2) },
+                    label = { Text("ماه ۱ تا ۱۲") }, singleLine = true, modifier = Modifier.weight(1f))
+            }
+            val period = runCatching { YearMonth.of(histYear.toInt(), histMonth.toInt()) }.getOrNull()
+                ?.takeIf { it.year >= 2009 && it <= lastCompleteMonth }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = {
+                    if (period != null) runCatching { uriHandler.openUri(
+                        "https://www.histdata.com/download-free-forex-historical-data/?/ascii/1-minute-bar-quotes/xauusd/${period.year}/${period.monthValue}") }
+                }, enabled = period != null, modifier = Modifier.weight(1f)) { Text("صفحهٔ دانلود رسمی") }
+                OutlinedButton(onClick = { histPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "text/*", "application/octet-stream")) },
+                    modifier = Modifier.weight(1f)) { Text("انتخاب ZIP/CSV") }
+            }
+            if (period == null) Text("ماه تکمیل‌شدهٔ معتبر از ۲۰۰۹ تا ${lastCompleteMonth} را انتخاب کنید.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+            histUri?.let { Text("فایل انتخاب شد: ${it.lastPathSegment?.takeLast(40) ?: "ZIP/CSV"}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan) }
+            Button(onClick = {
+                viewModel.importHistData(histUri, balance.toDoubleOrNull() ?: settings.accountBalance,
+                    risk.toDoubleOrNull() ?: settings.riskPercent,
+                    spread.toDoubleOrNull() ?: settings.spreadPrice,
+                    commission.toDoubleOrNull() ?: settings.commissionPerOz,
+                    settings.minConfidence)
+            }, enabled = histUri != null && learn !is LearnState.Loading,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("بک‌تست پژوهشی فایل HistData") }
+            Text("HistData ساعت EST ثابت UTC−05:00 بدون تغییر تابستانی و کندل BID دارد؛ اسپرد/کارمزد فرض‌اند. نام فایل منشأ را اثبات نمی‌کند؛ تنها ۵۰۰۰ کندل آخر تحلیل می‌شود و هیچ داده‌ای به چارت زنده/ژورنال معامله تزریق نمی‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 6.dp))
         }
