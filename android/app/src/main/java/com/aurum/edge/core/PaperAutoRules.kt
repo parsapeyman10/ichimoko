@@ -10,6 +10,9 @@ object PaperAutoRules {
     fun blocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
                 now: Long = System.currentTimeMillis()): String? {
         if (!settings.autoPaperTrading) return "معاملهٔ خودکار کاغذی خاموش است"
+        // REST publishes a recent BAR, not a timestamped last trade within that bar.
+        // It can justify an educational candidate, never an automatic paper fill.
+        if (market.feed.mode != FeedMode.LIVE) return "ورود خودکار کاغذی فقط با تیک تازهٔ WebSocket مجاز است؛ کندل REST نامزد آموزشی است"
         return opportunityBlocker(market, settings, news, now)
     }
 

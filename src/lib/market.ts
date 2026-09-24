@@ -125,7 +125,11 @@ export function macdLine(candles: Candle[]) {
   const line = e12.map((v, i) => v - e26[i]);
   const k = 2 / 10;
   let s = line[Math.min(25, line.length - 1)];
-  const sig = line.map((v, i) => (i < 25 ? null : ((s = v * k + s * (1 - k)), s)));
+  const sig = line.map((v, i) => {
+    if (i < 25) return null;
+    s = v * k + s * (1 - k);
+    return s;
+  });
   const hist = line.map((v, i) => (sig[i] == null ? null : v - (sig[i] as number)));
   return { line, sig, hist };
 }

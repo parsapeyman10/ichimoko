@@ -10,6 +10,7 @@ import com.aurum.edge.core.Interval
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.engine.SignalEngine
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -26,6 +27,10 @@ internal fun hasCurrentRestBar(bars: List<Candle>, interval: Interval, now: Long
     val last = bars.maxByOrNull { it.time } ?: return false
     return now - last.time in 0L..(interval.millis + 90_000L)
 }
+
+/** Never place a delayed provider tick into a bar that had not opened at event time. */
+internal fun isCurrentIntervalTick(at: Long, interval: Interval, now: Long): Boolean =
+    at in (now - now % interval.millis)..now && now - at <= 90_000L
 
 data class MarketState(
     val symbol: String = "XAU/USD",
@@ -168,10 +173,12 @@ class MarketRepository(
                     ),
                 )
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: DataFeedException) {
             if (!hasRecentStream()) publishOffline(e.message ?: "خطای دریافت داده واقعی")
-        } catch (e: Exception) {
-            if (!hasRecentStream()) publishOffline(e.message ?: "خطای نامشخص در دریافت داده")
+        } catch (_: Exception) {
+            if (!hasRecentStream()) publishOffline("دریافت یا اعتبارسنجی داده واقعی با خطا روبه‌رو شد")
         }
     }
 
@@ -211,9 +218,13 @@ class MarketRepository(
                         backoff = 2_000L
                         onTick(tick.price, tick.at)
                     }
-                    publishOffline("جریان زنده قطع شد — تلاش مجدد")
-                } catch (e: Exception) {
-                    publishOffline(e.message ?: "قطع جریان زنده")
+                    publishStreamUnavailable("جریان WebSocket قطع شد — تلاش مجدد")
+                } catch (e: CancellationException) {
+                    throw e // cancelling an old market job must not relabel the new market offline
+                } catch (e: DataFeedException) {
+                    publishStreamUnavailable(e.message ?: "قطع جریان WebSocket")
+                } catch (_: Exception) {
+                    publishStreamUnavailable("اتصال WebSocket قطع شد؛ اینترنت/دسترسی فید را بررسی کنید")
                 }
                 delay(backoff)
                 backoff = (backoff * 2).coerceAtMost(60_000L)
@@ -223,7 +234,9 @@ class MarketRepository(
 
     private suspend fun onTick(price: Double, at: Long) {
         val current = settings.read()
-        val periodStart = currentPeriodStart(current.interval)
+        val now = System.currentTimeMillis()
+        if (!isCurrentIntervalTick(at, current.interval, now)) return
+        val periodStart = now - now % current.interval.millis
         val existing = cachedBars[periodStart]
         val bar = existing?.copy(
             high = maxOf(existing.high, price),
@@ -254,13 +267,24 @@ class MarketRepository(
         )
         publishCandles()
 
-        val now = System.currentTimeMillis()
-        if (now - lastCacheWrite > 60_000L) {
-            lastCacheWrite = now
+        val writeAt = System.currentTimeMillis()
+        if (writeAt - lastCacheWrite > 60_000L) {
+            lastCacheWrite = writeAt
             persistCache()
         }
         // settle paper trades against real prices as they arrive
         journal.settle(Candle(time = at, open = price, high = price, low = price, close = price), current.symbol, at)
+    }
+
+    private fun publishStreamUnavailable(detail: String) {
+        val current = _state.value
+        val now = System.currentTimeMillis()
+        if (current.feed.mode == FeedMode.POLLING &&
+            current.feed.lastSuccessAt?.let { now - it in 0L..90_000L } == true &&
+            hasCurrentRestBar(current.candles, current.interval, now)) {
+            _state.value = current.copy(feed = current.feed.copy(detail =
+                "$detail؛ کندل REST دوره‌ای است، نه تیک زنده"))
+        } else publishOffline(detail)
     }
 
     private fun publishOffline(detail: String) {

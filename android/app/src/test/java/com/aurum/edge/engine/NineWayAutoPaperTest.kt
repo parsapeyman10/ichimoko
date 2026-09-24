@@ -151,6 +151,11 @@ class NineWayAutoPaperTest {
         ).forEachIndexed { idx, input ->
             assertNotNull("market $idx", PaperAutoRules.blocker(input, settings, news, now))
         }
+        val restOnly = ready.copy(feed = FeedStatus(FeedMode.POLLING, lastSuccessAt = now))
+        assertNotNull("REST has no individually timestamped live tick for automatic paper entry",
+            PaperAutoRules.blocker(restOnly, settings, news, now))
+        assertNull("a verified REST candle may still trigger an educational candidate alert",
+            PaperAutoRules.opportunityBlocker(restOnly, settings, news, now))
         assertNotNull(PaperAutoRules.blocker(ready.copy(signal = confirmed.copy(
             confluence = confirmed.confluence.mapIndexed { index, item ->
                 if (index == 0) item.copy(status = ConfluenceStatus.UNKNOWN) else item

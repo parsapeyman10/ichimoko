@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity, AlertTriangle, BarChart3, Bell, BookOpen, Brain, ChevronDown, CircleDollarSign,
   Clock3, Gauge, HelpCircle, History, Layers, LayoutDashboard, LogOut, Menu, Newspaper,
-  PanelLeftClose, Rss, Search, Settings, ShieldCheck, Signal, SlidersHorizontal, Sparkles,
+  Rss, Search, Settings, ShieldCheck, Signal, Sparkles,
   TrendingDown, TrendingUp, Users, WalletCards, WifiOff, X, Zap
 } from 'lucide-react';
 import TradingChart from './components/TradingChart';
@@ -10,7 +10,7 @@ import BacktestPanel from './components/BacktestPanel';
 import PredictionPanel from './components/PredictionPanel';
 import TopTradersPanel from './components/TopTradersPanel';
 import MTFPanel from './components/MTFPanel';
-import { apiGet, apiPost, toBackendCandles, type DataStatus } from './lib/api';
+import { apiGet, apiPost, barIsCurrent, toBackendCandles, type DataStatus } from './lib/api';
 import { useMarketFeed } from './lib/feed';
 import type { Candle } from './lib/market';
 
@@ -58,18 +58,18 @@ function Sidebar({ active, setActive, open, close, feedState, keyMissing }: { ac
   ];
   return <>
     <aside className={`sidebar ${open ? 'mobile-open' : ''}`}>
-      <div className="sidebar-head"><Brand/><button className="mobile-close" onClick={close}><X size={19}/></button></div>
+      <div className="sidebar-head"><Brand/><button type="button" className="mobile-close" onClick={close}><X size={19}/></button></div>
       <p className="nav-label">WORKSPACE · فضای کاری</p>
-      <nav>{nav.map(({ key, label, sub, icon: Icon }) => <button key={key} className={active === key ? 'active' : ''} onClick={() => { setActive(key); close(); document.getElementById(key)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}><Icon size={17}/><span><em style={{ display: 'block', fontStyle: 'normal', fontSize: '11px', fontWeight: 700, lineHeight: 1 }}>{label}</em><i style={{ display: 'block', fontStyle: 'normal', fontSize: '8px', color: '#6b7280', fontWeight: 500 }}>{sub}</i></span></button>)}</nav>
+      <nav>{nav.map(({ key, label, sub, icon: Icon }) => <button type="button" key={key} className={active === key ? 'active' : ''} onClick={() => { setActive(key); close(); document.getElementById(key)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}><Icon size={17}/><span><em style={{ display: 'block', fontStyle: 'normal', fontSize: '11px', fontWeight: 700, lineHeight: 1 }}>{label}</em><i style={{ display: 'block', fontStyle: 'normal', fontSize: '8px', color: '#6b7280', fontWeight: 500 }}>{sub}</i></span></button>)}</nav>
       <p className="nav-label account-label">ACCOUNT · حساب</p>
       <nav>
-        <button><WalletCards size={17}/><span>پورتفوی</span></button>
-        <button><Settings size={17}/><span>تنظیمات</span></button>
+        <button type="button"><WalletCards size={17}/><span>پورتفوی</span></button>
+        <button type="button"><Settings size={17}/><span>تنظیمات</span></button>
       </nav>
       <div className="system-card">
         <div>
           <span className="system-icon">{keyMissing ? <AlertTriangle size={17}/> : feedState === 'live' ? <ShieldCheck size={17}/> : feedState === 'offline' ? <WifiOff size={17}/> : <Activity size={17}/>}</span>
-          <div><b>{keyMissing ? 'کلید داده تنظیم نشده' : feedState === 'live' ? 'فید واقعی متصل' : feedState === 'offline' ? 'فید قطع است' : 'در حال اتصال'}</b><small>بدون دیتای ساختگی</small></div>
+          <div><b>{keyMissing ? 'کلید داده تنظیم نشده' : feedState === 'live' ? 'فید واقعی متصل' : feedState === 'offline' ? 'فید قطع است' : feedState === 'polling' ? 'کندل REST، نه قیمت زنده' : 'در حال اتصال'}</b><small>بدون دیتای ساختگی</small></div>
         </div>
         <div className="system-row"><span>منبع داده</span><b style={{ color: 'var(--gold)' }}>Twelve Data</b></div>
         <div className="system-row"><span>وضعیت فید</span><b>{feedState}</b></div>
@@ -77,20 +77,20 @@ function Sidebar({ active, setActive, open, close, feedState, keyMissing }: { ac
       </div>
       <div className="user-card"><div className="avatar">PP</div><div><b>Peyman P.</b><small>حساب کوچک · Paper</small></div><ChevronDown size={15}/></div>
     </aside>
-    {open && <button aria-label="Close navigation" className="sidebar-scrim" onClick={close}/>}
+    {open && <button type="button" aria-label="Close navigation" className="sidebar-scrim" onClick={close}/>}
   </>;
 }
 
 function Header({ price, previous, menu, feedState, lastBarTime }: { price: number | null; previous: number | null; menu: () => void; feedState: string; lastBarTime: number | null }) {
   const delta = price != null && previous != null ? price - previous : null;
   return <header className="topbar">
-    <div className="mobile-brand"><button onClick={menu}><Menu size={20}/></button><Brand/></div>
+    <div className="mobile-brand"><button type="button" onClick={menu}><Menu size={20}/></button><Brand/></div>
     <div className="market-title">
       <div className="mini-gold">Au</div>
       <div><span>XAU / USD</span><small>Gold Spot · انس طلا</small></div>
       <div className="live-pill" style={feedState === 'live' ? undefined : { background: '#f1bc4b12', borderColor: '#f1bc4b30', color: 'var(--gold)' }}>
         <i style={feedState === 'live' ? undefined : { background: 'var(--gold)', boxShadow: 'none' }}/>
-        {feedState === 'live' ? 'LIVE · فید واقعی' : feedState === 'offline' ? 'OFFLINE · قطع' : feedState === 'no-key' ? 'NO KEY · بدون کلید' : 'CONNECTING'}
+        {feedState === 'live' ? 'LIVE · فید واقعی' : feedState === 'offline' ? 'OFFLINE · قطع' : feedState === 'no-key' ? 'NO KEY · بدون کلید' : feedState === 'polling' ? 'REST · کندل دوره‌ای' : 'CONNECTING'}
       </div>
       {lastBarTime && <div className="live-pill" style={{ background: '#f1bc4b12', borderColor: '#f1bc4b30', color: 'var(--gold)' }}><Zap size={11}/> آخرین کندل {new Date(lastBarTime).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}</div>}
     </div>
@@ -101,9 +101,9 @@ function Header({ price, previous, menu, feedState, lastBarTime }: { price: numb
       </span>
     </div>
     <div className="top-actions">
-      <button className="search"><Search size={16}/><span>جستجو</span><kbd>⌘ K</kbd></button>
-      <button className="round"><HelpCircle size={17}/></button>
-      <button className="round notification"><Bell size={17}/></button>
+      <button type="button" className="search"><Search size={16}/><span>جستجو</span><kbd>⌘ K</kbd></button>
+      <button type="button" className="round"><HelpCircle size={17}/></button>
+      <button type="button" className="round notification"><Bell size={17}/></button>
     </div>
   </header>;
 }
@@ -187,19 +187,19 @@ function ConfluenceCard({ signal }: { signal: LiveSignal }) {
 }
 
 type NewsArticle = { headline: string; source: string; published_at?: string | null; body?: string };
+type NewsStatus = { configured: boolean; note?: string; last_error?: string | null };
 type Sentiment = { direction: string; confidence: number; impact: string; rationale: string };
 
 function NewsCard() {
   const [articles, setArticles] = useState<NewsArticle[]>([]);
-  const [status, setStatus] = useState<{ configured: boolean; note?: string; last_error?: string | null } | null>(null);
+  const [status, setStatus] = useState<NewsStatus | null>(null);
   const [sentiment, setSentiment] = useState<Sentiment | null>(null);
   const [error, setError] = useState<string>('');
-  const [expanded, setExpanded] = useState(0);
 
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      const headlines = await apiGet<{ status: any; articles: NewsArticle[] }>('/api/v1/news/headlines');
+      const headlines = await apiGet<{ status: NewsStatus; articles: NewsArticle[] }>('/api/v1/news/headlines');
       if (!alive) return;
       if (headlines.ok) {
         setArticles(headlines.data.articles ?? []);
@@ -247,15 +247,17 @@ function NewsCard() {
 
     <div className="news-list">
       {articles.slice(0, 8).map((item, index) => (
-        <article key={`${item.headline}-${index}`} className={expanded === index ? 'expanded' : ''} onClick={() => setExpanded(index)} style={{ cursor: 'pointer' }}>
-          <div className="news-time" style={{ fontFamily: 'DM Mono' }}>{item.published_at ? new Date(item.published_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '—'}</div>
-          <div className="tone-icon neutral" style={{ width: 26, height: 26 }}><Newspaper size={14}/></div>
-          <div className="news-copy">
-            <div><span className="news-tag">NEWS</span><span className="source">{item.source}</span></div>
-            <h3 style={{ whiteSpace: expanded === index ? 'normal' : 'nowrap', lineHeight: 1.4 }}>{item.headline}</h3>
-            {expanded === index && <p style={{ fontSize: '10px', lineHeight: 1.6, color: '#9aa0ad' }}>{item.body?.slice(0, 600)}</p>}
-          </div>
-        </article>
+        <details key={`${item.headline}-${index}`} className="news-item">
+          <summary>
+            <span className="news-time" style={{ fontFamily: 'DM Mono' }}>{item.published_at ? new Date(item.published_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+            <span className="tone-icon neutral" style={{ width: 26, height: 26 }}><Newspaper size={14}/></span>
+            <span className="news-copy">
+              <span className="news-meta"><span className="news-tag">NEWS</span><span className="source">{item.source}</span></span>
+              <span className="news-headline">{item.headline}</span>
+            </span>
+          </summary>
+          {item.body && <p className="news-excerpt">{item.body.slice(0, 600)}</p>}
+        </details>
       ))}
       {!articles.length && !error && (
         <div style={{ padding: 14, color: '#6b7280', fontSize: 11, lineHeight: 1.8 }}>
@@ -291,10 +293,10 @@ function RiskCard({ signal, price }: { signal: LiveSignal; price: number | null 
     </div>
     <label><span>موجودی حساب (دلار)</span><div className="input-wrap"><i>$</i><input value={balance} onChange={(event) => setBalance(Number(event.target.value) || 0)} type="number"/><em>USD</em></div></label>
     <div style={{ display: 'flex', gap: 6, margin: '0 13px', flexWrap: 'wrap' }}>
-      {[100, 250, 500, 1000, 5000].map((value) => <button key={value} onClick={() => setBalance(value)} style={{ flex: 1, minWidth: 44, height: 24, border: balance === value ? '1px solid var(--gold)' : '1px solid var(--line)', background: balance === value ? '#f1bc4b18' : '#0a0c10', color: balance === value ? 'var(--gold)' : '#888', borderRadius: 4, font: '700 9px DM Mono', cursor: 'pointer' }}>${value}</button>)}
+      {[100, 250, 500, 1000, 5000].map((value) => <button type="button" key={value} onClick={() => setBalance(value)} style={{ flex: 1, minWidth: 44, height: 24, border: balance === value ? '1px solid var(--gold)' : '1px solid var(--line)', background: balance === value ? '#f1bc4b18' : '#0a0c10', color: balance === value ? 'var(--gold)' : '#888', borderRadius: 4, font: '700 9px DM Mono', cursor: 'pointer' }}>${value}</button>)}
     </div>
-    <label><span>ریسک هر معامله</span><b className="gold-text" style={{ color: riskColor }}>{risk.toFixed(2)}%</b></label>
-    <input className="range" type="range" min="0.1" max="2" step="0.1" value={risk} onChange={(event) => setRisk(Number(event.target.value))} style={{ background: `linear-gradient(90deg, ${riskColor} ${risk / 2 * 100}%, #262b33 ${risk / 2 * 100}%)` }}/>
+    <label htmlFor="risk-per-trade"><span>ریسک هر معامله</span><b className="gold-text" style={{ color: riskColor }}>{risk.toFixed(2)}%</b></label>
+    <input id="risk-per-trade" className="range" type="range" min="0.1" max="2" step="0.1" value={risk} onChange={(event) => setRisk(Number(event.target.value))} style={{ background: `linear-gradient(90deg, ${riskColor} ${risk / 2 * 100}%, #262b33 ${risk / 2 * 100}%)` }}/>
     <div className="risk-marks"><span>0.1%</span><span style={{ color: riskColor }}>{risk <= 0.5 ? 'محافظه‌کار' : risk <= 1 ? 'متعادل' : 'تهاجمی'}</span><span>2.0%</span></div>
 
     {stopDist == null ? (
@@ -308,7 +310,7 @@ function RiskCard({ signal, price }: { signal: LiveSignal; price: number | null 
           <div><span>حجم قابل اجرا</span><b>{executableOz.toFixed(2)} oz</b><small style={{ color: '#6b7280', font: '7px DM Mono' }}>ریسک واقعی ${actualRisk.toFixed(2)} ({balance ? (actualRisk / balance * 100).toFixed(2) : '0'}%)</small></div>
         </div>
         <div style={{ margin: '8px 13px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, font: '7px DM Mono' }}>
-          <div style={{ background: '#0a0e12', border: '1px solid #1a2520', borderRadius: 4, padding: '6px 7px', color: '#7a8a9a' }}>استاپ: <b style={{ color: '#fff' }}>{stopDist.toFixed(2)}$</b> ({(stopDist / entry! * 100).toFixed(3)}%)</div>
+          <div style={{ background: '#0a0e12', border: '1px solid #1a2520', borderRadius: 4, padding: '6px 7px', color: '#7a8a9a' }}>استاپ: <b style={{ color: '#fff' }}>{stopDist.toFixed(2)}$</b> ({entry != null && entry > 0 ? `${(stopDist / entry * 100).toFixed(3)}%` : '—'})</div>
           <div style={{ background: '#0a0e12', border: '1px solid #1a2520', borderRadius: 4, padding: '6px 7px', color: '#7a8a9a' }}>R:R: <b style={{ color: 'var(--green)' }}>1:{signal.risk_reward?.toFixed(2) ?? '—'}</b></div>
         </div>
         <div className="risk-note" style={{ borderColor: belowMin ? '#f1bc4b30' : '#28c99b18', background: belowMin ? '#f1bc4b0a' : '#28c99b07' }}>
@@ -346,15 +348,17 @@ type JournalEntry = {
   pnl?: number | null;
 };
 
+type JournalStats = { closed: number; open: number; win_rate: number | null };
+
 function JournalCard() {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<JournalStats | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      const result = await apiGet<{ entries: JournalEntry[]; stats: any }>('/api/v1/journal?limit=50');
+      const result = await apiGet<{ entries: JournalEntry[]; stats: JournalStats }>('/api/v1/journal?limit=50');
       if (!alive) return;
       if (result.ok) {
         setEntries(result.data.entries ?? []);
@@ -437,19 +441,32 @@ export default function App() {
 
   // Evaluate the real candles server-side. No client-side fallback signal exists.
   useEffect(() => {
+    if (snapshot.state !== 'live' && snapshot.state !== 'polling' ||
+        !barIsCurrent(candles[candles.length - 1], timeframe)) {
+      setSignal({ ...emptySignal, blockers: [snapshot.detail || 'دادهٔ زندهٔ تأییدشده در دسترس نیست؛ کندل‌های قدیمی فقط برای مشاهده‌اند'] });
+      setUpdatedAt(null);
+      return;
+    }
     if (candles.length < 60) {
-      setSignal({ ...emptySignal, blockers: [snapshot.detail || 'کندل واقعی کافی برای ارزیابی دریافت نشده است'] });
+      setSignal({ ...emptySignal, blockers: ['کندل واقعی کافی برای ارزیابی دریافت نشده است'] });
       setUpdatedAt(null);
       return;
     }
     let alive = true;
+    let latestRequest = 0;
     const evaluate = async () => {
+      const requestId = ++latestRequest;
+      if (!barIsCurrent(candles[candles.length - 1], timeframe)) {
+        setSignal({ ...emptySignal, blockers: ['کندل منبع قدیمی شده است؛ ارزیابی تازه انجام نشد'] });
+        setUpdatedAt(null);
+        return;
+      }
       const payload = toBackendCandles(candles.slice(-320), timeframe);
       const result = await apiPost<LiveSignal>('/api/v1/strategy/evaluate', {
         candles: payload,
         context: { spread: 0.30, typical_spread: 0.30, event_risk: false, higher_timeframe_bias: 'NEUTRAL' },
       });
-      if (!alive) return;
+      if (!alive || latestRequest !== requestId || !barIsCurrent(candles[candles.length - 1], timeframe)) return;
       if (result.ok) {
         setSignal({
           action: result.data.action,
@@ -483,7 +500,7 @@ export default function App() {
     return 'آفلاین — آخرین داده واقعی کش‌شده';
   }, [snapshot.state]);
 
-  const feedTone = snapshot.state === 'live' ? 'live' : snapshot.state === 'offline' || snapshot.state === 'no-key' ? 'offline' : 'stale';
+  const feedTone: 'live' | 'offline' | 'stale' = snapshot.state === 'live' ? 'live' : snapshot.state === 'offline' || snapshot.state === 'no-key' ? 'offline' : 'stale';
   const previousClose = candles.length > 1 ? candles[candles.length - 2].close : null;
   const select = useCallback((key: string) => { setActive(key); document.getElementById(key)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, []);
 
@@ -505,7 +522,7 @@ export default function App() {
             <span><i className="feed-dot" style={{ background: feedTone === 'live' ? 'var(--green)' : feedTone === 'offline' ? 'var(--red)' : 'var(--gold)' }}/> {feedLabel}</span>
             <span>{status?.provider ?? 'twelve_data'}</span>
             <span style={{ background: '#f1bc4b18', color: 'var(--gold)', border: '1px solid #f1bc4b30', padding: '2px 6px', borderRadius: 4, font: '700 8px DM Mono' }}>REAL DATA ONLY</span>
-            <button onClick={refresh} className="text-button" style={{ font: '700 8px DM Mono' }}>به‌روزرسانی</button>
+            <button type="button" onClick={refresh} className="text-button" style={{ font: '700 8px DM Mono' }}>به‌روزرسانی</button>
           </div>
         </div>
 
@@ -527,7 +544,7 @@ export default function App() {
             candles={candles}
             levels={signal.action === 'NO_TRADE' ? null : { entry: signal.entry, stop_loss: signal.stop_loss, take_profit: signal.take_profit, action: signal.action }}
             feedLabel={feedLabel}
-            feedTone={feedTone as any}
+            feedTone={feedTone}
             lastBarTime={snapshot.lastBarTime}
           />
           <SignalCard signal={signal} timeframe={timeframe} updatedAt={updatedAt}/>
@@ -554,8 +571,8 @@ export default function App() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="text-button" onClick={() => select('backtest')} style={{ height: 34, padding: '0 14px', borderRadius: 6, border: '1px solid var(--gold)', background: 'linear-gradient(180deg, #f5ca6d, #d9a33c)', color: '#1b160c', font: '800 10px Manrope' }}><BarChart3 size={14}/> رفتن به بک‌تست واقعی</button>
-            <button className="text-button" onClick={() => select('journal')} style={{ height: 34, padding: '0 12px', borderRadius: 6, border: '1px solid var(--line)', background: '#11151b', color: '#8a909c', font: '700 10px Manrope' }}>ژورنال کاغذی</button>
+            <button type="button" className="text-button" onClick={() => select('backtest')} style={{ height: 34, padding: '0 14px', borderRadius: 6, border: '1px solid var(--gold)', background: 'linear-gradient(180deg, #f5ca6d, #d9a33c)', color: '#1b160c', font: '800 10px Manrope' }}><BarChart3 size={14}/> رفتن به بک‌تست واقعی</button>
+            <button type="button" className="text-button" onClick={() => select('journal')} style={{ height: 34, padding: '0 12px', borderRadius: 6, border: '1px solid var(--line)', background: '#11151b', color: '#8a909c', font: '700 10px Manrope' }}>ژورنال کاغذی</button>
           </div>
         </div>
 

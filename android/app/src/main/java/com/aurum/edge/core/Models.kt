@@ -72,7 +72,7 @@ enum class FeedMode(val label: String) {
     NO_KEY("کلید API وارد نشده"),
     CONNECTING("در حال اتصال"),
     LIVE("زنده — WebSocket"),
-    POLLING("زنده — REST هر ۶۰ ثانیه"),
+    POLLING("کندل REST دوره‌ای — نه تیک زنده"),
     OFFLINE("آفلاین"),
 }
 

@@ -127,7 +127,7 @@ fun Pill(text: String, color: Color, modifier: Modifier = Modifier) {
 fun FeedBanner(status: FeedStatus, lastPrice: Double?, lastBarTime: Long?, showingCache: Boolean) {
     val (color, title) = when (status.mode) {
         FeedMode.LIVE -> AurumColors.Green to "زنده — ${status.provider}"
-        FeedMode.POLLING -> AurumColors.Gold to "به‌روزرسانی دوره‌ای (REST) — ${status.provider}"
+        FeedMode.POLLING -> AurumColors.Gold to "کندل REST دوره‌ای (نه تیک زنده) — ${status.provider}"
         FeedMode.CONNECTING -> AurumColors.Cyan to "در حال اتصال…"
         FeedMode.OFFLINE -> AurumColors.Red to "آفلاین — داده ساختگی نمایش داده نمی‌شود"
         FeedMode.NO_KEY -> AurumColors.Red to "کلید API لازم است"

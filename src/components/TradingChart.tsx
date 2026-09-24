@@ -160,14 +160,15 @@ export default function TradingChart({
           <div className="asset-orb">Au</div>
           <div><strong>XAU / USD</strong><span>داده واقعی Twelve Data</span></div>
         </div>
-        <div className="timeframes" aria-label="Chart timeframe">
+        <fieldset className="timeframes">
+          <legend className="sr-only">Chart timeframe</legend>
           {(['1m', '5m', '15m', '1h'] as const).map((tf) => (
-            <button className={timeframe === tf ? 'active' : ''} onClick={() => onTimeframeChange(tf)} key={tf}>{tf}</button>
+            <button type="button" className={timeframe === tf ? 'active' : ''} onClick={() => onTimeframeChange(tf)} key={tf}>{tf}</button>
           ))}
-        </div>
+        </fieldset>
         <div className="chart-actions">
-          <button className={showStudies ? 'study active' : 'study'} onClick={() => setShowStudies(!showStudies)}><Layers3 size={14}/> اندیکاتور <span>4</span></button>
-          <button aria-label="Reset chart" onClick={() => chartRef.current?.timeScale().fitContent()}><RotateCcw size={15}/></button>
+          <button type="button" className={showStudies ? 'study active' : 'study'} onClick={() => setShowStudies(!showStudies)}><Layers3 size={14}/> اندیکاتور <span>4</span></button>
+          <button type="button" aria-label="Reset chart" onClick={() => chartRef.current?.timeScale().fitContent()}><RotateCcw size={15}/></button>
         </div>
       </div>
 
@@ -188,7 +189,7 @@ export default function TradingChart({
           </div>
           <div className="chart-body">
             <aside className="drawing-tools">
-              <button className="active"><ChevronDown size={15}/></button>
+              <button type="button" className="active"><ChevronDown size={15}/></button>
             </aside>
             <div className="chart-canvas" ref={containerRef}/>
           </div>

@@ -94,7 +94,7 @@ class SignalMonitorService : Service() {
             container.verifiedMarket.collect { state ->
                 val text = when (state.feed.mode) {
                     FeedMode.LIVE -> "زنده · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
-                    FeedMode.POLLING -> "به‌روزرسانی دوره‌ای · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
+                    FeedMode.POLLING -> "آخرین کندل REST (نه تیک زنده) · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
                     FeedMode.CONNECTING -> "در حال اتصال…"
                     FeedMode.OFFLINE -> "آفلاین — آخرین دیتای واقعی: ${state.candles.lastOrNull()?.time ?: "—"}"
                     FeedMode.NO_KEY -> "کلید API لازم است"

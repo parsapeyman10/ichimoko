@@ -14,8 +14,8 @@ type Trade = {
   side: string;
   entry_time: string;
   exit_time: string;
-  entry_price: number;
-  exit_price: number;
+  entry: number;
+  exit: number;
   position_oz: number;
   pnl: number;
   r_multiple: number | null;
@@ -190,7 +190,10 @@ export default function BacktestPanel() {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end', padding: '10px 14px', borderBottom: '1px solid var(--line)' }}>
         <label style={{ display: 'grid', gap: 4, font: '8px DM Mono', color: '#6b7280' }}>
           تایم‌فریم
-          <select value={timeframe} onChange={(event) => setTimeframe(event.target.value as any)} style={{ background: '#11151b', color: '#d5d9e0', border: '1px solid #1f2630', borderRadius: 5, padding: '5px 8px', font: '9px DM Mono' }}>
+          <select value={timeframe} onChange={(event) => {
+            const value = event.target.value;
+            if (value === '5m' || value === '15m' || value === '1h') setTimeframe(value);
+          }} style={{ background: '#11151b', color: '#d5d9e0', border: '1px solid #1f2630', borderRadius: 5, padding: '5px 8px', font: '9px DM Mono' }}>
             <option value="5m">5m</option><option value="15m">15m</option><option value="1h">1h</option>
           </select>
         </label>
@@ -208,7 +211,7 @@ export default function BacktestPanel() {
           ریسک هر معامله (%)
           <input type="number" min={0.1} max={5} step={0.1} value={risk} onChange={(event) => setRisk(Number(event.target.value))} style={{ width: 80, background: '#11151b', color: '#d5d9e0', border: '1px solid #1f2630', borderRadius: 5, padding: '5px 8px', font: '9px DM Mono' }} />
         </label>
-        <button className="primary-button" onClick={run} disabled={state.running} style={{ height: 30, padding: '0 14px', display: 'flex', alignItems: 'center', gap: 6, font: '700 9px Manrope', opacity: state.running ? 0.6 : 1 }}>
+        <button type="button" className="primary-button" onClick={run} disabled={state.running} style={{ height: 30, padding: '0 14px', display: 'flex', alignItems: 'center', gap: 6, font: '700 9px Manrope', opacity: state.running ? 0.6 : 1 }}>
           <Play size={12}/> {state.running ? 'در حال دریافت کندل واقعی…' : 'اجرای بک‌تست'}
         </button>
       </div>
@@ -343,7 +346,7 @@ export default function BacktestPanel() {
                         <td style={{ padding: '4px 8px', textAlign: 'left', color: '#7a8290' }}>{new Date(trade.entry_time).toLocaleString('fa-IR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
                         <td style={{ color: trade.side === 'BUY' ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>{trade.side}</td>
                         <td>{trade.position_oz} oz</td>
-                        <td>{trade.entry_price} → {trade.exit_price}</td>
+                        <td>{trade.entry} → {trade.exit}</td>
                         <td style={{ color: trade.pnl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>{trade.pnl > 0 ? '+' : ''}{trade.pnl.toFixed(2)}$</td>
                         <td>{trade.r_multiple != null ? `${trade.r_multiple}R` : '—'}</td>
                         <td style={{ textAlign: 'left', color: '#8a909c' }}>{trade.exit_reason}</td>

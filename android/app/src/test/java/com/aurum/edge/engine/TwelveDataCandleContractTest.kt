@@ -5,6 +5,7 @@ import com.aurum.edge.core.Interval
 import com.aurum.edge.data.DataFeedException
 import com.aurum.edge.data.TwelveDataClient
 import com.aurum.edge.data.hasCurrentRestBar
+import com.aurum.edge.data.isCurrentIntervalTick
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -59,8 +60,11 @@ class TwelveDataCandleContractTest {
         )) assertThrows(DataFeedException::class.java) { parse(bad) }
     }
 
-    @Test fun `stale history is not a current REST market price even when download succeeded`() {
+    @Test fun `stale history and previous-period ticks never become a current paper quote`() {
         val yesterday = Candle(now - 86_400_000L, 3100.0, 3101.0, 3099.0, 3100.0)
         assertFalse(hasCurrentRestBar(listOf(yesterday), Interval.M5, now))
+        assertTrue(isCurrentIntervalTick(now - 30_000L, Interval.M5, now))
+        assertFalse(isCurrentIntervalTick(now - 2 * 60_000L, Interval.M5, now))
+        assertFalse(isCurrentIntervalTick(now + 1L, Interval.M5, now))
     }
 }

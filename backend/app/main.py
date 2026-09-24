@@ -83,6 +83,17 @@ class MarketHub:
         self.feed_status.update({"state": state, "detail": detail})
         self.publish({"type": "feed.status", "status": state, "detail": detail})
 
+    def public_feed_status(self, now: datetime | None = None) -> dict[str, Any]:
+        """A socket that remains open without quotes is NOT evidence of a live market."""
+        result = self.feed_status.copy()
+        last_tick = result.get("last_tick_at")
+        clock = now or datetime.now(timezone.utc)
+        if result["state"] in ("live", "polling") and (
+                not isinstance(last_tick, datetime) or last_tick.tzinfo is None or
+                not 0 <= (clock - last_tick).total_seconds() <= 90):
+            result.update(state="stale", detail="آخرین تیک منبع قدیمی است؛ فید قابل اتکا نیست")
+        return result
+
 
 hub = MarketHub()
 sentiment = SentimentEngine(settings)
@@ -104,9 +115,13 @@ async def run_market_pipeline() -> None:
         try:
             hub.set_status("connecting", "اتصال به Twelve Data…")
             async for tick in market_ticks(settings):
+                source_state = "live" if tick.provider == "twelve_data:ws" else "polling"
+                source_detail = None if source_state == "live" else "تیک از کندل REST ناشر؛ قیمت درون کندل زنده نیست"
+                if hub.feed_status["state"] != source_state:
+                    hub.set_status(source_state, source_detail)
                 hub.last_tick = tick.model_dump(mode="json")
                 hub.feed_status.update(
-                    {"state": "live", "detail": None, "last_tick_at": datetime.now(timezone.utc)}
+                    {"state": source_state, "detail": source_detail, "last_tick_at": datetime.now(timezone.utc)}
                 )
                 active_bars: dict[str, dict] = {}
                 for timeframe, builder in builders.items():
@@ -126,7 +141,8 @@ async def run_market_pipeline() -> None:
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60)
         except Exception as exc:
-            hub.set_status("error", f"{type(exc).__name__}: {exc}")
+            # A network error string may contain the request URL and its secret API key.
+            hub.set_status("error", f"اختلال در پردازش فید ({type(exc).__name__})")
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60)
 
@@ -190,15 +206,16 @@ app.add_middleware(
 # ─── status ────────────────────────────────────────────────────────────
 @app.get("/api/v1/health")
 async def health():
+    feed = hub.public_feed_status()
     return {
         "status": "ok",
         "environment": settings.environment,
         "market_data": {
             "provider": "twelve_data",
             "configured": settings.has_market_key,
-            "feed_state": hub.feed_status["state"],
-            "detail": hub.feed_status["detail"],
-            "last_tick_at": hub.feed_status["last_tick_at"],
+            "feed_state": feed["state"],
+            "detail": feed["detail"],
+            "last_tick_at": feed["last_tick_at"],
         },
         "news": news_aggregator.status(),
         "subscribers": len(hub.subscribers),
@@ -222,7 +239,7 @@ async def data_status():
         "provider": "twelve_data",
         "api_key_configured": settings.has_market_key,
         "symbol": settings.market_symbol,
-        "feed": hub.feed_status,
+        "feed": hub.public_feed_status(),
         "timeframes": per_timeframe,
         "policy": (
             "فقط داده واقعی منتشر می‌شود. در نبود کلید/اینترنت، اندپوینت‌ها خطا برمی‌گردانند و "
@@ -744,13 +761,14 @@ async def market_socket(websocket: WebSocket):
     await websocket.accept()
     queue = hub.subscribe()
     try:
+        feed = hub.public_feed_status()
         await websocket.send_json(
             {
                 "type": "connected",
                 "symbol": settings.market_symbol,
                 "provider": "twelve_data",
-                "feed_state": hub.feed_status["state"],
-                "detail": hub.feed_status["detail"],
+                "feed_state": feed["state"],
+                "detail": feed["detail"],
             }
         )
         while True:
