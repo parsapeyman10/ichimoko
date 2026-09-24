@@ -14,6 +14,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.jsoup.Jsoup
+import java.io.IOException
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
@@ -25,6 +26,7 @@ class SourceFetcher(
         .callTimeout(25, TimeUnit.SECONDS)
         .followRedirects(false) // never forward an API key to a redirect target
         .build(),
+    private val retryDelay: (Long) -> Unit = Thread::sleep,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -57,7 +59,12 @@ class SourceFetcher(
                         symbols.joinToString(",") { encode(it.code) }), apiKey) }.getOrNull()
                 } else null
                 if (batch != null) symbols.map { parseJsonQuote(source, it, batch) }
-                else coroutineScope { symbols.map { symbol -> async { fetchOne(source, symbol, apiKey) } }.awaitAll() }
+                else if (source.batchTemplate != null) {
+                    // Batch may be a fixed snapshot (Navasan) or a list (CoinGecko).
+                    // Never fan one failed/429 batch out into repeated individual GETs.
+                    symbols.map { Quote(it.code, it.label, error = "پاسخ گروهی منبع در دسترس نیست؛ کش با زمان اصلی باقی می‌ماند",
+                        sourceId = source.id) }
+                } else coroutineScope { symbols.map { symbol -> async { fetchOne(source, symbol, apiKey) } }.awaitAll() }
             }
         }
         SourceSnapshot(source, quotes, online = quotes.any { it.price != null }, error = quotes.firstOrNull { it.price == null }?.error)
@@ -135,15 +142,24 @@ class SourceFetcher(
             .header("Accept", if (source.kind == SourceKind.HTML_CSS) "text/html,application/xhtml+xml" else "application/json, text/plain")
             .apply { source.headers.forEach { (key, value) -> header(key, value) } }
             .build()
-        http.newCall(request).execute().use { response ->
-            // Do not echo provider response bodies or URLs: a URL may contain a read-only key.
-            if (!response.isSuccessful) throw IllegalStateException("خطای منبع (HTTP ${response.code})")
-            val limit = if (source.kind == SourceKind.HTML_CSS) 2_000_000L else 1_048_576L
-            val text = response.peekBody(limit + 1).string()
-            if (text.length > limit) throw IllegalStateException("پاسخ منبع بیش از حد بزرگ است")
-            if (text.isBlank()) throw IllegalStateException("پاسخ منبع خالی است")
-            return text
+        repeat(3) { attempt ->
+            try {
+                http.newCall(request).execute().use { response ->
+                    // Never retry HTTP 4xx/429, malformed HTML or changed provider schema.
+                    // Do not echo provider bodies or URLs (which may contain a read-only key).
+                    if (!response.isSuccessful) throw IllegalStateException("خطای منبع (HTTP ${response.code})")
+                    val limit = if (source.kind == SourceKind.HTML_CSS) 2_000_000L else 1_048_576L
+                    val text = response.peekBody(limit + 1).string()
+                    if (text.length > limit) throw IllegalStateException("پاسخ منبع بیش از حد بزرگ است")
+                    if (text.isBlank()) throw IllegalStateException("پاسخ منبع خالی است")
+                    return text
+                }
+            } catch (_: IOException) {
+                if (attempt == 2) throw IllegalStateException("اتصال منبع پس از ۳ تلاش کوتاه برقرار نشد")
+                retryDelay(500L * (attempt + 1))
+            }
         }
+        error("پاسخ منبع دریافت نشد")
     }
 
     private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8").replace("+", "%20")

@@ -88,7 +88,9 @@ fun NobitexSpotScanSection(viewModel: AurumViewModel) {
                     }
                     Text("آخرین: $price $quote · ۲۴ساعت: ${row.dayChangePct?.let { formatPrice(it) + "٪" } ?: "—"} · اسپرد ${row.spreadPct?.let { formatPrice(it) + "٪" } ?: "—"}",
                         style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-                    Text("گردش سمت $quote: ${formatPrice(row.volumeQuote)} · ${if (fresh) row.observation else "مشاهدهٔ قبلی؛ برای غربال دوباره دریافت کنید"}",
+                    Text("بهترین خرید ${formatPrice(row.bestBuy)} / فروش ${formatPrice(row.bestSell)} · گردش سمت $quote: ${formatPrice(row.volumeQuote)}",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                    Text(if (fresh) row.observation else "مشاهدهٔ قبلی؛ برای غربال دوباره دریافت کنید",
                         style = MaterialTheme.typography.labelSmall,
                         color = if (candidate) AurumColors.Green else AurumColors.TextMuted)
                 }
