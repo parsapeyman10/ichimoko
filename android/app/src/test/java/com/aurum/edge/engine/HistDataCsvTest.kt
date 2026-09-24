@@ -60,7 +60,7 @@ class HistDataCsvTest {
         listOf(
             zip("../$name" to csv()),
             zip("DAT_ASCII_XAUUSD_M1_202607.csv" to csv()),
-            zip(name to csv(), name to csv()),
+            zip(name to csv(), name.lowercase() to csv()),
         ).forEach { bytes -> assertTrue(runCatching { HistDataCsv.unzip(bytes, nameZip) }.isFailure) }
     }
 
