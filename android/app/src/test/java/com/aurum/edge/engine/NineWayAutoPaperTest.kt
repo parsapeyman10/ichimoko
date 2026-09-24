@@ -43,11 +43,11 @@ class NineWayAutoPaperTest {
         ai = AiNewsVerdict("AVAILABLE", "XAU/USD", "BUY", 91.0, "test-model",
             "fixture classification", now, listOf("id1")),
     )
-    private val raw = Signal(SignalAction.BUY, 86.0, entry = 3000.0, stopLoss = 2995.0,
-        takeProfit = 3010.0, interval = Interval.M5, barTime = barTime, confluence = eight)
+    private val raw = Signal(SignalAction.BUY, 86.0, entry = 3000.0, stopLoss = 2994.5,
+        takeProfit = 3009.0, interval = Interval.M5, barTime = barTime, confluence = eight)
 
     private fun market(s: Signal, symbol: String = "XAU/USD") = MarketState(symbol = symbol, interval = Interval.M5,
-        candles = listOf(Candle(barTime, 3000.0, 3002.0, 2999.0, 3000.0, closed = true)),
+        candles = IctTestBars.readyAt(barTime),
         lastPrice = 3000.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now), signal = s)
 
     @Test fun backendWebNewsJsonToNineWayAndAutoPolicyIsOneContract() {

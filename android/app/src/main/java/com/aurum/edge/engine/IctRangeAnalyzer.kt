@@ -94,7 +94,8 @@ object IctRangeAnalyzer {
         val latestSweepRange = listOf(buy, sell)
             .filter { it.first != null && it.second.sweepAt != null }
             .maxByOrNull { it.second.sweepAt!! }?.first
-        val range = latestSweepRange ?: confirmedRange(bars, last)
+        val range = listOf(buy, sell).firstOrNull { it.second.ready }?.first
+            ?: latestSweepRange ?: confirmedRange(bars, last)
         return Snapshot(lastTime, range, window, buy.second, sell.second)
     }
 

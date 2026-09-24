@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.FeedMode
+import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.Interval
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.engine.IctRangeAnalyzer
@@ -159,6 +160,12 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
             if (market.showingCachedData || market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING)) {
                 Text("نمایش تحلیل تاریخی/کش؛ ورود یا اعلان زنده از آن مجاز نیست.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+            }
+            market.signal?.takeIf { it.isActionable }?.let {
+                val gate = IctEntryRules.assess(market)
+                Text("اثر بر ورود سیگنالی paper: ${gate.reason ?: "گیت ICT تأیید است؛ ۹/۹، خبر AI و ریسک هنوز جداگانه بررسی می‌شوند"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (gate.allowed) AurumColors.Green else AurumColors.Red)
             }
             Text("حتی «آماده» فقط یک الگوی تقریبی است؛ ورود خودکار paper به قیمت زنده، ۹/۹ از جمله خبر AI، و گیت رنجِ همین کندل نیاز دارد. معاملهٔ واقعی وجود ندارد.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)

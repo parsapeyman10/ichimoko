@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
@@ -48,6 +49,15 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState) {
             signal = signal,
             onOpenPaperTrade = { signal?.let(viewModel::openPaperTrade) },
         )
+        SectionCard("گیت رنج و زمان خرید/فروش کاغذی",
+            "افزوده بر ۸ شرط فنی + خبر AI؛ خط S/R یا طرح سیگنال، پوزیشن ثبت‌شده نیست") {
+            val reason = IctEntryRules.assess(market).reason
+            Text(reason ?: "رنج، جاروب/بازپس‌گیری، MSS، FVG، بازآزمایی، جلسهٔ نیویورک و فضای کافی تأیید شدند؛ ۹/۹ و ریسک همچنان جداگانه لازم‌اند.",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (reason == null) AurumColors.Green else AurumColors.Gold)
+            Text("دکمهٔ ورود سیگنالی نیز پیش از ذخیره دوباره بررسی می‌شود؛ ورود دستیِ جداگانه ادعای تأیید این گیت ندارد.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        }
         SectionCard("خبر وب: شرط نهم سیگنال و وتوی اختیاری دستی", "برای ورود خودکار، خبر AI هم‌جهت همیشه الزامی است؛ سفارش واقعی نداریم") {
             val blocked = settings.pauseOnNews && (news.gate != NewsGate.CLEAR || news.lastCheckedAt == null ||
                 System.currentTimeMillis() - news.lastCheckedAt!! > 180_000L)

@@ -43,6 +43,7 @@ object PaperAutoRules {
         if (price == null || !price.isFinite() || price <= 0.0 || !signal.entry.isFinite() ||
             signal.entry <= 0.0 || abs(price / signal.entry - 1.0) > 0.005)
             return "قیمت تازه از ورود سیگنال فاصله گرفته است"
-        return null
+        // An additional gate, never a substitute for the technical and AI-news 9/9.
+        return IctEntryRules.assess(market, now).reason
     }
 }

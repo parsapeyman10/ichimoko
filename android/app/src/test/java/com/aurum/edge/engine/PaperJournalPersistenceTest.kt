@@ -55,11 +55,11 @@ class PaperJournalPersistenceTest {
                 "evidence_ids":["verified"]}}"""
         val parsed = parseWebNews(Json.parseToJsonElement(json) as JsonObject, now)
         val bar = now - Interval.M5.millis
-        val technical = signal.copy(barTime = bar,
+        val technical = signal.copy(barTime = bar, stopLoss = 2994.5, takeProfit = 3009.0,
             confluence = (1..8).map { ConfluenceItem("فنی $it", true, "fixture") })
         val verified = NewsConfluence.apply(technical, "XAU/USD", parsed, now)!!
         val current = MarketState(symbol = "XAU/USD", interval = Interval.M5,
-            candles = listOf(Candle(bar, 3000.0, 3001.0, 2999.0, 3000.0)),
+            candles = IctTestBars.readyAt(bar),
             lastPrice = 3000.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now), signal = verified)
         val config = AppSettings(backgroundMonitor = true, autoPaperTrading = true)
         assertEquals(SignalAction.BUY, verified.action)

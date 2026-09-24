@@ -48,8 +48,8 @@ class PaperOpportunityTest {
         ai = AiNewsVerdict("AVAILABLE", "XAU/USD", "BUY", 91.0, "test-model",
             "fixture", now, listOf("id")),
     )
-    private val raw = Signal(SignalAction.BUY, 87.0, entry = 3000.0, stopLoss = 2995.0,
-        takeProfit = 3010.0, interval = Interval.M5, barTime = bar,
+    private val raw = Signal(SignalAction.BUY, 87.0, entry = 3000.0, stopLoss = 2994.5,
+        takeProfit = 3009.0, interval = Interval.M5, barTime = bar,
         confluence = (1..8).map { ConfluenceItem("فنی $it", true, "fixture $it") })
     private val signal get() = NewsConfluence.apply(raw, "XAU/USD", news, now)!!
     private val snapshot = MtfAnalyzer.Snapshot(Interval.M5,
@@ -59,7 +59,7 @@ class PaperOpportunityTest {
         buyCount = 1, sellCount = 0, neutralCount = 0, veto = false,
         vetoReason = null, advisory = "fixture", barTime = bar, skippedFrames = emptyList())
     private val market get() = MarketState(symbol = "XAU/USD", interval = Interval.M5,
-        candles = listOf(Candle(bar, 3000.0, 3002.0, 2999.0, 3000.0)),
+        candles = IctTestBars.readyAt(bar),
         lastPrice = 3000.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now), signal = signal)
     private val context get() = RuntimeEnvironment.getApplication()
 

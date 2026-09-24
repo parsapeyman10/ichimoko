@@ -12,6 +12,7 @@ import com.aurum.edge.data.SourceComparison
 import com.aurum.edge.data.VerificationStatus
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.core.Interval
+import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
@@ -466,10 +467,15 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     abs(price / signal.entry - 1.0) <= 0.005 && _mtf.value?.veto != true) {
                     "سیگنال قدیمی، وتوشده یا دور از قیمت تازه است"
                 }
-                require(NewsConfluence.alignment(current.symbol, signal.action, news.value).status ==
-                    com.aurum.edge.core.ConfluenceStatus.CONFIRMED) {
-                    "شرط نهم خبر AI دیگر معتبر نیست؛ ورود سیگنالی متوقف شد"
+                val alignment = NewsConfluence.alignment(current.symbol, signal.action, news.value)
+                require(alignment.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED &&
+                    signal.confluence.size >= 9 &&
+                    signal.confluence.take(8).all { it.ok && it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED } &&
+                    signal.confluence[8].let { it.name == NewsConfluence.NEWS_LABEL && it.ok &&
+                        it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED && it.detail == alignment.detail }) {
+                    "۹ شرط از جمله خبر AI دیگر معتبر نیستند؛ ورود سیگنالی متوقف شد"
                 }
+                IctEntryRules.assess(current).reason?.let { throw IllegalArgumentException(it) }
             }
             PaperOrderRules.preview(signal.action, current.symbol, price,
                 signal.stopLoss ?: throw IllegalArgumentException("حد ضرر لازم است"),

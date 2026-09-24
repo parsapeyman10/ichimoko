@@ -61,8 +61,10 @@ class AppContainer(context: Context) {
     /** Shared by chart, signal tab, notifications and automatic *paper* entries. Expires on time. */
     val verifiedMarket: StateFlow<MarketState> = combine(
         market.state, news.state, flow { while (true) { emit(System.currentTimeMillis()); delay(20_000L) } },
-    ) { raw, headlines, now -> raw.copy(signal = NewsConfluence.apply(raw.signal, raw.symbol, headlines, now)) }
-        .stateIn(appScope, SharingStarted.Eagerly, market.state.value.copy(signal = null))
+    ) { raw, headlines, now ->
+        val verified = raw.copy(signal = NewsConfluence.apply(raw.signal, raw.symbol, headlines, now))
+        IctEntryRules.withSafePlan(verified)
+    }.stateIn(appScope, SharingStarted.Eagerly, market.state.value.copy(signal = null))
     val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore, verifiedMarket)
     val crypto = CryptoRepository(settingsStore, appScope)
     val freeHistory = FreeHistoryDownloader()
