@@ -52,7 +52,8 @@ import com.aurum.edge.ui.theme.AurumColors
 @Composable
 fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     val context = LocalContext.current
-    var key by remember { mutableStateOf(settings.apiKey) }
+    // Never prefill a saved secret in an editable Compose field. Blank means keep the stored key.
+    var key by remember { mutableStateOf("") }
     var symbol by remember { mutableStateOf(settings.symbol) }
     var newsUrl by remember { mutableStateOf(settings.newsBaseUrl) }
     var balance by remember { mutableStateOf(settings.accountBalance.toString()) }
@@ -64,7 +65,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     var confirmJournalClear by remember { mutableStateOf(false) }
     var autoAfterPermission by remember { mutableStateOf(false) }
 
-    LaunchedEffect(settings.apiKey) { if (key.isBlank()) key = settings.apiKey }
+    LaunchedEffect(settings.apiKey) { key = "" } // clear input only after a saved key changes
     LaunchedEffect(settings.symbol) { symbol = settings.symbol }
     LaunchedEffect(settings.newsBaseUrl) { newsUrl = settings.newsBaseUrl }
 
@@ -109,13 +110,17 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             title = "منبع دیتای واقعی",
             subtitle = "Twelve Data برای چارت، سیگنال و بک‌تست؛ دیده‌بان پایین منابع جدا دارد",
         ) {
+            Text(if (settings.hasKey) "✓ کلید خواندنی در همین نصب موجود است؛ اعتبارش فقط با دریافت دادهٔ تازه مشخص می‌شود."
+                else "کلید روی این نصب ذخیره نشده است.",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (settings.hasKey) AurumColors.Cyan else AurumColors.Gold)
             OutlinedTextField(
                 value = key,
                 onValueChange = { key = it },
-                label = { Text("Twelve Data API Key") },
+                label = { Text(if (settings.hasKey) "کلید جدید برای جایگزینی (خالی = کلید قبلی)" else "Twelve Data API Key") },
                 visualTransformation = PasswordVisualTransformation(),
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
             OutlinedTextField(
                 value = symbol,
@@ -127,10 +132,8 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     .padding(top = 8.dp),
             )
             Button(
-                onClick = {
-                    viewModel.saveApiKey(key)
-                    viewModel.saveSymbol(symbol)
-                },
+                onClick = { viewModel.saveMarketCredentials(key, symbol) },
+                enabled = key.isNotBlank() || settings.hasKey,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 10.dp),
@@ -141,14 +144,14 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 6.dp),
             )
-            Text("کلید داخل APK قرار نمی‌گیرد و پشتیبان‌گیری خودکار داده‌های اپ غیرفعال است.",
+            Text("کلید داخل APK نیست؛ فقط در دادهٔ خصوصی این نصب ذخیره می‌شود. پاک‌کردن داده‌ها/حذف اپ، کلید را پاک می‌کند. debug و release دو نصب جدا با داده‌های جدا هستند: ${BuildConfig.APPLICATION_ID}. APKهای CI با امضای debug موقت ممکن است قابل ارتقا روی نصب قبلی نباشند؛ برای حفظ داده، امضای ثابت لازم است.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan,
                 modifier = Modifier.padding(top = 4.dp))
         }
 
         WatchSettingsSection(viewModel)
 
-        SectionCard("اخبار وب، غربال رمزارز و توقف ورود کاغذی", "نیازمند بک‌اند HTTPS؛ RSS عمومی ناشران و دادهٔ بازار با انتساب منبع") {
+        SectionCard("گیت AI خبر و غربال رمزارز", "تیترهای واقعی وب بدون سرور در تب «خبر»؛ شرط نهم معامله به بک‌اند HTTPS نیاز دارد") {
             OutlinedTextField(
                 value = newsUrl, onValueChange = { newsUrl = it }, singleLine = true,
                 label = { Text("آدرس سرور API (https://api.example.com)") },
@@ -162,7 +165,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
                 Switch(checked = settings.pauseOnNews, onCheckedChange = viewModel::setPauseOnNews)
             }
-            Text("خوراک‌های IRIB، YJC، اقتصاد۲۴، CoinDesk و BLS روی سرور خوانده می‌شوند؛ پوشش کامل یا حق بازنشر تجاری تضمین نیست. کلید AI و رضایت ناشران فقط روی سرور تنظیم می‌شود. وتوی بالا برای برگهٔ دستی است؛ ورود سیگنالی/خودکار بدون خبر AI معتبر همیشه متوقف است. خروج‌ها مسدود نمی‌شوند؛ سفارش واقعی غیرفعال است.",
+            Text("خوراک‌های عمومی IRIB، YJC، اقتصاد۲۴، FXStreet، CoinDesk و BLS مستقیم روی گوشی فقط برای مطالعه‌اند؛ به‌جای شواهد AI استفاده نمی‌شوند. سرور و مدل معتبر برای شرط نهم لازم‌اند. وتوی بالا برای برگهٔ دستی است؛ ورود سیگنالی/خودکار بدون خبر AI معتبر همیشه متوقف است. خروج‌ها مسدود نمی‌شوند؛ سفارش واقعی غیرفعال است.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
@@ -279,7 +282,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     onCheckedChange = viewModel::setNotifyOnSignal,
                 )
             }
-            Text("هشدار فقط با پایش روشن و اعلان مجاز اندروید کار می‌کند؛ بدون مدل خبر معتبر هیچ آلارمی داده نمی‌شود. خاموش بودن ورود خودکار کاغذی مانع هشدار نیست. محدودیت Android 15 ممکن است پایش پس‌زمینه را پس از ۶ ساعت متوقف کند.",
+            Text("علت لحظه‌ای بی‌هشداری در تب «معامله» ← «چرا هشدار نیامده؟» نمایش داده می‌شود. هشدار فقط با پایش روشن و اعلان مجاز اندروید کار می‌کند؛ بدون مدل خبر معتبر هیچ آلارمی داده نمی‌شود. خاموش بودن ورود خودکار کاغذی مانع هشدار نیست. محدودیت Android 15 ممکن است پایش پس‌زمینه را پس از ۶ ساعت متوقف کند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             Text("صدای هشدار: ${settings.alertSoundName.ifBlank { "اعلان پیش‌فرض گوشی" }}",
                 modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
@@ -434,10 +437,10 @@ private fun WatchSettingsSection(viewModel: AurumViewModel) {
             OutlinedTextField(
                 value = key, onValueChange = { key = it }, singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
-                label = { Text("کلید Twelve Data فقط برای ${symbol.id}") },
+                label = { Text("کلید اختصاصی ${symbol.id} (خالی = حذف)") },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
-            Text("اگر اینجا خالی باشد، کلید عمومیِ چارت استفاده می‌شود؛ فقط به Twelve Data ارسال می‌شود.",
+            Text("این فیلد مختص دیده‌بان است و بر چارت/هشدار تأثیر ندارد. اگر کلید اختصاصی را خالی ذخیره کنید، کلید چارت استفاده می‌شود؛ فقط به Twelve Data ارسال می‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             OutlinedButton(onClick = { viewModel.setWatchKeyOverride(symbol.id, key) }) { Text("ذخیره کلید این نماد") }
         }

@@ -39,6 +39,37 @@ class SettingsStore(context: Context) {
         autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
     )
 
+    /**
+     * Persist the market key and symbol in ONE disk transaction. A successful commit,
+     * not merely an in-memory SharedPreferences.apply(), is required before reconnecting.
+     * Empty input preserves an existing key; it never silently erases credentials.
+     */
+    @Synchronized
+    fun saveMarketCredentials(keyInput: String, symbolInput: String): Boolean {
+        val key = keyInput.trim().ifBlank { read().apiKey }
+        if (key.isBlank() || key.any { it.isWhitespace() }) return false
+        val symbol = symbolInput.trim().uppercase(java.util.Locale.ROOT).ifBlank { "XAU/USD" }
+        val saved = prefs.edit().putString(KEY_API, key).putString(KEY_SYMBOL, symbol).commit()
+        if (saved && prefs.getString(KEY_API, null) == key && prefs.getString(KEY_SYMBOL, null) == symbol) {
+            _settings.value = read()
+            return true
+        }
+        // Do not report success or restart the feed on a failed disk write.
+        return false
+    }
+
+    /** Server configuration must also survive process death before we say it was saved. */
+    @Synchronized
+    fun saveNewsBaseUrl(url: String): Boolean {
+        val saved = prefs.edit().putString(KEY_NEWS_URL, url).commit()
+        if (saved && prefs.getString(KEY_NEWS_URL, null) == url) {
+            _settings.value = read()
+            return true
+        }
+        return false
+    }
+
+    @Synchronized
     fun update(transform: (AppSettings) -> AppSettings) {
         val next = transform(_settings.value)
         prefs.edit()

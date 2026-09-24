@@ -6,6 +6,11 @@ import com.aurum.edge.data.DataFeedException
 import com.aurum.edge.data.TwelveDataClient
 import com.aurum.edge.data.hasCurrentRestBar
 import com.aurum.edge.data.isCurrentIntervalTick
+import kotlinx.coroutines.runBlocking
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -58,6 +63,32 @@ class TwelveDataCandleContractTest {
             json(rows = "$older,${latest.dropLast(1)},\"volume\":\"-1\"}"),
             """{"code":429,"message":"quota"}""",
         )) assertThrows(DataFeedException::class.java) { parse(bad) }
+    }
+
+    @Test fun `provider errors never echo an API key into the user-facing feed detail`() {
+        val syntheticSecret = "synthetic_secret_do_not_echo"
+        val error = assertThrows(DataFeedException::class.java) {
+            parse("""{"code":500,"message":"$syntheticSecret is invalid"}""")
+        }
+        assertFalse(error.message.orEmpty().contains(syntheticSecret))
+        assertTrue(error.message.orEmpty().contains("500"))
+        val invalid = assertThrows(DataFeedException::class.java) {
+            parse("""{"code":401,"message":"$syntheticSecret"}""")
+        }
+        assertFalse(invalid.message.orEmpty().contains(syntheticSecret))
+        assertTrue(invalid.message.orEmpty().contains("کلید"))
+    }
+
+    @Test fun `HTTP unauthorized is shown as a key problem without leaking a key`() = runBlocking {
+        val rest = TwelveDataClient(OkHttpClient.Builder().addInterceptor { chain ->
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                .code(401).message("Unauthorized").body("".toResponseBody()).build()
+        }.build())
+        val secret = "synthetic_rest_key"
+        val problem = runCatching { rest.fetchCandles(secret, "XAU/USD", Interval.M5) }.exceptionOrNull()
+        assertTrue(problem is DataFeedException)
+        assertTrue(problem?.message.orEmpty().contains("کلید"))
+        assertFalse(problem?.message.orEmpty().contains(secret))
     }
 
     @Test fun `stale history and previous-period ticks never become a current paper quote`() {

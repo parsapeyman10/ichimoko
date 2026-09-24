@@ -24,6 +24,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -63,12 +66,14 @@ class SignalMonitorService : Service() {
             true
         }.getOrElse { false }
         if (!started) {
+            _running.value = false
             container.settingsStore.update { it.copy(backgroundMonitor = false, autoPaperTrading = false) }
             container.autoPaperTrader.stopped("سرویس پس‌زمینه شروع نشد؛ ورود خودکار خاموش شد")
             stopSelf()
             return START_NOT_STICKY
         }
 
+        _running.value = true // only after startForeground succeeded, not just a queued start request
         container.settingsStore.update { it.copy(backgroundMonitor = true) }
         newsJob?.cancel()
         newsJob = scope.launch {
@@ -192,6 +197,7 @@ class SignalMonitorService : Service() {
     }
 
     override fun onDestroy() {
+        _running.value = false
         val container = (application as AurumApplication).container
         container.settingsStore.update { it.copy(backgroundMonitor = false, autoPaperTrading = false) }
         scope.cancel()
@@ -200,6 +206,9 @@ class SignalMonitorService : Service() {
     }
 
     companion object {
+        private val _running = MutableStateFlow(false)
+        val running: StateFlow<Boolean> = _running.asStateFlow()
+
         const val ACTION_STOP = "com.aurum.edge.STOP_MONITOR"
 
         fun start(context: Context): Boolean {

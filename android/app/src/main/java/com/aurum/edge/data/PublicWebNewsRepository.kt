@@ -18,6 +18,9 @@ import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
 import org.jsoup.parser.Parser
 import java.net.URI
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
+import javax.net.ssl.SSLException
 import java.time.OffsetDateTime
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -196,8 +199,17 @@ class PublicWebNewsRepository(
             if (articles.isEmpty()) FeedResult(feed, emptyList(), PublicFeedState.OUTDATED,
                 "خوراک پاسخ داد، ولی تیتر با زمان انتشار و لینک معتبر در بازهٔ مجاز یافت نشد")
             else FeedResult(feed, articles, PublicFeedState.ONLINE, "${articles.size} تیتر تاریخ‌دار دریافت شد")
-        } catch (_: Exception) {
-            FeedResult(feed, emptyList(), PublicFeedState.FAILED, "اتصال یا قالب خوراک ناشر در دسترس نیست")
+        } catch (e: Exception) {
+            // Only fixed categories: never show arbitrary exception text, network URLs or secrets.
+            val detail = when (e) {
+                is UnknownHostException -> "DNS ناشر پاسخ نداد؛ اینترنت/DNS گوشی را بررسی کنید"
+                is SocketTimeoutException -> "دریافت خوراک به مهلت خورد؛ اینترنت گوشی یا ناشر کند است"
+                is SSLException -> "اتصال امن HTTPS برقرار نشد؛ ساعت گوشی/شبکه/گواهی ناشر را بررسی کنید"
+                is IllegalArgumentException -> "خوراک بزرگ یا ناامن است؛ نمایش داده نشد"
+                is IllegalStateException -> "پاسخ ناشر قالب RSS/Atom معتبر ندارد"
+                else -> "اتصال یا قالب خوراک ناشر در دسترس نیست"
+            }
+            FeedResult(feed, emptyList(), PublicFeedState.FAILED, detail)
         }
     }
 

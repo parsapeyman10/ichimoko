@@ -23,6 +23,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
+import java.net.UnknownHostException
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -76,6 +77,19 @@ class PublicWebNewsTest {
             parsePublicFeed("<!DOCTYPE rss [<!ENTITY x SYSTEM 'file:///data/data/private'>]><rss>&x;</rss>", fa, now)
             fail("external entities must be rejected")
         } catch (_: IllegalArgumentException) { /* expected */ }
+    }
+
+    @Test fun `publisher DNS failure is shown per feed without confusing it with AI clearance`() = runBlocking {
+        val client = OkHttpClient.Builder().addInterceptor { throw UnknownHostException("private synthetic URL") }.build()
+        val repository = PublicWebNewsRepository(CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            client, listOf(fa))
+        repository.refresh()
+        val status = repository.state.value.feeds.single()
+        assertEquals(PublicFeedState.FAILED, status.state)
+        assertTrue(status.detail.contains("DNS"))
+        assertFalse(status.detail.contains("private synthetic URL"))
+        assertTrue(repository.state.value.headlines.isEmpty())
+        assertEquals(NewsGate.UNKNOWN, PersianNewsState().gate)
     }
 
     @Test fun `partial feed failure keeps cached headlines visibly non-online and never approves news gate`() = runBlocking {

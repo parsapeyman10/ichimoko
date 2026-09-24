@@ -59,7 +59,7 @@ class TwelveDataClient(
         val request = Request.Builder().url(url).header("Accept", "application/json").build()
         val body = try {
             client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw DataFeedException("سرویس‌دهنده پاسخ HTTP ${response.code} داد")
+                if (!response.isSuccessful) throw DataFeedException(describeError(response.code.toString()))
                 val bytes = response.peekBody(2_000_001L).bytes()
                 if (bytes.size > 2_000_000) throw DataFeedException("پاسخ کندل بیش از حد بزرگ است")
                 val text = bytes.toString(Charsets.UTF_8)
@@ -82,7 +82,7 @@ class TwelveDataClient(
             ?: throw DataFeedException("پاسخ نامعتبر از سرویس‌دهنده")
         fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
         val code = obj.text("code")
-        if (code != null && code != "200") throw DataFeedException(describeError(code, obj.text("message")))
+        if (code != null && code != "200") throw DataFeedException(describeError(code))
         val meta = obj["meta"] as? JsonObject ?: throw DataFeedException("هویت نماد پاسخ مشخص نیست")
         if (meta.text("symbol")?.equals(expectedSymbol.trim(), ignoreCase = true) != true ||
             meta.text("interval") != interval.api) {
@@ -178,11 +178,12 @@ class TwelveDataClient(
         return PriceTick(price, at)
     }
 
-    private fun describeError(code: String?, message: String?): String = when (code) {
+    // Provider-supplied messages may echo the request URL, which contains the API key.
+    private fun describeError(code: String?): String = when (code) {
         "401", "403" -> "کلید Twelve Data نامعتبر یا غیرفعال است"
         "429" -> "سهمیه درخواست Twelve Data تمام شد (محدودیت پلن رایگان)"
         "404" -> "نماد مورد نظر در Twelve Data پیدا نشد"
-        else -> message?.takeIf { it.isNotBlank() } ?: "خطای سرویس‌دهنده Twelve Data ($code)"
+        else -> "خطای سرویس‌دهنده Twelve Data (${code?.takeIf { it.matches(Regex("[0-9]{3}")) } ?: "نامشخص"})"
     }
 
     companion object {

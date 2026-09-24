@@ -282,10 +282,16 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             _toast.value = "آدرس HTTPS سرور خبر بدون مسیر و کلید وارد کنید"
             return
         }
-        container.settingsStore.update { it.copy(newsBaseUrl = url) }
-        container.news.resetAndRefresh()
-        container.crypto.resetAndRefresh()
-        _toast.value = "آدرس سرور خبر و غربالگر ذخیره شد"
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) { container.settingsStore.saveNewsBaseUrl(url) }
+            if (!saved) {
+                _toast.value = "ذخیرهٔ آدرس سرور روی دستگاه ناموفق بود؛ خبر AI هنوز تأیید نشده است"
+                return@launch
+            }
+            container.news.resetAndRefresh()
+            container.crypto.resetAndRefresh()
+            _toast.value = if (url.isBlank()) "سرور خبر جدا شد؛ تیترهای وب در تب خبر بدون سرور قابل دریافت‌اند، ولی هشدار ۹/۹ مسدود است"
+                else "آدرس سرور ذخیره شد؛ پاسخ فید و مدل AI را در تب خبر جداگانه بررسی کنید"
     }
 
     fun setPauseOnNews(enabled: Boolean) {
@@ -303,9 +309,16 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun watchKeyOverride(symbolId: String): String = container.watchSettings.keyOverride(symbolId)
 
     fun setWatchKeyOverride(symbolId: String, key: String) {
-        container.watchSettings.setKeyOverride(symbolId, key)
-        container.watch.refreshNow()
-        _toast.value = "کلید خواندنی این نماد ذخیره شد"
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) { container.watchSettings.setKeyOverride(symbolId, key) }
+            if (!saved) {
+                _toast.value = "کلید اختصاصی ذخیره نشد؛ فاصله/خط جدید یا حافظهٔ دستگاه را بررسی کنید"
+                return@launch
+            }
+            container.watch.refreshNow()
+            _toast.value = if (key.isBlank()) "کلید اختصاصی این نماد حذف شد؛ کلید چارت در صورت وجود استفاده می‌شود"
+                else "کلید خواندنی این نماد روی همین نصب ذخیره و بازخوانی شد"
+        }
     }
 
     fun showWatchHistory(symbolId: String, sourceId: String) {
@@ -345,14 +358,38 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setInterval(interval: Interval) = container.market.setInterval(interval)
 
-    fun saveApiKey(key: String) {
-        container.settingsStore.update { it.copy(apiKey = key.trim()) }
-        container.market.restart()
-    }
+    private var marketSaveInFlight = false
 
-    fun saveSymbol(symbol: String) {
-        container.settingsStore.update { it.copy(symbol = symbol.trim().ifBlank { "XAU/USD" }) }
-        container.market.restart()
+    fun saveApiKey(key: String) = saveMarketCredentials(key, settings.value.symbol)
+
+    /** One verified write, one feed restart; never echo a credential into a toast or log. */
+    fun saveMarketCredentials(key: String, symbol: String) {
+        if (marketSaveInFlight) return
+        if (key.isBlank() && !settings.value.hasKey) {
+            _toast.value = "ابتدا کلید تازهٔ Twelve Data را روی همین گوشی وارد کنید"
+            return
+        }
+        if (key.trim().any { it.isWhitespace() }) {
+            _toast.value = "کلید نباید فاصله یا خط جدید داشته باشد؛ چیزی ذخیره نشد"
+            return
+        }
+        marketSaveInFlight = true
+        viewModelScope.launch {
+            try {
+                val saved = withContext(Dispatchers.IO) { container.settingsStore.saveMarketCredentials(key, symbol) }
+                if (!saved) {
+                    _toast.value = "ذخیرهٔ کلید روی دستگاه تأیید نشد؛ کلید قبلی را حذف نکنید و دوباره تلاش کنید"
+                    return@launch
+                }
+                container.market.restart()
+                container.watch.refreshNow()
+                _toast.value = "کلید و نماد روی همین نصب ذخیره و بازخوانی شدند؛ برای اعتبار کلید، وضعیت اتصال بازار را بررسی کنید"
+            } catch (_: Exception) {
+                _toast.value = "ذخیره/اتصال مجدد ناموفق بود؛ وضعیت دادهٔ بازار را بررسی کنید"
+            } finally {
+                marketSaveInFlight = false
+            }
+        }
     }
 
     fun saveRiskPercent(value: Double) = container.settingsStore.update { it.copy(riskPercent = value.coerceIn(0.1, 5.0)) }

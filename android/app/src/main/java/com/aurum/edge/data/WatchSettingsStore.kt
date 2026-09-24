@@ -48,8 +48,13 @@ class WatchSettingsStore(context: Context) {
     fun keyOverride(symbolId: String): String =
         if (WatchCatalog.find(symbolId) == null) "" else prefs.getString("key_$symbolId", "").orEmpty()
 
-    fun setKeyOverride(symbolId: String, key: String) {
-        if (WatchCatalog.find(symbolId)?.providerCodes?.containsKey(SourceCatalog.twelveData.id) != true) return
-        prefs.edit().putString("key_$symbolId", key.trim()).apply()
+    /** Explicit blank removes this per-symbol override; the chart key remains untouched. */
+    @Synchronized
+    fun setKeyOverride(symbolId: String, key: String): Boolean {
+        if (WatchCatalog.find(symbolId)?.providerCodes?.containsKey(SourceCatalog.twelveData.id) != true) return false
+        val normalized = key.trim()
+        if (normalized.any { it.isWhitespace() }) return false
+        val saved = prefs.edit().putString("key_$symbolId", normalized).commit()
+        return saved && prefs.getString("key_$symbolId", null) == normalized
     }
 }

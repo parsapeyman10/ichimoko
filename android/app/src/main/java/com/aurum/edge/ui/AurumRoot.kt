@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Bookmarks
+import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Settings
@@ -52,6 +53,7 @@ enum class AurumTab(val label: String, val icon: ImageVector) {
     Chart("چارت", Icons.Filled.ShowChart),
     Signal("معامله", Icons.Filled.Bolt),
     Watch("دیده‌بان", Icons.Filled.ViewList),
+    News("خبر", Icons.Filled.Article),
     Crypto("رمزارز", Icons.Filled.TrendingUp),
     Learn("یادگیری", Icons.Filled.School),
     Journal("ژورنال", Icons.Filled.Bookmarks),
@@ -84,7 +86,8 @@ fun AurumRoot(viewModel: AurumViewModel) {
                         selected = tab == entry,
                         onClick = { tab = entry },
                         icon = { Icon(entry.icon, contentDescription = entry.label, modifier = Modifier.size(20.dp)) },
-                        label = { Text(entry.label, style = MaterialTheme.typography.labelSmall) },
+                        label = { Text(entry.label, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                        alwaysShowLabel = true,
                     )
                 }
             }
@@ -95,7 +98,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            if (tab != AurumTab.Watch && tab != AurumTab.Crypto) {
+            if (tab != AurumTab.Watch && tab != AurumTab.Crypto && tab != AurumTab.News) {
                 AppHeader(
                     symbol = market.symbol,
                     price = market.lastPrice,
@@ -114,8 +117,9 @@ fun AurumRoot(viewModel: AurumViewModel) {
                 when (tab) {
                     AurumTab.Chart -> ChartScreen(viewModel, market,
                         onOpenSettings = { tab = AurumTab.Settings }, onOpenJournal = { tab = AurumTab.Journal })
-                    AurumTab.Signal -> SignalScreen(viewModel, market)
+                    AurumTab.Signal -> SignalScreen(viewModel, market, onOpenNews = { tab = AurumTab.News })
                     AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { tab = AurumTab.Settings })
+                    AurumTab.News -> PersianNewsScreen(viewModel, onOpenSettings = { tab = AurumTab.Settings })
                     AurumTab.Crypto -> CryptoScreen(viewModel, onOpenSettings = { tab = AurumTab.Settings })
                     AurumTab.Learn -> LearnScreen(viewModel)
                     AurumTab.Journal -> JournalScreen(viewModel, market)
