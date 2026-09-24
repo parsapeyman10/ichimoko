@@ -358,6 +358,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         _toast.value = "صدای پیش‌فرض اعلان گوشی انتخاب شد"
     }
 
+    fun reportNotificationTest(posted: Boolean) {
+        _toast.value = if (posted) "اعلان آزمایشی تحویل سیستم اندروید شد؛ نمایش/صدا را روی گوشی بررسی کنید"
+            else "اعلان ارسال نشد: مجوز اعلان یا کانال آن بسته است؛ تنظیمات اعلان‌های اندروید را باز کنید"
+    }
+
     fun testAlertSound(context: Context) {
         val uri = settings.value.alertSoundUri
         if (uri.isBlank()) {

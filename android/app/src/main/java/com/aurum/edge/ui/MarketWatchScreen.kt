@@ -29,6 +29,7 @@ import com.aurum.edge.data.SourceCatalog
 import com.aurum.edge.data.SourceComparison
 import com.aurum.edge.data.VerificationStatus
 import com.aurum.edge.data.WatchCatalog
+import com.aurum.edge.data.WatchDisplay
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.formatDateTime
@@ -40,14 +41,18 @@ import kotlinx.coroutines.delay
 /** Separate read-only watchlist and publisher web news. No quote is sent as an order. */
 @Composable
 fun MarketWatchScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
-    var newsTab by remember { mutableStateOf(false) }
+    var page by remember { mutableStateOf(0) }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = !newsTab, onClick = { newsTab = false }, label = { Text("منابع بازار") })
-            FilterChip(selected = newsTab, onClick = { newsTab = true }, label = { Text("اخبار وب") })
+            FilterChip(selected = page == 0, onClick = { page = 0 }, label = { Text("منابع بازار") })
+            FilterChip(selected = page == 1, onClick = { page = 1 }, label = { Text("طلا و ارز") })
+            FilterChip(selected = page == 2, onClick = { page = 2 }, label = { Text("اخبار وب") })
         }
-        if (newsTab) PersianNewsScreen(viewModel, onOpenSettings)
-        else WatchPricesScreen(viewModel, onOpenSettings)
+        when (page) {
+            1 -> IranPricesScreen(viewModel, onOpenSettings)
+            2 -> PersianNewsScreen(viewModel, onOpenSettings)
+            else -> WatchPricesScreen(viewModel, onOpenSettings)
+        }
     }
 }
 
@@ -62,6 +67,7 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
         while (true) {
             delay(30_000L)
             now = System.currentTimeMillis()
+            if (now - (state.lastAttemptAt ?: 0L) >= 180_000L) viewModel.refreshWatch()
         }
     }
 
@@ -85,7 +91,8 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
             val selected = selections[symbol.id] ?: return@forEach
             val quotes = state.quotes[symbol.id].orEmpty()
             val verification = SourceComparison.verify(symbol, selected.enabledSources, quotes, now)
-            val preferred = quotes[selected.preferredSourceId]
+            val display = WatchDisplay.choose(symbol, selected, quotes, now)
+            val preferred = display.quote
             val tone = when (verification.status) {
                 VerificationStatus.CONFIRMED -> AurumColors.Green
                 VerificationStatus.CONFLICT -> AurumColors.Red
@@ -94,7 +101,7 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
             }
             SectionCard(
                 title = "${symbol.label} · ${symbol.id}",
-                subtitle = "منبع منتخب: ${SourceCatalog.find(selected.preferredSourceId)?.title ?: "انتخاب نشده"} · ${symbol.unit}",
+                subtitle = "منبع نمایشی: ${SourceCatalog.find(display.sourceId)?.title ?: "انتخاب نشده"}${if (display.fallback) " · جایگزین" else ""} · ${symbol.unit}",
                 trailing = { Pill(verification.status.name, tone) },
             ) {
                 Text(

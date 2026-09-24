@@ -190,9 +190,17 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
             Text(formatTime(shown.time), style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
+        val signalBlocker = when {
+            trades.any { it.symbol == market.symbol && it.isOpen } -> "پوزیشن این نماد هنوز باز است"
+            market.signal != null && trades.any { it.symbol == market.symbol && it.signalBarTime != null &&
+                it.signalBarTime == market.signal?.barTime } ->
+                "این کندل قبلاً معامله شده است"
+            else -> IctEntryRules.assess(market).reason
+        }
         SignalSummaryCard(
             signal = market.signal,
             onOpenPaperTrade = { market.signal?.let(viewModel::openPaperTrade) },
+            entryBlocker = signalBlocker,
         )
 
         SectionCard("معاملهٔ ثبت‌شده یا فقط خطوط سیگنال؟", "خط‌های «طرح ورود/SL/TP» معامله نیستند و به‌تنهایی ژورنال نمی‌سازند") {

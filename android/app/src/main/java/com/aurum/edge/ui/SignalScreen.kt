@@ -37,7 +37,14 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val mtf by viewModel.mtf.collectAsStateWithLifecycle()
     val news by viewModel.news.collectAsStateWithLifecycle()
+    val trades by viewModel.trades.collectAsStateWithLifecycle()
     val signal = market.signal
+    val positionBlocker = when {
+        trades.any { it.symbol == market.symbol && it.isOpen } -> "پوزیشن این نماد هنوز باز است"
+        signal != null && trades.any { it.symbol == market.symbol && it.signalBarTime != null &&
+            it.signalBarTime == signal.barTime } -> "این کندل قبلاً معامله شده است"
+        else -> IctEntryRules.assess(market).reason
+    }
 
     Column(
         modifier = Modifier
@@ -48,6 +55,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState) {
         SignalSummaryCard(
             signal = signal,
             onOpenPaperTrade = { signal?.let(viewModel::openPaperTrade) },
+            entryBlocker = positionBlocker,
         )
         SectionCard("گیت رنج و زمان خرید/فروش کاغذی",
             "افزوده بر ۸ شرط فنی + خبر AI؛ خط S/R یا طرح سیگنال، پوزیشن ثبت‌شده نیست") {

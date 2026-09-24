@@ -92,6 +92,12 @@ object Notifier {
             manager.getNotificationChannel(channel)?.importance?.let { it > NotificationManager.IMPORTANCE_NONE } == true
     }
 
+    /** User-initiated diagnostic: test the REAL Android notification channel, not just MediaPlayer. */
+    fun notifyTest(context: Context, customSoundUri: String): Boolean = postVerified(
+        context, 4209, "آزمون اعلان Aurum Edge", "آزمایش مجوز، کانال و صدای گوشی",
+        "این اعلان آزمایشی است؛ هیچ سیگنال، معامله یا سفارش واقعی ثبت نشده است.", customSoundUri,
+    )
+
     /** Only after the candidate is durably saved. This alert NEVER claims a trade was opened. */
     fun notifyVerifiedOpportunity(context: Context, item: PaperOpportunity, customSoundUri: String): Boolean {
         val title = when (item.action) {

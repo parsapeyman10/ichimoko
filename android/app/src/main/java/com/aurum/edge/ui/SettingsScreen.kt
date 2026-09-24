@@ -80,6 +80,11 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
         if (autoAfterPermission) viewModel.setAutoPaperTrading(started)
         autoAfterPermission = false
     }
+    val testPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        viewModel.reportNotificationTest(granted && Notifier.notifyTest(context, settings.alertSoundUri))
+    }
 
     fun startMonitorIfAllowed(alsoEnableAuto: Boolean = false) {
         autoAfterPermission = alsoEnableAuto
@@ -292,6 +297,12 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 }
             }
             OutlinedButton(onClick = {
+                val permissionMissing = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                if (permissionMissing) testPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                else viewModel.reportNotificationTest(Notifier.notifyTest(context, settings.alertSoundUri))
+            }, modifier = Modifier.fillMaxWidth()) { Text("آزمون اعلان واقعی گوشی · بدون معامله") }
+            OutlinedButton(onClick = {
                 val channelId = if (settings.alertSoundUri.isBlank()) Notifier.CHANNEL_VERIFIED_DEFAULT
                     else Notifier.CHANNEL_VERIFIED_FILE
                 Notifier.ensureChannels(context)
@@ -348,7 +359,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 "در حالت آفلاین فقط آخرین کندل‌های واقعیِ ذخیره‌شده با برچسب زمان نمایش داده می‌شود.",
                 "هیچ آمار عملکردی جعلی وجود ندارد؛ نرخ برد و فاکتور سود فقط از نتایج واقعی محاسبه می‌شود.",
                 "تنها «دمو»: اجرای استراتژی روی همان دیتای واقعی (تب یادگیری) و معاملات کاغذی که روی قیمت واقعی تسویه می‌شوند.",
-                "کلید API فقط روی همین دستگاه ذخیره می‌شود و به هیچ سروری ارسال نمی‌گردد.",
+                "کلید خواندنی در APK نیست؛ از همین گوشی فقط به HTTPS همان ارائه‌دهندهٔ انتخابی ارسال می‌شود، نه سرور اخبار یا نوبیتکس. کلید معاملاتی در اپ پذیرفته نمی‌شود.",
             ).forEach { line ->
                 Text("• $line", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary, modifier = Modifier.padding(vertical = 2.dp))
             }

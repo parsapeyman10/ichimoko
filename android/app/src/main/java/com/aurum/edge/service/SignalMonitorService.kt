@@ -133,17 +133,25 @@ class SignalMonitorService : Service() {
                     }
                 }
                 // A candidate is NOT an entry. Wait for the atomic journal write before notifying.
-                val autoEnabled = container.settingsStore.read().autoPaperTrading
-                val opened = if (autoEnabled) container.autoPaperTrader.onMarketUpdate(state) else null
+                val currentSettings = container.settingsStore.read()
+                val autoEnabled = currentSettings.autoPaperTrading
+                val canAlert = currentSettings.notifyOnSignal &&
+                    Notifier.canNotifyVerified(this@SignalMonitorService, currentSettings.alertSoundUri)
+                // A silent automatic entry is worse than no entry. Permissions/channel can
+                // be revoked while the service is running; stop BEFORE touching the journal.
+                val opened = if (autoEnabled && canAlert) container.autoPaperTrader.onMarketUpdate(state) else null
+                if (autoEnabled && !canAlert) container.autoPaperTrader.stopped(
+                    "اعلان گوشی مجاز/فعال نیست؛ ورود خودکار کاغذی متوقف است")
                 if (opened != null) {
                     if (alertsAvailable) runCatching {
                         newCandidate?.let { container.opportunityStore.record(it) }
                         container.opportunityStore.linkTrade(opened)
                     }
                     val currentSettings = container.settingsStore.read()
-                    if (currentSettings.notifyOnSignal) {
-                        Notifier.notifyRecordedAutoEntry(this@SignalMonitorService, opened,
-                            currentSettings.alertSoundUri)
+                    if (!Notifier.notifyRecordedAutoEntry(this@SignalMonitorService, opened,
+                            currentSettings.alertSoundUri)) {
+                        container.autoPaperTrader.stopped(
+                            "معاملهٔ کاغذی در ژورنال ثبت شد، ولی اعلان توسط سیستم ارسال نشد؛ مجوز/کانال را بررسی کنید")
                     }
                 } else if (!autoEnabled) {
                     val candidate = newCandidate

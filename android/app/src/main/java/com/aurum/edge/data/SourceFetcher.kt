@@ -40,15 +40,24 @@ class SourceFetcher(
                 Quote(it.code, it.label, error = "کلید خواندنی ${source.title} وارد نشده است", sourceId = source.id)
             }, online = false, error = "کلید API وارد نشده است")
         }
-        val batch = source.batchTemplate?.let { template ->
-            runCatching { fetchJson(source, template.replace("{symbols}", symbols.joinToString(",") { encode(it.code) }), apiKey) }
-                .getOrNull()
-        }
-        val quotes = if (batch != null && source.kind == SourceKind.JSON_REST) {
-            symbols.map { parseJsonQuote(source, it, batch) }
-        } else {
-            coroutineScope {
-                symbols.map { symbol -> async { fetchOne(source, symbol, apiKey) } }.awaitAll()
+        val quotes = when {
+            source.kind == SourceKind.HTML_CSS && source.batchTemplate != null -> {
+                // TGJU's home page holds the market rows together. NEVER send nine
+                // duplicate fallback requests if the page blocks us or changes format.
+                val body = runCatching { fetchText(source, source.batchTemplate, apiKey) }
+                symbols.map { symbol ->
+                    if (body.isSuccess) parseHtmlQuote(source, symbol, body.getOrThrow())
+                    else Quote(symbol.code, symbol.label,
+                        error = "وب‌سایت منبع در دسترس نیست؛ دریافت تازه انجام نشد", sourceId = source.id)
+                }
+            }
+            else -> {
+                val batch = if (source.kind == SourceKind.JSON_REST) source.batchTemplate?.let { template ->
+                    runCatching { fetchJson(source, template.replace("{symbols}",
+                        symbols.joinToString(",") { encode(it.code) }), apiKey) }.getOrNull()
+                } else null
+                if (batch != null) symbols.map { parseJsonQuote(source, it, batch) }
+                else coroutineScope { symbols.map { symbol -> async { fetchOne(source, symbol, apiKey) } }.awaitAll() }
             }
         }
         SourceSnapshot(source, quotes, online = quotes.any { it.price != null }, error = quotes.firstOrNull { it.price == null }?.error)
@@ -65,7 +74,7 @@ class SourceFetcher(
         Quote(symbol.code, symbol.label, error = (error.message ?: "خطای دریافت داده").take(100), sourceId = source.id)
     }
 
-    private fun parseJsonQuote(source: SourceDef, symbol: SymbolDef, root: JsonElement): Quote {
+    internal fun parseJsonQuote(source: SourceDef, symbol: SymbolDef, root: JsonElement): Quote {
         val raw = JsonPath.number(root, source.pricePath, symbol.code)?.takeIf { it > 0 }
         val price = raw?.times(source.scale)?.takeIf { it.isFinite() && it > 0 }
         val rawChange = JsonPath.number(root, source.changePath, symbol.code)
@@ -96,13 +105,21 @@ class SourceFetcher(
         )
     }
 
-    private fun parseHtmlQuote(source: SourceDef, symbol: SymbolDef, body: String): Quote {
-        val selector = source.cssSelector ?: return Quote(symbol.code, symbol.label, error = "سلکتور HTML تنظیم نشده است", sourceId = source.id)
-        val element = Jsoup.parse(body).select(selector).first()
-            ?: return Quote(symbol.code, symbol.label, error = "سلکتور در صفحه پیدا نشد", sourceId = source.id)
+    internal fun parseHtmlQuote(source: SourceDef, symbol: SymbolDef, body: String): Quote {
+        require(SourceCatalog.find(source.id) == source && symbol.code.matches(Regex("[a-z0-9_]{2,40}"))) {
+            "نماد/وب‌سایت ثابت و معتبر نیست"
+        }
+        val selector = source.cssSelector?.replace("{symbol}", symbol.code)
+            ?: return Quote(symbol.code, symbol.label, error = "سلکتور HTML تنظیم نشده است", sourceId = source.id)
+        val element = Jsoup.parse(body).selectFirst(selector)
+            ?: return Quote(symbol.code, symbol.label, error = "ردیف نماد در صفحه پیدا نشد", sourceId = source.id)
+        // data-price belongs to the exact identified market row, NOT an advert, daily
+        // high or a related coin. Fail closed if markup disappears or becomes ambiguous.
         val raw = if (source.cssAttr.isNullOrBlank()) element.text() else element.attr(source.cssAttr)
         val price = Num.parse(raw)?.times(source.scale)?.takeIf { it.isFinite() && it > 0 }
-        return Quote(symbol.code, symbol.label, price = price, unit = source.unit, error = if (price == null) "مقدار صفحه عددی نبود" else null, sourceId = source.id)
+        return Quote(symbol.code, symbol.label, price = price, unit = source.unit,
+            error = if (price == null) "قیمت معتبر در ردیف این نماد نبود" else null,
+            sourceId = source.id, providerAt = null) // TGJU row has HH:MM, not a full date.
     }
 
     private fun fetchJson(source: SourceDef, url: String, apiKey: String): JsonElement = json.parseToJsonElement(fetchText(source, url, apiKey))
@@ -121,8 +138,9 @@ class SourceFetcher(
         http.newCall(request).execute().use { response ->
             // Do not echo provider response bodies or URLs: a URL may contain a read-only key.
             if (!response.isSuccessful) throw IllegalStateException("خطای منبع (HTTP ${response.code})")
-            val text = response.peekBody(1_048_577L).string()
-            if (text.length > 1_048_576) throw IllegalStateException("پاسخ منبع بیش از حد بزرگ است")
+            val limit = if (source.kind == SourceKind.HTML_CSS) 2_000_000L else 1_048_576L
+            val text = response.peekBody(limit + 1).string()
+            if (text.length > limit) throw IllegalStateException("پاسخ منبع بیش از حد بزرگ است")
             if (text.isBlank()) throw IllegalStateException("پاسخ منبع خالی است")
             return text
         }

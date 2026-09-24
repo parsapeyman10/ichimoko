@@ -27,15 +27,59 @@ object WatchCatalog {
         WatchSymbol("AAPL", "اپل", "$", linkedMapOf(
             "stocks_yahoo" to "AAPL", "twelve_data_quote" to "AAPL",
         ), listOf("stocks_yahoo"), 20 * 60_000L, 0.5),
-        WatchSymbol("USD/IRT", "دلار", "تومان", linkedMapOf(
-            "iran_navasan_fiat" to "usd",
-        ), listOf("iran_navasan_fiat"), 24 * 60 * 60_000L, 1.0),
-        WatchSymbol("GOLD18/IRT", "طلای ۱۸ عیار", "تومان", linkedMapOf(
-            "iran_navasan_gold" to "18ayar",
-        ), listOf("iran_navasan_gold"), 24 * 60 * 60_000L, 1.0),
+        WatchSymbol("USD/IRT", "دلار آزاد", "تومان", linkedMapOf(
+            "iran_tgju_web" to "price_dollar_rl", "iran_navasan_fiat" to "usd",
+        ), listOf("iran_tgju_web", "iran_navasan_fiat"), 60 * 60_000L, 1.0),
+        WatchSymbol("GOLD18/IRT", "طلای ۱۸ عیار / گرم", "تومان", linkedMapOf(
+            "iran_tgju_web" to "geram18", "iran_navasan_gold" to "18ayar",
+        ), listOf("iran_tgju_web", "iran_navasan_gold"), 60 * 60_000L, 1.0),
+        WatchSymbol("GOLD24/IRT", "طلای ۲۴ عیار / گرم", "تومان", linkedMapOf(
+            "iran_tgju_web" to "geram24",
+        ), listOf("iran_tgju_web"), 30 * 60_000L, 1.0),
+        WatchSymbol("MESGHAL/IRT", "مثقال طلا", "تومان", linkedMapOf(
+            "iran_tgju_web" to "mesghal",
+        ), listOf("iran_tgju_web"), 30 * 60_000L, 1.0),
+        WatchSymbol("SEKEE/IRT", "سکه امامی", "تومان", linkedMapOf(
+            "iran_tgju_web" to "sekee", "iran_navasan_gold" to "sekkeh",
+        ), listOf("iran_tgju_web", "iran_navasan_gold"), 4 * 60 * 60_000L, 1.0),
+        WatchSymbol("SEKEB/IRT", "سکه بهار آزادی", "تومان", linkedMapOf(
+            "iran_tgju_web" to "sekeb", "iran_navasan_gold" to "bahar",
+        ), listOf("iran_tgju_web", "iran_navasan_gold"), 4 * 60 * 60_000L, 1.0),
+        WatchSymbol("NIM/IRT", "نیم‌سکه", "تومان", linkedMapOf(
+            "iran_tgju_web" to "nim", "iran_navasan_gold" to "nim",
+        ), listOf("iran_tgju_web", "iran_navasan_gold"), 4 * 60 * 60_000L, 1.0),
+        WatchSymbol("ROB/IRT", "ربع‌سکه", "تومان", linkedMapOf(
+            "iran_tgju_web" to "rob", "iran_navasan_gold" to "rob",
+        ), listOf("iran_tgju_web", "iran_navasan_gold"), 4 * 60 * 60_000L, 1.0),
+        WatchSymbol("GERAMI/IRT", "سکهٔ یک‌گرمی", "تومان", linkedMapOf(
+            "iran_tgju_web" to "gerami", "iran_navasan_gold" to "gerami",
+        ), listOf("iran_tgju_web", "iran_navasan_gold"), 4 * 60 * 60_000L, 1.0),
     )
 
     fun find(id: String): WatchSymbol? = symbols.firstOrNull { it.id == id }
+}
+
+data class DisplayQuote(val quote: Quote?, val sourceId: String, val fallback: Boolean)
+
+/** Display-only fallback; a recent HTML scrape is NOT proof of a fresh provider trade. */
+object WatchDisplay {
+    fun choose(symbol: WatchSymbol, selection: WatchSelection, quotes: Map<String, Quote>,
+               now: Long = System.currentTimeMillis()): DisplayQuote {
+        val preferred = selection.preferredSourceId
+        fun readable(id: String): Boolean {
+            val q = quotes[id] ?: return false
+            return id in symbol.providerCodes && q.price?.let { it.isFinite() && it > 0 } == true &&
+                q.unit == symbol.unit && !q.stale && q.error == null &&
+                q.ts in (now - symbol.maxAgeMillis)..(now + 60_000L) &&
+                (q.providerAt == null || q.providerAt in (now - symbol.maxAgeMillis)..(now + 60_000L))
+        }
+        val picked = selection.enabledSources.firstOrNull { it == preferred && readable(it) }
+            ?: selection.enabledSources.firstOrNull(::readable)
+            ?: preferred.takeIf { it in selection.enabledSources && quotes[it]?.price != null }
+            ?: selection.enabledSources.firstOrNull { quotes[it]?.price != null }
+            ?: preferred
+        return DisplayQuote(quotes[picked], picked, picked != preferred && picked.isNotBlank())
+    }
 }
 
 enum class VerificationStatus { CONFIRMED, CONFLICT, UNVERIFIED, NO_DATA }
