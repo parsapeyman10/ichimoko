@@ -99,9 +99,43 @@ object IctEntryRules {
         val beyondWick = if (isBuy) stop <= stopLimit else stop >= stopLimit
         val insideRangeTarget = if (isBuy) target <= targetLimit else target >= targetLimit
         if (!beyondWick || !insideRangeTarget || risk <= 0.0 || reward <= 0.0 ||
-            !risk.isFinite() || !reward.isFinite() || reward / risk < 1.5 ||
+            !risk.isFinite() || !reward.isFinite() || reward / risk !in 1.5..5.0 ||
             room / risk < 1.5)
             return Decision("گیت ICT: SL باید بیرون جاروب و TP قبل سطح مقابل با حداقل ۱٫۵R باشد", snapshot, setup)
         return Decision(null, snapshot, setup)
+    }
+
+    /** Capture approved evidence from THIS quote/bar, not a recomputation after a restart. */
+    fun approvedEvidence(market: MarketState, now: Long = System.currentTimeMillis()): IctPriceActionRecord? {
+        val decision = assess(market, now)
+        if (!decision.allowed) return null
+        val snap = decision.snapshot ?: return null
+        val range = snap.range ?: return null
+        val setup = decision.setup ?: return null
+        val fvg = setup.fvg ?: return null
+        val window = snap.window ?: return null
+        val signal = market.signal ?: return null
+        val price = market.lastPrice ?: return null
+        val stop = signal.stopLoss ?: return null
+        val target = signal.takeProfit ?: return null
+        val risk = if (signal.action == SignalAction.BUY) price - stop else stop - price
+        val reward = if (signal.action == SignalAction.BUY) target - price else price - target
+        val record = IctPriceActionRecord(
+            symbol = market.symbol, interval = market.interval, barTime = snap.barTime ?: return null,
+            action = signal.action, feedProvider = market.feed.provider, checkedAt = now,
+            nyDate = window.date.toString(), nySession = window.session.name, nyTime = window.localTime,
+            support = range.support, resistance = range.resistance, atr = range.atr,
+            supportTouches = range.supportTouches, resistanceTouches = range.resistanceTouches,
+            levelsConfirmedAt = range.confirmedAt, sweepAt = setup.sweepAt ?: return null,
+            mssAt = setup.shiftAt ?: return null, fvgAt = fvg.at,
+            fvgLow = fvg.low, fvgHigh = fvg.high,
+            orderBlockLow = setup.orderBlock?.low, orderBlockHigh = setup.orderBlock?.high,
+            retestAt = setup.retestAt ?: return null,
+            quote = price, stop = stop, target = target,
+            stopBoundary = setup.proposedStop ?: return null,
+            opposingLevel = setup.opposingLevel ?: return null,
+            rewardRisk = reward / risk,
+        )
+        return record.takeIf { it.matches(signal, market.symbol, price) }
     }
 }

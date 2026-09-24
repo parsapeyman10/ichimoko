@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.PaperConditionRecord
+import com.aurum.edge.core.IctPriceActionRecord
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.FeedMode
@@ -160,6 +161,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                 )
                             }
                             ConditionDisclosure(trade.id, trade.entryConditions)
+                            IctDisclosure(trade.id, trade.priceAction)
                         }
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
@@ -284,6 +286,7 @@ private fun TradeRow(trade: PaperTrade) {
             trade.mtf?.let { Text("MTF هنگام ورود: ${it.bias} · ${(it.alignment * 100).toInt()}٪ هم‌جهتی",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted) }
             ConditionDisclosure(trade.id, trade.entryConditions)
+            IctDisclosure(trade.id, trade.priceAction)
         }
         Column(horizontalAlignment = Alignment.End) {
             Text(
@@ -338,11 +341,44 @@ private fun OpportunityRow(item: PaperOpportunity, tradeStillSaved: Boolean) {
         Text("کندل ${formatDateTime(item.signalBarTime)} · MTF ${item.mtf.bias} · مدل ${item.newsEvidence.model}",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         ConditionDisclosure(item.key, item.conditions)
+        IctDisclosure(item.key, item.priceAction)
         item.newsEvidence.evidence.forEach { news ->
             OutlinedButton(onClick = { runCatching { uriHandler.openUri(news.url) } }) {
                 Text("شاهد خبر: ${news.source}", style = MaterialTheme.typography.labelSmall)
             }
         }
+    }
+}
+
+@Composable
+private fun IctDisclosure(key: String, record: IctPriceActionRecord?) {
+    if (record == null) {
+        Text("شواهد ICT ثبت نشده؛ رکورد دستی/قدیمی ادعای تأیید رنج ندارد.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        return
+    }
+    var expanded by remember("ict-$key") { mutableStateOf(false) }
+    Text("شواهد رنج/ICT هنگام ثبت · ${record.action} · S ${formatPrice(record.support)} / R ${formatPrice(record.resistance)} · ${String.format("%.2f", record.rewardRisk)}R",
+        style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
+    OutlinedButton(onClick = { expanded = !expanded }) {
+        Text(if (expanded) "بستن شواهد ICT" else "نمایش نقدینگی، FVG و زمان ICT",
+            style = MaterialTheme.typography.labelSmall)
+    }
+    if (expanded) {
+        Text("${record.model} · ${record.feedProvider} · کندل ${record.interval.label} ${formatDateTime(record.barTime)} · ارزیابی ${formatDateTime(record.checkedAt)}",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+        Text("جلسه ${record.nySession} · ${record.nyDate} ${record.nyTime} به وقت America/New_York؛ زمان‌های بعدی به وقت گوشی",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+        Text("حمایت ${formatPrice(record.support)} (${record.supportTouches} تماس) / مقاومت ${formatPrice(record.resistance)} (${record.resistanceTouches} تماس) · تأیید ${formatDateTime(record.levelsConfirmedAt)} · ATR ${formatPrice(record.atr)}",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+        Text("جاروب/بازپس‌گیری ${formatDateTime(record.sweepAt)} → MSS ${formatDateTime(record.mssAt)} → FVG ${formatPrice(record.fvgLow)}–${formatPrice(record.fvgHigh)} (${formatDateTime(record.fvgAt)}) → بازآزمایی ${formatDateTime(record.retestAt)}",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+        Text("اردربلاک صرفاً نامزدِ OHLC: ${if (record.orderBlockLow == null) "یافت نشد" else "${formatPrice(record.orderBlockLow)}–${formatPrice(record.orderBlockHigh)}"}",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+        Text("قیمت ${formatPrice(record.quote)} · SL ${formatPrice(record.stop)} (حد بیرون جاروب ${formatPrice(record.stopBoundary)}) · TP ${formatPrice(record.target)} (حد پیش از سطح مقابل ${formatPrice(record.opposingLevel)})",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+        Text("تقریب آموزشی روی کندل بسته؛ سفارش نهادی/سود آینده را تأیید نمی‌کند. مدل قدیمی پس از ثبت دوباره‌نویسی نمی‌شود.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
     }
 }
 

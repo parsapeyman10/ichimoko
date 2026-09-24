@@ -101,6 +101,8 @@ object Notifier {
         }
         val text = "${item.interval.label} · قیمت ${formatPrice(item.priceAtAlert)}$ · " +
             "SL ${formatPrice(item.stopLoss)} · TP ${formatPrice(item.takeProfit)}"
+        if (item.priceAction?.barTime != item.signalBarTime ||
+            item.priceAction?.action != item.action) return false
         return postVerified(context, item.key.hashCode(), title, text,
             "$text\nکاندیدا؛ باز شدن پوزیشن کاغذی یا سفارش واقعی را نشان نمی‌دهد. جزئیات در ژورنال.",
             customSoundUri)
@@ -113,13 +115,16 @@ object Notifier {
             trade.newsEvidence?.evidence.isNullOrEmpty() || trade.mtf?.veto != false ||
             trade.entryConditions.size != 9 ||
             trade.entryConditions.any { it.status != "CONFIRMED" } ||
-            trade.entryConditions[8].name != NewsConfluence.NEWS_LABEL) return false
+            trade.entryConditions[8].name != NewsConfluence.NEWS_LABEL ||
+            trade.priceAction?.barTime != trade.signalBarTime ||
+            trade.priceAction?.action != trade.action ||
+            trade.priceAction?.quote != trade.entry) return false
         val side = if (trade.action == SignalAction.BUY) "خرید" else "فروش"
         val title = "معاملهٔ آموزشی $side ثبت شد · فقط کاغذی"
         val text = "XAU/USD ${trade.interval.label} · ورود ${formatPrice(trade.entry)}$ · شناسه ${trade.id.take(8)}"
         return postVerified(context, trade.id.hashCode(), title, text,
             "$text\nSL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)} · " +
-                "۹/۹ و شواهد خبر در ژورنال ثبت شدند. سفارش واقعی ارسال نشد.", customSoundUri)
+                "۹/۹، خبر و شواهد رنج/ICT در ژورنال ثبت شدند. سفارش واقعی ارسال نشد.", customSoundUri)
     }
 
     private fun postVerified(context: Context, id: Int, title: String, text: String,

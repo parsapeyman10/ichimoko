@@ -42,6 +42,11 @@ class IctEntryRulesTest {
 
     @Test fun `valid pattern AND nine checks permit only paper candidate`() {
         assertTrue(IctEntryRules.assess(market, now).allowed)
+        val evidence = IctEntryRules.approvedEvidence(market, now)!!
+        assertTrue(evidence.matches(verified, market.symbol, market.lastPrice!!))
+        assertEquals(3, evidence.supportTouches)
+        assertEquals(IctRangeAnalyzer.ZoneKind.FVG, IctRangeAnalyzer.analyze(market.candles, Interval.M5).buy.fvg?.kind)
+        assertFalse(evidence.copy(barTime = bar - Interval.M5.millis).matches(verified, market.symbol, market.lastPrice!!))
         assertNull(PaperAutoRules.blocker(market, config, news, now))
         assertNull(PaperAutoRules.opportunityBlocker(market, config.copy(autoPaperTrading = false), news, now))
     }

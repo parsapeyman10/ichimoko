@@ -501,12 +501,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                         com.aurum.edge.core.ConfluenceStatus.CONFIRMED) { "خبر AI در لحظهٔ ثبت قدیمی شد" }
                     NewsConfluence.record(latestNews) ?: error("شواهد خبر قابل ذخیره نیست")
                 }
+                val ict = if (manual) null else (IctEntryRules.approvedEvidence(current)
+                    ?: error("شواهد رنج/ICT همین کندل پیش از ثبت معتبر نیست"))
                 val trade = container.journalStore.open(
                     signal = signal, symbol = current.symbol, price = price,
                     balance = s.accountBalance, riskPercent = s.riskPercent,
                     mtf = if (manual) null else _mtf.value?.let { MtfSnapshotRecord.from(it) },
                     manual = manual,
-                    newsEvidence = newsRecord,
+                    newsEvidence = newsRecord, priceAction = ict,
                 )
                 _stats.value = container.journalStore.stats()
                 // Linking is metadata only; a damaged opportunity file must not erase a saved trade.

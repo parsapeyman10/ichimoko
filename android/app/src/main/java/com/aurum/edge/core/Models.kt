@@ -101,6 +101,60 @@ data class PaperNewsRecord(
     val evidence: List<PaperNewsEvidence>,
 )
 
+/** Snapshot of an OHLC approximation at the moment a PAPER opportunity/entry was checked. */
+@Serializable
+data class IctPriceActionRecord(
+    val model: String = "OHLC_RANGE_ICT_V1",
+    val symbol: String,
+    val interval: Interval,
+    val barTime: Long,
+    val action: SignalAction,
+    val feedProvider: String,
+    val checkedAt: Long,
+    val nyDate: String,
+    val nySession: String,
+    val nyTime: String,
+    val support: Double,
+    val resistance: Double,
+    val atr: Double,
+    val supportTouches: Int,
+    val resistanceTouches: Int,
+    val levelsConfirmedAt: Long,
+    val sweepAt: Long,
+    val mssAt: Long,
+    val fvgAt: Long,
+    val fvgLow: Double,
+    val fvgHigh: Double,
+    val orderBlockLow: Double?,
+    val orderBlockHigh: Double?,
+    val retestAt: Long,
+    val quote: Double,
+    val stop: Double,
+    val target: Double,
+    val stopBoundary: Double,
+    val opposingLevel: Double,
+    val rewardRisk: Double,
+) {
+    fun matches(signal: Signal, marketSymbol: String, marketPrice: Double): Boolean {
+        val risk = if (action == SignalAction.BUY) quote - stop else stop - quote
+        val reward = if (action == SignalAction.BUY) target - quote else quote - target
+        return model == "OHLC_RANGE_ICT_V1" && symbol == marketSymbol &&
+            action != SignalAction.NO_TRADE && action == signal.action &&
+            interval == signal.interval && barTime == signal.barTime &&
+            quote == marketPrice && stop == signal.stopLoss && target == signal.takeProfit &&
+            feedProvider.isNotBlank() && checkedAt > barTime && nyDate.isNotBlank() &&
+            nySession in setOf("LONDON", "NEW_YORK") && nyTime.isNotBlank() &&
+            support > 0.0 && resistance > support && atr.isFinite() && atr > 0.0 &&
+            supportTouches >= 2 && resistanceTouches >= 2 &&
+            levelsConfirmedAt in 1L until sweepAt && sweepAt < mssAt && mssAt < fvgAt &&
+            fvgAt < retestAt && retestAt == barTime && fvgLow.isFinite() && fvgHigh > fvgLow &&
+            risk > 0.0 && reward / risk >= 1.5 && reward / risk <= 5.0 &&
+            rewardRisk.isFinite() && kotlin.math.abs(reward / risk - rewardRisk) < 1e-6 &&
+            (if (action == SignalAction.BUY) stop <= stopBoundary && target <= opposingLevel
+             else stop >= stopBoundary && target >= opposingLevel)
+    }
+}
+
 @Serializable
 data class PaperTrade(
     val id: String,
@@ -130,6 +184,8 @@ data class PaperTrade(
     val newsEvidence: PaperNewsRecord? = null,
     /** Snapshot at the moment the paper position was actually saved; never recompute on read. */
     val entryConditions: List<PaperConditionRecord> = emptyList(),
+    /** Null on older/manual records; never infer a historical ICT verdict on read. */
+    val priceAction: IctPriceActionRecord? = null,
 ) {
     val isOpen: Boolean get() = closedAt == null
     val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }
@@ -167,14 +223,19 @@ data class PaperOpportunity(
     val mtf: MtfSnapshotRecord,
     val newsEvidence: PaperNewsRecord,
     val paperTradeId: String? = null,
+    /** Null only for a candidate written before the new ICT gate. */
+    val priceAction: IctPriceActionRecord? = null,
 ) {
     companion object {
         fun from(signal: Signal, symbol: String, price: Double, mtf: MtfSnapshotRecord,
-                 news: PaperNewsRecord, now: Long = System.currentTimeMillis()): PaperOpportunity {
+                 news: PaperNewsRecord, ict: IctPriceActionRecord,
+                 now: Long = System.currentTimeMillis()): PaperOpportunity {
             require(symbol == "XAU/USD" && signal.isActionable && signal.barTime > 0 &&
                 signal.confluence.take(9).size == 9 &&
                 signal.confluence.take(9).all { it.ok && it.status == ConfluenceStatus.CONFIRMED } &&
-                price.isFinite() && price > 0 && signal.stopLoss != null && signal.takeProfit != null) {
+                signal.confluence[8].name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL &&
+                price.isFinite() && price > 0 && signal.stopLoss != null && signal.takeProfit != null &&
+                ict.matches(signal, symbol, price) && !mtf.veto && mtf.barTime == signal.barTime) {
                 "فرصت آموزشی معتبر نیست"
             }
             return PaperOpportunity(
@@ -183,7 +244,7 @@ data class PaperOpportunity(
                 signalBarTime = signal.barTime, priceAtAlert = price,
                 stopLoss = signal.stopLoss, takeProfit = signal.takeProfit,
                 alertedAt = now, conditions = signal.confluence.take(9).map(PaperConditionRecord::from),
-                mtf = mtf, newsEvidence = news,
+                mtf = mtf, newsEvidence = news, priceAction = ict,
             )
         }
     }

@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.AtomicFile
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.MtfSnapshotRecord
+import com.aurum.edge.core.IctPriceActionRecord
+import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PaperNewsRecord
 import com.aurum.edge.core.PaperOrderRules
@@ -116,11 +118,21 @@ class JournalStore(context: Context, private val file: File = File(context.files
         manual: Boolean = false,
         automatic: Boolean = false,
         newsEvidence: PaperNewsRecord? = null,
+        priceAction: IctPriceActionRecord? = null,
     ): PaperTrade {
         require(!automatic || (!manual && signal.isActionable && signal.barTime > 0 &&
-            newsEvidence != null && newsEvidence.evidence.isNotEmpty())) { "شواهد خبر برای معاملهٔ خودکار کاغذی کامل نیست" }
+            newsEvidence != null && newsEvidence.evidence.isNotEmpty() &&
+            signal.confluence.size >= 9 && signal.confluence.take(9).all {
+                it.ok && it.status == ConfluenceStatus.CONFIRMED
+            } && signal.confluence[8].name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL &&
+            mtf != null && !mtf.veto && mtf.barTime == signal.barTime && mtf.frames.isNotEmpty())) {
+            "۹ شرط، خبر AI یا چندتایم‌فریم برای ورود خودکار کاغذی کامل نیست"
+        }
         val stop = signal.stopLoss ?: throw IllegalArgumentException("حد ضرر وجود ندارد")
         val target = signal.takeProfit ?: throw IllegalArgumentException("حد سود وجود ندارد")
+        require(manual || priceAction?.matches(signal, symbol, price) == true) {
+            "شواهد همان کندلِ رنج/ICT برای ورود سیگنالی کاغذی ثبت نشده است"
+        }
         val draft = PaperOrderRules.preview(signal.action, symbol, price, stop, target, balance, riskPercent)
         val trade = PaperTrade(
             id = UUID.randomUUID().toString(),
@@ -137,7 +149,7 @@ class JournalStore(context: Context, private val file: File = File(context.files
             positionUnit = draft.unit,
             note = when {
                 manual -> "ورود دستی کاغذی؛ بدون تأیید موتور/بروکر"
-                automatic -> "ورود خودکار کاغذی با ۸ شرط فنی + خبر AI؛ بدون سفارش بروکر"
+                automatic -> "ورود خودکار کاغذی با ۸ شرط فنی + خبر AI و شواهد رنج/ICT؛ بدون سفارش بروکر"
                 else -> "سیگنال کاغذی روی قیمت دریافتی — ${signal.interval.label}"
             },
             mtf = if (manual) null else mtf,
@@ -147,6 +159,7 @@ class JournalStore(context: Context, private val file: File = File(context.files
             entryConditions = if (manual) emptyList() else signal.confluence.take(9).map {
                 com.aurum.edge.core.PaperConditionRecord.from(it)
             },
+            priceAction = if (manual) null else priceAction,
         )
         mutex.withLock {
             // Serialize the check and append. No pyramiding or duplicate position per symbol.

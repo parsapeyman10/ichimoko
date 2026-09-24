@@ -6,6 +6,7 @@ import com.aurum.edge.core.ConfluenceItem
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.Interval
+import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperAlertRules
 import com.aurum.edge.core.PaperOpportunity
@@ -89,13 +90,15 @@ class PaperOpportunityTest {
         val root = Files.createTempDirectory("opportunities").toFile()
         val file = File(root, "opportunities.json")
         val journalFile = File(root, "journal.json")
+        val ict = IctEntryRules.approvedEvidence(market, now)!!
         val opportunity = PaperOpportunity.from(signal, "XAU/USD", 3000.0,
-            MtfSnapshotRecord.from(snapshot), NewsConfluence.record(news)!!, now)
+            MtfSnapshotRecord.from(snapshot), NewsConfluence.record(news)!!, ict, now)
         val store = PaperOpportunityStore(context, file)
         store.load()
         assertTrue(store.record(opportunity))
         assertFalse(store.record(opportunity))
         assertEquals(9, store.items.value.single().conditions.size)
+        assertEquals(ict, store.items.value.single().priceAction)
         val journal = JournalStore(context, journalFile)
         journal.load()
         assertEquals(0, journal.stats().open)
@@ -103,10 +106,13 @@ class PaperOpportunityTest {
         val reopened = PaperOpportunityStore(context, file).also { it.load() }
         assertFalse(reopened.record(opportunity))
         val trade = journal.open(signal, "XAU/USD", 3000.0, 100.0, 0.5,
-            automatic = true, newsEvidence = NewsConfluence.record(news))
+            automatic = true, mtf = MtfSnapshotRecord.from(snapshot),
+            newsEvidence = NewsConfluence.record(news), priceAction = ict)
         reopened.linkTrade(trade)
         assertEquals(trade.id, PaperOpportunityStore(context, file).also { it.load() }.items.value.single().paperTradeId)
-        assertEquals(9, JournalStore(context, journalFile).also { it.load() }.trades.value.single().entryConditions.size)
+        val persisted = JournalStore(context, journalFile).also { it.load() }.trades.value.single()
+        assertEquals(9, persisted.entryConditions.size)
+        assertEquals(ict, persisted.priceAction)
         assertEquals("۹ · خبر AI با شاهد ناشر", trade.entryConditions[8].name)
         assertEquals(1, journal.stats().open)
         assertEquals(0, journal.stats().total)

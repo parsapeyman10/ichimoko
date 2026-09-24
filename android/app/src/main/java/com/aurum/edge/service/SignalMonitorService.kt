@@ -11,6 +11,7 @@ import androidx.core.app.NotificationManagerCompat
 import com.aurum.edge.AurumApplication
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.MtfSnapshotRecord
+import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.PaperAlertRules
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.engine.MtfAnalyzer
@@ -121,10 +122,11 @@ class SignalMonitorService : Service() {
                             PaperAlertRules.blocker(latest, recentConfig, recentNews,
                                 container.journalStore.trades.value, snapshot) == null) {
                             val evidence = NewsConfluence.record(recentNews)
-                            if (evidence != null && snapshot != null &&
+                            val ict = IctEntryRules.approvedEvidence(latest)
+                            if (evidence != null && ict != null && snapshot != null &&
                                 Notifier.canNotifyVerified(this@SignalMonitorService, recentConfig.alertSoundUri)) {
                                 val item = runCatching { PaperOpportunity.from(latest.signal!!, latest.symbol,
-                                    latest.lastPrice!!, MtfSnapshotRecord.from(snapshot), evidence) }.getOrNull()
+                                    latest.lastPrice!!, MtfSnapshotRecord.from(snapshot), evidence, ict) }.getOrNull()
                                 newCandidate = item
                             }
                         }

@@ -1,6 +1,7 @@
 package com.aurum.edge.data
 
 import com.aurum.edge.core.MtfSnapshotRecord
+import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.engine.MtfAnalyzer
@@ -62,10 +63,15 @@ class PaperAutoTrader(
             _status.value = "شواهد خبر برای ثبت در ژورنال کامل نیست"
             return null
         }
+        val ict = IctEntryRules.approvedEvidence(current) ?: run {
+            _status.value = "شواهد رنج/ICT همین کندل برای ژورنال تأیید نشد"
+            return null
+        }
         return try {
             val trade = journal.open(signal, current.symbol, current.lastPrice!!,
                 recentSettings.accountBalance, recentSettings.riskPercent,
-                mtf = MtfSnapshotRecord.from(mtf), automatic = true, newsEvidence = newsRecord)
+                mtf = MtfSnapshotRecord.from(mtf), automatic = true,
+                newsEvidence = newsRecord, priceAction = ict)
             _status.value = "کاغذی ثبت شد: ${trade.symbol} ${trade.action} · شناسهٔ ${trade.id.take(8)}؛ در ژورنال قابل مشاهده است"
             trade
         } catch (e: Exception) {
