@@ -1,3 +1,8 @@
+import org.gradle.api.tasks.testing.Test
+import org.gradle.api.tasks.testing.TestDescriptor
+import org.gradle.api.tasks.testing.TestListener
+import org.gradle.api.tasks.testing.TestResult
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -87,6 +92,26 @@ dependencies {
     // They never run inside the APK; release assembly requires them to pass below.
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.robolectric:robolectric:4.14.1")
+}
+
+// GitHub test logs are hosted externally and may be inaccessible. Surface the failed
+// test and its exception as a check annotation so a broken APK cannot be mistaken for green.
+tasks.withType<Test>().configureEach {
+    if (System.getenv("GITHUB_ACTIONS") == "true") {
+        addTestListener(object : TestListener {
+            override fun beforeSuite(suite: TestDescriptor) = Unit
+            override fun afterSuite(suite: TestDescriptor, result: TestResult) = Unit
+            override fun beforeTest(test: TestDescriptor) = Unit
+            override fun afterTest(test: TestDescriptor, result: TestResult) {
+                if (result.resultType == TestResult.ResultType.FAILURE) {
+                    val detail = result.exceptions.firstOrNull()?.let {
+                        "${it.javaClass.simpleName}: ${it.message.orEmpty()}"
+                    }.orEmpty().replace('\n', ' ').replace('\r', ' ').take(300)
+                    println("::error title=JVM test failed::${test.className}.${test.name}: $detail")
+                }
+            }
+        })
+    }
 }
 
 // The published workflow currently makes its separate JVM-test step non-blocking.
