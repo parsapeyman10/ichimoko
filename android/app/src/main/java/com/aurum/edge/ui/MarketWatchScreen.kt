@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.data.Quote
+import com.aurum.edge.data.QuoteDisplayState
 import com.aurum.edge.data.SourceCatalog
 import com.aurum.edge.data.SourceComparison
 import com.aurum.edge.data.VerificationStatus
@@ -72,7 +73,7 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
-        SectionCard("دیده‌بان چندمنبعی", "قیمت هر منبع جداست؛ تأیید تنها با ۲ منبع مستقلِ تازه و هم‌واحد") {
+        SectionCard("دیده‌بان چندمنبعی", "قیمت نمایشی ≠ تأیید دومنبعی؛ زمان دریافت وب جای زمان قیمت ناشر را نمی‌گیرد") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = viewModel::refreshWatch, enabled = !state.refreshing, modifier = Modifier.weight(1f)) {
                     Text(if (state.refreshing) "در حال دریافت…" else "دریافت دوباره")
@@ -102,12 +103,13 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
             SectionCard(
                 title = "${symbol.label} · ${symbol.id}",
                 subtitle = "منبع نمایشی: ${SourceCatalog.find(display.sourceId)?.title ?: "انتخاب نشده"}${if (display.fallback) " · جایگزین" else ""} · ${symbol.unit}",
-                trailing = { Pill(verification.status.name, tone) },
+                trailing = { Pill(verification.badge, tone) },
             ) {
                 Text(
                     preferred?.price?.let { "${formatPrice(it)} ${symbol.unit}" } ?: "قیمت موجود نیست",
                     style = MaterialTheme.typography.titleMedium,
-                    color = if (preferred != null && SourceComparison.isFresh(symbol, preferred, now)) AurumColors.TextPrimary else AurumColors.TextMuted,
+                    color = if (SourceComparison.assess(symbol, display.sourceId, preferred, now).readable)
+                        AurumColors.TextPrimary else AurumColors.TextMuted,
                 )
                 Text(
                     verification.reason + (verification.spreadPct?.let { " · اختلاف ${String.format("%.2f", it)}%" } ?: ""),
@@ -120,21 +122,24 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
                 selected.enabledSources.forEach sourceLoop@{ sourceId ->
                     val source = SourceCatalog.find(sourceId) ?: return@sourceLoop
                     val quote = quotes[sourceId]
-                    val fresh = quote?.let { SourceComparison.isFresh(symbol, it, now) } == true
+                    val assessment = SourceComparison.assess(symbol, sourceId, quote, now)
+                    val shown = quote?.let { q -> q.price?.takeIf { q.sourceId == sourceId && q.unit == symbol.unit && it.isFinite() && it > 0 } }
                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Column(Modifier.weight(1f)) {
-                            Text("${source.title}: ${formatPrice(quote?.price)} ${symbol.unit}",
+                            Text("${source.title}: ${formatPrice(shown)} ${symbol.unit}",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (fresh) AurumColors.TextPrimary else AurumColors.TextMuted)
-                            Text(when {
-                                quote == null -> "هنوز دریافت نشده"
-                                quote.error != null -> "${quote.error} · آخرین مشاهده ${formatDateTime(quote.ts)}"
-                                quote.stale -> "کش‌شده · مشاهده ${formatDateTime(quote.ts)}"
-                                quote.providerAt == null -> "زمان قیمت توسط منبع ارائه نشده · مشاهده ${formatDateTime(quote.ts)}"
-                                !fresh -> "قدیمی/تعطیل · قیمت منبع ${formatDateTime(quote.providerAt)}"
-                                else -> "تازه · زمان منبع ${formatDateTime(quote.providerAt)}"
+                                color = if (assessment.readable) AurumColors.TextPrimary else AurumColors.TextMuted)
+                            Text(buildString {
+                                append(assessment.detail)
+                                if (assessment.state == QuoteDisplayState.ERROR && quote?.error != null) append(" · ${quote.error}")
+                                if (quote?.providerAt != null) append(" · زمان قیمت ${formatDateTime(quote.providerAt)}")
+                                if (quote != null) append(" · دریافت ${formatDateTime(quote.ts)}")
                             }, style = MaterialTheme.typography.labelSmall,
-                                color = if (fresh) AurumColors.Green else AurumColors.TextMuted)
+                                color = when (assessment.state) {
+                                    QuoteDisplayState.DATED -> AurumColors.Green
+                                    QuoteDisplayState.UNDATED -> AurumColors.Gold
+                                    else -> AurumColors.TextMuted
+                                })
                         }
                         OutlinedButton(onClick = { viewModel.showWatchHistory(symbol.id, sourceId) }) {
                             Text("تاریخچه", style = MaterialTheme.typography.labelSmall)

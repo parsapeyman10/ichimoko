@@ -15,6 +15,7 @@ import com.aurum.edge.data.MetaTraderCsv
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.MetaTraderImporter
 import com.aurum.edge.data.NewsRepository
+import com.aurum.edge.data.PublicWebNewsRepository
 import com.aurum.edge.data.NobitexPublicData
 import com.aurum.edge.data.NobitexSpotScanner
 import com.aurum.edge.data.NobitexPracticeStore
@@ -61,7 +62,8 @@ class AppContainer(context: Context) {
     val watchSettings = WatchSettingsStore(appContext)
     val quoteHistory = QuoteHistoryStore(appContext)
     val watch = WatchRepository(SourceFetcher(), quoteHistory, watchSettings, settingsStore, appScope)
-    val news = NewsRepository(settingsStore, appScope)
+    val news = NewsRepository(settingsStore, appScope) // independent, fail-closed server AI gate
+    val publicWebNews = PublicWebNewsRepository(appScope) // direct read-only headlines for the UI, never the AI gate
     val forexCalendar = ForexCalendarRepository(appScope) // public schedule UI; server checks it independently for the AI gate
     /** Shared by chart, signal tab, notifications and automatic *paper* entries. Expires on time. */
     val verifiedMarket: StateFlow<MarketState> = combine(

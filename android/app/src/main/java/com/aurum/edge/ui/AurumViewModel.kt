@@ -92,6 +92,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val watchSettings: StateFlow<Map<String, WatchSelection>> = container.watchSettings.selections
     val watch: StateFlow<WatchState> = container.watch.state
     val news = container.news.state
+    val publicWebNews = container.publicWebNews.state // headlines for display, not ninth-confluence evidence
     val forexCalendar = container.forexCalendar.state
     val crypto = container.crypto.state
     private val _nobitex = MutableStateFlow<NobitexState>(NobitexState.Idle)
@@ -177,6 +178,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun refreshWatch() = container.watch.refreshNow()
 
     fun refreshNews() = container.news.refreshNow()
+
+    fun refreshPublicWebNews() = container.publicWebNews.refreshNow()
 
     fun refreshForexCalendar() = container.forexCalendar.refreshNow()
 

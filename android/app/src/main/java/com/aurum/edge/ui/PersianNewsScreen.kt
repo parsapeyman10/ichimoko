@@ -1,6 +1,7 @@
 package com.aurum.edge.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,20 +11,27 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.data.NewsGate
+import com.aurum.edge.data.PublicFeedState
+import com.aurum.edge.data.PublicNewsCategory
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.formatDateTime
@@ -33,58 +41,142 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
-    val state by viewModel.news.collectAsStateWithLifecycle()
+    val server by viewModel.news.collectAsStateWithLifecycle()
+    val web by viewModel.publicWebNews.collectAsStateWithLifecycle()
     val calendar by viewModel.forexCalendar.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val uriHandler = LocalUriHandler.current
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var category by remember { mutableStateOf<PublicNewsCategory?>(null) }
+    var showAll by remember { mutableStateOf(false) }
+    var showFeeds by remember { mutableStateOf(false) }
+    var showCalendar by remember { mutableStateOf(false) }
+    var showServerArticles by remember { mutableStateOf(false) }
+
     LaunchedEffect(settings.newsBaseUrl) { viewModel.refreshNews() }
+    LaunchedEffect(Unit) {
+        viewModel.refreshPublicWebNews() // no backend URL or news API key needed
+        while (true) { delay(900_000L); viewModel.refreshPublicWebNews() }
+    }
     LaunchedEffect(Unit) {
         while (true) { viewModel.refreshForexCalendar(); delay(900_000L) }
     }
-    val tone = when (state.gate) {
+    LaunchedEffect(Unit) {
+        while (true) { delay(30_000L); now = System.currentTimeMillis() }
+    }
+    val filtered = web.headlines.filter { (category == null || it.feed.category == category) &&
+        now - it.publishedAt in -15 * 60_000L..it.feed.maxAgeHours * 3_600_000L }
+    val onlineFeeds = web.feeds.count { it.online(now) }
+    val serverTone = when (server.gate) {
         NewsGate.CLEAR -> AurumColors.Green
         NewsGate.BLOCKED -> AurumColors.Red
         NewsGate.UNKNOWN -> AurumColors.Gold
     }
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
-        SectionCard("اخبار واقعی از وب", "RSS رسمی/عمومی ناشران؛ تیتر و چکیدهٔ کوتاه بدون ترجمه یا محتوای ساختگی",
-            trailing = { Pill(state.gate.name, tone) }) {
-            Text(state.reason, style = MaterialTheme.typography.bodySmall, color = tone)
-            Text("منبع: ${state.provider ?: "پیکربندی نشده"} · آخرین دریافت: ${relativeTime(state.lastCheckedAt)}" +
-                (if (state.cached) " · داده قبلی/وضعیت نامشخص" else ""),
+        SectionCard("تیترهای واقعی وب", "خواندن مستقیم RSS/Atom ناشران روی گوشی · بدون سرور یا کلید",
+            trailing = { Pill(if (web.loading) "در حال دریافت" else "$onlineFeeds/${web.feeds.size} خوراک",
+                if (onlineFeeds > 0 && !web.loading) AurumColors.Cyan else AurumColors.Gold) }) {
+            Text("تیتر و چکیدهٔ کوتاه همان خوراک ناشر است؛ خبر انگلیسی ترجمه یا تحلیل ساختگی ندارد. تاریخ انتشار و لینک اصلی زیر هر تیتر است.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            Text("آخرین تلاش: ${relativeTime(web.lastAttemptAt, now)} · قطع یک ناشر، خبرهای دیگر را پنهان نمی‌کند. به‌روزرسانی حداکثر هر ۶۰ ثانیه.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 5.dp))
-            state.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red) }
+            Text("صرفاً برای مطالعه؛ این تیترها هرگز شرط نهم AI، تأیید خبر برای معامله یا مجوز سفارش نیستند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 5.dp))
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = viewModel::refreshNews, enabled = !state.loading, modifier = Modifier.weight(1f)) {
-                    Text(if (state.loading) "دریافت…" else "تازه‌سازی")
+                Button(onClick = viewModel::refreshPublicWebNews, enabled = !web.loading, modifier = Modifier.weight(1f)) {
+                    Text(if (web.loading) "دریافت…" else "تازه‌سازی تیترها")
                 }
-                OutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) { Text("تنظیم سرور") }
+                OutlinedButton(onClick = { showFeeds = !showFeeds }, modifier = Modifier.weight(1f)) {
+                    Text("وضعیت خوراک‌ها")
+                }
             }
-            Text("وتوی خبر برای ورود دستی کاغذی ${if (settings.pauseOnNews) "روشن" else "خاموش"} است؛ برای ورود خودکار و سیگنالی شرط AI همیشه الزامی است. قطع یک خوراک UNKNOWN می‌کند. CLEAR تقویم کامل یا اجازهٔ سفارش واقعی نیست.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 6.dp))
+            if (showFeeds || onlineFeeds == 0) web.feeds.forEach { feed ->
+                val label = when {
+                    feed.online(now) -> "دریافت شد"
+                    feed.state == PublicFeedState.PENDING -> "هنوز بررسی نشده"
+                    feed.state == PublicFeedState.OUTDATED -> "خبر تازه ندارد"
+                    feed.state == PublicFeedState.ONLINE -> "دریافت قدیمی"
+                    else -> "قطع/خطا"
+                }
+                Text("${feed.feed.title}: $label · ${feed.detail} · بررسی ${relativeTime(feed.checkedAt, now)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (feed.online(now)) AurumColors.Cyan else AurumColors.Gold,
+                    modifier = Modifier.padding(top = 4.dp))
+            }
         }
-        SectionCard("تقویم اقتصادی Forex Factory", "دریافت مستقیم وب، مستقل از سرور خبر · برنامهٔ رویداد، نه نتیجهٔ خبر یا سیگنال",
-            trailing = { Pill(if (calendar.online()) "دریافت شد" else "نامشخص", if (calendar.online()) AurumColors.Green else AurumColors.Gold) }) {
-            Text("● نشان قرمز = رویداد پراثر · زمان به وقت گوشی · آخرین دریافت ${relativeTime(calendar.checkedAt)}",
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(null to "همه", PublicNewsCategory.IRAN to "ایران", PublicNewsCategory.MARKETS to "طلا/فارکس",
+                PublicNewsCategory.CRYPTO to "رمزارز", PublicNewsCategory.ECONOMY to "آمار رسمی").forEach { (id, label) ->
+                FilterChip(selected = category == id, onClick = { category = id; showAll = false }, label = { Text(label) })
+            }
+        }
+        if (filtered.isEmpty()) {
+            SectionCard("تیتر قابل نمایش نیست", "نبود تیتر به معنی نبود خبر یا امن‌بودن بازار نیست") {
+                Text(if (web.loading) "در حال خواندن خوراک‌های ناشران…" else
+                    "به وضعیت هر خوراک در بالا نگاه کنید و با اینترنت دوباره تلاش کنید؛ برای نمایش خبر نیازی به واردکردن نشانی سرور نیست.",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+            }
+        }
+        filtered.take(if (showAll) 45 else 8).forEach { item ->
+            val feedStatus = web.feeds.firstOrNull { it.feed.id == item.feed.id }
+            val fromRecentResponse = !web.loading && feedStatus?.online(now) == true &&
+                item.receivedAt >= (feedStatus.checkedAt ?: 0L) - 30_000L
+            val periodic = item.feed.category == PublicNewsCategory.ECONOMY
+            val receiptLabel = when {
+                !fromRecentResponse -> "کش/دریافت پیشین"
+                periodic -> "گزارش دوره‌ای"
+                else -> "از خوراک ناشر"
+            }
+            SectionCard(item.title,
+                "${item.feed.title} · ${if (item.feed.language == "en") "EN · زبان اصلی" else "FA"} · انتشار ${formatDateTime(item.publishedAt)}" +
+                    (if (item.publishedAt > now) " · ساعت ناشر جلوتر است" else " · ${relativeTime(item.publishedAt, now)}"),
+                trailing = { Pill(receiptLabel, if (fromRecentResponse) AurumColors.Cyan else AurumColors.Gold) }) {
+                if (item.excerpt.isNotBlank()) Text(item.excerpt,
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+                Text("دریافت در گوشی: ${formatDateTime(item.receivedAt)} · ${if (fromRecentResponse) "وضعیت خوراک بالا" else "قدیمی/کش؛ تازگی مجدد تأیید نشده"}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                    modifier = Modifier.padding(top = 4.dp))
+                OutlinedButton(onClick = { runCatching { uriHandler.openUri(item.url) } }, modifier = Modifier.padding(top = 5.dp)) {
+                    Text("باز کردن در وب‌سایت ناشر")
+                }
+            }
+        }
+        if (filtered.size > 8 && !showAll) {
+            OutlinedButton(onClick = { showAll = true }, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) {
+                Text("نمایش ${minOf(filtered.size - 8, 37)} تیتر دیگر")
+            }
+        }
+
+        SectionCard("تقویم اقتصادی Forex Factory", "وب مستقیم · برنامهٔ رویداد، نه نتیجهٔ خبر یا سیگنال",
+            trailing = { Pill(if (calendar.online(now)) "دریافت شد" else "نامشخص",
+                if (calendar.online(now)) AurumColors.Green else AurumColors.Gold) }) {
+            Text("● قرمز = رویداد پراثر · ساعت به وقت گوشی · بررسی ${relativeTime(calendar.checkedAt, now)}",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
             calendar.error?.let { Text("تقویم در دسترس نیست: $it · نبود داده به معنی نبود رویداد نیست",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Red) }
-            val now = System.currentTimeMillis()
-            val upcoming = if (calendar.online(now)) calendar.events.filter { it.at in (now - 2 * 3_600_000L)..(now + 7 * 86_400_000L) }.take(90)
-                else emptyList()
-            if (upcoming.isEmpty()) Text("رویدادِ قابل نمایش در بازهٔ پیشِ رو دریافت نشده؛ وضعیت خبر برای ورود تأیید نیست.",
+            val upcoming = if (calendar.online(now)) calendar.events.filter {
+                it.at in (now - 2 * 3_600_000L)..(now + 7 * 86_400_000L)
+            }.take(90) else emptyList()
+            if (upcoming.isEmpty()) Text("رویداد قابل نمایش دریافت نشده؛ وضعیت خبر برای ورود تأیید نیست.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
-            upcoming.forEach { event ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Box(Modifier.padding(top = 5.dp).size(8.dp).background(
-                        if (event.impact == "High") AurumColors.Red else AurumColors.TextMuted,
-                        RoundedCornerShape(2.dp)))
-                    Text("${event.country} · ${formatDateTime(event.at)} · ${event.title}" +
-                        (if (event.impact == "High") " · پراثر" else ""),
-                        modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
-                        color = if (event.impact == "High") AurumColors.Red else AurumColors.TextSecondary)
+            else {
+                upcoming.take(if (showCalendar) 90 else 6).forEach { event ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.padding(top = 5.dp).size(8.dp).background(
+                            if (event.impact == "High") AurumColors.Red else AurumColors.TextMuted,
+                            RoundedCornerShape(2.dp)))
+                        Text("${event.country} · ${formatDateTime(event.at)} · ${event.title}" +
+                            (if (event.impact == "High") " · پراثر" else ""),
+                            modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                            color = if (event.impact == "High") AurumColors.Red else AurumColors.TextSecondary)
+                    }
+                }
+                if (upcoming.size > 6) OutlinedButton(onClick = { showCalendar = !showCalendar }) {
+                    Text(if (showCalendar) "جمع کردن رویدادها" else "نمایش همهٔ ${upcoming.size} رویداد")
                 }
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -94,62 +186,68 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 OutlinedButton(onClick = { runCatching { uriHandler.openUri("https://www.forexfactory.com/calendar") } },
                     modifier = Modifier.weight(1f)) { Text("وب‌سایت منبع") }
             }
-            Text("برای طلا، سرور از ۳۰ دقیقه پیش تا ۴۵ دقیقه پس از رویداد پراثر USD ورود جدید را متوقف می‌کند؛ قطع تقویم نیز UNKNOWN است. تقویم عمومی ممکن است کامل نباشد.",
+            Text("سرور، اگر جداگانه تنظیم شده باشد، توقف ورود جدید برای رویداد پراثر USD را مستقل بررسی می‌کند. تقویم عمومی کامل‌بودن خبرها را ثابت نمی‌کند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
-        SectionCard("شرط نهم · تحلیل خودکار خبر با AI", "فقط XAU/USD · نتیجهٔ مدلِ سرور؛ قواعد کلیدواژه‌ای AI محسوب نمی‌شوند") {
-            val ready = state.ai.status == "AVAILABLE" && state.gate == NewsGate.CLEAR && !state.cached && !state.loading
-            Text(if (ready) "جهت پیشنهادی مدل: ${state.ai.direction} · اطمینان ${state.ai.confidence.toInt()}٪"
-                else "UNKNOWN · ${state.ai.reason}",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (ready) AurumColors.Green else AurumColors.Gold)
-            Text("مدل: ${state.ai.model ?: "فعال نیست"} · بررسی ${relativeTime(state.ai.checkedAt)} · برای ورود خودکار باید هشت شرط فنی، تطابق جهت، همهٔ منابع و کنترل خبر هم‌زمان معتبر باشند.",
+
+        SectionCard("شرط نهم AI · جدا از تیترهای نمایشی", "فقط XAU/USD · نیازمند سرور HTTPS، مدل و شواهد معتبر",
+            trailing = { Pill(server.gate.name, serverTone) }) {
+            Text(if (settings.newsBaseUrl.isBlank())
+                "برای دیدن تیترها سرور لازم نیست؛ اما گیت معامله و AI بدون سرور تنظیم نشده و UNKNOWN است."
+                else server.reason, style = MaterialTheme.typography.bodySmall, color = serverTone)
+            Text("سرور: ${server.provider ?: "تنظیم نشده"} · آخرین دریافت ${relativeTime(server.lastCheckedAt, now)}" +
+                (if (server.cached) " · دادهٔ قبلی؛ گیت UNKNOWN" else ""),
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            state.ai.evidenceIds.mapNotNull { id -> state.articles.singleOrNull { it.id == id } }.forEach { source ->
-                Text("شاهد: ${source.source} · ${source.headline}",
+            server.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red) }
+            val ready = server.ai.status == "AVAILABLE" && server.gate == NewsGate.CLEAR && !server.cached && !server.loading
+            Text(if (ready) "جهت پیشنهادی مدل: ${server.ai.direction} · اطمینان ${server.ai.confidence.toInt()}٪"
+                else "AI: UNKNOWN · ${server.ai.reason}",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (ready) AurumColors.Green else AurumColors.Gold,
+                modifier = Modifier.padding(top = 6.dp))
+            Text("مدل: ${server.ai.model ?: "فعال نیست"} · بررسی ${relativeTime(server.ai.checkedAt, now)} · تیترهای مستقیم گوشی هرگز شاهد این تحلیل نیستند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            server.ai.evidenceIds.mapNotNull { id -> server.articles.singleOrNull { it.id == id } }.forEach { source ->
+                Text("شاهدِ سرور: ${source.source} · ${source.headline}",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
                 source.link?.let { url ->
                     OutlinedButton(onClick = { runCatching { uriHandler.openUri(url) } }) {
-                        Text("خبر در منبع", style = MaterialTheme.typography.labelSmall)
+                        Text("شاهد در منبع", style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
-        }
-        if (state.sources.isNotEmpty()) {
-            SectionCard("وضعیت منبع‌های ناشر", "فقط تیتر، چکیدهٔ کوتاه، زمان و لینک خودِ ناشر") {
-                state.sources.forEach { source ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("${source.name}: ${if (source.state == "online") "دریافت شد" else "ناموجود"}",
-                            modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
-                            color = if (source.state == "online") AurumColors.Green else AurumColors.Red)
-                        if (source.feed.startsWith("https://")) {
-                            OutlinedButton(onClick = { runCatching { uriHandler.openUri(source.feed) } }) {
-                                Text("خوراک", style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                    }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = viewModel::refreshNews, enabled = !server.loading && settings.newsBaseUrl.isNotBlank(),
+                    modifier = Modifier.weight(1f)) { Text("بررسی گیت") }
+                OutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) { Text("تنظیم سرور") }
+            }
+            Text("وتوی خبر برای ورود دستی کاغذی ${if (settings.pauseOnNews) "روشن" else "خاموش"} است؛ برای ورود سیگنالی/خودکار شرط مدل همیشه الزامی است. CLEAR تضمین یا مجوز سفارش واقعی نیست.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            if (server.sources.isNotEmpty() || server.articles.isNotEmpty()) {
+                OutlinedButton(onClick = { showServerArticles = !showServerArticles }) {
+                    Text(if (showServerArticles) "جمع کردن شواهد سرور" else "جزئیات خبر سرور")
                 }
             }
         }
-        if (state.articles.isEmpty()) {
-            SectionCard("تیتر موجود نیست", "نبود اتصال یا توقف منبع به معنی نبود خبر نیست") {
-                Text("نشانی HTTPS بک‌اند را در تنظیمات وارد کنید؛ فیدهای عمومی شناخته‌شده روی سرور خوانده می‌شوند. برای استفادهٔ تجاری، شرایط هر ناشر را بررسی کنید.",
-                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
+        if (showServerArticles && server.sources.isNotEmpty()) {
+            SectionCard("وضعیت خوراک‌های سرور", "مستقل از خوراک‌های مستقیم بالا") {
+                server.sources.forEach { source ->
+                    Text("${source.name}: ${if (source.state == "online") "دریافت شد" else "ناموجود"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (source.state == "online") AurumColors.Green else AurumColors.Red)
+                }
             }
         }
-        state.articles.forEach { item ->
-            SectionCard(item.headline, "${item.source} · ${if (item.language == "en") "EN · زبان اصلی" else "FA"} · انتشار ${formatDateTime(item.publishedAt)}",
+        if (showServerArticles) server.articles.forEach { item ->
+            SectionCard(item.headline, "${item.source} · انتشار ${formatDateTime(item.publishedAt)}",
                 trailing = { Pill(item.impact, if (item.impact == "HIGH") AurumColors.Red else AurumColors.TextMuted) }) {
                 if (item.summary.isNotBlank()) Text(item.summary,
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-                Text("برچسب قاعده‌ای برای اثر احتمالی بر طلا (نه سیگنال): ${item.direction} · ${item.analysisSource}",
-                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
-                    modifier = Modifier.padding(top = 5.dp))
-                item.link?.let { url ->
-                    OutlinedButton(onClick = { runCatching { uriHandler.openUri(url) } }, modifier = Modifier.padding(top = 5.dp)) {
-                        Text("باز کردن خبر در منبع")
-                    }
-                }
+                Text("برچسب قاعده‌ای: ${item.direction} · ${item.analysisSource} · نه AI و نه سیگنال",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+                item.link?.let { url -> OutlinedButton(onClick = { runCatching { uriHandler.openUri(url) } }) {
+                    Text("خبر در منبع")
+                } }
             }
         }
     }
