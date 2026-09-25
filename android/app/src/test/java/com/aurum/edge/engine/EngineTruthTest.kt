@@ -82,6 +82,15 @@ class EngineTruthTest {
         assertTrue(report.outOfSample.trades.all { it.entryTime >= report.splitTime })
         assertTrue(report.verdict.isNotBlank())
         assertEquals(report.bars, bars.size)
+        assertEquals(report.outOfSample.fromTime, report.costStressOutOfSample.fromTime)
+        assertEquals(report.outOfSample.toTime, report.costStressOutOfSample.toTime)
+        assertEquals(report.outOfSample.spreadPrice * 2,
+            report.costStressOutOfSample.spreadPrice, 1e-9)
+        assertEquals(report.outOfSample.commissionPerOz * 2,
+            report.costStressOutOfSample.commissionPerOz, 1e-9)
+        assertTrue(report.outOfSample.trades.all { it.exitTime >= it.entryTime &&
+            !it.exitReason.contains("آخرین قیمت") })
+        assertTrue(report.costStressOutOfSample.trades.all { it.entryTime >= report.splitTime })
     }
 
     @Test

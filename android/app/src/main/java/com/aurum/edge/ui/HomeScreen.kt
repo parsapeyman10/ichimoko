@@ -56,6 +56,7 @@ fun HomeScreen(
     val news by viewModel.news.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val reports by viewModel.reports.collectAsStateWithLifecycle()
+    val reportError by viewModel.reportError.collectAsStateWithLifecycle()
     val mtf by viewModel.mtf.collectAsStateWithLifecycle()
     val opportunityError by viewModel.opportunityError.collectAsStateWithLifecycle()
     val journalError by viewModel.journalError.collectAsStateWithLifecycle()
@@ -126,8 +127,10 @@ fun HomeScreen(
         SectionCard("پژوهش و ژورنال", "فقط نتایج ثبت‌شده؛ نه ادعای سود آینده") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatTile("بستهٔ کاغذی", "$closedPaper", modifier = Modifier.weight(1f))
-                StatTile("گزارش خارج نمونه", "${reports.size}", modifier = Modifier.weight(1f))
+                StatTile("گزارش خارج نمونه", if (reportError == null) "${reports.size}" else "—", modifier = Modifier.weight(1f))
             }
+            reportError?.let { Text(it, style = MaterialTheme.typography.bodySmall,
+                color = AurumColors.Red, modifier = Modifier.padding(top = 8.dp)) }
             Text("معاملهٔ دستی، سیگنال ۹/۹ و بک‌تست نباید در یک آمارِ «سوددهی استراتژی» مخلوط شوند. هزینه‌ها و تعداد نمونه را در گزارش پژوهش بررسی کن.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
                 modifier = Modifier.padding(top = 8.dp))

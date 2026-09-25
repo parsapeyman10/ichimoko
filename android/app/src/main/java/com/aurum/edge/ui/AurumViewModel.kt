@@ -39,6 +39,7 @@ import com.aurum.edge.engine.Backtester
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.notify.AlertSoundPlayer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -74,7 +75,7 @@ sealed interface LearnState {
 sealed interface WalkForwardState {
     data object Idle : WalkForwardState
     data class Loading(val step: String) : WalkForwardState
-    data class Done(val result: Backtester.WalkForward, val interval: Interval) : WalkForwardState
+    data class Done(val result: Backtester.WalkForward, val interval: Interval, val saved: Boolean) : WalkForwardState
     data class Failed(val message: String) : WalkForwardState
 }
 
@@ -112,6 +113,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Walk-forward runs made on this device, kept so the numbers can be re-checked later. */
     val reports: StateFlow<List<WalkForwardRecord>> = container.journalStore.reports
+    val reportError: StateFlow<String?> = container.journalStore.reportError
 
     private val _stats = MutableStateFlow(container.journalStore.stats())
     val stats: StateFlow<JournalStats> = _stats.asStateFlow()
@@ -144,7 +146,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             runCatching { container.nobitexPractice.load() }.onFailure {
                 _toast.value = "ژورنال تمرین نوبیتکس خوانده نشد؛ فایل برای بازیابی نگه داشته شد"
             }
-            container.journalStore.loadReports()
+            runCatching { container.journalStore.loadReports() }.onFailure {
+                _toast.value = "گزارش پژوهش خوانده نشد؛ فایل قبلی برای بازیابی نگه داشته شد"
+            }
             _stats.value = container.journalStore.stats()
             container.market.start()
             container.watch.loadCached()
@@ -753,8 +757,16 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             _walkForward.value = WalkForwardState.Loading("دانلود $bars کندل واقعی ${interval.label} و تقسیم به داخل/خارج نمونه…")
             try {
                 val result = container.runWalkForward(interval, bars, balance, risk, spread, commission, threshold)
-                container.journalStore.saveReport(WalkForwardRecord.from(result))
-                _walkForward.value = WalkForwardState.Done(result, interval)
+                val saved = try {
+                    container.journalStore.saveReport(WalkForwardRecord.from(result))
+                    true
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    _toast.value = "تست انجام شد ولی گزارش در گوشی ذخیره نشد؛ فایل قبلی دست‌نخورده ماند"
+                    false
+                }
+                _walkForward.value = WalkForwardState.Done(result, interval, saved)
             } catch (e: Exception) {
                 _walkForward.value = WalkForwardState.Failed(e.message ?: "خطا در دریافت داده واقعی")
             }

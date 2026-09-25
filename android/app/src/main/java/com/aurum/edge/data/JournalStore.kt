@@ -45,6 +45,9 @@ class JournalStore(context: Context, private val file: File = File(context.files
      */
     private val _reports = MutableStateFlow<List<WalkForwardRecord>>(emptyList())
     val reports: StateFlow<List<WalkForwardRecord>> = _reports.asStateFlow()
+    private val _reportError = MutableStateFlow<String?>(null)
+    val reportError: StateFlow<String?> = _reportError.asStateFlow()
+    private var reportsLoaded = false
 
     private val _trades = MutableStateFlow<List<PaperTrade>>(emptyList())
     val trades: StateFlow<List<PaperTrade>> = _trades.asStateFlow()
@@ -89,22 +92,38 @@ class JournalStore(context: Context, private val file: File = File(context.files
     }
 
     suspend fun loadReports() = withContext(Dispatchers.IO) {
-        val list = if (reportsFile.exists()) {
-            runCatching {
-                json.decodeFromString(ListSerializer(WalkForwardRecord.serializer()), reportsFile.readText())
-            }.getOrDefault(emptyList())
-        } else emptyList()
-        _reports.value = list.sortedByDescending { it.generatedAt }
+        mutex.withLock {
+            val list = try {
+                if (reportsFile.exists() || File(reportsFile.path + ".bak").exists()) {
+                    json.decodeFromString(ListSerializer(WalkForwardRecord.serializer()),
+                        AtomicFile(reportsFile).openRead().bufferedReader().use { it.readText() })
+                } else emptyList()
+            } catch (error: Exception) {
+                reportsLoaded = false
+                _reportError.value = "فایل گزارش پژوهش خوانده نشد؛ گزارش‌ها حذف یا بازنویسی نشدند"
+                throw IllegalStateException(_reportError.value, error)
+            }
+            _reports.value = list.sortedByDescending { it.generatedAt }
+            _reportError.value = null
+            reportsLoaded = true
+        }
     }
 
     suspend fun saveReport(report: WalkForwardRecord) = withContext(Dispatchers.IO) {
-        val next = (_reports.value + report).sortedByDescending { it.generatedAt }.take(12)
-        _reports.value = next
-        runCatching {
-            val tmp = File(reportsFile.parentFile, reportsFile.name + ".tmp")
-            tmp.writeText(json.encodeToString(ListSerializer(WalkForwardRecord.serializer()), next))
-            if (reportsFile.exists()) reportsFile.delete()
-            tmp.renameTo(reportsFile)
+        mutex.withLock {
+            check(reportsLoaded && _reportError.value == null) { "گزارش‌های قبلی بارگذاری نشده/آسیب‌دیده‌اند؛ بازنویسی نمی‌شود" }
+            val next = (_reports.value + report).sortedByDescending { it.generatedAt }.take(12)
+            val atomic = AtomicFile(reportsFile)
+            val stream = atomic.startWrite()
+            try {
+                stream.write(json.encodeToString(ListSerializer(WalkForwardRecord.serializer()), next)
+                    .toByteArray(Charsets.UTF_8))
+                atomic.finishWrite(stream)
+            } catch (error: Exception) {
+                atomic.failWrite(stream)
+                throw error
+            }
+            _reports.value = next // only a durable report is called 'stored'
         }
     }
 

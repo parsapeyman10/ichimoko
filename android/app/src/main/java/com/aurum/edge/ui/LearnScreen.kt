@@ -40,7 +40,9 @@ import com.aurum.edge.core.Interval
 import com.aurum.edge.data.FreeHistoryCatalog
 import com.aurum.edge.data.FreeHistoryResult
 import com.aurum.edge.data.FreeHistoryState
+import com.aurum.edge.engine.EvidenceGrade
 import com.aurum.edge.engine.PerformanceMetrics
+import com.aurum.edge.engine.ResearchEvidence
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatDateTime
@@ -89,11 +91,11 @@ fun LearnScreen(viewModel: AurumViewModel) {
             .padding(bottom = 12.dp),
     ) {
         SectionCard(
-            title = "یادگیری روی دیتای اصلی",
-            subtitle = "استراتژی روی کندل‌های واقعی Twelve Data اجرا می‌شود و نتیجه واقعی گزارش می‌شود",
+            title = "پژوهش فنی · بدون سرور",
+            subtitle = "دادهٔ OHLC واقعی یا فایل وارداتی؛ اجرای معاملات در گذشته فرضی است",
         ) {
             Text(
-                "تنها «دموی» این اپ همین است: همان موتور زنده، روی همان کندل‌های واقعی، از گذشته به آینده اجرا می‌شود تا ببینی در ادامه چطور رفتار می‌کند. هیچ عدد شبیه‌سازی‌شده یا مونت‌کارلویی ساخته نمی‌شود.",
+                "این بک‌تست فقط قواعد فنی روی کندل‌هاست؛ شواهد تاریخیِ نقطه‌به‌نقطه برای شرط نهم AI/خبر، ICT و MTF نداریم. بنابراین عملکرد استراتژی ۹/۹ یا سفارش واقعی را نمی‌سنجد. عدد ساختگی، خبرِ جایگزین AI و وعدهٔ سود تولید نمی‌شود.",
                 style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextSecondary,
             )
@@ -195,11 +197,12 @@ fun LearnScreen(viewModel: AurumViewModel) {
                         threshold = settings.minConfidence,
                     )
                 },
+                enabled = learn !is LearnState.Loading && walkForward !is WalkForwardState.Loading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 12.dp),
             ) {
-                Text("دانلود دیتای واقعی و اجرای استراتژی", fontWeight = FontWeight.Bold)
+                Text("دانلود و بازپخش قواعد فنی", fontWeight = FontWeight.Bold)
             }
             Button(
                 onClick = {
@@ -213,14 +216,15 @@ fun LearnScreen(viewModel: AurumViewModel) {
                         threshold = settings.minConfidence,
                     )
                 },
+                enabled = learn !is LearnState.Loading && walkForward !is WalkForwardState.Loading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp),
             ) {
-                Text("تست خارج از نمونه (۷۰٪ گذشته / ۳۰٪ دیده‌نشده)", fontWeight = FontWeight.Bold)
+                Text("خارج نمونه ۷۰/۳۰ + آزمون هزینهٔ ۲×", fontWeight = FontWeight.Bold)
             }
             Text(
-                "در این تست، استراتژی روی نیمه قدیمی سری واقعی اجرا می‌شود و بعد همان قواعد روی نیمه جدیدی که در تنظیم ندیده، سنجیده می‌شود. اگر خارج از نمونه زیان‌ده بود، همان را نشان می‌دهیم.",
+                "یک تقسیم ۷۰/۳۰ زمانی از همان کندل‌ها؛ نتیجهٔ خارج نمونه با هزینهٔ فرضی و دوباره با اسپرد/کمیسیون ۲ برابر محاسبه می‌شود. این آزمون حساسیت، اجرای بروکر یا تأیید شرط نهم AI نیست. کمتر از ۳۰ معاملهٔ بسته فقط هشدار کم‌نمونگی دارد (نه آزمون معنی‌داری).",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 6.dp),
@@ -443,18 +447,31 @@ private fun HalfReport(label: String, accent: Color, result: com.aurum.edge.engi
 @Composable
 private fun WalkForwardReport(state: WalkForwardState.Done) {
     val wf = state.result
-    val outPf = wf.outOfSample.profitFactor ?: 0.0
+    val assessment = ResearchEvidence.outOfSample(wf.outOfSample, wf.costStressOutOfSample)
+    val stressed = wf.costStressOutOfSample
     SectionCard(
-        title = "تست خارج از نمونه (Walk-Forward) ${state.interval.label}",
-        subtitle = "${wf.bars} کندل واقعی · تقسیم در ${formatDateTime(wf.splitTime)} · هزینه‌ها در هر دو نیمه یکسان",
+        title = "یک آزمون خارج از نمونه (۷۰/۳۰) ${state.interval.label}",
+        subtitle = "${wf.bars} کندل · تقسیم در ${formatDateTime(wf.splitTime)} · فقط قواعد فنی، نه گیت ۹/۹",
     ) {
-        Text(
-            wf.verdict,
-            style = MaterialTheme.typography.bodySmall,
-            color = if (outPf > 1.0) AurumColors.Green else AurumColors.Red,
-        )
-        HalfReport("داخل نمونه (آموزش)", AurumColors.TextSecondary, wf.inSample)
-        HalfReport("خارج از نمونه (دیده‌نشده)", AurumColors.Gold, wf.outOfSample)
+        Text(assessment.title, style = MaterialTheme.typography.bodySmall,
+            color = if (assessment.grade == EvidenceGrade.UNFAVORABLE) AurumColors.Red else AurumColors.Gold)
+        Text(assessment.detail, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+        if (!state.saved) Text("گزارش روی گوشی ذخیره نشد؛ این نتیجه پس از خروج ممکن است از دست برود.",
+            style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
+        HalfReport("داخل نمونه (فنی)", AurumColors.TextSecondary, wf.inSample)
+        HalfReport("خارج نمونه (فنی)", AurumColors.Gold, wf.outOfSample)
+        Text("آزمون همان داده با اسپرد/کمیسیون ×۲ · تکرار موتور فنی با فرض هزینهٔ بیشتر، نه لغزش مشاهده‌شده",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan,
+            modifier = Modifier.padding(top = 10.dp))
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatTile("بسته‌شده ×۲", "${stressed.trades.size}", modifier = Modifier.weight(1f))
+            StatTile("خالص فرضی ×۲", "${formatPrice(stressed.netPnl)}$", modifier = Modifier.weight(1f))
+            StatTile("PF ×۲", stressed.profitFactor?.let { String.format("%.2f", it) } ?: "—",
+                modifier = Modifier.weight(1f))
+        }
+        Text("پوزیشن باز پایان بازه: عادی ${if (wf.outOfSample.openAtEnd) 1 else 0} · ×۲ ${if (stressed.openAtEnd) 1 else 0}؛ هیچ‌کدام در خالص بسته‌ها نیستند. گپِ ورودِ رد‌شده ${wf.outOfSample.skippedGap} · پوزیشن حل‌نشدهٔ گپ ${wf.outOfSample.unresolvedGap}.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 6.dp))
 
         if (wf.outOfSample.trades.isNotEmpty()) {
             Text(
@@ -503,10 +520,14 @@ private fun WalkForwardReport(state: WalkForwardState.Done) {
 @Composable
 private fun BacktestReport(state: LearnState.Done) {
     val result = state.result
+    val assessment = ResearchEvidence.inSample(result)
     SectionCard(
-        title = "گزارش ${state.interval.label} · ${result.dataSource}",
+        title = "بک‌تست فرضی ${state.interval.label} · ${result.dataSource}",
         subtitle = "${result.bars} کندل · ${formatDateTime(result.fromTime)} تا ${formatDateTime(result.toTime)}",
     ) {
+        Text(assessment.title, style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+        Text(assessment.detail, style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.TextSecondary, modifier = Modifier.padding(bottom = 8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             StatTile("معاملات", "${result.trades.size}", AurumColors.TextPrimary, Modifier.weight(1f))
             StatTile("نرخ برد", result.winRate?.let { "${String.format("%.1f", it)}%" } ?: "—", AurumColors.Green, Modifier.weight(1f))
@@ -529,7 +550,7 @@ private fun BacktestReport(state: LearnState.Done) {
                 .padding(top = 8.dp),
         ) {
             StatTile("انتظار به R", result.expectancyR?.let { String.format("%.2f", it) } ?: "—", AurumColors.TextPrimary, Modifier.weight(1f))
-            StatTile("کارمزد کل", "${formatPrice(result.feesUsd)}$", AurumColors.TextSecondary, Modifier.weight(1f))
+            StatTile("هزینهٔ فرضی کل", "${formatPrice(result.feesUsd)}$",  AurumColors.TextSecondary, Modifier.weight(1f))
             StatTile("رد‌شده (حداقل لات)", "${result.skippedMinLot}", AurumColors.TextSecondary, Modifier.weight(1f))
         }
 
@@ -564,8 +585,11 @@ private fun BacktestReport(state: LearnState.Done) {
         }
 
         Text(result.note, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 10.dp))
+        Text("بازِ تسویه‌نشده در انتهای بازه: ${if (result.openAtEnd) 1 else 0} · رد به‌علت گپ زمانی: ${result.skippedGap} · رد به‌علت گپ قیمت: ${result.skippedFill} · پوزیشن حل‌نشدهٔ گپ: ${result.unresolvedGap}. موجودی نهایی فقط بسته‌هاست.",
+            style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold,
+            modifier = Modifier.padding(top = 6.dp))
         Text(
-            "فرض‌های هزینه: اسپرد ${result.spreadPrice} و کمیسیون ${result.commissionPerOz}$ بر انس (رفت و برگشت محاسبه شده). حداقل حجم 0.01 لات = 1 انس.",
+            "فرض‌های هزینه: اسپرد ${result.spreadPrice} و کمیسیون ${result.commissionPerOz}$ بر واحد (رفت و برگشت). حداقل حجم فرضی ${result.minPositionOz} واحد؛ برای طلا ۱ انس ≈ ۰٫۰۱ لات، برای نمادهای دیگر مشخصات بروکر را جدا بررسی کن.",
             style = MaterialTheme.typography.labelSmall,
             color = AurumColors.TextMuted,
             modifier = Modifier.padding(top = 4.dp),
@@ -615,9 +639,10 @@ private fun BacktestReport(state: LearnState.Done) {
             }
         }
     } else {
-        SectionCard("هیچ معامله‌ای شکل نگرفت", "هیچ نتیجه‌ای برای پر کردن آمار ساخته نمی‌شود") {
+        SectionCard("هیچ معامله‌ای بسته نشد", "بدون نتیجهٔ محقق‌شده آمار برد تعریف نشده است") {
             Text(
-                "در این بازه، موتور حتی یک سیگنال واجد شرایط پیدا نکرد. نتیجه‌ای ساخته نمی‌شود تا عدد قشنگ‌تری ببینی — بازه بزرگ‌تر یا تایم‌فریم دیگری را امتحان کن.",
+                if (result.openAtEnd) "یک پوزیشن فرضی در پایان بازه باز ماند و در سود/زیان محقق‌شده شمرده نشد. بازهٔ طولانی‌تر را بررسی کن."
+                else "در این بازه سیگنال قابل ورود/تسویه‌ای نماند؛ ممکن است حداقل حجم یا گپ داده مانع شده باشد. صفر معامله را به‌جای صفر درصد برد نخوان.",
                 style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextSecondary,
             )

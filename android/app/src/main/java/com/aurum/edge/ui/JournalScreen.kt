@@ -35,7 +35,9 @@ import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NobitexMarket
 import com.aurum.edge.data.NobitexPracticeTrade
+import com.aurum.edge.engine.EvidenceGrade
 import com.aurum.edge.engine.PerformanceMetrics
+import com.aurum.edge.engine.ResearchEvidence
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatDateTime
@@ -52,11 +54,13 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     val nobitexState by viewModel.nobitex.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val reports by viewModel.reports.collectAsStateWithLifecycle()
+    val reportError by viewModel.reportError.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val loadError by viewModel.journalError.collectAsStateWithLifecycle()
     var confirmClear by remember { mutableStateOf(false) }
     var confirmOpportunityClear by remember { mutableStateOf(false) }
     var confirmNobitexClear by remember { mutableStateOf(false) }
+    var showCombined by remember { mutableStateOf(false) }
     val now = System.currentTimeMillis()
     val livePrice = market.lastPrice?.takeIf {
         it.isFinite() && it > 0 && !market.showingCachedData &&
@@ -75,7 +79,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     ) {
         SectionCard(
             title = "ژورنال معاملات کاغذی",
-            subtitle = "فقط پوزیشن‌های کاغذی واقعاً ثبت‌شده؛ خط‌های سیگنال چارت معامله نیستند",
+            subtitle = "جمع فعالیت دستی و ۹/۹؛ فقط کاغذیِ ذخیره‌شده، نه سود استراتژی یا خط چارت",
         ) {
             loadError?.let { Text(it, style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.Red, modifier = Modifier.padding(bottom = 8.dp)) }
@@ -92,7 +96,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             ) {
                 StatTile("نرخ برد", stats.winRate?.let { "${String.format("%.1f", it)}%" } ?: "—", AurumColors.Green, Modifier.weight(1f))
                 StatTile("فاکتور سود", stats.profitFactor?.let { String.format("%.2f", it) } ?: "—", AurumColors.Gold, Modifier.weight(1f))
-                StatTile("سود خالص", "${formatPrice(stats.netPnl)}$", if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
+                StatTile("خالص خامِ کل", "${formatPrice(stats.netPnl)}$",  if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
             }
             if (stats.total == 0 && loadError == null) {
                 Text(
@@ -187,7 +191,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
 
         val closed = trades.filter { !it.isOpen }
         if (closed.isNotEmpty()) {
-            SectionCard("معاملات بسته‌شده", "تسویه‌شده روی قیمت واقعی") {
+            SectionCard("معاملات بسته‌شده", "خروج فرضی بر اساس قیمت دریافتی؛ نه اجرای بروکر/هزینهٔ واقعی") {
                 closed.forEach { trade: PaperTrade -> TradeRow(trade) }
             }
             Button(
@@ -217,14 +221,34 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                 }
             }
         }
-        PerformancePanel(PerformanceMetrics.fromPaper(trades, settings.accountBalance),
-            "حداکثر ۵۰۰ معاملهٔ آخر ژورنال · فرض موجودی اولیه ${formatPrice(settings.accountBalance)}$ (در طول تاریخچه ممکن است تغییر کرده باشد)")
-        reports.firstOrNull()?.let { report ->
+        if (loadError == null) {
+            val recorded = trades.filter(ResearchEvidence::hasRecordedNineWay)
+            val other = trades.filterNot(ResearchEvidence::hasRecordedNineWay)
+            PaperEvidencePanel(recorded, other, settings.spreadPrice, settings.commissionPerOz)
+            if (recorded.any { !it.isOpen && it.pnlUsd != null }) PerformancePanel(
+                PerformanceMetrics.fromPaper(recorded, settings.accountBalance),
+                "فقط کاغذی XAU/USD با ۹ شاهد ثبت‌شده؛ P/L خام بدون کارمزد/لغزش بروکر · فرض موجودی اولیه ${formatPrice(settings.accountBalance)}$")
+            if (other.any { !it.isOpen && it.pnlUsd != null }) PerformancePanel(
+                PerformanceMetrics.fromPaper(other, settings.accountBalance),
+                "معاملات دستی/قدیمی/فاقد شواهد کامل · بدون ادعای عملکرد گیت ۹/۹")
+            if (trades.any { !it.isOpen && it.pnlUsd != null }) {
+                OutlinedButton(onClick = { showCombined = !showCombined },
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) {
+                    Text(if (showCombined) "بستن آمار کلِ مخلوط" else "نمایش آمار کل ژورنال (مخلوط)")
+                }
+                if (showCombined) PerformancePanel(PerformanceMetrics.fromPaper(trades, settings.accountBalance),
+                    "کل ژورنال: دستی + ۹/۹ مخلوط؛ برای اثبات استراتژی معتبر نیست · حداکثر ۵۰۰ معاملهٔ اخیر")
+            }
+        }
+        reportError?.let { SectionCard("گزارش پژوهش قابل خواندن نیست") {
+            Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
+        } }
+        if (reportError == null) reports.firstOrNull()?.let { report ->
             StoredReportCard(report)
-            PerformanceMetrics.fromStoredReport(report.outOfSample)?.let { performance ->
-                PerformancePanel(performance, "آخرین تست خارج از نمونه · ${report.outOfSample.symbol} · ${report.interval}")
-            } ?: SectionCard("گزارش قدیمی ناقص", "در نسخهٔ قبلی تنها بخشی از معاملات ذخیره شده بود") {
-                Text("برای گزارش ۱۸ شاخص دقیق، تست خارج از نمونه را دوباره اجرا کنید.", color = AurumColors.Gold)
+            if (ResearchEvidence.stored(report).grade != EvidenceGrade.NO_DATA) {
+                PerformanceMetrics.fromStoredReport(report.outOfSample)?.let { performance ->
+                    PerformancePanel(performance, "فقط تست فنیِ خارج نمونه · ${report.outOfSample.symbol} · ${report.interval}؛ نه ۹/۹")
+                }
             }
         }
     }
@@ -243,6 +267,40 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
         text = { Text("تمام تمرین‌های باز و بستهٔ BTCUSDT از این گوشی پاک می‌شوند؛ معاملات طلا و هشدارها دست‌نخورده باقی می‌مانند.") },
         confirmButton = { TextButton(onClick = { viewModel.clearNobitexPractice(); confirmNobitexClear = false }) { Text("حذف تمرین‌ها") } },
         dismissButton = { TextButton(onClick = { confirmNobitexClear = false }) { Text("انصراف") } })
+}
+
+@Composable
+private fun PaperEvidencePanel(recorded: List<PaperTrade>, other: List<PaperTrade>,
+                               spread: Double, commission: Double) {
+    val closed = recorded.count { !it.isOpen && it.pnlUsd != null }
+    val cost = ResearchEvidence.paperCostWhatIf(recorded, spread, commission)
+    SectionCard("تفکیک شواهد عملکرد کاغذی", "سوابق همین نصب؛ بک‌تست فنی و تمرین رمزارز در این آمار نیستند") {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatTile("بستهٔ ۹/۹ با شاهد", "$closed", modifier = Modifier.weight(1f))
+            StatTile("دستی/بدون شاهد", "${other.count { !it.isOpen && it.pnlUsd != null }}",
+                modifier = Modifier.weight(1f))
+            StatTile("۹/۹ باز", "${recorded.count { it.isOpen }}", modifier = Modifier.weight(1f))
+        }
+        Text(if (closed == 0) "بدون معاملهٔ کاغذی بسته با شواهد کامل، هیچ نرخ برد یا سود ۹/۹ قابل گزارش نیست. تیتر RSS جای AI را نمی‌گیرد."
+            else if (closed < ResearchEvidence.CAUTION_MIN_CLOSED)
+                "فقط $closed نتیجهٔ بسته با شواهد ثبت‌شده: نمونهٔ کم. آستانهٔ ۳۰ صرفاً هشدار احتیاطی است، نه معناداری آماری یا تضمین سود."
+            else "شمار معامله بیشتر است، اما نتایج paper با قیمت مشاهده‌شده، بدون اجرای بروکر و لغزش‌اند؛ هنوز سود واقعی را ثابت نمی‌کنند.",
+            style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold,
+            modifier = Modifier.padding(top = 8.dp))
+        if (cost != null) {
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                StatTile("خالص خام", "${formatPrice(cost.rawPnlUsd)}$", modifier = Modifier.weight(1f))
+                StatTile("پس از فرض هزینه", "${formatPrice(cost.afterAssumedCostUsd)}$", modifier = Modifier.weight(1f))
+                StatTile("هزینهٔ ×۲", "${formatPrice(cost.afterDoubleCostUsd)}$", modifier = Modifier.weight(1f))
+            }
+            Text("کسر فرضی از همان P/L ژورنال: هر رفت‌وبرگشت اسپرد $spread دلار/انس + ۲ × کمیسیون $commission دلار/انس؛ بر اساس مقدار ثبت‌شدهٔ هر معامله. جمع فرض هزینه ${formatPrice(cost.estimatedCostUsd)}$ است؛ هیچ نتیجهٔ ذخیره‌شده‌ای ویرایش نمی‌شود. تنظیم هزینهٔ صفر آزمون حساسیت نیست؛ لغزش/هزینهٔ واقعی نامعلوم‌اند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 6.dp))
+        }
+        Text("طبقه‌بندی ۹/۹ فقط از شواهدِ زمان ورودِ ذخیره‌شده خوانده می‌شود؛ خبر تاریخی بازاعتبارسنجی نمی‌شود. تغییر موجودی اولیه و محدودیت ۵۰۰ معاملهٔ اخیر، برداشت از افت سرمایه را تغییر می‌دهد.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+            modifier = Modifier.padding(top = 6.dp))
+    }
 }
 
 @Composable
@@ -411,31 +469,25 @@ private fun ConditionDisclosure(key: String, conditions: List<PaperConditionReco
  */
 @Composable
 private fun StoredReportCard(report: WalkForwardRecord) {
-    val outPf = report.outOfSample.profitFactor ?: 0.0
+    val assessment = ResearchEvidence.stored(report)
+    val stress = report.costStressOutOfSample
     SectionCard(
-        title = "آخرین تست خارج از نمونه (ذخیره‌شده روی گوشی)",
-        subtitle = "${report.interval} · ${report.bars} کندل واقعی · ${formatDateTime(report.generatedAt)}",
+        title = "آخرین تست فنیِ خارج نمونه (گزارش گوشی)",
+        subtitle = "${report.interval} · ${report.bars} کندل · ${formatDateTime(report.generatedAt)}",
     ) {
-        Text(
-            report.verdict,
-            style = MaterialTheme.typography.bodySmall,
-            color = if (outPf > 1.0) AurumColors.Green else AurumColors.Red,
-        )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-        ) {
-            StatTile("داخل نمونه PF", report.inSample.profitFactor?.let { String.format("%.2f", it) } ?: "—", AurumColors.TextSecondary, Modifier.weight(1f))
-            StatTile("خارج نمونه PF", report.outOfSample.profitFactor?.let { String.format("%.2f", it) } ?: "—", AurumColors.Gold, Modifier.weight(1f))
-            StatTile("معاملات خارج نمونه", "${report.outOfSample.trades.size}", AurumColors.TextPrimary, Modifier.weight(1f))
+        Text(assessment.title, style = MaterialTheme.typography.bodySmall,
+            color = if (assessment.grade == EvidenceGrade.UNFAVORABLE) AurumColors.Red else AurumColors.Gold)
+        Text(assessment.detail, style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 5.dp))
+        if (assessment.grade != EvidenceGrade.NO_DATA && stress != null) {
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatTile("بستهٔ خارج نمونه", "${report.outOfSample.trades.size}", modifier = Modifier.weight(1f))
+                StatTile("خالص فرضی", "${formatPrice(report.outOfSample.netPnl)}$", modifier = Modifier.weight(1f))
+                StatTile("خالص هزینهٔ ×۲", "${formatPrice(stress.netPnl)}$", modifier = Modifier.weight(1f))
+            }
+            Text("اسپرد ${report.outOfSample.spreadPrice} و کمیسیون ${report.outOfSample.commissionPerOz} دلار/واحد؛ با فرض ×۲: ${stress.spreadPrice} و ${stress.commissionPerOz}. بسته‌شدهٔ ×۲: ${stress.trades.size}. باز در پایان: عادی ${if (report.outOfSample.openAtEnd) 1 else 0}، ×۲ ${if (stress.openAtEnd) 1 else 0}؛ پوزیشن حل‌نشدهٔ گپ: عادی ${report.outOfSample.unresolvedGap}، ×۲ ${stress.unresolvedGap}. فقط پژوهشِ موتور فنی؛ نه معاملات ۹/۹ کاغذی.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 8.dp))
         }
-        Text(
-            "هزینه‌های فرض‌شده: اسپرد ${report.outOfSample.spreadPrice}$ · کمیسیون ${report.outOfSample.commissionPerOz}$ بر انس",
-            style = MaterialTheme.typography.labelSmall,
-            color = AurumColors.TextMuted,
-            modifier = Modifier.padding(top = 8.dp),
-        )
     }
 }

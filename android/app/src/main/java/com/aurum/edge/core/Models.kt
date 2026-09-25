@@ -339,6 +339,12 @@ data class BacktestRecord(
     val commissionPerOz: Double,
     val note: String,
     val trades: List<BacktestTradeRecord> = emptyList(),
+    /** Old JSON had same-close entry and forced last-bar settlement; do not treat it as V2. */
+    val executionModel: String = "LEGACY_CLOSE_FILL",
+    val skippedGap: Int = 0,
+    val skippedFill: Int = 0,
+    val unresolvedGap: Int = 0,
+    val openAtEnd: Boolean = false,
 ) {
     companion object {
         fun from(result: com.aurum.edge.engine.Backtester.Result): BacktestRecord = BacktestRecord(
@@ -363,6 +369,11 @@ data class BacktestRecord(
             spreadPrice = result.spreadPrice,
             commissionPerOz = result.commissionPerOz,
             note = result.note,
+            executionModel = com.aurum.edge.engine.Backtester.EXECUTION_MODEL,
+            skippedGap = result.skippedGap,
+            skippedFill = result.skippedFill,
+            unresolvedGap = result.unresolvedGap,
+            openAtEnd = result.openAtEnd,
             trades = result.trades.map {
                 BacktestTradeRecord(
                     side = it.side.name,
@@ -390,6 +401,8 @@ data class WalkForwardRecord(
     val generatedAt: Long,
     val inSample: BacktestRecord,
     val outOfSample: BacktestRecord,
+    /** Null for older stored reports; never manufacture a cost scenario on read. */
+    val costStressOutOfSample: BacktestRecord? = null,
 ) {
     companion object {
         fun from(result: com.aurum.edge.engine.Backtester.WalkForward, generatedAt: Long = System.currentTimeMillis()): WalkForwardRecord =
@@ -402,6 +415,7 @@ data class WalkForwardRecord(
                 generatedAt = generatedAt,
                 inSample = BacktestRecord.from(result.inSample),
                 outOfSample = BacktestRecord.from(result.outOfSample),
+                costStressOutOfSample = BacktestRecord.from(result.costStressOutOfSample),
             )
     }
 }
