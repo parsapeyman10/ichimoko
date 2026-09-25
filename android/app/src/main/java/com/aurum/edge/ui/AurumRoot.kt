@@ -1,6 +1,7 @@
 package com.aurum.edge.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,9 +12,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Bookmarks
-import androidx.compose.material.icons.filled.Article
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Settings
@@ -22,7 +25,10 @@ import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
@@ -50,6 +56,7 @@ import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
 
 enum class AurumTab(val label: String, val icon: ImageVector) {
+    Home("خانه", Icons.Filled.Home),
     Chart("چارت", Icons.Filled.ShowChart),
     Signal("معامله", Icons.Filled.Bolt),
     Watch("دیده‌بان", Icons.Filled.ViewList),
@@ -60,9 +67,15 @@ enum class AurumTab(val label: String, val icon: ImageVector) {
     Settings("تنظیمات", Icons.Filled.Settings),
 }
 
+/** The five frequent destinations stay readable on small phones; the others remain one tap away. */
+internal val primaryTabs = listOf(AurumTab.Home, AurumTab.Chart, AurumTab.Signal, AurumTab.News, AurumTab.Crypto)
+internal val moreTabs = listOf(AurumTab.Watch, AurumTab.Learn, AurumTab.Journal, AurumTab.Settings)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AurumRoot(viewModel: AurumViewModel) {
-    var tab by remember { mutableStateOf(AurumTab.Chart) }
+    var tab by remember { mutableStateOf(AurumTab.Home) }
+    var showMore by remember { mutableStateOf(false) }
     val market by viewModel.market.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val toast by viewModel.toast.collectAsStateWithLifecycle()
@@ -81,7 +94,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
         snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             NavigationBar(containerColor = AurumColors.Surface) {
-                AurumTab.entries.forEach { entry ->
+                primaryTabs.forEach { entry ->
                     NavigationBarItem(
                         selected = tab == entry,
                         onClick = { tab = entry },
@@ -90,6 +103,13 @@ fun AurumRoot(viewModel: AurumViewModel) {
                         alwaysShowLabel = true,
                     )
                 }
+                NavigationBarItem(
+                    selected = tab in moreTabs,
+                    onClick = { showMore = true },
+                    icon = { Icon(Icons.Filled.MoreHoriz, contentDescription = "بخش‌های دیگر", modifier = Modifier.size(20.dp)) },
+                    label = { Text("بیشتر", style = MaterialTheme.typography.labelSmall) },
+                    alwaysShowLabel = true,
+                )
             }
         },
     ) { padding ->
@@ -98,7 +118,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
                 .fillMaxSize()
                 .padding(padding),
         ) {
-            if (tab != AurumTab.Watch && tab != AurumTab.Crypto && tab != AurumTab.News) {
+            if (tab == AurumTab.Chart || tab == AurumTab.Signal) {
                 AppHeader(
                     symbol = market.symbol,
                     price = market.lastPrice,
@@ -115,6 +135,10 @@ fun AurumRoot(viewModel: AurumViewModel) {
             }
             Box(modifier = Modifier.fillMaxSize()) {
                 when (tab) {
+                    AurumTab.Home -> HomeScreen(viewModel, market,
+                        onChart = { tab = AurumTab.Chart }, onSignal = { tab = AurumTab.Signal },
+                        onNews = { tab = AurumTab.News }, onLearn = { tab = AurumTab.Learn },
+                        onJournal = { tab = AurumTab.Journal }, onSettings = { tab = AurumTab.Settings })
                     AurumTab.Chart -> ChartScreen(viewModel, market,
                         onOpenSettings = { tab = AurumTab.Settings }, onOpenJournal = { tab = AurumTab.Journal })
                     AurumTab.Signal -> SignalScreen(viewModel, market, onOpenNews = { tab = AurumTab.News })
@@ -125,6 +149,22 @@ fun AurumRoot(viewModel: AurumViewModel) {
                     AurumTab.Journal -> JournalScreen(viewModel, market)
                     AurumTab.Settings -> SettingsScreen(viewModel, settings)
                 }
+            }
+        }
+    }
+    if (showMore) {
+        ModalBottomSheet(onDismissRequest = { showMore = false }, containerColor = AurumColors.Surface) {
+            Text("بخش‌های دیگر", style = MaterialTheme.typography.titleMedium,
+                color = AurumColors.TextPrimary, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
+            moreTabs.forEach { destination ->
+                ListItem(
+                    headlineContent = { Text(destination.label) },
+                    leadingContent = { Icon(destination.icon, contentDescription = null) },
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        tab = destination
+                        showMore = false
+                    },
+                )
             }
         }
     }
