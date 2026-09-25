@@ -1,7 +1,11 @@
 package com.aurum.edge.ui
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -185,9 +189,16 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         } else {
             container.market.stop()
         }
-        if (settings.value.backgroundMonitor && !SignalMonitorService.running.value &&
-            !SignalMonitorService.start(context)) {
-            container.settingsStore.update { it.copy(backgroundMonitor = false, autoPaperTrading = false) }
+        // A saved opt-in can outlive a killed service. Re-arm only on foreground entry to
+        // the SAME workspace; a switched space loses its opt-in in selectWorkspace above.
+        if (settings.value.backgroundMonitor && !SignalMonitorService.running.value) {
+            val permitted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+                    PackageManager.PERMISSION_GRANTED
+            if (!permitted || !SignalMonitorService.start(context)) {
+                setMonitorFlag(false)
+                _toast.value = "سرویس پایش شروع نشد؛ مجوز اعلان یا محدودیت باتری گوشی را بررسی کنید"
+            }
         }
         return true
     }

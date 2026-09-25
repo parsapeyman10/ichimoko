@@ -1,13 +1,16 @@
 package com.aurum.edge.service
 
+import android.Manifest
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.ServiceCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.aurum.edge.AurumApplication
@@ -60,6 +63,10 @@ class SignalMonitorService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    private fun notificationsPermitted(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+        ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
             stopSelf()
@@ -67,6 +74,11 @@ class SignalMonitorService : Service() {
         }
         val container = (application as AurumApplication).container
         val selectedSpace = container.settingsStore.read().workspaceId
+        if (!notificationsPermitted()) {
+            container.settingsStore.update { it.copy(backgroundMonitor = false, autoPaperTrading = false) }
+            stopSelf()
+            return START_NOT_STICKY // no hidden user-initiated monitor after notification permission revocation
+        }
         if (intent == null && !container.settingsStore.read().backgroundMonitor) {
             stopSelf()
             return START_NOT_STICKY // do not resurrect a monitor the user turned off
@@ -144,6 +156,7 @@ class SignalMonitorService : Service() {
             var turns = 0
             while (isActive) {
                 if (container.settingsStore.read().workspaceId != "forex") break
+                if (!notificationsPermitted()) { stopSelf(); break }
                 container.forexCalendar.refreshNow() // 1m near High/USD, 15m otherwise (repository throttles)
                 if (turns++ % 15 == 0) container.publicWebNews.refreshNow() // display only, avoid RSS hammering
                 if (container.settingsStore.read().let { it.autoPaperTrading || it.pauseOnNews || it.notifyOnSignal } &&
@@ -292,6 +305,7 @@ class SignalMonitorService : Service() {
     private suspend fun monitorResearchSpace(container: AppContainer, space: String) {
         var round = 0
         while (scope.isActive && container.settingsStore.read().workspaceId == space) {
+            if (!notificationsPermitted()) { stopSelf(); return }
             when (space) {
                 "crypto" -> {
                     container.publicCrypto.refreshNow()

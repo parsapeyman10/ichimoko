@@ -13,6 +13,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
@@ -33,6 +34,8 @@ class ResearchAlertsTest {
         val pending = calendar(now - 60_000L)
         assertTrue(ResearchAlerts.forex(pending, now).single().text.contains("نتیجه در این خروجی نیست"))
         val released = calendar(now - 60_000L, "2.5%")
+        assertNotEquals(ResearchAlerts.forex(pending, now).single().evidenceId,
+            ResearchAlerts.forex(released, now).single().evidenceId) // a late actual is new evidence
         assertTrue(ResearchAlerts.forex(released, now).single().text.contains("بالاتر از پیش‌بینی"))
         assertFalse(ResearchAlerts.forex(released, now).single().title.contains("معاملهٔ ثبت"))
         assertTrue(ResearchAlerts.forex(calendar(now - 60_000L, checkedAt = now - 21 * 60_000L), now).isEmpty())
