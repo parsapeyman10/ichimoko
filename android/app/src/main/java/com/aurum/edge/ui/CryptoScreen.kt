@@ -49,6 +49,7 @@ fun CryptoScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
+        ReadOnlyMonitorCard(viewModel, settings)
         SectionCard("نمای جهانی بی‌کلید", "CoinGecko عمومی · ۲۰ دارایی برتر · فقط یک منبع") {
             Text("قیمت USD و حجم از CoinGecko است؛ قیمت Binance، دفتر سفارش، جفت قابل معامله و احتمال رشد در این نما تأیید نشده‌اند.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)

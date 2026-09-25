@@ -22,6 +22,7 @@ import com.aurum.edge.data.PublicNewsCategory
 import com.aurum.edge.data.PublicNewsFeeds
 import com.aurum.edge.data.NobitexPublicData
 import com.aurum.edge.data.NobitexSpotScanner
+import com.aurum.edge.data.NobitexSpotResearch
 import com.aurum.edge.data.NobitexPracticeStore
 import com.aurum.edge.data.NobitexSnapshot
 import com.aurum.edge.data.PaperAutoTrader
@@ -63,6 +64,7 @@ class AppContainer(context: Context) {
     val market = MarketRepository(appContext, client, candleCache, settingsStore, journalStore)
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val nobitexResearch = NobitexSpotResearch(nobitexSpotScanner, settingsStore, appScope)
     val watchSettings = WatchSettingsStore(appContext)
     val quoteHistory = QuoteHistoryStore(appContext)
     val watch = WatchRepository(SourceFetcher(), quoteHistory, watchSettings, settingsStore, appScope)
@@ -72,12 +74,18 @@ class AppContainer(context: Context) {
         feeds = PublicNewsFeeds.all.filter { it.category in setOf(PublicNewsCategory.MARKETS, PublicNewsCategory.ECONOMY) })
     val cryptoWebNews = PublicWebNewsRepository(appScope,
         feeds = PublicNewsFeeds.all.filter { it.category == PublicNewsCategory.CRYPTO })
+    val iranWebNews = PublicWebNewsRepository(appScope,
+        feeds = PublicNewsFeeds.all.filter { it.category == PublicNewsCategory.IRAN })
     val forexCalendar = ForexCalendarRepository(appScope) // public schedule UI; server checks it independently for the AI gate
     /** Shared by chart, signal tab, notifications and automatic *paper* entries. Expires on time. */
     val verifiedMarket: StateFlow<MarketState> = combine(
         market.state, news.state, flow { while (true) { emit(System.currentTimeMillis()); delay(20_000L) } },
     ) { raw, headlines, now ->
-        val verified = raw.copy(signal = NewsConfluence.apply(raw.signal, raw.symbol, headlines, now))
+        val observedFeed = FeedLiveness.display(raw.feed, now)
+        val delayed = observedFeed.mode == FeedMode.DELAYED
+        val verified = raw.copy(feed = observedFeed,
+            showingCachedData = raw.showingCachedData || delayed,
+            signal = if (delayed) null else NewsConfluence.apply(raw.signal, raw.symbol, headlines, now))
         IctEntryRules.withSafePlan(verified)
     }.stateIn(appScope, SharingStarted.Eagerly, market.state.value.copy(signal = null))
     val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore, verifiedMarket)

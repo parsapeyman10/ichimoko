@@ -9,6 +9,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
@@ -19,7 +21,9 @@ import com.aurum.edge.ui.theme.AurumColors
 @Composable
 fun NobitexWorkspaceScreen(viewModel: AurumViewModel) {
     val browser = LocalUriHandler.current
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
+        ReadOnlyMonitorCard(viewModel, settings)
         SectionCard("اتصال رسمی نوبیتکس", "راهنمای دریافت دسترسی از سایت خود صرافی · بدون درخواست کلید در این اپ") {
             Text("در سایت رسمی حساب خود وارد «پروفایل ← خدمات API» شوید و مستندات سطح دسترسی را بخوانید. برای آمار عمومی این صفحه هیچ کلیدی لازم نیست. در حال حاضر اتصال حساب، برداشت و سفارش واقعی غیرفعال‌اند؛ کلید معاملاتی را اینجا یا در چت وارد نکنید.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)

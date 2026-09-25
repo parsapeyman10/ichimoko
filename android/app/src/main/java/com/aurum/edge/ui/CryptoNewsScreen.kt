@@ -22,6 +22,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.data.NewsResearch
+import com.aurum.edge.data.ResearchSpace
+import com.aurum.edge.data.ResearchState
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.relativeTime
@@ -65,6 +68,9 @@ fun CryptoNewsScreen(viewModel: AurumViewModel) {
                     style = MaterialTheme.typography.labelSmall, color = if (live) AurumColors.Cyan else AurumColors.Gold)
                 if (item.excerpt.isNotBlank()) Text(item.excerpt,
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+                val note = NewsResearch.headline(item, state, ResearchSpace.CRYPTO, now)
+                Text("${note.title}: ${note.detail}", style = MaterialTheme.typography.labelSmall,
+                    color = if (note.state == ResearchState.CONTEXT) AurumColors.Cyan else AurumColors.Gold)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { runCatching { browser.openUri(item.url) } }, modifier = Modifier.weight(1f)) {
                         Text("متن ناشر")

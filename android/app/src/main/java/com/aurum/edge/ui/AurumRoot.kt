@@ -54,6 +54,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.ui.components.FeedBanner
 import com.aurum.edge.ui.components.Pill
@@ -71,7 +73,9 @@ enum class AurumTab(val label: String, val icon: ImageVector) {
     Crypto("رمزارز", Icons.Filled.TrendingUp),
     CryptoNews("خبر کریپتو", Icons.Filled.Article),
     Nobitex("نوبیتکس", Icons.Filled.ViewList),
+    NobitexNews("خبر نوبیتکس", Icons.Filled.Article),
     Stocks("بورس ایران", Icons.Filled.ShowChart),
+    IranNews("خبر بورس", Icons.Filled.Article),
     IranPrices("ریالی", Icons.Filled.ViewList),
     IranWatchSettings("منابع ریالی", Icons.Filled.Settings),
     Agah("آگاه", Icons.Filled.Bookmarks),
@@ -84,8 +88,8 @@ enum class AurumTab(val label: String, val icon: ImageVector) {
 internal fun primaryTabsFor(space: Workspace): List<AurumTab> = when (space) {
     Workspace.FOREX -> listOf(AurumTab.Home, AurumTab.Chart, AurumTab.Signal, AurumTab.News, AurumTab.Watch)
     Workspace.CRYPTO -> listOf(AurumTab.Crypto, AurumTab.CryptoNews)
-    Workspace.NOBITEX -> listOf(AurumTab.Nobitex)
-    Workspace.IRAN_STOCKS -> listOf(AurumTab.Stocks, AurumTab.IranPrices, AurumTab.Agah)
+    Workspace.NOBITEX -> listOf(AurumTab.Nobitex, AurumTab.NobitexNews)
+    Workspace.IRAN_STOCKS -> listOf(AurumTab.Stocks, AurumTab.IranPrices, AurumTab.IranNews, AurumTab.Agah)
 }
 
 internal fun moreTabsFor(space: Workspace): List<AurumTab> = when (space) {
@@ -132,6 +136,12 @@ fun AurumRoot(viewModel: AurumViewModel) {
             snackbarHostState.showSnackbar(toast!!)
             viewModel.consumeToast()
         }
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        if (workspace == Workspace.FOREX) viewModel.pauseInvisibleForexFeed()
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_START) {
+        if (workspace == Workspace.FOREX) viewModel.resumeVisibleForexFeed()
     }
     if (workspace == null) {
         WorkspaceChooser(selectionError) { selected ->
@@ -192,7 +202,9 @@ fun AurumRoot(viewModel: AurumViewModel) {
                     AurumTab.Crypto -> CryptoScreen(viewModel, onOpenSettings = { open(AurumTab.CryptoNews) })
                     AurumTab.CryptoNews -> CryptoNewsScreen(viewModel)
                     AurumTab.Nobitex -> NobitexWorkspaceScreen(viewModel)
+                    AurumTab.NobitexNews -> NobitexNewsScreen(viewModel)
                     AurumTab.Stocks -> IranStocksScreen(viewModel)
+                    AurumTab.IranNews -> IranNewsScreen(viewModel)
                     AurumTab.IranPrices -> IranPricesScreen(viewModel, onOpenSettings = { open(AurumTab.IranWatchSettings) })
                     AurumTab.IranWatchSettings -> IranWatchSettingsScreen(viewModel)
                     AurumTab.Agah -> AgahGuideScreen()

@@ -52,7 +52,7 @@ class IranEquityRepository(private val settings: SettingsStore, private val scop
         }
         val elapsed = SystemClock.elapsedRealtime()
         if (attemptedAt != 0L && elapsed - attemptedAt in 0L until 180_000L) {
-            _state.value = EquityBoardState(EquityBoardStatus.UNAVAILABLE,
+            if (!_state.value.recentReceipt()) _state.value = EquityBoardState(EquityBoardStatus.UNAVAILABLE,
                 error = "برای رعایت سهمیه، سه دقیقه بین دریافت‌ها صبر کنید؛ مشاهدهٔ پیشین برای غربال تازه معتبر نیست")
             return@withLock
         }

@@ -2,6 +2,7 @@ package com.aurum.edge.ui
 
 import android.Manifest
 import android.content.Intent
+import android.net.Uri
 import android.provider.Settings
 import android.content.pm.PackageManager
 import android.os.Build
@@ -52,6 +53,7 @@ import com.aurum.edge.ui.theme.AurumColors
 @Composable
 fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     val context = LocalContext.current
+    val monitorRunning by SignalMonitorService.running.collectAsStateWithLifecycle()
     // Never prefill a saved secret in an editable Compose field. Blank means keep the stored key.
     var key by remember { mutableStateOf("") }
     var symbol by remember { mutableStateOf(settings.symbol) }
@@ -250,7 +252,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("پایش زنده در پس‌زمینه", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
                     Text(
-                        "یک سرویس پیش‌زمینه دیتای واقعی را نگه می‌دارد و روی کندل بسته سیگنال می‌سازد.",
+                        "وضعیت سرویس: ${if (monitorRunning) "فعال" else if (settings.backgroundMonitor) "در انتظار شروع" else "خاموش"} · هنگام قفل بودن، فید و تقویم فارکس دوره‌ای بررسی می‌شوند؛ دادهٔ دیررس معامله نیست.",
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.TextMuted,
                     )
@@ -282,8 +284,14 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     onCheckedChange = viewModel::setNotifyOnSignal,
                 )
             }
-            Text("علت لحظه‌ای بی‌هشداری در تب «معامله» ← «چرا هشدار نیامده؟» نمایش داده می‌شود. هشدار فقط با پایش روشن و اعلان مجاز اندروید کار می‌کند؛ بدون مدل خبر معتبر هیچ آلارمی داده نمی‌شود. خاموش بودن ورود خودکار کاغذی مانع هشدار نیست. محدودیت Android 15 ممکن است پایش پس‌زمینه را پس از ۶ ساعت متوقف کند.",
+            Text("خبر High/USD با اعلام قبلی یا انتشار عدد (فقط اگر در تقویم باشد) در کانال مستقل «خبر پژوهشی · نه معامله» اطلاع داده می‌شود؛ عنوان/مقایسهٔ عددی سیگنال یا شرط نهم AI نیست. علت بی‌هشداری معامله در تب «معامله» است. هنگام قفل بودن، تغییر شبکه/سکوت فید بازیابی با تأخیر و برچسب دادهٔ قدیمی می‌گیرد، نه LIVE جعلی. Doze، سهمیهٔ ناشر و محدودیت dataSync در Android 15 (حدود ۶ ساعت مجموع در ۲۴ ساعتِ پس‌زمینه) قابل دورزدن نیستند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            OutlinedButton(onClick = { runCatching {
+                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:${context.packageName}")))
+            } }, modifier = Modifier.fillMaxWidth()) { Text("تنظیم باتری/اعلان این برنامه در گوشی") }
+            Text("در صفحهٔ تنظیمات گوشی، اجازهٔ فعالیت پس‌زمینه و محدودیت باتری را خودتان بررسی کنید؛ برنامه مجوز را خودکار تغییر نمی‌دهد و هیچ تنظیمی اتصال ۲۴ساعته را تضمین نمی‌کند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             Text("صدای هشدار: ${settings.alertSoundName.ifBlank { "اعلان پیش‌فرض گوشی" }}",
                 modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.Gold)

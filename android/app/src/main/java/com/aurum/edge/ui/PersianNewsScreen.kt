@@ -18,6 +18,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,6 +31,9 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.data.NewsGate
+import com.aurum.edge.data.NewsResearch
+import com.aurum.edge.data.ResearchState
+import com.aurum.edge.data.ResearchSpace
 import com.aurum.edge.data.PublicFeedState
 import com.aurum.edge.data.PublicNewsCategory
 import com.aurum.edge.ui.components.Pill
@@ -38,6 +42,7 @@ import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
 import kotlinx.coroutines.delay
+import kotlin.math.abs
 
 @Composable
 fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
@@ -59,7 +64,7 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
         while (true) { delay(900_000L); viewModel.refreshPublicWebNews() }
     }
     LaunchedEffect(Unit) {
-        while (true) { viewModel.refreshForexCalendar(); delay(900_000L) }
+        while (true) { viewModel.refreshForexCalendar(); delay(60_000L) } // repository throttles outside release windows
     }
     LaunchedEffect(Unit) {
         while (true) { delay(30_000L); now = System.currentTimeMillis() }
@@ -95,12 +100,13 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
             calendar.error?.let { Text("تقویم در دسترس نیست: $it · نبود داده به معنی نبود رویداد نیست",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Red) }
             val upcoming = if (calendar.online(now)) calendar.events.filter {
-                it.at in (now - 2 * 3_600_000L)..(now + 7 * 86_400_000L)
+                it.at in (now - 6 * 3_600_000L)..(now + 7 * 86_400_000L)
             }.take(90) else emptyList()
             if (upcoming.isEmpty()) Text("رویداد قابل نمایش دریافت نشده؛ وضعیت خبر برای ورود تأیید نیست.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
             else {
-                val preview = upcoming.filter { it.country == "USD" }.take(6).ifEmpty { upcoming.take(6) }
+                val preview = upcoming.filter { it.country == "USD" }
+                    .sortedBy { abs(it.at - now) }.take(6).ifEmpty { upcoming.take(6) }
                 (if (showCalendar) upcoming else preview).forEach { event ->
                     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Box(Modifier.padding(top = 5.dp).size(8.dp).background(
@@ -114,6 +120,12 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                     if (event.forecast != null || event.previous != null || event.actual != null) Text(
                         "پیش‌بینی ${event.forecast ?: "—"} · قبل ${event.previous ?: "—"} · منتشرشده ${event.actual ?: "—"}",
                         style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                    if (event.country == "USD") {
+                        val note = NewsResearch.gold(event, calendar, now)
+                        Text("${note.title} · ${note.detail}", style = MaterialTheme.typography.labelSmall,
+                            color = if (note.state == ResearchState.PUBLISHED) AurumColors.Cyan else AurumColors.Gold,
+                            modifier = Modifier.padding(start = 16.dp, top = 3.dp))
+                    }
                     OutlinedButton(onClick = {
                         TranslateLink.englishToPersian(event.title)?.let { url ->
                             runCatching { uriHandler.openUri(url) }
@@ -131,6 +143,11 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 OutlinedButton(onClick = { runCatching { uriHandler.openUri("https://www.forexfactory.com/calendar") } },
                     modifier = Modifier.weight(1f)) { Text("وب‌سایت منبع") }
             }
+            TextButton(onClick = { runCatching { uriHandler.openUri("https://www.forexfactory.com/news") } }) {
+                Text("متن خبرهای Forex Factory در مرورگر ↗")
+            }
+            Text("تحلیل بالا فقط مقایسهٔ قاعده‌ایِ اعدادِ منتشرشدهٔ تقویم است؛ متن مقالهٔ Forex Factory در خوراک عمومیِ این برنامه نیست. نتیجهٔ غایب جعل نمی‌شود و از آن سیگنال طلا استخراج نمی‌کنیم.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             Text("سرور، اگر جداگانه تنظیم شده باشد، توقف ورود جدید برای رویداد پراثر USD را مستقل بررسی می‌کند. تقویم عمومی کامل‌بودن خبرها را ثابت نمی‌کند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
@@ -199,6 +216,9 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 trailing = { Pill(receiptLabel, if (fromRecentResponse) AurumColors.Cyan else AurumColors.Gold) }) {
                 if (item.excerpt.isNotBlank()) Text(item.excerpt,
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+                val context = NewsResearch.headline(item, web, ResearchSpace.FOREX, now)
+                Text("${context.title}: ${context.detail}", style = MaterialTheme.typography.labelSmall,
+                    color = if (context.state == ResearchState.CONTEXT) AurumColors.Cyan else AurumColors.Gold)
                 Text("دریافت در گوشی: ${formatDateTime(item.receivedAt)} · ${if (fromRecentResponse) "وضعیت خوراک بالا" else "قدیمی/کش؛ تازگی مجدد تأیید نشده"}",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
                     modifier = Modifier.padding(top = 4.dp))

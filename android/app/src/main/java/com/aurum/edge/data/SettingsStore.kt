@@ -65,9 +65,11 @@ class SettingsStore(context: Context) {
     @Synchronized
     fun selectWorkspace(id: String): Boolean {
         if (id !in setOf("forex", "crypto", "nobitex", "iran_stocks", "")) return false
+        val previous = read()
+        val sameSpace = id.isNotBlank() && previous.workspaceId == id
         val saved = prefs.edit().putString(KEY_WORKSPACE, id)
-            .putBoolean(KEY_MONITOR, if (id == "forex") read().backgroundMonitor else false)
-            .putBoolean(KEY_AUTO_PAPER, if (id == "forex") read().autoPaperTrading else false)
+            .putBoolean(KEY_MONITOR, sameSpace && previous.backgroundMonitor)
+            .putBoolean(KEY_AUTO_PAPER, sameSpace && id == "forex" && previous.autoPaperTrading)
             .commit()
         if (saved && prefs.getString(KEY_WORKSPACE, null) == id) {
             _settings.value = read()

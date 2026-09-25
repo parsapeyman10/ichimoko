@@ -66,6 +66,7 @@ fun IranStocksScreen(viewModel: AurumViewModel) {
             .take(12)
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
+        ReadOnlyMonitorCard(viewModel, settings)
         SectionCard("بورس ایران · تابلو و پژوهش", "BrsApi (واسطهٔ مستقل TSETMC) · نه حساب کارگزاری آگاه") {
             Text("کلید رایگانِ خواندنی بازار را از خود ارائه‌دهنده بگیرید؛ کلید معاملاتی آگاه/نوبیتکس را اینجا وارد نکنید. دادهٔ قیمت تابلوی این سرویس فقط ساعت HH:mm:ss دارد، نه تاریخ مستقل معامله؛ حتی پاسخ تازه، قیمت زنده یا مجوز خرید نیست.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)

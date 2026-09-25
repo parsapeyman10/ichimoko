@@ -31,7 +31,7 @@ import com.aurum.edge.data.NobitexMarket
 import com.aurum.edge.data.NobitexPracticeRules
 import com.aurum.edge.data.NobitexPracticeTrade
 import com.aurum.edge.data.NobitexSnapshot
-import com.aurum.edge.data.SpotScan
+import com.aurum.edge.data.NobitexScanState
 import com.aurum.edge.data.Quote
 import com.aurum.edge.data.WatchSelection
 import com.aurum.edge.data.WatchState
@@ -57,13 +57,6 @@ sealed interface NobitexState {
     data object Loading : NobitexState
     data class Done(val snapshot: NobitexSnapshot) : NobitexState
     data class Failed(val message: String) : NobitexState
-}
-
-sealed interface NobitexScanState {
-    data object Idle : NobitexScanState
-    data object Loading : NobitexScanState
-    data class Done(val snapshot: SpotScan) : NobitexScanState
-    data class Failed(val message: String) : NobitexScanState
 }
 
 sealed interface LearnState {
@@ -95,15 +88,15 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val watch: StateFlow<WatchState> = container.watch.state
     val news = container.news.state
     val publicWebNews = container.publicWebNews.state // Forex publisher snippets, not ninth-confluence evidence
-    val cryptoWebNews = container.cryptoWebNews.state // CoinDesk only, not Forex or Nobitex
+    val cryptoWebNews = container.cryptoWebNews.state // CoinDesk global context; not official Nobitex notices
+    val iranWebNews = container.iranWebNews.state // general economy headlines, not authenticated Codal filings
     val forexCalendar = container.forexCalendar.state
     val crypto = container.crypto.state
     val publicCrypto = container.publicCrypto.state
     val equities = container.equities.state
     private val _nobitex = MutableStateFlow<NobitexState>(NobitexState.Idle)
     val nobitex: StateFlow<NobitexState> = _nobitex.asStateFlow()
-    private val _nobitexScan = MutableStateFlow<NobitexScanState>(NobitexScanState.Idle)
-    val nobitexScan: StateFlow<NobitexScanState> = _nobitexScan.asStateFlow()
+    val nobitexScan: StateFlow<NobitexScanState> = container.nobitexResearch.state
     val nobitexTrades: StateFlow<List<NobitexPracticeTrade>> = container.nobitexPractice.trades
     val nobitexJournalError: StateFlow<String?> = container.nobitexPractice.loadError
     private val _watchHistory = MutableStateFlow(WatchHistory())
@@ -185,16 +178,16 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun enterWorkspace(context: Context, workspace: Workspace): Boolean {
         if (!container.settingsStore.selectWorkspace(workspace.id)) return false
         if (workspace != Workspace.IRAN_STOCKS) container.equities.clear()
+        if (workspace != Workspace.NOBITEX) container.nobitexResearch.clear()
         if (workspace == Workspace.FOREX) {
             container.market.start()
             container.watch.loadCached()
-            if (settings.value.backgroundMonitor && !SignalMonitorService.running.value &&
-                !SignalMonitorService.start(context)) {
-                container.settingsStore.update { it.copy(backgroundMonitor = false, autoPaperTrading = false) }
-            }
         } else {
-            SignalMonitorService.stop(context)
             container.market.stop()
+        }
+        if (settings.value.backgroundMonitor && !SignalMonitorService.running.value &&
+            !SignalMonitorService.start(context)) {
+            container.settingsStore.update { it.copy(backgroundMonitor = false, autoPaperTrading = false) }
         }
         return true
     }
@@ -208,6 +201,16 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         return true
     }
 
+    /** UI resume must not restart a healthy service socket; start() is idempotent. */
+    fun resumeVisibleForexFeed() {
+        if (settings.value.workspaceId == Workspace.FOREX.id) container.market.start()
+    }
+
+    /** When no user-enabled foreground service remains, do not keep a headless feed alive. */
+    fun pauseInvisibleForexFeed() {
+        if (!SignalMonitorService.running.value) container.market.stop()
+    }
+
     fun refreshNow() = container.market.refreshNow()
 
     fun refreshWatch() = container.watch.refreshNow()
@@ -217,6 +220,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun refreshPublicWebNews() = container.publicWebNews.refreshNow()
 
     fun refreshCryptoWebNews() = container.cryptoWebNews.refreshNow()
+
+    fun refreshIranWebNews() = container.iranWebNews.refreshNow()
 
     fun refreshEquities() = container.equities.refreshNow()
 
@@ -234,17 +239,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshPublicCrypto() = container.publicCrypto.refreshNow()
 
-    fun refreshNobitexScan() {
-        if (_nobitexScan.value == NobitexScanState.Loading) return
-        viewModelScope.launch {
-            _nobitexScan.value = NobitexScanState.Loading // prior response is NOT a live candidate
-            _nobitexScan.value = try {
-                NobitexScanState.Done(container.nobitexSpotScanner.scan())
-            } catch (e: Exception) {
-                NobitexScanState.Failed((e.message ?: "آمار عمومی نوبیتکس در دسترس نیست").take(130))
-            }
-        }
-    }
+    fun refreshNobitexScan() = container.nobitexResearch.refreshNow()
 
     fun downloadNobitex(market: NobitexMarket, interval: Interval) {
         if (_nobitex.value == NobitexState.Loading) return
@@ -510,10 +505,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun setMonitorFlag(enabled: Boolean) {
         container.settingsStore.update { it.copy(backgroundMonitor = enabled,
             autoPaperTrading = if (enabled) it.autoPaperTrading else false) }
-        if (!enabled) _toast.value = "پایش پس‌زمینه روشن نشد؛ معاملهٔ خودکار کاغذی خاموش ماند"
+        if (!enabled) _toast.value = "پایش پس‌زمینه خاموش/ناموفق است؛ ورود خودکار کاغذی غیرفعال ماند"
     }
 
     fun setAutoPaperTrading(enabled: Boolean) {
+        if (enabled && settings.value.workspaceId != Workspace.FOREX.id) {
+            _toast.value = "ورود خودکار کاغذی فقط در فضای فارکس قابل فعال‌سازی است"
+            return
+        }
         if (enabled && (!settings.value.backgroundMonitor || settings.value.newsBaseUrl.isBlank())) {
             _toast.value = "برای خودکار کاغذی، پایش و آدرس HTTPS سرور خبر را فعال کنید"
             return

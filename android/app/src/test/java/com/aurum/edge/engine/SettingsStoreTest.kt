@@ -55,6 +55,25 @@ class SettingsStoreTest {
         assertEquals("", SettingsStore(context).read().stockDataKey)
     }
 
+    @Test fun `research monitor opt in is per selected space and never enables forex auto paper`() {
+        val context = RuntimeEnvironment.getApplication()
+        context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit().clear().commit()
+        val store = SettingsStore(context)
+        assertTrue(store.selectWorkspace("crypto"))
+        store.update { it.copy(backgroundMonitor = true, autoPaperTrading = false) }
+        assertTrue(store.selectWorkspace("crypto")) // process recreation of the same selected space
+        assertTrue(SettingsStore(context).read().backgroundMonitor)
+        assertTrue(store.selectWorkspace("nobitex"))
+        assertFalse(store.read().backgroundMonitor)
+        assertFalse(store.read().autoPaperTrading)
+        store.update { it.copy(backgroundMonitor = true) }
+        assertTrue(store.selectWorkspace("forex"))
+        assertFalse(SettingsStore(context).read().backgroundMonitor)
+        assertFalse(SettingsStore(context).read().autoPaperTrading)
+        assertTrue(store.selectWorkspace(""))
+        assertFalse(store.read().backgroundMonitor)
+    }
+
     @Test fun `server URL save is independent of market key and survives a new store`() {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit().clear().commit()

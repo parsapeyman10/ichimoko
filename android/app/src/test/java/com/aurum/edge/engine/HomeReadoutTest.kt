@@ -3,6 +3,7 @@ package com.aurum.edge.engine
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
+import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.HomeReadout
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.WatchCatalog
@@ -48,6 +49,19 @@ class HomeReadoutTest {
         assertNull(noBars.value) // a bare number without a timestamp is not a displayable quote
     }
 
+    @Test fun `quiet socket and stale REST downgrade without rewriting their original receipt`() {
+        for (mode in listOf(FeedMode.LIVE, FeedMode.POLLING)) {
+            val received = FeedStatus(mode, lastSuccessAt = now - 90_001L)
+            val delayed = FeedLiveness.display(received, now)
+            assertEquals(FeedMode.DELAYED, delayed.mode)
+            assertEquals(received.lastSuccessAt, delayed.lastSuccessAt)
+            assertFalse(HomeReadout.from(fresh.copy(feed = delayed), now).current)
+            assertEquals(mode, FeedLiveness.display(received.copy(lastSuccessAt = now - 1L), now).mode)
+        }
+        assertEquals(FeedMode.OFFLINE, FeedLiveness.display(FeedStatus(FeedMode.OFFLINE), now).mode)
+        assertFalse(FeedLiveness.hasRecentReceipt(FeedStatus(FeedMode.LIVE, lastSuccessAt = now + 1), now))
+    }
+
     @Test fun `four workspaces expose only their own destinations`() {
         assertEquals(4, Workspace.entries.size)
         val tabs = Workspace.entries.associateWith { primaryTabsFor(it) + moreTabsFor(it) }
@@ -57,8 +71,8 @@ class HomeReadoutTest {
         assertTrue(AurumTab.Learn in moreTabsFor(Workspace.FOREX))
         assertTrue(AurumTab.Settings in moreTabsFor(Workspace.FOREX))
         assertEquals(listOf(AurumTab.Crypto, AurumTab.CryptoNews), tabs.getValue(Workspace.CRYPTO))
-        assertEquals(listOf(AurumTab.Nobitex), tabs.getValue(Workspace.NOBITEX))
-        assertEquals(listOf(AurumTab.Stocks, AurumTab.IranPrices, AurumTab.Agah,
+        assertEquals(listOf(AurumTab.Nobitex, AurumTab.NobitexNews), tabs.getValue(Workspace.NOBITEX))
+        assertEquals(listOf(AurumTab.Stocks, AurumTab.IranPrices, AurumTab.IranNews, AurumTab.Agah,
             AurumTab.IranWatchSettings), tabs.getValue(Workspace.IRAN_STOCKS))
         assertTrue(Workspace.entries.map { it.id }.distinct().size == 4)
     }

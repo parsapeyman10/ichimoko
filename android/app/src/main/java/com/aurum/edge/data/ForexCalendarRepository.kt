@@ -56,6 +56,7 @@ internal fun parseForexCalendar(root: JsonArray, now: Long): List<ForexEvent> {
         } ?: error("زمان منطقه‌دار رویداد معتبر نیست")
         require(abs(time - now) <= 8 * 86_400_000L) { "هفتهٔ تقویم کهنه/نامعتبر است" }
         fun metric(field: String) = str(field)?.trim()?.takeIf { it.isNotBlank() && it.length <= 48 &&
+            it.lowercase() !in setOf("n/a", "tba", "—", "-", "?") &&
             '<' !in it && it.none { ch -> Character.isISOControl(ch) } }
         ForexEvent(title, country, impact, time,
             forecast = metric("forecast"), previous = metric("previous"), actual = metric("actual"))
@@ -76,10 +77,13 @@ class ForexCalendarRepository(private val scope: CoroutineScope) {
     fun refreshNow() { scope.launch { refresh() } }
 
     private suspend fun refresh() = mutex.withLock {
-        val now = SystemClock.elapsedRealtime()
-        val interval = if (_state.value.online()) 900_000L else 60_000L
-        if (attemptedAt != 0L && now - attemptedAt in 0L until interval) return@withLock
-        attemptedAt = now
+        val elapsed = SystemClock.elapsedRealtime()
+        val now = System.currentTimeMillis()
+        val nearbyRelease = _state.value.events.any { it.country == "USD" && it.impact == "High" &&
+            it.at in (now - 75 * 60_000L)..(now + 40 * 60_000L) }
+        val interval = if (_state.value.online(now) && !nearbyRelease) 900_000L else 60_000L
+        if (attemptedAt != 0L && elapsed - attemptedAt in 0L until interval) return@withLock
+        attemptedAt = elapsed
         _state.value = _state.value.copy(loading = true)
         try {
             val root = withContext(Dispatchers.IO) {
