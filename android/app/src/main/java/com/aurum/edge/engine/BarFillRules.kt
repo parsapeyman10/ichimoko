@@ -42,8 +42,16 @@ internal object BarFillRules {
         }
     }
 
-    fun nextOpenExit(bar: Candle, side: SignalAction, spread: Double, reason: String): Exit {
+    fun nextOpenExit(bar: Candle, side: SignalAction, stop: Double, target: Double,
+                     spread: Double, reason: String): Exit {
         val dir = if (side == SignalAction.BUY) 1.0 else -1.0
-        return Exit(bar.open - dir * spread / 2.0, reason)
+        val executable = bar.open - dir * spread / 2.0
+        // A protective order was also standing overnight. Never grant a better-than-target
+        // price on a favorable opening gap; adverse gaps through stop fill at the worse open.
+        return when {
+            (executable - stop) * dir <= 0.0 -> Exit(executable, "حد ضرر (گپ در open)")
+            (target - executable) * dir <= 0.0 -> Exit(target, "حد سود (گپ در open)")
+            else -> Exit(executable, reason)
+        }
     }
 }

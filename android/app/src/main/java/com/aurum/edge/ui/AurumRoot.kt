@@ -51,7 +51,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.ui.components.FeedBanner
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.formatPrice
-import com.aurum.edge.ui.components.formatSigned
 import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
 
@@ -210,7 +209,7 @@ private fun AppHeader(
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                if (price == null) "بدون داده واقعی" else formatSigned(price),
+                if (price == null) "بدون دادهٔ تازه" else "آخرین مشاهده · وضعیت فید پایین صفحه",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
             )

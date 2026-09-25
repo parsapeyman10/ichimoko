@@ -177,7 +177,8 @@ object Backtester {
                 // The bar of entry is eligible for SL/TP. An ambiguous bar hits the stop first.
                 // A Kijun/cross/time signal is known only at close, so fill it at NEXT open.
                 val fill = current.pendingExitReason?.let {
-                    BarFillRules.nextOpenExit(bar, current.side, spreadPrice, it)
+                    BarFillRules.nextOpenExit(bar, current.side, current.stopLoss,
+                        current.takeProfit, spreadPrice, it)
                 } ?: BarFillRules.protectiveExit(bar, current.side, current.stopLoss,
                     current.takeProfit, spreadPrice)
                 if (fill != null) {

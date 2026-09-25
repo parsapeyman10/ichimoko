@@ -86,6 +86,28 @@ class BacktesterExecutionTest {
         assertEquals(0.0, unresolved.netPnl, 1e-8)
     }
 
+    @Test fun `short stop wins ambiguous bar and pending exits respect protective opening gaps`() {
+        val input = bars().toMutableList()
+        input[213] = input[213].copy(open = 99.0, high = 106.0, low = 94.0, close = 100.0)
+        val sell = Backtester.runWithDecisions(input, interval, { i ->
+            if (i == 212) Signal(SignalAction.SELL, 90.0, stopLoss = 105.0,
+                takeProfit = 95.0, barTime = input[i].time, interval = interval)
+            else Signal(SignalAction.NO_TRADE, 0.0)
+        }, spreadPrice = 0.20, commissionPerOz = 0.0).trades.single()
+        assertEquals(98.9, sell.entry, 1e-8)
+        assertEquals("حد ضرر", sell.exitReason)
+        assertEquals(105.0, sell.exit, 1e-8)
+
+        val longGap = input[214].copy(open = 110.0, high = 110.5, low = 109.5, close = 110.0)
+        assertEquals(105.0, BarFillRules.nextOpenExit(longGap, SignalAction.BUY,
+            95.0, 105.0, 0.20, "زمان").fill, 1e-8) // no windfall beyond target
+        val shortGap = input[214].copy(open = 110.0, high = 110.5, low = 109.5, close = 110.0)
+        val adverse = BarFillRules.nextOpenExit(shortGap, SignalAction.SELL,
+            105.0, 95.0, 0.20, "زمان")
+        assertEquals(110.1, adverse.fill, 1e-8)
+        assertTrue(adverse.reason.contains("گپ"))
+    }
+
     @Test fun `price gaps through original risk and reward cancel an entry rather than invent a fill`() {
         val input = bars().toMutableList()
         input[214] = input[214].copy(open = 106.0, high = 106.5, low = 105.8, close = 106.0)

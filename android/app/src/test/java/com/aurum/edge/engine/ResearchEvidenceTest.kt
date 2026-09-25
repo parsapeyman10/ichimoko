@@ -55,6 +55,7 @@ class ResearchEvidenceTest {
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = null)))
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = news.copy(model = "deterministic-fallback"))))
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = news.copy(calendarSource = null))))
+        assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = news.copy(checkedAt = paper.openedAt + 1))))
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(priceAction = null)))
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(entryConditions = conditions.dropLast(1))))
         assertNull(ResearchEvidence.paperCostWhatIf(listOf(manual), 0.30, 0.05))

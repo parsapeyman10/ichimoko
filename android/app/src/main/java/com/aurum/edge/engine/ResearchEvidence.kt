@@ -124,9 +124,13 @@ object ResearchEvidence {
             ict.symbol == trade.symbol && ict.action == trade.action && ict.barTime == bar &&
             news.model.isNotBlank() && news.model != "deterministic-fallback" &&
             news.direction == trade.action.name && news.confidence in 80.0..100.0 &&
-            news.checkedAt > 0L && news.calendarSource == FOREX_CALENDAR_SOURCE_URL &&
-            news.calendarCheckedAt != null && news.evidence.isNotEmpty() &&
-            news.evidence.all { it.source.isNotBlank() && it.url.startsWith("https://") } &&
+            news.checkedAt > 0L && trade.openedAt - news.checkedAt in 0L..180_000L &&
+            trade.openedAt - ict.checkedAt in 0L..180_000L &&
+            news.calendarSource == FOREX_CALENDAR_SOURCE_URL &&
+            news.calendarCheckedAt?.let { trade.openedAt - it in 0L..1_200_000L } == true &&
+            news.evidence.isNotEmpty() && news.evidence.all { it.id.isNotBlank() &&
+                it.source.isNotBlank() && it.url.startsWith("https://") &&
+                news.checkedAt - it.publishedAt in 0L..10_800_000L } &&
             trade.entryConditions.size == 9 &&
             trade.entryConditions.all { it.status == "CONFIRMED" } &&
             trade.entryConditions.last().name == NewsConfluence.NEWS_LABEL

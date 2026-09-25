@@ -91,8 +91,11 @@ fun HomeScreen(
         }
 
         SectionCard("بازار · ${market.symbol}", "هر عددی قیمت قابل اجرا یا تضمین معامله نیست",
-            trailing = { Pill(if (price.current) "دریافت تازه" else "آفلاین/قدیمی",
-                if (price.current) AurumColors.Cyan else AurumColors.Gold) }) {
+            trailing = { Pill(when {
+                price.current -> "دریافت تازه"
+                price.value != null -> "قبلی/کش"
+                else -> "بدون داده"
+            }, if (price.current) AurumColors.Cyan else AurumColors.Gold) }) {
             Text(formatPrice(price.value), style = MaterialTheme.typography.headlineMedium,
                 color = if (price.current) AurumColors.TextPrimary else AurumColors.TextMuted)
             Text(if (price.current) "${price.label} · دریافت ${formatDateTime(price.observedAt)}"
