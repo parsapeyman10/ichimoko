@@ -16,6 +16,30 @@ if (System.getenv("GITHUB_ACTIONS") == "true") {
 
 // Never bake provider credentials into an APK (even a GitHub Actions secret is extractable).
 // Read-only market keys are entered on the device; trading keys must stay server-side.
+// The CI artifact is a DEBUG-SIGNED preview. A repository owner can explicitly supply a
+// stable, privately held signing key for sideloaded updates; signing is NOT Play certification
+// and does not guarantee that Google Play Protect will stop warning on first sideload.
+val ownerStorePath = System.getenv("AURUM_RELEASE_STORE_FILE")?.takeIf { it.isNotBlank() }
+val ownerStorePassword = System.getenv("AURUM_RELEASE_STORE_PASSWORD")?.takeIf { it.isNotBlank() }
+val ownerKeyAlias = System.getenv("AURUM_RELEASE_KEY_ALIAS")?.takeIf { it.isNotBlank() }
+val ownerKeyPassword = System.getenv("AURUM_RELEASE_KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+val signingValues = listOf(ownerStorePath, ownerStorePassword, ownerKeyAlias, ownerKeyPassword)
+val ownerSigningReady = signingValues.all { it != null }
+val requireOwnerSigning = providers.gradleProperty("aurumRequireReleaseSigning").orNull == "true"
+if (!ownerSigningReady && (requireOwnerSigning || signingValues.any { it != null })) {
+    throw org.gradle.api.GradleException(
+        "Owner-signed release requires all four AURUM_RELEASE_* environment variables; refusing an incomplete signing setup."
+    )
+}
+if (ownerSigningReady) {
+    val keystore = file(ownerStorePath!!).canonicalFile
+    if (!keystore.isFile || keystore.toPath().startsWith(rootDir.parentFile.canonicalFile.toPath())) {
+        throw org.gradle.api.GradleException("The release keystore must be an existing file OUTSIDE the repository.")
+    }
+} else if (System.getenv("GITHUB_ACTIONS") == "true") {
+    println("::warning title=Preview APK::The CI artifact named release is signed with an ephemeral DEBUG key. " +
+        "It is not a trusted/published release; Play Protect may warn, and upgrades may fail.")
+}
 android {
     namespace = "com.aurum.edge"
     compileSdk = 35
@@ -30,16 +54,26 @@ android {
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
     }
 
+    signingConfigs {
+        if (ownerSigningReady) create("ownerRelease") {
+            storeFile = file(ownerStorePath!!)
+            storePassword = ownerStorePassword!!
+            keyAlias = ownerKeyAlias!!
+            keyPassword = ownerKeyPassword!!
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
             isMinifyEnabled = false
         }
         release {
-            // The APK produced by CI is installable as-is (no signing secrets required).
+            // Compatibility with the existing preview workflow. This is NOT a public release.
+            // Owner-signed APKs use the same applicationId and a key kept outside this repository.
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (ownerSigningReady) "ownerRelease" else "debug")
         }
     }
 

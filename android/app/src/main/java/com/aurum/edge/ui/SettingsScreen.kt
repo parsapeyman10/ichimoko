@@ -375,7 +375,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 Text("• $line", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary, modifier = Modifier.padding(vertical = 2.dp))
             }
             Text(
-                "Trading ${BuildConfig.VERSION_NAME} · تصمیم‌یار، نه مشاوره مالی",
+                "Aurum Edge ${BuildConfig.VERSION_NAME} · تصمیم‌یار، نه مشاوره مالی",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 8.dp),
