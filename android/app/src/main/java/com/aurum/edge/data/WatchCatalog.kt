@@ -57,6 +57,13 @@ object WatchCatalog {
     )
 
     fun find(id: String): WatchSymbol? = symbols.firstOrNull { it.id == id }
+
+    /** Keep exploratory watch requests in the explicitly chosen workspace. */
+    fun forWorkspace(id: String): List<WatchSymbol> = when (id) {
+        "forex" -> symbols.filter { it.id == "XAU/USD" }
+        "iran_stocks" -> symbols.filter { it.id.endsWith("/IRT") }
+        else -> emptyList() // Crypto and Nobitex use their own dedicated read-only feeds
+    }
 }
 
 data class DisplayQuote(val quote: Quote?, val sourceId: String, val fallback: Boolean)

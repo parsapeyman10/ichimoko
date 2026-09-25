@@ -5,6 +5,7 @@ import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.HomeReadout
 import com.aurum.edge.data.MarketState
+import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.ui.AurumTab
 import com.aurum.edge.ui.Workspace
 import com.aurum.edge.ui.moreTabsFor
@@ -57,7 +58,17 @@ class HomeReadoutTest {
         assertTrue(AurumTab.Settings in moreTabsFor(Workspace.FOREX))
         assertEquals(listOf(AurumTab.Crypto, AurumTab.CryptoNews), tabs.getValue(Workspace.CRYPTO))
         assertEquals(listOf(AurumTab.Nobitex), tabs.getValue(Workspace.NOBITEX))
-        assertEquals(listOf(AurumTab.Stocks, AurumTab.Agah), tabs.getValue(Workspace.IRAN_STOCKS))
+        assertEquals(listOf(AurumTab.Stocks, AurumTab.IranPrices, AurumTab.Agah,
+            AurumTab.IranWatchSettings), tabs.getValue(Workspace.IRAN_STOCKS))
         assertTrue(Workspace.entries.map { it.id }.distinct().size == 4)
+    }
+
+    @Test fun `read only watch sources never cross workspace boundaries`() {
+        assertEquals(listOf("XAU/USD"), WatchCatalog.forWorkspace(Workspace.FOREX.id).map { it.id })
+        assertTrue(WatchCatalog.forWorkspace(Workspace.CRYPTO.id).isEmpty()) // dedicated CoinGecko feed
+        assertTrue(WatchCatalog.forWorkspace(Workspace.IRAN_STOCKS.id).isNotEmpty())
+        assertTrue(WatchCatalog.forWorkspace(Workspace.IRAN_STOCKS.id).all { it.id.endsWith("/IRT") })
+        assertTrue(WatchCatalog.forWorkspace(Workspace.NOBITEX.id).isEmpty())
+        assertTrue(WatchCatalog.forWorkspace("").isEmpty()) // no selection -> no background fetch
     }
 }

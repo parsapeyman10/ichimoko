@@ -57,10 +57,11 @@ class WatchRepository(
 
     private suspend fun refresh() = mutex.withLock {
         ensureLoaded()
-        _state.value = _state.value.copy(refreshing = true, error = null)
+        val activeWorkspace = chartSettings.read().workspaceId
+        _state.value = _state.value.copy(refreshing = true, error = null, lastAttemptAt = null)
         try {
             val selected = preferences.selections.value
-            val targets = WatchCatalog.symbols.flatMap { symbol ->
+            val targets = WatchCatalog.forWorkspace(activeWorkspace).flatMap { symbol ->
                 selected[symbol.id]?.enabledSources.orEmpty().mapNotNull { sourceId ->
                     val source = SourceCatalog.find(sourceId) ?: return@mapNotNull null
                     val code = symbol.providerCodes[sourceId] ?: return@mapNotNull null
@@ -78,6 +79,9 @@ class WatchRepository(
                     }
                 }.awaitAll().flatten()
             }
+            // A request that started in a space being left must not persist observations as
+            // though the newly selected space had made them. The old HTTP call may still finish.
+            if (chartSettings.read().workspaceId != activeWorkspace) return@withLock
             val updated = _state.value.quotes.mapValues { it.value.toMutableMap() }.toMutableMap()
             for ((target, incoming) in results) {
                 val quotes = updated.getOrPut(target.symbol.id) { mutableMapOf() }
@@ -94,7 +98,8 @@ class WatchRepository(
             }
             _state.value = _state.value.copy(quotes = updated, lastAttemptAt = System.currentTimeMillis())
         } catch (e: Exception) {
-            _state.value = _state.value.copy(error = "به‌روزرسانی دیده‌بان انجام نشد: ${e.message ?: "خطای داده"}")
+            if (chartSettings.read().workspaceId == activeWorkspace)
+                _state.value = _state.value.copy(error = "به‌روزرسانی دیده‌بان انجام نشد: ${e.message ?: "خطای داده"}")
         } finally {
             _state.value = _state.value.copy(refreshing = false)
         }
@@ -112,9 +117,10 @@ class WatchRepository(
     }
 
     suspend fun clearHistory() = mutex.withLock {
-        history.clear()
-        _state.value = _state.value.copy(quotes = _state.value.quotes.mapValues { (_, quotes) ->
-            quotes.filterValues { !it.stale }
+        val ids = WatchCatalog.forWorkspace(chartSettings.read().workspaceId).map { it.id }
+        history.clear(ids)
+        _state.value = _state.value.copy(quotes = _state.value.quotes.mapValues { (symbolId, quotes) ->
+            if (symbolId in ids) quotes.filterValues { !it.stale } else quotes
         })
     }
 }

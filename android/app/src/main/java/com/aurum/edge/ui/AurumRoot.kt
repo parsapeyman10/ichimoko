@@ -72,6 +72,8 @@ enum class AurumTab(val label: String, val icon: ImageVector) {
     CryptoNews("خبر کریپتو", Icons.Filled.Article),
     Nobitex("نوبیتکس", Icons.Filled.ViewList),
     Stocks("بورس ایران", Icons.Filled.ShowChart),
+    IranPrices("ریالی", Icons.Filled.ViewList),
+    IranWatchSettings("منابع ریالی", Icons.Filled.Settings),
     Agah("آگاه", Icons.Filled.Bookmarks),
     Learn("یادگیری", Icons.Filled.School),
     Journal("ژورنال", Icons.Filled.Bookmarks),
@@ -83,11 +85,12 @@ internal fun primaryTabsFor(space: Workspace): List<AurumTab> = when (space) {
     Workspace.FOREX -> listOf(AurumTab.Home, AurumTab.Chart, AurumTab.Signal, AurumTab.News, AurumTab.Watch)
     Workspace.CRYPTO -> listOf(AurumTab.Crypto, AurumTab.CryptoNews)
     Workspace.NOBITEX -> listOf(AurumTab.Nobitex)
-    Workspace.IRAN_STOCKS -> listOf(AurumTab.Stocks, AurumTab.Agah)
+    Workspace.IRAN_STOCKS -> listOf(AurumTab.Stocks, AurumTab.IranPrices, AurumTab.Agah)
 }
 
 internal fun moreTabsFor(space: Workspace): List<AurumTab> = when (space) {
     Workspace.FOREX -> listOf(AurumTab.Learn, AurumTab.Journal, AurumTab.Settings)
+    Workspace.IRAN_STOCKS -> listOf(AurumTab.IranWatchSettings)
     else -> emptyList()
 }
 
@@ -190,6 +193,8 @@ fun AurumRoot(viewModel: AurumViewModel) {
                     AurumTab.CryptoNews -> CryptoNewsScreen(viewModel)
                     AurumTab.Nobitex -> NobitexWorkspaceScreen(viewModel)
                     AurumTab.Stocks -> IranStocksScreen(viewModel)
+                    AurumTab.IranPrices -> IranPricesScreen(viewModel, onOpenSettings = { open(AurumTab.IranWatchSettings) })
+                    AurumTab.IranWatchSettings -> IranWatchSettingsScreen(viewModel)
                     AurumTab.Agah -> AgahGuideScreen()
                     AurumTab.Learn -> LearnScreen(viewModel)
                     AurumTab.Journal -> JournalScreen(viewModel, market)

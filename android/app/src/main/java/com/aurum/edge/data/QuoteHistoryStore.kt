@@ -60,7 +60,13 @@ class QuoteHistoryStore(context: Context) : SQLiteOpenHelper(context, "watch_quo
         ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else 0L }
     }
 
-    suspend fun clear() = withContext(Dispatchers.IO) { writableDatabase.delete("quote_history", null, null) }
+    /** Clear only the explicitly selected workspace; one space must never erase another's history. */
+    suspend fun clear(symbolIds: List<String>) = withContext(Dispatchers.IO) {
+        if (symbolIds.isNotEmpty()) {
+            writableDatabase.delete("quote_history",
+                "symbol_id IN (${symbolIds.joinToString(",") { "?" }})", symbolIds.toTypedArray())
+        }
+    }
 
     private fun query(symbolId: String, sourceId: String, before: Long?, limit: Int): List<Quote> {
         val where = "symbol_id=? AND source_id=?" + if (before != null) " AND observed_at<?" else ""

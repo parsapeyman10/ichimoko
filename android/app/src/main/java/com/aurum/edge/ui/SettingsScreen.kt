@@ -149,23 +149,23 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 modifier = Modifier.padding(top = 4.dp))
         }
 
-        WatchSettingsSection(viewModel)
+        WatchSettingsSection(viewModel, settings.workspaceId)
 
-        SectionCard("گیت AI خبر و غربال رمزارز", "تیترهای واقعی وب بدون سرور در تب «خبر»؛ شرط نهم معامله به بک‌اند HTTPS نیاز دارد") {
+        SectionCard("گیت خبر و AI فارکس", "تقویم Forex Factory و خبرهای واقعی وب بی‌نیاز از سرور؛ شرط نهم معامله به سرور HTTPS نیاز دارد") {
             OutlinedTextField(
                 value = newsUrl, onValueChange = { newsUrl = it }, singleLine = true,
-                label = { Text("آدرس سرور API (https://api.example.com)") },
+                label = { Text("نشانی HTTPS سرور خبر فارکس (اختیاری)") },
                 modifier = Modifier.fillMaxWidth(),
             )
             Button(onClick = { viewModel.saveNewsBaseUrl(newsUrl) }, modifier = Modifier.padding(top = 8.dp)) {
-                Text("اتصال به سرور اخبار و رمزارز")
+                Text("ذخیره/حذف نشانی سرور خبر فارکس")
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("وتوی خبر برای ورود دستی کاغذی هنگام عدم‌دسترسی", Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
                 Switch(checked = settings.pauseOnNews, onCheckedChange = viewModel::setPauseOnNews)
             }
-            Text("خوراک‌های عمومی IRIB، YJC، اقتصاد۲۴، FXStreet، CoinDesk و BLS مستقیم روی گوشی فقط برای مطالعه‌اند؛ به‌جای شواهد AI استفاده نمی‌شوند. سرور و مدل معتبر برای شرط نهم لازم‌اند. وتوی بالا برای برگهٔ دستی است؛ ورود سیگنالی/خودکار بدون خبر AI معتبر همیشه متوقف است. خروج‌ها مسدود نمی‌شوند؛ سفارش واقعی غیرفعال است.",
+            Text("Forex Factory مرجع اصلی تقویم خبر فارکس است؛ خبرهای مکمل وب FXStreet/BLS و سایر منابع فقط برای مطالعه‌اند، نه شواهد AI. سرور و مدل معتبر برای شرط نهم لازم‌اند. نشانی غربال رمزارز جدا و فقط در فضای کریپتو تنظیم می‌شود. وتوی بالا برای برگهٔ دستی است؛ ورود سیگنالی/خودکار بدون خبر AI معتبر همیشه متوقف است. خروج‌ها مسدود نمی‌شوند؛ سفارش واقعی غیرفعال است.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
@@ -395,10 +395,22 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
 }
 
 @Composable
-private fun WatchSettingsSection(viewModel: AurumViewModel) {
+fun IranWatchSettingsScreen(viewModel: AurumViewModel) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
+        SectionCard("منابع دیده‌بان ریالی", "مجزا از XAU/USD فارکس و API معاملاتی آگاه") {
+            Text("انتخاب منابع فقط قیمت‌های نمایشی طلا/ارز ایران را تغییر می‌دهد؛ به داده‌های تابلوخوانی، سفارش یا سیگنال فارکس وصل نیست.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+        }
+        WatchSettingsSection(viewModel, Workspace.IRAN_STOCKS.id)
+    }
+}
+
+@Composable
+private fun WatchSettingsSection(viewModel: AurumViewModel, workspaceId: String) {
     val selections by viewModel.watchSettings.collectAsStateWithLifecycle()
-    var symbolId by remember { mutableStateOf(WatchCatalog.symbols.first().id) }
-    val symbol = WatchCatalog.find(symbolId) ?: return
+    val available = WatchCatalog.forWorkspace(workspaceId)
+    var symbolId by remember(workspaceId) { mutableStateOf(available.firstOrNull()?.id.orEmpty()) }
+    val symbol = available.firstOrNull { it.id == symbolId } ?: return
     val selected = selections[symbolId] ?: return
     var key by remember(symbolId) { mutableStateOf(viewModel.watchKeyOverride(symbolId)) }
     var confirmClear by remember { mutableStateOf(false) }
@@ -409,7 +421,7 @@ private fun WatchSettingsSection(viewModel: AurumViewModel) {
     ) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            WatchCatalog.symbols.forEach { item ->
+            available.forEach { item ->
                 FilterChip(selected = symbolId == item.id, onClick = { symbolId = item.id },
                     label = { Text(item.id) })
             }
@@ -447,18 +459,18 @@ private fun WatchSettingsSection(viewModel: AurumViewModel) {
         Text("تاریخچهٔ کامل مشاهدات هر منبع روی همین دستگاه در SQLite نگهداری می‌شود و در دیده‌بان صفحه‌به‌صفحه قابل مشاهده است؛ بک‌فیل تاریخی از سرویس‌دهنده نیست.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
             modifier = Modifier.padding(top = 8.dp))
-        Text("TSETMC هنوز منبع معتبر/قرارداد پایدار ندارد و به عمد قابل انتخاب نیست. API معاملاتی و کلید Nobitex/MT5 را هرگز اینجا وارد نکنید.",
+        Text("فقط منابع نمایشی همین فضا اینجا انتخاب می‌شوند؛ تابلوخوانی سهام از BrsApi در تب بورس جداست. API معاملاتی و کلید Nobitex/MT5 را هرگز اینجا وارد نکنید.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
             modifier = Modifier.padding(top = 6.dp))
         OutlinedButton(onClick = { confirmClear = true }, modifier = Modifier.padding(top = 8.dp)) {
-            Text("پاک کردن تاریخچهٔ دیده‌بان")
+            Text("پاک کردن تاریخچهٔ همین فضا")
         }
     }
     if (confirmClear) {
         AlertDialog(
             onDismissRequest = { confirmClear = false },
-            title = { Text("حذف تاریخچهٔ دیده‌بان؟") },
-            text = { Text("تمام قیمت‌های قبلاً دریافت‌شدهٔ همهٔ منابع روی این گوشی حذف می‌شود. این کار قابل بازگشت نیست.") },
+            title = { Text("حذف تاریخچهٔ همین فضا؟") },
+            text = { Text("فقط قیمت‌های قبلاً دریافت‌شدهٔ نمادهای این فضا روی گوشی حذف می‌شود؛ دادهٔ فضاهای دیگر حفظ می‌شود. این کار قابل بازگشت نیست.") },
             confirmButton = { TextButton(onClick = { viewModel.clearWatchHistory(); confirmClear = false }) { Text("حذف") } },
             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("انصراف") } },
         )

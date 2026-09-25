@@ -38,7 +38,7 @@ import kotlinx.coroutines.delay
 
 /** Read-only Iranian board. A time-only HTML row cannot approve a trade. */
 @Composable
-fun IranPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
+fun IranPricesScreen(viewModel: AurumViewModel, onOpenSettings: (() -> Unit)? = null) {
     val state by viewModel.watch.collectAsStateWithLifecycle()
     val selections by viewModel.watchSettings.collectAsStateWithLifecycle()
     val uriHandler = LocalUriHandler.current
@@ -58,7 +58,9 @@ fun IranPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = viewModel::refreshWatch, enabled = !state.refreshing,
                     modifier = Modifier.weight(1f)) { Text("دریافت دوباره") }
-                OutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) { Text("منابع") }
+                if (onOpenSettings != null) {
+                    OutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) { Text("منابع") }
+                }
             }
             if (state.refreshing) CircularProgressIndicator(modifier = Modifier.padding(top = 6.dp))
             Text("آخرین تلاش: ${relativeTime(state.lastAttemptAt, now)} · قطع اینترنت = نمایش کش با زمان اصلی، نه قیمت آنلاین.",

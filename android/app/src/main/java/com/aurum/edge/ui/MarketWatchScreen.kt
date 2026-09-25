@@ -10,7 +10,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -18,7 +17,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -39,22 +37,10 @@ import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
 import kotlinx.coroutines.delay
 
-/** Separate read-only watchlist and publisher web news. No quote is sent as an order. */
+/** Read-only XAU/USD watch. Other markets belong to their own workspaces. */
 @Composable
 fun MarketWatchScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
-    var page by remember { mutableStateOf(0) }
-    Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = page == 0, onClick = { page = 0 }, label = { Text("منابع بازار") })
-            FilterChip(selected = page == 1, onClick = { page = 1 }, label = { Text("طلا و ارز") })
-            FilterChip(selected = page == 2, onClick = { page = 2 }, label = { Text("اخبار وب") })
-        }
-        when (page) {
-            1 -> IranPricesScreen(viewModel, onOpenSettings)
-            2 -> PersianNewsScreen(viewModel, onOpenSettings)
-            else -> WatchPricesScreen(viewModel, onOpenSettings)
-        }
-    }
+    WatchPricesScreen(viewModel, onOpenSettings)
 }
 
 @Composable
@@ -73,7 +59,7 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
-        SectionCard("دیده‌بان چندمنبعی", "قیمت نمایشی ≠ تأیید دومنبعی؛ زمان دریافت وب جای زمان قیمت ناشر را نمی‌گیرد") {
+        SectionCard("دیده‌بان فارکس · XAU/USD", "قیمت نمایشی ≠ تأیید دومنبعی؛ زمان دریافت وب جای زمان قیمت ناشر را نمی‌گیرد") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = viewModel::refreshWatch, enabled = !state.refreshing, modifier = Modifier.weight(1f)) {
                     Text(if (state.refreshing) "در حال دریافت…" else "دریافت دوباره")
@@ -88,7 +74,7 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
             )
             state.error?.let { Text(it, color = AurumColors.Red, style = MaterialTheme.typography.bodySmall) }
         }
-        WatchCatalog.symbols.forEach { symbol ->
+        WatchCatalog.forWorkspace("forex").forEach { symbol ->
             val selected = selections[symbol.id] ?: return@forEach
             val quotes = state.quotes[symbol.id].orEmpty()
             val verification = SourceComparison.verify(symbol, selected.enabledSources, quotes, now)
@@ -157,7 +143,7 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
             }
         }
         SectionCard("منابع محدود", "وضعیت شفاف اتصال‌های دیگر") {
-            Text("TSETMC: اتصال رسمی و شناسهٔ نماد تأیید نشده؛ هیچ قیمت بورسی از آن نمایش داده نمی‌شود. Nobitex/MT5: سفارش واقعی در اپ فعال نیست.",
+            Text("این دیده‌بان فقط XAU/USD است؛ تابلوی سهام BrsApi و قیمت‌های ریالی در فضای بورس ایران هستند. Nobitex/MT5: سفارش واقعی در اپ فعال نیست.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
         }
     }
