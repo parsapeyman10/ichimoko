@@ -87,6 +87,6 @@ object NewsResearch {
         val exchange = if (space == ResearchSpace.NOBITEX)
             "CoinDesk اطلاعیهٔ رسمی نوبیتکس یا تأیید بازار ریالی/USDT نیست. " else ""
         return ResearchNote(ResearchState.CONTEXT, "برداشت محدود از تیتر ناشر",
-            "$theme$exchangeمتن کامل ناشر و واکنش قیمت/حجم را جدا بررسی کنید؛ نه AI، نه پیش‌بینی و نه مجوز معامله.")
+            "$theme${exchange}متن کامل ناشر و واکنش قیمت/حجم را جدا بررسی کنید؛ نه AI، نه پیش‌بینی و نه مجوز معامله.")
     }
 }
