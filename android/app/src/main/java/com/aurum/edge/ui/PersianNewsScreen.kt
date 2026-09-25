@@ -74,10 +74,72 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
-        SectionCard("تیترهای واقعی وب", "خواندن مستقیم RSS/Atom ناشران روی گوشی · بدون سرور یا کلید",
+        SectionCard("Forex Factory · مرجع اصلی خبر فارکس", "تقویم اقتصادی هفتگی · وب عمومی مستقیم · تمرکز روی USD/XAU",
+            trailing = { Pill(when {
+                !calendar.online(now) -> "نامشخص"
+                calendar.highImpactUsdWindow(now) -> "بازهٔ خبر پراثر"
+                else -> "تقویم دریافت شد"
+            }, when {
+                !calendar.online(now) -> AurumColors.Gold
+                calendar.highImpactUsdWindow(now) -> AurumColors.Red
+                else -> AurumColors.Cyan
+            }) }) {
+            Text("ابتدا رویدادهای USD؛ ● قرمز = اثر زیاد · ساعت به وقت گوشی · آخرین بررسی ${relativeTime(calendar.checkedAt, now)}. برنامه/پیش‌بینی لزوماً نتیجهٔ خبر نیست.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            Text(if (calendar.highImpactUsdWindow(now)) "رویداد High برای USD از ۳۰ دقیقه پیش تا ۴۵ دقیقه پس از آن: فقط هشدار پژوهشی؛ ورود خودکار تنها با گیت مستقل سرور بررسی می‌شود."
+                 else if (calendar.online(now)) "بازهٔ High/USD در این تقویم مشاهده نشد؛ این عبارت تأیید نبود خبر یا مجوز معامله نیست."
+                 else "تقویم نامعتبر/قطع است؛ وضعیت ریسک خبر نامشخص است، نه امن.",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (calendar.highImpactUsdWindow(now)) AurumColors.Red else AurumColors.Gold,
+                modifier = Modifier.padding(top = 5.dp))
+            calendar.error?.let { Text("تقویم در دسترس نیست: $it · نبود داده به معنی نبود رویداد نیست",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Red) }
+            val upcoming = if (calendar.online(now)) calendar.events.filter {
+                it.at in (now - 2 * 3_600_000L)..(now + 7 * 86_400_000L)
+            }.take(90) else emptyList()
+            if (upcoming.isEmpty()) Text("رویداد قابل نمایش دریافت نشده؛ وضعیت خبر برای ورود تأیید نیست.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+            else {
+                val preview = upcoming.filter { it.country == "USD" }.take(6).ifEmpty { upcoming.take(6) }
+                (if (showCalendar) upcoming else preview).forEach { event ->
+                    Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.padding(top = 5.dp).size(8.dp).background(
+                            if (event.impact == "High") AurumColors.Red else AurumColors.TextMuted,
+                            RoundedCornerShape(2.dp)))
+                        Text("${event.country} · ${formatDateTime(event.at)} · ${event.title}" +
+                            (if (event.impact == "High") " · پراثر" else ""),
+                            modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                            color = if (event.impact == "High") AurumColors.Red else AurumColors.TextSecondary)
+                    }
+                    if (event.forecast != null || event.previous != null || event.actual != null) Text(
+                        "پیش‌بینی ${event.forecast ?: "—"} · قبل ${event.previous ?: "—"} · منتشرشده ${event.actual ?: "—"}",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                    OutlinedButton(onClick = {
+                        TranslateLink.englishToPersian(event.title)?.let { url ->
+                            runCatching { uriHandler.openUri(url) }
+                        }
+                    }) { Text("ترنسلیت عنوان ↗") }
+                }
+                if (upcoming.size > preview.size) OutlinedButton(onClick = { showCalendar = !showCalendar }) {
+                    Text(if (showCalendar) "فقط USD" else "نمایش تمام ${upcoming.size} رویداد")
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = viewModel::refreshForexCalendar, enabled = !calendar.loading, modifier = Modifier.weight(1f)) {
+                    Text(if (calendar.loading) "دریافت…" else "بررسی تقویم")
+                }
+                OutlinedButton(onClick = { runCatching { uriHandler.openUri("https://www.forexfactory.com/calendar") } },
+                    modifier = Modifier.weight(1f)) { Text("وب‌سایت منبع") }
+            }
+            Text("سرور، اگر جداگانه تنظیم شده باشد، توقف ورود جدید برای رویداد پراثر USD را مستقل بررسی می‌کند. تقویم عمومی کامل‌بودن خبرها را ثابت نمی‌کند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        }
+
+
+        SectionCard("تیترهای مکمل فارکس", "FXStreet و آمار رسمی BLS · RSS/Atom مستقل از تقویم Forex Factory",
             trailing = { Pill(if (web.loading) "در حال دریافت" else "$onlineFeeds/${web.feeds.size} خوراک",
                 if (onlineFeeds > 0 && !web.loading) AurumColors.Cyan else AurumColors.Gold) }) {
-            Text("تیتر و چکیدهٔ کوتاه همان خوراک ناشر است؛ خبر انگلیسی ترجمه یا تحلیل ساختگی ندارد. تاریخ انتشار و لینک اصلی زیر هر تیتر است.",
+            Text("عنوان، چکیده و زمان از ناشرند. گزینهٔ ترنسلیت فقط با لمس شما متن کوتاه را در Google Translate باز می‌کند؛ ترجمه در گیت AI/سیگنال استفاده نمی‌شود.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
             Text("آخرین تلاش: ${relativeTime(web.lastAttemptAt, now)} · قطع یک ناشر، خبرهای دیگر را پنهان نمی‌کند. به‌روزرسانی حداکثر هر ۶۰ ثانیه.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
@@ -109,8 +171,8 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf(null to "همه", PublicNewsCategory.IRAN to "ایران", PublicNewsCategory.MARKETS to "طلا/فارکس",
-                PublicNewsCategory.CRYPTO to "رمزارز", PublicNewsCategory.ECONOMY to "آمار رسمی").forEach { (id, label) ->
+            listOf(null to "همه", PublicNewsCategory.MARKETS to "فارکس/طلا",
+                PublicNewsCategory.ECONOMY to "آمار رسمی").forEach { (id, label) ->
                 FilterChip(selected = category == id, onClick = { category = id; showAll = false }, label = { Text(label) })
             }
         }
@@ -140,8 +202,14 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 Text("دریافت در گوشی: ${formatDateTime(item.receivedAt)} · ${if (fromRecentResponse) "وضعیت خوراک بالا" else "قدیمی/کش؛ تازگی مجدد تأیید نشده"}",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
                     modifier = Modifier.padding(top = 4.dp))
-                OutlinedButton(onClick = { runCatching { uriHandler.openUri(item.url) } }, modifier = Modifier.padding(top = 5.dp)) {
-                    Text("باز کردن در وب‌سایت ناشر")
+                Row(Modifier.fillMaxWidth().padding(top = 5.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    OutlinedButton(onClick = { runCatching { uriHandler.openUri(item.url) } },
+                        modifier = Modifier.weight(1f)) { Text("سایت ناشر") }
+                    if (item.feed.language == "en") OutlinedButton(onClick = {
+                        TranslateLink.englishToPersian(item.title, item.excerpt)?.let { url ->
+                            runCatching { uriHandler.openUri(url) }
+                        }
+                    }, modifier = Modifier.weight(1f)) { Text("ترنسلیت ↗") }
                 }
             }
         }
@@ -149,45 +217,6 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
             OutlinedButton(onClick = { showAll = true }, modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) {
                 Text("نمایش ${minOf(filtered.size - 8, 37)} تیتر دیگر")
             }
-        }
-
-        SectionCard("تقویم اقتصادی Forex Factory", "وب مستقیم · برنامهٔ رویداد، نه نتیجهٔ خبر یا سیگنال",
-            trailing = { Pill(if (calendar.online(now)) "دریافت شد" else "نامشخص",
-                if (calendar.online(now)) AurumColors.Green else AurumColors.Gold) }) {
-            Text("● قرمز = رویداد پراثر · ساعت به وقت گوشی · بررسی ${relativeTime(calendar.checkedAt, now)}",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-            calendar.error?.let { Text("تقویم در دسترس نیست: $it · نبود داده به معنی نبود رویداد نیست",
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.Red) }
-            val upcoming = if (calendar.online(now)) calendar.events.filter {
-                it.at in (now - 2 * 3_600_000L)..(now + 7 * 86_400_000L)
-            }.take(90) else emptyList()
-            if (upcoming.isEmpty()) Text("رویداد قابل نمایش دریافت نشده؛ وضعیت خبر برای ورود تأیید نیست.",
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
-            else {
-                upcoming.take(if (showCalendar) 90 else 6).forEach { event ->
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Box(Modifier.padding(top = 5.dp).size(8.dp).background(
-                            if (event.impact == "High") AurumColors.Red else AurumColors.TextMuted,
-                            RoundedCornerShape(2.dp)))
-                        Text("${event.country} · ${formatDateTime(event.at)} · ${event.title}" +
-                            (if (event.impact == "High") " · پراثر" else ""),
-                            modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
-                            color = if (event.impact == "High") AurumColors.Red else AurumColors.TextSecondary)
-                    }
-                }
-                if (upcoming.size > 6) OutlinedButton(onClick = { showCalendar = !showCalendar }) {
-                    Text(if (showCalendar) "جمع کردن رویدادها" else "نمایش همهٔ ${upcoming.size} رویداد")
-                }
-            }
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = viewModel::refreshForexCalendar, enabled = !calendar.loading, modifier = Modifier.weight(1f)) {
-                    Text(if (calendar.loading) "دریافت…" else "بررسی تقویم")
-                }
-                OutlinedButton(onClick = { runCatching { uriHandler.openUri("https://www.forexfactory.com/calendar") } },
-                    modifier = Modifier.weight(1f)) { Text("وب‌سایت منبع") }
-            }
-            Text("سرور، اگر جداگانه تنظیم شده باشد، توقف ورود جدید برای رویداد پراثر USD را مستقل بررسی می‌کند. تقویم عمومی کامل‌بودن خبرها را ثابت نمی‌کند.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
         SectionCard("شرط نهم AI · جدا از تیترهای نمایشی", "فقط XAU/USD · نیازمند سرور HTTPS، مدل و شواهد معتبر",

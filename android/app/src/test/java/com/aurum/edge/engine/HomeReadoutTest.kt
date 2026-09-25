@@ -6,8 +6,9 @@ import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.HomeReadout
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.ui.AurumTab
-import com.aurum.edge.ui.moreTabs
-import com.aurum.edge.ui.primaryTabs
+import com.aurum.edge.ui.Workspace
+import com.aurum.edge.ui.moreTabsFor
+import com.aurum.edge.ui.primaryTabsFor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -46,12 +47,17 @@ class HomeReadoutTest {
         assertNull(noBars.value) // a bare number without a timestamp is not a displayable quote
     }
 
-    @Test fun `navigation keeps all destinations reachable while news and crypto remain visible`() {
-        assertEquals(AurumTab.entries.toSet(), (primaryTabs + moreTabs).toSet())
-        assertTrue(AurumTab.Home in primaryTabs)
-        assertTrue(AurumTab.News in primaryTabs)
-        assertTrue(AurumTab.Crypto in primaryTabs)
-        assertTrue(AurumTab.Learn in moreTabs)
-        assertTrue(AurumTab.Settings in moreTabs)
+    @Test fun `four workspaces expose only their own destinations`() {
+        assertEquals(4, Workspace.entries.size)
+        val tabs = Workspace.entries.associateWith { primaryTabsFor(it) + moreTabsFor(it) }
+        assertEquals(AurumTab.entries.toSet(), tabs.values.flatten().toSet())
+        assertEquals(AurumTab.Home, primaryTabsFor(Workspace.FOREX).first())
+        assertTrue(AurumTab.News in tabs.getValue(Workspace.FOREX))
+        assertTrue(AurumTab.Learn in moreTabsFor(Workspace.FOREX))
+        assertTrue(AurumTab.Settings in moreTabsFor(Workspace.FOREX))
+        assertEquals(listOf(AurumTab.Crypto, AurumTab.CryptoNews), tabs.getValue(Workspace.CRYPTO))
+        assertEquals(listOf(AurumTab.Nobitex), tabs.getValue(Workspace.NOBITEX))
+        assertEquals(listOf(AurumTab.Stocks, AurumTab.Agah), tabs.getValue(Workspace.IRAN_STOCKS))
+        assertTrue(Workspace.entries.map { it.id }.distinct().size == 4)
     }
 }

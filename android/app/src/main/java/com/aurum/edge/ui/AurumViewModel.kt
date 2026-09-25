@@ -39,6 +39,7 @@ import com.aurum.edge.engine.Backtester
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.notify.AlertSoundPlayer
+import com.aurum.edge.service.SignalMonitorService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -93,9 +94,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val watchSettings: StateFlow<Map<String, WatchSelection>> = container.watchSettings.selections
     val watch: StateFlow<WatchState> = container.watch.state
     val news = container.news.state
-    val publicWebNews = container.publicWebNews.state // headlines for display, not ninth-confluence evidence
+    val publicWebNews = container.publicWebNews.state // Forex publisher snippets, not ninth-confluence evidence
+    val cryptoWebNews = container.cryptoWebNews.state // CoinDesk only, not Forex or Nobitex
     val forexCalendar = container.forexCalendar.state
     val crypto = container.crypto.state
+    val publicCrypto = container.publicCrypto.state
+    val equities = container.equities.state
     private val _nobitex = MutableStateFlow<NobitexState>(NobitexState.Idle)
     val nobitex: StateFlow<NobitexState> = _nobitex.asStateFlow()
     private val _nobitexScan = MutableStateFlow<NobitexScanState>(NobitexScanState.Idle)
@@ -150,8 +154,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _toast.value = "گزارش پژوهش خوانده نشد؛ فایل قبلی برای بازیابی نگه داشته شد"
             }
             _stats.value = container.journalStore.stats()
-            container.market.start()
-            container.watch.loadCached()
+            // The Forex feed must not connect before the person chooses that workspace.
         }
         viewModelScope.launch {
             // Automatic SL/TP settlement happens in MarketRepository, not in this ViewModel.
@@ -160,7 +163,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
         viewModelScope.launch {
             while (isActive) {
-                if (settings.value.pauseOnNews && settings.value.newsBaseUrl.isNotBlank()) container.news.refreshNow()
+                if (settings.value.workspaceId == Workspace.FOREX.id && settings.value.pauseOnNews &&
+                    settings.value.newsBaseUrl.isNotBlank()) container.news.refreshNow()
                 delay(120_000L)
             }
         }
@@ -177,6 +181,33 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** No implicit cross-market startup: only the explicitly selected Forex space starts XAU/USD. */
+    fun enterWorkspace(context: Context, workspace: Workspace): Boolean {
+        if (!container.settingsStore.selectWorkspace(workspace.id)) return false
+        if (workspace != Workspace.IRAN_STOCKS) container.equities.clear()
+        if (workspace == Workspace.FOREX) {
+            container.market.start()
+            container.watch.loadCached()
+            if (settings.value.backgroundMonitor && !SignalMonitorService.running.value &&
+                !SignalMonitorService.start(context)) {
+                container.settingsStore.update { it.copy(backgroundMonitor = false, autoPaperTrading = false) }
+            }
+        } else {
+            SignalMonitorService.stop(context)
+            container.market.stop()
+        }
+        return true
+    }
+
+    fun leaveWorkspace(context: Context): Boolean {
+        // Returning to the chooser is an explicit end to any automatic paper session.
+        if (!container.settingsStore.selectWorkspace("")) return false
+        SignalMonitorService.stop(context)
+        container.market.stop()
+        container.equities.clear()
+        return true
+    }
+
     fun refreshNow() = container.market.refreshNow()
 
     fun refreshWatch() = container.watch.refreshNow()
@@ -185,9 +216,23 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshPublicWebNews() = container.publicWebNews.refreshNow()
 
+    fun refreshCryptoWebNews() = container.cryptoWebNews.refreshNow()
+
+    fun refreshEquities() = container.equities.refreshNow()
+
+    fun saveStockDataKey(key: String): Boolean = container.settingsStore.saveStockDataKey(key)
+
+    fun clearStockDataKey(): Boolean {
+        val removed = container.settingsStore.clearStockDataKey()
+        if (removed) container.equities.clear()
+        return removed
+    }
+
     fun refreshForexCalendar() = container.forexCalendar.refreshNow()
 
     fun refreshCrypto() = container.crypto.refreshNow()
+
+    fun refreshPublicCrypto() = container.publicCrypto.refreshNow()
 
     fun refreshNobitexScan() {
         if (_nobitexScan.value == NobitexScanState.Loading) return
@@ -280,6 +325,23 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun saveCryptoBaseUrl(value: String) {
+        val url = value.trim().trimEnd('/')
+        if (url.isNotBlank() && NewsRepository.cryptoUrl(url) == null) {
+            _toast.value = "آدرس سرور HTTPS رمزارز بدون مسیر یا کلید وارد کنید"
+            return
+        }
+        viewModelScope.launch {
+            if (!withContext(Dispatchers.IO) { container.settingsStore.saveCryptoBaseUrl(url) }) {
+                _toast.value = "نشانی سرور رمزارز روی دستگاه ذخیره نشد"
+                return@launch
+            }
+            container.crypto.resetAndRefresh()
+            _toast.value = if (url.isBlank()) "سرور پژوهشی رمزارز جدا شد؛ نمای CoinGecko بی‌کلید در دسترس است"
+                else "سرور رمزارز ثبت شد؛ وضعیت نامزدها و زمان شواهد را جداگانه بررسی کنید"
+        }
+    }
+
     fun saveNewsBaseUrl(value: String) {
         val url = value.trim().trimEnd('/')
         if (url.isNotBlank() && NewsRepository.newsUrl(url) == null) {
@@ -293,7 +355,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 return@launch
             }
             container.news.resetAndRefresh()
-            container.crypto.resetAndRefresh()
             _toast.value = if (url.isBlank()) "سرور خبر جدا شد؛ تیترهای وب در تب خبر بدون سرور قابل دریافت‌اند، ولی هشدار ۹/۹ مسدود است"
                 else "آدرس سرور ذخیره شد؛ پاسخ فید و مدل AI را در تب خبر جداگانه بررسی کنید"
         }

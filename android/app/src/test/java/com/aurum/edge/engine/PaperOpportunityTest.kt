@@ -40,7 +40,7 @@ class PaperOpportunityTest {
     private val now = 1_800_000_000_000L
     private val bar = now - Interval.M5.millis
     private val config = AppSettings(backgroundMonitor = true, notifyOnSignal = true,
-        autoPaperTrading = false, accountBalance = 100.0)
+        autoPaperTrading = false, accountBalance = 100.0, workspaceId = "forex")
     private val news = PersianNewsState(
         articles = listOf(PersianHeadline("id", "Gold and USD", "", "Publisher",
             "https://publisher.example/article", now - 60_000, "LOW", "BUY", "rules")),

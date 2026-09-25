@@ -35,8 +35,13 @@ class Settings(BaseSettings):
     # Public/keyless requests may be rate-limited; provider failures leave the scan unavailable.
     coingecko_demo_api_key: str | None = None
 
-    # Optional NLP stage (only used when a key is configured). Web RSS titles/excerpts are
-    # NEVER shared with a third party unless the operator explicitly accepts publisher terms.
+    # Optional free-tier Gemini key stays SERVER-SIDE. Free-tier traffic may be used by the
+    # provider to improve products; review publisher rights before enabling external consent.
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.5-flash-lite"
+
+    # Optional legacy paid NLP stage. Web RSS titles/excerpts are NEVER shared with any model
+    # unless the operator explicitly accepts publisher terms. No model key is shipped in an APK.
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
     ai_news_external_consent: bool = False

@@ -27,8 +27,19 @@ class ForexCalendarTest {
         assertEquals("High", events.last().impact)
         assertEquals("USD", events.last().country)
         assertTrue(ForexCalendarState(events, now).online(now + 15 * 60_000L))
+        assertTrue(ForexCalendarState(events, now).highImpactUsdWindow(now))
         assertFalse(ForexCalendarState(events, now).online(now + 21 * 60_000L))
+        assertFalse(ForexCalendarState(events, now).highImpactUsdWindow(now + 21 * 60_000L))
         assertFalse(ForexCalendarState(events, now, error = "network").online(now))
+    }
+
+    @Test fun `forecast and prior are explicitly distinct from an actual report`() {
+        val withNumbers = valid.replace("\"impact\":\"High\"}",
+            "\"impact\":\"High\",\"forecast\":\"210K\",\"previous\":\"190K\"}")
+        val first = parse(withNumbers).first { it.country == "USD" }
+        assertEquals("210K", first.forecast)
+        assertEquals("190K", first.previous)
+        assertEquals(null, first.actual)
     }
 
     @Test fun staleOrTimezoneFreeWeekCannotMasqueradeAsCleanCalendar() {

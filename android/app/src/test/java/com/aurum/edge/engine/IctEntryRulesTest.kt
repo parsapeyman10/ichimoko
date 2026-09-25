@@ -23,7 +23,7 @@ class IctEntryRulesTest {
     private val now = 1_800_000_000_000L // 03:00 in New York (London window)
     private val bar = now - Interval.M5.millis
     private val config = AppSettings(symbol = "XAU/USD", interval = Interval.M5,
-        backgroundMonitor = true, autoPaperTrading = true)
+        backgroundMonitor = true, autoPaperTrading = true, workspaceId = "forex")
     private val news = PersianNewsState(
         articles = listOf(PersianHeadline("gold-news", "Gold", "fixture", "Publisher",
             "https://publisher.example/gold", now - 60_000, "LOW", "BUY", "rules")),

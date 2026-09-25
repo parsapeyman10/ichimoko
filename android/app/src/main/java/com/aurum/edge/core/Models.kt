@@ -441,6 +441,12 @@ data class AppSettings(
     val pauseOnNews: Boolean = false,
     /** Explicit opt-in; automatic orders here are local paper records, never broker orders. */
     val autoPaperTrading: Boolean = false,
+    /** Optional HTTPS backend for global crypto research, distinct from Forex news AI. */
+    val cryptoBaseUrl: String = "",
+    /** Last explicitly selected workspace, used only to fail closed the Forex foreground service. */
+    val workspaceId: String = "",
+    /** Read-only third-party stock-data key, entered on the device; never a broker credential. */
+    val stockDataKey: String = "",
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
 }

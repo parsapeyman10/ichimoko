@@ -74,7 +74,7 @@ class CryptoRepository(private val settings: SettingsStore, private val scope: C
     fun refreshNow() { scope.launch { refresh() } }
 
     private suspend fun refresh() = mutex.withLock {
-        val base = settings.read().newsBaseUrl
+        val base = settings.read().cryptoBaseUrl
         val url = NewsRepository.cryptoUrl(base)
         if (url == null) {
             _state.value = CryptoScanState(error = if (base.isBlank()) null else "نشانی HTTPS سرور نامعتبر است")
@@ -91,7 +91,7 @@ class CryptoRepository(private val settings: SettingsStore, private val scope: C
                     json.parseToJsonElement(body) as? JsonObject ?: error("پاسخ غربالگری نامعتبر است")
                 }
             }
-            if (settings.read().newsBaseUrl != base) return@withLock // discard in-flight old server
+            if (settings.read().cryptoBaseUrl != base) return@withLock // discard in-flight old server
             val status = root["status"] as? JsonObject ?: error("وضعیت منبع مشخص نیست")
             val provider = status.text("provider") ?: "CoinGecko + Binance Spot"
             val checkedAt = root.text("checked_at").toMillis()
@@ -132,7 +132,7 @@ class CryptoRepository(private val settings: SettingsStore, private val scope: C
                 }
             }
         } catch (e: Exception) {
-            if (settings.read().newsBaseUrl == base) _state.value = CryptoScanState(
+            if (settings.read().cryptoBaseUrl == base) _state.value = CryptoScanState(
                 status = CryptoScanStatus.UNAVAILABLE,
                 error = (e.message ?: "خطای شبکه یا اعتبارسنجی").take(120),
             ) // never retain a previously displayed candidate after a failed refresh

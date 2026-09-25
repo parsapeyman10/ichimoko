@@ -37,6 +37,9 @@ class SettingsStore(context: Context) {
         newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty(),
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
         autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
+        cryptoBaseUrl = prefs.getString(KEY_CRYPTO_URL, "").orEmpty(),
+        workspaceId = prefs.getString(KEY_WORKSPACE, "").orEmpty(),
+        stockDataKey = prefs.getString(KEY_STOCK_DATA, "").orEmpty(),
     )
 
     /**
@@ -55,6 +58,54 @@ class SettingsStore(context: Context) {
             return true
         }
         // Do not report success or restart the feed on a failed disk write.
+        return false
+    }
+
+    /** A workspace switch must hit disk before any non-Forex screen or monitor starts. */
+    @Synchronized
+    fun selectWorkspace(id: String): Boolean {
+        if (id !in setOf("forex", "crypto", "nobitex", "iran_stocks", "")) return false
+        val saved = prefs.edit().putString(KEY_WORKSPACE, id)
+            .putBoolean(KEY_MONITOR, if (id == "forex") read().backgroundMonitor else false)
+            .putBoolean(KEY_AUTO_PAPER, if (id == "forex") read().autoPaperTrading else false)
+            .commit()
+        if (saved && prefs.getString(KEY_WORKSPACE, null) == id) {
+            _settings.value = read()
+            return true
+        }
+        return false
+    }
+
+    /** A read-only market-data key, not an Agah/Nobitex trading token. Never prefill the UI. */
+    @Synchronized
+    fun saveStockDataKey(input: String): Boolean {
+        val key = input.trim()
+        if (!key.matches(Regex("[A-Za-z0-9_-]{10,80}"))) return false
+        val saved = prefs.edit().putString(KEY_STOCK_DATA, key).commit()
+        if (saved && prefs.getString(KEY_STOCK_DATA, null) == key) {
+            _settings.value = read()
+            return true
+        }
+        return false
+    }
+
+    @Synchronized
+    fun saveCryptoBaseUrl(url: String): Boolean {
+        val saved = prefs.edit().putString(KEY_CRYPTO_URL, url).commit()
+        if (saved && prefs.getString(KEY_CRYPTO_URL, null) == url) {
+            _settings.value = read()
+            return true
+        }
+        return false
+    }
+
+    @Synchronized
+    fun clearStockDataKey(): Boolean {
+        val saved = prefs.edit().remove(KEY_STOCK_DATA).commit()
+        if (saved && prefs.getString(KEY_STOCK_DATA, null) == null) {
+            _settings.value = read()
+            return true
+        }
         return false
     }
 
@@ -86,8 +137,11 @@ class SettingsStore(context: Context) {
             .putString(KEY_ALERT_SOUND_URI, next.alertSoundUri)
             .putString(KEY_ALERT_SOUND_NAME, next.alertSoundName)
             .putString(KEY_NEWS_URL, next.newsBaseUrl.trim())
+            .putString(KEY_CRYPTO_URL, next.cryptoBaseUrl.trim())
             .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
             .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
+            .putString(KEY_WORKSPACE, next.workspaceId)
+            .putString(KEY_STOCK_DATA, next.stockDataKey)
             .apply()
         _settings.value = next
     }
@@ -113,7 +167,10 @@ class SettingsStore(context: Context) {
         private const val KEY_ALERT_SOUND_URI = "verified_alert_sound_uri"
         private const val KEY_ALERT_SOUND_NAME = "verified_alert_sound_name"
         private const val KEY_NEWS_URL = "news_base_url"
+        private const val KEY_CRYPTO_URL = "crypto_base_url"
         private const val KEY_NEWS_PAUSE = "pause_on_news"
         private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"
+        private const val KEY_WORKSPACE = "active_workspace"
+        private const val KEY_STOCK_DATA = "stock_data_readonly_key"
     }
 }

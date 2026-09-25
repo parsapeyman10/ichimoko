@@ -36,12 +36,33 @@ class SettingsStoreTest {
         assertTrue(reopened.backgroundMonitor)
     }
 
+    @Test fun `switching to non forex commits the fail closed flags and keeps only read only stock key`() {
+        val context = RuntimeEnvironment.getApplication()
+        context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit().clear().commit()
+        val store = SettingsStore(context)
+        assertFalse(store.selectWorkspace("injected-destination"))
+        assertFalse(store.saveStockDataKey("x y"))
+        assertTrue(store.saveStockDataKey("synthetic-stock-read-only"))
+        assertTrue(store.selectWorkspace("forex"))
+        store.update { it.copy(backgroundMonitor = true, autoPaperTrading = true) }
+        assertTrue(store.selectWorkspace("iran_stocks"))
+        val reopened = SettingsStore(context).read()
+        assertEquals("iran_stocks", reopened.workspaceId)
+        assertFalse(reopened.backgroundMonitor)
+        assertFalse(reopened.autoPaperTrading)
+        assertEquals("synthetic-stock-read-only", reopened.stockDataKey)
+        assertTrue(store.clearStockDataKey())
+        assertEquals("", SettingsStore(context).read().stockDataKey)
+    }
+
     @Test fun `server URL save is independent of market key and survives a new store`() {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit().clear().commit()
         val store = SettingsStore(context)
         assertTrue(store.saveNewsBaseUrl("https://news.example.org"))
+        assertTrue(store.saveCryptoBaseUrl("https://crypto.example.org"))
         assertEquals("https://news.example.org", SettingsStore(context).read().newsBaseUrl)
+        assertEquals("https://crypto.example.org", SettingsStore(context).read().cryptoBaseUrl)
         assertFalse(SettingsStore(context).read().hasKey)
         assertTrue(store.saveNewsBaseUrl(""))
         assertEquals("", SettingsStore(context).read().newsBaseUrl)

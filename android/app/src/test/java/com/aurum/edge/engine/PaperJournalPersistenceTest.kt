@@ -76,7 +76,7 @@ class PaperJournalPersistenceTest {
         val current = MarketState(symbol = "XAU/USD", interval = Interval.M5,
             candles = IctTestBars.readyAt(bar),
             lastPrice = 3000.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now), signal = verified)
-        val config = AppSettings(backgroundMonitor = true, autoPaperTrading = true)
+        val config = AppSettings(backgroundMonitor = true, autoPaperTrading = true, workspaceId = "forex")
         assertEquals(SignalAction.BUY, verified.action)
         assertEquals(9, verified.confluence.size)
         assertNull(PaperAutoRules.blocker(current, config, parsed, now))

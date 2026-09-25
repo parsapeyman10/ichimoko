@@ -1,5 +1,6 @@
 package com.aurum.edge.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -10,7 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Bolt
@@ -23,11 +26,12 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -35,21 +39,25 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.ui.components.FeedBanner
 import com.aurum.edge.ui.components.Pill
+import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
@@ -61,89 +69,128 @@ enum class AurumTab(val label: String, val icon: ImageVector) {
     Watch("دیده‌بان", Icons.Filled.ViewList),
     News("خبر", Icons.Filled.Article),
     Crypto("رمزارز", Icons.Filled.TrendingUp),
+    CryptoNews("خبر کریپتو", Icons.Filled.Article),
+    Nobitex("نوبیتکس", Icons.Filled.ViewList),
+    Stocks("بورس ایران", Icons.Filled.ShowChart),
+    Agah("آگاه", Icons.Filled.Bookmarks),
     Learn("یادگیری", Icons.Filled.School),
     Journal("ژورنال", Icons.Filled.Bookmarks),
     Settings("تنظیمات", Icons.Filled.Settings),
 }
 
-/** The five frequent destinations stay readable on small phones; the others remain one tap away. */
-internal val primaryTabs = listOf(AurumTab.Home, AurumTab.Chart, AurumTab.Signal, AurumTab.News, AurumTab.Crypto)
-internal val moreTabs = listOf(AurumTab.Watch, AurumTab.Learn, AurumTab.Journal, AurumTab.Settings)
+/** No tab from another workspace is reachable from the current bottom navigation. */
+internal fun primaryTabsFor(space: Workspace): List<AurumTab> = when (space) {
+    Workspace.FOREX -> listOf(AurumTab.Home, AurumTab.Chart, AurumTab.Signal, AurumTab.News, AurumTab.Watch)
+    Workspace.CRYPTO -> listOf(AurumTab.Crypto, AurumTab.CryptoNews)
+    Workspace.NOBITEX -> listOf(AurumTab.Nobitex)
+    Workspace.IRAN_STOCKS -> listOf(AurumTab.Stocks, AurumTab.Agah)
+}
+
+internal fun moreTabsFor(space: Workspace): List<AurumTab> = when (space) {
+    Workspace.FOREX -> listOf(AurumTab.Learn, AurumTab.Journal, AurumTab.Settings)
+    else -> emptyList()
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AurumRoot(viewModel: AurumViewModel) {
-    var tab by remember { mutableStateOf(AurumTab.Home) }
+    // Choose on every cold launch; only rotation/process recreation preserves the current screen.
+    var workspaceId by rememberSaveable { mutableStateOf<String?>(null) }
+    var tab by rememberSaveable { mutableStateOf(AurumTab.Home.name) }
     var showMore by remember { mutableStateOf(false) }
+    var selectionError by remember { mutableStateOf(false) }
+    var activatedHere by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     val market by viewModel.market.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val workspace = Workspace.entries.firstOrNull { it.id == workspaceId && it.id == settings.workspaceId }
     val toast by viewModel.toast.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    fun leave() {
+        if (viewModel.leaveWorkspace(context)) {
+            workspaceId = null
+            activatedHere = false
+            tab = AurumTab.Home.name
+            showMore = false
+        } else selectionError = true
+    }
+    BackHandler(enabled = workspace != null) { leave() }
+    // After process recreation Compose may restore a visible workspace, but the new app
+    // container has no running feed. Re-activate it only after that workspace is visible.
+    LaunchedEffect(workspace?.id) {
+        if (workspace != null && !activatedHere) {
+            if (viewModel.enterWorkspace(context, workspace)) activatedHere = true
+            else { workspaceId = null; selectionError = true }
+        }
+    }
     LaunchedEffect(toast) {
-        val message = toast
-        if (message != null) {
-            snackbarHostState.showSnackbar(message)
+        if (toast != null) {
+            snackbarHostState.showSnackbar(toast!!)
             viewModel.consumeToast()
         }
     }
+    if (workspace == null) {
+        WorkspaceChooser(selectionError) { selected ->
+            if (viewModel.enterWorkspace(context, selected)) {
+                selectionError = false
+                activatedHere = true
+                workspaceId = selected.id
+                tab = primaryTabsFor(selected).first().name
+            } else selectionError = true
+        }
+        return
+    }
+    val primary = primaryTabsFor(workspace)
+    val more = moreTabsFor(workspace)
+    val selectedTab = AurumTab.entries.firstOrNull { it.name == tab && it in primary + more } ?: primary.first()
+    fun open(destination: AurumTab) { if (destination in primary + more) tab = destination.name }
 
-    Scaffold(
-        containerColor = AurumColors.Bg,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+    Scaffold(containerColor = AurumColors.Bg, snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             NavigationBar(containerColor = AurumColors.Surface) {
-                primaryTabs.forEach { entry ->
-                    NavigationBarItem(
-                        selected = tab == entry,
-                        onClick = { tab = entry },
+                primary.forEach { entry ->
+                    NavigationBarItem(selected = selectedTab == entry, onClick = { open(entry) },
                         icon = { Icon(entry.icon, contentDescription = entry.label, modifier = Modifier.size(20.dp)) },
                         label = { Text(entry.label, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
-                        alwaysShowLabel = true,
-                    )
+                        alwaysShowLabel = true)
                 }
-                NavigationBarItem(
-                    selected = tab in moreTabs,
+                if (more.isNotEmpty()) NavigationBarItem(selected = selectedTab in more,
                     onClick = { showMore = true },
                     icon = { Icon(Icons.Filled.MoreHoriz, contentDescription = "بخش‌های دیگر", modifier = Modifier.size(20.dp)) },
                     label = { Text("بیشتر", style = MaterialTheme.typography.labelSmall) },
-                    alwaysShowLabel = true,
-                )
+                    alwaysShowLabel = true)
             }
-        },
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-        ) {
-            if (tab == AurumTab.Chart || tab == AurumTab.Signal) {
-                AppHeader(
-                    symbol = market.symbol,
-                    price = market.lastPrice,
-                    interval = market.interval,
-                    lastUpdate = market.feed.lastSuccessAt,
-                    onRefresh = { viewModel.refreshNow() },
-                )
-                FeedBanner(
-                    status = market.feed,
-                    lastPrice = market.lastPrice,
-                    lastBarTime = market.candles.lastOrNull()?.time,
-                    showingCache = market.showingCachedData,
-                )
+        }) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            Row(Modifier.fillMaxWidth().background(AurumColors.SurfaceAlt).padding(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("فضای ${workspace.label}", style = MaterialTheme.typography.labelMedium,
+                    color = AurumColors.Gold, modifier = Modifier.weight(1f))
+                TextButton(onClick = ::leave) { Text("تغییر فضا") }
             }
-            Box(modifier = Modifier.fillMaxSize()) {
-                when (tab) {
+            if (workspace == Workspace.FOREX && (selectedTab == AurumTab.Chart || selectedTab == AurumTab.Signal)) {
+                AppHeader(symbol = market.symbol, price = market.lastPrice, interval = market.interval,
+                    lastUpdate = market.feed.lastSuccessAt, onRefresh = viewModel::refreshNow)
+                FeedBanner(status = market.feed, lastPrice = market.lastPrice,
+                    lastBarTime = market.candles.lastOrNull()?.time, showingCache = market.showingCachedData)
+            }
+            Box(Modifier.fillMaxSize()) {
+                when (selectedTab) {
                     AurumTab.Home -> HomeScreen(viewModel, market,
-                        onChart = { tab = AurumTab.Chart }, onSignal = { tab = AurumTab.Signal },
-                        onNews = { tab = AurumTab.News }, onLearn = { tab = AurumTab.Learn },
-                        onJournal = { tab = AurumTab.Journal }, onSettings = { tab = AurumTab.Settings })
+                        onChart = { open(AurumTab.Chart) }, onSignal = { open(AurumTab.Signal) },
+                        onNews = { open(AurumTab.News) }, onLearn = { open(AurumTab.Learn) },
+                        onJournal = { open(AurumTab.Journal) }, onSettings = { open(AurumTab.Settings) })
                     AurumTab.Chart -> ChartScreen(viewModel, market,
-                        onOpenSettings = { tab = AurumTab.Settings }, onOpenJournal = { tab = AurumTab.Journal })
-                    AurumTab.Signal -> SignalScreen(viewModel, market, onOpenNews = { tab = AurumTab.News })
-                    AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { tab = AurumTab.Settings })
-                    AurumTab.News -> PersianNewsScreen(viewModel, onOpenSettings = { tab = AurumTab.Settings })
-                    AurumTab.Crypto -> CryptoScreen(viewModel, onOpenSettings = { tab = AurumTab.Settings })
+                        onOpenSettings = { open(AurumTab.Settings) }, onOpenJournal = { open(AurumTab.Journal) })
+                    AurumTab.Signal -> SignalScreen(viewModel, market, onOpenNews = { open(AurumTab.News) })
+                    AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) })
+                    AurumTab.News -> PersianNewsScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) })
+                    AurumTab.Crypto -> CryptoScreen(viewModel, onOpenSettings = { open(AurumTab.CryptoNews) })
+                    AurumTab.CryptoNews -> CryptoNewsScreen(viewModel)
+                    AurumTab.Nobitex -> NobitexWorkspaceScreen(viewModel)
+                    AurumTab.Stocks -> IranStocksScreen(viewModel)
+                    AurumTab.Agah -> AgahGuideScreen()
                     AurumTab.Learn -> LearnScreen(viewModel)
                     AurumTab.Journal -> JournalScreen(viewModel, market)
                     AurumTab.Settings -> SettingsScreen(viewModel, settings)
@@ -151,68 +198,71 @@ fun AurumRoot(viewModel: AurumViewModel) {
             }
         }
     }
-    if (showMore) {
+    if (showMore && more.isNotEmpty()) {
         ModalBottomSheet(onDismissRequest = { showMore = false }, containerColor = AurumColors.Surface) {
-            Text("بخش‌های دیگر", style = MaterialTheme.typography.titleMedium,
+            Text("فقط بخش‌های ${workspace.label}", style = MaterialTheme.typography.titleMedium,
                 color = AurumColors.TextPrimary, modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp))
-            moreTabs.forEach { destination ->
-                ListItem(
-                    headlineContent = { Text(destination.label) },
+            more.forEach { destination ->
+                ListItem(headlineContent = { Text(destination.label) },
                     leadingContent = { Icon(destination.icon, contentDescription = null) },
-                    modifier = Modifier.fillMaxWidth().clickable {
-                        tab = destination
-                        showMore = false
-                    },
-                )
+                    modifier = Modifier.fillMaxWidth().clickable { open(destination); showMore = false })
             }
         }
     }
 }
 
 @Composable
-private fun AppHeader(
-    symbol: String,
-    price: Double?,
-    interval: com.aurum.edge.core.Interval,
-    lastUpdate: Long?,
-    onRefresh: () -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(AurumColors.Surface)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(34.dp)
-                .background(AurumColors.Gold.copy(alpha = 0.15f), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
+private fun WorkspaceChooser(error: Boolean, onChoose: (Workspace) -> Unit) {
+    Column(Modifier.fillMaxSize().background(AurumColors.Bg).verticalScroll(rememberScrollState())
+        .padding(vertical = 18.dp)) {
+        Text("AURUM / EDGE", style = MaterialTheme.typography.labelLarge, color = AurumColors.Gold,
+            modifier = Modifier.padding(horizontal = 20.dp))
+        Text("انتخاب فضای کار", style = MaterialTheme.typography.headlineMedium, color = AurumColors.TextPrimary,
+            modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 8.dp))
+        Text("پیش از نمایش بازار، یکی از چهار فضای مستقل را انتخاب کنید. این مرحله ورود به حساب صرافی یا کارگزاری نیست.",
+            style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
+        if (error) Text("تغییر فضا روی دستگاه ذخیره نشد؛ برای جلوگیری از پایش هم‌زمان، دوباره تلاش کنید.",
+            style = MaterialTheme.typography.bodySmall, color = AurumColors.Red,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
+        Workspace.entries.forEach { space ->
+            SectionCard(space.label, space.sources) {
+                Text(when (space) {
+                    Workspace.FOREX -> "چارت و پژوهش طلا، تقویم خبر و ژورنال کاغذی مخصوص فارکس."
+                    Workspace.CRYPTO -> "رصد جهانی و خبر رمزارز؛ نه قیمت ریالی یا ژورنال فارکس."
+                    Workspace.NOBITEX -> "بازار USDT و ریال جدا؛ تمرین اسپات در ژورنال مستقل، بدون کلید معاملاتی."
+                    Workspace.IRAN_STOCKS -> "تابلوخوانی و غربال عددی بورس؛ TTM کدال و مسیر رسمی آساتریدر."
+                }, style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+                Button(onClick = { onChoose(space) }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
+                    Text("ورود به ${space.label}")
+                }
+            }
+        }
+        Text("تغییر فضا پایش خودکار کاغذی فارکس را خاموش می‌کند. هیچ سفارشی به بروکر ارسال نمی‌شود.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp))
+    }
+}
+
+@Composable
+private fun AppHeader(symbol: String, price: Double?, interval: com.aurum.edge.core.Interval,
+                      lastUpdate: Long?, onRefresh: () -> Unit) {
+    Row(Modifier.fillMaxWidth().background(AurumColors.Surface).padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(Modifier.size(34.dp).background(AurumColors.Gold.copy(alpha = 0.15f), CircleShape),
+            contentAlignment = Alignment.Center) {
             Text("Au", color = AurumColors.Gold, style = MaterialTheme.typography.titleSmall)
         }
-        Column(modifier = Modifier.weight(1f)) {
+        Column(Modifier.weight(1f)) {
             Text(symbol, style = MaterialTheme.typography.titleMedium, color = AurumColors.TextPrimary)
-            Text(
-                "${interval.label} · آخرین دریافت ${relativeTime(lastUpdate)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-            )
+            Text("${interval.label} · آخرین دریافت ${relativeTime(lastUpdate)}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
         Column(horizontalAlignment = Alignment.End) {
-            Text(
-                formatPrice(price),
-                style = MaterialTheme.typography.titleMedium,
-                color = AurumColors.TextPrimary,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                if (price == null) "بدون دادهٔ تازه" else "آخرین مشاهده · وضعیت فید پایین صفحه",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-            )
+            Text(formatPrice(price), style = MaterialTheme.typography.titleMedium,
+                color = AurumColors.TextPrimary, fontWeight = FontWeight.Bold)
+            Text(if (price == null) "بدون دادهٔ تازه" else "آخرین مشاهده · وضعیت فید پایین صفحه",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
         IconButton(onClick = onRefresh) {
             Icon(Icons.Filled.Refresh, contentDescription = "بروزرسانی", tint = AurumColors.Gold)

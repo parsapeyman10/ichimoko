@@ -9,6 +9,7 @@ import kotlin.math.abs
 object PaperAutoRules {
     fun blocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
                 now: Long = System.currentTimeMillis()): String? {
+        if (settings.workspaceId != "forex") return "فضای فارکس برای ورود خودکار کاغذی انتخاب نشده است"
         if (!settings.autoPaperTrading) return "معاملهٔ خودکار کاغذی خاموش است"
         // REST publishes a recent BAR, not a timestamped last trade within that bar.
         // It can justify an educational candidate, never an automatic paper fill.
@@ -19,6 +20,7 @@ object PaperAutoRules {
     /** A 9/9 educational alert can be enabled while automatic paper entry is OFF. */
     fun opportunityBlocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
                            now: Long = System.currentTimeMillis()): String? {
+        if (settings.workspaceId != "forex") return "فضای فارکس برای هشدار انتخاب نشده است"
         if (!settings.backgroundMonitor) return "برای هشدار/ورود، پایش پس‌زمینه باید روشن باشد"
         if (market.symbol != settings.symbol || market.interval != settings.interval) return "نماد/بازه عوض شده است"
         if (market.showingCachedData || market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))

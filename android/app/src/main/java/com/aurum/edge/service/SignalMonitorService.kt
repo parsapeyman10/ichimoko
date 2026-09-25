@@ -51,6 +51,11 @@ class SignalMonitorService : Service() {
             return START_NOT_STICKY
         }
         val container = (application as AurumApplication).container
+        if (container.settingsStore.read().workspaceId != "forex") {
+            container.autoPaperTrader.stopped("فضای فارکس فعال نیست؛ ورود خودکار کاغذی متوقف شد")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         Notifier.ensureChannels(this)
         val started = runCatching {
             ServiceCompat.startForeground(
@@ -97,6 +102,11 @@ class SignalMonitorService : Service() {
             // Use collect, not collectLatest: never cancel a partially persisted paper entry
             // just because another tick arrives during the atomic journal write.
             container.verifiedMarket.collect { state ->
+                if (container.settingsStore.read().workspaceId != "forex") {
+                    container.autoPaperTrader.stopped("فضای فارکس فعال نیست")
+                    stopSelf()
+                    return@collect
+                }
                 val text = when (state.feed.mode) {
                     FeedMode.LIVE -> "زنده · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
                     FeedMode.POLLING -> "آخرین کندل REST (نه تیک زنده) · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
@@ -123,7 +133,8 @@ class SignalMonitorService : Service() {
                         val latest = container.verifiedMarket.value
                         val recentNews = container.news.state.value
                         val recentConfig = container.settingsStore.read()
-                        if (latest.symbol == state.symbol && latest.signal?.barTime == signal.barTime &&
+                        if (recentConfig.workspaceId == "forex" && latest.symbol == state.symbol &&
+                            latest.signal?.barTime == signal.barTime &&
                             PaperAlertRules.blocker(latest, recentConfig, recentNews,
                                 container.journalStore.trades.value, snapshot) == null) {
                             val evidence = NewsConfluence.record(recentNews)
@@ -139,8 +150,8 @@ class SignalMonitorService : Service() {
                 }
                 // A candidate is NOT an entry. Wait for the atomic journal write before notifying.
                 val currentSettings = container.settingsStore.read()
-                val autoEnabled = currentSettings.autoPaperTrading
-                val canAlert = currentSettings.notifyOnSignal &&
+                val autoEnabled = currentSettings.workspaceId == "forex" && currentSettings.autoPaperTrading
+                val canAlert = currentSettings.workspaceId == "forex" && currentSettings.notifyOnSignal &&
                     Notifier.canNotifyVerified(this@SignalMonitorService, currentSettings.alertSoundUri)
                 // A silent automatic entry is worse than no entry. Permissions/channel can
                 // be revoked while the service is running; stop BEFORE touching the journal.
@@ -177,6 +188,7 @@ class SignalMonitorService : Service() {
             // A service restart must not re-notify all old, already closed paper trades.
             notifiedTrades.addAll(container.journalStore.trades.value.filterNot { it.isOpen }.map { it.id })
             container.journalStore.trades.collect { trades ->
+                if (container.settingsStore.read().workspaceId != "forex") return@collect
                 if (canLink) trades.filter { it.signalBarTime != null }.forEach { trade ->
                     runCatching { container.opportunityStore.linkTrade(trade) }
                 }

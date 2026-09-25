@@ -10,12 +10,16 @@ import com.aurum.edge.data.FreeHistoryResult
 import com.aurum.edge.data.ForexCalendarRepository
 import com.aurum.edge.data.HistDataCsv
 import com.aurum.edge.data.JournalStore
+import com.aurum.edge.data.IranEquityRepository
 import com.aurum.edge.data.MarketRepository
 import com.aurum.edge.data.MetaTraderCsv
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.MetaTraderImporter
 import com.aurum.edge.data.NewsRepository
 import com.aurum.edge.data.PublicWebNewsRepository
+import com.aurum.edge.data.PublicCryptoMarket
+import com.aurum.edge.data.PublicNewsCategory
+import com.aurum.edge.data.PublicNewsFeeds
 import com.aurum.edge.data.NobitexPublicData
 import com.aurum.edge.data.NobitexSpotScanner
 import com.aurum.edge.data.NobitexPracticeStore
@@ -63,7 +67,11 @@ class AppContainer(context: Context) {
     val quoteHistory = QuoteHistoryStore(appContext)
     val watch = WatchRepository(SourceFetcher(), quoteHistory, watchSettings, settingsStore, appScope)
     val news = NewsRepository(settingsStore, appScope) // independent, fail-closed server AI gate
-    val publicWebNews = PublicWebNewsRepository(appScope) // direct read-only headlines for the UI, never the AI gate
+    // Separate display feeds: global-crypto news cannot appear in the Forex research context.
+    val publicWebNews = PublicWebNewsRepository(appScope,
+        feeds = PublicNewsFeeds.all.filter { it.category in setOf(PublicNewsCategory.MARKETS, PublicNewsCategory.ECONOMY) })
+    val cryptoWebNews = PublicWebNewsRepository(appScope,
+        feeds = PublicNewsFeeds.all.filter { it.category == PublicNewsCategory.CRYPTO })
     val forexCalendar = ForexCalendarRepository(appScope) // public schedule UI; server checks it independently for the AI gate
     /** Shared by chart, signal tab, notifications and automatic *paper* entries. Expires on time. */
     val verifiedMarket: StateFlow<MarketState> = combine(
@@ -74,6 +82,8 @@ class AppContainer(context: Context) {
     }.stateIn(appScope, SharingStarted.Eagerly, market.state.value.copy(signal = null))
     val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore, verifiedMarket)
     val crypto = CryptoRepository(settingsStore, appScope)
+    val publicCrypto = PublicCryptoMarket(appScope) // keyless market overview, NOT the server's two-source screener
+    val equities = IranEquityRepository(settingsStore, appScope)
     val freeHistory = FreeHistoryDownloader()
     val metaTraderImporter = MetaTraderImporter(appContext)
 

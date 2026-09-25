@@ -22,7 +22,8 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 /** Weekly public calendar export: research/display only. Not AI evidence or a price source. */
-data class ForexEvent(val title: String, val country: String, val impact: String, val at: Long)
+data class ForexEvent(val title: String, val country: String, val impact: String, val at: Long,
+                      val forecast: String? = null, val previous: String? = null, val actual: String? = null)
 data class ForexCalendarState(
     val events: List<ForexEvent> = emptyList(),
     val checkedAt: Long? = null,
@@ -31,6 +32,11 @@ data class ForexCalendarState(
 ) {
     fun online(now: Long = System.currentTimeMillis()): Boolean =
         error == null && !loading && events.isNotEmpty() && checkedAt?.let { now - it in 0L..1_200_000L } == true
+
+    /** Display-only risk window. It does NOT grant AI CLEAR or permission to trade. */
+    fun highImpactUsdWindow(now: Long = System.currentTimeMillis()): Boolean = online(now) &&
+        events.any { it.country == "USD" && it.impact == "High" &&
+            it.at in (now - 45 * 60_000L)..(now + 30 * 60_000L) }
 }
 
 /** No clock-less dates: reject partial/invalid/stale weeks instead of falsely declaring CLEAR. */
@@ -49,7 +55,10 @@ internal fun parseForexCalendar(root: JsonArray, now: Long): List<ForexEvent> {
             runCatching { OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull()
         } ?: error("زمان منطقه‌دار رویداد معتبر نیست")
         require(abs(time - now) <= 8 * 86_400_000L) { "هفتهٔ تقویم کهنه/نامعتبر است" }
-        ForexEvent(title, country, impact, time)
+        fun metric(field: String) = str(field)?.trim()?.takeIf { it.isNotBlank() && it.length <= 48 &&
+            '<' !in it && it.none { ch -> Character.isISOControl(ch) } }
+        ForexEvent(title, country, impact, time,
+            forecast = metric("forecast"), previous = metric("previous"), actual = metric("actual"))
     }
     require(events.any { it.country == "USD" }) { "برنامهٔ رویداد USD برای طلا در دسترس نیست" }
     return events.sortedBy { it.at }
