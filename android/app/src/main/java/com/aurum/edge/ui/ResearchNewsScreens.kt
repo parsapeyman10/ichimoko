@@ -20,7 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.aurum.edge.data.NewsResearch
+import com.aurum.edge.data.HeadlineImpactResearch
 import com.aurum.edge.data.PublicWebNewsState
 import com.aurum.edge.data.ResearchSpace
 import com.aurum.edge.data.ResearchState
@@ -79,14 +79,14 @@ private fun ResearchNewsScreen(state: PublicWebNewsState, space: ResearchSpace, 
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
         }
         visible.forEach { item ->
-            val note = NewsResearch.headline(item, state, space, now)
+            val insight = HeadlineImpactResearch.assess(item, state, space, now)
             SectionCard(item.title, "${item.feed.title} · انتشار ${formatDateTime(item.publishedAt)}") {
-                Text("دریافت در گوشی ${formatDateTime(item.receivedAt)} · ${note.title}",
+                Text("دریافت در گوشی ${formatDateTime(item.receivedAt)} · ${insight.note.title}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (note.state == ResearchState.CONTEXT) AurumColors.Cyan else AurumColors.Gold)
+                    color = if (insight.note.state == ResearchState.CONTEXT) AurumColors.Cyan else AurumColors.Gold)
                 if (item.excerpt.isNotBlank()) Text(item.excerpt,
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-                Text(note.detail, style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+                HeadlineInsightView(insight, item.url)
                 OutlinedButton(onClick = { runCatching { browser.openUri(item.url) } }) { Text("متن ناشر ↗") }
                 if (item.feed.language == "en") translationSnippet(item.title, item.excerpt)?.let {
                     InlinePersianTranslation(it)

@@ -43,7 +43,8 @@ import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
 
 @Composable
-fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () -> Unit) {
+fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () -> Unit,
+                 onOpenGuide: () -> Unit) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val mtf by viewModel.mtf.collectAsStateWithLifecycle()
     val news by viewModel.news.collectAsStateWithLifecycle()
@@ -84,6 +85,9 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             OutlinedButton(onClick = onOpenNews, modifier = Modifier.padding(top = 6.dp)) {
                 Text("خبر واقعی و وضعیت خوراک‌ها")
+            }
+            OutlinedButton(onClick = onOpenGuide, modifier = Modifier.padding(top = 6.dp)) {
+                Text("برای شرط نهم چه چیز لازم است؟")
             }
         }
         SignalSummaryCard(

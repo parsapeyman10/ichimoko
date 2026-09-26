@@ -73,6 +73,10 @@ class HomeReadoutTest {
         assertEquals(AurumTab.Home, primaryTabsFor(Workspace.FOREX).first())
         assertTrue(AurumTab.News in tabs.getValue(Workspace.FOREX))
         assertTrue(AurumTab.Learn in moreTabsFor(Workspace.FOREX))
+        assertTrue(AurumTab.Guide in moreTabsFor(Workspace.FOREX))
+        assertTrue(Workspace.entries.filter { it != Workspace.FOREX }.none {
+            AurumTab.Guide in tabs.getValue(it)
+        })
         assertTrue(AurumTab.Settings in moreTabsFor(Workspace.FOREX))
         assertEquals(listOf(AurumTab.Crypto, AurumTab.CryptoNews, AurumTab.Api), tabs.getValue(Workspace.CRYPTO))
         assertEquals(listOf(AurumTab.Nobitex, AurumTab.NobitexNews, AurumTab.Api), tabs.getValue(Workspace.NOBITEX))

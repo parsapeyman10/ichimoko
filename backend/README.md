@@ -4,6 +4,8 @@ FastAPI برای کندل/بک‌تست XAU/USD از Twelve Data، جمع‌آو
 
 ## راه‌اندازی و آزمون
 
+برای استقرار شخصی HTTPS، نگهداری کلید مدل فقط روی سرور، پیکربندی reverse proxy محدود و آزمایش پاسخ واقعی `/api/v1/news/web` به‌جای اتکا به `health.status=ok`، [راهنمای گام‌به‌گام فارسی](../docs/NINTH_GATE_SETUP_FA.md) را ببینید. در APK هم «راهنمای شرط نهم» از فضای فارکس، تنظیمات و تب خبر در دسترس است؛ فعال‌کردن سوییچ بدون شواهد معتبر مدل، شرط نهم را برقرار نمی‌کند.
+
 ```bash
 cd backend
 python -m venv .venv && source .venv/bin/activate

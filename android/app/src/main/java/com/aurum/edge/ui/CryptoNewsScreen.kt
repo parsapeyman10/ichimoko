@@ -20,9 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.aurum.edge.data.NewsResearch
+import com.aurum.edge.data.HeadlineImpactResearch
 import com.aurum.edge.data.ResearchSpace
-import com.aurum.edge.data.ResearchState
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.relativeTime
@@ -41,7 +40,7 @@ fun CryptoNewsScreen(viewModel: AurumViewModel) {
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         SectionCard("خبر رمزارز", "RSS مستقیم CoinDesk · نه Forex Factory و نه خبر بورس ایران") {
-            Text("تیتر و چکیدهٔ ناشر با تاریخ؛ ترجمهٔ فارسی با لمس شما در همین صفحه و روی دستگاه است. تیتر مجوز معامله نیست.",
+            Text("اهمیت اینجا «اولویت بررسی موضوعی» است، نه درجهٔ FF؛ جهت و اثر واقعی قیمت بدون گزارش کامل و کندل هم‌زمان نامعلوم‌اند. ترجمه در همین اپ؛ تیتر مجوز معامله نیست.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
             Button(onClick = viewModel::refreshCryptoWebNews, enabled = !state.loading,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("تازه‌سازی") }
@@ -66,9 +65,7 @@ fun CryptoNewsScreen(viewModel: AurumViewModel) {
                     style = MaterialTheme.typography.labelSmall, color = if (live) AurumColors.Cyan else AurumColors.Gold)
                 if (item.excerpt.isNotBlank()) Text(item.excerpt,
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-                val note = NewsResearch.headline(item, state, ResearchSpace.CRYPTO, now)
-                Text("${note.title}: ${note.detail}", style = MaterialTheme.typography.labelSmall,
-                    color = if (note.state == ResearchState.CONTEXT) AurumColors.Cyan else AurumColors.Gold)
+                HeadlineInsightView(HeadlineImpactResearch.assess(item, state, ResearchSpace.CRYPTO, now), item.url)
                 translationSnippet(item.title, item.excerpt)?.let { InlinePersianTranslation(it) }
                 OutlinedButton(onClick = { runCatching { browser.openUri(item.url) } }) {
                     Text("متن ناشر ↗")

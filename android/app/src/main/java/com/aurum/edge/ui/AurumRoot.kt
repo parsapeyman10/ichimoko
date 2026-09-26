@@ -80,6 +80,7 @@ enum class AurumTab(val label: String, val icon: ImageVector) {
     IranWatchSettings("منابع ریالی", Icons.Filled.Settings),
     Agah("آگاه", Icons.Filled.Bookmarks),
     Learn("یادگیری", Icons.Filled.School),
+    Guide("راهنمای شرط نهم", Icons.Filled.School),
     Journal("ژورنال", Icons.Filled.Bookmarks),
     Settings("تنظیمات", Icons.Filled.Settings),
     Api("APIها", Icons.Filled.Settings),
@@ -94,7 +95,7 @@ internal fun primaryTabsFor(space: Workspace): List<AurumTab> = when (space) {
 }
 
 internal fun moreTabsFor(space: Workspace): List<AurumTab> = when (space) {
-    Workspace.FOREX -> listOf(AurumTab.Learn, AurumTab.Journal, AurumTab.Settings, AurumTab.Api)
+    Workspace.FOREX -> listOf(AurumTab.Guide, AurumTab.Learn, AurumTab.Journal, AurumTab.Settings, AurumTab.Api)
     Workspace.IRAN_STOCKS -> listOf(AurumTab.IranWatchSettings, AurumTab.Api)
     Workspace.CRYPTO, Workspace.NOBITEX -> listOf(AurumTab.Api)
 }
@@ -197,9 +198,11 @@ fun AurumRoot(viewModel: AurumViewModel) {
                         onJournal = { open(AurumTab.Journal) }, onSettings = { open(AurumTab.Settings) })
                     AurumTab.Chart -> ChartScreen(viewModel, market,
                         onOpenSettings = { open(AurumTab.Settings) }, onOpenJournal = { open(AurumTab.Journal) })
-                    AurumTab.Signal -> SignalScreen(viewModel, market, onOpenNews = { open(AurumTab.News) })
+                    AurumTab.Signal -> SignalScreen(viewModel, market, onOpenNews = { open(AurumTab.News) },
+                        onOpenGuide = { open(AurumTab.Guide) })
                     AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) })
-                    AurumTab.News -> PersianNewsScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) })
+                    AurumTab.News -> PersianNewsScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) },
+                        onOpenGuide = { open(AurumTab.Guide) })
                     AurumTab.Crypto -> CryptoScreen(viewModel, onOpenSettings = { open(AurumTab.CryptoNews) })
                     AurumTab.CryptoNews -> CryptoNewsScreen(viewModel)
                     AurumTab.Nobitex -> NobitexWorkspaceScreen(viewModel)
@@ -210,8 +213,11 @@ fun AurumRoot(viewModel: AurumViewModel) {
                     AurumTab.IranWatchSettings -> IranWatchSettingsScreen(viewModel)
                     AurumTab.Agah -> AgahGuideScreen()
                     AurumTab.Learn -> LearnScreen(viewModel)
+                    AurumTab.Guide -> NinthGateGuideScreen(viewModel, market,
+                        onOpenSettings = { open(AurumTab.Settings) }, onOpenNews = { open(AurumTab.News) },
+                        onOpenSignal = { open(AurumTab.Signal) })
                     AurumTab.Journal -> JournalScreen(viewModel, market)
-                    AurumTab.Settings -> SettingsScreen(viewModel, settings)
+                    AurumTab.Settings -> SettingsScreen(viewModel, settings, onOpenGuide = { open(AurumTab.Guide) })
                     AurumTab.Api -> ApiMenuScreen(settings, workspace,
                         onForexSettings = { open(AurumTab.Settings) },
                         onIranStocks = { open(AurumTab.Stocks) },

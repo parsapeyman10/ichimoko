@@ -51,7 +51,7 @@ import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.theme.AurumColors
 
 @Composable
-fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
+fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings, onOpenGuide: () -> Unit) {
     val context = LocalContext.current
     val monitorRunning by SignalMonitorService.running.collectAsStateWithLifecycle()
     // Never prefill a saved secret in an editable Compose field. Blank means keep the stored key.
@@ -159,8 +159,13 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 label = { Text("نشانی HTTPS سرور خبر فارکس (اختیاری)") },
                 modifier = Modifier.fillMaxWidth(),
             )
+            Text("فقط ریشهٔ https://your-domain.example با گواهی معتبر روی ۴۴۳؛ اپ /api/v1/news/web را خودش اضافه می‌کند. ذخیرهٔ نشانی یا health=ok، آماده‌بودن مدل نیست.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             Button(onClick = { viewModel.saveNewsBaseUrl(newsUrl) }, modifier = Modifier.padding(top = 8.dp)) {
                 Text("ذخیره/حذف نشانی سرور خبر فارکس")
+            }
+            OutlinedButton(onClick = onOpenGuide, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+                Text("راهنمای استقرار و فعال‌سازی شرط نهم")
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("وتوی خبر برای ورود دستی کاغذی هنگام عدم‌دسترسی", Modifier.weight(1f),

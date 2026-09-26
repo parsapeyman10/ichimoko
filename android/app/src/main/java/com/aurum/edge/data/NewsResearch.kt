@@ -7,6 +7,7 @@ import kotlin.math.max
 enum class ResearchState { SCHEDULED, AWAITING_RESULT, PUBLISHED, CONTEXT, UNKNOWN }
 data class ResearchNote(val state: ResearchState, val title: String, val detail: String)
 enum class ResearchSpace { FOREX, CRYPTO, NOBITEX, IRAN_STOCKS }
+enum class NumericSurprise { ABOVE_FORECAST, BELOW_FORECAST, AS_FORECAST }
 
 object NewsResearch {
     private val number = Regex("^([+-]?(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?)\\s*(%|[kmb]|bp)?$", RegexOption.IGNORE_CASE)
@@ -38,18 +39,33 @@ object NewsResearch {
             return ResearchNote(ResearchState.AWAITING_RESULT, "زمان رویداد گذشته؛ نتیجه در این خروجی نیست",
                 "${risk}Forecast و Previous نتیجهٔ واقعی نیستند. سایت ناشر/واکنش قیمت را بررسی کنید؛ هیچ جهت یا تأییدی نداریم.")
         }
-        val actual = metric(event.actual)
-        val forecast = metric(event.forecast)
-        val comparison = when {
-            actual == null -> "نتیجهٔ منتشرشده متن/واحد غیرعددی دارد؛ مقایسهٔ عددی ممکن نیست. "
-            forecast == null || actual.kind != forecast.kind -> "مبنای پیش‌بینی هم‌واحد/عددی در خروجی نیست؛ غافلگیری قابل محاسبه نیست. "
-            abs(actual.amount - forecast.amount) <= max(1.0, abs(forecast.amount)) * 1e-8 ->
+        val comparison = when (surprise(event, calendar, now)) {
+            NumericSurprise.AS_FORECAST ->
                 "نتیجهٔ عددی برابر پیش‌بینی ثبت شده است؛ اثر بازار از این برابری معلوم نیست. "
-            actual.amount > forecast.amount -> "نتیجهٔ عددی بالاتر از پیش‌بینی است؛ «بالاتر» لزوماً به‌معنی رشد طلا نیست. "
-            else -> "نتیجهٔ عددی پایین‌تر از پیش‌بینی است؛ «پایین‌تر» لزوماً به‌معنی افت طلا نیست. "
+            NumericSurprise.ABOVE_FORECAST -> "نتیجهٔ عددی بالاتر از پیش‌بینی است؛ «بالاتر» لزوماً به‌معنی رشد طلا نیست. "
+            NumericSurprise.BELOW_FORECAST -> "نتیجهٔ عددی پایین‌تر از پیش‌بینی است؛ «پایین‌تر» لزوماً به‌معنی افت طلا نیست. "
+            null -> if (metric(event.actual) == null)
+                "نتیجهٔ منتشرشده متن/واحد غیرعددی دارد؛ مقایسهٔ عددی ممکن نیست. " else
+                "مبنای پیش‌بینی هم‌واحد/عددی در خروجی نیست؛ غافلگیری قابل محاسبه نیست. "
         }
         return ResearchNote(ResearchState.PUBLISHED, "مقایسهٔ محتاطانهٔ نتیجهٔ منتشرشده",
             "$risk${comparison}برای اثر بر XAU/USD واکنش هم‌زمان دلار، بازده اوراق و قیمت واقعی لازم است؛ این خروجی فقط تقویم است، نه تحلیل مدل/سیگنال.")
+    }
+
+    /** Compare only the actual and forecast of the SAME verified USD release, in the SAME unit.
+     * This is a numerical description, never an AI verdict, directional confirmation or gate.
+     */
+    fun surprise(event: ForexEvent, calendar: ForexCalendarState, now: Long): NumericSurprise? {
+        if (event.country != "USD" || !calendar.online(now) || event !in calendar.events ||
+            now < event.at || calendar.checkedAt?.let { it >= event.at } != true) return null
+        val actual = metric(event.actual) ?: return null
+        val forecast = metric(event.forecast) ?: return null
+        if (actual.kind != forecast.kind) return null
+        return when {
+            abs(actual.amount - forecast.amount) <= max(1.0, abs(forecast.amount)) * 1e-8 -> NumericSurprise.AS_FORECAST
+            actual.amount > forecast.amount -> NumericSurprise.ABOVE_FORECAST
+            else -> NumericSurprise.BELOW_FORECAST
+        }
     }
 
     /** A headline alone proves neither its full article nor the market's reaction. Explicit
@@ -63,7 +79,8 @@ object NewsResearch {
         }
         val health = state.feeds.singleOrNull { it.feed.id == item.feed.id }
         val receiptRecent = health?.checkedAt?.let { item.receivedAt in (it - 30_000L)..(it + 30_000L) } == true
-        if (!categoryAllowed || state.loading || health?.online(now) != true || !receiptRecent ||
+        if (!categoryAllowed || item !in state.headlines || state.loading || health?.online(now) != true ||
+            !receiptRecent || item.receivedAt !in 0L..now ||
             now - item.publishedAt !in 0L..(24 * 3_600_000L)) {
             return ResearchNote(ResearchState.UNKNOWN, "تیتر قبلی/نامرتبط، نه خبر تازه",
                 "تازگی خوراک/انتشار یا تعلق آن به این فضا تأیید نیست؛ از تیتر نتیجهٔ بازار استخراج نمی‌شود.")

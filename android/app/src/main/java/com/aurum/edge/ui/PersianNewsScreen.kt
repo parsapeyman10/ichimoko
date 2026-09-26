@@ -30,24 +30,29 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.aurum.edge.core.MarketHours
+import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.ForexNewsDecisions
+import com.aurum.edge.core.MarketHours
+import com.aurum.edge.core.SignalAction
+import com.aurum.edge.data.HeadlineImpactResearch
 import com.aurum.edge.data.NewsGate
-import com.aurum.edge.data.NewsResearch
-import com.aurum.edge.data.ResearchState
-import com.aurum.edge.data.ResearchSpace
+import com.aurum.edge.data.NewsImpactResearch
 import com.aurum.edge.data.PublicFeedState
 import com.aurum.edge.data.PublicNewsCategory
+import com.aurum.edge.data.ResearchSpace
+import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.formatDateTime
+import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
+import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 
 @Composable
-fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
+fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit, onOpenGuide: () -> Unit) {
     val server by viewModel.news.collectAsStateWithLifecycle()
     val market by viewModel.market.collectAsStateWithLifecycle()
     val web by viewModel.publicWebNews.collectAsStateWithLifecycle()
@@ -96,6 +101,17 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
             Text(decision.paperEntry, style = MaterialTheme.typography.bodySmall,
                 color = if (decision.canEnterPaper) AurumColors.Green else AurumColors.Red)
         }
+        SectionCard("اهمیت و اثر خبر را چطور بخوانیم؟", "چهار شاهد متفاوت · هیچ‌کدام به‌تنهایی سیگنال نیست") {
+            Text("① درجهٔ High/Medium/Low از خود Forex Factory، برای ارز رویداد است؛ رتبهٔ خبرهای RSS چنین درجه‌ای نیست.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+            Text("② Actual نسبت به Forecast فقط اختلاف عددی هم‌واحد است؛ ③ سناریوی طلا مشروط به دلار/بازده؛ ④ اثر مشاهده‌شده فقط تغییر کندل واقعی در پنجرهٔ رویداد است، نه اثبات علت.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+            Text("جهت تأییدشدهٔ مدلِ سرور و گیت ۹/۹ جدا هستند؛ بررسی عدد اولیه در منبع رسمی، سپس رفتار قیمت/اسپرد لازم است.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+            TextButton(onClick = { runCatching { uriHandler.openUri("https://www.bls.gov/bls/newsrels.htm") } }) {
+                Text("فهرست گزارش‌های رسمی BLS ↗")
+            }
+        }
         SectionCard("Forex Factory · مرجع اصلی خبر فارکس", "تقویم اقتصادی هفتگی · وب عمومی مستقیم · تمرکز روی USD/XAU",
             trailing = { Pill(when {
                 MarketHours.forexWeekendClosed(now) -> "بازار بسته"
@@ -126,23 +142,38 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 val preview = upcoming.filter { it.country == "USD" }
                     .sortedBy { abs(it.at - now) }.take(6).ifEmpty { upcoming.take(6) }
                 (if (showCalendar) upcoming else preview).forEach { event ->
+                    val insight = NewsImpactResearch.gold(event, calendar, market, now)
                     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Box(Modifier.padding(top = 5.dp).size(8.dp).background(
                             if (event.impact == "High") AurumColors.Red else AurumColors.TextMuted,
                             RoundedCornerShape(2.dp)))
-                        Text("${event.country} · ${formatDateTime(event.at)} · ${event.title}" +
-                            (if (event.impact == "High") " · پراثر" else ""),
+                        Text("${event.country} · ${formatDateTime(event.at)} · ${event.title}",
                             modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
                             color = if (event.impact == "High") AurumColors.Red else AurumColors.TextSecondary)
                     }
-                    if (event.forecast != null || event.previous != null || event.actual != null) Text(
-                        "پیش‌بینی ${event.forecast ?: "—"} · قبل ${event.previous ?: "—"} · منتشرشده ${event.actual ?: "—"}",
-                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                    if (event.country == "USD") {
-                        val note = NewsResearch.gold(event, calendar, now)
-                        Text("${note.title} · ${note.detail}", style = MaterialTheme.typography.labelSmall,
-                            color = if (note.state == ResearchState.PUBLISHED) AurumColors.Cyan else AurumColors.Gold,
-                            modifier = Modifier.padding(start = 16.dp, top = 3.dp))
+                    Column(Modifier.padding(start = 16.dp, top = 3.dp)) {
+                        Text("اهمیت اعلامی Forex Factory: ${insight.importance} · ${insight.relevance}",
+                            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+                        if (event.forecast != null || event.previous != null || event.actual != null) Text(
+                            "Forecast ${event.forecast ?: "—"} · Previous ${event.previous ?: "—"} · Actual ${event.actual?.takeIf { now >= event.at && calendar.checkedAt?.let { at -> at >= event.at } == true } ?: "—"}",
+                            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                        if (event.country == "USD" && event.impact in setOf("High", "Medium", "Low")) {
+                            Text("غافلگیری: ${insight.surprise}", style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextSecondary)
+                            Text("جهت احتمالی: ${insight.scenario}", style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.Gold)
+                            insight.observed?.let { move ->
+                                val direction = when {
+                                    move.percent > 0.01 -> "افزایش"
+                                    move.percent < -0.01 -> "کاهش"
+                                    else -> "تقریباً بدون تغییر"
+                                }
+                                Text("تغییر مشاهده‌شدهٔ XAU/USD: ${formatPrice(move.before)} → ${formatPrice(move.after)} دلار/اونس ($direction ${String.format(Locale.US, "%.2f", abs(move.percent))}٪) · بسته‌شدن کندل ${formatDateTime(move.beforeCloseAt)} تا ${formatDateTime(move.afterCloseAt)}${if (move.cached) " · بازخوانی کش، نه قیمت آنلاین" else " · کندل واقعی منبع"}",
+                                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
+                            }
+                            Text("اثر: ${insight.observationNote}", style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextMuted)
+                        }
                     }
                     translationSnippet(event.title)?.let { InlinePersianTranslation(it) }
                 }
@@ -225,9 +256,7 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 trailing = { Pill(receiptLabel, if (fromRecentResponse) AurumColors.Cyan else AurumColors.Gold) }) {
                 if (item.excerpt.isNotBlank()) Text(item.excerpt,
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-                val context = NewsResearch.headline(item, web, ResearchSpace.FOREX, now)
-                Text("${context.title}: ${context.detail}", style = MaterialTheme.typography.labelSmall,
-                    color = if (context.state == ResearchState.CONTEXT) AurumColors.Cyan else AurumColors.Gold)
+                HeadlineInsightView(HeadlineImpactResearch.assess(item, web, ResearchSpace.FOREX, now), item.url)
                 Text("دریافت در گوشی: ${formatDateTime(item.receivedAt)} · ${if (fromRecentResponse) "وضعیت خوراک بالا" else "قدیمی/کش؛ تازگی مجدد تأیید نشده"}",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
                     modifier = Modifier.padding(top = 4.dp))
@@ -253,15 +282,21 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 (if (server.cached) " · دادهٔ قبلی؛ گیت UNKNOWN" else ""),
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             server.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red) }
-            val ready = server.ai.status == "AVAILABLE" && server.gate == NewsGate.CLEAR && !server.cached && !server.loading
-            Text(if (ready) "جهت پیشنهادی مدل: ${server.ai.direction} · اطمینان ${server.ai.confidence.toInt()}٪"
-                else "AI: UNKNOWN · ${server.ai.reason}",
+            val modelAction = when (server.ai.direction) {
+                "BUY" -> SignalAction.BUY
+                "SELL" -> SignalAction.SELL
+                else -> null
+            }
+            val alignment = modelAction?.let { NewsConfluence.alignment(market.symbol, it, server, now) }
+            val ready = alignment?.status == ConfluenceStatus.CONFIRMED
+            Text(if (ready) "پاسخ مدل با شاهد معتبر: ${server.ai.direction} · اطمینان ${server.ai.confidence.toInt()}٪ · هم‌جهتی با سیگنال هنوز جداست"
+                else "شرط نهم هنوز تأیید نیست · ${alignment?.detail ?: server.ai.reason}",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (ready) AurumColors.Green else AurumColors.Gold,
                 modifier = Modifier.padding(top = 6.dp))
             Text("مدل: ${server.ai.model ?: "فعال نیست"} · بررسی ${relativeTime(server.ai.checkedAt, now)} · تیترهای مستقیم گوشی هرگز شاهد این تحلیل نیستند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            server.ai.evidenceIds.mapNotNull { id -> server.articles.singleOrNull { it.id == id } }.forEach { source ->
+            (if (ready) server.ai.evidenceIds else emptyList()).mapNotNull { id -> server.articles.singleOrNull { it.id == id } }.forEach { source ->
                 Text("شاهدِ سرور: ${source.source} · ${source.headline}",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
                 source.link?.let { url ->
@@ -275,6 +310,7 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                     modifier = Modifier.weight(1f)) { Text("بررسی گیت") }
                 OutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) { Text("تنظیم سرور") }
             }
+            TextButton(onClick = onOpenGuide) { Text("راهنمای گام‌به‌گام فعال‌سازی شرط نهم") }
             Text("وتوی خبر برای ورود دستی کاغذی ${if (settings.pauseOnNews) "روشن" else "خاموش"} است؛ برای ورود سیگنالی/خودکار شرط مدل همیشه الزامی است. CLEAR تضمین یا مجوز سفارش واقعی نیست.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             if (server.sources.isNotEmpty() || server.articles.isNotEmpty()) {
@@ -294,10 +330,10 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
         }
         if (showServerArticles) server.articles.forEach { item ->
             SectionCard(item.headline, "${item.source} · انتشار ${formatDateTime(item.publishedAt)}",
-                trailing = { Pill(item.impact, if (item.impact == "HIGH") AurumColors.Red else AurumColors.TextMuted) }) {
+                trailing = { Pill("تیتر RSS", AurumColors.TextMuted) }) {
                 if (item.summary.isNotBlank()) Text(item.summary,
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-                Text("برچسب قاعده‌ای: ${item.direction} · ${item.analysisSource} · نه AI و نه سیگنال",
+                Text("اولویت تیتر از قواعد سرور: ${item.impact} · ${item.analysisSource}؛ نه درجهٔ FF، نه جهت تأییدشده، نه واکنش قیمت/سیگنال",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
                 item.link?.let { url -> OutlinedButton(onClick = { runCatching { uriHandler.openUri(url) } }) {
                     Text("خبر در منبع")
