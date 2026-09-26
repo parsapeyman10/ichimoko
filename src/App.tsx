@@ -12,6 +12,7 @@ import TopTradersPanel from './components/TopTradersPanel';
 import MTFPanel from './components/MTFPanel';
 import CryptoPumpScanner from './components/CryptoPumpScanner';
 import RiskPanel from './components/RiskPanel';
+import FeatureInspectorPanel from './components/FeatureInspectorPanel';
 import { apiGet, apiPost, barIsCurrent, toBackendCandles, type DataStatus } from './lib/api';
 import { useMarketFeed } from './lib/feed';
 import type { Candle } from './lib/market';
@@ -56,6 +57,7 @@ function Sidebar({ active, setActive, open, close, feedState, provider }: { acti
     { key: 'backtest', label: 'بک‌تست دیتای واقعی', sub: 'Real-candle replay', icon: BarChart3 },
     { key: 'confluence', label: 'روش‌های مکمل', sub: 'Confluence', icon: Layers },
     { key: 'pump-scanner', label: 'اسکن میم‌کوین / پامپ', sub: 'Crypto momentum scan', icon: Flame },
+    { key: 'feature-inspector', label: 'شفافیت ویژگی‌های موتور', sub: 'Feature transparency', icon: Sparkles },
     { key: 'news', label: 'هوش خبری', sub: 'News (auto)', icon: Newspaper },
     { key: 'journal', label: 'رزومه / ژورنال', sub: 'Paper journal', icon: BookOpen },
     { key: 'risk', label: 'مدیریت سرمایه', sub: 'Risk', icon: Gauge },
@@ -632,6 +634,7 @@ export default function App() {
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><BacktestPanel/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><CryptoPumpScanner/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><RiskPanel/></div>
+        <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><FeatureInspectorPanel timeframe={timeframe}/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><JournalCard/></div>
 
         <Disclaimer/>
