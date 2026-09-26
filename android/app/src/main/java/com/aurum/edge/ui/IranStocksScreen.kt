@@ -130,6 +130,16 @@ fun IranStocksScreen(viewModel: AurumViewModel) {
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
             }
             shown.forEach { row -> EquityRowCard(row, recentReceipt) }
+            SectionCard("همهٔ سهم‌های عبوری از غربال عددی (کامل، بدون سقف ۱۲تایی)",
+                "${state.rows.size} نماد کل تابلو بررسی شد · ${qualified.size} مورد عبوری") {
+                Text("این فهرست تمام تابلوی دریافتی را می‌گردد، نه فقط ۱۲ ردیف پرگردش بالا. عبور عددی به معنی سود تضمینی یا تأیید CAN SLIM نیست؛ ساعت تابلو تاریخ مستقل معامله ندارد.",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+                if (!recentReceipt) Text("دریافت تازه نیست؛ این فهرست را برای غربال زنده معتبر ندانید.",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
+                else if (qualified.isEmpty()) Text("هیچ نمادی در این پاسخ از هر دو فیلتر عبور نکرد.",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
+            }
+            qualified.forEach { row -> EquityRowCard(row, recentReceipt) }
         }
         TtmCalculator()
     }
@@ -138,6 +148,7 @@ fun IranStocksScreen(viewModel: AurumViewModel) {
 @Composable
 private fun EquityRowCard(row: EquityRow, recentReceipt: Boolean) {
     val basic = row.basicValuePass && row.boardPass
+    val browser = LocalUriHandler.current
     SectionCard("${row.symbol} · ${row.name}", "${row.isin} · ساعت اعلام‌شده ${row.boardClock} (تاریخ نامشخص)",
         trailing = { Pill(if (recentReceipt && basic) "عبور عددی" else "فقط مشاهده",
             if (recentReceipt && basic) AurumColors.Cyan else AurumColors.Gold) }) {
@@ -149,6 +160,9 @@ private fun EquityRowCard(row: EquityRow, recentReceipt: Boolean) {
             style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
         Text("عمق سفارش، تازگی معامله، افشای کدال و معامله‌پذیری جداگانه تأیید نشده‌اند.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+        OutlinedButton(onClick = { runCatching {
+            browser.openUri("https://codal.ir/ReportList.aspx?search&Symbol=" + android.net.Uri.encode(row.symbol))
+        } }, modifier = Modifier.padding(top = 6.dp)) { Text("گزارش‌های مالی ${row.symbol} در کدال ↗ (برای TTM دستی)") }
     }
 }
 
@@ -228,6 +242,13 @@ fun AgahGuideScreen() {
         SectionCard("مرز امنیتی", "تحقیق تابلوی بورس ≠ دسترسی به حساب معاملاتی") {
             Text("حتی اگر نتیجهٔ غربال عددی یا TTM دلخواه باشد، قیمت تابلو تاریخ مستقل ندارد، CAN SLIM کامل نیست و تأیید ریسک، قوانین سفارش و سطح دسترسی رسمی کارگزاری وجود ندارد؛ اجرای واقعی عمداً غیرفعال است.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
+        }
+        SectionCard("چرا استخراج خودکار اعداد کدال هنوز نیست", "آزمایش شد؛ نتیجه صادقانه گزارش می‌شود") {
+            Text("زیر هر سهم در تب «بورس ایران»، دکمه‌ای مستقیماً همان نماد را در جست‌وجوی رسمی کدال باز می‌کند — دیگر نیازی به تایپ دستی نماد در کدال نیست.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Cyan)
+            Text("اما استخراج خودکارِ خودِ اعداد (سود خالص/EPS) از صفحات کدال بدون مرورگر واقعی پیاده نشد: درخواست‌های ساده به API کدال حتی از IPهای عادی اغلب مسدود/بی‌پاسخ می‌مانند (رفتار شناخته‌شدهٔ ضدربات آن). برای دورزدن این مانع باید یک مرورگر کامل درون‌برنامه‌ای (نوع Selenium/WebView خودکار) اجرا شود که قبلاً به‌عنوان خارج از محدودهٔ این اپ رد شده است. اگر می‌خواهید همین مسیر را با همهٔ ریسک پایداری‌اش (تغییر قالب صفحه، کپچا، کندی) پیش ببریم، اعلام کنید.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 6.dp))
         }
     }
 }

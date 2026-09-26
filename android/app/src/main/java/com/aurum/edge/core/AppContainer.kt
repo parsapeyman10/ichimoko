@@ -27,6 +27,7 @@ import com.aurum.edge.data.NobitexPracticeStore
 import com.aurum.edge.data.NobitexLiveTradeStore
 import com.aurum.edge.data.NobitexTradingClient
 import com.aurum.edge.data.NobitexSnapshot
+import com.aurum.edge.data.CryptoFundamentalsRepository
 import com.aurum.edge.data.PaperAutoTrader
 import com.aurum.edge.data.PaperOpportunityStore
 import com.aurum.edge.data.SettingsStore
@@ -97,6 +98,8 @@ class AppContainer(context: Context) {
     val crypto = CryptoRepository(settingsStore, appScope)
     val publicCrypto = PublicCryptoMarket(appScope) // keyless market overview, NOT the server's two-source screener
     val equities = IranEquityRepository(settingsStore, appScope)
+    // Reuses the SAME NobitexPublicData instance/rate-limit as the paper-trading screen.
+    val cryptoFundamentals = CryptoFundamentalsRepository(nobitexPublic, appScope)
     val freeHistory = FreeHistoryDownloader()
     val metaTraderImporter = MetaTraderImporter(appContext)
 
