@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.core.MarketHours
 import com.aurum.edge.data.Quote
 import com.aurum.edge.data.QuoteDisplayState
 import com.aurum.edge.data.SourceCatalog
@@ -50,18 +51,21 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
     val history by viewModel.watchHistory.collectAsStateWithLifecycle()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
-        viewModel.refreshWatch()
+        if (!MarketHours.forexWeekendClosed()) viewModel.refreshWatch()
         while (true) {
             delay(30_000L)
             now = System.currentTimeMillis()
-            if (now - (state.lastAttemptAt ?: 0L) >= 180_000L) viewModel.refreshWatch()
+            if (!MarketHours.forexWeekendClosed(now) &&
+                now - (state.lastAttemptAt ?: 0L) >= 180_000L) viewModel.refreshWatch()
         }
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         SectionCard("دیده‌بان فارکس · XAU/USD", "قیمت نمایشی ≠ تأیید دومنبعی؛ زمان دریافت وب جای زمان قیمت ناشر را نمی‌گیرد") {
+            if (MarketHours.forexWeekendClosed(now)) Text(MarketHours.labelForWorkspace("forex", now),
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = viewModel::refreshWatch, enabled = !state.refreshing, modifier = Modifier.weight(1f)) {
+                Button(onClick = viewModel::refreshWatch, enabled = !state.refreshing && !MarketHours.forexWeekendClosed(now), modifier = Modifier.weight(1f)) {
                     Text(if (state.refreshing) "در حال دریافت…" else "دریافت دوباره")
                 }
                 OutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) { Text("منابع نمادها") }
@@ -94,11 +98,13 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
                 Text(
                     preferred?.price?.let { "${formatPrice(it)} ${symbol.unit}" } ?: "قیمت موجود نیست",
                     style = MaterialTheme.typography.titleMedium,
-                    color = if (SourceComparison.assess(symbol, display.sourceId, preferred, now).readable)
+                    color = if (!MarketHours.forexWeekendClosed(now) &&
+                        SourceComparison.assess(symbol, display.sourceId, preferred, now).readable)
                         AurumColors.TextPrimary else AurumColors.TextMuted,
                 )
                 Text(
-                    verification.reason + (verification.spreadPct?.let { " · اختلاف ${String.format("%.2f", it)}%" } ?: ""),
+                    (if (MarketHours.forexWeekendClosed(now)) "بازار تعطیل؛ قیمت صرفاً مشاهدهٔ قبلی است. " else "") +
+                        verification.reason + (verification.spreadPct?.let { " · اختلاف ${String.format("%.2f", it)}%" } ?: ""),
                     style = MaterialTheme.typography.bodySmall, color = tone,
                     modifier = Modifier.padding(top = 4.dp, bottom = 7.dp),
                 )
@@ -114,16 +120,18 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
                         Column(Modifier.weight(1f)) {
                             Text("${source.title}: ${formatPrice(shown)} ${symbol.unit}",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (assessment.readable) AurumColors.TextPrimary else AurumColors.TextMuted)
+                                color = if (!MarketHours.forexWeekendClosed(now) && assessment.readable)
+                                    AurumColors.TextPrimary else AurumColors.TextMuted)
                             Text(buildString {
                                 append(assessment.detail)
                                 if (assessment.state == QuoteDisplayState.ERROR && quote?.error != null) append(" · ${quote.error}")
                                 if (quote?.providerAt != null) append(" · زمان قیمت ${formatDateTime(quote.providerAt)}")
                                 if (quote != null) append(" · دریافت ${formatDateTime(quote.ts)}")
                             }, style = MaterialTheme.typography.labelSmall,
-                                color = when (assessment.state) {
-                                    QuoteDisplayState.DATED -> AurumColors.Green
-                                    QuoteDisplayState.UNDATED -> AurumColors.Gold
+                                color = when {
+                                    MarketHours.forexWeekendClosed(now) -> AurumColors.TextMuted
+                                    assessment.state == QuoteDisplayState.DATED -> AurumColors.Green
+                                    assessment.state == QuoteDisplayState.UNDATED -> AurumColors.Gold
                                     else -> AurumColors.TextMuted
                                 })
                         }

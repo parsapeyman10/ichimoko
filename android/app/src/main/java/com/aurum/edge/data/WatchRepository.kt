@@ -1,5 +1,7 @@
 package com.aurum.edge.data
 
+import android.os.SystemClock
+import com.aurum.edge.core.MarketHours
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -28,6 +30,8 @@ class WatchRepository(
     private val scope: CoroutineScope,
 ) {
     private val mutex = Mutex()
+    private var lastWorkspace = ""
+    private var attemptedAtElapsed = 0L
     private var loaded = false
     private val _state = MutableStateFlow(WatchState())
     val state: StateFlow<WatchState> = _state.asStateFlow()
@@ -58,7 +62,22 @@ class WatchRepository(
     private suspend fun refresh() = mutex.withLock {
         ensureLoaded()
         val activeWorkspace = chartSettings.read().workspaceId
-        _state.value = _state.value.copy(refreshing = true, error = null, lastAttemptAt = null)
+        if (activeWorkspace == "forex" && MarketHours.forexWeekendClosed()) {
+            _state.value = _state.value.copy(refreshing = false,
+                error = "تعطیلی معمول فارکس؛ درخواست قیمت جدید XAU/USD ارسال نشد")
+            return@withLock
+        }
+        if (activeWorkspace !in setOf("forex", "iran_stocks")) return@withLock
+        val elapsed = SystemClock.elapsedRealtime()
+        if (lastWorkspace == activeWorkspace && attemptedAtElapsed != 0L &&
+            elapsed - attemptedAtElapsed in 0L until 180_000L) {
+            _state.value = _state.value.copy(error = "برای سهمیهٔ منابع، حداقل سه دقیقه بین دریافت‌های دیده‌بان صبر کنید")
+            return@withLock
+        }
+        lastWorkspace = activeWorkspace
+        attemptedAtElapsed = elapsed
+        _state.value = _state.value.copy(refreshing = true, error = null,
+            lastAttemptAt = System.currentTimeMillis()) // attempt time, not quote freshness
         try {
             val selected = preferences.selections.value
             val targets = WatchCatalog.forWorkspace(activeWorkspace).flatMap { symbol ->

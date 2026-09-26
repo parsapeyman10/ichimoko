@@ -71,11 +71,11 @@ class PublicCryptoMarket(private val scope: CoroutineScope) {
     fun refreshNow() { scope.launch { refresh() } }
     private suspend fun refresh() = mutex.withLock {
         val elapsed = SystemClock.elapsedRealtime()
-        if (attemptedAt != 0L && elapsed - attemptedAt in 0L until 60_000L) {
+        if (attemptedAt != 0L && elapsed - attemptedAt in 0L until 180_000L) {
             // A just-opened screen and the foreground service may request the same snapshot.
             // Throttling must not erase a still-valid observation or call it an outage.
             if (!_state.value.recent()) _state.value = PublicCryptoState(PublicCryptoStatus.UNAVAILABLE,
-                error = "برای سهمیهٔ عمومی، یک دقیقه بعد دوباره تلاش کنید")
+                error = "برای سهمیهٔ عمومی، سه دقیقه بعد دوباره تلاش کنید")
             return@withLock
         }
         attemptedAt = elapsed

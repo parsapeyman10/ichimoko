@@ -128,6 +128,7 @@ fun FeedBanner(status: FeedStatus, lastPrice: Double?, lastBarTime: Long?, showi
     val (color, title) = when (status.mode) {
         FeedMode.LIVE -> AurumColors.Green to "زنده — ${status.provider}"
         FeedMode.POLLING -> AurumColors.Gold to "کندل REST دوره‌ای (نه تیک زنده) — ${status.provider}"
+        FeedMode.MARKET_CLOSED -> AurumColors.Gold to "بازار طبق برنامهٔ معمول بسته است — دریافت متوقف"
         FeedMode.DELAYED -> AurumColors.Gold to "دادهٔ بازار دیررس/نامعلوم — ${status.provider}"
         FeedMode.CONNECTING -> AurumColors.Cyan to "در حال اتصال…"
         FeedMode.OFFLINE -> AurumColors.Red to "آفلاین — داده ساختگی نمایش داده نمی‌شود"

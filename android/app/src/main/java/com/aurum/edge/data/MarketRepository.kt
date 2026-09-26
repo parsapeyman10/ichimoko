@@ -9,6 +9,7 @@ import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
+import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
@@ -97,7 +98,9 @@ class MarketRepository(
         // tear down a healthy socket, roll back its last tick, or duplicate REST requests.
         if (started && activeKey == current.apiKey && _state.value.symbol == current.symbol &&
             _state.value.interval == current.interval &&
-            (!current.hasKey || pollJob?.isActive == true && streamJob?.isActive == true)) return
+            (!current.hasKey || (MarketHours.forexWeekendClosed() &&
+                _state.value.feed.mode == FeedMode.MARKET_CLOSED) ||
+                pollJob?.isActive == true && streamJob?.isActive == true)) return
         stop()
         started = true
         activeKey = current.apiKey
@@ -107,18 +110,22 @@ class MarketRepository(
             cachedBars.clear() // never reuse a different instrument's bars or signal
             _state.value = MarketState(symbol = current.symbol, interval = current.interval)
         }
+        val closed = MarketHours.forexWeekendClosed()
         _state.value = _state.value.copy(
-            feed = FeedStatus(if (current.hasKey) FeedMode.CONNECTING else FeedMode.NO_KEY,
-                if (current.hasKey) "در حال دریافت…" else "کلید Twelve Data وارد نشده است"),
+            feed = FeedStatus(when { closed -> FeedMode.MARKET_CLOSED; current.hasKey -> FeedMode.CONNECTING
+                else -> FeedMode.NO_KEY },
+                when { closed -> "تعطیلی معمول پایان هفته؛ قیمت تازه دریافت نمی‌شود"
+                    current.hasKey -> "در حال دریافت…" else -> "کلید Twelve Data وارد نشده است" }),
             signal = null,
+            showingCachedData = closed && _state.value.candles.isNotEmpty(),
         )
         loadCacheThenRefresh(session) // cached real bars are read-only even without the key
         if (current.hasKey) {
-            startStream()
-            startPolling()
-            startWatchdog(session)
+            if (!closed) startStream()
+            startPolling() // timer checks local hours and does NOT request REST while closed
             registerNetworkCallback()
         }
+        startWatchdog(session) // local clock re-arms the feed at the next scheduled opening
     }
 
     @Synchronized
@@ -178,6 +185,10 @@ class MarketRepository(
         val current = settings.read()
         val session = generation
         if (!started || current.workspaceId != "forex") return@withLock
+        if (MarketHours.forexWeekendClosed()) {
+            publishClosed()
+            return@withLock // no REST requests on the scheduled weekend
+        }
         if (!current.hasKey) {
             _state.value = _state.value.copy(feed = FeedStatus(FeedMode.NO_KEY, "کلید Twelve Data وارد نشده است"))
             return@withLock
@@ -194,6 +205,7 @@ class MarketRepository(
             if (!started || generation != session || settings.read().workspaceId != "forex" ||
                 settings.read().symbol != current.symbol || settings.read().interval != current.interval ||
                 settings.read().apiKey != current.apiKey || _state.value.symbol != current.symbol) return@withLock
+            if (MarketHours.forexWeekendClosed()) { publishClosed(); return@withLock }
             val receivedAt = System.currentTimeMillis()
             val streamRecent = _state.value.feed.mode == FeedMode.LIVE &&
                 _state.value.feed.lastSuccessAt?.let { receivedAt - it in 0L..90_000L } == true
@@ -233,6 +245,7 @@ class MarketRepository(
         _state.value.feed.mode == FeedMode.LIVE && FeedLiveness.hasRecentReceipt(_state.value.feed, now)
 
     private fun reportRestFailure(detail: String) {
+        if (MarketHours.forexWeekendClosed()) { publishClosed(); return }
         val current = _state.value
         if (current.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
             !current.showingCachedData && FeedLiveness.hasRecentReceipt(current.feed)) {
@@ -254,6 +267,7 @@ class MarketRepository(
     @Synchronized
     private fun startStream() {
         if (!started || settings.read().workspaceId != "forex") return
+        if (MarketHours.forexWeekendClosed()) { publishClosed(); return }
         val epoch = ++streamEpoch
         streamJob?.cancel()
         val session = generation
@@ -262,6 +276,7 @@ class MarketRepository(
             while (isActive && started && generation == session && streamEpoch == epoch) {
                 val current = settings.read()
                 if (current.workspaceId != "forex") break
+                if (MarketHours.forexWeekendClosed()) { publishClosed(); delay(60_000L); continue }
                 if (!current.hasKey) {
                     _state.value = _state.value.copy(feed = FeedStatus(FeedMode.NO_KEY, "کلید Twelve Data وارد نشده است"))
                     delay(10_000); continue
@@ -308,6 +323,22 @@ class MarketRepository(
                 delay(20_000L)
                 if (!started || generation != session || settings.read().workspaceId != "forex") break
                 val now = System.currentTimeMillis()
+                if (MarketHours.forexWeekendClosed(now)) {
+                    if (_state.value.feed.mode != FeedMode.MARKET_CLOSED || streamJob?.isActive == true) {
+                        synchronized(this@MarketRepository) { ++streamEpoch; streamJob?.cancel(); streamJob = null }
+                        recoveryJob?.cancel()
+                        publishClosed()
+                    }
+                    continue // no network check, HTTP request or reconnect on a known closed weekend
+                }
+                if (_state.value.feed.mode == FeedMode.MARKET_CLOSED) {
+                    _state.value = _state.value.copy(feed = FeedStatus(
+                        if (settings.read().hasKey) FeedMode.CONNECTING else FeedMode.NO_KEY,
+                        "برنامهٔ معمول بازگشایی شد؛ منتظر تیک/کندل معتبر هستیم"), signal = null)
+                    if (settings.read().hasKey) { startStream(); refreshNow() }
+                    continue
+                }
+                if (!settings.read().hasKey) continue
                 val feed = _state.value.feed
                 if (feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
                     !FeedLiveness.hasRecentReceipt(feed, now)) {
@@ -341,7 +372,8 @@ class MarketRepository(
                 recoveryJob?.cancel()
                 recoveryJob = scope?.launch {
                     delay(750L) // a default network may be announced before it can actually route
-                    if (!started || generation != session || settings.read().workspaceId != "forex") return@launch
+                    if (!started || generation != session || settings.read().workspaceId != "forex" ||
+                        MarketHours.forexWeekendClosed()) return@launch
                     if (cm.activeNetwork != network || !hasInternet()) return@launch
                     lastNetwork = network
                     publishDelayed("شبکه تغییر کرد؛ تیک قدیمی قابل معامله نیست. اتصال WebSocket/REST بازیابی می‌شود")
@@ -356,7 +388,7 @@ class MarketRepository(
                 recoveryJob?.cancel()
                 recoveryJob = scope?.launch {
                     delay(1_500L) // allow Android to switch to a new default network first
-                    if (started && generation == session && !hasInternet()) {
+                    if (started && generation == session && !MarketHours.forexWeekendClosed() && !hasInternet()) {
                         publishDelayed("شبکه در حال تغییر/قطع است؛ تا رسیدن دادهٔ تازه آنلاین نیست")
                     }
                 }
@@ -368,6 +400,7 @@ class MarketRepository(
     private suspend fun onTick(price: Double, at: Long) {
         val current = settings.read()
         val now = System.currentTimeMillis()
+        if (MarketHours.forexWeekendClosed(now)) { publishClosed(); return }
         if (!isCurrentIntervalTick(at, current.interval, now)) return
         val periodStart = now - now % current.interval.millis
         val existing = cachedBars[periodStart]
@@ -411,6 +444,7 @@ class MarketRepository(
     }
 
     private fun publishStreamUnavailable(detail: String) {
+        if (MarketHours.forexWeekendClosed()) { publishClosed(); return }
         val current = _state.value
         val now = System.currentTimeMillis()
         if (current.feed.mode == FeedMode.POLLING &&
@@ -419,6 +453,17 @@ class MarketRepository(
             _state.value = current.copy(feed = current.feed.copy(detail =
                 "$detail؛ کندل REST دوره‌ای است، نه تیک زنده"))
         } else publishDelayed(detail)
+    }
+
+    private fun publishClosed() {
+        val current = _state.value
+        if (current.feed.mode == FeedMode.MARKET_CLOSED) return
+        _state.value = current.copy(
+            feed = FeedStatus(FeedMode.MARKET_CLOSED,
+                "تعطیلی معمول پایان هفته به وقت نیویورک؛ روزهای تعطیل دیگر/ساعت بروکر جداگانه تأیید نشده‌اند",
+                current.feed.lastSuccessAt),
+            showingCachedData = current.candles.isNotEmpty(), signal = null,
+        )
     }
 
     private fun publishDelayed(detail: String) {

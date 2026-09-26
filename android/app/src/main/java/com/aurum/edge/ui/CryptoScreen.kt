@@ -44,8 +44,13 @@ fun CryptoScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(settings.cryptoBaseUrl) { baseUrl = settings.cryptoBaseUrl; viewModel.refreshCrypto() }
     LaunchedEffect(Unit) {
-        viewModel.refreshPublicCrypto()
-        while (true) { delay(30_000L); now = System.currentTimeMillis() }
+        var elapsed = 0
+        while (true) {
+            if (elapsed % 6 == 0) viewModel.refreshPublicCrypto() // one public request per ~3m
+            delay(30_000L)
+            now = System.currentTimeMillis()
+            elapsed++
+        }
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {

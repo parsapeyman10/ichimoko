@@ -16,6 +16,7 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import com.aurum.edge.AurumApplication
 import com.aurum.edge.core.AppContainer
 import com.aurum.edge.core.FeedMode
+import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.PaperAlertRules
@@ -147,7 +148,7 @@ class SignalMonitorService : Service() {
         }
         researchAlertJob = scope.launch {
             container.forexCalendar.state.collect { state ->
-                if (container.settingsStore.read().workspaceId == "forex")
+                if (container.settingsStore.read().workspaceId == "forex" && !MarketHours.forexWeekendClosed())
                     ResearchAlerts.forex(state, System.currentTimeMillis()).forEach(::postResearchAlert)
             }
         }
@@ -157,10 +158,12 @@ class SignalMonitorService : Service() {
             while (isActive) {
                 if (container.settingsStore.read().workspaceId != "forex") break
                 if (!notificationsPermitted()) { stopSelf(); break }
-                container.forexCalendar.refreshNow() // 1m near High/USD, 15m otherwise (repository throttles)
-                if (turns++ % 15 == 0) container.publicWebNews.refreshNow() // display only, avoid RSS hammering
-                if (container.settingsStore.read().let { it.autoPaperTrading || it.pauseOnNews || it.notifyOnSignal } &&
-                    container.settingsStore.read().newsBaseUrl.isNotBlank()) container.news.refreshNow()
+                if (!MarketHours.forexWeekendClosed()) {
+                    container.forexCalendar.refreshNow() // weekly export, 1m near release only
+                    if (turns++ % 15 == 0) container.publicWebNews.refreshNow()
+                    if (container.settingsStore.read().let { it.autoPaperTrading || it.pauseOnNews || it.notifyOnSignal } &&
+                        container.settingsStore.read().newsBaseUrl.isNotBlank()) container.news.refreshNow()
+                }
                 delay(60_000L)
             }
         }
@@ -186,6 +189,7 @@ class SignalMonitorService : Service() {
                 val text = when (state.feed.mode) {
                     FeedMode.LIVE -> "زنده · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
                     FeedMode.POLLING -> "آخرین کندل REST (نه تیک زنده) · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
+                    FeedMode.MARKET_CLOSED -> "بازار طبق برنامهٔ معمول بسته است؛ قیمت/ورود بررسی نمی‌شود"
                     FeedMode.DELAYED -> "دادهٔ دیررس؛ اتصال در حال بررسی (معامله مسدود)"
                     FeedMode.CONNECTING -> "در حال اتصال…"
                     FeedMode.OFFLINE -> "آفلاین — آخرین دیتای واقعی: ${state.candles.lastOrNull()?.time ?: "—"}"
@@ -316,8 +320,9 @@ class SignalMonitorService : Service() {
                     if (round % 5 == 0) container.cryptoWebNews.refreshNow() // global context, not exchange notices
                 }
                 "iran_stocks" -> {
-                    if (container.settingsStore.read().stockDataKey.isNotBlank()) container.equities.refreshNow()
-                    if (round % 3 == 0) container.watch.refreshNow() // avoid hammering TGJU/Navasan
+                    if (MarketHours.iranStockSessionScheduled() &&
+                        container.settingsStore.read().stockDataKey.isNotBlank()) container.equities.refreshNow()
+                    if (round % 3 == 0) container.watch.refreshNow() // rial markets have DIFFERENT hours
                     if (round % 5 == 0) container.iranWebNews.refreshNow()
                 }
             }
@@ -338,7 +343,9 @@ class SignalMonitorService : Service() {
                         else "نوبیتکس · آمار قدیمی؛ نامزد زنده نداریم"
                         else -> "نوبیتکس · آمار عمومی ناموجود/در انتظار؛ نه سفارش"
                     }
-                    else -> container.equities.state.value.let { state ->
+                    else -> if (!MarketHours.iranStockSessionScheduled(now))
+                        "بورس ایران · خارج ساعت معمول؛ تابلو بررسی نمی‌شود (بازار ریالی مستقل است)"
+                    else container.equities.state.value.let { state ->
                         if (state.status == EquityBoardStatus.OBSERVED && state.recentReceipt(now))
                             "بورس · BrsApi پاسخ اخیر؛ تاریخ مستقل قیمت سهم نامعلوم"
                         else "بورس · پاسخ تازهٔ تابلو نداریم؛ فقط مشاهدهٔ قبلی"

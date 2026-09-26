@@ -28,6 +28,7 @@ import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.theme.AurumColors
+import kotlinx.coroutines.delay
 import java.util.Locale
 
 /** Scan is completely read-only; not a signal, risk clearance, price feed or trading bridge. */
@@ -37,7 +38,12 @@ fun NobitexSpotScanSection(viewModel: AurumViewModel) {
     var quote by remember { mutableStateOf("USDT") }
     var selected by remember { mutableStateOf(NobitexSpotCatalog.bases.toSet()) }
     val uriHandler = LocalUriHandler.current
-    LaunchedEffect(Unit) { viewModel.refreshNobitexScan() } // shared repository keeps a just-fetched result
+    LaunchedEffect(Unit) {
+        while (true) {
+            viewModel.refreshNobitexScan() // repository de-duplicates the optional monitor
+            delay(180_000L) // bounded public scan; no exchange-order API
+        }
+    }
 
     SectionCard("غربال اسپات نوبیتکس · USDT / ریال", "۶ دارایی × دو بازار · دادهٔ واقعی عمومی، بدون کلید و بدون سفارش") {
         Text("برچسب «نامزد پژوهشی» تنها وقتی بازار باز، تغییر ۲۴ساعته ۱ تا ۱۲٪، اسپرد ≤۰٫۸٪ و گردش ۲۴ساعته ≥۲۰٬۰۰۰ USDT یا ≥۵۰ میلیارد ریال باشد داده می‌شود؛ احتمال رشد یا سود نیست.",

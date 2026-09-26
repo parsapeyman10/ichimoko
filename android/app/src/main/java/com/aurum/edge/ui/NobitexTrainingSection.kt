@@ -49,6 +49,7 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
     var stopText by remember { mutableStateOf("2") }
     var targetText by remember { mutableStateOf("4") }
     var pending by remember { mutableStateOf<PracticeRequest?>(null) }
+    var showRiskDetails by remember { mutableStateOf(false) }
     var pendingCsv by remember { mutableStateOf<com.aurum.edge.data.NobitexSnapshot?>(null) }
     val uriHandler = LocalUriHandler.current
     val saveCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
@@ -61,9 +62,9 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
     }
 
     SectionCard("نوبیتکس · آموزش و صحه‌سنجی با دادهٔ عمومی", "مستقیم از API رسمی، بدون کلید صرافی، بدون ارسال سفارش") {
-        Text("حالت ۱ · اکنون: دادهٔ عمومی GET، راستی‌آزمایی و حساب spot کاملاً کاغذی؛ مستقل از موتور طلا و حساب دلاری.",
+        Text("فعلاً فقط حساب کاغذی؛ آمار/دفتر عمومی، مستقل از موتور طلا.",
             style = MaterialTheme.typography.bodySmall, color = AurumColors.Green)
-        Text("حالت ۲ · آینده: اتصال حساب و ارسال سفارش واقعی غیرفعال است؛ ابتدا قرارداد رسمی، واحد قیمت، امنیت سرور، مجوز، ریسک و آزمون عملی لازم است. کلید معاملاتی را در گوشی وارد نکنید.",
+        Text("سفارش واقعی غیرفعال است؛ کلید معاملاتی را در گوشی وارد نکنید.",
             style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             NobitexMarket.entries.forEach { choice ->
@@ -173,7 +174,12 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
             modifier = Modifier.fillMaxWidth()) {
             Text(if (open) "تمرین BTCUSDT باز دارید" else "بررسی و تأیید خرید کاغذی Spot")
         }
-        Text("این تمرین دستی است؛ ۸ شرط فنی طلا و خبر AI برای BTCUSDT اعتبارسنجی نشده‌اند. کارمزد، اسلیپیج و حداقل سفارش لحاظ نشده؛ سود/زیان واقعی نیست. SL/TP تنها با bid دفتر سفارشِ دارای timestamp بعد از ثبت بررسی می‌شود؛ عبور بین دو دریافت ممکن است دیده نشود. در ژورنال مستقل ثبت و پیگیری می‌شود.",
+        Text("تمرین دستی و بدون سفارش؛ کارمزد/لغزش لحاظ نشده و گیت ۹/۹ طلا به BTC تعمیم داده نشده.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+        OutlinedButton(onClick = { showRiskDetails = !showRiskDetails }) {
+            Text(if (showRiskDetails) "بستن جزئیات ریسک" else "جزئیات ریسک تمرین")
+        }
+        if (showRiskDetails) Text("حد ضرر/سود فقط با bid زمان‌دار دفتر سفارش پس از ثبت بررسی می‌شود؛ عبور بین دریافت‌ها ممکن است دیده نشود. سود/زیان واقعی نیست؛ نتیجه در ژورنال مستقل ثبت می‌شود.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
     }
 

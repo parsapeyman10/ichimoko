@@ -25,6 +25,7 @@ data class HomeReadout(
                     current && market.feed.mode == FeedMode.LIVE -> "تیک تازهٔ WebSocket"
                     current -> "کندل تازهٔ REST؛ نه تیک قابل اجرای سفارش"
                     market.feed.mode == FeedMode.NO_KEY -> "کلید دادهٔ بازار روی این نصب موجود نیست"
+                    market.feed.mode == FeedMode.MARKET_CLOSED -> "بازار طبق برنامهٔ معمول بسته است؛ قیمت قبلی است"
                     market.showingCachedData || lastBarAt != null -> "دادهٔ قبلی/کش؛ قیمت اکنون تأیید نشده"
                     market.feed.mode == FeedMode.CONNECTING -> "در حال اتصال به دادهٔ واقعی"
                     else -> "دادهٔ تازه در دسترس نیست"

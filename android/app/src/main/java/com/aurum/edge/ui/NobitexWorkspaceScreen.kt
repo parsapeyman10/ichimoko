@@ -25,7 +25,7 @@ fun NobitexWorkspaceScreen(viewModel: AurumViewModel) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         ReadOnlyMonitorCard(viewModel, settings)
         SectionCard("اتصال رسمی نوبیتکس", "راهنمای دریافت دسترسی از سایت خود صرافی · بدون درخواست کلید در این اپ") {
-            Text("در سایت رسمی حساب خود وارد «پروفایل ← خدمات API» شوید و مستندات سطح دسترسی را بخوانید. برای آمار عمومی این صفحه هیچ کلیدی لازم نیست. در حال حاضر اتصال حساب، برداشت و سفارش واقعی غیرفعال‌اند؛ کلید معاملاتی را اینجا یا در چت وارد نکنید.",
+            Text("دادهٔ عمومی بی‌کلید است؛ سفارش واقعی خاموش. کلید حساب را در اپ یا چت وارد نکنید.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
             Text("طبق صفحهٔ رسمی API، درخواست‌ها ممکن است به IP ایران محدود باشند؛ خطای شبکه را دادهٔ سالم فرض نکنید.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,

@@ -30,6 +30,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.core.MarketHours
+import com.aurum.edge.core.ForexNewsDecisions
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.NewsResearch
 import com.aurum.edge.data.ResearchState
@@ -47,6 +49,7 @@ import kotlin.math.abs
 @Composable
 fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
     val server by viewModel.news.collectAsStateWithLifecycle()
+    val market by viewModel.market.collectAsStateWithLifecycle()
     val web by viewModel.publicWebNews.collectAsStateWithLifecycle()
     val calendar by viewModel.forexCalendar.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -58,13 +61,18 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
     var showCalendar by remember { mutableStateOf(false) }
     var showServerArticles by remember { mutableStateOf(false) }
 
-    LaunchedEffect(settings.newsBaseUrl) { viewModel.refreshNews() }
+    LaunchedEffect(settings.newsBaseUrl) { if (!MarketHours.forexWeekendClosed()) viewModel.refreshNews() }
     LaunchedEffect(Unit) {
-        viewModel.refreshPublicWebNews() // no backend URL or news API key needed
-        while (true) { delay(900_000L); viewModel.refreshPublicWebNews() }
+        while (true) {
+            if (!MarketHours.forexWeekendClosed()) viewModel.refreshPublicWebNews()
+            delay(900_000L)
+        }
     }
     LaunchedEffect(Unit) {
-        while (true) { viewModel.refreshForexCalendar(); delay(60_000L) } // repository throttles outside release windows
+        while (true) {
+            if (!MarketHours.forexWeekendClosed()) viewModel.refreshForexCalendar()
+            delay(60_000L) // repository throttles outside release windows
+        }
     }
     LaunchedEffect(Unit) {
         while (true) { delay(30_000L); now = System.currentTimeMillis() }
@@ -78,22 +86,32 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
         NewsGate.UNKNOWN -> AurumColors.Gold
     }
 
+    val decision = ForexNewsDecisions.assess(market, settings, calendar, server, now)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
+        SectionCard("خلاصهٔ خبر و ورود کاغذی", "تقویم Forex Factory ≠ متن کامل خبر یا نظر مدل") {
+            Text(decision.context, style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
+            Text(decision.modelOpinion, style = MaterialTheme.typography.bodySmall,
+                color = if (decision.canEnterPaper) AurumColors.Cyan else AurumColors.Gold)
+            Text("جهت: ${decision.direction}", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            Text(decision.paperEntry, style = MaterialTheme.typography.bodySmall,
+                color = if (decision.canEnterPaper) AurumColors.Green else AurumColors.Red)
+        }
         SectionCard("Forex Factory · مرجع اصلی خبر فارکس", "تقویم اقتصادی هفتگی · وب عمومی مستقیم · تمرکز روی USD/XAU",
             trailing = { Pill(when {
+                MarketHours.forexWeekendClosed(now) -> "بازار بسته"
                 !calendar.online(now) -> "نامشخص"
                 calendar.highImpactUsdWindow(now) -> "بازهٔ خبر پراثر"
                 else -> "تقویم دریافت شد"
             }, when {
-                !calendar.online(now) -> AurumColors.Gold
+                MarketHours.forexWeekendClosed(now) || !calendar.online(now) -> AurumColors.Gold
                 calendar.highImpactUsdWindow(now) -> AurumColors.Red
                 else -> AurumColors.Cyan
             }) }) {
-            Text("ابتدا رویدادهای USD؛ ● قرمز = اثر زیاد · ساعت به وقت گوشی · آخرین بررسی ${relativeTime(calendar.checkedAt, now)}. برنامه/پیش‌بینی لزوماً نتیجهٔ خبر نیست.",
+            Text("USD اول · ساعت گوشی · بررسی ${relativeTime(calendar.checkedAt, now)} · پیش‌بینی ≠ نتیجه",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-            Text(if (calendar.highImpactUsdWindow(now)) "رویداد High برای USD از ۳۰ دقیقه پیش تا ۴۵ دقیقه پس از آن: فقط هشدار پژوهشی؛ ورود خودکار تنها با گیت مستقل سرور بررسی می‌شود."
-                 else if (calendar.online(now)) "بازهٔ High/USD در این تقویم مشاهده نشد؛ این عبارت تأیید نبود خبر یا مجوز معامله نیست."
-                 else "تقویم نامعتبر/قطع است؛ وضعیت ریسک خبر نامشخص است، نه امن.",
+            Text(if (calendar.highImpactUsdWindow(now)) "رویداد پراثر نزدیک است؛ جهت نامعلوم و ورود وابسته به گیت مستقل."
+                 else if (calendar.online(now)) "رویداد پراثر نزدیک در این تقویم نیست؛ نبود خبر تأیید نیست."
+                 else "تقویم تازه نیست؛ ریسک خبر نامشخص است.",
                 style = MaterialTheme.typography.labelSmall,
                 color = if (calendar.highImpactUsdWindow(now)) AurumColors.Red else AurumColors.Gold,
                 modifier = Modifier.padding(top = 5.dp))
@@ -126,11 +144,7 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                             color = if (note.state == ResearchState.PUBLISHED) AurumColors.Cyan else AurumColors.Gold,
                             modifier = Modifier.padding(start = 16.dp, top = 3.dp))
                     }
-                    OutlinedButton(onClick = {
-                        TranslateLink.englishToPersian(event.title)?.let { url ->
-                            runCatching { uriHandler.openUri(url) }
-                        }
-                    }) { Text("ترنسلیت عنوان ↗") }
+                    translationSnippet(event.title)?.let { InlinePersianTranslation(it) }
                 }
                 if (upcoming.size > preview.size) OutlinedButton(onClick = { showCalendar = !showCalendar }) {
                     Text(if (showCalendar) "فقط USD" else "نمایش تمام ${upcoming.size} رویداد")
@@ -146,23 +160,18 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
             TextButton(onClick = { runCatching { uriHandler.openUri("https://www.forexfactory.com/news") } }) {
                 Text("متن خبرهای Forex Factory در مرورگر ↗")
             }
-            Text("تحلیل بالا فقط مقایسهٔ قاعده‌ایِ اعدادِ منتشرشدهٔ تقویم است؛ متن مقالهٔ Forex Factory در خوراک عمومیِ این برنامه نیست. نتیجهٔ غایب جعل نمی‌شود و از آن سیگنال طلا استخراج نمی‌کنیم.",
+            Text("متن کامل خبر Forex Factory در تقویم عمومی نیست؛ مدل/شاهد سرور اختیاری، شرط جداگانهٔ ورود است.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
-            Text("سرور، اگر جداگانه تنظیم شده باشد، توقف ورود جدید برای رویداد پراثر USD را مستقل بررسی می‌کند. تقویم عمومی کامل‌بودن خبرها را ثابت نمی‌کند.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
 
         SectionCard("تیترهای مکمل فارکس", "FXStreet و آمار رسمی BLS · RSS/Atom مستقل از تقویم Forex Factory",
             trailing = { Pill(if (web.loading) "در حال دریافت" else "$onlineFeeds/${web.feeds.size} خوراک",
                 if (onlineFeeds > 0 && !web.loading) AurumColors.Cyan else AurumColors.Gold) }) {
-            Text("عنوان، چکیده و زمان از ناشرند. گزینهٔ ترنسلیت فقط با لمس شما متن کوتاه را در Google Translate باز می‌کند؛ ترجمه در گیت AI/سیگنال استفاده نمی‌شود.",
+            Text("تیتر/چکیدهٔ ناشر · ترجمهٔ فارسی روی گوشی · فقط پژوهش، نه گیت AI",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-            Text("آخرین تلاش: ${relativeTime(web.lastAttemptAt, now)} · قطع یک ناشر، خبرهای دیگر را پنهان نمی‌کند. به‌روزرسانی حداکثر هر ۶۰ ثانیه.",
+            Text("بررسی ${relativeTime(web.lastAttemptAt, now)} · هر ناشر مستقل · حداقل فاصلهٔ درخواست: ۶۰ ثانیه",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 5.dp))
-            Text("صرفاً برای مطالعه؛ این تیترها هرگز شرط نهم AI، تأیید خبر برای معامله یا مجوز سفارش نیستند.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 5.dp))
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = viewModel::refreshPublicWebNews, enabled = !web.loading, modifier = Modifier.weight(1f)) {
@@ -222,15 +231,11 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 Text("دریافت در گوشی: ${formatDateTime(item.receivedAt)} · ${if (fromRecentResponse) "وضعیت خوراک بالا" else "قدیمی/کش؛ تازگی مجدد تأیید نشده"}",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
                     modifier = Modifier.padding(top = 4.dp))
-                Row(Modifier.fillMaxWidth().padding(top = 5.dp), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-                    OutlinedButton(onClick = { runCatching { uriHandler.openUri(item.url) } },
-                        modifier = Modifier.weight(1f)) { Text("سایت ناشر") }
-                    if (item.feed.language == "en") OutlinedButton(onClick = {
-                        TranslateLink.englishToPersian(item.title, item.excerpt)?.let { url ->
-                            runCatching { uriHandler.openUri(url) }
-                        }
-                    }, modifier = Modifier.weight(1f)) { Text("ترنسلیت ↗") }
+                if (item.feed.language == "en") translationSnippet(item.title, item.excerpt)?.let {
+                    InlinePersianTranslation(it)
                 }
+                OutlinedButton(onClick = { runCatching { uriHandler.openUri(item.url) } },
+                    modifier = Modifier.padding(top = 4.dp)) { Text("سایت ناشر ↗") }
             }
         }
         if (filtered.size > 8 && !showAll) {

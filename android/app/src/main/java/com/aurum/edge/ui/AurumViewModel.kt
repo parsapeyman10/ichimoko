@@ -16,6 +16,7 @@ import com.aurum.edge.data.SourceComparison
 import com.aurum.edge.data.VerificationStatus
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.core.Interval
+import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperOpportunity
@@ -160,8 +161,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
         viewModelScope.launch {
             while (isActive) {
-                if (settings.value.workspaceId == Workspace.FOREX.id && settings.value.pauseOnNews &&
-                    settings.value.newsBaseUrl.isNotBlank()) container.news.refreshNow()
+                if (settings.value.workspaceId == Workspace.FOREX.id && !MarketHours.forexWeekendClosed() &&
+                    settings.value.pauseOnNews && settings.value.newsBaseUrl.isNotBlank()) container.news.refreshNow()
                 delay(120_000L)
             }
         }

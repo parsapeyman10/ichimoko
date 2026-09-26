@@ -82,6 +82,7 @@ enum class AurumTab(val label: String, val icon: ImageVector) {
     Learn("یادگیری", Icons.Filled.School),
     Journal("ژورنال", Icons.Filled.Bookmarks),
     Settings("تنظیمات", Icons.Filled.Settings),
+    Api("APIها", Icons.Filled.Settings),
 }
 
 /** No tab from another workspace is reachable from the current bottom navigation. */
@@ -93,9 +94,9 @@ internal fun primaryTabsFor(space: Workspace): List<AurumTab> = when (space) {
 }
 
 internal fun moreTabsFor(space: Workspace): List<AurumTab> = when (space) {
-    Workspace.FOREX -> listOf(AurumTab.Learn, AurumTab.Journal, AurumTab.Settings)
-    Workspace.IRAN_STOCKS -> listOf(AurumTab.IranWatchSettings)
-    else -> emptyList()
+    Workspace.FOREX -> listOf(AurumTab.Learn, AurumTab.Journal, AurumTab.Settings, AurumTab.Api)
+    Workspace.IRAN_STOCKS -> listOf(AurumTab.IranWatchSettings, AurumTab.Api)
+    Workspace.CRYPTO, Workspace.NOBITEX -> listOf(AurumTab.Api)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -211,6 +212,10 @@ fun AurumRoot(viewModel: AurumViewModel) {
                     AurumTab.Learn -> LearnScreen(viewModel)
                     AurumTab.Journal -> JournalScreen(viewModel, market)
                     AurumTab.Settings -> SettingsScreen(viewModel, settings)
+                    AurumTab.Api -> ApiMenuScreen(settings, workspace,
+                        onForexSettings = { open(AurumTab.Settings) },
+                        onIranStocks = { open(AurumTab.Stocks) },
+                        onCrypto = { open(AurumTab.Crypto) })
                 }
             }
         }

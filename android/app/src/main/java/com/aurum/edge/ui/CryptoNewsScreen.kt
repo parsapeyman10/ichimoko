@@ -1,8 +1,6 @@
 package com.aurum.edge.ui
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -43,7 +41,7 @@ fun CryptoNewsScreen(viewModel: AurumViewModel) {
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         SectionCard("خبر رمزارز", "RSS مستقیم CoinDesk · نه Forex Factory و نه خبر بورس ایران") {
-            Text("فقط تیتر و چکیدهٔ ناشر با تاریخ و لینک اصلی؛ ترجمه در سرویس بیرونی و به درخواست شماست. این خبر مجوز معامله نیست.",
+            Text("تیتر و چکیدهٔ ناشر با تاریخ؛ ترجمهٔ فارسی با لمس شما در همین صفحه و روی دستگاه است. تیتر مجوز معامله نیست.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
             Button(onClick = viewModel::refreshCryptoWebNews, enabled = !state.loading,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("تازه‌سازی") }
@@ -71,15 +69,9 @@ fun CryptoNewsScreen(viewModel: AurumViewModel) {
                 val note = NewsResearch.headline(item, state, ResearchSpace.CRYPTO, now)
                 Text("${note.title}: ${note.detail}", style = MaterialTheme.typography.labelSmall,
                     color = if (note.state == ResearchState.CONTEXT) AurumColors.Cyan else AurumColors.Gold)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { runCatching { browser.openUri(item.url) } }, modifier = Modifier.weight(1f)) {
-                        Text("متن ناشر")
-                    }
-                    OutlinedButton(onClick = {
-                        TranslateLink.englishToPersian(item.title, item.excerpt)?.let { url ->
-                            runCatching { browser.openUri(url) }
-                        }
-                    }, modifier = Modifier.weight(1f)) { Text("ترنسلیت ↗") }
+                translationSnippet(item.title, item.excerpt)?.let { InlinePersianTranslation(it) }
+                OutlinedButton(onClick = { runCatching { browser.openUri(item.url) } }) {
+                    Text("متن ناشر ↗")
                 }
             }
         }

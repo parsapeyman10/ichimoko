@@ -21,6 +21,7 @@ object PaperAutoRules {
     fun opportunityBlocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
                            now: Long = System.currentTimeMillis()): String? {
         if (settings.workspaceId != "forex") return "فضای فارکس برای هشدار انتخاب نشده است"
+        if (MarketHours.forexWeekendClosed(now)) return "بازار فارکس طبق برنامهٔ معمول پایان هفته بسته است؛ ورود/اعلان معاملاتی نداریم"
         if (!settings.backgroundMonitor) return "برای هشدار/ورود، پایش پس‌زمینه باید روشن باشد"
         if (market.symbol != settings.symbol || market.interval != settings.interval) return "نماد/بازه عوض شده است"
         if (market.showingCachedData || market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))

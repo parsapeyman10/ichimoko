@@ -44,6 +44,10 @@ class HomeReadoutTest {
             assertEquals(historical.time, readout.observedAt)
             assertFalse(readout.label.contains("WebSocket"))
         }
+        val closed = HomeReadout.from(fresh.copy(feed = FeedStatus(FeedMode.MARKET_CLOSED,
+            lastSuccessAt = now - 10_000L)), now)
+        assertFalse(closed.current)
+        assertTrue(closed.label.contains("بسته"))
         val noBars = HomeReadout.from(MarketState(lastPrice = 3001.0,
             feed = FeedStatus(FeedMode.OFFLINE)), now)
         assertNull(noBars.value) // a bare number without a timestamp is not a displayable quote
@@ -70,10 +74,11 @@ class HomeReadoutTest {
         assertTrue(AurumTab.News in tabs.getValue(Workspace.FOREX))
         assertTrue(AurumTab.Learn in moreTabsFor(Workspace.FOREX))
         assertTrue(AurumTab.Settings in moreTabsFor(Workspace.FOREX))
-        assertEquals(listOf(AurumTab.Crypto, AurumTab.CryptoNews), tabs.getValue(Workspace.CRYPTO))
-        assertEquals(listOf(AurumTab.Nobitex, AurumTab.NobitexNews), tabs.getValue(Workspace.NOBITEX))
+        assertEquals(listOf(AurumTab.Crypto, AurumTab.CryptoNews, AurumTab.Api), tabs.getValue(Workspace.CRYPTO))
+        assertEquals(listOf(AurumTab.Nobitex, AurumTab.NobitexNews, AurumTab.Api), tabs.getValue(Workspace.NOBITEX))
         assertEquals(listOf(AurumTab.Stocks, AurumTab.IranPrices, AurumTab.IranNews, AurumTab.Agah,
-            AurumTab.IranWatchSettings), tabs.getValue(Workspace.IRAN_STOCKS))
+            AurumTab.IranWatchSettings, AurumTab.Api), tabs.getValue(Workspace.IRAN_STOCKS))
+        assertTrue(Workspace.entries.all { AurumTab.Api in tabs.getValue(it) })
         assertTrue(Workspace.entries.map { it.id }.distinct().size == 4)
     }
 

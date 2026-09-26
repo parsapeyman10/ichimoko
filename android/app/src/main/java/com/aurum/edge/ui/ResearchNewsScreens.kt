@@ -88,11 +88,9 @@ private fun ResearchNewsScreen(state: PublicWebNewsState, space: ResearchSpace, 
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
                 Text(note.detail, style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
                 OutlinedButton(onClick = { runCatching { browser.openUri(item.url) } }) { Text("متن ناشر ↗") }
-                if (item.feed.language == "en") OutlinedButton(onClick = {
-                    TranslateLink.englishToPersian(item.title, item.excerpt)?.let { url ->
-                        runCatching { browser.openUri(url) }
-                    }
-                }) { Text("ترنسلیت ↗") }
+                if (item.feed.language == "en") translationSnippet(item.title, item.excerpt)?.let {
+                    InlinePersianTranslation(it)
+                }
             }
         }
     }

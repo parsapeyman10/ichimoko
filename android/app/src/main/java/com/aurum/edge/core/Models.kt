@@ -73,6 +73,7 @@ enum class FeedMode(val label: String) {
     CONNECTING("در حال اتصال"),
     LIVE("زنده — WebSocket"),
     POLLING("کندل REST دوره‌ای — نه تیک زنده"),
+    MARKET_CLOSED("تعطیلی معمول بازار؛ دریافت قیمت متوقف"),
     DELAYED("دادهٔ بازار قدیمی؛ اتصال/بازار را بررسی کنید"),
     OFFLINE("آفلاین"),
 }

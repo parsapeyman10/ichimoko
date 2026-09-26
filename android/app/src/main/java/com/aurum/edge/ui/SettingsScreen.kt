@@ -167,7 +167,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
                 Switch(checked = settings.pauseOnNews, onCheckedChange = viewModel::setPauseOnNews)
             }
-            Text("Forex Factory مرجع اصلی تقویم خبر فارکس است؛ خبرهای مکمل وب FXStreet/BLS و سایر منابع فقط برای مطالعه‌اند، نه شواهد AI. سرور و مدل معتبر برای شرط نهم لازم‌اند. نشانی غربال رمزارز جدا و فقط در فضای کریپتو تنظیم می‌شود. وتوی بالا برای برگهٔ دستی است؛ ورود سیگنالی/خودکار بدون خبر AI معتبر همیشه متوقف است. خروج‌ها مسدود نمی‌شوند؛ سفارش واقعی غیرفعال است.",
+            Text("خبرهای مستقیم فقط برای مطالعه‌اند؛ ورود سیگنالی/خودکار بدون مدل و شاهد معتبر متوقف است. وتوی دستی جداست؛ سفارش واقعی غیرفعال.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 

@@ -172,6 +172,12 @@ class NineWayAutoPaperTest {
         assertNotNull(PaperAutoRules.opportunityBlocker(ready, settings.copy(workspaceId = "iran_stocks"), news, now))
         assertNotNull(PaperAutoRules.blocker(ready.copy(symbol = "AAPL"), settings, news, now))
         assertNotNull(PaperAutoRules.blocker(ready, settings, news, now + 90_001))
+        // A late WebSocket tick near Friday's close cannot authorize a weekend entry/alert.
+        val closedAt = Instant.parse("2027-01-15T22:00:00Z").toEpochMilli()
+        assertTrue(PaperAutoRules.opportunityBlocker(ready.copy(feed = FeedStatus(FeedMode.LIVE,
+            lastSuccessAt = closedAt)), settings, news, closedAt)!!.contains("بسته"))
+        assertNotNull(PaperAutoRules.blocker(ready.copy(feed = FeedStatus(FeedMode.MARKET_CLOSED)),
+            settings, news, closedAt))
         assertEquals(ConfluenceStatus.UNKNOWN, NewsConfluence.alignment("AAPL", SignalAction.BUY, news, now).status)
     }
 }

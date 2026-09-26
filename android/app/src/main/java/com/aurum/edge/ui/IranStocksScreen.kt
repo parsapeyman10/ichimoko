@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.core.MarketHours
 import com.aurum.edge.data.EquityBoardStatus
 import com.aurum.edge.data.EquityRow
 import com.aurum.edge.data.TtmResearch
@@ -54,7 +55,10 @@ fun IranStocksScreen(viewModel: AurumViewModel) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(settings.stockDataKey) {
         keyInput = "" // a saved key must not reappear as editable text in the UI
-        if (settings.stockDataKey.isNotBlank()) viewModel.refreshEquities()
+        if (settings.stockDataKey.isNotBlank()) while (true) {
+            if (MarketHours.iranStockSessionScheduled()) viewModel.refreshEquities()
+            delay(180_000L) // one bounded board refresh per three minutes, not web scraping per second
+        }
     }
     LaunchedEffect(Unit) { while (true) { delay(30_000L); now = System.currentTimeMillis() } }
     val recentReceipt = state.recentReceipt(now)
@@ -68,6 +72,9 @@ fun IranStocksScreen(viewModel: AurumViewModel) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         ReadOnlyMonitorCard(viewModel, settings)
         SectionCard("بورس ایران · تابلو و پژوهش", "BrsApi (واسطهٔ مستقل TSETMC) · نه حساب کارگزاری آگاه") {
+            Text(MarketHours.labelForWorkspace("iran_stocks", now),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (MarketHours.iranStockSessionScheduled(now)) AurumColors.Cyan else AurumColors.Gold)
             Text("کلید رایگانِ خواندنی بازار را از خود ارائه‌دهنده بگیرید؛ کلید معاملاتی آگاه/نوبیتکس را اینجا وارد نکنید. دادهٔ قیمت تابلوی این سرویس فقط ساعت HH:mm:ss دارد، نه تاریخ مستقل معامله؛ حتی پاسخ تازه، قیمت زنده یا مجوز خرید نیست.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
             OutlinedButton(onClick = { runCatching { browser.openUri("https://brsapi.ir/tsetmc-exchange-free-bourse-api-key-request/") } }) {
