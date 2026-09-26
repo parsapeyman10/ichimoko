@@ -58,7 +58,7 @@ fun NobitexJournalSignalSection(viewModel: AurumViewModel) {
         Text("این بخش، نه معاملهٔ ساده‌شدهٔ درصدی، بلکه دقیقاً همان قوانین ایچیموکو/VWAP/EMA200/RSI/ATR/MACD طلاست.",
             style = MaterialTheme.typography.bodySmall, color = AurumColors.Green)
         if (snapshot == null) {
-            Text("ابتدا از کارت بالا کندل BTCUSDT را دریافت کنید.", style = MaterialTheme.typography.labelSmall,
+            Text("ابتدا در کارت «نوبیتکس · آموزش و صحه‌سنجی» پایین‌تر، BTCUSDT و کندل را دریافت کنید.", style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted)
         } else if (signal == null) {
             Text("برای این سیگنال حداقل ۲۱۰ کندل بستهٔ BTCUSDT لازم است یا محاسبه ناموفق بود.",

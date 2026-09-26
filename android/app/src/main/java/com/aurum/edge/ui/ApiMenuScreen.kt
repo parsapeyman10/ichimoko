@@ -21,7 +21,8 @@ import com.aurum.edge.ui.theme.AurumColors
  */
 @Composable
 fun ApiMenuScreen(settings: AppSettings, workspace: Workspace,
-                  onForexSettings: () -> Unit, onIranStocks: () -> Unit, onCrypto: () -> Unit) {
+                  onForexSettings: () -> Unit, onIranStocks: () -> Unit, onCrypto: () -> Unit,
+                  onNobitex: () -> Unit = {}) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         SectionCard("منابع و APIهای ${workspace.label}", "فقط منابع تعریف‌شده، نه «همهٔ سایت‌ها»") {
             Text("کلید API اختصاصیِ دستیار وجود ندارد. کلید خواندنی خود را فقط در فضای مربوط وارد کنید؛ کلید معاملاتی یا کلید افشاشده را وارد نکنید.",
@@ -48,9 +49,14 @@ fun ApiMenuScreen(settings: AppSettings, workspace: Workspace,
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
                 OutlinedButton(onClick = onCrypto, modifier = Modifier.fillMaxWidth()) { Text("بازار و تنظیم سرور اختیاری") }
             }
-            Workspace.NOBITEX -> SectionCard("نوبیتکس · دادهٔ رسمی عمومی", "BTC/USDT و BTC/IRT · بدون کلید") {
-                Text("آمار/دفتر/کندل و تمرین دستی کاغذی از API عمومی؛ سفارش واقعی خاموش است. کلید حساب/برداشت را داخل اپ نگذارید.",
+            Workspace.NOBITEX -> SectionCard("نوبیتکس · دادهٔ عمومی + معاملهٔ واقعی", "BTC/USDT و BTC/IRT · دادهٔ عمومی بدون کلید، معاملهٔ واقعی با کلید API شخصی شما") {
+                Text("کلید API شخصی نوبیتکس (فقط برای معاملهٔ واقعی) داخل خودِ فضای «نوبیتکس»، در بخش با کادر قرمز «معاملهٔ واقعی نوبیتکس» وارد می‌شود — نه اینجا.",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
+                Text("آمار/دفتر/کندل و تمرین کاغذی رایگان از API عمومی بدون هیچ کلیدی کار می‌کنند.",
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+                OutlinedButton(onClick = onNobitex, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Text("رفتن به فضای نوبیتکس برای وارد کردن کلید")
+                }
             }
             Workspace.IRAN_STOCKS -> SectionCard("BrsApi · تابلوی بورس", "واسطهٔ خواندنی TSETMC · کلید شخصی") {
                 Text("ورود کلید در تب بورس؛ دادهٔ نمادها فقط در ساعت معمول تابلو خودکار دریافت می‌شود. قیمت ریالی TGJU/Navasan مستقل است؛ آگاه در این نسخه اتصال سفارش ندارد.",

@@ -24,8 +24,13 @@ fun NobitexWorkspaceScreen(viewModel: AurumViewModel) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         ReadOnlyMonitorCard(viewModel, settings)
-        SectionCard("اتصال رسمی نوبیتکس", "دادهٔ عمومی بدون کلید؛ کلید حساب فقط برای بخش قرمز «معاملهٔ واقعی» پایین همین صفحه لازم است") {
-            Text("کارت‌های آموزشی/تمرینی و سیگنال بالا به هیچ کلیدی نیاز ندارند و کاملاً کاغذی‌اند.",
+        // Moved to the TOP on purpose: this is the real-money section with the API-key field,
+        // it must be the first thing visible after opening the Nobitex workspace — no scrolling
+        // past the practice/training cards to find it.
+        NobitexLiveTradingSection(viewModel) // REAL orders, REAL money — visually isolated (red border)
+        NobitexJournalSignalSection(viewModel) // same SignalEngine + same JournalStore as gold
+        SectionCard("اتصال رسمی نوبیتکس (اطلاعات)", "کلید حساب فقط برای بخش قرمز «معاملهٔ واقعی نوبیتکس» در بالای همین صفحه لازم است") {
+            Text("کارت‌های آموزشی/تمرینی پایین‌تر به هیچ کلیدی نیاز ندارند و کاملاً کاغذی‌اند.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
             Text("طبق صفحهٔ رسمی API، درخواست‌ها ممکن است به IP ایران محدود باشند؛ خطای شبکه را دادهٔ سالم فرض نکنید.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
@@ -38,7 +43,6 @@ fun NobitexWorkspaceScreen(viewModel: AurumViewModel) {
             }
         }
         NobitexTrainingSection(viewModel) // includes the separate USDT/IRR scanner and practice store
-        NobitexJournalSignalSection(viewModel) // same SignalEngine + same JournalStore as gold
-        NobitexLiveTradingSection(viewModel) // REAL orders, REAL money — visually isolated (red border)
     }
 }
+

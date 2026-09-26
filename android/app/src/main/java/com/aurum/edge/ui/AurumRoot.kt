@@ -215,7 +215,8 @@ fun AurumRoot(viewModel: AurumViewModel) {
                     AurumTab.Api -> ApiMenuScreen(settings, workspace,
                         onForexSettings = { open(AurumTab.Settings) },
                         onIranStocks = { open(AurumTab.Stocks) },
-                        onCrypto = { open(AurumTab.Crypto) })
+                        onCrypto = { open(AurumTab.Crypto) },
+                        onNobitex = { open(AurumTab.Nobitex) })
                 }
             }
         }
@@ -252,7 +253,7 @@ private fun WorkspaceChooser(error: Boolean, onChoose: (Workspace) -> Unit) {
                 Text(when (space) {
                     Workspace.FOREX -> "چارت و پژوهش طلا، تقویم خبر و ژورنال کاغذی مخصوص فارکس."
                     Workspace.CRYPTO -> "رصد جهانی و خبر رمزارز؛ نه قیمت ریالی یا ژورنال فارکس."
-                    Workspace.NOBITEX -> "بازار USDT و ریال جدا؛ تمرین اسپات در ژورنال مستقل، بدون کلید معاملاتی."
+                    Workspace.NOBITEX -> "بازار USDT و ریال جدا؛ تمرین اسپات کاغذی رایگان بدون کلید، و بخش قرمز معاملهٔ واقعی که کلید API شخصی خودتان را می‌گیرد."
                     Workspace.IRAN_STOCKS -> "تابلوخوانی و غربال عددی بورس؛ TTM کدال و مسیر رسمی آساتریدر."
                 }, style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
                 Button(onClick = { onChoose(space) }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
