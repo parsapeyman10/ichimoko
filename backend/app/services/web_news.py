@@ -81,7 +81,11 @@ class WebNewsFeed:
             parsed = parse_news_xml(await self._request(source), source.name,
                                     language=source.language, allowed_host=source.host)
             # Dated entries and a publisher-domain HTTPS link are needed to display an item.
-            # If the entire feed is malformed, do not treat that source as successful.
+            # If the entire feed is malformed, do not treat that source as successful. This
+            # filtered list — not the raw `parsed` — is what actually gets returned: an
+            # undated/unlinked item slipping through here would poison news_guard() (it treats
+            # ANY article with published_at=None as "state unknown"), silently degrading every
+            # other healthy source and the AI confluence along with it.
             dated = [item for item in parsed if item.published_at and item.url]
             if not dated:
                 raise ValueError("خوراک بدون تیتر تاریخ‌دار/لینک معتبر است")
@@ -89,8 +93,8 @@ class WebNewsFeed:
             age = datetime.now(timezone.utc) - newest
             if not -timedelta(minutes=15) <= age <= timedelta(hours=source.max_age_hours):
                 raise ValueError("منبع خبری کهنه یا دارای تاریخ آینده است")
-            status.update(state="online", count=len(parsed[:source.max_items]), error=None)
-            return parsed[:source.max_items], status
+            status.update(state="online", count=len(dated[:source.max_items]), error=None)
+            return dated[:source.max_items], status
         except Exception as exc:
             # Never return a URL, response text or a token that might be embedded in an error.
             status.update(state="unavailable", count=0, error=type(exc).__name__)

@@ -52,7 +52,7 @@ function Sidebar({ active, setActive, open, close, feedState, keyMissing }: { ac
     { key: 'traders', label: 'اجماع سبک‌ها', sub: 'Rule ensemble', icon: Users },
     { key: 'backtest', label: 'بک‌تست دیتای واقعی', sub: 'Real-candle replay', icon: BarChart3 },
     { key: 'confluence', label: 'روش‌های مکمل', sub: 'Confluence', icon: Layers },
-    { key: 'news', label: 'هوش خبری', sub: 'News (licensed)', icon: Newspaper },
+    { key: 'news', label: 'هوش خبری', sub: 'News (auto)', icon: Newspaper },
     { key: 'journal', label: 'رزومه / ژورنال', sub: 'Paper journal', icon: BookOpen },
     { key: 'risk', label: 'مدیریت سرمایه', sub: 'Risk', icon: Gauge },
   ];
@@ -186,32 +186,65 @@ function ConfluenceCard({ signal }: { signal: LiveSignal }) {
   </section>;
 }
 
-type NewsArticle = { headline: string; source: string; published_at?: string | null; body?: string };
-type NewsStatus = { configured: boolean; note?: string; last_error?: string | null };
-type Sentiment = { direction: string; confidence: number; impact: string; rationale: string };
+type NewsAnalysis = { direction: string; confidence: number; impact: string; rationale: string };
+type NewsArticle = {
+  id: string;
+  headline: string;
+  summary: string;
+  source: string;
+  url?: string | null;
+  published_at?: string | null;
+  analysis: NewsAnalysis;
+  language: string;
+};
+type NewsSourceStatus = { name: string; feed: string; language: string; state: string; count?: number; error?: string | null };
+type NewsWebStatus = {
+  provider: string | null;
+  configured: boolean;
+  state: 'online' | 'partial' | 'unavailable';
+  last_success_at?: string | null;
+  error?: string | null;
+  cached: boolean;
+  sources: NewsSourceStatus[];
+};
+type NewsGuard = { state: 'CLEAR' | 'BLOCKED' | 'UNKNOWN'; reason: string; until?: string | null };
+type AiConfluence = {
+  status: 'AVAILABLE' | 'UNKNOWN';
+  symbol: string;
+  direction: string;
+  confidence: number;
+  impact?: string;
+  model?: string | null;
+  reason: string;
+  evidence_ids: string[];
+  checked_at: string;
+};
+type WebNewsResponse = {
+  status: NewsWebStatus;
+  articles: NewsArticle[];
+  guard: NewsGuard;
+  ai_confluence: AiConfluence;
+  checked_at: string;
+  notice?: string;
+};
 
 function NewsCard() {
-  const [articles, setArticles] = useState<NewsArticle[]>([]);
-  const [status, setStatus] = useState<NewsStatus | null>(null);
-  const [sentiment, setSentiment] = useState<Sentiment | null>(null);
+  const [data, setData] = useState<WebNewsResponse | null>(null);
   const [error, setError] = useState<string>('');
 
   useEffect(() => {
     let alive = true;
+    // /api/v1/news/web scrapes publishers' own public RSS feeds automatically (no manual
+    // URL/API key needed) and, only if a server-side model key is configured, adds a real
+    // model-backed AI confluence verdict. It never falls back to keyword-guessing "AI".
     const load = async () => {
-      const headlines = await apiGet<{ status: NewsStatus; articles: NewsArticle[] }>('/api/v1/news/headlines');
+      const result = await apiGet<WebNewsResponse>('/api/v1/news/web');
       if (!alive) return;
-      if (headlines.ok) {
-        setArticles(headlines.data.articles ?? []);
-        setStatus(headlines.data.status);
+      if (result.ok) {
+        setData(result.data);
         setError('');
       } else {
-        setError(headlines.error);
-      }
-      if (headlines.ok && (headlines.data.articles ?? []).length) {
-        const first = headlines.data.articles[0];
-        const analysis = await apiPost<Sentiment>('/api/v1/news/analyze', { headline: first.headline, body: first.body ?? '', source: first.source });
-        if (alive && analysis.ok) setSentiment(analysis.data);
+        setError(result.error);
       }
     };
     void load();
@@ -219,55 +252,89 @@ function NewsCard() {
     return () => { alive = false; window.clearInterval(timer); };
   }, []);
 
-  const tone = sentiment?.direction === 'BUY' ? 'bullish' : sentiment?.direction === 'SELL' ? 'bearish' : 'neutral';
+  const ai = data?.ai_confluence;
+  const guard = data?.guard;
+  const articles = data?.articles ?? [];
+  const aiTone = ai?.status === 'AVAILABLE' ? (ai.direction === 'BUY' ? 'bullish' : ai.direction === 'SELL' ? 'bearish' : 'neutral') : 'neutral';
+  const guardColor = guard?.state === 'CLEAR' ? 'var(--green)' : guard?.state === 'BLOCKED' ? 'var(--red)' : '#e6a244';
+  const onlineSources = data?.status.sources.filter((s) => s.state === 'online').length ?? 0;
+  const totalSources = data?.status.sources.length ?? 0;
 
   return <section className="news-panel panel" id="news">
     <div className="panel-heading wide">
       <div>
-        <span className="eyebrow"><Rss size={12}/> LICENSED NEWS FEED · فقط منبع مجاز</span>
-        <h2>نبض بازار (بدون خبر ساختگی)</h2>
-        <small style={{ color: '#6b7280', fontSize: '8px' }}>اگر کلید خبری مجاز تنظیم نشده باشد، این بخش خالی می‌ماند — هیچ تیتری جعل نمی‌شود.</small>
+        <span className="eyebrow"><Rss size={12}/> RSS خودکار ناشران + تقویم Forex Factory · بدون تنظیم دستی</span>
+        <h2>نبض بازار (خودکار، بدون خبر ساختگی)</h2>
+        <small style={{ color: '#6b7280', fontSize: '8px' }}>
+          فقط از فید عمومی ناشران و تقویم هفتگی؛ اگر پوشش کامل نباشد وضعیت «نامشخص» اعلام می‌شود، نه خبر ساختگی.
+        </small>
       </div>
-      {sentiment && (
+      {ai && (
         <div className="sentiment-summary">
-          <span>تحلیل خبر اول</span>
-          <b style={{ color: tone === 'bullish' ? 'var(--green)' : tone === 'bearish' ? 'var(--red)' : '#e6a244' }}>
-            <TrendingUp size={15}/> {sentiment.direction} · {sentiment.confidence.toFixed(0)}%
+          <span>{ai.status === 'AVAILABLE' ? 'تحلیل هوش مصنوعی' : 'هوش مصنوعی'}</span>
+          <b style={{ color: aiTone === 'bullish' ? 'var(--green)' : aiTone === 'bearish' ? 'var(--red)' : '#e6a244' }}>
+            <TrendingUp size={15}/>
+            {ai.status === 'AVAILABLE' ? `${ai.direction} · ${ai.confidence.toFixed(0)}%` : 'غیرفعال'}
           </b>
         </div>
       )}
     </div>
 
-    {(error || (status && !status.configured)) && (
-      <div style={{ padding: '14px 16px', color: '#e6a244', fontSize: 11, lineHeight: 1.8 }}>
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '0 16px 10px' }}>
+      {guard && (
+        <span className="live-pill" style={{ background: 'transparent', borderColor: guardColor + '40', color: guardColor }}>
+          <AlertTriangle size={11}/> {guard.state === 'CLEAR' ? 'بدون خبر پراثر تازه' : guard.state === 'BLOCKED' ? 'توقف ورود — خبر پراثر' : 'وضعیت نامشخص'}
+        </span>
+      )}
+      {data?.status && (
+        <span className="live-pill" style={{ background: 'transparent' }}>منابع آنلاین {onlineSources}/{totalSources}</span>
+      )}
+    </div>
+
+    {(error || (guard && guard.state !== 'CLEAR')) && (
+      <div style={{ padding: '0 16px 14px', color: '#e6a244', fontSize: 11, lineHeight: 1.8 }}>
         <AlertTriangle size={14} style={{ verticalAlign: '-2px', marginLeft: 6 }}/>
-        {error || status?.note} {status?.last_error && <div style={{ color: '#7a8290', fontSize: 9, marginTop: 4 }}>آخرین خطا: {status.last_error}</div>}
+        {error || guard?.reason}
+      </div>
+    )}
+    {ai && ai.status !== 'AVAILABLE' && (
+      <div style={{ padding: '0 16px 14px', color: '#6b7280', fontSize: 10, lineHeight: 1.8 }}>
+        هوش مصنوعی: {ai.reason}
       </div>
     )}
 
     <div className="news-list">
-      {articles.slice(0, 8).map((item, index) => (
-        <details key={`${item.headline}-${index}`} className="news-item">
-          <summary>
-            <span className="news-time" style={{ fontFamily: 'DM Mono' }}>{item.published_at ? new Date(item.published_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
-            <span className="tone-icon neutral" style={{ width: 26, height: 26 }}><Newspaper size={14}/></span>
-            <span className="news-copy">
-              <span className="news-meta"><span className="news-tag">NEWS</span><span className="source">{item.source}</span></span>
-              <span className="news-headline">{item.headline}</span>
-            </span>
-          </summary>
-          {item.body && <p className="news-excerpt">{item.body.slice(0, 600)}</p>}
-        </details>
-      ))}
+      {articles.slice(0, 8).map((item) => {
+        const dir = item.analysis?.direction;
+        const tone = dir === 'BUY' ? 'bullish' : dir === 'SELL' ? 'bearish' : 'neutral';
+        return (
+          <details key={item.id} className="news-item">
+            <summary>
+              <span className="news-time" style={{ fontFamily: 'DM Mono' }}>{item.published_at ? new Date(item.published_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+              <span className={`tone-icon ${tone}`} style={{ width: 26, height: 26 }}><Newspaper size={14}/></span>
+              <span className="news-copy">
+                <span className="news-meta"><span className="news-tag">{item.language === 'fa' ? 'خبر' : 'NEWS'}</span><span className="source">{item.source}</span></span>
+                <span className="news-headline">{item.headline}</span>
+              </span>
+            </summary>
+            {item.summary && <p className="news-excerpt">{item.summary}</p>}
+            {item.url && (
+              <a href={item.url} target="_blank" rel="noreferrer" style={{ display: 'block', padding: '0 16px 12px', fontSize: 9, color: 'var(--gold)' }}>
+                مشاهده در منبع ↗
+              </a>
+            )}
+          </details>
+        );
+      })}
       {!articles.length && !error && (
         <div style={{ padding: 14, color: '#6b7280', fontSize: 11, lineHeight: 1.8 }}>
-          خبری از منبع مجاز دریافت نشد. برای فعال‌سازی، <code style={{ fontFamily: 'DM Mono' }}>AURUM_FMP_API_KEY</code> را در <code style={{ fontFamily: 'DM Mono' }}>backend/.env</code> بگذارید.
+          هنوز خبری از فیدهای عمومی دریافت نشده؛ اتصال سرور به ناشران در حال بررسی است.
         </div>
       )}
     </div>
 
     <div style={{ padding: '10px 14px', borderTop: '1px solid var(--line)', color: '#7a8290', fontSize: 9, lineHeight: 1.7 }}>
-      تحلیل سنتیمنت روی متن خبر واقعی اجرا می‌شود (FinBERT در صورت نصب، وگرنه قاعده‌محور). هیچ خبر یا تقویم اقتصادی‌ای از خودمان اضافه نمی‌کنیم.
+      برچسب هر خبر یک تحلیل قاعده‌محور سریع است، نه هوش مصنوعی؛ تحلیل واقعی هوش مصنوعی فقط در نشان بالای پنل (وقتی مدل و مجوز روی سرور فعال باشد) نمایش داده می‌شود. هیچ خبر یا تقویم اقتصادی‌ای از خودمان اضافه نمی‌کنیم.
     </div>
   </section>;
 }
