@@ -14,8 +14,8 @@ type Trade = {
   side: string;
   entry_time: string;
   exit_time: string;
-  entry_price: number;
-  exit_price: number;
+  entry: number;
+  exit: number;
   position_oz: number;
   pnl: number;
   r_multiple: number | null;
@@ -45,6 +45,17 @@ type BacktestResult = {
   avg_win?: number | null;
   avg_loss?: number | null;
   sharpe?: number | null;
+  performance?: {
+    total: number; wins: number; losses: number;
+    long_count: number; short_count: number;
+    win_rate_pct: number | null; net_pnl_usd: number;
+    gross_profit_usd: number; gross_loss_usd: number;
+    average_win_usd: number | null; average_loss_usd: number | null;
+    profit_factor: number | null; sharpe_per_trade: number | null;
+    expectancy_r: number | null; average_duration_seconds: number | null;
+    longest_winning_streak: number; longest_losing_streak: number;
+    max_drawdown_pct: number | null; fees_usd: number;
+  };
   max_drawdown?: number;
   max_drawdown_pct?: number;
   fees_paid?: number;
@@ -179,7 +190,10 @@ export default function BacktestPanel() {
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end', padding: '10px 14px', borderBottom: '1px solid var(--line)' }}>
         <label style={{ display: 'grid', gap: 4, font: '8px DM Mono', color: '#6b7280' }}>
           تایم‌فریم
-          <select value={timeframe} onChange={(event) => setTimeframe(event.target.value as any)} style={{ background: '#11151b', color: '#d5d9e0', border: '1px solid #1f2630', borderRadius: 5, padding: '5px 8px', font: '9px DM Mono' }}>
+          <select value={timeframe} onChange={(event) => {
+            const value = event.target.value;
+            if (value === '5m' || value === '15m' || value === '1h') setTimeframe(value);
+          }} style={{ background: '#11151b', color: '#d5d9e0', border: '1px solid #1f2630', borderRadius: 5, padding: '5px 8px', font: '9px DM Mono' }}>
             <option value="5m">5m</option><option value="15m">15m</option><option value="1h">1h</option>
           </select>
         </label>
@@ -197,7 +211,7 @@ export default function BacktestPanel() {
           ریسک هر معامله (%)
           <input type="number" min={0.1} max={5} step={0.1} value={risk} onChange={(event) => setRisk(Number(event.target.value))} style={{ width: 80, background: '#11151b', color: '#d5d9e0', border: '1px solid #1f2630', borderRadius: 5, padding: '5px 8px', font: '9px DM Mono' }} />
         </label>
-        <button className="primary-button" onClick={run} disabled={state.running} style={{ height: 30, padding: '0 14px', display: 'flex', alignItems: 'center', gap: 6, font: '700 9px Manrope', opacity: state.running ? 0.6 : 1 }}>
+        <button type="button" className="primary-button" onClick={run} disabled={state.running} style={{ height: 30, padding: '0 14px', display: 'flex', alignItems: 'center', gap: 6, font: '700 9px Manrope', opacity: state.running ? 0.6 : 1 }}>
           <Play size={12}/> {state.running ? 'در حال دریافت کندل واقعی…' : 'اجرای بک‌تست'}
         </button>
       </div>
@@ -228,10 +242,37 @@ export default function BacktestPanel() {
             {stat('PF', data.profit_factor != null ? String(data.profit_factor) : '—', (data.profit_factor ?? 0) > 1 ? 'var(--green)' : 'var(--red)')}
             {stat('انتظار (R)', data.expectancy != null ? `${data.expectancy}R` : '—')}
             {stat('افت سرمایه', `-${data.max_drawdown_pct ?? 0}%`, 'var(--red)')}
-            {stat('شارپ', data.sharpe != null ? String(data.sharpe) : '—')}
+            {stat('Sharpe معامله‌ای', data.sharpe != null ? String(data.sharpe) : '—')}
             {stat('کارمزد پرداختی', `$${(data.fees_paid ?? 0).toFixed(2)}`, '#e6a244')}
             {stat('معاملات رد‌شده (حجم کم)', String(data.skipped_min_lot ?? 0), '#e6a244')}
           </div>
+
+          {data.performance && (
+            <div style={{ margin: '0 14px 14px', padding: 12, border: '1px solid var(--line)', borderRadius: 8, background: '#0a0e12' }}>
+              <div style={{ color: 'var(--gold)', fontSize: 11, marginBottom: 8 }}>گزارش کامل عملکرد · معاملات واقعیِ بک‌تست</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(115px, 1fr))', gap: 7 }}>
+                {stat('کل / برد / باخت', `${data.performance.total} / ${data.performance.wins} / ${data.performance.losses}`)}
+                {stat('Long / Short', `${data.performance.long_count} / ${data.performance.short_count}`)}
+                {stat('نرخ برد', data.performance.win_rate_pct != null ? `${data.performance.win_rate_pct}%` : '—')}
+                {stat('سود ناخالص', `${data.performance.gross_profit_usd}$`)}
+                {stat('زیان ناخالص', `${data.performance.gross_loss_usd}$`)}
+                {stat('سود خالص', `${data.performance.net_pnl_usd}$`, data.performance.net_pnl_usd >= 0 ? 'var(--green)' : 'var(--red)')}
+                {stat('میانگین برد', data.performance.average_win_usd != null ? `${data.performance.average_win_usd}$` : '—')}
+                {stat('میانگین باخت', data.performance.average_loss_usd != null ? `${data.performance.average_loss_usd}$` : '—')}
+                {stat('فاکتور سود', data.performance.profit_factor != null ? String(data.performance.profit_factor) : '—')}
+                {stat('Sharpe معامله‌ای', data.performance.sharpe_per_trade != null ? String(data.performance.sharpe_per_trade) : '—')}
+                {stat('انتظار به R', data.performance.expectancy_r != null ? String(data.performance.expectancy_r) : '—')}
+                {stat('میانگین مدت', data.performance.average_duration_seconds != null ? `${Math.round(data.performance.average_duration_seconds / 60)} دقیقه` : '—')}
+                {stat('برد پیاپی', String(data.performance.longest_winning_streak))}
+                {stat('باخت پیاپی', String(data.performance.longest_losing_streak))}
+                {stat('بیشینه افت', data.performance.max_drawdown_pct != null ? `${data.performance.max_drawdown_pct}%` : '—')}
+                {stat('کارمزد', `${data.performance.fees_usd}$`)}
+              </div>
+              <small style={{ display: 'block', color: '#6b7280', marginTop: 8 }}>
+                Sharpe بر پایه بازده هر معامله، با انحراف معیار نمونه و بدون سالانه‌سازی است؛ معادل Sharpe روزانه نیست. نسبت تعریف‌نشده با «—» نشان داده می‌شود.
+              </small>
+            </div>
+          )}
 
           {data.equity_curve && data.equity_curve.length > 1 && (
             <div style={{ padding: '0 14px 12px' }}>
@@ -305,7 +346,7 @@ export default function BacktestPanel() {
                         <td style={{ padding: '4px 8px', textAlign: 'left', color: '#7a8290' }}>{new Date(trade.entry_time).toLocaleString('fa-IR', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
                         <td style={{ color: trade.side === 'BUY' ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>{trade.side}</td>
                         <td>{trade.position_oz} oz</td>
-                        <td>{trade.entry_price} → {trade.exit_price}</td>
+                        <td>{trade.entry} → {trade.exit}</td>
                         <td style={{ color: trade.pnl >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 700 }}>{trade.pnl > 0 ? '+' : ''}{trade.pnl.toFixed(2)}$</td>
                         <td>{trade.r_multiple != null ? `${trade.r_multiple}R` : '—'}</td>
                         <td style={{ textAlign: 'left', color: '#8a909c' }}>{trade.exit_reason}</td>

@@ -1,52 +1,57 @@
-# Trading API
+# Trading API — پژوهش، اخبار وب و غربالگری خواندنی
 
-FastAPI service for XAU/USD analysis on **real provider data only**: normalized candles, indicators,
-strategy evaluation, real-candle backtests, walk-forward, MTF analysis, news sentiment and the paper
-journal.
+FastAPI برای کندل/بک‌تست XAU/USD از Twelve Data، جمع‌آوری تیتر از خوراک وب ناشران، و غربال دادهٔ CoinGecko + Binance Spot استفاده می‌کند. هیچ شمع، خبر، نامزد «پامپ» یا سفارش ساختگی تولید نمی‌شود. ارسال سفارش واقعی **همیشه ۵۰۳** است؛ حتی با درخواست SELL. فروش اسپات Nobitex معادل بازکردن پوزیشن شورت نیست.
 
-## Data policy
-
-- Prices/candles come from Twelve Data (`AURUM_TWELVE_DATA_API_KEY`). History is cached (memory +
-  disk) so an offline restart can still show the last real bars, clearly marked as cached.
-- News comes from a licensed provider when configured; otherwise the list is empty and the status
-  says why. No headline or economic-calendar entry is ever invented.
-- When the provider is unavailable every data route answers `503` with a Persian explanation.
-  Client apps render that state instead of a fabricated chart.
-- `backend/tests/test_real_data_policy.py` asserts all of the above.
-
-## Environment
-
-All variables use the `AURUM_` prefix — see `.env.example`.
+## راه‌اندازی و آزمون
 
 ```bash
-AURUM_TWELVE_DATA_API_KEY=...   # required for any market data
-AURUM_FMP_API_KEY=...           # optional: news + calendar
-AURUM_OPENAI_API_KEY=...        # optional: LLM news analysis (falls back to rules)
-AURUM_MARKET_SYMBOL=XAU/USD
-```
-
-## Local development
-
-```bash
+cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-pytest -q
+cp .env.example .env       # کلیدها را فقط محلی/Secret Manager نگهدارید
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+python -m pytest -q
 ```
 
-Useful endpoints:
+- `AURUM_TWELVE_DATA_API_KEY`: برای کندل چارت/بک‌تست بک‌اند. اندروید کلید خواندنی خودش را جدا می‌گیرد.
+- `AURUM_COINGECKO_DEMO_API_KEY`: کلید Demo خواندنی CoinGecko روی **سرور** (ترجیحی؛ Keyless ممکن است محدود شود). هیچ کلیدی داخل APK یا URL query نمی‌رود. دادهٔ Binance از میزبان عمومیِ فقط بازار `data-api.binance.vision` خوانده می‌شود؛ هیچ کلید معاملاتی لازم نیست.
+- `AURUM_NEWS_HOLD_MINUTES`: مدت مکث بعد از خبر پراثر (پیش‌فرض ۴۵ دقیقه). `AURUM_FA_NEWS_RSS_URL` و `AURUM_FA_NEWS_ALLOWED_HOST` همچنان برای مسیر جداگانهٔ فید فارسیِ دارای مجوز `/api/v1/news/fa` هستند، نه شرط اخبار وب.
+- `AURUM_FMP_API_KEY`: تیترهای انگلیسی مسیر قدیمی `/news/headlines`، جدا از تقویم عمومی هفتگی Forex Factory. **گزینهٔ منتخب رایگان مدل:** `AURUM_GEMINI_API_KEY` از [Google AI Studio](https://aistudio.google.com/apikey) برای `gemini-2.5-flash-lite` (سهمیهٔ رایگان وابسته به پروژه/منطقه و قابل تغییر)، فقط **روی سرور** همراه `AURUM_AI_NEWS_EXTERNAL_CONSENT=true` و پس از بررسی حقوق خوراک ناشران. در پلن رایگان دادهٔ ارسالی ممکن است برای بهبود سرویس استفاده شود. اگر کلید Gemini نباشد، `AURUM_OPENAI_API_KEY` قدیمی اختیاری است؛ اگر Gemini تنظیم باشد ولی خطا دهد، به کلید دیگر fallback نمی‌کنیم. هیچ کلید مشترک/واقعی در APK یا مخزن نیست. نبود کلید/رضایت، خطای سهمیه، محتوای مدل نامعتبر یا قطع خوراک/تقویم → `ai_confluence.status=UNKNOWN` و **هیچ ورود خودکار کاغذی**؛ API قدیمی `/news/analyze` ممکن است قواعد ساده داشته باشد اما **شرط نهم AI محسوب نمی‌شود**.
 
-| Endpoint | Purpose |
+**اعتبارسنجی مدل:** تست `backend/tests/test_gemini_free_tier.py` قرارداد HTTP رسمی Gemini را با `httpx.MockTransport`، منع قراردادن کلید در URL، شناسهٔ شاهد واقعی و حالت‌های ۴۲۹/پاسخ مخدوش/ردشده بررسی می‌کند. بدون کلید شخصی و استقرار سرور، تماس موفق واقعی با مدل و صحت نتیجهٔ معاملاتی **آزموده/تأیید نشده** است؛ تست مدل، سودآوری را ثابت نمی‌کند. [قیمت و شرایط Free Tier](https://ai.google.dev/gemini-api/docs/pricing) و [قواعد حفاظت از API key](https://ai.google.dev/gemini-api/docs/generate-content/api-key) را پیش از فعال‌سازی بررسی کنید.
+
+### انتخاب منبع خبر و حق استفاده
+
+`/api/v1/news/web` **خوراک‌های RSS/Atom منتشرشده توسط خود ناشران را از وب جمع‌آوری و تجزیه می‌کند**؛ صفحهٔ مقاله، محتوای پشت paywall، Reuters/Bloomberg و RSS خصوصی اسکرپ نمی‌شوند. فقط عنوان، حداکثر ۲۸۰ کاراکتر چکیدهٔ همان خوراک، زمان، لینک HTTPS خود ناشر، زبان و انتساب به منبع برمی‌گردد. هیچ ترجمهٔ ماشینی/تخمینی جای خبر واقعی نشانده نمی‌شود:
+
+| منبع | خوراک اعلام‌شدهٔ ناشر |
 |---|---|
-| `GET /api/v1/health` | process health |
-| `GET /api/v1/data/status` | key configured? feed state? which timeframes have real bars |
-| `GET /api/v1/market/{tf}/candles` | real candles (503 when the provider is down) |
-| `GET /api/v1/backtest/run` | replay of the live strategy on real candles |
-| `GET /api/v1/backtest/forward` | in-sample vs out-of-sample split of the real series |
-| `GET /api/v1/journal` | paper journal built from real signals |
-| `WS /ws/v1/market/xauusd` | real ticks pushed from the provider |
+| صدا و سیما ـ اقتصاد | [IRIB RSS](https://www.irib-news.ir/fa/rss) / `https://www.irib-news.ir/fa/rss/6` |
+| باشگاه خبرنگاران جوان ـ اقتصاد | [YJC RSS](https://www.yjc.ir/fa/rss) / `https://www.yjc.ir/fa/rss/6` |
+| اقتصاد۲۴ ـ ارز | [Eghtesaad24 RSS](https://eghtesaad24.ir/fa/rss) / `https://eghtesaad24.ir/fa/rss/12` |
+| CoinDesk ـ رمزارز (EN) | [اعلام رسمی CoinDesk RSS](https://www.coindesk.com/coindesk-news/2021/09/17/coindesk-rss) |
+| ادارهٔ آمار کار آمریکا ـ CPI و اشتغال (EN) | [BLS RSS](https://www.bls.gov/feed/) |
 
-The in-process `MarketHub` is suitable for a local preview. In production, put normalized events on
-NATS JetStream/Redpanda, make socket gateways stateless consumers, and store completed bars and
-decisions in TimescaleDB; Redis is only hot/reconstructible state.
+کش ۲دقیقه‌ای RSS، سقف اندازه و زمان پاسخ، XML بدون entity expansion، عدم دنبال‌کردن redirect و محدودیت دامنهٔ لینک اعمال می‌شوند. هر ناشر وضعیت جدا دارد. خوراک روزانهٔ قدیمی/قطع‌شده یا گزارش ماهانهٔ بیش از ۴۵ روز و تاریخ نامعتبر → `UNKNOWN`. برنامهٔ هفتگیِ عمومی [Forex Factory](https://nfs.faireconomy.media/ff_calendar_thisweek.json) با HTTPS ثابت، محدودیت ۵۱۲KB، زمان منطقه‌دار و کش حداکثر ۱۵ دقیقه خوانده می‌شود؛ در شکست، کش قبلی برای مجوز ورود بازاستفاده نمی‌شود. رویداد `High` برای `USD` از ۳۰ دقیقه پیش تا دورهٔ توقف پس از آن (پیش‌فرض ۴۵ دقیقه) `BLOCKED`، نبود/کهنگی/ساختار ناشناختهٔ تقویم `UNKNOWN` می‌دهد. شرط نهم AI و ورود **سیگنالی/خودکار کاغذی** در هر دو حالت fail-closed هستند؛ سوییچ «توقف خبر» فقط برای ورود **دستی کاغذی** اختیاری است. `CLEAR` فقط دربارهٔ منابع فهرست‌شده در همین لحظه است و به معنی نبود رویداد دیگر یا اجازهٔ معاملهٔ واقعی نیست. حق بازنشر/استفادهٔ تجاریِ هر خوراک را پیش از عرضهٔ عمومی با ناشر بررسی کنید؛ این کد مجوز محتوا نمی‌دهد. در صورت رضایت صریح اپراتور سرور، حداکثر ۶ تیتر و چکیدهٔ ۱۶۰کاراکتری مرتبط/تازه به مدل خارجی ارسال می‌شود؛ خروجی JSON مدل تنها با شناسهٔ خبر واقعاً دریافت‌شده، جهت BUY/SELL، اطمینان ≥۸۰٪ و نبود خبر پراثر تأیید می‌شود. پاسخ نادرست/بی‌شاهد، منبع ناقص یا نبود کلید → `UNKNOWN`؛ واژه‌های قاعده‌ای **جای مدل را نمی‌گیرند**. تحلیل فقط XAU/USD را پوشش می‌دهد؛ تقویمِ نمایش‌داده‌شده تنها برنامهٔ هفتگی است، نه تأیید نتیجهٔ رویداد یا مجوز معامله. پاسخ مدل با کلید ناشر در سرور محدود، تا ۹۰ ثانیه کش می‌شود تا درخواست عمومی منجر به قبض نامحدود نشود؛ در استقرار عمومی محدودسازی نرخ و دسترسی نیز لازم است.
+
+### غربال رمزارز (نه سیگنال خرید)
+
+`/api/v1/crypto/candidates`: ۲۰۰ ارز نخست CoinGecko بر اساس ارزش بازار USD؛ حداکثر ۱۲ نمادِ ازپیش‌گزین‌شده؛ الزام ارزش بازار ۵۰میلیون تا ۵میلیارد، حجم ۲۴ساعته حداقل ۱۵میلیون، گردش ۸٪ تا ۱۰۰٪، عرضهٔ درگردش حداقل ۵۰٪ حداکثر عرضه، FDV/market-cap حداکثر ۲، شتاب مثبت اما نه افراطی. سپس جفتِ دقیق همان **شناسهٔ CoinGecko** در بازار Binance Spot/USDT از مسیر `/coins/{id}/tickers` بررسی می‌شود (نه صرفاً برابری نام اختصاری). زمان تیکر جفت حداکثر ۱۰ دقیقه و قیمتش حداکثر ۲٪ با بایننس اختلاف دارد؛ جفت stale/anomaly حذف می‌شود. تیکر/دفتر سفارش Binance، حجم و شمار معامله، اسپرد حداکثر ۰٫۳٪، توافق قیمت بازار CoinGecko/Binance حداکثر ۱٫۵٪، و ۱۲ کندل **بسته**ٔ یک‌ساعته برای جهش حجم ۳ساعته و سهم خرید تیکرِ گزارش‌شده بررسی می‌شوند. همهٔ آستانه‌ها و تعداد بررسی‌شده در پاسخ API و تب اندروید نمایش داده می‌شوند.
+
+قطع، محدودیت نرخ (HTTP ۴۲۹)، خطای شِما/زمان یا تأخیر منبع → `unavailable` و **لیست خالی با برچسب نامعتبر**، نه «هیچ ارزی پیدا نشد» یا دادهٔ کشی قابل معامله. اسکن موفقِ بدون نامزد جداگانه `online` با لیست خالی است. نتیجهٔ موفق حداکثر ۱۲۰ ثانیه در حافظه بازاستفاده می‌شود و `status.cached` و `checked_at` زمان **آخرین بررسی واقعی** را از زمان پاسخ سرور متمایز می‌کنند؛ تلاش دوباره پس از شکست نیز تا ۱۲۰ ثانیه محدود می‌شود. تغییرات قیمت/حجم گذشته، احتمال پامپ آینده یا سود را ثابت نمی‌کنند؛ این ابزار دستور معامله صادر نمی‌کند، بازار مشتقه/شورت را اسکن نمی‌کند و عمق سفارش برای حجم دلخواه را تضمین نمی‌کند. دادهٔ تست‌های خودکار mock است؛ دسترسی خروجی این محیط به میزبان‌های خبری/قیمتی مسدود بود، پس end-to-end آنلاین باید در سرورِ مستقرشده جدا کنترل شود.
+
+## مسیرهای مهم
+
+| مسیر | کاربرد |
+|---|---|
+| `GET /api/v1/health` و `/api/v1/data/status` | وضعیت فید کندل و کلیدها |
+| `GET /api/v1/market/{tf}/candles` | کندل واقعی؛ در نبود داده ۵۰۳ |
+| `GET /api/v1/backtest/run` و `/forward` | بک‌تست/خارج نمونه؛ گزارش با منابع و هزینه‌ها |
+| `GET /api/v1/news/web` | چند خوراک عمومی با انتساب، گیت `CLEAR/BLOCKED/UNKNOWN` و `ai_confluence` (مدل واقعی یا `UNKNOWN`) |
+| `GET /api/v1/news/fa` | فید فارسی اختصاصی/دارای مجوز (قدیمی، جداگانه) |
+| `GET /api/v1/crypto/candidates` | فقط نامزدهای داده‌ای با شواهد و آستانه‌های ثابت |
+| `GET /api/v1/execution/status`, `POST /preflight` | Kill switch و علل مسدودبودن Nobitex/MT5 |
+| `POST /api/v1/execution/orders` | **همیشه ۵۰۳**؛ هیچ سفارش صادر نمی‌شود |
+| `WS /ws/v1/market/xauusd` | تیک واقعی همان نماد بک‌اند |
+
+بک‌اند هنوز **بدون احراز هویت کاربران** است؛ برای داده‌های خواندنی می‌توان آن را پشت HTTPS با محدودسازی نرخ/دسترسی مستقر کرد، اما برای پول واقعی آماده نیست. کلید Nobitex یا رمز MT5 را هرگز در APK، این API یا چت وارد نکنید. [نقشهٔ راه](../docs/ROADMAP_FA.md).
