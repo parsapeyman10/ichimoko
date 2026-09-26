@@ -1,16 +1,19 @@
 """
-Real market history — Twelve Data REST only.
+Real market history — Twelve Data REST when a key is configured, otherwise the automatic
+free spot-gold fallback (see app.services.spot_feed) built from real, self-observed bars.
 
 There is no synthetic generator, no anchor interpolation and no Monte-Carlo price path
-anywhere in this module. If the provider cannot be reached, or no API key is configured,
-the caller gets [DataUnavailable] and the API returns an explicit error. Inventing a
-candle to keep the UI alive is never an option.
+anywhere in this module. If neither provider can deliver real candles, the caller gets
+[DataUnavailable] and the API returns an explicit error. Inventing a candle to keep the UI
+alive is never an option.
 """
 from __future__ import annotations
 
 import json
+import math
+import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -50,6 +53,26 @@ class DataUnavailable(RuntimeError):
     """Raised whenever real data cannot be delivered. Never replaced by generated data."""
 
 
+def _validate_candles(candles: list[Candle], symbol: str, timeframe: Timeframe) -> list[Candle]:
+    """Check provider AND disk-cache data before it reaches charts or the backtest engine."""
+    if not candles or len(candles) > MAX_POINTS_PER_REQUEST:
+        raise DataUnavailable("تعداد کندل معتبر نیست")
+    now = datetime.now(timezone.utc) + timedelta(minutes=1)
+    seen: set[datetime] = set()
+    for candle in candles:
+        prices = (candle.open, candle.high, candle.low, candle.close)
+        if (candle.symbol.casefold() != symbol.casefold() or candle.timeframe != timeframe or
+                candle.timestamp.tzinfo is None or candle.timestamp <= datetime.fromtimestamp(0, timezone.utc) or
+                candle.timestamp > now or candle.timestamp.timestamp() % timeframe.seconds != 0 or
+                candle.timestamp in seen or any(not math.isfinite(p) or p <= 0 for p in prices) or
+                not math.isfinite(candle.volume) or candle.volume < 0 or
+                candle.low > min(candle.open, candle.close) or
+                candle.high < max(candle.open, candle.close)):
+            raise DataUnavailable("کندل دارای هویت، زمان، OHLC یا حجم نامعتبر است")
+        seen.add(candle.timestamp)
+    return sorted(candles, key=lambda item: item.timestamp)
+
+
 def _cache_key(symbol: str, timeframe: Timeframe, output_size: int, start: str | None, end: str | None) -> str:
     return f"{symbol.replace('/', '_')}_{timeframe.value}_{output_size}_{start or 'live'}_{end or 'live'}"
 
@@ -77,33 +100,31 @@ def _serialize(candles: list[Candle]) -> str:
     )
 
 
-def _deserialize(raw: str, timeframe: Timeframe) -> list[Candle]:
+def _deserialize(raw: str, symbol: str, timeframe: Timeframe) -> list[Candle]:
+    items = json.loads(raw)
+    if not isinstance(items, list) or len(items) > MAX_POINTS_PER_REQUEST:
+        raise DataUnavailable("ساختار کش کندل معتبر نیست")
     out: list[Candle] = []
-    for item in json.loads(raw):
-        out.append(
-            Candle(
-                symbol=item["symbol"],
-                timeframe=timeframe,
-                timestamp=datetime.fromisoformat(item["timestamp"]),
-                open=item["open"],
-                high=item["high"],
-                low=item["low"],
-                close=item["close"],
-                volume=item.get("volume", 0),
-                complete=item.get("complete", True),
-            )
-        )
-    return out
+    for item in items:
+        if item["timeframe"] != timeframe.value:
+            raise DataUnavailable("بازهٔ کش با درخواست یکسان نیست")
+        out.append(Candle(
+            symbol=item["symbol"], timeframe=timeframe,
+            timestamp=datetime.fromisoformat(item["timestamp"]),
+            open=item["open"], high=item["high"], low=item["low"], close=item["close"],
+            volume=item.get("volume", 0), complete=item.get("complete", True),
+        ))
+    return _validate_candles(out, symbol, timeframe)
 
 
-def _read_disk(key: str, timeframe: Timeframe, ttl: int) -> list[Candle] | None:
+def _read_disk(key: str, symbol: str, timeframe: Timeframe, ttl: int) -> list[Candle] | None:
     path = _cache_path(key)
     if not path.exists():
         return None
-    if time.time() - path.stat().st_mtime > ttl:
+    if time.time() - path.stat().st_mtime > ttl or path.stat().st_size > 2_000_000:
         return None
     try:
-        return _deserialize(path.read_text(), timeframe)
+        return _deserialize(path.read_text(), symbol, timeframe)
     except Exception:
         return None
 
@@ -142,10 +163,10 @@ def resample(candles: list[Candle], minutes: int, timeframe: Timeframe) -> list[
 
 
 async def _request(settings: Settings, interval: str, output_size: int, start: str | None, end: str | None) -> list[Candle]:
-    if not settings.twelve_data_api_key:
-        raise DataUnavailable(
-            "AURUM_TWELVE_DATA_API_KEY تنظیم نشده است — بدون کلید، هیچ داده‌ای ساخته نمی‌شود"
-        )
+    if not settings.has_market_key:
+        raise DataUnavailable("AURUM_TWELVE_DATA_API_KEY تنظیم نشده است — بدون کلید، داده‌ای ساخته نمی‌شود")
+    if interval not in NATIVE_INTERVALS.values():
+        raise DataUnavailable("بازهٔ درخواستی پشتیبانی نمی‌شود")
     params = {
         "symbol": settings.market_symbol,
         "interval": interval,
@@ -159,48 +180,54 @@ async def _request(settings: Settings, interval: str, output_size: int, start: s
     if end:
         params["end_date"] = end
     try:
-        async with httpx.AsyncClient(timeout=25) as client:
+        async with httpx.AsyncClient(timeout=25, follow_redirects=False) as client:
             response = await client.get("https://api.twelvedata.com/time_series", params=params)
+            if len(response.content) > 2_000_000:
+                raise DataUnavailable("حجم پاسخ کندل بیش از حد مجاز است")
+            response.raise_for_status()
             payload = response.json()
-    except Exception as exc:  # network / parse failure
-        raise DataUnavailable(f"اتصال به Twelve Data برقرار نشد: {type(exc).__name__}") from exc
+    except DataUnavailable:
+        raise
+    except Exception as exc:  # never include the request URL: it contains the API key
+        raise DataUnavailable(f"اتصال به Twelve Data برقرار نشد: {type(exc).__name__}") from None
 
+    if not isinstance(payload, dict):
+        raise DataUnavailable("ساختار پاسخ سرویس‌دهنده معتبر نیست")
     status = payload.get("status")
-    if status == "error" or "code" in payload and status is None and "values" not in payload:
+    if status == "error" or ("code" in payload and status is None and "values" not in payload):
         code = str(payload.get("code", ""))
-        message = payload.get("message", "خطای سرویس‌دهنده")
         if code in ("401", "403"):
             raise DataUnavailable("کلید Twelve Data نامعتبر یا غیرفعال است")
         if code == "429":
             raise DataUnavailable("سهمیه درخواست Twelve Data تمام شده است (محدودیت پلن)")
-        raise DataUnavailable(message)
-    values = payload.get("values") or []
-    if not values:
-        raise DataUnavailable("سرویس‌دهنده هیچ کندلی برای این نماد/تایم‌فریم برنگرداند")
-
+        raise DataUnavailable("سرویس‌دهنده درخواست تاریخچه را رد کرد")
+    meta = payload.get("meta")
+    quote = settings.market_symbol.partition("/")[2]
+    if not isinstance(meta, dict) or str(meta.get("symbol", "")).casefold() != settings.market_symbol.casefold() or \
+            meta.get("interval") != interval or \
+            (quote and "currency" in meta and str(meta["currency"]).casefold() != quote.casefold()) or \
+            ("timezone" in meta and meta["timezone"] not in ("UTC", "Etc/UTC")):
+        raise DataUnavailable("هویت نماد، بازه یا منطقهٔ زمانی کندل پاسخ معتبر نیست")
+    values = payload.get("values")
+    if not isinstance(values, list) or not 0 < len(values) <= MAX_POINTS_PER_REQUEST:
+        raise DataUnavailable("سرویس‌دهنده فهرست کندل معتبر برنگرداند")
     timeframe = _timeframe_for_interval(interval)
     candles: list[Candle] = []
     for item in values:
         try:
-            candles.append(
-                Candle(
-                    symbol=settings.market_symbol,
-                    timeframe=timeframe,
-                    timestamp=_parse_datetime(item["datetime"]),
-                    open=float(item["open"]),
-                    high=float(item["high"]),
-                    low=float(item["low"]),
-                    close=float(item["close"]),
-                    volume=float(item.get("volume") or 0),
-                    complete=True,
-                )
-            )
+            if not isinstance(item, dict):
+                raise ValueError("invalid row")
+            volume = item.get("volume", 0)
+            candles.append(Candle(
+                symbol=meta["symbol"], timeframe=timeframe,
+                timestamp=_parse_datetime(item["datetime"], allow_date_only=timeframe is Timeframe.D1),
+                open=float(item["open"]), high=float(item["high"]), low=float(item["low"]),
+                close=float(item["close"]), volume=float(volume if volume is not None else 0),
+                complete=True,
+            ))
         except Exception:
-            continue
-    if not candles:
-        raise DataUnavailable("کندل قابل‌استفاده‌ای در پاسخ سرویس‌دهنده نبود")
-    candles.sort(key=lambda c: c.timestamp)
-    return candles
+            raise DataUnavailable("پاسخ کندل شامل ردیف نامعتبر است") from None
+    return _validate_candles(candles, settings.market_symbol, timeframe)
 
 
 def _timeframe_for_interval(interval: str) -> Timeframe:
@@ -210,14 +237,16 @@ def _timeframe_for_interval(interval: str) -> Timeframe:
     return Timeframe.M1
 
 
-def _parse_datetime(raw: str) -> datetime:
-    cleaned = raw.strip().replace("T", " ").removesuffix("Z")
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d %H", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(cleaned[: len(fmt)], fmt).replace(tzinfo=timezone.utc)
-        except ValueError:
-            continue
-    raise ValueError(f"unparsable datetime: {raw}")
+def _parse_datetime(raw: str, *, allow_date_only: bool = False) -> datetime:
+    if not isinstance(raw, str):
+        raise ValueError("invalid datetime")
+    value = raw.strip().replace(" ", "T", 1)
+    if allow_date_only and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        return datetime.strptime(value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?", value):
+        raise ValueError("invalid datetime")
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return (parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc))
 
 
 async def load_history(
@@ -228,7 +257,26 @@ async def load_history(
     end_date: str | None = None,
     use_cache: bool = True,
 ) -> list[Candle]:
-    """Return real candles for [timeframe]. Raises [DataUnavailable] on any failure."""
+    """Return verified provider candles; stale/uncertain data is never manufactured."""
+    if not settings.has_market_key:
+        if not settings.market_free_fallback_enabled:
+            raise DataUnavailable(
+                "AURUM_TWELVE_DATA_API_KEY تنظیم نشده و فید رایگان جایگزین غیرفعال است"
+            )
+        # No paid key configured: read whatever real history the automatic, keyless spot
+        # fallback (Swissquote / gold-api.com) has genuinely observed so far. It never
+        # invents a bar — if it has not collected enough yet, this honestly fails instead
+        # of fabricating history, and a Twelve Data key remains a purely optional upgrade.
+        from app.services import spot_feed
+        candles = spot_feed.get_history(timeframe, output_size)
+        if len(candles) < 2:
+            raise DataUnavailable(
+                "کلید Twelve Data تنظیم نشده؛ فید رایگان خودکار قیمت طلا (Swissquote/Gold-API) "
+                "هنوز تاریخچهٔ کافی برای این بازه جمع نکرده است. داده‌ای ساخته نمی‌شود — چند دقیقه صبر "
+                "کنید تا کندل‌های واقعی جمع شوند، یا برای تاریخچهٔ فوری/عمیق‌تر کلید Twelve Data را "
+                "(کاملاً اختیاری) اضافه کنید."
+            )
+        return candles
     ttl = TTL_SECONDS.get(timeframe, 60)
     key = _cache_key(settings.market_symbol, timeframe, output_size, start_date, end_date)
 
@@ -236,7 +284,7 @@ async def load_history(
         cached = _memory.get(key)
         if cached and time.time() - cached[0] < ttl:
             return cached[1]
-        disk = _read_disk(key, timeframe, ttl)
+        disk = _read_disk(key, settings.market_symbol, timeframe, ttl)
         if disk:
             _memory[key] = (time.time(), disk)
             return disk
@@ -256,11 +304,12 @@ async def load_history(
     return candles
 
 
-def cached_history(timeframe: Timeframe, output_size: int = 1500) -> list[Candle] | None:
-    """Last fetched real series from disk, if still present (used only to report state)."""
-    for path in CACHE_DIR.glob(f"*_{timeframe.value}_{output_size}_*.json"):
+def cached_history(symbol: str, timeframe: Timeframe, output_size: int = 1500) -> list[Candle] | None:
+    """Verified historical cache for display ONLY, never proof of a live quote."""
+    for path in CACHE_DIR.glob(f"{symbol.replace('/', '_')}_{timeframe.value}_{output_size}_*.json"):
         try:
-            return _deserialize(path.read_text(), timeframe)
+            if path.stat().st_size <= 2_000_000:
+                return _deserialize(path.read_text(), symbol, timeframe)
         except Exception:
             continue
     return None

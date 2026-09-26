@@ -10,14 +10,14 @@ Rules of this module:
 """
 from __future__ import annotations
 
-import math
 import random
 from datetime import datetime, timezone
-from statistics import mean, median, pstdev
+from statistics import mean
 from typing import Any
 
 from app.models import Candle, Direction, StrategyContext, Timeframe, TradeSignal
 from app.services import indicators
+from app.services.performance_metrics import summarize_trades
 from app.services.strategy import evaluate_scalp, get_trailing_stop, should_exit
 
 # Bars handed to the live evaluator on each candidate (it requires >= 200).
@@ -77,6 +77,7 @@ def run_backtest(
     use_trailing: bool = True,
     context: StrategyContext | None = None,
     start_index: int | None = None,
+    data_source: str = "twelve_data",
 ) -> dict[str, Any]:
     """Replay the live strategy over real candles. Returns an honest report.
 
@@ -135,6 +136,11 @@ def run_backtest(
                             "oz": oz,
                             "entry_time": bar.timestamp,
                             "entry_index": i,
+                            # Kept separate from signal.stop_loss on purpose: the latter gets
+                            # trailed over time, but R-multiples (trailing thresholds, risk_usd,
+                            # r_multiple in the trade log) must stay pinned to the risk actually
+                            # taken when the position was opened.
+                            "initial_stop": float(signal.stop_loss),
                         }
                 else:
                     for blocker in signal.blockers:
@@ -147,7 +153,10 @@ def run_backtest(
             kijun = kijun_full[i] or bar.close
             atr_value = atr_full[i] or 0.0
             if use_trailing:
-                new_stop = get_trailing_stop(signal, since_entry, float(kijun), float(atr_value))
+                new_stop = get_trailing_stop(
+                    signal, since_entry, float(kijun), float(atr_value),
+                    initial_stop=position["initial_stop"],
+                )
                 if new_stop is not None:
                     signal = signal.model_copy(update={"stop_loss": new_stop})
                     position["signal"] = signal
@@ -173,7 +182,10 @@ def run_backtest(
                 oz = position["oz"]
                 fees = commission_per_oz * oz * 2.0
                 pnl = (exit_fill - position["entry"]) * direction * oz - fees
-                risk_usd = abs(position["entry"] - float(signal.stop_loss)) * oz
+                # r_multiple must reflect the risk actually taken at entry, not the (possibly
+                # trailed-in) stop at exit time — otherwise a trailed stop makes small wins look
+                # like huge R multiples.
+                risk_usd = abs(position["entry"] - position["initial_stop"]) * oz
                 balance += pnl
                 peak = max(peak, balance)
                 drawdown = (peak - balance) / peak * 100 if peak > 0 else 0.0
@@ -210,8 +222,10 @@ def run_backtest(
         oz = position["oz"]
         fees = commission_per_oz * oz * 2.0
         pnl = (exit_fill - position["entry"]) * direction * oz - fees
-        risk_usd = abs(position["entry"] - float(position["signal"].stop_loss)) * oz
+        risk_usd = abs(position["entry"] - position["initial_stop"]) * oz
         balance += pnl
+        peak = max(peak, balance)
+        max_drawdown = max(max_drawdown, (peak - balance) / peak * 100 if peak > 0 else 0.0)
         trades.append(
             {
                 "id": f"bt-{len(trades) + 1:04d}",
@@ -251,11 +265,13 @@ def run_backtest(
         rejected=rejected,
         risk_percent=risk_percent,
         skipped_stop_distances=skipped_stop_distances,
+        data_source=data_source,
     )
 
 
 def _summarize(
     *,
+    data_source: str = "twelve_data",
     trades: list[dict[str, Any]],
     equity_curve: list[dict[str, Any]],
     initial_balance: float,
@@ -278,7 +294,7 @@ def _summarize(
     gross_profit = sum(t["pnl"] for t in wins)
     gross_loss = abs(sum(t["pnl"] for t in losses))
     r_values = [t["r_multiple"] for t in trades]
-    returns = [t["pnl"] / initial_balance for t in trades]
+    performance = summarize_trades(trades, initial_balance)
     notes = [
         f"شبیه‌سازی روی {len(candles)} کندل واقعی {timeframe.value} دریافت‌شده از Twelve Data "
         f"({candles[0].timestamp:%Y-%m-%d %H:%M} تا {candles[-1].timestamp:%Y-%m-%d %H:%M} UTC)",
@@ -316,7 +332,7 @@ def _summarize(
     else:
         feasibility["verdict"] = "همه سیگنال‌های واجد شرایط با حداقل لات بروکر قابل اجرا بودند."
     return {
-        "data_source": "twelve_data",
+        "data_source": data_source,
         "symbol": candles[0].symbol,
         "timeframe": timeframe.value,
         "bars": len(candles),
@@ -335,7 +351,13 @@ def _summarize(
         "expectancy_usd": round(mean([t["pnl"] for t in trades]), 2) if trades else None,
         "avg_win": round(mean([t["pnl"] for t in wins]), 2) if wins else None,
         "avg_loss": round(mean([t["pnl"] for t in losses]), 2) if losses else None,
-        "sharpe": round(mean(returns) / pstdev(returns) * math.sqrt(len(returns)), 2) if len(returns) > 1 and pstdev(returns) > 0 else None,
+        "sharpe": performance["sharpe_per_trade"],  # never mislabel a sqrt(N) t-statistic as Sharpe
+        "long_count": performance["long_count"],
+        "short_count": performance["short_count"],
+        "average_duration_seconds": performance["average_duration_seconds"],
+        "longest_winning_streak": performance["longest_winning_streak"],
+        "longest_losing_streak": performance["longest_losing_streak"],
+        "performance": performance,
         "max_drawdown": round(max_drawdown_pct / 100 * initial_balance, 2),
         "max_drawdown_pct": round(max_drawdown_pct, 2),
         "gross_profit": round(gross_profit, 2),

@@ -2,20 +2,17 @@ package com.aurum.edge.engine
 
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.Interval
+import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
 import kotlin.math.abs
 
 /**
- * Back-test that walks the SAME decision function as the live engine over bars that were
- * actually delivered by the provider.
- *
- * It refuses to invent anything:
- *  - no Monte-Carlo "tuned" projections, no synthetic price history;
- *  - every trade is settled with real OHLC values from the series you downloaded;
- *  - the broker minimum lot (0.01 lot = 1 oz) is respected, so trades that a small account
- *    cannot actually place are counted as skipped instead of silently reported as winners.
+ * Historical replay of the TECHNICAL SignalEngine only, on actual provider/imported OHLC.
+ * This is NOT a replay of the nine-way AI news/ICT/MTF paper-entry gate: historical verdicts for
+ * those gates are unavailable. Entries/exits are hypothetical OHLC fills, not broker executions.
  */
 object Backtester {
+    const val EXECUTION_MODEL = "NEXT_OPEN_OHLC_V2"
 
     data class Trade(
         val side: SignalAction,
@@ -36,6 +33,7 @@ object Backtester {
 
     data class Result(
         val symbol: String,
+        val dataSource: String,
         val interval: Interval,
         val fromTime: Long,
         val toTime: Long,
@@ -58,6 +56,12 @@ object Backtester {
         val commissionPerOz: Double,
         val minPositionOz: Double,
         val note: String,
+        val skippedGap: Int = 0,
+        val skippedFill: Int = 0,
+        /** A position crossed missing OHLC bars; its outcome cannot be reconstructed. */
+        val unresolvedGap: Int = 0,
+        /** Not included in netPnl, finalBalance, win rate, drawdown, or the list of closed trades. */
+        val openAtEnd: Boolean = false,
     ) {
         val hasTrades: Boolean get() = trades.isNotEmpty()
     }
@@ -66,6 +70,7 @@ object Backtester {
         candles: List<Candle>,
         interval: Interval,
         symbol: String,
+        dataSource: String = "Twelve Data (دیتای واقعی)",
         initialBalance: Double = 100.0,
         riskPercent: Double = 0.5,
         spreadPrice: Double = 0.30,
@@ -73,14 +78,46 @@ object Backtester {
         leverage: Int = 100,
         minPositionOz: Double = 1.0,
         threshold: Double = 72.0,
-        /**
-         * First bar the engine may open a trade on. Used by [walkForward] so out-of-sample runs
-         * only trade after the split while their indicators stay warmed by the earlier real bars.
-         */
+        /** First signal bar permitted by walk-forward. Indicators may use earlier real bars. */
         startIndex: Int? = null,
     ): Result {
+        require(threshold.isFinite()) { "آستانهٔ سیگنال معتبر نیست" }
+        return replay(candles, interval, symbol, dataSource, initialBalance, riskPercent,
+            spreadPrice, commissionPerOz, leverage, minPositionOz, startIndex) { series, index ->
+            SignalEngine.decide(series, index, threshold, spreadPrice, narrative = false)
+        }
+    }
+
+    /** Test seam only. UI and production walk-forward always call [run] with the real decision. */
+    internal fun runWithDecisions(
+        candles: List<Candle>, interval: Interval, decision: (Int) -> Signal,
+        spreadPrice: Double = 0.30, commissionPerOz: Double = 0.05,
+    ): Result = replay(candles, interval, "XAU/USD", "JVM fixture only", 10_000.0, 1.0,
+        spreadPrice, commissionPerOz, 100, 0.01, null) { _, index -> decision(index) }
+
+    private fun replay(
+        candles: List<Candle>, interval: Interval, symbol: String, dataSource: String,
+        initialBalance: Double, riskPercent: Double, spreadPrice: Double,
+        commissionPerOz: Double, leverage: Int, minPositionOz: Double, startIndex: Int?,
+        decideAt: (SignalEngine.Series, Int) -> Signal,
+    ): Result {
+        require(initialBalance.isFinite() && initialBalance > 0.0 &&
+            riskPercent.isFinite() && riskPercent > 0.0 && riskPercent <= 100.0 &&
+            spreadPrice.isFinite() && spreadPrice >= 0.0 &&
+            commissionPerOz.isFinite() && commissionPerOz >= 0.0 &&
+            minPositionOz.isFinite() && minPositionOz > 0.0 && leverage > 0) {
+            "موجودی، ریسک، حجم و هزینه‌های فرضی باید مثبت/معتبر باشند"
+        }
         val series = SignalEngine.series(candles, interval)
         val bars = series.bars
+        require(bars.all { bar ->
+            bar.time > 0L && listOf(bar.open, bar.high, bar.low, bar.close).all {
+                it.isFinite() && it > 0.0
+            } && bar.high >= maxOf(bar.open, bar.close) &&
+                bar.low <= minOf(bar.open, bar.close) && bar.low <= bar.high
+        } && bars.zipWithNext().all { (a, b) -> b.time > a.time }) {
+            "قیمت، OHLC یا ترتیب کندل‌ها معتبر نیست"
+        }
         val firstIndex = maxOf(SignalEngine.minBars(interval), startIndex ?: 0)
         var balance = initialBalance
         var peak = initialBalance
@@ -89,182 +126,122 @@ object Backtester {
         val equity = mutableListOf(EquityPoint(bars.getOrNull(firstIndex)?.time ?: 0L, initialBalance))
         var skippedMinLot = 0
         var skippedMargin = 0
-
+        var skippedGap = 0
+        var skippedFill = 0
+        var unresolvedGap = 0
         var open: OpenPosition? = null
         var index = firstIndex
 
         while (index < bars.size) {
             val bar = bars[index]
+            if (open != null && index > 0 && bar.time - bars[index - 1].time != interval.millis) {
+                // Missing bars may have touched either exit. Do not invent a winning/losing fill.
+                unresolvedGap++
+                open = null
+                index++
+                continue
+            }
             val current = open
             if (current == null) {
-                val signal = SignalEngine.decide(series, index, threshold, spreadPrice, narrative = false)
-                if (signal.isActionable && signal.stopLoss != null && signal.takeProfit != null) {
-                    val dir = if (signal.action == SignalAction.BUY) 1.0 else -1.0
-                    val fill = bar.close + dir * spreadPrice / 2.0
-                    val stopDistance = abs(fill - signal.stopLoss)
-                    val riskUsd = balance * riskPercent / 100.0
-                    var oz = if (stopDistance > 0) riskUsd / stopDistance else 0.0
-                    val maxOz = balance * leverage / bar.close
-                    if (oz > maxOz) {
-                        oz = maxOz
-                        skippedMargin++
-                    }
-                    if (oz < minPositionOz) {
-                        // A real broker would reject this order: 0.01 lot on gold = 1 oz.
-                        skippedMinLot++
-                    } else {
-                        open = OpenPosition(
-                            side = signal.action,
-                            entry = fill,
-                            stopLoss = signal.stopLoss,
-                            takeProfit = signal.takeProfit,
-                            positionOz = oz,
-                            entryTime = bar.time,
-                            entryBar = index,
-                            entrySpot = bar.close,
-                            confidence = signal.confidence,
-                        )
+                // This decision uses the close of bar[index]; it can NEVER fill on that close.
+                if (index < bars.lastIndex && balance > 0.0) {
+                    val signal = decideAt(series, index)
+                    val stop = signal.stopLoss
+                    val target = signal.takeProfit
+                    if (signal.isActionable && stop != null && target != null) {
+                        val next = bars[index + 1]
+                        val entry = BarFillRules.nextOpen(bar, next, interval, signal.action,
+                            stop, target, spreadPrice)
+                        if (entry == null) {
+                            if (next.time - bar.time != interval.millis) skippedGap++ else skippedFill++
+                        } else {
+                            val distance = abs(entry.fill - stop)
+                            val riskUsd = balance * riskPercent / 100.0
+                            var oz = riskUsd / distance
+                            val maxOz = balance * leverage / next.open
+                            if (oz > maxOz) {
+                                oz = maxOz
+                                skippedMargin++
+                            }
+                            if (!oz.isFinite() || oz < minPositionOz) {
+                                // A real broker would reject less than the chosen minimum quantity.
+                                skippedMinLot++
+                            } else {
+                                open = OpenPosition(signal.action, entry.fill, stop, target, oz,
+                                    entry.time, index + 1)
+                            }
+                        }
                     }
                 }
             } else {
-                // Settle on this bar only (never inside the entry bar itself).
-                val dir = if (current.side == SignalAction.BUY) 1.0 else -1.0
-                val hitStop = if (dir > 0) bar.low <= current.stopLoss else bar.high >= current.stopLoss
-                val hitTarget = if (dir > 0) bar.high >= current.takeProfit else bar.low <= current.takeProfit
-                val heldBars = index - current.entryBar
-                val kijun = series.ichimoku.kijun.getOrNull(index)
-                val kijunBreak = kijun != null && if (dir > 0) bar.close < kijun else bar.close > kijun
-                val oppositeCross = if (dir > 0) {
-                    SignalEngine.snapshot(series, index)?.bearCross == true
-                } else {
-                    SignalEngine.snapshot(series, index)?.bullCross == true
-                }
-                val timeStop = heldBars >= SignalEngine.barsValid(interval) * 2
-
-                var exitSpot: Double? = null
-                var reason = ""
-                if (hitStop) {
-                    exitSpot = current.stopLoss
-                    reason = "حد ضرر"
-                } else if (hitTarget) {
-                    exitSpot = current.takeProfit
-                    reason = "حد سود"
-                } else if (kijunBreak) {
-                    exitSpot = bar.close
-                    reason = "شکست کیجون (کندل بسته)"
-                } else if (oppositeCross) {
-                    exitSpot = bar.close
-                    reason = "کراس مخالف"
-                } else if (timeStop) {
-                    exitSpot = bar.close
-                    reason = "پایان زمان مجاز (${SignalEngine.barsValid(interval) * 2} کندل)"
-                }
-
-                if (exitSpot != null) {
-                    val exitFill = exitSpot - dir * spreadPrice / 2.0
+                // The bar of entry is eligible for SL/TP. An ambiguous bar hits the stop first.
+                // A Kijun/cross/time signal is known only at close, so fill it at NEXT open.
+                val fill = current.pendingExitReason?.let {
+                    BarFillRules.nextOpenExit(bar, current.side, current.stopLoss,
+                        current.takeProfit, spreadPrice, it)
+                } ?: BarFillRules.protectiveExit(bar, current.side, current.stopLoss,
+                    current.takeProfit, spreadPrice)
+                if (fill != null) {
+                    val dir = if (current.side == SignalAction.BUY) 1.0 else -1.0
                     val fees = commissionPerOz * current.positionOz * 2.0
-                    val pnl = (exitFill - current.entry) * dir * current.positionOz - fees
+                    val pnl = (fill.fill - current.entry) * dir * current.positionOz - fees
                     val risk = abs(current.entry - current.stopLoss) * current.positionOz
                     balance += pnl
                     peak = maxOf(peak, balance)
-                    val dd = if (peak > 0) (peak - balance) / peak * 100.0 else 0.0
-                    if (dd > maxDrawdownPct) maxDrawdownPct = dd
-                    trades += Trade(
-                        side = current.side,
-                        entryTime = current.entryTime,
-                        entry = current.entry,
-                        exitTime = bar.time,
-                        exit = exitFill,
-                        stopLoss = current.stopLoss,
-                        takeProfit = current.takeProfit,
-                        exitReason = reason,
-                        positionOz = current.positionOz,
-                        pnlUsd = pnl,
-                        rMultiple = if (risk > 0) pnl / risk else 0.0,
-                        feesUsd = fees + spreadPrice * current.positionOz,
-                    )
+                    if (peak > 0.0) maxDrawdownPct = maxOf(maxDrawdownPct, (peak - balance) / peak * 100.0)
+                    trades += Trade(current.side, current.entryTime, current.entry, bar.time, fill.fill,
+                        current.stopLoss, current.takeProfit, fill.reason, current.positionOz, pnl,
+                        if (risk > 0) pnl / risk else 0.0,
+                        fees + spreadPrice * current.positionOz)
                     equity += EquityPoint(bar.time, balance)
                     open = null
+                } else {
+                    val dir = if (current.side == SignalAction.BUY) 1.0 else -1.0
+                    val kijun = series.ichimoku.kijun.getOrNull(index)
+                    val kijunBreak = kijun != null &&
+                        (if (dir > 0) bar.close < kijun else bar.close > kijun)
+                    val snap = SignalEngine.snapshot(series, index)
+                    val oppositeCross = if (dir > 0) snap?.bearCross == true else snap?.bullCross == true
+                    val heldBars = index - current.entryBar
+                    val reason = when {
+                        kijunBreak -> "شکست کیجون (خروج در open کندل بعد)"
+                        oppositeCross -> "کراس مخالف (خروج در open کندل بعد)"
+                        heldBars >= SignalEngine.barsValid(interval) * 2 ->
+                            "پایان زمان مجاز (خروج در open کندل بعد)"
+                        else -> null
+                    }
+                    if (reason != null) open = current.copy(pendingExitReason = reason)
                 }
             }
             index++
         }
-
-        // Close any still-open position at the last real price, marked as such.
-        open?.let { pos ->
-            val dir = if (pos.side == SignalAction.BUY) 1.0 else -1.0
-            val last = bars.last()
-            val exitFill = last.close - dir * spreadPrice / 2.0
-            val fees = commissionPerOz * pos.positionOz * 2.0
-            val pnl = (exitFill - pos.entry) * dir * pos.positionOz - fees
-            val risk = abs(pos.entry - pos.stopLoss) * pos.positionOz
-            balance += pnl
-            trades += Trade(
-                side = pos.side,
-                entryTime = pos.entryTime,
-                entry = pos.entry,
-                exitTime = last.time,
-                exit = exitFill,
-                stopLoss = pos.stopLoss,
-                takeProfit = pos.takeProfit,
-                exitReason = "باز — بسته‌شده روی آخرین قیمت واقعی",
-                positionOz = pos.positionOz,
-                pnlUsd = pnl,
-                rMultiple = if (risk > 0) pnl / risk else 0.0,
-                feesUsd = fees + spreadPrice * pos.positionOz,
-            )
-            equity += EquityPoint(last.time, balance)
-        }
-
+        // Never force-close a position at the final close; that return was not executable here.
         val wins = trades.count { it.pnlUsd > 0 }
         val losses = trades.count { it.pnlUsd <= 0 }
         val grossWin = trades.filter { it.pnlUsd > 0 }.sumOf { it.pnlUsd }
         val grossLoss = abs(trades.filter { it.pnlUsd <= 0 }.sumOf { it.pnlUsd })
-        val rList = trades.map { it.rMultiple }
-
         val note = buildString {
-            append("شبیه‌سازی روی ${bars.size} کندل واقعی ${interval.label} دریافت‌شده از Twelve Data")
-            if (skippedMinLot > 0) {
-                append(" — $skippedMinLot سیگنال به‌دلیل حداقل حجم بروکر (0.01 لات = 1 انس) قابل اجرا نبود و رد شد")
-            }
-            if (skippedMargin > 0) {
-                append(" — $skippedMargin ترید به‌دلیل سقف لوریج کوچک‌تر شد")
-            }
+            append("بازپخش فنی روی ${bars.size} کندل ${interval.label} از $dataSource؛ بدون بازپخش شرط نهم AI/خبر، ICT و MTF")
+            append("؛ ورود open کندل بعد، خروج دستورِ close در open بعد، برخورد SL/TP به نفع حد ضرر")
+            if (open != null) append("؛ یک پوزیشن انتهای بازه باز ماند و از سود/زیان محقق‌شده حذف شد")
+            if (skippedGap > 0) append("؛ $skippedGap ورود روی گپ زمانی رد شد")
+            if (skippedFill > 0) append("؛ $skippedFill ورود با گپ قیمتی نامعتبر شد")
+            if (unresolvedGap > 0) append("؛ $unresolvedGap پوزیشن هنگام فقدان کندل حل‌نشده از آمار حذف شد")
+            if (skippedMinLot > 0) append("؛ $skippedMinLot سیگنال زیر حداقل حجم فرضی $minPositionOz واحد رد شد")
+            if (skippedMargin > 0) append("؛ $skippedMargin حجم به‌دلیل سقف لوریج فرضی کاهش یافت")
+            append("؛ اسپرد/کمیسیون فرضی‌اند، لغزش واقعی و نقدشوندگی شبیه‌سازی نشده‌اند")
         }
-
-        return Result(
-            symbol = symbol,
-            interval = interval,
-            fromTime = bars.firstOrNull()?.time ?: 0L,
-            toTime = bars.lastOrNull()?.time ?: 0L,
-            bars = bars.size,
-            initialBalance = initialBalance,
-            finalBalance = balance,
-            trades = trades,
-            equity = equity,
-            wins = wins,
-            losses = losses,
-            winRate = if (trades.isEmpty()) null else wins * 100.0 / trades.size,
-            profitFactor = if (grossLoss <= 0.0) null else grossWin / grossLoss,
-            expectancyR = if (rList.isEmpty()) null else rList.average(),
-            netPnl = balance - initialBalance,
-            feesUsd = trades.sumOf { it.feesUsd },
-            maxDrawdownPct = maxDrawdownPct,
-            skippedMinLot = skippedMinLot,
-            skippedMargin = skippedMargin,
-            spreadPrice = spreadPrice,
-            commissionPerOz = commissionPerOz,
-            minPositionOz = minPositionOz,
-            note = note,
-        )
+        return Result(symbol, dataSource, interval, bars.firstOrNull()?.time ?: 0L,
+            bars.lastOrNull()?.time ?: 0L, bars.size, initialBalance, balance,
+            trades, equity, wins, losses, if (trades.isEmpty()) null else wins * 100.0 / trades.size,
+            if (grossLoss <= 0.0) null else grossWin / grossLoss,
+            trades.takeIf { it.isNotEmpty() }?.map { it.rMultiple }?.average(),
+            balance - initialBalance, trades.sumOf { it.feesUsd }, maxDrawdownPct,
+            skippedMinLot, skippedMargin, spreadPrice, commissionPerOz, minPositionOz,
+            note, skippedGap, skippedFill, unresolvedGap, open != null)
     }
 
-    /**
-     * Walk-forward: the older part of the real series is in-sample, the newer part is
-     * out-of-sample. Both halves are settled with the same real bars and the same costs, so the
-     * comparison shows whether the rules still hold on data the tuning never saw. The verdict is
-     * descriptive — the app never promises a result.
-     */
+    /** One chronological 70/30 split, NOT a statistical validation of profitability. */
     data class WalkForward(
         val inSample: Result,
         val outOfSample: Result,
@@ -272,73 +249,34 @@ object Backtester {
         val splitIndex: Int,
         val bars: Int,
         val verdict: String,
+        val costStressOutOfSample: Result,
     )
 
     fun walkForward(
-        candles: List<Candle>,
-        interval: Interval,
-        symbol: String,
-        initialBalance: Double = 100.0,
-        riskPercent: Double = 0.5,
-        spreadPrice: Double = 0.30,
-        commissionPerOz: Double = 0.05,
-        leverage: Int = 100,
-        minPositionOz: Double = 1.0,
-        threshold: Double = 72.0,
-        splitFraction: Double = 0.7,
+        candles: List<Candle>, interval: Interval, symbol: String,
+        initialBalance: Double = 100.0, riskPercent: Double = 0.5,
+        spreadPrice: Double = 0.30, commissionPerOz: Double = 0.05,
+        leverage: Int = 100, minPositionOz: Double = 1.0,
+        threshold: Double = 72.0, splitFraction: Double = 0.7,
     ): WalkForward {
         val closed = candles.filter { it.closed }
         val splitIndex = (closed.size * splitFraction.coerceIn(0.3, 0.85)).toInt()
             .coerceIn(1, maxOf(1, closed.size - 1))
-
-        val inSample = run(
-            candles = closed.take(splitIndex),
-            interval = interval,
-            symbol = symbol,
-            initialBalance = initialBalance,
-            riskPercent = riskPercent,
-            spreadPrice = spreadPrice,
-            commissionPerOz = commissionPerOz,
-            leverage = leverage,
-            minPositionOz = minPositionOz,
-            threshold = threshold,
-        )
-        val outOfSample = run(
-            candles = closed,
-            interval = interval,
-            symbol = symbol,
-            initialBalance = initialBalance,
-            riskPercent = riskPercent,
-            spreadPrice = spreadPrice,
-            commissionPerOz = commissionPerOz,
-            leverage = leverage,
-            minPositionOz = minPositionOz,
-            threshold = threshold,
-            startIndex = splitIndex,
-        )
-
-        val splitTime = closed.getOrNull(splitIndex)?.time ?: 0L
-        val inPf = inSample.profitFactor ?: 0.0
-        val outPf = outOfSample.profitFactor ?: 0.0
-        val verdict = when {
-            outOfSample.trades.isEmpty() ->
-                "خارج از نمونه هیچ معامله‌ای ثبت نشد — برای قضاوت، بازه بلندتری لازم است."
-            outPf > 1.0 && outPf >= inPf * 0.7 ->
-                "خارج از نمونه هم مثبت ماند — شواهد پایداری، نه تضمین سود."
-            outPf > 1.0 ->
-                "خارج از نمونه سودده است ولی ضعیف‌تر از داخل نمونه."
-            else ->
-                "خارج از نمونه زیان‌ده است — با این تنظیمات قابل اتکا نیست."
-        }
-
-        return WalkForward(
-            inSample = inSample,
-            outOfSample = outOfSample,
-            splitTime = splitTime,
-            splitIndex = splitIndex,
-            bars = closed.size,
-            verdict = verdict,
-        )
+        val inSample = run(closed.take(splitIndex), interval, symbol, initialBalance = initialBalance,
+            riskPercent = riskPercent, spreadPrice = spreadPrice, commissionPerOz = commissionPerOz,
+            leverage = leverage, minPositionOz = minPositionOz, threshold = threshold)
+        val outOfSample = run(closed, interval, symbol, initialBalance = initialBalance,
+            riskPercent = riskPercent, spreadPrice = spreadPrice, commissionPerOz = commissionPerOz,
+            leverage = leverage, minPositionOz = minPositionOz, threshold = threshold, startIndex = splitIndex)
+        // Re-run on these EXACT SAME closed bars; changing costs can change fills AND which
+        // technical setups remain eligible. This is sensitivity analysis, not observed slippage.
+        val stressed = run(closed, interval, symbol, initialBalance = initialBalance,
+            riskPercent = riskPercent, spreadPrice = spreadPrice * 2.0,
+            commissionPerOz = commissionPerOz * 2.0, leverage = leverage,
+            minPositionOz = minPositionOz, threshold = threshold, startIndex = splitIndex)
+        return WalkForward(inSample, outOfSample, closed.getOrNull(splitIndex)?.time ?: 0L,
+            splitIndex, closed.size,
+            ResearchEvidence.outOfSample(outOfSample, stressed).title, stressed)
     }
 
     private data class OpenPosition(
@@ -349,7 +287,6 @@ object Backtester {
         val positionOz: Double,
         val entryTime: Long,
         val entryBar: Int,
-        val entrySpot: Double,
-        val confidence: Double,
+        val pendingExitReason: String? = null,
     )
 }

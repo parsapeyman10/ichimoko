@@ -4,7 +4,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
 /** Small provider-neutral JSON path: fields, array indexes, {symbol}, and | fallbacks. */
@@ -20,14 +20,14 @@ object JsonPath {
 
     fun number(root: JsonElement, path: String?, symbol: String? = null): Double? =
         first(root, path, symbol)?.let { element ->
-            element.jsonPrimitive.contentOrNull?.let(Num::parse)
+            (element as? JsonPrimitive)?.contentOrNull?.let(Num::parse)
         }
 
     fun numbers(root: JsonElement, path: String?, symbol: String? = null): List<Double> {
         val value = first(root, path, symbol) ?: return emptyList()
         return when (value) {
-            is JsonArray -> value.mapNotNull { it.jsonPrimitive.contentOrNull?.let(Num::parse) }
-            else -> listOfNotNull(value.jsonPrimitive.contentOrNull?.let(Num::parse))
+            is JsonArray -> value.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.let(Num::parse) }
+            else -> listOfNotNull((value as? JsonPrimitive)?.contentOrNull?.let(Num::parse))
         }
     }
 

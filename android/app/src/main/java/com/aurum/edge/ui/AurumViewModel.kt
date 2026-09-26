@@ -1,24 +1,71 @@
 package com.aurum.edge.ui
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.aurum.edge.core.AppContainer
 import com.aurum.edge.core.AppSettings
+import com.aurum.edge.core.FeedMode
+import com.aurum.edge.data.SourceComparison
+import com.aurum.edge.data.VerificationStatus
+import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.core.Interval
+import com.aurum.edge.core.MarketHours
+import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.MtfSnapshotRecord
+import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
+import com.aurum.edge.core.PaperOrderRules
+import com.aurum.edge.core.PaperTicket
 import com.aurum.edge.core.Signal
+import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.WalkForwardRecord
+import com.aurum.edge.data.FreeHistoryCatalog
+import com.aurum.edge.data.FreeHistoryState
 import com.aurum.edge.data.JournalStats
+import com.aurum.edge.data.MarketState
+import com.aurum.edge.data.NewsGate
+import com.aurum.edge.data.NewsRepository
+import com.aurum.edge.data.NobitexMarket
+import com.aurum.edge.data.NobitexPracticeRules
+import com.aurum.edge.data.NobitexPracticeTrade
+import com.aurum.edge.data.NobitexSnapshot
+import com.aurum.edge.data.NobitexScanState
+import com.aurum.edge.data.Quote
+import com.aurum.edge.data.WatchSelection
+import com.aurum.edge.data.WatchState
+import com.aurum.edge.data.NobitexLiveOrder
 import com.aurum.edge.engine.Backtester
 import com.aurum.edge.engine.MtfAnalyzer
+import com.aurum.edge.engine.NewsConfluence
+import com.aurum.edge.engine.SignalEngine
+import java.util.UUID
+import com.aurum.edge.notify.AlertSoundPlayer
+import com.aurum.edge.service.SignalMonitorService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
+import kotlin.math.min
+
+sealed interface NobitexState {
+    data object Idle : NobitexState
+    data object Loading : NobitexState
+    data class Done(val snapshot: NobitexSnapshot) : NobitexState
+    data class Failed(val message: String) : NobitexState
+}
 
 sealed interface LearnState {
     data object Idle : LearnState
@@ -30,24 +77,64 @@ sealed interface LearnState {
 sealed interface WalkForwardState {
     data object Idle : WalkForwardState
     data class Loading(val step: String) : WalkForwardState
-    data class Done(val result: Backtester.WalkForward, val interval: Interval) : WalkForwardState
+    data class Done(val result: Backtester.WalkForward, val interval: Interval, val saved: Boolean) : WalkForwardState
     data class Failed(val message: String) : WalkForwardState
 }
+
+data class WatchHistory(
+    val symbolId: String = "",
+    val sourceId: String = "",
+    val entries: List<Quote> = emptyList(),
+    val total: Long = 0L,
+    val loading: Boolean = false,
+)
 
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
-    val market = container.market.state
+    val watchSettings: StateFlow<Map<String, WatchSelection>> = container.watchSettings.selections
+    val watch: StateFlow<WatchState> = container.watch.state
+    val news = container.news.state
+    val publicWebNews = container.publicWebNews.state // Forex publisher snippets, not ninth-confluence evidence
+    val cryptoWebNews = container.cryptoWebNews.state // CoinDesk global context; not official Nobitex notices
+    val iranWebNews = container.iranWebNews.state // general economy headlines, not authenticated Codal filings
+    val forexCalendar = container.forexCalendar.state
+    val crypto = container.crypto.state
+    val publicCrypto = container.publicCrypto.state
+    val equities = container.equities.state
+    private val _nobitex = MutableStateFlow<NobitexState>(NobitexState.Idle)
+    val nobitex: StateFlow<NobitexState> = _nobitex.asStateFlow()
+    val nobitexScan: StateFlow<NobitexScanState> = container.nobitexResearch.state
+    val nobitexTrades: StateFlow<List<NobitexPracticeTrade>> = container.nobitexPractice.trades
+    val nobitexJournalError: StateFlow<String?> = container.nobitexPractice.loadError
+    /** REAL Nobitex orders placed from this app, with real money on the user's own account. */
+    val nobitexLiveOrders: StateFlow<List<com.aurum.edge.data.NobitexLiveOrder>> = container.nobitexLiveTrades.orders
+    val nobitexLiveError: StateFlow<String?> = container.nobitexLiveTrades.loadError
+    private val _nobitexBalance = MutableStateFlow<Pair<String, Double>?>(null)
+    val nobitexBalance: StateFlow<Pair<String, Double>?> = _nobitexBalance.asStateFlow()
+    private val _nobitexLiveBusy = MutableStateFlow(false)
+    val nobitexLiveBusy: StateFlow<Boolean> = _nobitexLiveBusy.asStateFlow()
+    private val _watchHistory = MutableStateFlow(WatchHistory())
+    val watchHistory: StateFlow<WatchHistory> = _watchHistory.asStateFlow()
+    val market = container.verifiedMarket
     val trades: StateFlow<List<PaperTrade>> = container.journalStore.trades
+    val opportunities: StateFlow<List<PaperOpportunity>> = container.opportunityStore.items
+    val opportunityError: StateFlow<String?> = container.opportunityStore.loadError
+    val journalError: StateFlow<String?> = container.journalStore.loadError
+    val autoPaperStatus: StateFlow<String> = container.autoPaperTrader.status
 
     /** Walk-forward runs made on this device, kept so the numbers can be re-checked later. */
     val reports: StateFlow<List<WalkForwardRecord>> = container.journalStore.reports
+    val reportError: StateFlow<String?> = container.journalStore.reportError
 
     private val _stats = MutableStateFlow(container.journalStore.stats())
     val stats: StateFlow<JournalStats> = _stats.asStateFlow()
 
     private val _learn = MutableStateFlow<LearnState>(LearnState.Idle)
     val learn: StateFlow<LearnState> = _learn.asStateFlow()
+
+    private val _freeHistory = MutableStateFlow<FreeHistoryState>(FreeHistoryState.Idle)
+    val freeHistory: StateFlow<FreeHistoryState> = _freeHistory.asStateFlow()
 
     private val _walkForward = MutableStateFlow<WalkForwardState>(WalkForwardState.Idle)
     val walkForward: StateFlow<WalkForwardState> = _walkForward.asStateFlow()
@@ -62,10 +149,35 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     init {
         viewModelScope.launch {
-            container.journalStore.load()
-            container.journalStore.loadReports()
+            runCatching { container.journalStore.load() }.onFailure {
+                _toast.value = "ژورنال خوانده نشد؛ فایل قبلی برای بازیابی نگه داشته شد"
+            }
+            runCatching { container.opportunityStore.load() }.onFailure {
+                _toast.value = "تاریخچهٔ فرصت‌ها خوانده نشد؛ فایل قبلی نگه داشته شد و هشدار تکراری متوقف است"
+            }
+            runCatching { container.nobitexPractice.load() }.onFailure {
+                _toast.value = "ژورنال تمرین نوبیتکس خوانده نشد؛ فایل برای بازیابی نگه داشته شد"
+            }
+            runCatching { container.nobitexLiveTrades.load() }.onFailure {
+                _toast.value = "دفتر سفارش‌های واقعی نوبیتکس خوانده نشد؛ فایل برای بازیابی نگه داشته شد"
+            }
+            runCatching { container.journalStore.loadReports() }.onFailure {
+                _toast.value = "گزارش پژوهش خوانده نشد؛ فایل قبلی برای بازیابی نگه داشته شد"
+            }
             _stats.value = container.journalStore.stats()
-            container.market.start()
+            // The Forex feed must not connect before the person chooses that workspace.
+        }
+        viewModelScope.launch {
+            // Automatic SL/TP settlement happens in MarketRepository, not in this ViewModel.
+            // Keep totals in sync with the journal flow even while a screen is not open.
+            trades.collect { _stats.value = container.journalStore.stats() }
+        }
+        viewModelScope.launch {
+            while (isActive) {
+                if (settings.value.workspaceId == Workspace.FOREX.id && !MarketHours.forexWeekendClosed() &&
+                    settings.value.pauseOnNews && settings.value.newsBaseUrl.isNotBlank()) container.news.refreshNow()
+                delay(120_000L)
+            }
         }
         viewModelScope.launch {
             container.market.state.collect { state ->
@@ -80,18 +192,518 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** No implicit cross-market startup: only the explicitly selected Forex space starts XAU/USD. */
+    fun enterWorkspace(context: Context, workspace: Workspace): Boolean {
+        if (!container.settingsStore.selectWorkspace(workspace.id)) return false
+        if (workspace != Workspace.IRAN_STOCKS) container.equities.clear()
+        if (workspace != Workspace.NOBITEX) container.nobitexResearch.clear()
+        if (workspace == Workspace.FOREX) {
+            container.market.start()
+            container.watch.loadCached()
+        } else {
+            container.market.stop()
+        }
+        // A saved opt-in can outlive a killed service. Re-arm only on foreground entry to
+        // the SAME workspace; a switched space loses its opt-in in selectWorkspace above.
+        if (settings.value.backgroundMonitor && !SignalMonitorService.running.value) {
+            val permitted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+                    PackageManager.PERMISSION_GRANTED
+            if (!permitted || !SignalMonitorService.start(context)) {
+                setMonitorFlag(false)
+                _toast.value = "سرویس پایش شروع نشد؛ مجوز اعلان یا محدودیت باتری گوشی را بررسی کنید"
+            }
+        }
+        return true
+    }
+
+    fun leaveWorkspace(context: Context): Boolean {
+        // Returning to the chooser is an explicit end to any automatic paper session.
+        if (!container.settingsStore.selectWorkspace("")) return false
+        SignalMonitorService.stop(context)
+        container.market.stop()
+        container.equities.clear()
+        return true
+    }
+
+    /** UI resume must not restart a healthy service socket; start() is idempotent. */
+    fun resumeVisibleForexFeed() {
+        if (settings.value.workspaceId == Workspace.FOREX.id) container.market.start()
+    }
+
+    /** When no user-enabled foreground service remains, do not keep a headless feed alive. */
+    fun pauseInvisibleForexFeed() {
+        if (!SignalMonitorService.running.value) container.market.stop()
+    }
+
     fun refreshNow() = container.market.refreshNow()
+
+    fun refreshWatch() = container.watch.refreshNow()
+
+    fun refreshNews() = container.news.refreshNow()
+
+    fun refreshPublicWebNews() = container.publicWebNews.refreshNow()
+
+    fun refreshCryptoWebNews() = container.cryptoWebNews.refreshNow()
+
+    fun refreshIranWebNews() = container.iranWebNews.refreshNow()
+
+    fun refreshEquities() = container.equities.refreshNow()
+
+    fun saveStockDataKey(key: String): Boolean = container.settingsStore.saveStockDataKey(key)
+
+    fun clearStockDataKey(): Boolean {
+        val removed = container.settingsStore.clearStockDataKey()
+        if (removed) container.equities.clear()
+        return removed
+    }
+
+    fun refreshForexCalendar() = container.forexCalendar.refreshNow()
+
+    fun refreshCrypto() = container.crypto.refreshNow()
+
+    fun refreshPublicCrypto() = container.publicCrypto.refreshNow()
+
+    fun refreshNobitexScan() = container.nobitexResearch.refreshNow()
+
+    private val lastNobitexNotifiedBarTime = mutableMapOf<com.aurum.edge.data.NobitexMarket, Long>()
+
+    /** On-demand alert: fires only for a NEW closed-bar signal, mirroring the gold alert's intent. */
+    private fun maybeNotifyNobitexSignal(snapshot: com.aurum.edge.data.NobitexSnapshot) {
+        val ctx = nobitexNotifyContext ?: return
+        if (!settings.value.notifyOnSignal) return
+        val signal = nobitexJournalSignal() ?: return
+        if (!signal.isActionable || signal.barTime == lastNobitexNotifiedBarTime[snapshot.market]) return
+        val posted = runCatching {
+            com.aurum.edge.notify.Notifier.notifyNobitexSignal(
+                ctx, nobitexJournalSymbol(snapshot.market), signal.action, signal.confidence,
+                signal.stopLoss, signal.takeProfit, signal.barTime, settings.value.alertSoundUri,
+            )
+        }.getOrDefault(false)
+        if (posted) lastNobitexNotifiedBarTime[snapshot.market] = signal.barTime
+    }
+
+
+    private var nobitexNotifyContext: Context? = null
+
+    /** Called once from the Nobitex screen so background-free, on-demand alerts can be posted. */
+    fun enableNobitexAlerts(context: Context) {
+        nobitexNotifyContext = context.applicationContext
+    }
+
+    fun downloadNobitex(market: NobitexMarket, interval: Interval) {
+        if (_nobitex.value == NobitexState.Loading) return
+        _nobitex.value = NobitexState.Loading // old quotes are never used while reconnecting
+        viewModelScope.launch {
+            try {
+                val snapshot = container.nobitexPublic.download(market, interval)
+                _nobitex.value = NobitexState.Done(snapshot)
+                val closed = runCatching { container.nobitexPractice.settle(snapshot) }
+                    .getOrDefault(emptyList())
+                if (closed.isNotEmpty()) _toast.value = "تمرین ${closed.first().id.take(8)} با bid عمومی نوبیتکس کاغذی تسویه شد؛ ژورنال را ببینید"
+                settleNobitexJournal(snapshot) // same JournalStore/settlement rule used for gold
+                maybeNotifyNobitexSignal(snapshot)
+            } catch (error: Exception) {
+                _nobitex.value = NobitexState.Failed((error.message ?: "پاسخ دادهٔ عمومی نوبیتکس معتبر نیست").take(180))
+            }
+        }
+    }
+
+    fun openNobitexPractice(market: NobitexMarket, amount: Double, stopPercent: Double,
+                             targetPercent: Double, expectedAsk: Double, expectedQuoteAt: Long) {
+        val current = (_nobitex.value as? NobitexState.Done)?.snapshot
+        if (current?.market != market || current.practiceBlocker() != null) {
+            _toast.value = "تمرین باز نشد؛ قیمت همین نماد را دوباره دریافت و بررسی کنید"
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val snapshot = (_nobitex.value as? NobitexState.Done)?.snapshot
+                    ?: throw IllegalArgumentException("در حال دریافت داده؛ قیمت قبلی معتبر نیست")
+                require(snapshot.market == market && snapshot.quote.receivedAt == expectedQuoteAt) {
+                    "نماد یا زمان قیمت عوض شده است"
+                }
+                val trade = container.nobitexPractice.open(snapshot, amount, stopPercent,
+                    targetPercent, expectedAsk, expectedQuoteAt)
+                _toast.value = "فقط تمرین spot BUY کاغذی: ${trade.id.take(8)}؛ در ژورنال نوبیتکس ثبت شد"
+            } catch (error: Exception) {
+                _toast.value = "تمرین باز نشد: ${error.message ?: "ورود نامعتبر است"}"
+            }
+        }
+    }
+
+    fun closeNobitexPractice(id: String) {
+        val snapshot = (_nobitex.value as? NobitexState.Done)?.snapshot
+        if (snapshot?.practiceBlocker() != null) {
+            _toast.value = "برای بستن تمرین، آمار تازهٔ همان نماد را دریافت کنید"
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val fresh = (_nobitex.value as? NobitexState.Done)?.snapshot
+                    ?: throw IllegalArgumentException("دادهٔ بازار در دسترس نیست")
+                val trade = container.nobitexPractice.close(id, fresh)
+                _toast.value = "تمرین ${trade.id.take(8)} فقط کاغذی با نرخ bid مشاهده‌شده بسته شد"
+            } catch (error: Exception) {
+                _toast.value = "بستن تمرین انجام نشد: ${error.message ?: "قیمت معتبر نیست"}"
+            }
+        }
+    }
+
+    fun exportNobitexHistory(uri: Uri, snapshot: NobitexSnapshot) {
+        viewModelScope.launch {
+            try {
+                container.exportNobitexCsv(uri, snapshot)
+                _toast.value = "CSV ${snapshot.market.code} از کندل‌های دریافتی ذخیره شد"
+            } catch (error: Exception) {
+                _toast.value = "ذخیرهٔ CSV انجام نشد: ${error.message ?: "خطای فایل"}"
+            }
+        }
+    }
+
+    fun clearNobitexPractice() {
+        viewModelScope.launch {
+            try {
+                container.nobitexPractice.clear()
+                _toast.value = "فقط تاریخچهٔ تمرین نوبیتکس پاک شد؛ معاملات طلا و کاندیداها تغییر نکردند"
+            } catch (error: Exception) {
+                _toast.value = "پاک کردن تمرین ممکن نیست: ${error.message ?: "فایل قبلی حفظ شد"}"
+            }
+        }
+    }
+
+    // ---- "همون متود طلا": run the SAME SignalEngine + SAME JournalStore on Nobitex candles ----
+
+    /** "BTC_USDT" -> "BTC/USDT" etc.; kept in one place so every caller tags the journal identically. */
+    fun nobitexJournalSymbol(market: com.aurum.edge.data.NobitexMarket): String =
+        "${market.srcCurrency.uppercase()}/${market.quoteUnit}"
+
+    /**
+     * Pure/cheap: recompute the Ichimoku+confluence signal from the latest downloaded Nobitex
+     * candles, using the exact same [SignalEngine] the gold feed uses. Works for ANY Nobitex
+     * market that supports practice (all vetted USDT pairs, not just BTC/USDT). Returns null
+     * while there are not yet enough closed candles (the engine's own [SignalEngine.minBars] rule).
+     */
+    fun nobitexJournalSignal(): Signal? {
+        val snapshot = (_nobitex.value as? NobitexState.Done)?.snapshot ?: return null
+        if (!snapshot.market.supportsPractice) return null
+        val closed = snapshot.candles.count { it.closed }
+        if (closed < SignalEngine.minBars(snapshot.interval)) return null
+        return runCatching { SignalEngine.evaluate(snapshot.candles, snapshot.interval, settings.value.minConfidence) }
+            .getOrNull()
+    }
+
+    private var nobitexJournalOpening = false
+
+    /**
+     * Journals a Nobitex signal into the SAME [container.journalStore] gold trades use (same
+     * risk-sizing, same settlement, same statistics), tagged with the currently downloaded
+     * market's symbol (e.g. "ETH/USDT", "BTC/USDT" — any vetted Nobitex USDT pair, not just
+     * Bitcoin). This is a manual entry (like the gold manual-entry path): it does not require
+     * the Forex news gate, which is specific to USD pairs. The signal AND the market are
+     * re-verified fresh at submission time so a stale on-screen preview can never be persisted.
+     */
+    fun openNobitexJournalTrade(expectedSignal: Signal, expectedPrice: Double, expectedMarket: com.aurum.edge.data.NobitexMarket) {
+        if (nobitexJournalOpening) { _toast.value = "درخواست قبلی هنوز ذخیره نشده است"; return }
+        if (!expectedSignal.isActionable) { _toast.value = "سیگنال فعلی قابل معامله نیست"; return }
+        nobitexJournalOpening = true
+        viewModelScope.launch {
+            try {
+                val current = (_nobitex.value as? NobitexState.Done)?.snapshot
+                    ?: throw IllegalArgumentException("داده نوبیتکس در دسترس نیست")
+                require(current.market == expectedMarket) { "نماد از زمان پیش‌نمایش عوض شده است؛ دوباره بررسی کنید" }
+                val fresh = nobitexJournalSignal()
+                    ?: throw IllegalArgumentException("دادهٔ تازهٔ ${expectedMarket.code} در دسترس نیست؛ دوباره دریافت کنید")
+                require(fresh.barTime == expectedSignal.barTime && fresh.action == expectedSignal.action &&
+                    kotlin.math.abs((fresh.stopLoss ?: 0.0) - (expectedSignal.stopLoss ?: 0.0)) < 1e-6 &&
+                    kotlin.math.abs((fresh.takeProfit ?: 0.0) - (expectedSignal.takeProfit ?: 0.0)) < 1e-6) {
+                    "سیگنال از زمان پیش‌نمایش تغییر کرده است؛ دوباره بررسی کنید"
+                }
+                val price = current.quote.latest
+                require(price.isFinite() && price > 0 && kotlin.math.abs(price / expectedPrice - 1.0) <= 0.01) {
+                    "قیمت نسبت به پیش‌نمایش بیش‌ازحد تغییر کرده است"
+                }
+                val symbol = nobitexJournalSymbol(expectedMarket)
+                val s = container.settingsStore.read()
+                val trade = container.journalStore.open(
+                    signal = fresh, symbol = symbol, price = price,
+                    balance = s.accountBalance, riskPercent = s.riskPercent, manual = true,
+                )
+                _stats.value = container.journalStore.stats()
+                _toast.value = "ثبت در همان ژورنال طلا: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} " +
+                    "${trade.symbol} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}"
+            } catch (e: Exception) {
+                _toast.value = "ثبت در ژورنال انجام نشد: ${e.message ?: "ذخیره ممکن نیست"}"
+            } finally {
+                nobitexJournalOpening = false
+            }
+        }
+    }
+
+    /** Settles any open paper trades of THIS market's symbol against real closed candles — same rule gold uses. */
+    private fun settleNobitexJournal(snapshot: com.aurum.edge.data.NobitexSnapshot) {
+        if (!snapshot.market.supportsPractice) return
+        val symbol = nobitexJournalSymbol(snapshot.market)
+        viewModelScope.launch {
+            val closedBars = snapshot.candles.filter { it.closed }
+            for (bar in closedBars.takeLast(50)) {
+                runCatching { container.journalStore.settle(bar, symbol, bar.time + snapshot.interval.millis) }
+            }
+            _stats.value = container.journalStore.stats()
+        }
+    }
+
+    // ---- Real Nobitex trading: the user's OWN API token, OWN money, hard notional cap ----
+
+    fun saveNobitexApiToken(token: String): Boolean = container.settingsStore.saveNobitexApiToken(token)
+
+    fun clearNobitexApiToken(): Boolean {
+        _nobitexBalance.value = null
+        return container.settingsStore.clearNobitexApiToken()
+    }
+
+    fun saveNobitexOrderCap(usdt: Double): Boolean = container.settingsStore.saveNobitexOrderCap(usdt)
+
+    fun checkNobitexBalance(currency: String) {
+        val token = settings.value.nobitexApiToken
+        if (token.isBlank()) { _toast.value = "ابتدا کلید API نوبیتکس را وارد و ذخیره کنید"; return }
+        if (_nobitexLiveBusy.value) return
+        _nobitexLiveBusy.value = true
+        viewModelScope.launch {
+            try {
+                val balance = container.nobitexTrading.walletBalance(token, currency)
+                _nobitexBalance.value = currency to balance
+                _toast.value = "موجودی واقعی $currency: $balance"
+            } catch (e: Exception) {
+                _toast.value = "دریافت موجودی ناموفق: ${e.message ?: "خطای نامشخص نوبیتکس"}"
+            } finally {
+                _nobitexLiveBusy.value = false
+            }
+        }
+    }
+
+    /**
+     * Places a REAL order on the user's own Nobitex account with REAL money. Enforced here,
+     * client-side, before any network call: order notional must not exceed the user's own
+     * saved cap ([AppSettings.nobitexLiveOrderCapUsdt]) — a fat-finger guard, not a broker limit.
+     * There is NO server-side precision/lot-step data available publicly, so this never guesses
+     * amount/price rounding; Nobitex's own rejection (if any) is shown verbatim.
+     */
+    fun placeNobitexLiveOrder(side: SignalAction, srcCurrency: String, dstCurrency: String,
+                              amount: String, price: String?, execution: String, estimatedPrice: Double) {
+        val token = settings.value.nobitexApiToken
+        if (token.isBlank()) { _toast.value = "ابتدا کلید API نوبیتکس را وارد و ذخیره کنید"; return }
+        if (side == SignalAction.NO_TRADE) { _toast.value = "جهت خرید یا فروش را انتخاب کنید"; return }
+        val qty = amount.toDoubleOrNull()
+        if (qty == null || !qty.isFinite() || qty <= 0.0) { _toast.value = "حجم سفارش نامعتبر است"; return }
+        val cap = settings.value.nobitexLiveOrderCapUsdt
+        val notional = qty * estimatedPrice
+        if (!notional.isFinite() || notional <= 0.0 || notional > cap + 1e-6) {
+            _toast.value = "ارزش تقریبی سفارش (${String.format("%.2f", notional)}) از سقف ایمنی $cap تجاوز می‌کند؛ سقف را در تنظیمات تغییر دهید یا حجم را کم کنید"
+            return
+        }
+        if (_nobitexLiveBusy.value) { _toast.value = "درخواست واقعی قبلی هنوز پردازش می‌شود"; return }
+        _nobitexLiveBusy.value = true
+        val clientOrderId = "aurum-" + UUID.randomUUID().toString().take(24)
+        val type = if (side == SignalAction.BUY) "buy" else "sell"
+        val symbol = "${srcCurrency.uppercase()}/${dstCurrency.uppercase()}"
+        viewModelScope.launch {
+            try {
+                val result = runCatching {
+                    container.nobitexTrading.placeOrder(token, type, srcCurrency, dstCurrency, amount, price, execution, clientOrderId)
+                }
+                container.nobitexLiveTrades.recordAttempt(
+                    symbol = symbol, side = type, execution = execution, amount = amount, price = price,
+                    notionalCapUsdt = cap, clientOrderId = clientOrderId, result = result,
+                )
+                _toast.value = result.fold(
+                    onSuccess = { r -> "سفارش واقعی ارسال شد: ${r.status} · شناسه نوبیتکس ${r.id ?: "—"}" },
+                    onFailure = { e -> "سفارش واقعی رد شد: ${e.message ?: "خطای نامشخص نوبیتکس"}" },
+                )
+            } catch (e: Exception) {
+                _toast.value = "ارسال سفارش واقعی متوقف شد: ${e.message ?: "خطای نامشخص"}"
+            } finally {
+                _nobitexLiveBusy.value = false
+            }
+        }
+    }
+
+    fun refreshNobitexLiveOrderStatus(order: NobitexLiveOrder) {
+        val token = settings.value.nobitexApiToken
+        val exchangeId = order.exchangeOrderId
+        if (token.isBlank() || exchangeId == null) {
+            _toast.value = "شناسه سفارش نوبیتکس در دسترس نیست"
+            return
+        }
+        viewModelScope.launch {
+            val result = runCatching { container.nobitexTrading.orderStatus(token, exchangeId) }
+            container.nobitexLiveTrades.updateStatus(order.id, result)
+            _toast.value = result.fold(
+                onSuccess = { r -> "وضعیت واقعی: ${r.status} · پرشده ${r.matchedAmount ?: "0"}" },
+                onFailure = { e -> "دریافت وضعیت ناموفق: ${e.message ?: "خطای نامشخص"}" },
+            )
+        }
+    }
+
+    fun cancelNobitexLiveOrder(order: NobitexLiveOrder) {
+        val token = settings.value.nobitexApiToken
+        val exchangeId = order.exchangeOrderId
+        if (token.isBlank() || exchangeId == null) {
+            _toast.value = "شناسه سفارش نوبیتکس در دسترس نیست"
+            return
+        }
+        viewModelScope.launch {
+            val result = runCatching { container.nobitexTrading.cancelOrder(token, exchangeId) }
+            container.nobitexLiveTrades.updateStatus(order.id, result)
+            _toast.value = result.fold(
+                onSuccess = { r -> "درخواست لغو ارسال شد: ${r.status}" },
+                onFailure = { e -> "لغو ناموفق: ${e.message ?: "خطای نامشخص"}" },
+            )
+        }
+    }
+
+    fun clearNobitexLiveOrders() {
+        viewModelScope.launch {
+            try {
+                container.nobitexLiveTrades.clear()
+                _toast.value = "فقط دفتر محلی سفارش‌های واقعی نوبیتکس پاک شد؛ خود سفارش‌ها در نوبیتکس دست‌نخورده‌اند"
+            } catch (e: Exception) {
+                _toast.value = "پاک کردن دفتر واقعی ممکن نیست: ${e.message ?: "خطای ذخیره"}"
+            }
+        }
+    }
+
+    fun saveCryptoBaseUrl(value: String) {
+        val url = value.trim().trimEnd('/')
+        if (url.isNotBlank() && NewsRepository.cryptoUrl(url) == null) {
+            _toast.value = "آدرس سرور HTTPS رمزارز بدون مسیر یا کلید وارد کنید"
+            return
+        }
+        viewModelScope.launch {
+            if (!withContext(Dispatchers.IO) { container.settingsStore.saveCryptoBaseUrl(url) }) {
+                _toast.value = "نشانی سرور رمزارز روی دستگاه ذخیره نشد"
+                return@launch
+            }
+            container.crypto.resetAndRefresh()
+            _toast.value = if (url.isBlank()) "سرور پژوهشی رمزارز جدا شد؛ نمای CoinGecko بی‌کلید در دسترس است"
+                else "سرور رمزارز ثبت شد؛ وضعیت نامزدها و زمان شواهد را جداگانه بررسی کنید"
+        }
+    }
+
+    fun saveNewsBaseUrl(value: String) {
+        val url = value.trim().trimEnd('/')
+        if (url.isNotBlank() && NewsRepository.newsUrl(url) == null) {
+            _toast.value = "آدرس HTTPS سرور خبر بدون مسیر و کلید وارد کنید"
+            return
+        }
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) { container.settingsStore.saveNewsBaseUrl(url) }
+            if (!saved) {
+                _toast.value = "ذخیرهٔ آدرس سرور روی دستگاه ناموفق بود؛ خبر AI هنوز تأیید نشده است"
+                return@launch
+            }
+            container.news.resetAndRefresh()
+            _toast.value = if (url.isBlank()) "سرور خبر جدا شد؛ تیترهای وب در تب خبر بدون سرور قابل دریافت‌اند، ولی هشدار ۹/۹ مسدود است"
+                else "آدرس سرور ذخیره شد؛ پاسخ فید و مدل AI را در تب خبر جداگانه بررسی کنید"
+        }
+    }
+
+    fun setPauseOnNews(enabled: Boolean) {
+        container.settingsStore.update { it.copy(pauseOnNews = enabled) }
+        if (enabled) container.news.refreshNow()
+    }
+
+    fun selectWatchSource(symbolId: String, sourceId: String, enabled: Boolean) {
+        container.watchSettings.selectSource(symbolId, sourceId, enabled)
+        if (enabled) container.watch.refreshNow()
+    }
+
+    fun setWatchPreferred(symbolId: String, sourceId: String) = container.watchSettings.setPreferred(symbolId, sourceId)
+
+    fun watchKeyOverride(symbolId: String): String = container.watchSettings.keyOverride(symbolId)
+
+    fun setWatchKeyOverride(symbolId: String, key: String) {
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) { container.watchSettings.setKeyOverride(symbolId, key) }
+            if (!saved) {
+                _toast.value = "کلید اختصاصی ذخیره نشد؛ فاصله/خط جدید یا حافظهٔ دستگاه را بررسی کنید"
+                return@launch
+            }
+            container.watch.refreshNow()
+            _toast.value = if (key.isBlank()) "کلید اختصاصی این نماد حذف شد؛ کلید چارت در صورت وجود استفاده می‌شود"
+                else "کلید خواندنی این نماد روی همین نصب ذخیره و بازخوانی شد"
+        }
+    }
+
+    fun showWatchHistory(symbolId: String, sourceId: String) {
+        if (_watchHistory.value.symbolId == symbolId && _watchHistory.value.sourceId == sourceId) {
+            _watchHistory.value = WatchHistory()
+            return
+        }
+        _watchHistory.value = WatchHistory(symbolId, sourceId, loading = true)
+        viewModelScope.launch {
+            val page = container.watch.page(symbolId, sourceId)
+            val total = container.watch.count(symbolId, sourceId)
+            if (_watchHistory.value.symbolId == symbolId && _watchHistory.value.sourceId == sourceId) {
+                _watchHistory.value = WatchHistory(symbolId, sourceId, page, total)
+            }
+        }
+    }
+
+    fun moreWatchHistory() {
+        val current = _watchHistory.value
+        if (current.loading || current.total <= current.entries.size || current.entries.isEmpty()) return
+        _watchHistory.value = current.copy(loading = true)
+        viewModelScope.launch {
+            val next = container.watch.page(current.symbolId, current.sourceId, current.entries.last().ts)
+            if (_watchHistory.value.symbolId == current.symbolId && _watchHistory.value.sourceId == current.sourceId) {
+                _watchHistory.value = current.copy(entries = current.entries + next)
+            }
+        }
+    }
+
+    fun clearWatchHistory() {
+        viewModelScope.launch {
+            container.watch.clearHistory()
+            _watchHistory.value = WatchHistory()
+            _toast.value = "تاریخچهٔ دریافت‌شدهٔ دیده‌بان پاک شد"
+        }
+    }
 
     fun setInterval(interval: Interval) = container.market.setInterval(interval)
 
-    fun saveApiKey(key: String) {
-        container.settingsStore.update { it.copy(apiKey = key.trim()) }
-        container.market.restart()
-    }
+    private var marketSaveInFlight = false
 
-    fun saveSymbol(symbol: String) {
-        container.settingsStore.update { it.copy(symbol = symbol.trim().ifBlank { "XAU/USD" }) }
-        container.market.restart()
+    fun saveApiKey(key: String) = saveMarketCredentials(key, settings.value.symbol)
+
+    /** One verified write, one feed restart; never echo a credential into a toast or log. */
+    fun saveMarketCredentials(key: String, symbol: String) {
+        if (marketSaveInFlight) return
+        if (key.isBlank() && !settings.value.hasKey) {
+            _toast.value = "ابتدا کلید تازهٔ Twelve Data را روی همین گوشی وارد کنید"
+            return
+        }
+        if (key.trim().any { it.isWhitespace() }) {
+            _toast.value = "کلید نباید فاصله یا خط جدید داشته باشد؛ چیزی ذخیره نشد"
+            return
+        }
+        marketSaveInFlight = true
+        viewModelScope.launch {
+            try {
+                val saved = withContext(Dispatchers.IO) { container.settingsStore.saveMarketCredentials(key, symbol) }
+                if (!saved) {
+                    _toast.value = "ذخیرهٔ کلید روی دستگاه تأیید نشد؛ کلید قبلی را حذف نکنید و دوباره تلاش کنید"
+                    return@launch
+                }
+                container.market.restart()
+                container.watch.refreshNow()
+                _toast.value = "کلید و نماد روی همین نصب ذخیره و بازخوانی شدند؛ برای اعتبار کلید، وضعیت اتصال بازار را بررسی کنید"
+            } catch (_: Exception) {
+                _toast.value = "ذخیره/اتصال مجدد ناموفق بود؛ وضعیت دادهٔ بازار را بررسی کنید"
+            } finally {
+                marketSaveInFlight = false
+            }
+        }
     }
 
     fun saveRiskPercent(value: Double) = container.settingsStore.update { it.copy(riskPercent = value.coerceIn(0.1, 5.0)) }
@@ -107,40 +719,237 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setNotifyOnSignal(enabled: Boolean) = container.settingsStore.update { it.copy(notifyOnSignal = enabled) }
 
-    fun setMonitorFlag(enabled: Boolean) = container.settingsStore.update { it.copy(backgroundMonitor = enabled) }
+    fun selectAlertSound(context: Context, uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val name = withContext(Dispatchers.IO) { AlertSoundPlayer.select(context, uri) }
+                container.settingsStore.update { it.copy(alertSoundUri = uri.toString(), alertSoundName = name) }
+                _toast.value = "صدای هشدار آموزشی: $name؛ برای بررسی «پخش آزمون» را بزنید"
+            } catch (error: Exception) {
+                _toast.value = "صدای فایل انتخاب نشد: ${error.message ?: "دسترسی به فایل برقرار نیست"}"
+            }
+        }
+    }
 
-    fun openPaperTrade(signal: Signal) {
-        val price = market.value.lastPrice
-        if (price == null || !signal.isActionable) {
-            _toast.value = "سیگنال قابل معامله نیست یا قیمت واقعی موجود نیست"
+    fun resetAlertSound() {
+        AlertSoundPlayer.stop()
+        container.settingsStore.update { it.copy(alertSoundUri = "", alertSoundName = "") }
+        _toast.value = "صدای پیش‌فرض اعلان گوشی انتخاب شد"
+    }
+
+    fun reportNotificationTest(posted: Boolean) {
+        _toast.value = if (posted) "اعلان آزمایشی تحویل سیستم اندروید شد؛ نمایش/صدا را روی گوشی بررسی کنید"
+            else "اعلان ارسال نشد: مجوز اعلان یا کانال آن بسته است؛ تنظیمات اعلان‌های اندروید را باز کنید"
+    }
+
+    fun testAlertSound(context: Context) {
+        val uri = settings.value.alertSoundUri
+        if (uri.isBlank()) {
+            _toast.value = "برای شنیدن صدای سیستم، تنظیمات اعلان‌های اندروید را بررسی کنید"
             return
         }
         viewModelScope.launch {
-            val s = container.settingsStore.read()
-            val trade = container.journalStore.open(
-                signal = signal,
-                price = price,
-                balance = s.accountBalance,
-                riskPercent = s.riskPercent,
-                mtf = _mtf.value?.let { MtfSnapshotRecord.from(it) },
-            )
-            _stats.value = container.journalStore.stats()
-            _toast.value = "پوزیشن کاغذی باز شد: ${trade.action.name} روی قیمت واقعی ${String.format("%.2f", trade.entry)}"
+            val queued = withContext(Dispatchers.IO) { AlertSoundPlayer.play(context, uri) }
+            _toast.value = if (queued) "آزمون پخش فایل تا ۱۰ ثانیه؛ بلندی صدا/مزاحم‌نشدن دستگاه را بررسی کنید"
+                else "فایل صوتی دیگر قابل خواندن نیست؛ دوباره انتخاب کنید"
+        }
+    }
+
+    fun setMonitorFlag(enabled: Boolean) {
+        container.settingsStore.update { it.copy(backgroundMonitor = enabled,
+            autoPaperTrading = if (enabled) it.autoPaperTrading else false) }
+        if (!enabled) _toast.value = "پایش پس‌زمینه خاموش/ناموفق است؛ ورود خودکار کاغذی غیرفعال ماند"
+    }
+
+    fun setAutoPaperTrading(enabled: Boolean) {
+        if (enabled && settings.value.workspaceId != Workspace.FOREX.id) {
+            _toast.value = "ورود خودکار کاغذی فقط در فضای فارکس قابل فعال‌سازی است"
+            return
+        }
+        if (enabled && (!settings.value.backgroundMonitor || settings.value.newsBaseUrl.isBlank())) {
+            _toast.value = "برای خودکار کاغذی، پایش و آدرس HTTPS سرور خبر را فعال کنید"
+            return
+        }
+        container.settingsStore.update { it.copy(autoPaperTrading = enabled) }
+        if (enabled) container.news.refreshNow()
+        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ بدون مدل AI و ۹/۹ معتبر هیچ ورودی ثبت نمی‌شود"
+            else "معاملهٔ خودکار کاغذی خاموش شد"
+    }
+
+    private var paperOpening = false
+
+    /** A price received recently is still not an exchange fill; only a paper ticket can use it. */
+    private fun freshPaperQuote(current: MarketState): String? {
+        val now = System.currentTimeMillis()
+        val received = current.feed.lastSuccessAt
+        val lastBar = current.candles.lastOrNull()?.time
+        return when {
+            current.symbol != settings.value.symbol || current.interval != settings.value.interval ->
+                "نماد یا بازهٔ قیمت با تنظیمات فعلی فرق دارد"
+            current.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING) || current.showingCachedData ->
+                "قیمت زنده نیست؛ ورود/خروج روی کش ممنوع است"
+            current.lastPrice?.let { it.isFinite() && it > 0.0 } != true -> "قیمت معتبر موجود نیست"
+            received == null || now - received !in 0L..90_000L -> "آخرین دریافت قیمت قدیمی است"
+            lastBar == null || now - lastBar !in 0L..min(180_000L, current.interval.millis * 2) ->
+                "کندل این نماد برای ورود خیلی قدیمی است"
+            else -> null
+        }
+    }
+
+    private fun entryBlocker(current: MarketState): String? {
+        freshPaperQuote(current)?.let { return it }
+        if (settings.value.pauseOnNews) {
+            val checked = news.value.lastCheckedAt
+            if (news.value.gate != NewsGate.CLEAR || checked == null ||
+                System.currentTimeMillis() - checked !in 0L..180_000L) {
+                return "خبر پراثر، نامعتبر یا وضعیت خبری نامشخص/قدیمی؛ توقف ورود جدید"
+            }
+        }
+        WatchCatalog.find(current.symbol)?.let { watched ->
+            val selected = watchSettings.value[current.symbol]
+            if (selected != null && SourceComparison.verify(watched, selected.enabledSources,
+                    watch.value.quotes[current.symbol].orEmpty()).status == VerificationStatus.CONFLICT) {
+                return "قیمت منابع مستقل با هم تعارض دارد"
+            }
+        }
+        if (trades.value.any { it.isOpen && it.symbol == current.symbol }) return "برای این نماد یک پوزیشن کاغذی باز است"
+        return null
+    }
+
+    fun previewManualTicket(side: SignalAction, stop: Double?, target: Double?): Result<PaperTicket> = runCatching {
+        val current = market.value
+        entryBlocker(current)?.let { throw IllegalArgumentException(it) }
+        PaperOrderRules.preview(side, current.symbol, current.lastPrice!!,
+            stop ?: throw IllegalArgumentException("حد ضرر را وارد کنید"),
+            target ?: throw IllegalArgumentException("حد سود را وارد کنید"),
+            settings.value.accountBalance, settings.value.riskPercent)
+    }
+
+    fun openPaperTrade(signal: Signal) = submitPaper(signal, manual = false)
+
+    fun openManualPaperTrade(side: SignalAction, stop: Double, target: Double,
+                             expectedPrice: Double, expectedSymbol: String) {
+        val signal = Signal(action = side, confidence = 0.0, stopLoss = stop,
+            takeProfit = target, interval = market.value.interval)
+        submitPaper(signal, manual = true, expectedPrice = expectedPrice, expectedSymbol = expectedSymbol)
+    }
+
+    private fun submitPaper(signal: Signal, manual: Boolean, expectedPrice: Double? = null,
+                            expectedSymbol: String? = null) {
+        if (paperOpening) {
+            _toast.value = "درخواست کاغذی قبلی هنوز ذخیره نشده است"
+            return
+        }
+        fun verified(): Pair<MarketState, Double> {
+            val current = market.value
+            entryBlocker(current)?.let { throw IllegalArgumentException(it) }
+            val price = current.lastPrice!!
+            if (manual) {
+                require(expectedSymbol == current.symbol && expectedPrice != null && expectedPrice.isFinite() &&
+                    expectedPrice > 0.0 && abs(price / expectedPrice - 1.0) <= 0.001) {
+                    "قیمت/نماد نسبت به پیش‌نمایش تغییر کرده است؛ دوباره بررسی کنید"
+                }
+            } else {
+                require(signal.isActionable && current.signal == signal && signal.interval == current.interval &&
+                    signal.entry != null && signal.entry.isFinite() && signal.entry > 0.0 &&
+                    abs(price / signal.entry - 1.0) <= 0.005 && _mtf.value?.veto != true) {
+                    "سیگنال قدیمی، وتوشده یا دور از قیمت تازه است"
+                }
+                val alignment = NewsConfluence.alignment(current.symbol, signal.action, news.value)
+                require(alignment.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED &&
+                    signal.confluence.size >= 9 &&
+                    signal.confluence.take(8).all { it.ok && it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED } &&
+                    signal.confluence[8].let { it.name == NewsConfluence.NEWS_LABEL && it.ok &&
+                        it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED && it.detail == alignment.detail }) {
+                    "۹ شرط از جمله خبر AI دیگر معتبر نیستند؛ ورود سیگنالی متوقف شد"
+                }
+                IctEntryRules.assess(current).reason?.let { throw IllegalArgumentException(it) }
+            }
+            PaperOrderRules.preview(signal.action, current.symbol, price,
+                signal.stopLoss ?: throw IllegalArgumentException("حد ضرر لازم است"),
+                signal.takeProfit ?: throw IllegalArgumentException("حد سود لازم است"),
+                settings.value.accountBalance, settings.value.riskPercent)
+            return current to price
+        }
+        try {
+            verified()
+        } catch (error: Exception) {
+            _toast.value = "ورود کاغذی متوقف: ${error.message ?: "شرایط ورود معتبر نیست"}"
+            return
+        }
+        paperOpening = true
+        viewModelScope.launch {
+            try {
+                // Repeat all checks after scheduling; never persist a stale or switched symbol.
+                val (current, price) = verified()
+                val s = container.settingsStore.read()
+                val newsRecord = if (manual) null else {
+                    val latestNews = news.value
+                    require(NewsConfluence.alignment(current.symbol, signal.action, latestNews).status ==
+                        com.aurum.edge.core.ConfluenceStatus.CONFIRMED) { "خبر AI در لحظهٔ ثبت قدیمی شد" }
+                    NewsConfluence.record(latestNews) ?: error("شواهد خبر قابل ذخیره نیست")
+                }
+                val ict = if (manual) null else (IctEntryRules.approvedEvidence(current)
+                    ?: error("شواهد رنج/ICT همین کندل پیش از ثبت معتبر نیست"))
+                val trade = container.journalStore.open(
+                    signal = signal, symbol = current.symbol, price = price,
+                    balance = s.accountBalance, riskPercent = s.riskPercent,
+                    mtf = if (manual) null else _mtf.value?.let { MtfSnapshotRecord.from(it) },
+                    manual = manual,
+                    newsEvidence = newsRecord, priceAction = ict,
+                )
+                _stats.value = container.journalStore.stats()
+                // Linking is metadata only; a damaged opportunity file must not erase a saved trade.
+                runCatching { container.opportunityStore.linkTrade(trade) }
+                _toast.value = "فقط کاغذی: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} ${trade.symbol} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}"
+            } catch (e: Exception) {
+                _toast.value = "ورود کاغذی انجام نشد: ${e.message ?: "ذخیره ممکن نیست"}"
+            } finally {
+                paperOpening = false
+            }
         }
     }
 
     fun closePaperTrade(trade: PaperTrade) {
-        val price = market.value.lastPrice ?: return
+        val current = market.value
+        val blocked = freshPaperQuote(current)
+        if (trade.symbol != current.symbol || blocked != null) {
+            _toast.value = "بستن کاغذی متوقف: ${blocked ?: "نماد قیمت با پوزیشن فرق دارد"}"
+            return
+        }
         viewModelScope.launch {
-            container.journalStore.close(trade.id, price, "بستن دستی روی قیمت واقعی")
-            _stats.value = container.journalStore.stats()
+            try {
+                val latest = market.value
+                require(trade.symbol == latest.symbol && freshPaperQuote(latest) == null) { "قیمت خروج تازهٔ همان نماد نیست" }
+                val closed = container.journalStore.close(trade.id, latest.lastPrice!!, "بستن دستی روی قیمت دریافتی")
+                _stats.value = container.journalStore.stats()
+                _toast.value = "پوزیشن کاغذی ${closed.id.take(8)} با ${closed.pnlUsd} دلار بسته و در ژورنال ذخیره شد"
+            } catch (error: Exception) {
+                _toast.value = "بستن انجام نشد: ${error.message ?: "خطا در ذخیره"}"
+            }
         }
     }
 
     fun clearJournal() {
         viewModelScope.launch {
-            container.journalStore.clear()
-            _stats.value = container.journalStore.stats()
+            try {
+                container.journalStore.clear()
+                _stats.value = container.journalStore.stats()
+                _toast.value = "ژورنال کاغذی روی دستگاه پاک شد"
+            } catch (e: Exception) {
+                _toast.value = "پاک‌کردن انجام نشد؛ فایل حفظ شد: ${e.message ?: "خطای ذخیره"}"
+            }
+        }
+    }
+
+    fun clearOpportunityHistory() {
+        viewModelScope.launch {
+            try {
+                container.opportunityStore.clear()
+                _toast.value = "فقط تاریخچهٔ کاندیداهای آموزشی پاک شد؛ آمار معامله تغییر نکرد"
+            } catch (error: Exception) {
+                _toast.value = "حذف کاندیدا انجام نشد؛ فایل قبلی حفظ شد: ${error.message ?: "خطای ذخیره"}"
+            }
         }
     }
 
@@ -172,6 +981,82 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** Automatically fetch fixed-source, read-only history without asking for a CSV URL. */
+    fun downloadFreeHistory(id: String) {
+        val choice = FreeHistoryCatalog.find(id) ?: run {
+            _freeHistory.value = FreeHistoryState.Failed("نمادِ قابل دریافت پیدا نشد")
+            return
+        }
+        if (_freeHistory.value is FreeHistoryState.Loading) return
+        _freeHistory.value = FreeHistoryState.Loading(choice.title)
+        viewModelScope.launch {
+            try {
+                _freeHistory.value = FreeHistoryState.Done(
+                    container.freeHistory.download(id, container.settingsStore.read().apiKey))
+            } catch (e: Exception) {
+                _freeHistory.value = FreeHistoryState.Failed((e.message ?: "دادهٔ منبع دریافت نشد").take(160))
+            }
+        }
+    }
+
+    fun saveFreeHistoryCsv(uri: Uri) {
+        val done = _freeHistory.value as? FreeHistoryState.Done ?: run {
+            _toast.value = "ابتدا دادهٔ واقعی را دریافت کنید"
+            return
+        }
+        viewModelScope.launch {
+            try {
+                container.exportFreeHistory(uri, done.result)
+                _toast.value = "CSV ${done.result.choice.code} از دادهٔ دریافتی در فایل انتخابی ذخیره شد"
+            } catch (e: Exception) {
+                _toast.value = "ذخیرهٔ CSV انجام نشد: ${e.message ?: "فایل مقصد نامعتبر است"}"
+            }
+        }
+    }
+
+    /** Offline historical HistData XAUUSD M1 file, NEVER a market-feed or order source. */
+    fun importHistData(uri: Uri?, balance: Double, risk: Double, spread: Double,
+                       commission: Double, threshold: Double) {
+        if (uri == null) { _learn.value = LearnState.Failed("ابتدا ZIP/CSV ماهانهٔ HistData را از گوشی انتخاب کنید"); return }
+        viewModelScope.launch {
+            _learn.value = LearnState.Loading("خواندن ZIP/CSV ماهانهٔ HistData؛ قیمت BID تاریخی با EST ثابت…")
+            try {
+                val (csv, filename) = container.metaTraderImporter.fromHistData(uri)
+                val result = container.runHistDataBacktest(csv, filename, balance,
+                    risk.coerceIn(0.1, 5.0), spread, commission, threshold)
+                _learn.value = LearnState.Done(result, Interval.M1)
+            } catch (e: Exception) {
+                _learn.value = LearnState.Failed((e.message ?: "فایل HistData قابل تحلیل نیست").take(160))
+            }
+        }
+    }
+
+    /** Imported MT history is research-only: never written to the live chart/candle cache. */
+    fun importMetaTrader(
+        uri: Uri?, link: String?, symbol: String, interval: Interval, timezone: String,
+        balance: Double, risk: Double, spread: Double, commission: Double, threshold: Double,
+    ) {
+        if (!symbol.matches(Regex("[A-Za-z0-9/_-]{3,30}"))) {
+            _learn.value = LearnState.Failed("نام نماد وارداتی معتبر نیست")
+            return
+        }
+        viewModelScope.launch {
+            _learn.value = LearnState.Loading("خواندن CSV متاتریدر برای پژوهش؛ منشأ فایل تأیید نشده است…")
+            try {
+                val csv = when {
+                    uri != null -> container.metaTraderImporter.fromFile(uri)
+                    !link.isNullOrBlank() -> container.metaTraderImporter.fromHttps(link)
+                    else -> throw IllegalArgumentException("فایل یا لینک CSV را انتخاب کنید")
+                }
+                val result = container.runImportedBacktest(csv, symbol, interval, timezone,
+                    balance, risk.coerceIn(0.1, 5.0), spread, commission, threshold)
+                _learn.value = LearnState.Done(result, interval)
+            } catch (e: Exception) {
+                _learn.value = LearnState.Failed(e.message ?: "فایل/لینک متاتریدر قابل تحلیل نیست")
+            }
+        }
+    }
+
     fun runWalkForward(
         interval: Interval,
         bars: Int,
@@ -185,8 +1070,16 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             _walkForward.value = WalkForwardState.Loading("دانلود $bars کندل واقعی ${interval.label} و تقسیم به داخل/خارج نمونه…")
             try {
                 val result = container.runWalkForward(interval, bars, balance, risk, spread, commission, threshold)
-                container.journalStore.saveReport(WalkForwardRecord.from(result))
-                _walkForward.value = WalkForwardState.Done(result, interval)
+                val saved = try {
+                    container.journalStore.saveReport(WalkForwardRecord.from(result))
+                    true
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    _toast.value = "تست انجام شد ولی گزارش در گوشی ذخیره نشد؛ فایل قبلی دست‌نخورده ماند"
+                    false
+                }
+                _walkForward.value = WalkForwardState.Done(result, interval, saved)
             } catch (e: Exception) {
                 _walkForward.value = WalkForwardState.Failed(e.message ?: "خطا در دریافت داده واقعی")
             }

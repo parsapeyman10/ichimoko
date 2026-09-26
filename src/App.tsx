@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Activity, AlertTriangle, BarChart3, Bell, BookOpen, Brain, ChevronDown, CircleDollarSign,
-  Clock3, Gauge, HelpCircle, History, Layers, LayoutDashboard, LogOut, Menu, Newspaper,
-  PanelLeftClose, Rss, Search, Settings, ShieldCheck, Signal, SlidersHorizontal, Sparkles,
+  Activity, AlertTriangle, BarChart3, Bell, BookOpen, Brain, Calculator, ChevronDown, CircleDollarSign,
+  Clock3, Flame, Gauge, HelpCircle, History, Layers, LayoutDashboard, LogOut, Menu, Newspaper,
+  Rss, Search, Settings, ShieldCheck, Signal, Sparkles,
   TrendingDown, TrendingUp, Users, WalletCards, WifiOff, X, Zap
 } from 'lucide-react';
 import TradingChart from './components/TradingChart';
@@ -10,7 +10,10 @@ import BacktestPanel from './components/BacktestPanel';
 import PredictionPanel from './components/PredictionPanel';
 import TopTradersPanel from './components/TopTradersPanel';
 import MTFPanel from './components/MTFPanel';
-import { apiGet, apiPost, toBackendCandles, type DataStatus } from './lib/api';
+import CryptoPumpScanner from './components/CryptoPumpScanner';
+import RiskPanel from './components/RiskPanel';
+import FeatureInspectorPanel from './components/FeatureInspectorPanel';
+import { apiGet, apiPost, barIsCurrent, toBackendCandles, type DataStatus } from './lib/api';
 import { useMarketFeed } from './lib/feed';
 import type { Candle } from './lib/market';
 
@@ -43,7 +46,8 @@ function Brand() {
   return <div className="brand"><div className="brand-mark"><span>A</span></div><div><b>AURUM</b><small>EDGE</small></div></div>;
 }
 
-function Sidebar({ active, setActive, open, close, feedState, keyMissing }: { active: string; setActive: (s: string) => void; open: boolean; close: () => void; feedState: string; keyMissing: boolean }) {
+function Sidebar({ active, setActive, open, close, feedState, provider }: { active: string; setActive: (s: string) => void; open: boolean; close: () => void; feedState: string; provider: string }) {
+  const providerLabel = provider === 'twelve_data' ? 'Twelve Data' : provider === 'spot_fallback' ? 'فید رایگان خودکار' : '—';
   const nav = [
     { key: 'terminal', label: 'ترمینال معاملات', sub: 'Trading terminal', icon: LayoutDashboard },
     { key: 'signals', label: 'موتور سیگنال', sub: 'Signal engine', icon: Signal },
@@ -52,45 +56,48 @@ function Sidebar({ active, setActive, open, close, feedState, keyMissing }: { ac
     { key: 'traders', label: 'اجماع سبک‌ها', sub: 'Rule ensemble', icon: Users },
     { key: 'backtest', label: 'بک‌تست دیتای واقعی', sub: 'Real-candle replay', icon: BarChart3 },
     { key: 'confluence', label: 'روش‌های مکمل', sub: 'Confluence', icon: Layers },
-    { key: 'news', label: 'هوش خبری', sub: 'News (licensed)', icon: Newspaper },
+    { key: 'pump-scanner', label: 'اسکن میم‌کوین / پامپ', sub: 'Crypto momentum scan', icon: Flame },
+    { key: 'feature-inspector', label: 'شفافیت ویژگی‌های موتور', sub: 'Feature transparency', icon: Sparkles },
+    { key: 'news', label: 'هوش خبری', sub: 'News (auto)', icon: Newspaper },
     { key: 'journal', label: 'رزومه / ژورنال', sub: 'Paper journal', icon: BookOpen },
     { key: 'risk', label: 'مدیریت سرمایه', sub: 'Risk', icon: Gauge },
+    { key: 'risk-lab', label: 'حجم پوزیشن و هزینه بروکر', sub: 'Sizing & broker cost', icon: Calculator },
   ];
   return <>
     <aside className={`sidebar ${open ? 'mobile-open' : ''}`}>
-      <div className="sidebar-head"><Brand/><button className="mobile-close" onClick={close}><X size={19}/></button></div>
+      <div className="sidebar-head"><Brand/><button type="button" className="mobile-close" onClick={close}><X size={19}/></button></div>
       <p className="nav-label">WORKSPACE · فضای کاری</p>
-      <nav>{nav.map(({ key, label, sub, icon: Icon }) => <button key={key} className={active === key ? 'active' : ''} onClick={() => { setActive(key); close(); document.getElementById(key)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}><Icon size={17}/><span><em style={{ display: 'block', fontStyle: 'normal', fontSize: '11px', fontWeight: 700, lineHeight: 1 }}>{label}</em><i style={{ display: 'block', fontStyle: 'normal', fontSize: '8px', color: '#6b7280', fontWeight: 500 }}>{sub}</i></span></button>)}</nav>
+      <nav>{nav.map(({ key, label, sub, icon: Icon }) => <button type="button" key={key} className={active === key ? 'active' : ''} onClick={() => { setActive(key); close(); document.getElementById(key)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}><Icon size={17}/><span><em style={{ display: 'block', fontStyle: 'normal', fontSize: '11px', fontWeight: 700, lineHeight: 1 }}>{label}</em><i style={{ display: 'block', fontStyle: 'normal', fontSize: '8px', color: '#6b7280', fontWeight: 500 }}>{sub}</i></span></button>)}</nav>
       <p className="nav-label account-label">ACCOUNT · حساب</p>
       <nav>
-        <button><WalletCards size={17}/><span>پورتفوی</span></button>
-        <button><Settings size={17}/><span>تنظیمات</span></button>
+        <button type="button"><WalletCards size={17}/><span>پورتفوی</span></button>
+        <button type="button"><Settings size={17}/><span>تنظیمات</span></button>
       </nav>
       <div className="system-card">
         <div>
-          <span className="system-icon">{keyMissing ? <AlertTriangle size={17}/> : feedState === 'live' ? <ShieldCheck size={17}/> : feedState === 'offline' ? <WifiOff size={17}/> : <Activity size={17}/>}</span>
-          <div><b>{keyMissing ? 'کلید داده تنظیم نشده' : feedState === 'live' ? 'فید واقعی متصل' : feedState === 'offline' ? 'فید قطع است' : 'در حال اتصال'}</b><small>بدون دیتای ساختگی</small></div>
+          <span className="system-icon">{feedState === 'offline' ? <AlertTriangle size={17}/> : feedState === 'live' ? <ShieldCheck size={17}/> : <Activity size={17}/>}</span>
+          <div><b>{feedState === 'live' ? 'فید واقعی متصل' : feedState === 'offline' ? 'فید قطع است' : feedState === 'polling' ? 'کندل REST، نه قیمت زنده' : 'در حال اتصال'}</b><small>بدون دیتای ساختگی</small></div>
         </div>
-        <div className="system-row"><span>منبع داده</span><b style={{ color: 'var(--gold)' }}>Twelve Data</b></div>
+        <div className="system-row"><span>منبع داده</span><b style={{ color: 'var(--gold)' }}>{providerLabel}</b></div>
         <div className="system-row"><span>وضعیت فید</span><b>{feedState}</b></div>
         <div className="system-row"><span>حالت</span><b style={{ color: 'var(--gold)' }}>REAL DATA ONLY</b></div>
       </div>
       <div className="user-card"><div className="avatar">PP</div><div><b>Peyman P.</b><small>حساب کوچک · Paper</small></div><ChevronDown size={15}/></div>
     </aside>
-    {open && <button aria-label="Close navigation" className="sidebar-scrim" onClick={close}/>}
+    {open && <button type="button" aria-label="Close navigation" className="sidebar-scrim" onClick={close}/>}
   </>;
 }
 
 function Header({ price, previous, menu, feedState, lastBarTime }: { price: number | null; previous: number | null; menu: () => void; feedState: string; lastBarTime: number | null }) {
   const delta = price != null && previous != null ? price - previous : null;
   return <header className="topbar">
-    <div className="mobile-brand"><button onClick={menu}><Menu size={20}/></button><Brand/></div>
+    <div className="mobile-brand"><button type="button" onClick={menu}><Menu size={20}/></button><Brand/></div>
     <div className="market-title">
       <div className="mini-gold">Au</div>
       <div><span>XAU / USD</span><small>Gold Spot · انس طلا</small></div>
       <div className="live-pill" style={feedState === 'live' ? undefined : { background: '#f1bc4b12', borderColor: '#f1bc4b30', color: 'var(--gold)' }}>
         <i style={feedState === 'live' ? undefined : { background: 'var(--gold)', boxShadow: 'none' }}/>
-        {feedState === 'live' ? 'LIVE · فید واقعی' : feedState === 'offline' ? 'OFFLINE · قطع' : feedState === 'no-key' ? 'NO KEY · بدون کلید' : 'CONNECTING'}
+        {feedState === 'live' ? 'LIVE · فید واقعی' : feedState === 'offline' ? 'OFFLINE · قطع' : feedState === 'polling' ? 'REST · کندل دوره‌ای' : 'CONNECTING'}
       </div>
       {lastBarTime && <div className="live-pill" style={{ background: '#f1bc4b12', borderColor: '#f1bc4b30', color: 'var(--gold)' }}><Zap size={11}/> آخرین کندل {new Date(lastBarTime).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}</div>}
     </div>
@@ -101,9 +108,9 @@ function Header({ price, previous, menu, feedState, lastBarTime }: { price: numb
       </span>
     </div>
     <div className="top-actions">
-      <button className="search"><Search size={16}/><span>جستجو</span><kbd>⌘ K</kbd></button>
-      <button className="round"><HelpCircle size={17}/></button>
-      <button className="round notification"><Bell size={17}/></button>
+      <button type="button" className="search"><Search size={16}/><span>جستجو</span><kbd>⌘ K</kbd></button>
+      <button type="button" className="round"><HelpCircle size={17}/></button>
+      <button type="button" className="round notification"><Bell size={17}/></button>
     </div>
   </header>;
 }
@@ -186,32 +193,65 @@ function ConfluenceCard({ signal }: { signal: LiveSignal }) {
   </section>;
 }
 
-type NewsArticle = { headline: string; source: string; published_at?: string | null; body?: string };
-type Sentiment = { direction: string; confidence: number; impact: string; rationale: string };
+type NewsAnalysis = { direction: string; confidence: number; impact: string; rationale: string };
+type NewsArticle = {
+  id: string;
+  headline: string;
+  summary: string;
+  source: string;
+  url?: string | null;
+  published_at?: string | null;
+  analysis: NewsAnalysis;
+  language: string;
+};
+type NewsSourceStatus = { name: string; feed: string; language: string; state: string; count?: number; error?: string | null };
+type NewsWebStatus = {
+  provider: string | null;
+  configured: boolean;
+  state: 'online' | 'partial' | 'unavailable';
+  last_success_at?: string | null;
+  error?: string | null;
+  cached: boolean;
+  sources: NewsSourceStatus[];
+};
+type NewsGuard = { state: 'CLEAR' | 'BLOCKED' | 'UNKNOWN'; reason: string; until?: string | null };
+type AiConfluence = {
+  status: 'AVAILABLE' | 'UNKNOWN';
+  symbol: string;
+  direction: string;
+  confidence: number;
+  impact?: string;
+  model?: string | null;
+  reason: string;
+  evidence_ids: string[];
+  checked_at: string;
+};
+type WebNewsResponse = {
+  status: NewsWebStatus;
+  articles: NewsArticle[];
+  guard: NewsGuard;
+  ai_confluence: AiConfluence;
+  checked_at: string;
+  notice?: string;
+};
 
 function NewsCard() {
-  const [articles, setArticles] = useState<NewsArticle[]>([]);
-  const [status, setStatus] = useState<{ configured: boolean; note?: string; last_error?: string | null } | null>(null);
-  const [sentiment, setSentiment] = useState<Sentiment | null>(null);
+  const [data, setData] = useState<WebNewsResponse | null>(null);
   const [error, setError] = useState<string>('');
-  const [expanded, setExpanded] = useState(0);
 
   useEffect(() => {
     let alive = true;
+    // /api/v1/news/web scrapes publishers' own public RSS feeds automatically (no manual
+    // URL/API key needed) and, only if a server-side model key is configured, adds a real
+    // model-backed AI confluence verdict. It never falls back to keyword-guessing "AI".
     const load = async () => {
-      const headlines = await apiGet<{ status: any; articles: NewsArticle[] }>('/api/v1/news/headlines');
+      const result = await apiGet<WebNewsResponse>('/api/v1/news/web');
       if (!alive) return;
-      if (headlines.ok) {
-        setArticles(headlines.data.articles ?? []);
-        setStatus(headlines.data.status);
+      if (result.ok) {
+        setData(result.data);
         setError('');
       } else {
-        setError(headlines.error);
-      }
-      if (headlines.ok && (headlines.data.articles ?? []).length) {
-        const first = headlines.data.articles[0];
-        const analysis = await apiPost<Sentiment>('/api/v1/news/analyze', { headline: first.headline, body: first.body ?? '', source: first.source });
-        if (alive && analysis.ok) setSentiment(analysis.data);
+        setError(result.error);
       }
     };
     void load();
@@ -219,53 +259,89 @@ function NewsCard() {
     return () => { alive = false; window.clearInterval(timer); };
   }, []);
 
-  const tone = sentiment?.direction === 'BUY' ? 'bullish' : sentiment?.direction === 'SELL' ? 'bearish' : 'neutral';
+  const ai = data?.ai_confluence;
+  const guard = data?.guard;
+  const articles = data?.articles ?? [];
+  const aiTone = ai?.status === 'AVAILABLE' ? (ai.direction === 'BUY' ? 'bullish' : ai.direction === 'SELL' ? 'bearish' : 'neutral') : 'neutral';
+  const guardColor = guard?.state === 'CLEAR' ? 'var(--green)' : guard?.state === 'BLOCKED' ? 'var(--red)' : '#e6a244';
+  const onlineSources = data?.status.sources.filter((s) => s.state === 'online').length ?? 0;
+  const totalSources = data?.status.sources.length ?? 0;
 
   return <section className="news-panel panel" id="news">
     <div className="panel-heading wide">
       <div>
-        <span className="eyebrow"><Rss size={12}/> LICENSED NEWS FEED · فقط منبع مجاز</span>
-        <h2>نبض بازار (بدون خبر ساختگی)</h2>
-        <small style={{ color: '#6b7280', fontSize: '8px' }}>اگر کلید خبری مجاز تنظیم نشده باشد، این بخش خالی می‌ماند — هیچ تیتری جعل نمی‌شود.</small>
+        <span className="eyebrow"><Rss size={12}/> RSS خودکار ناشران + تقویم Forex Factory · بدون تنظیم دستی</span>
+        <h2>نبض بازار (خودکار، بدون خبر ساختگی)</h2>
+        <small style={{ color: '#6b7280', fontSize: '8px' }}>
+          فقط از فید عمومی ناشران و تقویم هفتگی؛ اگر پوشش کامل نباشد وضعیت «نامشخص» اعلام می‌شود، نه خبر ساختگی.
+        </small>
       </div>
-      {sentiment && (
+      {ai && (
         <div className="sentiment-summary">
-          <span>تحلیل خبر اول</span>
-          <b style={{ color: tone === 'bullish' ? 'var(--green)' : tone === 'bearish' ? 'var(--red)' : '#e6a244' }}>
-            <TrendingUp size={15}/> {sentiment.direction} · {sentiment.confidence.toFixed(0)}%
+          <span>{ai.status === 'AVAILABLE' ? 'تحلیل هوش مصنوعی' : 'هوش مصنوعی'}</span>
+          <b style={{ color: aiTone === 'bullish' ? 'var(--green)' : aiTone === 'bearish' ? 'var(--red)' : '#e6a244' }}>
+            <TrendingUp size={15}/>
+            {ai.status === 'AVAILABLE' ? `${ai.direction} · ${ai.confidence.toFixed(0)}%` : 'غیرفعال'}
           </b>
         </div>
       )}
     </div>
 
-    {(error || (status && !status.configured)) && (
-      <div style={{ padding: '14px 16px', color: '#e6a244', fontSize: 11, lineHeight: 1.8 }}>
+    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '0 16px 10px' }}>
+      {guard && (
+        <span className="live-pill" style={{ background: 'transparent', borderColor: guardColor + '40', color: guardColor }}>
+          <AlertTriangle size={11}/> {guard.state === 'CLEAR' ? 'بدون خبر پراثر تازه' : guard.state === 'BLOCKED' ? 'توقف ورود — خبر پراثر' : 'وضعیت نامشخص'}
+        </span>
+      )}
+      {data?.status && (
+        <span className="live-pill" style={{ background: 'transparent' }}>منابع آنلاین {onlineSources}/{totalSources}</span>
+      )}
+    </div>
+
+    {(error || (guard && guard.state !== 'CLEAR')) && (
+      <div style={{ padding: '0 16px 14px', color: '#e6a244', fontSize: 11, lineHeight: 1.8 }}>
         <AlertTriangle size={14} style={{ verticalAlign: '-2px', marginLeft: 6 }}/>
-        {error || status?.note} {status?.last_error && <div style={{ color: '#7a8290', fontSize: 9, marginTop: 4 }}>آخرین خطا: {status.last_error}</div>}
+        {error || guard?.reason}
+      </div>
+    )}
+    {ai && ai.status !== 'AVAILABLE' && (
+      <div style={{ padding: '0 16px 14px', color: '#6b7280', fontSize: 10, lineHeight: 1.8 }}>
+        هوش مصنوعی: {ai.reason}
       </div>
     )}
 
     <div className="news-list">
-      {articles.slice(0, 8).map((item, index) => (
-        <article key={`${item.headline}-${index}`} className={expanded === index ? 'expanded' : ''} onClick={() => setExpanded(index)} style={{ cursor: 'pointer' }}>
-          <div className="news-time" style={{ fontFamily: 'DM Mono' }}>{item.published_at ? new Date(item.published_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '—'}</div>
-          <div className="tone-icon neutral" style={{ width: 26, height: 26 }}><Newspaper size={14}/></div>
-          <div className="news-copy">
-            <div><span className="news-tag">NEWS</span><span className="source">{item.source}</span></div>
-            <h3 style={{ whiteSpace: expanded === index ? 'normal' : 'nowrap', lineHeight: 1.4 }}>{item.headline}</h3>
-            {expanded === index && <p style={{ fontSize: '10px', lineHeight: 1.6, color: '#9aa0ad' }}>{item.body?.slice(0, 600)}</p>}
-          </div>
-        </article>
-      ))}
+      {articles.slice(0, 8).map((item) => {
+        const dir = item.analysis?.direction;
+        const tone = dir === 'BUY' ? 'bullish' : dir === 'SELL' ? 'bearish' : 'neutral';
+        return (
+          <details key={item.id} className="news-item">
+            <summary>
+              <span className="news-time" style={{ fontFamily: 'DM Mono' }}>{item.published_at ? new Date(item.published_at).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' }) : '—'}</span>
+              <span className={`tone-icon ${tone}`} style={{ width: 26, height: 26 }}><Newspaper size={14}/></span>
+              <span className="news-copy">
+                <span className="news-meta"><span className="news-tag">{item.language === 'fa' ? 'خبر' : 'NEWS'}</span><span className="source">{item.source}</span></span>
+                <span className="news-headline">{item.headline}</span>
+              </span>
+            </summary>
+            {item.summary && <p className="news-excerpt">{item.summary}</p>}
+            {item.url && (
+              <a href={item.url} target="_blank" rel="noreferrer" style={{ display: 'block', padding: '0 16px 12px', fontSize: 9, color: 'var(--gold)' }}>
+                مشاهده در منبع ↗
+              </a>
+            )}
+          </details>
+        );
+      })}
       {!articles.length && !error && (
         <div style={{ padding: 14, color: '#6b7280', fontSize: 11, lineHeight: 1.8 }}>
-          خبری از منبع مجاز دریافت نشد. برای فعال‌سازی، <code style={{ fontFamily: 'DM Mono' }}>AURUM_FMP_API_KEY</code> را در <code style={{ fontFamily: 'DM Mono' }}>backend/.env</code> بگذارید.
+          هنوز خبری از فیدهای عمومی دریافت نشده؛ اتصال سرور به ناشران در حال بررسی است.
         </div>
       )}
     </div>
 
     <div style={{ padding: '10px 14px', borderTop: '1px solid var(--line)', color: '#7a8290', fontSize: 9, lineHeight: 1.7 }}>
-      تحلیل سنتیمنت روی متن خبر واقعی اجرا می‌شود (FinBERT در صورت نصب، وگرنه قاعده‌محور). هیچ خبر یا تقویم اقتصادی‌ای از خودمان اضافه نمی‌کنیم.
+      برچسب هر خبر یک تحلیل قاعده‌محور سریع است، نه هوش مصنوعی؛ تحلیل واقعی هوش مصنوعی فقط در نشان بالای پنل (وقتی مدل و مجوز روی سرور فعال باشد) نمایش داده می‌شود. هیچ خبر یا تقویم اقتصادی‌ای از خودمان اضافه نمی‌کنیم.
     </div>
   </section>;
 }
@@ -291,10 +367,10 @@ function RiskCard({ signal, price }: { signal: LiveSignal; price: number | null 
     </div>
     <label><span>موجودی حساب (دلار)</span><div className="input-wrap"><i>$</i><input value={balance} onChange={(event) => setBalance(Number(event.target.value) || 0)} type="number"/><em>USD</em></div></label>
     <div style={{ display: 'flex', gap: 6, margin: '0 13px', flexWrap: 'wrap' }}>
-      {[100, 250, 500, 1000, 5000].map((value) => <button key={value} onClick={() => setBalance(value)} style={{ flex: 1, minWidth: 44, height: 24, border: balance === value ? '1px solid var(--gold)' : '1px solid var(--line)', background: balance === value ? '#f1bc4b18' : '#0a0c10', color: balance === value ? 'var(--gold)' : '#888', borderRadius: 4, font: '700 9px DM Mono', cursor: 'pointer' }}>${value}</button>)}
+      {[100, 250, 500, 1000, 5000].map((value) => <button type="button" key={value} onClick={() => setBalance(value)} style={{ flex: 1, minWidth: 44, height: 24, border: balance === value ? '1px solid var(--gold)' : '1px solid var(--line)', background: balance === value ? '#f1bc4b18' : '#0a0c10', color: balance === value ? 'var(--gold)' : '#888', borderRadius: 4, font: '700 9px DM Mono', cursor: 'pointer' }}>${value}</button>)}
     </div>
-    <label><span>ریسک هر معامله</span><b className="gold-text" style={{ color: riskColor }}>{risk.toFixed(2)}%</b></label>
-    <input className="range" type="range" min="0.1" max="2" step="0.1" value={risk} onChange={(event) => setRisk(Number(event.target.value))} style={{ background: `linear-gradient(90deg, ${riskColor} ${risk / 2 * 100}%, #262b33 ${risk / 2 * 100}%)` }}/>
+    <label htmlFor="risk-per-trade"><span>ریسک هر معامله</span><b className="gold-text" style={{ color: riskColor }}>{risk.toFixed(2)}%</b></label>
+    <input id="risk-per-trade" className="range" type="range" min="0.1" max="2" step="0.1" value={risk} onChange={(event) => setRisk(Number(event.target.value))} style={{ background: `linear-gradient(90deg, ${riskColor} ${risk / 2 * 100}%, #262b33 ${risk / 2 * 100}%)` }}/>
     <div className="risk-marks"><span>0.1%</span><span style={{ color: riskColor }}>{risk <= 0.5 ? 'محافظه‌کار' : risk <= 1 ? 'متعادل' : 'تهاجمی'}</span><span>2.0%</span></div>
 
     {stopDist == null ? (
@@ -308,7 +384,7 @@ function RiskCard({ signal, price }: { signal: LiveSignal; price: number | null 
           <div><span>حجم قابل اجرا</span><b>{executableOz.toFixed(2)} oz</b><small style={{ color: '#6b7280', font: '7px DM Mono' }}>ریسک واقعی ${actualRisk.toFixed(2)} ({balance ? (actualRisk / balance * 100).toFixed(2) : '0'}%)</small></div>
         </div>
         <div style={{ margin: '8px 13px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, font: '7px DM Mono' }}>
-          <div style={{ background: '#0a0e12', border: '1px solid #1a2520', borderRadius: 4, padding: '6px 7px', color: '#7a8a9a' }}>استاپ: <b style={{ color: '#fff' }}>{stopDist.toFixed(2)}$</b> ({(stopDist / entry! * 100).toFixed(3)}%)</div>
+          <div style={{ background: '#0a0e12', border: '1px solid #1a2520', borderRadius: 4, padding: '6px 7px', color: '#7a8a9a' }}>استاپ: <b style={{ color: '#fff' }}>{stopDist.toFixed(2)}$</b> ({entry != null && entry > 0 ? `${(stopDist / entry * 100).toFixed(3)}%` : '—'})</div>
           <div style={{ background: '#0a0e12', border: '1px solid #1a2520', borderRadius: 4, padding: '6px 7px', color: '#7a8a9a' }}>R:R: <b style={{ color: 'var(--green)' }}>1:{signal.risk_reward?.toFixed(2) ?? '—'}</b></div>
         </div>
         <div className="risk-note" style={{ borderColor: belowMin ? '#f1bc4b30' : '#28c99b18', background: belowMin ? '#f1bc4b0a' : '#28c99b07' }}>
@@ -346,15 +422,17 @@ type JournalEntry = {
   pnl?: number | null;
 };
 
+type JournalStats = { closed: number; open: number; win_rate: number | null };
+
 function JournalCard() {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<JournalStats | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      const result = await apiGet<{ entries: JournalEntry[]; stats: any }>('/api/v1/journal?limit=50');
+      const result = await apiGet<{ entries: JournalEntry[]; stats: JournalStats }>('/api/v1/journal?limit=50');
       if (!alive) return;
       if (result.ok) {
         setEntries(result.data.entries ?? []);
@@ -406,8 +484,9 @@ function Disclaimer() {
   return <div className="disclaimer" style={{ margin: '16px 0', padding: '12px 14px', background: '#0a0c10', border: '1px solid var(--line)', borderRadius: 8 }}>
     <b style={{ fontSize: 11, color: '#c9a86a', display: 'flex', alignItems: 'center', gap: 6 }}><History size={13}/> دیتای واقعی، بدون نسخه دمو</b>
     <p style={{ margin: '6px 0 0', fontSize: 10, color: '#8a909c', lineHeight: 1.9 }}>
-      این ترمینال هیچ کندل، قیمت، خبر یا معامله‌ای نمی‌سازد. هر عدد از Twelve Data (و در صورت تنظیم، منبع خبری مجاز) می‌آید.
-      وقتی اینترنت یا کلید داده نباشد، وضعیت «آفلاین / بدون کلید» نشان داده می‌شود و آخرین داده واقعیِ دریافت‌شده برچسب‌دار نمایش داده می‌شود —
+      این ترمینال هیچ کندل، قیمت، خبر یا معامله‌ای نمی‌سازد. هر عدد از یک منبع واقعی می‌آید: در صورت وجود کلید Twelve Data، مستقیم از آن؛
+      در غیر این صورت به‌صورت خودکار از فید رایگان و بدون کلید قیمت لحظه‌ای طلا (Swissquote/Gold-API) — و در صورت تنظیم، منبع خبری مجاز.
+      وقتی اینترنت قطع باشد یا هیچ منبعی پاسخ ندهد، وضعیت «آفلاین» نشان داده می‌شود و آخرین داده واقعیِ دریافت‌شده برچسب‌دار نمایش داده می‌شود —
       نه یک نسخه دموی ساختگی. تنها «تمرینی» که وجود دارد، یاد گرفتن از همین دیتای واقعی است: بک‌تست، walk-forward و ژورنال کاغذی.
     </p>
   </div>;
@@ -423,6 +502,8 @@ export default function App() {
 
   const { snapshot, refresh } = useMarketFeed(timeframe);
   const candles: Candle[] = snapshot.candles;
+  const activeProvider = status?.provider ?? snapshot.provider;
+  const providerName = activeProvider === 'twelve_data' ? 'Twelve Data' : activeProvider === 'spot_fallback' ? 'فید رایگان خودکار طلا (Swissquote/Gold-API)' : '—';
 
   useEffect(() => {
     let alive = true;
@@ -437,19 +518,32 @@ export default function App() {
 
   // Evaluate the real candles server-side. No client-side fallback signal exists.
   useEffect(() => {
+    if (snapshot.state !== 'live' && snapshot.state !== 'polling' ||
+        !barIsCurrent(candles[candles.length - 1], timeframe)) {
+      setSignal({ ...emptySignal, blockers: [snapshot.detail || 'دادهٔ زندهٔ تأییدشده در دسترس نیست؛ کندل‌های قدیمی فقط برای مشاهده‌اند'] });
+      setUpdatedAt(null);
+      return;
+    }
     if (candles.length < 60) {
-      setSignal({ ...emptySignal, blockers: [snapshot.detail || 'کندل واقعی کافی برای ارزیابی دریافت نشده است'] });
+      setSignal({ ...emptySignal, blockers: ['کندل واقعی کافی برای ارزیابی دریافت نشده است'] });
       setUpdatedAt(null);
       return;
     }
     let alive = true;
+    let latestRequest = 0;
     const evaluate = async () => {
+      const requestId = ++latestRequest;
+      if (!barIsCurrent(candles[candles.length - 1], timeframe)) {
+        setSignal({ ...emptySignal, blockers: ['کندل منبع قدیمی شده است؛ ارزیابی تازه انجام نشد'] });
+        setUpdatedAt(null);
+        return;
+      }
       const payload = toBackendCandles(candles.slice(-320), timeframe);
       const result = await apiPost<LiveSignal>('/api/v1/strategy/evaluate', {
         candles: payload,
         context: { spread: 0.30, typical_spread: 0.30, event_risk: false, higher_timeframe_bias: 'NEUTRAL' },
       });
-      if (!alive) return;
+      if (!alive || latestRequest !== requestId || !barIsCurrent(candles[candles.length - 1], timeframe)) return;
       if (result.ok) {
         setSignal({
           action: result.data.action,
@@ -479,16 +573,15 @@ export default function App() {
     if (snapshot.state === 'live') return 'فید زنده واقعی';
     if (snapshot.state === 'polling') return 'به‌روزرسانی دوره‌ای (REST)';
     if (snapshot.state === 'loading') return 'در حال دریافت…';
-    if (snapshot.state === 'no-key') return 'کلید داده تنظیم نشده';
     return 'آفلاین — آخرین داده واقعی کش‌شده';
   }, [snapshot.state]);
 
-  const feedTone = snapshot.state === 'live' ? 'live' : snapshot.state === 'offline' || snapshot.state === 'no-key' ? 'offline' : 'stale';
+  const feedTone: 'live' | 'offline' | 'stale' = snapshot.state === 'live' ? 'live' : snapshot.state === 'offline' ? 'offline' : 'stale';
   const previousClose = candles.length > 1 ? candles[candles.length - 2].close : null;
   const select = useCallback((key: string) => { setActive(key); document.getElementById(key)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, []);
 
   return <div className="app-shell">
-    <Sidebar active={active} setActive={setActive} open={sidebarOpen} close={() => setSidebarOpen(false)} feedState={snapshot.state} keyMissing={status ? !status.api_key_configured : false}/>
+    <Sidebar active={active} setActive={setActive} open={sidebarOpen} close={() => setSidebarOpen(false)} feedState={snapshot.state} provider={status?.provider ?? snapshot.provider}/>
     <div className="main-shell">
       <Header price={snapshot.lastPrice} previous={previousClose} menu={() => setSidebarOpen(true)} feedState={snapshot.state} lastBarTime={snapshot.lastBarTime}/>
       <main>
@@ -499,21 +592,21 @@ export default function App() {
               PRECIOUS METALS DESK · میز طلا
             </span>
             <h1>ترمینال هوشمند طلا روی دیتای واقعی</h1>
-            <small style={{ color: '#6b7280', fontSize: '10px' }}>Twelve Data · بک‌تست و walk-forward روی همان کندل‌های واقعی · بدون هیچ دیتای ساختگی</small>
+            <small style={{ color: '#6b7280', fontSize: '10px' }}>{providerName} · بک‌تست و walk-forward روی همان کندل‌های واقعی · بدون هیچ دیتای ساختگی</small>
           </div>
           <div className="intro-stats">
             <span><i className="feed-dot" style={{ background: feedTone === 'live' ? 'var(--green)' : feedTone === 'offline' ? 'var(--red)' : 'var(--gold)' }}/> {feedLabel}</span>
-            <span>{status?.provider ?? 'twelve_data'}</span>
+            <span>{providerName}</span>
             <span style={{ background: '#f1bc4b18', color: 'var(--gold)', border: '1px solid #f1bc4b30', padding: '2px 6px', borderRadius: 4, font: '700 8px DM Mono' }}>REAL DATA ONLY</span>
-            <button onClick={refresh} className="text-button" style={{ font: '700 8px DM Mono' }}>به‌روزرسانی</button>
+            <button type="button" onClick={refresh} className="text-button" style={{ font: '700 8px DM Mono' }}>به‌روزرسانی</button>
           </div>
         </div>
 
-        {(snapshot.state === 'offline' || snapshot.state === 'no-key') && (
+        {snapshot.state === 'offline' && (
           <div className="event-banner" style={{ borderColor: '#ef637130', background: '#ef63710a' }}>
             <span className="event-icon" style={{ background: '#ef637118' }}><WifiOff size={16}/></span>
             <div>
-              <b>{snapshot.state === 'no-key' ? 'کلید داده واقعی تنظیم نشده است' : 'اتصال به منبع داده قطع است'}</b>
+              <b>اتصال به منبع داده قطع است</b>
               <p style={{ margin: '3px 0 0', fontSize: 10, color: '#c9b896', lineHeight: 1.7 }}>{snapshot.detail}</p>
             </div>
             <div className="event-date">{candles.length ? `آخرین کندل: ${new Date((snapshot.lastBarTime ?? 0)).toLocaleString('fa-IR')}` : 'بدون داده'}</div>
@@ -527,7 +620,7 @@ export default function App() {
             candles={candles}
             levels={signal.action === 'NO_TRADE' ? null : { entry: signal.entry, stop_loss: signal.stop_loss, take_profit: signal.take_profit, action: signal.action }}
             feedLabel={feedLabel}
-            feedTone={feedTone as any}
+            feedTone={feedTone}
             lastBarTime={snapshot.lastBarTime}
           />
           <SignalCard signal={signal} timeframe={timeframe} updatedAt={updatedAt}/>
@@ -539,6 +632,9 @@ export default function App() {
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><MTFPanel timeframe={timeframe}/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><TopTradersPanel timeframe={timeframe}/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><BacktestPanel/></div>
+        <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><CryptoPumpScanner/></div>
+        <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><RiskPanel/></div>
+        <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><FeatureInspectorPanel timeframe={timeframe}/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><JournalCard/></div>
 
         <Disclaimer/>
@@ -549,19 +645,19 @@ export default function App() {
             <div>
               <b style={{ fontSize: 12 }}>قبل از هر چیز: اعداد واقعی را ببین</b>
               <small style={{ display: 'block', color: '#6b7280', fontSize: 10, marginTop: 2 }}>
-                ۱) کلید Twelve Data را در backend/.env بگذار · ۲) بک‌تست و walk-forward را روی دیتای واقعی اجرا کن · ۳) فقط اگر خارج از نمونه هم مثبت ماند، به Paper Trade فکر کن.
+                ۱) فید قیمت به‌صورت خودکار متصل است ({providerName}) · ۲) بک‌تست و walk-forward را روی دیتای واقعی اجرا کن · ۳) فقط اگر خارج از نمونه هم مثبت ماند، به Paper Trade فکر کن.
               </small>
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button className="text-button" onClick={() => select('backtest')} style={{ height: 34, padding: '0 14px', borderRadius: 6, border: '1px solid var(--gold)', background: 'linear-gradient(180deg, #f5ca6d, #d9a33c)', color: '#1b160c', font: '800 10px Manrope' }}><BarChart3 size={14}/> رفتن به بک‌تست واقعی</button>
-            <button className="text-button" onClick={() => select('journal')} style={{ height: 34, padding: '0 12px', borderRadius: 6, border: '1px solid var(--line)', background: '#11151b', color: '#8a909c', font: '700 10px Manrope' }}>ژورنال کاغذی</button>
+            <button type="button" className="text-button" onClick={() => select('backtest')} style={{ height: 34, padding: '0 14px', borderRadius: 6, border: '1px solid var(--gold)', background: 'linear-gradient(180deg, #f5ca6d, #d9a33c)', color: '#1b160c', font: '800 10px Manrope' }}><BarChart3 size={14}/> رفتن به بک‌تست واقعی</button>
+            <button type="button" className="text-button" onClick={() => select('journal')} style={{ height: 34, padding: '0 12px', borderRadius: 6, border: '1px solid var(--line)', background: '#11151b', color: '#8a909c', font: '700 10px Manrope' }}>ژورنال کاغذی</button>
           </div>
         </div>
 
         <footer style={{ marginTop: 14, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, color: '#5a6b65', font: '9px DM Mono' }}>
           <span>AURUM EDGE · Real-data build</span>
-          <span>Twelve Data · بدون fallback ساختگی</span>
+          <span>{providerName} · بدون fallback ساختگی</span>
         </footer>
       </main>
     </div>

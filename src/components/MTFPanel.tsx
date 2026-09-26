@@ -14,9 +14,12 @@ type MTFStatus = {
   sell_count?: number;
   neutral_count?: number;
   weights?: Record<string, number>;
-  timeframes?: Record<string, { bias?: string; detail?: string }>;
+  // Backend key is `per_tf` (see app/services/mtf_analyzer.py::mtf_confluence), not `timeframes`.
+  per_tf?: Record<string, { bias?: string; strength?: number; adx?: number; ema_dist?: number; rsi?: number; score?: number; candles?: number }>;
   advisory?: string;
-  veto?: boolean;
+  // Backend key is `is_veto`, not `veto`.
+  is_veto?: boolean;
+  veto_reasons?: string[];
   error?: string;
 };
 
@@ -43,7 +46,7 @@ export default function MTFPanel({ timeframe }: { timeframe: string }) {
   const bias = mtf?.mtf_bias ?? 'NEUTRAL';
   const isBuy = bias === 'BUY';
   const isSell = bias === 'SELL';
-  const isVeto = Boolean(mtf?.veto);
+  const isVeto = Boolean(mtf?.is_veto);
   const alignment = mtf?.alignment ?? 0;
 
   return (
@@ -92,17 +95,28 @@ export default function MTFPanel({ timeframe }: { timeframe: string }) {
             {mtf.advisory && (
               <p style={{ margin: 0, fontSize: 10, color: '#c9b896', lineHeight: 1.7 }}>{mtf.advisory}</p>
             )}
+            {isVeto && mtf.veto_reasons && mtf.veto_reasons.length > 0 && (
+              <ul style={{ margin: 0, paddingInlineStart: 16, fontSize: 10, color: '#ef6371', lineHeight: 1.7 }}>
+                {mtf.veto_reasons.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            )}
           </div>
 
-          {mtf.timeframes && (
+          {mtf.per_tf && (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 1, background: '#1a1f28' }}>
-              {Object.entries(mtf.timeframes).map(([tf, info]) => (
+              {Object.entries(mtf.per_tf).map(([tf, info]) => (
                 <div key={tf} style={{ background: '#0d1117', padding: '9px 11px' }}>
                   <span style={{ display: 'block', color: '#6b7280', font: '7px DM Mono' }}>{tf}</span>
                   <b style={{ display: 'block', marginTop: 3, color: info.bias === 'BUY' ? 'var(--green)' : info.bias === 'SELL' ? 'var(--red)' : '#c9cdd5', font: '700 11px DM Mono' }}>
                     {info.bias ?? '—'}
                   </b>
-                  <small style={{ display: 'block', color: '#6b7280', fontSize: 8, marginTop: 2 }}>{info.detail ?? ''}</small>
+                  <small style={{ display: 'block', color: '#6b7280', fontSize: 8, marginTop: 2 }}>
+                    {info.strength != null ? `قدرت ${info.strength}` : ''}
+                    {info.adx != null ? ` · ADX ${info.adx}` : ''}
+                    {info.candles != null ? ` · ${info.candles} کندل` : ''}
+                  </small>
                 </div>
               ))}
             </div>

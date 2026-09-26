@@ -1,20 +1,15 @@
 /**
- * Live market feed for the browser terminal.
- *
- * Sources, in order:
- *   1. `GET /api/v1/market/{timeframe}/candles` — real candles from the backend (Twelve Data);
- *   2. `WS  /ws/v1/market/xauusd` — real ticks pushed by the backend.
- *
- * If both fail, the hook reports `offline` and hands back the last real candles it received
- * (clearly labelled with their timestamps). It never fabricates a candle or a price.
+ * Live market feed for the browser terminal. Only backend/provider candles or ticks enter the
+ * chart. REST success is not proof of freshness; a WebSocket connection is not a price tick.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { apiGet, toChartCandles, type BackendCandle, type DataStatus } from './api';
+import { apiGet, barIsCurrent, parseSocketUpdate, toChartCandles, type BackendCandle, type ChartTimeframe, type DataStatus } from './api';
 import type { Candle } from './market';
 
-export type FeedState = 'loading' | 'live' | 'polling' | 'offline' | 'no-key';
+export type FeedState = 'loading' | 'live' | 'polling' | 'offline';
 
 export type FeedSnapshot = {
+  timeframe: ChartTimeframe;
   state: FeedState;
   detail: string;
   candles: Candle[];
@@ -25,156 +20,182 @@ export type FeedSnapshot = {
   backendReachable: boolean;
 };
 
-const POLL_MS = 20_000;
+const POLL_MS = 10_000;
+const WS_FRESH_MS = 90_000;
+const emptySnapshot = (timeframe: ChartTimeframe): FeedSnapshot => ({
+  timeframe, state: 'loading', detail: 'در حال دریافت دیتای واقعی…', candles: [],
+  lastPrice: null, lastBarTime: null, lastUpdate: null,
+  provider: 'unknown', backendReachable: false,
+});
 
-export function useMarketFeed(timeframe: '1m' | '5m' | '15m' | '1h') {
-  const [snapshot, setSnapshot] = useState<FeedSnapshot>({
-    state: 'loading',
-    detail: 'در حال دریافت دیتای واقعی…',
-    candles: [],
-    lastPrice: null,
-    lastBarTime: null,
-    lastUpdate: null,
-    provider: 'twelve_data',
-    backendReachable: false,
-  });
+export function useMarketFeed(timeframe: ChartTimeframe) {
+  const [snapshot, setSnapshot] = useState<FeedSnapshot>(() => emptySnapshot(timeframe));
   const socketRef = useRef<WebSocket | null>(null);
   const candlesRef = useRef<Candle[]>([]);
-  const timeframeRef = useRef(timeframe);
-  timeframeRef.current = timeframe;
+  const generationRef = useRef(0);
+  const requestRef = useRef(0);
+  const lastTickAtRef = useRef(0);
+  const lastWsReceivedRef = useRef(0);
 
-  const loadHistory = useCallback(async () => {
+  const loadHistory = useCallback(async (generation: number) => {
+    if (generation !== generationRef.current) return;
+    const requestId = ++requestRef.current;
     const result = await apiGet<BackendCandle[]>(`/api/v1/market/${timeframe}/candles?limit=500`);
+    if (generation !== generationRef.current || requestId !== requestRef.current) return;
+    const now = Date.now();
+    let recentWs = now - lastWsReceivedRef.current < WS_FRESH_MS;
     if (!result.ok) {
-      setSnapshot((prev) => ({
-        ...prev,
-        state: 'offline',
-        detail: result.error,
-        backendReachable: false,
-        // keep whatever real candles we already had
-        candles: candlesRef.current,
+      setSnapshot((prev) => prev.timeframe !== timeframe ? prev : ({
+        ...prev, state: recentWs ? 'live' : 'offline',
+        detail: result.error, backendReachable: result.status !== 0,
       }));
       return;
     }
-    const rows = toChartCandles(result.data);
+    let rows: Candle[];
+    try {
+      rows = toChartCandles(result.data, timeframe, now);
+    } catch (error) {
+      if (!recentWs) setSnapshot((prev) => prev.timeframe !== timeframe ? prev : ({
+        ...prev, state: 'offline', detail: error instanceof Error ? error.message : 'کندل نامعتبر', backendReachable: true,
+      }));
+      return;
+    }
+    const current = barIsCurrent(rows[rows.length - 1], timeframe, now);
+    const previous = candlesRef.current[candlesRef.current.length - 1];
+    if (previous && rows[rows.length - 1]?.time > previous.time) recentWs = false;
+    if (recentWs && !current) return; // never roll back a recent provider tick to old REST data
+    const latestStreamBar = recentWs ? candlesRef.current[candlesRef.current.length - 1] : undefined;
+    if (latestStreamBar && latestStreamBar.time >= (rows[rows.length - 1]?.time ?? 0)) {
+      rows = [...rows.filter((bar) => bar.time < latestStreamBar.time), latestStreamBar];
+    }
     candlesRef.current = rows;
-    setSnapshot((prev) => ({
+    setSnapshot((prev) => prev.timeframe !== timeframe ? prev : ({
       ...prev,
-      state: 'polling',
-      detail: '',
+      state: recentWs ? 'live' : current ? 'polling' : 'offline',
+      detail: recentWs ? prev.detail : current
+        ? 'REST: کندل تازه است؛ زمان آخرین معاملهٔ درون کندل جداگانه منتشر نشده'
+        : 'آخرین کندل منبع قدیمی است؛ دریافت موفق تاریخچه به معنی قیمت زنده نیست',
       candles: rows,
-      lastPrice: rows.length ? rows[rows.length - 1].close : null,
+      lastPrice: recentWs ? prev.lastPrice : rows[rows.length - 1]?.close ?? null,
       lastBarTime: rows.length ? rows[rows.length - 1].time * 1000 : null,
-      lastUpdate: Date.now(),
+      lastUpdate: current && !recentWs ? now : prev.lastUpdate,
       backendReachable: true,
     }));
   }, [timeframe]);
 
-  const connectSocket = useCallback(() => {
-    if (socketRef.current) return;
+  const connectSocket = useCallback((generation: number) => {
+    if (generation !== generationRef.current || socketRef.current) return;
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const socket = new WebSocket(`${protocol}://${window.location.host}/ws/v1/market/xauusd`);
     socketRef.current = socket;
-
     socket.onmessage = (event) => {
+      if (generation !== generationRef.current) return;
       try {
         const message = JSON.parse(event.data);
         if (message.type === 'feed.status') {
-          setSnapshot((prev) => ({
-            ...prev,
-            state: message.status === 'live' ? prev.state : 'offline',
-            detail: message.detail || prev.detail,
-          }));
+          if (message.status !== 'live') {
+            lastWsReceivedRef.current = 0;
+            setSnapshot((prev) => prev.timeframe !== timeframe ? prev : ({
+              ...prev, state: barIsCurrent(prev.candles[prev.candles.length - 1], timeframe) ? 'polling' : 'offline',
+              detail: typeof message.detail === 'string' ? message.detail : 'فید قطع شده است',
+            }));
+          }
           return;
         }
-        if (message.type === 'market.update') {
-          const price = message?.tick?.mid ?? (message?.tick?.bid + message?.tick?.ask) / 2;
-          if (typeof price !== 'number' || !Number.isFinite(price)) return;
-          const key = timeframeRef.current;
-          const bar = message?.candles?.[key];
-          const rows = [...candlesRef.current];
-          if (bar) {
-            const time = Math.floor(new Date(bar.timestamp).getTime() / 1000);
-            const incoming: Candle = {
-              time,
-              open: bar.open,
-              high: bar.high,
-              low: bar.low,
-              close: bar.close,
-              volume: bar.volume,
-            };
-            const last = rows[rows.length - 1];
-            if (last && last.time === time) rows[rows.length - 1] = incoming;
-            else if (!last || time > last.time) rows.push(incoming);
-            candlesRef.current = rows.slice(-800);
-          }
-          setSnapshot((prev) => ({
-            ...prev,
-            state: 'live',
-            candles: candlesRef.current,
-            lastPrice: price,
-            lastBarTime: bar ? new Date(bar.timestamp).getTime() : prev.lastBarTime,
-            lastUpdate: Date.now(),
-            backendReachable: true,
-          }));
-        }
+        const update = parseSocketUpdate(message, timeframe);
+        if (!update || update.at < lastTickAtRef.current) return;
+        lastTickAtRef.current = update.at;
+        const rows = [...candlesRef.current];
+        const last = rows[rows.length - 1];
+        if (last && last.time === update.bar.time) rows[rows.length - 1] = update.bar;
+        else if (!last || update.bar.time > last.time) rows.push(update.bar);
+        else return; // out-of-order bar must not roll the chart backwards
+        candlesRef.current = rows.slice(-800);
+        lastWsReceivedRef.current = update.streaming ? Date.now() : 0;
+        setSnapshot((prev) => prev.timeframe !== timeframe ? prev : ({
+          ...prev, state: update.streaming ? 'live' : 'polling',
+          detail: update.streaming ? '' : 'REST: تیک از کندل منبع با تأخیر دریافت شد',
+          candles: candlesRef.current, lastPrice: update.price,
+          lastBarTime: update.bar.time * 1000, lastUpdate: update.at, backendReachable: true,
+        }));
       } catch {
-        /* ignore malformed frames — never substitute data */
+        // Ignore malformed frames; never substitute fabricated bars.
       }
     };
-    socket.onerror = () => {
-      socket.close();
-    };
+    socket.onerror = () => socket.close();
     socket.onclose = () => {
+      if (generation !== generationRef.current) return;
       socketRef.current = null;
-      setSnapshot((prev) => ({
-        ...prev,
-        state: prev.candles.length ? 'offline' : prev.state,
-        detail: prev.candles.length
-          ? 'کانال زنده بسته شد — همان کندل‌های واقعیِ دریافت‌شده نمایش داده می‌شود'
-          : 'کانال زنده بسته شد و هنوز کندلی دریافت نشده است',
+      lastWsReceivedRef.current = 0;
+      setSnapshot((prev) => prev.timeframe !== timeframe ? prev : ({
+        ...prev, state: barIsCurrent(prev.candles[prev.candles.length - 1], timeframe) ? 'polling' : 'offline',
+        detail: 'کانال زنده بسته شد؛ نمایش کندل‌های واقعی با برچسب وضعیت REST/آفلاین',
       }));
-      // fall back to REST polling (still real data)
-      window.setTimeout(() => {
-        void loadHistory();
-      }, 3_000);
+      void loadHistory(generation);
+      window.setTimeout(() => connectSocket(generation), 15_000);
     };
-  }, [loadHistory]);
+  }, [timeframe, loadHistory]);
 
   useEffect(() => {
+    const generation = ++generationRef.current;
     candlesRef.current = [];
-    let cancelled = false;
-    (async () => {
+    lastTickAtRef.current = 0;
+    lastWsReceivedRef.current = 0;
+    setSnapshot(emptySnapshot(timeframe));
+    let poll: number | null = null;
+    let freshnessTimer: number | null = null;
+    void (async () => {
       const status = await apiGet<DataStatus>('/api/v1/data/status');
-      if (!cancelled && status.ok && !status.data.api_key_configured) {
-        setSnapshot((prev) => ({
-          ...prev,
-          state: 'no-key',
-          detail:
-            'کلید Twelve Data در بک‌اند تنظیم نشده است (AURUM_TWELVE_DATA_API_KEY). بدون آن هیچ داده‌ای — نه واقعی و نه ساختگی — نمایش داده نمی‌شود.',
-          backendReachable: true,
-        }));
+      if (generation !== generationRef.current) return;
+      // Without a Twelve Data key the backend automatically switches to a free, keyless,
+      // real spot-quote feed (Swissquote/Gold-API) — it is not a reason to stop. Only a
+      // genuine, complete provider outage (backend unreachable) should block the feed.
+      if (!status.ok && status.status === 0) {
+        setSnapshot({ ...emptySnapshot(timeframe), state: 'offline',
+          detail: 'اتصال به سرور برقرار نشد.', backendReachable: false });
         return;
       }
-      void loadHistory();
-      connectSocket();
+      if (status.ok) {
+        setSnapshot((prev) => prev.timeframe !== timeframe ? prev : ({ ...prev, provider: status.data.provider }));
+      }
+      void loadHistory(generation);
+      connectSocket(generation);
+      poll = window.setInterval(() => void loadHistory(generation), POLL_MS);
+      // An open socket or a pending REST request must not keep the quote "live" indefinitely.
+      freshnessTimer = window.setInterval(() => {
+        if (generation !== generationRef.current) return;
+        const now = Date.now();
+        setSnapshot((prev) => {
+          if (prev.timeframe !== timeframe) return prev;
+          if (prev.state === 'live' && (!prev.lastUpdate || now - prev.lastUpdate > WS_FRESH_MS)) {
+            lastWsReceivedRef.current = 0;
+            return { ...prev, state: 'offline', detail: 'آخرین تیک ناشر قدیمی است؛ فید زنده قابل تأیید نیست' };
+          }
+          if (prev.state === 'polling' && !barIsCurrent(prev.candles[prev.candles.length - 1], timeframe, now)) {
+            return { ...prev, state: 'offline', detail: 'آخرین کندل REST قدیمی شده است' };
+          }
+          return prev;
+        });
+      }, 5_000);
     })();
-
-    const poll = window.setInterval(() => {
-      void loadHistory();
-    }, POLL_MS);
-
     return () => {
-      cancelled = true;
-      window.clearInterval(poll);
-      socketRef.current?.close();
-      socketRef.current = null;
+      generationRef.current++;
+      requestRef.current++;
+      if (poll !== null) window.clearInterval(poll);
+      if (freshnessTimer !== null) window.clearInterval(freshnessTimer);
+      if (socketRef.current) {
+        socketRef.current.onclose = null;
+        socketRef.current.onmessage = null;
+        socketRef.current.close();
+        socketRef.current = null;
+      }
     };
   }, [timeframe, loadHistory, connectSocket]);
 
   const refresh = useCallback(() => {
-    void loadHistory();
+    void loadHistory(generationRef.current);
   }, [loadHistory]);
 
-  return { snapshot, refresh };
+  // Prevent one render of the previous timeframe's candles/signals while effects are switching.
+  return { snapshot: snapshot.timeframe === timeframe ? snapshot : emptySnapshot(timeframe), refresh };
 }

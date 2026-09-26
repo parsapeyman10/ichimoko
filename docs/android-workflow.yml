@@ -25,10 +25,6 @@ jobs:
   apk:
     name: Build APK
     runs-on: ubuntu-latest
-    env:
-      # اختیاری: یک secret با نام TD_API_KEY بساز تا APK با کلید Twelve Data ساخته شود.
-      # اگر نگذاری، اپ موقع اولین اجرا کلید را در تب «تنظیمات» می‌پرسد.
-      TD_API_KEY: ${{ secrets.TD_API_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -75,17 +71,10 @@ jobs:
             "$SDK/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0" > /dev/null 2>&1 || true
           fi
 
-      - name: Build debug + release APK
+      - name: Unit tests, then build debug + release APK
         if: steps.guard.outputs.ready == 'true'
         working-directory: android
-        run: gradle assembleDebug assembleRelease --no-daemon --stacktrace
-
-      # تست‌های JVM موتور؛ عمداً non-blocking تا نبود APK به‌خاطر یک تست از دست نرود.
-      - name: Unit tests (engine truth checks)
-        if: steps.guard.outputs.ready == 'true'
-        continue-on-error: true
-        working-directory: android
-        run: gradle testDebugUnitTest --no-daemon --stacktrace
+        run: gradle testDebugUnitTest assembleDebug assembleRelease --no-daemon --stacktrace
 
       # نام‌گذاری ساده برای دانلود راحت‌تر.
       - name: Collect APKs
@@ -120,12 +109,7 @@ jobs:
             echo ""
             echo "Release با کلید دیباگ امضا شده تا بدون keystore روی گوشی نصب شود؛ هنگام نصب اجازهٔ «نصب از منبع ناشناس» را بده."
             echo ""
-            echo "اگر مرحلهٔ تست موتور قرمز شد، APKها با این حال ساخته شده‌اند؛ لاگ تست را بفرست تا بررسی شود."
-            if [ -n "$TD_API_KEY" ]; then
-              echo ""
-              echo "کلید Twelve Data در این بیلد داخل APK قرار گرفته است (secret TD_API_KEY)."
-            else
-              echo ""
-              echo "کلید Twelve Data داخل APK نیست: اول در تب «تنظیمات» کلید را وارد کن."
-            fi
+            echo "اگر تست‌های JVM رد شوند APK ساخته نمی‌شود؛ ابتدا خطا را رفع کن."
+            echo ""
+            echo "کلید سرویس‌دهنده در APK نیست؛ در تب تنظیمات وارد کن. سفارش واقعی غیرفعال است."
           } >> "$GITHUB_STEP_SUMMARY"

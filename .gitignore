@@ -17,3 +17,9 @@ android/local.properties
 android/.idea/
 *.apk
 *.keystore
+*.jks
+*.jceks
+*.p12
+*.pfx
+# Signing material must be stored outside the repository, not merely ignored.
+android/keystores/

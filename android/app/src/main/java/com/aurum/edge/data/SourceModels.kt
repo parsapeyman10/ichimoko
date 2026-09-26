@@ -9,6 +9,9 @@ enum class SourceKind { JSON_REST, HTML_CSS, TSE_TSETMC }
 enum class ChangeMode { PERCENT, ABSOLUTE, PREV_CLOSE, NONE }
 
 @Serializable
+enum class SourceTime { NONE, UNIX_SECONDS, UTC_DATETIME }
+
+@Serializable
 data class SymbolDef(
     val code: String,
     val label: String,
@@ -35,6 +38,9 @@ data class SourceDef(
     val symbols: List<SymbolDef> = emptyList(),
     val headers: Map<String, String> = emptyMap(),
     val builtIn: Boolean = true,
+    val requiresKey: Boolean = false,
+    val timestampPath: String? = null,
+    val timestampMode: SourceTime = SourceTime.NONE,
 )
 
 @Serializable
@@ -50,6 +56,8 @@ data class Quote(
     val stale: Boolean = false,
     val spark: List<Double> = emptyList(),
     val sourceId: String,
+    /** Provider's last-trade/update time; null means freshness cannot be verified. */
+    val providerAt: Long? = null,
 )
 
 data class SourceSnapshot(
@@ -73,6 +81,6 @@ object Num {
                 else -> ch
             }
         }.joinToString("")
-        return allowed.replace(separators.replace(latin, ""), "").toDoubleOrNull()
+        return allowed.replace(separators.replace(latin, ""), "").toDoubleOrNull()?.takeIf { it.isFinite() }
     }
 }
