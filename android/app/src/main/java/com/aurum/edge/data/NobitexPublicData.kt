@@ -17,12 +17,19 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 /** Fixed allowlist, public GET endpoints only; no exchange credentials or order endpoints. */
-enum class NobitexMarket(val code: String, val statsKey: String, val destination: String,
-                         val quoteUnit: String, val supportsPractice: Boolean) {
-    BTC_USDT("BTCUSDT", "btc-usdt", "usdt", "USDT", true),
+enum class NobitexMarket(val code: String, val srcCurrency: String, val statsKey: String,
+                         val destination: String, val quoteUnit: String, val supportsPractice: Boolean) {
+    BTC_USDT("BTCUSDT", "btc", "btc-usdt", "usdt", "USDT", true),
     // Empirical live check on 2026-09-23: BTCIRT UDF close ~19.5bn vs stats ~195bn.
     // OHLC docs do not define the unit. Display raw values only; NEVER mix with RLS fills.
-    BTC_IRT("BTCIRT", "btc-rls", "rls", "ریال (فقط آمار)", false),
+    BTC_IRT("BTCIRT", "btc", "btc-rls", "rls", "ریال (فقط آمار)", false),
+    // Same USDT catalog already vetted for the read-only scanner (NobitexSpotCatalog.bases);
+    // OHLC/stats/order-book unit agreement re-checked per market by [NobitexSnapshot.practiceBlocker].
+    ETH_USDT("ETHUSDT", "eth", "eth-usdt", "usdt", "USDT", true),
+    SOL_USDT("SOLUSDT", "sol", "sol-usdt", "usdt", "USDT", true),
+    XRP_USDT("XRPUSDT", "xrp", "xrp-usdt", "usdt", "USDT", true),
+    DOGE_USDT("DOGEUSDT", "doge", "doge-usdt", "usdt", "USDT", true),
+    ADA_USDT("ADAUSDT", "ada", "ada-usdt", "usdt", "USDT", true),
 }
 
 data class NobitexQuote(
@@ -185,7 +192,7 @@ class NobitexPublicData(
         val prefix = "https://apiv2.nobitex.ir"
         val history = get("$prefix/market/udf/history?symbol=${market.code}&resolution=$resolution&to=${now / 1000}&countback=320")
         val candles = parseNobitexHistory(history, interval, clock())
-        val stats = get("$prefix/market/stats?srcCurrency=btc&dstCurrency=${market.destination}")
+        val stats = get("$prefix/market/stats?srcCurrency=${market.srcCurrency}&dstCurrency=${market.destination}")
         val statsReceivedAt = clock()
         // Book failure must not erase readable OHLC/stats, but it MUST block spot practice.
         val bookResult = runCatching {
@@ -217,7 +224,7 @@ class NobitexPublicData(
             snapshot.candles.forEach { bar ->
                 append("Nobitex,${snapshot.market.code},${snapshot.interval.label},${Instant.ofEpochMilli(bar.time)},")
                 append("${bar.open},${bar.high},${bar.low},${bar.close},${bar.volume},${bar.closed},")
-                append(if (snapshot.market == NobitexMarket.BTC_IRT) "unverified_BTCIRT_history_unit" else "USDT")
+                append(if (!snapshot.market.supportsPractice) "unverified_${snapshot.market.code}_history_unit" else snapshot.market.quoteUnit)
                 append('\n')
             }
         }

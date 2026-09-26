@@ -202,19 +202,19 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
         }
         if (nobitexTrades.isNotEmpty() || nobitexJournalError != null) {
             val snapshot = (nobitexState as? NobitexState.Done)?.snapshot
-            SectionCard("ژورنال مستقلِ تمرین نوبیتکس · BTCUSDT", "ask/bid دفتر سفارش عمومیِ زمان‌دار · سود فرضی USDT، جدا از آمار دلاری طلا") {
+            SectionCard("ژورنال مستقلِ تمرین نوبیتکس · همهٔ رمزارزها", "ask/bid دفتر سفارش عمومیِ زمان‌دار · سود فرضی USDT، جدا از آمار دلاری طلا") {
                 nobitexJournalError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red) }
                 val closedPractice = nobitexTrades.filterNot { it.isOpen }
                 Text("باز ${nobitexTrades.count { it.isOpen }} · بسته ${closedPractice.size} · سود/زیان مشاهده‌ای ${formatPrice(closedPractice.sumOf { it.pnlQuote ?: 0.0 })} USDT",
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
                 nobitexTrades.take(30).forEach { practice ->
-                    NobitexPracticeRow(practice, snapshot?.takeIf { it.market == NobitexMarket.BTC_USDT &&
+                    NobitexPracticeRow(practice, snapshot?.takeIf { it.market.code == practice.symbol &&
                         it.practiceBlocker() == null && it.quote.receivedAt > practice.openedAt &&
                         (it.book?.updatedAt ?: 0L) > practice.openedAt &&
                         (it.book?.updatedAt ?: 0L) > (practice.orderBookUpdatedAt ?: practice.openedAt) } != null,
                         onClose = { viewModel.closeNobitexPractice(practice.id) })
                 }
-                Text("SL/TP فقط با bid دفتر سفارشِ دارای timestamp جدیدتر از ورود بررسی می‌شود؛ بین دو دریافت ممکن است برخورد دیده نشود. کارمزد/لغزش در این حساب تمرینی صفر فرض شده‌اند؛ این عملکرد قابل معامله نیست. برای بستن دستی، در تب رمزارز نرخ تازه بگیر.",
+                Text("SL/TP فقط با bid دفتر سفارشِ دارای timestamp جدیدتر از ورود بررسی می‌شود؛ بین دو دریافت ممکن است برخورد دیده نشود. کارمزد/لغزش در این حساب تمرینی صفر فرض شده‌اند؛ این عملکرد قابل معامله نیست. برای بستن دستی، همان رمزارز را در تب رمزارز دوباره انتخاب و نرخ تازه بگیر.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 if (nobitexTrades.isNotEmpty()) OutlinedButton(onClick = { confirmNobitexClear = true }) {
                     Text("پاک کردن فقط تمرین‌های نوبیتکس")
@@ -264,7 +264,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
         dismissButton = { TextButton(onClick = { confirmOpportunityClear = false }) { Text("انصراف") } })
     if (confirmNobitexClear) AlertDialog(onDismissRequest = { confirmNobitexClear = false },
         title = { Text("تمرین‌های نوبیتکس حذف شوند؟") },
-        text = { Text("تمام تمرین‌های باز و بستهٔ BTCUSDT از این گوشی پاک می‌شوند؛ معاملات طلا و هشدارها دست‌نخورده باقی می‌مانند.") },
+        text = { Text("تمام تمرین‌های باز و بستهٔ هر رمزارز نوبیتکس از این گوشی پاک می‌شوند؛ معاملات طلا و هشدارها دست‌نخورده باقی می‌مانند.") },
         confirmButton = { TextButton(onClick = { viewModel.clearNobitexPractice(); confirmNobitexClear = false }) { Text("حذف تمرین‌ها") } },
         dismissButton = { TextButton(onClick = { confirmNobitexClear = false }) { Text("انصراف") } })
 }
@@ -368,7 +368,7 @@ private fun NobitexPracticeRow(trade: NobitexPracticeTrade, canClose: Boolean, o
     Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
         Text("${trade.symbol} · BUY spot فقط کاغذی · شناسهٔ ${trade.id.take(8)} · ${if (trade.isOpen) "باز" else "بسته"}",
             style = MaterialTheme.typography.bodySmall, color = AurumColors.Cyan)
-        Text("${String.format("%.6f", trade.quantityBtc)} BTC · ورود ask ${formatPrice(trade.entryAsk)} ${trade.quoteUnit} · SL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)}",
+        Text("${String.format("%.6f", trade.quantityBtc)} ${trade.symbol.removeSuffix(trade.quoteUnit)} · ورود ask ${formatPrice(trade.entryAsk)} ${trade.quoteUnit} · SL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)}",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextPrimary)
         Text("شرایط ثبت: ${trade.conditionNote} · دریافت آمار روی گوشی ${formatDateTime(trade.quoteReceivedAt)} · دفتر سفارش ${formatDateTime(trade.orderBookUpdatedAt)} · کندل بسته ${formatDateTime(trade.historyBarTime)} (${trade.historyInterval})",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)

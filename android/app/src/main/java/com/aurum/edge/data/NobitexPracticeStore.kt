@@ -50,8 +50,8 @@ object NobitexPracticeRules {
     fun preview(snapshot: NobitexSnapshot, amountUsdt: Double, stopPercent: Double,
                 targetPercent: Double, now: Long = System.currentTimeMillis()): NobitexPracticePreview {
         snapshot.practiceBlocker(now)?.let { throw IllegalArgumentException(it) }
-        require(snapshot.market == NobitexMarket.BTC_USDT && amountUsdt.isFinite() && amountUsdt in 20.0..10_000.0) {
-            "فقط BTCUSDT؛ بودجهٔ فرضی بین ۲۰ تا ۱۰٬۰۰۰ USDT باشد"
+        require(snapshot.market.supportsPractice && amountUsdt.isFinite() && amountUsdt in 20.0..10_000.0) {
+            "بودجهٔ فرضی بین ۲۰ تا ۱۰٬۰۰۰ USDT باشد"
         }
         require(stopPercent.isFinite() && targetPercent.isFinite() &&
             stopPercent in 0.5..15.0 && targetPercent in 1.0..30.0 &&
@@ -122,14 +122,14 @@ class NobitexPracticeStore(context: Context,
                      now: Long = System.currentTimeMillis()): NobitexPracticeTrade = mutex.withLock {
         check(loaded && _loadError.value == null) { "ژورنال تمرین نوبیتکس آماده نیست" }
         val book = snapshot.book ?: throw IllegalArgumentException("دفتر سفارش نوبیتکس در دسترس نیست")
-        require(snapshot.market == NobitexMarket.BTC_USDT &&
+        require(snapshot.market.supportsPractice &&
             snapshot.quote.receivedAt == expectedQuoteAt && expectedAsk.isFinite() && expectedAsk > 0 &&
             kotlin.math.abs(book.bestAsk / expectedAsk - 1.0) <= 0.001) {
             "قیمت/بازار از پیش‌نمایش تغییر کرده است"
         }
         val preview = NobitexPracticeRules.preview(snapshot, amountUsdt, stopPercent, targetPercent, now)
         require(_trades.value.none { it.isOpen && it.symbol == snapshot.market.code }) {
-            "برای BTCUSDT از قبل تمرین باز دارید"
+            "برای ${snapshot.market.code} از قبل تمرین باز دارید"
         }
         val trade = NobitexPracticeTrade(
             id = UUID.randomUUID().toString(), symbol = snapshot.market.code, quoteUnit = "USDT",

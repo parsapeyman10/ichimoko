@@ -266,22 +266,23 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshNobitexScan() = container.nobitexResearch.refreshNow()
 
-    private var lastNobitexNotifiedBarTime: Long = -1L
+    private val lastNobitexNotifiedBarTime = mutableMapOf<com.aurum.edge.data.NobitexMarket, Long>()
 
     /** On-demand alert: fires only for a NEW closed-bar signal, mirroring the gold alert's intent. */
     private fun maybeNotifyNobitexSignal(snapshot: com.aurum.edge.data.NobitexSnapshot) {
         val ctx = nobitexNotifyContext ?: return
         if (!settings.value.notifyOnSignal) return
         val signal = nobitexJournalSignal() ?: return
-        if (!signal.isActionable || signal.barTime == lastNobitexNotifiedBarTime) return
+        if (!signal.isActionable || signal.barTime == lastNobitexNotifiedBarTime[snapshot.market]) return
         val posted = runCatching {
             com.aurum.edge.notify.Notifier.notifyNobitexSignal(
-                ctx, signal.action, signal.confidence, signal.stopLoss, signal.takeProfit,
-                signal.barTime, settings.value.alertSoundUri,
+                ctx, nobitexJournalSymbol(snapshot.market), signal.action, signal.confidence,
+                signal.stopLoss, signal.takeProfit, signal.barTime, settings.value.alertSoundUri,
             )
         }.getOrDefault(false)
-        if (posted) lastNobitexNotifiedBarTime = signal.barTime
+        if (posted) lastNobitexNotifiedBarTime[snapshot.market] = signal.barTime
     }
+
 
     private var nobitexNotifyContext: Context? = null
 
@@ -334,7 +335,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun closeNobitexPractice(id: String) {
         val snapshot = (_nobitex.value as? NobitexState.Done)?.snapshot
         if (snapshot?.practiceBlocker() != null) {
-            _toast.value = "برای بستن تمرین، آمار تازهٔ BTCUSDT را دریافت کنید"
+            _toast.value = "برای بستن تمرین، آمار تازهٔ همان نماد را دریافت کنید"
             return
         }
         viewModelScope.launch {
@@ -373,14 +374,19 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     // ---- "همون متود طلا": run the SAME SignalEngine + SAME JournalStore on Nobitex candles ----
 
+    /** "BTC_USDT" -> "BTC/USDT" etc.; kept in one place so every caller tags the journal identically. */
+    fun nobitexJournalSymbol(market: com.aurum.edge.data.NobitexMarket): String =
+        "${market.srcCurrency.uppercase()}/${market.quoteUnit}"
+
     /**
      * Pure/cheap: recompute the Ichimoku+confluence signal from the latest downloaded Nobitex
-     * candles, using the exact same [SignalEngine] the gold feed uses. Returns null while there
-     * are not yet enough closed candles (the engine's own [SignalEngine.minBars] rule).
+     * candles, using the exact same [SignalEngine] the gold feed uses. Works for ANY Nobitex
+     * market that supports practice (all vetted USDT pairs, not just BTC/USDT). Returns null
+     * while there are not yet enough closed candles (the engine's own [SignalEngine.minBars] rule).
      */
     fun nobitexJournalSignal(): Signal? {
         val snapshot = (_nobitex.value as? NobitexState.Done)?.snapshot ?: return null
-        if (snapshot.market != com.aurum.edge.data.NobitexMarket.BTC_USDT) return null
+        if (!snapshot.market.supportsPractice) return null
         val closed = snapshot.candles.count { it.closed }
         if (closed < SignalEngine.minBars(snapshot.interval)) return null
         return runCatching { SignalEngine.evaluate(snapshot.candles, snapshot.interval, settings.value.minConfidence) }
@@ -390,34 +396,37 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private var nobitexJournalOpening = false
 
     /**
-     * Journals a Nobitex BTC/USDT signal into the SAME [container.journalStore] gold trades use
-     * (same risk-sizing, same settlement, same statistics), tagged symbol "BTC/USDT". This is a
-     * manual entry (like the gold manual-entry path): it does not require the Forex news gate,
-     * which is specific to USD pairs. The signal is re-verified fresh at submission time so a
-     * stale on-screen preview can never be persisted.
+     * Journals a Nobitex signal into the SAME [container.journalStore] gold trades use (same
+     * risk-sizing, same settlement, same statistics), tagged with the currently downloaded
+     * market's symbol (e.g. "ETH/USDT", "BTC/USDT" — any vetted Nobitex USDT pair, not just
+     * Bitcoin). This is a manual entry (like the gold manual-entry path): it does not require
+     * the Forex news gate, which is specific to USD pairs. The signal AND the market are
+     * re-verified fresh at submission time so a stale on-screen preview can never be persisted.
      */
-    fun openNobitexJournalTrade(expectedSignal: Signal, expectedPrice: Double) {
+    fun openNobitexJournalTrade(expectedSignal: Signal, expectedPrice: Double, expectedMarket: com.aurum.edge.data.NobitexMarket) {
         if (nobitexJournalOpening) { _toast.value = "درخواست قبلی هنوز ذخیره نشده است"; return }
         if (!expectedSignal.isActionable) { _toast.value = "سیگنال فعلی قابل معامله نیست"; return }
         nobitexJournalOpening = true
         viewModelScope.launch {
             try {
+                val current = (_nobitex.value as? NobitexState.Done)?.snapshot
+                    ?: throw IllegalArgumentException("داده نوبیتکس در دسترس نیست")
+                require(current.market == expectedMarket) { "نماد از زمان پیش‌نمایش عوض شده است؛ دوباره بررسی کنید" }
                 val fresh = nobitexJournalSignal()
-                    ?: throw IllegalArgumentException("داده تازهٔ BTCUSDT در دسترس نیست؛ دوباره دریافت کنید")
+                    ?: throw IllegalArgumentException("دادهٔ تازهٔ ${expectedMarket.code} در دسترس نیست؛ دوباره دریافت کنید")
                 require(fresh.barTime == expectedSignal.barTime && fresh.action == expectedSignal.action &&
                     kotlin.math.abs((fresh.stopLoss ?: 0.0) - (expectedSignal.stopLoss ?: 0.0)) < 1e-6 &&
                     kotlin.math.abs((fresh.takeProfit ?: 0.0) - (expectedSignal.takeProfit ?: 0.0)) < 1e-6) {
                     "سیگنال از زمان پیش‌نمایش تغییر کرده است؛ دوباره بررسی کنید"
                 }
-                val current = (_nobitex.value as? NobitexState.Done)?.snapshot
-                    ?: throw IllegalArgumentException("داده نوبیتکس در دسترس نیست")
                 val price = current.quote.latest
                 require(price.isFinite() && price > 0 && kotlin.math.abs(price / expectedPrice - 1.0) <= 0.01) {
                     "قیمت نسبت به پیش‌نمایش بیش‌ازحد تغییر کرده است"
                 }
+                val symbol = nobitexJournalSymbol(expectedMarket)
                 val s = container.settingsStore.read()
                 val trade = container.journalStore.open(
-                    signal = fresh, symbol = "BTC/USDT", price = price,
+                    signal = fresh, symbol = symbol, price = price,
                     balance = s.accountBalance, riskPercent = s.riskPercent, manual = true,
                 )
                 _stats.value = container.journalStore.stats()
@@ -431,13 +440,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** Settles any open BTC/USDT paper trades against real Nobitex closed candles — same rule gold uses. */
+    /** Settles any open paper trades of THIS market's symbol against real closed candles — same rule gold uses. */
     private fun settleNobitexJournal(snapshot: com.aurum.edge.data.NobitexSnapshot) {
-        if (snapshot.market != com.aurum.edge.data.NobitexMarket.BTC_USDT) return
+        if (!snapshot.market.supportsPractice) return
+        val symbol = nobitexJournalSymbol(snapshot.market)
         viewModelScope.launch {
             val closedBars = snapshot.candles.filter { it.closed }
             for (bar in closedBars.takeLast(50)) {
-                runCatching { container.journalStore.settle(bar, "BTC/USDT", bar.time + snapshot.interval.millis) }
+                runCatching { container.journalStore.settle(bar, symbol, bar.time + snapshot.interval.millis) }
             }
             _stats.value = container.journalStore.stats()
         }

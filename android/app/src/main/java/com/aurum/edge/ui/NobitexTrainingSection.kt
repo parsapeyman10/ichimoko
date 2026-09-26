@@ -66,10 +66,13 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
             style = MaterialTheme.typography.bodySmall, color = AurumColors.Green)
         Text("این بخش سفارش واقعی نمی‌فرستد؛ برای معاملهٔ واقعی به بخش قرمز «معاملهٔ واقعی نوبیتکس» در بالای همین صفحه بروید.",
             style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("رمزارز را انتخاب کنید (همهٔ نمادهای واقعی نوبیتکس که برای تمرین/ژورنال تأیید شده‌اند):",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             NobitexMarket.entries.forEach { choice ->
                 FilterChip(selected = market == choice, onClick = { market = choice; pending = null },
-                    label = { Text(choice.code) }, modifier = Modifier.weight(1f))
+                    label = { Text(choice.code) })
             }
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
@@ -101,7 +104,7 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
 
     current?.let { snapshot ->
         val quote = snapshot.quote
-        val unit = if (market == NobitexMarket.BTC_USDT) "USDT" else "ریال (آمار بازار)"
+        val unit = if (market.supportsPractice) market.quoteUnit else "ریال (آمار بازار)"
         SectionCard("صحه‌سنجی ${market.code}", "${snapshot.candles.size} کندل دریافتی · ${snapshot.candles.count { it.closed }} بسته · صرفاً دادهٔ مشاهده‌شده") {
             Text("قیمت اخیر ${formatPrice(quote.latest)} $unit · بهترین خرید ${formatPrice(quote.bestBuy)} · بهترین فروش ${formatPrice(quote.bestSell)}",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
@@ -113,10 +116,10 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
             } ?: Text("دفتر سفارش با timestamp معتبر در دسترس نیست (${snapshot.bookError ?: "پاسخ نامشخص"})؛ کندل/آمار فقط برای مطالعه نمایش داده شده‌اند و تمرین بسته است.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
             snapshot.lastClosed?.let { bar ->
-                Text("آخرین کندل بسته: ${formatDateTime(bar.time)} (زمان آغاز کندل) · Close خام ${formatPrice(bar.close)} ${if (market == NobitexMarket.BTC_IRT) "[واحد تاریخی نامشخص]" else "USDT"}",
+                Text("آخرین کندل بسته: ${formatDateTime(bar.time)} (زمان آغاز کندل) · Close خام ${formatPrice(bar.close)} ${if (!market.supportsPractice) "[واحد تاریخی نامشخص]" else market.quoteUnit}",
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
             }
-            if (market == NobitexMarket.BTC_IRT) {
+            if (!market.supportsPractice) {
                 Text("هشدار واحد: در بررسی زنده، OHLC بیت‌کوین ریالی تقریباً یک‌دهم stats ریالی بود. واحد قیمت تاریخی در مستند OHLC صریح نیست؛ تبدیل فرضی ۱۰× نکردیم. تمرین خرید/سود و ادغام چارت برای این جفت مسدود است.",
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.Red,
                     modifier = Modifier.padding(top = 8.dp))
@@ -136,8 +139,8 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
         }
     }
 
-    SectionCard("تمرین Spot نوبیتکس · فقط BTCUSDT", "BUY کاغذی با ask دفتر سفارش زمان‌دار، خروج فرضی با bid تازه؛ بدون شورت/سفارش واقعی") {
-        val blocker = if (current == null) "ابتدا BTCUSDT و کندل‌های معتبرِ تازه را دریافت کنید"
+    SectionCard("تمرین Spot نوبیتکس · ${market.code}", "BUY کاغذی با ask دفتر سفارش زمان‌دار، خروج فرضی با bid تازه؛ بدون شورت/سفارش واقعی؛ هر رمزارز بالا قابل انتخاب است") {
+        val blocker = if (current == null) "ابتدا ${market.code} و کندل‌های معتبرِ تازه را دریافت کنید"
             else current.practiceBlocker()
         journalError?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red) }
         if (blocker != null) Text("فعلاً تمرین متوقف: $blocker",
@@ -156,7 +159,7 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
         }
         val draft = preview?.getOrNull()
         if (draft != null) {
-            Text("حجم ${String.format("%.6f", draft.quantityBtc)} BTC · ارزش ${formatPrice(draft.notional)} USDT · ریسک تا SL ${formatPrice(draft.riskQuote)} USDT",
+            Text("حجم ${String.format("%.6f", draft.quantityBtc)} ${market.srcCurrency.uppercase()} · ارزش ${formatPrice(draft.notional)} USDT · ریسک تا SL ${formatPrice(draft.riskQuote)} USDT",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
             Text("ask دفتر سفارش ${formatPrice(draft.ask)} · SL ${formatPrice(draft.stop)} · TP ${formatPrice(draft.target)} USDT",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
@@ -164,7 +167,7 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
             Text("برگهٔ تمرین نامعتبر: ${preview?.exceptionOrNull()?.message ?: "حدود یا بودجه را بررسی کنید"}",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Red)
         }
-        val open = trades.any { it.isOpen && it.symbol == NobitexMarket.BTC_USDT.code }
+        val open = trades.any { it.isOpen && it.symbol == market.code }
         Button(onClick = {
             val s = current
             if (s != null && draft != null) pending = PracticeRequest(s.market,
@@ -172,7 +175,7 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
                 draft.ask, s.quote.receivedAt)
         }, enabled = !open && journalError == null && draft != null,
             modifier = Modifier.fillMaxWidth()) {
-            Text(if (open) "تمرین BTCUSDT باز دارید" else "بررسی و تأیید خرید کاغذی Spot")
+            Text(if (open) "تمرین ${market.code} باز دارید" else "بررسی و تأیید خرید کاغذی Spot")
         }
         Text("تمرین دستی و بدون سفارش؛ کارمزد/لغزش لحاظ نشده و گیت ۹/۹ طلا به BTC تعمیم داده نشده.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
@@ -185,7 +188,7 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
 
     pending?.let { request ->
         AlertDialog(onDismissRequest = { pending = null },
-            title = { Text("تأیید خرید فقط کاغذی BTCUSDT؟") },
+            title = { Text("تأیید خرید فقط کاغذی ${request.market.code}؟") },
             text = { Text("${formatPrice(request.amount)} USDT بودجهٔ فرضی · ورود تقریبی ask دفتر سفارش ${formatPrice(request.ask)} USDT · SL ${formatPrice(request.ask * (1 - request.stopPct / 100))} · TP ${formatPrice(request.ask * (1 + request.targetPct / 100))}.\nهیچ سفارشی به نوبیتکس ارسال نمی‌شود. قیمت هنگام ثبت دوباره چک می‌شود؛ خروج فقط با bid دفتر سفارشِ دارای زمان جدید پس از ورود است.") },
             confirmButton = { TextButton(onClick = {
                 pending = null

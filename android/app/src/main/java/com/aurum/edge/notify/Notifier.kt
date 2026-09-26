@@ -146,20 +146,21 @@ object Notifier {
     }
 
     /**
-     * Nobitex BTC/USDT confluence alert, computed by the SAME [com.aurum.edge.engine.SignalEngine]
-     * the gold feed uses, on real Nobitex candles. This is an alert only — it never claims an
-     * order or paper trade was opened; the user must still confirm in the app.
+     * Nobitex confluence alert (any vetted USDT pair, e.g. BTC/USDT, ETH/USDT, ...), computed by
+     * the SAME [com.aurum.edge.engine.SignalEngine] the gold feed uses, on real Nobitex candles.
+     * This is an alert only — it never claims an order or paper trade was opened; the user must
+     * still confirm in the app.
      */
-    fun notifyNobitexSignal(context: Context, action: SignalAction, confidence: Double,
+    fun notifyNobitexSignal(context: Context, symbol: String, action: SignalAction, confidence: Double,
                             stopLoss: Double?, takeProfit: Double?, barTime: Long, customSoundUri: String): Boolean {
         val title = when (action) {
-            SignalAction.BUY -> "سیگنال خرید BTC/USDT نوبیتکس (متود طلا)"
-            SignalAction.SELL -> "سیگنال فروش BTC/USDT نوبیتکس (متود طلا)"
+            SignalAction.BUY -> "سیگنال خرید $symbol نوبیتکس (متود طلا)"
+            SignalAction.SELL -> "سیگنال فروش $symbol نوبیتکس (متود طلا)"
             SignalAction.NO_TRADE -> return false
         }
         val text = "امتیاز همگرایی ${String.format("%.0f", confidence)} · SL ${stopLoss?.let { formatPrice(it) } ?: "—"} " +
             "· TP ${takeProfit?.let { formatPrice(it) } ?: "—"}"
-        return postVerified(context, ("nobitex_$barTime").hashCode(), title, text,
+        return postVerified(context, ("nobitex_${symbol}_$barTime").hashCode(), title, text,
             "$text\nفقط هشدار؛ نه سفارش واقعی و نه پوزیشن کاغذی. برای ثبت در ژورنال یا ارسال سفارش، اپ را باز کنید.",
             customSoundUri)
     }
