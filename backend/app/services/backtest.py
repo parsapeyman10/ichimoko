@@ -135,6 +135,11 @@ def run_backtest(
                             "oz": oz,
                             "entry_time": bar.timestamp,
                             "entry_index": i,
+                            # Kept separate from signal.stop_loss on purpose: the latter gets
+                            # trailed over time, but R-multiples (trailing thresholds, risk_usd,
+                            # r_multiple in the trade log) must stay pinned to the risk actually
+                            # taken when the position was opened.
+                            "initial_stop": float(signal.stop_loss),
                         }
                 else:
                     for blocker in signal.blockers:
@@ -147,7 +152,10 @@ def run_backtest(
             kijun = kijun_full[i] or bar.close
             atr_value = atr_full[i] or 0.0
             if use_trailing:
-                new_stop = get_trailing_stop(signal, since_entry, float(kijun), float(atr_value))
+                new_stop = get_trailing_stop(
+                    signal, since_entry, float(kijun), float(atr_value),
+                    initial_stop=position["initial_stop"],
+                )
                 if new_stop is not None:
                     signal = signal.model_copy(update={"stop_loss": new_stop})
                     position["signal"] = signal
@@ -173,7 +181,10 @@ def run_backtest(
                 oz = position["oz"]
                 fees = commission_per_oz * oz * 2.0
                 pnl = (exit_fill - position["entry"]) * direction * oz - fees
-                risk_usd = abs(position["entry"] - float(signal.stop_loss)) * oz
+                # r_multiple must reflect the risk actually taken at entry, not the (possibly
+                # trailed-in) stop at exit time — otherwise a trailed stop makes small wins look
+                # like huge R multiples.
+                risk_usd = abs(position["entry"] - position["initial_stop"]) * oz
                 balance += pnl
                 peak = max(peak, balance)
                 drawdown = (peak - balance) / peak * 100 if peak > 0 else 0.0
@@ -210,7 +221,7 @@ def run_backtest(
         oz = position["oz"]
         fees = commission_per_oz * oz * 2.0
         pnl = (exit_fill - position["entry"]) * direction * oz - fees
-        risk_usd = abs(position["entry"] - float(position["signal"].stop_loss)) * oz
+        risk_usd = abs(position["entry"] - position["initial_stop"]) * oz
         balance += pnl
         peak = max(peak, balance)
         max_drawdown = max(max_drawdown, (peak - balance) / peak * 100 if peak > 0 else 0.0)
