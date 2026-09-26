@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity, AlertTriangle, BarChart3, Bell, BookOpen, Brain, ChevronDown, CircleDollarSign,
-  Clock3, Gauge, HelpCircle, History, Layers, LayoutDashboard, LogOut, Menu, Newspaper,
+  Clock3, Flame, Gauge, HelpCircle, History, Layers, LayoutDashboard, LogOut, Menu, Newspaper,
   Rss, Search, Settings, ShieldCheck, Signal, Sparkles,
   TrendingDown, TrendingUp, Users, WalletCards, WifiOff, X, Zap
 } from 'lucide-react';
@@ -10,6 +10,7 @@ import BacktestPanel from './components/BacktestPanel';
 import PredictionPanel from './components/PredictionPanel';
 import TopTradersPanel from './components/TopTradersPanel';
 import MTFPanel from './components/MTFPanel';
+import CryptoPumpScanner from './components/CryptoPumpScanner';
 import { apiGet, apiPost, barIsCurrent, toBackendCandles, type DataStatus } from './lib/api';
 import { useMarketFeed } from './lib/feed';
 import type { Candle } from './lib/market';
@@ -53,6 +54,7 @@ function Sidebar({ active, setActive, open, close, feedState, provider }: { acti
     { key: 'traders', label: 'اجماع سبک‌ها', sub: 'Rule ensemble', icon: Users },
     { key: 'backtest', label: 'بک‌تست دیتای واقعی', sub: 'Real-candle replay', icon: BarChart3 },
     { key: 'confluence', label: 'روش‌های مکمل', sub: 'Confluence', icon: Layers },
+    { key: 'pump-scanner', label: 'اسکن میم‌کوین / پامپ', sub: 'Crypto momentum scan', icon: Flame },
     { key: 'news', label: 'هوش خبری', sub: 'News (auto)', icon: Newspaper },
     { key: 'journal', label: 'رزومه / ژورنال', sub: 'Paper journal', icon: BookOpen },
     { key: 'risk', label: 'مدیریت سرمایه', sub: 'Risk', icon: Gauge },
@@ -626,6 +628,7 @@ export default function App() {
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><MTFPanel timeframe={timeframe}/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><TopTradersPanel timeframe={timeframe}/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><BacktestPanel/></div>
+        <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><CryptoPumpScanner/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><JournalCard/></div>
 
         <Disclaimer/>

@@ -65,6 +65,9 @@ class MarketRepository(
     private val cache: CandleCache,
     private val settings: SettingsStore,
     private val journal: JournalStore,
+    // Automatic, keyless real-price fallback (Swissquote/Gold-API) used only while no Twelve
+    // Data key is configured, so the chart/signal/backtest pipeline never sits idle behind a key.
+    private val spotFallback: SpotFallbackClient = SpotFallbackClient(),
 ) {
     private val _state = MutableStateFlow(MarketState())
     val state: StateFlow<MarketState> = _state.asStateFlow()
@@ -98,9 +101,11 @@ class MarketRepository(
         // tear down a healthy socket, roll back its last tick, or duplicate REST requests.
         if (started && activeKey == current.apiKey && _state.value.symbol == current.symbol &&
             _state.value.interval == current.interval &&
-            (!current.hasKey || (MarketHours.forexWeekendClosed() &&
-                _state.value.feed.mode == FeedMode.MARKET_CLOSED) ||
-                pollJob?.isActive == true && streamJob?.isActive == true)) return
+            ((MarketHours.forexWeekendClosed() && _state.value.feed.mode == FeedMode.MARKET_CLOSED) ||
+                // With a key both REST polling and the WebSocket must be alive; the free fallback
+                // has no REST poll job, so only its tick stream needs to still be running.
+                (if (current.hasKey) pollJob?.isActive == true && streamJob?.isActive == true
+                 else streamJob?.isActive == true))) return
         stop()
         started = true
         activeKey = current.apiKey
@@ -112,19 +117,20 @@ class MarketRepository(
         }
         val closed = MarketHours.forexWeekendClosed()
         _state.value = _state.value.copy(
-            feed = FeedStatus(when { closed -> FeedMode.MARKET_CLOSED; current.hasKey -> FeedMode.CONNECTING
-                else -> FeedMode.NO_KEY },
-                when { closed -> "تعطیلی معمول پایان هفته؛ قیمت تازه دریافت نمی‌شود"
-                    current.hasKey -> "در حال دریافت…" else -> "کلید Twelve Data وارد نشده است" }),
+            feed = FeedStatus(
+                mode = if (closed) FeedMode.MARKET_CLOSED else FeedMode.CONNECTING,
+                detail = if (closed) "تعطیلی معمول پایان هفته؛ قیمت تازه دریافت نمی‌شود" else "در حال دریافت…",
+                // Without a key the free keyless fallback (Swissquote/Gold-API) drives the same
+                // real tick pipeline — the feed is never blocked on the user obtaining a key.
+                provider = if (current.hasKey) "Twelve Data" else "فید رایگان خودکار (Swissquote/Gold-API)",
+            ),
             signal = null,
             showingCachedData = closed && _state.value.candles.isNotEmpty(),
         )
         loadCacheThenRefresh(session) // cached real bars are read-only even without the key
-        if (current.hasKey) {
-            if (!closed) startStream()
-            startPolling() // timer checks local hours and does NOT request REST while closed
-            registerNetworkCallback()
-        }
+        if (!closed) startStream() // Twelve Data WS with a key, otherwise the free keyless fallback
+        if (current.hasKey) startPolling() // periodic REST refresh only exists for Twelve Data
+        registerNetworkCallback()
         startWatchdog(session) // local clock re-arms the feed at the next scheduled opening
     }
 
@@ -190,7 +196,8 @@ class MarketRepository(
             return@withLock // no REST requests on the scheduled weekend
         }
         if (!current.hasKey) {
-            _state.value = _state.value.copy(feed = FeedStatus(FeedMode.NO_KEY, "کلید Twelve Data وارد نشده است"))
+            // No REST endpoint exists for the free fallback; its tick stream alone drives the
+            // feed state, so a periodic refresh() here must not clobber a healthy LIVE status.
             return@withLock
         }
         if (!hasInternet()) {
@@ -277,34 +284,47 @@ class MarketRepository(
                 val current = settings.read()
                 if (current.workspaceId != "forex") break
                 if (MarketHours.forexWeekendClosed()) { publishClosed(); delay(60_000L); continue }
-                if (!current.hasKey) {
-                    _state.value = _state.value.copy(feed = FeedStatus(FeedMode.NO_KEY, "کلید Twelve Data وارد نشده است"))
-                    delay(10_000); continue
-                }
                 if (!hasInternet()) {
-                    publishDelayed("شبکه موقتاً در دسترس نیست؛ WebSocket بعد از بازگشت شبکه دوباره وصل می‌شود")
+                    publishDelayed(if (current.hasKey)
+                        "شبکه موقتاً در دسترس نیست؛ WebSocket بعد از بازگشت شبکه دوباره وصل می‌شود"
+                    else "شبکه موقتاً در دسترس نیست؛ فید رایگان بعد از بازگشت شبکه دوباره وصل می‌شود")
                     delay(RECONNECT_WHEN_OFFLINE_MS); continue
                 }
+                fun stillCurrent(active: com.aurum.edge.core.AppSettings): Boolean =
+                    started && generation == session && streamEpoch == epoch &&
+                        active.workspaceId == "forex" && active.symbol == current.symbol &&
+                        active.interval == current.interval
                 try {
-                    client.streamPrice(current.apiKey, current.symbol).collect { tick ->
-                        // Ignore an already queued tick when the user changed markets/intervals.
-                        val active = settings.read()
-                        if (!started || generation != session || streamEpoch != epoch ||
-                            active.workspaceId != "forex" || active.apiKey != current.apiKey || active.symbol != current.symbol ||
-                            active.interval != current.interval) return@collect
-                        backoff = 2_000L
-                        onTick(tick.price, tick.at)
+                    if (current.hasKey) {
+                        client.streamPrice(current.apiKey, current.symbol).collect { tick ->
+                            // Ignore an already queued tick when the user changed markets/intervals.
+                            val active = settings.read()
+                            if (!stillCurrent(active) || active.apiKey != current.apiKey) return@collect
+                            backoff = 2_000L
+                            onTick(tick.price, tick.at, "Twelve Data")
+                        }
+                    } else {
+                        spotFallback.streamQuotes(current.symbol).collect { tick ->
+                            val active = settings.read()
+                            if (!stillCurrent(active) || active.hasKey) return@collect
+                            backoff = 2_000L
+                            onTick(tick.price, tick.at, "فید رایگان خودکار (Swissquote/Gold-API)")
+                        }
                     }
                     if (started && generation == session && streamEpoch == epoch)
-                        publishStreamUnavailable("جریان WebSocket قطع شد — تلاش مجدد")
+                        publishStreamUnavailable(if (current.hasKey)
+                            "جریان WebSocket قطع شد — تلاش مجدد" else "جریان فید رایگان قطع شد — تلاش مجدد")
                 } catch (e: CancellationException) {
                     throw e // cancelling an old market job must not relabel the new market offline
                 } catch (e: DataFeedException) {
                     if (started && generation == session && streamEpoch == epoch)
-                        publishStreamUnavailable(e.message ?: "قطع جریان WebSocket")
+                        publishStreamUnavailable(e.message
+                            ?: (if (current.hasKey) "قطع جریان WebSocket" else "قطع جریان فید رایگان"))
                 } catch (_: Exception) {
                     if (started && generation == session && streamEpoch == epoch)
-                        publishStreamUnavailable("اتصال WebSocket قطع شد؛ اینترنت/دسترسی فید را بررسی کنید")
+                        publishStreamUnavailable(if (current.hasKey)
+                            "اتصال WebSocket قطع شد؛ اینترنت/دسترسی فید را بررسی کنید"
+                        else "اتصال فید رایگان قطع شد؛ اینترنت را بررسی کنید")
                 }
                 delay(backoff)
                 backoff = (backoff * 2).coerceAtMost(60_000L)
@@ -333,12 +353,13 @@ class MarketRepository(
                 }
                 if (_state.value.feed.mode == FeedMode.MARKET_CLOSED) {
                     _state.value = _state.value.copy(feed = FeedStatus(
-                        if (settings.read().hasKey) FeedMode.CONNECTING else FeedMode.NO_KEY,
-                        "برنامهٔ معمول بازگشایی شد؛ منتظر تیک/کندل معتبر هستیم"), signal = null)
-                    if (settings.read().hasKey) { startStream(); refreshNow() }
+                        FeedMode.CONNECTING, "برنامهٔ معمول بازگشایی شد؛ منتظر تیک/کندل معتبر هستیم",
+                        provider = if (settings.read().hasKey) "Twelve Data" else "فید رایگان خودکار (Swissquote/Gold-API)"),
+                        signal = null)
+                    startStream()
+                    if (settings.read().hasKey) refreshNow() // no REST endpoint exists for the free fallback
                     continue
                 }
-                if (!settings.read().hasKey) continue
                 val feed = _state.value.feed
                 if (feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
                     !FeedLiveness.hasRecentReceipt(feed, now)) {
@@ -397,7 +418,7 @@ class MarketRepository(
         runCatching { cm.registerDefaultNetworkCallback(callback) }.onSuccess { networkCallback = callback }
     }
 
-    private suspend fun onTick(price: Double, at: Long) {
+    private suspend fun onTick(price: Double, at: Long, provider: String = "Twelve Data") {
         val current = settings.read()
         val now = System.currentTimeMillis()
         if (MarketHours.forexWeekendClosed(now)) { publishClosed(); return }
@@ -429,7 +450,7 @@ class MarketRepository(
         lastQuietReconnect = SystemClock.elapsedRealtime()
         _state.value = _state.value.copy(
             lastPrice = price,
-            feed = FeedStatus(FeedMode.LIVE, "", System.currentTimeMillis()),
+            feed = FeedStatus(FeedMode.LIVE, "", System.currentTimeMillis(), provider = provider),
             showingCachedData = false,
         )
         publishCandles()
@@ -459,9 +480,8 @@ class MarketRepository(
         val current = _state.value
         if (current.feed.mode == FeedMode.MARKET_CLOSED) return
         _state.value = current.copy(
-            feed = FeedStatus(FeedMode.MARKET_CLOSED,
-                "تعطیلی معمول پایان هفته به وقت نیویورک؛ روزهای تعطیل دیگر/ساعت بروکر جداگانه تأیید نشده‌اند",
-                current.feed.lastSuccessAt),
+            feed = current.feed.copy(mode = FeedMode.MARKET_CLOSED,
+                detail = "تعطیلی معمول پایان هفته به وقت نیویورک؛ روزهای تعطیل دیگر/ساعت بروکر جداگانه تأیید نشده‌اند"),
             showingCachedData = current.candles.isNotEmpty(), signal = null,
         )
     }

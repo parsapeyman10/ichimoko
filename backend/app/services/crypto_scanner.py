@@ -186,6 +186,17 @@ def confirm_spot(coin: dict, exchange_info: dict, ticker: dict, book: dict, klin
     if not (1.8 <= ratio <= 8 and recent >= 1_500_000 and .54 <= buy_ratio <= .78 and
             1 <= change_3h <= 8 and abs(closes[-1] / price - 1) <= .03):
         return None
+    # Reference levels only — both come straight from the real, just-fetched Binance book/klines.
+    # Never a signal or an order-entry recommendation; the note field says so explicitly too.
+    recent_low_3h = min(_number(row[3]) for row in closed[-3:])
+    reasons = [
+        f"حجم معاملهٔ ۳ ساعت اخیر {ratio:.1f} برابر میانگین ۹ ساعت قبل از آن (آستانه ۱٫۸ تا ۸ برابر)",
+        f"سهم خرید تیکر (taker buy) در ۳ ساعت اخیر {buy_ratio * 100:.1f}٪ (آستانه ۵۴٪ تا ۷۸٪)",
+        f"رشد قیمت ۳ ساعت اخیر {change_3h:.1f}٪ روی کندل‌های بستهٔ واقعی بایننس",
+        f"تغییر ۱ساعته/۲۴ساعته/۷روزه CoinGecko: {_number(coin['price_change_percentage_1h_in_currency']):.1f}٪ / "
+        f"{_number(coin['price_change_percentage_24h_in_currency']):.1f}٪ / {_number(coin['price_change_percentage_7d_in_currency']):.1f}٪",
+        f"اسپرد دفتر سفارش لحظه‌ای فقط {spread:.2f}٪ و نقدشوندگی ۲۴ساعتهٔ بایننس {volume / 1_000_000:.1f} میلیون USDT",
+    ]
     return {
         "id": coin["id"], "name": str(coin.get("name", code))[:80], "symbol": symbol,
         "price_usd": price, "market_cap_usd": _number(coin["market_cap"]),
@@ -196,6 +207,10 @@ def confirm_spot(coin: dict, exchange_info: dict, ticker: dict, book: dict, klin
         "change_3h_pct": round(change_3h, 2), "volume_ratio_3h": round(ratio, 2),
         "taker_buy_ratio_3h": round(buy_ratio, 3), "spread_pct": round(spread, 3),
         "supply_ratio": round(_number(coin["circulating_supply"]) / _number(coin["max_supply"]), 3),
+        "bid_price": bid, "ask_price": ask,
+        "entry_reference_price": ask,  # real, live Binance best-ask — a reference, not an order
+        "stop_reference_price": round(recent_low_3h, 8),  # real low of the last 3 closed 1h candles
+        "reasons": reasons,
         "coingecko_at": coin["last_updated"],
         "coingecko_pair_at": pair["timestamp"],
         "binance_at": datetime.fromtimestamp(float(ticker["closeTime"]) / 1000, timezone.utc).isoformat(),
@@ -312,5 +327,6 @@ class CryptoScanner:
                 "preselected": self._preselected if self._online else 0,
                 "filters": FILTERS,
                 "candidates": self._candidates if self._online else [],
-                "note": "صرفاً غربالگری داده‌های تاریخیِ لحظه‌ای؛ پامپ قطعی، احتمال سود یا سیگنال سفارش نیست. دادهٔ ناقص نتیجهٔ خالی معتبر نیست. معاملهٔ شورت Spot در این صفحه وجود ندارد.",
+                "note": "صرفاً غربالگری داده‌های تاریخیِ لحظه‌ای؛ پامپ قطعی، احتمال سود یا سیگنال سفارش نیست. دادهٔ ناقص نتیجهٔ خالی معتبر نیست. معاملهٔ شورت Spot در این صفحه وجود ندارد. "
+                "«reasons»، «entry_reference_price» و «stop_reference_price» هرکدام مستقیماً از دادهٔ واقعی لحظه‌ای/کندل بستهٔ بایننس محاسبه شده‌اند و صرفاً سطوح مرجع‌اند، نه توصیهٔ معاملاتی یا تضمین سود.",
             }

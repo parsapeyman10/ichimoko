@@ -20,7 +20,7 @@ export type FeedSnapshot = {
   backendReachable: boolean;
 };
 
-const POLL_MS = 20_000;
+const POLL_MS = 10_000;
 const WS_FRESH_MS = 90_000;
 const emptySnapshot = (timeframe: ChartTimeframe): FeedSnapshot => ({
   timeframe, state: 'loading', detail: 'در حال دریافت دیتای واقعی…', candles: [],

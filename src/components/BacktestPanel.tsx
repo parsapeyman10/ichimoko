@@ -149,6 +149,7 @@ export default function BacktestPanel() {
   const [bars, setBars] = useState(1500);
   const [balance, setBalance] = useState(100);
   const [risk, setRisk] = useState(0.5);
+  const [useFuturesProxy, setUseFuturesProxy] = useState(false);
   const [state, setState] = useState<{ running: boolean; error?: string; data?: BacktestResult }>({ running: false });
 
   const run = async () => {
@@ -160,6 +161,7 @@ export default function BacktestPanel() {
       risk_percent: String(risk),
       spread: '0.30',
       commission_per_oz: '0.05',
+      source: useFuturesProxy ? 'futures_proxy' : 'auto',
     });
     const result = await apiGet<BacktestResult>(`/api/v1/backtest/run?${query.toString()}`);
     if (!result.ok) return setState({ running: false, error: result.error });
@@ -170,7 +172,7 @@ export default function BacktestPanel() {
   useEffect(() => {
     void run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [useFuturesProxy]);
 
   const data = state.data;
   const positive = (data?.total_pnl ?? 0) >= 0;
@@ -214,7 +216,21 @@ export default function BacktestPanel() {
         <button type="button" className="primary-button" onClick={run} disabled={state.running} style={{ height: 30, padding: '0 14px', display: 'flex', alignItems: 'center', gap: 6, font: '700 9px Manrope', opacity: state.running ? 0.6 : 1 }}>
           <Play size={12}/> {state.running ? 'در حال دریافت کندل واقعی…' : 'اجرای بک‌تست'}
         </button>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, font: '8px DM Mono', color: '#6b7280', cursor: 'pointer' }}>
+          <input type="checkbox" checked={useFuturesProxy} onChange={(event) => setUseFuturesProxy(event.target.checked)} />
+          تاریخچهٔ عمیق فیوچرز کوموکس (GC=F) به‌جای اسپات
+        </label>
       </div>
+
+      {useFuturesProxy && (
+        <div style={{ padding: '8px 14px', color: '#e6a244', fontSize: 9.5, display: 'flex', gap: 8, alignItems: 'flex-start', borderBottom: '1px solid var(--line)', background: '#e6a24410' }}>
+          <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }}/>
+          <span>
+            این نتایج روی <b>فیوچرز طلای کوموکس (GC=F)</b> اجرا شده، نه اسپات XAU/USD — این دو نماد واقعی و متفاوت‌اند و معمولاً چند تا چند ده دلار «بیسیس» با هم فاصله دارند.
+            هدف این حالت فقط اعتبارسنجی سریع قواعد استراتژی روی تاریخچهٔ عمیق و واقعی است، تا فید اسپات رایگان تاریخچهٔ کافی خودش را جمع کند؛ برای تصمیم معاملاتی نهایی به بک‌تست روی دیتای اسپات (حالت پیش‌فرض) تکیه کنید.
+          </span>
+        </div>
+      )}
 
       {state.error && (
         <div style={{ padding: '14px 16px', color: '#e6a244', fontSize: 11, display: 'flex', gap: 8, alignItems: 'flex-start' }}>

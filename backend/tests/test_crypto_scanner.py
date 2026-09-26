@@ -199,3 +199,20 @@ class FixedDatetime(datetime):
     @classmethod
     def now(cls, tz=None):
         return NOW
+
+
+def test_confirmed_candidate_carries_real_reasons_and_reference_levels_not_a_recommendation():
+    info, ticker, book, bars = venue()
+    pair = coin_pair()
+    result = confirm_spot(coin(), info, ticker, book, bars, NOW, pair)
+    assert result is not None
+    assert result["entry_reference_price"] == float(book["askPrice"])
+    # stop reference is the real low of the last 3 *closed* 1h candles (index -2 is the last closed one).
+    closed_lows = [float(row[3]) for row in bars[-4:-1]]
+    assert result["stop_reference_price"] == round(min(closed_lows), 8)
+    assert isinstance(result["reasons"], list) and len(result["reasons"]) >= 3
+    assert all(isinstance(reason, str) and reason for reason in result["reasons"])
+    # Every reason must be traceable to a real numeric field already on the candidate — never a
+    # vague or invented claim.
+    joined = " ".join(result["reasons"])
+    assert "حجم" in joined and "۳ ساعت" in joined

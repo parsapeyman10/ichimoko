@@ -181,7 +181,7 @@ async def run_news_pipeline() -> None:
             raise
         except Exception as exc:
             hub.publish({"type": "news.status", "status": "degraded", "detail": type(exc).__name__})
-        await asyncio.sleep(60)
+        await asyncio.sleep(30)
 
 
 @asynccontextmanager
@@ -446,16 +446,35 @@ async def _backtest_payload(
     broker_name: str | None,
     min_position_oz: float,
     use_trailing: bool,
+    source: str = "auto",
 ) -> dict:
     tf = Timeframe(timeframe) if timeframe in {t.value for t in Timeframe} else Timeframe.M5
     if broker_name:
         broker: BrokerConfig = get_broker(broker_name)
         spread = broker.spread_gold
         commission_per_oz = broker.commission_per_oz or commission_per_oz
-    try:
-        candles = await load_history(settings, tf, output_size=bars)
-    except DataUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if source == "futures_proxy":
+        # Explicit opt-in: real, deep COMEX gold futures (GC=F) history to validate the rule
+        # engine immediately. Never silently mixed with XAU/USD spot — always labeled distinctly.
+        import httpx
+
+        from app.services.futures_history import fetch_futures_history
+
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                candles = await fetch_futures_history(client, tf, limit=bars)
+        except DataUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        data_source_label = (
+            "gc_futures_proxy — کندل‌های واقعی فیوچرز طلای کوموکس (GC=F)، نه اسپات XAU/USD؛ "
+            "فقط برای اعتبارسنجی قواعد روی تاریخچهٔ عمیق تا زمانی‌که فید اسپات تاریخچهٔ کافی جمع کند"
+        )
+    else:
+        try:
+            candles = await load_history(settings, tf, output_size=bars)
+        except DataUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        data_source_label = market_provider_label()
     result = run_backtest(
         candles,
         initial_balance=max(10.0, min(initial_balance, 100000.0)),
@@ -464,7 +483,7 @@ async def _backtest_payload(
         commission_per_oz=commission_per_oz,
         min_position_oz=min_position_oz,
         use_trailing=use_trailing,
-        data_source=market_provider_label(),
+        data_source=data_source_label,
     )
     if broker_name:
         result["broker"] = get_broker(broker_name).model_dump()
@@ -482,10 +501,11 @@ async def backtest_run_get(
     min_position_oz: float = 1.0,
     broker_name: str | None = None,
     use_trailing: bool = True,
+    source: str = Query("auto", pattern="^(auto|futures_proxy)$"),
 ):
-    """Replay the live strategy over real candles pulled from Twelve Data."""
+    """Replay the live strategy over real candles (auto spot/Twelve Data, or opt-in GC=F futures)."""
     return await _backtest_payload(
-        timeframe, bars, initial_balance, risk_percent, spread, commission_per_oz, broker_name, min_position_oz, use_trailing
+        timeframe, bars, initial_balance, risk_percent, spread, commission_per_oz, broker_name, min_position_oz, use_trailing, source
     )
 
 
@@ -500,9 +520,10 @@ async def backtest_run_post(
     min_position_oz: float = 1.0,
     broker_name: str | None = None,
     use_trailing: bool = True,
+    source: str = Query("auto", pattern="^(auto|futures_proxy)$"),
 ):
     return await _backtest_payload(
-        timeframe, bars, initial_balance, risk_percent, spread, commission_per_oz, broker_name, min_position_oz, use_trailing
+        timeframe, bars, initial_balance, risk_percent, spread, commission_per_oz, broker_name, min_position_oz, use_trailing, source
     )
 
 
