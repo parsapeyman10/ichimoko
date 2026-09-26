@@ -8,7 +8,7 @@ plugins {
 }
 
 if (System.getenv("GITHUB_ACTIONS") == "true") {
-    println("::warning::aurum trace 3/4 · root build script evaluated (gradle " + gradle.gradleVersion + ")")
+    println("::notice::aurum trace 3/4 · root build script evaluated (gradle " + gradle.gradleVersion + ")")
 }
 
 // ---------------------------------------------------------------------------------------

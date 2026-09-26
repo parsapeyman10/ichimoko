@@ -11,7 +11,7 @@ plugins {
 }
 
 if (System.getenv("GITHUB_ACTIONS") == "true") {
-    println("::warning::aurum trace 4/4 · app build script evaluated")
+    println("::notice::aurum trace 4/4 · app build script evaluated")
 }
 
 // Never bake provider credentials into an APK (even a GitHub Actions secret is extractable).

@@ -34,7 +34,7 @@ System.clearProperty("aurum.failedTask")
 val aurumTrace = System.getenv("GITHUB_ACTIONS") == "true" && System.getenv("AURUM_DIAGNOSE") != "1"
 
 if (aurumTrace) {
-    println("::warning::aurum trace 1/4 · settings evaluated (gradle " + gradle.gradleVersion +
+    println("::notice::aurum trace 1/4 · settings evaluated (gradle " + gradle.gradleVersion +
         ", jvm " + System.getProperty("java.version") + ", sdk " + System.getenv("ANDROID_HOME") + ")")
 }
 
@@ -64,5 +64,5 @@ if (aurumTrace) {
             }
         }
     })
-    println("::warning::aurum trace 2/4 · diagnostics listener attached")
+    println("::notice::aurum trace 2/4 · diagnostics listener attached")
 }
