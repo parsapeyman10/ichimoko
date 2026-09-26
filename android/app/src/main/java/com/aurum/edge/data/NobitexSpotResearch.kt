@@ -10,7 +10,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-/** One shared read-only scan for the screen and opt-in locked-screen research service. */
+/** One shared read-only scan for the chooser, screen and opt-in locked-screen research service. */
 sealed interface NobitexScanState {
     data object Idle : NobitexScanState
     data object Loading : NobitexScanState
@@ -18,18 +18,16 @@ sealed interface NobitexScanState {
     data class Failed(val message: String) : NobitexScanState
 }
 
-class NobitexSpotResearch(private val scanner: NobitexSpotScanner, private val settings: SettingsStore,
-                          private val scope: CoroutineScope) {
+class NobitexSpotResearch(private val scanner: NobitexSpotScanner, private val scope: CoroutineScope) {
     private val mutex = Mutex()
     private var lastAttempt = 0L
     private val _state = MutableStateFlow<NobitexScanState>(NobitexScanState.Idle)
     val state: StateFlow<NobitexScanState> = _state.asStateFlow()
 
-    fun clear() { _state.value = NobitexScanState.Idle }
     fun refreshNow() { scope.launch { refresh() } }
 
-    private suspend fun refresh() = mutex.withLock {
-        if (settings.read().workspaceId != "nobitex") return@withLock
+    /** Safe before selecting a workspace: a public GET only; no orders, alerts or paper practice. */
+    internal suspend fun refresh() = mutex.withLock {
         val elapsed = SystemClock.elapsedRealtime()
         if (lastAttempt != 0L && elapsed - lastAttempt in 0L until 60_000L) {
             if (_state.value == NobitexScanState.Idle) _state.value = NobitexScanState.Failed(
@@ -41,6 +39,6 @@ class NobitexSpotResearch(private val scanner: NobitexSpotScanner, private val s
         val next = try { NobitexScanState.Done(scanner.scan()) }
             catch (e: CancellationException) { throw e }
             catch (e: Exception) { NobitexScanState.Failed((e.message ?: "آمار عمومی نوبیتکس در دسترس نیست").take(130)) }
-        if (settings.read().workspaceId == "nobitex") _state.value = next
+        _state.value = next
     }
 }

@@ -69,7 +69,7 @@ class PublicCryptoMarket(private val scope: CoroutineScope) {
     val state: StateFlow<PublicCryptoState> = _state.asStateFlow()
 
     fun refreshNow() { scope.launch { refresh() } }
-    private suspend fun refresh() = mutex.withLock {
+    internal suspend fun refresh() = mutex.withLock {
         val elapsed = SystemClock.elapsedRealtime()
         if (attemptedAt != 0L && elapsed - attemptedAt in 0L until 180_000L) {
             // A just-opened screen and the foreground service may request the same snapshot.

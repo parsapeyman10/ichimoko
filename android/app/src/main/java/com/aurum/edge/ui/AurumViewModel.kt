@@ -94,8 +94,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val news = container.news.state
     val publicWebNews = container.publicWebNews.state // Forex publisher snippets, not ninth-confluence evidence
     val cryptoWebNews = container.cryptoWebNews.state // CoinDesk global context; not official Nobitex notices
-    val iranWebNews = container.iranWebNews.state // general economy headlines, not authenticated Codal filings
+    val iranWebNews = container.iranWebNews.state // SENA/other publishers, not authenticated Codal filings
     val forexCalendar = container.forexCalendar.state
+    val forexPreview = container.forexPreview.state // one XAU REST observation; never the trade engine
+    val nobitexNotices = container.nobitexNotices.state // official public HTML, not a documented API
     val crypto = container.crypto.state
     val publicCrypto = container.publicCrypto.state
     val equities = container.equities.state
@@ -179,11 +181,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** No implicit cross-market startup: only the explicitly selected Forex space starts XAU/USD. */
+    /** Only the chosen Forex space starts the signal feed; overview GETs stay read-only. */
     fun enterWorkspace(context: Context, workspace: Workspace): Boolean {
         if (!container.settingsStore.selectWorkspace(workspace.id)) return false
-        if (workspace != Workspace.IRAN_STOCKS) container.equities.clear()
-        if (workspace != Workspace.NOBITEX) container.nobitexResearch.clear()
         if (workspace == Workspace.FOREX) {
             container.market.start()
             container.watch.loadCached()
@@ -209,7 +209,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         if (!container.settingsStore.selectWorkspace("")) return false
         SignalMonitorService.stop(context)
         container.market.stop()
-        container.equities.clear()
+        // Keep bounded, read-only overview observations; their timestamps expire on screen.
         return true
     }
 
@@ -237,7 +237,16 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshEquities() = container.equities.refreshNow()
 
-    fun saveStockDataKey(key: String): Boolean = container.settingsStore.saveStockDataKey(key)
+    fun refreshOverview() = container.overview.refreshNow()
+
+    fun refreshNobitexNotices() = container.nobitexNotices.refreshNow()
+
+    fun saveStockDataKey(key: String): Boolean {
+        val previous = settings.value.stockDataKey
+        val saved = container.settingsStore.saveStockDataKey(key)
+        if (saved && key.trim() != previous) container.equities.clear()
+        return saved
+    }
 
     fun clearStockDataKey(): Boolean {
         val removed = container.settingsStore.clearStockDataKey()

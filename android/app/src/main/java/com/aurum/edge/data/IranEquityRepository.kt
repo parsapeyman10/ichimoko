@@ -1,6 +1,7 @@
 package com.aurum.edge.data
 
 import android.os.SystemClock
+import com.aurum.edge.core.MarketHours
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,9 +32,12 @@ data class EquityBoardState(
 }
 
 /** Third-party read-only BrsApi mirror of TSETMC. No broker authentication and no orders. */
-class IranEquityRepository(private val settings: SettingsStore, private val scope: CoroutineScope) {
-    private val http = OkHttpClient.Builder().followRedirects(false)
-        .callTimeout(35, TimeUnit.SECONDS).build()
+class IranEquityRepository(private val settings: SettingsStore, private val scope: CoroutineScope,
+    private val http: OkHttpClient = OkHttpClient.Builder().followRedirects(false)
+        .callTimeout(35, TimeUnit.SECONDS).build(),
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val elapsed: () -> Long = SystemClock::elapsedRealtime,
+) {
     private val json = Json { ignoreUnknownKeys = true }
     private val mutex = Mutex()
     private var attemptedAt = 0L
@@ -43,20 +47,24 @@ class IranEquityRepository(private val settings: SettingsStore, private val scop
     fun clear() { _state.value = EquityBoardState() }
     fun refreshNow() { scope.launch { refresh() } }
 
-    private suspend fun refresh() = mutex.withLock {
-        val configured = settings.read()
-        val key = configured.stockDataKey
-        if (configured.workspaceId != "iran_stocks" || !key.matches(Regex("[A-Za-z0-9_-]{10,80}"))) {
+    /** Fixed public board snapshot; never broker access or a trade signal. Independent of the selected space. */
+    internal suspend fun refresh() = mutex.withLock {
+        val key = settings.read().stockDataKey
+        if (!MarketHours.iranStockSessionScheduled(clock())) {
+            _state.value = EquityBoardState(error = "بورس خارج ساعت معمول است؛ تابلو بررسی نشد")
+            return@withLock
+        }
+        if (!key.matches(Regex("[A-Za-z0-9_-]{10,80}"))) {
             _state.value = EquityBoardState(error = if (key.isBlank()) null else "کلید دادهٔ خواندنی نامعتبر است")
             return@withLock
         }
-        val elapsed = SystemClock.elapsedRealtime()
-        if (attemptedAt != 0L && elapsed - attemptedAt in 0L until 180_000L) {
-            if (!_state.value.recentReceipt()) _state.value = EquityBoardState(EquityBoardStatus.UNAVAILABLE,
+        val tick = elapsed()
+        if (attemptedAt != 0L && tick - attemptedAt in 0L until 180_000L) {
+            if (!_state.value.recentReceipt(clock())) _state.value = EquityBoardState(EquityBoardStatus.UNAVAILABLE,
                 error = "برای رعایت سهمیه، سه دقیقه بین دریافت‌ها صبر کنید؛ مشاهدهٔ پیشین برای غربال تازه معتبر نیست")
             return@withLock
         }
-        attemptedAt = elapsed
+        attemptedAt = tick
         _state.value = EquityBoardState(EquityBoardStatus.LOADING) // never pass old rows off as a fresh scan
         try {
             val data = withContext(Dispatchers.IO) {
@@ -78,13 +86,15 @@ class IranEquityRepository(private val settings: SettingsStore, private val scop
                     parseEquityRows(root)
                 }
             }
-            if (settings.read().let { it.workspaceId == "iran_stocks" && it.stockDataKey == key }) {
-                _state.value = EquityBoardState(EquityBoardStatus.OBSERVED, data, System.currentTimeMillis())
+            if (settings.read().stockDataKey == key && MarketHours.iranStockSessionScheduled(clock())) {
+                _state.value = EquityBoardState(EquityBoardStatus.OBSERVED, data, clock())
             } else _state.value = EquityBoardState()
         } catch (e: Exception) {
+            if (settings.read().stockDataKey != key) { _state.value = EquityBoardState(); return@withLock }
             _state.value = EquityBoardState(EquityBoardStatus.UNAVAILABLE,
-                error = when (e) {
-                    is IllegalArgumentException -> e.message?.take(120)
+                error = when {
+                    e.message?.startsWith("پاسخ سرویس تابلو نامعتبر است (HTTP ") == true ->
+                        "دسترسی تابلو رد شد؛ کلید/سهمیهٔ BrsApi را بررسی کنید"
                     else -> "دریافت یا ساختار تابلو نامعتبر است؛ هیچ ردیفی برای غربال فعال نگه نداشتیم"
                 })
             // Never log/echo the request URL: provider keys are sent as query parameters.

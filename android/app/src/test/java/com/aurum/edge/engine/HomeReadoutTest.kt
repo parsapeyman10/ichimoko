@@ -92,6 +92,6 @@ class HomeReadoutTest {
         assertTrue(WatchCatalog.forWorkspace(Workspace.IRAN_STOCKS.id).isNotEmpty())
         assertTrue(WatchCatalog.forWorkspace(Workspace.IRAN_STOCKS.id).all { it.id.endsWith("/IRT") })
         assertTrue(WatchCatalog.forWorkspace(Workspace.NOBITEX.id).isEmpty())
-        assertTrue(WatchCatalog.forWorkspace("").isEmpty()) // no selection -> no background fetch
+        assertTrue(WatchCatalog.forWorkspace("").isEmpty()) // no trading watch; chooser read-only feeds are separate
     }
 }

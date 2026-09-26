@@ -76,7 +76,7 @@ class ForexCalendarRepository(private val scope: CoroutineScope) {
 
     fun refreshNow() { scope.launch { refresh() } }
 
-    private suspend fun refresh() = mutex.withLock {
+    internal suspend fun refresh() = mutex.withLock {
         val elapsed = SystemClock.elapsedRealtime()
         val now = System.currentTimeMillis()
         val nearbyRelease = _state.value.events.any { it.country == "USD" && it.impact == "High" &&

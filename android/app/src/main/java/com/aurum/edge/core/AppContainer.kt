@@ -8,6 +8,7 @@ import com.aurum.edge.data.DataFeedException
 import com.aurum.edge.data.FreeHistoryDownloader
 import com.aurum.edge.data.FreeHistoryResult
 import com.aurum.edge.data.ForexCalendarRepository
+import com.aurum.edge.data.ForexPreviewRepository
 import com.aurum.edge.data.HistDataCsv
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.IranEquityRepository
@@ -21,6 +22,7 @@ import com.aurum.edge.data.PublicCryptoMarket
 import com.aurum.edge.data.PublicNewsCategory
 import com.aurum.edge.data.PublicNewsFeeds
 import com.aurum.edge.data.NobitexPublicData
+import com.aurum.edge.data.NobitexAnnouncementsRepository
 import com.aurum.edge.data.NobitexSpotScanner
 import com.aurum.edge.data.NobitexSpotResearch
 import com.aurum.edge.data.NobitexPracticeStore
@@ -64,7 +66,9 @@ class AppContainer(context: Context) {
     val market = MarketRepository(appContext, client, candleCache, settingsStore, journalStore)
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    val nobitexResearch = NobitexSpotResearch(nobitexSpotScanner, settingsStore, appScope)
+    val nobitexResearch = NobitexSpotResearch(nobitexSpotScanner, appScope)
+    val nobitexNotices = NobitexAnnouncementsRepository(appScope)
+    val forexPreview = ForexPreviewRepository(settingsStore, client, appScope)
     val watchSettings = WatchSettingsStore(appContext)
     val quoteHistory = QuoteHistoryStore(appContext)
     val watch = WatchRepository(SourceFetcher(), quoteHistory, watchSettings, settingsStore, appScope)
@@ -92,6 +96,19 @@ class AppContainer(context: Context) {
     val crypto = CryptoRepository(settingsStore, appScope)
     val publicCrypto = PublicCryptoMarket(appScope) // keyless market overview, NOT the server's two-source screener
     val equities = IranEquityRepository(settingsStore, appScope)
+    // Starts on foreground launch/resume only. Every action is GET-only, isolated from
+    // MarketRepository, the optional monitor, journals and the automatic paper trader.
+    val overview = WorkspaceOverviewCoordinator(appScope, mapOf<OverviewCheck, suspend () -> Unit>(
+        OverviewCheck.FOREX_CALENDAR to { forexCalendar.refresh() },
+        OverviewCheck.FOREX_PUBLISHERS to { publicWebNews.refresh() },
+        OverviewCheck.FOREX_SAMPLE to { forexPreview.refresh() },
+        OverviewCheck.CRYPTO_PRICES to { publicCrypto.refresh() },
+        OverviewCheck.CRYPTO_PUBLISHERS to { cryptoWebNews.refresh() },
+        OverviewCheck.NOBITEX_STATS to { nobitexResearch.refresh() },
+        OverviewCheck.NOBITEX_NOTICES to { nobitexNotices.refresh() },
+        OverviewCheck.IRAN_PUBLISHERS to { iranWebNews.refresh() },
+        OverviewCheck.IRAN_BOARD to { equities.refresh() },
+    ))
     val freeHistory = FreeHistoryDownloader()
     val metaTraderImporter = MetaTraderImporter(appContext)
 

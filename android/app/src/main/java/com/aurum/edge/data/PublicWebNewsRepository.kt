@@ -43,6 +43,9 @@ data class PublicFeed(
 object PublicNewsFeeds {
     // Fixed, publicly advertised publisher feeds. Never accept arbitrary RSS URLs or credentials.
     val all = listOf(
+        // The publisher lists this بورس/فرابورس RSS at https://www.sena.ir/rss-help.
+        // SENA is a market news agency, NOT an official Codal disclosure feed.
+        PublicFeed("sena_exchange", "سنا · بورس و فرابورس", "https://www.sena.ir/rss/tp/5", "fa", PublicNewsCategory.IRAN, 48),
         PublicFeed("irib", "خبرگزاری صدا و سیما · اقتصاد", "https://www.irib-news.ir/fa/rss/6", "fa", PublicNewsCategory.IRAN, 48),
         PublicFeed("yjc", "باشگاه خبرنگاران جوان · اقتصاد", "https://www.yjc.ir/fa/rss/6", "fa", PublicNewsCategory.IRAN, 48),
         PublicFeed("eghtesaad24", "اقتصاد۲۴ · ارز", "https://eghtesaad24.ir/fa/rss/12", "fa", PublicNewsCategory.IRAN, 72),

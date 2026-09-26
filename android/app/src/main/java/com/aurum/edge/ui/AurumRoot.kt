@@ -43,6 +43,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -63,6 +64,7 @@ import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
+import kotlinx.coroutines.delay
 
 enum class AurumTab(val label: String, val icon: ImageVector) {
     Home("خانه", Icons.Filled.Home),
@@ -139,14 +141,18 @@ fun AurumRoot(viewModel: AurumViewModel) {
             viewModel.consumeToast()
         }
     }
+    // Even BEFORE a workspace is chosen, read-only checks for all four spaces start concurrently.
+    // The single foreground coordinator throttles the initial effect + ON_START/resume.
+    LaunchedEffect(Unit) { viewModel.refreshOverview() }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
         if (workspace == Workspace.FOREX) viewModel.pauseInvisibleForexFeed()
     }
     LifecycleEventEffect(Lifecycle.Event.ON_START) {
+        viewModel.refreshOverview()
         if (workspace == Workspace.FOREX) viewModel.resumeVisibleForexFeed()
     }
     if (workspace == null) {
-        WorkspaceChooser(selectionError) { selected ->
+        WorkspaceChooser(viewModel, selectionError) { selected ->
             if (viewModel.enterWorkspace(context, selected)) {
                 selectionError = false
                 activatedHere = true
@@ -240,33 +246,34 @@ fun AurumRoot(viewModel: AurumViewModel) {
 }
 
 @Composable
-private fun WorkspaceChooser(error: Boolean, onChoose: (Workspace) -> Unit) {
+private fun WorkspaceChooser(viewModel: AurumViewModel, error: Boolean, onChoose: (Workspace) -> Unit) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { delay(30_000L); now = System.currentTimeMillis() } }
     Column(Modifier.fillMaxSize().background(AurumColors.Bg).verticalScroll(rememberScrollState())
         .padding(vertical = 18.dp)) {
         Text("AURUM / EDGE", style = MaterialTheme.typography.labelLarge, color = AurumColors.Gold,
             modifier = Modifier.padding(horizontal = 20.dp))
-        Text("انتخاب فضای کار", style = MaterialTheme.typography.headlineMedium, color = AurumColors.TextPrimary,
+        Text("چهار فضای مستقل", style = MaterialTheme.typography.headlineMedium, color = AurumColors.TextPrimary,
             modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 6.dp, bottom = 8.dp))
-        Text("پیش از نمایش بازار، یکی از چهار فضای مستقل را انتخاب کنید. این مرحله ورود به حساب صرافی یا کارگزاری نیست.",
-            style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
-        if (error) Text("تغییر فضا روی دستگاه ذخیره نشد؛ برای جلوگیری از پایش هم‌زمان، دوباره تلاش کنید.",
+        SectionCard("بررسی هم‌زمان آغازین", "فقط دادهٔ عمومی/خواندنی هر فضا · بدون انتخاب حساب یا روشن‌کردن پایش") {
+            Text("قیمت/خبر هر فضا از منبع خودش می‌آید؛ زمان دریافت گوشی با زمان معامله فرق دارد. خطا، کلید لازم و تعطیلی به‌جای عدد ساختگی نشان داده می‌شوند.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            Button(onClick = viewModel::refreshOverview, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                Text("بررسی دوبارهٔ چهار فضا")
+            }
+        }
+        if (error) Text("تغییر فضا روی دستگاه ذخیره نشد؛ پایش/ورود فعال نشد. دوباره تلاش کنید.",
             style = MaterialTheme.typography.bodySmall, color = AurumColors.Red,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
         Workspace.entries.forEach { space ->
             SectionCard(space.label, space.sources) {
-                Text(when (space) {
-                    Workspace.FOREX -> "چارت و پژوهش طلا، تقویم خبر و ژورنال کاغذی مخصوص فارکس."
-                    Workspace.CRYPTO -> "رصد جهانی و خبر رمزارز؛ نه قیمت ریالی یا ژورنال فارکس."
-                    Workspace.NOBITEX -> "بازار USDT و ریال جدا؛ تمرین اسپات در ژورنال مستقل، بدون کلید معاملاتی."
-                    Workspace.IRAN_STOCKS -> "تابلوخوانی و غربال عددی بورس؛ TTM کدال و مسیر رسمی آساتریدر."
-                }, style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+                WorkspaceOverviewPanel(viewModel, space, now)
                 Button(onClick = { onChoose(space) }, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
                     Text("ورود به ${space.label}")
                 }
             }
         }
-        Text("تغییر فضا پایش خودکار کاغذی فارکس را خاموش می‌کند. هیچ سفارشی به بروکر ارسال نمی‌شود.",
+        Text("بررسی آغازین معامله یا اعلان خودکار نیست. انتخاب فضا برای جزئیات و فعال‌سازی اختیاری پایش پس‌زمینه لازم است؛ سفارش واقعی غیرفعال است.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp))
     }

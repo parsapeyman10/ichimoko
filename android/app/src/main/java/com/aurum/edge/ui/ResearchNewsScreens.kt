@@ -21,6 +21,9 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.data.HeadlineImpactResearch
+import com.aurum.edge.data.NOBITEX_NOTICES_URL
+import com.aurum.edge.data.NobitexNoticesState
+import com.aurum.edge.data.NoticesStatus
 import com.aurum.edge.data.PublicWebNewsState
 import com.aurum.edge.data.ResearchSpace
 import com.aurum.edge.data.ResearchState
@@ -33,25 +36,32 @@ import kotlinx.coroutines.delay
 @Composable
 fun NobitexNewsScreen(viewModel: AurumViewModel) {
     val news by viewModel.cryptoWebNews.collectAsStateWithLifecycle()
+    val notices by viewModel.nobitexNotices.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) {
+        viewModel.refreshNobitexNotices()
+        while (true) { delay(15 * 60_000L); viewModel.refreshNobitexNotices() }
+    }
     ResearchNewsScreen(news, ResearchSpace.NOBITEX, viewModel::refreshCryptoWebNews,
         "زمینهٔ جهانی رمزارز", "CoinDesk · نه اطلاعیهٔ رسمی نوبیتکس، نه خبر اختصاصی جفت ریالی/USDT",
-        "اطلاعیه‌ها و وضعیت خدمات نوبیتکس فقط در سایت رسمی خود صرافی قابل بررسی‌اند؛ این صفحه خوراک رسمی اطلاعیهٔ نوبیتکس ندارد.",
-        "اطلاعیه‌های رسمی نوبیتکس", "https://nobitex.ir/announcement/")
+        "اطلاعیه‌های صرافی از صفحهٔ رسمیِ عمومی جداگانه خوانده می‌شوند؛ CoinDesk هیچ رویداد محلی را تأیید نمی‌کند.",
+        "صفحهٔ رسمی اطلاعیه‌ها", NOBITEX_NOTICES_URL,
+        extra = { OfficialNobitexNotices(notices, viewModel::refreshNobitexNotices) })
 }
 
 @Composable
 fun IranNewsScreen(viewModel: AurumViewModel) {
     val news by viewModel.iranWebNews.collectAsStateWithLifecycle()
     ResearchNewsScreen(news, ResearchSpace.IRAN_STOCKS, viewModel::refreshIranWebNews,
-        "خبرهای عمومی اقتصاد ایران", "RSS ناشران عمومی · نه گزارش کدال/تابلوی آگاه",
-        "تیتر اقتصاد جای صورت مالی نماد نیست؛ TTM و CAN SLIM فقط با اسناد هم‌دورهٔ کدال و تاریخ معتبر بررسی می‌شوند.",
+        "خبر بورس ایران", "RSS سنا · بورس/فرابورس + ناشران اقتصاد؛ نه گزارش خودکار کدال",
+        "خبر سنا و اقتصاد جای صورت مالی نماد نیست؛ TTM و CAN SLIM فقط با اسناد هم‌دورهٔ کدال و تاریخ معتبر بررسی می‌شوند.",
         "جست‌وجوی گزارش‌های کدال", "https://www.codal.ir/Search.aspx")
 }
 
 @Composable
 private fun ResearchNewsScreen(state: PublicWebNewsState, space: ResearchSpace, refresh: () -> Unit,
                                heading: String, description: String, warning: String,
-                               officialLabel: String, officialUrl: String) {
+                               officialLabel: String, officialUrl: String,
+                               extra: @Composable (() -> Unit)? = null) {
     val browser = LocalUriHandler.current
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(space) {
@@ -73,6 +83,7 @@ private fun ResearchNewsScreen(state: PublicWebNewsState, space: ResearchSpace, 
                 modifier = Modifier.fillMaxWidth().padding(top = 7.dp)) { Text("تازه‌سازی خبر") }
             OutlinedButton(onClick = { runCatching { browser.openUri(officialUrl) } }) { Text("$officialLabel ↗") }
         }
+        extra?.invoke()
         val visible = state.headlines.filter { now - it.publishedAt in -15 * 60_000L..(72 * 3_600_000L) }.take(14)
         if (visible.isEmpty()) SectionCard("خبر قابل نمایش نیست", "خوراک ممکن است قطع یا بی‌خبر باشد") {
             Text("تیتر ساختگی یا تحلیل جهت‌دار جایگزین دادهٔ ناشر نمی‌شود.",
@@ -92,6 +103,33 @@ private fun ResearchNewsScreen(state: PublicWebNewsState, space: ResearchSpace, 
                     InlinePersianTranslation(it)
                 }
             }
+        }
+    }
+}
+
+/** HTML page is NOT a supported RSS/API; date labels are not converted to "just published". */
+@Composable
+private fun OfficialNobitexNotices(state: NobitexNoticesState, refresh: () -> Unit) {
+    val browser = LocalUriHandler.current
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { delay(30_000L); now = System.currentTimeMillis() } }
+    SectionCard("اطلاعیه‌های نوبیتکس", "عنوان‌ها از صفحهٔ رسمی عمومی، نه CoinDesk یا یک API/RSS مستند") {
+        Text(when {
+            state.status == NoticesStatus.LOADING -> "در حال خواندن صفحهٔ رسمی؛ نتیجهٔ قبلی فعال نیست."
+            state.recentReceipt(now) -> "${state.items.size} عنوان · دریافت روی گوشی ${formatDateTime(state.receivedAt)}؛ تاریخ درج‌شده را در اصل اطلاعیه تأیید کنید."
+            state.status == NoticesStatus.IDLE -> "هنوز بررسی نشده است."
+            else -> "صفحه/قالب HTML در دسترس نیست یا دریافت کهنه است؛ ${state.error ?: "وضعیت نامشخص"}"
+        }, style = MaterialTheme.typography.bodySmall,
+            color = if (state.recentReceipt(now)) AurumColors.Cyan else AurumColors.Gold)
+        Text("این صفحهٔ HTML ممکن است تغییر کند؛ عنوان/تاریخ به معنی هشدار فوری، توقف جفت، مجوز معامله یا تحلیل AI نیست.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        Button(onClick = refresh, enabled = state.status != NoticesStatus.LOADING,
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text("بررسی اطلاعیه‌های رسمی") }
+        if (state.recentReceipt(now)) state.items.take(6).forEach { item ->
+            Text("${item.title} · تاریخ درج‌شده ${item.dateLabel ?: "نامشخص"}",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary,
+                modifier = Modifier.padding(top = 8.dp))
+            OutlinedButton(onClick = { runCatching { browser.openUri(item.url) } }) { Text("اصل اطلاعیه ↗") }
         }
     }
 }
