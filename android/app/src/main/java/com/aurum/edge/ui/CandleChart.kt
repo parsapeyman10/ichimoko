@@ -32,6 +32,7 @@ import com.aurum.edge.core.Interval
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.engine.Ichimoku
+import com.aurum.edge.engine.IctRangeAnalyzer
 import com.aurum.edge.engine.Indicators
 import com.aurum.edge.engine.SignalEngine
 import com.aurum.edge.ui.components.formatPrice
@@ -53,6 +54,7 @@ fun CandleChart(
     candles: List<Candle>,
     interval: Interval,
     signal: Signal?,
+    structure: IctRangeAnalyzer.Snapshot? = null,
     modifier: Modifier = Modifier,
     showIchimoku: Boolean = true,
     showLevels: Boolean = true,
@@ -253,6 +255,34 @@ fun CandleChart(
                 drawSeries(ema200, AurumColors.TextSecondary, 2.0f)
             }
 
+            // ── confirmed range and *approximate* ICT zones ──────────────
+            // Start at confirmation, never paint a level back into bars before it existed.
+            val currentStructure = structure?.takeIf {
+                it.barTime == candles.lastOrNull { bar -> bar.closed }?.time
+            }
+            val confirmedRange = currentStructure?.range
+            val rangeStart = confirmedRange?.let { level ->
+                candles.indexOfFirst { it.time >= level.confirmedAt }
+            } ?: -1
+            val activeSetup = currentStructure?.let { snapshot ->
+                listOf(snapshot.buy, snapshot.sell).filter { it.sweepAt != null }
+                    .maxByOrNull { it.sweepAt!! }
+            }
+            fun zoneOverlay(zone: IctRangeAnalyzer.Zone?, colour: Color) {
+                if (zone == null || rangeStart < 0) return
+                val start = candles.indexOfFirst { it.time >= zone.at }
+                if (start < 0 || start > lastVisible) return
+                val top = yOf(zone.high).coerceAtLeast(8f)
+                val bottom = yOf(zone.low).coerceAtMost(plotBottom)
+                val x = xOf(max(firstVisible, start)).coerceAtLeast(0f)
+                if (bottom > top && x < plotWidth) {
+                    drawRect(colour.copy(alpha = 0.17f), Offset(x, top),
+                        Size(plotWidth - x, bottom - top))
+                }
+            }
+            zoneOverlay(activeSetup?.orderBlock, AurumColors.Purple)
+            zoneOverlay(activeSetup?.fvg, AurumColors.Cyan)
+
             // ── candles ───────────────────────────────────────────────────
             val candleWidth = (plotWidth / visibleCount) * 0.62f
             for (i in max(0, firstVisible)..min(lastIndex, lastVisible)) {
@@ -270,6 +300,24 @@ fun CandleChart(
                 )
             }
 
+            // S/R is not a trade or an entry line. Show it only since its second
+            // separated touch was confirmed, and only when its price is on screen.
+            if (rangeStart >= 0 && rangeStart <= lastVisible && confirmedRange != null) {
+                fun boundary(price: Double, colour: Color, label: String) {
+                    val y = yOf(price)
+                    if (y !in 8f..plotBottom) return
+                    val from = xOf(max(firstVisible, rangeStart)).coerceAtLeast(0f)
+                    if (from >= plotWidth) return
+                    drawLine(colour.copy(alpha = 0.86f), Offset(from, y), Offset(plotWidth, y),
+                        strokeWidth = 2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 5f), 0f))
+                    val paint = Paint(axisPaint).apply { color = colour.toArgbSafe() }
+                    drawContext.canvas.nativeCanvas.drawText("$label ${formatPrice(price)}",
+                        (from + 6f).coerceAtMost((plotWidth - 110f).coerceAtLeast(0f)), y - 7f, paint)
+                }
+                boundary(confirmedRange.support, AurumColors.Green, "S")
+                boundary(confirmedRange.resistance, AurumColors.Red, "R")
+            }
+
             // ── signal levels ─────────────────────────────────────────────
             if (showLevels && signal != null && signal.isActionable) {
                 val dash = PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f)
@@ -280,9 +328,10 @@ fun CandleChart(
                     val labelPaint = Paint(axisPaint).apply { this.color = color.toArgbSafe() }
                     drawContext.canvas.nativeCanvas.drawText("$label ${formatPrice(price)}", 6f, y - 6f, labelPaint)
                 }
-                levelLine(signal.entry, AurumColors.Gold, "ورود")
-                levelLine(signal.stopLoss, AurumColors.Red, "SL")
-                levelLine(signal.takeProfit, AurumColors.Green, "TP")
+                // These are a SIGNAL PLAN, not an executed paper/broker transaction.
+                levelLine(signal.entry, AurumColors.Gold, "طرح ورود")
+                levelLine(signal.stopLoss, AurumColors.Red, "طرح SL")
+                levelLine(signal.takeProfit, AurumColors.Green, "طرح TP")
             }
 
             // ── time axis ─────────────────────────────────────────────────

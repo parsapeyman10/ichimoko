@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
@@ -32,19 +33,28 @@ async def twelve_data_ticks(settings: Settings) -> AsyncIterator[Tick]:
         await socket.send(json.dumps({"action": "subscribe", "params": {"symbols": settings.market_symbol}}))
         async for raw in socket:
             message = json.loads(raw)
+            if not isinstance(message, dict):
+                continue
             event = message.get("event")
             if event == "heartbeat":
                 await socket.send(json.dumps({"action": "heartbeat"}))
                 continue
             if event in ("error", "disconnect"):
-                raise DataUnavailable(message.get("message", "WebSocket provider error"))
-            if event != "price":
+                # Provider text can echo the URL/query (including the API key).
+                raise DataUnavailable("اتصال Twelve Data قطع یا توسط سرویس‌دهنده رد شد")
+            if event != "price" or not isinstance(message.get("symbol"), str) or \
+                    message["symbol"].casefold() != settings.market_symbol.casefold():
                 continue
-            price = float(message["price"])
-            timestamp = datetime.fromtimestamp(
-                float(message.get("timestamp") or datetime.now(timezone.utc).timestamp()),
-                timezone.utc,
-            )
+            try:
+                price = float(message["price"])
+                seconds = float(message["timestamp"])  # never invent the missing event time
+                if not math.isfinite(price) or price <= 0 or not math.isfinite(seconds) or seconds <= 0:
+                    continue
+                timestamp = datetime.fromtimestamp(seconds, timezone.utc)
+            except (KeyError, TypeError, ValueError, OverflowError, OSError):
+                continue
+            if not -30 <= (datetime.now(timezone.utc) - timestamp).total_seconds() <= 90:
+                continue
             # The price endpoint publishes a single mid price: bid == ask, and no spread is invented.
             yield Tick(
                 symbol=settings.market_symbol,
@@ -61,6 +71,10 @@ async def twelve_data_poll_ticks(settings: Settings) -> AsyncIterator[Tick]:
     while True:
         candles = await load_history(settings, Timeframe.M1, output_size=10, use_cache=False)
         latest = candles[-1]
+        age = (datetime.now(timezone.utc) - latest.timestamp).total_seconds()
+        if latest.symbol.casefold() != settings.market_symbol.casefold() or latest.timeframe != Timeframe.M1 or \
+                not 0 <= age <= 90:
+            raise DataUnavailable("آخرین کندل REST قدیمی/نامعتبر است؛ قیمت زنده‌ای منتشر نشد")
         if latest.timestamp != last_closed:
             last_closed = latest.timestamp
             yield Tick(

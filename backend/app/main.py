@@ -34,9 +34,13 @@ from app.services.backtest import run_backtest, stress_test_from_trades
 from app.services.broker import BROKERS, RECOMMENDED, get_broker
 from app.services.candle_builder import CandleBuilder
 from app.services.forward_test import run_forward_test
+from app.services.execution_gate import OrderIntent, preflight as order_preflight, status as execution_status
 from app.services.history import DataUnavailable, load_history
 from app.services.market_feed import market_ticks
 from app.services.news_feed import NewsAggregator
+from app.services.persian_news import PersianNewsFeed
+from app.services.web_news import WebNewsFeed
+from app.services.crypto_scanner import CryptoScanner
 from app.services.sentiment import SentimentEngine
 from app.services.strategy import evaluate_scalp, explain_profitability
 from app.services.ytd_trades import get_ytd_report
@@ -79,10 +83,24 @@ class MarketHub:
         self.feed_status.update({"state": state, "detail": detail})
         self.publish({"type": "feed.status", "status": state, "detail": detail})
 
+    def public_feed_status(self, now: datetime | None = None) -> dict[str, Any]:
+        """A socket that remains open without quotes is NOT evidence of a live market."""
+        result = self.feed_status.copy()
+        last_tick = result.get("last_tick_at")
+        clock = now or datetime.now(timezone.utc)
+        if result["state"] in ("live", "polling") and (
+                not isinstance(last_tick, datetime) or last_tick.tzinfo is None or
+                not 0 <= (clock - last_tick).total_seconds() <= 90):
+            result.update(state="stale", detail="آخرین تیک منبع قدیمی است؛ فید قابل اتکا نیست")
+        return result
+
 
 hub = MarketHub()
 sentiment = SentimentEngine(settings)
 news_aggregator = NewsAggregator(settings)
+persian_news = PersianNewsFeed(settings)
+web_news = WebNewsFeed(settings)
+crypto_scanner = CryptoScanner(settings)
 
 
 async def run_market_pipeline() -> None:
@@ -97,9 +115,13 @@ async def run_market_pipeline() -> None:
         try:
             hub.set_status("connecting", "اتصال به Twelve Data…")
             async for tick in market_ticks(settings):
+                source_state = "live" if tick.provider == "twelve_data:ws" else "polling"
+                source_detail = None if source_state == "live" else "تیک از کندل REST ناشر؛ قیمت درون کندل زنده نیست"
+                if hub.feed_status["state"] != source_state:
+                    hub.set_status(source_state, source_detail)
                 hub.last_tick = tick.model_dump(mode="json")
                 hub.feed_status.update(
-                    {"state": "live", "detail": None, "last_tick_at": datetime.now(timezone.utc)}
+                    {"state": source_state, "detail": source_detail, "last_tick_at": datetime.now(timezone.utc)}
                 )
                 active_bars: dict[str, dict] = {}
                 for timeframe, builder in builders.items():
@@ -119,7 +141,8 @@ async def run_market_pipeline() -> None:
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60)
         except Exception as exc:
-            hub.set_status("error", f"{type(exc).__name__}: {exc}")
+            # A network error string may contain the request URL and its secret API key.
+            hub.set_status("error", f"اختلال در پردازش فید ({type(exc).__name__})")
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60)
 
@@ -183,15 +206,16 @@ app.add_middleware(
 # ─── status ────────────────────────────────────────────────────────────
 @app.get("/api/v1/health")
 async def health():
+    feed = hub.public_feed_status()
     return {
         "status": "ok",
         "environment": settings.environment,
         "market_data": {
             "provider": "twelve_data",
             "configured": settings.has_market_key,
-            "feed_state": hub.feed_status["state"],
-            "detail": hub.feed_status["detail"],
-            "last_tick_at": hub.feed_status["last_tick_at"],
+            "feed_state": feed["state"],
+            "detail": feed["detail"],
+            "last_tick_at": feed["last_tick_at"],
         },
         "news": news_aggregator.status(),
         "subscribers": len(hub.subscribers),
@@ -215,7 +239,7 @@ async def data_status():
         "provider": "twelve_data",
         "api_key_configured": settings.has_market_key,
         "symbol": settings.market_symbol,
-        "feed": hub.feed_status,
+        "feed": hub.public_feed_status(),
         "timeframes": per_timeframe,
         "policy": (
             "فقط داده واقعی منتشر می‌شود. در نبود کلید/اینترنت، اندپوینت‌ها خطا برمی‌گردانند و "
@@ -259,6 +283,42 @@ async def news_headlines():
 async def calendar():
     events = await news_aggregator.fetch_calendar()
     return {"status": news_aggregator.status(), "events": events}
+
+
+@app.get("/api/v1/news/fa")
+async def persian_headlines():
+    """Custom licensed Persian feed (kept for backwards compatibility)."""
+    return await persian_news.snapshot()
+
+
+@app.get("/api/v1/news/web")
+async def web_headlines():
+    """Public publisher RSS: attributed short excerpts; partial coverage cannot clear the guard."""
+    return await web_news.snapshot()
+
+
+@app.get("/api/v1/crypto/candidates")
+async def crypto_candidates():
+    """Read-only, strict spot-market screening; NOT pump prediction or a trade intent."""
+    return await crypto_scanner.snapshot()
+
+
+# ─── real execution boundary (intentionally disabled until independently audited) ──
+@app.get("/api/v1/execution/status")
+async def get_execution_status():
+    return execution_status()
+
+
+@app.post("/api/v1/execution/preflight")
+async def check_order_preflight(intent: OrderIntent):
+    return order_preflight(intent)
+
+
+@app.post("/api/v1/execution/orders")
+async def submit_real_order(intent: OrderIntent):
+    # No broker signing, network call, account credentials or acceptance of client-provided
+    # 'safe' flags. This endpoint cannot execute even if a malicious client calls it.
+    raise HTTPException(status_code=503, detail="ارسال سفارش واقعی غیرفعال است؛ اتصال احراز هویت‌شده و حسابرسی‌شده نصب نشده است")
 
 
 # ─── strategy / risk ───────────────────────────────────────────────────
@@ -701,13 +761,14 @@ async def market_socket(websocket: WebSocket):
     await websocket.accept()
     queue = hub.subscribe()
     try:
+        feed = hub.public_feed_status()
         await websocket.send_json(
             {
                 "type": "connected",
                 "symbol": settings.market_symbol,
                 "provider": "twelve_data",
-                "feed_state": hub.feed_status["state"],
-                "detail": hub.feed_status["detail"],
+                "feed_state": feed["state"],
+                "detail": feed["detail"],
             }
         )
         while True:

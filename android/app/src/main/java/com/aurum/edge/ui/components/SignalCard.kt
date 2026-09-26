@@ -30,6 +30,7 @@ fun SignalSummaryCard(
     onOpenPaperTrade: () -> Unit,
     modifier: Modifier = Modifier,
     showBlockers: Boolean = true,
+    entryBlocker: String? = null,
 ) {
     val action = signal?.action ?: SignalAction.NO_TRADE
     val color = when (action) {
@@ -105,8 +106,13 @@ fun SignalSummaryCard(
                 color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 8.dp),
             )
+            entryBlocker?.let { reason ->
+                Text("ورود کاغذی مجاز نیست: $reason", style = MaterialTheme.typography.bodySmall,
+                    color = AurumColors.Red, modifier = Modifier.padding(top = 8.dp))
+            }
             Button(
                 onClick = onOpenPaperTrade,
+                enabled = entryBlocker == null,
                 colors = ButtonDefaults.buttonColors(containerColor = AurumColors.Gold, contentColor = Color(0xFF14100A)),
                 modifier = Modifier
                     .fillMaxWidth()

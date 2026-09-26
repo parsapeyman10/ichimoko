@@ -18,6 +18,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aurum.edge.core.ConfluenceItem
+import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.ui.theme.AurumColors
@@ -126,7 +127,9 @@ fun Pill(text: String, color: Color, modifier: Modifier = Modifier) {
 fun FeedBanner(status: FeedStatus, lastPrice: Double?, lastBarTime: Long?, showingCache: Boolean) {
     val (color, title) = when (status.mode) {
         FeedMode.LIVE -> AurumColors.Green to "زنده — ${status.provider}"
-        FeedMode.POLLING -> AurumColors.Gold to "به‌روزرسانی دوره‌ای (REST) — ${status.provider}"
+        FeedMode.POLLING -> AurumColors.Gold to "کندل REST دوره‌ای (نه تیک زنده) — ${status.provider}"
+        FeedMode.MARKET_CLOSED -> AurumColors.Gold to "بازار طبق برنامهٔ معمول بسته است — دریافت متوقف"
+        FeedMode.DELAYED -> AurumColors.Gold to "دادهٔ بازار دیررس/نامعلوم — ${status.provider}"
         FeedMode.CONNECTING -> AurumColors.Cyan to "در حال اتصال…"
         FeedMode.OFFLINE -> AurumColors.Red to "آفلاین — داده ساختگی نمایش داده نمی‌شود"
         FeedMode.NO_KEY -> AurumColors.Red to "کلید API لازم است"
@@ -149,13 +152,13 @@ fun FeedBanner(status: FeedStatus, lastPrice: Double?, lastBarTime: Long?, showi
                 if (isNotEmpty()) append(" · ")
                 append("آخرین کندل واقعی: ${formatDateTime(lastBarTime)}")
             }
-            if (status.lastSuccessAt != null && status.mode != FeedMode.OFFLINE) {
+            if (status.lastSuccessAt != null) {
                 if (isNotEmpty()) append(" · ")
                 append("آخرین دریافت ${relativeTime(status.lastSuccessAt)}")
             }
             lastPrice?.let {
                 if (isNotEmpty()) append(" · ")
-                append("قیمت واقعی ${formatPrice(it)}")
+                append("${if (status.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) && !showingCache) "قیمت دریافت‌شده" else "قیمت قبلی (نه آنلاین)"} ${formatPrice(it)}")
             }
         }
         if (detail.isNotBlank()) {
@@ -173,8 +176,16 @@ fun ConfluenceRow(item: ConfluenceItem) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            if (item.ok) "✓" else "✕",
-            color = if (item.ok) AurumColors.Green else AurumColors.Red,
+            when (item.status) {
+                ConfluenceStatus.CONFIRMED -> "✓"
+                ConfluenceStatus.CONFLICT -> "✕"
+                ConfluenceStatus.UNKNOWN -> "؟"
+            },
+            color = when (item.status) {
+                ConfluenceStatus.CONFIRMED -> AurumColors.Green
+                ConfluenceStatus.CONFLICT -> AurumColors.Red
+                ConfluenceStatus.UNKNOWN -> AurumColors.Gold
+            },
             style = MaterialTheme.typography.titleSmall,
             modifier = Modifier.padding(end = 10.dp),
         )

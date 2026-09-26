@@ -25,6 +25,14 @@ type Metrics = {
   skipped_min_lot: number;
 };
 
+type ForwardTrade = {
+  entry_time: string;
+  side: 'BUY' | 'SELL';
+  position_oz: number;
+  pnl: number;
+  exit_reason: string;
+};
+
 type ForwardData = {
   error?: string;
   data_source?: string;
@@ -34,7 +42,7 @@ type ForwardData = {
   split_time?: string;
   in_sample?: Metrics;
   out_of_sample?: Metrics;
-  out_of_sample_trades?: any[];
+  out_of_sample_trades?: ForwardTrade[];
   stress_test?: {
     real_trades?: number;
     median_final_balance?: number;
@@ -198,13 +206,13 @@ export default function ForwardTestPanel({
                 </tr>
               </thead>
               <tbody>
-                {(data.out_of_sample_trades ?? []).slice(-8).map((trade: any, index: number) => (
+                {(data.out_of_sample_trades ?? []).slice(-8).map((trade, index) => (
                   <tr key={index} style={{ borderTop: '1px solid #1a1f28', color: '#c9cdd5' }}>
                     <td style={{ padding: '4px 6px', font: '7px DM Mono', color: '#7a8290' }}>{new Date(trade.entry_time).toLocaleDateString('fa-IR')}</td>
                     <td><span style={{ font: '700 7px DM Mono', color: trade.side === 'BUY' ? 'var(--green)' : 'var(--red)' }}>{trade.side}</span></td>
                     <td style={{ font: '7px DM Mono', color: '#7a8290' }}>{trade.position_oz} oz</td>
-                    <td style={{ font: '700 8px DM Mono', color: (trade.pnl_usd || 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                      {trade.pnl_usd != null ? `${trade.pnl_usd > 0 ? '+' : ''}${trade.pnl_usd.toFixed(2)}$` : '—'}
+                    <td style={{ font: '700 8px DM Mono', color: (trade.pnl || 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                      {trade.pnl != null ? `${trade.pnl > 0 ? '+' : ''}${trade.pnl.toFixed(2)}$` : '—'}
                     </td>
                     <td style={{ fontSize: 8, color: '#8a909c' }}>{trade.exit_reason}</td>
                   </tr>

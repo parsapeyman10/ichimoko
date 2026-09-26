@@ -158,7 +158,13 @@ def test_walk_forward_splits_real_series(monkeypatch):
     report = asyncio.run(forward_module.run_forward_test(Settings(twelve_data_api_key="test"), timeframe="5m", output_size=1200))
     assert report["data_source"] == "twelve_data"
     assert report["bars"] == 1200
-    assert report["in_sample"]["bars"] == 1200
+    assert report["in_sample"]["bars"] == 840
+    assert report["in_sample"]["end"] < report["split_time"]
+    assert report["out_of_sample"]["bars"] == 360
+    assert report["out_of_sample"]["start"] == report["split_time"]
+    assert report["out_of_sample"]["warmup_bars"] == 840
+    assert report["out_of_sample"]["equity_curve"][0]["time"] == report["split_time"]
+    assert report["out_of_sample"]["equity_curve"][0]["balance"] == 100.0
     for trade in report["out_of_sample_trades"]:
         assert trade["entry_time"] >= report["split_time"]
     assert any("دیتای واقعی" in note for note in report["notes"])
