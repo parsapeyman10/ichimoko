@@ -60,7 +60,7 @@ class WorkspaceOverviewTest {
         var tick = 120_000L
         val calls = mutableListOf<OverviewCheck>()
         val coordinator = WorkspaceOverviewCoordinator(this,
-            OverviewCheck.entries.associateWith { c -> suspend { calls.add(c) } }, elapsed = { tick })
+            OverviewCheck.entries.associateWith { c -> suspend { calls.add(c); Unit } }, elapsed = { tick })
         coordinator.refresh(open)
         coordinator.refresh(open)
         assertEquals(9, calls.size)
