@@ -40,9 +40,12 @@ import com.aurum.edge.data.NobitexScanState
 import com.aurum.edge.data.Quote
 import com.aurum.edge.data.WatchSelection
 import com.aurum.edge.data.WatchState
+import com.aurum.edge.data.NobitexLiveOrder
 import com.aurum.edge.engine.Backtester
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
+import com.aurum.edge.engine.SignalEngine
+import java.util.UUID
 import com.aurum.edge.notify.AlertSoundPlayer
 import com.aurum.edge.service.SignalMonitorService
 import kotlinx.coroutines.CancellationException
@@ -104,6 +107,13 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val nobitexScan: StateFlow<NobitexScanState> = container.nobitexResearch.state
     val nobitexTrades: StateFlow<List<NobitexPracticeTrade>> = container.nobitexPractice.trades
     val nobitexJournalError: StateFlow<String?> = container.nobitexPractice.loadError
+    /** REAL Nobitex orders placed from this app, with real money on the user's own account. */
+    val nobitexLiveOrders: StateFlow<List<com.aurum.edge.data.NobitexLiveOrder>> = container.nobitexLiveTrades.orders
+    val nobitexLiveError: StateFlow<String?> = container.nobitexLiveTrades.loadError
+    private val _nobitexBalance = MutableStateFlow<Pair<String, Double>?>(null)
+    val nobitexBalance: StateFlow<Pair<String, Double>?> = _nobitexBalance.asStateFlow()
+    private val _nobitexLiveBusy = MutableStateFlow(false)
+    val nobitexLiveBusy: StateFlow<Boolean> = _nobitexLiveBusy.asStateFlow()
     private val _watchHistory = MutableStateFlow(WatchHistory())
     val watchHistory: StateFlow<WatchHistory> = _watchHistory.asStateFlow()
     val market = container.verifiedMarket
@@ -147,6 +157,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             }
             runCatching { container.nobitexPractice.load() }.onFailure {
                 _toast.value = "ژورنال تمرین نوبیتکس خوانده نشد؛ فایل برای بازیابی نگه داشته شد"
+            }
+            runCatching { container.nobitexLiveTrades.load() }.onFailure {
+                _toast.value = "دفتر سفارش‌های واقعی نوبیتکس خوانده نشد؛ فایل برای بازیابی نگه داشته شد"
             }
             runCatching { container.journalStore.loadReports() }.onFailure {
                 _toast.value = "گزارش پژوهش خوانده نشد؛ فایل قبلی برای بازیابی نگه داشته شد"
@@ -253,6 +266,30 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshNobitexScan() = container.nobitexResearch.refreshNow()
 
+    private var lastNobitexNotifiedBarTime: Long = -1L
+
+    /** On-demand alert: fires only for a NEW closed-bar signal, mirroring the gold alert's intent. */
+    private fun maybeNotifyNobitexSignal(snapshot: com.aurum.edge.data.NobitexSnapshot) {
+        val ctx = nobitexNotifyContext ?: return
+        if (!settings.value.notifyOnSignal) return
+        val signal = nobitexJournalSignal() ?: return
+        if (!signal.isActionable || signal.barTime == lastNobitexNotifiedBarTime) return
+        val posted = runCatching {
+            com.aurum.edge.notify.Notifier.notifyNobitexSignal(
+                ctx, signal.action, signal.confidence, signal.stopLoss, signal.takeProfit,
+                signal.barTime, settings.value.alertSoundUri,
+            )
+        }.getOrDefault(false)
+        if (posted) lastNobitexNotifiedBarTime = signal.barTime
+    }
+
+    private var nobitexNotifyContext: Context? = null
+
+    /** Called once from the Nobitex screen so background-free, on-demand alerts can be posted. */
+    fun enableNobitexAlerts(context: Context) {
+        nobitexNotifyContext = context.applicationContext
+    }
+
     fun downloadNobitex(market: NobitexMarket, interval: Interval) {
         if (_nobitex.value == NobitexState.Loading) return
         _nobitex.value = NobitexState.Loading // old quotes are never used while reconnecting
@@ -263,6 +300,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 val closed = runCatching { container.nobitexPractice.settle(snapshot) }
                     .getOrDefault(emptyList())
                 if (closed.isNotEmpty()) _toast.value = "تمرین ${closed.first().id.take(8)} با bid عمومی نوبیتکس کاغذی تسویه شد؛ ژورنال را ببینید"
+                settleNobitexJournal(snapshot) // same JournalStore/settlement rule used for gold
+                maybeNotifyNobitexSignal(snapshot)
             } catch (error: Exception) {
                 _nobitex.value = NobitexState.Failed((error.message ?: "پاسخ دادهٔ عمومی نوبیتکس معتبر نیست").take(180))
             }
@@ -328,6 +367,198 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _toast.value = "فقط تاریخچهٔ تمرین نوبیتکس پاک شد؛ معاملات طلا و کاندیداها تغییر نکردند"
             } catch (error: Exception) {
                 _toast.value = "پاک کردن تمرین ممکن نیست: ${error.message ?: "فایل قبلی حفظ شد"}"
+            }
+        }
+    }
+
+    // ---- "همون متود طلا": run the SAME SignalEngine + SAME JournalStore on Nobitex candles ----
+
+    /**
+     * Pure/cheap: recompute the Ichimoku+confluence signal from the latest downloaded Nobitex
+     * candles, using the exact same [SignalEngine] the gold feed uses. Returns null while there
+     * are not yet enough closed candles (the engine's own [SignalEngine.minBars] rule).
+     */
+    fun nobitexJournalSignal(): Signal? {
+        val snapshot = (_nobitex.value as? NobitexState.Done)?.snapshot ?: return null
+        if (snapshot.market != com.aurum.edge.data.NobitexMarket.BTC_USDT) return null
+        val closed = snapshot.candles.count { it.closed }
+        if (closed < SignalEngine.minBars(snapshot.interval)) return null
+        return runCatching { SignalEngine.evaluate(snapshot.candles, snapshot.interval, settings.value.minConfidence) }
+            .getOrNull()
+    }
+
+    private var nobitexJournalOpening = false
+
+    /**
+     * Journals a Nobitex BTC/USDT signal into the SAME [container.journalStore] gold trades use
+     * (same risk-sizing, same settlement, same statistics), tagged symbol "BTC/USDT". This is a
+     * manual entry (like the gold manual-entry path): it does not require the Forex news gate,
+     * which is specific to USD pairs. The signal is re-verified fresh at submission time so a
+     * stale on-screen preview can never be persisted.
+     */
+    fun openNobitexJournalTrade(expectedSignal: Signal, expectedPrice: Double) {
+        if (nobitexJournalOpening) { _toast.value = "درخواست قبلی هنوز ذخیره نشده است"; return }
+        if (!expectedSignal.isActionable) { _toast.value = "سیگنال فعلی قابل معامله نیست"; return }
+        nobitexJournalOpening = true
+        viewModelScope.launch {
+            try {
+                val fresh = nobitexJournalSignal()
+                    ?: throw IllegalArgumentException("داده تازهٔ BTCUSDT در دسترس نیست؛ دوباره دریافت کنید")
+                require(fresh.barTime == expectedSignal.barTime && fresh.action == expectedSignal.action &&
+                    kotlin.math.abs((fresh.stopLoss ?: 0.0) - (expectedSignal.stopLoss ?: 0.0)) < 1e-6 &&
+                    kotlin.math.abs((fresh.takeProfit ?: 0.0) - (expectedSignal.takeProfit ?: 0.0)) < 1e-6) {
+                    "سیگنال از زمان پیش‌نمایش تغییر کرده است؛ دوباره بررسی کنید"
+                }
+                val current = (_nobitex.value as? NobitexState.Done)?.snapshot
+                    ?: throw IllegalArgumentException("داده نوبیتکس در دسترس نیست")
+                val price = current.quote.latest
+                require(price.isFinite() && price > 0 && kotlin.math.abs(price / expectedPrice - 1.0) <= 0.01) {
+                    "قیمت نسبت به پیش‌نمایش بیش‌ازحد تغییر کرده است"
+                }
+                val s = container.settingsStore.read()
+                val trade = container.journalStore.open(
+                    signal = fresh, symbol = "BTC/USDT", price = price,
+                    balance = s.accountBalance, riskPercent = s.riskPercent, manual = true,
+                )
+                _stats.value = container.journalStore.stats()
+                _toast.value = "ثبت در همان ژورنال طلا: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} " +
+                    "${trade.symbol} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}"
+            } catch (e: Exception) {
+                _toast.value = "ثبت در ژورنال انجام نشد: ${e.message ?: "ذخیره ممکن نیست"}"
+            } finally {
+                nobitexJournalOpening = false
+            }
+        }
+    }
+
+    /** Settles any open BTC/USDT paper trades against real Nobitex closed candles — same rule gold uses. */
+    private fun settleNobitexJournal(snapshot: com.aurum.edge.data.NobitexSnapshot) {
+        if (snapshot.market != com.aurum.edge.data.NobitexMarket.BTC_USDT) return
+        viewModelScope.launch {
+            val closedBars = snapshot.candles.filter { it.closed }
+            for (bar in closedBars.takeLast(50)) {
+                runCatching { container.journalStore.settle(bar, "BTC/USDT", bar.time + snapshot.interval.millis) }
+            }
+            _stats.value = container.journalStore.stats()
+        }
+    }
+
+    // ---- Real Nobitex trading: the user's OWN API token, OWN money, hard notional cap ----
+
+    fun saveNobitexApiToken(token: String): Boolean = container.settingsStore.saveNobitexApiToken(token)
+
+    fun clearNobitexApiToken(): Boolean {
+        _nobitexBalance.value = null
+        return container.settingsStore.clearNobitexApiToken()
+    }
+
+    fun saveNobitexOrderCap(usdt: Double): Boolean = container.settingsStore.saveNobitexOrderCap(usdt)
+
+    fun checkNobitexBalance(currency: String) {
+        val token = settings.value.nobitexApiToken
+        if (token.isBlank()) { _toast.value = "ابتدا کلید API نوبیتکس را وارد و ذخیره کنید"; return }
+        if (_nobitexLiveBusy.value) return
+        _nobitexLiveBusy.value = true
+        viewModelScope.launch {
+            try {
+                val balance = container.nobitexTrading.walletBalance(token, currency)
+                _nobitexBalance.value = currency to balance
+                _toast.value = "موجودی واقعی $currency: $balance"
+            } catch (e: Exception) {
+                _toast.value = "دریافت موجودی ناموفق: ${e.message ?: "خطای نامشخص نوبیتکس"}"
+            } finally {
+                _nobitexLiveBusy.value = false
+            }
+        }
+    }
+
+    /**
+     * Places a REAL order on the user's own Nobitex account with REAL money. Enforced here,
+     * client-side, before any network call: order notional must not exceed the user's own
+     * saved cap ([AppSettings.nobitexLiveOrderCapUsdt]) — a fat-finger guard, not a broker limit.
+     * There is NO server-side precision/lot-step data available publicly, so this never guesses
+     * amount/price rounding; Nobitex's own rejection (if any) is shown verbatim.
+     */
+    fun placeNobitexLiveOrder(side: SignalAction, srcCurrency: String, dstCurrency: String,
+                              amount: String, price: String?, execution: String, estimatedPrice: Double) {
+        val token = settings.value.nobitexApiToken
+        if (token.isBlank()) { _toast.value = "ابتدا کلید API نوبیتکس را وارد و ذخیره کنید"; return }
+        if (side == SignalAction.NO_TRADE) { _toast.value = "جهت خرید یا فروش را انتخاب کنید"; return }
+        val qty = amount.toDoubleOrNull()
+        if (qty == null || !qty.isFinite() || qty <= 0.0) { _toast.value = "حجم سفارش نامعتبر است"; return }
+        val cap = settings.value.nobitexLiveOrderCapUsdt
+        val notional = qty * estimatedPrice
+        if (!notional.isFinite() || notional <= 0.0 || notional > cap + 1e-6) {
+            _toast.value = "ارزش تقریبی سفارش (${String.format("%.2f", notional)}) از سقف ایمنی $cap تجاوز می‌کند؛ سقف را در تنظیمات تغییر دهید یا حجم را کم کنید"
+            return
+        }
+        if (_nobitexLiveBusy.value) { _toast.value = "درخواست واقعی قبلی هنوز پردازش می‌شود"; return }
+        _nobitexLiveBusy.value = true
+        val clientOrderId = "aurum-" + UUID.randomUUID().toString().take(24)
+        val type = if (side == SignalAction.BUY) "buy" else "sell"
+        val symbol = "${srcCurrency.uppercase()}/${dstCurrency.uppercase()}"
+        viewModelScope.launch {
+            try {
+                val result = runCatching {
+                    container.nobitexTrading.placeOrder(token, type, srcCurrency, dstCurrency, amount, price, execution, clientOrderId)
+                }
+                container.nobitexLiveTrades.recordAttempt(
+                    symbol = symbol, side = type, execution = execution, amount = amount, price = price,
+                    notionalCapUsdt = cap, clientOrderId = clientOrderId, result = result,
+                )
+                _toast.value = result.fold(
+                    onSuccess = { r -> "سفارش واقعی ارسال شد: ${r.status} · شناسه نوبیتکس ${r.id ?: "—"}" },
+                    onFailure = { e -> "سفارش واقعی رد شد: ${e.message ?: "خطای نامشخص نوبیتکس"}" },
+                )
+            } catch (e: Exception) {
+                _toast.value = "ارسال سفارش واقعی متوقف شد: ${e.message ?: "خطای نامشخص"}"
+            } finally {
+                _nobitexLiveBusy.value = false
+            }
+        }
+    }
+
+    fun refreshNobitexLiveOrderStatus(order: NobitexLiveOrder) {
+        val token = settings.value.nobitexApiToken
+        val exchangeId = order.exchangeOrderId
+        if (token.isBlank() || exchangeId == null) {
+            _toast.value = "شناسه سفارش نوبیتکس در دسترس نیست"
+            return
+        }
+        viewModelScope.launch {
+            val result = runCatching { container.nobitexTrading.orderStatus(token, exchangeId) }
+            container.nobitexLiveTrades.updateStatus(order.id, result)
+            _toast.value = result.fold(
+                onSuccess = { r -> "وضعیت واقعی: ${r.status} · پرشده ${r.matchedAmount ?: "0"}" },
+                onFailure = { e -> "دریافت وضعیت ناموفق: ${e.message ?: "خطای نامشخص"}" },
+            )
+        }
+    }
+
+    fun cancelNobitexLiveOrder(order: NobitexLiveOrder) {
+        val token = settings.value.nobitexApiToken
+        val exchangeId = order.exchangeOrderId
+        if (token.isBlank() || exchangeId == null) {
+            _toast.value = "شناسه سفارش نوبیتکس در دسترس نیست"
+            return
+        }
+        viewModelScope.launch {
+            val result = runCatching { container.nobitexTrading.cancelOrder(token, exchangeId) }
+            container.nobitexLiveTrades.updateStatus(order.id, result)
+            _toast.value = result.fold(
+                onSuccess = { r -> "درخواست لغو ارسال شد: ${r.status}" },
+                onFailure = { e -> "لغو ناموفق: ${e.message ?: "خطای نامشخص"}" },
+            )
+        }
+    }
+
+    fun clearNobitexLiveOrders() {
+        viewModelScope.launch {
+            try {
+                container.nobitexLiveTrades.clear()
+                _toast.value = "فقط دفتر محلی سفارش‌های واقعی نوبیتکس پاک شد؛ خود سفارش‌ها در نوبیتکس دست‌نخورده‌اند"
+            } catch (e: Exception) {
+                _toast.value = "پاک کردن دفتر واقعی ممکن نیست: ${e.message ?: "خطای ذخیره"}"
             }
         }
     }

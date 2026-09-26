@@ -40,6 +40,8 @@ class SettingsStore(context: Context) {
         cryptoBaseUrl = prefs.getString(KEY_CRYPTO_URL, "").orEmpty(),
         workspaceId = prefs.getString(KEY_WORKSPACE, "").orEmpty(),
         stockDataKey = prefs.getString(KEY_STOCK_DATA, "").orEmpty(),
+        nobitexApiToken = prefs.getString(KEY_NOBITEX_TOKEN, "").orEmpty(),
+        nobitexLiveOrderCapUsdt = prefs.getFloat(KEY_NOBITEX_CAP, 20f).toDouble(),
     )
 
     /**
@@ -85,6 +87,45 @@ class SettingsStore(context: Context) {
         if (!key.matches(Regex("[A-Za-z0-9_-]{10,80}"))) return false
         val saved = prefs.edit().putString(KEY_STOCK_DATA, key).commit()
         if (saved && prefs.getString(KEY_STOCK_DATA, null) == key) {
+            _settings.value = read()
+            return true
+        }
+        return false
+    }
+
+    /**
+     * The user's own Nobitex trading token, entered explicitly on this device for the
+     * real-trading section. Nobitex tokens observed in official docs are long hex/alnum
+     * strings; this accepts a reasonably wide range without weakening the format.
+     */
+    @Synchronized
+    fun saveNobitexApiToken(input: String): Boolean {
+        val token = input.trim()
+        if (!token.matches(Regex("[A-Za-z0-9]{20,80}"))) return false
+        val saved = prefs.edit().putString(KEY_NOBITEX_TOKEN, token).commit()
+        if (saved && prefs.getString(KEY_NOBITEX_TOKEN, null) == token) {
+            _settings.value = read()
+            return true
+        }
+        return false
+    }
+
+    @Synchronized
+    fun clearNobitexApiToken(): Boolean {
+        val saved = prefs.edit().remove(KEY_NOBITEX_TOKEN).commit()
+        if (saved && prefs.getString(KEY_NOBITEX_TOKEN, null) == null) {
+            _settings.value = read()
+            return true
+        }
+        return false
+    }
+
+    /** Hard client-side notional cap for real Nobitex orders; a fat-finger guard, not a broker limit. */
+    @Synchronized
+    fun saveNobitexOrderCap(usdt: Double): Boolean {
+        if (!usdt.isFinite() || usdt < 5.0 || usdt > 500.0) return false
+        val saved = prefs.edit().putFloat(KEY_NOBITEX_CAP, usdt.toFloat()).commit()
+        if (saved && prefs.getFloat(KEY_NOBITEX_CAP, -1f).toDouble() == usdt) {
             _settings.value = read()
             return true
         }
@@ -144,6 +185,8 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
             .putString(KEY_WORKSPACE, next.workspaceId)
             .putString(KEY_STOCK_DATA, next.stockDataKey)
+            .putString(KEY_NOBITEX_TOKEN, next.nobitexApiToken)
+            .putFloat(KEY_NOBITEX_CAP, next.nobitexLiveOrderCapUsdt.toFloat())
             .apply()
         _settings.value = next
     }
@@ -174,5 +217,7 @@ class SettingsStore(context: Context) {
         private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"
         private const val KEY_WORKSPACE = "active_workspace"
         private const val KEY_STOCK_DATA = "stock_data_readonly_key"
+        private const val KEY_NOBITEX_TOKEN = "nobitex_live_api_token"
+        private const val KEY_NOBITEX_CAP = "nobitex_live_order_cap_usdt"
     }
 }

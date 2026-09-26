@@ -24,6 +24,8 @@ import com.aurum.edge.data.NobitexPublicData
 import com.aurum.edge.data.NobitexSpotScanner
 import com.aurum.edge.data.NobitexSpotResearch
 import com.aurum.edge.data.NobitexPracticeStore
+import com.aurum.edge.data.NobitexLiveTradeStore
+import com.aurum.edge.data.NobitexTradingClient
 import com.aurum.edge.data.NobitexSnapshot
 import com.aurum.edge.data.PaperAutoTrader
 import com.aurum.edge.data.PaperOpportunityStore
@@ -60,6 +62,9 @@ class AppContainer(context: Context) {
     val nobitexPublic = NobitexPublicData()
     val nobitexSpotScanner = NobitexSpotScanner()
     val nobitexPractice = NobitexPracticeStore(appContext)
+    /** REAL order execution against the user's own Nobitex account; separate from the paper store above. */
+    val nobitexTrading = NobitexTradingClient()
+    val nobitexLiveTrades = NobitexLiveTradeStore(appContext)
     val client = TwelveDataClient()
     val market = MarketRepository(appContext, client, candleCache, settingsStore, journalStore)
 

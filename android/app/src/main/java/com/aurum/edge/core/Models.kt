@@ -449,6 +449,17 @@ data class AppSettings(
     val workspaceId: String = "",
     /** Read-only third-party stock-data key, entered on the device; never a broker credential. */
     val stockDataKey: String = "",
+    /**
+     * The user's OWN personal Nobitex API token (from nobitex.ir/panel/profile/api-services/),
+     * entered on this device only, used solely to call the user's account endpoints
+     * (balance/order placement/status/cancel) directly from this device to apiv2.nobitex.ir.
+     * It is never sent anywhere else and never logged. Real money moves only when the user
+     * explicitly confirms an order in the live-trading section.
+     */
+    val nobitexApiToken: String = "",
+    /** Client-side fat-finger guard: max notional (quote currency, e.g. USDT) per live order. */
+    val nobitexLiveOrderCapUsdt: Double = 20.0,
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
+    val hasNobitexKey: Boolean get() = nobitexApiToken.isNotBlank()
 }

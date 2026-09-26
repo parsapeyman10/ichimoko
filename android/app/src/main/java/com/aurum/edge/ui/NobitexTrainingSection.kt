@@ -64,7 +64,7 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
     SectionCard("نوبیتکس · آموزش و صحه‌سنجی با دادهٔ عمومی", "مستقیم از API رسمی، بدون کلید صرافی، بدون ارسال سفارش") {
         Text("فعلاً فقط حساب کاغذی؛ آمار/دفتر عمومی، مستقل از موتور طلا.",
             style = MaterialTheme.typography.bodySmall, color = AurumColors.Green)
-        Text("سفارش واقعی غیرفعال است؛ کلید معاملاتی را در گوشی وارد نکنید.",
+        Text("این بخش سفارش واقعی نمی‌فرستد؛ برای معاملهٔ واقعی به بخش قرمز «معاملهٔ واقعی نوبیتکس» در پایین صفحه بروید.",
             style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             NobitexMarket.entries.forEach { choice ->
