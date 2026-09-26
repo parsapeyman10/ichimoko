@@ -43,7 +43,8 @@ function Brand() {
   return <div className="brand"><div className="brand-mark"><span>A</span></div><div><b>AURUM</b><small>EDGE</small></div></div>;
 }
 
-function Sidebar({ active, setActive, open, close, feedState, keyMissing }: { active: string; setActive: (s: string) => void; open: boolean; close: () => void; feedState: string; keyMissing: boolean }) {
+function Sidebar({ active, setActive, open, close, feedState, provider }: { active: string; setActive: (s: string) => void; open: boolean; close: () => void; feedState: string; provider: string }) {
+  const providerLabel = provider === 'twelve_data' ? 'Twelve Data' : provider === 'spot_fallback' ? 'فید رایگان خودکار' : '—';
   const nav = [
     { key: 'terminal', label: 'ترمینال معاملات', sub: 'Trading terminal', icon: LayoutDashboard },
     { key: 'signals', label: 'موتور سیگنال', sub: 'Signal engine', icon: Signal },
@@ -68,10 +69,10 @@ function Sidebar({ active, setActive, open, close, feedState, keyMissing }: { ac
       </nav>
       <div className="system-card">
         <div>
-          <span className="system-icon">{keyMissing ? <AlertTriangle size={17}/> : feedState === 'live' ? <ShieldCheck size={17}/> : feedState === 'offline' ? <WifiOff size={17}/> : <Activity size={17}/>}</span>
-          <div><b>{keyMissing ? 'کلید داده تنظیم نشده' : feedState === 'live' ? 'فید واقعی متصل' : feedState === 'offline' ? 'فید قطع است' : feedState === 'polling' ? 'کندل REST، نه قیمت زنده' : 'در حال اتصال'}</b><small>بدون دیتای ساختگی</small></div>
+          <span className="system-icon">{feedState === 'offline' ? <AlertTriangle size={17}/> : feedState === 'live' ? <ShieldCheck size={17}/> : <Activity size={17}/>}</span>
+          <div><b>{feedState === 'live' ? 'فید واقعی متصل' : feedState === 'offline' ? 'فید قطع است' : feedState === 'polling' ? 'کندل REST، نه قیمت زنده' : 'در حال اتصال'}</b><small>بدون دیتای ساختگی</small></div>
         </div>
-        <div className="system-row"><span>منبع داده</span><b style={{ color: 'var(--gold)' }}>Twelve Data</b></div>
+        <div className="system-row"><span>منبع داده</span><b style={{ color: 'var(--gold)' }}>{providerLabel}</b></div>
         <div className="system-row"><span>وضعیت فید</span><b>{feedState}</b></div>
         <div className="system-row"><span>حالت</span><b style={{ color: 'var(--gold)' }}>REAL DATA ONLY</b></div>
       </div>
@@ -90,7 +91,7 @@ function Header({ price, previous, menu, feedState, lastBarTime }: { price: numb
       <div><span>XAU / USD</span><small>Gold Spot · انس طلا</small></div>
       <div className="live-pill" style={feedState === 'live' ? undefined : { background: '#f1bc4b12', borderColor: '#f1bc4b30', color: 'var(--gold)' }}>
         <i style={feedState === 'live' ? undefined : { background: 'var(--gold)', boxShadow: 'none' }}/>
-        {feedState === 'live' ? 'LIVE · فید واقعی' : feedState === 'offline' ? 'OFFLINE · قطع' : feedState === 'no-key' ? 'NO KEY · بدون کلید' : feedState === 'polling' ? 'REST · کندل دوره‌ای' : 'CONNECTING'}
+        {feedState === 'live' ? 'LIVE · فید واقعی' : feedState === 'offline' ? 'OFFLINE · قطع' : feedState === 'polling' ? 'REST · کندل دوره‌ای' : 'CONNECTING'}
       </div>
       {lastBarTime && <div className="live-pill" style={{ background: '#f1bc4b12', borderColor: '#f1bc4b30', color: 'var(--gold)' }}><Zap size={11}/> آخرین کندل {new Date(lastBarTime).toLocaleTimeString('fa-IR', { hour: '2-digit', minute: '2-digit' })}</div>}
     </div>
@@ -477,8 +478,9 @@ function Disclaimer() {
   return <div className="disclaimer" style={{ margin: '16px 0', padding: '12px 14px', background: '#0a0c10', border: '1px solid var(--line)', borderRadius: 8 }}>
     <b style={{ fontSize: 11, color: '#c9a86a', display: 'flex', alignItems: 'center', gap: 6 }}><History size={13}/> دیتای واقعی، بدون نسخه دمو</b>
     <p style={{ margin: '6px 0 0', fontSize: 10, color: '#8a909c', lineHeight: 1.9 }}>
-      این ترمینال هیچ کندل، قیمت، خبر یا معامله‌ای نمی‌سازد. هر عدد از Twelve Data (و در صورت تنظیم، منبع خبری مجاز) می‌آید.
-      وقتی اینترنت یا کلید داده نباشد، وضعیت «آفلاین / بدون کلید» نشان داده می‌شود و آخرین داده واقعیِ دریافت‌شده برچسب‌دار نمایش داده می‌شود —
+      این ترمینال هیچ کندل، قیمت، خبر یا معامله‌ای نمی‌سازد. هر عدد از یک منبع واقعی می‌آید: در صورت وجود کلید Twelve Data، مستقیم از آن؛
+      در غیر این صورت به‌صورت خودکار از فید رایگان و بدون کلید قیمت لحظه‌ای طلا (Swissquote/Gold-API) — و در صورت تنظیم، منبع خبری مجاز.
+      وقتی اینترنت قطع باشد یا هیچ منبعی پاسخ ندهد، وضعیت «آفلاین» نشان داده می‌شود و آخرین داده واقعیِ دریافت‌شده برچسب‌دار نمایش داده می‌شود —
       نه یک نسخه دموی ساختگی. تنها «تمرینی» که وجود دارد، یاد گرفتن از همین دیتای واقعی است: بک‌تست، walk-forward و ژورنال کاغذی.
     </p>
   </div>;
@@ -494,6 +496,8 @@ export default function App() {
 
   const { snapshot, refresh } = useMarketFeed(timeframe);
   const candles: Candle[] = snapshot.candles;
+  const activeProvider = status?.provider ?? snapshot.provider;
+  const providerName = activeProvider === 'twelve_data' ? 'Twelve Data' : activeProvider === 'spot_fallback' ? 'فید رایگان خودکار طلا (Swissquote/Gold-API)' : '—';
 
   useEffect(() => {
     let alive = true;
@@ -563,16 +567,15 @@ export default function App() {
     if (snapshot.state === 'live') return 'فید زنده واقعی';
     if (snapshot.state === 'polling') return 'به‌روزرسانی دوره‌ای (REST)';
     if (snapshot.state === 'loading') return 'در حال دریافت…';
-    if (snapshot.state === 'no-key') return 'کلید داده تنظیم نشده';
     return 'آفلاین — آخرین داده واقعی کش‌شده';
   }, [snapshot.state]);
 
-  const feedTone: 'live' | 'offline' | 'stale' = snapshot.state === 'live' ? 'live' : snapshot.state === 'offline' || snapshot.state === 'no-key' ? 'offline' : 'stale';
+  const feedTone: 'live' | 'offline' | 'stale' = snapshot.state === 'live' ? 'live' : snapshot.state === 'offline' ? 'offline' : 'stale';
   const previousClose = candles.length > 1 ? candles[candles.length - 2].close : null;
   const select = useCallback((key: string) => { setActive(key); document.getElementById(key)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, []);
 
   return <div className="app-shell">
-    <Sidebar active={active} setActive={setActive} open={sidebarOpen} close={() => setSidebarOpen(false)} feedState={snapshot.state} keyMissing={status ? !status.api_key_configured : false}/>
+    <Sidebar active={active} setActive={setActive} open={sidebarOpen} close={() => setSidebarOpen(false)} feedState={snapshot.state} provider={status?.provider ?? snapshot.provider}/>
     <div className="main-shell">
       <Header price={snapshot.lastPrice} previous={previousClose} menu={() => setSidebarOpen(true)} feedState={snapshot.state} lastBarTime={snapshot.lastBarTime}/>
       <main>
@@ -583,21 +586,21 @@ export default function App() {
               PRECIOUS METALS DESK · میز طلا
             </span>
             <h1>ترمینال هوشمند طلا روی دیتای واقعی</h1>
-            <small style={{ color: '#6b7280', fontSize: '10px' }}>Twelve Data · بک‌تست و walk-forward روی همان کندل‌های واقعی · بدون هیچ دیتای ساختگی</small>
+            <small style={{ color: '#6b7280', fontSize: '10px' }}>{providerName} · بک‌تست و walk-forward روی همان کندل‌های واقعی · بدون هیچ دیتای ساختگی</small>
           </div>
           <div className="intro-stats">
             <span><i className="feed-dot" style={{ background: feedTone === 'live' ? 'var(--green)' : feedTone === 'offline' ? 'var(--red)' : 'var(--gold)' }}/> {feedLabel}</span>
-            <span>{status?.provider ?? 'twelve_data'}</span>
+            <span>{providerName}</span>
             <span style={{ background: '#f1bc4b18', color: 'var(--gold)', border: '1px solid #f1bc4b30', padding: '2px 6px', borderRadius: 4, font: '700 8px DM Mono' }}>REAL DATA ONLY</span>
             <button type="button" onClick={refresh} className="text-button" style={{ font: '700 8px DM Mono' }}>به‌روزرسانی</button>
           </div>
         </div>
 
-        {(snapshot.state === 'offline' || snapshot.state === 'no-key') && (
+        {snapshot.state === 'offline' && (
           <div className="event-banner" style={{ borderColor: '#ef637130', background: '#ef63710a' }}>
             <span className="event-icon" style={{ background: '#ef637118' }}><WifiOff size={16}/></span>
             <div>
-              <b>{snapshot.state === 'no-key' ? 'کلید داده واقعی تنظیم نشده است' : 'اتصال به منبع داده قطع است'}</b>
+              <b>اتصال به منبع داده قطع است</b>
               <p style={{ margin: '3px 0 0', fontSize: 10, color: '#c9b896', lineHeight: 1.7 }}>{snapshot.detail}</p>
             </div>
             <div className="event-date">{candles.length ? `آخرین کندل: ${new Date((snapshot.lastBarTime ?? 0)).toLocaleString('fa-IR')}` : 'بدون داده'}</div>
@@ -633,7 +636,7 @@ export default function App() {
             <div>
               <b style={{ fontSize: 12 }}>قبل از هر چیز: اعداد واقعی را ببین</b>
               <small style={{ display: 'block', color: '#6b7280', fontSize: 10, marginTop: 2 }}>
-                ۱) کلید Twelve Data را در backend/.env بگذار · ۲) بک‌تست و walk-forward را روی دیتای واقعی اجرا کن · ۳) فقط اگر خارج از نمونه هم مثبت ماند، به Paper Trade فکر کن.
+                ۱) فید قیمت به‌صورت خودکار متصل است ({providerName}) · ۲) بک‌تست و walk-forward را روی دیتای واقعی اجرا کن · ۳) فقط اگر خارج از نمونه هم مثبت ماند، به Paper Trade فکر کن.
               </small>
             </div>
           </div>
@@ -645,7 +648,7 @@ export default function App() {
 
         <footer style={{ marginTop: 14, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, color: '#5a6b65', font: '9px DM Mono' }}>
           <span>AURUM EDGE · Real-data build</span>
-          <span>Twelve Data · بدون fallback ساختگی</span>
+          <span>{providerName} · بدون fallback ساختگی</span>
         </footer>
       </main>
     </div>

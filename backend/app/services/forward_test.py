@@ -69,7 +69,7 @@ async def run_forward_test(
     out_of_sample["trades"] = [t for t in out_of_sample["trades"] if datetime.fromisoformat(t["entry_time"]) >= split_time]
 
     return {
-        "data_source": "twelve_data",
+        "data_source": "twelve_data" if settings.has_market_key else "spot_fallback",
         "symbol": candles[0].symbol,
         "timeframe": tf.value,
         "bars": len(candles),

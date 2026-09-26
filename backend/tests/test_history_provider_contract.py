@@ -8,6 +8,7 @@ import pytest
 from app.config import Settings
 from app.models import Timeframe
 from app.services import history
+from app.services import spot_feed
 
 
 BAR = {"datetime": "2026-09-24 15:15:00", "open": "3100", "high": "3105", "low": "3098", "close": "3103"}
@@ -69,6 +70,10 @@ def test_old_or_mismatched_cache_is_display_only_and_never_an_unverified_online_
     path.write_text(history._serialize([bars[0].model_copy(update={"symbol": "BTC/USD"})]))
     assert history._read_disk(key, "XAU/USD", Timeframe.M5, 60) is None
     path.write_text(history._serialize(bars))
+    # The free spot-fallback store is a completely separate cache from the Twelve Data disk
+    # cache under test above; isolate it too so this "no key" assertion never depends on
+    # whatever the fallback may or may not have collected on disk from another run.
+    monkeypatch.setattr(spot_feed, "store", spot_feed.SpotHistoryStore(path=tmp_path / "spot_fallback.json"))
     no_key = Settings(twelve_data_api_key=None)
     with pytest.raises(history.DataUnavailable):
         asyncio.run(history.load_history(no_key, Timeframe.M5, output_size=10))

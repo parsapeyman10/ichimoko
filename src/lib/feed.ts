@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiGet, barIsCurrent, parseSocketUpdate, toChartCandles, type BackendCandle, type ChartTimeframe, type DataStatus } from './api';
 import type { Candle } from './market';
 
-export type FeedState = 'loading' | 'live' | 'polling' | 'offline' | 'no-key';
+export type FeedState = 'loading' | 'live' | 'polling' | 'offline';
 
 export type FeedSnapshot = {
   timeframe: ChartTimeframe;
@@ -25,7 +25,7 @@ const WS_FRESH_MS = 90_000;
 const emptySnapshot = (timeframe: ChartTimeframe): FeedSnapshot => ({
   timeframe, state: 'loading', detail: 'در حال دریافت دیتای واقعی…', candles: [],
   lastPrice: null, lastBarTime: null, lastUpdate: null,
-  provider: 'twelve_data', backendReachable: false,
+  provider: 'unknown', backendReachable: false,
 });
 
 export function useMarketFeed(timeframe: ChartTimeframe) {
@@ -147,11 +147,16 @@ export function useMarketFeed(timeframe: ChartTimeframe) {
     void (async () => {
       const status = await apiGet<DataStatus>('/api/v1/data/status');
       if (generation !== generationRef.current) return;
-      if (status.ok && !status.data.api_key_configured) {
-        setSnapshot({ ...emptySnapshot(timeframe), state: 'no-key',
-          detail: 'کلید Twelve Data در بک‌اند تنظیم نشده است (AURUM_TWELVE_DATA_API_KEY). بدون آن داده‌ای تولید نمی‌شود.',
-          backendReachable: true });
+      // Without a Twelve Data key the backend automatically switches to a free, keyless,
+      // real spot-quote feed (Swissquote/Gold-API) — it is not a reason to stop. Only a
+      // genuine, complete provider outage (backend unreachable) should block the feed.
+      if (!status.ok && status.status === 0) {
+        setSnapshot({ ...emptySnapshot(timeframe), state: 'offline',
+          detail: 'اتصال به سرور برقرار نشد.', backendReachable: false });
         return;
+      }
+      if (status.ok) {
+        setSnapshot((prev) => prev.timeframe !== timeframe ? prev : ({ ...prev, provider: status.data.provider }));
       }
       void loadHistory(generation);
       connectSocket(generation);
@@ -188,8 +193,8 @@ export function useMarketFeed(timeframe: ChartTimeframe) {
   }, [timeframe, loadHistory, connectSocket]);
 
   const refresh = useCallback(() => {
-    if (snapshot.state !== 'no-key') void loadHistory(generationRef.current);
-  }, [loadHistory, snapshot.state]);
+    void loadHistory(generationRef.current);
+  }, [loadHistory]);
 
   // Prevent one render of the previous timeframe's candles/signals while effects are switching.
   return { snapshot: snapshot.timeframe === timeframe ? snapshot : emptySnapshot(timeframe), refresh };

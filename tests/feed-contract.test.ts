@@ -45,6 +45,10 @@ test('only matching timely WS ticks with matching bar and known provenance count
   assert.equal(update.price, 3101);
   assert.equal(update.streaming, true);
   assert.equal(parseSocketUpdate(frame({ provider: 'twelve_data:rest' }), '5m', now)?.streaming, false);
+  // The free, keyless spot fallback (Swissquote/Gold-API) is a real, trusted provider too —
+  // it just polls rather than pushing, so it must be accepted but never marked "streaming".
+  assert.equal(parseSocketUpdate(frame({ provider: 'spot_fallback:swissquote' }), '5m', now)?.streaming, false);
+  assert.equal(parseSocketUpdate(frame({ provider: 'spot_fallback:gold-api' }), '5m', now)?.streaming, false);
   for (const bad of [
     frame({ symbol: 'BTC/USD' }), frame({ provider: 'unknown' }), frame({ timestamp: '2026-09-24T15:00:00Z' }),
     frame({ bid: 0 }), frame({ bid: 3102, ask: 3101 }), frame({ bid: 3000, ask: 3000 }),

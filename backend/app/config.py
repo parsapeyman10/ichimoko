@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     twelve_data_api_key: str | None = None
     market_symbol: str = "XAU/USD"
     default_history_bars: int = 1500
+    # Without a Twelve Data key the backend automatically self-aggregates real candles from a
+    # free, keyless spot XAU/USD feed (Swissquote, with Gold-API as a backup) instead of going
+    # dark. Set to false to force the strict "no key -> unavailable" behaviour instead.
+    market_free_fallback_enabled: bool = True
 
     # Optional licensed news / calendar provider
     fmp_api_key: str | None = None

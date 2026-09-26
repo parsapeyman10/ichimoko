@@ -1,10 +1,14 @@
 """
 Live market ticks — real provider data only.
 
-1. Twelve Data price WebSocket (true streaming).
-2. If the socket is unavailable, a REST polling loop over real bars (also real data,
-   just slower) is used. There is no synthetic tick generator in this codebase: when the
-   provider cannot be reached the pipeline reports the failure and emits nothing.
+1. If AURUM_TWELVE_DATA_API_KEY is configured: Twelve Data price WebSocket (true streaming),
+   falling back to REST polling over real bars if the socket is unavailable (also real data,
+   just slower).
+2. If no key is configured: an automatic, keyless, free spot-quote fallback
+   (see app.services.spot_feed — Swissquote / gold-api.com) so the terminal still has a real,
+   live, zero-setup feed instead of sitting idle. There is no synthetic tick generator in this
+   codebase: when no real provider can be reached, the pipeline reports the failure and emits
+   nothing.
 """
 from __future__ import annotations
 
@@ -89,11 +93,17 @@ async def twelve_data_poll_ticks(settings: Settings) -> AsyncIterator[Tick]:
 
 async def market_ticks(settings: Settings) -> AsyncIterator[Tick]:
     """
-    Streaming first, REST polling as a *real-data* fallback.
-    Both paths raise [DataUnavailable] instead of producing anything invented.
+    Streaming first, REST polling as a *real-data* fallback; when no key is configured at
+    all, an automatic keyless real spot-quote fallback takes over instead of stopping.
+    Every path raises [DataUnavailable] instead of producing anything invented.
     """
     if not settings.has_market_key:
-        raise DataUnavailable("کلید Twelve Data تنظیم نشده است — هیچ داده‌ای تولید نمی‌شود")
+        if not settings.market_free_fallback_enabled:
+            raise DataUnavailable("AURUM_TWELVE_DATA_API_KEY تنظیم نشده و فید رایگان جایگزین غیرفعال است")
+        from app.services.spot_feed import spot_fallback_ticks
+        async for tick in spot_fallback_ticks(settings):
+            yield tick
+        return
     try:
         async for tick in twelve_data_ticks(settings):
             yield tick

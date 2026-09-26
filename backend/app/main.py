@@ -48,6 +48,11 @@ from app.services.ytd_trades import get_ytd_report
 settings = get_settings()
 
 
+def market_provider_label() -> str:
+    """Which real feed is actually driving market data right now — never a fixed label."""
+    return "twelve_data" if settings.has_market_key else "spot_fallback"
+
+
 class MarketHub:
     """In-process live state for the real feed. Contains provider data only."""
 
@@ -60,7 +65,7 @@ class MarketHub:
             "state": "starting",
             "detail": None,
             "last_tick_at": None,
-            "provider": "twelve_data",
+            "provider": market_provider_label(),
         }
 
     def subscribe(self) -> asyncio.Queue:
@@ -113,15 +118,24 @@ async def run_market_pipeline() -> None:
     backoff = 2
     while True:
         try:
-            hub.set_status("connecting", "اتصال به Twelve Data…")
+            hub.set_status(
+                "connecting",
+                "اتصال به Twelve Data…" if settings.has_market_key else "اتصال به فید رایگان خودکار طلا (Swissquote/Gold-API)…",
+            )
             async for tick in market_ticks(settings):
                 source_state = "live" if tick.provider == "twelve_data:ws" else "polling"
-                source_detail = None if source_state == "live" else "تیک از کندل REST ناشر؛ قیمت درون کندل زنده نیست"
-                if hub.feed_status["state"] != source_state:
+                if tick.provider == "twelve_data:ws":
+                    source_detail = None
+                elif tick.provider == "twelve_data:rest":
+                    source_detail = "تیک از کندل REST ناشر؛ قیمت درون کندل زنده نیست"
+                else:
+                    source_detail = "فید رایگان خودکار (بدون کلید) — Swissquote/Gold-API؛ نرخ‌دهی هر چند ثانیه، نه tick-by-tick"
+                if hub.feed_status["state"] != source_state or hub.feed_status.get("provider") != tick.provider:
                     hub.set_status(source_state, source_detail)
                 hub.last_tick = tick.model_dump(mode="json")
                 hub.feed_status.update(
-                    {"state": source_state, "detail": source_detail, "last_tick_at": datetime.now(timezone.utc)}
+                    {"state": source_state, "detail": source_detail, "last_tick_at": datetime.now(timezone.utc),
+                     "provider": tick.provider}
                 )
                 active_bars: dict[str, dict] = {}
                 for timeframe, builder in builders.items():
@@ -211,7 +225,7 @@ async def health():
         "status": "ok",
         "environment": settings.environment,
         "market_data": {
-            "provider": "twelve_data",
+            "provider": market_provider_label(),
             "configured": settings.has_market_key,
             "feed_state": feed["state"],
             "detail": feed["detail"],
@@ -236,14 +250,16 @@ async def data_status():
             "last_bar": hub.latest[timeframe].timestamp if timeframe in hub.latest else None,
         }
     return {
-        "provider": "twelve_data",
+        "provider": market_provider_label(),
         "api_key_configured": settings.has_market_key,
         "symbol": settings.market_symbol,
         "feed": hub.public_feed_status(),
         "timeframes": per_timeframe,
         "policy": (
-            "فقط داده واقعی منتشر می‌شود. در نبود کلید/اینترنت، اندپوینت‌ها خطا برمی‌گردانند و "
-            "هیچ کندل، قیمت یا خبری ساخته نمی‌شود."
+            "فقط داده واقعی منتشر می‌شود. بدون کلید Twelve Data، یک فید رایگان و کاملاً خودکار "
+            "(Swissquote/Gold-API) جای آن را می‌گیرد — نیازی به تنظیم دستی نیست. اگر اینترنت قطع باشد "
+            "یا هیچ منبع واقعی در دسترس نباشد، اندپوینت‌ها خطا برمی‌گردانند و هیچ کندل، قیمت یا خبری "
+            "ساخته نمی‌شود."
         ),
     }
 
@@ -448,6 +464,7 @@ async def _backtest_payload(
         commission_per_oz=commission_per_oz,
         min_position_oz=min_position_oz,
         use_trailing=use_trailing,
+        data_source=market_provider_label(),
     )
     if broker_name:
         result["broker"] = get_broker(broker_name).model_dump()
@@ -567,7 +584,7 @@ async def backtest_history(days: int = Query(365, ge=30, le=2000)):
     except DataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {
-        "data_source": "twelve_data",
+        "data_source": market_provider_label(),
         "candles": [
             {"time": c.timestamp.isoformat(), "open": c.open, "high": c.high, "low": c.low, "close": c.close, "volume": c.volume}
             for c in daily
@@ -590,7 +607,7 @@ async def stress_test(
     """
     payload = await _backtest_payload(timeframe, bars, initial_balance, 0.5, spread, commission_per_oz, None, 1.0, True)
     report = stress_test_from_trades(payload.get("trades", []), initial_balance, runs=runs)
-    report["data_source"] = "twelve_data"
+    report["data_source"] = market_provider_label()
     report["bars_used"] = payload.get("bars")
     return report
 
@@ -766,7 +783,7 @@ async def market_socket(websocket: WebSocket):
             {
                 "type": "connected",
                 "symbol": settings.market_symbol,
-                "provider": "twelve_data",
+                "provider": market_provider_label(),
                 "feed_state": feed["state"],
                 "detail": feed["detail"],
             }

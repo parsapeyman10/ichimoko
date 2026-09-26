@@ -1,10 +1,11 @@
 """
-Real market history — Twelve Data REST only.
+Real market history — Twelve Data REST when a key is configured, otherwise the automatic
+free spot-gold fallback (see app.services.spot_feed) built from real, self-observed bars.
 
 There is no synthetic generator, no anchor interpolation and no Monte-Carlo price path
-anywhere in this module. If the provider cannot be reached, or no API key is configured,
-the caller gets [DataUnavailable] and the API returns an explicit error. Inventing a
-candle to keep the UI alive is never an option.
+anywhere in this module. If neither provider can deliver real candles, the caller gets
+[DataUnavailable] and the API returns an explicit error. Inventing a candle to keep the UI
+alive is never an option.
 """
 from __future__ import annotations
 
@@ -258,7 +259,24 @@ async def load_history(
 ) -> list[Candle]:
     """Return verified provider candles; stale/uncertain data is never manufactured."""
     if not settings.has_market_key:
-        raise DataUnavailable("کلید Twelve Data تنظیم نشده است — کش، دادهٔ زنده یا قابل معامله نیست")
+        if not settings.market_free_fallback_enabled:
+            raise DataUnavailable(
+                "AURUM_TWELVE_DATA_API_KEY تنظیم نشده و فید رایگان جایگزین غیرفعال است"
+            )
+        # No paid key configured: read whatever real history the automatic, keyless spot
+        # fallback (Swissquote / gold-api.com) has genuinely observed so far. It never
+        # invents a bar — if it has not collected enough yet, this honestly fails instead
+        # of fabricating history, and a Twelve Data key remains a purely optional upgrade.
+        from app.services import spot_feed
+        candles = spot_feed.get_history(timeframe, output_size)
+        if len(candles) < 2:
+            raise DataUnavailable(
+                "کلید Twelve Data تنظیم نشده؛ فید رایگان خودکار قیمت طلا (Swissquote/Gold-API) "
+                "هنوز تاریخچهٔ کافی برای این بازه جمع نکرده است. داده‌ای ساخته نمی‌شود — چند دقیقه صبر "
+                "کنید تا کندل‌های واقعی جمع شوند، یا برای تاریخچهٔ فوری/عمیق‌تر کلید Twelve Data را "
+                "(کاملاً اختیاری) اضافه کنید."
+            )
+        return candles
     ttl = TTL_SECONDS.get(timeframe, 60)
     key = _cache_key(settings.market_symbol, timeframe, output_size, start_date, end_date)
 

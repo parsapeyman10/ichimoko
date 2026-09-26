@@ -116,7 +116,7 @@ export function barIsCurrent(last: Candle | undefined, timeframe: ChartTimeframe
 export function parseSocketUpdate(payload: unknown, timeframe: ChartTimeframe, now = Date.now()): { price: number; at: number; bar: Candle; streaming: boolean } | null {
   const message = payload as { type?: string; tick?: { symbol?: string; timestamp?: string; provider?: string; bid?: number; ask?: number }; candles?: Record<string, BackendCandle> } | null;
   if (message?.type !== 'market.update' || message.tick?.symbol !== 'XAU/USD' ||
-      !['twelve_data:ws', 'twelve_data:rest'].includes(message.tick?.provider ?? '') ||
+      !['twelve_data:ws', 'twelve_data:rest', 'spot_fallback:swissquote', 'spot_fallback:gold-api'].includes(message.tick?.provider ?? '') ||
       typeof message.tick?.timestamp !== 'string' ||
       !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(message.tick.timestamp)) return null;
   const at = Date.parse(message.tick.timestamp);

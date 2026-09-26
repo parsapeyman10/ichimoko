@@ -97,12 +97,14 @@ test('an open WS with no further provider ticks expires without waiting for REST
   expect(result.current.snapshot.detail).toContain('قدیمی');
 });
 
-test('no key does not poll REST or initiate a WebSocket', async () => {
+test('no key automatically falls back to the free spot feed instead of stopping', async () => {
   vi.stubGlobal('WebSocket', FakeWebSocket);
-  const fetchMock = vi.fn(async () => reply({ api_key_configured: false }));
-  vi.stubGlobal('fetch', fetchMock);
+  vi.stubGlobal('fetch', vi.fn((path: string) => path === '/api/v1/data/status'
+    ? Promise.resolve(reply({ api_key_configured: false, provider: 'spot_fallback' }))
+    : Promise.resolve(reply([row('5m', 3200)]))));
   const { result } = renderHook(() => useMarketFeed('5m'));
-  await waitFor(() => expect(result.current.snapshot.state).toBe('no-key'));
-  expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(FakeWebSocket.sockets).toHaveLength(0);
+  // Absence of a paid key must not halt the feed — it should still load history and connect.
+  await waitFor(() => expect(result.current.snapshot.state).toBe('polling'));
+  expect(result.current.snapshot.provider).toBe('spot_fallback');
+  expect(FakeWebSocket.sockets).toHaveLength(1);
 });

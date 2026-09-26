@@ -21,6 +21,7 @@ from app.models import Candle, Timeframe  # noqa: E402
 from app.services.backtest import cross_candidate_indices, run_backtest, stress_test_from_trades  # noqa: E402
 from app.services.history import DataUnavailable, load_history  # noqa: E402
 from app.services.news_feed import NewsAggregator  # noqa: E402
+from app.services import spot_feed  # noqa: E402
 from app.config import Settings  # noqa: E402
 
 
@@ -53,7 +54,11 @@ def fixture_candles(count: int = 700, timeframe: Timeframe = Timeframe.M5) -> li
     return candles
 
 
-def test_load_history_requires_a_key(tmp_path):
+def test_load_history_requires_a_key(tmp_path, monkeypatch):
+    # Isolate the free spot-fallback store so this policy test never sees a real on-disk
+    # cache from another test run/process: with no key AND no fallback history yet, the
+    # backend must still honestly fail rather than fabricate anything.
+    monkeypatch.setattr(spot_feed, "store", spot_feed.SpotHistoryStore(path=tmp_path / "spot.json"))
     settings = Settings(twelve_data_api_key=None)
     import asyncio
 
@@ -62,7 +67,7 @@ def test_load_history_requires_a_key(tmp_path):
     except DataUnavailable as exc:
         assert "کلید" in str(exc)
         return
-    raise AssertionError("load_history must raise DataUnavailable without an API key")
+    raise AssertionError("load_history must raise DataUnavailable without an API key or fallback history")
 
 
 def test_news_aggregator_returns_nothing_without_a_license():

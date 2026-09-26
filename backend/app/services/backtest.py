@@ -77,6 +77,7 @@ def run_backtest(
     use_trailing: bool = True,
     context: StrategyContext | None = None,
     start_index: int | None = None,
+    data_source: str = "twelve_data",
 ) -> dict[str, Any]:
     """Replay the live strategy over real candles. Returns an honest report.
 
@@ -264,11 +265,13 @@ def run_backtest(
         rejected=rejected,
         risk_percent=risk_percent,
         skipped_stop_distances=skipped_stop_distances,
+        data_source=data_source,
     )
 
 
 def _summarize(
     *,
+    data_source: str = "twelve_data",
     trades: list[dict[str, Any]],
     equity_curve: list[dict[str, Any]],
     initial_balance: float,
@@ -329,7 +332,7 @@ def _summarize(
     else:
         feasibility["verdict"] = "همه سیگنال‌های واجد شرایط با حداقل لات بروکر قابل اجرا بودند."
     return {
-        "data_source": "twelve_data",
+        "data_source": data_source,
         "symbol": candles[0].symbol,
         "timeframe": timeframe.value,
         "bars": len(candles),
