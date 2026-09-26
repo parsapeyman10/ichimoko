@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Activity, AlertTriangle, BarChart3, Bell, BookOpen, Brain, ChevronDown, CircleDollarSign,
+  Activity, AlertTriangle, BarChart3, Bell, BookOpen, Brain, Calculator, ChevronDown, CircleDollarSign,
   Clock3, Flame, Gauge, HelpCircle, History, Layers, LayoutDashboard, LogOut, Menu, Newspaper,
   Rss, Search, Settings, ShieldCheck, Signal, Sparkles,
   TrendingDown, TrendingUp, Users, WalletCards, WifiOff, X, Zap
@@ -11,6 +11,7 @@ import PredictionPanel from './components/PredictionPanel';
 import TopTradersPanel from './components/TopTradersPanel';
 import MTFPanel from './components/MTFPanel';
 import CryptoPumpScanner from './components/CryptoPumpScanner';
+import RiskPanel from './components/RiskPanel';
 import { apiGet, apiPost, barIsCurrent, toBackendCandles, type DataStatus } from './lib/api';
 import { useMarketFeed } from './lib/feed';
 import type { Candle } from './lib/market';
@@ -58,6 +59,7 @@ function Sidebar({ active, setActive, open, close, feedState, provider }: { acti
     { key: 'news', label: 'هوش خبری', sub: 'News (auto)', icon: Newspaper },
     { key: 'journal', label: 'رزومه / ژورنال', sub: 'Paper journal', icon: BookOpen },
     { key: 'risk', label: 'مدیریت سرمایه', sub: 'Risk', icon: Gauge },
+    { key: 'risk-lab', label: 'حجم پوزیشن و هزینه بروکر', sub: 'Sizing & broker cost', icon: Calculator },
   ];
   return <>
     <aside className={`sidebar ${open ? 'mobile-open' : ''}`}>
@@ -629,6 +631,7 @@ export default function App() {
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><TopTradersPanel timeframe={timeframe}/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><BacktestPanel/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><CryptoPumpScanner/></div>
+        <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><RiskPanel/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><JournalCard/></div>
 
         <Disclaimer/>
