@@ -20,12 +20,19 @@ type Vote = {
 
 type Ensemble = {
   consensus: string;
-  consensus_confidence?: number;
+  elite_confidence?: number;
   agreement?: number;
   quality?: string;
   advisory?: string;
   veto_reasons?: string[];
   votes: Vote[];
+  error?: string;
+};
+
+// The route returns { base, elite, features_used }: the ensemble fields live under `elite`,
+// not at the top level (see app/main.py::traders_ensemble_get).
+type EnsembleResponse = {
+  elite?: Ensemble;
   error?: string;
 };
 
@@ -35,10 +42,10 @@ export default function TopTradersPanel({ timeframe }: { timeframe: string }) {
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      const result = await apiGet<Ensemble>(`/api/v1/traders/ensemble?timeframe=${timeframe}`);
+      const result = await apiGet<EnsembleResponse>(`/api/v1/traders/ensemble?timeframe=${timeframe}`);
       if (!alive) return;
-      if (result.ok) setState({ loading: false, data: result.data });
-      else setState({ loading: false, error: result.error });
+      if (result.ok && result.data.elite) setState({ loading: false, data: result.data.elite });
+      else setState({ loading: false, error: result.ok ? 'داده اجماع سبک‌ها ناقص است' : result.error });
     };
     void load();
     const timer = window.setInterval(load, 30_000);

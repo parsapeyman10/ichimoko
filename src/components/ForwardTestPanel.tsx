@@ -48,7 +48,8 @@ type ForwardData = {
     median_final_balance?: number;
     p05_final_balance?: number;
     p95_final_balance?: number;
-    ruin_probability_pct?: number | null;
+    // Backend key is `risk_of_80pct_loss_pct` (see app/services/backtest.py::stress_test_from_trades).
+    risk_of_80pct_loss_pct?: number | null;
     note?: string;
     error?: string;
   };
@@ -186,7 +187,7 @@ export default function ForwardTestPanel({
             <span>میانه: <b style={{ color: '#fff' }}>${data.stress_test.median_final_balance?.toFixed(2)}</b></span>
             <span>۵٪ بدترین: <b style={{ color: 'var(--red)' }}>${data.stress_test.p05_final_balance?.toFixed(2)}</b></span>
             <span>۹۵٪ بهترین: <b style={{ color: 'var(--green)' }}>${data.stress_test.p95_final_balance?.toFixed(2)}</b></span>
-            <span>ریسک ورشکستگی: <b style={{ color: '#e6a244' }}>{data.stress_test.ruin_probability_pct != null ? `${data.stress_test.ruin_probability_pct}%` : '—'}</b></span>
+            <span>ریسک افت ۸۰٪ سرمایه: <b style={{ color: '#e6a244' }}>{data.stress_test.risk_of_80pct_loss_pct != null ? `${data.stress_test.risk_of_80pct_loss_pct}%` : '—'}</b></span>
           </div>
           {data.stress_test.note && <div style={{ marginTop: 6, fontSize: 8, color: '#6b7280', lineHeight: 1.6 }}>{data.stress_test.note}</div>}
         </div>
