@@ -56,9 +56,16 @@ class NobitexSpotScannerTest {
         assertEquals(0, parseSpotStats(root(response(changes = "-0.5")), at).candidates)
         assertEquals(0, parseSpotStats(root(response(changes = "14.5")), at).candidates)
         assertEquals(0, parseSpotStats(root(response(volume = "3000")), at).pairs.count { it.quote == "USDT" && it.candidate })
-        // A single pair with an inverted bid/ask is dropped, not fatal to the rest of the response.
-        val badSpread = parseSpotStats(root(response().replace("\"bestSell\":\"100.4\"", "\"bestSell\":\"99.0\"")), at)
-        assertTrue(badSpread.pairs.size < 12)
+        // A single pair with an inverted bid/ask still appears (as "not a candidate"), it just
+        // never becomes a fatal reason to drop every OTHER real, well-formed market.
+        val oneBadPair = """{"status":"ok","stats":{
+            "btc-usdt":{"isClosed":false,"bestBuy":"100.0","bestSell":"99.0","latest":"100.2","volumeDst":"50000","dayChange":"2.5"},
+            "eth-usdt":{"isClosed":false,"bestBuy":"100.0","bestSell":"100.4","latest":"100.2","volumeDst":"50000","dayChange":"2.5"}
+        }}"""
+        val badSpread = parseSpotStats(root(oneBadPair), at)
+        assertEquals(2, badSpread.pairs.size)
+        assertFalse(badSpread.pairs.single { it.base == "BTC" }.candidate)
+        assertTrue(badSpread.pairs.single { it.base == "ETH" }.candidate)
         assertTrue(runCatching { parseSpotStats(root(response().replace("\"status\":\"ok\"", "\"status\":\"failed\"")), at) }.isFailure)
     }
 
