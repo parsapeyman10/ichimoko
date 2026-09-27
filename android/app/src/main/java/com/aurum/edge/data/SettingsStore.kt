@@ -42,6 +42,9 @@ class SettingsStore(context: Context) {
         stockDataKey = prefs.getString(KEY_STOCK_DATA, "").orEmpty(),
         nobitexApiToken = prefs.getString(KEY_NOBITEX_TOKEN, "").orEmpty(),
         nobitexLiveOrderCapUsdt = prefs.getFloat(KEY_NOBITEX_CAP, 20f).toDouble(),
+        newsAiApiKey = prefs.getString(KEY_NEWS_AI_KEY, "").orEmpty(),
+        newsAiBaseUrl = prefs.getString(KEY_NEWS_AI_URL, "").orEmpty(),
+        newsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, "").orEmpty(),
     )
 
     /**
@@ -163,6 +166,40 @@ class SettingsStore(context: Context) {
         return false
     }
 
+    /**
+     * User's OWN key for a DIRECT-FROM-PHONE, OpenAI-compatible AI news call, replacing the need
+     * for a self-hosted backend for the Forex ninth-condition gate. Explicit, on-device only;
+     * never logged. An empty [apiKey] or [baseUrl] or [model] clears client mode entirely (falls
+     * back to [newsBaseUrl] server mode, or UNKNOWN if neither is configured).
+     */
+    @Synchronized
+    fun saveNewsAiConfig(apiKey: String, baseUrl: String, model: String): Boolean {
+        val key = apiKey.trim()
+        val url = baseUrl.trim()
+        val modelName = model.trim()
+        if (key.isNotBlank() && (url.isBlank() || !url.startsWith("https://") || modelName.isBlank())) return false
+        val saved = prefs.edit()
+            .putString(KEY_NEWS_AI_KEY, key)
+            .putString(KEY_NEWS_AI_URL, url)
+            .putString(KEY_NEWS_AI_MODEL, modelName)
+            .commit()
+        if (saved && prefs.getString(KEY_NEWS_AI_KEY, null) == key) {
+            _settings.value = read()
+            return true
+        }
+        return false
+    }
+
+    @Synchronized
+    fun clearNewsAiConfig(): Boolean {
+        val saved = prefs.edit().remove(KEY_NEWS_AI_KEY).remove(KEY_NEWS_AI_URL).remove(KEY_NEWS_AI_MODEL).commit()
+        if (saved && prefs.getString(KEY_NEWS_AI_KEY, null) == null) {
+            _settings.value = read()
+            return true
+        }
+        return false
+    }
+
     @Synchronized
     fun update(transform: (AppSettings) -> AppSettings) {
         val next = transform(_settings.value)
@@ -219,5 +256,8 @@ class SettingsStore(context: Context) {
         private const val KEY_STOCK_DATA = "stock_data_readonly_key"
         private const val KEY_NOBITEX_TOKEN = "nobitex_live_api_token"
         private const val KEY_NOBITEX_CAP = "nobitex_live_order_cap_usdt"
+        private const val KEY_NEWS_AI_KEY = "news_ai_client_key"
+        private const val KEY_NEWS_AI_URL = "news_ai_client_base_url"
+        private const val KEY_NEWS_AI_MODEL = "news_ai_client_model"
     }
 }

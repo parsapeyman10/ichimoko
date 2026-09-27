@@ -75,7 +75,6 @@ class AppContainer(context: Context) {
     val watchSettings = WatchSettingsStore(appContext)
     val quoteHistory = QuoteHistoryStore(appContext)
     val watch = WatchRepository(SourceFetcher(), quoteHistory, watchSettings, settingsStore, appScope)
-    val news = NewsRepository(settingsStore, appScope) // independent, fail-closed server AI gate
     // Separate display feeds: global-crypto news cannot appear in the Forex research context.
     val publicWebNews = PublicWebNewsRepository(appScope,
         feeds = PublicNewsFeeds.all.filter { it.category in setOf(PublicNewsCategory.MARKETS, PublicNewsCategory.ECONOMY) })
@@ -84,6 +83,9 @@ class AppContainer(context: Context) {
     val iranWebNews = PublicWebNewsRepository(appScope,
         feeds = PublicNewsFeeds.all.filter { it.category == PublicNewsCategory.IRAN })
     val forexCalendar = ForexCalendarRepository(appScope) // public schedule UI; server checks it independently for the AI gate
+    // Backend server mode (preferred if configured) OR direct-from-phone client mode (publicWebNews
+    // + forexCalendar + the user's own key) — see NewsRepository's class doc.
+    val news = NewsRepository(settingsStore, appScope, publicWebNews, forexCalendar)
     /** Shared by chart, signal tab, notifications and automatic *paper* entries. Expires on time. */
     val verifiedMarket: StateFlow<MarketState> = combine(
         market.state, news.state, flow { while (true) { emit(System.currentTimeMillis()); delay(20_000L) } },

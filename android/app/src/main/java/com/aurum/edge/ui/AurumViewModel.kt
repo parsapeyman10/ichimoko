@@ -613,6 +613,32 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun saveNewsAiConfig(apiKey: String, baseUrl: String, model: String) {
+        val url = baseUrl.trim().trimEnd('/')
+        if (apiKey.isNotBlank() && (!url.startsWith("https://") || model.isBlank())) {
+            _toast.value = "برای کلید مستقیم، نشانی HTTPS و نام مدل هم لازم است"
+            return
+        }
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) { container.settingsStore.saveNewsAiConfig(apiKey, url, model) }
+            if (!saved) {
+                _toast.value = "ذخیرهٔ کلید مستقیم ناموفق بود"
+                return@launch
+            }
+            container.news.resetAndRefresh()
+            _toast.value = if (apiKey.isBlank()) "کلید مستقیم حذف شد"
+                else "کلید مستقیم ذخیره شد؛ اگر نشانی سرور بالا خالی باشد، گیت خبر مستقیماً از گوشی بررسی می‌شود"
+        }
+    }
+
+    fun clearNewsAiConfig() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { container.settingsStore.clearNewsAiConfig() }
+            container.news.resetAndRefresh()
+            _toast.value = "کلید مستقیم حذف شد"
+        }
+    }
+
     fun saveNewsBaseUrl(value: String) {
         val url = value.trim().trimEnd('/')
         if (url.isNotBlank() && NewsRepository.newsUrl(url) == null) {

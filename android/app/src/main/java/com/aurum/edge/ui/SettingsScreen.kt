@@ -58,6 +58,10 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     var key by remember { mutableStateOf("") }
     var symbol by remember { mutableStateOf(settings.symbol) }
     var newsUrl by remember { mutableStateOf(settings.newsBaseUrl) }
+    // Never prefill a saved secret in an editable field; blank on entry, like the API key above.
+    var newsAiKey by remember { mutableStateOf("") }
+    var newsAiBaseUrl by remember { mutableStateOf(settings.newsAiBaseUrl) }
+    var newsAiModel by remember { mutableStateOf(settings.newsAiModel) }
     var balance by remember { mutableStateOf(settings.accountBalance.toString()) }
     var risk by remember { mutableStateOf(settings.riskPercent.toString()) }
     var minConfidence by remember { mutableStateOf(settings.minConfidence.toString()) }
@@ -70,6 +74,9 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     LaunchedEffect(settings.apiKey) { key = "" } // clear input only after a saved key changes
     LaunchedEffect(settings.symbol) { symbol = settings.symbol }
     LaunchedEffect(settings.newsBaseUrl) { newsUrl = settings.newsBaseUrl }
+    LaunchedEffect(settings.newsAiApiKey) { newsAiKey = "" }
+    LaunchedEffect(settings.newsAiBaseUrl) { newsAiBaseUrl = settings.newsAiBaseUrl }
+    LaunchedEffect(settings.newsAiModel) { newsAiModel = settings.newsAiModel }
 
     val soundPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) viewModel.selectAlertSound(context, uri)
@@ -169,6 +176,28 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             }
             Text("خبرهای مستقیم فقط برای مطالعه‌اند؛ ورود سیگنالی/خودکار بدون مدل و شاهد معتبر متوقف است. وتوی دستی جداست؛ سفارش واقعی غیرفعال.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            Text("جایگزین بدون سرور: اگر نشانی بالا خالی باشد و کلید زیر را پر کنید، خودِ گوشی مستقیماً با RSS همین‌جا + کلید شما تحلیل می‌کند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold, modifier = Modifier.padding(top = 6.dp))
+            OutlinedTextField(value = newsAiKey, onValueChange = { newsAiKey = it }, singleLine = true,
+                label = { Text("کلید AI سازگار با OpenAI (اختیاری، فقط روی همین گوشی)") },
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            OutlinedTextField(value = newsAiBaseUrl, onValueChange = { newsAiBaseUrl = it }, singleLine = true,
+                label = { Text("نشانی پایهٔ HTTPS سازگار با OpenAI (مثلاً https://api.openai.com/v1)") },
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            OutlinedTextField(value = newsAiModel, onValueChange = { newsAiModel = it }, singleLine = true,
+                label = { Text("نام مدل (مثلاً gpt-4o-mini یا claude-sonnet-4.6)") },
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { viewModel.saveNewsAiConfig(newsAiKey, newsAiBaseUrl, newsAiModel) },
+                    modifier = Modifier.weight(1f)) { Text("ذخیرهٔ کلید مستقیم") }
+                OutlinedButton(onClick = {
+                    newsAiKey = ""; newsAiBaseUrl = ""; newsAiModel = ""
+                    viewModel.clearNewsAiConfig()
+                }, modifier = Modifier.weight(1f)) { Text("حذف کلید مستقیم") }
+            }
+            Text("⚠️ این کلید روی گوشی ذخیره می‌شود، هرگز به گیت‌هاب نمی‌رود، اما اگر همین APK را با کسی به‌اشتراک بگذارید، کلید همراه آن قابل استخراج است. برای ارائهٔ عمومی از سقف/rate limit سرویس کلید استفاده کنید.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Red)
         }
 
         SectionCard(
