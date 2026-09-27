@@ -42,14 +42,14 @@ object MetaTraderCsv {
         .removeSuffix(">")
         .trim()
         .lowercase()
-        .replace(Regex("[\s_\-./]+"), "")
+        .replace(Regex("""[\s_./-]+"""), "")
 
 
     private fun timestampUsesEmbeddedZone(raw: String): Boolean {
         val text = raw.trim().trim('"')
         if (text.toLongOrNull() != null) return true
         if (text.endsWith("Z", ignoreCase = true)) return true
-        return Regex(".*[T ]\d{1,2}:\d{2}(:\d{2})?([+-]\d{2}:?\d{2})$").matches(text)
+        return Regex(""".*[T ]\d{1,2}:\d{2}(:\d{2})?([+-]\d{2}:?\d{2})${'$'}""").matches(text)
     }
 
     private fun parseTimestamp(raw: String, offset: ZoneOffset): Long {
