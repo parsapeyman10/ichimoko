@@ -27,6 +27,7 @@ enum class Interval(val api: String, val label: String, val minutes: Int) {
     M1("1min", "1m", 1),
     M5("5min", "5m", 5),
     M15("15min", "15m", 15),
+    M30("30min", "30m", 30),
     H1("1h", "1H", 60),
     H4("4h", "4H", 240);
 

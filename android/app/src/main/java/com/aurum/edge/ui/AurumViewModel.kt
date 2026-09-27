@@ -590,19 +590,23 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** Offline historical HistData XAUUSD M1 file, NEVER a market-feed or order source. */
-    fun importHistData(uri: Uri?, balance: Double, risk: Double, spread: Double,
-                       commission: Double, threshold: Double) {
-        if (uri == null) { _learn.value = LearnState.Failed("ابتدا ZIP/CSV ماهانهٔ HistData را از گوشی انتخاب کنید"); return }
+    /**
+     * Offline historical HistData M1 archives (monthly CSV/ZIP or the site's yearly ZIP,
+     * one or MANY files), merged and aggregated to the chosen research timeframe (M1..H1).
+     * NEVER a market-feed or order source; gaps stay gaps, nothing is synthesised.
+     */
+    fun importHistData(uris: List<Uri>, interval: Interval, balance: Double, risk: Double,
+                       spread: Double, commission: Double, threshold: Double) {
+        if (uris.isEmpty()) { _learn.value = LearnState.Failed("ابتدا فایل(های) ZIP/CSV ماهانه یا سالانهٔ HistData را انتخاب کنید"); return }
         viewModelScope.launch {
-            _learn.value = LearnState.Loading("خواندن ZIP/CSV ماهانهٔ HistData؛ قیمت BID تاریخی با EST ثابت…")
+            _learn.value = LearnState.Loading("خواندن ${uris.size} فایل HistData و تجمیع به تایم‌فریم ${interval.label}؛ قیمت BID تاریخی با EST ثابت…")
             try {
-                val (csv, filename) = container.metaTraderImporter.fromHistData(uri)
-                val result = container.runHistDataBacktest(csv, filename, balance,
+                val files = container.metaTraderImporter.fromHistDataFiles(uris)
+                val result = container.runHistDataBacktest(files, interval, balance,
                     risk.coerceIn(0.1, 5.0), spread, commission, threshold)
-                _learn.value = LearnState.Done(result, Interval.M1)
+                _learn.value = LearnState.Done(result, interval)
             } catch (e: Exception) {
-                _learn.value = LearnState.Failed((e.message ?: "فایل HistData قابل تحلیل نیست").take(160))
+                _learn.value = LearnState.Failed((e.message ?: "فایل‌های HistData قابل تحلیل نیست").take(160))
             }
         }
     }

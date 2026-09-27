@@ -81,8 +81,10 @@ fun LearnScreen(viewModel: AurumViewModel) {
     val lastCompleteMonth = remember { YearMonth.now(ZoneOffset.UTC).minusMonths(1) }
     var histYear by remember { mutableStateOf(lastCompleteMonth.year.toString()) }
     var histMonth by remember { mutableStateOf(lastCompleteMonth.monthValue.toString()) }
-    var histUri by remember { mutableStateOf<Uri?>(null) }
-    val histPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> histUri = uri }
+    var histUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var histInterval by remember { mutableStateOf(Interval.M5) }
+    val histPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        histUris = uris.sorted() }
 
     Column(
         modifier = Modifier
@@ -291,9 +293,20 @@ fun LearnScreen(viewModel: AurumViewModel) {
                 modifier = Modifier.padding(top = 6.dp))
         }
 
-        SectionCard("HistData · طلای XAU/USD تاریخی", "فقط فایل ماهانهٔ M1 و قیمت BID؛ پژوهش، نه فید یا سفارش") {
-            Text("آرشیو ماهانهٔ رسمی را باز کن، فایل ZIP را در مرورگر گوشی دانلود و همین‌جا انتخاب کن؛ URL دلخواه یا کلید لازم نیست. CSV داخل ZIP به‌شکل DAT_ASCII/MT_XAUUSD_M1_YYYYMM است. سال‌های کاملِ چندصد هزارردیفی یا فایل تیک پشتیبانی نمی‌شوند.",
+        SectionCard("HistData · تاریخچهٔ XAU/USD و ۷ جفت اصلی", "فایل ماهانه/سالانهٔ M1 و قیمت BID؛ پژوهش، نه فید یا سفارش") {
+            Text("از صفحهٔ دانلود رسمی، ZIP ماهانه یا سالانه را در مرورگر گوشی بگیر و همین‌جا انتخاب کن؛ URL دلخواه یا کلید لازم نیست. می‌توانی چند فایل را با هم انتخاب کنی (مثلاً ۵ ZIP سالانه = ۵ سال)؛ همه باید نماد یکسان داشته باشند و به تایم‌فریم انتخابی تجمیع می‌شوند. فایل تیک پشتیبانی نمی‌شود.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            Text("تایم‌فریم پژوهشی (از کندل‌های M1 واقعی تجمیع می‌شود؛ شکاف آخر هفته/تعطیلی همان می‌ماند):",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 8.dp))
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(Interval.M1, Interval.M5, Interval.M15, Interval.M30, Interval.H1).forEach { entry ->
+                    if (histInterval == entry) Button(onClick = { histInterval = entry },
+                        modifier = Modifier.weight(1f)) { Text(entry.label) }
+                    else OutlinedButton(onClick = { histInterval = entry },
+                        modifier = Modifier.weight(1f)) { Text(entry.label) }
+                }
+            }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(value = histYear, onValueChange = { histYear = it.take(4) },
                     label = { Text("سال میلادی") }, singleLine = true, modifier = Modifier.weight(1f))
@@ -310,25 +323,26 @@ fun LearnScreen(viewModel: AurumViewModel) {
                 OutlinedButton(onClick = { histPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "text/*", "application/octet-stream")) },
                     modifier = Modifier.weight(1f)) { Text("انتخاب ZIP/CSV") }
             }
-            if (period == null) Text("ماه تکمیل‌شدهٔ معتبر از ۲۰۰۹ تا ${lastCompleteMonth} را انتخاب کنید.",
+            if (period == null) Text("ماه تکمیل‌شدهٔ معتبر از ۲۰۰۹ تا ${lastCompleteMonth} را انتخاب کنید؛ ZIP سالانهٔ کامل را هم از همان صفحه می‌توانی بگیری و یک‌جا انتخاب کنی.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
-            histUri?.let { Text("فایل انتخاب شد: ${it.lastPathSegment?.takeLast(40) ?: "ZIP/CSV"}",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan) }
+            if (histUris.isNotEmpty()) Text("${histUris.size} فایل انتخاب شد (ماهانه یا سالانه، هم‌نماد)",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
             Button(onClick = {
-                viewModel.importHistData(histUri, balance.toDoubleOrNull() ?: settings.accountBalance,
+                viewModel.importHistData(histUris, histInterval,
+                    balance.toDoubleOrNull() ?: settings.accountBalance,
                     risk.toDoubleOrNull() ?: settings.riskPercent,
                     spread.toDoubleOrNull() ?: settings.spreadPrice,
                     commission.toDoubleOrNull() ?: settings.commissionPerOz,
                     settings.minConfidence)
-            }, enabled = histUri != null && learn !is LearnState.Loading,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("بک‌تست پژوهشی فایل HistData") }
-            Text("HistData ساعت EST ثابت UTC−05:00 بدون تغییر تابستانی و کندل BID دارد؛ اسپرد/کارمزد فرض‌اند. نام فایل منشأ را اثبات نمی‌کند؛ تنها ۵۰۰۰ کندل آخر تحلیل می‌شود و هیچ داده‌ای به چارت زنده/ژورنال معامله تزریق نمی‌شود.",
+            }, enabled = histUris.isNotEmpty() && learn !is LearnState.Loading,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("بک‌تست پژوهشی فایل‌های HistData") }
+            Text("HistData ساعت EST ثابت UTC−05:00 بدون تغییر تابستانی و کندل BID دارد؛ اسپرد/کارمزد فرض‌اند. نام فایل منشأ را اثبات نمی‌کند؛ سقف پژوهش ۶۰۰ هزار کندل است (۵ سالِ ۵ دقیقه‌ای ≈ ۵۲۵ هزار) و کندل‌های تجمیعی فقط از M1 واقعی همان فایل‌ها ساخته می‌شوند. هیچ داده‌ای به چارت زنده/ژورنال معامله تزریق نمی‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 6.dp))
         }
 
         SectionCard("ورود فایل/لینک MetaTrader برای پژوهش", "CSV / TSV خروجی MT4 یا MT5؛ هرگز به چارت زنده یا سفارش وصل نمی‌شود") {
-            Text("منشأ فایل را خودت تأیید کن؛ نام نماد، تایم‌فریم انتخابی بالای صفحه و منطقه زمانی سرور MT باید با فایل یکسان باشند. تنها ۵۰۰۰ کندل آخر تحلیل می‌شود.",
+            Text("منشأ فایل را خودت تأیید کن؛ نام نماد، تایم‌فریم انتخابی بالای صفحه و منطقه زمانی سرور MT باید با فایل یکسان باشند. تا ۶۰۰ هزار کندل آخر تحلیل می‌شود.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(value = mtSymbol, onValueChange = { mtSymbol = it }, singleLine = true,

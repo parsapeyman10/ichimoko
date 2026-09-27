@@ -125,14 +125,15 @@ class AppContainer(context: Context) {
     }
 
     /** HistData monthly CSV is historical BID, never part of Twelve Data live candles or orders. */
-    suspend fun runHistDataBacktest(csv: String, fileName: String, initialBalance: Double,
-                                    riskPercent: Double, spreadPrice: Double,
+    suspend fun runHistDataBacktest(files: List<Pair<String, String>>, interval: Interval,
+                                    initialBalance: Double, riskPercent: Double, spreadPrice: Double,
                                     commissionPerOz: Double, threshold: Double): Backtester.Result =
         withContext(Dispatchers.Default) {
-            val imported = HistDataCsv.parse(csv, fileName)
-            Backtester.run(candles = imported.candles, interval = Interval.M1, symbol = "XAU/USD",
-                dataSource = "HistData فایل کاربر $fileName · BID تاریخی · EST ثابت UTC−05:00 · " +
-                    "${imported.candles.size} از ${imported.totalRows} ردیف؛ منشأ فایل مستقل تأیید نشده",
+            val merged = HistDataCsv.parseMerged(files, interval)
+            Backtester.run(candles = merged.candles, interval = merged.interval, symbol = merged.symbol,
+                dataSource = "HistData فایل‌های کاربر (${merged.months} ماه · ${merged.symbol} · " +
+                    "تایم‌فریم ${merged.interval.label} تجمیع‌شده از M1 واقعی) · BID تاریخی · EST ثابت UTC−05:00 · " +
+                    "${merged.candles.size} کندل از ${merged.totalRows} ردیف M1؛ منشأ فایل مستقل تأیید نشده",
                 initialBalance = initialBalance, riskPercent = riskPercent,
                 spreadPrice = spreadPrice, commissionPerOz = commissionPerOz, threshold = threshold)
         }

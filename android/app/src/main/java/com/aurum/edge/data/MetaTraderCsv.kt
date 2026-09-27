@@ -87,7 +87,7 @@ object MetaTraderCsv {
         if (abs(median - interval.millis) > interval.millis / 5) {
             throw DataFeedException("تایم‌فریم انتخابی ${interval.label} با فاصلهٔ معمول کندل‌های فایل مطابقت ندارد")
         }
-        return ImportedHistory(parsed.takeLast(5000), parsed.size, offset.id)
+        return ImportedHistory(parsed.takeLast(HistDataCsv.MAX_RESEARCH_CANDLES), parsed.size, offset.id)
     }
 }
 
@@ -99,16 +99,26 @@ class MetaTraderImporter(private val context: Context) {
         input.use { String(readLimited(it), Charsets.UTF_8) }
     }
 
-    /** SAF-only ZIP/CSV. A filename is a format hint, never proof of publisher authenticity. */
-    suspend fun fromHistData(uri: Uri): Pair<String, String> = withContext(Dispatchers.IO) {
-        val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) cursor.getString(0) else null
-        }?.takeIf { it.length <= 100 && '/' !in it && '\\' !in it }
-            ?: throw DataFeedException("نام فایل انتخاب‌شده برای بررسی HistData در دسترس نیست")
-        val input = context.contentResolver.openInputStream(uri) ?: throw DataFeedException("فایل HistData خوانده نشد")
-        val bytes = input.use { readLimited(it, 12_000_000) }
-        if (name.endsWith(".zip", ignoreCase = true)) HistDataCsv.unzip(bytes, name)
-        else String(bytes, Charsets.UTF_8) to name
+    /**
+     * SAF-only ZIP/CSV, one or MANY files (yearly ZIPs hold 12 monthly CSVs). A filename is a
+     * format hint, never proof of publisher authenticity. Order of the returned monthly CSVs
+     * is whatever the picker gave; merging re-sorts by each file's own period.
+     */
+    suspend fun fromHistDataFiles(uris: List<Uri>): List<Pair<String, String>> = withContext(Dispatchers.IO) {
+        if (uris.isEmpty()) throw DataFeedException("ابتدا فایل(ها) ZIP/CSV ماهانه یا سالانهٔ HistData را انتخاب کنید")
+        if (uris.size > 30) throw DataFeedException("حداکثر ۳۰ فایل در هر تحلیل پشتیبانی می‌شود")
+        val out = ArrayList<Pair<String, String>>()
+        uris.forEach { uri ->
+            val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }?.takeIf { it.length <= 100 && '/' !in it && '\\' !in it }
+                ?: throw DataFeedException("نام فایل انتخاب‌شده برای بررسی HistData در دسترس نیست")
+            val input = context.contentResolver.openInputStream(uri) ?: throw DataFeedException("فایل HistData خوانده نشد")
+            val bytes = input.use { readLimited(it, 24_000_000) }
+            if (name.endsWith(".zip", ignoreCase = true)) out += HistDataCsv.unzip(bytes, name)
+            else out += String(bytes, Charsets.UTF_8) to name
+        }
+        out
     }
 
     suspend fun fromHttps(raw: String): String = withContext(Dispatchers.IO) {
