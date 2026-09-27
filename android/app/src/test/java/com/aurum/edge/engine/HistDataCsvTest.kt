@@ -101,9 +101,10 @@ class HistDataCsvTest {
             append(";2500.00;2501.00;2499.00;2500.50;1\n") } }
 
     @Test fun mergedMonthsAggregateFromRealM1BarsAscending() {
+        // convention: Pair(csvContent, fileName) exactly as unzip()/fromHistDataFiles() emit
         val files = listOf(
-            "DAT_ASCII_XAUUSD_M1_202608.csv" to monthCsv(LocalDateTime.of(2026, 8, 4, 10, 0)),
-            "DAT_ASCII_XAUUSD_M1_202607.csv" to monthCsv(LocalDateTime.of(2026, 7, 4, 10, 0)),
+            monthCsv(LocalDateTime.of(2026, 8, 4, 10, 0)) to "DAT_ASCII_XAUUSD_M1_202608.csv",
+            monthCsv(LocalDateTime.of(2026, 7, 4, 10, 0)) to "DAT_ASCII_XAUUSD_M1_202607.csv",
         )
         val m5 = HistDataCsv.parseMerged(files, Interval.M5, now)
         assertEquals("XAU/USD", m5.symbol)
@@ -127,10 +128,10 @@ class HistDataCsvTest {
     }
 
     @Test fun mergedResearchFailsClosedOnDuplicatesSymbolsAndCap() {
-        val files = listOf(name to csv(), name to csv())
+        val files = listOf(csv() to name, csv() to name)
         assertTrue(runCatching { HistDataCsv.parseMerged(files, Interval.M5, now) }.isFailure)
-        val mixed = listOf(name to csv(),
-            "DAT_ASCII_EURUSD_M1_202607.csv" to monthCsv(LocalDateTime.of(2026, 7, 4, 10, 0)))
+        val mixed = listOf(csv() to name,
+            monthCsv(LocalDateTime.of(2026, 7, 4, 10, 0)) to "DAT_ASCII_EURUSD_M1_202607.csv")
         assertTrue(runCatching { HistDataCsv.parseMerged(mixed, Interval.M5, now) }.isFailure)
         assertTrue(runCatching { HistDataCsv.parseMerged(emptyList(), Interval.M5, now) }.isFailure)
     }
