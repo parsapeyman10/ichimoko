@@ -23,7 +23,8 @@ class SettingsStore(context: Context) {
     fun read(): AppSettings = AppSettings(
         apiKey = prefs.getString(KEY_API, null)?.takeIf { it.isNotBlank() }
             ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY,
-        symbol = prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD",
+        // Legacy installs may still hold a removed symbol (crypto/stock); the app is forex-only now.
+        symbol = (prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD").takeIf { it in WatchCatalog.chartSymbols } ?: "XAU/USD",
         interval = Interval.fromLabel(prefs.getString(KEY_INTERVAL, null) ?: "5m"),
         riskPercent = prefs.getFloat(KEY_RISK, 0.5f).toDouble(),
         accountBalance = prefs.getFloat(KEY_BALANCE, 100f).toDouble(),
@@ -32,8 +33,105 @@ class SettingsStore(context: Context) {
         commissionPerOz = prefs.getFloat(KEY_COMMISSION, 0.05f).toDouble(),
         backgroundMonitor = prefs.getBoolean(KEY_MONITOR, false),
         notifyOnSignal = prefs.getBoolean(KEY_NOTIFY, true),
+        alertSoundUri = prefs.getString(KEY_ALERT_SOUND_URI, "").orEmpty(),
+        alertSoundName = prefs.getString(KEY_ALERT_SOUND_NAME, "").orEmpty(),
+        newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty(),
+        pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
+        autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
+        newsAiApiKey = prefs.getString(KEY_NEWS_AI_KEY, "").orEmpty(),
+        newsAiBaseUrl = prefs.getString(KEY_NEWS_AI_URL, "").orEmpty(),
+        newsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, "").orEmpty(),
+        newsAiFormat = prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" },
     )
 
+    /**
+     * Persist the market key and symbol in ONE disk transaction. A successful commit,
+     * not merely an in-memory SharedPreferences.apply(), is required before reconnecting.
+     * Empty input preserves an existing key; it never silently erases credentials.
+     */
+    @Synchronized
+    fun saveMarketCredentials(keyInput: String, symbolInput: String): Boolean {
+        val key = keyInput.trim().ifBlank { read().apiKey }
+        if (key.isBlank() || key.any { it.isWhitespace() }) return false
+        val symbol = symbolInput.trim().uppercase(java.util.Locale.ROOT).ifBlank { "XAU/USD" }
+        if (symbol !in WatchCatalog.chartSymbols) return false
+        val saved = prefs.edit().putString(KEY_API, key).putString(KEY_SYMBOL, symbol).commit()
+        if (saved && prefs.getString(KEY_API, null) == key && prefs.getString(KEY_SYMBOL, null) == symbol) {
+            _settings.value = read()
+            return true
+        }
+        // Do not report success or restart the feed on a failed disk write.
+        return false
+    }
+
+    /**
+     * Switch ONLY the chart/signal symbol, without touching the stored key. Allowed set is the
+     * watch catalog (gold + major pairs); the write is commit-verified like every other setting.
+     * Works keyless: the Swissquote fallback feed serves ticks for any catalog pair.
+     */
+    @Synchronized
+    fun saveChartSymbol(symbolInput: String): Boolean {
+        val symbol = symbolInput.trim().uppercase(java.util.Locale.ROOT)
+        if (symbol !in WatchCatalog.chartSymbols) return false
+        val saved = prefs.edit().putString(KEY_SYMBOL, symbol).commit()
+        if (saved && prefs.getString(KEY_SYMBOL, null) == symbol) {
+            _settings.value = read()
+            return true
+        }
+        return false
+    }
+
+    /** Server configuration must also survive process death before we say it was saved. */
+    @Synchronized
+    fun saveNewsBaseUrl(url: String): Boolean {
+        val saved = prefs.edit().putString(KEY_NEWS_URL, url).commit()
+        if (saved && prefs.getString(KEY_NEWS_URL, null) == url) {
+            _settings.value = read()
+            return true
+        }
+        return false
+    }
+
+    /**
+     * User's OWN key for a DIRECT-FROM-PHONE AI news call (Anthropic or OpenAI-compatible,
+     * see the format parameter), replacing the need
+     * for a self-hosted backend for the Forex ninth-condition gate. Explicit, on-device only;
+     * never logged. An empty [apiKey] or [baseUrl] or [model] clears client mode entirely (falls
+     * back to [newsBaseUrl] server mode, or UNKNOWN if neither is configured).
+     */
+    @Synchronized
+    fun saveNewsAiConfig(apiKey: String, baseUrl: String, model: String, format: String = "AUTO"): Boolean {
+        val key = apiKey.trim()
+        val url = baseUrl.trim()
+        val modelName = model.trim()
+        val wireFormat = format.trim().uppercase(java.util.Locale.ROOT).let {
+            if (it in setOf("ANTHROPIC", "OPENAI")) it else "AUTO" }
+        if (key.isNotBlank() && (url.isBlank() || !url.startsWith("https://") || modelName.isBlank())) return false
+        val saved = prefs.edit()
+            .putString(KEY_NEWS_AI_KEY, key)
+            .putString(KEY_NEWS_AI_URL, url)
+            .putString(KEY_NEWS_AI_MODEL, modelName)
+            .putString(KEY_NEWS_AI_FORMAT, wireFormat)
+            .commit()
+        if (saved && prefs.getString(KEY_NEWS_AI_KEY, null) == key) {
+            _settings.value = read()
+            return true
+        }
+        return false
+    }
+
+    @Synchronized
+    fun clearNewsAiConfig(): Boolean {
+        val saved = prefs.edit().remove(KEY_NEWS_AI_KEY).remove(KEY_NEWS_AI_URL)
+            .remove(KEY_NEWS_AI_MODEL).remove(KEY_NEWS_AI_FORMAT).commit()
+        if (saved && prefs.getString(KEY_NEWS_AI_KEY, null) == null) {
+            _settings.value = read()
+            return true
+        }
+        return false
+    }
+
+    @Synchronized
     fun update(transform: (AppSettings) -> AppSettings) {
         val next = transform(_settings.value)
         prefs.edit()
@@ -47,6 +145,11 @@ class SettingsStore(context: Context) {
             .putFloat(KEY_COMMISSION, next.commissionPerOz.toFloat())
             .putBoolean(KEY_MONITOR, next.backgroundMonitor)
             .putBoolean(KEY_NOTIFY, next.notifyOnSignal)
+            .putString(KEY_ALERT_SOUND_URI, next.alertSoundUri)
+            .putString(KEY_ALERT_SOUND_NAME, next.alertSoundName)
+            .putString(KEY_NEWS_URL, next.newsBaseUrl.trim())
+            .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
+            .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
             .apply()
         _settings.value = next
     }
@@ -69,5 +172,14 @@ class SettingsStore(context: Context) {
         private const val KEY_COMMISSION = "commission_per_oz"
         private const val KEY_MONITOR = "background_monitor"
         private const val KEY_NOTIFY = "notify_signal"
+        private const val KEY_ALERT_SOUND_URI = "verified_alert_sound_uri"
+        private const val KEY_ALERT_SOUND_NAME = "verified_alert_sound_name"
+        private const val KEY_NEWS_URL = "news_base_url"
+        private const val KEY_NEWS_PAUSE = "pause_on_news"
+        private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"
+        private const val KEY_NEWS_AI_KEY = "news_ai_client_key"
+        private const val KEY_NEWS_AI_URL = "news_ai_client_base_url"
+        private const val KEY_NEWS_AI_MODEL = "news_ai_client_model"
+    private const val KEY_NEWS_AI_FORMAT = "news_ai_format"
     }
 }

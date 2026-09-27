@@ -57,6 +57,7 @@ object MtfAnalyzer {
         Interval.M1 -> listOf(Interval.M1, Interval.M5, Interval.M15, Interval.H1)
         Interval.M5 -> listOf(Interval.M5, Interval.M15, Interval.H1)
         Interval.M15 -> listOf(Interval.M15, Interval.H1)
+        Interval.M30 -> listOf(Interval.M30, Interval.H1)
         Interval.H1 -> listOf(Interval.H1)
         Interval.H4 -> listOf(Interval.H4)
     }
@@ -65,6 +66,7 @@ object MtfAnalyzer {
         Interval.M1 -> 0.15
         Interval.M5 -> 0.20
         Interval.M15 -> 0.25
+        Interval.M30 -> 0.25
         Interval.H1 -> 0.25
         Interval.H4 -> 0.15
     }

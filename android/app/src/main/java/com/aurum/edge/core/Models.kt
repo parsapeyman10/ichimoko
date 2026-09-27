@@ -27,6 +27,7 @@ enum class Interval(val api: String, val label: String, val minutes: Int) {
     M1("1min", "1m", 1),
     M5("5min", "5m", 5),
     M15("15min", "15m", 15),
+    M30("30min", "30m", 30),
     H1("1h", "1H", 60),
     H4("4h", "4H", 240);
 
@@ -41,10 +42,13 @@ data class PriceTick(val price: Double, val at: Long)
 
 enum class SignalAction { BUY, SELL, NO_TRADE }
 
+enum class ConfluenceStatus { CONFIRMED, CONFLICT, UNKNOWN }
+
 data class ConfluenceItem(
     val name: String,
     val ok: Boolean,
     val detail: String,
+    val status: ConfluenceStatus = if (ok) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
 )
 
 data class Signal(
@@ -69,7 +73,9 @@ enum class FeedMode(val label: String) {
     NO_KEY("کلید API وارد نشده"),
     CONNECTING("در حال اتصال"),
     LIVE("زنده — WebSocket"),
-    POLLING("زنده — REST هر ۶۰ ثانیه"),
+    POLLING("کندل REST دوره‌ای — نه تیک زنده"),
+    MARKET_CLOSED("تعطیلی معمول بازار؛ دریافت قیمت متوقف"),
+    DELAYED("دادهٔ بازار قدیمی؛ اتصال/بازار را بررسی کنید"),
     OFFLINE("آفلاین"),
 }
 
@@ -79,6 +85,82 @@ data class FeedStatus(
     val lastSuccessAt: Long? = null,
     val provider: String = "Twelve Data",
 )
+
+@Serializable
+data class PaperNewsEvidence(
+    val id: String,
+    val source: String,
+    val headline: String,
+    val url: String,
+    val publishedAt: Long,
+)
+
+@Serializable
+data class PaperNewsRecord(
+    val model: String,
+    val direction: String,
+    val confidence: Double,
+    val checkedAt: Long,
+    val evidence: List<PaperNewsEvidence>,
+    /** Calendar is a schedule only; retain its verified receipt time, never invent an article. */
+    val calendarSource: String? = null,
+    val calendarCheckedAt: Long? = null,
+)
+
+/** Snapshot of an OHLC approximation at the moment a PAPER opportunity/entry was checked. */
+@Serializable
+data class IctPriceActionRecord(
+    val model: String = "OHLC_RANGE_ICT_V1",
+    val symbol: String,
+    val interval: Interval,
+    val barTime: Long,
+    val action: SignalAction,
+    val feedProvider: String,
+    val checkedAt: Long,
+    val nyDate: String,
+    val nySession: String,
+    val nyTime: String,
+    val support: Double,
+    val resistance: Double,
+    val atr: Double,
+    val supportTouches: Int,
+    val resistanceTouches: Int,
+    val levelsConfirmedAt: Long,
+    val sweepAt: Long,
+    val mssAt: Long,
+    val fvgAt: Long,
+    val fvgLow: Double,
+    val fvgHigh: Double,
+    val orderBlockLow: Double?,
+    val orderBlockHigh: Double?,
+    val retestAt: Long,
+    val quote: Double,
+    val stop: Double,
+    val target: Double,
+    val stopBoundary: Double,
+    val opposingLevel: Double,
+    val rewardRisk: Double,
+) {
+    fun matches(signal: Signal, marketSymbol: String, marketPrice: Double): Boolean {
+        val risk = if (action == SignalAction.BUY) quote - stop else stop - quote
+        val reward = if (action == SignalAction.BUY) target - quote else quote - target
+        return model == "OHLC_RANGE_ICT_V1" && symbol == marketSymbol &&
+            action != SignalAction.NO_TRADE && action == signal.action &&
+            interval == signal.interval && barTime == signal.barTime &&
+            quote == marketPrice && stop == signal.stopLoss && target == signal.takeProfit &&
+            feedProvider.isNotBlank() && checkedAt > barTime && nyDate.isNotBlank() &&
+            nySession in setOf("LONDON", "NEW_YORK") && nyTime.isNotBlank() &&
+            support > 0.0 && resistance > support && atr.isFinite() && atr > 0.0 &&
+            supportTouches >= 2 && resistanceTouches >= 2 &&
+            levelsConfirmedAt > 0L && levelsConfirmedAt <= sweepAt &&
+            sweepAt < mssAt && mssAt < fvgAt &&
+            fvgAt < retestAt && retestAt == barTime && fvgLow.isFinite() && fvgHigh > fvgLow &&
+            risk > 0.0 && reward / risk >= 1.5 && reward / risk <= 5.0 &&
+            rewardRisk.isFinite() && kotlin.math.abs(reward / risk - rewardRisk) < 1e-6 &&
+            (if (action == SignalAction.BUY) stop <= stopBoundary && target <= opposingLevel
+             else stop >= stopBoundary && target >= opposingLevel)
+    }
+}
 
 @Serializable
 data class PaperTrade(
@@ -96,21 +178,87 @@ data class PaperTrade(
     val exitPrice: Double? = null,
     val exitReason: String? = null,
     val pnlUsd: Double? = null,
+    /** Historical JSON field name; quantity is in [unit], not necessarily troy ounces. */
     val positionOz: Double = 1.0,
     val note: String = "paper روی قیمت واقعی",
+    /** Empty for older journal records; infer from the symbol on read. */
+    val positionUnit: String = "",
     /** What the multi-timeframe engine said on the phone when this paper trade was opened. */
     val mtf: MtfSnapshotRecord? = null,
+    /** Defaults keep older journal JSON readable. Auto is always PAPER, never a broker fill. */
+    val autoOpened: Boolean = false,
+    val signalBarTime: Long? = null,
+    val newsEvidence: PaperNewsRecord? = null,
+    /** Snapshot at the moment the paper position was actually saved; never recompute on read. */
+    val entryConditions: List<PaperConditionRecord> = emptyList(),
+    /** Null on older/manual records; never infer a historical ICT verdict on read. */
+    val priceAction: IctPriceActionRecord? = null,
 ) {
     val isOpen: Boolean get() = closedAt == null
+    val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }
 
     val riskPerOz: Double get() = kotlin.math.abs(entry - stopLoss)
+
+    /** Risk in QUOTE currency per unit; convert to USD before comparing with the budget. */
+    val riskUsd: Double
+        get() = PaperOrderRules.quotePnlToUsd(symbol, riskPerOz * positionOz, entry)
 
     val rMultiple: Double?
         get() {
             val pnl = pnlUsd ?: return null
-            val risk = riskPerOz * positionOz
+            val risk = riskUsd
             return if (risk <= 0.0) null else pnl / risk
         }
+}
+
+@Serializable
+data class PaperConditionRecord(val name: String, val status: String, val detail: String) {
+    companion object {
+        fun from(item: ConfluenceItem) = PaperConditionRecord(item.name, item.status.name, item.detail)
+    }
+}
+
+/** An eligible alert is NOT a trade. Stored separately from paper positions and their statistics. */
+@Serializable
+data class PaperOpportunity(
+    val key: String,
+    val symbol: String,
+    val interval: Interval,
+    val action: SignalAction,
+    val signalBarTime: Long,
+    val priceAtAlert: Double,
+    val stopLoss: Double,
+    val takeProfit: Double,
+    val alertedAt: Long,
+    val conditions: List<PaperConditionRecord>,
+    val mtf: MtfSnapshotRecord,
+    val newsEvidence: PaperNewsRecord,
+    val paperTradeId: String? = null,
+    /** Null only for a candidate written before the new ICT gate. */
+    val priceAction: IctPriceActionRecord? = null,
+) {
+    companion object {
+        fun from(signal: Signal, symbol: String, price: Double, mtf: MtfSnapshotRecord,
+                 news: PaperNewsRecord, ict: IctPriceActionRecord,
+                 now: Long = System.currentTimeMillis()): PaperOpportunity {
+            require(PaperOrderRules.paperable(symbol) && signal.isActionable && signal.barTime > 0 &&
+                signal.confluence.take(9).size == 9 &&
+                signal.confluence.take(9).all { it.ok && it.status == ConfluenceStatus.CONFIRMED } &&
+                signal.confluence[8].name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL &&
+                price.isFinite() && price > 0 && signal.stopLoss != null && signal.takeProfit != null &&
+                ict.matches(signal, symbol, price) && !mtf.veto && mtf.barTime == signal.barTime) {
+                "فرصت آموزشی معتبر نیست"
+            }
+            return PaperOpportunity(
+                key = "$symbol|${signal.interval.label}|${signal.barTime}|${signal.action}",
+                symbol = symbol, interval = signal.interval, action = signal.action,
+                signalBarTime = signal.barTime, priceAtAlert = price,
+                stopLoss = signal.stopLoss, takeProfit = signal.takeProfit,
+                alertedAt = now, conditions = signal.confluence.take(9).map(PaperConditionRecord::from),
+                mtf = mtf, newsEvidence = news, priceAction = ict,
+            )
+        }
+    }
 }
 
 @Serializable
@@ -177,6 +325,8 @@ data class BacktestTradeRecord(
 @Serializable
 data class BacktestRecord(
     val interval: String,
+    val symbol: String = "XAU/USD",
+    val dataSource: String = "Twelve Data (دیتای واقعی)",
     val fromTime: Long,
     val toTime: Long,
     val bars: Int,
@@ -196,10 +346,18 @@ data class BacktestRecord(
     val commissionPerOz: Double,
     val note: String,
     val trades: List<BacktestTradeRecord> = emptyList(),
+    /** Old JSON had same-close entry and forced last-bar settlement; do not treat it as V2. */
+    val executionModel: String = "LEGACY_CLOSE_FILL",
+    val skippedGap: Int = 0,
+    val skippedFill: Int = 0,
+    val unresolvedGap: Int = 0,
+    val openAtEnd: Boolean = false,
 ) {
     companion object {
         fun from(result: com.aurum.edge.engine.Backtester.Result): BacktestRecord = BacktestRecord(
             interval = result.interval.label,
+            symbol = result.symbol,
+            dataSource = result.dataSource,
             fromTime = result.fromTime,
             toTime = result.toTime,
             bars = result.bars,
@@ -218,7 +376,12 @@ data class BacktestRecord(
             spreadPrice = result.spreadPrice,
             commissionPerOz = result.commissionPerOz,
             note = result.note,
-            trades = result.trades.takeLast(80).map {
+            executionModel = com.aurum.edge.engine.Backtester.EXECUTION_MODEL,
+            skippedGap = result.skippedGap,
+            skippedFill = result.skippedFill,
+            unresolvedGap = result.unresolvedGap,
+            openAtEnd = result.openAtEnd,
+            trades = result.trades.map {
                 BacktestTradeRecord(
                     side = it.side.name,
                     entryTime = it.entryTime,
@@ -245,6 +408,8 @@ data class WalkForwardRecord(
     val generatedAt: Long,
     val inSample: BacktestRecord,
     val outOfSample: BacktestRecord,
+    /** Null for older stored reports; never manufacture a cost scenario on read. */
+    val costStressOutOfSample: BacktestRecord? = null,
 ) {
     companion object {
         fun from(result: com.aurum.edge.engine.Backtester.WalkForward, generatedAt: Long = System.currentTimeMillis()): WalkForwardRecord =
@@ -257,6 +422,7 @@ data class WalkForwardRecord(
                 generatedAt = generatedAt,
                 inSample = BacktestRecord.from(result.inSample),
                 outOfSample = BacktestRecord.from(result.outOfSample),
+                costStressOutOfSample = BacktestRecord.from(result.costStressOutOfSample),
             )
     }
 }
@@ -273,6 +439,33 @@ data class AppSettings(
     val commissionPerOz: Double = 0.05,
     val backgroundMonitor: Boolean = false,
     val notifyOnSignal: Boolean = true,
+    /** Persistable SAF content Uri; blank uses the device's system notification tone. */
+    val alertSoundUri: String = "",
+    val alertSoundName: String = "",
+    /** Optional HTTPS URL of this project's backend (licensed Persian news). */
+    val newsBaseUrl: String = "",
+    /** Applies to NEW paper entries; real orders remain disabled independently. */
+    val pauseOnNews: Boolean = false,
+    /** Explicit opt-in; automatic orders here are local paper records, never broker orders. */
+    val autoPaperTrading: Boolean = false,
+    /**
+     * OPTIONAL alternative to [newsBaseUrl] for the Forex ninth-condition AI gate: instead of your
+     * own backend server, the phone calls this endpoint DIRECTLY with your own key - either the
+     * Anthropic (Claude) Messages API or any OpenAI-compatible service (see [newsAiFormat]). Used only if [newsBaseUrl] is blank. The SAME publisher-rights/consent responsibility
+     * applies to whoever holds this key; headline/excerpt text goes straight to this host from
+     * the phone, so if you later share this APK, this key travels with it and is extractable.
+     */
+    val newsAiApiKey: String = "",
+    val newsAiBaseUrl: String = "",
+    val newsAiModel: String = "",
+    /**
+     * Wire format of the AI endpoint: AUTO (detect Anthropic by host, else OpenAI-compatible),
+     * ANTHROPIC (Messages API on ANY host, e.g. a relay) or OPENAI (chat/completions on any
+     * host). Explicit beats guessing for proxy keys with non-standard prefixes.
+     */
+    val newsAiFormat: String = "AUTO",
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
+    val hasClientNewsAi: Boolean get() = newsAiApiKey.isNotBlank() && newsAiBaseUrl.isNotBlank() && newsAiModel.isNotBlank()
+    val newsAiFormatNormalized: String get() = if (newsAiFormat in setOf("ANTHROPIC", "OPENAI")) newsAiFormat else "AUTO"
 }

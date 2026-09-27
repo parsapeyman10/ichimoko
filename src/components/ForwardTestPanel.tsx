@@ -25,6 +25,14 @@ type Metrics = {
   skipped_min_lot: number;
 };
 
+type ForwardTrade = {
+  entry_time: string;
+  side: 'BUY' | 'SELL';
+  position_oz: number;
+  pnl: number;
+  exit_reason: string;
+};
+
 type ForwardData = {
   error?: string;
   data_source?: string;
@@ -34,13 +42,14 @@ type ForwardData = {
   split_time?: string;
   in_sample?: Metrics;
   out_of_sample?: Metrics;
-  out_of_sample_trades?: any[];
+  out_of_sample_trades?: ForwardTrade[];
   stress_test?: {
     real_trades?: number;
     median_final_balance?: number;
     p05_final_balance?: number;
     p95_final_balance?: number;
-    ruin_probability_pct?: number | null;
+    // Backend key is `risk_of_80pct_loss_pct` (see app/services/backtest.py::stress_test_from_trades).
+    risk_of_80pct_loss_pct?: number | null;
     note?: string;
     error?: string;
   };
@@ -178,7 +187,7 @@ export default function ForwardTestPanel({
             <span>میانه: <b style={{ color: '#fff' }}>${data.stress_test.median_final_balance?.toFixed(2)}</b></span>
             <span>۵٪ بدترین: <b style={{ color: 'var(--red)' }}>${data.stress_test.p05_final_balance?.toFixed(2)}</b></span>
             <span>۹۵٪ بهترین: <b style={{ color: 'var(--green)' }}>${data.stress_test.p95_final_balance?.toFixed(2)}</b></span>
-            <span>ریسک ورشکستگی: <b style={{ color: '#e6a244' }}>{data.stress_test.ruin_probability_pct != null ? `${data.stress_test.ruin_probability_pct}%` : '—'}</b></span>
+            <span>ریسک افت ۸۰٪ سرمایه: <b style={{ color: '#e6a244' }}>{data.stress_test.risk_of_80pct_loss_pct != null ? `${data.stress_test.risk_of_80pct_loss_pct}%` : '—'}</b></span>
           </div>
           {data.stress_test.note && <div style={{ marginTop: 6, fontSize: 8, color: '#6b7280', lineHeight: 1.6 }}>{data.stress_test.note}</div>}
         </div>
@@ -198,13 +207,13 @@ export default function ForwardTestPanel({
                 </tr>
               </thead>
               <tbody>
-                {(data.out_of_sample_trades ?? []).slice(-8).map((trade: any, index: number) => (
+                {(data.out_of_sample_trades ?? []).slice(-8).map((trade, index) => (
                   <tr key={index} style={{ borderTop: '1px solid #1a1f28', color: '#c9cdd5' }}>
                     <td style={{ padding: '4px 6px', font: '7px DM Mono', color: '#7a8290' }}>{new Date(trade.entry_time).toLocaleDateString('fa-IR')}</td>
                     <td><span style={{ font: '700 7px DM Mono', color: trade.side === 'BUY' ? 'var(--green)' : 'var(--red)' }}>{trade.side}</span></td>
                     <td style={{ font: '7px DM Mono', color: '#7a8290' }}>{trade.position_oz} oz</td>
-                    <td style={{ font: '700 8px DM Mono', color: (trade.pnl_usd || 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                      {trade.pnl_usd != null ? `${trade.pnl_usd > 0 ? '+' : ''}${trade.pnl_usd.toFixed(2)}$` : '—'}
+                    <td style={{ font: '700 8px DM Mono', color: (trade.pnl || 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                      {trade.pnl != null ? `${trade.pnl > 0 ? '+' : ''}${trade.pnl.toFixed(2)}$` : '—'}
                     </td>
                     <td style={{ fontSize: 8, color: '#8a909c' }}>{trade.exit_reason}</td>
                   </tr>

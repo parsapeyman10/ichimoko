@@ -487,19 +487,34 @@ def should_exit(signal: TradeSignal, candles_since_entry: list[Candle], kijun: f
     return False, "Position remains valid / پوزیشن معتبر است — نگهداری"
 
 
-def get_trailing_stop(signal: TradeSignal, candles_since_entry: list[Candle], kijun: float, atr: float) -> float | None:
+def get_trailing_stop(
+    signal: TradeSignal,
+    candles_since_entry: list[Candle],
+    kijun: float,
+    atr: float,
+    initial_stop: float | None = None,
+) -> float | None:
     """هوشمند تریلینگ — اگر سود کم می‌شود رهاش کن
     - 1R → SL به ورود (بریک‌اون)
     - 1.5R → SL به 0.5R سود قفل
     - بعد → تریل با کیجون -0.15 ATR (فقط اگر ADX>30 و روند قوی)
     Returns new_stop or None if no update
+
+    [initial_stop] must be the stop-loss the position was actually risked against at entry.
+    R-multiples are always measured against that original distance, never against the
+    already-trailed `signal.stop_loss` — otherwise, once the stop reaches breakeven the risk
+    distance collapses to 0 and the position could never be trailed any further (a real bug
+    fixed here: trades that ran past 1R used to freeze at breakeven forever instead of locking
+    in the 1.5R / Kijun trail the docstring promises). Callers that omit it keep the old
+    (degraded) behaviour so this stays backward compatible.
     """
     if not signal.entry or not signal.stop_loss or not candles_since_entry:
         return None
     latest = candles_since_entry[-1]
     long = signal.action == Direction.BUY
     entry = signal.entry
-    stop_dist = abs(entry - signal.stop_loss)
+    risk_reference = initial_stop if initial_stop is not None else signal.stop_loss
+    stop_dist = abs(entry - risk_reference)
     if stop_dist < 0.01:
         return None
     # distance from entry — هوشمند: اول 1.5R سپس 1R

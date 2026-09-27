@@ -172,7 +172,13 @@ def mtf_confluence(candles_by_tf: dict[Timeframe, list[Candle]]) -> dict[str, An
         max_adx = max(max_adx, info["adx"])
 
     if total_w==0:
-        return {"mtf_bias": Direction.NEUTRAL.value, "mtf_score": 0, "mtf_strength": 0, "alignment": 0, "per_tf": {}, "veto": False, "veto_reasons": [], "quality": "C"}
+        return {
+            "mtf_bias": Direction.NEUTRAL.value, "mtf_score": 0, "mtf_strength": 0, "alignment": 0,
+            "per_tf": {}, "buy_count": 0, "sell_count": 0, "neutral_count": 0,
+            "is_veto": False, "veto_reasons": [], "quality": "C — داده کافی نیست",
+            "advisory": "کندل کافی برای هیچ تایم‌فریمی موجود نیست؛ تراز MTF قابل محاسبه نیست.",
+            "weights": {k.value: v for k, v in MTF_WEIGHTS.items()},
+        }
 
     norm = weighted_score / max(total_w*1.0, 0.01)  # -1 .. +1
     # overall bias
