@@ -125,6 +125,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private val _aiProbe = MutableStateFlow(AiProbeState())
     val aiProbe: StateFlow<AiProbeState> = _aiProbe.asStateFlow()
 
+    /** Allowed model IDs for the user's key, fetched live from the service catalogue. */
+    data class AiModelsState(val loading: Boolean = false, val models: List<String> = emptyList(),
+                             val error: String? = null)
+    private val _aiModels = MutableStateFlow(AiModelsState())
+    val aiModels: StateFlow<AiModelsState> = _aiModels.asStateFlow()
+
     init {
         viewModelScope.launch {
             runCatching { container.journalStore.load() }.onFailure {
@@ -749,6 +755,26 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
      * SAVED values (the key field is intentionally blanked after saving) so the test always
      * checks what the app would actually use. The key itself is never echoed.
      */
+    /** Fetch the model IDs this key may use, so Settings never guesses a model name. */
+    fun loadNewsAiModels(keyInput: String, baseUrl: String, format: String = "AUTO") {
+        val saved = container.settingsStore.read()
+        val key = keyInput.trim().ifBlank { saved.newsAiApiKey }
+        val url = baseUrl.trim().trimEnd('/').ifBlank { saved.newsAiBaseUrl }
+        if (key.isBlank() || !url.startsWith("https://")) {
+            _aiModels.value = AiModelsState(error = "کلید و نشانی HTTPS هر دو لازم است")
+            return
+        }
+        _aiModels.value = AiModelsState(loading = true)
+        viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) { container.traderAdvisor.listModels(key, url, format) }
+            }
+            _aiModels.value = result.fold(
+                onSuccess = { AiModelsState(models = it) },
+                onFailure = { AiModelsState(error = (it.message ?: "خطای نامشخص").take(120)) })
+        }
+    }
+
     fun testNewsAiConnection(keyInput: String, baseUrl: String, model: String, format: String = "AUTO") {
         val saved = container.settingsStore.read()
         val key = keyInput.trim().ifBlank { saved.newsAiApiKey }

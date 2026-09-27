@@ -41,6 +41,31 @@ class AiTraderTest {
         assertTrue(AiProvider.usesAnthropic("https://api.anthropic.com", ""))
     }
 
+    // ---------- endpoint URLs (relay gateways vs official hosts) ----------
+
+    @Test fun `endpoint builders handle hosts with and without v1`() {
+        // Anthropic format on ANY host: always /v1/messages, tolerating a base that ends in /v1
+        assertEquals("https://api.anthropic.com/v1/messages", AiProvider.anthropicMessagesUrl("https://api.anthropic.com"))
+        assertEquals("https://api.llmsrelay.com/v1/messages", AiProvider.anthropicMessagesUrl("https://api.llmsrelay.com"))
+        assertEquals("https://api.anthropic.com/v1/messages", AiProvider.anthropicMessagesUrl("https://api.anthropic.com/v1"))
+        // OpenAI format: hosts that already carry /v1 keep it; relay roots get /v1 appended
+        assertEquals("https://api.openai.com/v1/chat/completions", AiProvider.openAiChatUrl("https://api.openai.com/v1"))
+        assertEquals("https://api.llmsrelay.com/v1/chat/completions", AiProvider.openAiChatUrl("https://api.llmsrelay.com"))
+        assertEquals("https://openrouter.ai/api/v1/chat/completions", AiProvider.openAiChatUrl("https://openrouter.ai/api/v1"))
+        // Models catalogue: same rule
+        assertEquals("https://api.llmsrelay.com/v1/models", AiProvider.modelsUrl("https://api.llmsrelay.com"))
+        assertEquals("https://api.openai.com/v1/models", AiProvider.modelsUrl("https://api.openai.com/v1"))
+    }
+
+    @Test fun `model ids come from the catalogue in service order, deduped and bounded`() {
+        val root = Json.parseToJsonElement(
+            """{"object":"list","data":[{"id":"claude-sonnet-4.6"},{"id":"claude-opus-5"},
+                {"id":"claude-sonnet-4.6"},{"id":"  "},{"type":"model","display_name":"x"}]}"""
+        ).jsonObject
+        assertEquals(listOf("claude-sonnet-4.6", "claude-opus-5"), AiProvider.parseModelIds(root))
+        assertTrue(AiProvider.parseModelIds(Json.parseToJsonElement("""{"data":"nope"}""").jsonObject).isEmpty())
+    }
+
     // ---------- response extraction ----------
 
     @Test fun `anthropic content array first text block is extracted`() {

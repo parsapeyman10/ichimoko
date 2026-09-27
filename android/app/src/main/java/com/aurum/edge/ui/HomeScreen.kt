@@ -190,7 +190,7 @@ internal fun TraderCompanionCard(state: TraderOpinionState, onRefresh: () -> Uni
         val opinion = state.opinion
         when {
             !state.configured -> Text(
-                "برای فعال‌سازی، کلید مدل خود را در تنظیمات وارد کنید: Claude (نشانی https://api.anthropic.com و مدلی مثل claude-sonnet-4-6) یا هر سرویس سازگار با OpenAI. کلید فقط روی همین گوشی می‌ماند.",
+                "برای فعال‌سازی، کلید مدل خود را در تنظیمات وارد کنید — نشانی سرویس با یک دکمهٔ آماده (LLMsRelay/Claude/OpenAI) پر می‌شود و فهرست مدل‌های مجازِ کلیدتان هم همان‌جا می‌آید. کلید فقط روی همین گوشی می‌ماند.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
             state.loading && opinion == null -> CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.padding(vertical = 6.dp))
             opinion != null -> {

@@ -101,6 +101,10 @@ class TraderAdvisor(
         }
     }
 
+    /** Model IDs the user's key may use, straight from the service catalogue (key-filtered). */
+    suspend fun listModels(apiKey: String, baseUrl: String, format: String = "AUTO"): List<String> =
+        AiProvider.listModels(http, baseUrl, apiKey, format)
+
     /**
      * One-tap connectivity probe for Settings (never sends the snapshot, never stores the key).
      * Returns the model's short reply; throws with a Persian message on any failure.

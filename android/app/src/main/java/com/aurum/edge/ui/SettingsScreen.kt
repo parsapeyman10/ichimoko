@@ -186,11 +186,45 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
             OutlinedTextField(value = newsAiBaseUrl, onValueChange = { newsAiBaseUrl = it }, singleLine = true,
-                label = { Text("نشانی پایهٔ HTTPS — Claude: https://api.anthropic.com · سازگار با OpenAI: https://api.openai.com/v1") },
+                label = { Text("نشانی پایهٔ HTTPS سرویس مدل") },
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(onClick = {
+                    newsAiBaseUrl = "https://api.llmsrelay.com"; newsAiFormat = "ANTHROPIC"
+                }, modifier = Modifier.weight(1f)) { Text("LLMsRelay (sk-cs4)", maxLines = 1) }
+                OutlinedButton(onClick = {
+                    newsAiBaseUrl = "https://api.anthropic.com"; newsAiFormat = "ANTHROPIC"
+                }, modifier = Modifier.weight(1f)) { Text("Claude رسمی", maxLines = 1) }
+                OutlinedButton(onClick = {
+                    newsAiBaseUrl = "https://api.openai.com/v1"; newsAiFormat = "OPENAI"
+                }, modifier = Modifier.weight(1f)) { Text("OpenAI رسمی", maxLines = 1) }
+            }
+            Text("«نشانی پایه» یعنی آدرسِ سرویسی که کلید شما را صادر کرده — کلید مثل رمز کارت است و نشانی مثل آدرس همان مغازه؛ هر دو را فقط پنل سایت کلید (بخش API / Base URL) می‌دهد. اپ فقط نشانی‌های امن https:// را می‌پذیرد تا کلید در مسیر لو نرود. کلیدهایی که با sk-cs4 شروع می‌شوند مال LLMsRelay هستند و نشانی‌شان با دکمهٔ بالا پر می‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 4.dp))
             OutlinedTextField(value = newsAiModel, onValueChange = { newsAiModel = it }, singleLine = true,
-                label = { Text("نام مدل (مثلاً claude-sonnet-4-6 یا gpt-4o-mini)") },
+                label = { Text("نام مدل (مثلاً claude-sonnet-4.6 یا gpt-4o-mini)") },
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            val models = viewModel.aiModels.collectAsStateWithLifecycle().value
+            OutlinedButton(onClick = { viewModel.loadNewsAiModels(newsAiKey, newsAiBaseUrl, newsAiFormat) },
+                enabled = !models.loading && (newsAiKey.isNotBlank() || settings.hasClientNewsAi) &&
+                    (newsAiBaseUrl.isNotBlank() || settings.newsAiBaseUrl.isNotBlank()),
+                modifier = Modifier.padding(top = 6.dp)) {
+                Text(if (models.loading) "در حال دریافت…" else "فهرست مدل‌های مجازِ همین کلید")
+            }
+            models.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red) }
+            if (models.models.isNotEmpty()) {
+                Text("روی مدل بزنید تا انتخاب شود (فهرست واقعی همان سرویس، فیلترشده با کلید شما):",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                    modifier = Modifier.padding(top = 4.dp))
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    models.models.forEach { id ->
+                        if (id == newsAiModel) Button(onClick = { newsAiModel = id }) { Text(id, maxLines = 1) }
+                        else OutlinedButton(onClick = { newsAiModel = id }) { Text(id, maxLines = 1) }
+                    }
+                }
+            }
             Text("قالب API (برای نشانی‌های غیر از دو دامنهٔ رسمی، صریح انتخاب کنید):",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
                 modifier = Modifier.padding(top = 8.dp))
