@@ -18,15 +18,17 @@ import org.junit.Test
 /** Weak-network retries are bounded and quota errors are never retried. */
 class WatchRetryTest {
     private fun network(reply: (Int) -> String?): Pair<OkHttpClient, () -> Int> {
-        var requests = 0
+        // Per-symbol fetches run concurrently on Dispatchers.IO: the counter MUST be atomic,
+        // otherwise lost increments fake a wrong retry count (flaky red).
+        val requests = java.util.concurrent.atomic.AtomicInteger(0)
         val client = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
-            requests++
-            val body = reply(requests) ?: throw IOException("temporary network interruption")
+            val n = requests.incrementAndGet()
+            val body = reply(n) ?: throw IOException("temporary network interruption")
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(
                 if (body == "429") 429 else 200).message("fixture")
                 .body(body.toResponseBody()).build()
         }).build()
-        return client to { requests }
+        return client to { requests.get() }
     }
 
     @Test fun weakNetworkRecoversOnThirdAttemptWithProviderTimestamp() = runBlocking {

@@ -27,7 +27,9 @@ class WatchVerificationReasonsTest {
         val one = SourceComparison.verify(jpy, listOf(only), mapOf(only to quote(jpy.id, only)), now)
         assertEquals(VerificationStatus.UNVERIFIED, one.status)
         assertEquals("تک‌منبعی", one.badge)
-        assertTrue(one.reason.contains("فقط یک منبع فعال"))
+        // No second source is DEFINED for this symbol: the honest message says exactly that,
+        // and must not imply a second source merely sits disabled ("فقط یک منبع فعال").
+        assertFalse(one.reason.contains("فقط یک منبع فعال"))
         assertTrue(one.reason.contains("منبع مستقل دومی"))
     }
 
