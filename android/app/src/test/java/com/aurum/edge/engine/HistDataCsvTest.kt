@@ -94,9 +94,12 @@ class HistDataCsvTest {
             HistDataCsv.unzip(zip("DAT_ASCII_XAUUSD_M1_202507.csv" to july), yearly) }.isFailure)
     }
 
-    /** 230 consecutive M1 bars starting at a whole hour, volume 1 each (usable for any month). */
-    private fun monthCsv(start: LocalDateTime) = buildString {
-        repeat(230) { i ->
+    /**
+     * Consecutive M1 bars starting at a whole hour, volume 1 each. Default 3500 bars (~2.4
+     * trading days) keeps every aggregated timeframe above the honest 220-bar research floor.
+     */
+    private fun monthCsv(start: LocalDateTime, bars: Int = 3500) = buildString {
+        repeat(bars) { i ->
             append(start.plusMinutes(i.toLong()).format(ascii))
             append(";2500.00;2501.00;2499.00;2500.50;1\n") } }
 
@@ -109,8 +112,8 @@ class HistDataCsvTest {
         val m5 = HistDataCsv.parseMerged(files, Interval.M5, now)
         assertEquals("XAU/USD", m5.symbol)
         assertEquals(2, m5.months)
-        assertEquals(460, m5.totalRows)
-        assertEquals(92, m5.candles.size) // 230 M1 bars -> 46 five-minute buckets per month
+        assertEquals(7000, m5.totalRows)
+        assertEquals(1400, m5.candles.size) // 3500 M1 bars -> 700 five-minute buckets per month
         // every bucket is an epoch-aligned 5m bar built from exactly five real M1 bars
         m5.candles.forEach { bar ->
             assertEquals(0L, bar.time % Interval.M5.millis)
@@ -122,9 +125,10 @@ class HistDataCsvTest {
         assertTrue(m5.candles.zipWithNext().all { (a, b) -> b.time > a.time })
         val m30 = HistDataCsv.parseMerged(files, Interval.M30, now)
         m30.candles.forEach { assertEquals(0L, it.time % Interval.M30.millis) }
+        assertTrue(m30.candles.size >= 220) // still above the honest research floor
         // raw M1 target keeps the bars untouched
         val m1 = HistDataCsv.parseMerged(files, Interval.M1, now)
-        assertEquals(460, m1.candles.size)
+        assertEquals(7000, m1.candles.size)
     }
 
     @Test fun mergedResearchFailsClosedOnDuplicatesSymbolsAndCap() {
