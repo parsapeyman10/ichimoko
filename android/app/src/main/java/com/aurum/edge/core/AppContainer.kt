@@ -61,7 +61,6 @@ class AppContainer(context: Context) {
     val journalStore = JournalStore(appContext)
     val opportunityStore = PaperOpportunityStore(appContext)
     val nobitexPublic = NobitexPublicData()
-    val nobitexCatalog = com.aurum.edge.data.NobitexMarketCatalog(appScope)
     val nobitexSpotScanner = NobitexSpotScanner()
     val nobitexPractice = NobitexPracticeStore(appContext)
     /** REAL order execution against the user's own Nobitex account; separate from the paper store above. */
@@ -71,6 +70,7 @@ class AppContainer(context: Context) {
     val market = MarketRepository(appContext, client, candleCache, settingsStore, journalStore)
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val nobitexCatalog = com.aurum.edge.data.NobitexMarketCatalog(appScope)
     val nobitexResearch = NobitexSpotResearch(nobitexSpotScanner, settingsStore, appScope)
     val watchSettings = WatchSettingsStore(appContext)
     val quoteHistory = QuoteHistoryStore(appContext)
