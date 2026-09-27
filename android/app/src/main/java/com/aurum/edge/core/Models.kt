@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
  * Real market data contracts.
  *
  * Rule of this app: every price that reaches the UI originates from a real provider
- * (Twelve Data REST/WebSocket) or from a local cache of previously received real prices.
+ * (Twelve Data REST/WebSocket, labelled live fallback ticks) or from a local cache of previously received real prices.
  * There is no generator, no random walk, no seeded simulation anywhere in this module.
  */
 @Serializable
@@ -73,7 +73,7 @@ data class Signal(
 enum class FeedMode(val label: String) {
     NO_KEY("کلید API وارد نشده"),
     CONNECTING("در حال اتصال"),
-    LIVE("زنده — WebSocket"),
+    LIVE("زنده — تیک تازه"),
     POLLING("کندل REST دوره‌ای — نه تیک زنده"),
     MARKET_CLOSED("تعطیلی معمول بازار؛ دریافت قیمت متوقف"),
     DELAYED("دادهٔ بازار قدیمی؛ اتصال/بازار را بررسی کنید"),

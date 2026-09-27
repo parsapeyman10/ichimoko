@@ -22,7 +22,8 @@ data class HomeReadout(
                 value = price?.takeIf { current || lastBarAt != null },
                 observedAt = if (current) market.feed.lastSuccessAt else lastBarAt,
                 label = when {
-                    current && market.feed.mode == FeedMode.LIVE -> "تیک تازهٔ WebSocket"
+                    current && market.feed.mode == FeedMode.LIVE && market.feed.provider.contains("Twelve", ignoreCase = true) -> "تیک تازهٔ Twelve Data WebSocket"
+                    current && market.feed.mode == FeedMode.LIVE -> "تیک تازهٔ زنده از ${market.feed.provider}"
                     current -> "کندل تازهٔ REST؛ نه تیک قابل اجرای سفارش"
                     market.feed.mode == FeedMode.NO_KEY -> "کلید دادهٔ بازار روی این نصب موجود نیست"
                     market.feed.mode == FeedMode.MARKET_CLOSED -> "بازار طبق برنامهٔ معمول بسته است؛ قیمت قبلی است"

@@ -12,7 +12,7 @@ object PaperAutoRules {
         if (!settings.autoPaperTrading) return "معاملهٔ خودکار کاغذی خاموش است"
         // REST publishes a recent BAR, not a timestamped last trade within that bar.
         // It can justify an educational candidate, never an automatic paper fill.
-        if (market.feed.mode != FeedMode.LIVE) return "ورود خودکار کاغذی فقط با تیک تازهٔ WebSocket مجاز است؛ کندل REST نامزد آموزشی است"
+        if (market.feed.mode != FeedMode.LIVE) return "ورود خودکار کاغذی فقط با تیک تازهٔ زنده مجاز است؛ کندل REST نامزد آموزشی است"
         return opportunityBlocker(market, settings, news, now)
     }
 
@@ -22,7 +22,7 @@ object PaperAutoRules {
      * [allowedSymbols] widens the check from the single selected chart symbol to a catalog sweep
      * (the multi-pair scanner); [barAgeGraceMs] extends the signal-bar freshness window by one
      * interval for REST-swept pairs, where the provider's latest closed bar may be up to one
-     * interval old at fetch time. The live WebSocket path keeps the strict 90s defaults.
+     * interval old at fetch time. The live tick path keeps the strict 90s defaults.
      */
     fun opportunityBlocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
                            now: Long = System.currentTimeMillis(),

@@ -148,7 +148,7 @@ class SignalMonitorService : Service() {
         }
 
         // Periodic all-pairs REST sweep: same nine conditions per pair, educational candidates
-        // only — automatic paper fills stay WebSocket-tick-only on the selected symbol.
+        // only — automatic paper fills stay live-tick-only on the selected symbol.
         sweepJob?.cancel()
         sweepJob = scope.launch {
             while (isActive) {

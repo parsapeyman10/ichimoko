@@ -20,7 +20,7 @@ class HomeReadoutTest {
     private val now = 1_800_000_000_000L
     private val historical = Candle(now - 300_000L, 3000.0, 3002.0, 2998.0, 3001.0)
     private val fresh = MarketState(candles = listOf(historical), lastPrice = 3001.0,
-        feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now - 10_000L))
+        feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now - 10_000L, provider = "Twelve Data WebSocket"))
 
     @Test fun `live and REST are described differently and stale or cached quotes never say current`() {
         val live = HomeReadout.from(fresh, now)
@@ -32,6 +32,11 @@ class HomeReadoutTest {
         assertTrue(rest.current)
         assertTrue(rest.label.contains("REST"))
         assertFalse(rest.label.contains("WebSocket"))
+        val fallback = HomeReadout.from(fresh.copy(feed = FeedStatus(FeedMode.LIVE,
+            lastSuccessAt = now - 15_000L, provider = "فید زندهٔ جایگزین")), now)
+        assertTrue(fallback.current)
+        assertTrue(fallback.label.contains("جایگزین"))
+        assertFalse(fallback.label.contains("WebSocket"))
 
         for (stale in listOf(
             fresh.copy(feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now - 90_001L)),

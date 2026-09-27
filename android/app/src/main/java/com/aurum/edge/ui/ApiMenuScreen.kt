@@ -39,7 +39,7 @@ fun ApiMenuScreen(settings: AppSettings, onForexSettings: () -> Unit) {
             Text("ترجمهٔ درون‌اپ روی گوشی انجام می‌شود. شرط نهم AI نیازمند سرور HTTPS و مدل/شواهد واقعی است؛ بدون آن ورود خودکار کاغذی بسته می‌ماند.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
         }
-        Text("۲۰ تا ۶۰ درخواست وب در دقیقه در پلن‌های عمومی پشتیبانی نمی‌شود؛ فید WebSocket در صورت دسترسی و بازبودن بازار به‌کار می‌رود. سهمیه/۴۲۹ یا قطع منبع هرگز قیمت یا مجوز ساختگی تولید نمی‌کند.",
+        Text("۲۰ تا ۶۰ درخواست وب در دقیقه در پلن‌های عمومی پشتیبانی نمی‌شود؛ فید WebSocket در صورت دسترسی و بازبودن بازار به‌کار می‌رود؛ اگر کلید/پلن WebSocket ندهد، فید زندهٔ جایگزینِ برچسب‌دار استفاده می‌شود. سهمیه/۴۲۹ یا قطع منبع هرگز قیمت یا مجوز ساختگی تولید نمی‌کند.",
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
     }

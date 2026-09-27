@@ -44,11 +44,11 @@ data class PairScanState(
 
 /**
  * Periodic REST sweep over the whole watch catalog (gold + majors) so no pair's 9/9 opportunity
- * goes unnoticed while the live WebSocket feed follows only the selected chart symbol.
+ * goes unnoticed while the live tick feed follows only the selected chart symbol.
  *
  * Honest limits, identical to the single-symbol pipeline:
  * - REST candles justify an educational CANDIDATE + notification, never an automatic paper
- *   fill (auto entry stays WebSocket-tick only, on the selected symbol).
+ *   fill (auto entry stays live-tick only, on the selected symbol).
  * - Every pair is evaluated with the SAME nine conditions (8 technical + per-pair AI news),
  *   the SAME ICT gate and the SAME MTF veto; a missing key or a failed fetch is an explicit
  *   status, never a fabricated signal.

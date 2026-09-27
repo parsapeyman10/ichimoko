@@ -27,6 +27,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** A successful REST download is not proof that the market has a current bar. */
 internal fun hasCurrentRestBar(bars: List<Candle>, interval: Interval, now: Long): Boolean {
@@ -65,8 +66,9 @@ class MarketRepository(
     private val cache: CandleCache,
     private val settings: SettingsStore,
     private val journal: JournalStore,
-    // Automatic, keyless real-price fallback (Swissquote/Gold-API) used only while no Twelve
-    // Data key is configured, so the chart/signal/backtest pipeline never sits idle behind a key.
+    // Automatic, keyless real-price fallback (Swissquote/Gold-API). It is used when no Twelve
+    // Data key is configured, and as a labelled live-tick fallback when the user's Twelve Data
+    // plan/key does not provide a working WebSocket; Twelve REST candles still use the key.
     private val spotFallback: SpotFallbackClient = SpotFallbackClient(),
 ) {
     private val _state = MutableStateFlow(MarketState())
@@ -127,7 +129,7 @@ class MarketRepository(
             showingCachedData = closed && _state.value.candles.isNotEmpty(),
         )
         loadCacheThenRefresh(session) // cached real bars are read-only even without the key
-        if (!closed) startStream() // Twelve Data WS with a key, otherwise the free keyless fallback
+        if (!closed) startStream() // Twelve Data WS with a key; labelled fallback ticks if WS is unavailable
         if (current.hasKey) startPolling() // periodic REST refresh only exists for Twelve Data
         registerNetworkCallback()
         startWatchdog(session) // local clock re-arms the feed at the next scheduled opening
@@ -291,26 +293,55 @@ class MarketRepository(
                 fun stillCurrent(active: com.aurum.edge.core.AppSettings): Boolean =
                     started && generation == session && streamEpoch == epoch &&
                         active.symbol == current.symbol && active.interval == current.interval
-                try {
-                    if (current.hasKey) {
-                        client.streamPrice(current.apiKey, current.symbol).collect { tick ->
-                            // Ignore an already queued tick when the user changed markets/intervals.
-                            val active = settings.read()
-                            if (!stillCurrent(active) || active.apiKey != current.apiKey) return@collect
-                            backoff = 2_000L
-                            onTick(tick.price, tick.at, "Twelve Data")
-                        }
-                    } else {
+                suspend fun collectSpotFallback(provider: String, maxMillis: Long? = null) {
+                    val collectBlock: suspend () -> Unit = {
                         spotFallback.streamQuotes(current.symbol).collect { tick ->
                             val active = settings.read()
-                            if (!stillCurrent(active) || active.hasKey) return@collect
+                            if (!stillCurrent(active) || active.hasKey != current.hasKey ||
+                                (current.hasKey && active.apiKey != current.apiKey)) return@collect
                             backoff = 2_000L
-                            onTick(tick.price, tick.at, "فید رایگان خودکار (Swissquote/Gold-API)")
+                            onTick(tick.price, tick.at, provider)
                         }
                     }
-                    if (started && generation == session && streamEpoch == epoch)
-                        publishStreamUnavailable(if (current.hasKey)
-                            "جریان WebSocket قطع شد — تلاش مجدد" else "جریان فید رایگان قطع شد — تلاش مجدد")
+                    if (maxMillis == null) collectBlock()
+                    else withTimeoutOrNull(maxMillis) { collectBlock() }
+                }
+                try {
+                    if (current.hasKey) {
+                        var fallbackStarted = false
+                        try {
+                            client.streamPrice(current.apiKey, current.symbol).collect { tick ->
+                                // Ignore an already queued tick when the user changed markets/intervals.
+                                val active = settings.read()
+                                if (!stillCurrent(active) || active.apiKey != current.apiKey) return@collect
+                                backoff = 2_000L
+                                onTick(tick.price, tick.at, "Twelve Data WebSocket")
+                            }
+                        } catch (e: DataFeedException) {
+                            if (started && generation == session && streamEpoch == epoch) {
+                                publishStreamUnavailable((e.message ?: "WebSocket Twelve Data در دسترس نیست") +
+                                    "؛ تا تلاش بعدی از فید زندهٔ جایگزین استفاده می‌شود")
+                                fallbackStarted = true
+                                collectSpotFallback("فید زندهٔ جایگزین (Swissquote/Gold-API؛ WebSocket Twelve در دسترس نیست)",
+                                    TWELVE_WS_FALLBACK_WINDOW_MS)
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            if (started && generation == session && streamEpoch == epoch) {
+                                publishStreamUnavailable("اتصال WebSocket Twelve Data قطع شد؛ تا تلاش بعدی از فید زندهٔ جایگزین استفاده می‌شود")
+                                fallbackStarted = true
+                                collectSpotFallback("فید زندهٔ جایگزین (Swissquote/Gold-API؛ WebSocket Twelve در دسترس نیست)",
+                                    TWELVE_WS_FALLBACK_WINDOW_MS)
+                            }
+                        }
+                        if (!fallbackStarted && started && generation == session && streamEpoch == epoch)
+                            publishStreamUnavailable("جریان WebSocket Twelve Data قطع شد — تلاش مجدد")
+                    } else {
+                        collectSpotFallback("فید رایگان خودکار (Swissquote/Gold-API)")
+                        if (started && generation == session && streamEpoch == epoch)
+                            publishStreamUnavailable("جریان فید رایگان قطع شد — تلاش مجدد")
+                    }
                 } catch (e: CancellationException) {
                     throw e // cancelling an old market job must not relabel the new market offline
                 } catch (e: DataFeedException) {
@@ -555,5 +586,6 @@ class MarketRepository(
         private const val POLL_INTERVAL_MS = 60_000L
         private const val RECONNECT_WHEN_OFFLINE_MS = 15_000L
         private const val QUIET_RECONNECT_MS = 5 * 60_000L
+        private const val TWELVE_WS_FALLBACK_WINDOW_MS = 2 * 60_000L
     }
 }
