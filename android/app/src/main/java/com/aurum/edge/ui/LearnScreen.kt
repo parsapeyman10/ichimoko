@@ -341,20 +341,20 @@ fun LearnScreen(viewModel: AurumViewModel) {
                 modifier = Modifier.padding(top = 6.dp))
         }
 
-        SectionCard("ورود فایل/لینک MetaTrader برای پژوهش", "CSV / TSV خروجی MT4 یا MT5؛ هرگز به چارت زنده یا سفارش وصل نمی‌شود") {
-            Text("منشأ فایل را خودت تأیید کن؛ نام نماد، تایم‌فریم انتخابی بالای صفحه و منطقه زمانی سرور MT باید با فایل یکسان باشند. تا ۶۰۰ هزار کندل آخر تحلیل می‌شود.",
+        SectionCard("ورود فایل/لینک آموزشی OHLC / MetaTrader", "CSV / TSV با هدر روشن؛ هرگز به چارت زنده یا سفارش وصل نمی‌شود") {
+            Text("منشأ فایل را خودت تأیید کن؛ نام نماد، تایم‌فریم انتخابی بالای صفحه و منطقه زمانی دیتاست/سرور باید با فایل یکسان باشند. دیتاست‌های آموزشی با ستون‌های timestamp یا datetime یا DATE+TIME و OPEN/HIGH/LOW/CLOSE (حجم اختیاری) پذیرفته می‌شوند. تا ۶۰۰ هزار کندل آخر تحلیل می‌شود.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(value = mtSymbol, onValueChange = { mtSymbol = it }, singleLine = true,
                     label = { Text("نماد فایل") }, modifier = Modifier.weight(1f))
                 OutlinedTextField(value = mtTimezone, onValueChange = { mtTimezone = it }, singleLine = true,
-                    label = { Text("UTC offset") }, modifier = Modifier.weight(1f))
+                    label = { Text("UTC offset دیتاست") }, modifier = Modifier.weight(1f))
             }
             OutlinedTextField(value = mtLink, onValueChange = { mtLink = it }, singleLine = true,
-                label = { Text("لینک عمومی HTTPS فایل CSV (اختیاری)") },
+                label = { Text("لینک عمومی HTTPS فایل CSV آموزشی (اختیاری)") },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
             OutlinedButton(onClick = { csvPicker.launch(arrayOf("text/*", "application/octet-stream", "application/vnd.ms-excel")) },
-                modifier = Modifier.padding(top = 8.dp)) { Text("انتخاب فایل CSV از گوشی") }
+                modifier = Modifier.padding(top = 8.dp)) { Text("انتخاب فایل CSV/TSV از گوشی") }
             mtUri?.let { Text("فایل انتخاب شد: ${it.lastPathSegment?.takeLast(45) ?: "CSV"} (اولویت با فایل)",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan) }
             Button(onClick = {
@@ -364,8 +364,8 @@ fun LearnScreen(viewModel: AurumViewModel) {
                     spread.toDoubleOrNull() ?: settings.spreadPrice,
                     commission.toDoubleOrNull() ?: settings.commissionPerOz,
                     settings.minConfidence)
-            }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("بک‌تست پژوهشی روی CSV وارداتی") }
-            Text("فایل باید DATE/TIME/OPEN/HIGH/LOW/CLOSE داشته باشد. قیمت یا نتایج فایل وارداتی توسط ارائه‌دهندهٔ بازار تأیید نشده‌اند.",
+            }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("بک‌تست پژوهشی روی CSV آموزشی/MT") }
+            Text("هدرهای قابل قبول: timestamp/datetime یا DATE+TIME، سپس OPEN/HIGH/LOW/CLOSE و در صورت وجود volume/tickvol. قیمت یا نتایج فایل وارداتی توسط ارائه‌دهندهٔ بازار تأیید نشده‌اند و در فید زنده/ژورنال سفارش ذخیره نمی‌شوند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 6.dp))
         }

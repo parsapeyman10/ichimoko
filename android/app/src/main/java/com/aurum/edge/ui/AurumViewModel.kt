@@ -633,7 +633,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** Imported MT history is research-only: never written to the live chart/candle cache. */
+    /** Imported MT/educational OHLC history is research-only: never written to the live chart/candle cache. */
     fun importMetaTrader(
         uri: Uri?, link: String?, symbol: String, interval: Interval, timezone: String,
         balance: Double, risk: Double, spread: Double, commission: Double, threshold: Double,
@@ -643,18 +643,18 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             return
         }
         viewModelScope.launch {
-            _learn.value = LearnState.Loading("خواندن CSV متاتریدر برای پژوهش؛ منشأ فایل تأیید نشده است…")
+            _learn.value = LearnState.Loading("خواندن CSV آموزشی/متاتریدر برای پژوهش؛ منشأ فایل تأیید نشده است…")
             try {
                 val csv = when {
                     uri != null -> container.metaTraderImporter.fromFile(uri)
                     !link.isNullOrBlank() -> container.metaTraderImporter.fromHttps(link)
-                    else -> throw IllegalArgumentException("فایل یا لینک CSV را انتخاب کنید")
+                    else -> throw IllegalArgumentException("فایل یا لینک CSV آموزشی/متاتریدر را انتخاب کنید")
                 }
                 val result = container.runImportedBacktest(csv, symbol, interval, timezone,
                     balance, risk.coerceIn(0.1, 5.0), spread, commission, threshold)
                 _learn.value = LearnState.Done(result, interval)
             } catch (e: Exception) {
-                _learn.value = LearnState.Failed(e.message ?: "فایل/لینک متاتریدر قابل تحلیل نیست")
+                _learn.value = LearnState.Failed(e.message ?: "فایل/لینک CSV آموزشی/متاتریدر قابل تحلیل نیست")
             }
         }
     }

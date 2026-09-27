@@ -32,6 +32,46 @@ class MetaTraderCsvTest {
         assertEquals(5L * 60_000, history.candles[1].time - history.candles[0].time)
     }
 
+
+    @Test fun educationalOhlcCsvWithTimestampAndNoVolumeIsAcceptedForResearchOnly() {
+        val start = 1_735_689_600_000L // 2025-01-01T00:00:00Z
+        val data = buildString {
+            appendLine("timestamp,open,high,low,close")
+            repeat(230) { i ->
+                val t = start + i * 5L * 60_000L
+                appendLine("$t,100.0,102.0,99.0,101.0")
+            }
+        }
+
+        val history = MetaTraderCsv.parse(data, Interval.M5, "+00:00", now = 1_900_000_000_000L)
+
+        assertEquals("CSV آموزشی OHLC", history.formatLabel)
+        assertEquals("embedded timestamp / UTC", history.timezone)
+        assertEquals(false, history.volumeProvided)
+        assertEquals(230, history.candles.size)
+        assertTrue(history.candles.all { it.volume == 0.0 && it.closed })
+        assertEquals(5L * 60_000, history.candles[1].time - history.candles[0].time)
+    }
+
+    @Test fun educationalOhlcCsvWithIsoTimestampAndVolumeIsAccepted() {
+        val start = LocalDateTime.of(2025, 1, 1, 0, 0)
+        val data = buildString {
+            appendLine("Gmt time;Open;High;Low;Close;Volume")
+            repeat(230) { i ->
+                val at = start.plusMinutes(i * 5L)
+                appendLine("${at}Z;100.0;102.0;99.0;101.0;12")
+            }
+        }
+
+        val history = MetaTraderCsv.parse(data, Interval.M5, "+03:30", now = 1_900_000_000_000L)
+
+        assertEquals("CSV آموزشی OHLC", history.formatLabel)
+        assertEquals("embedded timestamp / UTC", history.timezone)
+        assertEquals(true, history.volumeProvided)
+        assertEquals(12.0, history.candles.first().volume, 0.0)
+        assertEquals(5L * 60_000, history.candles[1].time - history.candles[0].time)
+    }
+
     @Test fun malformedTimezoneOrDuplicatesOrIntervalAreNotSilentlyAccepted() {
         for ((data, interval, timezone) in listOf(
             Triple(csv(230, duplicate = true), Interval.M5, "+00:00"),

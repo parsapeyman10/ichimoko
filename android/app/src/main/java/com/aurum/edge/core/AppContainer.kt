@@ -131,10 +131,12 @@ class AppContainer(context: Context) {
         commissionPerOz: Double, threshold: Double,
     ): Backtester.Result = withContext(Dispatchers.Default) {
         val imported = MetaTraderCsv.parse(csv, interval, timezone)
+        val volumeNote = if (imported.volumeProvided) ")"
+            else "؛ بدون ستون حجم — حجم ۰ فقط برای اندیکاتورهای حجمی ثبت شد)"
         Backtester.run(
             candles = imported.candles, interval = interval, symbol = symbol,
-            dataSource = "CSV کاربر از MetaTrader (منشأ تأیید نشده؛ منطقه زمانی ${imported.timezone}؛ " +
-                "${imported.candles.size} از ${imported.totalRows} ردیف)",
+            dataSource = "${imported.formatLabel} کاربر (منشأ تأیید نشده؛ منطقه زمانی ${imported.timezone}؛ " +
+                "${imported.candles.size} از ${imported.totalRows} ردیف$volumeNote",
             initialBalance = initialBalance, riskPercent = riskPercent,
             spreadPrice = spreadPrice, commissionPerOz = commissionPerOz, threshold = threshold,
         )
