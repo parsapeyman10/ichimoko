@@ -120,6 +120,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private val _watchHistory = MutableStateFlow(WatchHistory())
     val watchHistory: StateFlow<WatchHistory> = _watchHistory.asStateFlow()
 
+    /** Result of the one-tap AI connectivity probe from Settings (never carries the key). */
+    data class AiProbeState(val running: Boolean = false, val message: String? = null)
+    private val _aiProbe = MutableStateFlow(AiProbeState())
+    val aiProbe: StateFlow<AiProbeState> = _aiProbe.asStateFlow()
+
     init {
         viewModelScope.launch {
             runCatching { container.journalStore.load() }.onFailure {
@@ -710,14 +715,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setInterval(interval: Interval) = container.market.setInterval(interval)
 
-    fun saveNewsAiConfig(apiKey: String, baseUrl: String, model: String) {
+    fun saveNewsAiConfig(apiKey: String, baseUrl: String, model: String, format: String = "AUTO") {
         val url = baseUrl.trim().trimEnd('/')
         if (apiKey.isNotBlank() && (!url.startsWith("https://") || model.isBlank())) {
             _toast.value = "برای کلید مستقیم، نشانی HTTPS و نام مدل هم لازم است"
             return
         }
         viewModelScope.launch {
-            val saved = withContext(Dispatchers.IO) { container.settingsStore.saveNewsAiConfig(apiKey, url, model) }
+            val saved = withContext(Dispatchers.IO) { container.settingsStore.saveNewsAiConfig(apiKey, url, model, format) }
             if (!saved) {
                 _toast.value = "ذخیرهٔ کلید مستقیم ناموفق بود"
                 return@launch
@@ -736,6 +741,33 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             container.news.resetAndRefresh()
             container.traderAdvisor.refreshNow() // flips the companion card to "not configured"
             _toast.value = "کلید مستقیم حذف شد"
+        }
+    }
+
+    /**
+     * One-tap proof of life for the user's own model endpoint. Empty fields fall back to the
+     * SAVED values (the key field is intentionally blanked after saving) so the test always
+     * checks what the app would actually use. The key itself is never echoed.
+     */
+    fun testNewsAiConnection(keyInput: String, baseUrl: String, model: String, format: String = "AUTO") {
+        val saved = container.settingsStore.read()
+        val key = keyInput.trim().ifBlank { saved.newsAiApiKey }
+        val url = baseUrl.trim().trimEnd('/').ifBlank { saved.newsAiBaseUrl }
+        val modelName = model.trim().ifBlank { saved.newsAiModel }
+        if (key.isBlank() || !url.startsWith("https://") || modelName.isBlank()) {
+            _aiProbe.value = AiProbeState(message = "کلید، نشانی HTTPS و نام مدل هر سه لازم است")
+            return
+        }
+        _aiProbe.value = AiProbeState(running = true)
+        viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    container.traderAdvisor.probe(key, url, modelName, format)
+                }
+            }
+            _aiProbe.value = AiProbeState(message = result.fold(
+                onSuccess = { "اتصال تأیید شد؛ پاسخ مدل: «$it»" },
+                onFailure = { "اتصال ناموفق: ${(it.message ?: "خطای نامشخص").take(120)}" }))
         }
     }
 

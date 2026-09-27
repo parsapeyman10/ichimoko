@@ -62,6 +62,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     var newsAiKey by remember { mutableStateOf("") }
     var newsAiBaseUrl by remember { mutableStateOf(settings.newsAiBaseUrl) }
     var newsAiModel by remember { mutableStateOf(settings.newsAiModel) }
+    var newsAiFormat by remember { mutableStateOf(settings.newsAiFormatNormalized) }
     var balance by remember { mutableStateOf(settings.accountBalance.toString()) }
     var risk by remember { mutableStateOf(settings.riskPercent.toString()) }
     var minConfidence by remember { mutableStateOf(settings.minConfidence.toString()) }
@@ -190,13 +191,41 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             OutlinedTextField(value = newsAiModel, onValueChange = { newsAiModel = it }, singleLine = true,
                 label = { Text("نام مدل (مثلاً claude-sonnet-4-6 یا gpt-4o-mini)") },
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            Text("قالب API (برای نشانی‌های غیر از دو دامنهٔ رسمی، صریح انتخاب کنید):",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 8.dp))
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(
+                    "AUTO" to "خودکار (با دامنه تشخیص)",
+                    "ANTHROPIC" to "Claude / Anthropic",
+                    "OPENAI" to "سازگار با OpenAI",
+                ).forEach { (value, label) ->
+                    val selected = newsAiFormat == value
+                    if (selected) Button(onClick = { newsAiFormat = value },
+                        modifier = Modifier.weight(1f)) { Text(label, maxLines = 1) }
+                    else OutlinedButton(onClick = { newsAiFormat = value },
+                        modifier = Modifier.weight(1f)) { Text(label, maxLines = 1) }
+                }
+            }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { viewModel.saveNewsAiConfig(newsAiKey, newsAiBaseUrl, newsAiModel) },
+                Button(onClick = { viewModel.saveNewsAiConfig(newsAiKey, newsAiBaseUrl, newsAiModel, newsAiFormat) },
                     modifier = Modifier.weight(1f)) { Text("ذخیرهٔ کلید مستقیم") }
                 OutlinedButton(onClick = {
                     newsAiKey = ""; newsAiBaseUrl = ""; newsAiModel = ""
                     viewModel.clearNewsAiConfig()
                 }, modifier = Modifier.weight(1f)) { Text("حذف کلید مستقیم") }
+            }
+            val probe = viewModel.aiProbe.collectAsStateWithLifecycle().value
+            OutlinedButton(onClick = {
+                viewModel.testNewsAiConnection(newsAiKey, newsAiBaseUrl, newsAiModel, newsAiFormat)
+            }, enabled = !probe.running && (newsAiKey.isNotBlank() || settings.hasClientNewsAi),
+                modifier = Modifier.padding(top = 8.dp)) {
+                Text(if (probe.running) "در حال آزمون…" else "تست اتصال به مدل")
+            }
+            probe.message?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall,
+                    color = if (it.startsWith("اتصال تأیید شد")) AurumColors.Green else AurumColors.Red,
+                    modifier = Modifier.padding(top = 4.dp))
             }
             Text("⚠️ این کلید روی گوشی ذخیره می‌شود، هرگز به گیت‌هاب نمی‌رود، اما اگر همین APK را با کسی به‌اشتراک بگذارید، کلید همراه آن قابل استخراج است. برای ارائهٔ عمومی از سقف/rate limit سرویس کلید استفاده کنید.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Red)

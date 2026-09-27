@@ -101,6 +101,13 @@ class TraderAdvisor(
         }
     }
 
+    /**
+     * One-tap connectivity probe for Settings (never sends the snapshot, never stores the key).
+     * Returns the model's short reply; throws with a Persian message on any failure.
+     */
+    suspend fun probe(apiKey: String, baseUrl: String, model: String, format: String = "AUTO"): String =
+        AiProvider.probe(http, baseUrl, apiKey, model, format)
+
     /** Atomically read+clear the flip flag so the service notifies each flip exactly once. */
     fun consumeBiasFlip(): TraderOpinion? {
         val current = _state.value
@@ -162,7 +169,7 @@ class TraderAdvisor(
             "\"invalidation\": max 160 characters IN PERSIAN describing what would invalidate this view}. " +
             "If the snapshot is insufficient, use bias NEUTRAL and say so in the summary."
         val output = AiProvider.completeJson(http, config.newsAiBaseUrl, config.newsAiApiKey,
-            config.newsAiModel, system, snapshot)
+            config.newsAiModel, system, snapshot, format = config.newsAiFormatNormalized)
         return parseOpinion(output, symbol, config.newsAiModel, now)
             ?: throw IllegalStateException("پاسخ مدل قابل‌راستی‌آزمایی نبود؛ نظری نمایش داده نمی‌شود")
     }

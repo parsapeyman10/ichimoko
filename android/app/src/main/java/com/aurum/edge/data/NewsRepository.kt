@@ -210,7 +210,8 @@ class NewsRepository(
         }
         val aiBySymbol = if (gate == NewsGate.CLEAR) {
             runCatching {
-                clientAiAnalyze(articles, settingsNow.newsAiApiKey, settingsNow.newsAiBaseUrl, settingsNow.newsAiModel, now)
+                clientAiAnalyze(articles, settingsNow.newsAiApiKey, settingsNow.newsAiBaseUrl,
+                    settingsNow.newsAiModel, settingsNow.newsAiFormatNormalized, now)
             }.getOrElse {
                 mapOf("XAU/USD" to AiNewsVerdict(reason = "تحلیل AI مستقیم روی گوشی ناموفق بود: ${it.message?.take(100) ?: "خطا"}"))
             }
@@ -244,7 +245,7 @@ class NewsRepository(
      * never trusts raw model output; an unevaluated pair is UNKNOWN, never CLEAR.
      */
     private suspend fun clientAiAnalyze(articles: List<PersianHeadline>, apiKey: String, baseUrl: String,
-                                        model: String, now: Long): Map<String, AiNewsVerdict> {
+                                        model: String, format: String, now: Long): Map<String, AiNewsVerdict> {
         val pairs = WatchCatalog.chartSymbols
         val candidates = articles.filter { it.link != null && it.publishedAt != null &&
             now - it.publishedAt in 0L..CLIENT_AI_LOOKBACK_MILLIS &&
@@ -272,7 +273,7 @@ class NewsRepository(
         }
         // One direct call with the user's OWN key — Anthropic (Claude) or OpenAI-compatible.
         val output = AiProvider.completeJson(client, baseUrl, apiKey, model,
-            instructions, snippets.toString())
+            instructions, snippets.toString(), format = format)
         val raw = (output["verdicts"] as? JsonArray) ?: error("خروجی مدل فاقد فهرست verdicts است")
         val validCandidateIds = candidates.map { it.id }.toSet()
         val parsed = mutableMapOf<String, AiNewsVerdict>()

@@ -35,14 +35,41 @@ internal object AiProvider {
         runCatching { URI(baseUrl.trim()) }.getOrNull()
             ?.host?.equals(ANTHROPIC_HOST, ignoreCase = true) == true
 
+    /**
+     * Which wire format to speak: an EXPLICIT "ANTHROPIC"/"OPENAI" wins (relay services host
+     * either protocol on arbitrary domains), anything else falls back to host detection.
+     */
+    internal fun usesAnthropic(baseUrl: String, format: String): Boolean = when (format.trim().uppercase()) {
+        "ANTHROPIC" -> true
+        "OPENAI" -> false
+        else -> isAnthropic(baseUrl)
+    }
+
     /** One completion whose textual output must be a JSON object. Throws on any transport error. */
     suspend fun completeJson(httpClient: OkHttpClient, baseUrl: String, apiKey: String, model: String,
-                              system: String, user: String, maxTokens: Int = 1024): JsonObject {
+                              system: String, user: String, maxTokens: Int = 1024,
+                              format: String = "AUTO"): JsonObject {
+        val content = completeText(httpClient, baseUrl, apiKey, model, system, user, maxTokens, format)
+        return parseJsonObjectLoose(content) ?: throw IllegalStateException("خروجی مدل JSON معتبر نیست")
+    }
+
+    /**
+     * Minimal connectivity probe with the user's OWN key: one tiny prompt, no JSON contract.
+     * Returns the model's short reply so settings can show proof of life. Never logs the key.
+     */
+    suspend fun probe(httpClient: OkHttpClient, baseUrl: String, apiKey: String, model: String,
+                      format: String = "AUTO"): String =
+        completeText(httpClient, baseUrl, apiKey, model,
+            "You are a connectivity test. Reply with the single word: OK",
+            "ping", 16, format).take(60)
+
+    private suspend fun completeText(httpClient: OkHttpClient, baseUrl: String, apiKey: String, model: String,
+                                     system: String, user: String, maxTokens: Int, format: String): String {
         val base = baseUrl.trim().trimEnd('/')
         val uri = runCatching { URI(base) }.getOrNull()
         require(uri?.scheme == "https" && !uri.host.isNullOrBlank() && uri.rawUserInfo == null &&
             uri.port in listOf(-1, 443)) { "نشانی سرویس مدل معتبر نیست (فقط HTTPS معمول)" }
-        val anthropic = isAnthropic(base)
+        val anthropic = usesAnthropic(base, format)
         val url = if (anthropic) base.removeSuffix("/v1") + "/v1/messages" else "$base/chat/completions"
         val body = if (anthropic) buildJsonObject {
             put("model", model)
@@ -76,9 +103,8 @@ internal object AiProvider {
         }
         val root = runCatching { Json.parseToJsonElement(response) as? JsonObject }
             .getOrNull() ?: throw IllegalStateException("پاسخ سرویس مدل ساختار JSON ندارد")
-        val content = (if (anthropic) extractAnthropicText(root) else extractOpenAiText(root))
+        return (if (anthropic) extractAnthropicText(root) else extractOpenAiText(root))
             ?: throw IllegalStateException("متن پاسخ مدل نامعتبر است")
-        return parseJsonObjectLoose(content) ?: throw IllegalStateException("خروجی مدل JSON معتبر نیست")
     }
 
     /** Anthropic Messages API: first text block of the `content` array. */

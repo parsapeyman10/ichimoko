@@ -41,6 +41,7 @@ class SettingsStore(context: Context) {
         newsAiApiKey = prefs.getString(KEY_NEWS_AI_KEY, "").orEmpty(),
         newsAiBaseUrl = prefs.getString(KEY_NEWS_AI_URL, "").orEmpty(),
         newsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, "").orEmpty(),
+        newsAiFormat = prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" },
     )
 
     /**
@@ -92,21 +93,25 @@ class SettingsStore(context: Context) {
     }
 
     /**
-     * User's OWN key for a DIRECT-FROM-PHONE, OpenAI-compatible AI news call, replacing the need
+     * User's OWN key for a DIRECT-FROM-PHONE AI news call (Anthropic or OpenAI-compatible,
+     * see the format parameter), replacing the need
      * for a self-hosted backend for the Forex ninth-condition gate. Explicit, on-device only;
      * never logged. An empty [apiKey] or [baseUrl] or [model] clears client mode entirely (falls
      * back to [newsBaseUrl] server mode, or UNKNOWN if neither is configured).
      */
     @Synchronized
-    fun saveNewsAiConfig(apiKey: String, baseUrl: String, model: String): Boolean {
+    fun saveNewsAiConfig(apiKey: String, baseUrl: String, model: String, format: String = "AUTO"): Boolean {
         val key = apiKey.trim()
         val url = baseUrl.trim()
         val modelName = model.trim()
+        val wireFormat = format.trim().uppercase(java.util.Locale.ROOT).let {
+            if (it in setOf("ANTHROPIC", "OPENAI")) it else "AUTO" }
         if (key.isNotBlank() && (url.isBlank() || !url.startsWith("https://") || modelName.isBlank())) return false
         val saved = prefs.edit()
             .putString(KEY_NEWS_AI_KEY, key)
             .putString(KEY_NEWS_AI_URL, url)
             .putString(KEY_NEWS_AI_MODEL, modelName)
+            .putString(KEY_NEWS_AI_FORMAT, wireFormat)
             .commit()
         if (saved && prefs.getString(KEY_NEWS_AI_KEY, null) == key) {
             _settings.value = read()
@@ -117,7 +122,8 @@ class SettingsStore(context: Context) {
 
     @Synchronized
     fun clearNewsAiConfig(): Boolean {
-        val saved = prefs.edit().remove(KEY_NEWS_AI_KEY).remove(KEY_NEWS_AI_URL).remove(KEY_NEWS_AI_MODEL).commit()
+        val saved = prefs.edit().remove(KEY_NEWS_AI_KEY).remove(KEY_NEWS_AI_URL)
+            .remove(KEY_NEWS_AI_MODEL).remove(KEY_NEWS_AI_FORMAT).commit()
         if (saved && prefs.getString(KEY_NEWS_AI_KEY, null) == null) {
             _settings.value = read()
             return true
@@ -174,5 +180,6 @@ class SettingsStore(context: Context) {
         private const val KEY_NEWS_AI_KEY = "news_ai_client_key"
         private const val KEY_NEWS_AI_URL = "news_ai_client_base_url"
         private const val KEY_NEWS_AI_MODEL = "news_ai_client_model"
+    private const val KEY_NEWS_AI_FORMAT = "news_ai_format"
     }
 }

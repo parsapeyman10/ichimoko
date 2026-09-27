@@ -449,15 +449,22 @@ data class AppSettings(
     val autoPaperTrading: Boolean = false,
     /**
      * OPTIONAL alternative to [newsBaseUrl] for the Forex ninth-condition AI gate: instead of your
-     * own backend server, the phone calls this OpenAI-compatible endpoint DIRECTLY with your own
-     * key. Used only if [newsBaseUrl] is blank. The SAME publisher-rights/consent responsibility
+     * own backend server, the phone calls this endpoint DIRECTLY with your own key - either the
+     * Anthropic (Claude) Messages API or any OpenAI-compatible service (see [newsAiFormat]). Used only if [newsBaseUrl] is blank. The SAME publisher-rights/consent responsibility
      * applies to whoever holds this key; headline/excerpt text goes straight to this host from
      * the phone, so if you later share this APK, this key travels with it and is extractable.
      */
     val newsAiApiKey: String = "",
     val newsAiBaseUrl: String = "",
     val newsAiModel: String = "",
+    /**
+     * Wire format of the AI endpoint: AUTO (detect Anthropic by host, else OpenAI-compatible),
+     * ANTHROPIC (Messages API on ANY host, e.g. a relay) or OPENAI (chat/completions on any
+     * host). Explicit beats guessing for proxy keys with non-standard prefixes.
+     */
+    val newsAiFormat: String = "AUTO",
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
     val hasClientNewsAi: Boolean get() = newsAiApiKey.isNotBlank() && newsAiBaseUrl.isNotBlank() && newsAiModel.isNotBlank()
+    val newsAiFormatNormalized: String get() = if (newsAiFormat in setOf("ANTHROPIC", "OPENAI")) newsAiFormat else "AUTO"
 }

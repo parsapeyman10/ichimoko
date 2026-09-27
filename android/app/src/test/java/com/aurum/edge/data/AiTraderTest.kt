@@ -27,6 +27,20 @@ class AiTraderTest {
         assertFalse(AiProvider.isAnthropic(""))
     }
 
+    @Test fun `explicit format overrides host detection for relay services`() {
+        // AUTO keeps host detection
+        assertTrue(AiProvider.usesAnthropic("https://api.anthropic.com", "AUTO"))
+        assertFalse(AiProvider.usesAnthropic("https://relay.example.com", "AUTO"))
+        // ANTHROPIC forces the Messages API even on a relay domain (e.g. sk-cs4-… proxy keys)
+        assertTrue(AiProvider.usesAnthropic("https://relay.example.com", "ANTHROPIC"))
+        assertTrue(AiProvider.usesAnthropic("https://relay.example.com", "anthropic"))
+        // OPENAI forces chat/completions even if the host LOOKS like Anthropic
+        assertFalse(AiProvider.usesAnthropic("https://api.anthropic.com", "OPENAI"))
+        // anything unknown falls back to AUTO behaviour (fail-safe, never crashes)
+        assertFalse(AiProvider.usesAnthropic("https://relay.example.com", "nonsense"))
+        assertTrue(AiProvider.usesAnthropic("https://api.anthropic.com", ""))
+    }
+
     // ---------- response extraction ----------
 
     @Test fun `anthropic content array first text block is extracted`() {
