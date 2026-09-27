@@ -60,6 +60,7 @@ object MtfAnalyzer {
         Interval.M30 -> listOf(Interval.M30, Interval.H1)
         Interval.H1 -> listOf(Interval.H1)
         Interval.H4 -> listOf(Interval.H4)
+        Interval.D1 -> listOf(Interval.D1)
     }
 
     private fun weightFor(interval: Interval): Double = when (interval) {
@@ -69,6 +70,7 @@ object MtfAnalyzer {
         Interval.M30 -> 0.25
         Interval.H1 -> 0.25
         Interval.H4 -> 0.15
+        Interval.D1 -> 0.10
     }
 
     /**

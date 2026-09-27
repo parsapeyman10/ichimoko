@@ -29,7 +29,8 @@ enum class Interval(val api: String, val label: String, val minutes: Int) {
     M15("15min", "15m", 15),
     M30("30min", "30m", 30),
     H1("1h", "1H", 60),
-    H4("4h", "4H", 240);
+    H4("4h", "4H", 240),
+    D1("1day", "1D", 1440);
 
     val millis: Long get() = minutes * 60_000L
 

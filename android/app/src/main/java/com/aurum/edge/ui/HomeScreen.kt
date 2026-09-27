@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.dp
@@ -29,6 +30,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AlertCheckKind
 import com.aurum.edge.core.AlertDiagnostics
 import com.aurum.edge.core.HomeReadout
+import com.aurum.edge.core.MarketHours
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.TraderOpinionState
 import com.aurum.edge.notify.Notifier
@@ -77,6 +79,7 @@ fun HomeScreen(
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(20_000L); now = System.currentTimeMillis() } }
     val price = HomeReadout.from(market, now)
+    val session = MarketHours.sessionWindow(now)
     val checks = AlertDiagnostics.checks(market, settings, news, monitorRunning,
         Notifier.canNotifyVerified(context, settings.alertSoundUri), trades, mtf,
         opportunityError, journalError, now)
@@ -93,13 +96,33 @@ fun HomeScreen(
                 .border(1.dp, AurumColors.Gold.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
                 .padding(18.dp),
         ) {
-            Text("AURUM  /  EDGE", color = AurumColors.Gold,
-                style = MaterialTheme.typography.labelMedium)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top) {
+                Text("AURUM  /  EDGE", color = AurumColors.Gold,
+                    style = MaterialTheme.typography.labelMedium)
+                Column(horizontalAlignment = Alignment.End,
+                    modifier = Modifier
+                        .background((if (session.closed) AurumColors.Red else AurumColors.Green).copy(alpha = 0.10f),
+                            RoundedCornerShape(12.dp))
+                        .border(1.dp, (if (session.closed) AurumColors.Red else AurumColors.Green).copy(alpha = 0.35f),
+                            RoundedCornerShape(12.dp))
+                        .padding(horizontal = 10.dp, vertical = 7.dp)) {
+                    Text(if (session.closed) "طبق برنامه بسته" else "طبق برنامه باز",
+                        color = if (session.closed) AurumColors.Red else AurumColors.Green,
+                        style = MaterialTheme.typography.labelMedium)
+                    Text("${session.nextChangeLabel}: ${formatDateTime(session.nextChangeAt)}",
+                        color = AurumColors.TextPrimary, style = MaterialTheme.typography.labelSmall)
+                    Text(session.newYorkTimeLabel, color = AurumColors.TextMuted,
+                        style = MaterialTheme.typography.labelSmall)
+                }
+            }
             Text("نمای کلی", color = AurumColors.TextPrimary,
                 style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 5.dp))
             Text("وضعیت واقعی داده، هشدار و پژوهش روی همین گوشی · بدون سرور",
                 color = AurumColors.TextSecondary, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 5.dp))
+            Text(session.detail, color = AurumColors.TextMuted,
+                style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
         }
 
         SectionCard("بازار · ${market.symbol}", "هر عددی قیمت قابل اجرا یا تضمین معامله نیست",

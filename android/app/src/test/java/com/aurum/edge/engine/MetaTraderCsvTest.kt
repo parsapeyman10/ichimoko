@@ -72,6 +72,24 @@ class MetaTraderCsvTest {
         assertEquals(5L * 60_000, history.candles[1].time - history.candles[0].time)
     }
 
+
+    @Test fun appExportedDailyOhlcCsvWithBlankVolumeCanBeReimportedAsDailyResearch() {
+        val start = LocalDateTime.of(2025, 1, 1, 0, 0)
+        val data = buildString {
+            appendLine("date,symbol,open,high,low,close,volume,source")
+            repeat(230) { i ->
+                appendLine("${start.plusDays(i.toLong()).toLocalDate()},XAU/USD,100.0,102.0,99.0,101.0,,Twelve Data")
+            }
+        }
+
+        val history = MetaTraderCsv.parse(data, Interval.D1, "+00:00", now = 1_900_000_000_000L)
+
+        assertEquals("CSV آموزشی OHLC", history.formatLabel)
+        assertEquals(false, history.volumeProvided)
+        assertEquals(230, history.candles.size)
+        assertEquals(24L * 60L * 60_000L, history.candles[1].time - history.candles[0].time)
+    }
+
     @Test fun malformedTimezoneOrDuplicatesOrIntervalAreNotSilentlyAccepted() {
         for ((data, interval, timezone) in listOf(
             Triple(csv(230, duplicate = true), Interval.M5, "+00:00"),

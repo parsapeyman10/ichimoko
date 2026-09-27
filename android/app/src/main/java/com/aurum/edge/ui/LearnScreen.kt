@@ -365,7 +365,7 @@ fun LearnScreen(viewModel: AurumViewModel) {
                     commission.toDoubleOrNull() ?: settings.commissionPerOz,
                     settings.minConfidence)
             }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("بک‌تست پژوهشی روی CSV آموزشی/MT") }
-            Text("هدرهای قابل قبول: timestamp/datetime یا DATE+TIME، سپس OPEN/HIGH/LOW/CLOSE و در صورت وجود volume/tickvol. قیمت یا نتایج فایل وارداتی توسط ارائه‌دهندهٔ بازار تأیید نشده‌اند و در فید زنده/ژورنال سفارش ذخیره نمی‌شوند.",
+            Text("هدرهای قابل قبول: timestamp/datetime/date یا DATE+TIME، سپس OPEN/HIGH/LOW/CLOSE و در صورت وجود volume/tickvol. برای CSV روزانهٔ خروجی همین اپ، تایم‌فریم 1D را انتخاب کن؛ فایل‌های نرخ مرجع ECB یا طلای ماهانه کندل OHLC نیستند و عمداً بک‌تست کندلی نمی‌شوند. قیمت یا نتایج فایل وارداتی توسط ارائه‌دهندهٔ بازار تأیید نشده‌اند و در فید زنده/ژورنال سفارش ذخیره نمی‌شوند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 6.dp))
         }

@@ -13,6 +13,7 @@ import okhttp3.Request
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
@@ -58,6 +59,8 @@ object MetaTraderCsv {
         }
         runCatching { Instant.parse(text).toEpochMilli() }.getOrNull()?.let { return it }
         runCatching { OffsetDateTime.parse(text).toInstant().toEpochMilli() }.getOrNull()?.let { return it }
+        runCatching { LocalDate.parse(text.replace('/', '-')).atStartOfDay().toInstant(offset).toEpochMilli() }
+            .getOrNull()?.let { return it }
         val cleaned = text.replace('/', '-').replace('T', ' ')
         val local = dateTimes.firstNotNullOfOrNull { format ->
             runCatching { LocalDateTime.parse(cleaned, format) }.getOrNull()
@@ -102,6 +105,7 @@ object MetaTraderCsv {
             throw DataFeedException("ستون‌های زمان/OPEN/HIGH/LOW/CLOSE در CSV پیدا نشد؛ CSV آموزشی باید هدر روشن OHLC داشته باشد")
         }
         val hasVolumeColumn = volIdx >= 0
+        var volumeWasProvided = false
         var embeddedTimestampZone = false
         val parsed = ArrayList<Candle>()
         var lineNumber = 1
@@ -119,7 +123,11 @@ object MetaTraderCsv {
                 val c = price(closeIdx)
                 require(h >= maxOf(o, c) && l <= minOf(o, c) && l > 0 && time in 1L..now)
                 val volume = if (hasVolumeColumn) {
-                    row[volIdx].toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 } ?: error("volume")
+                    val rawVolume = row.getOrNull(volIdx).orEmpty().trim()
+                    if (rawVolume.isBlank()) 0.0 else {
+                        volumeWasProvided = true
+                        rawVolume.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 } ?: error("volume")
+                    }
                 } else 0.0
                 parsed += Candle(time, o, h, l, c, volume, closed = true)
             } catch (_: Exception) {
@@ -140,7 +148,7 @@ object MetaTraderCsv {
         val formatLabel = if (fields.any { it in setOf("tickvol", "tickvolume") }) "MT4/MT5 CSV" else "CSV آموزشی OHLC"
         val timezoneLabel = if (embeddedTimestampZone) "embedded timestamp / UTC" else offset.id
         return ImportedHistory(parsed.takeLast(HistDataCsv.MAX_RESEARCH_CANDLES), parsed.size, timezoneLabel,
-            formatLabel = formatLabel, volumeProvided = hasVolumeColumn)
+            formatLabel = formatLabel, volumeProvided = volumeWasProvided)
     }
 }
 
