@@ -17,7 +17,6 @@ class PaperAutoTrader(
     private val settings: SettingsStore,
     private val news: NewsRepository,
     private val journal: JournalStore,
-    private val latestMarket: StateFlow<MarketState>,
 ) {
     private val _status = MutableStateFlow("خاموش؛ هیچ معاملهٔ خودکاری در بروکر یا ژورنال باز نشده است")
     val status: StateFlow<String> = _status.asStateFlow()
@@ -50,7 +49,9 @@ class PaperAutoTrader(
             _status.value = "تراز چندتایم‌فریم همین کندل در دسترس نیست یا ورود را وتو کرده است"
             return null
         }
-        val current = latestMarket.value
+        // Re-verify against the SAME emission plus freshly read news/settings: those flows are
+        // global, so this guard stays race-safe for any symbol (selected pair or scanner sweep).
+        val current = state
         val recentNews = news.state.value
         val recentSettings = settings.read()
         PaperAutoRules.blocker(current, recentSettings, recentNews)?.let {
@@ -58,8 +59,7 @@ class PaperAutoTrader(
             return null
         }
         val signal = current.signal ?: return null
-        if (state.signal?.barTime != signal.barTime || state.symbol != current.symbol) return null
-        val newsRecord = NewsConfluence.record(recentNews) ?: run {
+        val newsRecord = NewsConfluence.record(recentNews, current.symbol) ?: run {
             _status.value = "شواهد خبر برای ثبت در ژورنال کامل نیست"
             return null
         }

@@ -82,6 +82,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val news = container.news.state
     val publicWebNews = container.publicWebNews.state // Forex publisher snippets, not ninth-confluence evidence
     val forexCalendar = container.forexCalendar.state
+    /** All-pairs radar: periodic REST sweep status of every catalog pair. */
+    val pairScan = container.pairScanner.state
     val market = container.verifiedMarket
     val trades: StateFlow<List<PaperTrade>> = container.journalStore.trades
     val opportunities: StateFlow<List<PaperOpportunity>> = container.opportunityStore.items
@@ -184,6 +186,23 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun refreshNow() = container.market.refreshNow()
 
     fun refreshWatch() = container.watch.refreshNow()
+
+    /** Manual all-pairs sweep. Candidates are recorded (journal/radar) without playing a sound:
+     * the user is looking at the screen; background alerts come from the monitor service. */
+    fun scanPairs() {
+        if (container.pairScanner.state.value.sweeping) {
+            _toast.value = "اسکن همگانی در حال اجراست"
+            return
+        }
+        viewModelScope.launch {
+            _toast.value = "اسکن همگانی ۸ جفت‌ارز آغاز شد (حدود یک دقیقه؛ سهمیهٔ منابع رعایت می‌شود)"
+            try {
+                container.pairScanner.sweepOnce(minIntervalMs = 3 * 60_000L) { }
+            } catch (_: Exception) {
+                _toast.value = "اسکن همگانی ناتمام ماند؛ وضعیت هر نماد در رادار مشخص است"
+            }
+        }
+    }
 
     fun refreshNews() = container.news.refreshNow()
 

@@ -25,7 +25,9 @@ object ForexNewsDecisions {
         val context = if (!calendar.online(now)) "تقویم Forex Factory تازه نیست؛ اثر خبر نامعلوم" else
             highlight?.let { "${it.title}: ${NewsResearch.gold(it, calendar, now).title}" }
                 ?: "در تقویم دریافتی، رویداد High/USD نزدیک نیست؛ نبود خبر ثابت نشده"
-        val action = when (news.ai.direction) { "BUY" -> SignalAction.BUY; "SELL" -> SignalAction.SELL; else -> null }
+        // Per-pair ninth condition: probe with the SELECTED pair's own model verdict.
+        val verdict = news.aiBySymbol[market.symbol] ?: news.ai.takeIf { it.symbol == market.symbol }
+        val action = when (verdict?.direction) { "BUY" -> SignalAction.BUY; "SELL" -> SignalAction.SELL; else -> null }
         val aligned = if (!closed && action != null) {
             NewsConfluence.alignment(market.symbol, action, news, now).status == ConfluenceStatus.CONFIRMED
         } else false
@@ -34,7 +36,7 @@ object ForexNewsDecisions {
         val allowed = blocker == null && aligned
         return ForexNewsDecision(
             context,
-            modelOpinion = if (aligned) "مدل ${news.ai.model} با شاهد معتبر بررسی شد؛ این برداشت تضمین حرکت قیمت نیست"
+            modelOpinion = if (aligned) "مدل ${verdict?.model} با شاهد معتبر بررسی شد؛ این برداشت تضمین حرکت قیمت نیست"
                 else "نظر AI معتبر نداریم؛ خروجی تقویم به‌تنهایی تحلیل معامله‌گر نیست",
             direction = if (aligned) { if (action == SignalAction.BUY) "LONG / خرید" else "SHORT / فروش" }
                 else "نامعلوم؛ جهت از تیتر/پیش‌بینی ساخته نمی‌شود",

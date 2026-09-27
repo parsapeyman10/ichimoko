@@ -97,6 +97,25 @@ class PaperJournalPersistenceTest {
         assertFalse(restored.trades.value.single().isOpen)
     }
 
+    @Test fun usdJpyPaperSettlesInDollarsThroughItsOwnExitPrice() = runBlocking {
+        val file = journalFile()
+        val store = JournalStore(context, file)
+        store.load()
+        // Manual long USD/JPY: entry 150, stop 148, target 153 -> 750 units, 10 USD risk.
+        val manual = signal.copy(action = SignalAction.BUY, entry = 150.0,
+            stopLoss = 148.0, takeProfit = 153.0, interval = Interval.M5)
+        val opened = store.open(manual, "USD/JPY", 150.0, 1000.0, 1.0, manual = true)
+        assertEquals(750.0, opened.positionOz, 1e-6)
+        assertEquals("USD", opened.unit)
+        assertEquals(10.0, opened.riskUsd, 1e-8)
+        val tick = opened.openedAt + 1000L
+        // Target hit at 153: P/L = 750 x 3 JPY = 2250 JPY = 2250/153 USD (~14.71).
+        store.settle(Candle(tick, 152.9, 153.5, 152.8, 153.2), "USD/JPY", tick)
+        val closed = store.trades.value.single()
+        assertFalse(closed.isOpen)
+        assertEquals(2250.0 / 153.0, closed.pnlUsd!!, 0.01)
+    }
+
     @Test fun autoOpenSettlementAndReloadKeepSameTradeAndEvidence() = runBlocking {
         val file = journalFile()
         val store = JournalStore(context, file)

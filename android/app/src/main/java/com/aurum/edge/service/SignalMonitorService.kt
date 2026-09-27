@@ -50,6 +50,7 @@ class SignalMonitorService : Service() {
     private var newsJob: Job? = null
     private var researchAlertJob: Job? = null
     private var settingsJob: Job? = null
+    private var sweepJob: Job? = null
     private val notifiedResearch = mutableSetOf<String>()
     private val notifiedTrades = mutableSetOf<String>()
 
@@ -123,8 +124,37 @@ class SignalMonitorService : Service() {
                 if (!MarketHours.forexWeekendClosed()) {
                     container.forexCalendar.refreshNow() // weekly export, 1m near release only
                     if (turns++ % 15 == 0) container.publicWebNews.refreshNow()
-                    if (container.settingsStore.read().let { it.autoPaperTrading || it.pauseOnNews || it.notifyOnSignal } &&
-                        container.settingsStore.read().newsBaseUrl.isNotBlank()) container.news.refreshNow()
+                    // The ninth condition expires after ~3 minutes: refresh in server OR client
+                    // mode (user's own on-device key) whenever alerts/auto-paper depend on it.
+                    if (container.settingsStore.read().let {
+                            it.autoPaperTrading || it.pauseOnNews || it.notifyOnSignal } &&
+                        container.settingsStore.read().let {
+                            it.newsBaseUrl.isNotBlank() || it.hasClientNewsAi }) container.news.refreshNow()
+                }
+                delay(60_000L)
+            }
+        }
+
+        // Periodic all-pairs REST sweep: same nine conditions per pair, educational candidates
+        // only — automatic paper fills stay WebSocket-tick-only on the selected symbol.
+        sweepJob?.cancel()
+        sweepJob = scope.launch {
+            while (isActive) {
+                if (!notificationsPermitted()) { stopSelf(); break }
+                val config = container.settingsStore.read()
+                if (config.backgroundMonitor && !MarketHours.forexWeekendClosed()) {
+                    if (config.apiKey.isBlank() || !config.notifyOnSignal) {
+                        container.pairScanner.refreshNow() // records honest needs_key / alert-off statuses
+                    } else {
+                        try {
+                            container.pairScanner.sweepOnce { candidate ->
+                                if (Notifier.canNotifyVerified(this@SignalMonitorService, config.alertSoundUri)) {
+                                    Notifier.notifyVerifiedOpportunity(this@SignalMonitorService, candidate,
+                                        config.alertSoundUri)
+                                }
+                            }
+                        } catch (_: Exception) { /* radar statuses carry per-pair errors */ }
+                    }
                 }
                 delay(60_000L)
             }
@@ -180,7 +210,7 @@ class SignalMonitorService : Service() {
                             latest.signal?.barTime == signal.barTime &&
                             PaperAlertRules.blocker(latest, recentConfig, recentNews,
                                 container.journalStore.trades.value, snapshot) == null) {
-                            val evidence = NewsConfluence.record(recentNews)
+                            val evidence = NewsConfluence.record(recentNews, latest.symbol)
                             val ict = IctEntryRules.approvedEvidence(latest)
                             if (evidence != null && ict != null && snapshot != null &&
                                 Notifier.canNotifyVerified(this@SignalMonitorService, recentConfig.alertSoundUri)) {

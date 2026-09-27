@@ -198,10 +198,14 @@ data class PaperTrade(
 
     val riskPerOz: Double get() = kotlin.math.abs(entry - stopLoss)
 
+    /** Risk in QUOTE currency per unit; convert to USD before comparing with the budget. */
+    val riskUsd: Double
+        get() = PaperOrderRules.quotePnlToUsd(symbol, riskPerOz * positionOz, entry)
+
     val rMultiple: Double?
         get() {
             val pnl = pnlUsd ?: return null
-            val risk = riskPerOz * positionOz
+            val risk = riskUsd
             return if (risk <= 0.0) null else pnl / risk
         }
 }
@@ -236,7 +240,7 @@ data class PaperOpportunity(
         fun from(signal: Signal, symbol: String, price: Double, mtf: MtfSnapshotRecord,
                  news: PaperNewsRecord, ict: IctPriceActionRecord,
                  now: Long = System.currentTimeMillis()): PaperOpportunity {
-            require(symbol == "XAU/USD" && signal.isActionable && signal.barTime > 0 &&
+            require(PaperOrderRules.paperable(symbol) && signal.isActionable && signal.barTime > 0 &&
                 signal.confluence.take(9).size == 9 &&
                 signal.confluence.take(9).all { it.ok && it.status == ConfluenceStatus.CONFIRMED } &&
                 signal.confluence[8].name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL &&

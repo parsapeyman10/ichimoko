@@ -107,6 +107,30 @@ class NineWayAutoPaperTest {
         }
     }
 
+    @Test fun ninthConditionIsEvaluatedPerPairForAllCatalogMajors() {
+        // Client mode returns one verdict per catalog pair; gold may be absent while EUR/USD passes.
+        val eurNews = news.copy(
+            ai = AiNewsVerdict(),
+            aiBySymbol = mapOf("EUR/USD" to AiNewsVerdict("AVAILABLE", "EUR/USD", "BUY", 88.0,
+                "test-model", "euro context", now, listOf("id1"))),
+            vetoedSymbols = setOf("USD/JPY"),
+        )
+        val combined = NewsConfluence.apply(raw, "EUR/USD", eurNews, now)!!
+        assertEquals(SignalAction.BUY, combined.action)
+        assertEquals(ConfluenceStatus.CONFIRMED, combined.confluence[8].status)
+        assertEquals("id1", NewsConfluence.record(eurNews, "EUR/USD")!!.evidence.single().id)
+        assertNull(NewsConfluence.record(eurNews)) // gold verdict absent -> no gold evidence
+        // A High-impact event of the pair's own currency vetoes that pair even with a valid verdict.
+        val jpyNews = eurNews.copy(aiBySymbol = mapOf("USD/JPY" to AiNewsVerdict("AVAILABLE", "USD/JPY",
+            "SELL", 85.0, "test-model", "jpy context", now, listOf("id1"))))
+        val jpyBlocked = NewsConfluence.apply(raw, "USD/JPY", jpyNews, now)!!
+        assertEquals(SignalAction.NO_TRADE, jpyBlocked.action)
+        assertEquals(ConfluenceStatus.CONFLICT, jpyBlocked.confluence[8].status)
+        // Server mode (per-pair map empty): a non-gold pair stays honestly UNKNOWN.
+        val serverOnly = NewsConfluence.apply(raw, "EUR/USD", news, now)!!
+        assertEquals(SignalAction.NO_TRADE, serverOnly.action)
+    }
+
     @Test fun eachNewsFailureBlocksEntryButKeepsTechnicalScoreInformational() {
         val cases = listOf(
             news.copy(ai = AiNewsVerdict()),

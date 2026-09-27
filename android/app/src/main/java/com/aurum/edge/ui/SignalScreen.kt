@@ -6,8 +6,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -28,6 +32,7 @@ import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
+import com.aurum.edge.data.PairScanState
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.notify.Notifier
 import com.aurum.edge.service.SignalMonitorService
@@ -72,6 +77,12 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             .padding(bottom = 12.dp),
     ) {
         SymbolPickerRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
+        PairRadarCard(
+            scan = viewModel.pairScan.collectAsStateWithLifecycle().value,
+            onScan = viewModel::scanPairs,
+            onSelectSymbol = { viewModel.selectChartSymbol(it) },
+            now = now,
+        )
         SectionCard("چرا هشدار نیامده؟", "وضعیت همین لحظه؛ بدون ساختن سیگنال یا سست‌کردن شرط‌های ورود",
             trailing = { Pill("${checks.count { it.ready }}/${checks.size} پیش‌نیاز",
                 if (checks.all { it.ready }) AurumColors.Green else AurumColors.Gold) }) {
@@ -263,5 +274,69 @@ private fun MtfCard(snapshot: MtfAnalyzer.Snapshot) {
                 modifier = Modifier.padding(top = 8.dp),
             )
         }
+    }
+}
+
+/** All-pairs radar: one glance over gold + the majors. A tap switches the live chart feed. */
+@Composable
+internal fun PairRadarCard(scan: PairScanState, onScan: () -> Unit, onSelectSymbol: (String) -> Unit, now: Long) {
+    // First visit per process: one honest sweep so the radar is never empty; afterwards the
+    // background service (or the button) keeps it fresh. Throttled inside the scanner.
+    LaunchedEffect(scan.lastSweepAt) { if (scan.lastSweepAt == null) onScan() }
+    SectionCard(
+        title = "رادار ۸ جفت‌ارز",
+        subtitle = "اسکن دوره‌ای همهٔ نمادها با همان ۹ شرط؛ کاندیدا فقط اعلان آموزشی است — ورود خودکار کاغذی همچنان فقط با فید زندهٔ نماد انتخابی",
+        trailing = {
+            Pill(
+                when {
+                    scan.sweeping -> "در حال اسکن…"
+                    scan.lastSweepAt != null -> "آخرین اسکن " + relativeTime(scan.lastSweepAt, now)
+                    else -> "اسکن نشده"
+                },
+                if (scan.sweeping) AurumColors.Cyan else AurumColors.TextMuted,
+            )
+        },
+    ) {
+        scan.statuses.forEach { status ->
+            val tone = when (status.state) {
+                "candidate" -> AurumColors.Green
+                "blocked" -> AurumColors.Gold
+                "error" -> AurumColors.Red
+                "needs_key" -> AurumColors.Gold
+                else -> AurumColors.TextMuted
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(AurumColors.SurfaceAlt, RoundedCornerShape(8.dp))
+                    .clickable { onSelectSymbol(status.symbol) }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(status.symbol, style = MaterialTheme.typography.labelLarge, color = AurumColors.Gold)
+                Text(
+                    status.price?.let { formatPrice(it) } ?: "—",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                )
+                Text(
+                    status.detail + (status.lastScanAt?.let { " · " + relativeTime(it, now) } ?: ""),
+                    style = MaterialTheme.typography.labelSmall, color = tone,
+                    modifier = Modifier.weight(1f),
+                )
+                if (status.technicalScore != null) {
+                    Pill("${status.technicalScore}/۸", tone)
+                }
+            }
+        }
+        scan.lastError?.let { Text(it, color = AurumColors.Red, style = MaterialTheme.typography.bodySmall) }
+        Button(onClick = onScan, enabled = !scan.sweeping, modifier = Modifier.padding(top = 6.dp)) {
+            Text(if (scan.sweeping) "در حال اسکن…" else "اسکن همگانی ۸ جفت‌ارز")
+        }
+        Text(
+            "برای بررسی هر نماد روی ردیفش بزنید؛ فید زنده و ورود خودکار کاغذی همان‌جا فعال می‌شود. اسکن دوره‌ای در پس‌زمینه هر ۵ دقیقه (با پایش روشن و کلید داده) انجام می‌شود و سهمیهٔ منابع را رعایت می‌کند.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 4.dp),
+        )
     }
 }

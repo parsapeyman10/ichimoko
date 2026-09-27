@@ -29,6 +29,27 @@ class PaperOrderRulesTest {
         assertEquals(0.071428, ticket.quantity, 1e-8)
     }
 
+    @Test fun usdCrossPairsSizeRiskInDollarsViaTheirOwnPrice() {
+        // USD/JPY at 150: a 2 JPY stop risks 2/150 USD per unit, so 10 USD budget needs 750 units.
+        val ticket = PaperOrderRules.preview(SignalAction.BUY, "USD/JPY", 150.0, 148.0, 153.0,
+            1000.0, 1.0)
+        assertEquals("USD", ticket.unit)
+        assertEquals(750.0, ticket.quantity, 1e-6)
+        assertEquals(10.0, ticket.actualRiskUsd, 1e-8)
+        assertTrue(ticket.actualRiskUsd <= ticket.riskBudgetUsd)
+        // Base of a USD/XXX pair IS one dollar: notional is the unit count, not units x price.
+        assertEquals(750.0, ticket.notionalUsd, 1e-6)
+        assertEquals(1.5, ticket.rewardRisk, 1e-9)
+        // Quote P/L converts to USD through the pair's own exit price.
+        assertEquals(10.0 / 153.0, PaperOrderRules.quotePnlToUsd("USD/JPY", 10.0, 153.0), 1e-9)
+        assertEquals(10.0, PaperOrderRules.quotePnlToUsd("EUR/USD", 10.0, 1.08), 1e-9)
+        assertTrue(PaperOrderRules.paperable("USD/CHF"))
+        assertTrue(PaperOrderRules.paperable("USD/CAD"))
+        assertTrue(PaperOrderRules.paperable("XAU/USD"))
+        assertTrue(!PaperOrderRules.paperable("EUR/JPY")) // not convertible via own price
+        assertTrue(!PaperOrderRules.paperable("USD/IRT"))
+    }
+
     @Test fun rejectsWrongSideExcessLeverageRewardAndInvalidQuotes() {
         fun invalid(block: () -> Unit) {
             try { block(); throw AssertionError("Must fail closed") }

@@ -216,7 +216,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             PaperEvidencePanel(recorded, other, settings.spreadPrice, settings.commissionPerOz)
             if (recorded.any { !it.isOpen && it.pnlUsd != null }) PerformancePanel(
                 PerformanceMetrics.fromPaper(recorded, settings.accountBalance),
-                "فقط کاغذی XAU/USD با ۹ شاهد ثبت‌شده؛ P/L خام بدون کارمزد/لغزش بروکر · فرض موجودی اولیه ${formatPrice(settings.accountBalance)}$")
+                "فقط معاملات کاغذی با ۹ شاهد ثبت‌شده؛ P/L خام بدون کارمزد/لغزش بروکر · فرض موجودی اولیه ${formatPrice(settings.accountBalance)}$")
             if (other.any { !it.isOpen && it.pnlUsd != null }) PerformancePanel(
                 PerformanceMetrics.fromPaper(other, settings.accountBalance),
                 "معاملات دستی/قدیمی/فاقد شواهد کامل · بدون ادعای عملکرد گیت ۹/۹")

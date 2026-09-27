@@ -247,7 +247,7 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
             }
         }
 
-        SectionCard("شرط نهم AI · جدا از تیترهای نمایشی", "فقط XAU/USD · نیازمند سرور HTTPS، مدل و شواهد معتبر",
+        SectionCard("شرط نهم AI · جدا از تیترهای نمایشی", "ارزیابی مستقل برای هر جفت‌ارز · نیازمند مدل و شواهد معتبر",
             trailing = { Pill(server.gate.name, serverTone) }) {
             Text(if (settings.newsBaseUrl.isBlank())
                 "برای دیدن تیترها سرور لازم نیست؛ اما گیت معامله و AI بدون سرور تنظیم نشده و UNKNOWN است."
@@ -256,15 +256,25 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 (if (server.cached) " · دادهٔ قبلی؛ گیت UNKNOWN" else ""),
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             server.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red) }
-            val ready = server.ai.status == "AVAILABLE" && server.gate == NewsGate.CLEAR && !server.cached && !server.loading
-            Text(if (ready) "جهت پیشنهادی مدل: ${server.ai.direction} · اطمینان ${server.ai.confidence.toInt()}٪"
-                else "AI: UNKNOWN · ${server.ai.reason}",
+            // The verdict shown is the SELECTED chart pair's own evaluation (per-pair client mode;
+            // server mode still evaluates XAU/USD only).
+            val selected = settings.symbol
+            val ai = server.aiBySymbol[selected]
+                ?: server.ai.takeIf { it.status == "AVAILABLE" && it.symbol == selected }
+            val ready = ai?.status == "AVAILABLE" && server.gate == NewsGate.CLEAR && !server.cached && !server.loading
+            Text(if (ready) "جهت پیشنهادی مدل برای $selected: ${ai!!.direction} · اطمینان ${ai.confidence.toInt()}٪"
+                else "AI برای $selected: UNKNOWN · ${ai?.reason ?: "برای این نماد ارزیابی‌ای ثبت نشده است"}",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (ready) AurumColors.Green else AurumColors.Gold,
                 modifier = Modifier.padding(top = 6.dp))
-            Text("مدل: ${server.ai.model ?: "فعال نیست"} · بررسی ${relativeTime(server.ai.checkedAt, now)} · تیترهای مستقیم گوشی هرگز شاهد این تحلیل نیستند.",
+            if (server.aiBySymbol.isNotEmpty()) Text(
+                "احکام دیگر جفت‌ها: " + server.aiBySymbol.entries.joinToString("، ") { (pair, v) ->
+                    "$pair=${if (v.status == "AVAILABLE") v.direction else "UNKNOWN"}" },
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 2.dp))
+            Text("مدل: ${ai?.model ?: server.ai.model ?: "فعال نیست"} · بررسی ${relativeTime(ai?.checkedAt ?: server.ai.checkedAt, now)} · تیترهای مستقیم گوشی هرگز شاهد این تحلیل نیستند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            server.ai.evidenceIds.mapNotNull { id -> server.articles.singleOrNull { it.id == id } }.forEach { source ->
+            (ai?.evidenceIds ?: server.ai.evidenceIds).mapNotNull { id -> server.articles.singleOrNull { it.id == id } }.forEach { source ->
                 Text("شاهدِ سرور: ${source.source} · ${source.headline}",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
                 source.link?.let { url ->

@@ -26,7 +26,6 @@ object NewsConfluence {
     fun alignment(symbol: String, action: SignalAction, news: PersianNewsState,
                   now: Long = System.currentTimeMillis()): Alignment {
         fun unknown(reason: String) = Alignment(ConfluenceStatus.UNKNOWN, reason)
-        if (symbol != "XAU/USD") return unknown("این مدل فقط برای XAU/USD ارزیابی می‌شود؛ نماد دیگر تأیید نشده")
         if (action == SignalAction.NO_TRADE) return unknown("ابتدا هشت شرط فنی باید جهت معتبر بدهند")
         if (news.loading || news.cached || news.error != null || news.sources.isEmpty() ||
             news.sources.none { it.feed == FOREX_CALENDAR_SOURCE_URL && it.state == "online" } ||
@@ -38,7 +37,16 @@ object NewsConfluence {
             return Alignment(if (news.gate == NewsGate.BLOCKED) ConfluenceStatus.CONFLICT else ConfluenceStatus.UNKNOWN,
                 "وتوی خبر پراثر یا وضعیت خبری نامشخص: ${news.reason}")
         }
-        val ai = news.ai
+        if (symbol in news.vetoedSymbols) {
+            return Alignment(ConfluenceStatus.CONFLICT,
+                "رویداد پراثر یکی از ارزهای $symbol در بازهٔ توقف ورود است")
+        }
+        // Client mode returns a verdict per catalog pair; the XAU-only server verdict is honored
+        // for gold, and other pairs stay honestly UNKNOWN under a server-only configuration.
+        val ai = news.aiBySymbol[symbol]
+            ?: news.ai.takeIf { it.status == "AVAILABLE" && it.symbol == symbol }
+            ?: return unknown(if (symbol == "XAU/USD") "مدل AI و شواهد معتبر در دسترس نیست"
+                else "مدل AI برای $symbol ارزیابی‌ای ندارد (حالت سرور فعلاً فقط XAU/USD را می‌سنجد)")
         if (ai.status != "AVAILABLE" || ai.symbol != symbol || ai.model.isNullOrBlank() ||
             ai.model == "deterministic-fallback" || ai.checkedAt?.let {
                 now - it in 0L..MAX_REVIEW_AGE_MS && it <= news.lastCheckedAt!!
@@ -79,8 +87,8 @@ object NewsConfluence {
         }
     }
 
-    fun record(news: PersianNewsState): PaperNewsRecord? {
-        val ai = news.ai
+    fun record(news: PersianNewsState, symbol: String = "XAU/USD"): PaperNewsRecord? {
+        val ai = news.aiBySymbol[symbol] ?: news.ai.takeIf { it.symbol == symbol } ?: return null
         val model = ai.model ?: return null
         val calendarAt = news.calendarCheckedAt ?: return null
         if (news.sources.none { it.feed == FOREX_CALENDAR_SOURCE_URL && it.state == "online" }) return null

@@ -75,7 +75,9 @@ class AppContainer(context: Context) {
             signal = if (delayed) null else NewsConfluence.apply(raw.signal, raw.symbol, headlines, now))
         IctEntryRules.withSafePlan(verified)
     }.stateIn(appScope, SharingStarted.Eagerly, market.state.value.copy(signal = null))
-    val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore, verifiedMarket)
+    val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore)
+    /** Periodic all-pairs REST sweep: candidates + radar status for every catalog pair. */
+    val pairScanner = PairScanner(client, settingsStore, news, journalStore, opportunityStore, appScope)
     val freeHistory = FreeHistoryDownloader()
     val metaTraderImporter = MetaTraderImporter(appContext)
 

@@ -50,15 +50,20 @@ object IctEntryRules {
         ))
     }
 
-    /** With missing, discontinuous or invalid bars the default is BLOCK, never BUY. */
-    fun assess(market: MarketState, now: Long = System.currentTimeMillis()): Decision {
+    /**
+     * With missing, discontinuous or invalid bars the default is BLOCK, never BUY.
+     * [maxBarAgeMs] keeps the live path at 90s; a REST catalog sweep may pass one interval
+     * plus grace because the provider's newest CLOSED bar can be up to one interval old.
+     */
+    fun assess(market: MarketState, now: Long = System.currentTimeMillis(),
+               maxBarAgeMs: Long = 90_000L): Decision {
         val signal = market.signal ?: return Decision("سیگنال موجود نیست")
         if (market.showingCachedData || market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING) ||
             market.feed.lastSuccessAt?.let { now - it in 0L..90_000L } != true)
             return Decision("گیت ICT: قیمت زنده/تازه در دسترس نیست")
         if (signal.action == SignalAction.NO_TRADE || signal.interval != market.interval ||
             signal.barTime != market.candles.lastOrNull { it.closed }?.time ||
-            now - (signal.barTime + market.interval.millis) !in 0L..90_000L)
+            now - (signal.barTime + market.interval.millis) !in 0L..maxBarAgeMs)
             return Decision("گیت ICT: سیگنالِ همین کندل بستهٔ تازه وجود ندارد")
         val snapshot = IctRangeAnalyzer.analyze(market.candles, market.interval)
         if (!snapshot.valid || snapshot.barTime != signal.barTime)
@@ -106,8 +111,9 @@ object IctEntryRules {
     }
 
     /** Capture approved evidence from THIS quote/bar, not a recomputation after a restart. */
-    fun approvedEvidence(market: MarketState, now: Long = System.currentTimeMillis()): IctPriceActionRecord? {
-        val decision = assess(market, now)
+    fun approvedEvidence(market: MarketState, now: Long = System.currentTimeMillis(),
+                         maxBarAgeMs: Long = 90_000L): IctPriceActionRecord? {
+        val decision = assess(market, now, maxBarAgeMs)
         if (!decision.allowed) return null
         val snap = decision.snapshot ?: return null
         val range = snap.range ?: return null

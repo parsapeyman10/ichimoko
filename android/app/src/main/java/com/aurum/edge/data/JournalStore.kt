@@ -189,7 +189,7 @@ class JournalStore(context: Context, private val file: File = File(context.files
             if (automatic) require(_trades.value.none {
                 it.symbol == symbol && it.signalBarTime == signal.barTime
             }) { "در همین کندل سیگنال، معاملهٔ کاغذی قبلاً ثبت شده است" }
-            val totalRisk = _trades.value.filter { it.isOpen }.sumOf { it.riskPerOz * it.positionOz }
+            val totalRisk = _trades.value.filter { it.isOpen }.sumOf { it.riskUsd }
             require(totalRisk + draft.actualRiskUsd <= balance * 0.05 + 1e-8) {
                 "مجموع ریسک پوزیشن‌های کاغذی از ۵٪ موجودی عبور می‌کند"
             }
@@ -237,7 +237,8 @@ class JournalStore(context: Context, private val file: File = File(context.files
                 closedAt = observedAt,
                 exitPrice = exit,
                 exitReason = if (hitStop) "حد ضرر (قیمت واقعی)" else "حد سود (قیمت واقعی)",
-                pnlUsd = kotlin.math.round(pnlPerOz * t.positionOz * 100.0) / 100.0,
+                pnlUsd = kotlin.math.round(
+                    PaperOrderRules.quotePnlToUsd(t.symbol, pnlPerOz * t.positionOz, exit) * 100.0) / 100.0,
             )
         }
         if (changed) persist(updated)
@@ -250,7 +251,8 @@ class JournalStore(context: Context, private val file: File = File(context.files
         val pnlPerOz = if (trade.action == SignalAction.BUY) price - trade.entry else trade.entry - price
         val closed = trade.copy(
             closedAt = System.currentTimeMillis(), exitPrice = price, exitReason = reason,
-            pnlUsd = kotlin.math.round(pnlPerOz * trade.positionOz * 100.0) / 100.0,
+            pnlUsd = kotlin.math.round(
+                PaperOrderRules.quotePnlToUsd(trade.symbol, pnlPerOz * trade.positionOz, price) * 100.0) / 100.0,
         )
         persist(_trades.value.map { if (it.id == tradeId) closed else it })
         closed

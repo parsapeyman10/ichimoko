@@ -31,17 +31,23 @@ object AlertDiagnostics {
         val aiFresh = news.lastCheckedAt?.let { now - it in 0L..180_000L } == true
         // Preliminary feed/model availability only; directional alignment is checked below.
         val calendarFresh = news.calendarCheckedAt?.let { now - it in 0L..1_200_000L } == true
-        val modelFresh = news.ai.checkedAt?.let { at ->
+        // The ninth condition is per pair: use the SELECTED pair's own model verdict.
+        val selectedVerdict = news.aiBySymbol[market.symbol] ?: news.ai.takeIf { it.symbol == market.symbol }
+        val modelFresh = selectedVerdict?.checkedAt?.let { at ->
             now - at in 0L..180_000L && news.lastCheckedAt?.let { reviewed -> at <= reviewed } == true
         } == true
         val sourcesOnline = news.sources.isNotEmpty() && news.sources.all { it.state == "online" } &&
             news.sources.any { it.feed == FOREX_CALENDAR_SOURCE_URL }
-        val newsReady = settings.newsBaseUrl.isNotBlank() && !news.cached && !news.loading &&
+        // Either the HTTPS server bridge OR the direct-from-phone client AI counts as configured.
+        val newsConfigured = settings.newsBaseUrl.isNotBlank() || settings.hasClientNewsAi
+        val newsReady = newsConfigured && !news.cached && !news.loading &&
             news.error == null && aiFresh && calendarFresh && sourcesOnline &&
-            news.gate == NewsGate.CLEAR && news.ai.status == "AVAILABLE" && modelFresh &&
-            news.ai.symbol == market.symbol && news.ai.confidence in 80.0..100.0 &&
-            !news.ai.model.isNullOrBlank() && news.ai.model != "deterministic-fallback" &&
-            news.ai.evidenceIds.isNotEmpty()
+            news.gate == NewsGate.CLEAR && modelFresh &&
+            selectedVerdict?.let {
+                it.status == "AVAILABLE" && it.confidence in 80.0..100.0 &&
+                    !it.model.isNullOrBlank() && it.model != "deterministic-fallback" &&
+                    it.evidenceIds.isNotEmpty()
+            } == true
         val signal = market.signal
         val entryBlocker = if (signal?.isActionable == true)
             PaperAlertRules.blocker(market, settings, news, trades, mtf, now)

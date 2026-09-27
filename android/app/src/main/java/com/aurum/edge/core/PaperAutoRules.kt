@@ -16,12 +16,25 @@ object PaperAutoRules {
         return opportunityBlocker(market, settings, news, now)
     }
 
-    /** A 9/9 educational alert can be enabled while automatic paper entry is OFF. */
+    /**
+     * A 9/9 educational alert can be enabled while automatic paper entry is OFF.
+     *
+     * [allowedSymbols] widens the check from the single selected chart symbol to a catalog sweep
+     * (the multi-pair scanner); [barAgeGraceMs] extends the signal-bar freshness window by one
+     * interval for REST-swept pairs, where the provider's latest closed bar may be up to one
+     * interval old at fetch time. The live WebSocket path keeps the strict 90s defaults.
+     */
     fun opportunityBlocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
-                           now: Long = System.currentTimeMillis()): String? {
+                           now: Long = System.currentTimeMillis(),
+                           allowedSymbols: List<String>? = null,
+                           barAgeGraceMs: Long = 90_000L): String? {
         if (MarketHours.forexWeekendClosed(now)) return "بازار فارکس طبق برنامهٔ معمول پایان هفته بسته است؛ ورود/اعلان معاملاتی نداریم"
         if (!settings.backgroundMonitor) return "برای هشدار/ورود، پایش پس‌زمینه باید روشن باشد"
-        if (market.symbol != settings.symbol || market.interval != settings.interval) return "نماد/بازه عوض شده است"
+        if (allowedSymbols != null) {
+            if (market.symbol !in allowedSymbols || market.interval != settings.interval) return "نماد/بازه اسکن معتبر نیست"
+        } else if (market.symbol != settings.symbol || market.interval != settings.interval) {
+            return "نماد/بازه عوض شده است"
+        }
         if (market.showingCachedData || market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))
             return "فید واقعی زنده نیست؛ کش برای ورود ممنوع"
         if (market.feed.lastSuccessAt?.let { now - it in 0L..90_000L } != true)
@@ -41,13 +54,13 @@ object PaperAutoRules {
             return "شواهد خبرِ فعلی با سیگنال یکی نیست؛ منتظر محاسبهٔ دوباره بمانید"
         val lastClosed = market.candles.lastOrNull { it.closed }
         if (lastClosed?.time != signal.barTime || signal.barTime <= 0L ||
-            now - (signal.barTime + market.interval.millis) !in 0L..90_000L)
+            now - (signal.barTime + market.interval.millis) !in 0L..barAgeGraceMs)
             return "سیگنال روی تازه‌ترین کندل بسته نیست یا اعتبار آن گذشته است"
         val price = market.lastPrice
         if (price == null || !price.isFinite() || price <= 0.0 || !signal.entry.isFinite() ||
             signal.entry <= 0.0 || abs(price / signal.entry - 1.0) > 0.005)
             return "قیمت تازه از ورود سیگنال فاصله گرفته است"
         // An additional gate, never a substitute for the technical and AI-news 9/9.
-        return IctEntryRules.assess(market, now).reason
+        return IctEntryRules.assess(market, now, maxBarAgeMs = barAgeGraceMs).reason
     }
 }
