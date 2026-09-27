@@ -108,6 +108,22 @@ class AppContainer(context: Context) {
         return client.fetchCandles(s.apiKey, s.symbol, interval, outputSize)
     }
 
+    /** Verified candles already stored on this device for this pair/timeframe; may be empty. */
+    suspend fun cachedCandles(symbol: String, interval: Interval): List<Candle> =
+        candleCache.load(symbol, interval)
+
+    /**
+     * Real provider bars for the window of an ALREADY RECORDED paper trade — display only.
+     * Same client, parser and verification as the live chart; it never becomes a quote, a signal
+     * or an entry, and a cache-write failure must not hide bars that were just verified.
+     */
+    suspend fun fetchTradeCandles(symbol: String, interval: Interval, outputSize: Int = 3000): List<Candle> {
+        val s = settingsStore.read()
+        if (!s.hasKey) throw DataFeedException("کلید Twelve Data وارد نشده است")
+        val fresh = client.fetchCandles(s.apiKey, symbol, interval, outputSize.coerceIn(10, 3000))
+        return runCatching { candleCache.merge(symbol, interval, fresh) }.getOrDefault(fresh)
+    }
+
     /** MetaTrader file/link is untrusted research input, not part of the market feed/cache. */
     suspend fun runImportedBacktest(
         csv: String, symbol: String, interval: Interval, timezone: String,
