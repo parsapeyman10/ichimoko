@@ -66,3 +66,24 @@ data class SourceSnapshot(
     val error: String? = null,
 )
 
+/**
+ * Strict numeric parse for provider payloads: Persian/Arabic digits and grouping separators
+ * are normalized, anything else unexpected fails to null (never a guessed number).
+ * Used by [JsonPath] — keep even though no source in this build is TSE/HTML.
+ */
+object Num {
+    private val separators = Regex("[,٬،\s\u00A0\u200E\u200F]")
+    private val allowed = Regex("[^0-9.+\-eE]")
+
+    fun parse(value: String?): Double? {
+        if (value.isNullOrBlank()) return null
+        val latin = value.map { ch ->
+            when (ch) {
+                in '۰'..'۹' -> ('0'.code + ch.code - '۰'.code).toChar()
+                in '٠'..'٩' -> ('0'.code + ch.code - '٠'.code).toChar()
+                else -> ch
+            }
+        }.joinToString("")
+        return allowed.replace(separators.replace(latin, ""), "").toDoubleOrNull()?.takeIf { it.isFinite() }
+    }
+}

@@ -76,7 +76,7 @@ internal object AiProvider {
         }
         val root = runCatching { Json.parseToJsonElement(response) as? JsonObject }
             .getOrNull() ?: throw IllegalStateException("پاسخ سرویس مدل ساختار JSON ندارد")
-        val content = if (anthropic) extractAnthropicText(root) else extractOpenAiText(root)
+        val content = (if (anthropic) extractAnthropicText(root) else extractOpenAiText(root))
             ?: throw IllegalStateException("متن پاسخ مدل نامعتبر است")
         return parseJsonObjectLoose(content) ?: throw IllegalStateException("خروجی مدل JSON معتبر نیست")
     }

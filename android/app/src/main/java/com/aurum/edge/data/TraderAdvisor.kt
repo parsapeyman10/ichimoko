@@ -109,7 +109,7 @@ class TraderAdvisor(
         return current.opinion
     }
 
-    private fun analyze(config: com.aurum.edge.core.AppSettings): TraderOpinion {
+    private suspend fun analyze(config: com.aurum.edge.core.AppSettings): TraderOpinion {
         val marketState = market.state.value
         val radar = scanner.state.value
         val headlines = news.state.value
