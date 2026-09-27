@@ -179,7 +179,8 @@ class TraderAdvisor(
                 if (items.size != array.size) return null
                 return items
             }
-            val bias = str("bias")?.uppercase(Locale.ROOT)
+            // Explicit null check: `!in` alone does not smart-cast for the constructor below.
+            val bias = str("bias")?.uppercase(Locale.ROOT) ?: return null
             if (bias !in setOf("BUY", "SELL", "NEUTRAL")) return null
             val confidence = str("confidence")?.toDoubleOrNull() ?: return null
             if (!confidence.isFinite() || confidence < 0.0 || confidence > 100.0) return null
