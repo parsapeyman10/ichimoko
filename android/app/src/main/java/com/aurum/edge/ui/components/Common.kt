@@ -21,10 +21,43 @@ import com.aurum.edge.core.ConfluenceItem
 import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
+import com.aurum.edge.data.NewsClassification
+import com.aurum.edge.data.NewsDirection
+import com.aurum.edge.data.NewsImportance
 import com.aurum.edge.ui.theme.AurumColors
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/** Rule-based (NOT AI) importance/direction badges for a real, already-fetched headline.
+ * Purely orientational for a human reader — never a trading signal or the server's AI news gate. */
+@Composable
+fun NewsClassificationRow(classification: NewsClassification, modifier: Modifier = Modifier) {
+    val importanceColor = when (classification.importance) {
+        NewsImportance.HIGH -> AurumColors.Red
+        NewsImportance.MEDIUM -> AurumColors.Gold
+        NewsImportance.LOW -> AurumColors.TextMuted
+    }
+    val importanceLabel = when (classification.importance) {
+        NewsImportance.HIGH -> "اهمیت بالا"
+        NewsImportance.MEDIUM -> "اهمیت متوسط"
+        NewsImportance.LOW -> "اهمیت کم"
+    }
+    val directionColor = when (classification.direction) {
+        NewsDirection.BULLISH -> AurumColors.Green
+        NewsDirection.BEARISH -> AurumColors.Red
+        NewsDirection.NEUTRAL -> AurumColors.TextMuted
+    }
+    val directionLabel = when (classification.direction) {
+        NewsDirection.BULLISH -> "جهت صعودی (تخمینی)"
+        NewsDirection.BEARISH -> "جهت نزولی (تخمینی)"
+        NewsDirection.NEUTRAL -> "جهت خنثی/نامشخص"
+    }
+    Row(modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Pill(importanceLabel, importanceColor)
+        Pill(directionLabel, directionColor)
+    }
+}
 
 fun formatPrice(value: Double?): String =
     if (value == null) "—" else String.format(Locale.US, "%,.2f", value)

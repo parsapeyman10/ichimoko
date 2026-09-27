@@ -38,6 +38,7 @@ import com.aurum.edge.data.ResearchState
 import com.aurum.edge.data.ResearchSpace
 import com.aurum.edge.data.PublicFeedState
 import com.aurum.edge.data.PublicNewsCategory
+import com.aurum.edge.ui.components.NewsClassificationRow
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.formatDateTime
@@ -170,6 +171,8 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 if (onlineFeeds > 0 && !web.loading) AurumColors.Cyan else AurumColors.Gold) }) {
             Text("تیتر/چکیدهٔ ناشر · ترجمهٔ فارسی روی گوشی · فقط پژوهش، نه گیت AI",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            Text("برچسب «اهمیت/جهت» زیر هر خبر تخمین قاعده‌ایِ کلیدواژه‌ای است، نه گیت AI رسمی طلا (شرط نهم) که جدا و سخت‌گیرانه‌تر باقی می‌ماند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             Text("بررسی ${relativeTime(web.lastAttemptAt, now)} · هر ناشر مستقل · حداقل فاصلهٔ درخواست: ۶۰ ثانیه",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 5.dp))
@@ -223,6 +226,7 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 "${item.feed.title} · ${if (item.feed.language == "en") "EN · زبان اصلی" else "FA"} · انتشار ${formatDateTime(item.publishedAt)}" +
                     (if (item.publishedAt > now) " · ساعت ناشر جلوتر است" else " · ${relativeTime(item.publishedAt, now)}"),
                 trailing = { Pill(receiptLabel, if (fromRecentResponse) AurumColors.Cyan else AurumColors.Gold) }) {
+                NewsClassificationRow(com.aurum.edge.data.NewsClassifier.classify(item.title, item.excerpt))
                 if (item.excerpt.isNotBlank()) Text(item.excerpt,
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
                 val context = NewsResearch.headline(item, web, ResearchSpace.FOREX, now)

@@ -20,9 +20,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.data.NewsClassifier
 import com.aurum.edge.data.NewsResearch
 import com.aurum.edge.data.ResearchSpace
 import com.aurum.edge.data.ResearchState
+import com.aurum.edge.ui.components.NewsClassificationRow
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.relativeTime
@@ -43,6 +45,8 @@ fun CryptoNewsScreen(viewModel: AurumViewModel) {
         SectionCard("خبر رمزارز", "RSS مستقیم CoinDesk · نه Forex Factory و نه خبر بورس ایران") {
             Text("تیتر و چکیدهٔ ناشر با تاریخ؛ ترجمهٔ فارسی با لمس شما در همین صفحه و روی دستگاه است. تیتر مجوز معامله نیست.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            Text("برچسب «اهمیت/جهت» زیر هر خبر یک تخمین قاعده‌ایِ کلیدواژه‌ای روی همان گوشی است، نه تحلیل هوش مصنوعی.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             Button(onClick = viewModel::refreshCryptoWebNews, enabled = !state.loading,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("تازه‌سازی") }
             state.feeds.forEach { health ->
@@ -64,6 +68,7 @@ fun CryptoNewsScreen(viewModel: AurumViewModel) {
                 Text(if (live) "خوراک دریافت شد · دریافت در گوشی ${formatDateTime(item.receivedAt)}"
                      else "کش قبلی / تازگی دوباره تأیید نشد · دریافت ${formatDateTime(item.receivedAt)}",
                     style = MaterialTheme.typography.labelSmall, color = if (live) AurumColors.Cyan else AurumColors.Gold)
+                NewsClassificationRow(NewsClassifier.classify(item.title, item.excerpt))
                 if (item.excerpt.isNotBlank()) Text(item.excerpt,
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
                 val note = NewsResearch.headline(item, state, ResearchSpace.CRYPTO, now)

@@ -20,10 +20,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.data.NewsClassifier
 import com.aurum.edge.data.NewsResearch
 import com.aurum.edge.data.PublicWebNewsState
 import com.aurum.edge.data.ResearchSpace
 import com.aurum.edge.data.ResearchState
+import com.aurum.edge.ui.components.NewsClassificationRow
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.relativeTime
@@ -77,10 +79,13 @@ private fun ResearchNewsScreen(state: PublicWebNewsState, space: ResearchSpace, 
         if (visible.isEmpty()) SectionCard("خبر قابل نمایش نیست", "خوراک ممکن است قطع یا بی‌خبر باشد") {
             Text("تیتر ساختگی یا تحلیل جهت‌دار جایگزین دادهٔ ناشر نمی‌شود.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
-        }
+        } else Text("برچسب «اهمیت/جهت» زیر هر خبر یک تخمین قاعده‌ایِ کلیدواژه‌ای است، نه تحلیل هوش مصنوعی و نه سیگنال معاملاتی.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted, modifier = Modifier.padding(top = 4.dp))
         visible.forEach { item ->
             val note = NewsResearch.headline(item, state, space, now)
+            val classification = NewsClassifier.classify(item.title, item.excerpt)
             SectionCard(item.title, "${item.feed.title} · انتشار ${formatDateTime(item.publishedAt)}") {
+                NewsClassificationRow(classification)
                 Text("دریافت در گوشی ${formatDateTime(item.receivedAt)} · ${note.title}",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (note.state == ResearchState.CONTEXT) AurumColors.Cyan else AurumColors.Gold)
