@@ -72,8 +72,8 @@ data class SourceSnapshot(
  * Used by [JsonPath] — keep even though no source in this build is TSE/HTML.
  */
 object Num {
-    private val separators = Regex("[,٬،\s\u00A0\u200E\u200F]")
-    private val allowed = Regex("[^0-9.+\-eE]")
+    private val separators = Regex("[,٬،\\s\\u00A0\\u200E\\u200F]")
+    private val allowed = Regex("[^0-9.+\\-eE]")
 
     fun parse(value: String?): Double? {
         if (value.isNullOrBlank()) return null
