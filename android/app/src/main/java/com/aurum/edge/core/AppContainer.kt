@@ -19,8 +19,10 @@ import com.aurum.edge.data.PublicNewsCategory
 import com.aurum.edge.data.PublicNewsFeeds
 import com.aurum.edge.data.PaperAutoTrader
 import com.aurum.edge.data.PaperOpportunityStore
+import com.aurum.edge.data.PairScanner
 import com.aurum.edge.data.SettingsStore
 import com.aurum.edge.data.TwelveDataClient
+import com.aurum.edge.data.TraderAdvisor
 import com.aurum.edge.data.QuoteHistoryStore
 import com.aurum.edge.data.SourceFetcher
 import com.aurum.edge.data.WatchRepository
@@ -78,6 +80,8 @@ class AppContainer(context: Context) {
     val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore)
     /** Periodic all-pairs REST sweep: candidates + radar status for every catalog pair. */
     val pairScanner = PairScanner(client, settingsStore, news, journalStore, opportunityStore, appScope)
+    /** The user's own AI (Claude or OpenAI-compatible) as an educational trading companion. */
+    val traderAdvisor = TraderAdvisor(settingsStore, market, pairScanner, news, appScope)
     val freeHistory = FreeHistoryDownloader()
     val metaTraderImporter = MetaTraderImporter(appContext)
 

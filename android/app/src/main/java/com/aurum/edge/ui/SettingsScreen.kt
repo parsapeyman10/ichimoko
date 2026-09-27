@@ -162,7 +162,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
 
         WatchSettingsSection(viewModel)
 
-        SectionCard("گیت خبر و AI فارکس", "تقویم Forex Factory و خبرهای واقعی وب بی‌نیاز از سرور؛ شرط نهم معامله به سرور HTTPS نیاز دارد") {
+        SectionCard("گیت خبر و AI فارکس", "تقویم Forex Factory و خبرهای واقعی وب بی‌نیاز از سرور؛ شرط نهم با سرور HTTPS یا کلید مستقیم زیر تأمین می‌شود") {
             OutlinedTextField(
                 value = newsUrl, onValueChange = { newsUrl = it }, singleLine = true,
                 label = { Text("نشانی HTTPS سرور خبر فارکس (اختیاری)") },
@@ -178,17 +178,17 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             }
             Text("خبرهای مستقیم فقط برای مطالعه‌اند؛ ورود سیگنالی/خودکار بدون مدل و شاهد معتبر متوقف است. وتوی دستی جداست؛ سفارش واقعی غیرفعال.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            Text("جایگزین بدون سرور: اگر نشانی بالا خالی باشد و کلید زیر را پر کنید، خودِ گوشی مستقیماً با RSS همین‌جا + کلید شما تحلیل می‌کند.",
+            Text("جایگزین بدون سرور: اگر نشانی بالا خالی باشد و کلید زیر را پر کنید، خودِ گوشی مستقیماً با RSS همین‌جا + کلید شما تحلیل می‌کند. همین کلید، «همراه تریدر AI» صفحهٔ خانه را هم روشن می‌کند (نظر خودکار هر ۱۰ دقیقه + اعلان تغییر جهت).",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold, modifier = Modifier.padding(top = 6.dp))
             OutlinedTextField(value = newsAiKey, onValueChange = { newsAiKey = it }, singleLine = true,
-                label = { Text("کلید AI سازگار با OpenAI (اختیاری، فقط روی همین گوشی)") },
+                label = { Text("کلید هوش مصنوعی تریدر — Claude یا سازگار با OpenAI (فقط روی همین گوشی)") },
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
             OutlinedTextField(value = newsAiBaseUrl, onValueChange = { newsAiBaseUrl = it }, singleLine = true,
-                label = { Text("نشانی پایهٔ HTTPS سازگار با OpenAI (مثلاً https://api.openai.com/v1)") },
+                label = { Text("نشانی پایهٔ HTTPS — Claude: https://api.anthropic.com · سازگار با OpenAI: https://api.openai.com/v1") },
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
             OutlinedTextField(value = newsAiModel, onValueChange = { newsAiModel = it }, singleLine = true,
-                label = { Text("نام مدل (مثلاً gpt-4o-mini یا claude-sonnet-4.6)") },
+                label = { Text("نام مدل (مثلاً claude-sonnet-4-6 یا gpt-4o-mini)") },
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { viewModel.saveNewsAiConfig(newsAiKey, newsAiBaseUrl, newsAiModel) },

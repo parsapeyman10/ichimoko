@@ -130,6 +130,18 @@ class SignalMonitorService : Service() {
                             it.autoPaperTrading || it.pauseOnNews || it.notifyOnSignal } &&
                         container.settingsStore.read().let {
                             it.newsBaseUrl.isNotBlank() || it.hasClientNewsAi }) container.news.refreshNow()
+                    // The AI companion refreshes on its own 10-minute throttle; a bias flip is
+                    // surfaced once through the informational research channel — never a trade.
+                    container.traderAdvisor.refreshNow()
+                    container.traderAdvisor.consumeBiasFlip()?.let { flip ->
+                        if (notificationsPermitted()) {
+                            val from = container.traderAdvisor.state.value.previousBias ?: "—"
+                            Notifier.notifyResearch(this@SignalMonitorService,
+                                "trader-ai|" + flip.symbol + "|" + flip.generatedAt,
+                                "همراه تریدر AI · تغییر جهت ${flip.symbol}",
+                                "جهت از $from به ${flip.bias} تغییر کرد — ${flip.summary}")
+                        }
+                    }
                 }
                 delay(60_000L)
             }

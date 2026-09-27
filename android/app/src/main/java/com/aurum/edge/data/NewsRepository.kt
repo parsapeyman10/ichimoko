@@ -17,10 +17,8 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URI
 import java.time.OffsetDateTime
 import java.util.concurrent.TimeUnit
@@ -272,31 +270,9 @@ class NewsRepository(
                 })
             }
         }
-        val requestBody = buildJsonObject {
-            put("model", model)
-            put("messages", buildJsonArray {
-                add(buildJsonObject { put("role", "system"); put("content", instructions) })
-                add(buildJsonObject { put("role", "user"); put("content", snippets.toString()) })
-            })
-            put("temperature", 0)
-            put("response_format", buildJsonObject { put("type", "json_object") })
-        }
-        val url = baseUrl.trimEnd('/') + "/chat/completions"
-        val response = withContext(Dispatchers.IO) {
-            val request = Request.Builder().url(url)
-                .header("Authorization", "Bearer $apiKey").header("Content-Type", "application/json")
-                .post(requestBody.toString().toRequestBody("application/json".toMediaType()))
-                .build()
-            client.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) throw IllegalStateException("سرویس مدل پاسخ معتبر نداد (HTTP ${resp.code})")
-                val body = resp.peekBody(16_000L).string()
-                json.parseToJsonElement(body) as? JsonObject ?: error("پاسخ مدل ساختار JSON ندارد")
-            }
-        }
-        val choices = response["choices"] as? JsonArray ?: error("پاسخ مدل بدون choices است")
-        val messageContent = ((choices.firstOrNull() as? JsonObject)?.get("message") as? JsonObject)
-            ?.get("content")?.let { (it as? JsonPrimitive)?.contentOrNull } ?: error("متن پاسخ مدل نامعتبر است")
-        val output = json.parseToJsonElement(messageContent) as? JsonObject ?: error("خروجی مدل JSON معتبر نیست")
+        // One direct call with the user's OWN key — Anthropic (Claude) or OpenAI-compatible.
+        val output = AiProvider.completeJson(client, baseUrl, apiKey, model,
+            instructions, snippets.toString())
         val raw = (output["verdicts"] as? JsonArray) ?: error("خروجی مدل فاقد فهرست verdicts است")
         val validCandidateIds = candidates.map { it.id }.toSet()
         val parsed = mutableMapOf<String, AiNewsVerdict>()

@@ -84,6 +84,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val forexCalendar = container.forexCalendar.state
     /** All-pairs radar: periodic REST sweep status of every catalog pair. */
     val pairScan = container.pairScanner.state
+    /** The AI trading companion's latest strictly-validated opinion (analysis, never a signal). */
+    val traderOpinion = container.traderAdvisor.state
     val market = container.verifiedMarket
     val trades: StateFlow<List<PaperTrade>> = container.journalStore.trades
     val opportunities: StateFlow<List<PaperOpportunity>> = container.opportunityStore.items
@@ -186,6 +188,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun refreshNow() = container.market.refreshNow()
 
     fun refreshWatch() = container.watch.refreshNow()
+
+    /** Ask the companion AI for a fresh opinion; throttled inside the advisor (10 minutes). */
+    fun refreshTraderOpinion(force: Boolean = false) = container.traderAdvisor.refreshNow(force)
 
     /** Manual all-pairs sweep. Candidates are recorded (journal/radar) without playing a sound:
      * the user is looking at the screen; background alerts come from the monitor service. */
@@ -718,8 +723,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 return@launch
             }
             container.news.resetAndRefresh()
+            // The companion card reacts immediately to a newly saved/cleared key.
+            container.traderAdvisor.refreshNow(force = apiKey.isNotBlank())
             _toast.value = if (apiKey.isBlank()) "کلید مستقیم حذف شد"
-                else "کلید مستقیم ذخیره شد؛ اگر نشانی سرور بالا خالی باشد، گیت خبر مستقیماً از گوشی بررسی می‌شود"
+                else "کلید مستقیم ذخیره شد؛ همراه تریدر AI هم فعال شد — نظر اول چند لحظهٔ دیگر می‌آید"
         }
     }
 
@@ -727,6 +734,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { container.settingsStore.clearNewsAiConfig() }
             container.news.resetAndRefresh()
+            container.traderAdvisor.refreshNow() // flips the companion card to "not configured"
             _toast.value = "کلید مستقیم حذف شد"
         }
     }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -29,6 +30,7 @@ import com.aurum.edge.core.AlertCheckKind
 import com.aurum.edge.core.AlertDiagnostics
 import com.aurum.edge.core.HomeReadout
 import com.aurum.edge.data.MarketState
+import com.aurum.edge.data.TraderOpinionState
 import com.aurum.edge.notify.Notifier
 import com.aurum.edge.service.SignalMonitorService
 import com.aurum.edge.ui.components.Pill
@@ -36,6 +38,7 @@ import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
+import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
@@ -52,6 +55,15 @@ fun HomeScreen(
     onJournal: () -> Unit,
     onSettings: () -> Unit,
 ) {
+    // "Automatically beside you": refresh the AI companion's opinion every 10 minutes while
+    // Home is visible; throttled inside the advisor, and the monitor service covers background.
+    LaunchedEffect(Unit) {
+        while (true) {
+            viewModel.refreshTraderOpinion()
+            delay(10 * 60_000L)
+        }
+    }
+
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val news by viewModel.news.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
@@ -111,6 +123,11 @@ fun HomeScreen(
             }
         }
 
+        TraderCompanionCard(
+            state = viewModel.traderOpinion.collectAsStateWithLifecycle().value,
+            onRefresh = { viewModel.refreshTraderOpinion(force = true) },
+        )
+
         SectionCard("هشدار و خبر", "وضعیت تب خبرِ عمومی با گیت AI ورود، یکی نیست",
             trailing = { Pill(if (newsCheck.ready) "بررسی‌شده" else "تأیید نشده",
                 if (newsCheck.ready) AurumColors.Green else AurumColors.Gold) }) {
@@ -147,3 +164,59 @@ fun HomeScreen(
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
     }
 }
+
+/** The AI trading companion: automatic, strictly-validated, educational opinions only. */
+@Composable
+internal fun TraderCompanionCard(state: TraderOpinionState, onRefresh: () -> Unit) {
+    SectionCard(
+        title = "همراه تریدر AI",
+        subtitle = "نظر خودکار مدل خودتان روی دادهٔ واقعی همین اپ — تحلیل آموزشی، نه سیگنال/تأیید ۹/۹ و نه توصیهٔ معامله",
+        trailing = {
+            val opinion = state.opinion
+            Pill(when {
+                state.loading -> "در حال تحلیل…"
+                opinion == null -> "بدون نظر"
+                opinion.bias == "BUY" -> "خرید ${opinion.confidence}٪"
+                opinion.bias == "SELL" -> "فروش ${opinion.confidence}٪"
+                else -> "بی‌طرف"
+            }, when {
+                state.loading -> AurumColors.Cyan
+                opinion?.bias == "BUY" -> AurumColors.Green
+                opinion?.bias == "SELL" -> AurumColors.Red
+                else -> AurumColors.Gold
+            })
+        },
+    ) {
+        val opinion = state.opinion
+        when {
+            !state.configured -> Text(
+                "برای فعال‌سازی، کلید مدل خود را در تنظیمات وارد کنید: Claude (نشانی https://api.anthropic.com و مدلی مثل claude-sonnet-4-6) یا هر سرویس سازگار با OpenAI. کلید فقط روی همین گوشی می‌ماند.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+            state.loading && opinion == null -> CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.padding(vertical = 6.dp))
+            opinion != null -> {
+                Text(opinion.summary, style = MaterialTheme.typography.bodySmall,
+                    color = AurumColors.TextPrimary)
+                if (opinion.keyLevels.isNotEmpty()) Text("سطوح کلیدی: " + opinion.keyLevels.joinToString("، "),
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan,
+                    modifier = Modifier.padding(top = 4.dp))
+                if (opinion.risks.isNotEmpty()) Text("ریسک‌ها: " + opinion.risks.joinToString("، "),
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                    modifier = Modifier.padding(top = 2.dp))
+                Text("نقض‌کنندهٔ این نظر: ${opinion.invalidation}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+                    modifier = Modifier.padding(top = 2.dp))
+                Text("مدل: ${opinion.model} · ${opinion.symbol} · ${relativeTime(opinion.generatedAt, System.currentTimeMillis())}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                    modifier = Modifier.padding(top = 4.dp))
+            }
+        }
+        state.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red,
+            modifier = Modifier.padding(top = 4.dp)) }
+        OutlinedButton(onClick = onRefresh, enabled = state.configured && !state.loading,
+            modifier = Modifier.padding(top = 6.dp)) { Text("تحلیل تازه بگیر") }
+        Text("این نظر با تغییر جهت (خرید↔فروش) یک اعلان اطلاع‌رسانی می‌فرستد؛ هرگز سفارش یا ورود کاغذی ایجاد نمی‌کند و جای شرط نهم خبر را نمی‌گیرد.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
