@@ -28,7 +28,7 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /** Publisher RSS/Atom headlines on the phone. Display ONLY: never a NewsGate, AI verdict or trade input. */
-enum class PublicNewsCategory { IRAN, MARKETS, CRYPTO, ECONOMY }
+enum class PublicNewsCategory { MARKETS, ECONOMY }
 
 data class PublicFeed(
     val id: String,
@@ -43,11 +43,7 @@ data class PublicFeed(
 object PublicNewsFeeds {
     // Fixed, publicly advertised publisher feeds. Never accept arbitrary RSS URLs or credentials.
     val all = listOf(
-        PublicFeed("irib", "خبرگزاری صدا و سیما · اقتصاد", "https://www.irib-news.ir/fa/rss/6", "fa", PublicNewsCategory.IRAN, 48),
-        PublicFeed("yjc", "باشگاه خبرنگاران جوان · اقتصاد", "https://www.yjc.ir/fa/rss/6", "fa", PublicNewsCategory.IRAN, 48),
-        PublicFeed("eghtesaad24", "اقتصاد۲۴ · ارز", "https://eghtesaad24.ir/fa/rss/12", "fa", PublicNewsCategory.IRAN, 72),
         PublicFeed("fxstreet", "FXStreet · فارکس و طلا", "https://www.fxstreet.com/rss/news", "en", PublicNewsCategory.MARKETS, 48),
-        PublicFeed("coindesk", "CoinDesk · رمزارز", "https://www.coindesk.com/arc/outboundfeeds/rss", "en", PublicNewsCategory.CRYPTO, 48),
         PublicFeed("bls_cpi", "BLS · تورم آمریکا", "https://www.bls.gov/feed/cpi.rss", "en", PublicNewsCategory.ECONOMY, 45 * 24, 2),
         PublicFeed("bls_jobs", "BLS · اشتغال آمریکا", "https://www.bls.gov/feed/empsit.rss", "en", PublicNewsCategory.ECONOMY, 45 * 24, 2),
     )

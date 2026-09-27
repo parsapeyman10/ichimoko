@@ -33,7 +33,7 @@ class NineWayAutoPaperTest {
     private val barTime = now - Interval.M5.millis
     private val eight = (1..8).map { ConfluenceItem("فنی $it", true, "دادهٔ آزمون") }
     private val settings = AppSettings(symbol = "XAU/USD", interval = Interval.M5,
-        backgroundMonitor = true, autoPaperTrading = true, workspaceId = "forex")
+        backgroundMonitor = true, autoPaperTrading = true)
     private val headline = PersianHeadline("id1", "Gold reacts to dollar weakness", "headline fixture",
         "Publisher", "https://publisher.example/news", now - 60_000L,
         "MEDIUM", "BUY", "rule-label", "en")
@@ -168,8 +168,6 @@ class NineWayAutoPaperTest {
             news.copy(ai = news.ai.copy(model = "another-verified-model")), now))
         assertNotNull(PaperAutoRules.blocker(ready, settings.copy(autoPaperTrading = false), news, now))
         assertNotNull(PaperAutoRules.blocker(ready, settings.copy(backgroundMonitor = false), news, now))
-        assertNotNull(PaperAutoRules.blocker(ready, settings.copy(workspaceId = "nobitex"), news, now))
-        assertNotNull(PaperAutoRules.opportunityBlocker(ready, settings.copy(workspaceId = "iran_stocks"), news, now))
         assertNotNull(PaperAutoRules.blocker(ready.copy(symbol = "AAPL"), settings, news, now))
         assertNotNull(PaperAutoRules.blocker(ready, settings, news, now + 90_001))
         // A late WebSocket tick near Friday's close cannot authorize a weekend entry/alert.

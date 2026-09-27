@@ -28,50 +28,30 @@ class SettingsStoreTest {
         assertEquals("synthetic-read-only-key", SettingsStore(context).read().apiKey)
         assertEquals("XAU/USD", SettingsStore(context).read().symbol)
         // Changing just the symbol with an empty field must retain the private key.
-        assertTrue(store.saveMarketCredentials("", " XAG/USD "))
+        assertTrue(store.saveMarketCredentials("", " EUR/USD "))
         store.update { it.copy(backgroundMonitor = true, notifyOnSignal = true) }
         val reopened = SettingsStore(context).read()
         assertEquals("synthetic-read-only-key", reopened.apiKey)
-        assertEquals("XAG/USD", reopened.symbol)
+        assertEquals("EUR/USD", reopened.symbol)
         assertTrue(reopened.backgroundMonitor)
     }
 
-    @Test fun `switching to non forex commits the fail closed flags and keeps only read only stock key`() {
+    @Test fun `symbol writes accept only catalog pairs and legacy symbols migrate to gold`() {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit().clear().commit()
         val store = SettingsStore(context)
-        assertFalse(store.selectWorkspace("injected-destination"))
-        assertFalse(store.saveStockDataKey("x y"))
-        assertTrue(store.saveStockDataKey("synthetic-stock-read-only"))
-        assertTrue(store.selectWorkspace("forex"))
-        store.update { it.copy(backgroundMonitor = true, autoPaperTrading = true) }
-        assertTrue(store.selectWorkspace("iran_stocks"))
-        val reopened = SettingsStore(context).read()
-        assertEquals("iran_stocks", reopened.workspaceId)
-        assertFalse(reopened.backgroundMonitor)
-        assertFalse(reopened.autoPaperTrading)
-        assertEquals("synthetic-stock-read-only", reopened.stockDataKey)
-        assertTrue(store.clearStockDataKey())
-        assertEquals("", SettingsStore(context).read().stockDataKey)
-    }
-
-    @Test fun `research monitor opt in is per selected space and never enables forex auto paper`() {
-        val context = RuntimeEnvironment.getApplication()
-        context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit().clear().commit()
-        val store = SettingsStore(context)
-        assertTrue(store.selectWorkspace("crypto"))
-        store.update { it.copy(backgroundMonitor = true, autoPaperTrading = false) }
-        assertTrue(store.selectWorkspace("crypto")) // process recreation of the same selected space
-        assertTrue(SettingsStore(context).read().backgroundMonitor)
-        assertTrue(store.selectWorkspace("nobitex"))
-        assertFalse(store.read().backgroundMonitor)
-        assertFalse(store.read().autoPaperTrading)
-        store.update { it.copy(backgroundMonitor = true) }
-        assertTrue(store.selectWorkspace("forex"))
-        assertFalse(SettingsStore(context).read().backgroundMonitor)
-        assertFalse(SettingsStore(context).read().autoPaperTrading)
-        assertTrue(store.selectWorkspace(""))
-        assertFalse(store.read().backgroundMonitor)
+        // Non-catalog symbols (crypto/stocks of removed workspaces) are rejected, key untouched.
+        assertFalse(store.saveMarketCredentials("another-synthetic-key", "BTC/USDT"))
+        assertFalse(store.saveChartSymbol("AAPL"))
+        assertFalse(store.saveChartSymbol("XAG/USD")) // silver is not in this forex-only catalog
+        assertTrue(store.saveChartSymbol(" eur/usd "))
+        assertEquals("EUR/USD", store.read().symbol)
+        // Keyless quick switch: no key required, symbol persists for a fresh store.
+        assertEquals("EUR/USD", SettingsStore(context).read().symbol)
+        // A legacy stored symbol (old install) is coerced to the catalog default on read.
+        context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit()
+            .putString("symbol", "BTC/USDT").commit()
+        assertEquals("XAU/USD", SettingsStore(context).read().symbol)
     }
 
     @Test fun `server URL save is independent of market key and survives a new store`() {
@@ -79,9 +59,7 @@ class SettingsStoreTest {
         context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit().clear().commit()
         val store = SettingsStore(context)
         assertTrue(store.saveNewsBaseUrl("https://news.example.org"))
-        assertTrue(store.saveCryptoBaseUrl("https://crypto.example.org"))
         assertEquals("https://news.example.org", SettingsStore(context).read().newsBaseUrl)
-        assertEquals("https://crypto.example.org", SettingsStore(context).read().cryptoBaseUrl)
         assertFalse(SettingsStore(context).read().hasKey)
         assertTrue(store.saveNewsBaseUrl(""))
         assertEquals("", SettingsStore(context).read().newsBaseUrl)

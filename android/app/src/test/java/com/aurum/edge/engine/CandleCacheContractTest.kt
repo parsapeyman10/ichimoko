@@ -47,7 +47,7 @@ class CandleCacheContractTest {
         val current = valid.copy(time = System.currentTimeMillis().let { it - it % Interval.M5.millis }, closed = false)
         cache.save("XAU/USD", Interval.M5, listOf(current))
         assertEquals(listOf(current), cache.load("XAU/USD", Interval.M5))
-        assertTrue(cache.load("BTC/USD", Interval.M5).isEmpty())
+        assertTrue(cache.load("EUR/USD", Interval.M5).isEmpty())
         val file = File(market, "verified_v2_XAU_USD_5m.json")
         val atomic = AtomicFile(file)
         val interrupted = atomic.startWrite()

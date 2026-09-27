@@ -11,8 +11,8 @@ data class NewsClassification(val importance: NewsImportance, val direction: New
  * which stays authoritative and fails closed to UNKNOWN on its own. This is a fast, transparent,
  * disclosed heuristic to help a human scan a headline list; it must not be read as a trading
  * signal or an AI verdict, exactly like the backend's own rule: "no keyword fallback may call
- * itself AI". Same dictionary is reused across the four workspaces (forex/gold, both crypto
- * screens, Iran bourse) since financial direction words overlap heavily across languages/markets;
+ * itself AI". The dictionary is shared by every Forex news surface since financial
+ * direction words overlap heavily across languages/markets;
  * "high" importance additionally flags macro/regulatory/corporate-action terms per domain.
  */
 object NewsClassifier {

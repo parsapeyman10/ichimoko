@@ -443,22 +443,6 @@ data class AppSettings(
     val pauseOnNews: Boolean = false,
     /** Explicit opt-in; automatic orders here are local paper records, never broker orders. */
     val autoPaperTrading: Boolean = false,
-    /** Optional HTTPS backend for global crypto research, distinct from Forex news AI. */
-    val cryptoBaseUrl: String = "",
-    /** Last explicitly selected workspace, used only to fail closed the Forex foreground service. */
-    val workspaceId: String = "",
-    /** Read-only third-party stock-data key, entered on the device; never a broker credential. */
-    val stockDataKey: String = "",
-    /**
-     * The user's OWN personal Nobitex API token (from nobitex.ir/panel/profile/api-services/),
-     * entered on this device only, used solely to call the user's account endpoints
-     * (balance/order placement/status/cancel) directly from this device to apiv2.nobitex.ir.
-     * It is never sent anywhere else and never logged. Real money moves only when the user
-     * explicitly confirms an order in the live-trading section.
-     */
-    val nobitexApiToken: String = "",
-    /** Client-side fat-finger guard: max notional (quote currency, e.g. USDT) per live order. */
-    val nobitexLiveOrderCapUsdt: Double = 20.0,
     /**
      * OPTIONAL alternative to [newsBaseUrl] for the Forex ninth-condition AI gate: instead of your
      * own backend server, the phone calls this OpenAI-compatible endpoint DIRECTLY with your own
@@ -471,6 +455,5 @@ data class AppSettings(
     val newsAiModel: String = "",
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
-    val hasNobitexKey: Boolean get() = nobitexApiToken.isNotBlank()
     val hasClientNewsAi: Boolean get() = newsAiApiKey.isNotBlank() && newsAiBaseUrl.isNotBlank() && newsAiModel.isNotBlank()
 }

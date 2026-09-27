@@ -14,7 +14,7 @@ class FreeHistoryTest {
     private val client = FreeHistoryDownloader()
     private val today = LocalDate.of(2026, 9, 23)
     private val ecb = FreeHistoryCatalog.find("eur-usd")!!
-    private val stock = FreeHistoryCatalog.find("aapl-stock")!!
+    private val stock = FreeHistoryCatalog.find("gold-spot")!!
     private val gold = FreeHistoryCatalog.find("gold-monthly")!!
 
     private fun goldCsv(extra: String = "") = "Date,Price\n" +
@@ -26,7 +26,7 @@ class FreeHistoryTest {
             """{"date":"${today.minusDays(i.toLong())}","base":"EUR","quote":"USD","rate":1.1}"""
         } + listOf(extra).filter { it.isNotEmpty() }).joinToString(",") + "]"
 
-    private fun ohlc(extra: String = "", symbol: String = "AAPL") = """{"meta":{"symbol":"$symbol","interval":"1day","currency":"USD"},"values":[""" +
+    private fun ohlc(extra: String = "", symbol: String = "XAU/USD") = """{"meta":{"symbol":"$symbol","interval":"1day","currency":"USD"},"values":[""" +
         ((1..35).map { i ->
             """{"datetime":"${today.minusDays(i.toLong())}","open":"101","high":"105","low":"99","close":"104","volume":"200"}"""
         } + listOf(extra).filter { it.isNotEmpty() }).joinToString(",") + "]}"
@@ -80,7 +80,7 @@ class FreeHistoryTest {
         }
     }
 
-    @Test fun stockDailyDropsTodayAndRequiresExactAssetCurrencyAndValidOhlc() {
+    @Test fun twelveDailyDropsTodayAndRequiresExactAssetCurrencyAndValidOhlc() {
         val forming = """{"datetime":"$today","open":"101","high":"105","low":"99","close":"104"}"""
         val parsed = client.parseTwelveDaily(ohlc(forming), stock, today)
         assertEquals(35, parsed.size)
@@ -90,7 +90,7 @@ class FreeHistoryTest {
         val data = FreeHistoryResult.Ohlc(stock, parsed, stock.sourcePage, 1L)
         assertTrue(FreeHistoryDownloader.csv(data).startsWith("date,symbol,open,high,low,close,volume,source\n"))
         for (bad in listOf(
-            ohlc(symbol = "MSFT"),
+            ohlc(symbol = "EUR/USD"),
             ohlc("""{"datetime":"${today.minusDays(2)}","open":"101","high":"105","low":"99","close":"104"}"""),
             ohlc().replace("\"high\":\"105\"", "\"high\":\"98\""),
             ohlc().replace("\"volume\":\"200\"", "\"volume\":\"unknown\""),

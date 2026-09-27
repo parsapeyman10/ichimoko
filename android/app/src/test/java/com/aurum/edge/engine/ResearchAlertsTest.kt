@@ -1,13 +1,7 @@
 package com.aurum.edge.engine
 
 import com.aurum.edge.data.ForexCalendarState
-import com.aurum.edge.data.PublicFeedHealth
-import com.aurum.edge.data.PublicFeedState
-import com.aurum.edge.data.PublicHeadline
-import com.aurum.edge.data.PublicNewsFeeds
-import com.aurum.edge.data.PublicWebNewsState
 import com.aurum.edge.data.ResearchAlerts
-import com.aurum.edge.data.ResearchSpace
 import com.aurum.edge.data.parseForexCalendar
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -42,16 +36,4 @@ class ResearchAlertsTest {
         assertTrue(ResearchAlerts.forex(calendar(now - 16 * 60_000L), now).isEmpty())
     }
 
-    @Test fun `only dated fresh same-space publisher headline can inform a research notification`() {
-        val feed = PublicNewsFeeds.all.first { it.id == "coindesk" }
-        val item = PublicHeadline("Bitcoin ETF decision", "", "https://www.coindesk.com/asset", now - 60_000L,
-            now, feed)
-        val state = PublicWebNewsState(listOf(item), listOf(PublicFeedHealth(feed, PublicFeedState.ONLINE, now)))
-        assertTrue(ResearchAlerts.latestHeadline(state, ResearchSpace.NOBITEX, now)!!.title.contains("نه اطلاعیه"))
-        assertEquals(null, ResearchAlerts.latestHeadline(state, ResearchSpace.FOREX, now))
-        assertEquals(null, ResearchAlerts.latestHeadline(state, ResearchSpace.IRAN_STOCKS, now))
-        assertEquals(null, ResearchAlerts.latestHeadline(state.copy(feeds = listOf(PublicFeedHealth(feed,
-            PublicFeedState.FAILED, now))), ResearchSpace.CRYPTO, now))
-        assertEquals(null, ResearchAlerts.latestHeadline(state, ResearchSpace.CRYPTO, now + 11 * 60_000L))
-    }
 }

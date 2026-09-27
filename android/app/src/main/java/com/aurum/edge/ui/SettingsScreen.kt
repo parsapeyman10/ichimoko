@@ -120,7 +120,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             subtitle = "Twelve Data برای چارت، سیگنال و بک‌تست؛ بدون کلید هم فید رایگان خودکار (Swissquote/Gold-API) وصل می‌شود؛ دیده‌بان پایین منابع جدا دارد",
         ) {
             Text(if (settings.hasKey) "✓ کلید خواندنی در همین نصب موجود است؛ اعتبارش فقط با دریافت دادهٔ تازه مشخص می‌شود."
-                else "کلید روی این نصب ذخیره نشده است؛ به‌طور خودکار از فید رایگان قیمت لحظه‌ای (Swissquote، و در صورت نیاز Gold-API) استفاده می‌شود — تنها برای XAU/USD و جفت‌ارزهای اصلی، بدون تاریخچهٔ REST جداگانه.",
+                else "کلید روی این نصب ذخیره نشده است؛ به‌طور خودکار از فید رایگان قیمت لحظه‌ای (Swissquote، و در صورت نیاز Gold-API برای طلا) استفاده می‌شود — بدون تاریخچهٔ REST جداگانه.",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (settings.hasKey) AurumColors.Cyan else AurumColors.Gold)
             OutlinedTextField(
@@ -131,15 +131,17 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
-            OutlinedTextField(
-                value = symbol,
-                onValueChange = { symbol = it },
-                label = { Text("نماد (مثلاً XAU/USD یا XAG/USD)") },
-                singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-            )
+            Text("جفت‌ارز چارت و سیگنال (انتخاب فوری؛ فقط همین ۸ نماد):", style = MaterialTheme.typography.bodySmall,
+                color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 8.dp))
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                WatchCatalog.chartSymbols.forEach { pair ->
+                    FilterChip(selected = symbol == pair, onClick = {
+                        symbol = pair
+                        viewModel.selectChartSymbol(pair)
+                    }, label = { Text(pair) })
+                }
+            }
             Button(
                 onClick = { viewModel.saveMarketCredentials(key, symbol) },
                 enabled = key.isNotBlank() || settings.hasKey,
@@ -158,7 +160,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 modifier = Modifier.padding(top = 4.dp))
         }
 
-        WatchSettingsSection(viewModel, settings.workspaceId)
+        WatchSettingsSection(viewModel)
 
         SectionCard("گیت خبر و AI فارکس", "تقویم Forex Factory و خبرهای واقعی وب بی‌نیاز از سرور؛ شرط نهم معامله به سرور HTTPS نیاز دارد") {
             OutlinedTextField(
@@ -399,7 +401,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 "در حالت آفلاین فقط آخرین کندل‌های واقعیِ ذخیره‌شده با برچسب زمان نمایش داده می‌شود.",
                 "هیچ آمار عملکردی جعلی وجود ندارد؛ نرخ برد و فاکتور سود فقط از نتایج واقعی محاسبه می‌شود.",
                 "تنها «دمو»: اجرای استراتژی روی همان دیتای واقعی (تب یادگیری) و معاملات کاغذی که روی قیمت واقعی تسویه می‌شوند.",
-                "کلید خواندنی در APK نیست؛ از همین گوشی فقط به HTTPS همان ارائه‌دهندهٔ انتخابی ارسال می‌شود، نه سرور اخبار یا نوبیتکس. کلید معاملاتی در اپ پذیرفته نمی‌شود.",
+                "کلید خواندنی در APK نیست؛ از همین گوشی فقط به HTTPS همان ارائه‌دهندهٔ انتخابی ارسال می‌شود. کلید معاملاتی در اپ پذیرفته نمی‌شود.",
             ).forEach { line ->
                 Text("• $line", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary, modifier = Modifier.padding(vertical = 2.dp))
             }
@@ -432,21 +434,10 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
 }
 
 @Composable
-fun IranWatchSettingsScreen(viewModel: AurumViewModel) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
-        SectionCard("منابع دیده‌بان ریالی", "مجزا از XAU/USD فارکس و API معاملاتی آگاه") {
-            Text("انتخاب منابع فقط قیمت‌های نمایشی طلا/ارز ایران را تغییر می‌دهد؛ به داده‌های تابلوخوانی، سفارش یا سیگنال فارکس وصل نیست.",
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-        }
-        WatchSettingsSection(viewModel, Workspace.IRAN_STOCKS.id)
-    }
-}
-
-@Composable
-private fun WatchSettingsSection(viewModel: AurumViewModel, workspaceId: String) {
+private fun WatchSettingsSection(viewModel: AurumViewModel) {
     val selections by viewModel.watchSettings.collectAsStateWithLifecycle()
-    val available = WatchCatalog.forWorkspace(workspaceId)
-    var symbolId by remember(workspaceId) { mutableStateOf(available.firstOrNull()?.id.orEmpty()) }
+    val available = WatchCatalog.symbols
+    var symbolId by remember { mutableStateOf(available.firstOrNull()?.id.orEmpty()) }
     val symbol = available.firstOrNull { it.id == symbolId } ?: return
     val selected = selections[symbolId] ?: return
     var key by remember(symbolId) { mutableStateOf(viewModel.watchKeyOverride(symbolId)) }
@@ -496,7 +487,7 @@ private fun WatchSettingsSection(viewModel: AurumViewModel, workspaceId: String)
         Text("تاریخچهٔ کامل مشاهدات هر منبع روی همین دستگاه در SQLite نگهداری می‌شود و در دیده‌بان صفحه‌به‌صفحه قابل مشاهده است؛ بک‌فیل تاریخی از سرویس‌دهنده نیست.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
             modifier = Modifier.padding(top = 8.dp))
-        Text("فقط منابع نمایشی همین فضا اینجا انتخاب می‌شوند؛ تابلوخوانی سهام از BrsApi در تب بورس جداست. API معاملاتی و کلید Nobitex/MT5 را هرگز اینجا وارد نکنید.",
+        Text("فقط منابع نمایشی همین نمادها اینجا انتخاب می‌شوند. کلید معاملاتی بروکر را هرگز اینجا وارد نکنید؛ این اپ سفارش واقعی ارسال نمی‌کند.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
             modifier = Modifier.padding(top = 6.dp))
         OutlinedButton(onClick = { confirmClear = true }, modifier = Modifier.padding(top = 8.dp)) {
@@ -506,8 +497,8 @@ private fun WatchSettingsSection(viewModel: AurumViewModel, workspaceId: String)
     if (confirmClear) {
         AlertDialog(
             onDismissRequest = { confirmClear = false },
-            title = { Text("حذف تاریخچهٔ همین فضا؟") },
-            text = { Text("فقط قیمت‌های قبلاً دریافت‌شدهٔ نمادهای این فضا روی گوشی حذف می‌شود؛ دادهٔ فضاهای دیگر حفظ می‌شود. این کار قابل بازگشت نیست.") },
+            title = { Text("حذف تاریخچهٔ دیده‌بان؟") },
+            text = { Text("فقط قیمت‌های قبلاً دریافت‌شدهٔ نمادهای دیده‌بان روی گوشی حذف می‌شود؛ ژورنال و تنظیمات دست‌نخورده می‌مانند. این کار قابل بازگشت نیست.") },
             confirmButton = { TextButton(onClick = { viewModel.clearWatchHistory(); confirmClear = false }) { Text("حذف") } },
             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("انصراف") } },
         )

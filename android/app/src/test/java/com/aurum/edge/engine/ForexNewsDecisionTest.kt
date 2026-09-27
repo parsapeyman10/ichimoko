@@ -16,7 +16,7 @@ import java.time.Instant
 class ForexNewsDecisionTest {
     private val open = Instant.parse("2026-09-28T14:00:00Z").toEpochMilli()
     private val market = MarketState()
-    private val config = AppSettings(workspaceId = "forex", autoPaperTrading = true, backgroundMonitor = true)
+    private val config = AppSettings(autoPaperTrading = true, backgroundMonitor = true)
     private val event = ForexEvent("Core CPI", "USD", "High", open + 3_600_000L,
         forecast = "3.2%", previous = "3.0%")
 

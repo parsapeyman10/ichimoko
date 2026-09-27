@@ -96,7 +96,6 @@ class MarketRepository(
     @Synchronized
     fun start() {
         val current = settings.read()
-        if (current.workspaceId != "forex") return
         // Entering the screen while the user-started service is already running must NOT
         // tear down a healthy socket, roll back its last tick, or duplicate REST requests.
         if (started && activeKey == current.apiKey && _state.value.symbol == current.symbol &&
@@ -177,7 +176,7 @@ class MarketRepository(
         bootstrapJob = s.launch {
             val current = settings.read()
             val cached = cache.load(current.symbol, current.interval)
-            if (!started || generation != session || settings.read().workspaceId != "forex" ||
+            if (!started || generation != session ||
                 settings.read().symbol != current.symbol || settings.read().interval != current.interval) return@launch
             if (cached.isNotEmpty()) {
                 cached.forEach { bar -> if (bar.time !in cachedBars) cachedBars[bar.time] = bar }
@@ -190,7 +189,7 @@ class MarketRepository(
     private suspend fun refresh() = refreshMutex.withLock {
         val current = settings.read()
         val session = generation
-        if (!started || current.workspaceId != "forex") return@withLock
+        if (!started) return@withLock
         if (MarketHours.forexWeekendClosed()) {
             publishClosed()
             return@withLock // no REST requests on the scheduled weekend
@@ -209,7 +208,7 @@ class MarketRepository(
             feed = _state.value.feed.copy(mode = FeedMode.CONNECTING, detail = "دریافت کندل‌های واقعی…"))
         try {
             val fetched = client.fetchCandles(current.apiKey, current.symbol, current.interval, outputSize = 1500)
-            if (!started || generation != session || settings.read().workspaceId != "forex" ||
+            if (!started || generation != session ||
                 settings.read().symbol != current.symbol || settings.read().interval != current.interval ||
                 settings.read().apiKey != current.apiKey || _state.value.symbol != current.symbol) return@withLock
             if (MarketHours.forexWeekendClosed()) { publishClosed(); return@withLock }
@@ -273,7 +272,7 @@ class MarketRepository(
 
     @Synchronized
     private fun startStream() {
-        if (!started || settings.read().workspaceId != "forex") return
+        if (!started) return
         if (MarketHours.forexWeekendClosed()) { publishClosed(); return }
         val epoch = ++streamEpoch
         streamJob?.cancel()
@@ -282,7 +281,6 @@ class MarketRepository(
             var backoff = 2_000L
             while (isActive && started && generation == session && streamEpoch == epoch) {
                 val current = settings.read()
-                if (current.workspaceId != "forex") break
                 if (MarketHours.forexWeekendClosed()) { publishClosed(); delay(60_000L); continue }
                 if (!hasInternet()) {
                     publishDelayed(if (current.hasKey)
@@ -292,8 +290,7 @@ class MarketRepository(
                 }
                 fun stillCurrent(active: com.aurum.edge.core.AppSettings): Boolean =
                     started && generation == session && streamEpoch == epoch &&
-                        active.workspaceId == "forex" && active.symbol == current.symbol &&
-                        active.interval == current.interval
+                        active.symbol == current.symbol && active.interval == current.interval
                 try {
                     if (current.hasKey) {
                         client.streamPrice(current.apiKey, current.symbol).collect { tick ->
@@ -341,7 +338,7 @@ class MarketRepository(
         watchdogJob = scope?.launch {
             while (isActive && started && generation == session) {
                 delay(20_000L)
-                if (!started || generation != session || settings.read().workspaceId != "forex") break
+                if (!started || generation != session) break
                 val now = System.currentTimeMillis()
                 if (MarketHours.forexWeekendClosed(now)) {
                     if (_state.value.feed.mode != FeedMode.MARKET_CLOSED || streamJob?.isActive == true) {
@@ -393,8 +390,7 @@ class MarketRepository(
                 recoveryJob?.cancel()
                 recoveryJob = scope?.launch {
                     delay(750L) // a default network may be announced before it can actually route
-                    if (!started || generation != session || settings.read().workspaceId != "forex" ||
-                        MarketHours.forexWeekendClosed()) return@launch
+                    if (!started || generation != session || MarketHours.forexWeekendClosed()) return@launch
                     if (cm.activeNetwork != network || !hasInternet()) return@launch
                     lastNetwork = network
                     publishDelayed("شبکه تغییر کرد؛ تیک قدیمی قابل معامله نیست. اتصال WebSocket/REST بازیابی می‌شود")

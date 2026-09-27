@@ -21,21 +21,4 @@ object ResearchAlerts {
                     "${event.title}: ${note.title}. ${note.detail}")
             }.toList()
     }
-
-    fun latestHeadline(news: PublicWebNewsState, space: ResearchSpace, now: Long): ResearchAlert? {
-        if (space == ResearchSpace.FOREX || news.loading) return null // FF events are the Forex priority
-        val item = news.headlines.asSequence().filter {
-            now - it.publishedAt in 0L..(10 * 60_000L)
-        }.firstOrNull { NewsResearch.headline(it, news, space, now).state == ResearchState.CONTEXT }
-            ?: return null
-        val note = NewsResearch.headline(item, news, space, now)
-        val title = when (space) {
-            ResearchSpace.CRYPTO -> "خبر جهانی CoinDesk · نه سیگنال"
-            ResearchSpace.NOBITEX -> "خبر جهانی · نه اطلاعیهٔ نوبیتکس"
-            ResearchSpace.IRAN_STOCKS -> "خبر اقتصاد عمومی · نه کدال"
-            ResearchSpace.FOREX -> return null
-        }
-        return ResearchAlert("${space.name}_${item.feed.id}_${item.publishedAt}_${item.url}", title,
-            "${item.title}. ${note.detail}")
-    }
 }

@@ -2,7 +2,6 @@ package com.aurum.edge.service
 
 import android.Manifest
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
@@ -14,19 +13,14 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.aurum.edge.AurumApplication
-import com.aurum.edge.core.AppContainer
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.PaperAlertRules
 import com.aurum.edge.core.PaperOpportunity
-import com.aurum.edge.data.EquityBoardStatus
-import com.aurum.edge.data.NobitexScanState
-import com.aurum.edge.data.PublicCryptoStatus
 import com.aurum.edge.data.ResearchAlert
 import com.aurum.edge.data.ResearchAlerts
-import com.aurum.edge.data.ResearchSpace
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.notify.AlertSoundPlayer
@@ -40,13 +34,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.security.MessageDigest
 
 /**
- * Keeps the real feed alive while the app is in the background and alerts only on
+ * Keeps the real Forex feed alive while the app is in the background and alerts only on
  * signals produced by the real engine. It performs no data generation of any kind.
  */
 class SignalMonitorService : Service() {
@@ -55,10 +48,8 @@ class SignalMonitorService : Service() {
     private var stateJob: Job? = null
     private var journalJob: Job? = null
     private var newsJob: Job? = null
-    private var researchJob: Job? = null
     private var researchAlertJob: Job? = null
-    private var workspaceJob: Job? = null
-    private var monitoredSpace: String? = null
+    private var settingsJob: Job? = null
     private val notifiedResearch = mutableSetOf<String>()
     private val notifiedTrades = mutableSetOf<String>()
 
@@ -74,7 +65,6 @@ class SignalMonitorService : Service() {
             return START_NOT_STICKY
         }
         val container = (application as AurumApplication).container
-        val selectedSpace = container.settingsStore.read().workspaceId
         if (!notificationsPermitted()) {
             container.settingsStore.update { it.copy(backgroundMonitor = false, autoPaperTrading = false) }
             stopSelf()
@@ -84,13 +74,7 @@ class SignalMonitorService : Service() {
             stopSelf()
             return START_NOT_STICKY // do not resurrect a monitor the user turned off
         }
-        if (selectedSpace !in setOf("forex", "crypto", "nobitex", "iran_stocks") ||
-            (monitoredSpace != null && monitoredSpace != selectedSpace)) {
-            container.autoPaperTrader.stopped("فضای پایش تغییر کرد؛ ورود خودکار کاغذی متوقف شد")
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        if (_running.value && monitoredSpace == selectedSpace) return START_STICKY // repeat start is not a reconnect
+        if (_running.value) return START_STICKY // repeat start is not a reconnect
         Notifier.ensureChannels(this)
         val started = runCatching {
             ServiceCompat.startForeground(
@@ -113,42 +97,21 @@ class SignalMonitorService : Service() {
             return START_NOT_STICKY
         }
 
-        monitoredSpace = selectedSpace
         _running.value = true // only after startForeground succeeded, not just a queued start request
-        container.settingsStore.update { it.copy(backgroundMonitor = true,
-            autoPaperTrading = if (selectedSpace == "forex") it.autoPaperTrading else false) }
-        workspaceJob?.cancel()
-        workspaceJob = scope.launch {
+        container.settingsStore.update { it.copy(backgroundMonitor = true) }
+        settingsJob?.cancel()
+        settingsJob = scope.launch {
             container.settingsStore.settings.collect { current ->
-                if (current.workspaceId != selectedSpace || !current.backgroundMonitor) {
-                    container.autoPaperTrader.stopped("پایش فضای قبلی متوقف شد")
+                if (!current.backgroundMonitor) {
+                    container.autoPaperTrader.stopped("پایش متوقف شد")
                     stopSelf()
                 }
             }
         }
         researchAlertJob?.cancel()
-        if (selectedSpace != "forex") {
-            researchJob?.cancel()
-            researchJob = scope.launch { monitorResearchSpace(container, selectedSpace) }
-            researchAlertJob = scope.launch {
-                val feed = if (selectedSpace == "iran_stocks") container.iranWebNews.state
-                    else container.cryptoWebNews.state
-                val space = when (selectedSpace) {
-                    "iran_stocks" -> ResearchSpace.IRAN_STOCKS
-                    "nobitex" -> ResearchSpace.NOBITEX
-                    else -> ResearchSpace.CRYPTO
-                }
-                feed.collect { state ->
-                    if (container.settingsStore.read().workspaceId == selectedSpace) {
-                        ResearchAlerts.latestHeadline(state, space, System.currentTimeMillis())?.let(::postResearchAlert)
-                    }
-                }
-            }
-            return START_STICKY // never read the Forex journal or execute paper rules here
-        }
         researchAlertJob = scope.launch {
             container.forexCalendar.state.collect { state ->
-                if (container.settingsStore.read().workspaceId == "forex" && !MarketHours.forexWeekendClosed())
+                if (container.settingsStore.read().backgroundMonitor && !MarketHours.forexWeekendClosed())
                     ResearchAlerts.forex(state, System.currentTimeMillis()).forEach(::postResearchAlert)
             }
         }
@@ -156,7 +119,6 @@ class SignalMonitorService : Service() {
         newsJob = scope.launch {
             var turns = 0
             while (isActive) {
-                if (container.settingsStore.read().workspaceId != "forex") break
                 if (!notificationsPermitted()) { stopSelf(); break }
                 if (!MarketHours.forexWeekendClosed()) {
                     container.forexCalendar.refreshNow() // weekly export, 1m near release only
@@ -181,8 +143,8 @@ class SignalMonitorService : Service() {
             // Use collect, not collectLatest: never cancel a partially persisted paper entry
             // just because another tick arrives during the atomic journal write.
             container.verifiedMarket.collect { state ->
-                if (container.settingsStore.read().workspaceId != "forex") {
-                    container.autoPaperTrader.stopped("فضای فارکس فعال نیست")
+                if (!container.settingsStore.read().backgroundMonitor) {
+                    container.autoPaperTrader.stopped("پایش متوقف شد")
                     stopSelf()
                     return@collect
                 }
@@ -214,7 +176,7 @@ class SignalMonitorService : Service() {
                         val latest = container.verifiedMarket.value
                         val recentNews = container.news.state.value
                         val recentConfig = container.settingsStore.read()
-                        if (recentConfig.workspaceId == "forex" && latest.symbol == state.symbol &&
+                        if (latest.symbol == state.symbol &&
                             latest.signal?.barTime == signal.barTime &&
                             PaperAlertRules.blocker(latest, recentConfig, recentNews,
                                 container.journalStore.trades.value, snapshot) == null) {
@@ -231,8 +193,8 @@ class SignalMonitorService : Service() {
                 }
                 // A candidate is NOT an entry. Wait for the atomic journal write before notifying.
                 val currentSettings = container.settingsStore.read()
-                val autoEnabled = currentSettings.workspaceId == "forex" && currentSettings.autoPaperTrading
-                val canAlert = currentSettings.workspaceId == "forex" && currentSettings.notifyOnSignal &&
+                val autoEnabled = currentSettings.autoPaperTrading
+                val canAlert = currentSettings.notifyOnSignal &&
                     Notifier.canNotifyVerified(this@SignalMonitorService, currentSettings.alertSoundUri)
                 // A silent automatic entry is worse than no entry. Permissions/channel can
                 // be revoked while the service is running; stop BEFORE touching the journal.
@@ -269,7 +231,6 @@ class SignalMonitorService : Service() {
             // A service restart must not re-notify all old, already closed paper trades.
             notifiedTrades.addAll(container.journalStore.trades.value.filterNot { it.isOpen }.map { it.id })
             container.journalStore.trades.collect { trades ->
-                if (container.settingsStore.read().workspaceId != "forex") return@collect
                 if (canLink) trades.filter { it.signalBarTime != null }.forEach { trade ->
                     runCatching { container.opportunityStore.linkTrade(trade) }
                 }
@@ -290,7 +251,7 @@ class SignalMonitorService : Service() {
     private fun postResearchAlert(alert: ResearchAlert) {
         val key = MessageDigest.getInstance("SHA-256").digest(alert.evidenceId.toByteArray(Charsets.UTF_8))
             .take(12).joinToString("") { "%02x".format(it) }
-        val prefs = getSharedPreferences("observed_news_alerts", Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences("observed_news_alerts", MODE_PRIVATE)
         if (prefs.contains(key) || key in notifiedResearch) return
         if (Notifier.notifyResearch(this, alert.evidenceId, alert.title, alert.text)) {
             notifiedResearch.add(key)
@@ -303,61 +264,6 @@ class SignalMonitorService : Service() {
         }
     }
 
-    /** Non-Forex spaces never enter the signal/journal path: sources remain read-only and
-     * independently timestamped. The notification is research status, not an order alert.
-     */
-    private suspend fun monitorResearchSpace(container: AppContainer, space: String) {
-        var round = 0
-        while (scope.isActive && container.settingsStore.read().workspaceId == space) {
-            if (!notificationsPermitted()) { stopSelf(); return }
-            when (space) {
-                "crypto" -> {
-                    container.publicCrypto.refreshNow()
-                    if (round % 5 == 0) container.cryptoWebNews.refreshNow()
-                }
-                "nobitex" -> {
-                    container.nobitexResearch.refreshNow()
-                    if (round % 5 == 0) container.cryptoWebNews.refreshNow() // global context, not exchange notices
-                }
-                "iran_stocks" -> {
-                    if (MarketHours.iranStockSessionScheduled() &&
-                        container.settingsStore.read().stockDataKey.isNotBlank()) container.equities.refreshNow()
-                    if (round % 3 == 0) container.watch.refreshNow() // rial markets have DIFFERENT hours
-                    if (round % 5 == 0) container.iranWebNews.refreshNow()
-                }
-            }
-            round++
-            repeat(6) {
-                delay(30_000L)
-                if (container.settingsStore.read().workspaceId != space) return
-                val now = System.currentTimeMillis()
-                val text = when (space) {
-                    "crypto" -> container.publicCrypto.state.value.let { state ->
-                        if (state.status == PublicCryptoStatus.OBSERVED && state.recent(now))
-                            "کریپتو · CoinGecko تک‌منبعی · دریافت اخیر؛ نه قیمت قابل معامله"
-                        else "کریپتو · پاسخ قدیمی/ناموجود؛ دریافت دوباره در انتظار"
-                    }
-                    "nobitex" -> when (val state = container.nobitexResearch.state.value) {
-                        is NobitexScanState.Done -> if (state.snapshot.fresh(now))
-                            "نوبیتکس · آمار عمومی دریافت شد؛ زمان معامله/قیمت اجرایی تأیید نیست"
-                        else "نوبیتکس · آمار قدیمی؛ نامزد زنده نداریم"
-                        else -> "نوبیتکس · آمار عمومی ناموجود/در انتظار؛ نه سفارش"
-                    }
-                    else -> if (!MarketHours.iranStockSessionScheduled(now))
-                        "بورس ایران · خارج ساعت معمول؛ تابلو بررسی نمی‌شود (بازار ریالی مستقل است)"
-                    else container.equities.state.value.let { state ->
-                        if (state.status == EquityBoardStatus.OBSERVED && state.recentReceipt(now))
-                            "بورس · BrsApi پاسخ اخیر؛ تاریخ مستقل قیمت سهم نامعلوم"
-                        else "بورس · پاسخ تازهٔ تابلو نداریم؛ فقط مشاهدهٔ قبلی"
-                    }
-                }
-                runCatching { NotificationManagerCompat.from(this@SignalMonitorService).notify(
-                    Notifier.MONITOR_NOTIFICATION_ID,
-                    Notifier.buildMonitorNotification(this@SignalMonitorService, text)) }
-            }
-        }
-    }
-
     // Android 15+ limits dataSync foreground services to 6 hours per 24 hours in background.
     // Never leave a timed-out service running or claim continuous monitoring after it stops.
     override fun onTimeout(startId: Int, fgsType: Int) {
@@ -367,12 +273,10 @@ class SignalMonitorService : Service() {
     override fun onDestroy() {
         _running.value = false
         val container = (application as AurumApplication).container
-        if (container.settingsStore.read().workspaceId == monitoredSpace) {
-            container.settingsStore.update { it.copy(backgroundMonitor = false, autoPaperTrading = false) }
-        }
+        container.settingsStore.update { it.copy(backgroundMonitor = false, autoPaperTrading = false) }
         // Do not leave a headless polling loop alive after Android times out/stops the FGS.
         // The visible Forex screen restarts the feed on foreground resume if needed.
-        if (monitoredSpace == "forex" && !ProcessLifecycleOwner.get().lifecycle.currentState
+        if (!ProcessLifecycleOwner.get().lifecycle.currentState
                 .isAtLeast(Lifecycle.State.STARTED)) container.market.stop()
         scope.cancel()
         AlertSoundPlayer.stop()
@@ -385,12 +289,12 @@ class SignalMonitorService : Service() {
 
         const val ACTION_STOP = "com.aurum.edge.STOP_MONITOR"
 
-        fun start(context: Context): Boolean {
+        fun start(context: android.content.Context): Boolean {
             val intent = Intent(context, SignalMonitorService::class.java)
             return runCatching { context.startForegroundService(intent); true }.getOrDefault(false)
         }
 
-        fun stop(context: Context) {
+        fun stop(context: android.content.Context) {
             val intent = Intent(context, SignalMonitorService::class.java).apply { action = ACTION_STOP }
             runCatching { context.startService(intent) }
         }

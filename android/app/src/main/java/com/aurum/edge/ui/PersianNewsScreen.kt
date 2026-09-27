@@ -35,7 +35,6 @@ import com.aurum.edge.core.ForexNewsDecisions
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.NewsResearch
 import com.aurum.edge.data.ResearchState
-import com.aurum.edge.data.ResearchSpace
 import com.aurum.edge.data.PublicFeedState
 import com.aurum.edge.data.PublicNewsCategory
 import com.aurum.edge.ui.components.NewsClassificationRow
@@ -229,7 +228,7 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 NewsClassificationRow(com.aurum.edge.data.NewsClassifier.classify(item.title, item.excerpt))
                 if (item.excerpt.isNotBlank()) Text(item.excerpt,
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-                val context = NewsResearch.headline(item, web, ResearchSpace.FOREX, now)
+                val context = NewsResearch.headline(item, web, now)
                 Text("${context.title}: ${context.detail}", style = MaterialTheme.typography.labelSmall,
                     color = if (context.state == ResearchState.CONTEXT) AurumColors.Cyan else AurumColors.Gold)
                 Text("دریافت در گوشی: ${formatDateTime(item.receivedAt)} · ${if (fromRecentResponse) "وضعیت خوراک بالا" else "قدیمی/کش؛ تازگی مجدد تأیید نشده"}",

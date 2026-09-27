@@ -8,9 +8,8 @@ import com.aurum.edge.core.HomeReadout
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.ui.AurumTab
-import com.aurum.edge.ui.Workspace
-import com.aurum.edge.ui.moreTabsFor
-import com.aurum.edge.ui.primaryTabsFor
+import com.aurum.edge.ui.moreTabs
+import com.aurum.edge.ui.primaryTabs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -66,28 +65,24 @@ class HomeReadoutTest {
         assertFalse(FeedLiveness.hasRecentReceipt(FeedStatus(FeedMode.LIVE, lastSuccessAt = now + 1), now))
     }
 
-    @Test fun `four workspaces expose only their own destinations`() {
-        assertEquals(4, Workspace.entries.size)
-        val tabs = Workspace.entries.associateWith { primaryTabsFor(it) + moreTabsFor(it) }
-        assertEquals(AurumTab.entries.toSet(), tabs.values.flatten().toSet())
-        assertEquals(AurumTab.Home, primaryTabsFor(Workspace.FOREX).first())
-        assertTrue(AurumTab.News in tabs.getValue(Workspace.FOREX))
-        assertTrue(AurumTab.Learn in moreTabsFor(Workspace.FOREX))
-        assertTrue(AurumTab.Settings in moreTabsFor(Workspace.FOREX))
-        assertEquals(listOf(AurumTab.Crypto, AurumTab.CryptoNews, AurumTab.Api), tabs.getValue(Workspace.CRYPTO))
-        assertEquals(listOf(AurumTab.Nobitex, AurumTab.NobitexNews, AurumTab.Api), tabs.getValue(Workspace.NOBITEX))
-        assertEquals(listOf(AurumTab.Stocks, AurumTab.IranPrices, AurumTab.IranNews, AurumTab.Agah,
-            AurumTab.IranWatchSettings, AurumTab.Api), tabs.getValue(Workspace.IRAN_STOCKS))
-        assertTrue(Workspace.entries.all { AurumTab.Api in tabs.getValue(it) })
-        assertTrue(Workspace.entries.map { it.id }.distinct().size == 4)
+    @Test fun `every destination is reachable from the forex navigation`() {
+        assertEquals(AurumTab.entries.toSet(), (primaryTabs + moreTabs).toSet())
+        assertEquals(AurumTab.Home, primaryTabs.first())
+        assertTrue(AurumTab.News in primaryTabs)
+        assertTrue(AurumTab.Learn in moreTabs)
+        assertTrue(AurumTab.Settings in moreTabs)
+        assertTrue(AurumTab.Api in moreTabs)
+        assertTrue(primaryTabs.size <= 5) // bottom bar stays usable on small screens
     }
 
-    @Test fun `read only watch sources never cross workspace boundaries`() {
-        assertEquals(listOf("XAU/USD"), WatchCatalog.forWorkspace(Workspace.FOREX.id).map { it.id })
-        assertTrue(WatchCatalog.forWorkspace(Workspace.CRYPTO.id).isEmpty()) // dedicated CoinGecko feed
-        assertTrue(WatchCatalog.forWorkspace(Workspace.IRAN_STOCKS.id).isNotEmpty())
-        assertTrue(WatchCatalog.forWorkspace(Workspace.IRAN_STOCKS.id).all { it.id.endsWith("/IRT") })
-        assertTrue(WatchCatalog.forWorkspace(Workspace.NOBITEX.id).isEmpty())
-        assertTrue(WatchCatalog.forWorkspace("").isEmpty()) // no selection -> no background fetch
+    @Test fun `watch catalog is forex only - gold plus the seven majors`() {
+        assertEquals(listOf("XAU/USD", "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD",
+            "USD/JPY", "USD/CHF", "USD/CAD"), WatchCatalog.symbols.map { it.id })
+        assertTrue(WatchCatalog.symbols.all { "IRT" !in it.id && it.unit != "تومان" })
+        // USD-quoted pairs have an independent second source for cross-checking
+        assertEquals(2, WatchCatalog.find("EUR/USD")!!.providerCodes.size)
+        // Non-USD-quoted pairs stay Twelve Data only; their Yahoo quotes are in another unit
+        assertEquals(1, WatchCatalog.find("USD/JPY")!!.providerCodes.size)
+        assertEquals("JPY", WatchCatalog.find("USD/JPY")!!.unit)
     }
 }

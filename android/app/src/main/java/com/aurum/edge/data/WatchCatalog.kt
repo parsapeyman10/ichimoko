@@ -14,56 +14,38 @@ data class WatchSymbol(
 )
 
 object WatchCatalog {
+    /** Forex-only watch: gold plus the seven most-traded currency pairs, all real read-only providers. */
     val symbols = listOf(
-        WatchSymbol("BTC/USD", "بیت‌کوین", "$", linkedMapOf(
-            "crypto_coingecko" to "bitcoin", "stocks_yahoo" to "BTC-USD", "twelve_data_quote" to "BTC/USD",
-        ), listOf("crypto_coingecko", "stocks_yahoo"), 5 * 60_000L, 0.8),
-        WatchSymbol("ETH/USD", "اتریوم", "$", linkedMapOf(
-            "crypto_coingecko" to "ethereum", "stocks_yahoo" to "ETH-USD", "twelve_data_quote" to "ETH/USD",
-        ), listOf("crypto_coingecko", "stocks_yahoo"), 5 * 60_000L, 0.8),
         WatchSymbol("XAU/USD", "طلای جهانی (هر انس)", "$",  linkedMapOf(
             "twelve_data_quote" to "XAU/USD",
         ), listOf("twelve_data_quote"), 10 * 60_000L, 0.5),
-        WatchSymbol("AAPL", "اپل", "$", linkedMapOf(
-            "stocks_yahoo" to "AAPL", "twelve_data_quote" to "AAPL",
-        ), listOf("stocks_yahoo"), 20 * 60_000L, 0.5),
-        WatchSymbol("USD/IRT", "دلار آزاد", "تومان", linkedMapOf(
-            "iran_tgju_web" to "price_dollar_rl", "iran_navasan_fiat" to "usd",
-        ), listOf("iran_tgju_web", "iran_navasan_fiat"), 60 * 60_000L, 1.0),
-        WatchSymbol("GOLD18/IRT", "طلای ۱۸ عیار / گرم", "تومان", linkedMapOf(
-            "iran_tgju_web" to "geram18", "iran_navasan_gold" to "18ayar",
-        ), listOf("iran_tgju_web", "iran_navasan_gold"), 60 * 60_000L, 1.0),
-        WatchSymbol("GOLD24/IRT", "طلای ۲۴ عیار / گرم", "تومان", linkedMapOf(
-            "iran_tgju_web" to "geram24",
-        ), listOf("iran_tgju_web"), 30 * 60_000L, 1.0),
-        WatchSymbol("MESGHAL/IRT", "مثقال طلا", "تومان", linkedMapOf(
-            "iran_tgju_web" to "mesghal",
-        ), listOf("iran_tgju_web"), 30 * 60_000L, 1.0),
-        WatchSymbol("SEKEE/IRT", "سکه امامی", "تومان", linkedMapOf(
-            "iran_tgju_web" to "sekee", "iran_navasan_gold" to "sekkeh",
-        ), listOf("iran_tgju_web", "iran_navasan_gold"), 4 * 60 * 60_000L, 1.0),
-        WatchSymbol("SEKEB/IRT", "سکه بهار آزادی", "تومان", linkedMapOf(
-            "iran_tgju_web" to "sekeb", "iran_navasan_gold" to "bahar",
-        ), listOf("iran_tgju_web", "iran_navasan_gold"), 4 * 60 * 60_000L, 1.0),
-        WatchSymbol("NIM/IRT", "نیم‌سکه", "تومان", linkedMapOf(
-            "iran_tgju_web" to "nim", "iran_navasan_gold" to "nim",
-        ), listOf("iran_tgju_web", "iran_navasan_gold"), 4 * 60 * 60_000L, 1.0),
-        WatchSymbol("ROB/IRT", "ربع‌سکه", "تومان", linkedMapOf(
-            "iran_tgju_web" to "rob", "iran_navasan_gold" to "rob",
-        ), listOf("iran_tgju_web", "iran_navasan_gold"), 4 * 60 * 60_000L, 1.0),
-        WatchSymbol("GERAMI/IRT", "سکهٔ یک‌گرمی", "تومان", linkedMapOf(
-            "iran_tgju_web" to "gerami", "iran_navasan_gold" to "gerami",
-        ), listOf("iran_tgju_web", "iran_navasan_gold"), 4 * 60 * 60_000L, 1.0),
+        WatchSymbol("EUR/USD", "یورو / دلار", "$", linkedMapOf(
+            "twelve_data_quote" to "EUR/USD", "stocks_yahoo" to "EURUSD=X",
+        ), listOf("twelve_data_quote", "stocks_yahoo"), 5 * 60_000L, 0.3),
+        WatchSymbol("GBP/USD", "پوند / دلار", "$", linkedMapOf(
+            "twelve_data_quote" to "GBP/USD", "stocks_yahoo" to "GBPUSD=X",
+        ), listOf("twelve_data_quote", "stocks_yahoo"), 5 * 60_000L, 0.3),
+        WatchSymbol("AUD/USD", "دلار استرالیا / دلار", "$", linkedMapOf(
+            "twelve_data_quote" to "AUD/USD", "stocks_yahoo" to "AUDUSD=X",
+        ), listOf("twelve_data_quote", "stocks_yahoo"), 5 * 60_000L, 0.3),
+        WatchSymbol("NZD/USD", "دلار نیوزیلند / دلار", "$", linkedMapOf(
+            "twelve_data_quote" to "NZD/USD", "stocks_yahoo" to "NZDUSD=X",
+        ), listOf("twelve_data_quote", "stocks_yahoo"), 5 * 60_000L, 0.3),
+        WatchSymbol("USD/JPY", "دلار / ین ژاپن", "JPY", linkedMapOf(
+            "twelve_data_quote" to "USD/JPY",
+        ), listOf("twelve_data_quote"), 5 * 60_000L, 0.3),
+        WatchSymbol("USD/CHF", "دلار / فرانک سوئیس", "CHF", linkedMapOf(
+            "twelve_data_quote" to "USD/CHF",
+        ), listOf("twelve_data_quote"), 5 * 60_000L, 0.3),
+        WatchSymbol("USD/CAD", "دلار / دلار کانادا", "CAD", linkedMapOf(
+            "twelve_data_quote" to "USD/CAD",
+        ), listOf("twelve_data_quote"), 5 * 60_000L, 0.3),
     )
 
     fun find(id: String): WatchSymbol? = symbols.firstOrNull { it.id == id }
 
-    /** Keep exploratory watch requests in the explicitly chosen workspace. */
-    fun forWorkspace(id: String): List<WatchSymbol> = when (id) {
-        "forex" -> symbols.filter { it.id == "XAU/USD" }
-        "iran_stocks" -> symbols.filter { it.id.endsWith("/IRT") }
-        else -> emptyList() // Crypto and Nobitex use their own dedicated read-only feeds
-    }
+    /** Symbols selectable for the chart/feed, in the same order as the watch. */
+    val chartSymbols: List<String> = symbols.map { it.id }
 }
 
 data class DisplayQuote(val quote: Quote?, val sourceId: String, val fallback: Boolean)
@@ -76,11 +58,14 @@ data class QuoteAssessment(val state: QuoteDisplayState, val detail: String) {
     val verifiable: Boolean get() = state == QuoteDisplayState.DATED
 }
 
-/** Retrieval time alone does not prove a price is fresh. Cached, undated and mismatched quotes cannot confirm. */
-object SourceComparison {
-    fun assess(symbol: WatchSymbol, sourceId: String, quote: Quote?, now: Long = System.currentTimeMillis()): QuoteAssessment {
-        if (sourceId !in symbol.providerCodes || SourceCatalog.find(sourceId)?.unit != symbol.unit)
-            return QuoteAssessment(QuoteDisplayState.INVALID, "نماد/واحد این منبع برای این کارت تعریف نشده")
+    /** Retrieval time alone does not prove a price is fresh. Cached, undated and mismatched quotes cannot confirm. */
+    object SourceComparison {
+        // providerCodes is the unit contract: each mapping is the *same* instrument and quote unit
+        // at that provider. SourceDef.unit is only a static label and cannot express multi-unit
+        // providers (Twelve Data serves both $ and JPY/CHF/CAD pairs), so it is not compared here.
+        fun assess(symbol: WatchSymbol, sourceId: String, quote: Quote?, now: Long = System.currentTimeMillis()): QuoteAssessment {
+            if (sourceId !in symbol.providerCodes)
+                return QuoteAssessment(QuoteDisplayState.INVALID, "نماد/واحد این منبع برای این کارت تعریف نشده")
         if (quote == null) return QuoteAssessment(QuoteDisplayState.NO_DATA, "هنوز پاسخی دریافت نشده")
         if (quote.sourceId != sourceId || quote.unit != symbol.unit)
             return QuoteAssessment(QuoteDisplayState.INVALID, "شناسهٔ منبع یا واحد قیمت ناهماهنگ است")

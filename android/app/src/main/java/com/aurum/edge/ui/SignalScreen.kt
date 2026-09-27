@@ -71,6 +71,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             .verticalScroll(rememberScrollState())
             .padding(bottom = 12.dp),
     ) {
+        SymbolPickerRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
         SectionCard("چرا هشدار نیامده؟", "وضعیت همین لحظه؛ بدون ساختن سیگنال یا سست‌کردن شرط‌های ورود",
             trailing = { Pill("${checks.count { it.ready }}/${checks.size} پیش‌نیاز",
                 if (checks.all { it.ready }) AurumColors.Green else AurumColors.Gold) }) {

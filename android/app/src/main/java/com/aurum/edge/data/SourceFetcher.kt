@@ -13,7 +13,6 @@ import kotlinx.serialization.json.contentOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import org.jsoup.Jsoup
 import java.io.IOException
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
@@ -42,41 +41,23 @@ class SourceFetcher(
                 Quote(it.code, it.label, error = "کلید خواندنی ${source.title} وارد نشده است", sourceId = source.id)
             }, online = false, error = "کلید API وارد نشده است")
         }
-        val quotes = when {
-            source.kind == SourceKind.HTML_CSS && source.batchTemplate != null -> {
-                // TGJU's home page holds the market rows together. NEVER send nine
-                // duplicate fallback requests if the page blocks us or changes format.
-                val body = runCatching { fetchText(source, source.batchTemplate, apiKey) }
-                symbols.map { symbol ->
-                    if (body.isSuccess) parseHtmlQuote(source, symbol, body.getOrThrow())
-                    else Quote(symbol.code, symbol.label,
-                        error = "وب‌سایت منبع در دسترس نیست؛ دریافت تازه انجام نشد", sourceId = source.id)
-                }
-            }
-            else -> {
-                val batch = if (source.kind == SourceKind.JSON_REST) source.batchTemplate?.let { template ->
-                    runCatching { fetchJson(source, template.replace("{symbols}",
-                        symbols.joinToString(",") { encode(it.code) }), apiKey) }.getOrNull()
-                } else null
-                if (batch != null) symbols.map { parseJsonQuote(source, it, batch) }
-                else if (source.batchTemplate != null) {
-                    // Batch may be a fixed snapshot (Navasan) or a list (CoinGecko).
-                    // Never fan one failed/429 batch out into repeated individual GETs.
-                    symbols.map { Quote(it.code, it.label, error = "پاسخ گروهی منبع در دسترس نیست؛ کش با زمان اصلی باقی می‌ماند",
-                        sourceId = source.id) }
-                } else coroutineScope { symbols.map { symbol -> async { fetchOne(source, symbol, apiKey) } }.awaitAll() }
-            }
-        }
+        val quotes = if (source.batchTemplate != null) {
+            // Batch only requests that share both a provider AND a read-only key. A key is
+            // never sent to another provider. Never fan a failed/429 batch out into
+            // repeated individual GETs.
+            val batch = runCatching { fetchJson(source, source.batchTemplate.replace("{symbols}",
+                symbols.joinToString(",") { encode(it.code) }), apiKey) }.getOrNull()
+            if (batch != null) symbols.map { parseJsonQuote(source, it, batch) }
+            else symbols.map { Quote(it.code, it.label,
+                error = "پاسخ گروهی منبع در دسترس نیست؛ کش با زمان اصلی باقی می‌ماند",
+                sourceId = source.id) }
+        } else coroutineScope { symbols.map { symbol -> async { fetchOne(source, symbol, apiKey) } }.awaitAll() }
         SourceSnapshot(source, quotes, online = quotes.any { it.price != null }, error = quotes.firstOrNull { it.price == null }?.error)
     }
 
     private suspend fun fetchOne(source: SourceDef, symbol: SymbolDef, apiKey: String): Quote = try {
         val url = source.urlTemplate.replace("{symbol}", encode(symbol.code))
-        when (source.kind) {
-            SourceKind.JSON_REST -> parseJsonQuote(source, symbol, fetchJson(source, url, apiKey))
-            SourceKind.HTML_CSS -> parseHtmlQuote(source, symbol, fetchText(source, url, apiKey))
-            SourceKind.TSE_TSETMC -> Quote(symbol.code, symbol.label, error = "قرارداد API و شناسه نماد TSETMC هنوز تأیید نشده است", sourceId = source.id)
-        }
+        parseJsonQuote(source, symbol, fetchJson(source, url, apiKey))
     } catch (error: Exception) {
         Quote(symbol.code, symbol.label, error = (error.message ?: "خطای دریافت داده").take(100), sourceId = source.id)
     }
@@ -112,23 +93,6 @@ class SourceFetcher(
         )
     }
 
-    internal fun parseHtmlQuote(source: SourceDef, symbol: SymbolDef, body: String): Quote {
-        require(SourceCatalog.find(source.id) == source && symbol.code.matches(Regex("[a-z0-9_]{2,40}"))) {
-            "نماد/وب‌سایت ثابت و معتبر نیست"
-        }
-        val selector = source.cssSelector?.replace("{symbol}", symbol.code)
-            ?: return Quote(symbol.code, symbol.label, error = "سلکتور HTML تنظیم نشده است", sourceId = source.id)
-        val element = Jsoup.parse(body).selectFirst(selector)
-            ?: return Quote(symbol.code, symbol.label, error = "ردیف نماد در صفحه پیدا نشد", sourceId = source.id)
-        // data-price belongs to the exact identified market row, NOT an advert, daily
-        // high or a related coin. Fail closed if markup disappears or becomes ambiguous.
-        val raw = if (source.cssAttr.isNullOrBlank()) element.text() else element.attr(source.cssAttr)
-        val price = Num.parse(raw)?.times(source.scale)?.takeIf { it.isFinite() && it > 0 }
-        return Quote(symbol.code, symbol.label, price = price, unit = source.unit,
-            error = if (price == null) "قیمت معتبر در ردیف این نماد نبود" else null,
-            sourceId = source.id, providerAt = null) // TGJU row has HH:MM, not a full date.
-    }
-
     private fun fetchJson(source: SourceDef, url: String, apiKey: String): JsonElement = json.parseToJsonElement(fetchText(source, url, apiKey))
 
     private fun fetchText(source: SourceDef, template: String, apiKey: String): String {
@@ -139,16 +103,16 @@ class SourceFetcher(
         val request = Request.Builder().url(parsed)
             .header("User-Agent", "Trading/1.0 (Android; public-data-client)")
             .header("Accept-Language", "fa,en;q=0.8")
-            .header("Accept", if (source.kind == SourceKind.HTML_CSS) "text/html,application/xhtml+xml" else "application/json, text/plain")
+            .header("Accept", "application/json, text/plain")
             .apply { source.headers.forEach { (key, value) -> header(key, value) } }
             .build()
         repeat(3) { attempt ->
             try {
                 http.newCall(request).execute().use { response ->
-                    // Never retry HTTP 4xx/429, malformed HTML or changed provider schema.
+                    // Never retry HTTP 4xx/429 or a changed provider schema.
                     // Do not echo provider bodies or URLs (which may contain a read-only key).
                     if (!response.isSuccessful) throw IllegalStateException("خطای منبع (HTTP ${response.code})")
-                    val limit = if (source.kind == SourceKind.HTML_CSS) 2_000_000L else 1_048_576L
+                    val limit = 1_048_576L
                     val text = response.peekBody(limit + 1).string()
                     if (text.length > limit) throw IllegalStateException("پاسخ منبع بیش از حد بزرگ است")
                     if (text.isBlank()) throw IllegalStateException("پاسخ منبع خالی است")
@@ -162,5 +126,7 @@ class SourceFetcher(
         error("پاسخ منبع دریافت نشد")
     }
 
-    private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8").replace("+", "%20")
+    /** Yahoo FX tickers carry "=" (EURUSD=X); "=" is a legal path/query char and must stay literal. */
+    private fun encode(value: String): String =
+        URLEncoder.encode(value, "UTF-8").replace("+", "%20").replace("%3D", "=")
 }

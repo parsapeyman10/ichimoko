@@ -105,9 +105,9 @@ fun HomeScreen(
             if (!price.current && market.feed.detail.isNotBlank()) Text(market.feed.detail,
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
                 modifier = Modifier.padding(top = 5.dp))
-            Button(onClick = if (settings.hasKey) onChart else onSettings,
+            Button(onClick = onChart,
                 modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
-                Text(if (settings.hasKey) "دیدن چارت و داده‌ها" else "ورود کلید خواندنی در تنظیمات")
+                Text(if (settings.hasKey) "دیدن چارت و داده‌ها" else "دیدن چارت (فید رایگان زنده) · کلید برای تاریخچه")
             }
         }
 

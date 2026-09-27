@@ -38,7 +38,7 @@ import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
 import kotlinx.coroutines.delay
 
-/** Read-only XAU/USD watch. Other markets belong to their own workspaces. */
+/** Read-only watch of gold plus the major currency pairs. */
 @Composable
 fun MarketWatchScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
     WatchPricesScreen(viewModel, onOpenSettings)
@@ -61,8 +61,8 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
-        SectionCard("دیده‌بان فارکس · XAU/USD", "قیمت نمایشی ≠ تأیید دومنبعی؛ زمان دریافت وب جای زمان قیمت ناشر را نمی‌گیرد") {
-            if (MarketHours.forexWeekendClosed(now)) Text(MarketHours.labelForWorkspace("forex", now),
+        SectionCard("دیده‌بان فارکس · طلا و جفت‌ارزهای اصلی", "قیمت نمایشی ≠ تأیید دومنبعی؛ زمان دریافت وب جای زمان قیمت ناشر را نمی‌گیرد") {
+            if (MarketHours.forexWeekendClosed(now)) Text(MarketHours.marketLabel(now),
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = viewModel::refreshWatch, enabled = !state.refreshing && !MarketHours.forexWeekendClosed(now), modifier = Modifier.weight(1f)) {
@@ -78,7 +78,7 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
             )
             state.error?.let { Text(it, color = AurumColors.Red, style = MaterialTheme.typography.bodySmall) }
         }
-        WatchCatalog.forWorkspace("forex").forEach { symbol ->
+        WatchCatalog.symbols.forEach { symbol ->
             val selected = selections[symbol.id] ?: return@forEach
             val quotes = state.quotes[symbol.id].orEmpty()
             val verification = SourceComparison.verify(symbol, selected.enabledSources, quotes, now)
@@ -151,7 +151,7 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
             }
         }
         SectionCard("منابع محدود", "وضعیت شفاف اتصال‌های دیگر") {
-            Text("این دیده‌بان فقط XAU/USD است؛ تابلوی سهام BrsApi و قیمت‌های ریالی در فضای بورس ایران هستند. Nobitex/MT5: سفارش واقعی در اپ فعال نیست.",
+            Text("این دیده‌بان فقط طلا و جفت‌ارزهای اصلی را نشان می‌دهد. Twelve Data منبع اصلی چارت است و Yahoo Finance برای جفت‌ارزهای دلاری منبع مستقل نمایشی دارد؛ سفارش واقعی در اپ فعال نیست.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
         }
     }

@@ -45,7 +45,5 @@ class MetaTraderCsvTest {
         }
         assertEquals(null, NewsRepository.newsUrl("http://localhost:8000"))
         assertEquals("https://news.example.com/api/v1/news/web", NewsRepository.newsUrl("https://news.example.com"))
-        assertEquals("https://news.example.com/api/v1/crypto/candidates", NewsRepository.cryptoUrl("https://news.example.com"))
-        assertEquals(null, NewsRepository.cryptoUrl("https://news.example.com/path"))
     }
 }

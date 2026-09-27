@@ -23,7 +23,8 @@ class SettingsStore(context: Context) {
     fun read(): AppSettings = AppSettings(
         apiKey = prefs.getString(KEY_API, null)?.takeIf { it.isNotBlank() }
             ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY,
-        symbol = prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD",
+        // Legacy installs may still hold a removed symbol (crypto/stock); the app is forex-only now.
+        symbol = (prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD").takeIf { it in WatchCatalog.chartSymbols } ?: "XAU/USD",
         interval = Interval.fromLabel(prefs.getString(KEY_INTERVAL, null) ?: "5m"),
         riskPercent = prefs.getFloat(KEY_RISK, 0.5f).toDouble(),
         accountBalance = prefs.getFloat(KEY_BALANCE, 100f).toDouble(),
@@ -37,11 +38,6 @@ class SettingsStore(context: Context) {
         newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty(),
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
         autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
-        cryptoBaseUrl = prefs.getString(KEY_CRYPTO_URL, "").orEmpty(),
-        workspaceId = prefs.getString(KEY_WORKSPACE, "").orEmpty(),
-        stockDataKey = prefs.getString(KEY_STOCK_DATA, "").orEmpty(),
-        nobitexApiToken = prefs.getString(KEY_NOBITEX_TOKEN, "").orEmpty(),
-        nobitexLiveOrderCapUsdt = prefs.getFloat(KEY_NOBITEX_CAP, 20f).toDouble(),
         newsAiApiKey = prefs.getString(KEY_NEWS_AI_KEY, "").orEmpty(),
         newsAiBaseUrl = prefs.getString(KEY_NEWS_AI_URL, "").orEmpty(),
         newsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, "").orEmpty(),
@@ -57,6 +53,7 @@ class SettingsStore(context: Context) {
         val key = keyInput.trim().ifBlank { read().apiKey }
         if (key.isBlank() || key.any { it.isWhitespace() }) return false
         val symbol = symbolInput.trim().uppercase(java.util.Locale.ROOT).ifBlank { "XAU/USD" }
+        if (symbol !in WatchCatalog.chartSymbols) return false
         val saved = prefs.edit().putString(KEY_API, key).putString(KEY_SYMBOL, symbol).commit()
         if (saved && prefs.getString(KEY_API, null) == key && prefs.getString(KEY_SYMBOL, null) == symbol) {
             _settings.value = read()
@@ -66,89 +63,17 @@ class SettingsStore(context: Context) {
         return false
     }
 
-    /** A workspace switch must hit disk before any non-Forex screen or monitor starts. */
-    @Synchronized
-    fun selectWorkspace(id: String): Boolean {
-        if (id !in setOf("forex", "crypto", "nobitex", "iran_stocks", "")) return false
-        val previous = read()
-        val sameSpace = id.isNotBlank() && previous.workspaceId == id
-        val saved = prefs.edit().putString(KEY_WORKSPACE, id)
-            .putBoolean(KEY_MONITOR, sameSpace && previous.backgroundMonitor)
-            .putBoolean(KEY_AUTO_PAPER, sameSpace && id == "forex" && previous.autoPaperTrading)
-            .commit()
-        if (saved && prefs.getString(KEY_WORKSPACE, null) == id) {
-            _settings.value = read()
-            return true
-        }
-        return false
-    }
-
-    /** A read-only market-data key, not an Agah/Nobitex trading token. Never prefill the UI. */
-    @Synchronized
-    fun saveStockDataKey(input: String): Boolean {
-        val key = input.trim()
-        if (!key.matches(Regex("[A-Za-z0-9_-]{10,80}"))) return false
-        val saved = prefs.edit().putString(KEY_STOCK_DATA, key).commit()
-        if (saved && prefs.getString(KEY_STOCK_DATA, null) == key) {
-            _settings.value = read()
-            return true
-        }
-        return false
-    }
-
     /**
-     * The user's own Nobitex trading token, entered explicitly on this device for the
-     * real-trading section. Nobitex tokens observed in official docs are long hex/alnum
-     * strings; this accepts a reasonably wide range without weakening the format.
+     * Switch ONLY the chart/signal symbol, without touching the stored key. Allowed set is the
+     * watch catalog (gold + major pairs); the write is commit-verified like every other setting.
+     * Works keyless: the Swissquote fallback feed serves ticks for any catalog pair.
      */
     @Synchronized
-    fun saveNobitexApiToken(input: String): Boolean {
-        val token = input.trim()
-        if (!token.matches(Regex("[A-Za-z0-9]{20,80}"))) return false
-        val saved = prefs.edit().putString(KEY_NOBITEX_TOKEN, token).commit()
-        if (saved && prefs.getString(KEY_NOBITEX_TOKEN, null) == token) {
-            _settings.value = read()
-            return true
-        }
-        return false
-    }
-
-    @Synchronized
-    fun clearNobitexApiToken(): Boolean {
-        val saved = prefs.edit().remove(KEY_NOBITEX_TOKEN).commit()
-        if (saved && prefs.getString(KEY_NOBITEX_TOKEN, null) == null) {
-            _settings.value = read()
-            return true
-        }
-        return false
-    }
-
-    /** Hard client-side notional cap for real Nobitex orders; a fat-finger guard, not a broker limit. */
-    @Synchronized
-    fun saveNobitexOrderCap(usdt: Double): Boolean {
-        if (!usdt.isFinite() || usdt < 5.0 || usdt > 500.0) return false
-        val saved = prefs.edit().putFloat(KEY_NOBITEX_CAP, usdt.toFloat()).commit()
-        if (saved && prefs.getFloat(KEY_NOBITEX_CAP, -1f).toDouble() == usdt) {
-            _settings.value = read()
-            return true
-        }
-        return false
-    }
-
-    @Synchronized
-    fun saveCryptoBaseUrl(url: String): Boolean {
-        val saved = prefs.edit().putString(KEY_CRYPTO_URL, url).commit()
-        if (saved && prefs.getString(KEY_CRYPTO_URL, null) == url) {
-            _settings.value = read()
-            return true
-        }
-        return false
-    }
-
-    @Synchronized
-    fun clearStockDataKey(): Boolean {
-        val saved = prefs.edit().remove(KEY_STOCK_DATA).commit()
-        if (saved && prefs.getString(KEY_STOCK_DATA, null) == null) {
+    fun saveChartSymbol(symbolInput: String): Boolean {
+        val symbol = symbolInput.trim().uppercase(java.util.Locale.ROOT)
+        if (symbol !in WatchCatalog.chartSymbols) return false
+        val saved = prefs.edit().putString(KEY_SYMBOL, symbol).commit()
+        if (saved && prefs.getString(KEY_SYMBOL, null) == symbol) {
             _settings.value = read()
             return true
         }
@@ -217,13 +142,8 @@ class SettingsStore(context: Context) {
             .putString(KEY_ALERT_SOUND_URI, next.alertSoundUri)
             .putString(KEY_ALERT_SOUND_NAME, next.alertSoundName)
             .putString(KEY_NEWS_URL, next.newsBaseUrl.trim())
-            .putString(KEY_CRYPTO_URL, next.cryptoBaseUrl.trim())
             .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
             .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
-            .putString(KEY_WORKSPACE, next.workspaceId)
-            .putString(KEY_STOCK_DATA, next.stockDataKey)
-            .putString(KEY_NOBITEX_TOKEN, next.nobitexApiToken)
-            .putFloat(KEY_NOBITEX_CAP, next.nobitexLiveOrderCapUsdt.toFloat())
             .apply()
         _settings.value = next
     }
@@ -249,13 +169,8 @@ class SettingsStore(context: Context) {
         private const val KEY_ALERT_SOUND_URI = "verified_alert_sound_uri"
         private const val KEY_ALERT_SOUND_NAME = "verified_alert_sound_name"
         private const val KEY_NEWS_URL = "news_base_url"
-        private const val KEY_CRYPTO_URL = "crypto_base_url"
         private const val KEY_NEWS_PAUSE = "pause_on_news"
         private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"
-        private const val KEY_WORKSPACE = "active_workspace"
-        private const val KEY_STOCK_DATA = "stock_data_readonly_key"
-        private const val KEY_NOBITEX_TOKEN = "nobitex_live_api_token"
-        private const val KEY_NOBITEX_CAP = "nobitex_live_order_cap_usdt"
         private const val KEY_NEWS_AI_KEY = "news_ai_client_key"
         private const val KEY_NEWS_AI_URL = "news_ai_client_base_url"
         private const val KEY_NEWS_AI_MODEL = "news_ai_client_model"

@@ -30,7 +30,6 @@ class WatchRepository(
     private val scope: CoroutineScope,
 ) {
     private val mutex = Mutex()
-    private var lastWorkspace = ""
     private var attemptedAtElapsed = 0L
     private var loaded = false
     private val _state = MutableStateFlow(WatchState())
@@ -61,26 +60,22 @@ class WatchRepository(
 
     private suspend fun refresh() = mutex.withLock {
         ensureLoaded()
-        val activeWorkspace = chartSettings.read().workspaceId
-        if (activeWorkspace == "forex" && MarketHours.forexWeekendClosed()) {
+        if (MarketHours.forexWeekendClosed()) {
             _state.value = _state.value.copy(refreshing = false,
-                error = "تعطیلی معمول فارکس؛ درخواست قیمت جدید XAU/USD ارسال نشد")
+                error = "تعطیلی معمول فارکس؛ درخواست قیمت جدید ارسال نشد")
             return@withLock
         }
-        if (activeWorkspace !in setOf("forex", "iran_stocks")) return@withLock
         val elapsed = SystemClock.elapsedRealtime()
-        if (lastWorkspace == activeWorkspace && attemptedAtElapsed != 0L &&
-            elapsed - attemptedAtElapsed in 0L until 180_000L) {
+        if (attemptedAtElapsed != 0L && elapsed - attemptedAtElapsed in 0L until 180_000L) {
             _state.value = _state.value.copy(error = "برای سهمیهٔ منابع، حداقل سه دقیقه بین دریافت‌های دیده‌بان صبر کنید")
             return@withLock
         }
-        lastWorkspace = activeWorkspace
         attemptedAtElapsed = elapsed
         _state.value = _state.value.copy(refreshing = true, error = null,
             lastAttemptAt = System.currentTimeMillis()) // attempt time, not quote freshness
         try {
             val selected = preferences.selections.value
-            val targets = WatchCatalog.forWorkspace(activeWorkspace).flatMap { symbol ->
+            val targets = WatchCatalog.symbols.flatMap { symbol ->
                 selected[symbol.id]?.enabledSources.orEmpty().mapNotNull { sourceId ->
                     val source = SourceCatalog.find(sourceId) ?: return@mapNotNull null
                     val code = symbol.providerCodes[sourceId] ?: return@mapNotNull null
@@ -88,7 +83,7 @@ class WatchRepository(
                 }
             }
             // Batch only requests that share both a provider AND a read-only key. A key is
-            // never sent to another provider; CoinGecko can fetch BTC/ETH in one request.
+            // never sent to another provider; Yahoo pairs can be fetched in one request.
             val results = withContext(Dispatchers.IO) {
                 targets.groupBy { it.source.id to it.key }.values.map { group ->
                     async {
@@ -98,27 +93,26 @@ class WatchRepository(
                     }
                 }.awaitAll().flatten()
             }
-            // A request that started in a space being left must not persist observations as
-            // though the newly selected space had made them. The old HTTP call may still finish.
-            if (chartSettings.read().workspaceId != activeWorkspace) return@withLock
             val updated = _state.value.quotes.mapValues { it.value.toMutableMap() }.toMutableMap()
             for ((target, incoming) in results) {
+                // providerCodes guarantees the mapped provider code is the same instrument and quote
+                // unit, so the symbol's unit is the true label (Twelve Data quotes USD/JPY in JPY).
+                val normalized = incoming.copy(unit = target.symbol.unit)
                 val quotes = updated.getOrPut(target.symbol.id) { mutableMapOf() }
-                if (incoming.price != null && incoming.error == null) {
-                    quotes[target.source.id] = incoming
-                    history.append(target.symbol.id, incoming)
+                if (normalized.price != null && normalized.error == null) {
+                    quotes[target.source.id] = normalized
+                    history.append(target.symbol.id, normalized)
                 } else {
                     // Keep old genuine observation and its ORIGINAL timestamp, but explicitly
                     // mark it cached/failed. Never make yesterday's price look fresh again.
                     val old = quotes[target.source.id]
-                    quotes[target.source.id] = old?.copy(stale = true, error = incoming.error)
-                        ?: incoming
+                    quotes[target.source.id] = old?.copy(stale = true, error = normalized.error)
+                        ?: normalized
                 }
             }
             _state.value = _state.value.copy(quotes = updated, lastAttemptAt = System.currentTimeMillis())
         } catch (e: Exception) {
-            if (chartSettings.read().workspaceId == activeWorkspace)
-                _state.value = _state.value.copy(error = "به‌روزرسانی دیده‌بان انجام نشد: ${e.message ?: "خطای داده"}")
+            _state.value = _state.value.copy(error = "به‌روزرسانی دیده‌بان انجام نشد: ${e.message ?: "خطای داده"}")
         } finally {
             _state.value = _state.value.copy(refreshing = false)
         }
@@ -136,7 +130,7 @@ class WatchRepository(
     }
 
     suspend fun clearHistory() = mutex.withLock {
-        val ids = WatchCatalog.forWorkspace(chartSettings.read().workspaceId).map { it.id }
+        val ids = WatchCatalog.symbols.map { it.id }
         history.clear(ids)
         _state.value = _state.value.copy(quotes = _state.value.quotes.mapValues { (symbolId, quotes) ->
             if (symbolId in ids) quotes.filterValues { !it.stale } else quotes

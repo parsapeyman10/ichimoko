@@ -3,31 +3,20 @@ package com.aurum.edge.core
 import android.content.Context
 import android.net.Uri
 import com.aurum.edge.data.CandleCache
-import com.aurum.edge.data.CryptoRepository
 import com.aurum.edge.data.DataFeedException
 import com.aurum.edge.data.FreeHistoryDownloader
 import com.aurum.edge.data.FreeHistoryResult
 import com.aurum.edge.data.ForexCalendarRepository
 import com.aurum.edge.data.HistDataCsv
 import com.aurum.edge.data.JournalStore
-import com.aurum.edge.data.IranEquityRepository
 import com.aurum.edge.data.MarketRepository
 import com.aurum.edge.data.MetaTraderCsv
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.MetaTraderImporter
 import com.aurum.edge.data.NewsRepository
 import com.aurum.edge.data.PublicWebNewsRepository
-import com.aurum.edge.data.PublicCryptoMarket
 import com.aurum.edge.data.PublicNewsCategory
 import com.aurum.edge.data.PublicNewsFeeds
-import com.aurum.edge.data.NobitexPublicData
-import com.aurum.edge.data.NobitexSpotScanner
-import com.aurum.edge.data.NobitexSpotResearch
-import com.aurum.edge.data.NobitexPracticeStore
-import com.aurum.edge.data.NobitexLiveTradeStore
-import com.aurum.edge.data.NobitexTradingClient
-import com.aurum.edge.data.NobitexSnapshot
-import com.aurum.edge.data.CryptoFundamentalsRepository
 import com.aurum.edge.data.PaperAutoTrader
 import com.aurum.edge.data.PaperOpportunityStore
 import com.aurum.edge.data.SettingsStore
@@ -51,6 +40,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Process-wide wiring. Single source of truth for settings, real market data, journal and engine.
+ * Forex/currency-pair workspace only: gold (XAU/USD) plus the major FX pairs.
  */
 class AppContainer(context: Context) {
 
@@ -60,28 +50,16 @@ class AppContainer(context: Context) {
     val candleCache = CandleCache(appContext)
     val journalStore = JournalStore(appContext)
     val opportunityStore = PaperOpportunityStore(appContext)
-    val nobitexPublic = NobitexPublicData()
-    val nobitexSpotScanner = NobitexSpotScanner()
-    val nobitexPractice = NobitexPracticeStore(appContext)
-    /** REAL order execution against the user's own Nobitex account; separate from the paper store above. */
-    val nobitexTrading = NobitexTradingClient()
-    val nobitexLiveTrades = NobitexLiveTradeStore(appContext)
     val client = TwelveDataClient()
     val market = MarketRepository(appContext, client, candleCache, settingsStore, journalStore)
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    val nobitexCatalog = com.aurum.edge.data.NobitexMarketCatalog(appScope)
-    val nobitexResearch = NobitexSpotResearch(nobitexSpotScanner, settingsStore, appScope)
     val watchSettings = WatchSettingsStore(appContext)
     val quoteHistory = QuoteHistoryStore(appContext)
     val watch = WatchRepository(SourceFetcher(), quoteHistory, watchSettings, settingsStore, appScope)
-    // Separate display feeds: global-crypto news cannot appear in the Forex research context.
+    // Forex publisher headlines only: FXStreet/BLS feed the research context, never the AI gate.
     val publicWebNews = PublicWebNewsRepository(appScope,
         feeds = PublicNewsFeeds.all.filter { it.category in setOf(PublicNewsCategory.MARKETS, PublicNewsCategory.ECONOMY) })
-    val cryptoWebNews = PublicWebNewsRepository(appScope,
-        feeds = PublicNewsFeeds.all.filter { it.category == PublicNewsCategory.CRYPTO })
-    val iranWebNews = PublicWebNewsRepository(appScope,
-        feeds = PublicNewsFeeds.all.filter { it.category == PublicNewsCategory.IRAN })
     val forexCalendar = ForexCalendarRepository(appScope) // public schedule UI; server checks it independently for the AI gate
     // Backend server mode (preferred if configured) OR direct-from-phone client mode (publicWebNews
     // + forexCalendar + the user's own key) — see NewsRepository's class doc.
@@ -98,11 +76,6 @@ class AppContainer(context: Context) {
         IctEntryRules.withSafePlan(verified)
     }.stateIn(appScope, SharingStarted.Eagerly, market.state.value.copy(signal = null))
     val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore, verifiedMarket)
-    val crypto = CryptoRepository(settingsStore, appScope)
-    val publicCrypto = PublicCryptoMarket(appScope) // keyless market overview, NOT the server's two-source screener
-    val equities = IranEquityRepository(settingsStore, appScope, quoteHistory)
-    // Reuses the SAME NobitexPublicData instance/rate-limit as the paper-trading screen.
-    val cryptoFundamentals = CryptoFundamentalsRepository(nobitexPublic, appScope)
     val freeHistory = FreeHistoryDownloader()
     val metaTraderImporter = MetaTraderImporter(appContext)
 
@@ -114,12 +87,6 @@ class AppContainer(context: Context) {
         val stream = appContext.contentResolver.openOutputStream(uri, "wt")
             ?: throw IllegalArgumentException("فایل مقصد برای ذخیره باز نشد")
         stream.bufferedWriter(Charsets.UTF_8).use { it.write(FreeHistoryDownloader.csv(result)) }
-    }
-
-    suspend fun exportNobitexCsv(uri: Uri, snapshot: NobitexSnapshot) = withContext(Dispatchers.IO) {
-        val stream = appContext.contentResolver.openOutputStream(uri, "wt")
-            ?: throw IllegalArgumentException("فایل مقصد برای ذخیره باز نشد")
-        stream.bufferedWriter(Charsets.UTF_8).use { it.write(NobitexPublicData.csv(snapshot)) }
     }
 
     /** PDF of REAL, already-saved journal trades only — same [PerformanceMetrics] the on-screen panel uses. */

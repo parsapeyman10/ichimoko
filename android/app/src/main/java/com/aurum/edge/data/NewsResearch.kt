@@ -6,7 +6,6 @@ import kotlin.math.max
 /** Explanations of *observed* publisher data; never NewsGate, AI evidence or a trade direction. */
 enum class ResearchState { SCHEDULED, AWAITING_RESULT, PUBLISHED, CONTEXT, UNKNOWN }
 data class ResearchNote(val state: ResearchState, val title: String, val detail: String)
-enum class ResearchSpace { FOREX, CRYPTO, NOBITEX, IRAN_STOCKS }
 
 object NewsResearch {
     private val number = Regex("^([+-]?(?:\\d{1,3}(?:,\\d{3})+|\\d+)(?:\\.\\d+)?)\\s*(%|[kmb]|bp)?$", RegexOption.IGNORE_CASE)
@@ -55,12 +54,8 @@ object NewsResearch {
     /** A headline alone proves neither its full article nor the market's reaction. Explicit
      * feed-category and receipt checks prevent using a cached headline as breaking news.
      */
-    fun headline(item: PublicHeadline, state: PublicWebNewsState, space: ResearchSpace, now: Long): ResearchNote {
-        val categoryAllowed = when (space) {
-            ResearchSpace.FOREX -> item.feed.category in setOf(PublicNewsCategory.MARKETS, PublicNewsCategory.ECONOMY)
-            ResearchSpace.CRYPTO, ResearchSpace.NOBITEX -> item.feed.category == PublicNewsCategory.CRYPTO
-            ResearchSpace.IRAN_STOCKS -> item.feed.category == PublicNewsCategory.IRAN
-        }
+    fun headline(item: PublicHeadline, state: PublicWebNewsState, now: Long): ResearchNote {
+        val categoryAllowed = item.feed.category in setOf(PublicNewsCategory.MARKETS, PublicNewsCategory.ECONOMY)
         val health = state.feeds.singleOrNull { it.feed.id == item.feed.id }
         val receiptRecent = health?.checkedAt?.let { item.receivedAt in (it - 30_000L)..(it + 30_000L) } == true
         if (!categoryAllowed || state.loading || health?.online(now) != true || !receiptRecent ||
@@ -69,24 +64,13 @@ object NewsResearch {
                 "تازگی خوراک/انتشار یا تعلق آن به این فضا تأیید نیست؛ از تیتر نتیجهٔ بازار استخراج نمی‌شود.")
         }
         val text = item.title.lowercase()
-        val theme = when (space) {
-            ResearchSpace.FOREX -> when {
-                listOf("fed", "fomc", "rate", "yield", "cpi", "pce", "payroll", "inflation", "gold", "xau", "usd")
-                    .any(text::contains) -> "عنوان به سیاست پولی، دادهٔ اقتصاد آمریکا یا طلا اشاره می‌کند؛ تقویم Forex Factory/عدد رسمی را جدا بررسی کنید. "
-                else -> "ارتباط مستقیم عنوان با XAU/USD تأیید نشده است. "
-            }
-            ResearchSpace.CRYPTO, ResearchSpace.NOBITEX -> when {
-                listOf("hack", "exploit", "breach", "attack", "security").any(text::contains) ->
-                    "عنوان به موضوع امنیت اشاره دارد؛ دامنه/زیان یا اثر روی جفت معاملاتی هنوز تأیید نشده است. "
-                listOf("etf", "regulation", "sec ", "regulator").any(text::contains) ->
-                    "عنوان به صندوق یا مقررات اشاره دارد؛ اثر قیمت و قوانین بازار محلی هنوز تأیید نشده است. "
-                else -> "دامنهٔ دارایی و تأثیر قیمت از این تیتر به‌تنهایی معلوم نیست. "
-            }
-            ResearchSpace.IRAN_STOCKS -> "این تیتر اقتصاد عمومی است؛ گزارش رسمی نماد/صورت مالی کدال و تاریخ مستقل تابلو از آن تأیید نمی‌شود. "
+        val theme = when {
+            listOf("fed", "fomc", "rate", "yield", "cpi", "pce", "payroll", "inflation", "gold", "xau", "usd",
+                "eur", "gbp", "jpy", "dollar", "euro", "pound", "yen")
+                .any(text::contains) -> "عنوان به سیاست پولی، دادهٔ اقتصاد آمریکا یا بازار ارز/طلا اشاره می‌کند؛ تقویم Forex Factory/عدد رسمی را جدا بررسی کنید. "
+            else -> "ارتباط مستقیم عنوان با جفت‌ارز فعال تأیید نشده است. "
         }
-        val exchange = if (space == ResearchSpace.NOBITEX)
-            "CoinDesk اطلاعیهٔ رسمی نوبیتکس یا تأیید بازار ریالی/USDT نیست. " else ""
         return ResearchNote(ResearchState.CONTEXT, "برداشت محدود از تیتر ناشر",
-            "$theme${exchange}متن کامل ناشر و واکنش قیمت/حجم را جدا بررسی کنید؛ نه AI، نه پیش‌بینی و نه مجوز معامله.")
+            "$themeمتن کامل ناشر و واکنش قیمت/حجم را جدا بررسی کنید؛ نه AI، نه پیش‌بینی و نه مجوز معامله.")
     }
 }

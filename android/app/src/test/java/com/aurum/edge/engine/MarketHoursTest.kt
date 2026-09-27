@@ -19,12 +19,4 @@ class MarketHoursTest {
         assertFalse(MarketHours.forexWeekendClosed(at("2026-12-28T15:00:00Z"))) // weekday schedule, holiday unknown
     }
 
-    @Test fun `iran equities are not polled outside ordinary Tehran session`() {
-        assertFalse(MarketHours.iranStockSessionScheduled(at("2026-09-25T07:00:00Z"))) // Friday
-        assertFalse(MarketHours.iranStockSessionScheduled(at("2026-09-26T05:29:00Z"))) // Saturday 08:59
-        assertTrue(MarketHours.iranStockSessionScheduled(at("2026-09-26T05:30:00Z"))) // Saturday 09:00
-        assertTrue(MarketHours.iranStockSessionScheduled(at("2026-09-26T08:59:00Z"))) // 12:29
-        assertFalse(MarketHours.iranStockSessionScheduled(at("2026-09-26T09:00:00Z"))) // 12:30
-        assertTrue(MarketHours.labelForWorkspace("nobitex").contains("۲۴ساعته"))
-    }
 }

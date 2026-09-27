@@ -289,7 +289,7 @@ class NewsRepository(
     companion object {
         /** Reject credentials, arbitrary paths/queries, cleartext or non-standard ports. */
         fun apiUrl(base: String, path: String): String? {
-            if (path !in setOf("news/web", "crypto/candidates")) return null
+            if (path != "news/web") return null
             val uri = runCatching { URI(base.trim()) }.getOrNull() ?: return null
             if (uri.scheme != "https" || uri.host.isNullOrBlank() || uri.rawUserInfo != null ||
                 uri.port !in listOf(-1, 443) || uri.path !in listOf("", "/") ||
@@ -298,7 +298,6 @@ class NewsRepository(
         }
 
         fun newsUrl(base: String): String? = apiUrl(base, "news/web")
-        fun cryptoUrl(base: String): String? = apiUrl(base, "crypto/candidates")
     }
 }
 

@@ -8,7 +8,6 @@ import com.aurum.edge.data.PublicFeedState
 import com.aurum.edge.data.PublicHeadline
 import com.aurum.edge.data.PublicNewsFeeds
 import com.aurum.edge.data.PublicWebNewsState
-import com.aurum.edge.data.ResearchSpace
 import com.aurum.edge.data.ResearchState
 import com.aurum.edge.data.parseForexCalendar
 import kotlinx.serialization.json.Json
@@ -58,20 +57,19 @@ class NewsResearchTest {
             released.copy(checkedAt = now - 10 * 60_000L), now).state)
     }
 
-    @Test fun `cross workspace cached and outdated publisher headlines never become insight evidence`() {
-        val feed = PublicNewsFeeds.all.single { it.id == "coindesk" }
-        val item = PublicHeadline("Bitcoin ETF update", "Excerpt", "https://www.coindesk.com/a", now - 60_000L,
-            now, feed)
+    @Test fun `cached and outdated publisher headlines never become insight evidence`() {
+        val feed = PublicNewsFeeds.all.single { it.id == "fxstreet" }
+        val item = PublicHeadline("Dollar steady ahead of Fed rate decision", "Excerpt",
+            "https://www.fxstreet.com/a", now - 60_000L, now, feed)
         val fresh = PublicWebNewsState(headlines = listOf(item),
             feeds = listOf(PublicFeedHealth(feed, PublicFeedState.ONLINE, now)))
-        assertEquals(ResearchState.CONTEXT, NewsResearch.headline(item, fresh, ResearchSpace.CRYPTO, now).state)
-        assertEquals(ResearchState.UNKNOWN, NewsResearch.headline(item, fresh, ResearchSpace.FOREX, now).state)
-        assertTrue(NewsResearch.headline(item, fresh, ResearchSpace.NOBITEX, now).detail.contains("اطلاعیهٔ رسمی نوبیتکس"))
-        assertEquals(ResearchState.UNKNOWN, NewsResearch.headline(item, fresh.copy(loading = true),
-            ResearchSpace.CRYPTO, now).state)
-        assertEquals(ResearchState.UNKNOWN, NewsResearch.headline(item, fresh, ResearchSpace.CRYPTO,
+        assertEquals(ResearchState.CONTEXT, NewsResearch.headline(item, fresh, now).state)
+        assertEquals(ResearchState.UNKNOWN, NewsResearch.headline(item, fresh.copy(loading = true), now).state)
+        assertEquals(ResearchState.UNKNOWN, NewsResearch.headline(item, fresh,
             now + 24 * 3_600_000L).state)
         assertEquals(ResearchState.UNKNOWN, NewsResearch.headline(item, fresh.copy(feeds = listOf(
-            PublicFeedHealth(feed, PublicFeedState.FAILED, now))), ResearchSpace.CRYPTO, now).state)
+            PublicFeedHealth(feed, PublicFeedState.FAILED, now))), now).state)
+        assertEquals(ResearchState.CONTEXT, NewsResearch.headline(PublicHeadline("Euro extends gains vs dollar",
+            "", "https://www.fxstreet.com/b", now - 60_000L, now, feed), fresh, now).state)
     }
 }

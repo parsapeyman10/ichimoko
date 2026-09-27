@@ -36,10 +36,6 @@ object FreeHistoryCatalog {
             "World Bank Pink Sheet از DataHub · بدون کلید", "https://datahub.io/core/gold-prices"),
         FreeHistoryChoice("gold-spot", "XAU/USD · اسپات روزانه (مشروط)", "XAU/USD", FreeHistoryKind.TWELVE_DAILY,
             "Twelve Data · دسترسی Commodities ممکن است پولی باشد", "https://twelvedata.com/docs/market-data/time-series"),
-        FreeHistoryChoice("aapl-stock", "AAPL · سهم آمریکا روزانه", "AAPL", FreeHistoryKind.TWELVE_DAILY,
-            "Twelve Data · کلید رایگان داده‌خوانی", "https://twelvedata.com/docs/market-data/time-series"),
-        FreeHistoryChoice("msft-stock", "MSFT · سهم آمریکا روزانه", "MSFT", FreeHistoryKind.TWELVE_DAILY,
-            "Twelve Data · کلید رایگان داده‌خوانی", "https://twelvedata.com/docs/market-data/time-series"),
     )
 
     fun find(id: String): FreeHistoryChoice? = choices.firstOrNull { it.id == id }
@@ -197,7 +193,6 @@ class FreeHistoryDownloader(
                 val rawVolume = bar.text("volume")
                 val volume = rawVolume?.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0.0 }
                 require(rawVolume == null || volume != null) { "حجم کندل معتبر نیست" }
-                if (choice.code in setOf("AAPL", "MSFT")) require(volume != null) { "حجم سهم گزارش نشده است" }
                 DailyOhlc(date, open, high, low, close, volume)
             }
         }.sortedBy { it.date }

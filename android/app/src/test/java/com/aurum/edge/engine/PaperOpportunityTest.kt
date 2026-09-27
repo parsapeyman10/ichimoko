@@ -40,7 +40,7 @@ class PaperOpportunityTest {
     private val now = 1_800_000_000_000L
     private val bar = now - Interval.M5.millis
     private val config = AppSettings(backgroundMonitor = true, notifyOnSignal = true,
-        autoPaperTrading = false, accountBalance = 100.0, workspaceId = "forex")
+        autoPaperTrading = false, accountBalance = 100.0)
     private val news = PersianNewsState(
         articles = listOf(PersianHeadline("id", "Gold and USD", "", "Publisher",
             "https://publisher.example/article", now - 60_000, "LOW", "BUY", "rules")),
@@ -85,7 +85,7 @@ class PaperOpportunityTest {
             assertNotNull("tech $i", PaperAlertRules.blocker(market.copy(signal =
                 NewsConfluence.apply(fail, "XAU/USD", news, now)), config, news, emptyList(), snapshot, now))
         }
-        assertNotNull(PaperAlertRules.blocker(market.copy(symbol = "BTC/USDT"), config, news, emptyList(), snapshot, now))
+        assertNotNull(PaperAlertRules.blocker(market.copy(symbol = "XAG/USD"), config, news, emptyList(), snapshot, now))
     }
 
     @Test fun candidateDedupsAcrossRestartAndKeepsItsOwnHistoryOutOfTradeStatistics() = runBlocking {

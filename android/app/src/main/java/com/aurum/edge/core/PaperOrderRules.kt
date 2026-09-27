@@ -29,8 +29,8 @@ object PaperOrderRules {
         riskPercent: Double,
     ): PaperTicket {
         require(side != SignalAction.NO_TRADE) { "جهت لانگ یا شورت را انتخاب کنید" }
-        require(symbol.matches(Regex("[A-Z0-9]{2,12}/(USD|USDT)"))) {
-            "محاسبهٔ ریسک دلاری فقط برای جفت‌ارزهای /USD یا /USDT معتبر است"
+        require(symbol.matches(Regex("[A-Z0-9]{2,12}/USD"))) {
+            "محاسبهٔ ریسک دلاری فقط برای جفت‌ارزهای /USD معتبر است"
         }
         require(entry.isFinite() && stop.isFinite() && target.isFinite() &&
             entry > 0.0 && stop > 0.0 && target > 0.0) { "قیمت یا حد ضرر/سود معتبر نیست" }

@@ -60,7 +60,7 @@ class QuoteHistoryStore(context: Context) : SQLiteOpenHelper(context, "watch_quo
         ).use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else 0L }
     }
 
-    /** Clear only the explicitly selected workspace; one space must never erase another's history. */
+    /** Clear only the watch symbols of this app; journal and settings stay untouched. */
     suspend fun clear(symbolIds: List<String>) = withContext(Dispatchers.IO) {
         if (symbolIds.isNotEmpty()) {
             writableDatabase.delete("quote_history",

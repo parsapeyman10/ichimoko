@@ -30,12 +30,13 @@ import java.time.format.DateTimeFormatter
 
 class PublicWebNewsTest {
     private val now = Instant.parse("2026-09-24T12:00:00Z").toEpochMilli()
-    private val fa = PublicNewsFeeds.all.first { it.id == "irib" }
+    // Synthetic Persian publisher only for parser tests; the shipped catalog stays MARKETS/ECONOMY.
+    private val fa = PublicFeed("test_fa", "آزمون · فارکس", "https://www.example-fa.org/rss", "fa", PublicNewsCategory.MARKETS, 48)
     private val en = PublicNewsFeeds.all.first { it.id == "fxstreet" }
     private val atom = PublicNewsFeeds.all.first { it.id == "bls_cpi" }
 
     private fun rss(title: String = "قیمت طلا و دلار در بازار", date: String = "Thu, 24 Sep 2026 11:40:00 GMT",
-                    url: String = "https://www.irib-news.ir/fa/news/123") = """
+                    url: String = "https://www.example-fa.org/fa/news/123") = """
         <?xml version="1.0"?><rss version="2.0"><channel><title>اقتصاد</title>
         <item><title>$title</title><link>$url</link><pubDate>$date</pubDate>
         <description>&lt;p&gt;خبر کوتاه &amp;amp; منبع&lt;/p&gt;</description></item></channel></rss>
@@ -67,9 +68,9 @@ class PublicWebNewsTest {
         assertTrue(parsePublicFeed(rss(date = "24 Sep 2026 11:40"), fa, now).isEmpty())
         assertTrue(parsePublicFeed(rss(date = "Thu, 24 Sep 2026 12:16:00 GMT"), fa, now).isEmpty())
         assertTrue(parsePublicFeed(rss(date = "Mon, 21 Sep 2026 11:40:00 GMT"), fa, now).isEmpty())
-        assertTrue(parsePublicFeed(rss(url = "https://www.irib-news.ir.evil.com/article"), fa, now).isEmpty())
-        assertTrue(parsePublicFeed(rss(url = "http://www.irib-news.ir/article"), fa, now).isEmpty())
-        assertTrue(parsePublicFeed(rss(url = "https://thief@www.irib-news.ir/article"), fa, now).isEmpty())
+        assertTrue(parsePublicFeed(rss(url = "https://www.example-fa.org.evil.com/article"), fa, now).isEmpty())
+        assertTrue(parsePublicFeed(rss(url = "http://www.example-fa.org/article"), fa, now).isEmpty())
+        assertTrue(parsePublicFeed(rss(url = "https://thief@www.example-fa.org/article"), fa, now).isEmpty())
         assertTrue(parsePublicFeed(rss(title = "US CPI today"), fa, now).isEmpty())
         assertEquals(null, safePublisherLink("javascript:alert(1)", fa))
         assertEquals(null, safePublisherLink("https://www.fxstreet.com:444/news/1", en))
@@ -97,13 +98,13 @@ class PublicWebNewsTest {
         val stamp = DateTimeFormatter.RFC_1123_DATE_TIME.withZone(ZoneOffset.UTC)
             .format(Instant.ofEpochMilli(current - 5 * 60_000L))
         val feedA = fa
-        val feedB = fa.copy(id = "second", title = "آینهٔ آزمون", url = "https://www.yjc.ir/fa/rss/6")
+        val feedB = fa.copy(id = "second", title = "آینهٔ آزمون", url = "https://www.example-fa2.org/rss")
         var tick = 1_000L
         var failSecond = false
         val client = OkHttpClient.Builder().addInterceptor { chain ->
-            val second = chain.request().url.host == "www.yjc.ir"
+            val second = chain.request().url.host == "www.example-fa2.org"
             val code = if (second && failSecond) 503 else 200
-            val link = if (second) "https://www.yjc.ir/fa/news/456" else "https://www.irib-news.ir/fa/news/123"
+            val link = if (second) "https://www.example-fa2.org/fa/news/456" else "https://www.example-fa.org/fa/news/123"
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(code)
                 .message("unit test").body(rss(date = stamp, url = link).toResponseBody("application/rss+xml".toMediaType()))
                 .build()

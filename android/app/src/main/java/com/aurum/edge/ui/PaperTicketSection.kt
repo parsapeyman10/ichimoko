@@ -80,7 +80,7 @@ fun PaperTicketSection(viewModel: AurumViewModel, market: MarketState) {
             Text(if (side == SignalAction.BUY) "بررسی و ثبت لانگ کاغذی" else "بررسی و ثبت شورت کاغذی",
                 fontWeight = FontWeight.Bold)
         }
-        Text("حجم کسری صرفاً فرض پژوهشی است؛ حداقل لات، کارمزد، اسلیپیج و مارجین بروکر بررسی نشده‌اند. شورت spot Nobitex امکان‌پذیر فرض نمی‌شود. سقف ارزش فرضی: ۳× موجودی.",
+        Text("حجم کسری صرفاً فرض پژوهشی است؛ حداقل لات، کارمزد، اسلیپیج و مارجین بروکر بررسی نشده‌اند. سقف ارزش فرضی: ۳× موجودی.",
             modifier = Modifier.padding(top = 7.dp), style = MaterialTheme.typography.labelSmall,
             color = AurumColors.TextMuted)
     }

@@ -12,15 +12,15 @@ import org.junit.Test
 
 class WatchAndMetricsTest {
     private val now = 1_700_000_000_000L
-    private val btc = WatchCatalog.find("BTC/USD")!!
+    private val eur = WatchCatalog.find("EUR/USD")!!
     private fun quote(source: String, price: Double, at: Long? = now, cached: Boolean = false): Quote = Quote(
-        code = "BTC", label = "بیت‌کوین", price = price, unit = "$", sourceId = source,
+        code = "EUR", label = "یورو", price = price, unit = "$", sourceId = source,
         ts = now, providerAt = at, stale = cached,
     )
 
     @Test fun twoIndependentFreshSourcesAgree() {
-        val ids = btc.defaultSources
-        val result = SourceComparison.verify(btc, ids, mapOf(
+        val ids = eur.defaultSources
+        val result = SourceComparison.verify(eur, ids, mapOf(
             ids[0] to quote(ids[0], 100.0), ids[1] to quote(ids[1], 100.3),
         ), now)
         assertEquals(VerificationStatus.CONFIRMED, result.status)
@@ -28,21 +28,21 @@ class WatchAndMetricsTest {
     }
 
     @Test fun conflictCannotBeConfirmedByOldCacheOrMissingTimestamps() {
-        val ids = btc.defaultSources
-        assertEquals(VerificationStatus.CONFLICT, SourceComparison.verify(btc, ids, mapOf(
+        val ids = eur.defaultSources
+        assertEquals(VerificationStatus.CONFLICT, SourceComparison.verify(eur, ids, mapOf(
             ids[0] to quote(ids[0], 100.0), ids[1] to quote(ids[1], 107.0),
         ), now).status)
-        assertEquals(VerificationStatus.UNVERIFIED, SourceComparison.verify(btc, ids, mapOf(
+        assertEquals(VerificationStatus.UNVERIFIED, SourceComparison.verify(eur, ids, mapOf(
             ids[0] to quote(ids[0], 100.0), ids[1] to quote(ids[1], 100.1, cached = true),
         ), now).status)
-        assertEquals(VerificationStatus.UNVERIFIED, SourceComparison.verify(btc, ids, mapOf(
+        assertEquals(VerificationStatus.UNVERIFIED, SourceComparison.verify(eur, ids, mapOf(
             ids[0] to quote(ids[0], 100.0), ids[1] to quote(ids[1], 100.1, at = null),
         ), now).status)
-        assertEquals(VerificationStatus.UNVERIFIED, SourceComparison.verify(btc, ids, mapOf(
-            ids[0] to quote(ids[0], 100.0), ids[1] to quote(ids[1], 100.1, at = now - btc.maxAgeMillis - 1),
+        assertEquals(VerificationStatus.UNVERIFIED, SourceComparison.verify(eur, ids, mapOf(
+            ids[0] to quote(ids[0], 100.0), ids[1] to quote(ids[1], 100.1, at = now - eur.maxAgeMillis - 1),
         ), now).status)
-        assertEquals(VerificationStatus.NO_DATA, SourceComparison.verify(btc, ids, emptyMap(), now).status)
-        assertTrue(!SourceComparison.isFresh(btc, quote(ids[0], Double.POSITIVE_INFINITY), now))
+        assertEquals(VerificationStatus.NO_DATA, SourceComparison.verify(eur, ids, emptyMap(), now).status)
+        assertTrue(!SourceComparison.isFresh(eur, quote(ids[0], Double.POSITIVE_INFINITY), now))
     }
 
     @Test fun eighteenMetricsComeOnlyFromSettledOutcomes() {
