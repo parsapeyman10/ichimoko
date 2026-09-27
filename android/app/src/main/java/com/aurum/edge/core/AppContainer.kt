@@ -97,7 +97,7 @@ class AppContainer(context: Context) {
     val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore, verifiedMarket)
     val crypto = CryptoRepository(settingsStore, appScope)
     val publicCrypto = PublicCryptoMarket(appScope) // keyless market overview, NOT the server's two-source screener
-    val equities = IranEquityRepository(settingsStore, appScope)
+    val equities = IranEquityRepository(settingsStore, appScope, quoteHistory)
     // Reuses the SAME NobitexPublicData instance/rate-limit as the paper-trading screen.
     val cryptoFundamentals = CryptoFundamentalsRepository(nobitexPublic, appScope)
     val freeHistory = FreeHistoryDownloader()
@@ -118,6 +118,12 @@ class AppContainer(context: Context) {
             ?: throw IllegalArgumentException("فایل مقصد برای ذخیره باز نشد")
         stream.bufferedWriter(Charsets.UTF_8).use { it.write(NobitexPublicData.csv(snapshot)) }
     }
+
+    /** PDF of REAL, already-saved journal trades only — same [PerformanceMetrics] the on-screen panel uses. */
+    suspend fun exportJournalPdf(uri: Uri, title: String, trades: List<PaperTrade>, startingBalance: Double) =
+        withContext(Dispatchers.IO) {
+            com.aurum.edge.data.JournalPdfExporter.export(appContext, uri, title, trades, startingBalance)
+        }
 
     /** Download real candles from the provider (no fallback, throws on failure). */
     suspend fun fetchCandles(interval: Interval, outputSize: Int): List<Candle> {

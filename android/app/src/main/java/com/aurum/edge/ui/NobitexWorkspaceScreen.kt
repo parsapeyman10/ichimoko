@@ -28,7 +28,7 @@ fun NobitexWorkspaceScreen(viewModel: AurumViewModel) {
         // it must be the first thing visible after opening the Nobitex workspace — no scrolling
         // past the practice/training cards to find it.
         NobitexLiveTradingSection(viewModel) // REAL orders, REAL money — visually isolated (red border)
-        NobitexJournalSignalSection(viewModel) // same SignalEngine + same JournalStore as gold
+        NobitexChartScreen(viewModel) // real candlestick chart + same SignalEngine as gold + paper/backtest
         SectionCard("اتصال رسمی نوبیتکس (اطلاعات)", "کلید حساب فقط برای بخش قرمز «معاملهٔ واقعی نوبیتکس» در بالای همین صفحه لازم است") {
             Text("کارت‌های آموزشی/تمرینی پایین‌تر به هیچ کلیدی نیاز ندارند و کاملاً کاغذی‌اند.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)

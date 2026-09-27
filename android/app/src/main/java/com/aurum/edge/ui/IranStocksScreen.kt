@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.data.EquityBoardStatus
+import com.aurum.edge.data.EquityFundamentalScore
 import com.aurum.edge.data.EquityRow
 import com.aurum.edge.data.TtmResearch
 import com.aurum.edge.ui.components.Pill
@@ -129,7 +130,24 @@ fun IranStocksScreen(viewModel: AurumViewModel) {
                 if (shown.isEmpty()) Text("نمادی در این پاسخ پیدا نشد.",
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
             }
-            shown.forEach { row -> EquityRowCard(row, recentReceipt) }
+            shown.forEach { row -> EquityRowCard(row, recentReceipt, state.fundamentals[row.isin]) }
+            SectionCard("چند روش تحلیل بنیادی (بدون کدال، فقط از همین تابلو + دیدهٔ قبلی ما)",
+                "روش۱: پرسنتایل P/E ارزان‌تر روی کل تابلو · روش۲: ترکیب گردش/توان حقیقی/اسپرد · روش۳: روند نسبت به دیدهٔ قبلی ما از همین نماد") {
+                Text("روش۱ و روش۲ صرفاً مقایسهٔ همین لحظهٔ تابلو با خودش‌اند؛ هیچ‌کدام درآمد/سودآوری واقعی شرکت را نمی‌سنجند (آن نیازمند گزارش رسمی کدال است که هنوز خودکار قابل استخراج نیست — دکمهٔ کدال زیر هر سهم را ببینید). روش۳ فقط پس از دومین بار باز کردن این صفحه برای همان سهم مقدار می‌گیرد.",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+                val ranked = remember(state.fundamentals) {
+                    state.fundamentals.values.filter { it.compositeScore != null }.sortedByDescending { it.compositeScore }.take(15)
+                }
+                if (ranked.isEmpty()) Text("هنوز امتیاز کافی برای رتبه‌بندی نداریم؛ ابتدا تابلو را دریافت کنید.",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
+                else Text("۱۵ سهم برتر بر اساس میانگین ساده روش۱+روش۲ (بدون روش۳؛ روند جدا نمایش داده می‌شود):",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 6.dp))
+                ranked.forEachIndexed { index, f ->
+                    Text("${index + 1}. ${f.row.symbol} · ترکیبی ${f.compositeScore.asBoardNumber()} (ارزش ${f.valuePercentile.asBoardNumber()} / کیفیت ${f.qualityScore.asBoardNumber()})" +
+                        (f.momentumPct?.let { " · روند ${it.asBoardNumber()}٪" } ?: ""),
+                        style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary, modifier = Modifier.padding(top = 3.dp))
+                }
+            }
             SectionCard("همهٔ سهم‌های عبوری از غربال عددی (کامل، بدون سقف ۱۲تایی)",
                 "${state.rows.size} نماد کل تابلو بررسی شد · ${qualified.size} مورد عبوری") {
                 Text("این فهرست تمام تابلوی دریافتی را می‌گردد، نه فقط ۱۲ ردیف پرگردش بالا. عبور عددی به معنی سود تضمینی یا تأیید CAN SLIM نیست؛ ساعت تابلو تاریخ مستقل معامله ندارد.",
@@ -139,14 +157,14 @@ fun IranStocksScreen(viewModel: AurumViewModel) {
                 else if (qualified.isEmpty()) Text("هیچ نمادی در این پاسخ از هر دو فیلتر عبور نکرد.",
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
             }
-            qualified.forEach { row -> EquityRowCard(row, recentReceipt) }
+            qualified.forEach { row -> EquityRowCard(row, recentReceipt, state.fundamentals[row.isin]) }
         }
         TtmCalculator()
     }
 }
 
 @Composable
-private fun EquityRowCard(row: EquityRow, recentReceipt: Boolean) {
+private fun EquityRowCard(row: EquityRow, recentReceipt: Boolean, fundamental: EquityFundamentalScore? = null) {
     val basic = row.basicValuePass && row.boardPass
     val browser = LocalUriHandler.current
     SectionCard("${row.symbol} · ${row.name}", "${row.isin} · ساعت اعلام‌شده ${row.boardClock} (تاریخ نامشخص)",
@@ -158,6 +176,11 @@ private fun EquityRowCard(row: EquityRow, recentReceipt: Boolean) {
             style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
         Text("توان حقیقی ${row.retailPower.asBoardNumber()}× · خالص حجم حقیقی ${row.netRetailShares.asBoardNumber()} سهم · اسپرد سطر اول ${row.bestSpreadPct.asBoardNumber()}٪",
             style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+        if (fundamental != null) {
+            Text("روش۱ ارزش (پرسنتایل P/E ارزان‌تر): ${fundamental.valuePercentile.asBoardNumber()} · روش۲ کیفیت/نقدشوندگی: ${fundamental.qualityScore.asBoardNumber()}" +
+                (fundamental.momentumPct?.let { " · روش۳ روند نسبت به دیدهٔ قبلی ما: ${it.asBoardNumber()}٪" } ?: " · روش۳ روند: هنوز دیدهٔ قبلی کافی نیست"),
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Cyan)
+        }
         Text("عمق سفارش، تازگی معامله، افشای کدال و معامله‌پذیری جداگانه تأیید نشده‌اند.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
         OutlinedButton(onClick = { runCatching {

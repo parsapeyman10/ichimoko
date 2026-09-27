@@ -1,5 +1,7 @@
 package com.aurum.edge.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -61,6 +63,12 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     var confirmOpportunityClear by remember { mutableStateOf(false) }
     var confirmNobitexClear by remember { mutableStateOf(false) }
     var showCombined by remember { mutableStateOf(false) }
+    var pendingPdf by remember { mutableStateOf<Pair<String, List<PaperTrade>>?>(null) }
+    val savePdf = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        val request = pendingPdf
+        pendingPdf = null
+        if (uri != null && request != null) viewModel.exportJournalPdf(uri, request.first, request.second)
+    }
     val now = System.currentTimeMillis()
     val livePrice = market.lastPrice?.takeIf {
         it.isFinite() && it > 0 && !market.showingCachedData &&
@@ -200,6 +208,38 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                 modifier = Modifier.padding(horizontal = 12.dp),
             ) { Text("پاک کردن ژورنال") }
         }
+
+        run {
+            val cryptoSymbols = remember {
+                com.aurum.edge.data.CryptoFundamentalsRepository.UNIVERSE.map { viewModel.nobitexJournalSymbol(it) }.toSet()
+            }
+            val cryptoTrades = trades.filter { it.symbol in cryptoSymbols }
+            if (cryptoTrades.isNotEmpty()) {
+                val cryptoClosed = cryptoTrades.filter { !it.isOpen }
+                val cryptoReport = if (cryptoClosed.isNotEmpty())
+                    PerformanceMetrics.fromPaper(cryptoTrades, settings.accountBalance) else null
+                SectionCard("ژورنال کریپتو (متود طلا) · وین‌ریت و PDF", "همان JournalStore طلا؛ فقط ردیف‌های نمادهای نوبیتکس") {
+                    Text("${cryptoTrades.count { it.isOpen }} باز · ${cryptoClosed.size} بسته از میان همهٔ نمادهای نوبیتکس ثبت‌شده در همین ژورنال.",
+                        style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+                    if (cryptoReport != null) {
+                        Text("وین‌ریت ${cryptoReport.winRatePct?.let { String.format("%.1f", it) + "٪" } ?: "—"} · " +
+                            "برد ${cryptoReport.wins} · باخت ${cryptoReport.losses} · Profit Factor ${cryptoReport.profitFactor?.let { String.format("%.2f", it) } ?: "—"} · " +
+                            "خالص ${formatPrice(cryptoReport.netPnlUsd)}",
+                            style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary, modifier = Modifier.padding(top = 4.dp))
+                    } else {
+                        Text("هنوز معاملهٔ بستهٔ کریپتویی برای محاسبهٔ وین‌ریت وجود ندارد.",
+                            style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold, modifier = Modifier.padding(top = 4.dp))
+                    }
+                    Button(onClick = {
+                        pendingPdf = "Aurum Edge - Crypto Journal (Nobitex, same rules as gold)" to cryptoTrades
+                        savePdf.launch("aurum_crypto_journal_${System.currentTimeMillis()}.pdf")
+                    }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) { Text("خروجی PDF ژورنال کریپتو") }
+                    Text("PDF شامل خلاصهٔ آماری (وین‌ریت، PF، انتظار R، بیشینه افت) و جدول تمام معاملات بستهٔ همین بخش است؛ هیچ ردیفی برای گزارش ساخته نمی‌شود.",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                }
+            }
+        }
+
         if (nobitexTrades.isNotEmpty() || nobitexJournalError != null) {
             val snapshot = (nobitexState as? NobitexState.Done)?.snapshot
             SectionCard("ژورنال مستقلِ تمرین نوبیتکس · همهٔ رمزارزها", "ask/bid دفتر سفارش عمومیِ زمان‌دار · سود فرضی USDT، جدا از آمار دلاری طلا") {

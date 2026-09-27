@@ -115,6 +115,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val nobitexBalance: StateFlow<Pair<String, Double>?> = _nobitexBalance.asStateFlow()
     private val _nobitexLiveBusy = MutableStateFlow(false)
     val nobitexLiveBusy: StateFlow<Boolean> = _nobitexLiveBusy.asStateFlow()
+    private val _nobitexLiveMarket = MutableStateFlow(com.aurum.edge.data.NobitexMarket.BTC_USDT)
+    /** Shared with the chart screen: tapping "real trade" there preselects the same asset here. */
+    val nobitexLiveMarket: StateFlow<com.aurum.edge.data.NobitexMarket> = _nobitexLiveMarket.asStateFlow()
+    fun setNobitexLiveMarket(market: com.aurum.edge.data.NobitexMarket) { _nobitexLiveMarket.value = market }
     private val _watchHistory = MutableStateFlow(WatchHistory())
     val watchHistory: StateFlow<WatchHistory> = _watchHistory.asStateFlow()
     val market = container.verifiedMarket
@@ -360,6 +364,18 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _toast.value = "CSV ${snapshot.market.code} از کندل‌های دریافتی ذخیره شد"
             } catch (error: Exception) {
                 _toast.value = "ذخیرهٔ CSV انجام نشد: ${error.message ?: "خطای فایل"}"
+            }
+        }
+    }
+
+    /** PDF export of REAL journal trades already on disk; [tradesForPdf] decides which slice (e.g. crypto-only). */
+    fun exportJournalPdf(uri: Uri, title: String, tradesForPdf: List<PaperTrade>) {
+        viewModelScope.launch {
+            try {
+                container.exportJournalPdf(uri, title, tradesForPdf, settings.value.accountBalance)
+                _toast.value = "PDF ژورنال ذخیره شد (${tradesForPdf.count { !it.isOpen }} معاملهٔ بسته)"
+            } catch (error: Exception) {
+                _toast.value = "ذخیرهٔ PDF انجام نشد: ${error.message ?: "خطای فایل"}"
             }
         }
     }

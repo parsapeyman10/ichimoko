@@ -253,7 +253,7 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
     }
 }
 
-private fun ictStatus(state: IctRangeAnalyzer.State): String = when (state) {
+internal fun ictStatus(state: IctRangeAnalyzer.State): String = when (state) {
     IctRangeAnalyzer.State.INVALID_DATA -> "داده/بازه ناکافی یا نامعتبر"
     IctRangeAnalyzer.State.NO_RANGE -> "رنج تأیید نشده"
     IctRangeAnalyzer.State.WAIT_SWEEP -> "در انتظار جاروب و بازپس‌گیری"
@@ -267,7 +267,7 @@ private fun ictStatus(state: IctRangeAnalyzer.State): String = when (state) {
 }
 
 @Composable
-private fun Legend(label: String, color: Color) {
+internal fun Legend(label: String, color: Color) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         androidx.compose.foundation.layout.Box(
             modifier = Modifier

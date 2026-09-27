@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -31,10 +33,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.data.NobitexLiveOrder
+import com.aurum.edge.data.NobitexMarket
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.theme.AurumColors
+
+/** Real orders offered for the SAME 6 vetted USDT markets the paper-trading chart covers. */
+private val LIVE_MARKETS = listOf(NobitexMarket.BTC_USDT, NobitexMarket.ETH_USDT, NobitexMarket.SOL_USDT,
+    NobitexMarket.XRP_USDT, NobitexMarket.DOGE_USDT, NobitexMarket.ADA_USDT)
 
 /**
  * "متودم همون متود طلاست": the SAME SignalEngine (Ichimoku + VWAP + EMA200 + RSI + ATR + MACD/ADX
@@ -135,6 +142,7 @@ fun NobitexLiveTradingSection(viewModel: AurumViewModel) {
     val balance by viewModel.nobitexBalance.collectAsStateWithLifecycle()
     val orders by viewModel.nobitexLiveOrders.collectAsStateWithLifecycle()
     val liveError by viewModel.nobitexLiveError.collectAsStateWithLifecycle()
+    val liveMarket by viewModel.nobitexLiveMarket.collectAsStateWithLifecycle()
     val browser = LocalUriHandler.current
     var tokenInput by remember { mutableStateOf("") }
     var capInput by remember { mutableStateOf(settings.nobitexLiveOrderCapUsdt.toString()) }
@@ -194,11 +202,20 @@ fun NobitexLiveTradingSection(viewModel: AurumViewModel) {
             }
 
             if (acknowledged) {
+                Text("رمزارز سفارش واقعی", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                    modifier = Modifier.padding(top = 8.dp))
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LIVE_MARKETS.forEach { choice ->
+                        FilterChip(selected = liveMarket == choice, onClick = { viewModel.setNobitexLiveMarket(choice) },
+                            label = { Text(choice.srcCurrency.uppercase() + "/USDT") })
+                    }
+                }
                 Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = side == SignalAction.BUY, onClick = { side = SignalAction.BUY },
-                        label = { Text("خرید BTC") }, modifier = Modifier.weight(1f))
+                        label = { Text("خرید ${liveMarket.srcCurrency.uppercase()}") }, modifier = Modifier.weight(1f))
                     FilterChip(selected = side == SignalAction.SELL, onClick = { side = SignalAction.SELL },
-                        label = { Text("فروش BTC") }, modifier = Modifier.weight(1f))
+                        label = { Text("فروش ${liveMarket.srcCurrency.uppercase()}") }, modifier = Modifier.weight(1f))
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = execution == "limit", onClick = { execution = "limit" },
@@ -208,7 +225,7 @@ fun NobitexLiveTradingSection(viewModel: AurumViewModel) {
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     OutlinedTextField(value = amountText, onValueChange = { amountText = it },
-                        label = { Text("حجم BTC") }, singleLine = true, modifier = Modifier.weight(1f))
+                        label = { Text("حجم ${liveMarket.srcCurrency.uppercase()}") }, singleLine = true, modifier = Modifier.weight(1f))
                     OutlinedTextField(value = priceText, onValueChange = { priceText = it },
                         label = { Text(if (execution == "market") "سقف/کف قیمت (اختیاری)" else "قیمت USDT") },
                         singleLine = true, modifier = Modifier.weight(1f))
@@ -225,7 +242,7 @@ fun NobitexLiveTradingSection(viewModel: AurumViewModel) {
                     val amount = amountText.trim()
                     val price = priceText.trim().ifBlank { null }
                     val estimate = px ?: 0.0
-                    if (amount.isNotBlank()) confirmRequest = LiveOrderRequest(side, "btc", "usdt", amount, price, execution, estimate)
+                    if (amount.isNotBlank()) confirmRequest = LiveOrderRequest(side, liveMarket.srcCurrency, liveMarket.destination, amount, price, execution, estimate)
                 }, enabled = !busy && amountText.isNotBlank(), modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     Text(if (busy) "در حال ارسال…" else "بررسی و تأیید سفارش واقعی")
                 }
@@ -246,7 +263,7 @@ fun NobitexLiveTradingSection(viewModel: AurumViewModel) {
             title = { Text("ارسال سفارش واقعی به نوبیتکس؟") },
             text = {
                 Column {
-                    Text("${if (request.side == SignalAction.BUY) "خرید" else "فروش"} ${request.amount} BTC/USDT · " +
+                    Text("${if (request.side == SignalAction.BUY) "خرید" else "فروش"} ${request.amount} ${request.src.uppercase()}/${request.dst.uppercase()} · " +
                         "${request.execution} ${request.price?.let { "قیمت $it" } ?: "بدون سقف قیمت"}")
                     Text("این سفارش واقعی است و با پول واقعی حساب شما اجرا می‌شود. Nobitex ممکن است آن را رد کند؛ پیام دقیق آن‌ها نمایش داده خواهد شد.",
                         style = MaterialTheme.typography.labelSmall, color = AurumColors.Red, modifier = Modifier.padding(top = 6.dp))

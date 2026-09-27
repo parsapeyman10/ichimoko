@@ -25,13 +25,16 @@ data class EquityBoardState(
     /** HTTP receipt time only; provider rows have clock HH:mm:ss WITHOUT a date. */
     val receivedAt: Long? = null,
     val error: String? = null,
+    /** Several real, disclosed fundamental methods (see [EquityFundamentals]), keyed by ISIN. */
+    val fundamentals: Map<String, EquityFundamentalScore> = emptyMap(),
 ) {
     fun recentReceipt(now: Long = System.currentTimeMillis()): Boolean =
         status == EquityBoardStatus.OBSERVED && receivedAt?.let { now - it in 0L..600_000L } == true
 }
 
 /** Third-party read-only BrsApi mirror of TSETMC. No broker authentication and no orders. */
-class IranEquityRepository(private val settings: SettingsStore, private val scope: CoroutineScope) {
+class IranEquityRepository(private val settings: SettingsStore, private val scope: CoroutineScope,
+                           private val quoteHistory: QuoteHistoryStore? = null) {
     private val http = OkHttpClient.Builder().followRedirects(false)
         .callTimeout(35, TimeUnit.SECONDS).build()
     private val json = Json { ignoreUnknownKeys = true }
@@ -42,6 +45,31 @@ class IranEquityRepository(private val settings: SettingsStore, private val scop
 
     fun clear() { _state.value = EquityBoardState() }
     fun refreshNow() { scope.launch { refresh() } }
+
+    /** Method 3 (momentum) only tracks rows that already passed the numeric screen, to bound local storage growth. */
+    private suspend fun computeFundamentals(rows: List<EquityRow>, receivedAt: Long): Map<String, EquityFundamentalScore> {
+        val percentiles = EquityFundamentals.valuePercentiles(rows)
+        val maxTurnover = rows.mapNotNull { it.turnoverRial }.maxOrNull()
+        val history = quoteHistory
+        return rows.associate { row ->
+            val quality = EquityFundamentals.qualityScore(row, maxTurnover)
+            var momentumPct: Double? = null
+            var momentumSpan: Long? = null
+            if (history != null && row.basicValuePass) {
+                runCatching { EquityFundamentals.momentum(history, row.isin, row.lastRial, receivedAt) }
+                    .getOrNull()?.let { (pct, span) -> momentumPct = pct; momentumSpan = span }
+                row.lastRial?.takeIf { it > 0 }?.let { price ->
+                    runCatching {
+                        history.append("iran_stock_${row.isin}", Quote(
+                            code = row.symbol, label = row.name, price = price.toDouble(), unit = "IRR",
+                            sourceId = "brsapi", ts = receivedAt, stale = false,
+                        ))
+                    }
+                }
+            }
+            row.isin to EquityFundamentalScore(row, percentiles[row.isin], quality, momentumPct, momentumSpan)
+        }
+    }
 
     private suspend fun refresh() = mutex.withLock {
         val configured = settings.read()
@@ -79,7 +107,9 @@ class IranEquityRepository(private val settings: SettingsStore, private val scop
                 }
             }
             if (settings.read().let { it.workspaceId == "iran_stocks" && it.stockDataKey == key }) {
-                _state.value = EquityBoardState(EquityBoardStatus.OBSERVED, data, System.currentTimeMillis())
+                val receivedAt = System.currentTimeMillis()
+                val fundamentals = withContext(Dispatchers.Default) { computeFundamentals(data, receivedAt) }
+                _state.value = EquityBoardState(EquityBoardStatus.OBSERVED, data, receivedAt, fundamentals = fundamentals)
             } else _state.value = EquityBoardState()
         } catch (e: Exception) {
             _state.value = EquityBoardState(EquityBoardStatus.UNAVAILABLE,
