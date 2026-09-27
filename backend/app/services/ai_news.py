@@ -176,9 +176,17 @@ class AiNewsAnalyzer:
             return await send(client)
 
     async def _request_openai(self, candidates: list[Headline]) -> dict:
-        """Legacy optional paid provider, used only when the server has no Gemini key."""
+        """Legacy optional paid provider, used only when the server has no Gemini key.
+
+        `openai_base_url`, when set, points the OFFICIAL OpenAI SDK at a different
+        OpenAI-compatible host (self-hosted proxy or a third-party relay/gateway) instead of
+        api.openai.com. This is a distinct trust decision — headline/excerpt text goes to that
+        host, not OpenAI — so it must be an explicit operator choice, same as the consent flag.
+        """
         from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=self.settings.openai_api_key, timeout=7, max_retries=0)
+        client = AsyncOpenAI(api_key=self.settings.openai_api_key,
+                              base_url=self.settings.openai_base_url or None,
+                              timeout=7, max_retries=0)
         response = await client.chat.completions.create(
             model=self.settings.openai_model,
             messages=[

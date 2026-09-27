@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # unless the operator explicitly accepts publisher terms. No model key is shipped in an APK.
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
+    # Optional custom OpenAI-COMPATIBLE endpoint (e.g. a self-hosted or third-party relay/gateway
+    # instead of api.openai.com directly). When set, publisher headline text is sent to THIS host,
+    # not OpenAI — that is a distinct trust decision from the operator, reviewed like any other.
+    openai_base_url: str | None = None
     ai_news_external_consent: bool = False
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="AURUM_", extra="ignore")
