@@ -16,21 +16,28 @@ import java.time.Instant
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
-/** Fixed allowlist, public GET endpoints only; no exchange credentials or order endpoints. */
-enum class NobitexMarket(val code: String, val srcCurrency: String, val statsKey: String,
+/** No longer a fixed 6-coin allowlist: [NobitexMarketCatalog] discovers ALL live USDT markets
+ * from Nobitex's own public /market/stats (dstCurrency=usdt returns every pair, per official
+ * docs). This data class is just the typed shape; [forUsdtBase] builds one for any base ticker
+ * Nobitex itself reports as tradable — never a guessed/invented pair.
+ */
+data class NobitexMarket(val code: String, val srcCurrency: String, val statsKey: String,
                          val destination: String, val quoteUnit: String, val supportsPractice: Boolean) {
-    BTC_USDT("BTCUSDT", "btc", "btc-usdt", "usdt", "USDT", true),
-    // Empirical live check on 2026-09-23: BTCIRT UDF close ~19.5bn vs stats ~195bn.
-    // OHLC docs do not define the unit. Display raw values only; NEVER mix with RLS fills.
-    BTC_IRT("BTCIRT", "btc", "btc-rls", "rls", "ریال (فقط آمار)", false),
-    // Same USDT catalog already vetted for the read-only scanner (NobitexSpotCatalog.bases);
-    // OHLC/stats/order-book unit agreement re-checked per market by [NobitexSnapshot.practiceBlocker].
-    ETH_USDT("ETHUSDT", "eth", "eth-usdt", "usdt", "USDT", true),
-    SOL_USDT("SOLUSDT", "sol", "sol-usdt", "usdt", "USDT", true),
-    XRP_USDT("XRPUSDT", "xrp", "xrp-usdt", "usdt", "USDT", true),
-    DOGE_USDT("DOGEUSDT", "doge", "doge-usdt", "usdt", "USDT", true),
-    ADA_USDT("ADAUSDT", "ada", "ada-usdt", "usdt", "USDT", true),
+    companion object {
+        val BTC_USDT = NobitexMarket("BTCUSDT", "btc", "btc-usdt", "usdt", "USDT", true)
+        // Empirical live check on 2026-09-23: BTCIRT UDF close ~19.5bn vs stats ~195bn.
+        // OHLC docs do not define the unit. Display raw values only; NEVER mix with RLS fills.
+        val BTC_IRT = NobitexMarket("BTCIRT", "btc", "btc-rls", "rls", "ریال (فقط آمار)", false)
+
+        /** Any base Nobitex's OWN /market/stats already reports as a live "<base>-usdt" pair. */
+        fun forUsdtBase(base: String): NobitexMarket {
+            val lower = base.trim().lowercase()
+            require(lower.isNotBlank() && lower.all { it.isLetterOrDigit() }) { "نماد پایه نامعتبر است" }
+            return NobitexMarket("${lower.uppercase()}USDT", lower, "$lower-usdt", "usdt", "USDT", true)
+        }
+    }
 }
+
 
 data class NobitexQuote(
     val market: NobitexMarket,

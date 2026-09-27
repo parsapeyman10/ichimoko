@@ -13,6 +13,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.Signal
+import com.aurum.edge.data.NobitexCatalogStatus
 import com.aurum.edge.data.NobitexMarket
 import com.aurum.edge.engine.Backtester
 import com.aurum.edge.engine.IctRangeAnalyzer
@@ -41,8 +43,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private val CHART_MARKETS = listOf(NobitexMarket.BTC_USDT, NobitexMarket.ETH_USDT, NobitexMarket.SOL_USDT,
-    NobitexMarket.XRP_USDT, NobitexMarket.DOGE_USDT, NobitexMarket.ADA_USDT)
 /** Nobitex's published base-tier ("Regular") USDT-market taker fee; real, cited, not invented. */
 private const val NOBITEX_BASE_TAKER_FEE = 0.0013
 
@@ -60,8 +60,11 @@ fun NobitexChartScreen(viewModel: AurumViewModel) {
     val state by viewModel.nobitex.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
+    val catalog by viewModel.nobitexCatalog.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { viewModel.ensureNobitexCatalog() }
     val scope = rememberCoroutineScope()
     var market by remember { mutableStateOf(NobitexMarket.BTC_USDT) }
+    var marketQuery by remember { mutableStateOf("") }
     var interval by remember { mutableStateOf(Interval.H1) }
     var confirmJournal by remember { mutableStateOf<Triple<Signal, Double, NobitexMarket>?>(null) }
     var backtestResult by remember { mutableStateOf<Backtester.Result?>(null) }
@@ -75,12 +78,22 @@ fun NobitexChartScreen(viewModel: AurumViewModel) {
         current?.let { IctRangeAnalyzer.analyze(it.candles, it.interval) }
     }
 
-    SectionCard("چارت نوبیتکس · $symbol", "کندل واقعی + ابر ایچیموکو/EMA200/VWAP + خط ورود/SL/TP همان قوانین طلا") {
+    SectionCard("چارت نوبیتکس · $symbol", "همهٔ بازارهای تتری زندهٔ نوبیتکس؛ کندل واقعی + ابر ایچیموکو/EMA200/VWAP + خط ورود/SL/TP همان قوانین طلا") {
         Text("رمزارز و بازه را انتخاب و دریافت کنید؛ همان SignalEngine طلا (ایچیموکو+VWAP+EMA200+RSI+ATR+MACD/ADX) روی این کندل‌ها اجرا می‌شود.",
             style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+        OutlinedTextField(value = marketQuery, onValueChange = { marketQuery = it.take(15) }, singleLine = true,
+            label = { Text("جست‌وجوی نماد (مثلاً btc, shib, pepe) از میان ${catalog.markets.size.takeIf { it > 0 } ?: "…"} بازار زندهٔ نوبیتکس") },
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+        if (catalog.status == NobitexCatalogStatus.FAILED) Text("دریافت فهرست کامل بازارها ناموفق بود: ${catalog.error ?: "خطا"}؛ فعلاً فقط BTC/USDT در دسترس است.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.Red, modifier = Modifier.padding(top = 4.dp))
+        val marketChoices = remember(marketQuery, catalog.markets) {
+            val pool = catalog.markets.map { it.market }.ifEmpty { listOf(NobitexMarket.BTC_USDT) }
+            if (marketQuery.isBlank()) pool.take(10)
+            else pool.filter { it.srcCurrency.contains(marketQuery.trim(), ignoreCase = true) }.take(20)
+        }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            CHART_MARKETS.forEach { choice ->
+            marketChoices.forEach { choice ->
                 FilterChip(selected = market == choice, onClick = { market = choice; backtestResult = null; backtestError = null },
                     label = { Text(choice.srcCurrency.uppercase() + "/USDT") })
             }

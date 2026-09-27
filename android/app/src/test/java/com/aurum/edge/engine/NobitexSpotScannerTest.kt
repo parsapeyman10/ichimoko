@@ -17,13 +17,17 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Fixtures model the public stats schema; no quote is a current price or pump forecast. */
+/** Fixtures model the public stats schema; no quote is a current price or pump forecast.
+ * The scanner no longer assumes a fixed 6-base allowlist: these are just fixture tickers used
+ * to exercise the SAME dynamic key-driven parsing Nobitex's real (100+ market) response gets.
+ */
 class NobitexSpotScannerTest {
     private val at = 1_800_000_000_000L
+    private val fixtureBases = listOf("btc", "eth", "sol", "xrp", "doge", "ada")
     private fun response(omit: String = "", changes: String = "2.5", volume: String = "50000") = """{
         "status":"ok","stats":{${listOf("usdt", "rls").flatMap { quote ->
-            NobitexSpotCatalog.bases.map { base ->
-                val key = "${base.lowercase()}-$quote"
+            fixtureBases.map { base ->
+                val key = "$base-$quote"
                 if (key == omit) "" else "\"$key\":{\"isClosed\":false,\"bestBuy\":\"100.0\"," +
                     "\"bestSell\":\"100.4\",\"latest\":\"100.2\",\"volumeDst\":\"${if (quote == "rls") "90000000000" else volume}\"," +
                     "\"dayChange\":\"$changes\"}"
@@ -43,12 +47,18 @@ class NobitexSpotScannerTest {
         assertTrue(snapshot.pairs.all { it.observation.contains("بررسی دستی") })
     }
 
-    @Test fun malformedOrIncompleteStatsNeverProduceFreshCandidates() {
-        assertFalse(parseSpotStats(root(response(omit = "ada-rls")), at).complete)
+    @Test fun dynamicParsingDropsOnlyTheMalformedPairInsteadOfTheWholeResponse() {
+        // Omitting one key now just means one fewer pair, not an "incomplete" whole response:
+        // a single bad/altcoin entry must never hide every other real market.
+        val omitted = parseSpotStats(root(response(omit = "ada-rls")), at)
+        assertTrue(omitted.complete)
+        assertEquals(11, omitted.pairs.size)
         assertEquals(0, parseSpotStats(root(response(changes = "-0.5")), at).candidates)
         assertEquals(0, parseSpotStats(root(response(changes = "14.5")), at).candidates)
         assertEquals(0, parseSpotStats(root(response(volume = "3000")), at).pairs.count { it.quote == "USDT" && it.candidate })
-        assertFalse(parseSpotStats(root(response().replace("\"bestSell\":\"100.4\"", "\"bestSell\":\"99.0\"")), at).complete)
+        // A single pair with an inverted bid/ask is dropped, not fatal to the rest of the response.
+        val badSpread = parseSpotStats(root(response().replace("\"bestSell\":\"100.4\"", "\"bestSell\":\"99.0\"")), at)
+        assertTrue(badSpread.pairs.size < 12)
         assertTrue(runCatching { parseSpotStats(root(response().replace("\"status\":\"ok\"", "\"status\":\"failed\"")), at) }.isFailure)
     }
 

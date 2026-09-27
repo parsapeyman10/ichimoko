@@ -39,10 +39,6 @@ import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.theme.AurumColors
 
-/** Real orders offered for the SAME 6 vetted USDT markets the paper-trading chart covers. */
-private val LIVE_MARKETS = listOf(NobitexMarket.BTC_USDT, NobitexMarket.ETH_USDT, NobitexMarket.SOL_USDT,
-    NobitexMarket.XRP_USDT, NobitexMarket.DOGE_USDT, NobitexMarket.ADA_USDT)
-
 /**
  * "متودم همون متود طلاست": the SAME SignalEngine (Ichimoku + VWAP + EMA200 + RSI + ATR + MACD/ADX
  * confluence) and the SAME JournalStore that gold uses, applied to Nobitex candles — works for
@@ -143,10 +139,13 @@ fun NobitexLiveTradingSection(viewModel: AurumViewModel) {
     val orders by viewModel.nobitexLiveOrders.collectAsStateWithLifecycle()
     val liveError by viewModel.nobitexLiveError.collectAsStateWithLifecycle()
     val liveMarket by viewModel.nobitexLiveMarket.collectAsStateWithLifecycle()
+    val catalog by viewModel.nobitexCatalog.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { viewModel.ensureNobitexCatalog() }
     val browser = LocalUriHandler.current
     var tokenInput by remember { mutableStateOf("") }
     var capInput by remember { mutableStateOf(settings.nobitexLiveOrderCapUsdt.toString()) }
     var acknowledged by remember { mutableStateOf(false) }
+    var liveMarketQuery by remember { mutableStateOf("") }
     var side by remember { mutableStateOf(SignalAction.BUY) }
     var amountText by remember { mutableStateOf("") }
     var priceText by remember { mutableStateOf("") }
@@ -202,11 +201,19 @@ fun NobitexLiveTradingSection(viewModel: AurumViewModel) {
             }
 
             if (acknowledged) {
-                Text("رمزارز سفارش واقعی", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                Text("رمزارز سفارش واقعی · از میان ${catalog.markets.size.takeIf { it > 0 } ?: "…"} بازار تتری زندهٔ نوبیتکس",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
                     modifier = Modifier.padding(top = 8.dp))
+                OutlinedTextField(value = liveMarketQuery, onValueChange = { liveMarketQuery = it.take(15) }, singleLine = true,
+                    label = { Text("جست‌وجوی نماد") }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+                val liveChoices = remember(liveMarketQuery, catalog.markets) {
+                    val pool = catalog.markets.map { it.market }.ifEmpty { listOf(NobitexMarket.BTC_USDT) }
+                    if (liveMarketQuery.isBlank()) pool.take(10)
+                    else pool.filter { it.srcCurrency.contains(liveMarketQuery.trim(), ignoreCase = true) }.take(20)
+                }
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    LIVE_MARKETS.forEach { choice ->
+                    liveChoices.forEach { choice ->
                         FilterChip(selected = liveMarket == choice, onClick = { viewModel.setNobitexLiveMarket(choice) },
                             label = { Text(choice.srcCurrency.uppercase() + "/USDT") })
                     }

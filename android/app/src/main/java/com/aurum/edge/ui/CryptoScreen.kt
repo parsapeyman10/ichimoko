@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -27,6 +28,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.data.CryptoFundamentalStatus
 import com.aurum.edge.data.CryptoScanStatus
+import com.aurum.edge.data.NobitexCatalogStatus
 import com.aurum.edge.data.PublicCryptoStatus
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
@@ -179,56 +181,72 @@ fun CryptoScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
 @Composable
 private fun CryptoFundamentalsSection(viewModel: AurumViewModel) {
     val state by viewModel.cryptoFundamentals.collectAsStateWithLifecycle()
-    SectionCard("تحلیل بنیادی ۶ رمزارز نوبیتکس (فراتر از قیمت)", "امتیازهای منتشرشدهٔ CoinGecko + سیگنال تکنیکال واقعی نوبیتکس؛ نه توصیهٔ خرید") {
+    val catalog by viewModel.nobitexCatalog.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { viewModel.ensureNobitexCatalog() }
+    var query by remember { mutableStateOf("") }
+    SectionCard("تحلیل بنیادی هر رمزارز نوبیتکس (فراتر از قیمت)", "همهٔ بازارهای تتری زندهٔ نوبیتکس؛ نه فقط چند نماد ثابت — امتیاز CoinGecko + سیگنال تکنیکال واقعی") {
         Text("سه امتیاز CoinGecko (توسعه‌دهنده/جامعه/نقدشوندگی؛ روش‌شناسی خودِ CoinGecko، نه ما) میانگین ساده گرفته می‌شود. " +
             "همزمان، همان SignalEngine ایچیموکو+همگرایی که ژورنال کاغذی نوبیتکس استفاده می‌کند، مستقلاً روی کندل ساعتی تازهٔ همان نماد اجرا می‌شود.",
             style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-        Text("این یک رتبه‌بندی سرمایه‌گذاری یا پیش‌بینی سود نیست؛ فقط مقایسهٔ چند منبع رسمی و واقعی، هرکدام با زمان دریافت خودش.",
+        Text("این یک رتبه‌بندی سرمایه‌گذاری یا پیش‌بینی سود نیست؛ فقط مقایسهٔ چند منبع رسمی و واقعی، هرکدام با زمان دریافت خودش. " +
+            "چون بازار نوبیتکس بیش از صد نماد دارد، هر بار فقط یک نماد بررسی می‌شود (~۵ ثانیه) نه یک اسکن ۲دقیقه‌ایِ همه‌چیز.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
-        Button(onClick = viewModel::refreshCryptoFundamentals,
-            enabled = state.status != CryptoFundamentalStatus.LOADING, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
-            Text(if (state.status == CryptoFundamentalStatus.LOADING) "در حال بررسی ۶ نماد (حدود ۲ دقیقه)…" else "بررسی بنیادی + تکنیکال هر ۶ رمزارز")
-        }
-        when (state.status) {
-            CryptoFundamentalStatus.IDLE -> Text("هنوز بررسی نشده؛ دکمهٔ بالا حدود ۲ دقیقه طول می‌کشد (شش نماد پشت‌سرهم، به‌خاطر سهمیهٔ CoinGecko و نوبیتکس).",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 6.dp))
-            CryptoFundamentalStatus.LOADING -> Text("نتیجهٔ قبلی برای غربال تازه معتبر نیست؛ در حال دریافت پی‌درپی است.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold, modifier = Modifier.padding(top = 6.dp))
-            CryptoFundamentalStatus.FAILED -> Text("بررسی ناموفق: " + (state.error ?: "خطای منبع"),
+        OutlinedTextField(value = query, onValueChange = { query = it.take(15) }, singleLine = true,
+            label = { Text("نماد را جست‌وجو کنید (مثلاً shib, pepe, btc)") }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+        when (catalog.status) {
+            NobitexCatalogStatus.LOADING, NobitexCatalogStatus.IDLE -> Text("در حال دریافت فهرست کامل بازارهای نوبیتکس…",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted, modifier = Modifier.padding(top = 6.dp))
+            NobitexCatalogStatus.FAILED -> Text("دریافت فهرست بازارها ناموفق بود: " + (catalog.error ?: "خطا"),
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Red, modifier = Modifier.padding(top = 6.dp))
-            CryptoFundamentalStatus.DONE -> Unit
-        }
-    }
-    if (state.status == CryptoFundamentalStatus.DONE && state.rows.isNotEmpty()) {
-        val ranked = state.rows.sortedByDescending { it.compositeScore ?: -1.0 }
-        ranked.forEachIndexed { index, row ->
-            val techColor = when (row.technical?.signal?.action) {
-                SignalAction.BUY -> AurumColors.Green
-                SignalAction.SELL -> AurumColors.Red
-                else -> AurumColors.TextMuted
-            }
-            SectionCard("${index + 1}. ${row.name} · ${row.market.srcCurrency.uppercase()}/USDT", "CoinGecko rank ${row.marketCapRank ?: "—"}",
-                trailing = { Pill(row.technical?.signal?.action?.name ?: "نامشخص", techColor) }) {
-                Text("امتیاز ترکیبی CoinGecko: ${row.compositeScore?.let { String.format("%.1f", it) } ?: "—"} " +
-                    "(توسعه‌دهنده ${row.developerScore?.let { String.format("%.1f", it) } ?: "—"} · جامعه ${row.communityScore?.let { String.format("%.1f", it) } ?: "—"} " +
-                    "· نقدشوندگی ${row.liquidityScore?.let { String.format("%.1f", it) } ?: "—"})",
-                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
-                Text("علاقهٔ عمومی ${row.publicInterestScore?.let { String.format("%.3f", it) } ?: "—"} · رأی مثبت جامعه ${row.sentimentUpPct?.let { String.format("%.0f", it) + "٪" } ?: "—"} " +
-                    "· سهم عرضهٔ در گردش ${row.supplyRatio?.let { String.format("%.0f", it * 100) + "٪" } ?: "—"} · فاصله از ATH ${row.athChangePct?.let { String.format("%.1f", it) + "٪" } ?: "—"}",
-                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-                Text("زمان CoinGecko: ${row.providerAt?.let { formatDateTime(it) } ?: "نامشخص"}",
-                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                val tech = row.technical
-                if (tech != null) {
-                    Text("تکنیکال (کندل ${tech.interval.label} تازهٔ نوبیتکس، ${formatDateTime(tech.computedAt)}): ${tech.signal.action} · امتیاز همگرایی ${String.format("%.1f", tech.signal.confidence)}" +
-                        (if (tech.signal.isActionable) " · ورود ${tech.signal.entry?.let { formatPrice(it) } ?: "—"}" else " · زیر آستانهٔ ورود"),
-                        style = MaterialTheme.typography.bodySmall, color = techColor, modifier = Modifier.padding(top = 4.dp))
-                } else {
-                    Text("تکنیکال: ${row.technicalError ?: "در دسترس نیست"}",
-                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted, modifier = Modifier.padding(top = 4.dp))
+            NobitexCatalogStatus.DONE -> {
+                Text("${catalog.markets.size} بازار تتری زندهٔ نوبیتکس بارگذاری شد.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted, modifier = Modifier.padding(top = 6.dp))
+                val matches = remember(query, catalog.markets) {
+                    if (query.isBlank()) catalog.markets.take(8)
+                    else catalog.markets.filter { it.market.srcCurrency.contains(query.trim(), ignoreCase = true) }.take(20)
                 }
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    matches.forEach { entry ->
+                        val busy = state.busyMarket == entry.market
+                        OutlinedButton(onClick = { viewModel.analyzeCryptoFundamentals(entry.market) }, enabled = !busy) {
+                            Text(if (busy) "…${entry.market.srcCurrency.uppercase()}" else entry.market.srcCurrency.uppercase())
+                        }
+                    }
+                }
+            }
+        }
+        if (state.status == CryptoFundamentalStatus.FAILED) Text("بررسی ناموفق: " + (state.error ?: "خطای منبع"),
+            style = MaterialTheme.typography.bodySmall, color = AurumColors.Red, modifier = Modifier.padding(top = 6.dp))
+    }
+    val ranked = remember(state.results) { state.results.values.sortedByDescending { it.compositeScore ?: -1.0 } }
+    ranked.forEachIndexed { index, row ->
+        val techColor = when (row.technical?.signal?.action) {
+            SignalAction.BUY -> AurumColors.Green
+            SignalAction.SELL -> AurumColors.Red
+            else -> AurumColors.TextMuted
+        }
+        SectionCard("${index + 1}. ${row.name} · ${row.market.srcCurrency.uppercase()}/USDT", "CoinGecko rank ${row.marketCapRank ?: "—"}",
+            trailing = { Pill(row.technical?.signal?.action?.name ?: "نامشخص", techColor) }) {
+            Text("امتیاز ترکیبی CoinGecko: ${row.compositeScore?.let { String.format("%.1f", it) } ?: "—"} " +
+                "(توسعه‌دهنده ${row.developerScore?.let { String.format("%.1f", it) } ?: "—"} · جامعه ${row.communityScore?.let { String.format("%.1f", it) } ?: "—"} " +
+                "· نقدشوندگی ${row.liquidityScore?.let { String.format("%.1f", it) } ?: "—"})",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
+            Text("علاقهٔ عمومی ${row.publicInterestScore?.let { String.format("%.3f", it) } ?: "—"} · رأی مثبت جامعه ${row.sentimentUpPct?.let { String.format("%.0f", it) + "٪" } ?: "—"} " +
+                "· سهم عرضهٔ در گردش ${row.supplyRatio?.let { String.format("%.0f", it * 100) + "٪" } ?: "—"} · فاصله از ATH ${row.athChangePct?.let { String.format("%.1f", it) + "٪" } ?: "—"}",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            Text("زمان CoinGecko: ${row.providerAt?.let { formatDateTime(it) } ?: "نامشخص"}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            val tech = row.technical
+            if (tech != null) {
+                Text("تکنیکال (کندل ${tech.interval.label} تازهٔ نوبیتکس، ${formatDateTime(tech.computedAt)}): ${tech.signal.action} · امتیاز همگرایی ${String.format("%.1f", tech.signal.confidence)}" +
+                    (if (tech.signal.isActionable) " · ورود ${tech.signal.entry?.let { formatPrice(it) } ?: "—"}" else " · زیر آستانهٔ ورود"),
+                    style = MaterialTheme.typography.bodySmall, color = techColor, modifier = Modifier.padding(top = 4.dp))
+            } else {
+                Text("تکنیکال: ${row.technicalError ?: "در دسترس نیست"}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted, modifier = Modifier.padding(top = 4.dp))
             }
         }
     }
 }
+

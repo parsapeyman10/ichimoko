@@ -43,7 +43,10 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
     val state by viewModel.nobitex.collectAsStateWithLifecycle()
     val trades by viewModel.nobitexTrades.collectAsStateWithLifecycle()
     val journalError by viewModel.nobitexJournalError.collectAsStateWithLifecycle()
+    val catalog by viewModel.nobitexCatalog.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(Unit) { viewModel.ensureNobitexCatalog() }
     var market by remember { mutableStateOf(NobitexMarket.BTC_USDT) }
+    var marketQuery by remember { mutableStateOf("") }
     var interval by remember { mutableStateOf(Interval.M5) }
     var amountText by remember { mutableStateOf("100") }
     var stopText by remember { mutableStateOf("2") }
@@ -66,11 +69,18 @@ fun NobitexTrainingSection(viewModel: AurumViewModel) {
             style = MaterialTheme.typography.bodySmall, color = AurumColors.Green)
         Text("این بخش سفارش واقعی نمی‌فرستد؛ برای معاملهٔ واقعی به بخش قرمز «معاملهٔ واقعی نوبیتکس» در بالای همین صفحه بروید.",
             style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
-        Text("رمزارز را انتخاب کنید (همهٔ نمادهای واقعی نوبیتکس که برای تمرین/ژورنال تأیید شده‌اند):",
+        Text("رمزارز را جست‌وجو کنید (همهٔ بازارهای تتری زندهٔ نوبیتکس؛ ${catalog.markets.size.takeIf { it > 0 } ?: "…"} مورد):",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+        OutlinedTextField(value = marketQuery, onValueChange = { marketQuery = it.take(15) }, singleLine = true,
+            label = { Text("مثلاً btc, shib") }, modifier = Modifier.fillMaxWidth())
+        val marketChoices = remember(marketQuery, catalog.markets) {
+            val pool = catalog.markets.map { it.market }.ifEmpty { listOf(NobitexMarket.BTC_USDT) }
+            if (marketQuery.isBlank()) pool.take(10)
+            else pool.filter { it.srcCurrency.contains(marketQuery.trim(), ignoreCase = true) }.take(20)
+        }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            NobitexMarket.entries.forEach { choice ->
+            marketChoices.forEach { choice ->
                 FilterChip(selected = market == choice, onClick = { market = choice; pending = null },
                     label = { Text(choice.code) })
             }

@@ -36,7 +36,7 @@ import java.util.Locale
 fun NobitexSpotScanSection(viewModel: AurumViewModel) {
     val state by viewModel.nobitexScan.collectAsStateWithLifecycle()
     var quote by remember { mutableStateOf("USDT") }
-    var selected by remember { mutableStateOf(NobitexSpotCatalog.bases.toSet()) }
+    var selected by remember { mutableStateOf<Set<String>>(emptySet()) } // empty = show every discovered base
     val uriHandler = LocalUriHandler.current
     LaunchedEffect(Unit) {
         while (true) {
@@ -44,8 +44,9 @@ fun NobitexSpotScanSection(viewModel: AurumViewModel) {
             delay(180_000L) // bounded public scan; no exchange-order API
         }
     }
+    val availableBases = ((state as? NobitexScanState.Done)?.snapshot?.pairs?.map { it.base }?.distinct()?.sorted()).orEmpty()
 
-    SectionCard("غربال اسپات نوبیتکس · USDT / ریال", "۶ دارایی × دو بازار · دادهٔ واقعی عمومی، بدون کلید و بدون سفارش") {
+    SectionCard("غربال اسپات نوبیتکس · USDT / ریال", "همهٔ دارایی‌های زندهٔ نوبیتکس (نه فهرست ثابت) × دو بازار · دادهٔ واقعی عمومی، بدون کلید و بدون سفارش") {
         Text("برچسب «نامزد پژوهشی» تنها وقتی بازار باز، تغییر ۲۴ساعته ۱ تا ۱۲٪، اسپرد ≤۰٫۸٪ و گردش ۲۴ساعته ≥۲۰٬۰۰۰ USDT یا ≥۵۰ میلیارد ریال باشد داده می‌شود؛ احتمال رشد یا سود نیست.",
             style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -54,12 +55,16 @@ fun NobitexSpotScanSection(viewModel: AurumViewModel) {
                     modifier = Modifier.weight(1f))
             }
         }
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            NobitexSpotCatalog.bases.forEach { base ->
-                FilterChip(selected = base in selected,
-                    onClick = { selected = if (base in selected) selected - base else selected + base },
-                    label = { Text(base) })
+        if (availableBases.isNotEmpty()) {
+            Text("فیلتر نماد (خالی = نمایش همه؛ ${availableBases.size} دارایی کشف‌شده):",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted, modifier = Modifier.padding(top = 6.dp))
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                availableBases.forEach { base ->
+                    FilterChip(selected = base in selected,
+                        onClick = { selected = if (base in selected) selected - base else selected + base },
+                        label = { Text(base) })
+                }
             }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -81,10 +86,10 @@ fun NobitexSpotScanSection(viewModel: AurumViewModel) {
                 Text("دریافت روی گوشی: ${formatDateTime(scan.receivedAt)} · ${if (fresh) "پاسخ کامل (۳ دقیقه اعتبار نمایش نامزد)" else "قدیمی/ناقص؛ نامزد فعال نداریم"} · زمانِ معامله توسط stats منتشر نمی‌شود.",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (fresh) AurumColors.Green else AurumColors.Gold)
-                val visible = scan.pairs.filter { it.quote == quote && it.base in selected }
+                val visible = scan.pairs.filter { it.quote == quote && (selected.isEmpty() || it.base in selected) }
                 if (visible.isEmpty()) Text("نمادی برای این گروه انتخاب نشده است.",
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
-                visible.forEach { row ->
+                visible.take(60).forEach { row ->
                     val candidate = fresh && row.candidate
                     val price = if (quote == "USDT" && row.latest != null && row.latest < 1.0)
                         String.format(Locale.US, "%.6f", row.latest) else formatPrice(row.latest)
@@ -101,7 +106,9 @@ fun NobitexSpotScanSection(viewModel: AurumViewModel) {
                         style = MaterialTheme.typography.labelSmall,
                         color = if (candidate) AurumColors.Green else AurumColors.TextMuted)
                 }
-                if (fresh && scan.candidates == 0) Text("هیچ‌کدام از ۱۲ جفت معیار پژوهشی را در این پاسخ برآورده نکردند؛ این پیش‌بینی نیست.",
+                if (visible.size > 60) Text("فقط ۶۰ ردیف اول این گروه نمایش داده می‌شود؛ برای باریک‌کردن، از فیلتر نماد بالا استفاده کنید.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                if (fresh && scan.candidates == 0) Text("هیچ‌کدام از ${scan.pairs.size} جفت این پاسخ معیار پژوهشی را برآورده نکردند؛ این پیش‌بینی نیست.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             }
         }

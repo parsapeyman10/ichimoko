@@ -210,10 +210,9 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
         }
 
         run {
-            val cryptoSymbols = remember {
-                com.aurum.edge.data.CryptoFundamentalsRepository.UNIVERSE.map { viewModel.nobitexJournalSymbol(it) }.toSet()
-            }
-            val cryptoTrades = trades.filter { it.symbol in cryptoSymbols }
+            // Every Nobitex market's journal symbol is "<BASE>/USDT" (see nobitexJournalSymbol);
+            // gold is always "XAU/USD", so this reliably covers ANY Nobitex asset, not a fixed list.
+            val cryptoTrades = trades.filter { it.symbol.endsWith("/USDT") }
             if (cryptoTrades.isNotEmpty()) {
                 val cryptoClosed = cryptoTrades.filter { !it.isOpen }
                 val cryptoReport = if (cryptoClosed.isNotEmpty())

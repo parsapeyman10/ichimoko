@@ -102,6 +102,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val crypto = container.crypto.state
     val publicCrypto = container.publicCrypto.state
     val cryptoFundamentals = container.cryptoFundamentals.state
+    /** ALL live Nobitex USDT markets, discovered from Nobitex's own API — never a fixed shortlist. */
+    val nobitexCatalog = container.nobitexCatalog.state
     val equities = container.equities.state
     private val _nobitex = MutableStateFlow<NobitexState>(NobitexState.Idle)
     val nobitex: StateFlow<NobitexState> = _nobitex.asStateFlow()
@@ -268,8 +270,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun refreshCrypto() = container.crypto.refreshNow()
 
     fun refreshPublicCrypto() = container.publicCrypto.refreshNow()
+    fun refreshNobitexCatalog() = container.nobitexCatalog.refreshNow()
+    fun ensureNobitexCatalog() = container.nobitexCatalog.ensureLoaded()
     /** Slow (~2 minutes for 6 assets): real CoinGecko fundamentals + a fresh, independent Nobitex technical read each. */
-    fun refreshCryptoFundamentals() = container.cryptoFundamentals.refreshNow()
+    fun analyzeCryptoFundamentals(market: com.aurum.edge.data.NobitexMarket) = container.cryptoFundamentals.analyze(market)
 
     fun refreshNobitexScan() = container.nobitexResearch.refreshNow()
 
