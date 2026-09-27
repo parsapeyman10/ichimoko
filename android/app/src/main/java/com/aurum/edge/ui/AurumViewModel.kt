@@ -25,6 +25,7 @@ import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.PaperTicket
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.core.TradeReplay
 import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.data.FreeHistoryCatalog
 import com.aurum.edge.data.FreeHistoryState
@@ -74,6 +75,23 @@ data class WatchHistory(
     val loading: Boolean = false,
 )
 
+/**
+ * Real candles around ONE recorded paper trade, for the journal chart.
+ *
+ * [window] only ever holds bars that passed the same verification as the live chart; when the
+ * device has no history for that period the state stays empty and says so instead of drawing
+ * anything invented.
+ */
+data class TradeChartState(
+    val tradeId: String = "",
+    val loading: Boolean = false,
+    val downloading: Boolean = false,
+    val window: TradeReplay.Window = TradeReplay.Window(),
+    /** Where the drawn bars came from — cache of this device or a fresh provider download. */
+    val source: String = "",
+    val error: String? = null,
+)
+
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
@@ -119,6 +137,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     private val _watchHistory = MutableStateFlow(WatchHistory())
     val watchHistory: StateFlow<WatchHistory> = _watchHistory.asStateFlow()
+
+    /** Candles behind ONE journal row. Only one trade is expanded at a time. */
+    private val _tradeChart = MutableStateFlow(TradeChartState())
+    val tradeChart: StateFlow<TradeChartState> = _tradeChart.asStateFlow()
 
     /** Result of the one-tap AI connectivity probe from Settings (never carries the key). */
     data class AiProbeState(val running: Boolean = false, val message: String? = null)
@@ -720,6 +742,72 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             container.watch.clearHistory()
             _watchHistory.value = WatchHistory()
             _toast.value = "تاریخچهٔ دریافت‌شدهٔ دیده‌بان پاک شد"
+        }
+    }
+
+    /**
+     * Draw a *recorded* paper trade on the real candles this device already verified.
+     * Tapping the same trade again closes the chart. Nothing here re-evaluates the trade: the
+     * entry/SL/TP levels are read from the stored record, never recomputed from today's engine.
+     */
+    fun showTradeChart(trade: PaperTrade) {
+        if (_tradeChart.value.tradeId == trade.id) {
+            _tradeChart.value = TradeChartState()
+            return
+        }
+        _tradeChart.value = TradeChartState(tradeId = trade.id, loading = true)
+        viewModelScope.launch {
+            val cached = runCatching { container.cachedCandles(trade.symbol, trade.interval) }
+            if (_tradeChart.value.tradeId != trade.id) return@launch
+            val bars = cached.getOrNull()
+            if (bars == null) {
+                _tradeChart.value = TradeChartState(tradeId = trade.id,
+                    error = "کش کندل این نماد خوانده نشد؛ برای جلوگیری از نمایش دادهٔ نامعتبر، نموداری رسم نمی‌شود")
+                return@launch
+            }
+            val window = withContext(Dispatchers.Default) { TradeReplay.window(trade, bars) }
+            _tradeChart.value = TradeChartState(
+                tradeId = trade.id,
+                window = window,
+                source = if (window.bars.isEmpty()) "" else "کش کندل‌های تأییدشدهٔ همین گوشی",
+            )
+        }
+    }
+
+    /**
+     * The local cache does not reach back far enough: ask the provider for the real bars of this
+     * pair/timeframe with the user's own read-only key. Display only — no order, no signal.
+     */
+    fun downloadTradeChart(trade: PaperTrade) {
+        val current = _tradeChart.value
+        if (current.tradeId != trade.id || current.downloading) return
+        if (!settings.value.hasKey) {
+            _toast.value = "برای دریافت کندل‌های گذشته، کلید Twelve Data را در تنظیمات وارد کنید"
+            return
+        }
+        _tradeChart.value = current.copy(downloading = true, error = null)
+        viewModelScope.launch {
+            try {
+                val bars = container.fetchTradeCandles(trade.symbol, trade.interval)
+                if (_tradeChart.value.tradeId != trade.id) return@launch
+                val window = withContext(Dispatchers.Default) { TradeReplay.window(trade, bars) }
+                _tradeChart.value = TradeChartState(
+                    tradeId = trade.id,
+                    window = window,
+                    source = if (window.bars.isEmpty()) "" else "دریافت تازه از Twelve Data (همان منبع چارت)",
+                )
+                if (window.bars.isEmpty()) {
+                    _toast.value = "ناشر برای این بازه کندلی برنگرداند؛ تاریخچهٔ این معامله در دسترس نیست"
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (_tradeChart.value.tradeId != trade.id) return@launch
+                _tradeChart.value = _tradeChart.value.copy(
+                    downloading = false,
+                    error = error.message ?: "دریافت کندل‌های این بازه انجام نشد",
+                )
+            }
         }
     }
 

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -33,6 +34,7 @@ import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.core.TradeReplay
 import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.engine.EvidenceGrade
@@ -187,6 +189,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                             ) { Text("بستن", style = MaterialTheme.typography.labelSmall) }
                         }
                     }
+                    TradeChartDisclosure(viewModel, trade)
                 }
             }
         }
@@ -194,7 +197,10 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
         val closed = trades.filter { !it.isOpen }
         if (closed.isNotEmpty()) {
             SectionCard("معاملات بسته‌شده", "خروج فرضی بر اساس قیمت دریافتی؛ نه اجرای بروکر/هزینهٔ واقعی") {
-                closed.forEach { trade: PaperTrade -> TradeRow(trade) }
+                closed.forEach { trade: PaperTrade ->
+                    TradeRow(trade)
+                    TradeChartDisclosure(viewModel, trade)
+                }
             }
             Button(
                 onClick = { confirmClear = true },
@@ -371,6 +377,90 @@ private fun OpportunityRow(item: PaperOpportunity, tradeStillSaved: Boolean) {
             OutlinedButton(onClick = { runCatching { uriHandler.openUri(news.url) } }) {
                 Text("شاهد خبر: ${news.source}", style = MaterialTheme.typography.labelSmall)
             }
+        }
+    }
+}
+
+/**
+ * «همین معامله روی چارت»: the stored entry/SL/TP of one journal row drawn over the REAL candles
+ * of that period. Bars come from this device's verified cache (or a fresh download with the
+ * user's own key); a period the phone never received stays empty and is labelled, never filled in.
+ */
+@Composable
+private fun TradeChartDisclosure(viewModel: AurumViewModel, trade: PaperTrade) {
+    val state by viewModel.tradeChart.collectAsStateWithLifecycle()
+    val expanded = state.tradeId == trade.id
+    OutlinedButton(
+        onClick = { viewModel.showTradeChart(trade) },
+        modifier = Modifier.padding(top = 4.dp),
+    ) {
+        Text(
+            if (expanded) "بستن نمودار این معامله" else "نمودار همین معامله روی کندل واقعی",
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+    if (!expanded) return
+    Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
+        when {
+            state.loading -> Text(
+                "در حال خواندن کندل‌های ذخیره‌شدهٔ این بازه…",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            )
+            state.window.hasChart -> {
+                TradeReplayChart(
+                    trade = trade,
+                    window = state.window,
+                    modifier = Modifier.fillMaxWidth().height(200.dp),
+                )
+                Text(
+                    "${trade.symbol} · ${trade.interval.label} · ورود ${formatDateTime(trade.openedAt)}" +
+                        " → ${if (trade.isOpen) "هنوز باز" else "خروج ${formatDateTime(trade.closedAt)}"}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                    modifier = Modifier.padding(top = 5.dp),
+                )
+                Text(
+                    "خط ENTRY/SL/TP/EXIT از همین رکورد ژورنال خوانده شده؛ IN-L/IN-S کندل ورود و OUT کندل خروج ثبت‌شده است." +
+                        " موتور امروز دوباره روی گذشته اجرا نمی‌شود و این تصویر سیگنال تازه نیست.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+                if (state.source.isNotBlank()) Text(
+                    "منبع کندل‌ها: ${state.source}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan,
+                )
+                Text(
+                    state.window.detail,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (state.window.coverage == TradeReplay.Coverage.FULL) AurumColors.TextMuted else AurumColors.Gold,
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+            }
+            else -> Text(
+                state.window.detail.ifBlank {
+                    "کندلی برای این بازه روی گوشی نیست؛ چیزی ساخته نمی‌شود."
+                },
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+            )
+        }
+        state.error?.let {
+            Text(it, style = MaterialTheme.typography.labelSmall, color = AurumColors.Red,
+                modifier = Modifier.padding(top = 3.dp))
+        }
+        if (!state.loading && state.window.coverage != TradeReplay.Coverage.FULL) {
+            OutlinedButton(
+                onClick = { viewModel.downloadTradeChart(trade) },
+                enabled = !state.downloading,
+                modifier = Modifier.padding(top = 5.dp),
+            ) {
+                Text(
+                    if (state.downloading) "در حال دریافت از ناشر…" else "دریافت کندل‌های این بازه از ناشر",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+            Text(
+                "دریافت با همان کلید خواندنی Twelve Data و فقط برای نمایش است؛ سقف تاریخچهٔ ناشر ممکن است به این بازه نرسد.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            )
         }
     }
 }
