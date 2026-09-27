@@ -62,12 +62,6 @@ fun NewsClassificationRow(classification: NewsClassification, modifier: Modifier
 fun formatPrice(value: Double?): String =
     if (value == null) "—" else String.format(Locale.US, "%,.2f", value)
 
-fun formatSigned(value: Double?, digits: Int = 2): String {
-    if (value == null) return "—"
-    val sign = if (value >= 0) "+" else "−"
-    return sign + String.format(Locale.US, "%,.${digits}f", kotlin.math.abs(value))
-}
-
 fun formatTime(millis: Long?): String {
     if (millis == null || millis <= 0) return "—"
     return SimpleDateFormat("HH:mm", Locale.US).format(Date(millis))

@@ -293,5 +293,3 @@ private fun AppHeader(symbol: String, price: Double?, interval: com.aurum.edge.c
     }
 }
 
-@Composable
-fun ModePill(text: String, color: Color) = Pill(text = text, color = color)

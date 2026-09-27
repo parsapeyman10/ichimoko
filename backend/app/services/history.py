@@ -303,13 +303,3 @@ async def load_history(
     _write_disk(key, candles)
     return candles
 
-
-def cached_history(symbol: str, timeframe: Timeframe, output_size: int = 1500) -> list[Candle] | None:
-    """Verified historical cache for display ONLY, never proof of a live quote."""
-    for path in CACHE_DIR.glob(f"{symbol.replace('/', '_')}_{timeframe.value}_{output_size}_*.json"):
-        try:
-            if path.stat().st_size <= 2_000_000:
-                return _deserialize(path.read_text(), symbol, timeframe)
-        except Exception:
-            continue
-    return None

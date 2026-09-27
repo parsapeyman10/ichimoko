@@ -26,11 +26,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.data.NobitexLiveOrder
 import com.aurum.edge.data.NobitexMarket
@@ -38,88 +36,6 @@ import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.theme.AurumColors
-
-/**
- * "متودم همون متود طلاست": the SAME SignalEngine (Ichimoku + VWAP + EMA200 + RSI + ATR + MACD/ADX
- * confluence) and the SAME JournalStore that gold uses, applied to Nobitex candles — works for
- * ANY vetted Nobitex USDT market (BTC, ETH, SOL, XRP, DOGE, ADA), whichever one is currently
- * downloaded in the training card below, not just Bitcoin.
- * Entries here are manual (no Forex/USD news gate — that gate is specific to XAU/USD) but every
- * other rule (risk sizing, ATR-based stop/target, settlement against real closed candles,
- * win-rate statistics) is identical to the gold journal.
- */
-@Composable
-fun NobitexJournalSignalSection(viewModel: AurumViewModel) {
-    val context = LocalContext.current
-    LaunchedEffect(Unit) { viewModel.enableNobitexAlerts(context) }
-    val nobitexState by viewModel.nobitex.collectAsStateWithLifecycle()
-    val settings by viewModel.settings.collectAsStateWithLifecycle()
-    var confirmJournal by remember { mutableStateOf<Triple<Signal, Double, com.aurum.edge.data.NobitexMarket>?>(null) }
-    // Recomputed on every recomposition from the latest downloaded snapshot — cheap, pure.
-    val signal = if (nobitexState is NobitexState.Done) viewModel.nobitexJournalSignal() else null
-    val snapshot = (nobitexState as? NobitexState.Done)?.snapshot
-    val symbol = snapshot?.let { viewModel.nobitexJournalSymbol(it.market) } ?: "—"
-
-    SectionCard("سیگنال $symbol با متود طلا", "همان SignalEngine و همان ژورنال کاغذی طلا؛ فقط ورود دستی، بدون گیت خبر USD") {
-        Text("این بخش، نه معاملهٔ ساده‌شدهٔ درصدی، بلکه دقیقاً همان قوانین ایچیموکو/VWAP/EMA200/RSI/ATR/MACD طلاست. " +
-            "برای تعویض رمزارز، در کارت «نوبیتکس · آموزش و صحه‌سنجی» پایین‌تر نماد دیگری انتخاب و دریافت کنید.",
-            style = MaterialTheme.typography.bodySmall, color = AurumColors.Green)
-        if (snapshot == null) {
-            Text("ابتدا در کارت «نوبیتکس · آموزش و صحه‌سنجی» پایین‌تر، یک رمزارز (BTC/ETH/SOL/XRP/DOGE/ADA) و کندل را دریافت کنید.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-        } else if (!snapshot.market.supportsPractice) {
-            Text("این نماد برای معاملهٔ کاغذی تأیید نشده است (واحد قیمت نامشخص)؛ نماد دیگری انتخاب کنید.",
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
-        } else if (signal == null) {
-            Text("برای این سیگنال حداقل ۲۱۰ کندل بستهٔ ${snapshot.market.code} لازم است یا محاسبه ناموفق بود.",
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
-        } else {
-            val color = when (signal.action) {
-                SignalAction.BUY -> AurumColors.Green
-                SignalAction.SELL -> AurumColors.Red
-                SignalAction.NO_TRADE -> AurumColors.TextMuted
-            }
-            Text("جهت: ${signal.action} · امتیاز همگرایی ${String.format("%.1f", signal.confidence)}",
-                style = MaterialTheme.typography.bodyMedium, color = color)
-            if (signal.isActionable) {
-                Text("ورود ${signal.entry?.let { formatPrice(it) } ?: "—"} · SL ${signal.stopLoss?.let { formatPrice(it) } ?: "—"} " +
-                    "· TP ${signal.takeProfit?.let { formatPrice(it) } ?: "—"} USDT · R:R ${signal.riskReward?.let { String.format("%.2f", it) } ?: "—"}",
-                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
-            } else {
-                Text("زیر آستانهٔ ${String.format("%.0f", settings.minConfidence)} یا شرایط ورود کامل نیست.",
-                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            }
-            signal.reasons.take(4).forEach {
-                Text("✓ $it", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-            }
-            signal.blockers.take(4).forEach {
-                Text("✗ $it", style = MaterialTheme.typography.labelSmall, color = AurumColors.Red)
-            }
-            val existingOpen = viewModel.trades.collectAsStateWithLifecycle().value.any { it.isOpen && it.symbol == symbol }
-            Button(onClick = {
-                val price = snapshot.quote.latest
-                if (price.isFinite() && price > 0) confirmJournal = Triple(signal, price, snapshot.market)
-            }, enabled = signal.isActionable && !existingOpen, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
-                Text(if (existingOpen) "پوزیشن باز $symbol در ژورنال دارید" else "ثبت در همان ژورنال طلا (کاغذی)")
-            }
-            Text("ورود کاغذی است، نه سفارش واقعی؛ SL/TP با همان قانون تسویهٔ کندل بستهٔ طلا بررسی می‌شود.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-        }
-    }
-
-    confirmJournal?.let { (sig, price, market) ->
-        val dialogSymbol = viewModel.nobitexJournalSymbol(market)
-        AlertDialog(onDismissRequest = { confirmJournal = null },
-            title = { Text("ثبت کاغذی $dialogSymbol در ژورنال طلا؟") },
-            text = { Text("${sig.action} · ورود تقریبی ${formatPrice(price)} · SL ${sig.stopLoss?.let { formatPrice(it) }} " +
-                "· TP ${sig.takeProfit?.let { formatPrice(it) }} USDT.\nهیچ سفارشی به نوبیتکس ارسال نمی‌شود؛ فقط رکورد کاغذی مشترک با ژورنال طلا.") },
-            confirmButton = { TextButton(onClick = {
-                confirmJournal = null
-                viewModel.openNobitexJournalTrade(sig, price, market)
-            }) { Text("ثبت در ژورنال") } },
-            dismissButton = { TextButton(onClick = { confirmJournal = null } ) { Text("انصراف") } })
-    }
-}
 
 private data class LiveOrderRequest(val side: SignalAction, val src: String, val dst: String,
     val amount: String, val price: String?, val execution: String, val estimatedPrice: Double)
