@@ -162,21 +162,6 @@ class SmallAccountConfig(BaseModel):
     contract_size: float = Field(default=1, description="oz per lot, 1 for micro-friendly")
 
 
-class RiskCalculation(BaseModel):
-    balance: float
-    risk_percent: float
-    risk_amount: float
-    entry: float
-    stop_loss: float
-    stop_distance: float
-    position_oz: float
-    position_lots: float
-    notional: float
-    is_micro_allowed: bool
-    warning: str | None = None
-
-
-
 class BrokerConfig(BaseModel):
     name: str = Field(description="Broker name")
     leverage: int = Field(default=500, ge=1, le=3000, description="Max leverage e.g. 500")
@@ -210,30 +195,3 @@ class ForwardTestMetrics(BaseModel):
     avg_loss: float
     is_out_of_sample: bool = False
 
-class ForwardTestResult(BaseModel):
-    in_sample: ForwardTestMetrics
-    out_of_sample: ForwardTestMetrics
-    future_projection_12m: ForwardTestMetrics
-    walk_forward_p_value: float = Field(description="Consistency p-value, >0.05 means not overfit")
-    is_robust: bool
-    broker: BrokerConfig
-    trailing_comparison: dict = Field(default_factory=dict)
-    journal_sample: list[dict] = Field(default_factory=list)
-    equity_curve_combined: list[dict] = Field(default_factory=list)
-    notes: list[str] = Field(default_factory=list)
-
-
-class PredictionResult(BaseModel):
-    prob_buy: float
-    prob_sell: float
-    prob_neutral: float
-    expected_direction: Direction
-    confidence: float
-    expected_value_R: float
-    score: float
-    drivers: list[dict]
-    horizon: str
-    features_used: int
-    is_actionable: bool
-    advisory: str
-    explanation: str | None = None

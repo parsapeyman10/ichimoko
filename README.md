@@ -1,107 +1,53 @@
-# Trading
+# Trading — ساخت اپ تحلیل ترید
 
-An XAU/USD intelligence workspace that runs on **real market data only** — a native Android app,
-a desktop/mobile web terminal, and a FastAPI engine.
+Native Android (Kotlin/Compose), React/Vite web terminal and FastAPI research backend. Market candles and chart signals use **real Twelve Data observations**; unavailable providers cause explicit offline/empty states, never fabricated candles or trades. Imported MetaTrader CSV is **user-supplied, unverified research data** and never becomes a live feed. **Real Nobitex/MT5 orders are disabled.**
 
-> **Data policy (hard rule):** every candle, price, headline and trade report in this project comes
-> from a real provider (Twelve Data for prices, an optional licensed source for news). When the
-> provider is unreachable or no key is configured, the UI shows an explicit **offline / no-key**
-> state with the last real cached data. No module in this repository invents candles, prices, news,
-> performance numbers or trades. There is no demo mode.
+**راهنمای فارسی وضعیت دقیق قابلیت‌ها و نیازهای ادامه:** [docs/ROADMAP_FA.md](docs/ROADMAP_FA.md).
 
-## What "practice" means here
+## Current capabilities
 
-The only training concept in the project is learning from real history:
+- **Android**: chart + Ichimoku/signal/MTF/paper journal/backtest/walk-forward in Forex; its read-only watch contains **only XAU/USD** (separate read-only Twelve Data watch key). The Iranian stocks/Agah workspace has its own read-only USD/IRT, gold and coin watch with independent TGJU/Navasan source choices and local SQLite history; clearing history affects only the selected workspace. Global crypto has a separate keyless CoinGecko overview, not a Forex BTC/ETH watch. AAPL/MSFT remain research-only historical downloads in Forex «یادگیری», not live watch quotes. Watch prices distinguish `CONFIRMED / CONFLICT / UNVERIFIED / NO_DATA` and never feed orders or chart signals. Forex chart bars still use Twelve Data; **live entry eligibility** also needs independently checked, model-backed web news.
+- **Workspace research (not broker login):** Global crypto has a keyless, single-source CoinGecko overview plus an optional HTTPS two-source scanner. Nobitex public reads/practice remain separate. Iranian stocks use an individually obtained, read-only BrsApi key for TSETMC snapshots, limited EPS/P-E and order-board metrics, manual Codal-derived TTM EPS, and official Agah signup/AsaTrader links; a full CAN SLIM pass, independently dated stock trades, Agah developer API and real orders are **not** claimed. English Forex Factory events and publisher headlines have an explicit button that opens the short text in Google Translate outside the app. [Exact sources and limits](docs/WORKSPACES_FA.md).
+- **Journal truth / opt-in automatic PAPER**: Chart Entry/SL/TP lines are *signal plans*, not executed trades. Android «ژورنال» contains only entries actually persisted on the device; closed positions update stats on settlement, and damaged journal files are never silently replaced with `[]`. Manual LONG/SHORT still has SL/TP preview, risk caps, fresh quotes and confirmation. With a separately confirmed Settings toggle and foreground monitoring, automatic **paper-only** entries require all eight technical checks, matching fresh server-model news with publisher evidence (ninth check), live quote + MTF guard, then atomically record once per signal bar; real orders remain disabled. Without a deployed HTTPS backend plus explicitly consented server AI key, ninth check is UNKNOWN and **no automatic entry occurs**. Historical backtests cannot use current news to claim nine-way confirmation.
+- **Verified educational alerts (XAU/USD only)**: With foreground monitoring and notifications enabled, only a fresh 9/9 model-backed opportunity that also passes MTF/risk/exposure checks can trigger an alert. If opt-in auto-paper is ON, the **entry** alert plays only after the journal's atomic write succeeds; on failure no entry/candidate sound is emitted. If auto-paper is OFF, a separately labeled **candidate-only** alert can play. Choose an Android audio file through the document picker and preview its brief app-played sound, or use the phone's default notification channel. Candidate history is persisted/deduplicated separately from trades; actual paper entries snapshot nine conditions in the journal. Notification/DND/background limits still apply; sound on real phones is not verified by CI. See [phone checklist](docs/ALERT_NOBITEX_FA.md).
+- **Nobitex public-data training, no trading access**: Visible in the separate Android «نوبیتکس» workspace, with public GET of BTCUSDT/BTCIRT OHLC, stats, and timestamped v3 order book, strict schema/freshness/cross-price checks and one-tap CSV export; no key or backend needed. A separate **USDT** practice ledger allows confirmed manual **BTCUSDT Spot BUY paper only**, simulated entry at a fresh book ask and later exits only against a book bid timestamped *after* entry (no fees, slippage, depth-based fill or real orders). Without a valid book timestamp, research data stay visible but practice is disabled. BTCIRT practice is **blocked**: checked again on 2026-09-24, OHLC price was ~1/10 of stats/book and the history unit is not explicitly specified; raw history is labeled unverified. No XAU 9/9 AI claim, spot short, exchange account, or order endpoint is added. [Source contracts and caveats](docs/ALERT_NOBITEX_FA.md).
+- **Publisher web news**: Android now opens with **four separate workspace choices** (Forex, global crypto, Nobitex, Iranian stocks/Agah). Forex news puts the Forex Factory weekly calendar first, then loads attributed FXStreet/BLS headlines; global crypto loads CoinDesk only. Headlines and provider links arrive **directly on the phone without server configuration**. Feed errors/age and display-only cached items are labeled; BLS monthly reports are not called breaking news. The optional HTTPS backend independently evaluates news for trading; direct headlines NEVER create `NewsGate.CLEAR` or AI evidence. Missing/stale backend feeds mean `UNKNOWN`; opt-in rule-based news pause affects **manual paper entries**, while the separate XAU/USD model-backed ninth confluence is always mandatory for *signal/automatic* paper eligibility. The optional licensed `/news/fa` feed remains separate; neither is an economic calendar. A limited free-tier Gemini 2.5 Flash-Lite BYOK option (or the legacy OpenAI provider) lives only on the server with an explicit publisher-rights consent flag; keyword fallback NEVER counts as AI.
+- **Crypto screen**: new Android «رمزارز» tab, strictly read-only; CoinGecko market/supply/momentum prefilter plus exact coin-ID verification against CoinGecko's Binance pair tickers, Binance Spot volume/book/completed-candle checks, source times, cached-scan labels/expiry, thresholds and honest unavailable/empty states. Candidates are **not** predictions of a pump.
+- **One-tap free historical downloads**: Android «یادگیری» gets EUR/USD and EUR/GBP *daily reference rates* from ECB via Frankfurter and *monthly* World Bank gold averages via the public-domain DataHub CSV without a key; AAPL/MSFT daily OHLC comes from Twelve Data with the user's free read-only key. Optional daily XAU/USD spot bars require Twelve Data commodity access, which may be a paid tier. It validates provenance/date/asset and exports locally to CSV. These are research data, not tradable quotes; ECB reference rates and monthly gold averages are **not candles**. Separately, the Android file picker or public HTTPS URL accepts historical MT4/MT5 CSV/TSV (explicit timezone, OHLC and timeframe validation), isolated from live trading and cache. Binary MT5 formats/Bridge not connected.
+- **Reports**: 18 descriptive metrics on Android paper/backtest/out-of-sample reports; backend/web backtest report includes counts by side, average win/loss/duration, streaks and per-trade, **nonannualized** Sharpe. Undefined ratios display `—`.
+- **Execution API boundary**: `/api/v1/execution/status` and `/preflight` explain blockers; `/orders` always returns 503. No trading credential is sent/stored in the APK.
 
-- **Backtest** — replays the live strategy over real candles.
-- **Walk-forward** — older part of the real series in-sample, newer part out-of-sample.
-- **Paper journal** — signals generated from real prices, settled later against real prices.
-- **Walk-forward** — older part of the real series in-sample, newer part out-of-sample, with an
-  explicit verdict (kept on the device so the numbers can be re-checked later).
-- **Learning tab in the app** — runs the real backtest **and** the walk-forward split on your phone,
-  then stores the report in the journal tab.
-
-The Android app needs no server: provider access, indicators, the signal engine, multi-timeframe
-aggregation, backtesting, the paper journal and the background monitor all run on the device.
-
-## Repository map
-
-```text
-android/                     Native Kotlin + Jetpack Compose app (Trading)
-  app/src/main/java/com/aurum/edge/
-    core/                    Models + AppContainer (dependency wiring)
-    data/                    Twelve Data client, settings, cache, journal, market repository
-    engine/                  Indicators, signal engine, real-candle backtester
-    notify/, service/        Notifications + foreground monitor
-    ui/                      Chart, Signal, Learn, Journal, Settings screens
-src/                         React + Vite terminal (desktop/mobile web)
-  lib/api.ts                 API client (surfaces backend errors, never fabricates)
-  lib/feed.ts                Real-candle feed: REST + WebSocket, offline detection
-  components/                Chart, signal, MTF, prediction, ensemble, backtest panels
-backend/app/
-  main.py                    FastAPI routes + real feed pipeline
-  services/history.py        Twelve Data history loader (memory + disk cache)
-  services/market_feed.py    WebSocket ticks + REST polling, no synthetic source
-  services/backtest.py       Real-candle replay of the live strategy
-  services/forward_test.py   In-sample / out-of-sample split on real candles
-  services/*                 Indicators, strategy, MTF, features, sentiment, journal
-docs/ANDROID.md              Build the APK through GitHub Actions
-docs/ARCHITECTURE.md         System design notes
-```
-
-## Run the API
+## Run backend
 
 ```bash
 cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # put your Twelve Data key in AURUM_TWELVE_DATA_API_KEY
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+cp .env.example .env
+# Put your own AURUM_TWELVE_DATA_API_KEY in .env for web chart/backtests.
+# Public publisher RSS news works without a feed key; CoinGecko Demo key is recommended
+# for the read-only crypto screen: AURUM_COINGECKO_DEMO_API_KEY (never inside the APK).
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+python -m pytest -q
 ```
 
-- `GET /api/v1/health` — process health.
-- `GET /api/v1/data/status` — whether a real key is configured and what the feed is doing.
-- `GET /docs` — full route list.
+`GET /api/v1/data/status`, `/api/v1/news/web`, `/api/v1/crypto/candidates`, `/api/v1/execution/status` and `/docs` expose provider readiness. Android model-backed XAU alerts and the CoinGecko/Binance scanner need this backend deployed over publicly reachable **HTTPS** and its address entered in Settings; the separate public Nobitex data/training section does **not**. `localhost` on the phone is not your PC. Without a Twelve Data key market-candle routes return 503 on purpose; news/scanner work independently of it when their sources are reachable.
 
-Without `AURUM_TWELVE_DATA_API_KEY` the data routes answer **503** with a Persian explanation; that
-is intentional, and the web/app UI displays it instead of a chart.
-
-## Run the web terminal
+## Run web terminal
 
 ```bash
-npm install
-npm run dev            # frontend on :5173
-npm run dev:backend    # API on :8000 (separate terminal, or use npm run dev:all)
+npm ci
+npm run dev           # :5173; proxies /api and /ws to backend :8000
+npm run build         # TypeScript + production build
 ```
 
-The terminal shows the live feed state (live / polling / offline / no-key) and marks any cached
-data as cached.
-
-## Build the Android APK
-
-The APK is built by GitHub Actions — nothing to install locally:
-
-1. Add the workflow file `.github/workflows/android.yml` to the repository (it is included in this
-   workspace; GitHub blocks automation tokens from pushing workflow files).
-2. Optional: add a repository secret `TD_API_KEY` with your Twelve Data key so the APK ships
-   pre-configured. Without it, the app asks for the key on first run.
-3. Run the **Android APK** workflow (or push a change under `android/`) and download the
-   `aurum-edge-apk` artifact — it contains the debug and release APKs.
-
-Details and troubleshooting: [`docs/ANDROID.md`](docs/ANDROID.md).
-
-## Tests
+## Build Android
 
 ```bash
-cd backend && .venv/bin/python -m pytest -q
+cd android
+./gradlew testDebugUnitTest assembleDebug
 ```
 
-`backend/tests/test_real_data_policy.py` is a guard rail: it asserts that history loading, the news
-aggregator and the backtester refuse to produce data when the provider is unavailable, and that no
-synthetic generator remains in the pipeline.
+Requires JDK 17 + Android SDK 35. Alternatively use the **Android APK** GitHub Actions workflow (`.github/workflows/main.yml`) for debug and debug-signed “release” **test** APK artifacts; the current remote workflow has a separate non-blocking JVM-test step, but `assembleRelease` itself now depends on `testDebugUnitTest` in Gradle, so failed tests prevent artifact upload. The proposed workflow-only hardening change still needs GitHub `workflows` permission to push. Enter the read-only Twelve Data key in the app's Settings after installation; baking even a GitHub Actions secret into an APK would disclose it. Details: [docs/ANDROID.md](docs/ANDROID.md), [android/README.md](android/README.md).
 
-## Important
-
-Decision support only — not financial advice. A phone is not an execution venue: keep ingestion,
-signal generation and risk limits server-side, keep a broker-side kill switch, and validate contract
-specifications and costs before risking money.
+Decision support only, not financial advice. The screen covers a limited liquid spot universe, **not a meme-coin pump detector**. No official TSETMC contract, Nobitex/MT5 order adapter or real order path is claimed ready; live trading requires an independently audited, authenticated execution system, venue rules, permitted data/news and user/broker approvals. CI must compile the changed APK before it can be called installable.

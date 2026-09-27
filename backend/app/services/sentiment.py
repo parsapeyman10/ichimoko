@@ -5,10 +5,10 @@ from typing import Any
 from app.config import Settings
 from app.models import Direction, Impact, NewsRequest, SentimentResult
 
-HIGH_IMPACT = {"fomc", "federal reserve", "powell", "nfp", "nonfarm", "cpi", "inflation", "rate decision", "war", "tariff"}
-MEDIUM_IMPACT = {"pce", "ppi", "retail sales", "jobless", "yield", "dxy", "dollar", "central bank", "geopolitical"}
-BULLISH_GOLD = {"rate cut", "dovish", "weak dollar", "yields fall", "recession", "safe haven", "ceasefire fails", "central bank buying"}
-BEARISH_GOLD = {"rate hike", "hawkish", "strong dollar", "yields rise", "hot inflation", "risk-on", "peace deal", "gold outflow"}
+HIGH_IMPACT = {"fomc", "federal reserve", "powell", "nfp", "nonfarm", "cpi", "inflation", "rate decision", "war", "tariff", "نرخ بهره", "فدرال رزرو", "تورم آمریکا", "اشتغال آمریکا", "جنگ", "تعرفه"}
+MEDIUM_IMPACT = {"pce", "ppi", "retail sales", "jobless", "yield", "dxy", "dollar", "central bank", "geopolitical", "شاخص دلار", "بانک مرکزی", "بازده اوراق"}
+BULLISH_GOLD = {"rate cut", "dovish", "weak dollar", "yields fall", "recession", "safe haven", "ceasefire fails", "central bank buying", "کاهش نرخ بهره", "تضعیف دلار", "کاهش بازده"}
+BEARISH_GOLD = {"rate hike", "hawkish", "strong dollar", "yields rise", "hot inflation", "risk-on", "peace deal", "gold outflow", "افزایش نرخ بهره", "تقویت دلار", "افزایش بازده"}
 
 
 class SentimentEngine:
@@ -58,7 +58,8 @@ Source: {news.source}"""
         result = self._analyze_rules(news)
         return result.model_copy(update={"direction": mapping[top["label"].lower()], "confidence": top["score"] * 100, "source": "ProsusAI/finbert"})
 
-    def _analyze_rules(self, news: NewsRequest) -> SentimentResult:
+    @staticmethod
+    def _analyze_rules(news: NewsRequest) -> SentimentResult:
         text = re.sub(r"\s+", " ", f"{news.headline} {news.body}").lower()
         bullish = sum(phrase in text for phrase in BULLISH_GOLD)
         bearish = sum(phrase in text for phrase in BEARISH_GOLD)

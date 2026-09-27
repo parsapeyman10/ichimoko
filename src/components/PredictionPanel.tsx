@@ -14,8 +14,8 @@ type Prediction = {
   is_actionable: boolean;
   explanation?: string;
   horizon?: string;
-  top_features?: { name: string; value: number; contribution?: number }[];
-  scenario?: { direction?: string; probability?: number }[];
+  // Backend key is `drivers` (see app/services/predictor.py::predict_next), not `top_features`.
+  drivers?: { name: string; label?: string; value: number; contribution?: number }[];
 };
 
 export default function PredictionPanel({ timeframe }: { timeframe: string }) {
@@ -100,13 +100,13 @@ export default function PredictionPanel({ timeframe }: { timeframe: string }) {
             <div style={{ background: '#0a0e12', border: '1px solid #1f2630', borderRadius: 8, padding: '11px 12px' }}>
               <span style={{ color: '#6b7280', font: '7px DM Mono' }}>مهم‌ترین ورودی‌ها</span>
               <div style={{ display: 'grid', gap: 4, marginTop: 6 }}>
-                {(prediction.top_features ?? []).slice(0, 6).map((feature, index) => (
+                {(prediction.drivers ?? []).slice(0, 6).map((feature, index) => (
                   <div key={`${feature.name}-${index}`} style={{ display: 'flex', justifyContent: 'space-between', font: '8px DM Mono', color: '#c9cdd5' }}>
-                    <span>{feature.name}</span>
+                    <span>{feature.label ?? feature.name}</span>
                     <b style={{ color: feature.value >= 0 ? 'var(--green)' : 'var(--red)' }}>{feature.value.toFixed(2)}</b>
                   </div>
                 ))}
-                {!(prediction.top_features ?? []).length && <small style={{ color: '#6b7280', fontSize: 9 }}>فهرست ورودی‌ها از بک‌اند ارسال نشد.</small>}
+                {!(prediction.drivers ?? []).length && <small style={{ color: '#6b7280', fontSize: 9 }}>فهرست ورودی‌ها از بک‌اند ارسال نشد.</small>}
               </div>
             </div>
 

@@ -34,14 +34,23 @@ from app.services.backtest import run_backtest, stress_test_from_trades
 from app.services.broker import BROKERS, RECOMMENDED, get_broker
 from app.services.candle_builder import CandleBuilder
 from app.services.forward_test import run_forward_test
+from app.services.execution_gate import OrderIntent, preflight as order_preflight, status as execution_status
 from app.services.history import DataUnavailable, load_history
 from app.services.market_feed import market_ticks
 from app.services.news_feed import NewsAggregator
+from app.services.persian_news import PersianNewsFeed
+from app.services.web_news import WebNewsFeed
+from app.services.crypto_scanner import CryptoScanner
 from app.services.sentiment import SentimentEngine
 from app.services.strategy import evaluate_scalp, explain_profitability
 from app.services.ytd_trades import get_ytd_report
 
 settings = get_settings()
+
+
+def market_provider_label() -> str:
+    """Which real feed is actually driving market data right now — never a fixed label."""
+    return "twelve_data" if settings.has_market_key else "spot_fallback"
 
 
 class MarketHub:
@@ -56,7 +65,7 @@ class MarketHub:
             "state": "starting",
             "detail": None,
             "last_tick_at": None,
-            "provider": "twelve_data",
+            "provider": market_provider_label(),
         }
 
     def subscribe(self) -> asyncio.Queue:
@@ -79,10 +88,24 @@ class MarketHub:
         self.feed_status.update({"state": state, "detail": detail})
         self.publish({"type": "feed.status", "status": state, "detail": detail})
 
+    def public_feed_status(self, now: datetime | None = None) -> dict[str, Any]:
+        """A socket that remains open without quotes is NOT evidence of a live market."""
+        result = self.feed_status.copy()
+        last_tick = result.get("last_tick_at")
+        clock = now or datetime.now(timezone.utc)
+        if result["state"] in ("live", "polling") and (
+                not isinstance(last_tick, datetime) or last_tick.tzinfo is None or
+                not 0 <= (clock - last_tick).total_seconds() <= 90):
+            result.update(state="stale", detail="آخرین تیک منبع قدیمی است؛ فید قابل اتکا نیست")
+        return result
+
 
 hub = MarketHub()
 sentiment = SentimentEngine(settings)
 news_aggregator = NewsAggregator(settings)
+persian_news = PersianNewsFeed(settings)
+web_news = WebNewsFeed(settings)
+crypto_scanner = CryptoScanner(settings)
 
 
 async def run_market_pipeline() -> None:
@@ -95,11 +118,24 @@ async def run_market_pipeline() -> None:
     backoff = 2
     while True:
         try:
-            hub.set_status("connecting", "اتصال به Twelve Data…")
+            hub.set_status(
+                "connecting",
+                "اتصال به Twelve Data…" if settings.has_market_key else "اتصال به فید رایگان خودکار طلا (Swissquote/Gold-API)…",
+            )
             async for tick in market_ticks(settings):
+                source_state = "live" if tick.provider == "twelve_data:ws" else "polling"
+                if tick.provider == "twelve_data:ws":
+                    source_detail = None
+                elif tick.provider == "twelve_data:rest":
+                    source_detail = "تیک از کندل REST ناشر؛ قیمت درون کندل زنده نیست"
+                else:
+                    source_detail = "فید رایگان خودکار (بدون کلید) — Swissquote/Gold-API؛ نرخ‌دهی هر چند ثانیه، نه tick-by-tick"
+                if hub.feed_status["state"] != source_state or hub.feed_status.get("provider") != tick.provider:
+                    hub.set_status(source_state, source_detail)
                 hub.last_tick = tick.model_dump(mode="json")
                 hub.feed_status.update(
-                    {"state": "live", "detail": None, "last_tick_at": datetime.now(timezone.utc)}
+                    {"state": source_state, "detail": source_detail, "last_tick_at": datetime.now(timezone.utc),
+                     "provider": tick.provider}
                 )
                 active_bars: dict[str, dict] = {}
                 for timeframe, builder in builders.items():
@@ -119,7 +155,8 @@ async def run_market_pipeline() -> None:
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60)
         except Exception as exc:
-            hub.set_status("error", f"{type(exc).__name__}: {exc}")
+            # A network error string may contain the request URL and its secret API key.
+            hub.set_status("error", f"اختلال در پردازش فید ({type(exc).__name__})")
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 60)
 
@@ -144,7 +181,7 @@ async def run_news_pipeline() -> None:
             raise
         except Exception as exc:
             hub.publish({"type": "news.status", "status": "degraded", "detail": type(exc).__name__})
-        await asyncio.sleep(60)
+        await asyncio.sleep(30)
 
 
 @asynccontextmanager
@@ -183,15 +220,16 @@ app.add_middleware(
 # ─── status ────────────────────────────────────────────────────────────
 @app.get("/api/v1/health")
 async def health():
+    feed = hub.public_feed_status()
     return {
         "status": "ok",
         "environment": settings.environment,
         "market_data": {
-            "provider": "twelve_data",
+            "provider": market_provider_label(),
             "configured": settings.has_market_key,
-            "feed_state": hub.feed_status["state"],
-            "detail": hub.feed_status["detail"],
-            "last_tick_at": hub.feed_status["last_tick_at"],
+            "feed_state": feed["state"],
+            "detail": feed["detail"],
+            "last_tick_at": feed["last_tick_at"],
         },
         "news": news_aggregator.status(),
         "subscribers": len(hub.subscribers),
@@ -212,14 +250,16 @@ async def data_status():
             "last_bar": hub.latest[timeframe].timestamp if timeframe in hub.latest else None,
         }
     return {
-        "provider": "twelve_data",
+        "provider": market_provider_label(),
         "api_key_configured": settings.has_market_key,
         "symbol": settings.market_symbol,
-        "feed": hub.feed_status,
+        "feed": hub.public_feed_status(),
         "timeframes": per_timeframe,
         "policy": (
-            "فقط داده واقعی منتشر می‌شود. در نبود کلید/اینترنت، اندپوینت‌ها خطا برمی‌گردانند و "
-            "هیچ کندل، قیمت یا خبری ساخته نمی‌شود."
+            "فقط داده واقعی منتشر می‌شود. بدون کلید Twelve Data، یک فید رایگان و کاملاً خودکار "
+            "(Swissquote/Gold-API) جای آن را می‌گیرد — نیازی به تنظیم دستی نیست. اگر اینترنت قطع باشد "
+            "یا هیچ منبع واقعی در دسترس نباشد، اندپوینت‌ها خطا برمی‌گردانند و هیچ کندل، قیمت یا خبری "
+            "ساخته نمی‌شود."
         ),
     }
 
@@ -259,6 +299,42 @@ async def news_headlines():
 async def calendar():
     events = await news_aggregator.fetch_calendar()
     return {"status": news_aggregator.status(), "events": events}
+
+
+@app.get("/api/v1/news/fa")
+async def persian_headlines():
+    """Custom licensed Persian feed (kept for backwards compatibility)."""
+    return await persian_news.snapshot()
+
+
+@app.get("/api/v1/news/web")
+async def web_headlines():
+    """Public publisher RSS: attributed short excerpts; partial coverage cannot clear the guard."""
+    return await web_news.snapshot()
+
+
+@app.get("/api/v1/crypto/candidates")
+async def crypto_candidates():
+    """Read-only, strict spot-market screening; NOT pump prediction or a trade intent."""
+    return await crypto_scanner.snapshot()
+
+
+# ─── real execution boundary (intentionally disabled until independently audited) ──
+@app.get("/api/v1/execution/status")
+async def get_execution_status():
+    return execution_status()
+
+
+@app.post("/api/v1/execution/preflight")
+async def check_order_preflight(intent: OrderIntent):
+    return order_preflight(intent)
+
+
+@app.post("/api/v1/execution/orders")
+async def submit_real_order(intent: OrderIntent):
+    # No broker signing, network call, account credentials or acceptance of client-provided
+    # 'safe' flags. This endpoint cannot execute even if a malicious client calls it.
+    raise HTTPException(status_code=503, detail="ارسال سفارش واقعی غیرفعال است؛ اتصال احراز هویت‌شده و حسابرسی‌شده نصب نشده است")
 
 
 # ─── strategy / risk ───────────────────────────────────────────────────
@@ -370,16 +446,35 @@ async def _backtest_payload(
     broker_name: str | None,
     min_position_oz: float,
     use_trailing: bool,
+    source: str = "auto",
 ) -> dict:
     tf = Timeframe(timeframe) if timeframe in {t.value for t in Timeframe} else Timeframe.M5
     if broker_name:
         broker: BrokerConfig = get_broker(broker_name)
         spread = broker.spread_gold
         commission_per_oz = broker.commission_per_oz or commission_per_oz
-    try:
-        candles = await load_history(settings, tf, output_size=bars)
-    except DataUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if source == "futures_proxy":
+        # Explicit opt-in: real, deep COMEX gold futures (GC=F) history to validate the rule
+        # engine immediately. Never silently mixed with XAU/USD spot — always labeled distinctly.
+        import httpx
+
+        from app.services.futures_history import fetch_futures_history
+
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                candles = await fetch_futures_history(client, tf, limit=bars)
+        except DataUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        data_source_label = (
+            "gc_futures_proxy — کندل‌های واقعی فیوچرز طلای کوموکس (GC=F)، نه اسپات XAU/USD؛ "
+            "فقط برای اعتبارسنجی قواعد روی تاریخچهٔ عمیق تا زمانی‌که فید اسپات تاریخچهٔ کافی جمع کند"
+        )
+    else:
+        try:
+            candles = await load_history(settings, tf, output_size=bars)
+        except DataUnavailable as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        data_source_label = market_provider_label()
     result = run_backtest(
         candles,
         initial_balance=max(10.0, min(initial_balance, 100000.0)),
@@ -388,6 +483,7 @@ async def _backtest_payload(
         commission_per_oz=commission_per_oz,
         min_position_oz=min_position_oz,
         use_trailing=use_trailing,
+        data_source=data_source_label,
     )
     if broker_name:
         result["broker"] = get_broker(broker_name).model_dump()
@@ -405,10 +501,11 @@ async def backtest_run_get(
     min_position_oz: float = 1.0,
     broker_name: str | None = None,
     use_trailing: bool = True,
+    source: str = Query("auto", pattern="^(auto|futures_proxy)$"),
 ):
-    """Replay the live strategy over real candles pulled from Twelve Data."""
+    """Replay the live strategy over real candles (auto spot/Twelve Data, or opt-in GC=F futures)."""
     return await _backtest_payload(
-        timeframe, bars, initial_balance, risk_percent, spread, commission_per_oz, broker_name, min_position_oz, use_trailing
+        timeframe, bars, initial_balance, risk_percent, spread, commission_per_oz, broker_name, min_position_oz, use_trailing, source
     )
 
 
@@ -423,9 +520,10 @@ async def backtest_run_post(
     min_position_oz: float = 1.0,
     broker_name: str | None = None,
     use_trailing: bool = True,
+    source: str = Query("auto", pattern="^(auto|futures_proxy)$"),
 ):
     return await _backtest_payload(
-        timeframe, bars, initial_balance, risk_percent, spread, commission_per_oz, broker_name, min_position_oz, use_trailing
+        timeframe, bars, initial_balance, risk_percent, spread, commission_per_oz, broker_name, min_position_oz, use_trailing, source
     )
 
 
@@ -507,7 +605,7 @@ async def backtest_history(days: int = Query(365, ge=30, le=2000)):
     except DataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {
-        "data_source": "twelve_data",
+        "data_source": market_provider_label(),
         "candles": [
             {"time": c.timestamp.isoformat(), "open": c.open, "high": c.high, "low": c.low, "close": c.close, "volume": c.volume}
             for c in daily
@@ -530,7 +628,7 @@ async def stress_test(
     """
     payload = await _backtest_payload(timeframe, bars, initial_balance, 0.5, spread, commission_per_oz, None, 1.0, True)
     report = stress_test_from_trades(payload.get("trades", []), initial_balance, runs=runs)
-    report["data_source"] = "twelve_data"
+    report["data_source"] = market_provider_label()
     report["bars_used"] = payload.get("bars")
     return report
 
@@ -701,13 +799,14 @@ async def market_socket(websocket: WebSocket):
     await websocket.accept()
     queue = hub.subscribe()
     try:
+        feed = hub.public_feed_status()
         await websocket.send_json(
             {
                 "type": "connected",
                 "symbol": settings.market_symbol,
-                "provider": "twelve_data",
-                "feed_state": hub.feed_status["state"],
-                "detail": hub.feed_status["detail"],
+                "provider": market_provider_label(),
+                "feed_state": feed["state"],
+                "detail": feed["detail"],
             }
         )
         while True:

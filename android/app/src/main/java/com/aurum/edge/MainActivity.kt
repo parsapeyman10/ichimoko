@@ -13,6 +13,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val container = (application as AurumApplication).container
+        // Never start Forex monitoring before the workspace chooser has been shown.
+        // A previously running foreground service is handled by its own workspace guard.
         setContent {
             AurumTheme {
                 val viewModel: AurumViewModel = viewModel(factory = AurumViewModelFactory(container))
