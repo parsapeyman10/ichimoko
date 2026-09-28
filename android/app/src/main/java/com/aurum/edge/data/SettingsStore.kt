@@ -23,11 +23,18 @@ class SettingsStore(context: Context) {
 
     fun read(): AppSettings {
         val legacyProfile = SignalProfile.fromName(prefs.getString(KEY_SIGNAL_PROFILE, null))
+        fun opt(key: String, legacy: Boolean): Boolean =
+            if (prefs.contains(key)) prefs.getBoolean(key, false) else legacy
         val profile = SignalProfile(
-            momentumVolume = if (prefs.contains(KEY_SIGNAL_MOMENTUM_VOLUME))
-                prefs.getBoolean(KEY_SIGNAL_MOMENTUM_VOLUME, false) else legacyProfile.momentumVolume,
-            flatSpanB = if (prefs.contains(KEY_SIGNAL_FLAT_SPAN_B))
-                prefs.getBoolean(KEY_SIGNAL_FLAT_SPAN_B, false) else legacyProfile.flatSpanB,
+            momentumVolume = opt(KEY_SIGNAL_MOMENTUM_VOLUME, legacyProfile.momentumVolume),
+            flatSpanB = opt(KEY_SIGNAL_FLAT_SPAN_B, legacyProfile.flatSpanB),
+            rangeChopFilter = opt(KEY_SIGNAL_RANGE_CHOP, legacyProfile.rangeChopFilter),
+            higherTimeframeFilter = opt(KEY_SIGNAL_HIGHER_TIMEFRAME, legacyProfile.higherTimeframeFilter),
+            fakeBreakoutFilter = opt(KEY_SIGNAL_FAKE_BREAKOUT, legacyProfile.fakeBreakoutFilter),
+            dynamicSpreadFilter = opt(KEY_SIGNAL_DYNAMIC_SPREAD, legacyProfile.dynamicSpreadFilter),
+            riskyTimingFilter = opt(KEY_SIGNAL_RISKY_TIMING, legacyProfile.riskyTimingFilter),
+            structureRiskFilter = opt(KEY_SIGNAL_STRUCTURE_RISK, legacyProfile.structureRiskFilter),
+            cooldownFilter = opt(KEY_SIGNAL_COOLDOWN, legacyProfile.cooldownFilter),
         )
         return AppSettings(
         apiKey = prefs.getString(KEY_API, null)?.takeIf { it.isNotBlank() }
@@ -162,6 +169,13 @@ class SettingsStore(context: Context) {
             .putString(KEY_SIGNAL_PROFILE, next.signalProfile.persistName())
             .putBoolean(KEY_SIGNAL_MOMENTUM_VOLUME, next.signalProfile.momentumVolume)
             .putBoolean(KEY_SIGNAL_FLAT_SPAN_B, next.signalProfile.flatSpanB)
+            .putBoolean(KEY_SIGNAL_RANGE_CHOP, next.signalProfile.rangeChopFilter)
+            .putBoolean(KEY_SIGNAL_HIGHER_TIMEFRAME, next.signalProfile.higherTimeframeFilter)
+            .putBoolean(KEY_SIGNAL_FAKE_BREAKOUT, next.signalProfile.fakeBreakoutFilter)
+            .putBoolean(KEY_SIGNAL_DYNAMIC_SPREAD, next.signalProfile.dynamicSpreadFilter)
+            .putBoolean(KEY_SIGNAL_RISKY_TIMING, next.signalProfile.riskyTimingFilter)
+            .putBoolean(KEY_SIGNAL_STRUCTURE_RISK, next.signalProfile.structureRiskFilter)
+            .putBoolean(KEY_SIGNAL_COOLDOWN, next.signalProfile.cooldownFilter)
             .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
             .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
             .apply()
@@ -198,5 +212,12 @@ class SettingsStore(context: Context) {
         private const val KEY_SIGNAL_PROFILE = "signal_profile"
         private const val KEY_SIGNAL_MOMENTUM_VOLUME = "signal_momentum_volume"
         private const val KEY_SIGNAL_FLAT_SPAN_B = "signal_flat_span_b"
+        private const val KEY_SIGNAL_RANGE_CHOP = "signal_range_chop_filter"
+        private const val KEY_SIGNAL_HIGHER_TIMEFRAME = "signal_higher_timeframe_filter"
+        private const val KEY_SIGNAL_FAKE_BREAKOUT = "signal_fake_breakout_filter"
+        private const val KEY_SIGNAL_DYNAMIC_SPREAD = "signal_dynamic_spread_filter"
+        private const val KEY_SIGNAL_RISKY_TIMING = "signal_risky_timing_filter"
+        private const val KEY_SIGNAL_STRUCTURE_RISK = "signal_structure_risk_filter"
+        private const val KEY_SIGNAL_COOLDOWN = "signal_cooldown_filter"
     }
 }

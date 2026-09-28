@@ -172,24 +172,60 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 }
                 Text("فعال", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
             }
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("افزودن فیلتر مومنتوم/حجم", style = MaterialTheme.typography.bodySmall,
-                        color = if (settings.signalProfile.momentumVolume) AurumColors.Gold else AurumColors.TextPrimary)
-                    Text("اگر روشن باشد، سیگنال پایه فقط وقتی اجازه ورود می‌گیرد که MACD/ADX هم‌جهت باشند و حجم نسبیِ معتبر ضعیف نباشد؛ حجم جعلی ساخته نمی‌شود.",
-                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                }
-                Switch(checked = settings.signalProfile.momentumVolume, onCheckedChange = viewModel::setSignalMomentumVolume)
-            }
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("افزودن سناریوی تختی SpanB52", style = MaterialTheme.typography.bodySmall,
-                        color = if (settings.signalProfile.flatSpanB) AurumColors.Gold else AurumColors.TextPrimary)
-                    Text("به‌جز سیگنال‌های پایه، اگر خط ۵۲ مدتی تخت باشد و قیمت از رنج خارج شود، یک مسیر ورود جدا هم بررسی می‌شود.",
-                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                }
-                Switch(checked = settings.signalProfile.flatSpanB, onCheckedChange = viewModel::setSignalFlatSpanB)
-            }
+            SignalAddonRow(
+                title = "افزودن فیلتر مومنتوم/حجم",
+                detail = "سیگنال پایه فقط وقتی اجازه ورود می‌گیرد که MACD/ADX هم‌جهت باشند و حجم نسبیِ معتبر ضعیف نباشد؛ حجم جعلی ساخته نمی‌شود.",
+                checked = settings.signalProfile.momentumVolume,
+                onCheckedChange = viewModel::setSignalMomentumVolume,
+            )
+            SignalAddonRow(
+                title = "افزودن سناریوی تختی SpanB52",
+                detail = "به‌جز سیگنال‌های پایه، اگر خط ۵۲ مدتی تخت باشد و قیمت از رنج خارج شود، یک مسیر ورود جدا هم بررسی می‌شود.",
+                checked = settings.signalProfile.flatSpanB,
+                onCheckedChange = viewModel::setSignalFlatSpanB,
+            )
+            SignalAddonRow(
+                title = "فیلتر بازار رنج / Chop",
+                detail = "وقتی ADX پایین، باند/رنج فشرده و شکست معتبر نداریم، ورود متوقف می‌شود تا سیگنال‌های داخل بازار خنثی کمتر شوند.",
+                checked = settings.signalProfile.rangeChopFilter,
+                onCheckedChange = viewModel::setSignalRangeChop,
+            )
+            SignalAddonRow(
+                title = "تأیید تایم‌فریم بالاتر",
+                detail = "از شیب EMA200 و موقعیت قیمت نسبت به ساختار بزرگ‌تر همین داده‌ها کمک می‌گیرد تا سیگنال خلاف روند غالب رد شود.",
+                checked = settings.signalProfile.higherTimeframeFilter,
+                onCheckedChange = viewModel::setSignalHigherTimeframe,
+            )
+            SignalAddonRow(
+                title = "فیلتر فیک‌بریک‌اوت / Retest",
+                detail = "کندل باید بسته‌شدن سالم، ویک غیرمشکوک و شکست/ری‌تست معتبر نسبت به ساختار نزدیک داشته باشد.",
+                checked = settings.signalProfile.fakeBreakoutFilter,
+                onCheckedChange = viewModel::setSignalFakeBreakout,
+            )
+            SignalAddonRow(
+                title = "فیلتر اسپرد و نقدشوندگی پویا",
+                detail = "اگر هزینهٔ اسپرد نسبت به ATR همان لحظه زیاد باشد، سیگنال اجرا متوقف می‌شود؛ قیمت یا اسپرد ساختگی تولید نمی‌شود.",
+                checked = settings.signalProfile.dynamicSpreadFilter,
+                onCheckedChange = viewModel::setSignalDynamicSpread,
+            )
+            SignalAddonRow(
+                title = "فیلتر زمان‌های خطرناک",
+                detail = "ورود نزدیک رول‌اور، باز/بسته‌شدن آخر هفته و پنجره‌های معمول خبرهای سنگین آمریکا محدود می‌شود؛ جایگزین تقویم واقعی خبر نیست.",
+                checked = settings.signalProfile.riskyTimingFilter,
+                onCheckedChange = viewModel::setSignalRiskyTiming,
+            )
+            SignalAddonRow(
+                title = "فیلتر ریسک ساختار و حد ضرر",
+                detail = "اگر حد ضرر نسبت به ATR/ساختار خیلی نزدیک یا خیلی دور باشد، ورود رد می‌شود تا R/R ظاهری فریبنده نشود.",
+                checked = settings.signalProfile.structureRiskFilter,
+                onCheckedChange = viewModel::setSignalStructureRisk,
+            )
+            SignalAddonRow(
+                title = "کول‌داون بعد از شکست/نوسان رفت‌وبرگشتی",
+                detail = "اگر اخیراً کراس مخالف یا چند چرخش تنکان/کیجون دیده شود، چند کندل صبر می‌کند تا overtrade کمتر شود.",
+                checked = settings.signalProfile.cooldownFilter,
+                onCheckedChange = viewModel::setSignalCooldown,
+            )
             Text("تختی SpanB 52 همان میانگین ۵۲ کندل ایچیموکو است: اگر چند کندل ثابت بماند یعنی سقف/کف ۵۲تایی عوض نشده؛ فقط وقتی قیمت از آن و از رنج کوتاه خارج شود به‌عنوان سناریوی رشد/ریزش بررسی می‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 6.dp))
@@ -525,6 +561,23 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             text = { Text("همهٔ پوزیشن‌های باز و بسته‌شدهٔ ثبت‌شده روی این گوشی حذف می‌شوند. این کار برگشت‌پذیر نیست؛ سیگنال‌های چارت اصلاً معاملهٔ ثبت‌شده نیستند.") },
             confirmButton = { TextButton(onClick = { viewModel.clearJournal(); confirmJournalClear = false }) { Text("حذف قطعی") } },
             dismissButton = { TextButton(onClick = { confirmJournalClear = false }) { Text("انصراف") } })
+    }
+}
+
+@Composable
+private fun SignalAddonRow(
+    title: String,
+    detail: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodySmall,
+                color = if (checked) AurumColors.Gold else AurumColors.TextPrimary)
+            Text(detail, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 

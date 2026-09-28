@@ -52,19 +52,42 @@ enum class SignalAction { BUY, SELL, NO_TRADE }
 data class SignalProfile(
     val momentumVolume: Boolean = false,
     val flatSpanB: Boolean = false,
+    val rangeChopFilter: Boolean = false,
+    val higherTimeframeFilter: Boolean = false,
+    val fakeBreakoutFilter: Boolean = false,
+    val dynamicSpreadFilter: Boolean = false,
+    val riskyTimingFilter: Boolean = false,
+    val structureRiskFilter: Boolean = false,
+    val cooldownFilter: Boolean = false,
 ) {
-    val isBaseOnly: Boolean get() = !momentumVolume && !flatSpanB
-    val title: String get() = activeLabels().ifEmpty { listOf("پایه") }.joinToString(" + ")
+    val isBaseOnly: Boolean get() = !momentumVolume && !flatSpanB && !rangeChopFilter &&
+        !higherTimeframeFilter && !fakeBreakoutFilter && !dynamicSpreadFilter &&
+        !riskyTimingFilter && !structureRiskFilter && !cooldownFilter
+    val title: String get() = activeLabels().joinToString(" + ")
 
     fun activeLabels(): List<String> = buildList {
         add("پایه")
         if (momentumVolume) add("مومنتوم/حجم")
         if (flatSpanB) add("تختی SpanB52")
+        if (rangeChopFilter) add("ضد رنج")
+        if (higherTimeframeFilter) add("تایم بالاتر")
+        if (fakeBreakoutFilter) add("ضد فیک‌بریک")
+        if (dynamicSpreadFilter) add("اسپرد پویا")
+        if (riskyTimingFilter) add("زمان خطرناک")
+        if (structureRiskFilter) add("ریسک ساختار")
+        if (cooldownFilter) add("کول‌داون")
     }
 
     fun persistName(): String = buildList {
         if (momentumVolume) add("MOMENTUM_VOLUME")
         if (flatSpanB) add("FLAT_SPAN_B")
+        if (rangeChopFilter) add("RANGE_CHOP_FILTER")
+        if (higherTimeframeFilter) add("HIGHER_TIMEFRAME_FILTER")
+        if (fakeBreakoutFilter) add("FAKE_BREAKOUT_FILTER")
+        if (dynamicSpreadFilter) add("DYNAMIC_SPREAD_FILTER")
+        if (riskyTimingFilter) add("RISKY_TIMING_FILTER")
+        if (structureRiskFilter) add("STRUCTURE_RISK_FILTER")
+        if (cooldownFilter) add("COOLDOWN_FILTER")
     }.ifEmpty { listOf("BASE") }.joinToString(",")
 
     companion object {
@@ -76,6 +99,13 @@ data class SignalProfile(
             return SignalProfile(
                 momentumVolume = "MOMENTUM_VOLUME" in parts,
                 flatSpanB = "FLAT_SPAN_B" in parts,
+                rangeChopFilter = "RANGE_CHOP_FILTER" in parts,
+                higherTimeframeFilter = "HIGHER_TIMEFRAME_FILTER" in parts,
+                fakeBreakoutFilter = "FAKE_BREAKOUT_FILTER" in parts,
+                dynamicSpreadFilter = "DYNAMIC_SPREAD_FILTER" in parts,
+                riskyTimingFilter = "RISKY_TIMING_FILTER" in parts,
+                structureRiskFilter = "STRUCTURE_RISK_FILTER" in parts,
+                cooldownFilter = "COOLDOWN_FILTER" in parts,
             )
         }
     }

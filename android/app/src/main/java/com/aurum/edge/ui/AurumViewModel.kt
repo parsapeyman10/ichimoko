@@ -323,6 +323,34 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         it.copy(flatSpanB = enabled)
     }
 
+    fun setSignalRangeChop(enabled: Boolean) = updateSignalProfile("فیلتر بازار رنج", enabled) {
+        it.copy(rangeChopFilter = enabled)
+    }
+
+    fun setSignalHigherTimeframe(enabled: Boolean) = updateSignalProfile("تأیید تایم‌فریم بالاتر", enabled) {
+        it.copy(higherTimeframeFilter = enabled)
+    }
+
+    fun setSignalFakeBreakout(enabled: Boolean) = updateSignalProfile("فیلتر فیک‌بریک‌اوت", enabled) {
+        it.copy(fakeBreakoutFilter = enabled)
+    }
+
+    fun setSignalDynamicSpread(enabled: Boolean) = updateSignalProfile("فیلتر اسپرد پویا", enabled) {
+        it.copy(dynamicSpreadFilter = enabled)
+    }
+
+    fun setSignalRiskyTiming(enabled: Boolean) = updateSignalProfile("فیلتر زمان‌های خطرناک", enabled) {
+        it.copy(riskyTimingFilter = enabled)
+    }
+
+    fun setSignalStructureRisk(enabled: Boolean) = updateSignalProfile("فیلتر ریسک ساختار", enabled) {
+        it.copy(structureRiskFilter = enabled)
+    }
+
+    fun setSignalCooldown(enabled: Boolean) = updateSignalProfile("کول‌داون بعد از شکست", enabled) {
+        it.copy(cooldownFilter = enabled)
+    }
+
     private fun updateSignalProfile(label: String, enabled: Boolean, transform: (SignalProfile) -> SignalProfile) {
         container.settingsStore.update { it.copy(signalProfile = transform(it.signalProfile)) }
         container.market.restart()
