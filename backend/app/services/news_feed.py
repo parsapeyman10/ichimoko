@@ -63,13 +63,25 @@ class NewsAggregator:
 
         articles: list[NewsRequest] = []
         for item in payload if isinstance(payload, list) else []:
+            # Provider JSON is untrusted: malformed rows are skipped, never coerced into a
+            # headline or allowed to crash the route with a 500 response.
+            if not isinstance(item, dict):
+                continue
+            headline = item.get("title")
+            if not isinstance(headline, str):
+                continue
+            headline = headline.strip()
+            if not 3 <= len(headline) <= 500:
+                continue
+            body = item.get("text", "") or item.get("content", "")
+            source = item.get("site", "FMP")
             article = NewsRequest(
-                headline=item.get("title", "").strip(),
-                body=item.get("text", "") or item.get("content", ""),
-                source=item.get("site", "FMP"),
+                headline=headline,
+                body=(body[:20_000] if isinstance(body, str) else ""),
+                source=source if isinstance(source, str) and source.strip() else "FMP",
                 published_at=self._parse_time(item.get("publishedDate")),
             )
-            if len(article.headline) >= 3 and self._accept(article):
+            if self._accept(article):
                 articles.append(article)
         if not articles:
             self.last_error = self.last_error or "پاسخ سرویس خبری خالی بود"
@@ -99,7 +111,7 @@ class NewsAggregator:
     @staticmethod
     def _parse_time(value: str | None) -> datetime | None:
         """Missing/bad provider timestamps stay unknown; never replace them with now()."""
-        if not value:
+        if not isinstance(value, str) or not value.strip():
             return None
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))

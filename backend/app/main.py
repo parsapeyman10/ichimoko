@@ -9,7 +9,7 @@ import asyncio
 import contextlib
 from collections import defaultdict, deque
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
@@ -47,6 +47,7 @@ from app.services.strategy import evaluate_scalp, explain_profitability
 from app.services.ytd_trades import get_ytd_report
 
 settings = get_settings()
+MIN_RESEARCH_BARS = 3000
 
 
 def market_provider_label() -> str:
@@ -59,7 +60,7 @@ class MarketHub:
 
     def __init__(self) -> None:
         self.subscribers: set[asyncio.Queue] = set()
-        self.history: dict[Timeframe, deque[Candle]] = defaultdict(lambda: deque(maxlen=2000))
+        self.history: dict[Timeframe, deque[Candle]] = defaultdict(lambda: deque(maxlen=5000))
         self.latest: dict[Timeframe, Candle] = {}
         self.last_tick: dict[str, Any] | None = None
         self.feed_status: dict[str, Any] = {
@@ -169,13 +170,20 @@ async def run_news_pipeline() -> None:
             articles = await news_aggregator.fetch()
             if articles:
                 results = await asyncio.gather(*(sentiment.analyze(article) for article in articles[:20]))
+                now = datetime.now(timezone.utc)
                 for article, result in zip(articles, results):
+                    # A model can classify an old/undated article for display, but it must not
+                    # create a time-sensitive alert from it. Missing or stale provider time is
+                    # UNKNOWN for alerting, never silently treated as "just published".
+                    published = article.published_at
+                    fresh = published is not None and -timedelta(minutes=15) <= now - published <= timedelta(hours=48)
                     hub.publish(
                         {
                             "type": "news.sentiment",
                             "article": article.model_dump(mode="json"),
                             "sentiment": result.model_dump(mode="json"),
-                            "alert": result.impact is Impact.HIGH and result.confidence >= 75,
+                            "alert": fresh and result.impact is Impact.HIGH and result.confidence >= 75,
+                            "alert_blocker": None if fresh else "زمان انتشار خبر نامعلوم یا قدیمی است",
                         }
                     )
         except asyncio.CancelledError:
@@ -287,16 +295,20 @@ async def data_status():
 
 # ─── market ────────────────────────────────────────────────────────────
 @app.get("/api/v1/market/{timeframe}/candles", response_model=list[Candle])
-async def candles(timeframe: Timeframe, limit: int = Query(300, ge=1, le=2000)):
+async def candles(timeframe: Timeframe, limit: int = Query(1200, ge=1, le=5000)):
     records = list(hub.history[timeframe])
     if timeframe in hub.latest:
         records.append(hub.latest[timeframe])
-    if records:
+    if records and len(records) >= min(limit, MIN_RESEARCH_BARS):
         return records[-limit:]
-    # Fall back to real provider history (still real data, just fetched on demand).
+    # A live process may have only just started. Prefer a real provider window over returning
+    # an arbitrarily short series; if that provider is unavailable, the already observed bars
+    # remain the only honest response and contain no padding.
     try:
         fetched = await load_history(settings, timeframe, output_size=limit)
     except DataUnavailable as exc:
+        if records:
+            return records[-limit:]
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return fetched[-limit:]
 
@@ -469,6 +481,11 @@ async def _backtest_payload(
     use_trailing: bool,
     source: str = "auto",
 ) -> dict:
+    if bars < MIN_RESEARCH_BARS:
+        raise HTTPException(
+            status_code=503,
+            detail=f"برای replay/backtest حداقل {MIN_RESEARCH_BARS} کندل واقعی لازم است؛ دادهٔ کمتر اجرا نمی‌شود",
+        )
     tf = Timeframe(timeframe) if timeframe in {t.value for t in Timeframe} else Timeframe.M5
     if broker_name:
         broker: BrokerConfig = get_broker(broker_name)
@@ -496,6 +513,11 @@ async def _backtest_payload(
         except DataUnavailable as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         data_source_label = market_provider_label()
+    if len(candles) < bars:
+        raise HTTPException(
+            status_code=503,
+            detail=f"منبع فقط {len(candles)} کندل واقعی از {bars} درخواستی برگرداند؛ replay/backtest بدون تکمیل ساختگی اجرا نشد",
+        )
     result = run_backtest(
         candles,
         initial_balance=max(10.0, min(initial_balance, 100000.0)),
@@ -514,7 +536,7 @@ async def _backtest_payload(
 @app.get("/api/v1/backtest/run")
 async def backtest_run_get(
     timeframe: str = "5m",
-    bars: int = Query(1500, ge=220, le=5000),
+    bars: int = Query(3000, ge=220, le=5000),
     initial_balance: float = 100,
     risk_percent: float = 0.5,
     spread: float = 0.30,
@@ -533,7 +555,7 @@ async def backtest_run_get(
 @app.post("/api/v1/backtest/run")
 async def backtest_run_post(
     timeframe: str = "5m",
-    bars: int = Query(1500, ge=220, le=5000),
+    bars: int = Query(3000, ge=220, le=5000),
     initial_balance: float = 100,
     risk_percent: float = 0.5,
     spread: float = 0.30,
@@ -551,7 +573,7 @@ async def backtest_run_post(
 @app.get("/api/v1/backtest/forward")
 async def backtest_forward(
     timeframe: str = "5m",
-    bars: int = Query(1500, ge=400, le=5000),
+    bars: int = Query(3000, ge=400, le=5000),
     split: float = 0.7,
     initial_balance: float = 100,
     risk_percent: float = 0.5,
@@ -560,6 +582,11 @@ async def backtest_forward(
     use_trailing: bool = True,
 ):
     """Walk-forward on real candles: older part in-sample, newer part out-of-sample."""
+    if bars < MIN_RESEARCH_BARS:
+        raise HTTPException(
+            status_code=503,
+            detail=f"برای research/walk-forward حداقل {MIN_RESEARCH_BARS} کندل واقعی لازم است؛ دادهٔ کمتر اجرا نمی‌شود",
+        )
     try:
         return await run_forward_test(
             settings,
@@ -579,7 +606,7 @@ async def backtest_forward(
 @app.post("/api/v1/backtest/forward")
 async def backtest_forward_post(
     timeframe: str = "5m",
-    bars: int = Query(1500, ge=400, le=5000),
+    bars: int = Query(3000, ge=400, le=5000),
     split: float = 0.7,
     initial_balance: float = 100,
     risk_percent: float = 0.5,
@@ -602,7 +629,7 @@ async def trades_ytd(timeframe: str = "5m", year: int | None = None):
 
 
 @app.get("/api/v1/backtest/profitability")
-async def profitability(timeframe: Timeframe = Timeframe.M5, limit: int = Query(300, ge=50, le=2000)):
+async def profitability(timeframe: Timeframe = Timeframe.M5, limit: int = Query(3000, ge=3000, le=5000)):
     """Statistical description of the *real* candles currently available."""
     records = list(hub.history[timeframe])
     if timeframe in hub.latest:
@@ -619,7 +646,7 @@ async def profitability(timeframe: Timeframe = Timeframe.M5, limit: int = Query(
 
 
 @app.get("/api/v1/backtest/history")
-async def backtest_history(days: int = Query(365, ge=30, le=2000)):
+async def backtest_history(days: int = Query(365, ge=30, le=5000)):
     """Real daily candles straight from the provider (used for long-range charting)."""
     try:
         daily = await load_history(settings, Timeframe.D1, output_size=min(days, 5000))
@@ -637,7 +664,7 @@ async def backtest_history(days: int = Query(365, ge=30, le=2000)):
 @app.get("/api/v1/risk/stress-test")
 async def stress_test(
     timeframe: str = "5m",
-    bars: int = Query(1000, ge=400, le=5000),
+    bars: int = Query(3000, ge=400, le=5000),
     initial_balance: float = 100,
     spread: float = 0.30,
     commission_per_oz: float = 0.05,

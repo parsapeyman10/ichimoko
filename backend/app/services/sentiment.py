@@ -17,7 +17,11 @@ class SentimentEngine:
         self._finbert: Any = None
 
     async def analyze(self, news: NewsRequest) -> SentimentResult:
-        if self.settings.openai_api_key:
+        # This legacy sentiment route is also used by the background FMP pipeline. A configured
+        # model key is not consent to send publisher text: the same explicit opt-in that gates
+        # the web-RSS AI confluence must gate this path too. The local deterministic classifier
+        # is disclosed as a fallback and never pretends to be a model verdict.
+        if self.settings.openai_api_key and self.settings.ai_news_external_consent:
             try:
                 return await self._analyze_openai(news)
             except Exception:
@@ -27,7 +31,12 @@ class SentimentEngine:
 
     async def _analyze_openai(self, news: NewsRequest) -> SentimentResult:
         from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=self.settings.openai_api_key, timeout=5, max_retries=1)
+        client = AsyncOpenAI(
+            api_key=self.settings.openai_api_key,
+            base_url=self.settings.openai_base_url or None,
+            timeout=5,
+            max_retries=0,
+        )
         prompt = f"""You classify immediate XAU/USD price impact, not general article tone.
 Return JSON only: {{"direction":"BUY|SELL|NEUTRAL","confidence":0-100,"impact":"HIGH|MEDIUM|LOW","rationale":"max 25 words"}}.
 Headline: {news.headline}

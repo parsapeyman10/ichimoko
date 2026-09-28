@@ -42,3 +42,33 @@ def test_provider_timestamp_is_unknown_when_missing_or_invalid(monkeypatch):
     articles = asyncio.run(aggregator.fetch())
     assert len(articles) == 2
     assert all(article.published_at is None for article in articles)
+
+
+def test_malformed_provider_rows_are_skipped_without_inventing_headlines(monkeypatch):
+    _patch_client(monkeypatch, [None, {"title": 12}, {"title": "Valid market update", "text": 3}])
+    aggregator = NewsAggregator(Settings(_env_file=None, fmp_api_key="private-test-key"))
+
+    articles = asyncio.run(aggregator.fetch())
+    assert [article.headline for article in articles] == ["Valid market update"]
+    assert articles[0].body == ""
+
+
+def test_legacy_sentiment_respects_external_text_consent(monkeypatch):
+    from app.models import NewsRequest
+    from app.services.sentiment import SentimentEngine
+
+    async def scenario():
+        engine = SentimentEngine(Settings(
+            _env_file=None,
+            openai_api_key="private-test-key",
+            ai_news_external_consent=False,
+        ))
+
+        async def forbidden(_news):
+            raise AssertionError("external model call was not consented")
+
+        monkeypatch.setattr(engine, "_analyze_openai", forbidden)
+        result = await engine.analyze(NewsRequest(headline="Gold market update"))
+        assert result.source == "deterministic-fallback"
+
+    asyncio.run(scenario())

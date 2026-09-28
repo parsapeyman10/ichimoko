@@ -146,7 +146,7 @@ const stat = (label: string, value: string, tone?: string) => (
 
 export default function BacktestPanel() {
   const [timeframe, setTimeframe] = useState<'5m' | '15m' | '1h'>('5m');
-  const [bars, setBars] = useState(1500);
+  const [bars, setBars] = useState(3000);
   const [balance, setBalance] = useState(100);
   const [risk, setRisk] = useState(0.5);
   const [useFuturesProxy, setUseFuturesProxy] = useState(false);
@@ -202,7 +202,7 @@ export default function BacktestPanel() {
         <label style={{ display: 'grid', gap: 4, font: '8px DM Mono', color: '#6b7280' }}>
           تعداد کندل
           <select value={bars} onChange={(event) => setBars(Number(event.target.value))} style={{ background: '#11151b', color: '#d5d9e0', border: '1px solid #1f2630', borderRadius: 5, padding: '5px 8px', font: '9px DM Mono' }}>
-            {[500, 1000, 1500, 3000, 5000].map((value) => <option key={value} value={value}>{value}</option>)}
+            {[3000, 5000].map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
         </label>
         <label style={{ display: 'grid', gap: 4, font: '8px DM Mono', color: '#6b7280' }}>

@@ -32,7 +32,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 python -m pytest -q
 ```
 
-`GET /api/v1/data/status`, `/api/v1/news/web`, `/api/v1/crypto/candidates`, `/api/v1/execution/status` and `/docs` expose provider readiness. Android model-backed XAU alerts and the CoinGecko/Binance scanner need this backend deployed over publicly reachable **HTTPS** and its address entered in Settings; the separate public Nobitex data/training section does **not**. `localhost` on the phone is not your PC. Without a Twelve Data key market-candle routes return 503 on purpose; news/scanner work independently of it when their sources are reachable.
+`GET /api/v1/data/status`, `/api/v1/news/web`, `/api/v1/crypto/candidates`, `/api/v1/execution/status` and `/docs` expose provider readiness. Android model-backed XAU alerts and the CoinGecko/Binance scanner need this backend deployed over publicly reachable **HTTPS** and its address entered in Settings; the separate public Nobitex data/training section does **not**. `localhost` on the phone is not your PC. Without a Twelve Data key the backend attempts the automatic real Swissquote/Gold-API spot fallback; until it has observed enough real bars, history/replay endpoints return an explicit 503 rather than fabricating candles. News/scanner work independently of the market key when their sources are reachable.
 
 ## Run web terminal
 

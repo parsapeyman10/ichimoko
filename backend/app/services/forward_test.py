@@ -17,11 +17,13 @@ from app.models import Timeframe
 from app.services.backtest import stress_test_from_trades, run_backtest
 from app.services.history import load_history
 
+MIN_RESEARCH_BARS = 3000
+
 
 async def run_forward_test(
     settings: Settings,
     timeframe: str = "5m",
-    output_size: int = 1500,
+    output_size: int = 3000,
     split: float = 0.7,
     initial_balance: float = 100.0,
     risk_percent: float = 0.5,
@@ -30,10 +32,15 @@ async def run_forward_test(
     use_trailing: bool = True,
 ) -> dict[str, Any]:
     tf = Timeframe(timeframe) if timeframe in {t.value for t in Timeframe} else Timeframe.M5
-    candles = await load_history(settings, tf, output_size=output_size)
-    if len(candles) < 400:
+    if output_size < MIN_RESEARCH_BARS:
         return {
-            "error": f"داده کافی نیست: {len(candles)} کندل واقعی دریافت شد؛ برای walk-forward حداقل ۴۰۰ کندل لازم است",
+            "error": f"برای walk-forward حداقل {MIN_RESEARCH_BARS} کندل واقعی درخواست کنید؛ دادهٔ کمتر اجرا نمی‌شود",
+            "bar": 0,
+        }
+    candles = await load_history(settings, tf, output_size=output_size)
+    if len(candles) < MIN_RESEARCH_BARS or len(candles) < output_size:
+        return {
+            "error": f"داده کافی نیست: {len(candles)} کندل واقعی دریافت شد؛ برای walk-forward حداقل {MIN_RESEARCH_BARS} کندل کامل لازم است",
             "bar": len(candles),
         }
 

@@ -156,18 +156,18 @@ def test_walk_forward_splits_real_series(monkeypatch):
 
     from app.services import forward_test as forward_module
 
-    async def fake_loader(settings, timeframe, output_size=1500, **kwargs):
-        return fixture_candles(1200, Timeframe.M5)
+    async def fake_loader(settings, timeframe, output_size=3000, **kwargs):
+        return fixture_candles(3000, Timeframe.M5)
 
     monkeypatch.setattr(forward_module, "load_history", fake_loader)
-    report = asyncio.run(forward_module.run_forward_test(Settings(twelve_data_api_key="test"), timeframe="5m", output_size=1200))
+    report = asyncio.run(forward_module.run_forward_test(Settings(twelve_data_api_key="test"), timeframe="5m", output_size=3000))
     assert report["data_source"] == "twelve_data"
-    assert report["bars"] == 1200
-    assert report["in_sample"]["bars"] == 840
+    assert report["bars"] == 3000
+    assert report["in_sample"]["bars"] == 2100
     assert report["in_sample"]["end"] < report["split_time"]
-    assert report["out_of_sample"]["bars"] == 360
+    assert report["out_of_sample"]["bars"] == 900
     assert report["out_of_sample"]["start"] == report["split_time"]
-    assert report["out_of_sample"]["warmup_bars"] == 840
+    assert report["out_of_sample"]["warmup_bars"] == 2100
     assert report["out_of_sample"]["equity_curve"][0]["time"] == report["split_time"]
     assert report["out_of_sample"]["equity_curve"][0]["balance"] == 100.0
     for trade in report["out_of_sample_trades"]:

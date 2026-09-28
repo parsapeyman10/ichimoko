@@ -79,7 +79,9 @@ class Settings(BaseSettings):
     # Real market data (required for every market endpoint)
     twelve_data_api_key: str | None = None
     market_symbol: str = "XAU/USD"
-    default_history_bars: int = 1500
+    # Research/replay callers request the full real-data window by default. A provider returning
+    # fewer rows is reported as incomplete; no padding is permitted.
+    default_history_bars: int = 3000
     # Without a Twelve Data key the backend automatically self-aggregates real candles from a
     # free, keyless spot XAU/USD feed (Swissquote, with Gold-API as a backup) instead of going
     # dark. Set to false to force the strict "no key -> unavailable" behaviour instead.

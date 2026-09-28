@@ -252,7 +252,7 @@ def _parse_datetime(raw: str, *, allow_date_only: bool = False) -> datetime:
 async def load_history(
     settings: Settings,
     timeframe: Timeframe,
-    output_size: int = 1500,
+    output_size: int = 3000,
     start_date: str | None = None,
     end_date: str | None = None,
     use_cache: bool = True,
@@ -304,7 +304,7 @@ async def load_history(
     return candles
 
 
-def cached_history(symbol: str, timeframe: Timeframe, output_size: int = 1500) -> list[Candle] | None:
+def cached_history(symbol: str, timeframe: Timeframe, output_size: int = 3000) -> list[Candle] | None:
     """Verified historical cache for display ONLY, never proof of a live quote."""
     for path in CACHE_DIR.glob(f"{symbol.replace('/', '_')}_{timeframe.value}_{output_size}_*.json"):
         try:

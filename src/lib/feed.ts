@@ -36,11 +36,12 @@ export function useMarketFeed(timeframe: ChartTimeframe) {
   const requestRef = useRef(0);
   const lastTickAtRef = useRef(0);
   const lastWsReceivedRef = useRef(0);
+  const historyLimitRef = useRef(1200);
 
-  const loadHistory = useCallback(async (generation: number) => {
+  const loadHistory = useCallback(async (generation: number, requestedLimit = historyLimitRef.current) => {
     if (generation !== generationRef.current) return;
     const requestId = ++requestRef.current;
-    const result = await apiGet<BackendCandle[]>(`/api/v1/market/${timeframe}/candles?limit=500`);
+    const result = await apiGet<BackendCandle[]>(`/api/v1/market/${timeframe}/candles?limit=${requestedLimit}`);
     if (generation !== generationRef.current || requestId !== requestRef.current) return;
     const now = Date.now();
     let recentWs = now - lastWsReceivedRef.current < WS_FRESH_MS;
@@ -110,7 +111,7 @@ export function useMarketFeed(timeframe: ChartTimeframe) {
         if (last && last.time === update.bar.time) rows[rows.length - 1] = update.bar;
         else if (!last || update.bar.time > last.time) rows.push(update.bar);
         else return; // out-of-order bar must not roll the chart backwards
-        candlesRef.current = rows.slice(-800);
+        candlesRef.current = rows.slice(-5000);
         lastWsReceivedRef.current = update.streaming ? Date.now() : 0;
         setSnapshot((prev) => prev.timeframe !== timeframe ? prev : ({
           ...prev, state: update.streaming ? 'live' : 'polling',
@@ -141,6 +142,7 @@ export function useMarketFeed(timeframe: ChartTimeframe) {
     candlesRef.current = [];
     lastTickAtRef.current = 0;
     lastWsReceivedRef.current = 0;
+    historyLimitRef.current = 1200;
     setSnapshot(emptySnapshot(timeframe));
     let poll: number | null = null;
     let freshnessTimer: number | null = null;
@@ -158,7 +160,13 @@ export function useMarketFeed(timeframe: ChartTimeframe) {
       if (status.ok) {
         setSnapshot((prev) => prev.timeframe !== timeframe ? prev : ({ ...prev, provider: status.data.provider }));
       }
-      void loadHistory(generation);
+      // Bootstrap quickly with more than one thousand real candles, then widen the same
+      // request to the 3000-candle research window. Neither phase pads missing provider rows.
+      void loadHistory(generation).then(() => {
+        if (generation !== generationRef.current) return;
+        historyLimitRef.current = 3000;
+        void loadHistory(generation, historyLimitRef.current);
+      });
       connectSocket(generation);
       poll = window.setInterval(() => void loadHistory(generation), POLL_MS);
       // An open socket or a pending REST request must not keep the quote "live" indefinitely.
