@@ -62,6 +62,18 @@ def _ok(**details: Any) -> dict[str, Any]:
     return {"state": "ok", **details}
 
 
+def _reject_error_envelope(payload: Any) -> None:
+    """Classify provider error envelopes without returning their message or request details."""
+    if not isinstance(payload, dict):
+        return
+    fields = [payload.get(name) for name in ("error", "Error Message", "message", "detail")]
+    marker = " ".join(str(value).lower() for value in fields if value is not None)
+    if marker:
+        if any(word in marker for word in ("quota", "limit", "rate", "too many")):
+            raise ProviderQuotaError("provider quota")
+        raise ProviderAuthError("provider rejected credentials or request")
+
+
 async def _json(client: httpx.AsyncClient, url: str, **kwargs: Any) -> tuple[httpx.Response, Any]:
     response = await client.get(url, **kwargs)
     response.raise_for_status()
@@ -111,6 +123,7 @@ async def _probe_fmp(settings: Settings, client: httpx.AsyncClient) -> dict[str,
         params={"tickers": "GCUSD", "limit": 1, "apikey": settings.fmp_api_key},
     )
     if not isinstance(payload, list):
+        _reject_error_envelope(payload)
         raise ValueError("FMP did not return a news list")
     return _ok(http_status=response.status_code, sample_count=len(payload))
 
@@ -125,6 +138,7 @@ async def _probe_coingecko(settings: Settings, client: httpx.AsyncClient) -> dic
         params={"vs_currency": "usd", "order": "market_cap_desc", "per_page": 1, "page": 1},
     )
     if not isinstance(payload, list):
+        _reject_error_envelope(payload)
         raise ValueError("CoinGecko did not return a market list")
     return _ok(http_status=response.status_code, sample_count=len(payload))
 
@@ -139,6 +153,7 @@ async def _probe_gemini(settings: Settings, client: httpx.AsyncClient) -> dict[s
     )
     models = payload.get("models") if isinstance(payload, dict) else None
     if not isinstance(models, list):
+        _reject_error_envelope(payload)
         raise ValueError("Gemini did not return a model list")
     return _ok(http_status=response.status_code, model_count=len(models))
 
@@ -156,6 +171,7 @@ async def _probe_openai(settings: Settings, client: httpx.AsyncClient) -> dict[s
     )
     models = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(models, list):
+        _reject_error_envelope(payload)
         raise ValueError("OpenAI-compatible endpoint did not return models")
     return _ok(http_status=response.status_code, model_count=len(models))
 
