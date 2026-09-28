@@ -162,4 +162,37 @@ class AiTraderTest {
         val missing = Json.parseToJsonElement("""{"bias":"BUY"}""").jsonObject
         assertNull(TraderAdvisor.parseOpinion(missing, "XAU/USD", "m", 1L))
     }
+    private fun tradeReviewJson(
+        verdict: String = "WORTHY",
+        confidence: String = "81",
+        summary: String = "همه شروط فنی و ICT برای ورود کاغذی ثبت شده‌اند.",
+        reasons: String = """["۸ شرط فنی تایید شده","MTF همسو است"]""",
+        cautions: String = """["خبر فقط زمینه ژورنال است"]""",
+    ): JsonObject = Json.parseToJsonElement(
+        """{"verdict":"$verdict","confidence":"$confidence","summary":"$summary",""" +
+            """"reasons":$reasons,"cautions":$cautions}"""
+    ).jsonObject
+
+    @Test fun `paper entry ai review parses with bounded fields`() {
+        val review = TraderAdvisor.parseTradeReview(tradeReviewJson(), "m", 123L)!!
+        assertEquals("WORTHY", review.verdict)
+        assertEquals(81, review.confidence)
+        assertEquals(2, review.reasons.size)
+        assertEquals("m", review.model)
+        assertEquals(123L, review.checkedAt)
+        val numeric = Json.parseToJsonElement(
+            """{"verdict":"RISKY","confidence":64,"summary":"شرایط مرزی است اما ژورنال ثبت شد",
+                "reasons":["ریسک ساختار نزدیک است"],"cautions":[]}"""
+        ).jsonObject
+        assertEquals(64, TraderAdvisor.parseTradeReview(numeric, "m", 2L)!!.confidence)
+    }
+
+    @Test fun `paper entry ai review invalid schema fails closed`() {
+        assertNull(TraderAdvisor.parseTradeReview(tradeReviewJson(verdict = "BUY"), "m", 1L))
+        assertNull(TraderAdvisor.parseTradeReview(tradeReviewJson(confidence = "101"), "m", 1L))
+        assertNull(TraderAdvisor.parseTradeReview(tradeReviewJson(summary = "کوتاه"), "m", 1L))
+        assertNull(TraderAdvisor.parseTradeReview(tradeReviewJson(reasons = "[]"), "m", 1L))
+        assertNull(TraderAdvisor.parseTradeReview(tradeReviewJson(reasons = """["a",{"bad":true}]"""), "m", 1L))
+    }
+
 }

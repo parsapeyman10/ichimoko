@@ -585,7 +585,15 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _stats.value = container.journalStore.stats()
                 // Linking is metadata only; a damaged opportunity file must not erase a saved trade.
                 runCatching { container.opportunityStore.linkTrade(trade) }
-                _toast.value = "فقط کاغذی: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} ${trade.symbol} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}"
+                val reviewedTrade = runCatching {
+                    val review = container.traderAdvisor.reviewPaperEntry(trade, current)
+                    container.journalStore.attachAiReview(trade.id, review)
+                }.getOrNull()
+                reviewedTrade?.let { _stats.value = container.journalStore.stats() }
+                val aiLine = reviewedTrade?.aiReview?.let { review ->
+                    " · نظر AI: ${review.verdictFa()}؛ ${review.summary}"
+                } ?: if (s.hasClientNewsAi) " · نظر AI فعلاً ذخیره نشد" else " · برای نظر AI، کلید/مدل را در تنظیمات AI وارد کن"
+                _toast.value = "فقط کاغذی: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} ${trade.symbol} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}$aiLine"
             } catch (e: Exception) {
                 _toast.value = "ورود کاغذی انجام نشد: ${e.message ?: "ذخیره ممکن نیست"}"
             } finally {
@@ -1018,4 +1026,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 class AurumViewModelFactory(private val container: AppContainer) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = AurumViewModel(container) as T
+}
+
+private fun com.aurum.edge.core.PaperAiReview.verdictFa(): String = when (verdict) {
+    "WORTHY" -> "شرایط مناسب بوده"
+    "RISKY" -> "پرریسک/مرزی بوده"
+    "NOT_WORTHY" -> "شرایط کافی نبوده"
+    else -> verdict
 }

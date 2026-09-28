@@ -32,6 +32,7 @@ import com.aurum.edge.core.PaperConditionRecord
 import com.aurum.edge.core.IctPriceActionRecord
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
+import com.aurum.edge.core.PaperAiReview
 import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.SignalAction
@@ -158,10 +159,11 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                 color = AurumColors.TextMuted,
                             )
                             trade.newsEvidence?.let { verdict ->
-                                Text("AI ${verdict.model} · ${verdict.direction} · ${verdict.evidence.joinToString { it.source }}" +
+                                Text("خبر ${verdict.model} · ${verdict.direction} · ${verdict.evidence.joinToString { it.source }}" +
                                     " · تقویم ${formatDateTime(verdict.calendarCheckedAt)}",
                                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
                             }
+                            AiReviewDisclosure(trade.aiReview)
                             trade.mtf?.let { snapshot ->
                                 Text(
                                     "تراز چندتایم‌فریم هنگام ورود: ${snapshot.bias} · هم‌جهتی ${(snapshot.alignment * 100).toInt()}%" +
@@ -334,6 +336,7 @@ private fun TradeRow(trade: PaperTrade) {
                     }
                 }
             }
+            AiReviewDisclosure(trade.aiReview)
             trade.mtf?.let { Text("MTF هنگام ورود: ${it.bias} · ${(it.alignment * 100).toInt()}٪ هم‌جهتی",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted) }
             ConditionDisclosure(trade.id, trade.entryConditions)
@@ -465,6 +468,46 @@ private fun TradeChartDisclosure(viewModel: AurumViewModel, trade: PaperTrade) {
             )
         }
     }
+}
+
+@Composable
+private fun AiReviewDisclosure(review: PaperAiReview?) {
+    if (review == null) {
+        Text("نظر AI هنگام بازشدن معامله ثبت نشده؛ اگر می‌خواهی دلیل مدل ذخیره شود، کلید/مدل AI را در تنظیمات وارد کن.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        return
+    }
+    val color = when (review.verdict) {
+        "WORTHY" -> AurumColors.Green
+        "RISKY" -> AurumColors.Gold
+        "NOT_WORTHY" -> AurumColors.Red
+        else -> AurumColors.TextSecondary
+    }
+    var expanded by remember("ai-review-${review.checkedAt}") { mutableStateOf(false) }
+    Text("نظر AI هنگام ورود: ${review.verdictFa()} · ${review.confidence}٪ · ${review.summary}",
+        style = MaterialTheme.typography.labelSmall, color = color)
+    OutlinedButton(onClick = { expanded = !expanded }) {
+        Text(if (expanded) "بستن چرایی AI" else "چرایی نظر AI", style = MaterialTheme.typography.labelSmall)
+    }
+    if (expanded) {
+        Text("مدل ${review.model} · ${formatDateTime(review.checkedAt)}",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        review.reasons.forEachIndexed { index, reason ->
+            Text("دلیل ${index + 1}: $reason", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+        }
+        review.cautions.forEachIndexed { index, caution ->
+            Text("احتیاط ${index + 1}: $caution", style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+        }
+        Text("این نظر فقط تحلیل آموزشی بعد از ثبت معاملهٔ کاغذی است؛ معامله را تأیید/رد یا سفارش واقعی ایجاد نمی‌کند.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+    }
+}
+
+private fun PaperAiReview.verdictFa(): String = when (verdict) {
+    "WORTHY" -> "شرایط مناسب بوده"
+    "RISKY" -> "پرریسک/مرزی بوده"
+    "NOT_WORTHY" -> "شرایط کافی نبوده"
+    else -> verdict
 }
 
 @Composable

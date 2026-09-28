@@ -249,8 +249,12 @@ class SignalMonitorService : Service() {
                         newCandidate?.let { container.opportunityStore.record(it) }
                         container.opportunityStore.linkTrade(opened)
                     }
+                    val reviewed = runCatching {
+                        val review = container.traderAdvisor.reviewPaperEntry(opened, state)
+                        container.journalStore.attachAiReview(opened.id, review)
+                    }.getOrNull() ?: opened
                     val currentSettings = container.settingsStore.read()
-                    if (!Notifier.notifyRecordedAutoEntry(this@SignalMonitorService, opened,
+                    if (!Notifier.notifyRecordedAutoEntry(this@SignalMonitorService, reviewed,
                             currentSettings.alertSoundUri)) {
                         container.autoPaperTrader.stopped(
                             "معاملهٔ کاغذی در ژورنال ثبت شد، ولی اعلان توسط سیستم ارسال نشد؛ مجوز/کانال را بررسی کنید")

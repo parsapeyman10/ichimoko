@@ -178,6 +178,18 @@ data class PaperNewsRecord(
     val calendarCheckedAt: Long? = null,
 )
 
+@Serializable
+data class PaperAiReview(
+    /** WORTHY | RISKY | NOT_WORTHY */
+    val verdict: String,
+    val confidence: Int,
+    val summary: String,
+    val reasons: List<String>,
+    val cautions: List<String>,
+    val model: String,
+    val checkedAt: Long,
+)
+
 /** Snapshot of an OHLC approximation at the moment a PAPER opportunity/entry was checked. */
 @Serializable
 data class IctPriceActionRecord(
@@ -260,6 +272,8 @@ data class PaperTrade(
     val autoOpened: Boolean = false,
     val signalBarTime: Long? = null,
     val newsEvidence: PaperNewsRecord? = null,
+    /** Companion AI's post-open educational review; never a gate and never financial advice. */
+    val aiReview: PaperAiReview? = null,
     /** Snapshot at the moment the paper position was actually saved; never recompute on read. */
     val entryConditions: List<PaperConditionRecord> = emptyList(),
     /** Null on older/manual records; never infer a historical ICT verdict on read. */

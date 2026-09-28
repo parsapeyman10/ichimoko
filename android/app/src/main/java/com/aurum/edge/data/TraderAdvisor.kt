@@ -2,6 +2,9 @@ package com.aurum.edge.data
 
 import android.os.SystemClock
 import com.aurum.edge.core.IctEntryRules
+import com.aurum.edge.core.PaperAiReview
+import com.aurum.edge.core.PaperTrade
+import com.aurum.edge.core.Signal
 import com.aurum.edge.engine.MtfAnalyzer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -112,6 +115,54 @@ class TraderAdvisor(
     suspend fun probe(apiKey: String, baseUrl: String, model: String, format: String = "AUTO"): String =
         AiProvider.probe(http, baseUrl, apiKey, model, format)
 
+    /**
+     * Called after a paper trade has already been saved. The review is educational and post-hoc:
+     * it never opens, rejects, edits or closes a trade. If the user's AI key is not configured,
+     * the caller should surface that explicitly instead of fabricating an opinion.
+     */
+    suspend fun reviewPaperEntry(trade: PaperTrade, marketState: MarketState): PaperAiReview {
+        val config = settings.read()
+        if (!config.hasClientNewsAi) {
+            throw IllegalStateException("برای اعلام نظر AI، کلید/مدل در تنظیمات AI وارد نشده است")
+        }
+        val now = System.currentTimeMillis()
+        val technicalOk = trade.entryConditions.take(8).count { it.status == "CONFIRMED" }
+        val rr = trade.riskReward
+        val newsLine = trade.newsEvidence?.let { news ->
+            "news_model=${news.model} news_direction=${news.direction} news_confidence=${news.confidence} evidence=" +
+                news.evidence.joinToString(";") { "${it.source}:${it.headline.take(90)}" }
+        } ?: "news_evidence=none"
+        val mtf = trade.mtf
+        val ict = trade.priceAction
+        val snapshot = buildString {
+            appendLine("A paper trade was just SAVED by the app. Review whether the open conditions were acceptable for an educational paper entry. Do not authorize, block, edit, close, or claim profit.")
+            appendLine("trade_id=${trade.id.take(8)} symbol=${trade.symbol} action=${trade.action} interval=${trade.interval.label} auto=${trade.autoOpened}")
+            appendLine("entry=${trade.entry} stop=${trade.stopLoss} target=${trade.takeProfit} rr=$rr confidence=${trade.confidence}")
+            appendLine("technical_confirmed=$technicalOk/8")
+            trade.entryConditions.take(12).forEachIndexed { index, item ->
+                appendLine("condition_${index + 1}=${item.name}|${item.status}|${item.detail.take(120)}")
+            }
+            appendLine("live_feed=${marketState.feed.mode.name} last_price=${marketState.lastPrice ?: "—"} closed_bars=${marketState.closedCount}")
+            appendLine("mtf_veto=${mtf?.veto ?: "—"} mtf_bias=${mtf?.bias ?: "—"} mtf_alignment=${mtf?.alignment ?: "—"}")
+            appendLine("ict=${ict?.model ?: "none"} ict_matches_trade=${ict?.matches(trade.toSignal(), trade.symbol, trade.entry) ?: false} ict_session=${ict?.nySession ?: "—"}")
+            appendLine(newsLine)
+            appendLine("Important policy: news is journal-mining context only, not a paper-entry condition. Judge the trade by technical/options, live quote, MTF, ICT and risk evidence.")
+        }
+        val system = "You are the companion AI inside an educational paper-trading app. " +
+            "A paper trade has already been saved atomically. Review only the recorded evidence. " +
+            "Do not invent prices, fills, broker execution, or future outcomes. Return JSON only: " +
+            "{\"verdict\":\"WORTHY\"|\"RISKY\"|\"NOT_WORTHY\",\"confidence\":0..100," +
+            "\"summary\": max 180 chars in Persian, " +
+            "\"reasons\": array of 1..4 short Persian reasons, " +
+            "\"cautions\": array of 0..3 short Persian cautions}. " +
+            "Use WORTHY only when the recorded technical/options, MTF, ICT and risk evidence support the paper entry. " +
+            "Use RISKY for mixed or fragile evidence. Use NOT_WORTHY if key evidence is missing/contradictory."
+        val output = AiProvider.completeJson(http, config.newsAiBaseUrl, config.newsAiApiKey,
+            config.newsAiModel, system, snapshot, format = config.newsAiFormatNormalized)
+        return parseTradeReview(output, config.newsAiModel, now)
+            ?: throw IllegalStateException("پاسخ نظر AI قابل‌راستی‌آزمایی نبود")
+    }
+
     /** Atomically read+clear the flip flag so the service notifies each flip exactly once. */
     fun consumeBiasFlip(): TraderOpinion? {
         val current = _state.value
@@ -182,6 +233,27 @@ class TraderAdvisor(
         const val REFRESH_PERIOD_MS = 10 * 60_000L
 
         /** Strict schema validation: bounded sizes and enums; anything else fails closed. */
+        internal fun parseTradeReview(root: JsonObject, model: String, now: Long): PaperAiReview? {
+            fun str(key: String): String? = (root[key] as? JsonPrimitive)?.contentOrNull?.trim()
+            fun list(key: String): List<String>? {
+                val array = root[key] as? JsonArray ?: return null
+                val items = array.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim() }
+                if (items.size != array.size) return null
+                return items
+            }
+            val verdict = str("verdict")?.uppercase(Locale.ROOT) ?: return null
+            if (verdict !in setOf("WORTHY", "RISKY", "NOT_WORTHY")) return null
+            val confidence = str("confidence")?.toDoubleOrNull() ?: return null
+            if (!confidence.isFinite() || confidence < 0.0 || confidence > 100.0) return null
+            val summary = str("summary") ?: return null
+            if (summary.length !in 10..180) return null
+            val reasons = list("reasons") ?: return null
+            if (reasons.isEmpty() || reasons.size > 4 || reasons.any { it.length !in 3..90 }) return null
+            val cautions = list("cautions") ?: emptyList()
+            if (cautions.size > 3 || cautions.any { it.length !in 3..90 }) return null
+            return PaperAiReview(verdict, confidence.toInt(), summary, reasons, cautions, model, now)
+        }
+
         internal fun parseOpinion(root: JsonObject, symbol: String, model: String, now: Long): TraderOpinion? {
             fun str(key: String): String? = (root[key] as? JsonPrimitive)?.contentOrNull?.trim()
             fun list(key: String): List<String>? {
@@ -208,6 +280,17 @@ class TraderAdvisor(
         }
     }
 }
+
+private fun PaperTrade.toSignal(): Signal = Signal(
+    action = action,
+    confidence = confidence,
+    entry = entry,
+    stopLoss = stopLoss,
+    takeProfit = takeProfit,
+    riskReward = riskReward,
+    interval = interval,
+    barTime = signalBarTime ?: 0L,
+)
 
 private fun List<Double>.averageOrNull(): Double? =
     if (isEmpty()) null else runCatching { average() }.getOrNull()?.takeIf { it.isFinite() }

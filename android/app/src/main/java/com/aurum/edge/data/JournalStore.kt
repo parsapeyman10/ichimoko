@@ -8,6 +8,7 @@ import com.aurum.edge.core.IctPriceActionRecord
 import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PaperNewsRecord
+import com.aurum.edge.core.PaperAiReview
 import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.Signal
@@ -195,6 +196,15 @@ class JournalStore(context: Context, private val file: File = File(context.files
             persist(_trades.value + trade)
         }
         return trade
+    }
+
+    suspend fun attachAiReview(tradeId: String, review: PaperAiReview): PaperTrade = mutex.withLock {
+        val current = _trades.value
+        val index = current.indexOfFirst { it.id == tradeId }
+        require(index >= 0) { "معاملهٔ کاغذی برای ثبت نظر AI پیدا نشد" }
+        val updated = current[index].copy(aiReview = review)
+        persist(current.toMutableList().also { it[index] = updated })
+        updated
     }
 
     /**
