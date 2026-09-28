@@ -76,7 +76,7 @@ class PaperOpportunityTest {
         assertNotNull(PaperAlertRules.blocker(market.copy(showingCachedData = true), config, news, emptyList(), snapshot, now))
         assertNotNull(PaperAlertRules.blocker(market.copy(feed = FeedStatus(FeedMode.OFFLINE, lastSuccessAt = now)),
             config, news, emptyList(), snapshot, now))
-        assertNotNull(PaperAlertRules.blocker(market, config, news.copy(ai = AiNewsVerdict()), emptyList(), snapshot, now))
+        assertNull(PaperAlertRules.blocker(market, config, news.copy(ai = AiNewsVerdict()), emptyList(), snapshot, now))
         assertNotNull(PaperAlertRules.blocker(market, config.copy(accountBalance = 5.0), news, emptyList(), snapshot, now))
         for (i in 0..7) {
             val fail = raw.copy(confluence = raw.confluence.mapIndexed { idx, item ->
@@ -99,7 +99,7 @@ class PaperOpportunityTest {
         store.load()
         assertTrue(store.record(opportunity))
         assertFalse(store.record(opportunity))
-        assertEquals(9, store.items.value.single().conditions.size)
+        assertEquals(8, store.items.value.single().conditions.size)
         assertEquals(ict, store.items.value.single().priceAction)
         val journal = JournalStore(context, journalFile)
         journal.load()
@@ -113,9 +113,9 @@ class PaperOpportunityTest {
         reopened.linkTrade(trade)
         assertEquals(trade.id, PaperOpportunityStore(context, file).also { it.load() }.items.value.single().paperTradeId)
         val persisted = JournalStore(context, journalFile).also { it.load() }.trades.value.single()
-        assertEquals(9, persisted.entryConditions.size)
+        assertEquals(8, persisted.entryConditions.size)
         assertEquals(ict, persisted.priceAction)
-        assertEquals(NewsConfluence.NEWS_LABEL, trade.entryConditions[8].name)
+        assertTrue(trade.entryConditions.none { it.name == NewsConfluence.NEWS_LABEL })
         assertEquals(1, journal.stats().open)
         assertEquals(0, journal.stats().total)
     }

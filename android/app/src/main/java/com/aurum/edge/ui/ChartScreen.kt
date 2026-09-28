@@ -194,7 +194,7 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
                         style = MaterialTheme.typography.bodySmall,
                         color = if (gate.allowed) AurumColors.Green else AurumColors.Red)
                 }
-                Text("حتی «آماده» فقط یک الگوی تقریبی است؛ ورود خودکار paper به قیمت زنده، ۸ شرط فنی، نبود وتوی خبر و گیت رنجِ همین کندل نیاز دارد. معاملهٔ واقعی وجود ندارد.",
+                Text("حتی «آماده» فقط یک الگوی تقریبی است؛ ورود خودکار paper به قیمت زنده، ۸ شرط فنی، آپشن‌های فعال و گیت رنجِ همین کندل نیاز دارد. خبر فقط در ژورنال داده‌کاوی می‌شود و معاملهٔ واقعی وجود ندارد.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             }
 

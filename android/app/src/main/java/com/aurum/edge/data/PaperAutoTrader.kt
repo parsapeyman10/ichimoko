@@ -49,8 +49,8 @@ class PaperAutoTrader(
             _status.value = "تراز چندتایم‌فریم همین کندل در دسترس نیست یا ورود را وتو کرده است"
             return null
         }
-        // Re-verify against the SAME emission plus freshly read news/settings: those flows are
-        // global, so this guard stays race-safe for any symbol (selected pair or scanner sweep).
+        // Re-verify against the SAME emission plus freshly read settings/news snapshot. News is
+        // not an entry gate; the snapshot is only used for journal evidence.
         val current = state
         val recentNews = news.state.value
         val recentSettings = settings.read()
@@ -59,11 +59,6 @@ class PaperAutoTrader(
             return null
         }
         val signal = current.signal ?: return null
-        val newsRisk = NewsConfluence.alignment(current.symbol, signal.action, recentNews)
-        if (newsRisk.status == com.aurum.edge.core.ConfluenceStatus.CONFLICT) {
-            _status.value = "وتوی خبر/تقویم فعال است: ${newsRisk.detail}"
-            return null
-        }
         val newsRecord = NewsConfluence.record(recentNews, current.symbol)
         val ict = IctEntryRules.approvedEvidence(current) ?: run {
             _status.value = "شواهد رنج/ICT همین کندل برای ژورنال تأیید نشد"

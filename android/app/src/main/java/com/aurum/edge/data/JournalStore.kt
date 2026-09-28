@@ -12,6 +12,7 @@ import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.WalkForwardRecord
+import com.aurum.edge.engine.NewsConfluence
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -139,13 +140,12 @@ class JournalStore(context: Context, private val file: File = File(context.files
         newsEvidence: PaperNewsRecord? = null,
         priceAction: IctPriceActionRecord? = null,
     ): PaperTrade {
+        val technicalConditions = signal.confluence.filterNot { it.name == NewsConfluence.NEWS_LABEL }
         require(!automatic || (!manual && signal.isActionable && signal.barTime > 0 &&
-            signal.confluence.size >= 9 && signal.confluence.take(8).all {
+            technicalConditions.take(8).size == 8 && technicalConditions.take(8).all {
                 it.ok && it.status == ConfluenceStatus.CONFIRMED
-            } && signal.confluence[8].name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL &&
-            signal.confluence[8].status != ConfluenceStatus.CONFLICT &&
-            mtf != null && !mtf.veto && mtf.barTime == signal.barTime && mtf.frames.isNotEmpty())) {
-            "۸ شرط فنی، نبود وتوی خبر/تقویم یا چندتایم‌فریم برای ورود خودکار کاغذی کامل نیست"
+            } && mtf != null && !mtf.veto && mtf.barTime == signal.barTime && mtf.frames.isNotEmpty())) {
+            "۸ شرط فنی و چندتایم‌فریم برای ورود خودکار کاغذی کامل نیست"
         }
         val stop = signal.stopLoss ?: throw IllegalArgumentException("حد ضرر وجود ندارد")
         val target = signal.takeProfit ?: throw IllegalArgumentException("حد سود وجود ندارد")
@@ -168,14 +168,14 @@ class JournalStore(context: Context, private val file: File = File(context.files
             positionUnit = draft.unit,
             note = when {
                 manual -> "ورود دستی کاغذی؛ بدون تأیید موتور/بروکر"
-                automatic -> "ورود خودکار کاغذی با ۸ شرط فنی، نبود وتوی خبر/تقویم و شواهد رنج/ICT؛ بدون سفارش بروکر"
+                automatic -> "ورود خودکار کاغذی با ۸ شرط فنی، گزینه‌های فعال و شواهد رنج/ICT؛ خبر فقط داده‌کاوی ژورنال است؛ بدون سفارش بروکر"
                 else -> "سیگنال کاغذی روی قیمت دریافتی — ${signal.interval.label}"
             },
             mtf = if (manual) null else mtf,
             autoOpened = automatic,
             signalBarTime = if (manual) null else signal.barTime,
             newsEvidence = if (manual) null else newsEvidence,
-            entryConditions = if (manual) emptyList() else signal.confluence.take(9).map {
+            entryConditions = if (manual) emptyList() else technicalConditions.map {
                 com.aurum.edge.core.PaperConditionRecord.from(it)
             },
             priceAction = if (manual) null else priceAction,

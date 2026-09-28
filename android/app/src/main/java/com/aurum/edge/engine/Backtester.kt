@@ -9,7 +9,7 @@ import kotlin.math.abs
 
 /**
  * Historical replay of the TECHNICAL SignalEngine only, on actual provider/imported OHLC.
- * This is NOT a replay of the nine-way AI news/ICT/MTF paper-entry gate: historical verdicts for
+ * This is NOT a replay of live AI news/ICT/MTF journal context: historical verdicts for
  * those gates are unavailable. Entries/exits are hypothetical OHLC fills, not broker executions.
  */
 object Backtester {

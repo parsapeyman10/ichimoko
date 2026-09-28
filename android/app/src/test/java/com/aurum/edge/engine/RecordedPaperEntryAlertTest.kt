@@ -69,7 +69,7 @@ class RecordedPaperEntryAlertTest {
         assertEquals(Notifier.CHANNEL_VERIFIED_DEFAULT, posted.channelId)
         assertTrue(posted.extras.getCharSequence(Notification.EXTRA_TITLE).toString().contains("ثبت شد"))
         assertTrue(posted.extras.getCharSequence(Notification.EXTRA_TEXT).toString().contains(entry.id.take(8)))
-        assertEquals(9, restored.entryConditions.size)
+        assertEquals(8, restored.entryConditions.size)
         assertEquals(evidence, restored.priceAction)
         assertEquals("news-1", restored.newsEvidence!!.evidence.single().id)
 
@@ -83,7 +83,7 @@ class RecordedPaperEntryAlertTest {
             entry.copy(entryConditions = entry.entryConditions.dropLast(1)), ""))
         assertFalse(Notifier.notifyRecordedAutoEntry(context,
             entry.copy(entryConditions = entry.entryConditions.mapIndexed { index, c ->
-                if (index == 8) c.copy(status = "CONFLICT") else c
+                if (index == 0) c.copy(status = "CONFLICT") else c
             }), ""))
         assertEquals(1, manager.activeNotifications.size)
     }

@@ -118,14 +118,14 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
                 System.currentTimeMillis() - news.lastCheckedAt!! > 180_000L)
             Text(
                 when {
-                    hardVeto -> "وتوی خبر/تقویم فعال است: ${news.reason}"
+                    hardVeto -> "خبر/تقویم پرریسک دیده شده: ${news.reason}؛ برای کاغذی فقط در ژورنال داده‌کاوی می‌شود"
                     manualBlocked -> "وتوی اختیاری دستی روشن است و وضعیت خبر تازه/کامل نیست: ${news.reason}"
-                    else -> "وتوی قطعی فعال نیست؛ اگر AI معتبر هم‌جهت باشد سبز می‌شود، و اگر نامشخص باشد زرد می‌ماند نه امتیاز منفی فنی."
+                    else -> "خبر شرط ورود کاغذی نیست؛ اگر AI معتبر هم‌جهت/مخالف باشد فقط به‌عنوان زمینهٔ ژورنال ذخیره و نمایش داده می‌شود."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = if (hardVeto || manualBlocked) AurumColors.Red else AurumColors.TextSecondary,
             )
-            Text("معیار: رویداد High در تقویم جفت‌ارز داخل پنجرهٔ حدود ۴۵ دقیقه قبل تا ۳۰ دقیقه بعد = وتو؛ AI فقط وقتی تازه، دارای شاهد ناشر و اطمینان ≥۸۰٪ باشد تأیید سبز می‌دهد.",
+            Text("معیار: رویداد High و AI معتبر فقط برای داده‌کاوی خبر نزدیک معامله استفاده می‌شوند؛ شرط ورود کاغذی همان موتور ایچیموکو، آپشن‌ها، ICT/MTF و ریسک است.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             Text("آخرین بررسی: ${relativeTime(news.lastCheckedAt)} · تقویم: ${relativeTime(news.calendarCheckedAt)}",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
@@ -135,17 +135,17 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
 
         signal?.let { s ->
             SectionCard(
-                title = "۸ شرط فنی اصلی + ریسک خبر",
-                subtitle = "هر شرط فنی جدا سبز/قرمز و با سهم امتیاز از ۱۰۰ نمایش داده می‌شود؛ خبر جدا از امتیاز فنی است · امتیاز کل: ${s.confidence.toInt()} از ۱۰۰ · کندل ${s.interval.label} · ${formatTime(s.barTime)}",
+                title = "۸ شرط فنی اصلی + آپشن‌ها",
+                subtitle = "هر شرط فنی جدا سبز/قرمز و با سهم امتیاز از ۱۰۰ نمایش داده می‌شود؛ خبر شرط ورود نیست و فقط زمینهٔ ژورنال است · امتیاز کل: ${s.confidence.toInt()} از ۱۰۰ · کندل ${s.interval.label} · ${formatTime(s.barTime)}",
             ) {
                 if (s.confluence.isEmpty()) {
                     Text("داده کافی برای نمایش جزئیات نیست", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
                 } else {
-                    s.confluence.take(9).forEach { ConfluenceRow(it) }
-                    if (s.confluence.size > 9) {
-                        Text("کنترل‌های اضافه (امتیاز همگرایی نیستند):", style = MaterialTheme.typography.labelSmall,
+                    s.confluence.take(8).forEach { ConfluenceRow(it) }
+                    if (s.confluence.size > 8) {
+                        Text("آپشن‌ها، کنترل‌های اضافه و داده‌کاوی خبر:", style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.TextMuted, modifier = Modifier.padding(top = 8.dp))
-                        s.confluence.drop(9).forEach { ConfluenceRow(it) }
+                        s.confluence.drop(8).forEach { ConfluenceRow(it) }
                     }
                 }
             }

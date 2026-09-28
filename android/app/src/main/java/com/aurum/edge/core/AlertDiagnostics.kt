@@ -11,7 +11,7 @@ import com.aurum.edge.engine.SignalEngine
 enum class AlertCheckKind(val label: String) {
     KEY("منبع بازار"), MARKET("قیمت واقعی تازه"), HISTORY("کندل بسته"),
     MONITOR("سرویس پایش"), APP_ALERT("هشدار در اپ"), ANDROID_ALERT("اعلان اندروید"),
-    STORAGE("فایل‌های هشدار/ژورنال"), AI_NEWS("ریسک خبر/تقویم"), NINE_WAY("۸/۸ فنی، ICT و ریسک"),
+    STORAGE("فایل‌های هشدار/ژورنال"), AI_NEWS("خبر نزدیک برای ژورنال"), NINE_WAY("۸/۸ فنی، ICT و MTF"),
 }
 
 data class AlertCheck(val kind: AlertCheckKind, val ready: Boolean, val detail: String)
@@ -28,8 +28,7 @@ object AlertDiagnostics {
             market.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
             FeedLiveness.hasRecentReceipt(market.feed, now)
         val minBars = SignalEngine.minBars(market.interval)
-        // News is now a transparent risk layer: valid AI can confirm, but UNKNOWN news does not
-        // erase a technical signal. Only an explicit high-impact/news conflict is a blocker.
+        // News is now journal-mining context only. It must never erase or block a paper signal.
         val calendarFresh = news.calendarCheckedAt?.let { now - it in 0L..1_200_000L } == true
         val selectedVerdict = news.aiBySymbol[market.symbol] ?: news.ai.takeIf { it.symbol == market.symbol }
         val modelFresh = selectedVerdict?.checkedAt?.let { at ->
@@ -38,7 +37,7 @@ object AlertDiagnostics {
         val sourcesOnline = news.sources.isNotEmpty() && news.sources.all { it.state == "online" } &&
             news.sources.any { it.feed == FOREX_CALENDAR_SOURCE_URL }
         val newsConfigured = settings.newsBaseUrl.isNotBlank() || settings.hasClientNewsAi
-        val noNewsVeto = news.gate != NewsGate.BLOCKED && market.symbol !in news.vetoedSymbols
+        val noNewsVeto = true
         val signal = market.signal
         val entryBlocker = if (signal?.isActionable == true)
             PaperAlertRules.blocker(market, settings, news, trades, mtf, now)
@@ -69,14 +68,14 @@ object AlertDiagnostics {
             AlertCheck(AlertCheckKind.AI_NEWS, noNewsVeto,
                 when {
                     news.gate == NewsGate.BLOCKED || market.symbol in news.vetoedSymbols ->
-                        "وتوی شفاف فعال است: ${news.reason}"
-                    news.loading -> "خبر در حال بررسی است؛ تا وقتی وتوی قطعی نیاید، فقط برچسب زرد می‌ماند"
+                        "خبر/تقویم پرریسک دیده شده: ${news.reason}؛ معاملهٔ کاغذی را مسدود نمی‌کند و فقط ثبت تحلیلی می‌شود"
+                    news.loading -> "خبر در حال بررسی است؛ ورود کاغذی فقط با شروط فنی/آپشن‌ها سنجیده می‌شود"
                     news.error != null -> "خطای خبر: ${news.error}؛ AI تأییدکننده نداریم اما سیگنال فنی منفی نمی‌شود"
                     !newsConfigured -> "مدل خبر تنظیم نشده؛ خبر فقط نمایش/هشدار تقویمی است، نه شرط امتیاز فنی"
                     !sourcesOnline || !calendarFresh -> "خوراک/تقویم کامل یا تازه نیست؛ خبر UNKNOWN است، نه امتیاز منفی فنی"
                     selectedVerdict?.status == "AVAILABLE" && modelFresh ->
-                        "AI خبر برای ${market.symbol}: ${selectedVerdict.direction} با ${selectedVerdict.confidence.toInt()}٪؛ تعارض فقط اگر خلاف سیگنال باشد وتو می‌کند"
-                    else -> "خبر معیار تأییدی کامل ندارد؛ به‌عنوان ریسک زرد نمایش داده می‌شود و جای ۸ شرط فنی را نمی‌گیرد"
+                        "AI خبر برای ${market.symbol}: ${selectedVerdict.direction} با ${selectedVerdict.confidence.toInt()}٪؛ فقط همراه معامله در ژورنال داده‌کاوی می‌شود"
+                    else -> "خبر معیار تأییدی کامل ندارد؛ شرط ورود نیست و فقط زمینهٔ ژورنال/آموزش است"
                 }),
             AlertCheck(AlertCheckKind.NINE_WAY, signal?.isActionable == true && entryBlocker == null,
                 entryBlocker ?: "شرایط این لحظه تأییدند؛ این به‌تنهایی وقوع هشدار، معامله یا سود را تضمین نمی‌کند"),

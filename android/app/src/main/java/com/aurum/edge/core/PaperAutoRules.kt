@@ -2,7 +2,6 @@ package com.aurum.edge.core
 
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.PersianNewsState
-import com.aurum.edge.engine.NewsConfluence
 import kotlin.math.abs
 
 /** Side-effect-free guard shared by service and unit tests. NEVER submits a broker order. */
@@ -41,19 +40,12 @@ object PaperAutoRules {
             return "قیمت دریافتی قدیمی است"
         val signal = market.signal ?: return "سیگنال محاسبه نشده است"
         if (!signal.isActionable || signal.entry == null || signal.stopLoss == null || signal.takeProfit == null)
-            return signal.blockers.firstOrNull { it.contains("خبر") || it.contains("تقویم") }
-                ?: "سیگنال فنی قابل معامله موجود نیست"
+            return "سیگنال فنی قابل معامله موجود نیست"
         if (signal.confluence.take(8).size != 8 ||
             signal.confluence.take(8).any { !it.ok || it.status != ConfluenceStatus.CONFIRMED })
             return "تمام هشت شرط فنی اصلی هم‌زمان تأیید نشده‌اند"
-        signal.confluence.getOrNull(8)?.takeIf { it.name == NewsConfluence.NEWS_LABEL }?.let { newsItem ->
-            if (newsItem.status == ConfluenceStatus.CONFLICT) return "وتوی خبر/تقویم فعال است: ${newsItem.detail}"
-        }
-        val match = NewsConfluence.alignment(market.symbol, signal.action, news, now)
-        if (match.status == ConfluenceStatus.CONFLICT) return "وتوی خبر/تقویم فعال است: ${match.detail}"
-        if (signal.confluence.getOrNull(8)?.let { it.name == NewsConfluence.NEWS_LABEL &&
-                it.status == ConfluenceStatus.CONFIRMED && it.detail != match.detail } == true)
-            return "شواهد خبرِ فعلی با سیگنال یکی نیست؛ منتظر محاسبهٔ دوباره بمانید"
+        // News is deliberately not an entry condition for paper trading. It is mined separately
+        // into the journal when it is near the trade, so technical/option gates stay deterministic.
         val lastClosed = market.candles.lastOrNull { it.closed }
         if (lastClosed?.time != signal.barTime || signal.barTime <= 0L ||
             now - (signal.barTime + market.interval.millis) !in 0L..barAgeGraceMs)
@@ -62,7 +54,7 @@ object PaperAutoRules {
         if (price == null || !price.isFinite() || price <= 0.0 || !signal.entry.isFinite() ||
             signal.entry <= 0.0 || abs(price / signal.entry - 1.0) > 0.005)
             return "قیمت تازه از ورود سیگنال فاصله گرفته است"
-        // An additional gate, never a substitute for the eight technical checks and news/calendar risk layer.
+        // An additional gate, never a substitute for the eight technical checks.
         return IctEntryRules.assess(market, now, maxBarAgeMs = barAgeGraceMs).reason
     }
 }

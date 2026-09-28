@@ -1,7 +1,7 @@
 {
   "applicationId": "com.aurum.edge",
-  "versionCode": 7,
-  "versionName": "1.2.4",
+  "versionCode": 8,
+  "versionName": "1.2.5",
   "commitSha": "",
   "notes": "Manifest پایدار برای تب بروزرسانی. برای انتشار واقعی، apkUrl و sha256 نسخه مالک-امضاشده را تنظیم کنید. اگر apkUrl خالی باشد اپ از GitHub Releases عمومی استفاده می‌کند، نه artifact خام Actions که ممکن است 401 بدهد.",
   "apkUrl": "",

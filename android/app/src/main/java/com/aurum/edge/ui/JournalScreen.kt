@@ -369,12 +369,13 @@ private fun OpportunityRow(item: PaperOpportunity, tradeStillSaved: Boolean) {
             else -> "رکورد معاملهٔ مرتبط بعداً از ژورنال پاک شده است."
         }, style = MaterialTheme.typography.labelSmall,
             color = if (tradeStillSaved) AurumColors.Green else AurumColors.TextMuted)
-        Text("کندل ${formatDateTime(item.signalBarTime)} · MTF ${item.mtf.bias} · مدل ${item.newsEvidence.model}" +
-            " · تقویم ${formatDateTime(item.newsEvidence.calendarCheckedAt)}",
+        Text("کندل ${formatDateTime(item.signalBarTime)} · MTF ${item.mtf.bias}" +
+            (item.newsEvidence?.let { " · مدل ${it.model} · تقویم ${formatDateTime(it.calendarCheckedAt)}" }
+                ?: " · خبر نزدیک معتبر برای این کاندیدا ثبت نشد"),
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         ConditionDisclosure(item.key, item.conditions)
         IctDisclosure(item.key, item.priceAction)
-        item.newsEvidence.evidence.forEach { news ->
+        item.newsEvidence?.evidence?.forEach { news ->
             OutlinedButton(onClick = { runCatching { uriHandler.openUri(news.url) } }) {
                 Text("شاهد خبر: ${news.source}", style = MaterialTheme.typography.labelSmall)
             }

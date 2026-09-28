@@ -490,7 +490,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
 
         SectionCard("ورود خودکار کاغذی · فقط آموزشی", "پیش‌فرض خاموش؛ بدون بروکر، بدون سفارش واقعی") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("باز کردن خودکار LONG/SHORT کاغذی پس از ۸ شرط فنی، نبود وتوی خبر/تقویم و تأییدهای ICT/MTF",
+                Text("باز کردن خودکار LONG/SHORT کاغذی پس از ۸ شرط فنی، آپشن‌های فعال و تأییدهای ICT/MTF؛ خبر فقط داده‌کاوی ژورنال",
                     modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
                     color = AurumColors.TextPrimary)
                 Switch(checked = settings.autoPaperTrading, onCheckedChange = { enabled ->
@@ -501,7 +501,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             Text(if (settings.autoPaperTrading) autoStatus else "خاموش؛ خطوط روی چارت معامله نیستند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 6.dp))
-            Text("پایش پس‌زمینه، قیمت زنده، ۸ شرط فنی، نبود وتوی خبر/تقویم و تأیید ICT/MTF لازم‌اند. AI خبر اگر معتبر باشد فقط تأیید سبز می‌دهد؛ UNKNOWN به‌تنهایی امتیاز فنی را منفی نمی‌کند. نتیجه در ژورنال روی گوشی ذخیره می‌شود؛ خروج با تیک واقعی SL/TP است. مدل و ناشران بازده یا معاملهٔ واقعی را تضمین نمی‌کنند.",
+            Text("پایش پس‌زمینه، قیمت زنده، ۸ شرط فنی پایهٔ ایچیموکو، آپشن‌های فعال و تأیید ICT/MTF لازم‌اند. AI/تقویم خبر شرط ورود نیست؛ فقط اگر نزدیک معامله شاهد معتبر داشته باشد در ژورنال برای داده‌کاوی ذخیره می‌شود. نتیجه در ژورنال روی گوشی ذخیره می‌شود؛ خروج با تیک واقعی SL/TP است. مدل و ناشران بازده یا معاملهٔ واقعی را تضمین نمی‌کنند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 

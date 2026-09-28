@@ -303,19 +303,21 @@ data class PaperOpportunity(
     val alertedAt: Long,
     val conditions: List<PaperConditionRecord>,
     val mtf: MtfSnapshotRecord,
-    val newsEvidence: PaperNewsRecord,
+    val newsEvidence: PaperNewsRecord? = null,
     val paperTradeId: String? = null,
     /** Null only for a candidate written before the new ICT gate. */
     val priceAction: IctPriceActionRecord? = null,
 ) {
     companion object {
         fun from(signal: Signal, symbol: String, price: Double, mtf: MtfSnapshotRecord,
-                 news: PaperNewsRecord, ict: IctPriceActionRecord,
+                 news: PaperNewsRecord?, ict: IctPriceActionRecord,
                  now: Long = System.currentTimeMillis()): PaperOpportunity {
+            val technicalConditions = signal.confluence.filterNot {
+                it.name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL
+            }
             require(PaperOrderRules.paperable(symbol) && signal.isActionable && signal.barTime > 0 &&
-                signal.confluence.take(9).size == 9 &&
-                signal.confluence.take(9).all { it.ok && it.status == ConfluenceStatus.CONFIRMED } &&
-                signal.confluence[8].name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL &&
+                technicalConditions.take(8).size == 8 &&
+                technicalConditions.take(8).all { it.ok && it.status == ConfluenceStatus.CONFIRMED } &&
                 price.isFinite() && price > 0 && signal.stopLoss != null && signal.takeProfit != null &&
                 ict.matches(signal, symbol, price) && !mtf.veto && mtf.barTime == signal.barTime) {
                 "فرصت آموزشی معتبر نیست"
@@ -325,7 +327,7 @@ data class PaperOpportunity(
                 symbol = symbol, interval = signal.interval, action = signal.action,
                 signalBarTime = signal.barTime, priceAtAlert = price,
                 stopLoss = signal.stopLoss, takeProfit = signal.takeProfit,
-                alertedAt = now, conditions = signal.confluence.take(9).map(PaperConditionRecord::from),
+                alertedAt = now, conditions = technicalConditions.map(PaperConditionRecord::from),
                 mtf = mtf, newsEvidence = news, priceAction = ict,
             )
         }

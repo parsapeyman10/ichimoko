@@ -465,7 +465,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
         container.settingsStore.update { it.copy(autoPaperTrading = enabled) }
         if (enabled) container.news.refreshNow()
-        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ ۸ شرط فنی، قیمت زنده، ICT/MTF و نبود وتوی خبر لازم است"
+        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ ۸ شرط فنی، آپشن‌های فعال، قیمت زنده و ICT/MTF لازم است؛ خبر فقط در ژورنال داده‌کاوی می‌شود"
             else "معاملهٔ خودکار کاغذی خاموش شد"
     }
 
@@ -547,13 +547,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     abs(price / signal.entry - 1.0) <= 0.005 && _mtf.value?.veto != true) {
                     "سیگنال قدیمی، وتوشده یا دور از قیمت تازه است"
                 }
-                val alignment = NewsConfluence.alignment(current.symbol, signal.action, news.value)
-                require(signal.confluence.size >= 9 &&
-                    signal.confluence.take(8).all { it.ok && it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED } &&
-                    alignment.status != com.aurum.edge.core.ConfluenceStatus.CONFLICT &&
-                    signal.confluence[8].let { it.name == NewsConfluence.NEWS_LABEL &&
-                        it.status != com.aurum.edge.core.ConfluenceStatus.CONFLICT }) {
-                    "۸ شرط فنی یا وتوی خبر/تقویم دیگر معتبر نیست؛ ورود سیگنالی متوقف شد"
+                val technicalConditions = signal.confluence.filterNot { it.name == NewsConfluence.NEWS_LABEL }
+                require(technicalConditions.take(8).size == 8 &&
+                    technicalConditions.take(8).all { it.ok && it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED }) {
+                    "۸ شرط فنی دیگر معتبر نیست؛ ورود سیگنالی متوقف شد"
                 }
                 IctEntryRules.assess(current).reason?.let { throw IllegalArgumentException(it) }
             }
@@ -575,12 +572,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 // Repeat all checks after scheduling; never persist a stale or switched symbol.
                 val (current, price) = verified()
                 val s = container.settingsStore.read()
-                val newsRecord = if (manual) null else {
-                    val latestNews = news.value
-                    val risk = NewsConfluence.alignment(current.symbol, signal.action, latestNews)
-                    require(risk.status != com.aurum.edge.core.ConfluenceStatus.CONFLICT) { "وتوی خبر/تقویم در لحظهٔ ثبت فعال شد" }
-                    NewsConfluence.record(latestNews, current.symbol)
-                }
+                val newsRecord = if (manual) null else NewsConfluence.record(news.value, current.symbol)
                 val ict = if (manual) null else (IctEntryRules.approvedEvidence(current)
                     ?: error("شواهد رنج/ICT همین کندل پیش از ثبت معتبر نیست"))
                 val trade = container.journalStore.open(

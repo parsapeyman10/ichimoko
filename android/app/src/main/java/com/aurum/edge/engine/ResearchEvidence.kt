@@ -118,10 +118,10 @@ object ResearchEvidence {
         val bar = trade.signalBarTime ?: return false
         val news = trade.newsEvidence
         val ict = trade.priceAction ?: return false
-        val newsStatus = trade.entryConditions.getOrNull(8)?.status
-        val newsEvidenceOk = if (news == null) newsStatus == "UNKNOWN" else (
+        val technicalConditions = trade.entryConditions.filterNot { it.name == NewsConfluence.NEWS_LABEL }
+        val newsEvidenceOk = news == null || (
             news.model.isNotBlank() && news.model != "deterministic-fallback" &&
-                news.direction == trade.action.name && news.confidence in 80.0..100.0 &&
+                news.confidence in 80.0..100.0 &&
                 news.checkedAt > 0L && trade.openedAt - news.checkedAt in 0L..180_000L &&
                 news.calendarSource == FOREX_CALENDAR_SOURCE_URL &&
                 news.calendarCheckedAt?.let { trade.openedAt - it in 0L..1_200_000L } == true &&
@@ -133,10 +133,8 @@ object ResearchEvidence {
             trade.mtf?.let { !it.veto && it.barTime == bar } == true &&
             ict.symbol == trade.symbol && ict.action == trade.action && ict.barTime == bar &&
             trade.openedAt - ict.checkedAt in 0L..180_000L && newsEvidenceOk &&
-            trade.entryConditions.size >= 9 &&
-            trade.entryConditions.take(8).all { it.status == "CONFIRMED" } &&
-            trade.entryConditions[8].name == NewsConfluence.NEWS_LABEL &&
-            trade.entryConditions[8].status != "CONFLICT"
+            technicalConditions.size >= 8 &&
+            technicalConditions.take(8).all { it.status == "CONFIRMED" }
     }
 
     /** A hypothetical deduction from recorded paper P/L, not a broker fill or a journal edit. */

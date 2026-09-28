@@ -51,9 +51,8 @@ data class PairScanState(
  * Honest limits, identical to the single-symbol pipeline:
  * - REST/public-history candles justify an educational CANDIDATE + notification, never an automatic paper
  *   fill (auto entry stays live-tick only, on the selected symbol).
- * - Every pair is evaluated with the SAME eight technical conditions plus a per-pair
- *   news/calendar risk layer, the SAME ICT gate and the SAME MTF veto; a missing key or a failed fetch is an explicit
- *   status, never a fabricated signal.
+ * - Every pair is evaluated with the SAME eight technical conditions, enabled optional filters,
+ *   the SAME ICT gate and the SAME MTF veto. News is mined only as journal context, never as an entry gate.
  * - Calls are spaced to respect Twelve/Yahoo provider limits (≤7 requests/minute).
  */
 class PairScanner(
@@ -181,10 +180,10 @@ class PairScanner(
             val evidence = NewsConfluence.record(headlines, symbol)
             val ict = IctEntryRules.approvedEvidence(market, System.currentTimeMillis(), graceMs)
             val fresh = settings.read() // re-read: the sweep itself can take over a minute
-            if (evidence == null || ict == null || mtf == null || price == null ||
+            if (ict == null || mtf == null || price == null ||
                 PaperAlertRules.blocker(market, fresh, news.state.value, journal.trades.value, mtf,
                     System.currentTimeMillis(), WatchCatalog.chartSymbols, graceMs) != null) {
-                update(symbol, "blocked", "شواهد کامل کاندیدای آموزشی در لحظهٔ ثبت در دسترس نبود", price, score)
+                update(symbol, "blocked", "شواهد فنی/ICT/MTF کاندیدای آموزشی در لحظهٔ ثبت در دسترس نبود", price, score)
                 return@forEachIndexed
             }
             val item = runCatching {
@@ -193,7 +192,7 @@ class PairScanner(
             if (item == null) { update(symbol, "blocked", "ساخت رکورد فرصت آموزشی ممکن نشد", price, score); return@forEachIndexed }
             val recorded = runCatching { opportunities.record(item) }.getOrDefault(false)
             if (recorded) onCandidate?.invoke(item)
-            update(symbol, "candidate", "کاندیدای آموزشی ۸/۸ + خبر ثبت شد؛ اعلان/ژورنال را ببینید — ورود خودکار فقط با فید زندهٔ همین نماد", price, score)
+            update(symbol, "candidate", "کاندیدای آموزشی ۸/۸ فنی ثبت شد؛ خبر نزدیک فقط در ژورنال داده‌کاوی می‌شود — ورود خودکار فقط با فید زندهٔ همین نماد", price, score)
         }
     }
 

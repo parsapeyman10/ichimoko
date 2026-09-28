@@ -25,7 +25,7 @@ object ForexNewsDecisions {
         val context = if (!calendar.online(now)) "تقویم Forex Factory تازه نیست؛ اثر خبر نامعلوم" else
             highlight?.let { "${it.title}: ${NewsResearch.gold(it, calendar, now).title}" }
                 ?: "در تقویم دریافتی، رویداد High/USD نزدیک نیست؛ نبود خبر ثابت نشده"
-        // News is a risk layer, not a hidden replacement for the eight technical rules.
+        // News is journal context, not a hidden replacement or blocker for the eight technical rules.
         val verdict = news.aiBySymbol[market.symbol] ?: news.ai.takeIf { it.symbol == market.symbol }
         val action = when (verdict?.direction) { "BUY" -> SignalAction.BUY; "SELL" -> SignalAction.SELL; else -> null }
         val aligned = if (!closed && action != null) {
@@ -37,12 +37,12 @@ object ForexNewsDecisions {
         val hardVeto = news.gate.name == "BLOCKED" || market.symbol in news.vetoedSymbols
         return ForexNewsDecision(
             context,
-            modelOpinion = if (aligned) "مدل ${verdict?.model} با شاهد معتبر هم‌جهت شد؛ این برداشت تضمین حرکت قیمت نیست"
-                else if (hardVeto) "خبر/تقویم وتوی روشن دارد؛ دلیل در تب خبر آمده است"
-                else "AI خبر معیار سبز کامل ندارد؛ این وضعیت فقط زرد است و امتیاز فنی را منفی نمی‌کند",
+            modelOpinion = if (aligned) "مدل ${verdict?.model} با شاهد معتبر هم‌جهت شد؛ این فقط زمینهٔ ژورنال است و تضمین حرکت قیمت نیست"
+                else if (hardVeto) "خبر/تقویم پرریسک دیده شده؛ دلیل در تب خبر آمده اما معاملهٔ کاغذی را شرطی/مسدود نمی‌کند"
+                else "AI خبر معیار سبز کامل ندارد؛ این وضعیت فقط زرد است و شرط ورود کاغذی نیست",
             direction = if (aligned) { if (action == SignalAction.BUY) "LONG / خرید" else "SHORT / فروش" }
                 else "نامعلوم؛ جهت از تیتر/پیش‌بینی ساخته نمی‌شود و جهت اصلی از ۸ شرط فنی می‌آید",
-            paperEntry = if (allowed) "ورود خودکار کاغذی از نظر خبر وتو نشده؛ ۸ شرط فنی، قیمت زنده، ICT/MTF و ریسک باید هم‌زمان برقرار باشند"
+            paperEntry = if (allowed) "ورود خودکار کاغذی وابسته به ۸ شرط فنی، آپشن‌های فعال، قیمت زنده، ICT/MTF و ریسک است؛ خبر فقط در ژورنال تحلیل می‌شود"
                 else "ورود خودکار کاغذی: خیر · $blocker",
             canEnterPaper = allowed,
         )

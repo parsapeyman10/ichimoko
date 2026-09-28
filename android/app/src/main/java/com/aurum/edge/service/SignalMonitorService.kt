@@ -215,7 +215,7 @@ class SignalMonitorService : Service() {
                     val headlines = container.news.state.value
                     if (PaperAlertRules.blocker(state, config, headlines,
                             container.journalStore.trades.value, snapshot) == null) {
-                        // Re-check after computation: a veto/news/price can change between flows.
+                        // Re-check after computation: technical/price/MTF state can change between flows.
                         val latest = container.verifiedMarket.value
                         val recentNews = container.news.state.value
                         val recentConfig = container.settingsStore.read()
@@ -225,7 +225,7 @@ class SignalMonitorService : Service() {
                                 container.journalStore.trades.value, snapshot) == null) {
                             val evidence = NewsConfluence.record(recentNews, latest.symbol)
                             val ict = IctEntryRules.approvedEvidence(latest)
-                            if (evidence != null && ict != null && snapshot != null &&
+                            if (ict != null && snapshot != null &&
                                 Notifier.canNotifyVerified(this@SignalMonitorService, recentConfig.alertSoundUri)) {
                                 val item = runCatching { PaperOpportunity.from(latest.signal!!, latest.symbol,
                                     latest.lastPrice!!, MtfSnapshotRecord.from(snapshot), evidence, ict) }.getOrNull()

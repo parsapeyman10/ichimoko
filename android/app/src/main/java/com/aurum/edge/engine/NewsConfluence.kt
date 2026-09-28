@@ -12,15 +12,15 @@ import com.aurum.edge.data.PersianNewsState
 import com.aurum.edge.data.PersianHeadline
 import java.net.URI
 
-/** Live-only news risk layer: eight technical confirmations are scored separately.
- * News can add a green confirmation when model evidence is valid, or veto only when a clear
- * high-impact calendar/news conflict exists. UNKNOWN news is displayed honestly, but it no longer
- * turns an otherwise technical signal negative just because no objective news metric exists.
+/** Live-only news journal-mining layer: eight technical confirmations are scored separately.
+ * News can add a green/amber/red context row and a journal evidence snapshot, but it is NOT an
+ * entry prerequisite for paper trading. UNKNOWN or CONFLICT news must stay visible and auditable
+ * without converting a valid Ichimoku/options signal into NO_TRADE.
  * Historical backtests have no point-in-time news archive and must NEVER claim news confirmation.
  */
 object NewsConfluence {
     const val TECHNICAL_COUNT = 8
-    const val NEWS_LABEL = "خبر/تقویم · ریسک جدا"
+    const val NEWS_LABEL = "خبر/تقویم · داده‌کاوی ژورنال"
     private const val MAX_REVIEW_AGE_MS = 180_000L
     private const val MAX_EVIDENCE_AGE_MS = 180 * 60_000L
 
@@ -123,23 +123,22 @@ object NewsConfluence {
                 ConfluenceStatus.UNKNOWN -> null
             },
         )
-        val combined = raw.copy(confluence = core + item + raw.confluence.drop(TECHNICAL_COUNT))
+        val combined = raw.copy(confluence = raw.confluence + item)
         if (!raw.isActionable) return combined
-        val blocker = when {
-            !technicalOk -> "هشت شرط فنی اصلی هم‌زمان تأیید نشده‌اند (${core.count { it.ok && it.status == ConfluenceStatus.CONFIRMED }}/$TECHNICAL_COUNT)"
-            match.status == ConfluenceStatus.CONFLICT -> "وتوی خبر/تقویم: ${match.detail}"
-            else -> null
-        }
+        val blocker = if (!technicalOk)
+            "هشت شرط فنی اصلی هم‌زمان تأیید نشده‌اند (${core.count { it.ok && it.status == ConfluenceStatus.CONFIRMED }}/$TECHNICAL_COUNT)"
+        else null
         if (blocker != null) {
             return combined.copy(action = SignalAction.NO_TRADE, entry = null, stopLoss = null,
                 takeProfit = null, riskReward = null, blockers = combined.blockers + blocker)
         }
         return when (match.status) {
             ConfluenceStatus.CONFIRMED -> combined.copy(
-                reasons = combined.reasons + "خبر/مدل هم‌جهت و تازه است؛ امتیاز فنی جداگانه حفظ شد")
+                reasons = combined.reasons + "خبر/مدل نزدیک معامله ثبت شد؛ فقط داده‌کاوی ژورنال است و شرط ورود نیست")
             ConfluenceStatus.UNKNOWN -> combined.copy(
-                reasons = combined.reasons + "خبر معیار تأییدی شفاف ندارد؛ فقط به‌عنوان هشدار زرد نمایش داده شد و امتیاز فنی را منفی نکرد")
-            ConfluenceStatus.CONFLICT -> combined
+                reasons = combined.reasons + "خبر معیار قطعی ندارد؛ برای داده‌کاوی ژورنال زرد می‌ماند و شرط ورود کاغذی نیست")
+            ConfluenceStatus.CONFLICT -> combined.copy(
+                reasons = combined.reasons + "خبر/تقویم با جهت سیگنال تعارض دارد؛ معاملهٔ کاغذی متوقف نمی‌شود و فقط در ژورنال برای تحلیل بعدی ثبت می‌شود")
         }
     }
 }
