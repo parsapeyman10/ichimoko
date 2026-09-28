@@ -185,7 +185,7 @@ class AppUpdateRepository(
             notes = obj.string("notes") ?: "انتشار پایدار مالک پروژه",
             downloadUrl = apkUrl,
             expectedSha256 = obj.string("sha256"),
-            sizeBytes = obj.long("sizeBytes"),
+            sizeBytes = obj.long("sizeBytes")?.takeIf { it > 0L },
         )
     }
 
@@ -215,7 +215,7 @@ class AppUpdateRepository(
             },
             downloadUrl = downloadUrl,
             artifactName = asset.string("name"),
-            sizeBytes = asset.long("size"),
+            sizeBytes = asset.long("size")?.takeIf { it > 0L },
         )
     }
 

@@ -119,9 +119,15 @@ private fun UpdateInfoCard(info: AppUpdateRepository.UpdateInfo) {
             Text(info.notes, style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted, modifier = Modifier.padding(top = 3.dp))
         }
-        info.sizeBytes?.let { bytes ->
-            Text("حجم تقریبی: ${bytes / 1_048_576} MB", style = MaterialTheme.typography.labelSmall,
+        info.sizeBytes?.takeIf { it > 0L }?.let { bytes ->
+            Text("حجم تقریبی: ${formatUpdateBytes(bytes)}", style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted, modifier = Modifier.padding(top = 3.dp))
         }
     }
+}
+
+private fun formatUpdateBytes(bytes: Long): String = when {
+    bytes >= 1_048_576L -> "${(bytes + 524_287L) / 1_048_576L} MB"
+    bytes >= 1_024L -> "${(bytes + 1_023L) / 1_024L} KB"
+    else -> "$bytes B"
 }
