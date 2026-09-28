@@ -35,9 +35,9 @@ internal fun hasCurrentRestBar(bars: List<Candle>, interval: Interval, now: Long
     return now - last.time in 0L..(interval.millis + 90_000L)
 }
 
-/** Never place a delayed provider tick into a bar that had not opened at event time. */
+/** A live tick may arrive a few seconds after its source timestamp, even across a candle boundary. */
 internal fun isCurrentIntervalTick(at: Long, interval: Interval, now: Long): Boolean =
-    at in (now - now % interval.millis)..now && now - at <= 90_000L
+    at in (now - 90_000L)..now
 
 data class MarketState(
     val symbol: String = "XAU/USD",
@@ -450,13 +450,14 @@ class MarketRepository(
         val now = System.currentTimeMillis()
         if (MarketHours.forexWeekendClosed(now)) { publishClosed(); return }
         if (!isCurrentIntervalTick(at, current.interval, now)) return
-        val periodStart = now - now % current.interval.millis
+        val wallPeriodStart = now - now % current.interval.millis
+        val periodStart = at - at % current.interval.millis
         val existing = cachedBars[periodStart]
         val bar = existing?.copy(
             high = maxOf(existing.high, price),
             low = minOf(existing.low, price),
             close = price,
-            closed = false,
+            closed = periodStart < wallPeriodStart,
         ) ?: Candle(
             time = periodStart,
             open = price,
@@ -464,7 +465,7 @@ class MarketRepository(
             low = price,
             close = price,
             volume = 0.0,
-            closed = false,
+            closed = periodStart < wallPeriodStart,
         )
         cachedBars[periodStart] = bar
 

@@ -95,6 +95,7 @@ class TwelveDataCandleContractTest {
         val yesterday = Candle(now - 86_400_000L, 3100.0, 3101.0, 3099.0, 3100.0)
         assertFalse(hasCurrentRestBar(listOf(yesterday), Interval.M5, now))
         assertTrue(isCurrentIntervalTick(now - 30_000L, Interval.M5, now))
+        assertTrue(isCurrentIntervalTick(now - 70_000L, Interval.M1, now)) // fresh quote across a 1m boundary
         assertFalse(isCurrentIntervalTick(now - 2 * 60_000L, Interval.M5, now))
         assertFalse(isCurrentIntervalTick(now + 1L, Interval.M5, now))
     }
