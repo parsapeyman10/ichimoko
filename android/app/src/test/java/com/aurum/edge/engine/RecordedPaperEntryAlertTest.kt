@@ -83,7 +83,7 @@ class RecordedPaperEntryAlertTest {
             entry.copy(entryConditions = entry.entryConditions.dropLast(1)), ""))
         assertFalse(Notifier.notifyRecordedAutoEntry(context,
             entry.copy(entryConditions = entry.entryConditions.mapIndexed { index, c ->
-                if (index == 8) c.copy(status = "UNKNOWN") else c
+                if (index == 8) c.copy(status = "CONFLICT") else c
             }), ""))
         assertEquals(1, manager.activeNotifications.size)
     }
