@@ -27,18 +27,17 @@ import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.Locale
-import java.util.zip.ZipInputStream
 
 /**
  * Sideload-friendly updater. Android still requires the system package installer confirmation;
  * no app can silently replace its own code outside managed/Play channels. The repository only
- * downloads real HTTPS APKs/artifacts and then hands them to PackageInstaller.
+ * downloads public HTTPS APKs and then hands them to PackageInstaller.
  */
 class AppUpdateRepository(
     private val context: Context,
     private val client: OkHttpClient = OkHttpClient.Builder().followRedirects(true).build(),
 ) {
-    enum class SourceKind { MANIFEST_APK, ACTIONS_ZIP }
+    enum class SourceKind { MANIFEST_APK, RELEASE_APK }
 
     data class UpdateInfo(
         val source: SourceKind,
@@ -81,10 +80,10 @@ class AppUpdateRepository(
         _state.value = _state.value.copy(checking = true, error = null,
             message = "در حال بررسی بروزرسانی امن…")
         val manifest = runCatching { checkManifest() }.getOrNull()
-        val ci = runCatching { checkLatestSuccessfulCi() }.getOrNull()
-        val update = listOfNotNull(manifest, ci).firstOrNull()
+        val release = runCatching { checkLatestRelease() }.getOrNull()
+        val update = listOfNotNull(manifest, release).firstOrNull()
         _state.value = if (update == null) {
-            State(message = "نسخهٔ نصب‌شده فعلاً آخرین نسخهٔ قابل دریافت است. نسخه ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · ${BuildConfig.GIT_SHA.take(7)}")
+            State(message = "نسخهٔ نصب‌شده فعلاً آخرین نسخهٔ عمومی قابل دریافت است. نسخه ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · ${BuildConfig.GIT_SHA.take(7)}. artifactهای خام GitHub Actions از داخل اپ استفاده نمی‌شوند چون برای دانلود عمومی گاهی 401/نیاز به ورود GitHub می‌دهند؛ مسیر عمومی امن، Release یا manifest پایدار است.")
         } else {
             State(available = update,
                 message = "نسخهٔ جدید پیدا شد: ${update.displayVersion} از ${update.sourceLabel}")
@@ -99,19 +98,15 @@ class AppUpdateRepository(
         _state.value = _state.value.copy(downloading = true, progressPercent = 0,
             error = null, message = "در حال دانلود ${info.sourceLabel}…")
         runCatching {
-            val payload = download(info)
-            val apk = when (info.source) {
-                SourceKind.MANIFEST_APK -> payload
-                SourceKind.ACTIONS_ZIP -> extractMatchingApk(payload)
-            }
+            val apk = downloadApk(info)
             val packageInfo = context.packageManager.getPackageArchiveInfo(apk.absolutePath, 0)
                 ?: throw DataFeedException("APK دانلودشده قابل خواندن نیست")
             if (packageInfo.packageName != context.packageName) {
                 throw DataFeedException("APK دانلودشده برای نصب فعلی نیست (${packageInfo.packageName})")
             }
             val versionCode = PackageInfoCompat.getLongVersionCode(packageInfo)
-            if (versionCode < BuildConfig.VERSION_CODE) {
-                throw DataFeedException("این فایل از نسخهٔ نصب‌شده قدیمی‌تر است و نصب نمی‌شود")
+            if (versionCode <= BuildConfig.VERSION_CODE) {
+                throw DataFeedException("این فایل نسخهٔ جدیدتری از نصب فعلی نیست")
             }
             _state.value = _state.value.copy(
                 downloading = false,
@@ -123,7 +118,9 @@ class AppUpdateRepository(
             )
         }.onFailure { error ->
             _state.value = _state.value.copy(downloading = false, progressPercent = null,
-                error = error.message ?: "دانلود یا آماده‌سازی بروزرسانی ناموفق بود")
+                error = if (error.message?.contains("401") == true)
+                    "دانلود عمومی مجاز نبود (401). این مسیر معمولاً artifact خام GitHub Actions است؛ نسخهٔ اصلاح‌شده فقط Release/manifest عمومی را پیشنهاد می‌کند."
+                else error.message ?: "دانلود یا آماده‌سازی بروزرسانی ناموفق بود")
         }
     }
 
@@ -180,32 +177,33 @@ class AppUpdateRepository(
         )
     }
 
-    private fun checkLatestSuccessfulCi(): UpdateInfo? {
+    private fun checkLatestRelease(): UpdateInfo? {
         val repo = BuildConfig.UPDATE_REPO
-        val branch = BuildConfig.UPDATE_BRANCH
-        val runs = requestJson("https://api.github.com/repos/$repo/actions/runs?branch=$branch&status=success&per_page=10")
-            .jsonObject["workflow_runs"]?.jsonArray ?: return null
-        val run = runs.mapNotNull { it as? JsonObject }.firstOrNull() ?: return null
-        if (run.string("head_sha")?.startsWith(BuildConfig.GIT_SHA) == true) return null
-        val runId = run.long("id") ?: return null
-        val artifacts = requestJson("https://api.github.com/repos/$repo/actions/runs/$runId/artifacts")
-            .jsonObject["artifacts"]?.jsonArray ?: return null
-        val artifact = artifacts.mapNotNull { it as? JsonObject }
-            .firstOrNull { it.string("name") == "aurum-edge-apk" && it.boolean("expired") != true }
-            ?: return null
-        val downloadUrl = artifact.string("archive_download_url") ?: return null
-        val sha = run.string("head_sha")
+        val releases = requestJson("https://api.github.com/repos/$repo/releases?per_page=10")
+            .jsonArray.mapNotNull { it as? JsonObject }
+        val release = releases.firstOrNull { it.boolean("draft") != true } ?: return null
+        val assets = release["assets"]?.jsonArray?.mapNotNull { it as? JsonObject }.orEmpty()
+        val asset = assets.firstOrNull { asset ->
+            val name = asset.string("name").orEmpty().lowercase(Locale.ROOT)
+            name.endsWith(".apk") && ("release" in name || "aurum" in name)
+        } ?: return null
+        val downloadUrl = asset.string("browser_download_url")?.takeIf { it.startsWith("https://") } ?: return null
+        val tag = release.string("tag_name").orEmpty()
+        val versionName = release.string("name")?.takeIf { it.isNotBlank() } ?: tag.ifBlank { "GitHub Release" }
+        val commitish = release.string("target_commitish")
+        if (tag.contains(BuildConfig.VERSION_NAME) && commitish?.startsWith(BuildConfig.GIT_SHA) == true) return null
         return UpdateInfo(
-            source = SourceKind.ACTIONS_ZIP,
-            sourceLabel = "بیلد آزمایشی GitHub Actions",
-            versionName = "Preview CI",
+            source = SourceKind.RELEASE_APK,
+            sourceLabel = if (release.boolean("prerelease") == true) "GitHub Release آزمایشی" else "GitHub Release عمومی",
+            versionName = versionName,
             versionCode = null,
-            commitSha = sha,
-            notes = "بیلد خودکار شاخه $branch. برای بروزرسانی بدون حذف نصب، امضای APK باید با نسخهٔ نصب‌شده یکی باشد.",
+            commitSha = commitish,
+            notes = release.string("body")?.take(500).orEmpty().ifBlank {
+                "فایل APK عمومی از GitHub Releases. برای بروزرسانی بدون حذف نصب، امضا باید با نسخهٔ فعلی یکی باشد."
+            },
             downloadUrl = downloadUrl,
-            expectedSha256 = artifact.string("digest")?.removePrefix("sha256:"),
-            artifactName = artifact.string("name"),
-            sizeBytes = artifact.long("size_in_bytes"),
+            artifactName = asset.string("name"),
+            sizeBytes = asset.long("size"),
         )
     }
 
@@ -222,13 +220,12 @@ class AppUpdateRepository(
         }
     }
 
-    private fun download(info: UpdateInfo): File {
+    private fun downloadApk(info: UpdateInfo): File {
         val dir = File(context.cacheDir, "updates").also { it.mkdirs() }
         dir.listFiles()?.forEach { if (it.isFile && it.lastModified() < System.currentTimeMillis() - 86_400_000L) it.delete() }
-        val extension = if (info.source == SourceKind.ACTIONS_ZIP) "zip" else "apk"
-        val file = File(dir, "aurum-update-${info.commitSha?.take(12) ?: info.versionCode ?: System.currentTimeMillis()}.$extension")
+        val file = File(dir, "aurum-update-${info.commitSha?.take(12) ?: info.versionCode ?: System.currentTimeMillis()}.apk")
         val request = Request.Builder().url(info.downloadUrl)
-            .header("Accept", if (extension == "zip") "application/zip" else "application/vnd.android.package-archive")
+            .header("Accept", "application/vnd.android.package-archive, application/octet-stream")
             .header("User-Agent", "AurumEdge/${BuildConfig.VERSION_NAME}")
             .build()
         client.newCall(request).execute().use { response ->
@@ -261,32 +258,6 @@ class AppUpdateRepository(
             }
         }
         return file
-    }
-
-    private fun extractMatchingApk(zipFile: File): File {
-        val dir = File(context.cacheDir, "updates/extracted-${zipFile.nameWithoutExtension}").also {
-            if (it.exists()) it.deleteRecursively()
-            it.mkdirs()
-        }
-        val candidates = mutableListOf<File>()
-        ZipInputStream(zipFile.inputStream().buffered()).use { zip ->
-            while (true) {
-                val entry = zip.nextEntry ?: break
-                val safeName = File(entry.name).name
-                if (!entry.isDirectory && safeName.lowercase(Locale.ROOT).endsWith(".apk")) {
-                    val outFile = File(dir, safeName)
-                    FileOutputStream(outFile).use { out -> zip.copyTo(out) }
-                    candidates += outFile
-                }
-                zip.closeEntry()
-            }
-        }
-        if (candidates.isEmpty()) throw DataFeedException("داخل artifact هیچ APK پیدا نشد")
-        val matching = candidates.mapNotNull { file ->
-            val info = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0) ?: return@mapNotNull null
-            if (info.packageName == context.packageName) file to PackageInfoCompat.getLongVersionCode(info) else null
-        }.maxByOrNull { it.second }
-        return matching?.first ?: throw DataFeedException("هیچ APK سازگار با ${context.packageName} داخل artifact نبود")
     }
 
     private fun sha256(file: File): String {

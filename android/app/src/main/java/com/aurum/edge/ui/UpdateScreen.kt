@@ -85,7 +85,7 @@ fun UpdateScreen(viewModel: AurumViewModel) {
         }
 
         SectionCard("سازگاری و محدودیت Android", "برای بیشترین سازگاری، اپ چند مسیر بروزرسانی را امتحان می‌کند") {
-            Text("• اول انتشار پایدار مالک پروژه بررسی می‌شود؛ اگر manifest/Release آماده نباشد، آخرین بیلد موفق GitHub Actions همین شاخه بررسی می‌شود.",
+            Text("• اول manifest پایدار مالک پروژه و سپس GitHub Releases عمومی بررسی می‌شود. artifact خام GitHub Actions از داخل اپ دانلود نمی‌شود چون معمولاً بدون ورود GitHub خطای 401 می‌دهد.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
             Text("• Android اجازهٔ نصب بی‌صدا نمی‌دهد؛ اپ فایل را از داخل خودش می‌گیرد، اما نصب نهایی باید با صفحهٔ Package Installer تأیید شود.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,

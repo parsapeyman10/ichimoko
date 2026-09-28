@@ -55,14 +55,14 @@ android {
         applicationId = "com.aurum.edge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2.0"
+        versionCode = 4
+        versionName = "1.2.1"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
         buildConfigField("String", "UPDATE_REPO", "\"parsapeyman10/ichimoko\"")
         buildConfigField("String", "UPDATE_BRANCH", "\"arena/01a0e4df-ichimoko\"")
-        buildConfigField("String", "UPDATE_MANIFEST_URL", "\"https://raw.githubusercontent.com/parsapeyman10/ichimoko/main/update/aurum-edge.json\"")
+        buildConfigField("String", "UPDATE_MANIFEST_URL", "\"https://raw.githubusercontent.com/parsapeyman10/ichimoko/arena/01a0e4df-ichimoko/update/aurum-edge.json\"")
     }
 
     signingConfigs {

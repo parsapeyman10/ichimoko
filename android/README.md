@@ -43,7 +43,7 @@ cd android
 # APK: app/build/outputs/apk/debug/app-debug.apk
 ```
 
-نیاز به JDK 17 و Android SDK 35. workflow گیت‌هاب روی PR بیلد می‌گیرد؛ تسک `assembleRelease` به `testDebugUnitTest` وابسته است و در صورت شکست آزمون APK ریلیز ساخته نمی‌شود. نسخهٔ فعلی `versionCode=3` / `versionName=1.2.0` و package ثابت `com.aurum.edge` دارد. تب «بروزرسانی» داخل اپ می‌تواند انتشار پایدار یا آخرین artifact موفق GitHub Actions را بررسی/دانلود کند و نصب‌کنندهٔ Android را باز کند؛ نصب نهایی همچنان تأیید کاربر و امضای سازگار می‌خواهد. خروجی release در CI با کلید debug موقت runner فقط preview است و ممکن است روی نصب قبلی update نشود. مالک مخزن برای بیلد قابل آپدیت با keystore محرمانهٔ ثابت می‌تواند از `android/tools/build-owner-apk.sh` استفاده کند. [راهنمای نصب و امضای ثابت](../docs/PLAY_PROTECT_FA.md).
+نیاز به JDK 17 و Android SDK 35. workflow گیت‌هاب روی PR بیلد می‌گیرد؛ تسک `assembleRelease` به `testDebugUnitTest` وابسته است و در صورت شکست آزمون APK ریلیز ساخته نمی‌شود. نسخهٔ فعلی `versionCode=4` / `versionName=1.2.1` و package ثابت `com.aurum.edge` دارد. تب «بروزرسانی» داخل اپ می‌تواند انتشار پایدار یا آخرین artifact موفق GitHub Actions را بررسی/دانلود کند و نصب‌کنندهٔ Android را باز کند؛ نصب نهایی همچنان تأیید کاربر و امضای سازگار می‌خواهد. خروجی release در CI با کلید debug موقت runner فقط preview است و ممکن است روی نصب قبلی update نشود. مالک مخزن برای بیلد قابل آپدیت با keystore محرمانهٔ ثابت می‌تواند از `android/tools/build-owner-apk.sh` استفاده کند. [راهنمای نصب و امضای ثابت](../docs/PLAY_PROTECT_FA.md).
 
 **کلید provider را در APK نگذارید.** بعد از نصب، از تب تنظیمات کلید Twelve Data داده‌خوانی را وارد کنید. `android:allowBackup=false` است؛ کلیدهای خواندنی در حافظهٔ خصوصی گوشی هستند (نه Android Keystore)، پس APK محصول تجاری نیست.
 
