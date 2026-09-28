@@ -51,8 +51,14 @@ class NewsAggregator:
                 )
                 response.raise_for_status()
                 payload = response.json()
+        except httpx.HTTPStatusError as exc:
+            # The request URL contains the FMP key; never expose exception text through /health.
+            self.last_error = f"سرویس خبری پاسخ معتبر نداد (HTTP {exc.response.status_code})"
+            return []
         except Exception as exc:
-            self.last_error = f"{type(exc).__name__}: {exc}"
+            # DNS/transport errors are still useful for diagnostics, but the exception message
+            # may echo a URL/query string containing the provider key.
+            self.last_error = f"اتصال سرویس خبری برقرار نشد ({type(exc).__name__})"
             return []
 
         articles: list[NewsRequest] = []
@@ -91,10 +97,12 @@ class NewsAggregator:
         return True
 
     @staticmethod
-    def _parse_time(value: str | None) -> datetime:
+    def _parse_time(value: str | None) -> datetime | None:
+        """Missing/bad provider timestamps stay unknown; never replace them with now()."""
         if not value:
-            return datetime.now(timezone.utc)
+            return None
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
-            return datetime.now(timezone.utc)
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)

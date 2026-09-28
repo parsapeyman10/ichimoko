@@ -36,6 +36,7 @@ from app.services.candle_builder import CandleBuilder
 from app.services.forward_test import run_forward_test
 from app.services.execution_gate import OrderIntent, preflight as order_preflight, status as execution_status
 from app.services.history import DataUnavailable, load_history
+from app.services.integration_probe import probe_integrations
 from app.services.market_feed import market_ticks
 from app.services.news_feed import NewsAggregator
 from app.services.persian_news import PersianNewsFeed
@@ -232,9 +233,29 @@ async def health():
             "last_tick_at": feed["last_tick_at"],
         },
         "news": news_aggregator.status(),
+        "configuration": {
+            "state": "valid" if not settings.configuration_errors else "invalid",
+            "errors": settings.configuration_errors,
+        },
         "subscribers": len(hub.subscribers),
         "timestamp": datetime.now(timezone.utc),
     }
+
+
+@app.get("/api/v1/config/status")
+async def config_status(live_probe: bool = Query(False)):
+    """Secret-free map of destinations; optionally run bounded live provider checks."""
+    errors = settings.configuration_errors
+    result = {
+        "state": "valid" if not errors else "invalid",
+        "errors": errors,
+        "integrations": settings.integration_status,
+        "note": "این endpoint مقدار کلیدها را برنمی‌گرداند؛ فقط مقصد و وضعیت تنظیم‌شدن را نشان می‌دهد.",
+        "timestamp": datetime.now(timezone.utc),
+    }
+    if live_probe:
+        result["live_probe"] = await probe_integrations(settings)
+    return result
 
 
 @app.get("/api/v1/data/status")

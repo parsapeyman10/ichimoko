@@ -62,6 +62,7 @@ npm run dev
    AURUM_TWELVE_DATA_API_KEY=کلید-خودت
    ```
 2. بک‌اند را دوباره اجرا کن. حالا:
+   - http://127.0.0.1:8000/api/v1/config/status → مقصد همهٔ کلیدهای تنظیم‌شده و خطای تنظیمات را بدون نمایش مقدار کلید نشان می‌دهد؛ برای اتصال زنده `?live_probe=true` را فقط هنگام نیاز اضافه کن
    - http://127.0.0.1:8000/api/v1/data/status → باید `api_key_configured: true` و وضعیت فید را نشان دهد
    - http://127.0.0.1:8000/api/v1/market/5m/candles?limit=50 → کندل‌های واقعی
    - داخل رابط: چارت زنده → بک‌تست → Walk-Forward → ژورنال

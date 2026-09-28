@@ -36,9 +36,13 @@ class SettingsStore(context: Context) {
             structureRiskFilter = opt(KEY_SIGNAL_STRUCTURE_RISK, legacyProfile.structureRiskFilter),
             cooldownFilter = opt(KEY_SIGNAL_COOLDOWN, legacyProfile.cooldownFilter),
         )
+        val storedApiKey = prefs.getString(KEY_API, null)?.trim()
+        val storedNewsAiKey = prefs.getString(KEY_NEWS_AI_KEY, null)?.trim().orEmpty()
+        val storedNewsAiUrl = prefs.getString(KEY_NEWS_AI_URL, null)?.trim().orEmpty()
+        val storedNewsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, null)?.trim().orEmpty()
         return AppSettings(
-        apiKey = prefs.getString(KEY_API, null)?.takeIf { it.isNotBlank() }
-            ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY,
+        apiKey = storedApiKey?.takeIf { it.isNotBlank() }
+            ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY.trim(),
         // Legacy installs may still hold a removed symbol (crypto/stock); the app is forex-only now.
         symbol = (prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD").takeIf { it in WatchCatalog.chartSymbols } ?: "XAU/USD",
         interval = Interval.fromLabel(prefs.getString(KEY_INTERVAL, null) ?: "5m"),
@@ -51,13 +55,13 @@ class SettingsStore(context: Context) {
         notifyOnSignal = prefs.getBoolean(KEY_NOTIFY, true),
         alertSoundUri = prefs.getString(KEY_ALERT_SOUND_URI, "").orEmpty(),
         alertSoundName = prefs.getString(KEY_ALERT_SOUND_NAME, "").orEmpty(),
-        newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty(),
+        newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty().trim(),
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
         autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
         autoDownloadUpdates = prefs.getBoolean(KEY_AUTO_DOWNLOAD_UPDATES, false),
-        newsAiApiKey = prefs.getString(KEY_NEWS_AI_KEY, "").orEmpty(),
-        newsAiBaseUrl = prefs.getString(KEY_NEWS_AI_URL, "").orEmpty(),
-        newsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, "").orEmpty(),
+        newsAiApiKey = storedNewsAiKey,
+        newsAiBaseUrl = storedNewsAiUrl,
+        newsAiModel = storedNewsAiModel,
         newsAiFormat = prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" },
         signalProfile = profile,
     )

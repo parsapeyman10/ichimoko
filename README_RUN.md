@@ -40,9 +40,18 @@ python -m app.main
 python app/main.py
 ```
 
+برای اجرای تست‌های provider و parser با MockTransport (در محیط توسعه):
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest -q
+```
+
 بعد از اجرا:
 - API: http://127.0.0.1:8000/docs
 - Health: http://127.0.0.1:8000/api/v1/health
+- وضعیت کلیدها و مقصد اتصال، بدون نمایش خود کلیدها: http://127.0.0.1:8000/api/v1/config/status
+- probe زندهٔ محدود برای key/URL و شکل پاسخ providerها (در صورت نیاز، با مصرف سهمیه): http://127.0.0.1:8000/api/v1/config/status?live_probe=true
 - بک‌تست 3m: http://127.0.0.1:8000/api/v1/backtest/run?timeframe=3m
 - لیست تریدهای 2026: http://127.0.0.1:8000/api/v1/backtest/trades-ytd?timeframe=3m
 - فرانت‌اند: `npm run dev` در ریشه، سپس http://127.0.0.1:5173
