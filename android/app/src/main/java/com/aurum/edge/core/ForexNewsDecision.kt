@@ -41,7 +41,7 @@ object ForexNewsDecisions {
                 else if (hardVeto) "خبر/تقویم وتوی روشن دارد؛ دلیل در تب خبر آمده است"
                 else "AI خبر معیار سبز کامل ندارد؛ این وضعیت فقط زرد است و امتیاز فنی را منفی نمی‌کند",
             direction = if (aligned) { if (action == SignalAction.BUY) "LONG / خرید" else "SHORT / فروش" }
-                else "جهت از تیتر/پیش‌بینی ساخته نمی‌شود؛ جهت اصلی از ۸ شرط فنی می‌آید",
+                else "نامعلوم؛ جهت از تیتر/پیش‌بینی ساخته نمی‌شود و جهت اصلی از ۸ شرط فنی می‌آید",
             paperEntry = if (allowed) "ورود خودکار کاغذی از نظر خبر وتو نشده؛ ۸ شرط فنی، قیمت زنده، ICT/MTF و ریسک باید هم‌زمان برقرار باشند"
                 else "ورود خودکار کاغذی: خیر · $blocker",
             canEnterPaper = allowed,
