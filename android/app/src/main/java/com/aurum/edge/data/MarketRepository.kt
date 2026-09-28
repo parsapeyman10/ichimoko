@@ -108,7 +108,8 @@ class MarketRepository(
             _state.value.interval == current.interval &&
             ((MarketHours.forexWeekendClosed() && _state.value.feed.mode == FeedMode.MARKET_CLOSED) ||
                 // Both keyed and keyless modes keep a history-refresh poll plus the live/fallback
-                // tick stream alive, so every tab sees the same continuously updated 3000-bar state.
+                // tick stream alive; the chart renders its quick 1200-bar window first and grows
+                // the shared cache toward the 3000-bar target in the background.
                 (pollJob?.isActive == true && streamJob?.isActive == true))) return
         stop()
         started = true
@@ -133,7 +134,7 @@ class MarketRepository(
         )
         loadCacheThenRefresh(session) // cached real bars are read-only even without the key
         if (!closed) startStream() // Twelve Data WS with a key; labelled fallback ticks if WS is unavailable
-        if (!closed) startPolling() // Twelve REST or keyless public-history refresh keeps the 3000-bar window current
+        if (!closed) startPolling() // Twelve REST or keyless public-history refresh keeps the chart window current
         registerNetworkCallback()
         startWatchdog(session) // local clock re-arms the feed at the next scheduled opening
     }
@@ -187,17 +188,32 @@ class MarketRepository(
                 cached.forEach { bar -> if (bar.time !in cachedBars) cachedBars[bar.time] = bar }
                 evaluateAndPublish(showingCache = true)
             }
-            refresh()
+            // Render a useful, real window first. The larger full-history request runs directly
+            // afterwards and grows the same cache without blocking the first chart frame.
+            refresh(
+                requestedSize = HistoryPolicy.CHART_BOOTSTRAP_CANDLES,
+                minimumSize = HistoryPolicy.CHART_BOOTSTRAP_MINIMUM,
+                allowClosedMarketHistory = true,
+            )
+            if (started && generation == session &&
+                cachedBars.values.count { it.closed } < HistoryPolicy.TARGET_CANDLES) {
+                delay(CHART_EXPANSION_DELAY_MS)
+                if (started && generation == session) refresh(allowClosedMarketHistory = true)
+            }
         }
     }
 
-    private suspend fun refresh() = refreshMutex.withLock {
+    private suspend fun refresh(
+        requestedSize: Int = HistoryPolicy.TARGET_CANDLES,
+        minimumSize: Int = HistoryPolicy.TARGET_CANDLES,
+        allowClosedMarketHistory: Boolean = false,
+    ) = refreshMutex.withLock {
         val current = settings.read()
         val session = generation
         if (!started) return@withLock
-        if (MarketHours.forexWeekendClosed()) {
+        if (MarketHours.forexWeekendClosed() && !allowClosedMarketHistory) {
             publishClosed()
-            return@withLock // no REST requests on the scheduled weekend
+            return@withLock // no recurring REST requests on the scheduled weekend
         }
         if (!hasInternet()) {
             publishDelayed("شبکهٔ پیش‌فرض موقتاً تأیید نشد؛ اتصال دوباره بررسی می‌شود. تا دریافت جدید، قیمت قابل معامله نیست")
@@ -207,7 +223,9 @@ class MarketRepository(
                 FeedLiveness.hasRecentReceipt(_state.value.feed))) _state.value = _state.value.copy(
             feed = _state.value.feed.copy(
                 mode = FeedMode.CONNECTING,
-                detail = if (current.hasKey) "دریافت حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی از Twelve Data…"
+                detail = if (requestedSize < HistoryPolicy.TARGET_CANDLES) {
+                    "دریافت سریع حداقل ${minimumSize} کندل واقعی… سپس تکمیل تا ${HistoryPolicy.TARGET_CANDLES} کندل"
+                } else if (current.hasKey) "دریافت حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی از Twelve Data…"
                 else "دریافت حداقل ${HistoryPolicy.TARGET_CANDLES} کندل تاریخچهٔ رایگان…",
             ))
         try {
@@ -217,9 +235,9 @@ class MarketRepository(
             if (current.hasKey) {
                 try {
                     fetched = client.fetchCandles(current.apiKey, current.symbol, current.interval,
-                        outputSize = HistoryPolicy.TARGET_CANDLES)
-                    if (fetched.size < HistoryPolicy.TARGET_CANDLES) {
-                        throw DataFeedException("Twelve Data فقط ${fetched.size} کندل داد؛ حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی لازم است")
+                        outputSize = requestedSize, minimumOutputSize = minimumSize)
+                    if (fetched.size < minimumSize) {
+                        throw DataFeedException("Twelve Data فقط ${fetched.size} کندل داد؛ حداقل ${minimumSize} کندل واقعی لازم است")
                     }
                     historyProvider = "Twelve Data"
                     staleDetail = "اتصال پاسخ داد اما آخرین کندل Twelve Data قدیمی است؛ شاید بازار بسته باشد. دریافت دوبارهٔ تاریخچه قیمت زنده/مجوز معامله نیست"
@@ -227,14 +245,14 @@ class MarketRepository(
                     throw cancel
                 } catch (primary: Exception) {
                     val public = publicHistory.fetchCandles(current.symbol, current.interval,
-                        minimumSize = HistoryPolicy.TARGET_CANDLES)
+                        minimumSize = minimumSize, desiredSize = requestedSize)
                     fetched = public.candles
                     historyProvider = "${public.provider} · پشتیبان تاریخچه"
                     staleDetail = "Twelve Data REST در دسترس نبود (${(primary.message ?: "خطای نامشخص").take(80)})؛ تاریخچهٔ عمومی پشتیبان پاسخ داد اما آخرین کندل آن باید با تیک زنده تأیید شود"
                 }
             } else {
                 val public = publicHistory.fetchCandles(current.symbol, current.interval,
-                    minimumSize = HistoryPolicy.TARGET_CANDLES)
+                    minimumSize = minimumSize, desiredSize = requestedSize)
                 fetched = public.candles
                 historyProvider = public.provider
                 staleDetail = "تاریخچهٔ رایگان پاسخ داد اما آخرین کندل آن قدیمی است؛ تیک زندهٔ جداگانه باید قیمت فعلی را تأیید کند"
@@ -243,7 +261,6 @@ class MarketRepository(
                 settings.read().symbol != current.symbol || settings.read().interval != current.interval ||
                 (current.hasKey && settings.read().apiKey != current.apiKey) ||
                 settings.read().hasKey != current.hasKey || _state.value.symbol != current.symbol) return@withLock
-            if (MarketHours.forexWeekendClosed()) { publishClosed(); return@withLock }
             val receivedAt = System.currentTimeMillis()
             val streamRecent = _state.value.feed.mode == FeedMode.LIVE &&
                 FeedLiveness.hasRecentReceipt(_state.value.feed, receivedAt)
@@ -258,10 +275,17 @@ class MarketRepository(
             trimCachedBars()
             settings.setLastSync(current.symbol, current.interval, receivedAt)
             persistCache()
-            val enoughHistory = cachedBars.values.count { it.closed } >= HistoryPolicy.TARGET_CANDLES
+            val closedCount = cachedBars.values.count { it.closed }
+            val enoughHistory = closedCount >= minimumSize
             evaluateAndPublish(showingCache = (!historyCurrent && !streamRecent) || !enoughHistory)
+            if (MarketHours.forexWeekendClosed()) {
+                // Historical bars are useful on weekends even though no fresh/live price is
+                // authorized. They are shown as closed/cached, never as an active signal.
+                publishClosed()
+                return@withLock
+            }
             if (!enoughHistory) {
-                publishDelayed("فقط ${cachedBars.values.count { it.closed }} کندل قبلی/بستهٔ واقعی ذخیره شد؛ حداقل ${HistoryPolicy.TARGET_CANDLES} لازم است و هیچ کندلی ساخته نمی‌شود")
+                publishDelayed("فقط $closedCount کندل قبلی/بستهٔ واقعی ذخیره شد؛ حداقل ${minimumSize} لازم است و هیچ کندلی ساخته نمی‌شود")
             } else if (!historyCurrent && streamRecent) {
                 _state.value = _state.value.copy(
                     feed = _state.value.feed.copy(detail = "$staleDetail؛ آخرین تیک زنده هنوز تازه است"),
@@ -655,5 +679,6 @@ class MarketRepository(
         private const val RECONNECT_WHEN_OFFLINE_MS = 15_000L
         private const val QUIET_RECONNECT_MS = 5 * 60_000L
         private const val TWELVE_WS_FALLBACK_WINDOW_MS = 2 * 60_000L
+        private const val CHART_EXPANSION_DELAY_MS = 250L
     }
 }

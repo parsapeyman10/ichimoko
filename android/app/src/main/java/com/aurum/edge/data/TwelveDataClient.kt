@@ -47,6 +47,7 @@ class TwelveDataClient(
         symbol: String,
         interval: Interval,
         outputSize: Int = HistoryPolicy.TARGET_CANDLES,
+        minimumOutputSize: Int = HistoryPolicy.MAX_CACHED_CANDLES,
     ): List<Candle> {
         val normalizedKey = apiKey.trim()
         if (normalizedKey.isBlank()) throw DataFeedException("کلید Twelve Data وارد نشده است")
@@ -54,7 +55,7 @@ class TwelveDataClient(
             append("https://api.twelvedata.com/time_series?symbol=")
             append(URLEncoder.encode(symbol, "UTF-8").replace("%2F", "/"))
             append("&interval=").append(interval.api)
-            append("&outputsize=").append(HistoryPolicy.providerRequestSize(outputSize))
+            append("&outputsize=").append(HistoryPolicy.providerRequestSize(outputSize, minimumOutputSize))
             append("&order=ASC&timezone=UTC&apikey=")
             append(URLEncoder.encode(normalizedKey, "UTF-8"))
         }
