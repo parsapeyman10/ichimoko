@@ -521,9 +521,24 @@ class MarketRepository(
     }
 
     private fun publishDelayed(detail: String) {
-        _state.value = _state.value.copy(
-            feed = _state.value.feed.copy(mode = FeedMode.DELAYED, detail = detail),
-            showingCachedData = _state.value.candles.isNotEmpty(),
+        val current = _state.value
+        val now = System.currentTimeMillis()
+        val recentReceipt = current.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
+            !current.showingCachedData && current.lastPrice != null &&
+            FeedLiveness.hasRecentReceipt(current.feed, now)
+        if (recentReceipt) {
+            // Do not relabel a one-second Swissquote/Gold-API fallback tick (or a fresh Twelve
+            // tick) as "delayed" merely because the other channel just failed/reconnected. The
+            // watchdog will downgrade it if no new real tick/candle arrives within 90 seconds.
+            _state.value = current.copy(
+                feed = current.feed.copy(detail = "$detail؛ آخرین تیک/کندل دریافتی هنوز تازه است"),
+                showingCachedData = false,
+            )
+            return
+        }
+        _state.value = current.copy(
+            feed = current.feed.copy(mode = FeedMode.DELAYED, detail = detail),
+            showingCachedData = current.candles.isNotEmpty(),
             signal = null, // a disconnected stream never authorizes a new paper entry
         )
     }
