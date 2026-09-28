@@ -213,6 +213,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _toast.value = "سرویس پایش شروع نشد؛ مجوز اعلان یا محدودیت باتری گوشی را بررسی کنید"
             }
         }
+        // Do this once per process, not on every tab change. If the user enabled automatic
+        // download, a verified public APK is downloaded and Android's installer is opened.
+        if (!updateCheckStarted) {
+            updateCheckStarted = true
+            checkForAppUpdate(settings.value.autoDownloadUpdates)
+        }
     }
 
     /** UI resume must not restart a healthy service socket; start() is idempotent. */
@@ -229,6 +235,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     private var visibleOnlineLoopStarted = false
     private var visibleOnlineLoopEnabled = false
+    private var updateCheckStarted = false
 
     /**
      * While the app UI is open (or the user-enabled foreground monitor is running), keep every
@@ -258,8 +265,13 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshNow() = container.market.refreshNow()
 
-    fun checkForAppUpdate() {
-        viewModelScope.launch { container.updater.checkForUpdate() }
+    fun checkForAppUpdate(autoDownload: Boolean = settings.value.autoDownloadUpdates) {
+        viewModelScope.launch {
+            container.updater.checkForUpdate(autoDownload)
+            if (autoDownload && container.updater.state.value.downloadedApkPath != null) {
+                container.updater.installDownloaded()
+            }
+        }
     }
 
     fun downloadAppUpdate() {
@@ -269,7 +281,17 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun setAutoDownloadUpdates(enabled: Boolean) {
+        container.settingsStore.update { it.copy(autoDownloadUpdates = enabled) }
+        if (enabled) checkForAppUpdate(autoDownload = true)
+        _toast.value = if (enabled)
+            "بررسی و دانلود خودکار فعال شد؛ نصب نهایی با تأیید Android انجام می‌شود"
+        else "دانلود خودکار بروزرسانی خاموش شد"
+    }
+
     fun installDownloadedUpdate() = container.updater.installDownloaded()
+
+    fun resumeUpdateInstall() = container.updater.resumePendingInstall()
 
     fun openUpdateInstallPermission() = container.updater.openInstallPermissionSettings()
 

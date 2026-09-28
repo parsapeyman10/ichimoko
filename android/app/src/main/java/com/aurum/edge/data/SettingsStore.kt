@@ -54,6 +54,7 @@ class SettingsStore(context: Context) {
         newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty(),
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
         autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
+        autoDownloadUpdates = prefs.getBoolean(KEY_AUTO_DOWNLOAD_UPDATES, false),
         newsAiApiKey = prefs.getString(KEY_NEWS_AI_KEY, "").orEmpty(),
         newsAiBaseUrl = prefs.getString(KEY_NEWS_AI_URL, "").orEmpty(),
         newsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, "").orEmpty(),
@@ -178,6 +179,7 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_SIGNAL_COOLDOWN, next.signalProfile.cooldownFilter)
             .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
             .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
+            .putBoolean(KEY_AUTO_DOWNLOAD_UPDATES, next.autoDownloadUpdates)
             .apply()
         _settings.value = next
     }
@@ -205,6 +207,7 @@ class SettingsStore(context: Context) {
         private const val KEY_NEWS_URL = "news_base_url"
         private const val KEY_NEWS_PAUSE = "pause_on_news"
         private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"
+        private const val KEY_AUTO_DOWNLOAD_UPDATES = "auto_download_updates"
         private const val KEY_NEWS_AI_KEY = "news_ai_client_key"
         private const val KEY_NEWS_AI_URL = "news_ai_client_base_url"
         private const val KEY_NEWS_AI_MODEL = "news_ai_client_model"

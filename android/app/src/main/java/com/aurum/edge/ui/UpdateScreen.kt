@@ -13,9 +13,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -29,6 +31,7 @@ import com.aurum.edge.ui.theme.AurumColors
 @Composable
 fun UpdateScreen(viewModel: AurumViewModel) {
     val state by viewModel.updateState.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -43,6 +46,21 @@ fun UpdateScreen(viewModel: AurumViewModel) {
             }
             Text("شناسه نصب: ${BuildConfig.APPLICATION_ID}", style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted, modifier = Modifier.padding(top = 8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("دانلود خودکار نسخهٔ جدید", style = MaterialTheme.typography.bodySmall,
+                        color = AurumColors.TextPrimary)
+                    Text("هنگام باز شدن برنامه نسخه را بررسی می‌کند و APK عمومی را می‌گیرد؛ نصب نهایی به تأیید Android نیاز دارد.",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                }
+                Switch(
+                    checked = settings.autoDownloadUpdates,
+                    onCheckedChange = viewModel::setAutoDownloadUpdates,
+                )
+            }
             Text(state.message, style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 10.dp))
             state.error?.let {
@@ -50,6 +68,11 @@ fun UpdateScreen(viewModel: AurumViewModel) {
                     color = AurumColors.Red, modifier = Modifier.padding(top = 8.dp))
             }
             state.available?.let { info -> UpdateInfoCard(info) }
+            if (state.installing) {
+                Text("نصاب Android باز شده است؛ تأیید نصب را در پنجرهٔ سیستم انجام بده.",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.Cyan,
+                    modifier = Modifier.padding(top = 10.dp))
+            }
             if (state.downloading) {
                 LinearProgressIndicator(
                     progress = { (state.progressPercent ?: 0) / 100f },
@@ -61,7 +84,7 @@ fun UpdateScreen(viewModel: AurumViewModel) {
             }
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
-                    onClick = viewModel::checkForAppUpdate,
+                    onClick = { viewModel.checkForAppUpdate() },
                     enabled = !state.checking && !state.downloading,
                     modifier = Modifier.weight(1f),
                 ) { Text(if (state.checking) "در حال بررسی…" else "بررسی نسخه جدید") }

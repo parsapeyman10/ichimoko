@@ -547,10 +547,10 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     if (confirmAuto) {
         AlertDialog(onDismissRequest = { confirmAuto = false },
             title = { Text("ورود خودکار فقط کاغذی") },
-            text = { Text("هیچ سفارشی به بروکر ارسال نمی‌شود. فقط با ۹ تأیید تازه و مدل AI فعال روی سرور، یک رکورد LONG/SHORT کاغذی در ژورنال ایجاد می‌شود. اگر سرویس/فید قطع شود ورودی تازه نداریم؛ خروجِ پوزیشن باز نیازمند قیمت واقعی است. فعال شود؟") },
+            text = { Text("هیچ سفارشی به بروکر ارسال نمی‌شود. فقط با ۸ شرط فنی، آپشن‌های فعال، قیمت زنده و تأییدهای MTF/ICT، یک رکورد LONG/SHORT کاغذی در ژورنال ایجاد می‌شود. خبر و AI فقط برای داده‌کاوی رکورد هستند و شرط ورود نیستند. اگر سرویس/فید قطع شود ورودی تازه نداریم؛ خروجِ پوزیشن باز نیز به قیمت واقعی نیاز دارد. فعال شود؟") },
             confirmButton = { TextButton(onClick = {
                 confirmAuto = false
-                if (settings.backgroundMonitor) viewModel.setAutoPaperTrading(true)
+                if (settings.backgroundMonitor && monitorRunning) viewModel.setAutoPaperTrading(true)
                 else startMonitorIfAllowed(alsoEnableAuto = true)
             }) { Text("فعال‌کردن کاغذی") } },
             dismissButton = { TextButton(onClick = { confirmAuto = false }) { Text("انصراف") } })

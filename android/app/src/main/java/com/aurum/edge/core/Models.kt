@@ -535,6 +535,8 @@ data class AppSettings(
     val pauseOnNews: Boolean = false,
     /** Explicit opt-in; automatic orders here are local paper records, never broker orders. */
     val autoPaperTrading: Boolean = false,
+    /** Check for a public APK when the app starts and download it when one is available. */
+    val autoDownloadUpdates: Boolean = false,
     /**
      * OPTIONAL alternative to [newsBaseUrl] for the Forex ninth-condition AI gate: instead of your
      * own backend server, the phone calls this endpoint DIRECTLY with your own key - either the

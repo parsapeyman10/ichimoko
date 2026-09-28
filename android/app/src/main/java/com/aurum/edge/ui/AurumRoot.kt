@@ -106,7 +106,12 @@ fun AurumRoot(viewModel: AurumViewModel) {
     }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.pauseInvisibleForexFeed() }
     LifecycleEventEffect(Lifecycle.Event.ON_START) {
-        if (started) viewModel.resumeVisibleForexFeed()
+        if (started) {
+            viewModel.resumeVisibleForexFeed()
+            // Returning from Android's "install unknown apps" settings should continue a
+            // previously downloaded update without making the user find the update tab again.
+            viewModel.resumeUpdateInstall()
+        }
     }
     val selectedTab = AurumTab.entries.firstOrNull { it.name == tab && it in primaryTabs + moreTabs } ?: primaryTabs.first()
     fun open(destination: AurumTab) { if (destination in primaryTabs + moreTabs) tab = destination.name }
