@@ -41,6 +41,8 @@ fun UpdateScreen(viewModel: AurumViewModel) {
                 StatTile("کد نسخه", BuildConfig.VERSION_CODE.toString(), AurumColors.Cyan, Modifier.weight(1f))
                 StatTile("Commit", BuildConfig.GIT_SHA.take(7), AurumColors.TextSecondary, Modifier.weight(1f))
             }
+            Text("شناسه نصب: ${BuildConfig.APPLICATION_ID}", style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted, modifier = Modifier.padding(top = 8.dp))
             Text(state.message, style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 10.dp))
             state.error?.let {
@@ -65,7 +67,7 @@ fun UpdateScreen(viewModel: AurumViewModel) {
                 ) { Text(if (state.checking) "در حال بررسی…" else "بررسی نسخه جدید") }
                 Button(
                     onClick = viewModel::downloadAppUpdate,
-                    enabled = state.available != null && !state.checking && !state.downloading,
+                    enabled = state.available?.canDownload == true && !state.checking && !state.downloading,
                     modifier = Modifier.weight(1f),
                 ) { Text(if (state.downloadedApkPath == null) "دانلود و نصب" else "نصب دوباره") }
             }
@@ -107,6 +109,12 @@ private fun UpdateInfoCard(info: AppUpdateRepository.UpdateInfo) {
             color = AurumColors.Gold, fontWeight = FontWeight.Bold)
         Text("منبع: ${info.sourceLabel}", style = MaterialTheme.typography.bodySmall,
             color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 3.dp))
+        if (!info.canDownload) {
+            Text("لینک مستقیم APK عمومی برای این نسخه هنوز تنظیم نشده؛ دکمهٔ دانلود تا زمان انتشار asset/manifest واقعی غیرفعال می‌ماند.",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 3.dp))
+        }
         if (info.notes.isNotBlank()) {
             Text(info.notes, style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted, modifier = Modifier.padding(top = 3.dp))

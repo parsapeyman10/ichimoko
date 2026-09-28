@@ -37,7 +37,7 @@ class AppUpdateRepository(
     private val context: Context,
     private val client: OkHttpClient = OkHttpClient.Builder().followRedirects(true).build(),
 ) {
-    enum class SourceKind { MANIFEST_APK, RELEASE_APK }
+    enum class SourceKind { MANIFEST_APK, MANIFEST_METADATA, RELEASE_APK }
 
     data class UpdateInfo(
         val source: SourceKind,
@@ -46,7 +46,7 @@ class AppUpdateRepository(
         val versionCode: Long?,
         val commitSha: String?,
         val notes: String,
-        val downloadUrl: String,
+        val downloadUrl: String? = null,
         val expectedSha256: String? = null,
         val artifactName: String? = null,
         val sizeBytes: Long? = null,
@@ -56,6 +56,7 @@ class AppUpdateRepository(
             versionCode?.let { append(" ($it)") }
             commitSha?.takeIf { it.isNotBlank() }?.let { append(" · ").append(it.take(7)) }
         }
+        val canDownload: Boolean get() = downloadUrl?.startsWith("https://") == true
     }
 
     data class State(
@@ -84,6 +85,9 @@ class AppUpdateRepository(
         val update = listOfNotNull(manifest, release).firstOrNull()
         _state.value = if (update == null) {
             State(message = "نسخهٔ نصب‌شده فعلاً آخرین نسخهٔ عمومی قابل دریافت است. نسخه ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · ${BuildConfig.GIT_SHA.take(7)}. artifactهای خام GitHub Actions از داخل اپ استفاده نمی‌شوند چون برای دانلود عمومی گاهی 401/نیاز به ورود GitHub می‌دهند؛ مسیر عمومی امن، Release یا manifest پایدار است.")
+        } else if (!update.canDownload) {
+            State(available = update,
+                message = "نسخهٔ بالاتر در manifest دیده شد: ${update.displayVersion}، اما هنوز APK عمومیِ قابل دانلود برای آن منتشر نشده است. برای آپدیت واقعی باید APK با همان امضای نسخهٔ نصب‌شده به Release عمومی یا apkUrl پایدار وصل شود؛ artifact خام Actions کافی نیست.")
         } else {
             State(available = update,
                 message = "نسخهٔ جدید پیدا شد: ${update.displayVersion} از ${update.sourceLabel}")
@@ -93,6 +97,14 @@ class AppUpdateRepository(
     suspend fun downloadAvailable() = withContext(Dispatchers.IO) {
         val info = _state.value.available ?: run {
             _state.value = _state.value.copy(error = "ابتدا بروزرسانی را بررسی کنید")
+            return@withContext
+        }
+        if (!info.canDownload) {
+            _state.value = _state.value.copy(
+                error = "برای این نسخه هنوز لینک مستقیم APK عمومی تنظیم نشده است؛ apkUrl manifest یا asset عمومی GitHub Release لازم است.",
+                downloading = false,
+                progressPercent = null,
+            )
             return@withContext
         }
         _state.value = _state.value.copy(downloading = true, progressPercent = 0,
@@ -163,10 +175,10 @@ class AppUpdateRepository(
         if (versionCode <= BuildConfig.VERSION_CODE.toLong()) return null
         val applicationId = obj.string("applicationId")
         if (!applicationId.isNullOrBlank() && applicationId != context.packageName) return null
-        val apkUrl = obj.string("apkUrl")?.takeIf { it.startsWith("https://") } ?: return null
+        val apkUrl = obj.string("apkUrl")?.takeIf { it.startsWith("https://") }
         return UpdateInfo(
-            source = SourceKind.MANIFEST_APK,
-            sourceLabel = "انتشار پایدار",
+            source = if (apkUrl == null) SourceKind.MANIFEST_METADATA else SourceKind.MANIFEST_APK,
+            sourceLabel = if (apkUrl == null) "manifest نسخهٔ جدید بدون APK عمومی" else "انتشار پایدار",
             versionName = obj.string("versionName") ?: versionCode.toString(),
             versionCode = versionCode,
             commitSha = obj.string("commitSha"),
@@ -224,7 +236,8 @@ class AppUpdateRepository(
         val dir = File(context.cacheDir, "updates").also { it.mkdirs() }
         dir.listFiles()?.forEach { if (it.isFile && it.lastModified() < System.currentTimeMillis() - 86_400_000L) it.delete() }
         val file = File(dir, "aurum-update-${info.commitSha?.take(12) ?: info.versionCode ?: System.currentTimeMillis()}.apk")
-        val request = Request.Builder().url(info.downloadUrl)
+        val downloadUrl = info.downloadUrl ?: throw DataFeedException("برای این نسخه لینک مستقیم APK عمومی تنظیم نشده است")
+        val request = Request.Builder().url(downloadUrl)
             .header("Accept", "application/vnd.android.package-archive, application/octet-stream")
             .header("User-Agent", "AurumEdge/${BuildConfig.VERSION_NAME}")
             .build()
