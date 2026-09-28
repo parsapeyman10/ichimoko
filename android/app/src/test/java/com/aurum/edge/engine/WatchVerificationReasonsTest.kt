@@ -21,16 +21,14 @@ class WatchVerificationReasonsTest {
             unit = symbol.unit, sourceId = sourceId, ts = now, providerAt = time)
     }
 
-    @Test fun `single source symbols explain that no independent second source exists`() {
-        val jpy = WatchCatalog.find("USD/JPY")!! // Twelve Data only: Yahoo quotes JPY in another unit
-        val only = jpy.defaultSources.single()
+    @Test fun `all forex symbols have a public second source but one enabled source is still unverified`() {
+        val jpy = WatchCatalog.find("USD/JPY")!!
+        assertEquals(2, jpy.defaultSources.size)
+        val only = jpy.defaultSources.first()
         val one = SourceComparison.verify(jpy, listOf(only), mapOf(only to quote(jpy.id, only)), now)
         assertEquals(VerificationStatus.UNVERIFIED, one.status)
         assertEquals("تک‌منبعی", one.badge)
-        // No second source is DEFINED for this symbol: the honest message says exactly that,
-        // and must not imply a second source merely sits disabled ("فقط یک منبع فعال").
-        assertFalse(one.reason.contains("فقط یک منبع فعال"))
-        assertTrue(one.reason.contains("منبع مستقل دومی"))
+        assertTrue(one.reason.contains("فقط یک منبع فعال"))
     }
 
     @Test fun `one source fresh still requires another independent fresh source`() {
