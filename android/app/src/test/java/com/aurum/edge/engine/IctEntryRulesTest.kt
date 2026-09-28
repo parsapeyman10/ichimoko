@@ -18,7 +18,7 @@ import com.aurum.edge.data.PersianNewsState
 import org.junit.Assert.*
 import org.junit.Test
 
-/** Combined contract: ICT can only further restrict the existing technical/news-risk PAPER policy. */
+/** Combined contract: ICT can only further restrict the existing technical/options PAPER policy. */
 class IctEntryRulesTest {
     private val now = 1_800_000_000_000L // 03:00 in New York (London window)
     private val bar = now - Interval.M5.millis
@@ -42,7 +42,7 @@ class IctEntryRulesTest {
         candles = IctTestBars.readyAt(bar), lastPrice = 3000.0,
         feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now), signal = verified)
 
-    @Test fun `valid pattern AND technical news risk checks permit only paper candidate`() {
+    @Test fun `valid pattern AND technical option checks permit only paper candidate`() {
         assertTrue(IctEntryRules.assess(market, now).allowed)
         val evidence = IctEntryRules.approvedEvidence(market, now)!!
         assertTrue(evidence.matches(verified, market.symbol, market.lastPrice!!))
@@ -82,9 +82,9 @@ class IctEntryRulesTest {
         }
     }
 
-    @Test fun `even a ready structure cannot replace fresh ninth news check`() {
+    @Test fun `news is not a paper entry gate but cached market still blocks`() {
         val invalidNews = news.copy(ai = AiNewsVerdict())
-        assertNotNull(PaperAutoRules.blocker(market, config, invalidNews, now))
+        assertNull(PaperAutoRules.blocker(market, config, invalidNews, now))
         assertNotNull(PaperAutoRules.blocker(market.copy(showingCachedData = true), config, news, now))
     }
 
