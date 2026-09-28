@@ -223,7 +223,7 @@ object Backtester {
         val grossWin = trades.filter { it.pnlUsd > 0 }.sumOf { it.pnlUsd }
         val grossLoss = abs(trades.filter { it.pnlUsd <= 0 }.sumOf { it.pnlUsd })
         val note = buildString {
-            append("بازپخش فنی روی ${bars.size} کندل ${interval.label} از $dataSource؛ بدون بازپخش شرط نهم AI/خبر، ICT و MTF")
+            append("بازپخش فنی روی ${bars.size} کندل ${interval.label} از $dataSource؛ بدون بازپخش لایهٔ خبر/AI، ICT و MTF")
             append("؛ ورود open کندل بعد، خروج دستورِ close در open بعد، برخورد SL/TP به نفع حد ضرر")
             if (open != null) append("؛ یک پوزیشن انتهای بازه باز ماند و از سود/زیان محقق‌شده حذف شد")
             if (skippedGap > 0) append("؛ $skippedGap ورود روی گپ زمانی رد شد")

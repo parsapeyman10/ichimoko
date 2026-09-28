@@ -45,14 +45,14 @@ data class PairScanState(
 )
 
 /**
- * Periodic 3000-candle sweep over the whole watch catalog (gold + majors) so no pair's 9/9 opportunity
- * goes unnoticed while the live tick feed follows only the selected chart symbol.
+ * Periodic 3000-candle sweep over the whole watch catalog (gold + majors) so no strong
+ * technical/risk-screened opportunity goes unnoticed while the live tick feed follows only the selected chart symbol.
  *
  * Honest limits, identical to the single-symbol pipeline:
  * - REST/public-history candles justify an educational CANDIDATE + notification, never an automatic paper
  *   fill (auto entry stays live-tick only, on the selected symbol).
- * - Every pair is evaluated with the SAME nine conditions (8 technical + per-pair AI news),
- *   the SAME ICT gate and the SAME MTF veto; a missing key or a failed fetch is an explicit
+ * - Every pair is evaluated with the SAME eight technical conditions plus a per-pair
+ *   news/calendar risk layer, the SAME ICT gate and the SAME MTF veto; a missing key or a failed fetch is an explicit
  *   status, never a fabricated signal.
  * - Calls are spaced to respect Twelve/Yahoo provider limits (≤7 requests/minute).
  */
@@ -184,7 +184,7 @@ class PairScanner(
             if (evidence == null || ict == null || mtf == null || price == null ||
                 PaperAlertRules.blocker(market, fresh, news.state.value, journal.trades.value, mtf,
                     System.currentTimeMillis(), WatchCatalog.chartSymbols, graceMs) != null) {
-                update(symbol, "blocked", "شواهد کامل ۹/۹ در لحظهٔ ثبت در دسترس نبود", price, score)
+                update(symbol, "blocked", "شواهد کامل کاندیدای آموزشی در لحظهٔ ثبت در دسترس نبود", price, score)
                 return@forEachIndexed
             }
             val item = runCatching {
@@ -193,7 +193,7 @@ class PairScanner(
             if (item == null) { update(symbol, "blocked", "ساخت رکورد فرصت آموزشی ممکن نشد", price, score); return@forEachIndexed }
             val recorded = runCatching { opportunities.record(item) }.getOrDefault(false)
             if (recorded) onCandidate?.invoke(item)
-            update(symbol, "candidate", "کاندیدای آموزشی ۹/۹ ثبت شد؛ اعلان/ژورنال را ببینید — ورود خودکار فقط با فید زندهٔ همین نماد", price, score)
+            update(symbol, "candidate", "کاندیدای آموزشی ۸/۸ + خبر ثبت شد؛ اعلان/ژورنال را ببینید — ورود خودکار فقط با فید زندهٔ همین نماد", price, score)
         }
     }
 

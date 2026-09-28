@@ -459,13 +459,13 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun setAutoPaperTrading(enabled: Boolean) {
-        if (enabled && (!settings.value.backgroundMonitor || settings.value.newsBaseUrl.isBlank())) {
-            _toast.value = "برای خودکار کاغذی، پایش و آدرس HTTPS سرور خبر را فعال کنید"
+        if (enabled && !settings.value.backgroundMonitor) {
+            _toast.value = "برای خودکار کاغذی، پایش پس‌زمینه را فعال کنید"
             return
         }
         container.settingsStore.update { it.copy(autoPaperTrading = enabled) }
         if (enabled) container.news.refreshNow()
-        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ بدون مدل AI و ۹/۹ معتبر هیچ ورودی ثبت نمی‌شود"
+        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ ۸ شرط فنی، قیمت زنده، ICT/MTF و نبود وتوی خبر لازم است"
             else "معاملهٔ خودکار کاغذی خاموش شد"
     }
 
@@ -548,12 +548,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     "سیگنال قدیمی، وتوشده یا دور از قیمت تازه است"
                 }
                 val alignment = NewsConfluence.alignment(current.symbol, signal.action, news.value)
-                require(alignment.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED &&
-                    signal.confluence.size >= 9 &&
+                require(signal.confluence.size >= 9 &&
                     signal.confluence.take(8).all { it.ok && it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED } &&
-                    signal.confluence[8].let { it.name == NewsConfluence.NEWS_LABEL && it.ok &&
-                        it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED && it.detail == alignment.detail }) {
-                    "۹ شرط از جمله خبر AI دیگر معتبر نیستند؛ ورود سیگنالی متوقف شد"
+                    alignment.status != com.aurum.edge.core.ConfluenceStatus.CONFLICT &&
+                    signal.confluence[8].let { it.name == NewsConfluence.NEWS_LABEL &&
+                        it.status != com.aurum.edge.core.ConfluenceStatus.CONFLICT }) {
+                    "۸ شرط فنی یا وتوی خبر/تقویم دیگر معتبر نیست؛ ورود سیگنالی متوقف شد"
                 }
                 IctEntryRules.assess(current).reason?.let { throw IllegalArgumentException(it) }
             }
@@ -577,9 +577,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 val s = container.settingsStore.read()
                 val newsRecord = if (manual) null else {
                     val latestNews = news.value
-                    require(NewsConfluence.alignment(current.symbol, signal.action, latestNews).status ==
-                        com.aurum.edge.core.ConfluenceStatus.CONFIRMED) { "خبر AI در لحظهٔ ثبت قدیمی شد" }
-                    NewsConfluence.record(latestNews) ?: error("شواهد خبر قابل ذخیره نیست")
+                    val risk = NewsConfluence.alignment(current.symbol, signal.action, latestNews)
+                    require(risk.status != com.aurum.edge.core.ConfluenceStatus.CONFLICT) { "وتوی خبر/تقویم در لحظهٔ ثبت فعال شد" }
+                    NewsConfluence.record(latestNews, current.symbol)
                 }
                 val ict = if (manual) null else (IctEntryRules.approvedEvidence(current)
                     ?: error("شواهد رنج/ICT همین کندل پیش از ثبت معتبر نیست"))
@@ -996,8 +996,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 return@launch
             }
             container.news.resetAndRefresh()
-            _toast.value = if (url.isBlank()) "سرور خبر جدا شد؛ تیترهای وب در تب خبر بدون سرور قابل دریافت‌اند، ولی هشدار ۹/۹ مسدود است"
-                else "آدرس سرور ذخیره شد؛ پاسخ فید و مدل AI را در تب خبر جداگانه بررسی کنید"
+            _toast.value = if (url.isBlank()) "سرور خبر جدا شد؛ تیترهای وب در تب خبر بدون سرور قابل دریافت‌اند؛ خبر فقط ریسک زرد/وتو می‌دهد"
+                else "آدرس سرور ذخیره شد؛ پاسخ فید، مدل AI و ریسک خبر را در تب خبر جداگانه بررسی کنید"
         }
     }
 

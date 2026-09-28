@@ -140,13 +140,12 @@ class JournalStore(context: Context, private val file: File = File(context.files
         priceAction: IctPriceActionRecord? = null,
     ): PaperTrade {
         require(!automatic || (!manual && signal.isActionable && signal.barTime > 0 &&
-            newsEvidence != null && newsEvidence.evidence.isNotEmpty() &&
-            newsEvidence.calendarSource == FOREX_CALENDAR_SOURCE_URL && newsEvidence.calendarCheckedAt != null &&
-            signal.confluence.size >= 9 && signal.confluence.take(9).all {
+            signal.confluence.size >= 9 && signal.confluence.take(8).all {
                 it.ok && it.status == ConfluenceStatus.CONFIRMED
             } && signal.confluence[8].name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL &&
+            signal.confluence[8].status != ConfluenceStatus.CONFLICT &&
             mtf != null && !mtf.veto && mtf.barTime == signal.barTime && mtf.frames.isNotEmpty())) {
-            "۹ شرط، تقویم/خبر AI یا چندتایم‌فریم برای ورود خودکار کاغذی کامل نیست"
+            "۸ شرط فنی، نبود وتوی خبر/تقویم یا چندتایم‌فریم برای ورود خودکار کاغذی کامل نیست"
         }
         val stop = signal.stopLoss ?: throw IllegalArgumentException("حد ضرر وجود ندارد")
         val target = signal.takeProfit ?: throw IllegalArgumentException("حد سود وجود ندارد")
@@ -169,7 +168,7 @@ class JournalStore(context: Context, private val file: File = File(context.files
             positionUnit = draft.unit,
             note = when {
                 manual -> "ورود دستی کاغذی؛ بدون تأیید موتور/بروکر"
-                automatic -> "ورود خودکار کاغذی با ۸ شرط فنی + خبر AI و شواهد رنج/ICT؛ بدون سفارش بروکر"
+                automatic -> "ورود خودکار کاغذی با ۸ شرط فنی، نبود وتوی خبر/تقویم و شواهد رنج/ICT؛ بدون سفارش بروکر"
                 else -> "سیگنال کاغذی روی قیمت دریافتی — ${signal.interval.label}"
             },
             mtf = if (manual) null else mtf,

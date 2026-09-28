@@ -164,13 +164,11 @@ fun HomeScreen(
             onRefresh = { viewModel.refreshTraderOpinion(force = true) },
         )
 
-        SectionCard("هشدار و خبر", "وضعیت تب خبرِ عمومی با گیت AI ورود، یکی نیست",
-            trailing = { Pill(if (newsCheck.ready) "بررسی‌شده" else "تأیید نشده",
-                if (newsCheck.ready) AurumColors.Green else AurumColors.Gold) }) {
-            Text(if (settings.newsBaseUrl.isBlank())
-                "بدون سرور، تیترهای واقعی را می‌توانی بخوانی؛ شرط نهم AI نامشخص است و هشدار ۹/۹/ورود خودکار کاغذی صادر نمی‌شود."
-                else newsCheck.detail,
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+        SectionCard("هشدار و خبر", "خبر یک معیار ریسک جداست؛ امتیاز فنی ۸ شرط را منفی نمی‌کند",
+            trailing = { Pill(if (newsCheck.ready) "بدون وتوی خبر" else "وتوی خبر",
+                if (newsCheck.ready) AurumColors.Green else AurumColors.Red) }) {
+            Text(newsCheck.detail,
+                style = MaterialTheme.typography.bodySmall, color = if (newsCheck.ready) AurumColors.TextSecondary else AurumColors.Red)
             Text("پایش: ${if (monitorCheck.ready) "در حال اجرا" else "غیرفعال/متوقف"} · اعلان: ${if (notifyCheck.ready) "کانال باز" else "نیاز به بررسی"}",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
                 modifier = Modifier.padding(top = 6.dp))
@@ -187,7 +185,7 @@ fun HomeScreen(
             }
             reportError?.let { Text(it, style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.Red, modifier = Modifier.padding(top = 8.dp)) }
-            Text("معاملهٔ دستی، سیگنال ۹/۹ و بک‌تست نباید در یک آمارِ «سوددهی استراتژی» مخلوط شوند. هزینه‌ها و تعداد نمونه را در گزارش پژوهش بررسی کن.",
+            Text("معاملهٔ دستی، سیگنال فنی ۸/۸ و بک‌تست نباید در یک آمارِ «سوددهی استراتژی» مخلوط شوند. هزینه‌ها و تعداد نمونه را در گزارش پژوهش بررسی کن.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
                 modifier = Modifier.padding(top = 8.dp))
             Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -206,7 +204,7 @@ fun HomeScreen(
 internal fun TraderCompanionCard(state: TraderOpinionState, onRefresh: () -> Unit) {
     SectionCard(
         title = "همراه تریدر AI",
-        subtitle = "نظر خودکار مدل خودتان روی دادهٔ واقعی همین اپ — تحلیل آموزشی، نه سیگنال/تأیید ۹/۹ و نه توصیهٔ معامله",
+        subtitle = "نظر خودکار مدل خودتان روی دادهٔ واقعی همین اپ — تحلیل آموزشی، نه سیگنال ۸/۸ و نه توصیهٔ معامله",
         trailing = {
             val opinion = state.opinion
             Pill(when {
@@ -250,7 +248,7 @@ internal fun TraderCompanionCard(state: TraderOpinionState, onRefresh: () -> Uni
             modifier = Modifier.padding(top = 4.dp)) }
         OutlinedButton(onClick = onRefresh, enabled = state.configured && !state.loading,
             modifier = Modifier.padding(top = 6.dp)) { Text("تحلیل تازه بگیر") }
-        Text("این نظر با تغییر جهت (خرید↔فروش) یک اعلان اطلاع‌رسانی می‌فرستد؛ هرگز سفارش یا ورود کاغذی ایجاد نمی‌کند و جای شرط نهم خبر را نمی‌گیرد.",
+        Text("این نظر با تغییر جهت (خرید↔فروش) یک اعلان اطلاع‌رسانی می‌فرستد؛ هرگز سفارش یا ورود کاغذی ایجاد نمی‌کند و جای ۸ شرط فنی یا معیار ریسک خبر را نمی‌گیرد.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
             modifier = Modifier.padding(top = 4.dp))
     }

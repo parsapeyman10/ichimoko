@@ -248,6 +248,17 @@ fun ConfluenceRow(item: ConfluenceItem) {
         Column(Modifier.weight(1f)) {
             Text(item.name, style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
             Text(item.detail, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            item.scorePercent?.let { score ->
+                Text(
+                    "امتیاز این شرط: $score/100",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = when (item.status) {
+                        ConfluenceStatus.CONFIRMED -> AurumColors.Green
+                        ConfluenceStatus.CONFLICT -> AurumColors.Red
+                        ConfluenceStatus.UNKNOWN -> AurumColors.Gold
+                    },
+                )
+            }
         }
     }
 }

@@ -17,7 +17,7 @@ object PaperAutoRules {
     }
 
     /**
-     * A 9/9 educational alert can be enabled while automatic paper entry is OFF.
+     * An educational 8/8 technical candidate alert can be enabled while automatic paper entry is OFF.
      *
      * [allowedSymbols] widens the check from the single selected chart symbol to a catalog sweep
      * (the multi-pair scanner); [barAgeGraceMs] extends the signal-bar freshness window by one
@@ -41,16 +41,18 @@ object PaperAutoRules {
             return "قیمت دریافتی قدیمی است"
         val signal = market.signal ?: return "سیگنال محاسبه نشده است"
         if (!signal.isActionable || signal.entry == null || signal.stopLoss == null || signal.takeProfit == null)
-            return "سیگنال ۹/۹ قابل معامله موجود نیست"
+            return signal.blockers.firstOrNull { it.contains("خبر") || it.contains("تقویم") }
+                ?: "سیگنال فنی قابل معامله موجود نیست"
         if (signal.confluence.take(8).size != 8 ||
-            signal.confluence.take(8).any { !it.ok || it.status != ConfluenceStatus.CONFIRMED } ||
-            signal.confluence.getOrNull(8)?.let {
-                it.name == NewsConfluence.NEWS_LABEL && it.ok && it.status == ConfluenceStatus.CONFIRMED
-            } != true)
-            return "تمام هشت شرط فنی و خبر AI هم‌زمان تأیید نشده‌اند"
+            signal.confluence.take(8).any { !it.ok || it.status != ConfluenceStatus.CONFIRMED })
+            return "تمام هشت شرط فنی اصلی هم‌زمان تأیید نشده‌اند"
+        signal.confluence.getOrNull(8)?.takeIf { it.name == NewsConfluence.NEWS_LABEL }?.let { newsItem ->
+            if (newsItem.status == ConfluenceStatus.CONFLICT) return "وتوی خبر/تقویم فعال است: ${newsItem.detail}"
+        }
         val match = NewsConfluence.alignment(market.symbol, signal.action, news, now)
-        if (match.status != ConfluenceStatus.CONFIRMED) return "خبر AI معتبر نیست: ${match.detail}"
-        if (signal.confluence[8].detail != match.detail)
+        if (match.status == ConfluenceStatus.CONFLICT) return "وتوی خبر/تقویم فعال است: ${match.detail}"
+        if (signal.confluence.getOrNull(8)?.let { it.name == NewsConfluence.NEWS_LABEL &&
+                it.status == ConfluenceStatus.CONFIRMED && it.detail != match.detail } == true)
             return "شواهد خبرِ فعلی با سیگنال یکی نیست؛ منتظر محاسبهٔ دوباره بمانید"
         val lastClosed = market.candles.lastOrNull { it.closed }
         if (lastClosed?.time != signal.barTime || signal.barTime <= 0L ||
@@ -60,7 +62,7 @@ object PaperAutoRules {
         if (price == null || !price.isFinite() || price <= 0.0 || !signal.entry.isFinite() ||
             signal.entry <= 0.0 || abs(price / signal.entry - 1.0) > 0.005)
             return "قیمت تازه از ورود سیگنال فاصله گرفته است"
-        // An additional gate, never a substitute for the technical and AI-news 9/9.
+        // An additional gate, never a substitute for the eight technical checks and news/calendar risk layer.
         return IctEntryRules.assess(market, now, maxBarAgeMs = barAgeGraceMs).reason
     }
 }

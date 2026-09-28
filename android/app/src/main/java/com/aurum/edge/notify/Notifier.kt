@@ -50,7 +50,7 @@ object Notifier {
         }
         val systemTone = NotificationChannel(
             CHANNEL_VERIFIED_DEFAULT, "فرصت آموزشی · صدای سیستم", NotificationManager.IMPORTANCE_HIGH,
-        ).apply { description = "تنها شرط‌های ۹/۹ تاییدشده؛ معاملهٔ واقعی نیست" }
+        ).apply { description = "کاندیدای فنی/آموزشی تأییدشده؛ معاملهٔ واقعی نیست" }
         val fileTone = NotificationChannel(
             CHANNEL_VERIFIED_FILE, "فرصت آموزشی · فایل صوتی گوشی", NotificationManager.IMPORTANCE_HIGH,
         ).apply {
@@ -130,8 +130,8 @@ object Notifier {
     /** Only after the candidate is durably saved. This alert NEVER claims a trade was opened. */
     fun notifyVerifiedOpportunity(context: Context, item: PaperOpportunity, customSoundUri: String): Boolean {
         val title = when (item.action) {
-            SignalAction.BUY -> "فرصت آموزشی خرید XAU/USD · ۹/۹"
-            SignalAction.SELL -> "فرصت آموزشی فروش XAU/USD · ۹/۹"
+            SignalAction.BUY -> "فرصت آموزشی خرید XAU/USD · ۸/۸ + خبر"
+            SignalAction.SELL -> "فرصت آموزشی فروش XAU/USD · ۸/۸ + خبر"
             SignalAction.NO_TRADE -> return false
         }
         val text = "${item.interval.label} · قیمت ${formatPrice(item.priceAtAlert)}$ · " +
@@ -149,12 +149,11 @@ object Notifier {
     fun notifyRecordedAutoEntry(context: Context, trade: PaperTrade, customSoundUri: String): Boolean {
         if (!trade.autoOpened || !trade.isOpen || trade.symbol != "XAU/USD" ||
             trade.action == SignalAction.NO_TRADE || (trade.signalBarTime ?: 0L) <= 0L ||
-            trade.newsEvidence?.evidence.isNullOrEmpty() ||
-            trade.newsEvidence?.calendarSource != FOREX_CALENDAR_SOURCE_URL ||
-            trade.newsEvidence?.calendarCheckedAt == null || trade.mtf?.veto != false ||
-            trade.entryConditions.size != 9 ||
-            trade.entryConditions.any { it.status != "CONFIRMED" } ||
+            trade.mtf?.veto != false ||
+            trade.entryConditions.size < 9 ||
+            trade.entryConditions.take(8).any { it.status != "CONFIRMED" } ||
             trade.entryConditions[8].name != NewsConfluence.NEWS_LABEL ||
+            trade.entryConditions[8].status == "CONFLICT" ||
             trade.priceAction?.barTime != trade.signalBarTime ||
             trade.priceAction?.action != trade.action ||
             trade.priceAction?.quote != trade.entry) return false
@@ -163,7 +162,7 @@ object Notifier {
         val text = "XAU/USD ${trade.interval.label} · ورود ${formatPrice(trade.entry)}$ · شناسه ${trade.id.take(8)}"
         return postVerified(context, trade.id.hashCode(), title, text,
             "$text\nSL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)} · " +
-                "۹/۹، خبر و شواهد رنج/ICT در ژورنال ثبت شدند. سفارش واقعی ارسال نشد.", customSoundUri)
+                "۸/۸ فنی، نبود وتوی خبر/تقویم و شواهد رنج/ICT در ژورنال ثبت شدند. سفارش واقعی ارسال نشد.", customSoundUri)
     }
 
     private fun postVerified(context: Context, id: Int, title: String, text: String,

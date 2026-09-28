@@ -190,11 +190,11 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
                 }
                 market.signal?.takeIf { it.isActionable }?.let {
                     val gate = IctEntryRules.assess(market)
-                    Text("اثر بر ورود سیگنالی paper: ${gate.reason ?: "گیت ICT تأیید است؛ ۹/۹، خبر AI و ریسک هنوز جداگانه بررسی می‌شوند"}",
+                    Text("اثر بر ورود سیگنالی paper: ${gate.reason ?: "گیت ICT تأیید است؛ ۸ شرط فنی، ریسک خبر و مدیریت ریسک هنوز جداگانه بررسی می‌شوند"}",
                         style = MaterialTheme.typography.bodySmall,
                         color = if (gate.allowed) AurumColors.Green else AurumColors.Red)
                 }
-                Text("حتی «آماده» فقط یک الگوی تقریبی است؛ ورود خودکار paper به قیمت زنده، ۹/۹ از جمله خبر AI، و گیت رنجِ همین کندل نیاز دارد. معاملهٔ واقعی وجود ندارد.",
+                Text("حتی «آماده» فقط یک الگوی تقریبی است؛ ورود خودکار paper به قیمت زنده، ۸ شرط فنی، نبود وتوی خبر و گیت رنجِ همین کندل نیاز دارد. معاملهٔ واقعی وجود ندارد.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             }
 
@@ -240,7 +240,7 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
                     Text("خودکار کاغذی: $autoStatus", style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.TextSecondary)
                 } else {
-                    Text("خودکار خاموش است؛ با تأیید خودت در تنظیمات می‌توانی ورود خودکار کاغذی ۹/۹ را روشن کنی. سفارش واقعی وجود ندارد.",
+                    Text("خودکار خاموش است؛ با تأیید خودت در تنظیمات می‌توانی ورود خودکار کاغذی آموزشی را روشن کنی. سفارش واقعی وجود ندارد.",
                         style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
                 sameSymbol.firstOrNull()?.let { trade ->

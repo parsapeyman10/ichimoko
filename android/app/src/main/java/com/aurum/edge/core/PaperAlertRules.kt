@@ -25,7 +25,8 @@ object PaperAlertRules {
         val totalRisk = trades.filter { it.isOpen }.sumOf { it.riskUsd }
         if (totalRisk + draft.actualRiskUsd > settings.accountBalance * 0.05 + 1e-8)
             return "مجموع ریسک پوزیشن‌های کاغذی از سقف ۵٪ می‌گذرد"
-        if (NewsConfluence.record(news, market.symbol) == null) return "شواهد خبر در دسترس نیست"
+        val newsRisk = NewsConfluence.alignment(market.symbol, signal.action, news, now)
+        if (newsRisk.status == ConfluenceStatus.CONFLICT) return "وتوی خبر/تقویم فعال است: ${newsRisk.detail}"
         return null
     }
 }

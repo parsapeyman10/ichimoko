@@ -170,7 +170,7 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 if (onlineFeeds > 0 && !web.loading) AurumColors.Cyan else AurumColors.Gold) }) {
             Text("تیتر/چکیدهٔ ناشر · ترجمهٔ فارسی روی گوشی · فقط پژوهش، نه گیت AI",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-            Text("برچسب «اهمیت/جهت» زیر هر خبر تخمین قاعده‌ایِ کلیدواژه‌ای است، نه گیت AI رسمی طلا (شرط نهم) که جدا و سخت‌گیرانه‌تر باقی می‌ماند.",
+            Text("برچسب «اهمیت/جهت» زیر هر خبر تخمین قاعده‌ایِ کلیدواژه‌ای است، نه معیار AI رسمی؛ خبر فقط تأیید سبز یا وتوی شفاف می‌دهد و امتیاز فنی را منفی نمی‌کند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             Text("بررسی ${relativeTime(web.lastAttemptAt, now)} · هر ناشر مستقل · حداقل فاصلهٔ درخواست: ۶۰ ثانیه",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
@@ -247,10 +247,10 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
             }
         }
 
-        SectionCard("شرط نهم AI · جدا از تیترهای نمایشی", "ارزیابی مستقل برای هر جفت‌ارز · نیازمند مدل و شواهد معتبر",
+        SectionCard("خبر و معیار ریسک معامله", "خبر امتیاز ۸ شرط فنی را منفی نمی‌کند؛ فقط وتوی روشن/قابل توضیح مانع می‌شود",
             trailing = { Pill(server.gate.name, serverTone) }) {
-            Text(if (settings.newsBaseUrl.isBlank())
-                "برای دیدن تیترها سرور لازم نیست؛ اما گیت معامله و AI بدون سرور تنظیم نشده و UNKNOWN است."
+            Text(if (settings.newsBaseUrl.isBlank() && !settings.hasClientNewsAi)
+                "برای دیدن تیترها سرور لازم نیست؛ مدل خبر تنظیم نشده و وضعیت AI زرد/UNKNOWN می‌ماند، اما امتیاز فنی را منفی نمی‌کند."
                 else server.reason, style = MaterialTheme.typography.bodySmall, color = serverTone)
             Text("سرور: ${server.provider ?: "تنظیم نشده"} · آخرین دریافت ${relativeTime(server.lastCheckedAt, now)}" +
                 (if (server.cached) " · دادهٔ قبلی؛ گیت UNKNOWN" else ""),
@@ -284,11 +284,11 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 }
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = viewModel::refreshNews, enabled = !server.loading && settings.newsBaseUrl.isNotBlank(),
-                    modifier = Modifier.weight(1f)) { Text("بررسی گیت") }
+                OutlinedButton(onClick = viewModel::refreshNews, enabled = !server.loading && (settings.newsBaseUrl.isNotBlank() || settings.hasClientNewsAi),
+                    modifier = Modifier.weight(1f)) { Text("بررسی ریسک خبر") }
                 OutlinedButton(onClick = onOpenSettings, modifier = Modifier.weight(1f)) { Text("تنظیم سرور") }
             }
-            Text("وتوی خبر برای ورود دستی کاغذی ${if (settings.pauseOnNews) "روشن" else "خاموش"} است؛ برای ورود سیگنالی/خودکار شرط مدل همیشه الزامی است. CLEAR تضمین یا مجوز سفارش واقعی نیست.",
+            Text("معیار شفاف: رویداد High در ارزهای همان جفت داخل حدود ۴۵ دقیقه قبل تا ۳۰ دقیقه بعد یا AI معتبرِ خلاف جهت = وتو. AI فقط وقتی تازه، دارای شاهد ناشر و اطمینان ≥۸۰٪ باشد سبز می‌شود؛ UNKNOWN زرد است و به‌تنهایی امتیاز فنی را منفی نمی‌کند. وتوی اختیاری خبر برای ورود دستی ${if (settings.pauseOnNews) "روشن" else "خاموش"} است.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             if (server.sources.isNotEmpty() || server.articles.isNotEmpty()) {
                 OutlinedButton(onClick = { showServerArticles = !showServerArticles }) {

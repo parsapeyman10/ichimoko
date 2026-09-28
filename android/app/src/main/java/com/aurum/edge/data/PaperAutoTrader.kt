@@ -59,10 +59,12 @@ class PaperAutoTrader(
             return null
         }
         val signal = current.signal ?: return null
-        val newsRecord = NewsConfluence.record(recentNews, current.symbol) ?: run {
-            _status.value = "شواهد خبر برای ثبت در ژورنال کامل نیست"
+        val newsRisk = NewsConfluence.alignment(current.symbol, signal.action, recentNews)
+        if (newsRisk.status == com.aurum.edge.core.ConfluenceStatus.CONFLICT) {
+            _status.value = "وتوی خبر/تقویم فعال است: ${newsRisk.detail}"
             return null
         }
+        val newsRecord = NewsConfluence.record(recentNews, current.symbol)
         val ict = IctEntryRules.approvedEvidence(current) ?: run {
             _status.value = "شواهد رنج/ICT همین کندل برای ژورنال تأیید نشد"
             return null

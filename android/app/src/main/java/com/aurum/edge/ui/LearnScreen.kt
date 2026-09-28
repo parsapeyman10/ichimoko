@@ -98,7 +98,7 @@ fun LearnScreen(viewModel: AurumViewModel) {
             subtitle = "دادهٔ OHLC واقعی یا فایل وارداتی؛ اجرای معاملات در گذشته فرضی است",
         ) {
             Text(
-                "این بک‌تست فقط قواعد فنی روی کندل‌هاست؛ شواهد تاریخیِ نقطه‌به‌نقطه برای شرط نهم AI/خبر، ICT و MTF نداریم. بنابراین عملکرد استراتژی ۹/۹ یا سفارش واقعی را نمی‌سنجد. عدد ساختگی، خبرِ جایگزین AI و وعدهٔ سود تولید نمی‌شود.",
+                "این بک‌تست فقط قواعد فنی روی کندل‌هاست؛ شواهد تاریخیِ نقطه‌به‌نقطه برای لایهٔ خبر/AI، ICT و MTF نداریم. بنابراین عملکرد سیگنال همراه خبر یا سفارش واقعی را نمی‌سنجد. عدد ساختگی، خبرِ جایگزین AI و وعدهٔ سود تولید نمی‌شود.",
                 style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextSecondary,
             )
@@ -227,7 +227,7 @@ fun LearnScreen(viewModel: AurumViewModel) {
                 Text("خارج نمونه ۷۰/۳۰ + آزمون هزینهٔ ۲×", fontWeight = FontWeight.Bold)
             }
             Text(
-                "یک تقسیم ۷۰/۳۰ زمانی از همان کندل‌ها؛ نتیجهٔ خارج نمونه با هزینهٔ فرضی و دوباره با اسپرد/کمیسیون ۲ برابر محاسبه می‌شود. این آزمون حساسیت، اجرای بروکر یا تأیید شرط نهم AI نیست. کمتر از ۳۰ معاملهٔ بسته فقط هشدار کم‌نمونگی دارد (نه آزمون معنی‌داری).",
+                "یک تقسیم ۷۰/۳۰ زمانی از همان کندل‌ها؛ نتیجهٔ خارج نمونه با هزینهٔ فرضی و دوباره با اسپرد/کمیسیون ۲ برابر محاسبه می‌شود. این آزمون حساسیت، اجرای بروکر یا تأیید لایهٔ خبر/AI نیست. کمتر از ۳۰ معاملهٔ بسته فقط هشدار کم‌نمونگی دارد (نه آزمون معنی‌داری).",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 6.dp),
@@ -466,7 +466,7 @@ private fun WalkForwardReport(state: WalkForwardState.Done) {
     val stressed = wf.costStressOutOfSample
     SectionCard(
         title = "یک آزمون خارج از نمونه (۷۰/۳۰) ${state.interval.label}",
-        subtitle = "${wf.bars} کندل · تقسیم در ${formatDateTime(wf.splitTime)} · فقط قواعد فنی، نه گیت ۹/۹",
+        subtitle = "${wf.bars} کندل · تقسیم در ${formatDateTime(wf.splitTime)} · فقط قواعد فنی، نه گیت خبر",
     ) {
         Text(assessment.title, style = MaterialTheme.typography.bodySmall,
             color = if (assessment.grade == EvidenceGrade.UNFAVORABLE) AurumColors.Red else AurumColors.Gold)

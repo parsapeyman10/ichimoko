@@ -118,6 +118,8 @@ data class ConfluenceItem(
     val ok: Boolean,
     val detail: String,
     val status: ConfluenceStatus = if (ok) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+    /** Optional per-condition contribution/health shown in the UI as a percent out of 100. */
+    val scorePercent: Int? = null,
 )
 
 data class Signal(

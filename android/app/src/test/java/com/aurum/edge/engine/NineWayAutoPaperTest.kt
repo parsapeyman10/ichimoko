@@ -76,10 +76,12 @@ class NineWayAutoPaperTest {
         assertNull(PaperAutoRules.blocker(market(combined), settings, parsed, now))
         assertEquals("id1", NewsConfluence.record(parsed)!!.evidence.single().id)
         val missingAi = parseWebNews(Json.parseToJsonElement(payload.replace("ai_confluence", "not_ai")) as JsonObject, now)
-        assertEquals(SignalAction.NO_TRADE, NewsConfluence.apply(raw, "XAU/USD", missingAi, now)!!.action)
+        assertEquals("UNKNOWN news is yellow/advisory, not a technical veto", SignalAction.BUY,
+            NewsConfluence.apply(raw, "XAU/USD", missingAi, now)!!.action)
         val withoutCalendar = parseWebNews(Json.parseToJsonElement(payload.replace("\"calendar\":", "\"ignoredCalendar\":")) as JsonObject, now)
         assertEquals(NewsGate.UNKNOWN, withoutCalendar.gate)
-        assertEquals(SignalAction.NO_TRADE, NewsConfluence.apply(raw, "XAU/USD", withoutCalendar, now)!!.action)
+        assertEquals("missing calendar cannot claim green news, but does not erase the 8-condition score",
+            SignalAction.BUY, NewsConfluence.apply(raw, "XAU/USD", withoutCalendar, now)!!.action)
         val blockedCalendar = parseWebNews(Json.parseToJsonElement(payload.replace(
             "\"events\":[{\"country\":\"USD\"}],\"guard\":{\"state\":\"CLEAR\"}",
             "\"events\":[{\"country\":\"USD\"}],\"guard\":{\"state\":\"BLOCKED\"}")) as JsonObject, now)
@@ -126,21 +128,20 @@ class NineWayAutoPaperTest {
         val jpyBlocked = NewsConfluence.apply(raw, "USD/JPY", jpyNews, now)!!
         assertEquals(SignalAction.NO_TRADE, jpyBlocked.action)
         assertEquals(ConfluenceStatus.CONFLICT, jpyBlocked.confluence[8].status)
-        // Server mode (per-pair map empty): a non-gold pair stays honestly UNKNOWN.
+        // Server mode (per-pair map empty): a non-gold pair stays honestly UNKNOWN but technical signal remains visible.
         val serverOnly = NewsConfluence.apply(raw, "EUR/USD", news, now)!!
-        assertEquals(SignalAction.NO_TRADE, serverOnly.action)
+        assertEquals(SignalAction.BUY, serverOnly.action)
+        assertEquals(ConfluenceStatus.UNKNOWN, serverOnly.confluence[8].status)
     }
 
-    @Test fun eachNewsFailureBlocksEntryButKeepsTechnicalScoreInformational() {
-        val cases = listOf(
+    @Test fun unknownNewsStaysAdvisoryButClearConflictsStillVeto() {
+        val advisoryCases = listOf(
             news.copy(ai = AiNewsVerdict()),
             news.copy(ai = news.ai.copy(status = "UNKNOWN")),
-            news.copy(ai = news.ai.copy(direction = "SELL")),
             news.copy(ai = news.ai.copy(confidence = 79.0)),
             news.copy(ai = news.ai.copy(model = "deterministic-fallback")),
             news.copy(ai = news.ai.copy(evidenceIds = listOf("made-up"))),
             news.copy(ai = news.ai.copy(evidenceIds = listOf("id1", "id1"))),
-            news.copy(gate = NewsGate.BLOCKED),
             news.copy(sources = listOf(NewsSourceStatus("Publisher", "unavailable", "https://publisher.example/rss"))),
             news.copy(loading = true),
             news.copy(lastCheckedAt = now - 180_001),
@@ -149,15 +150,23 @@ class NineWayAutoPaperTest {
             news.copy(articles = listOf(headline.copy(link = null))),
             news.copy(articles = listOf(headline.copy(link = "https://publisher.example.attacker.net/news"))),
         )
-        cases.forEachIndexed { idx, input ->
+        advisoryCases.forEachIndexed { idx, input ->
             val combined = NewsConfluence.apply(raw, "XAU/USD", input, now)!!
-            assertEquals("news $idx", SignalAction.NO_TRADE, combined.action)
-            assertFalse("news $idx", combined.confluence[8].ok)
+            assertEquals("advisory news $idx", SignalAction.BUY, combined.action)
+            assertFalse("advisory news $idx", combined.confluence[8].ok)
+            assertEquals(ConfluenceStatus.UNKNOWN, combined.confluence[8].status)
             assertEquals(raw.confidence, combined.confidence, 0.001)
+            assertNull(PaperAutoRules.blocker(market(combined), settings, input, now))
+        }
+        listOf(
+            news.copy(ai = news.ai.copy(direction = "SELL")),
+            news.copy(gate = NewsGate.BLOCKED),
+        ).forEachIndexed { idx, input ->
+            val combined = NewsConfluence.apply(raw, "XAU/USD", input, now)!!
+            assertEquals("veto news $idx", SignalAction.NO_TRADE, combined.action)
+            assertEquals(ConfluenceStatus.CONFLICT, combined.confluence[8].status)
             assertNotNull(PaperAutoRules.blocker(market(combined), settings, input, now))
         }
-        val conflict = NewsConfluence.apply(raw, "XAU/USD", news.copy(ai = news.ai.copy(direction = "SELL")), now)!!
-        assertEquals(ConfluenceStatus.CONFLICT, conflict.confluence[8].status)
         assertEquals(ConfluenceStatus.UNKNOWN,
             NewsConfluence.apply(raw, "XAU/USD", news.copy(ai = AiNewsVerdict()), now)!!.confluence[8].status)
     }

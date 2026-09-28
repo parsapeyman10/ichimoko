@@ -269,21 +269,13 @@ object SignalEngine {
         }
         if (narrative) {
             confluence += ConfluenceItem(
-                "کراس تنکان/کیجون (${series.setting.tenkan}/${series.setting.kijun})",
+                "۱ · جهت ایچیموکو: کراس تنکان/کیجون (${series.setting.tenkan}/${series.setting.kijun})",
                 crossDirection != null,
-                "T ${fmt(snap.tenkan)} / K ${fmt(snap.kijun)}",
+                "T ${fmt(snap.tenkan)} / K ${fmt(snap.kijun)} · سهم امتیاز ۲۰ از ۱۰۰",
+                scorePercent = if (crossDirection != null) 20 else 0,
             )
         }
 
-        if (narrative) {
-            val flatOk = flatDirection == direction && direction != null
-            confluence += ConfluenceItem(
-                "آپشن تختی SpanB52",
-                flatOk,
-                "${snap.spanBFlatBars} کندل تخت · B ${snap.spanBFlatValue?.let { fmt(it) } ?: "—"} · شکست ${if (snap.rangeBreakoutUp) "بالا" else if (snap.rangeBreakoutDown) "پایین" else "ندارد"}",
-                status = if (profile.flatSpanB && flatOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
-            )
-        }
         if (profile.flatSpanB && flatDirection == direction && direction != null) {
             score += 18
             if (!usedFlatEntry && narrative) reasons += "تأیید افزودهٔ تختی SpanB52 هم‌جهت با سیگنال پایه"
@@ -301,7 +293,12 @@ object SignalEngine {
         } else if (direction != null && narrative) {
             blockers += if (long) "قیمت داخل/نزدیک ابر — شکست صعودی تایید نشده" else "قیمت داخل/نزدیک ابر — شکست نزولی تایید نشده"
         }
-        if (narrative) confluence += ConfluenceItem("قبول قیمت خارج ابر", cloudOk, "${fmt(snap.cloudTop)} — ${fmt(snap.cloudBottom)}")
+        if (narrative) confluence += ConfluenceItem(
+            "۲ · قبول قیمت خارج ابر",
+            cloudOk,
+            "${fmt(snap.cloudTop)} — ${fmt(snap.cloudBottom)} · سهم امتیاز ۱۸ از ۱۰۰",
+            scorePercent = if (cloudOk) 18 else 0,
+        )
 
         val spanOk = when (direction) {
             SignalAction.BUY -> snap.spanA > snap.spanB
@@ -312,7 +309,12 @@ object SignalEngine {
             score += 10
             if (narrative) reasons += "ابر آینده هم‌جهت"
         } else if (direction != null && narrative) blockers += "ابر آینده مخالف جهت معامله"
-        if (narrative) confluence += ConfluenceItem("هم‌جهتی Senkou A/B", spanOk, "A ${fmt(snap.spanA)} / B ${fmt(snap.spanB)}")
+        if (narrative) confluence += ConfluenceItem(
+            "۳ · هم‌جهتی Senkou A/B",
+            spanOk,
+            "A ${fmt(snap.spanA)} / B ${fmt(snap.spanB)} · سهم امتیاز ۱۰ از ۱۰۰",
+            scorePercent = if (spanOk) 10 else 0,
+        )
 
         val chikouOk = when (direction) {
             SignalAction.BUY -> snap.chikouBuyClear
@@ -323,7 +325,12 @@ object SignalEngine {
             score += 10
             if (narrative) reasons += "تایید چیکو نسبت به ساختار ${series.setting.kijun} کندل قبل"
         } else if (direction != null && narrative) blockers += "چیکو تایید نمی‌کند — ساختار قبلی نقض می‌شود"
-        if (narrative) confluence += ConfluenceItem("تایید Chikou", chikouOk, if (long) "close بالای high قبلی" else "close زیر low قبلی")
+        if (narrative) confluence += ConfluenceItem(
+            "۴ · تایید Chikou",
+            chikouOk,
+            (if (long) "close بالای high قبلی" else "close زیر low قبلی") + " · سهم امتیاز ۱۰ از ۱۰۰",
+            scorePercent = if (chikouOk) 10 else 0,
+        )
 
         val emaOk = when (direction) {
             SignalAction.BUY -> snap.price > snap.ema200
@@ -334,7 +341,12 @@ object SignalEngine {
             score += 15
             if (narrative) reasons += "هم‌جهت با EMA200"
         } else if (direction != null && narrative) blockers += "خلاف روند EMA200"
-        if (narrative) confluence += ConfluenceItem("EMA200", emaOk, fmt(snap.ema200))
+        if (narrative) confluence += ConfluenceItem(
+            "۵ · EMA200",
+            emaOk,
+            "${fmt(snap.ema200)} · سهم امتیاز ۱۵ از ۱۰۰",
+            scorePercent = if (emaOk) 15 else 0,
+        )
 
         val vwapOk = when (direction) {
             SignalAction.BUY -> snap.price > snap.vwap
@@ -345,7 +357,12 @@ object SignalEngine {
             score += 12
             if (narrative) reasons += "سمت درست VWAP جلسه"
         } else if (direction != null && narrative) blockers += "سمت اشتباه VWAP جلسه"
-        if (narrative) confluence += ConfluenceItem("VWAP جلسه", vwapOk, fmt(snap.vwap))
+        if (narrative) confluence += ConfluenceItem(
+            "۶ · VWAP جلسه",
+            vwapOk,
+            "${fmt(snap.vwap)} · سهم امتیاز ۱۲ از ۱۰۰",
+            scorePercent = if (vwapOk) 12 else 0,
+        )
 
         val rsiOk = when (direction) {
             SignalAction.BUY -> snap.rsi in 52.0..72.0
@@ -356,7 +373,12 @@ object SignalEngine {
             score += 10
             if (narrative) reasons += "RSI7 در ناحیه سالم (${fmt(snap.rsi)})"
         } else if (direction != null && narrative) blockers += "RSI7 اشباع یا بی‌مومنتوم (${fmt(snap.rsi)})"
-        if (narrative) confluence += ConfluenceItem("RSI7", rsiOk, fmt(snap.rsi))
+        if (narrative) confluence += ConfluenceItem(
+            "۷ · RSI7",
+            rsiOk,
+            "${fmt(snap.rsi)} · سهم امتیاز ۱۰ از ۱۰۰",
+            scorePercent = if (rsiOk) 10 else 0,
+        )
 
         val hist = snap.macdHist ?: 0.0
         val momentumOk = (if (long) hist > 0 else hist < 0) && (snap.adx ?: 0.0) >= 20.0
@@ -366,14 +388,22 @@ object SignalEngine {
         } else if (direction != null && narrative) blockers += "مومنتوم کافی نیست (MACD/ADX)"
         if (narrative) {
             confluence += ConfluenceItem(
-                "مومنتوم MACD/ADX",
+                "۸ · مومنتوم MACD/ADX",
                 momentumOk,
-                "hist ${snap.macdHist?.let { fmt(it) } ?: "—"} / ADX ${snap.adx?.let { fmt(it) } ?: "—"}",
+                "hist ${snap.macdHist?.let { fmt(it) } ?: "—"} / ADX ${snap.adx?.let { fmt(it) } ?: "—"} · سهم امتیاز ۵ از ۱۰۰",
+                scorePercent = if (momentumOk) 5 else 0,
             )
             confluence += ConfluenceItem(
-                "نوسان ATR در محدوده",
+                "کنترل اضافه · نوسان ATR در محدوده",
                 !snap.atrShock,
                 "ATR ${fmt(snap.atr)}" + if (snap.atrShock) " — شوک نوسان" else "",
+            )
+            val flatOk = flatDirection == direction && direction != null
+            confluence += ConfluenceItem(
+                "آپشن افزوده · تختی SpanB52",
+                flatOk,
+                "${snap.spanBFlatBars} کندل تخت · B ${snap.spanBFlatValue?.let { fmt(it) } ?: "—"} · شکست ${if (snap.rangeBreakoutUp) "بالا" else if (snap.rangeBreakoutDown) "پایین" else "ندارد"}",
+                status = if (profile.flatSpanB && flatOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
             )
         }
         if (snap.atrShock) {

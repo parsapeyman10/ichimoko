@@ -115,7 +115,7 @@ class PaperOpportunityTest {
         val persisted = JournalStore(context, journalFile).also { it.load() }.trades.value.single()
         assertEquals(9, persisted.entryConditions.size)
         assertEquals(ict, persisted.priceAction)
-        assertEquals("۹ · خبر AI با شاهد ناشر", trade.entryConditions[8].name)
+        assertEquals(NewsConfluence.NEWS_LABEL, trade.entryConditions[8].name)
         assertEquals(1, journal.stats().open)
         assertEquals(0, journal.stats().total)
     }
