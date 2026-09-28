@@ -6,6 +6,7 @@ import com.aurum.edge.core.Interval
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.SignalProfile
+import com.aurum.edge.core.ConfluenceStatus
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -241,7 +242,7 @@ object SignalEngine {
             flatShort -> SignalAction.SELL
             else -> null
         }
-        val direction = crossDirection ?: if (profile == SignalProfile.FLAT_SPAN_B) flatDirection else null
+        val direction = crossDirection ?: if (profile.flatSpanB) flatDirection else null
         val usedFlatEntry = crossDirection == null && direction != null && flatDirection == direction
         val long = direction == SignalAction.BUY
         val reasons = mutableListOf<String>()
@@ -257,7 +258,7 @@ object SignalEngine {
                 else -> "جهت سیگنال تأیید شد"
             }
         } else if (narrative) {
-            blockers += if (profile == SignalProfile.FLAT_SPAN_B)
+            blockers += if (profile.flatSpanB)
                 "نه کراس تنکان/کیجون داریم، نه شکست معتبر از تختی SpanB52"
             else "کراس تازه تنکان/کیجون شکل نگرفته — ورود ممنوع"
         }
@@ -275,12 +276,12 @@ object SignalEngine {
                 "آپشن تختی SpanB52",
                 flatOk,
                 "${snap.spanBFlatBars} کندل تخت · B ${snap.spanBFlatValue?.let { fmt(it) } ?: "—"} · شکست ${if (snap.rangeBreakoutUp) "بالا" else if (snap.rangeBreakoutDown) "پایین" else "ندارد"}",
-                status = if (profile == SignalProfile.FLAT_SPAN_B && flatOk) com.aurum.edge.core.ConfluenceStatus.CONFIRMED else com.aurum.edge.core.ConfluenceStatus.UNKNOWN,
+                status = if (profile.flatSpanB && flatOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
             )
         }
-        if (profile == SignalProfile.FLAT_SPAN_B) {
-            if (flatDirection == direction && direction != null) score += 18
-            else if (direction != null && narrative) blockers += "پروفایل SpanB52 روشن است اما تختی/شکست خط ۵۲ تأیید نشد"
+        if (profile.flatSpanB && flatDirection == direction && direction != null) {
+            score += 18
+            if (!usedFlatEntry && narrative) reasons += "تأیید افزودهٔ تختی SpanB52 هم‌جهت با سیگنال پایه"
         }
 
         val clearance = 0.08 * snap.atr
@@ -384,7 +385,7 @@ object SignalEngine {
         if (narrative) {
             confluence += ConfluenceItem("حجم نسبی ۳۰ کندل", volumeOk != false, snap.relVolume?.let { "${fmt(it)}×" } ?: "حجم معتبر از منبع نداریم")
         }
-        if (profile == SignalProfile.MOMENTUM_VOLUME && direction != null) {
+        if (profile.momentumVolume && direction != null) {
             if (!momentumOk) blockers += "پروفایل مومنتوم/حجم: MACD/ADX باید هم‌جهت و قوی باشد"
             if (volumeOk == false) blockers += "پروفایل مومنتوم/حجم: حجم نسبی کمتر از حداقل است"
             if (momentumOk && volumeOk != false) score += 8
@@ -394,11 +395,7 @@ object SignalEngine {
         score = score.coerceIn(0.0, 100.0)
         val conf = score
 
-        val profileOk = when (profile) {
-            SignalProfile.BASE -> true
-            SignalProfile.MOMENTUM_VOLUME -> momentumOk && volumeOk != false
-            SignalProfile.FLAT_SPAN_B -> flatDirection == direction
-        }
+        val profileOk = !profile.momentumVolume || (momentumOk && volumeOk != false)
         val actionable = direction != null && conf >= minThreshold && !snap.atrShock && !spreadBlocked && profileOk
         if (!actionable) {
             if (narrative && conf < minThreshold && direction != null) {

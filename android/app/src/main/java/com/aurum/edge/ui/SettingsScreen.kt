@@ -43,7 +43,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
 import com.aurum.edge.BuildConfig
 import com.aurum.edge.core.AppSettings
-import com.aurum.edge.core.SignalProfile
 import com.aurum.edge.data.SourceCatalog
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.service.SignalMonitorService
@@ -164,18 +163,32 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
 
         WatchSettingsSection(viewModel)
 
-        SectionCard("پروفایل موتور سیگنال", "پایه مستقل می‌ماند؛ با انتخاب هر گزینه موتور همان حالت را برای چارت، رادار و بک‌تست پژوهشی به‌کار می‌گیرد") {
-            SignalProfile.entries.forEach { profile ->
-                Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(profile.title, style = MaterialTheme.typography.bodySmall,
-                            color = if (settings.signalProfile == profile) AurumColors.Gold else AurumColors.TextPrimary)
-                        Text(profile.detail, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                    }
-                    Switch(checked = settings.signalProfile == profile, onCheckedChange = { checked ->
-                        if (checked) viewModel.setSignalProfile(profile)
-                    })
+        SectionCard("افزونه‌های موتور سیگنال", "هستهٔ ایچیموکو/کانفلوئنس همیشه روشن است؛ تیک‌های زیر به همان موتور اضافه می‌شوند، جای آن را نمی‌گیرند") {
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("هسته پایه ایچیموکو", style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+                    Text("همیشه فعال: کراس/ابر/چیکو/EMA/VWAP/RSI و مدیریت ریسک فعلی",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
+                Text("فعال", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("افزودن فیلتر مومنتوم/حجم", style = MaterialTheme.typography.bodySmall,
+                        color = if (settings.signalProfile.momentumVolume) AurumColors.Gold else AurumColors.TextPrimary)
+                    Text("اگر روشن باشد، سیگنال پایه فقط وقتی اجازه ورود می‌گیرد که MACD/ADX هم‌جهت باشند و حجم نسبیِ معتبر ضعیف نباشد؛ حجم جعلی ساخته نمی‌شود.",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                }
+                Switch(checked = settings.signalProfile.momentumVolume, onCheckedChange = viewModel::setSignalMomentumVolume)
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("افزودن سناریوی تختی SpanB52", style = MaterialTheme.typography.bodySmall,
+                        color = if (settings.signalProfile.flatSpanB) AurumColors.Gold else AurumColors.TextPrimary)
+                    Text("به‌جز سیگنال‌های پایه، اگر خط ۵۲ مدتی تخت باشد و قیمت از رنج خارج شود، یک مسیر ورود جدا هم بررسی می‌شود.",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                }
+                Switch(checked = settings.signalProfile.flatSpanB, onCheckedChange = viewModel::setSignalFlatSpanB)
             }
             Text("تختی SpanB 52 همان میانگین ۵۲ کندل ایچیموکو است: اگر چند کندل ثابت بماند یعنی سقف/کف ۵۲تایی عوض نشده؛ فقط وقتی قیمت از آن و از رنج کوتاه خارج شود به‌عنوان سناریوی رشد/ریزش بررسی می‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,

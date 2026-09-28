@@ -315,10 +315,18 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun saveMinConfidence(value: Double) = container.settingsStore.update { it.copy(minConfidence = value.coerceIn(72.0, 95.0)) }
 
-    fun setSignalProfile(profile: SignalProfile) {
-        container.settingsStore.update { it.copy(signalProfile = profile) }
+    fun setSignalMomentumVolume(enabled: Boolean) = updateSignalProfile("فیلتر مومنتوم/حجم", enabled) {
+        it.copy(momentumVolume = enabled)
+    }
+
+    fun setSignalFlatSpanB(enabled: Boolean) = updateSignalProfile("سناریوی تختی SpanB52", enabled) {
+        it.copy(flatSpanB = enabled)
+    }
+
+    private fun updateSignalProfile(label: String, enabled: Boolean, transform: (SignalProfile) -> SignalProfile) {
+        container.settingsStore.update { it.copy(signalProfile = transform(it.signalProfile)) }
         container.market.restart()
-        _toast.value = "پروفایل موتور: ${profile.title}"
+        _toast.value = "$label ${if (enabled) "به موتور پایه اضافه شد" else "از افزونه‌های موتور برداشته شد"}"
     }
 
     /** Cost assumptions are the user's responsibility; they are echoed in every report. */

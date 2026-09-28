@@ -45,14 +45,39 @@ data class PriceTick(val price: Double, val at: Long, val bid: Double? = null, v
 
 enum class SignalAction { BUY, SELL, NO_TRADE }
 
-enum class SignalProfile(val title: String, val detail: String) {
-    BASE("ایچیموکو تلفیقی", "پایهٔ فعلی؛ حجم/مومنتوم فقط همگرایی کمکی‌اند"),
-    MOMENTUM_VOLUME("مومنتوم/حجم سخت‌گیرانه", "همان پایه، ولی MACD/ADX و حجم معتبر اگر موجود باشد باید تأیید کنند"),
-    FLAT_SPAN_B("تختی SpanB 52", "ورود اختیاری وقتی خط ۵۲ مدتی تخت است و قیمت از رنج خارج می‌شود"),
-    ;
+/**
+ * The base Ichimoku confluence engine is ALWAYS active. These booleans are additive
+ * opt-in safeguards/setups that the user can tick independently in Settings.
+ */
+data class SignalProfile(
+    val momentumVolume: Boolean = false,
+    val flatSpanB: Boolean = false,
+) {
+    val isBaseOnly: Boolean get() = !momentumVolume && !flatSpanB
+    val title: String get() = activeLabels().ifEmpty { listOf("پایه") }.joinToString(" + ")
+
+    fun activeLabels(): List<String> = buildList {
+        add("پایه")
+        if (momentumVolume) add("مومنتوم/حجم")
+        if (flatSpanB) add("تختی SpanB52")
+    }
+
+    fun persistName(): String = buildList {
+        if (momentumVolume) add("MOMENTUM_VOLUME")
+        if (flatSpanB) add("FLAT_SPAN_B")
+    }.ifEmpty { listOf("BASE") }.joinToString(",")
 
     companion object {
-        fun fromName(raw: String?): SignalProfile = entries.firstOrNull { it.name == raw } ?: BASE
+        val BASE = SignalProfile()
+
+        /** Migrates the previous single-choice enum value, and also accepts comma lists. */
+        fun fromName(raw: String?): SignalProfile {
+            val parts = raw.orEmpty().split(',', '|', '+').map { it.trim().uppercase() }.toSet()
+            return SignalProfile(
+                momentumVolume = "MOMENTUM_VOLUME" in parts,
+                flatSpanB = "FLAT_SPAN_B" in parts,
+            )
+        }
     }
 }
 

@@ -21,7 +21,15 @@ class SettingsStore(context: Context) {
     private val _settings = MutableStateFlow(read())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
-    fun read(): AppSettings = AppSettings(
+    fun read(): AppSettings {
+        val legacyProfile = SignalProfile.fromName(prefs.getString(KEY_SIGNAL_PROFILE, null))
+        val profile = SignalProfile(
+            momentumVolume = if (prefs.contains(KEY_SIGNAL_MOMENTUM_VOLUME))
+                prefs.getBoolean(KEY_SIGNAL_MOMENTUM_VOLUME, false) else legacyProfile.momentumVolume,
+            flatSpanB = if (prefs.contains(KEY_SIGNAL_FLAT_SPAN_B))
+                prefs.getBoolean(KEY_SIGNAL_FLAT_SPAN_B, false) else legacyProfile.flatSpanB,
+        )
+        return AppSettings(
         apiKey = prefs.getString(KEY_API, null)?.takeIf { it.isNotBlank() }
             ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY,
         // Legacy installs may still hold a removed symbol (crypto/stock); the app is forex-only now.
@@ -43,8 +51,9 @@ class SettingsStore(context: Context) {
         newsAiBaseUrl = prefs.getString(KEY_NEWS_AI_URL, "").orEmpty(),
         newsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, "").orEmpty(),
         newsAiFormat = prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" },
-        signalProfile = SignalProfile.fromName(prefs.getString(KEY_SIGNAL_PROFILE, SignalProfile.BASE.name)),
+        signalProfile = profile,
     )
+    }
 
     /**
      * Persist the market key and symbol in ONE disk transaction. A successful commit,
@@ -150,7 +159,9 @@ class SettingsStore(context: Context) {
             .putString(KEY_ALERT_SOUND_URI, next.alertSoundUri)
             .putString(KEY_ALERT_SOUND_NAME, next.alertSoundName)
             .putString(KEY_NEWS_URL, next.newsBaseUrl.trim())
-            .putString(KEY_SIGNAL_PROFILE, next.signalProfile.name)
+            .putString(KEY_SIGNAL_PROFILE, next.signalProfile.persistName())
+            .putBoolean(KEY_SIGNAL_MOMENTUM_VOLUME, next.signalProfile.momentumVolume)
+            .putBoolean(KEY_SIGNAL_FLAT_SPAN_B, next.signalProfile.flatSpanB)
             .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
             .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
             .apply()
@@ -185,5 +196,7 @@ class SettingsStore(context: Context) {
         private const val KEY_NEWS_AI_MODEL = "news_ai_client_model"
         private const val KEY_NEWS_AI_FORMAT = "news_ai_format"
         private const val KEY_SIGNAL_PROFILE = "signal_profile"
+        private const val KEY_SIGNAL_MOMENTUM_VOLUME = "signal_momentum_volume"
+        private const val KEY_SIGNAL_FLAT_SPAN_B = "signal_flat_span_b"
     }
 }
