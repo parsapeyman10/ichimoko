@@ -37,7 +37,7 @@ internal fun hasCurrentRestBar(bars: List<Candle>, interval: Interval, now: Long
 
 /** A live tick may arrive a few seconds after its source timestamp, even across a candle boundary. */
 internal fun isCurrentIntervalTick(at: Long, interval: Interval, now: Long): Boolean =
-    at in (now - 90_000L)..now
+    at in (now - 90_000L)..(now + 10_000L)
 
 data class MarketState(
     val symbol: String = "XAU/USD",
@@ -218,7 +218,7 @@ class MarketRepository(
             if (MarketHours.forexWeekendClosed()) { publishClosed(); return@withLock }
             val receivedAt = System.currentTimeMillis()
             val streamRecent = _state.value.feed.mode == FeedMode.LIVE &&
-                _state.value.feed.lastSuccessAt?.let { receivedAt - it in 0L..90_000L } == true
+                FeedLiveness.hasRecentReceipt(_state.value.feed, receivedAt)
             val restCurrent = hasCurrentRestBar(fetched, current.interval, receivedAt)
             if (!restCurrent && streamRecent) return@withLock // stale REST must not roll back a recent WS tick
             val periodStart = currentPeriodStart(current.interval)
@@ -503,7 +503,7 @@ class MarketRepository(
         val current = _state.value
         val now = System.currentTimeMillis()
         if (current.feed.mode == FeedMode.POLLING &&
-            current.feed.lastSuccessAt?.let { now - it in 0L..90_000L } == true &&
+            FeedLiveness.hasRecentReceipt(current.feed, now) &&
             hasCurrentRestBar(current.candles, current.interval, now)) {
             _state.value = current.copy(feed = current.feed.copy(detail =
                 "$detail؛ کندل REST دوره‌ای است، نه تیک زنده"))
@@ -523,15 +523,16 @@ class MarketRepository(
     private fun publishDelayed(detail: String) {
         val current = _state.value
         val now = System.currentTimeMillis()
-        val recentReceipt = current.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
-            !current.showingCachedData && current.lastPrice != null &&
-            FeedLiveness.hasRecentReceipt(current.feed, now)
+        val displayFeed = FeedLiveness.display(current.feed, now)
+        val recentReceipt = !current.showingCachedData && current.lastPrice != null &&
+            displayFeed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
+            FeedLiveness.hasRecentReceipt(displayFeed, now)
         if (recentReceipt) {
             // Do not relabel a one-second Swissquote/Gold-API fallback tick (or a fresh Twelve
-            // tick) as "delayed" merely because the other channel just failed/reconnected. The
-            // watchdog will downgrade it if no new real tick/candle arrives within 90 seconds.
+            // tick/candle) as "delayed" merely because another channel just failed/reconnected.
+            // Even if an older path had already set DELAYED with a fresh receipt, normalize it.
             _state.value = current.copy(
-                feed = current.feed.copy(detail = "$detail؛ آخرین تیک/کندل دریافتی هنوز تازه است"),
+                feed = displayFeed.copy(detail = "$detail؛ آخرین تیک/کندل دریافتی هنوز تازه است"),
                 showingCachedData = false,
             )
             return

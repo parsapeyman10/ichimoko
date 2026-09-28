@@ -11,6 +11,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.aurum.edge.core.AppContainer
 import com.aurum.edge.core.AppSettings
+import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.data.SourceComparison
 import com.aurum.edge.data.VerificationStatus
@@ -422,7 +423,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     /** A price received recently is still not an exchange fill; only a paper ticket can use it. */
     private fun freshPaperQuote(current: MarketState): String? {
         val now = System.currentTimeMillis()
-        val received = current.feed.lastSuccessAt
         val lastBar = current.candles.lastOrNull()?.time
         return when {
             current.symbol != settings.value.symbol || current.interval != settings.value.interval ->
@@ -430,7 +430,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             current.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING) || current.showingCachedData ->
                 "قیمت زنده نیست؛ ورود/خروج روی کش ممنوع است"
             current.lastPrice?.let { it.isFinite() && it > 0.0 } != true -> "قیمت معتبر موجود نیست"
-            received == null || now - received !in 0L..90_000L -> "آخرین دریافت قیمت قدیمی است"
+            !FeedLiveness.hasRecentReceipt(current.feed, now) -> "آخرین دریافت قیمت قدیمی است"
             lastBar == null || now - lastBar !in 0L..min(180_000L, current.interval.millis * 2) ->
                 "کندل این نماد برای ورود خیلی قدیمی است"
             else -> null

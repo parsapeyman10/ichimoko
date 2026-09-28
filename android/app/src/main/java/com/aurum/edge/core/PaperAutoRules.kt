@@ -37,7 +37,7 @@ object PaperAutoRules {
         }
         if (market.showingCachedData || market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))
             return "فید واقعی زنده نیست؛ کش برای ورود ممنوع"
-        if (market.feed.lastSuccessAt?.let { now - it in 0L..90_000L } != true)
+        if (!FeedLiveness.hasRecentReceipt(market.feed, now))
             return "قیمت دریافتی قدیمی است"
         val signal = market.signal ?: return "سیگنال محاسبه نشده است"
         if (!signal.isActionable || signal.entry == null || signal.stopLoss == null || signal.takeProfit == null)

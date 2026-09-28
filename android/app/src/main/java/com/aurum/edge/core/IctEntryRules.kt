@@ -59,7 +59,7 @@ object IctEntryRules {
                maxBarAgeMs: Long = 90_000L): Decision {
         val signal = market.signal ?: return Decision("سیگنال موجود نیست")
         if (market.showingCachedData || market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING) ||
-            market.feed.lastSuccessAt?.let { now - it in 0L..90_000L } != true)
+            !FeedLiveness.hasRecentReceipt(market.feed, now))
             return Decision("گیت ICT: قیمت زنده/تازه در دسترس نیست")
         if (signal.action == SignalAction.NO_TRADE || signal.interval != market.interval ||
             signal.barTime != market.candles.lastOrNull { it.closed }?.time ||

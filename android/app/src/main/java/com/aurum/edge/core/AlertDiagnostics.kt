@@ -26,7 +26,7 @@ object AlertDiagnostics {
     ): List<AlertCheck> {
         val priceFresh = !market.showingCachedData &&
             market.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
-            market.feed.lastSuccessAt?.let { now - it in 0L..90_000L } == true
+            FeedLiveness.hasRecentReceipt(market.feed, now)
         val minBars = SignalEngine.minBars(market.interval)
         val aiFresh = news.lastCheckedAt?.let { now - it in 0L..180_000L } == true
         // Preliminary feed/model availability only; directional alignment is checked below.

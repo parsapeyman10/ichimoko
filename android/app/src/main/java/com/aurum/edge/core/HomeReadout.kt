@@ -15,7 +15,7 @@ data class HomeReadout(
             val lastBarAt = market.candles.lastOrNull()?.time?.takeIf { it > 0L }
             val current = price != null && !market.showingCachedData &&
                 market.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
-                market.feed.lastSuccessAt?.let { now - it in 0L..90_000L } == true &&
+                FeedLiveness.hasRecentReceipt(market.feed, now) &&
                 lastBarAt?.let { now - it in 0L..(market.interval.millis + 90_000L) } == true
             return HomeReadout(
                 current = current,

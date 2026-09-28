@@ -32,6 +32,7 @@ import com.aurum.edge.core.PaperConditionRecord
 import com.aurum.edge.core.IctPriceActionRecord
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
+import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.TradeReplay
@@ -69,7 +70,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     val livePrice = market.lastPrice?.takeIf {
         it.isFinite() && it > 0 && !market.showingCachedData &&
             market.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
-            market.feed.lastSuccessAt?.let { at -> now - at in 0L..90_000L } == true &&
+            FeedLiveness.hasRecentReceipt(market.feed, now) &&
             market.candles.lastOrNull()?.time?.let { at ->
                 now - at in 0L..minOf(180_000L, market.interval.millis * 2)
             } == true

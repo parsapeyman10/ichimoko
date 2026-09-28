@@ -66,8 +66,19 @@ class HomeReadoutTest {
             assertFalse(HomeReadout.from(fresh.copy(feed = delayed), now).current)
             assertEquals(mode, FeedLiveness.display(received.copy(lastSuccessAt = now - 1L), now).mode)
         }
+        val freshDelayedTick = FeedLiveness.display(FeedStatus(FeedMode.DELAYED,
+            detail = "بیش از ۹۰ ثانیه تیک تازه دریافت نشده؛ این قیمت آنلاین نیست",
+            lastSuccessAt = now - 1_000L,
+            provider = "فید زندهٔ جایگزین (Swissquote/Gold-API؛ WebSocket Twelve در دسترس نیست)"), now)
+        assertEquals(FeedMode.LIVE, freshDelayedTick.mode)
+        assertFalse(freshDelayedTick.detail.contains("۹۰"))
+        val freshDelayedRest = FeedLiveness.display(FeedStatus(FeedMode.DELAYED,
+            lastSuccessAt = now - 1_000L,
+            provider = "Twelve Data"), now)
+        assertEquals(FeedMode.POLLING, freshDelayedRest.mode)
         assertEquals(FeedMode.OFFLINE, FeedLiveness.display(FeedStatus(FeedMode.OFFLINE), now).mode)
-        assertFalse(FeedLiveness.hasRecentReceipt(FeedStatus(FeedMode.LIVE, lastSuccessAt = now + 1), now))
+        assertTrue(FeedLiveness.hasRecentReceipt(FeedStatus(FeedMode.LIVE, lastSuccessAt = now + 1), now))
+        assertFalse(FeedLiveness.hasRecentReceipt(FeedStatus(FeedMode.LIVE, lastSuccessAt = now + 11_000L), now))
     }
 
     @Test fun `every destination is reachable from the forex navigation`() {
