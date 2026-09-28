@@ -44,6 +44,8 @@ data class MarketState(
     val interval: Interval = Interval.M5,
     val candles: List<Candle> = emptyList(),
     val lastPrice: Double? = null,
+    val bid: Double? = null,
+    val ask: Double? = null,
     val feed: FeedStatus = FeedStatus(FeedMode.NO_KEY),
     val signal: Signal? = null,
     val showingCachedData: Boolean = false,
@@ -300,7 +302,7 @@ class MarketRepository(
                             if (!stillCurrent(active) || active.hasKey != current.hasKey ||
                                 (current.hasKey && active.apiKey != current.apiKey)) return@collect
                             backoff = 2_000L
-                            onTick(tick.price, tick.at, provider)
+                            onTick(tick, provider)
                         }
                     }
                     if (maxMillis == null) collectBlock()
@@ -315,7 +317,7 @@ class MarketRepository(
                                 val active = settings.read()
                                 if (!stillCurrent(active) || active.apiKey != current.apiKey) return@collect
                                 backoff = 2_000L
-                                onTick(tick.price, tick.at, "Twelve Data WebSocket")
+                                onTick(tick, "Twelve Data WebSocket")
                             }
                         } catch (e: DataFeedException) {
                             if (started && generation == session && streamEpoch == epoch) {
@@ -445,9 +447,11 @@ class MarketRepository(
         runCatching { cm.registerDefaultNetworkCallback(callback) }.onSuccess { networkCallback = callback }
     }
 
-    private suspend fun onTick(price: Double, at: Long, provider: String = "Twelve Data") {
+    private suspend fun onTick(tick: com.aurum.edge.core.PriceTick, provider: String = "Twelve Data") {
         val current = settings.read()
         val now = System.currentTimeMillis()
+        val price = tick.price
+        val at = tick.at
         if (MarketHours.forexWeekendClosed(now)) { publishClosed(); return }
         if (!isCurrentIntervalTick(at, current.interval, now)) return
         val wallPeriodStart = now - now % current.interval.millis
@@ -478,6 +482,8 @@ class MarketRepository(
         lastQuietReconnect = SystemClock.elapsedRealtime()
         _state.value = _state.value.copy(
             lastPrice = price,
+            bid = tick.bid,
+            ask = tick.ask,
             feed = FeedStatus(FeedMode.LIVE, "", System.currentTimeMillis(), provider = provider),
             showingCachedData = false,
         )
@@ -547,7 +553,7 @@ class MarketRepository(
         val bars = cachedBars.values.sortedBy { it.time }
         val lastPrice = bars.lastOrNull()?.close ?: _state.value.lastPrice
         if (bars.isEmpty()) {
-            _state.value = _state.value.copy(candles = emptyList(), lastPrice = null, showingCachedData = false)
+            _state.value = _state.value.copy(candles = emptyList(), lastPrice = null, bid = null, ask = null, showingCachedData = false)
             return
         }
         val signal = if (showingCache) null else withContext(Dispatchers.Default) {

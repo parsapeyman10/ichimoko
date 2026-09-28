@@ -40,6 +40,8 @@ import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
+import com.aurum.edge.ui.components.formatQuotePrice
+import com.aurum.edge.ui.components.formatSpread
 import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
 import androidx.compose.ui.platform.LocalContext
@@ -137,6 +139,17 @@ fun HomeScreen(
                 else "${price.label} · آخرین کندل ${formatDateTime(price.observedAt)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (price.current) AurumColors.Cyan else AurumColors.Gold)
+            val spread = market.bid?.let { bid -> market.ask?.let { ask -> ask - bid } }
+            Row(Modifier.fillMaxWidth().padding(top = 7.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatTile("BID", formatQuotePrice(market.bid), if (price.current) AurumColors.Green else AurumColors.TextMuted, Modifier.weight(1f))
+                StatTile("ASK", formatQuotePrice(market.ask), if (price.current) AurumColors.Red else AurumColors.TextMuted, Modifier.weight(1f))
+                StatTile("SPREAD", formatSpread(spread), AurumColors.Gold, Modifier.weight(1f))
+            }
+            Text(
+                if (market.bid != null && market.ask != null) "اسپرد از همان تیک زندهٔ منبع فعلی است؛ اگر قیمت دیررس شود، این اعداد هم مجوز ورود نیستند."
+                else "منبع فعلی bid/ask جدا منتشر نکرده؛ وقتی فید Swissquote فعال باشد bid/ask/spread ثانیه‌ای نمایش داده می‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 4.dp))
             if (!price.current && market.feed.detail.isNotBlank()) Text(market.feed.detail,
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
                 modifier = Modifier.padding(top = 5.dp))

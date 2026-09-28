@@ -38,7 +38,10 @@ import com.aurum.edge.engine.IctRangeAnalyzer
 import com.aurum.edge.ui.components.EmptyState
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.SignalSummaryCard
+import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatPrice
+import com.aurum.edge.ui.components.formatQuotePrice
+import com.aurum.edge.ui.components.formatSpread
 import com.aurum.edge.ui.components.formatTime
 import com.aurum.edge.ui.theme.AurumColors
 
@@ -99,6 +102,25 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
             val change = previousClose?.let { shown.close - it }
             val structure = remember(market.candles, market.interval) {
                 IctRangeAnalyzer.analyze(market.candles, market.interval)
+            }
+            val liveTick = market.feed.mode == FeedMode.LIVE && !market.showingCachedData
+            val spread = market.bid?.let { bid -> market.ask?.let { ask -> ask - bid } }
+            SectionCard(
+                title = if (liveTick) "تیک زنده · ${market.feed.provider}" else "تیک زنده در دسترس نیست",
+                subtitle = if (liveTick) "چارت با هر تیک واقعی به‌روزرسانی می‌شود؛ تغییر فقط وقتی منبع قیمت جدید بدهد دیده می‌شود"
+                    else market.feed.detail.ifBlank { "کندل REST/کش جای تیک لحظه‌ای نیست" },
+            ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StatTile("LAST", formatQuotePrice(market.lastPrice), if (liveTick) AurumColors.Cyan else AurumColors.TextMuted, Modifier.weight(1f))
+                    StatTile("BID", formatQuotePrice(market.bid), if (liveTick) AurumColors.Green else AurumColors.TextMuted, Modifier.weight(1f))
+                    StatTile("ASK", formatQuotePrice(market.ask), if (liveTick) AurumColors.Red else AurumColors.TextMuted, Modifier.weight(1f))
+                    StatTile("SPREAD", formatSpread(spread), AurumColors.Gold, Modifier.weight(1f))
+                }
+                Text(
+                    if (market.bid != null && market.ask != null) "bid/ask/spread از فید زندهٔ فعلی است. مسیر جایگزین Swissquote هر ۱ ثانیه فقط نماد فعال را می‌خواند؛ قیمت ساخته نمی‌شود."
+                    else "این منبع bid/ask جدا ندارد؛ اگر Twelve WebSocket ندهد، فید جایگزین Swissquote/Gold-API با bid/ask برچسب‌دار فعال می‌شود.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                    modifier = Modifier.padding(top = 6.dp))
             }
 
             CandleChart(

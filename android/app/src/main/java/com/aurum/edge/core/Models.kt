@@ -39,7 +39,9 @@ enum class Interval(val api: String, val label: String, val minutes: Int) {
     }
 }
 
-data class PriceTick(val price: Double, val at: Long)
+data class PriceTick(val price: Double, val at: Long, val bid: Double? = null, val ask: Double? = null) {
+    val spread: Double? get() = if (bid != null && ask != null && ask >= bid) ask - bid else null
+}
 
 enum class SignalAction { BUY, SELL, NO_TRADE }
 

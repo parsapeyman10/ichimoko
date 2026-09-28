@@ -62,6 +62,29 @@ fun NewsClassificationRow(classification: NewsClassification, modifier: Modifier
 fun formatPrice(value: Double?): String =
     if (value == null) "—" else String.format(Locale.US, "%,.2f", value)
 
+fun formatQuotePrice(value: Double?): String {
+    if (value == null) return "—"
+    val abs = kotlin.math.abs(value)
+    val digits = when {
+        abs >= 1000.0 -> 2
+        abs >= 100.0 -> 3
+        abs >= 10.0 -> 4
+        else -> 5
+    }
+    return String.format(Locale.US, "%,.${digits}f", value)
+}
+
+fun formatSpread(value: Double?): String {
+    if (value == null) return "—"
+    val abs = kotlin.math.abs(value)
+    val digits = when {
+        abs >= 1.0 -> 2
+        abs >= 0.01 -> 4
+        else -> 5
+    }
+    return String.format(Locale.US, "%,.${digits}f", value)
+}
+
 fun formatSigned(value: Double?, digits: Int = 2): String {
     if (value == null) return "—"
     val sign = if (value >= 0) "+" else "−"

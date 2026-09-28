@@ -175,7 +175,11 @@ class TwelveDataClient(
         if ((receivedAt - at) !in -30_000L..90_000L) return null
         val price = event["price"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
             ?.takeIf { it.isFinite() && it > 0.0 } ?: return null
-        return PriceTick(price, at)
+        val bid = event["bid"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it > 0.0 }
+        val ask = event["ask"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it > 0.0 && (bid == null || it >= bid) }
+        return PriceTick(price, at, bid = bid, ask = ask)
     }
 
     // Provider-supplied messages may echo the request URL, which contains the API key.

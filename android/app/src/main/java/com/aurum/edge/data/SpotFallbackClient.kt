@@ -82,7 +82,7 @@ class SpotFallbackClient(
         val at = tsRaw.toLong()
         val age = System.currentTimeMillis() - at
         if (age !in -10_000L..MAX_QUOTE_AGE_MS) throw DataFeedException("قیمت Swissquote قدیمی یا با زمان نامعتبر است")
-        return PriceTick((bid + ask) / 2.0, at)
+        return PriceTick((bid + ask) / 2.0, at, bid = bid, ask = ask)
     }
 
     /** gold-api.com: a second, independent, keyless source — gold (XAU/USD) only. */
@@ -143,6 +143,6 @@ class SpotFallbackClient(
 
     companion object {
         private const val MAX_QUOTE_AGE_MS = 45_000L
-        const val POLL_INTERVAL_MS = 5_000L
+        const val POLL_INTERVAL_MS = 1_000L
     }
 }
