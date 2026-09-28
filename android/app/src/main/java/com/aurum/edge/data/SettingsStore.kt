@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.Interval
+import com.aurum.edge.core.SignalProfile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,6 +43,7 @@ class SettingsStore(context: Context) {
         newsAiBaseUrl = prefs.getString(KEY_NEWS_AI_URL, "").orEmpty(),
         newsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, "").orEmpty(),
         newsAiFormat = prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" },
+        signalProfile = SignalProfile.fromName(prefs.getString(KEY_SIGNAL_PROFILE, SignalProfile.BASE.name)),
     )
 
     /**
@@ -148,6 +150,7 @@ class SettingsStore(context: Context) {
             .putString(KEY_ALERT_SOUND_URI, next.alertSoundUri)
             .putString(KEY_ALERT_SOUND_NAME, next.alertSoundName)
             .putString(KEY_NEWS_URL, next.newsBaseUrl.trim())
+            .putString(KEY_SIGNAL_PROFILE, next.signalProfile.name)
             .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
             .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
             .apply()
@@ -180,6 +183,7 @@ class SettingsStore(context: Context) {
         private const val KEY_NEWS_AI_KEY = "news_ai_client_key"
         private const val KEY_NEWS_AI_URL = "news_ai_client_base_url"
         private const val KEY_NEWS_AI_MODEL = "news_ai_client_model"
-    private const val KEY_NEWS_AI_FORMAT = "news_ai_format"
+        private const val KEY_NEWS_AI_FORMAT = "news_ai_format"
+        private const val KEY_SIGNAL_PROFILE = "signal_profile"
     }
 }

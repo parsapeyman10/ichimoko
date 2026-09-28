@@ -5,6 +5,7 @@ import com.aurum.edge.core.ConfluenceItem
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.core.SignalProfile
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -106,6 +107,10 @@ object SignalEngine {
         val chikouSellClear: Boolean,
         val bullCross: Boolean,
         val bearCross: Boolean,
+        val spanBFlatBars: Int,
+        val spanBFlatValue: Double?,
+        val rangeBreakoutUp: Boolean,
+        val rangeBreakoutDown: Boolean,
     )
 
     fun snapshot(series: Series, index: Int): Snapshot? {
@@ -139,6 +144,25 @@ object SignalEngine {
         val chikouBuyClear = chikouIndex >= 0 && bars[i].close > bars[chikouIndex].high
         val chikouSellClear = chikouIndex >= 0 && bars[i].close < bars[chikouIndex].low
 
+        val rawSpanB = series.ichimoku.senkouB.getOrNull(i)
+        val flatTolerance = max(atrValue * 0.02, bars[i].close * 0.00005)
+        var spanBFlatBars = 0
+        if (rawSpanB != null) {
+            var j = i
+            while (j >= 0 && spanBFlatBars < 40) {
+                val b = series.ichimoku.senkouB.getOrNull(j) ?: break
+                if (abs(b - rawSpanB) > flatTolerance) break
+                spanBFlatBars++
+                j--
+            }
+        }
+        val rangeStart = max(0, i - 20)
+        val recent = if (rangeStart < i) bars.subList(rangeStart, i) else emptyList()
+        val rangeHigh = recent.maxOfOrNull { it.high } ?: bars[i].high
+        val rangeLow = recent.minOfOrNull { it.low } ?: bars[i].low
+        val rangeBreakoutUp = bars[i].close > rangeHigh + 0.08 * atrValue
+        val rangeBreakoutDown = bars[i].close < rangeLow - 0.08 * atrValue
+
         return Snapshot(
             index = i,
             barTime = bars[i].time,
@@ -163,6 +187,10 @@ object SignalEngine {
             chikouSellClear = chikouSellClear,
             bullCross = crossedUpNow || crossedUpBefore,
             bearCross = crossedDownNow || crossedDownBefore,
+            spanBFlatBars = spanBFlatBars,
+            spanBFlatValue = rawSpanB,
+            rangeBreakoutUp = rangeBreakoutUp,
+            rangeBreakoutDown = rangeBreakoutDown,
         )
     }
 
@@ -176,6 +204,7 @@ object SignalEngine {
         threshold: Double = 72.0,
         spread: Double? = null,
         narrative: Boolean = true,
+        profile: SignalProfile = SignalProfile.BASE,
     ): Signal {
         val interval = series.interval
         val bars = series.bars
@@ -196,29 +225,62 @@ object SignalEngine {
             barTime = bars.getOrNull(index)?.time ?: 0L,
         )
 
-        val direction = when {
+        val crossDirection = when {
             snap.bullCross -> SignalAction.BUY
             snap.bearCross -> SignalAction.SELL
             else -> null
         }
+        val flatLong = snap.spanBFlatBars >= 8 && snap.spanBFlatValue != null &&
+            snap.price > snap.spanBFlatValue + 0.10 * snap.atr &&
+            (snap.rangeBreakoutUp || (snap.adx ?: 0.0) >= 20.0)
+        val flatShort = snap.spanBFlatBars >= 8 && snap.spanBFlatValue != null &&
+            snap.price < snap.spanBFlatValue - 0.10 * snap.atr &&
+            (snap.rangeBreakoutDown || (snap.adx ?: 0.0) >= 20.0)
+        val flatDirection = when {
+            flatLong -> SignalAction.BUY
+            flatShort -> SignalAction.SELL
+            else -> null
+        }
+        val direction = crossDirection ?: if (profile == SignalProfile.FLAT_SPAN_B) flatDirection else null
+        val usedFlatEntry = crossDirection == null && direction != null && flatDirection == direction
         val long = direction == SignalAction.BUY
         val reasons = mutableListOf<String>()
         val blockers = mutableListOf<String>()
         val confluence = mutableListOf<ConfluenceItem>()
         val minThreshold = threshold.coerceAtLeast(72.0)
 
-        var score = 20.0
+        var score = if (usedFlatEntry) 30.0 else 20.0
         if (direction != null) {
-            if (narrative) reasons += if (long) "کراس تازه صعودی تنکان/کیجون" else "کراس تازه نزولی تنکان/کیجون"
+            if (narrative) reasons += when {
+                crossDirection != null -> if (long) "کراس تازه صعودی تنکان/کیجون" else "کراس تازه نزولی تنکان/کیجون"
+                usedFlatEntry -> if (long) "سناریوی تختی SpanB52: شکست رو به بالا پس از سکون خط ۵۲" else "سناریوی تختی SpanB52: شکست رو به پایین پس از سکون خط ۵۲"
+                else -> "جهت سیگنال تأیید شد"
+            }
         } else if (narrative) {
-            blockers += "کراس تازه تنکان/کیجون شکل نگرفته — ورود ممنوع"
+            blockers += if (profile == SignalProfile.FLAT_SPAN_B)
+                "نه کراس تنکان/کیجون داریم، نه شکست معتبر از تختی SpanB52"
+            else "کراس تازه تنکان/کیجون شکل نگرفته — ورود ممنوع"
         }
         if (narrative) {
             confluence += ConfluenceItem(
                 "کراس تنکان/کیجون (${series.setting.tenkan}/${series.setting.kijun})",
-                direction != null,
+                crossDirection != null,
                 "T ${fmt(snap.tenkan)} / K ${fmt(snap.kijun)}",
             )
+        }
+
+        if (narrative) {
+            val flatOk = flatDirection == direction && direction != null
+            confluence += ConfluenceItem(
+                "آپشن تختی SpanB52",
+                flatOk,
+                "${snap.spanBFlatBars} کندل تخت · B ${snap.spanBFlatValue?.let { fmt(it) } ?: "—"} · شکست ${if (snap.rangeBreakoutUp) "بالا" else if (snap.rangeBreakoutDown) "پایین" else "ندارد"}",
+                status = if (profile == SignalProfile.FLAT_SPAN_B && flatOk) com.aurum.edge.core.ConfluenceStatus.CONFIRMED else com.aurum.edge.core.ConfluenceStatus.UNKNOWN,
+            )
+        }
+        if (profile == SignalProfile.FLAT_SPAN_B) {
+            if (flatDirection == direction && direction != null) score += 18
+            else if (direction != null && narrative) blockers += "پروفایل SpanB52 روشن است اما تختی/شکست خط ۵۲ تأیید نشد"
         }
 
         val clearance = 0.08 * snap.atr
@@ -318,15 +380,26 @@ object SignalEngine {
             if (spreadBlocked && narrative) blockers += "اسپرد غیرعادی (${fmt(spread)}) — اجرا متوقف"
             if (narrative) confluence += ConfluenceItem("اسپرد", !spreadBlocked, fmt(spread))
         }
+        val volumeOk = snap.relVolume?.let { it >= 0.6 }
         if (narrative) {
-            snap.relVolume?.let { rv -> confluence += ConfluenceItem("حجم نسبی ۳۰ کندل", rv >= 0.6, "${fmt(rv)}×") }
+            confluence += ConfluenceItem("حجم نسبی ۳۰ کندل", volumeOk != false, snap.relVolume?.let { "${fmt(it)}×" } ?: "حجم معتبر از منبع نداریم")
+        }
+        if (profile == SignalProfile.MOMENTUM_VOLUME && direction != null) {
+            if (!momentumOk) blockers += "پروفایل مومنتوم/حجم: MACD/ADX باید هم‌جهت و قوی باشد"
+            if (volumeOk == false) blockers += "پروفایل مومنتوم/حجم: حجم نسبی کمتر از حداقل است"
+            if (momentumOk && volumeOk != false) score += 8
         }
 
         if (direction == null) score = min(score, 69.0)
         score = score.coerceIn(0.0, 100.0)
         val conf = score
 
-        val actionable = direction != null && conf >= minThreshold && !snap.atrShock && !spreadBlocked
+        val profileOk = when (profile) {
+            SignalProfile.BASE -> true
+            SignalProfile.MOMENTUM_VOLUME -> momentumOk && volumeOk != false
+            SignalProfile.FLAT_SPAN_B -> flatDirection == direction
+        }
+        val actionable = direction != null && conf >= minThreshold && !snap.atrShock && !spreadBlocked && profileOk
         if (!actionable) {
             if (narrative && conf < minThreshold && direction != null) {
                 blockers += "امتیاز همگرایی ${fmt(conf)} کمتر از آستانه ${fmt(minThreshold)}"
@@ -370,9 +443,10 @@ object SignalEngine {
     }
 
     /** Convenience for the live path: evaluate the newest closed bar. */
-    fun evaluate(candles: List<Candle>, interval: Interval, threshold: Double = 72.0, spread: Double? = null): Signal {
+    fun evaluate(candles: List<Candle>, interval: Interval, threshold: Double = 72.0, spread: Double? = null,
+                 profile: SignalProfile = SignalProfile.BASE): Signal {
         val s = series(candles, interval)
-        return decide(s, s.lastIndex, threshold, spread)
+        return decide(s, s.lastIndex, threshold, spread, profile = profile)
     }
 
     private fun fmt(value: Double): String = String.format("%.2f", value)

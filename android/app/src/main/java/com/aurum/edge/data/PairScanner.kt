@@ -138,7 +138,7 @@ class PairScanner(
             }
             val price = candles.lastOrNull()?.close
             val evaluated = withContext(Dispatchers.Default) {
-                runCatching { SignalEngine.evaluate(candles, interval, config.minConfidence, config.spreadPrice) }.getOrNull()
+                runCatching { SignalEngine.evaluate(candles, interval, config.minConfidence, config.spreadPrice, config.signalProfile) }.getOrNull()
             }
             if (evaluated == null) { update(symbol, "error", "ارزیابی سیگنال روی کندل‌های دریافتی ممکن نشد", price); return@forEachIndexed }
             val combined = NewsConfluence.apply(evaluated, symbol, headlines, now)!!

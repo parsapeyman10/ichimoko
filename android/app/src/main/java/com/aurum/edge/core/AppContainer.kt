@@ -131,6 +131,7 @@ class AppContainer(context: Context) {
         commissionPerOz: Double, threshold: Double,
     ): Backtester.Result = withContext(Dispatchers.Default) {
         val imported = MetaTraderCsv.parse(csv, interval, timezone)
+        val settings = settingsStore.read()
         val volumeNote = if (imported.volumeProvided) ")"
             else "؛ بدون ستون حجم — حجم ۰ فقط برای اندیکاتورهای حجمی ثبت شد)"
         Backtester.run(
@@ -139,6 +140,7 @@ class AppContainer(context: Context) {
                 "${imported.candles.size} از ${imported.totalRows} ردیف$volumeNote",
             initialBalance = initialBalance, riskPercent = riskPercent,
             spreadPrice = spreadPrice, commissionPerOz = commissionPerOz, threshold = threshold,
+            signalProfile = settings.signalProfile,
         )
     }
 
@@ -148,12 +150,14 @@ class AppContainer(context: Context) {
                                     commissionPerOz: Double, threshold: Double): Backtester.Result =
         withContext(Dispatchers.Default) {
             val merged = HistDataCsv.parseMerged(files, interval)
+            val settings = settingsStore.read()
             Backtester.run(candles = merged.candles, interval = merged.interval, symbol = merged.symbol,
                 dataSource = "HistData فایل‌های کاربر (${merged.months} ماه · ${merged.symbol} · " +
                     "تایم‌فریم ${merged.interval.label} تجمیع‌شده از M1 واقعی) · BID تاریخی · EST ثابت UTC−05:00 · " +
                     "${merged.candles.size} کندل از ${merged.totalRows} ردیف M1؛ منشأ فایل مستقل تأیید نشده",
                 initialBalance = initialBalance, riskPercent = riskPercent,
-                spreadPrice = spreadPrice, commissionPerOz = commissionPerOz, threshold = threshold)
+                spreadPrice = spreadPrice, commissionPerOz = commissionPerOz, threshold = threshold,
+                signalProfile = settings.signalProfile)
         }
 
     /** Walk-forward on the same downloaded real bars: older half in-sample, newer half unseen. */
@@ -181,6 +185,7 @@ class AppContainer(context: Context) {
                 spreadPrice = spreadPrice,
                 commissionPerOz = commissionPerOz,
                 threshold = threshold,
+                signalProfile = s.signalProfile,
             )
         }
     }
@@ -207,6 +212,7 @@ class AppContainer(context: Context) {
                 spreadPrice = spreadPrice,
                 commissionPerOz = commissionPerOz,
                 threshold = threshold,
+                signalProfile = s.signalProfile,
             )
         }
     }

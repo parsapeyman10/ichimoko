@@ -24,6 +24,7 @@ import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.PaperTicket
 import com.aurum.edge.core.Signal
+import com.aurum.edge.core.SignalProfile
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.TradeReplay
 import com.aurum.edge.core.WalkForwardRecord
@@ -313,6 +314,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun saveBalance(value: Double) = container.settingsStore.update { it.copy(accountBalance = value.coerceAtLeast(10.0)) }
 
     fun saveMinConfidence(value: Double) = container.settingsStore.update { it.copy(minConfidence = value.coerceIn(72.0, 95.0)) }
+
+    fun setSignalProfile(profile: SignalProfile) {
+        container.settingsStore.update { it.copy(signalProfile = profile) }
+        container.market.restart()
+        _toast.value = "پروفایل موتور: ${profile.title}"
+    }
 
     /** Cost assumptions are the user's responsibility; they are echoed in every report. */
     fun saveSpread(value: Double) = container.settingsStore.update { it.copy(spreadPrice = value.coerceIn(0.0, 5.0)) }

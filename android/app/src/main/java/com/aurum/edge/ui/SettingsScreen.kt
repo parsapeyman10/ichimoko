@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
 import com.aurum.edge.BuildConfig
 import com.aurum.edge.core.AppSettings
+import com.aurum.edge.core.SignalProfile
 import com.aurum.edge.data.SourceCatalog
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.service.SignalMonitorService
@@ -162,6 +163,24 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
         }
 
         WatchSettingsSection(viewModel)
+
+        SectionCard("پروفایل موتور سیگنال", "پایه مستقل می‌ماند؛ با انتخاب هر گزینه موتور همان حالت را برای چارت، رادار و بک‌تست پژوهشی به‌کار می‌گیرد") {
+            SignalProfile.entries.forEach { profile ->
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(profile.title, style = MaterialTheme.typography.bodySmall,
+                            color = if (settings.signalProfile == profile) AurumColors.Gold else AurumColors.TextPrimary)
+                        Text(profile.detail, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                    }
+                    Switch(checked = settings.signalProfile == profile, onCheckedChange = { checked ->
+                        if (checked) viewModel.setSignalProfile(profile)
+                    })
+                }
+            }
+            Text("تختی SpanB 52 همان میانگین ۵۲ کندل ایچیموکو است: اگر چند کندل ثابت بماند یعنی سقف/کف ۵۲تایی عوض نشده؛ فقط وقتی قیمت از آن و از رنج کوتاه خارج شود به‌عنوان سناریوی رشد/ریزش بررسی می‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 6.dp))
+        }
 
         SectionCard("گیت خبر و AI فارکس", "تقویم Forex Factory و خبرهای واقعی وب بی‌نیاز از سرور؛ شرط نهم با سرور HTTPS یا کلید مستقیم زیر تأمین می‌شود") {
             OutlinedTextField(

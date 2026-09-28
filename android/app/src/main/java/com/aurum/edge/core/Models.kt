@@ -45,6 +45,17 @@ data class PriceTick(val price: Double, val at: Long, val bid: Double? = null, v
 
 enum class SignalAction { BUY, SELL, NO_TRADE }
 
+enum class SignalProfile(val title: String, val detail: String) {
+    BASE("ایچیموکو تلفیقی", "پایهٔ فعلی؛ حجم/مومنتوم فقط همگرایی کمکی‌اند"),
+    MOMENTUM_VOLUME("مومنتوم/حجم سخت‌گیرانه", "همان پایه، ولی MACD/ADX و حجم معتبر اگر موجود باشد باید تأیید کنند"),
+    FLAT_SPAN_B("تختی SpanB 52", "ورود اختیاری وقتی خط ۵۲ مدتی تخت است و قیمت از رنج خارج می‌شود"),
+    ;
+
+    companion object {
+        fun fromName(raw: String?): SignalProfile = entries.firstOrNull { it.name == raw } ?: BASE
+    }
+}
+
 enum class ConfluenceStatus { CONFIRMED, CONFLICT, UNKNOWN }
 
 data class ConfluenceItem(
@@ -467,6 +478,7 @@ data class AppSettings(
      * host). Explicit beats guessing for proxy keys with non-standard prefixes.
      */
     val newsAiFormat: String = "AUTO",
+    val signalProfile: SignalProfile = SignalProfile.BASE,
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
     val hasClientNewsAi: Boolean get() = newsAiApiKey.isNotBlank() && newsAiBaseUrl.isNotBlank() && newsAiModel.isNotBlank()
