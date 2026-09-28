@@ -3,6 +3,7 @@ package com.aurum.edge.data
 import android.content.Context
 import android.util.AtomicFile
 import com.aurum.edge.core.Candle
+import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -22,7 +23,7 @@ class CandleCache(context: Context) {
         File(dir, "verified_v2_${symbol.replace("/", "_")}_${interval.label}.json")
 
     internal fun verify(candles: List<Candle>, interval: Interval, now: Long = System.currentTimeMillis()): List<Candle> {
-        require(candles.size <= MAX_BARS) { "تعداد کندل ذخیره‌شده معتبر نیست" }
+        require(candles.size <= HistoryPolicy.MAX_CACHED_CANDLES) { "تعداد کندل ذخیره‌شده معتبر نیست" }
         val seen = mutableSetOf<Long>()
         candles.forEach { bar ->
             require(bar.time > 0L && bar.time <= now + 60_000L && bar.time % interval.millis == 0L && seen.add(bar.time) &&
@@ -45,7 +46,7 @@ class CandleCache(context: Context) {
     }
 
     suspend fun save(symbol: String, interval: Interval, candles: List<Candle>) = withContext(Dispatchers.IO) {
-        val verified = verify(candles.sortedBy { it.time }.takeLast(MAX_BARS), interval)
+        val verified = verify(HistoryPolicy.trimForCache(candles), interval)
         val bytes = json.encodeToString(serializer, verified).toByteArray(Charsets.UTF_8)
         require(bytes.size <= MAX_FILE_BYTES) { "حجم کش کندل بیش از حد است" }
         val atomic = AtomicFile(file(symbol, interval))
@@ -64,7 +65,7 @@ class CandleCache(context: Context) {
         if (incoming.isEmpty()) return load(symbol, interval)
         val existing = load(symbol, interval).associateBy { it.time }.toMutableMap()
         verify(incoming, interval).forEach { existing[it.time] = it }
-        val merged = verify(existing.values.sortedBy { it.time }.takeLast(MAX_BARS), interval)
+        val merged = verify(HistoryPolicy.trimForCache(existing.values.toList()), interval)
         save(symbol, interval, merged)
         return merged
     }
@@ -74,7 +75,6 @@ class CandleCache(context: Context) {
     }
 
     companion object {
-        private const val MAX_BARS = 3000
         private const val MAX_FILE_BYTES = 2_000_000
     }
 }

@@ -36,6 +36,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
 import com.aurum.edge.data.FreeHistoryCatalog
 import com.aurum.edge.data.FreeHistoryResult
@@ -68,7 +69,7 @@ fun LearnScreen(viewModel: AurumViewModel) {
     }
 
     var interval by remember { mutableStateOf(settings.interval) }
-    var bars by remember { mutableStateOf(1000) }
+    var bars by remember { mutableStateOf(HistoryPolicy.TARGET_CANDLES) }
     var balance by remember { mutableStateOf(settings.accountBalance.toString()) }
     var risk by remember { mutableStateOf(settings.riskPercent.toString()) }
     var spread by remember { mutableStateOf(settings.spreadPrice.toString()) }
@@ -126,7 +127,7 @@ fun LearnScreen(viewModel: AurumViewModel) {
                     .padding(top = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                listOf(500, 1000, 2000, 5000).forEach { count ->
+                listOf(HistoryPolicy.TARGET_CANDLES, 5000).forEach { count ->
                     FilterChip(
                         selected = bars == count,
                         onClick = { bars = count },
@@ -234,7 +235,7 @@ fun LearnScreen(viewModel: AurumViewModel) {
         }
 
         SectionCard("دریافت خودکار دادهٔ تاریخی", "منابع رایگان مشخص؛ اسپات روزانهٔ طلا ممکن است طرح پولی بخواهد") {
-            Text("ارز: نرخ مرجع ECB؛ طلا: میانگین ماهانهٔ بانک جهانی از DataHub؛ هر دو بدون کلید. سهام آمریکا: کندل روزانهٔ Twelve Data با کلید خواندنی رایگان. اسپات روزانهٔ طلا ممکن است پلن پولی ناشر بخواهد. این سری‌ها برای پژوهش‌اند، نه تیک زنده یا سفارش.",
+            Text("بک‌تست بالا حداقل ۳۰۰۰ کندل از منبع آنلاین فعال می‌گیرد. این بخش CSV جداست: ارزها نرخ مرجع ECB و طلا میانگین ماهانهٔ بانک جهانی از DataHub را بدون کلید می‌گیرند؛ اسپات روزانهٔ طلا از Twelve Data ممکن است پلن پولی ناشر بخواهد. این سری‌ها برای پژوهش‌اند، نه تیک زنده یا سفارش.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
             FreeHistoryCatalog.choices.forEach { choice ->
                 FilterChip(selected = freeSource == choice.id, onClick = { freeSource = choice.id },
@@ -244,7 +245,7 @@ fun LearnScreen(viewModel: AurumViewModel) {
             Text("منبع: ${selected.sourceTitle}", style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.Cyan, modifier = Modifier.padding(top = 4.dp))
             if (selected.kind == com.aurum.edge.data.FreeHistoryKind.TWELVE_DAILY && !settings.hasKey) {
-                Text("برای سهم، کلید رایگان Twelve Data را در تنظیمات وارد کن؛ برای اسپات روزانهٔ طلا، خودِ کلید کافی نیست و ممکن است دسترسی پولی به Commodities لازم باشد. طلا ماهانه بدون کلید بالاست.",
+                Text("برای اسپات روزانهٔ طلا، کلید Twelve Data را در تنظیمات وارد کن؛ خودِ کلید کافی نیست و ممکن است دسترسی پولی به Commodities لازم باشد. طلا ماهانه بدون کلید بالاست.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

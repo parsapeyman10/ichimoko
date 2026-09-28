@@ -12,7 +12,7 @@ object PaperAutoRules {
         if (!settings.autoPaperTrading) return "معاملهٔ خودکار کاغذی خاموش است"
         // REST publishes a recent BAR, not a timestamped last trade within that bar.
         // It can justify an educational candidate, never an automatic paper fill.
-        if (market.feed.mode != FeedMode.LIVE) return "ورود خودکار کاغذی فقط با تیک تازهٔ زنده مجاز است؛ کندل REST نامزد آموزشی است"
+        if (market.feed.mode != FeedMode.LIVE) return "ورود خودکار کاغذی فقط با تیک تازهٔ زنده مجاز است؛ کندل/تاریخچهٔ دوره‌ای فقط نامزد آموزشی است"
         return opportunityBlocker(market, settings, news, now)
     }
 

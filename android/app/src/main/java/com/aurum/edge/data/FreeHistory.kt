@@ -1,5 +1,6 @@
 package com.aurum.edge.data
 
+import com.aurum.edge.core.HistoryPolicy
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -102,7 +103,7 @@ class FreeHistoryDownloader(
             FreeHistoryKind.TWELVE_DAILY -> {
                 require(twelveKey.isNotBlank()) { "برای سهم/طلای اسپات، کلید داده‌خوانی Twelve Data را در تنظیمات وارد کنید (طلای روزانه شاید دسترسی پولی بخواهد)" }
                 val url = "https://api.twelvedata.com/time_series?symbol=${URLEncoder.encode(choice.code, "UTF-8")}" +
-                    "&interval=1day&outputsize=365&order=ASC&timezone=UTC&apikey=${URLEncoder.encode(twelveKey.trim(), "UTF-8")}"
+                    "&interval=1day&outputsize=${HistoryPolicy.providerRequestSize(HistoryPolicy.TARGET_CANDLES)}&order=ASC&timezone=UTC&apikey=${URLEncoder.encode(twelveKey.trim(), "UTF-8")}"
                 val raw = fetch(url)
                 FreeHistoryResult.Ohlc(choice, parseTwelveDaily(raw, choice, today), choice.sourcePage, System.currentTimeMillis())
             }
@@ -176,13 +177,13 @@ class FreeHistoryDownloader(
         require(meta.text("symbol") == choice.code && meta.text("interval") == "1day" &&
             meta.text("currency") == "USD") { "نماد/واحد/بازهٔ زمانی پاسخ با درخواست یکسان نیست" }
         val values = root["values"] as? JsonArray ?: error("کندل روزانه موجود نیست")
-        require(values.size in 30..365) { "تعداد کندل روزانه قابل اتکا نیست" }
+        require(values.size in HistoryPolicy.TARGET_CANDLES..HistoryPolicy.MAX_PROVIDER_CANDLES) { "تعداد کندل روزانه قابل اتکا نیست" }
         val parsed = values.mapNotNull { value ->
             val bar = value as? JsonObject ?: error("کندل نامعتبر است")
             val date = parseDate(bar.text("datetime"))
             // An intraday/unfinished 'daily' bar is never returned as a completed EOD observation.
             if (date >= today) null else {
-                require(date >= today.minusDays(800)) { "تاریخ کندل خارج از پنجرهٔ انتخابی است" }
+                require(date >= today.minusDays(6_000)) { "تاریخ کندل خارج از پنجرهٔ انتخابی است" }
                 val open = bar.positive("open")
                 val high = bar.positive("high")
                 val low = bar.positive("low")
@@ -196,7 +197,7 @@ class FreeHistoryDownloader(
                 DailyOhlc(date, open, high, low, close, volume)
             }
         }.sortedBy { it.date }
-        require(parsed.size >= 30 && parsed.distinctBy { it.date }.size == parsed.size &&
+        require(parsed.size >= HistoryPolicy.TARGET_CANDLES && parsed.distinctBy { it.date }.size == parsed.size &&
             parsed.last().date >= today.minusDays(10)) { "کندل‌های روزانه کافی، تازه یا یکتا نیستند" }
         return parsed
     }

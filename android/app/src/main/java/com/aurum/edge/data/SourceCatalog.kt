@@ -5,7 +5,7 @@ object SourceCatalog {
     val yahoo = SourceDef(
         id = "stocks_yahoo",
         title = "Yahoo Finance",
-        subtitle = "قیمت مستقل جفت‌ارزهای دلاری",
+        subtitle = "قیمت/جرقهٔ عمومی فارکس و طلا بدون کلید",
         kind = SourceKind.JSON_REST,
         urlTemplate = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=5m&range=1d&includePrePost=false",
         pricePath = "chart.result[0].meta.regularMarketPrice",
@@ -16,7 +16,7 @@ object SourceCatalog {
         timestampPath = "chart.result[0].meta.regularMarketTime",
         timestampMode = SourceTime.UNIX_SECONDS,
         unit = "$",
-        symbols = listOf("EURUSD=X", "GBPUSD=X", "AUDUSD=X", "NZDUSD=X").map { SymbolDef(it, it) },
+        symbols = listOf("XAUUSD=X", "EURUSD=X", "GBPUSD=X", "AUDUSD=X", "NZDUSD=X", "JPY=X", "CHF=X", "CAD=X").map { SymbolDef(it, it) },
     )
 
     /** Read-only quote endpoint. The user's API key is inserted only into this HTTPS request. */

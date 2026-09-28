@@ -155,7 +155,7 @@ fun HomeScreen(
                 modifier = Modifier.padding(top = 5.dp))
             Button(onClick = onChart,
                 modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
-                Text(if (settings.hasKey) "دیدن چارت و داده‌ها" else "دیدن چارت (فید رایگان زنده) · کلید برای تاریخچه")
+                Text(if (settings.hasKey) "دیدن چارت و داده‌ها" else "دیدن چارت (۳۰۰۰ کندل رایگان + تیک زنده)")
             }
         }
 

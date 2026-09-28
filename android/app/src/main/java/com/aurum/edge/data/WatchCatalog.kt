@@ -17,8 +17,8 @@ object WatchCatalog {
     /** Forex-only watch: gold plus the seven most-traded currency pairs, all real read-only providers. */
     val symbols = listOf(
         WatchSymbol("XAU/USD", "طلای جهانی (هر انس)", "$",  linkedMapOf(
-            "twelve_data_quote" to "XAU/USD",
-        ), listOf("twelve_data_quote"), 10 * 60_000L, 0.5),
+            "twelve_data_quote" to "XAU/USD", "stocks_yahoo" to "XAUUSD=X",
+        ), listOf("twelve_data_quote", "stocks_yahoo"), 10 * 60_000L, 0.5),
         WatchSymbol("EUR/USD", "یورو / دلار", "$", linkedMapOf(
             "twelve_data_quote" to "EUR/USD", "stocks_yahoo" to "EURUSD=X",
         ), listOf("twelve_data_quote", "stocks_yahoo"), 5 * 60_000L, 0.3),
@@ -32,14 +32,14 @@ object WatchCatalog {
             "twelve_data_quote" to "NZD/USD", "stocks_yahoo" to "NZDUSD=X",
         ), listOf("twelve_data_quote", "stocks_yahoo"), 5 * 60_000L, 0.3),
         WatchSymbol("USD/JPY", "دلار / ین ژاپن", "JPY", linkedMapOf(
-            "twelve_data_quote" to "USD/JPY",
-        ), listOf("twelve_data_quote"), 5 * 60_000L, 0.3),
+            "twelve_data_quote" to "USD/JPY", "stocks_yahoo" to "JPY=X",
+        ), listOf("twelve_data_quote", "stocks_yahoo"), 5 * 60_000L, 0.3),
         WatchSymbol("USD/CHF", "دلار / فرانک سوئیس", "CHF", linkedMapOf(
-            "twelve_data_quote" to "USD/CHF",
-        ), listOf("twelve_data_quote"), 5 * 60_000L, 0.3),
+            "twelve_data_quote" to "USD/CHF", "stocks_yahoo" to "CHF=X",
+        ), listOf("twelve_data_quote", "stocks_yahoo"), 5 * 60_000L, 0.3),
         WatchSymbol("USD/CAD", "دلار / دلار کانادا", "CAD", linkedMapOf(
-            "twelve_data_quote" to "USD/CAD",
-        ), listOf("twelve_data_quote"), 5 * 60_000L, 0.3),
+            "twelve_data_quote" to "USD/CAD", "stocks_yahoo" to "CAD=X",
+        ), listOf("twelve_data_quote", "stocks_yahoo"), 5 * 60_000L, 0.3),
     )
 
     fun find(id: String): WatchSymbol? = symbols.firstOrNull { it.id == id }

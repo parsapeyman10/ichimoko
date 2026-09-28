@@ -96,10 +96,9 @@ class HomeReadoutTest {
         assertEquals(listOf("XAU/USD", "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD",
             "USD/JPY", "USD/CHF", "USD/CAD"), WatchCatalog.symbols.map { it.id })
         assertTrue(WatchCatalog.symbols.all { "IRT" !in it.id && it.unit != "تومان" })
-        // USD-quoted pairs have an independent second source for cross-checking
-        assertEquals(2, WatchCatalog.find("EUR/USD")!!.providerCodes.size)
-        // Non-USD-quoted pairs stay Twelve Data only; their Yahoo quotes are in another unit
-        assertEquals(1, WatchCatalog.find("USD/JPY")!!.providerCodes.size)
+        // Every working symbol has a Twelve Data mapping and a fixed public Yahoo mirror.
+        assertTrue(WatchCatalog.symbols.all { it.providerCodes.size == 2 })
+        assertEquals("XAUUSD=X", WatchCatalog.find("XAU/USD")!!.providerCodes["stocks_yahoo"])
         assertEquals("JPY", WatchCatalog.find("USD/JPY")!!.unit)
     }
 }

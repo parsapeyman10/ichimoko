@@ -1,6 +1,7 @@
 package com.aurum.edge.data
 
 import com.aurum.edge.core.Candle
+import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.PriceTick
 import kotlinx.coroutines.channels.awaitClose
@@ -45,14 +46,14 @@ class TwelveDataClient(
         apiKey: String,
         symbol: String,
         interval: Interval,
-        outputSize: Int = 1500,
+        outputSize: Int = HistoryPolicy.TARGET_CANDLES,
     ): List<Candle> {
         if (apiKey.isBlank()) throw DataFeedException("کلید Twelve Data وارد نشده است")
         val url = buildString {
             append("https://api.twelvedata.com/time_series?symbol=")
             append(URLEncoder.encode(symbol, "UTF-8").replace("%2F", "/"))
             append("&interval=").append(interval.api)
-            append("&outputsize=").append(outputSize.coerceIn(10, 5000))
+            append("&outputsize=").append(HistoryPolicy.providerRequestSize(outputSize))
             append("&order=ASC&timezone=UTC&apikey=")
             append(URLEncoder.encode(apiKey, "UTF-8"))
         }

@@ -13,6 +13,7 @@ import com.aurum.edge.core.AppContainer
 import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.FeedMode
+import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.data.SourceComparison
 import com.aurum.edge.data.VerificationStatus
 import com.aurum.edge.data.WatchCatalog
@@ -103,7 +104,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val news = container.news.state
     val publicWebNews = container.publicWebNews.state // Forex publisher snippets, not ninth-confluence evidence
     val forexCalendar = container.forexCalendar.state
-    /** All-pairs radar: periodic REST sweep status of every catalog pair. */
+    /** All-pairs radar: periodic online candle sweep status of every catalog pair. */
     val pairScan = container.pairScanner.state
     /** The AI trading companion's latest strictly-validated opinion (analysis, never a signal). */
     val traderOpinion = container.traderAdvisor.state
@@ -197,8 +198,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Forex is the app's only workspace: start the real feed as soon as the UI is visible. */
     fun startApp(context: Context) {
+        visibleOnlineLoopEnabled = true
         container.market.start()
         container.watch.loadCached()
+        ensureVisibleOnlineLoop()
         // A saved opt-in can outlive a killed service. Re-arm only when the UI is in the
         // foreground again; it stays off otherwise.
         if (settings.value.backgroundMonitor && !SignalMonitorService.running.value) {
@@ -214,12 +217,43 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     /** UI resume must not restart a healthy service socket; start() is idempotent. */
     fun resumeVisibleForexFeed() {
+        visibleOnlineLoopEnabled = true
         container.market.start()
     }
 
     /** When no user-enabled foreground service remains, do not keep a headless feed alive. */
     fun pauseInvisibleForexFeed() {
+        visibleOnlineLoopEnabled = false
         if (!SignalMonitorService.running.value) container.market.stop()
+    }
+
+    private var visibleOnlineLoopStarted = false
+    private var visibleOnlineLoopEnabled = false
+
+    /**
+     * While the app UI is open (or the user-enabled foreground monitor is running), keep every
+     * data section warm automatically. Individual repositories still enforce their own rate limits.
+     */
+    private fun ensureVisibleOnlineLoop() {
+        if (visibleOnlineLoopStarted) return
+        visibleOnlineLoopStarted = true
+        viewModelScope.launch {
+            var turns = 0
+            while (isActive) {
+                if ((visibleOnlineLoopEnabled || SignalMonitorService.running.value) && !MarketHours.forexWeekendClosed()) {
+                    if (turns % 3 == 0) container.watch.refreshNow()
+                    container.forexCalendar.refreshNow()
+                    if (turns % 5 == 0) container.publicWebNews.refreshNow()
+                    if (settings.value.pauseOnNews &&
+                        (settings.value.newsBaseUrl.isNotBlank() || settings.value.hasClientNewsAi)) {
+                        container.news.refreshNow()
+                    }
+                    container.traderAdvisor.refreshNow()
+                }
+                turns++
+                delay(60_000L)
+            }
+        }
     }
 
     fun refreshNow() = container.market.refreshNow()
@@ -629,9 +663,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         threshold: Double,
     ) {
         viewModelScope.launch {
-            _learn.value = LearnState.Loading("دانلود $bars کندل واقعی ${interval.label} از Twelve Data…")
+            val requestedBars = HistoryPolicy.providerRequestSize(bars)
+            val displayBars = bars.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)
+            _learn.value = LearnState.Loading("دانلود حداقل $displayBars کندل واقعی ${interval.label} از منبع آنلاین فعال…")
             try {
-                val result = container.runBacktest(interval, bars, balance, risk, spread, commission, threshold)
+                val result = container.runBacktest(interval, requestedBars, balance, risk, spread, commission, threshold)
                 _learn.value = LearnState.Done(result, interval)
             } catch (e: Exception) {
                 _learn.value = LearnState.Failed(e.message ?: "خطا در دریافت داده واقعی")
@@ -729,9 +765,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         threshold: Double,
     ) {
         viewModelScope.launch {
-            _walkForward.value = WalkForwardState.Loading("دانلود $bars کندل واقعی ${interval.label} و تقسیم به داخل/خارج نمونه…")
+            val requestedBars = HistoryPolicy.providerRequestSize(bars)
+            val displayBars = bars.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)
+            _walkForward.value = WalkForwardState.Loading("دانلود حداقل $displayBars کندل واقعی ${interval.label} و تقسیم به داخل/خارج نمونه…")
             try {
-                val result = container.runWalkForward(interval, bars, balance, risk, spread, commission, threshold)
+                val result = container.runWalkForward(interval, requestedBars, balance, risk, spread, commission, threshold)
                 val saved = try {
                     container.journalStore.saveReport(WalkForwardRecord.from(result))
                     true
@@ -841,20 +879,16 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun downloadTradeChart(trade: PaperTrade) {
         val current = _tradeChart.value
         if (current.tradeId != trade.id || current.downloading) return
-        if (!settings.value.hasKey) {
-            _toast.value = "برای دریافت کندل‌های گذشته، کلید Twelve Data را در تنظیمات وارد کنید"
-            return
-        }
         _tradeChart.value = current.copy(downloading = true, error = null)
         viewModelScope.launch {
             try {
-                val bars = container.fetchTradeCandles(trade.symbol, trade.interval)
+                val (bars, source) = container.fetchTradeCandles(trade.symbol, trade.interval)
                 if (_tradeChart.value.tradeId != trade.id) return@launch
                 val window = withContext(Dispatchers.Default) { TradeReplay.window(trade, bars) }
                 _tradeChart.value = TradeChartState(
                     tradeId = trade.id,
                     window = window,
-                    source = if (window.bars.isEmpty()) "" else "دریافت تازه از Twelve Data (همان منبع چارت)",
+                    source = if (window.bars.isEmpty()) "" else "دریافت تازه از $source",
                 )
                 if (window.bars.isEmpty()) {
                     _toast.value = "ناشر برای این بازه کندلی برنگرداند؛ تاریخچهٔ این معامله در دسترس نیست"

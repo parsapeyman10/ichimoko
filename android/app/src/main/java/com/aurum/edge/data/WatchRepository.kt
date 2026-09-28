@@ -83,7 +83,7 @@ class WatchRepository(
                 }
             }
             // Batch only requests that share both a provider AND a read-only key. A key is
-            // never sent to another provider; Yahoo pairs can be fetched in one request.
+            // never sent to another provider; public Yahoo symbols never receive a Twelve key.
             val results = withContext(Dispatchers.IO) {
                 targets.groupBy { it.source.id to it.key }.values.map { group ->
                     async {

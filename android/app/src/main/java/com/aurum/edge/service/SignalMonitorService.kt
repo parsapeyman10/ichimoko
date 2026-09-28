@@ -123,6 +123,7 @@ class SignalMonitorService : Service() {
                 if (!notificationsPermitted()) { stopSelf(); break }
                 if (!MarketHours.forexWeekendClosed()) {
                     container.forexCalendar.refreshNow() // weekly export, 1m near release only
+                    if (turns % 3 == 0) container.watch.refreshNow() // display/radar cards stay warm under their own throttle
                     if (turns++ % 15 == 0) container.publicWebNews.refreshNow()
                     // The ninth condition expires after ~3 minutes: refresh in server OR client
                     // mode (user's own on-device key) whenever alerts/auto-paper depend on it.
@@ -147,7 +148,7 @@ class SignalMonitorService : Service() {
             }
         }
 
-        // Periodic all-pairs REST sweep: same nine conditions per pair, educational candidates
+        // Periodic all-pairs online candle sweep: same nine conditions per pair, educational candidates
         // only — automatic paper fills stay live-tick-only on the selected symbol.
         sweepJob?.cancel()
         sweepJob = scope.launch {
@@ -155,8 +156,8 @@ class SignalMonitorService : Service() {
                 if (!notificationsPermitted()) { stopSelf(); break }
                 val config = container.settingsStore.read()
                 if (config.backgroundMonitor && !MarketHours.forexWeekendClosed()) {
-                    if (config.apiKey.isBlank() || !config.notifyOnSignal) {
-                        container.pairScanner.refreshNow() // records honest needs_key / alert-off statuses
+                    if (!config.notifyOnSignal) {
+                        container.pairScanner.refreshNow() // records honest online/error/alert-off statuses
                     } else {
                         try {
                             container.pairScanner.sweepOnce { candidate ->
@@ -192,7 +193,7 @@ class SignalMonitorService : Service() {
                 }
                 val text = when (state.feed.mode) {
                     FeedMode.LIVE -> "زنده · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
-                    FeedMode.POLLING -> "آخرین کندل REST (نه تیک زنده) · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
+                    FeedMode.POLLING -> "آخرین کندل/تاریخچه آنلاین (نه تیک زنده) · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
                     FeedMode.MARKET_CLOSED -> "بازار طبق برنامهٔ معمول بسته است؛ قیمت/ورود بررسی نمی‌شود"
                     FeedMode.DELAYED -> "دادهٔ دیررس؛ اتصال در حال بررسی (معامله مسدود)"
                     FeedMode.CONNECTING -> "در حال اتصال…"

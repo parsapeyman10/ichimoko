@@ -9,7 +9,7 @@ import com.aurum.edge.engine.SignalEngine
 
 /** Read-only, independent checks. Green checks are prerequisites, NOT a forecast or an entry. */
 enum class AlertCheckKind(val label: String) {
-    KEY("کلید بازار"), MARKET("قیمت واقعی تازه"), HISTORY("کندل بسته"),
+    KEY("منبع بازار"), MARKET("قیمت واقعی تازه"), HISTORY("کندل بسته"),
     MONITOR("سرویس پایش"), APP_ALERT("هشدار در اپ"), ANDROID_ALERT("اعلان اندروید"),
     STORAGE("فایل‌های هشدار/ژورنال"), AI_NEWS("آمادگی فید/مدل AI"), NINE_WAY("۹/۹، ICT و ریسک"),
 }
@@ -53,9 +53,9 @@ object AlertDiagnostics {
             PaperAlertRules.blocker(market, settings, news, trades, mtf, now)
         else signal?.blockers?.firstOrNull() ?: "برای این کندل سیگنال تأییدشدهٔ ۹/۹ موجود نیست"
         return listOf(
-            AlertCheck(AlertCheckKind.KEY, settings.hasKey,
-                if (settings.hasKey) "روی همین نصب موجود است؛ اعتبار کلید از اتصال داده مشخص می‌شود" else
-                    "روی این نصب کلیدی نیست؛ در تنظیمات، کلید تازهٔ خواندنی وارد کنید"),
+            AlertCheck(AlertCheckKind.KEY, settings.hasKey || market.closedCount >= HistoryPolicy.TARGET_CANDLES,
+                if (settings.hasKey) "کلید Twelve روی همین نصب موجود است؛ اعتبار آن از اتصال داده مشخص می‌شود" else
+                    "حالت بدون کلید فعال است؛ تاریخچهٔ عمومی/فید رایگان باید حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی بدهد"),
             AlertCheck(AlertCheckKind.MARKET, priceFresh,
                 if (priceFresh) "${market.feed.mode.label}؛ قیمت در ۹۰ ثانیهٔ اخیر دریافت شده" else
                     "${market.feed.mode.label}؛ ${market.feed.detail.ifBlank { "زمان قیمت/اتصال معتبر نیست" }}"),

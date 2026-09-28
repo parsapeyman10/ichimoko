@@ -261,22 +261,26 @@ object Backtester {
         leverage: Int = 100, minPositionOz: Double = 1.0,
         threshold: Double = 72.0, splitFraction: Double = 0.7,
         signalProfile: SignalProfile = SignalProfile.BASE,
+        dataSource: String = "Twelve Data (دیتای واقعی)",
     ): WalkForward {
         val closed = candles.filter { it.closed }
         val splitIndex = (closed.size * splitFraction.coerceIn(0.3, 0.85)).toInt()
             .coerceIn(1, maxOf(1, closed.size - 1))
-        val inSample = run(closed.take(splitIndex), interval, symbol, initialBalance = initialBalance,
-            riskPercent = riskPercent, spreadPrice = spreadPrice, commissionPerOz = commissionPerOz,
-            leverage = leverage, minPositionOz = minPositionOz, threshold = threshold, signalProfile = signalProfile)
-        val outOfSample = run(closed, interval, symbol, initialBalance = initialBalance,
-            riskPercent = riskPercent, spreadPrice = spreadPrice, commissionPerOz = commissionPerOz,
-            leverage = leverage, minPositionOz = minPositionOz, threshold = threshold, signalProfile = signalProfile, startIndex = splitIndex)
+        val inSample = run(closed.take(splitIndex), interval, symbol, dataSource = dataSource,
+            initialBalance = initialBalance, riskPercent = riskPercent, spreadPrice = spreadPrice,
+            commissionPerOz = commissionPerOz, leverage = leverage, minPositionOz = minPositionOz,
+            threshold = threshold, signalProfile = signalProfile)
+        val outOfSample = run(closed, interval, symbol, dataSource = dataSource,
+            initialBalance = initialBalance, riskPercent = riskPercent, spreadPrice = spreadPrice,
+            commissionPerOz = commissionPerOz, leverage = leverage, minPositionOz = minPositionOz,
+            threshold = threshold, signalProfile = signalProfile, startIndex = splitIndex)
         // Re-run on these EXACT SAME closed bars; changing costs can change fills AND which
         // technical setups remain eligible. This is sensitivity analysis, not observed slippage.
-        val stressed = run(closed, interval, symbol, initialBalance = initialBalance,
-            riskPercent = riskPercent, spreadPrice = spreadPrice * 2.0,
-            commissionPerOz = commissionPerOz * 2.0, leverage = leverage,
-            minPositionOz = minPositionOz, threshold = threshold, signalProfile = signalProfile, startIndex = splitIndex)
+        val stressed = run(closed, interval, symbol, dataSource = dataSource,
+            initialBalance = initialBalance, riskPercent = riskPercent,
+            spreadPrice = spreadPrice * 2.0, commissionPerOz = commissionPerOz * 2.0,
+            leverage = leverage, minPositionOz = minPositionOz, threshold = threshold,
+            signalProfile = signalProfile, startIndex = splitIndex)
         return WalkForward(inSample, outOfSample, closed.getOrNull(splitIndex)?.time ?: 0L,
             splitIndex, closed.size,
             ResearchEvidence.outOfSample(outOfSample, stressed).title, stressed)

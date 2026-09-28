@@ -83,7 +83,7 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
         if (!settings.hasKey) {
             KeyOnboarding(onSave = viewModel::saveApiKey, onOpenSettings = onOpenSettings)
             Text(
-                "بدون کلید، کندل‌ها به‌صورت زنده از فید رایگان Swissquote ساخته می‌شوند؛ تاریخچهٔ REST، MTF و بک‌تست نیازمند کلید Twelve Data هستند.",
+                "بدون کلید هم اپ حداقل ۳۰۰۰ کندل تاریخچهٔ عمومی Yahoo Finance را می‌گیرد و تیک زندهٔ Swissquote/Gold-API را روی آن اعمال می‌کند؛ اگر منبع عمومی این تعداد ندهد، صادقانه خطا می‌دهد و کندل نمی‌سازد.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
@@ -108,7 +108,7 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
             SectionCard(
                 title = if (liveTick) "تیک زنده · ${market.feed.provider}" else "تیک زنده در دسترس نیست",
                 subtitle = if (liveTick) "چارت با هر تیک واقعی به‌روزرسانی می‌شود؛ تغییر فقط وقتی منبع قیمت جدید بدهد دیده می‌شود"
-                    else market.feed.detail.ifBlank { "کندل REST/کش جای تیک لحظه‌ای نیست" },
+                    else market.feed.detail.ifBlank { "کندل/تاریخچه آنلاین یا کش جای تیک لحظه‌ای نیست" },
             ) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     StatTile("LAST", formatQuotePrice(market.lastPrice), if (liveTick) AurumColors.Cyan else AurumColors.TextMuted, Modifier.weight(1f))
@@ -259,7 +259,7 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
                 Text("منبع: ${market.feed.provider}", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
                 Text("حالت: ${market.feed.mode.label}", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 2.dp))
                 Text(
-                    "کندل‌های واقعی دریافت‌شده: ${market.candles.size} (بسته: ${market.closedCount})",
+                    "کندل‌های واقعی دریافت‌شده: ${market.candles.size} از هدف ۳۰۰۰ (بسته: ${market.closedCount})",
                     style = MaterialTheme.typography.bodySmall,
                     color = AurumColors.TextSecondary,
                     modifier = Modifier.padding(top = 2.dp),
@@ -336,11 +336,11 @@ fun KeyOnboarding(onSave: (String) -> Unit, onOpenSettings: () -> Unit) {
     var key by remember { mutableStateOf("") }
     Column(modifier = Modifier.padding(top = 8.dp)) {
         SectionCard(
-            title = "برای شروع، کلید دیتای واقعی لازم است",
-            subtitle = "چارت زندهٔ رایگان فعال است؛ کلید Twelve Data تاریخچهٔ REST، MTF و بک‌تست را اضافه می‌کند",
+            title = "کلید Twelve Data اختیاری است",
+            subtitle = "بدون کلید هم ۳۰۰۰ کندل عمومی Yahoo + تیک زنده فعال است؛ کلید Twelve Data منبع کندل اصلی را به Twelve تغییر می‌دهد",
         ) {
             Text(
-                "کلید رایگان Twelve Data را از twelvedata.com دریافت کن و اینجا وارد کن. این کلید فقط برای خواندن دیتای بازار است و دسترسی معاملاتی ندارد. بدون کلید هم چارت با تیک‌های زندهٔ فید رایگان Swissquote کار می‌کند.",
+                "کلید رایگان Twelve Data را از twelvedata.com دریافت کن و اینجا وارد کن. این کلید فقط برای خواندن دیتای بازار است و دسترسی معاملاتی ندارد. بدون کلید هم چارت با تاریخچهٔ عمومی Yahoo و تیک‌های زندهٔ فید رایگان Swissquote/Gold-API کار می‌کند.",
                 style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextSecondary,
             )
@@ -363,7 +363,7 @@ fun KeyOnboarding(onSave: (String) -> Unit, onOpenSettings: () -> Unit) {
                 Text("ذخیره و دریافت دیتای واقعی", fontWeight = FontWeight.Bold)
             }
             Text(
-                "بدون اینترنت یا بدون کلید معتبر، وضعیت «آفلاین» نمایش داده می‌شود — هیچ کندل یا سیگنال ساختگی ساخته نمی‌شود.",
+                "بدون اینترنت یا وقتی هیچ منبع عمومی/کلیددار پاسخ معتبر ندهد، وضعیت دیررس/آفلاین نمایش داده می‌شود — هیچ کندل یا سیگنال ساختگی ساخته نمی‌شود.",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 8.dp),

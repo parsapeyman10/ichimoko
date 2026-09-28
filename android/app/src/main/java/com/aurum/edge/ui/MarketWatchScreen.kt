@@ -151,7 +151,7 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
             }
         }
         SectionCard("منابع محدود", "وضعیت شفاف اتصال‌های دیگر") {
-            Text("این دیده‌بان فقط طلا و جفت‌ارزهای اصلی را نشان می‌دهد. Twelve Data منبع اصلی چارت است و Yahoo Finance برای جفت‌ارزهای دلاری منبع مستقل نمایشی دارد؛ سفارش واقعی در اپ فعال نیست.",
+            Text("این دیده‌بان فقط طلا و جفت‌ارزهای اصلی را نشان می‌دهد. Twelve Data و آینهٔ عمومی Yahoo برای همهٔ نمادهای کاری بررسی می‌شوند؛ چارت هم در حالت بدون کلید از تاریخچهٔ عمومی استفاده می‌کند. سفارش واقعی در اپ فعال نیست.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
         }
     }

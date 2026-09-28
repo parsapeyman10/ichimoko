@@ -118,7 +118,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     ) {
         SectionCard(
             title = "منبع دیتای واقعی",
-            subtitle = "Twelve Data برای چارت، سیگنال و بک‌تست؛ بدون کلید هم فید رایگان خودکار (Swissquote/Gold-API) وصل می‌شود؛ دیده‌بان پایین منابع جدا دارد",
+            subtitle = "Twelve Data برای کندل اصلی اختیاری است؛ بدون کلید هم تاریخچهٔ Yahoo و فید رایگان Swissquote/Gold-API وصل می‌شود؛ دیده‌بان پایین منابع جدا دارد",
         ) {
             Text(if (settings.hasKey) "✓ کلید خواندنی در همین نصب موجود است؛ اعتبارش فقط با دریافت دادهٔ تازه مشخص می‌شود."
                 else "کلید روی این نصب ذخیره نشده است؛ به‌طور خودکار از فید رایگان قیمت لحظه‌ای (Swissquote، و در صورت نیاز Gold-API برای طلا) استفاده می‌شود — بدون تاریخچهٔ REST جداگانه.",
