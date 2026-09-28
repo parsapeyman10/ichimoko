@@ -69,7 +69,11 @@ class AppContainer(context: Context) {
     /** Shared by chart, signal tab, notifications and automatic *paper* entries. Expires on time. */
     val verifiedMarket: StateFlow<MarketState> = combine(
         market.state, news.state, flow { while (true) { emit(System.currentTimeMillis()); delay(20_000L) } },
-    ) { raw, headlines, now ->
+    ) { raw, headlines, clockTick ->
+        // The periodic clock emits only every 20s, while the market stream may emit every second.
+        // If we judged a fresh tick against the older clockTick, a just-arrived local receipt can
+        // look "from the future" and be downgraded to DELAYED even though the header says 0s ago.
+        val now = maxOf(clockTick, System.currentTimeMillis())
         val observedFeed = FeedLiveness.display(raw.feed, now)
         val delayed = observedFeed.mode == FeedMode.DELAYED
         val verified = raw.copy(feed = observedFeed,
