@@ -2,6 +2,7 @@ import org.gradle.api.tasks.testing.Test
 import org.gradle.api.tasks.testing.TestDescriptor
 import org.gradle.api.tasks.testing.TestListener
 import org.gradle.api.tasks.testing.TestResult
+import java.io.ByteArrayOutputStream
 
 plugins {
     id("com.android.application")
@@ -26,6 +27,12 @@ val ownerKeyPassword = System.getenv("AURUM_RELEASE_KEY_PASSWORD")?.takeIf { it.
 val signingValues = listOf(ownerStorePath, ownerStorePassword, ownerKeyAlias, ownerKeyPassword)
 val ownerSigningReady = signingValues.all { it != null }
 val requireOwnerSigning = providers.gradleProperty("aurumRequireReleaseSigning").orNull == "true"
+fun gitOutput(vararg args: String): String = runCatching {
+    val out = ByteArrayOutputStream()
+    exec { commandLine("git", *args); standardOutput = out }
+    out.toString().trim().ifBlank { "unknown" }
+}.getOrDefault("unknown")
+val gitSha = gitOutput("rev-parse", "--short=12", "HEAD")
 if (!ownerSigningReady && (requireOwnerSigning || signingValues.any { it != null })) {
     throw org.gradle.api.GradleException(
         "Owner-signed release requires all four AURUM_RELEASE_* environment variables; refusing an incomplete signing setup."
@@ -48,10 +55,14 @@ android {
         applicationId = "com.aurum.edge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
+        buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
+        buildConfigField("String", "UPDATE_REPO", "\"parsapeyman10/ichimoko\"")
+        buildConfigField("String", "UPDATE_BRANCH", "\"arena/01a0e4df-ichimoko\"")
+        buildConfigField("String", "UPDATE_MANIFEST_URL", "\"https://raw.githubusercontent.com/parsapeyman10/ichimoko/main/update/aurum-edge.json\"")
     }
 
     signingConfigs {

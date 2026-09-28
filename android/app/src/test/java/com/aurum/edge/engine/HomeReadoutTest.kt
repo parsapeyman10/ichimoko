@@ -86,6 +86,7 @@ class HomeReadoutTest {
         assertEquals(AurumTab.Home, primaryTabs.first())
         assertTrue(AurumTab.News in primaryTabs)
         assertTrue(AurumTab.Learn in moreTabs)
+        assertTrue(AurumTab.Update in moreTabs)
         assertTrue(AurumTab.Settings in moreTabs)
         assertTrue(AurumTab.Api in moreTabs)
         assertTrue(primaryTabs.size <= 5) // bottom bar stays usable on small screens

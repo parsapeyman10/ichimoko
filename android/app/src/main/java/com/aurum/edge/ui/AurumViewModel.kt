@@ -29,6 +29,7 @@ import com.aurum.edge.core.SignalProfile
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.TradeReplay
 import com.aurum.edge.core.WalkForwardRecord
+import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.data.FreeHistoryCatalog
 import com.aurum.edge.data.FreeHistoryState
 import com.aurum.edge.data.JournalStats
@@ -112,6 +113,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val opportunityError: StateFlow<String?> = container.opportunityStore.loadError
     val journalError: StateFlow<String?> = container.journalStore.loadError
     val autoPaperStatus: StateFlow<String> = container.autoPaperTrader.status
+    val updateState: StateFlow<AppUpdateRepository.State> = container.updater.state
 
     /** Walk-forward runs made on this device, kept so the numbers can be re-checked later. */
     val reports: StateFlow<List<WalkForwardRecord>> = container.journalStore.reports
@@ -221,6 +223,21 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun refreshNow() = container.market.refreshNow()
+
+    fun checkForAppUpdate() {
+        viewModelScope.launch { container.updater.checkForUpdate() }
+    }
+
+    fun downloadAppUpdate() {
+        viewModelScope.launch {
+            container.updater.downloadAvailable()
+            if (container.updater.state.value.downloadedApkPath != null) container.updater.installDownloaded()
+        }
+    }
+
+    fun installDownloadedUpdate() = container.updater.installDownloaded()
+
+    fun openUpdateInstallPermission() = container.updater.openInstallPermissionSettings()
 
     fun refreshWatch() = container.watch.refreshNow()
 

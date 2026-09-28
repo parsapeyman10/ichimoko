@@ -2,6 +2,7 @@ package com.aurum.edge.core
 
 import android.content.Context
 import android.net.Uri
+import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.data.CandleCache
 import com.aurum.edge.data.DataFeedException
 import com.aurum.edge.data.FreeHistoryDownloader
@@ -54,6 +55,7 @@ class AppContainer(context: Context) {
     val opportunityStore = PaperOpportunityStore(appContext)
     val client = TwelveDataClient()
     val market = MarketRepository(appContext, client, candleCache, settingsStore, journalStore)
+    val updater = AppUpdateRepository(appContext)
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val watchSettings = WatchSettingsStore(appContext)

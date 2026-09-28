@@ -65,6 +65,7 @@ enum class AurumTab(val label: String, val icon: ImageVector) {
     News("خبر", Icons.Filled.Article),
     Learn("یادگیری", Icons.Filled.School),
     Journal("ژورنال", Icons.Filled.Bookmarks),
+    Update("بروزرسانی", Icons.Filled.Refresh),
     Settings("تنظیمات", Icons.Filled.Settings),
     Api("APIها", Icons.Filled.Settings),
 }
@@ -74,7 +75,7 @@ internal val primaryTabs = listOf(
 )
 
 internal val moreTabs = listOf(
-    AurumTab.Learn, AurumTab.Journal, AurumTab.Settings, AurumTab.Api,
+    AurumTab.Learn, AurumTab.Journal, AurumTab.Update, AurumTab.Settings, AurumTab.Api,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -146,6 +147,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
                     AurumTab.News -> PersianNewsScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) })
                     AurumTab.Learn -> LearnScreen(viewModel)
                     AurumTab.Journal -> JournalScreen(viewModel, market)
+                    AurumTab.Update -> UpdateScreen(viewModel)
                     AurumTab.Settings -> SettingsScreen(viewModel, settings)
                     AurumTab.Api -> ApiMenuScreen(settings, onForexSettings = { open(AurumTab.Settings) })
                 }
