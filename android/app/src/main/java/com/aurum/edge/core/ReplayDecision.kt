@@ -17,4 +17,11 @@ data class ReplayDecision(
     val profile: String,
     val dataSource: String,
     val recordedAt: Long,
+    /** DECISION_ONLY/PENDING_ENTRY/OPEN/OPEN_AT_END/WIN/LOSS/DATA_GAP/NO_LEVELS; computed only from bars revealed by replay. */
+    val outcomeStatus: String = "DECISION_ONLY",
+    val fillBarTime: Long? = null,
+    val fillPrice: Double? = null,
+    val outcomeBarTime: Long? = null,
+    val outcomePrice: Double? = null,
+    val outcomeReason: String? = null,
 )

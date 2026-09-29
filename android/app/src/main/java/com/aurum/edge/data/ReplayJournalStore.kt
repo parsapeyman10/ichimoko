@@ -67,6 +67,44 @@ class ReplayJournalStore(
         }
     }
 
+    suspend fun updateOutcome(
+        id: String,
+        outcomeStatus: String,
+        fillBarTime: Long?,
+        fillPrice: Double?,
+        outcomeBarTime: Long?,
+        outcomePrice: Double?,
+        outcomeReason: String?,
+    ) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            check(loaded && _loadError.value == null) {
+                "ژورنال replay بارگذاری نشده/آسیب‌دیده است؛ فایل موجود پاک نمی‌شود"
+            }
+            val current = _entries.value.firstOrNull { it.id == id } ?: return@withLock
+            val nextValue = current.copy(
+                outcomeStatus = outcomeStatus,
+                fillBarTime = fillBarTime,
+                fillPrice = fillPrice,
+                outcomeBarTime = outcomeBarTime,
+                outcomePrice = outcomePrice,
+                outcomeReason = outcomeReason,
+            )
+            if (nextValue == current) return@withLock
+            val next = _entries.value.map { if (it.id == id) nextValue else it }
+            val atomic = AtomicFile(file)
+            val stream = atomic.startWrite()
+            try {
+                stream.write(json.encodeToString(ListSerializer(ReplayDecision.serializer()), next)
+                    .toByteArray(Charsets.UTF_8))
+                atomic.finishWrite(stream)
+            } catch (error: Exception) {
+                atomic.failWrite(stream)
+                throw error
+            }
+            _entries.value = next
+        }
+    }
+
     companion object {
         private const val MAX_ENTRIES = 500
     }

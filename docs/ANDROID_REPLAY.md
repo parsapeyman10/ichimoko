@@ -37,3 +37,9 @@ Research/replay requires at least 3,000 closed real candles. The live chart may 
 ## Educational scope
 
 Replay and reports are paper-only. They display hypothetical strategy decisions, fills, fees/spread assumptions, drawdown, win rate, profit factor, open positions, gaps, and the exact data source. An actionable cursor can be saved as an educational replay decision in the separate replay journal; that record is explicitly a decision marker, not a broker fill and not a live paper position. They do not place broker orders and do not claim that historical results prove future profitability.
+
+## Interactive paper test
+
+A saved decision starts as `PENDING_ENTRY` while the cursor is on its decision candle. The evaluator uses the next revealed real candle's open as the educational fill, then checks SL/TP only through the current cursor. Therefore a target or stop visible in the downloaded dataset is not an outcome until replay has stepped over that candle. `DECISION_ONLY` is used when the cursor is before the decision candle; `OPEN` and `OPEN_AT_END` mean that no exit level has been revealed yet, while `WIN` and `LOSS` include the revealed outcome candle and price. A missing decision candle or real time gap produces `DATA_GAP`, never an interpolated result. If a revealed bar touches both SL and TP, the conservative stop-first rule records `LOSS`. Moving backwards reevaluates only the newly visible prefix, so a future outcome cannot survive behind the cursor.
+
+These fields are updated atomically in `replay_decisions.json`; a failed update preserves the previous file. The interactive evaluator is a pure adapter around the same candle/interval contract and does not create a second trading strategy or any live order.

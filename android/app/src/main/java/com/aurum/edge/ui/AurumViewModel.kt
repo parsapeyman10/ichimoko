@@ -45,6 +45,7 @@ import com.aurum.edge.engine.Backtester
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.engine.ReplayEngine
+import com.aurum.edge.engine.ReplayEvaluation
 import com.aurum.edge.notify.AlertSoundPlayer
 import com.aurum.edge.service.SignalMonitorService
 import kotlinx.coroutines.CancellationException
@@ -55,6 +56,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.min
@@ -140,6 +143,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private val _replay = MutableStateFlow<ReplayState>(ReplayState.Idle)
     val replay: StateFlow<ReplayState> = _replay.asStateFlow()
     private var replayJob: kotlinx.coroutines.Job? = null
+    private val replayOutcomeMutex = Mutex()
     private var replayRevision: Long = 0L
 
     private val _freeHistory = MutableStateFlow<FreeHistoryState>(FreeHistoryState.Idle)
@@ -739,7 +743,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     observedGapCount = dataset.observedGapCount,
                 )
                 val snapshot = withContext(Dispatchers.Default) { ReplayEngine.snapshot(session) }
-                if (replayRequest == replayRevision) _replay.value = ReplayState.Ready(snapshot)
+                if (replayRequest == replayRevision) {
+                    _replay.value = ReplayState.Ready(snapshot)
+                    refreshReplayOutcomes(session, replayRequest)
+                }
             } catch (e: Exception) {
                 if (replayRequest == replayRevision) {
                     _learn.value = LearnState.Failed(e.message ?: "خطا در دریافت داده واقعی")
@@ -759,10 +766,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         val ready = _replay.value as? ReplayState.Ready ?: return
         val session = ready.snapshot.session
         replayJob?.cancel()
-        replayRevision++
-        _replay.value = ReplayState.Ready(ready.snapshot.copy(
+        val revision = ++replayRevision
+        val published = ready.snapshot.copy(
             session = session.copy(startCursor = session.cursor, playing = false),
-        ))
+        )
+        _replay.value = ReplayState.Ready(published)
+        viewModelScope.launch { refreshReplayOutcomes(published.session, revision) }
     }
 
     fun setReplaySpeed(speed: Float) {
@@ -776,10 +785,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         val ready = _replay.value as? ReplayState.Ready ?: return
         if (!playing) {
             replayJob?.cancel()
-            replayRevision++
-            _replay.value = ReplayState.Ready(ready.snapshot.copy(
+            val revision = ++replayRevision
+            val published = ready.snapshot.copy(
                 session = ready.snapshot.session.copy(playing = false),
-            ))
+            )
+            _replay.value = ReplayState.Ready(published)
+            viewModelScope.launch { refreshReplayOutcomes(published.session, revision) }
             return
         }
         if (ready.snapshot.isAtEnd) return
@@ -800,9 +811,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 val next = ReplayEngine.step(afterDelay.snapshot.session)
                 val snapshot = withContext(Dispatchers.Default) { ReplayEngine.snapshot(next) }
                 if (playRevision != replayRevision) break
-                _replay.value = ReplayState.Ready(snapshot.copy(
+                val published = snapshot.copy(
                     session = if (snapshot.isAtEnd) next.copy(playing = false) else next,
-                ))
+                )
+                _replay.value = ReplayState.Ready(published)
+                refreshReplayOutcomes(published.session, playRevision)
                 if (snapshot.isAtEnd) break
             }
         }
@@ -815,8 +828,42 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         val next = transform(ready.snapshot.session)
         viewModelScope.launch {
             val snapshot = withContext(Dispatchers.Default) { ReplayEngine.snapshot(next) }
-            if (revision == replayRevision) _replay.value = ReplayState.Ready(snapshot)
+            if (revision == replayRevision) {
+                _replay.value = ReplayState.Ready(snapshot)
+                refreshReplayOutcomes(snapshot.session, revision)
+            }
         }
+    }
+
+    /** Update only decisions belonging to the current immutable replay dataset and cursor. */
+    private suspend fun refreshReplayOutcomes(session: ReplayEngine.Session, expectedRevision: Long) = replayOutcomeMutex.withLock {
+        if (expectedRevision != replayRevision) return@withLock
+        replayDecisions.value
+            .filter { it.symbol == session.symbol && it.interval == session.interval.label && it.dataSource == session.dataSource }
+            .forEach { decision ->
+                val result = ReplayEvaluation.evaluate(decision, session.allBars, session.interval, session.cursor)
+                if (decision.outcomeStatus != result.status ||
+                    decision.fillBarTime != result.fillBarTime ||
+                    decision.fillPrice != result.fillPrice ||
+                    decision.outcomeBarTime != result.outcomeBarTime ||
+                    decision.outcomePrice != result.outcomePrice ||
+                    decision.outcomeReason != result.reason
+                ) {
+                    runCatching {
+                        container.replayJournalStore.updateOutcome(
+                            id = decision.id,
+                            outcomeStatus = result.status,
+                            fillBarTime = result.fillBarTime,
+                            fillPrice = result.fillPrice,
+                            outcomeBarTime = result.outcomeBarTime,
+                            outcomePrice = result.outcomePrice,
+                            outcomeReason = result.reason,
+                        )
+                    }.onFailure {
+                        _toast.value = "نتیجهٔ تست replay ذخیره نشد؛ فایل قبلی حفظ شد"
+                    }
+                }
+            }
     }
 
     /** Store a historical strategy decision separately from live-price paper fills. */
@@ -830,23 +877,32 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
         viewModelScope.launch {
             try {
+                val decision = ReplayDecision(
+                    id = java.util.UUID.randomUUID().toString(),
+                    symbol = session.symbol,
+                    interval = session.interval.label,
+                    barTime = signal.barTime,
+                    action = signal.action.name,
+                    entry = signal.entry,
+                    stopLoss = signal.stopLoss,
+                    takeProfit = signal.takeProfit,
+                    confidence = signal.confidence,
+                    profile = session.config.signalProfile.persistName(),
+                    dataSource = session.dataSource,
+                    recordedAt = System.currentTimeMillis(),
+                )
+                val result = ReplayEvaluation.evaluate(decision, session.allBars, session.interval, session.cursor)
                 container.replayJournalStore.append(
-                    ReplayDecision(
-                        id = java.util.UUID.randomUUID().toString(),
-                        symbol = session.symbol,
-                        interval = session.interval.label,
-                        barTime = signal.barTime,
-                        action = signal.action.name,
-                        entry = signal.entry,
-                        stopLoss = signal.stopLoss,
-                        takeProfit = signal.takeProfit,
-                        confidence = signal.confidence,
-                        profile = session.config.signalProfile.persistName(),
-                        dataSource = session.dataSource,
-                        recordedAt = System.currentTimeMillis(),
+                    decision.copy(
+                        outcomeStatus = result.status,
+                        fillBarTime = result.fillBarTime,
+                        fillPrice = result.fillPrice,
+                        outcomeBarTime = result.outcomeBarTime,
+                        outcomePrice = result.outcomePrice,
+                        outcomeReason = result.reason,
                     ),
                 )
-                _toast.value = "تصمیم ${signal.action.name} روی کندل تاریخی در ژورنال آموزشی ثبت شد؛ fill بروکری نیست"
+                _toast.value = "تصمیم ${signal.action.name} روی کندل تاریخی در ژورنال آموزشی ثبت شد؛ نتیجه فقط با جلو رفتن replay آشکار می‌شود"
             } catch (error: Exception) {
                 _toast.value = "ثبت تصمیم replay انجام نشد؛ فایل قبلی حفظ شد: ${error.message ?: "خطای ذخیره"}"
             }

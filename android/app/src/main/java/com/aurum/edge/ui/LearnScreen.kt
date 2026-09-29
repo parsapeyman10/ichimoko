@@ -406,7 +406,7 @@ fun LearnScreen(viewModel: AurumViewModel) {
             }
         }
 
-        ReplayPanel(replay, viewModel, replayDecisions.size)
+        ReplayPanel(replay, viewModel, replayDecisions)
 
         when (val wf = walkForward) {
             is WalkForwardState.Idle -> Unit

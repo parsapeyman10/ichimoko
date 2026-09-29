@@ -15,7 +15,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.aurum.edge.core.ReplayDecision
 import com.aurum.edge.engine.ReplayEngine
+import com.aurum.edge.engine.ReplayEvaluation
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatDateTime
@@ -24,7 +26,7 @@ import com.aurum.edge.ui.theme.AurumColors
 
 /** GoCharting-style historical bar replay controls; every output ends at the cursor. */
 @Composable
-internal fun ReplayPanel(state: ReplayState, viewModel: AurumViewModel, decisionCount: Int) {
+internal fun ReplayPanel(state: ReplayState, viewModel: AurumViewModel, decisions: List<ReplayDecision>) {
     when (state) {
         ReplayState.Idle -> Unit
         ReplayState.Loading -> SectionCard("آماده‌سازی Bar Replay", "دریافت و اعتبارسنجی همان دیتای بک‌تست…") {
@@ -34,12 +36,12 @@ internal fun ReplayPanel(state: ReplayState, viewModel: AurumViewModel, decision
         is ReplayState.Failed -> SectionCard("Replay آماده نشد", "منبع داده معتبر نیست") {
             Text(state.message, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
         }
-        is ReplayState.Ready -> ReadyReplayPanel(state.snapshot, viewModel, decisionCount)
+        is ReplayState.Ready -> ReadyReplayPanel(state.snapshot, viewModel, decisions)
     }
 }
 
 @Composable
-private fun ReadyReplayPanel(snapshot: ReplayEngine.Snapshot, viewModel: AurumViewModel, decisionCount: Int) {
+private fun ReadyReplayPanel(snapshot: ReplayEngine.Snapshot, viewModel: AurumViewModel, decisions: List<ReplayDecision>) {
     val session = snapshot.session
     val report = snapshot.report
     SectionCard(
@@ -159,12 +161,41 @@ private fun ReadyReplayPanel(snapshot: ReplayEngine.Snapshot, viewModel: AurumVi
             modifier = Modifier.padding(top = 6.dp),
         )
         Text(
-            "تصمیم‌های تاریخی ذخیره‌شده در ژورنال آموزشی: $decisionCount · این‌ها fill بروکر یا معاملهٔ زنده نیستند.",
+            "تست تعاملی paper-only: تصمیم روی cursor ثبت می‌شود، اما fill و نتیجه فقط با آشکارشدن کندل‌های بعدی تعیین می‌شوند؛ از دادهٔ آینده در لحظهٔ ثبت استفاده نمی‌شود.",
             style = MaterialTheme.typography.labelSmall,
             color = AurumColors.Cyan,
-            modifier = Modifier.padding(top = 4.dp),
+            modifier = Modifier.padding(top = 6.dp),
         )
+        decisions
+            .filter { it.symbol == session.symbol && it.interval == session.interval.label && it.dataSource == session.dataSource }
+            .take(5)
+            .forEach { decision ->
+                Text(
+                    "${decision.action} · ${formatDateTime(decision.barTime)} · ${replayOutcomeLabel(decision.outcomeStatus)}" +
+                        (decision.outcomePrice?.let { " · ${formatPrice(it)}" } ?: ""),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = when (decision.outcomeStatus) {
+                        ReplayEvaluation.WIN -> AurumColors.Green
+                        ReplayEvaluation.LOSS -> AurumColors.Red
+                        ReplayEvaluation.DATA_GAP -> AurumColors.Gold
+                        else -> AurumColors.TextMuted
+                    },
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+            }
     }
+}
+
+private fun replayOutcomeLabel(status: String): String = when (status) {
+    ReplayEvaluation.DECISION_ONLY -> "فقط تصمیم"
+    ReplayEvaluation.PENDING_ENTRY -> "منتظر کندل ورود"
+    ReplayEvaluation.OPEN -> "باز / در انتظار خروج"
+    ReplayEvaluation.OPEN_AT_END -> "باز در پایان داده"
+    ReplayEvaluation.WIN -> "موفق"
+    ReplayEvaluation.LOSS -> "ناموفق"
+    ReplayEvaluation.DATA_GAP -> "دادهٔ ناقص"
+    ReplayEvaluation.NO_LEVELS -> "بدون سطوح خروج"
+    else -> status
 }
 
 private fun colorName(value: String): String = value
