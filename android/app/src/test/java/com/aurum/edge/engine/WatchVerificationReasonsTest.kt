@@ -21,9 +21,9 @@ class WatchVerificationReasonsTest {
             unit = symbol.unit, sourceId = sourceId, ts = now, providerAt = time)
     }
 
-    @Test fun `all forex symbols have a public second source but one enabled source is still unverified`() {
+    @Test fun `one enabled public source is displayable but still unverified`() {
         val jpy = WatchCatalog.find("USD/JPY")!!
-        assertEquals(2, jpy.defaultSources.size)
+        assertEquals(listOf("stocks_yahoo"), jpy.defaultSources)
         val only = jpy.defaultSources.first()
         val one = SourceComparison.verify(jpy, listOf(only), mapOf(only to quote(jpy.id, only)), now)
         assertEquals(VerificationStatus.UNVERIFIED, one.status)
@@ -33,8 +33,9 @@ class WatchVerificationReasonsTest {
 
     @Test fun `one source fresh still requires another independent fresh source`() {
         val eur = WatchCatalog.find("EUR/USD")!!
-        val a = eur.defaultSources[0]
-        val b = eur.defaultSources[1]
+        val sources = eur.providerCodes.keys.toList()
+        val a = sources[0]
+        val b = sources[1]
         val one = SourceComparison.verify(eur, listOf(a), mapOf(a to quote(eur.id, a)), now)
         assertEquals(VerificationStatus.UNVERIFIED, one.status)
         assertEquals("تک‌منبعی", one.badge)
@@ -48,8 +49,9 @@ class WatchVerificationReasonsTest {
 
     @Test fun `a spoofed source key or wrong unit cannot count as second independent quote`() {
         val eur = WatchCatalog.find("EUR/USD")!!
-        val a = eur.defaultSources[0]
-        val b = eur.defaultSources[1]
+        val sources = eur.providerCodes.keys.toList()
+        val a = sources[0]
+        val b = sources[1]
         val real = quote(eur.id, a)
         val forged = SourceComparison.verify(eur, listOf(a, b), mapOf(a to real, b to real), now)
         assertEquals(VerificationStatus.UNVERIFIED, forged.status)
@@ -64,7 +66,7 @@ class WatchVerificationReasonsTest {
             mapOf(a to real, b to quote(eur.id, b).copy(price = 1.2000)), now).status)
         assertEquals(VerificationStatus.CONFIRMED, SourceComparison.verify(eur, listOf(a, b),
             mapOf(a to real, b to quote(eur.id, b).copy(price = 1.0872)), now).status)
-        val selection = WatchSelection(eur.defaultSources, a)
+        val selection = WatchSelection(listOf(a, b), a)
         val display = WatchDisplay.choose(eur, selection, mapOf(a to real, b to quote(eur.id, b)), now)
         assertEquals(a, display.sourceId)
         assertTrue(SourceComparison.assess(eur, display.sourceId, display.quote, now).readable)

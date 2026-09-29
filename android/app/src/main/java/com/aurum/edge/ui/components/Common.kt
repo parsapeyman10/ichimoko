@@ -225,39 +225,30 @@ fun FeedBanner(status: FeedStatus, lastPrice: Double?, lastBarTime: Long?, showi
 
 @Composable
 fun ConfluenceRow(item: ConfluenceItem) {
+    val tone = when (item.status) {
+        ConfluenceStatus.CONFIRMED -> AurumColors.Green
+        ConfluenceStatus.UNKNOWN -> AurumColors.Orange
+        ConfluenceStatus.CONFLICT -> AurumColors.Red
+    }
+    val label = when (item.status) {
+        ConfluenceStatus.CONFIRMED -> "برقرار"
+        ConfluenceStatus.UNKNOWN -> "احتمالی"
+        ConfluenceStatus.CONFLICT -> "دور"
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            when (item.status) {
-                ConfluenceStatus.CONFIRMED -> "✓"
-                ConfluenceStatus.CONFLICT -> "✕"
-                ConfluenceStatus.UNKNOWN -> "؟"
-            },
-            color = when (item.status) {
-                ConfluenceStatus.CONFIRMED -> AurumColors.Green
-                ConfluenceStatus.CONFLICT -> AurumColors.Red
-                ConfluenceStatus.UNKNOWN -> AurumColors.Gold
-            },
-            style = MaterialTheme.typography.titleSmall,
-            modifier = Modifier.padding(end = 10.dp),
-        )
+        Text(label, color = tone, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 10.dp))
         Column(Modifier.weight(1f)) {
-            Text(item.name, style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
-            Text(item.detail, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            Text(item.name, style = MaterialTheme.typography.bodySmall, color = tone)
+            if (item.detail.isNotBlank()) {
+                Text(item.detail, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            }
             item.scorePercent?.let { score ->
-                Text(
-                    "امتیاز این شرط: $score/100",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = when (item.status) {
-                        ConfluenceStatus.CONFIRMED -> AurumColors.Green
-                        ConfluenceStatus.CONFLICT -> AurumColors.Red
-                        ConfluenceStatus.UNKNOWN -> AurumColors.Gold
-                    },
-                )
+                Text("سهم $score/100", style = MaterialTheme.typography.labelSmall, color = tone)
             }
         }
     }

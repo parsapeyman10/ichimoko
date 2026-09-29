@@ -158,12 +158,12 @@ object Notifier {
         val side = if (trade.action == SignalAction.BUY) "خرید" else "فروش"
         val title = "معاملهٔ آموزشی $side ثبت شد · فقط کاغذی"
         val text = "XAU/USD ${trade.interval.label} · ورود ${formatPrice(trade.entry)}$ · شناسه ${trade.id.take(8)}"
-        val ai = trade.aiReview?.let { review ->
-            "\nنظر AI: ${review.verdictFa()} (${review.confidence}٪) — ${review.summary}"
-        }.orEmpty()
+        val conditions = trade.entryConditions.take(8).joinToString("، ") {
+            it.name.substringAfter('·').trim()
+        }
         return postVerified(context, trade.id.hashCode(), title, text,
-            "$text\nSL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)} · " +
-                "۸/۸ فنی، گزینه‌های فعال و شواهد رنج/ICT در ژورنال ثبت شدند؛ خبر فقط داده‌کاوی همراه معامله است. سفارش واقعی ارسال نشد.$ai", customSoundUri)
+            "$text\nشروع معامله: $conditions\nSL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)}",
+            customSoundUri)
     }
 
     private fun postVerified(context: Context, id: Int, title: String, text: String,
@@ -209,11 +209,4 @@ object Notifier {
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(trade.id.hashCode(), notification) }
     }
-}
-
-private fun com.aurum.edge.core.PaperAiReview.verdictFa(): String = when (verdict) {
-    "WORTHY" -> "شرایط مناسب بوده"
-    "RISKY" -> "پرریسک/مرزی بوده"
-    "NOT_WORTHY" -> "شرایط کافی نبوده"
-    else -> verdict
 }

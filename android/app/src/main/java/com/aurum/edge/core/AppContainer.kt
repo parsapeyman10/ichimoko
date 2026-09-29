@@ -37,8 +37,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
@@ -46,7 +48,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Process-wide wiring. Single source of truth for settings, real market data, journal and engine.
- * Forex/currency-pair workspace only: gold (XAU/USD) plus the major FX pairs.
+ * Chart/signal workspace is forex/gold; watchlist also includes Iran gold and USD cash-board rows.
  */
 class AppContainer(context: Context) {
 
@@ -98,6 +100,19 @@ class AppContainer(context: Context) {
 
     init {
         market.attach(appScope)
+        appScope.launch {
+            verifiedMarket.collect { state ->
+                if (settingsStore.read().autoPaperTrading) {
+                    try {
+                        autoPaperTrader.onMarketUpdate(state)
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (_: Exception) {
+                        autoPaperTrader.stopped("ورود خودکار کاغذی در این به‌روزرسانی با خطا متوقف شد")
+                    }
+                }
+            }
+        }
     }
 
     suspend fun exportFreeHistory(uri: Uri, result: FreeHistoryResult) = withContext(Dispatchers.IO) {

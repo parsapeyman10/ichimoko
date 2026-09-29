@@ -13,6 +13,7 @@ import kotlinx.serialization.json.contentOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.jsoup.Jsoup
 import java.io.IOException
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
@@ -75,9 +76,25 @@ class SourceFetcher(
 
     private suspend fun fetchOne(source: SourceDef, symbol: SymbolDef, apiKey: String): Quote = try {
         val url = source.urlTemplate.replace("{symbol}", encode(symbol.code))
-        parseJsonQuote(source, symbol, fetchJson(source, url, apiKey))
+        if (source.id == SourceCatalog.bamaCars.id) parseBamaCarQuote(source, symbol, fetchText(source, url, apiKey))
+        else parseJsonQuote(source, symbol, fetchJson(source, url, apiKey))
     } catch (error: Exception) {
         Quote(symbol.code, symbol.label, error = (error.message ?: "خطای دریافت داده").take(100), sourceId = source.id)
+    }
+
+    internal fun parseBamaCarQuote(source: SourceDef, symbol: SymbolDef, html: String): Quote {
+        val text = Jsoup.parse(html).text()
+        val market = Regex("قیمت\\s+بازار\\s+([0-9۰-۹٠-٩,٬،.\\s]+)\\s*تومان").find(text)
+        val price = market?.groupValues?.getOrNull(1)?.let(Num::parse)
+            ?: Regex("([0-9۰-۹٠-٩,٬،.\\s]{7,})\\s*تومان").find(text)?.groupValues?.getOrNull(1)?.let(Num::parse)
+        return Quote(
+            code = symbol.code,
+            label = symbol.label,
+            price = price?.takeIf { it.isFinite() && it > 0.0 },
+            unit = source.unit,
+            error = if (price == null) "قیمت بازار خودرو در صفحه منبع پیدا نشد" else null,
+            sourceId = source.id,
+        )
     }
 
     internal fun parseJsonQuote(source: SourceDef, symbol: SymbolDef, root: JsonElement): Quote {
@@ -121,7 +138,7 @@ class SourceFetcher(
         val request = Request.Builder().url(parsed)
             .header("User-Agent", "Trading/1.0 (Android; public-data-client)")
             .header("Accept-Language", "fa,en;q=0.8")
-            .header("Accept", "application/json, text/plain")
+            .header("Accept", "application/json, text/html, text/plain")
             .apply { source.headers.forEach { (key, value) -> header(key, value) } }
             .build()
         repeat(3) { attempt ->

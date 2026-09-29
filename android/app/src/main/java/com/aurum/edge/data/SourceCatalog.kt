@@ -35,7 +35,44 @@ object SourceCatalog {
         requiresKey = true,
     )
 
+    val bamaCars = SourceDef(
+        id = "bama_car_price",
+        title = "Bama · قیمت خودرو",
+        subtitle = "قیمت بازار خودرو بدون کلید",
+        kind = SourceKind.HTML_PAGE,
+        urlTemplate = "https://bama.ir/price/{symbol}",
+        unit = "تومان",
+        symbols = listOf(
+            SymbolDef("quick_gxr_lmt", "کوییک GXRL / GXR-L"),
+            SymbolDef("peugeot_207_manualtu5p", "پژو ۲۰۷ دستی TU5P / TU5Plus"),
+        ),
+    )
+
+    /**
+     * Public TGJU board used only for the watchlist's Iran rows. TGJU publishes Rial strings;
+     * scale=0.1 converts them to Toman for the UI. This is not used by the chart/signal engine.
+     */
+    val tgju = SourceDef(
+        id = "tgju_public",
+        title = "TGJU عمومی",
+        subtitle = "دلار آزاد و طلای ایران بدون کلید",
+        kind = SourceKind.JSON_REST,
+        urlTemplate = "https://call1.tgju.org/ajax.json",
+        batchTemplate = "https://call1.tgju.org/ajax.json",
+        pricePath = "current.{symbol}.p",
+        changePath = "current.{symbol}.dp",
+        changeMode = ChangeMode.PERCENT,
+        timestampPath = "current.{symbol}.ts",
+        timestampMode = SourceTime.NONE,
+        scale = 0.1,
+        unit = "تومان",
+        symbols = listOf(
+            SymbolDef("geram18", "طلای ۱۸ عیار ایران"),
+            SymbolDef("price_dollar_rl", "دلار آزاد ایران"),
+        ),
+    )
+
     // Only vetted built-ins can be selected from the UI.
-    val all = listOf(yahoo, twelveData)
+    val all = listOf(yahoo, tgju, bamaCars, twelveData)
     fun find(id: String): SourceDef? = all.firstOrNull { it.id == id }
 }

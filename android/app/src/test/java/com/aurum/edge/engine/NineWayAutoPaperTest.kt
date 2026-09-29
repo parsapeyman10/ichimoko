@@ -201,7 +201,8 @@ class NineWayAutoPaperTest {
         assertNull(PaperAutoRules.blocker(ready, settings,
             news.copy(ai = news.ai.copy(model = "another-verified-model")), now))
         assertNotNull(PaperAutoRules.blocker(ready, settings.copy(autoPaperTrading = false), news, now))
-        assertNotNull(PaperAutoRules.blocker(ready, settings.copy(backgroundMonitor = false), news, now))
+        assertNull(PaperAutoRules.blocker(ready, settings.copy(backgroundMonitor = false), news, now))
+        assertNotNull(PaperAutoRules.opportunityBlocker(ready, settings.copy(backgroundMonitor = false), news, now))
         assertNotNull(PaperAutoRules.blocker(ready.copy(symbol = "AAPL"), settings, news, now))
         assertNotNull(PaperAutoRules.blocker(ready, settings, news, now + 90_001))
         // A late WebSocket tick near Friday's close cannot authorize a weekend entry/alert.

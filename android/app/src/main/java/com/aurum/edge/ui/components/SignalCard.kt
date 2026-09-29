@@ -21,7 +21,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
-import com.aurum.edge.engine.SignalEngine
 import com.aurum.edge.ui.theme.AurumColors
 
 @Composable
@@ -31,6 +30,7 @@ fun SignalSummaryCard(
     modifier: Modifier = Modifier,
     showBlockers: Boolean = true,
     entryBlocker: String? = null,
+    allowManualPaperTrade: Boolean = true,
 ) {
     val action = signal?.action ?: SignalAction.NO_TRADE
     val color = when (action) {
@@ -64,12 +64,8 @@ fun SignalSummaryCard(
         }
 
         if (signal == null) {
-            Text(
-                "برای محاسبه سیگنال، حداقل ${SignalEngine.minBars(com.aurum.edge.core.Interval.M5)} کندل بسته واقعی لازم است.",
-                style = MaterialTheme.typography.bodySmall,
-                color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 8.dp),
-            )
+            Text("—", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 8.dp))
             return@Column
         }
 
@@ -99,45 +95,27 @@ fun SignalSummaryCard(
                     }
                 }
             }
-            val validMinutes = SignalEngine.barsValid(signal.interval) * signal.interval.minutes
-            Text(
-                "اعتبار سیگنال: تا ${SignalEngine.barsValid(signal.interval)} کندل ${signal.interval.label} (~$validMinutes دقیقه) — هر ورودی باید هم‌زمان با کندل بسته باشد",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 8.dp),
-            )
             entryBlocker?.let { reason ->
-                Text("ورود کاغذی مجاز نیست: $reason", style = MaterialTheme.typography.bodySmall,
+                Text(reason, style = MaterialTheme.typography.bodySmall,
                     color = AurumColors.Red, modifier = Modifier.padding(top = 8.dp))
             }
-            Button(
-                onClick = onOpenPaperTrade,
-                enabled = entryBlocker == null,
-                colors = ButtonDefaults.buttonColors(containerColor = AurumColors.Gold, contentColor = Color(0xFF14100A)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp),
-            ) {
-                Text("باز کردن پوزیشن کاغذی روی قیمت واقعی", fontWeight = FontWeight.Bold)
-            }
-            Text(
-                "این «دمو» روی قیمت واقعی بازار اجرا می‌شود؛ سود/زیان با قیمت‌های بعدی همان بازار تسویه می‌شود.",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-        } else if (showBlockers) {
-            Column(modifier = Modifier.padding(top = 10.dp)) {
-                Text("چرا ورود نمی‌کنیم؟", style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold, fontWeight = FontWeight.SemiBold)
-                signal.blockers.take(5).forEach { blocker ->
-                    Text("✕ $blocker", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 3.dp))
+            if (allowManualPaperTrade) {
+                Button(
+                    onClick = onOpenPaperTrade,
+                    enabled = entryBlocker == null,
+                    colors = ButtonDefaults.buttonColors(containerColor = AurumColors.Gold, contentColor = Color(0xFF14100A)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp),
+                ) {
+                    Text("باز کردن پوزیشن کاغذی روی قیمت واقعی", fontWeight = FontWeight.Bold)
                 }
-                if (signal.reasons.isNotEmpty()) {
-                    Text("شرایط برقرارشده:", style = MaterialTheme.typography.bodySmall, color = AurumColors.Green, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
-                    signal.reasons.take(5).forEach { reason ->
-                        Text("✓ $reason", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 3.dp))
-                    }
-                }
+                Text(
+                    "این «دمو» روی قیمت واقعی بازار اجرا می‌شود؛ سود/زیان با قیمت‌های بعدی همان بازار تسویه می‌شود.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
             }
         }
     }
