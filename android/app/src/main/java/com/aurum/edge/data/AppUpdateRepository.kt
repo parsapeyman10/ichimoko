@@ -3,6 +3,8 @@ package com.aurum.edge.data
 import android.content.ClipData
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -42,6 +44,14 @@ class AppUpdateRepository(
     private val context: Context,
     private val client: OkHttpClient = OkHttpClient.Builder().followRedirects(true).build(),
 ) {
+    companion object {
+        // This is deliberately narrower than "any .apk". It prevents a debug APK, a random
+        // third-party asset, or a similarly named file from becoming an install candidate.
+        private val RELEASE_APK_NAME = Regex("^AurumEdge-v\\d+(?:\\.\\d+)*\\.apk$")
+        private val SHA256 = Regex("^[0-9a-fA-F]{64}$")
+        private const val MAX_APK_BYTES = 200L * 1024L * 1024L
+    }
+
     enum class SourceKind { MANIFEST_APK, MANIFEST_METADATA, RELEASE_APK }
 
     data class UpdateInfo(
@@ -55,6 +65,8 @@ class AppUpdateRepository(
         val expectedSha256: String? = null,
         val artifactName: String? = null,
         val sizeBytes: Long? = null,
+        val tagName: String? = null,
+        val publishedAt: String? = null,
     ) {
         val displayVersion: String get() = buildString {
             append(versionName)
@@ -160,11 +172,27 @@ class AppUpdateRepository(
         )
         runCatching {
             val apk = downloadApk(info)
-            val packageInfo = context.packageManager.getPackageArchiveInfo(apk.absolutePath, 0)
+            @Suppress("DEPRECATION")
+            val archiveFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                PackageManager.GET_SIGNING_CERTIFICATES
+            } else {
+                PackageManager.GET_SIGNATURES
+            }
+            val packageInfo = context.packageManager.getPackageArchiveInfo(apk.absolutePath, archiveFlags)
                 ?: throw DataFeedException("APK دانلودشده قابل خواندن نیست")
             if (packageInfo.packageName != context.packageName) {
                 throw DataFeedException(
                     "این APK برای ${packageInfo.packageName} است، اما نصب فعلی ${context.packageName} است؛ نسخهٔ debug و release جدا هستند.",
+                )
+            }
+            val installedInfo = context.packageManager.getPackageInfo(context.packageName, archiveFlags)
+            val installedSigners = signingCertificateDigests(installedInfo)
+            val downloadedSigners = signingCertificateDigests(packageInfo)
+            if (installedSigners.isEmpty() || downloadedSigners.isEmpty() ||
+                installedSigners.intersect(downloadedSigners).isEmpty()
+            ) {
+                throw DataFeedException(
+                    "امضای APK جدید با نسخهٔ نصب‌شده یکی نیست؛ فایل release باید با همان کلید ثابت امضا شود.",
                 )
             }
             val versionCode = PackageInfoCompat.getLongVersionCode(packageInfo)
@@ -275,7 +303,11 @@ class AppUpdateRepository(
         if (versionCode <= BuildConfig.VERSION_CODE.toLong()) return null
         val applicationId = obj.string("applicationId")
         if (!applicationId.isNullOrBlank() && applicationId != context.packageName) return null
-        val apkUrl = obj.string("apkUrl")?.trim()?.takeIf { it.startsWith("https://") }
+        val artifactName = obj.string("artifactName")?.trim()
+        val apkUrl = obj.string("apkUrl")?.trim()?.takeIf {
+            isTrustedReleaseAsset(it, artifactName ?: "")
+        }
+        val digest = normalizeSha256(obj.string("sha256"))
         return UpdateInfo(
             source = if (apkUrl == null) SourceKind.MANIFEST_METADATA else SourceKind.MANIFEST_APK,
             sourceLabel = if (apkUrl == null) "manifest نسخهٔ جدید بدون APK عمومی" else "انتشار پایدار",
@@ -284,8 +316,11 @@ class AppUpdateRepository(
             commitSha = obj.string("commitSha"),
             notes = obj.string("notes") ?: "انتشار پایدار مالک پروژه",
             downloadUrl = apkUrl,
-            expectedSha256 = obj.string("sha256")?.trim()?.takeIf { it.isNotBlank() },
+            expectedSha256 = digest,
+            artifactName = artifactName,
             sizeBytes = obj.long("sizeBytes")?.takeIf { it > 0L },
+            tagName = obj.string("tagName") ?: obj.string("tag"),
+            publishedAt = obj.string("publishedAt"),
         )
     }
 
@@ -293,7 +328,7 @@ class AppUpdateRepository(
         val repo = BuildConfig.UPDATE_REPO
         val releases = requestJson("https://api.github.com/repos/$repo/releases?per_page=10")
             .jsonArray.mapNotNull { it as? JsonObject }
-            .filter { it.boolean("draft") != true }
+            .filter { it.boolean("draft") != true && it.boolean("prerelease") != true }
         val currentVersion = semanticVersion(BuildConfig.VERSION_NAME)
         // Do not stop at a release that has no APK. A notes-only release must not hide the next
         // public release asset, and a debug APK must never be offered as an upgrade.
@@ -306,24 +341,43 @@ class AppUpdateRepository(
                 } == true) return@mapNotNull null
             val assets = release["assets"]?.jsonArray?.mapNotNull { it as? JsonObject }.orEmpty()
             val asset = assets.firstOrNull { candidate ->
-                val name = candidate.string("name").orEmpty().lowercase(Locale.ROOT)
-                name.endsWith(".apk") && !name.contains("debug")
+                val name = candidate.string("name").orEmpty()
+                val url = candidate.string("browser_download_url").orEmpty()
+                isTrustedReleaseAsset(url, name)
             } ?: return@mapNotNull null
-            val downloadUrl = asset.string("browser_download_url")?.takeIf { it.startsWith("https://") }
-                ?: return@mapNotNull null
-            val commitish = release.string("target_commitish")
+            val downloadUrl = asset.string("browser_download_url")!!
+            val artifactName = asset.string("name")!!
+            // The release asset carries the immutable versionCode/commit metadata produced by CI.
+            // If an older release has no metadata sidecar, the APK remains eligible but the missing
+            // fields stay visibly unknown instead of being guessed from versionName.
+            val metadata = assets.firstOrNull { candidate ->
+                val name = candidate.string("name").orEmpty()
+                val url = candidate.string("browser_download_url").orEmpty()
+                name == "$artifactName.json" && isTrustedMetadataAsset(url, name)
+            }?.string("browser_download_url")?.let { metadataUrl ->
+                runCatching { requestJson(metadataUrl).jsonObject }.getOrNull()
+            }
+            val commitish = metadata?.string("commitSha")?.takeIf { it.isNotBlank() }
+                ?: release.string("target_commitish")
             UpdateInfo(
                 source = SourceKind.RELEASE_APK,
-                sourceLabel = if (release.boolean("prerelease") == true) "GitHub Release آزمایشی" else "GitHub Release عمومی",
+                sourceLabel = "GitHub Release عمومی",
                 versionName = displayVersion,
-                versionCode = null,
+                versionCode = metadata?.long("versionCode"),
                 commitSha = commitish,
                 notes = release.string("body")?.take(500).orEmpty().ifBlank {
-                    "فایل APK عمومی از GitHub Releases. برای بروزرسانی بدون حذف نصب، امضا باید با نسخهٔ فعلی یکی باشد."
+                    metadata?.string("notes")?.take(500).orEmpty().ifBlank {
+                        "فایل APK عمومی از GitHub Releases. برای بروزرسانی بدون حذف نصب، امضا باید با نسخهٔ فعلی یکی باشد."
+                    }
                 },
                 downloadUrl = downloadUrl,
-                artifactName = asset.string("name"),
-                sizeBytes = asset.long("size")?.takeIf { it > 0L },
+                expectedSha256 = normalizeSha256(asset.string("digest"))
+                    ?: normalizeSha256(metadata?.string("sha256")),
+                artifactName = artifactName,
+                sizeBytes = asset.long("size")?.takeIf { it > 0L }
+                    ?: metadata?.long("sizeBytes")?.takeIf { it > 0L },
+                tagName = tag,
+                publishedAt = release.string("published_at"),
             )
         }.firstOrNull()
     }
@@ -351,6 +405,9 @@ class AppUpdateRepository(
         val partial = File(dir, "$token.part")
         partial.delete()
         val downloadUrl = info.downloadUrl ?: throw DataFeedException("برای این نسخه لینک مستقیم APK عمومی تنظیم نشده است")
+        if (info.sizeBytes != null && info.sizeBytes > MAX_APK_BYTES) {
+            throw DataFeedException("حجم APK منتشرشده از سقف مجاز بروزرسانی بیشتر است")
+        }
         val request = Request.Builder().url(downloadUrl)
             .header("Accept", "application/vnd.android.package-archive, application/octet-stream")
             .header("User-Agent", "AurumEdge/${BuildConfig.VERSION_NAME}")
@@ -359,7 +416,11 @@ class AppUpdateRepository(
             if (!response.isSuccessful) throw DataFeedException("دانلود بروزرسانی ناموفق بود (${response.code})")
             if (!response.request.url.isHttps) throw DataFeedException("دانلود فقط از HTTPS مجاز است")
             val body = response.body ?: throw DataFeedException("فایل بروزرسانی خالی است")
-            val total = body.contentLength().takeIf { it > 0L }
+            val declaredLength = body.contentLength()
+            if (declaredLength > MAX_APK_BYTES) {
+                throw DataFeedException("حجم APK دانلودی از سقف مجاز بروزرسانی بیشتر است")
+            }
+            val total = declaredLength.takeIf { it > 0L }
             FileOutputStream(partial).use { out ->
                 body.byteStream().use { input ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
@@ -370,6 +431,7 @@ class AppUpdateRepository(
                         if (read == 0) continue
                         out.write(buffer, 0, read)
                         done += read
+                        if (done > MAX_APK_BYTES) throw DataFeedException("حجم APK دانلودی از سقف مجاز بروزرسانی بیشتر است")
                         total?.let { length ->
                             val pct = ((done * 100) / length).toInt().coerceIn(0, 100)
                             if (pct != _state.value.progressPercent)
@@ -386,8 +448,14 @@ class AppUpdateRepository(
             partial.delete()
             throw DataFeedException("ذخیرهٔ امن فایل بروزرسانی ممکن نشد")
         }
+        info.sizeBytes?.let { expectedSize ->
+            if (file.length() != expectedSize) {
+                file.delete()
+                throw DataFeedException("حجم APK دریافت‌شده با metadata انتشار هم‌خوان نیست")
+            }
+        }
         info.expectedSha256?.let { expected ->
-            val normalized = expected.removePrefix("sha256:").trim()
+            val normalized = normalizeSha256(expected).orEmpty()
             if (normalized.isNotBlank()) {
                 val actual = sha256(file)
                 if (!actual.equals(normalized, ignoreCase = true)) {
@@ -407,6 +475,52 @@ class AppUpdateRepository(
             while (input.read(buffer).also { read = it } > 0) digest.update(buffer, 0, read)
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Check the signing certificate before opening Package Installer. Android performs the final
+     * check too, but doing it here gives a useful error and prevents presenting a known-incompatible
+     * debug/release APK to the user. Key rotation is intentionally conservative: at least one
+     * current content signer must match.
+     */
+    @Suppress("DEPRECATION")
+    private fun signingCertificateDigests(info: PackageInfo): Set<String> {
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.signingInfo?.apkContentsSigners.orEmpty()
+        } else {
+            info.signatures.orEmpty()
+        }
+        return signatures.map { signature ->
+            MessageDigest.getInstance("SHA-256")
+                .digest(signature.toByteArray())
+                .joinToString("") { "%02x".format(it) }
+        }.toSet()
+    }
+
+    /** Only the configured repository's release-download route is accepted. */
+    private fun isTrustedReleaseAsset(url: String, name: String): Boolean {
+        if (!RELEASE_APK_NAME.matches(name)) return false
+        val prefix = "https://github.com/${BuildConfig.UPDATE_REPO}/releases/download/"
+        return url.startsWith(prefix) &&
+            url.substringAfterLast('/') == name &&
+            '?' !in url && '#' !in url
+    }
+
+    private fun isTrustedMetadataAsset(url: String, name: String): Boolean {
+        val prefix = "https://github.com/${BuildConfig.UPDATE_REPO}/releases/download/"
+        return name.matches(Regex("^AurumEdge-v\\d+(?:\\.\\d+)*\\.apk\\.json$")) &&
+            url.startsWith(prefix) &&
+            url.substringAfterLast('/') == name &&
+            '?' !in url && '#' !in url
+    }
+
+    private fun normalizeSha256(value: String?): String? {
+        val normalized = value?.trim()
+            ?.removePrefix("sha256:")
+            ?.removePrefix("SHA256:")
+            ?.trim()
+            ?: return null
+        return normalized.takeIf { SHA256.matches(it) }?.lowercase(Locale.ROOT)
     }
 
     private fun safeFileToken(value: String): String = value

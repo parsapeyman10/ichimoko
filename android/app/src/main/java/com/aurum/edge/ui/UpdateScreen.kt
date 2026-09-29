@@ -142,8 +142,32 @@ private fun UpdateInfoCard(info: AppUpdateRepository.UpdateInfo) {
             Text(info.notes, style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted, modifier = Modifier.padding(top = 3.dp))
         }
+        info.tagName?.takeIf { it.isNotBlank() }?.let { tag ->
+            Text("Tag: $tag", style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted, modifier = Modifier.padding(top = 3.dp))
+        }
+        info.commitSha?.takeIf { it.isNotBlank() }?.let { sha ->
+            Text("Commit: $sha", style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted, modifier = Modifier.padding(top = 3.dp))
+        }
+        info.publishedAt?.takeIf { it.isNotBlank() }?.let { publishedAt ->
+            Text("زمان انتشار: $publishedAt", style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted, modifier = Modifier.padding(top = 3.dp))
+        }
+        info.artifactName?.takeIf { it.isNotBlank() }?.let { artifact ->
+            Text("Artifact: $artifact", style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted, modifier = Modifier.padding(top = 3.dp))
+        }
         info.sizeBytes?.takeIf { it > 0L }?.let { bytes ->
-            Text("حجم تقریبی: ${formatUpdateBytes(bytes)}", style = MaterialTheme.typography.labelSmall,
+            Text("حجم دقیق: ${formatUpdateBytes(bytes)} ($bytes bytes)", style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted, modifier = Modifier.padding(top = 3.dp))
+        }
+        info.expectedSha256?.takeIf { it.isNotBlank() }?.let { digest ->
+            Text("SHA-256: $digest", style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted, modifier = Modifier.padding(top = 3.dp))
+        }
+        info.downloadUrl?.takeIf { it.isNotBlank() }?.let { url ->
+            Text("URL asset: $url", style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted, modifier = Modifier.padding(top = 3.dp))
         }
     }

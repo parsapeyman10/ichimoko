@@ -16,6 +16,7 @@ import kotlinx.coroutines.withContext
 
 data class WatchState(
     val quotes: Map<String, Map<String, Quote>> = emptyMap(),
+    val sourceHealth: Map<String, SourceHealth> = emptyMap(),
     val refreshing: Boolean = false,
     val lastAttemptAt: Long? = null,
     val error: String? = null,
@@ -57,6 +58,11 @@ class WatchRepository(
     }
 
     private data class Target(val symbol: WatchSymbol, val source: SourceDef, val providerCode: String, val key: String)
+    private data class GroupResult(
+        val source: SourceDef,
+        val snapshot: SourceSnapshot,
+        val pairs: List<Pair<Target, Quote>>,
+    )
 
     private suspend fun refresh() = mutex.withLock {
         ensureLoaded()
@@ -88,13 +94,37 @@ class WatchRepository(
                 targets.groupBy { it.source.id to it.key }.values.map { group ->
                     async {
                         val source = group.first().source
-                        val snapshot = fetcher.fetchAll(source, group.map { SymbolDef(it.providerCode, it.symbol.label) }, group.first().key)
-                        group.zip(snapshot.quotes)
+                        val snapshot = fetcher.fetchAll(
+                            source,
+                            group.map { SymbolDef(it.providerCode, it.symbol.label) },
+                            group.first().key,
+                        )
+                        GroupResult(source, snapshot, group.zip(snapshot.quotes))
                     }
-                }.awaitAll().flatten()
+                }.awaitAll()
+            }
+            val health = results.associate { result ->
+                val snapshot = result.snapshot
+                val fresh = snapshot.quotes.count { it.price != null && it.error == null && !it.stale }
+                val state = when {
+                    snapshot.error?.contains("کلید") == true -> "NO_KEY"
+                    fresh == snapshot.quotes.size && fresh > 0 -> "HEALTHY"
+                    fresh > 0 -> "DEGRADED"
+                    else -> "OFFLINE"
+                }
+                result.source.id to SourceHealth(
+                    sourceId = result.source.id,
+                    provider = result.source.title,
+                    state = state,
+                    fetchedAt = snapshot.fetchedAt,
+                    latencyMs = snapshot.latencyMs,
+                    quoteCount = snapshot.quotes.size,
+                    freshQuoteCount = fresh,
+                    detail = snapshot.error,
+                )
             }
             val updated = _state.value.quotes.mapValues { it.value.toMutableMap() }.toMutableMap()
-            for ((target, incoming) in results) {
+            for (result in results) for ((target, incoming) in result.pairs) {
                 // providerCodes guarantees the mapped provider code is the same instrument and quote
                 // unit, so the symbol's unit is the true label (Twelve Data quotes USD/JPY in JPY).
                 val normalized = incoming.copy(unit = target.symbol.unit)
@@ -110,7 +140,11 @@ class WatchRepository(
                         ?: normalized
                 }
             }
-            _state.value = _state.value.copy(quotes = updated, lastAttemptAt = System.currentTimeMillis())
+            _state.value = _state.value.copy(
+                quotes = updated,
+                sourceHealth = health,
+                lastAttemptAt = System.currentTimeMillis(),
+            )
         } catch (e: Exception) {
             _state.value = _state.value.copy(error = "به‌روزرسانی دیده‌بان انجام نشد: ${e.message ?: "خطای داده"}")
         } finally {

@@ -64,6 +64,19 @@ data class SourceSnapshot(
     val fetchedAt: Long = System.currentTimeMillis(),
     val online: Boolean = true,
     val error: String? = null,
+    /** Monotonic request duration; network health is separate from provider quote freshness. */
+    val latencyMs: Long? = null,
+)
+
+data class SourceHealth(
+    val sourceId: String,
+    val provider: String,
+    val state: String,
+    val fetchedAt: Long,
+    val latencyMs: Long?,
+    val quoteCount: Int,
+    val freshQuoteCount: Int,
+    val detail: String? = null,
 )
 
 /**
