@@ -38,10 +38,8 @@ import com.aurum.edge.data.JournalStats
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.NewsRepository
-import com.aurum.edge.data.Quote
 import com.aurum.edge.data.WatchSelection
 import com.aurum.edge.data.WatchState
-import com.aurum.edge.engine.Backtester
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.engine.ReplayEngine
@@ -61,53 +59,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.min
-
-sealed interface LearnState {
-    data object Idle : LearnState
-    data class Loading(val step: String) : LearnState
-    data class Done(val result: Backtester.Result, val interval: Interval) : LearnState
-    data class Failed(val message: String) : LearnState
-}
-
-/** Cursor replay is independent from the batch report but uses the same immutable dataset. */
-sealed interface ReplayState {
-    data object Idle : ReplayState
-    data object Loading : ReplayState
-    data class Ready(val snapshot: ReplayEngine.Snapshot) : ReplayState
-    data class Failed(val message: String) : ReplayState
-}
-
-sealed interface WalkForwardState {
-    data object Idle : WalkForwardState
-    data class Loading(val step: String) : WalkForwardState
-    data class Done(val result: Backtester.WalkForward, val interval: Interval, val saved: Boolean) : WalkForwardState
-    data class Failed(val message: String) : WalkForwardState
-}
-
-data class WatchHistory(
-    val symbolId: String = "",
-    val sourceId: String = "",
-    val entries: List<Quote> = emptyList(),
-    val total: Long = 0L,
-    val loading: Boolean = false,
-)
-
-/**
- * Real candles around ONE recorded paper trade, for the journal chart.
- *
- * [window] only ever holds bars that passed the same verification as the live chart; when the
- * device has no history for that period the state stays empty and says so instead of drawing
- * anything invented.
- */
-data class TradeChartState(
-    val tradeId: String = "",
-    val loading: Boolean = false,
-    val downloading: Boolean = false,
-    val window: TradeReplay.Window = TradeReplay.Window(),
-    /** Where the drawn bars came from — cache of this device or a fresh provider download. */
-    val source: String = "",
-    val error: String? = null,
-)
 
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
@@ -166,17 +117,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     /** Candles behind ONE journal row. Only one trade is expanded at a time. */
     private val _tradeChart = MutableStateFlow(TradeChartState())
     val tradeChart: StateFlow<TradeChartState> = _tradeChart.asStateFlow()
-
-    /** Result of the one-tap AI connectivity probe from Settings (never carries the key). */
-    data class AiProbeState(val running: Boolean = false, val message: String? = null)
-    private val _aiProbe = MutableStateFlow(AiProbeState())
-    val aiProbe: StateFlow<AiProbeState> = _aiProbe.asStateFlow()
-
-    /** Allowed model IDs for the user's key, fetched live from the service catalogue. */
-    data class AiModelsState(val loading: Boolean = false, val models: List<String> = emptyList(),
-                             val error: String? = null)
-    private val _aiModels = MutableStateFlow(AiModelsState())
-    val aiModels: StateFlow<AiModelsState> = _aiModels.asStateFlow()
 
     init {
         viewModelScope.launch {
