@@ -316,20 +316,27 @@ object SignalEngine {
             scorePercent = if (spanOk) 10 else 0,
         )
 
-        val chikouOk = when (direction) {
+        val chikouOk = !profile.chikouConfirmation || when (direction) {
             SignalAction.BUY -> snap.chikouBuyClear
             SignalAction.SELL -> snap.chikouSellClear
             else -> false
         }
-        if (chikouOk) {
+        if (!profile.chikouConfirmation) {
+            if (narrative) reasons += "تایید Chikou در این پروفایل خاموش است"
+        } else if (chikouOk) {
             score += 10
             if (narrative) reasons += "تایید چیکو نسبت به ساختار ${series.setting.kijun} کندل قبل"
         } else if (direction != null && narrative) blockers += "چیکو تایید نمی‌کند — ساختار قبلی نقض می‌شود"
         if (narrative) confluence += ConfluenceItem(
             "۴ · تایید Chikou",
             chikouOk,
-            (if (long) "close بالای high قبلی" else "close زیر low قبلی") + " · سهم امتیاز ۱۰ از ۱۰۰",
-            scorePercent = if (chikouOk) 10 else 0,
+            if (profile.chikouConfirmation) {
+                (if (long) "close بالای high قبلی" else "close زیر low قبلی") + " · سهم امتیاز ۱۰ از ۱۰۰"
+            } else "خاموش در پروفایل؛ شرطی به امتیاز اضافه نشد",
+            status = if (profile.chikouConfirmation) {
+                if (chikouOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT
+            } else ConfluenceStatus.UNKNOWN,
+            scorePercent = if (profile.chikouConfirmation && chikouOk) 10 else 0,
         )
 
         val emaOk = when (direction) {

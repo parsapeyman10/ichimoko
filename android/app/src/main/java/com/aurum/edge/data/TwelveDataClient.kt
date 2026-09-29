@@ -47,15 +47,17 @@ class TwelveDataClient(
         symbol: String,
         interval: Interval,
         outputSize: Int = HistoryPolicy.TARGET_CANDLES,
+        minimumOutputSize: Int = HistoryPolicy.MAX_CACHED_CANDLES,
     ): List<Candle> {
-        if (apiKey.isBlank()) throw DataFeedException("کلید Twelve Data وارد نشده است")
+        val normalizedKey = apiKey.trim()
+        if (normalizedKey.isBlank()) throw DataFeedException("کلید Twelve Data وارد نشده است")
         val url = buildString {
             append("https://api.twelvedata.com/time_series?symbol=")
             append(URLEncoder.encode(symbol, "UTF-8").replace("%2F", "/"))
             append("&interval=").append(interval.api)
-            append("&outputsize=").append(HistoryPolicy.providerRequestSize(outputSize))
+            append("&outputsize=").append(HistoryPolicy.providerRequestSize(outputSize, minimumOutputSize))
             append("&order=ASC&timezone=UTC&apikey=")
-            append(URLEncoder.encode(apiKey, "UTF-8"))
+            append(URLEncoder.encode(normalizedKey, "UTF-8"))
         }
         val request = Request.Builder().url(url).header("Accept", "application/json").build()
         val body = try {
@@ -125,8 +127,14 @@ class TwelveDataClient(
 
     /** Real-time price stream. The flow closes on any connection problem. */
     fun streamPrice(apiKey: String, symbol: String): Flow<PriceTick> = callbackFlow {
+        val normalizedKey = apiKey.trim()
+        if (normalizedKey.isBlank()) {
+            close(DataFeedException("کلید Twelve Data وارد نشده است"))
+            awaitClose { }
+            return@callbackFlow
+        }
         val request = Request.Builder()
-            .url("wss://ws.twelvedata.com/v1/quotes/price?apikey=" + URLEncoder.encode(apiKey, "UTF-8"))
+            .url("wss://ws.twelvedata.com/v1/quotes/price?apikey=" + URLEncoder.encode(normalizedKey, "UTF-8"))
             .build()
         val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {

@@ -26,6 +26,7 @@ import com.aurum.edge.data.SettingsStore
 import com.aurum.edge.data.TwelveDataClient
 import com.aurum.edge.data.TraderAdvisor
 import com.aurum.edge.data.QuoteHistoryStore
+import com.aurum.edge.data.ReplayJournalStore
 import com.aurum.edge.data.SourceFetcher
 import com.aurum.edge.data.WatchRepository
 import com.aurum.edge.data.WatchSettingsStore
@@ -54,6 +55,7 @@ class AppContainer(context: Context) {
     val settingsStore = SettingsStore(appContext)
     val candleCache = CandleCache(appContext)
     val journalStore = JournalStore(appContext)
+    val replayJournalStore = ReplayJournalStore(appContext)
     val opportunityStore = PaperOpportunityStore(appContext)
     val client = TwelveDataClient()
     val publicHistory = PublicCandleHistoryClient()
@@ -110,31 +112,103 @@ class AppContainer(context: Context) {
             com.aurum.edge.data.JournalPdfExporter.export(appContext, uri, title, trades, startingBalance)
         }
 
-    private data class CandleDownload(val candles: List<Candle>, val source: String)
+    private data class CandleDownload(
+        val candles: List<Candle>,
+        val source: String,
+        /** Provider receipt timestamp; distinct from the last candle timestamp. */
+        val fetchedAt: Long = System.currentTimeMillis(),
+        val observedGapCount: Int = 0,
+    )
 
-    /** Download at least 3000 real candles: Twelve Data when configured, otherwise public no-key history. */
+    /**
+     * Download at least 3000 real candles.
+     *
+     * The keyless public history is deliberately tried first. A Twelve Data key is an explicit
+     * last fallback, never a silent primary: provider identity, timestamp and gaps are still
+     * validated by the provider adapter and a failure stops the research run.
+     */
     private suspend fun downloadCandles(symbol: String, interval: Interval, outputSize: Int): CandleDownload {
         val s = settingsStore.read()
         val requested = HistoryPolicy.providerRequestSize(outputSize)
-        return if (s.hasKey) {
+        return try {
+            val result = publicHistory.fetchCandles(symbol, interval,
+                minimumSize = HistoryPolicy.TARGET_CANDLES, desiredSize = requested)
+            CandleDownload(result.candles, result.provider, result.fetchedAt, result.gaps.size)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (publicFailure: Exception) {
+            if (!s.hasKey) {
+                throw DataFeedException(
+                    "منبع عمومی تاریخچه پاسخ معتبر نداد و کلید fallback تنظیم نشده است: " +
+                        (publicFailure.message ?: "خطای نامشخص").take(140)
+                )
+            }
             try {
                 val candles = client.fetchCandles(s.apiKey, symbol, interval, requested)
                 if (candles.size < HistoryPolicy.TARGET_CANDLES) {
                     throw DataFeedException("Twelve Data فقط ${candles.size} کندل داد؛ حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی لازم است")
                 }
-                CandleDownload(candles.sortedBy { it.time }.takeLast(requested), "Twelve Data (حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی)")
+                val sorted = candles.sortedBy { it.time }.takeLast(requested)
+                val gaps = PublicCandleHistoryClient.detectGaps(sorted, interval)
+                CandleDownload(
+                    candles = sorted,
+                    source = "Twelve Data · آخرین fallback پس از خطای منبع عمومی: ${(publicFailure.message ?: "نامشخص").take(80)}" +
+                        if (gaps.isEmpty()) " · بدون gap مشاهده‌شده" else " · ${gaps.size} gap واقعی بدون پرکردن",
+                    fetchedAt = System.currentTimeMillis(),
+                    observedGapCount = gaps.size,
+                )
             } catch (cancel: CancellationException) {
                 throw cancel
-            } catch (primary: Exception) {
-                val result = publicHistory.fetchCandles(symbol, interval,
-                    minimumSize = HistoryPolicy.TARGET_CANDLES, desiredSize = requested)
-                CandleDownload(result.candles,
-                    "${result.provider} · پشتیبان پس از خطای Twelve Data: ${(primary.message ?: "نامشخص").take(80)}")
+            } catch (fallbackFailure: Exception) {
+                throw DataFeedException(
+                    "منبع عمومی و آخرین fallback Twelve Data تاریخچهٔ معتبر ندادند؛ دادهٔ ساختگی/پرکننده مجاز نیست: " +
+                        (fallbackFailure.message ?: "خطای نامشخص").take(140)
+                )
             }
-        } else {
-            val result = publicHistory.fetchCandles(symbol, interval,
-                minimumSize = HistoryPolicy.TARGET_CANDLES, desiredSize = requested)
-            CandleDownload(result.candles, result.provider)
+        }
+    }
+
+    /** Immutable research input shared by batch backtest and cursor replay. */
+    data class ResearchDataset(
+        val candles: List<Candle>,
+        val source: String,
+        val fetchedAt: Long,
+        val observedGapCount: Int,
+    )
+
+    /** Download and retain the exact verified bars that LearnScreen will replay. */
+    suspend fun fetchResearchDataset(interval: Interval, outputSize: Int): ResearchDataset {
+        val download = downloadCandles(settingsStore.read().symbol, interval, outputSize)
+        require(download.candles.size >= HistoryPolicy.TARGET_CANDLES) {
+            "برای replay/backtest حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی لازم است (${download.candles.size} دریافت شد)"
+        }
+        return ResearchDataset(download.candles, download.source, download.fetchedAt, download.observedGapCount)
+    }
+
+    /** Run batch backtest on a dataset already shown to the replay; no second provider request. */
+    suspend fun runBacktest(
+        dataset: ResearchDataset,
+        interval: Interval,
+        initialBalance: Double,
+        riskPercent: Double,
+        spreadPrice: Double,
+        commissionPerOz: Double,
+        threshold: Double,
+    ): Backtester.Result {
+        val s = settingsStore.read()
+        return withContext(Dispatchers.Default) {
+            Backtester.run(
+                candles = dataset.candles,
+                interval = interval,
+                symbol = s.symbol,
+                dataSource = dataset.source,
+                initialBalance = initialBalance,
+                riskPercent = riskPercent,
+                spreadPrice = spreadPrice,
+                commissionPerOz = commissionPerOz,
+                threshold = threshold,
+                signalProfile = s.signalProfile,
+            )
         }
     }
 

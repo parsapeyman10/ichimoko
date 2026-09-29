@@ -212,15 +212,20 @@ object Indicators {
  * Ichimoku 7/22/44 (1m) or 9/26/52 (5m+).
  * `senkouA/B` are stored at their computation index; the execution-safe cloud for bar i
  * is read from `cloudAt(i)`, which uses the values computed `displacement` bars earlier.
+ * Chikou is stored at its display index and is null at the right edge until its source close exists.
  */
 data class Ichimoku(
     val tenkan: List<Double?>,
     val kijun: List<Double?>,
+    /** Raw Span A values at the bar where they are computed; display them displaced forward. */
     val senkouA: List<Double?>,
+    /** Raw Span B values at the bar where they are computed; display them displaced forward. */
     val senkouB: List<Double?>,
+    /** Chikou values indexed by their display bar; source close is displacement bars ahead. */
+    val chikou: List<Double?>,
     val displacement: Int,
 ) {
-    /** Cloud as it is actually visible at bar [index] (no look-ahead). */
+    /** Cloud as it is actually visible at bar [index], using only values computed no later than [index]. */
     fun cloudAt(index: Int): Pair<Double, Double>? {
         val i = index - displacement
         if (i < 0) return null
@@ -229,8 +234,17 @@ data class Ichimoku(
         return a to b
     }
 
+    /** Visible Span A at chart bar [index], or null until enough history exists. */
+    fun spanAAt(index: Int): Double? = senkouA.getOrNull(index - displacement)
+
+    /** Visible Span B at chart bar [index], or null until enough history exists. */
+    fun spanBAt(index: Int): Double? = senkouB.getOrNull(index - displacement)
+
     companion object {
         fun compute(candles: List<Candle>, tenkanPeriod: Int, kijunPeriod: Int, spanBPeriod: Int, displacement: Int): Ichimoku {
+            require(tenkanPeriod > 0 && kijunPeriod > 0 && spanBPeriod > 0 && displacement >= 0) {
+                "پارامترهای ایچیموکو باید مثبت باشند"
+            }
             val tenkan = Indicators.donchianMid(candles, tenkanPeriod)
             val kijun = Indicators.donchianMid(candles, kijunPeriod)
             val spanB = Indicators.donchianMid(candles, spanBPeriod)
@@ -240,7 +254,14 @@ data class Ichimoku(
                 val k = kijun[i]
                 if (t != null && k != null) spanA[i] = (t + k) / 2.0
             }
-            return Ichimoku(tenkan, kijun, spanA, spanB, displacement)
+            // A Chikou point at display index i is the close from i + displacement. The
+            // right-most displacement bars are intentionally null: a replay must never borrow
+            // a candle that has not reached its cursor yet.
+            val chikou = MutableList<Double?>(candles.size) { null }
+            for (displayIndex in candles.indices) {
+                chikou[displayIndex] = candles.getOrNull(displayIndex + displacement)?.close
+            }
+            return Ichimoku(tenkan, kijun, spanA, spanB, chikou, displacement)
         }
     }
 }

@@ -22,6 +22,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -60,6 +61,8 @@ import java.time.ZoneOffset
 fun LearnScreen(viewModel: AurumViewModel) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val learn by viewModel.learn.collectAsStateWithLifecycle()
+    val replay by viewModel.replay.collectAsStateWithLifecycle()
+    val replayDecisions by viewModel.replayDecisions.collectAsStateWithLifecycle()
     val walkForward by viewModel.walkForward.collectAsStateWithLifecycle()
     val freeHistory by viewModel.freeHistory.collectAsStateWithLifecycle()
     val uriHandler = LocalUriHandler.current
@@ -402,6 +405,8 @@ fun LearnScreen(viewModel: AurumViewModel) {
                 PerformancePanel(PerformanceMetrics.fromBacktest(state.result), "${state.result.symbol} · ${state.result.dataSource} · هزینه‌های فرض‌شده")
             }
         }
+
+        ReplayPanel(replay, viewModel, replayDecisions.size)
 
         when (val wf = walkForward) {
             is WalkForwardState.Idle -> Unit

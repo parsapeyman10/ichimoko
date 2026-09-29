@@ -179,9 +179,9 @@ class PersianNewsFeed:
     async def snapshot(self) -> dict:
         try:
             url = validated_feed_url(self.settings)
-        except ValueError as exc:
+        except ValueError:
             url = None
-            self._error = str(exc)
+            self._error = "پیکربندی فید فارسی معتبر نیست"
         if url is None:
             return self._payload(False)
         async with self._lock:

@@ -61,8 +61,11 @@ android {
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
         buildConfigField("String", "UPDATE_REPO", "\"parsapeyman10/ichimoko\"")
-        buildConfigField("String", "UPDATE_BRANCH", "\"arena/01a0e4df-ichimoko\"")
-        buildConfigField("String", "UPDATE_MANIFEST_URL", "\"https://raw.githubusercontent.com/parsapeyman10/ichimoko/arena/01a0e4df-ichimoko/update/aurum-edge.json\"")
+        // The updater must read the published manifest, not a short-lived Arena/PR branch.
+        // Public releases are still checked separately, so a manifest without apkUrl cannot
+        // hide a real downloadable GitHub Release.
+        buildConfigField("String", "UPDATE_BRANCH", "\"main\"")
+        buildConfigField("String", "UPDATE_MANIFEST_URL", "\"https://raw.githubusercontent.com/parsapeyman10/ichimoko/main/update/aurum-edge.json\"")
     }
 
     signingConfigs {

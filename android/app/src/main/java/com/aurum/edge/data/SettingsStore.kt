@@ -35,10 +35,15 @@ class SettingsStore(context: Context) {
             riskyTimingFilter = opt(KEY_SIGNAL_RISKY_TIMING, legacyProfile.riskyTimingFilter),
             structureRiskFilter = opt(KEY_SIGNAL_STRUCTURE_RISK, legacyProfile.structureRiskFilter),
             cooldownFilter = opt(KEY_SIGNAL_COOLDOWN, legacyProfile.cooldownFilter),
+            chikouConfirmation = opt(KEY_SIGNAL_CHIKOU, legacyProfile.chikouConfirmation),
         )
+        val storedApiKey = prefs.getString(KEY_API, null)?.trim()
+        val storedNewsAiKey = prefs.getString(KEY_NEWS_AI_KEY, null)?.trim().orEmpty()
+        val storedNewsAiUrl = prefs.getString(KEY_NEWS_AI_URL, null)?.trim().orEmpty()
+        val storedNewsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, null)?.trim().orEmpty()
         return AppSettings(
-        apiKey = prefs.getString(KEY_API, null)?.takeIf { it.isNotBlank() }
-            ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY,
+        apiKey = storedApiKey?.takeIf { it.isNotBlank() }
+            ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY.trim(),
         // Legacy installs may still hold a removed symbol (crypto/stock); the app is forex-only now.
         symbol = (prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD").takeIf { it in WatchCatalog.chartSymbols } ?: "XAU/USD",
         interval = Interval.fromLabel(prefs.getString(KEY_INTERVAL, null) ?: "5m"),
@@ -51,12 +56,13 @@ class SettingsStore(context: Context) {
         notifyOnSignal = prefs.getBoolean(KEY_NOTIFY, true),
         alertSoundUri = prefs.getString(KEY_ALERT_SOUND_URI, "").orEmpty(),
         alertSoundName = prefs.getString(KEY_ALERT_SOUND_NAME, "").orEmpty(),
-        newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty(),
+        newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty().trim(),
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
         autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
-        newsAiApiKey = prefs.getString(KEY_NEWS_AI_KEY, "").orEmpty(),
-        newsAiBaseUrl = prefs.getString(KEY_NEWS_AI_URL, "").orEmpty(),
-        newsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, "").orEmpty(),
+        autoDownloadUpdates = prefs.getBoolean(KEY_AUTO_DOWNLOAD_UPDATES, false),
+        newsAiApiKey = storedNewsAiKey,
+        newsAiBaseUrl = storedNewsAiUrl,
+        newsAiModel = storedNewsAiModel,
         newsAiFormat = prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" },
         signalProfile = profile,
     )
@@ -176,8 +182,10 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_SIGNAL_RISKY_TIMING, next.signalProfile.riskyTimingFilter)
             .putBoolean(KEY_SIGNAL_STRUCTURE_RISK, next.signalProfile.structureRiskFilter)
             .putBoolean(KEY_SIGNAL_COOLDOWN, next.signalProfile.cooldownFilter)
+            .putBoolean(KEY_SIGNAL_CHIKOU, next.signalProfile.chikouConfirmation)
             .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
             .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
+            .putBoolean(KEY_AUTO_DOWNLOAD_UPDATES, next.autoDownloadUpdates)
             .apply()
         _settings.value = next
     }
@@ -205,6 +213,7 @@ class SettingsStore(context: Context) {
         private const val KEY_NEWS_URL = "news_base_url"
         private const val KEY_NEWS_PAUSE = "pause_on_news"
         private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"
+        private const val KEY_AUTO_DOWNLOAD_UPDATES = "auto_download_updates"
         private const val KEY_NEWS_AI_KEY = "news_ai_client_key"
         private const val KEY_NEWS_AI_URL = "news_ai_client_base_url"
         private const val KEY_NEWS_AI_MODEL = "news_ai_client_model"
@@ -219,5 +228,6 @@ class SettingsStore(context: Context) {
         private const val KEY_SIGNAL_RISKY_TIMING = "signal_risky_timing_filter"
         private const val KEY_SIGNAL_STRUCTURE_RISK = "signal_structure_risk_filter"
         private const val KEY_SIGNAL_COOLDOWN = "signal_cooldown_filter"
+        private const val KEY_SIGNAL_CHIKOU = "signal_chikou_confirmation"
     }
 }

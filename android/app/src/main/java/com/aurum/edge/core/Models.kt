@@ -46,8 +46,8 @@ data class PriceTick(val price: Double, val at: Long, val bid: Double? = null, v
 enum class SignalAction { BUY, SELL, NO_TRADE }
 
 /**
- * The base Ichimoku confluence engine is ALWAYS active. These booleans are additive
- * opt-in safeguards/setups that the user can tick independently in Settings.
+ * The base Ichimoku confluence engine is active by default. These booleans are additive
+ * opt-in safeguards/setups; Chikou can be explicitly disabled only for a named profile experiment.
  */
 data class SignalProfile(
     val momentumVolume: Boolean = false,
@@ -59,10 +59,12 @@ data class SignalProfile(
     val riskyTimingFilter: Boolean = false,
     val structureRiskFilter: Boolean = false,
     val cooldownFilter: Boolean = false,
+    /** The standard Chikou confirmation can be explicitly disabled for profile experiments. */
+    val chikouConfirmation: Boolean = true,
 ) {
     val isBaseOnly: Boolean get() = !momentumVolume && !flatSpanB && !rangeChopFilter &&
         !higherTimeframeFilter && !fakeBreakoutFilter && !dynamicSpreadFilter &&
-        !riskyTimingFilter && !structureRiskFilter && !cooldownFilter
+        !riskyTimingFilter && !structureRiskFilter && !cooldownFilter && chikouConfirmation
     val title: String get() = activeLabels().joinToString(" + ")
 
     fun activeLabels(): List<String> = buildList {
@@ -76,6 +78,7 @@ data class SignalProfile(
         if (riskyTimingFilter) add("زمان خطرناک")
         if (structureRiskFilter) add("ریسک ساختار")
         if (cooldownFilter) add("کول‌داون")
+        if (!chikouConfirmation) add("بدون تایید چیکو")
     }
 
     fun persistName(): String = buildList {
@@ -88,6 +91,7 @@ data class SignalProfile(
         if (riskyTimingFilter) add("RISKY_TIMING_FILTER")
         if (structureRiskFilter) add("STRUCTURE_RISK_FILTER")
         if (cooldownFilter) add("COOLDOWN_FILTER")
+        if (!chikouConfirmation) add("CHIKOU_OFF")
     }.ifEmpty { listOf("BASE") }.joinToString(",")
 
     companion object {
@@ -106,6 +110,7 @@ data class SignalProfile(
                 riskyTimingFilter = "RISKY_TIMING_FILTER" in parts,
                 structureRiskFilter = "STRUCTURE_RISK_FILTER" in parts,
                 cooldownFilter = "COOLDOWN_FILTER" in parts,
+                chikouConfirmation = "CHIKOU_OFF" !in parts,
             )
         }
     }
@@ -535,6 +540,8 @@ data class AppSettings(
     val pauseOnNews: Boolean = false,
     /** Explicit opt-in; automatic orders here are local paper records, never broker orders. */
     val autoPaperTrading: Boolean = false,
+    /** Check for a public APK when the app starts and download it when one is available. */
+    val autoDownloadUpdates: Boolean = false,
     /**
      * OPTIONAL alternative to [newsBaseUrl] for the Forex ninth-condition AI gate: instead of your
      * own backend server, the phone calls this endpoint DIRECTLY with your own key - either the

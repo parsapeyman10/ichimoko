@@ -25,6 +25,7 @@ import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.PaperTicket
+import com.aurum.edge.core.ReplayDecision
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalProfile
 import com.aurum.edge.core.SignalAction
@@ -43,6 +44,7 @@ import com.aurum.edge.data.WatchState
 import com.aurum.edge.engine.Backtester
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
+import com.aurum.edge.engine.ReplayEngine
 import com.aurum.edge.notify.AlertSoundPlayer
 import com.aurum.edge.service.SignalMonitorService
 import kotlinx.coroutines.CancellationException
@@ -62,6 +64,14 @@ sealed interface LearnState {
     data class Loading(val step: String) : LearnState
     data class Done(val result: Backtester.Result, val interval: Interval) : LearnState
     data class Failed(val message: String) : LearnState
+}
+
+/** Cursor replay is independent from the batch report but uses the same immutable dataset. */
+sealed interface ReplayState {
+    data object Idle : ReplayState
+    data object Loading : ReplayState
+    data class Ready(val snapshot: ReplayEngine.Snapshot) : ReplayState
+    data class Failed(val message: String) : ReplayState
 }
 
 sealed interface WalkForwardState {
@@ -119,12 +129,18 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     /** Walk-forward runs made on this device, kept so the numbers can be re-checked later. */
     val reports: StateFlow<List<WalkForwardRecord>> = container.journalStore.reports
     val reportError: StateFlow<String?> = container.journalStore.reportError
+    val replayDecisions: StateFlow<List<ReplayDecision>> = container.replayJournalStore.entries
 
     private val _stats = MutableStateFlow(container.journalStore.stats())
     val stats: StateFlow<JournalStats> = _stats.asStateFlow()
 
     private val _learn = MutableStateFlow<LearnState>(LearnState.Idle)
     val learn: StateFlow<LearnState> = _learn.asStateFlow()
+
+    private val _replay = MutableStateFlow<ReplayState>(ReplayState.Idle)
+    val replay: StateFlow<ReplayState> = _replay.asStateFlow()
+    private var replayJob: kotlinx.coroutines.Job? = null
+    private var replayRevision: Long = 0L
 
     private val _freeHistory = MutableStateFlow<FreeHistoryState>(FreeHistoryState.Idle)
     val freeHistory: StateFlow<FreeHistoryState> = _freeHistory.asStateFlow()
@@ -168,6 +184,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             }
             runCatching { container.journalStore.loadReports() }.onFailure {
                 _toast.value = "گزارش پژوهش خوانده نشد؛ فایل قبلی نگه داشته شد"
+            }
+            runCatching { container.replayJournalStore.load() }.onFailure {
+                _toast.value = "ژورنال تصمیم‌های replay خوانده نشد؛ فایل قبلی دست‌نخورده ماند"
             }
             _stats.value = container.journalStore.stats()
         }
@@ -213,6 +232,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _toast.value = "سرویس پایش شروع نشد؛ مجوز اعلان یا محدودیت باتری گوشی را بررسی کنید"
             }
         }
+        // Do this once per process, not on every tab change. If the user enabled automatic
+        // download, a verified public APK is downloaded and Android's installer is opened.
+        if (!updateCheckStarted) {
+            updateCheckStarted = true
+            checkForAppUpdate(settings.value.autoDownloadUpdates)
+        }
     }
 
     /** UI resume must not restart a healthy service socket; start() is idempotent. */
@@ -229,6 +254,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     private var visibleOnlineLoopStarted = false
     private var visibleOnlineLoopEnabled = false
+    private var updateCheckStarted = false
 
     /**
      * While the app UI is open (or the user-enabled foreground monitor is running), keep every
@@ -258,8 +284,13 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshNow() = container.market.refreshNow()
 
-    fun checkForAppUpdate() {
-        viewModelScope.launch { container.updater.checkForUpdate() }
+    fun checkForAppUpdate(autoDownload: Boolean = settings.value.autoDownloadUpdates) {
+        viewModelScope.launch {
+            container.updater.checkForUpdate(autoDownload)
+            if (autoDownload && container.updater.state.value.downloadedApkPath != null) {
+                container.updater.installDownloaded()
+            }
+        }
     }
 
     fun downloadAppUpdate() {
@@ -269,7 +300,17 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun setAutoDownloadUpdates(enabled: Boolean) {
+        container.settingsStore.update { it.copy(autoDownloadUpdates = enabled) }
+        if (enabled) checkForAppUpdate(autoDownload = true)
+        _toast.value = if (enabled)
+            "بررسی و دانلود خودکار فعال شد؛ نصب نهایی با تأیید Android انجام می‌شود"
+        else "دانلود خودکار بروزرسانی خاموش شد"
+    }
+
     fun installDownloadedUpdate() = container.updater.installDownloaded()
+
+    fun resumeUpdateInstall() = container.updater.resumePendingInstall()
 
     fun openUpdateInstallPermission() = container.updater.openInstallPermissionSettings()
 
@@ -401,6 +442,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setSignalCooldown(enabled: Boolean) = updateSignalProfile("کول‌داون بعد از شکست", enabled) {
         it.copy(cooldownFilter = enabled)
+    }
+
+    fun setSignalChikou(enabled: Boolean) = updateSignalProfile("تایید چیکو", enabled) {
+        it.copy(chikouConfirmation = enabled)
     }
 
     private fun updateSignalProfile(label: String, enabled: Boolean, transform: (SignalProfile) -> SignalProfile) {
@@ -662,15 +707,148 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         commission: Double,
         threshold: Double,
     ) {
+        replayJob?.cancel()
+        val replayRequest = ++replayRevision
         viewModelScope.launch {
             val requestedBars = HistoryPolicy.providerRequestSize(bars)
             val displayBars = bars.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)
-            _learn.value = LearnState.Loading("دانلود حداقل $displayBars کندل واقعی ${interval.label} از منبع آنلاین فعال…")
+            _replay.value = ReplayState.Loading
+            _learn.value = LearnState.Loading("دانلود حداقل $displayBars کندل واقعی ${interval.label} از منبع عمومی؛ Twelve Data فقط fallback آخر…")
             try {
-                val result = container.runBacktest(interval, requestedBars, balance, risk, spread, commission, threshold)
+                // One verified dataset feeds both the batch report and the interactive cursor.
+                val dataset = container.fetchResearchDataset(interval, requestedBars)
+                if (replayRequest != replayRevision) return@launch
+                val result = container.runBacktest(dataset, interval, balance, risk, spread, commission, threshold)
+                if (replayRequest != replayRevision) return@launch
                 _learn.value = LearnState.Done(result, interval)
+                val profile = settings.value.signalProfile
+                val session = ReplayEngine.create(
+                    candles = dataset.candles,
+                    interval = interval,
+                    symbol = result.symbol,
+                    dataSource = dataset.source,
+                    config = ReplayEngine.Config(
+                        initialBalance = balance,
+                        riskPercent = risk,
+                        spreadPrice = spread,
+                        commissionPerOz = commission,
+                        threshold = threshold,
+                        signalProfile = profile,
+                    ),
+                    providerFetchedAt = dataset.fetchedAt,
+                    observedGapCount = dataset.observedGapCount,
+                )
+                val snapshot = withContext(Dispatchers.Default) { ReplayEngine.snapshot(session) }
+                if (replayRequest == replayRevision) _replay.value = ReplayState.Ready(snapshot)
             } catch (e: Exception) {
-                _learn.value = LearnState.Failed(e.message ?: "خطا در دریافت داده واقعی")
+                if (replayRequest == replayRevision) {
+                    _learn.value = LearnState.Failed(e.message ?: "خطا در دریافت داده واقعی")
+                    _replay.value = ReplayState.Failed(e.message ?: "دادهٔ replay آماده نشد")
+                }
+            }
+        }
+    }
+
+    fun seekReplay(cursor: Int) = updateReplay { ReplayEngine.seek(it, cursor) }
+
+    fun stepReplay(amount: Int = 1) = updateReplay { ReplayEngine.step(it, amount) }
+
+    fun resetReplay() = updateReplay(ReplayEngine::reset)
+
+    fun setReplayStartCursor() {
+        val ready = _replay.value as? ReplayState.Ready ?: return
+        val session = ready.snapshot.session
+        replayJob?.cancel()
+        replayRevision++
+        _replay.value = ReplayState.Ready(ready.snapshot.copy(
+            session = session.copy(startCursor = session.cursor, playing = false),
+        ))
+    }
+
+    fun setReplaySpeed(speed: Float) {
+        val ready = _replay.value as? ReplayState.Ready ?: return
+        _replay.value = ReplayState.Ready(ready.snapshot.copy(
+            session = ReplayEngine.setSpeed(ready.snapshot.session, speed),
+        ))
+    }
+
+    fun setReplayPlaying(playing: Boolean) {
+        val ready = _replay.value as? ReplayState.Ready ?: return
+        if (!playing) {
+            replayJob?.cancel()
+            replayRevision++
+            _replay.value = ReplayState.Ready(ready.snapshot.copy(
+                session = ready.snapshot.session.copy(playing = false),
+            ))
+            return
+        }
+        if (ready.snapshot.isAtEnd) return
+        replayJob?.cancel()
+        val playRevision = ++replayRevision
+        _replay.value = ReplayState.Ready(ready.snapshot.copy(
+            session = ready.snapshot.session.copy(playing = true),
+        ))
+        replayJob = viewModelScope.launch {
+            while (isActive && playRevision == replayRevision) {
+                val current = _replay.value as? ReplayState.Ready ?: break
+                val session = current.snapshot.session
+                if (!session.playing || current.snapshot.isAtEnd) break
+                val delayMs = (1000L / session.speed.coerceIn(0.25f, 8.0f)).toLong().coerceAtLeast(80L)
+                delay(delayMs)
+                val afterDelay = _replay.value as? ReplayState.Ready ?: break
+                if (!afterDelay.snapshot.session.playing) break
+                val next = ReplayEngine.step(afterDelay.snapshot.session)
+                val snapshot = withContext(Dispatchers.Default) { ReplayEngine.snapshot(next) }
+                if (playRevision != replayRevision) break
+                _replay.value = ReplayState.Ready(snapshot.copy(
+                    session = if (snapshot.isAtEnd) next.copy(playing = false) else next,
+                ))
+                if (snapshot.isAtEnd) break
+            }
+        }
+    }
+
+    private fun updateReplay(transform: (ReplayEngine.Session) -> ReplayEngine.Session) {
+        val ready = _replay.value as? ReplayState.Ready ?: return
+        replayJob?.cancel()
+        val revision = ++replayRevision
+        val next = transform(ready.snapshot.session)
+        viewModelScope.launch {
+            val snapshot = withContext(Dispatchers.Default) { ReplayEngine.snapshot(next) }
+            if (revision == replayRevision) _replay.value = ReplayState.Ready(snapshot)
+        }
+    }
+
+    /** Store a historical strategy decision separately from live-price paper fills. */
+    fun recordReplayDecision() {
+        val ready = _replay.value as? ReplayState.Ready ?: return
+        val signal = ready.snapshot.signal
+        val session = ready.snapshot.session
+        if (signal == null || !signal.isActionable || signal.entry == null || signal.barTime <= 0L) {
+            _toast.value = "این cursor تصمیم ورود قابل ثبت ندارد؛ NO_TRADE یا warm-up است"
+            return
+        }
+        viewModelScope.launch {
+            try {
+                container.replayJournalStore.append(
+                    ReplayDecision(
+                        id = java.util.UUID.randomUUID().toString(),
+                        symbol = session.symbol,
+                        interval = session.interval.label,
+                        barTime = signal.barTime,
+                        action = signal.action.name,
+                        entry = signal.entry,
+                        stopLoss = signal.stopLoss,
+                        takeProfit = signal.takeProfit,
+                        confidence = signal.confidence,
+                        profile = session.config.signalProfile.persistName(),
+                        dataSource = session.dataSource,
+                        recordedAt = System.currentTimeMillis(),
+                    ),
+                )
+                _toast.value = "تصمیم ${signal.action.name} روی کندل تاریخی در ژورنال آموزشی ثبت شد؛ fill بروکری نیست"
+            } catch (error: Exception) {
+                _toast.value = "ثبت تصمیم replay انجام نشد؛ فایل قبلی حفظ شد: ${error.message ?: "خطای ذخیره"}"
             }
         }
     }

@@ -17,9 +17,10 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
- * Automatic, keyless real spot-price fallback used only when no Twelve Data key is configured
- * on this installation. Mirrors the backend's app/services/spot_feed.py: Swissquote's public
- * BBO quote feed first, then gold-api.com (gold only) as a second real source.
+ * Automatic real spot-price source. Mirrors the backend's app/services/spot_feed.py:
+ * Swissquote's public BBO quote feed first, then gold-api.com (gold only) as a second real
+ * source. MarketRepository tries this public source before its final Twelve Data live fallback,
+ * whether or not a key is configured.
  *
  * This is not a mock/synthetic generator: every value returned is parsed from a live provider
  * response, and any parsing/staleness problem raises [DataFeedException] — never a fabricated

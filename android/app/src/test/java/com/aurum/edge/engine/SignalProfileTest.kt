@@ -40,4 +40,11 @@ class SignalProfileTest {
         assertEquals("BASE", SignalProfile.BASE.persistName())
         assertFalse(SignalProfile.fromName("BASE").momentumVolume)
     }
+
+    @Test fun `chikou can be explicitly disabled and survives profile persistence`() {
+        val disabled = SignalProfile(chikouConfirmation = false)
+        val restored = SignalProfile.fromName(disabled.persistName())
+        assertFalse(restored.chikouConfirmation)
+        assertTrue(SignalProfile.BASE.chikouConfirmation)
+    }
 }

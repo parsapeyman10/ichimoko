@@ -104,7 +104,7 @@ export default function CryptoPumpScanner() {
       const data = result.data;
       const freshIds = new Set(data.candidates.map((c) => c.id));
       if (seenIds.current) {
-        const isNew = [...freshIds].some((id) => !seenIds.current!.has(id));
+        const isNew = [...freshIds].some((id) => !seenIds.current?.has(id));
         if (isNew) playAlarm(alarm);
       }
       seenIds.current = freshIds;

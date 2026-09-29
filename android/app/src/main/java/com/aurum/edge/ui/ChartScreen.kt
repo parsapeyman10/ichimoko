@@ -83,7 +83,7 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
         if (!settings.hasKey) {
             KeyOnboarding(onSave = viewModel::saveApiKey, onOpenSettings = onOpenSettings)
             Text(
-                "بدون کلید هم اپ حداقل ۳۰۰۰ کندل تاریخچهٔ عمومی Yahoo Finance را می‌گیرد و تیک زندهٔ Swissquote/Gold-API را روی آن اعمال می‌کند؛ اگر منبع عمومی این تعداد ندهد، صادقانه خطا می‌دهد و کندل نمی‌سازد.",
+                "بدون کلید هم اپ ابتدا بیش از ۱۰۰۰ کندل واقعی Yahoo Finance را سریع نمایش می‌دهد و بعد همان تاریخچه را تا هدف ۳۰۰۰ کندل تکمیل می‌کند؛ تیک زندهٔ Swissquote/Gold-API روی آن اعمال می‌شود و هیچ کندلی ساخته نمی‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
@@ -337,7 +337,7 @@ fun KeyOnboarding(onSave: (String) -> Unit, onOpenSettings: () -> Unit) {
     Column(modifier = Modifier.padding(top = 8.dp)) {
         SectionCard(
             title = "کلید Twelve Data اختیاری است",
-            subtitle = "بدون کلید هم ۳۰۰۰ کندل عمومی Yahoo + تیک زنده فعال است؛ کلید Twelve Data منبع کندل اصلی را به Twelve تغییر می‌دهد",
+            subtitle = "ابتدا بیش از ۱۰۰۰ کندل عمومی Yahoo سریع نمایش داده می‌شود و سپس تا ۳۰۰۰ کندل تکمیل می‌گردد؛ کلید Twelve Data فقط آخرین fallback تاریخچه/فید زنده را فعال می‌کند",
         ) {
             Text(
                 "کلید رایگان Twelve Data را از twelvedata.com دریافت کن و اینجا وارد کن. این کلید فقط برای خواندن دیتای بازار است و دسترسی معاملاتی ندارد. بدون کلید هم چارت با تاریخچهٔ عمومی Yahoo و تیک‌های زندهٔ فید رایگان Swissquote/Gold-API کار می‌کند.",

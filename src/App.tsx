@@ -289,7 +289,7 @@ function NewsCard() {
 
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '0 16px 10px' }}>
       {guard && (
-        <span className="live-pill" style={{ background: 'transparent', borderColor: guardColor + '40', color: guardColor }}>
+        <span className="live-pill" style={{ background: 'transparent', borderColor: `${guardColor}40`, color: guardColor }}>
           <AlertTriangle size={11}/> {guard.state === 'CLEAR' ? 'بدون خبر پراثر تازه' : guard.state === 'BLOCKED' ? 'توقف ورود — خبر پراثر' : 'وضعیت نامشخص'}
         </span>
       )}

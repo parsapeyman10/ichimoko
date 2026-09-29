@@ -2,9 +2,8 @@
 
 > برای وضعیت امکانات جدید اندروید، خبر فارسی و محدودیت معاملهٔ واقعی: [docs/ROADMAP_FA.md](docs/ROADMAP_FA.md). متن زیر فقط راه‌اندازی ترمینال وبِ تک‌نمادی را شرح می‌دهد.
 
-> این نسخه فقط با **دیتای واقعی** کار می‌کند. قبل از اجرا `backend/.env` را از `backend/.env.example`
-> بساز و `AURUM_TWELVE_DATA_API_KEY` را پر کن. بدون کلید، رابط وضعیت «بدون کلید» نشان می‌دهد و
-> هیچ چارت یا سیگنالی ساخته نمی‌شود (نسخهٔ دمو وجود ندارد).
+> این نسخه فقط با **دیتای واقعی** کار می‌کند. `backend/.env` را از `backend/.env.example` بساز.
+> کلید Twelve Data برای تاریخچهٔ فوری/عمیق‌تر اختیاری است؛ بدون آن، فید واقعی و خودکار Swissquote/Gold-API برای قیمت طلا تلاش می‌شود و تاریخچه فقط از کندل‌هایی ساخته می‌شود که واقعاً مشاهده شده‌اند. تا وقتی provider حداقل پنجرهٔ لازم را نداده باشد، چارت/بک‌تست خطای صریح می‌دهد (نسخهٔ دمو، padding و interpolation وجود ندارد).
 
 
 ## خطای `ModuleNotFoundError: No module named 'app'` چرا پیش آمد؟
@@ -40,9 +39,18 @@ python -m app.main
 python app/main.py
 ```
 
+برای اجرای تست‌های provider و parser با MockTransport (در محیط توسعه):
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest -q
+```
+
 بعد از اجرا:
 - API: http://127.0.0.1:8000/docs
 - Health: http://127.0.0.1:8000/api/v1/health
+- وضعیت کلیدها و مقصد اتصال، بدون نمایش خود کلیدها: http://127.0.0.1:8000/api/v1/config/status
+- probe زندهٔ محدود برای key/URL و شکل پاسخ providerها (در صورت نیاز، با مصرف سهمیه): http://127.0.0.1:8000/api/v1/config/status?live_probe=true
 - بک‌تست 3m: http://127.0.0.1:8000/api/v1/backtest/run?timeframe=3m
 - لیست تریدهای 2026: http://127.0.0.1:8000/api/v1/backtest/trades-ytd?timeframe=3m
 - فرانت‌اند: `npm run dev` در ریشه، سپس http://127.0.0.1:5173

@@ -93,9 +93,9 @@ class PairScanner(
             _state.value = _state.value.copy(sweeping = true, lastError = null)
             try {
                 sweepAll(onCandidate)
-            } catch (error: Exception) {
+            } catch (_: Exception) {
                 _state.value = _state.value.copy(
-                    lastError = "اسکن دوره‌ای ناموفق بود: ${(error.message ?: "خطا").take(100)}")
+                    lastError = "اسکن دوره‌ای ناموفق بود؛ پاسخ یا اتصال provider معتبر نبود")
             } finally {
                 _state.value = _state.value.copy(sweeping = false, lastSweepAt = System.currentTimeMillis())
             }

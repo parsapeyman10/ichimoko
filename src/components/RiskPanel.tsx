@@ -141,7 +141,7 @@ export default function RiskPanel() {
 
   const runStressTest = async () => {
     setStress({ running: true });
-    const result = await apiGet<StressTest>('/api/v1/risk/stress-test?timeframe=5m&bars=1500&runs=5000&initial_balance=' + balance);
+    const result = await apiGet<StressTest>(`/api/v1/risk/stress-test?timeframe=5m&bars=3000&runs=5000&initial_balance=${balance}`);
     if (!result.ok) return setStress({ running: false, error: result.error });
     if (result.data?.error) return setStress({ running: false, error: result.data.error });
     setStress({ running: false, data: result.data });
@@ -230,7 +230,7 @@ export default function RiskPanel() {
       )}
 
       <div style={{ padding: '10px 14px', borderTop: '1px solid var(--line)' }}>
-        <button onClick={() => void runStressTest()} disabled={stress.running}
+        <button type="button" onClick={() => void runStressTest()} disabled={stress.running}
           style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#161b22', border: '1px solid #2a303a', color: '#d5d9e0', borderRadius: 6, padding: '7px 12px', font: '9px DM Mono', cursor: 'pointer' }}>
           <ShieldAlert size={13}/> {stress.running ? 'در حال اجرای بازنمونه‌گیری…' : 'اجرای آزمون استرس روی معاملات واقعی بک‌تست'}
         </button>

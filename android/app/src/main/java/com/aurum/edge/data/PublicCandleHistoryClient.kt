@@ -34,7 +34,15 @@ class PublicCandleHistoryClient(
         .followRedirects(false)
         .build(),
 ) {
-    data class Result(val candles: List<Candle>, val provider: String)
+    data class Gap(val fromTime: Long, val toTime: Long, val missingBars: Long)
+    data class Result(
+        val candles: List<Candle>,
+        val provider: String,
+        /** Provider receipt time, not the last candle time. */
+        val fetchedAt: Long = System.currentTimeMillis(),
+        /** Observed gaps are retained as provenance; they are never padded or interpolated. */
+        val gaps: List<Gap> = emptyList(),
+    )
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -78,8 +86,21 @@ class PublicCandleHistoryClient(
         if (trimmed.size < minimumSize) {
             throw DataFeedException("تاریخچهٔ رایگان فقط ${trimmed.size} کندل واقعی داد؛ حداقل ${HistoryPolicy.TARGET_CANDLES} لازم است")
         }
-        Result(trimmed, "Yahoo Finance عمومی (تاریخچهٔ بدون کلید)")
+        val gaps = detectGaps(trimmed, interval)
+        Result(
+            candles = trimmed,
+            provider = "Yahoo Finance عمومی (تاریخچهٔ بدون کلید)" +
+                if (gaps.isEmpty()) " · بدون gap مشاهده‌شده" else " · ${gaps.size} gap واقعی بدون پرکردن",
+            fetchedAt = System.currentTimeMillis(),
+            gaps = gaps,
+        )
     }
+
+    internal fun detectGaps(candles: List<Candle>, interval: Interval): List<Gap> =
+        candles.sortedBy { it.time }.zipWithNext().mapNotNull { (before, after) ->
+            val steps = (after.time - before.time) / interval.millis
+            if (steps > 1L) Gap(before.time, after.time, steps - 1L) else null
+        }
 
     internal fun parseYahooChart(
         body: String,

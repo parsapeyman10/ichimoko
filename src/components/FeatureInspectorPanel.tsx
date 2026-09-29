@@ -74,7 +74,7 @@ export default function FeatureInspectorPanel({ timeframe }: { timeframe: string
           </div>
 
           <div style={{ padding: '0 14px 12px' }}>
-            <button onClick={() => setShowAll((v) => !v)}
+            <button type="button" onClick={() => setShowAll((v) => !v)}
               style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#161b22', border: '1px solid #2a303a', color: '#d5d9e0', borderRadius: 6, padding: '6px 10px', font: '8px DM Mono', cursor: 'pointer' }}>
               <ListTree size={12}/> {showAll ? 'بستن فهرست کامل' : `نمایش هر ${allEntries.length} ویژگی`}
             </button>

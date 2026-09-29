@@ -51,19 +51,37 @@ class NewsAggregator:
                 )
                 response.raise_for_status()
                 payload = response.json()
+        except httpx.HTTPStatusError as exc:
+            # The request URL contains the FMP key; never expose exception text through /health.
+            self.last_error = f"سرویس خبری پاسخ معتبر نداد (HTTP {exc.response.status_code})"
+            return []
         except Exception as exc:
-            self.last_error = f"{type(exc).__name__}: {exc}"
+            # DNS/transport errors are still useful for diagnostics, but the exception message
+            # may echo a URL/query string containing the provider key.
+            self.last_error = f"اتصال سرویس خبری برقرار نشد ({type(exc).__name__})"
             return []
 
         articles: list[NewsRequest] = []
         for item in payload if isinstance(payload, list) else []:
+            # Provider JSON is untrusted: malformed rows are skipped, never coerced into a
+            # headline or allowed to crash the route with a 500 response.
+            if not isinstance(item, dict):
+                continue
+            headline = item.get("title")
+            if not isinstance(headline, str):
+                continue
+            headline = headline.strip()
+            if not 3 <= len(headline) <= 500:
+                continue
+            body = item.get("text", "") or item.get("content", "")
+            source = item.get("site", "FMP")
             article = NewsRequest(
-                headline=item.get("title", "").strip(),
-                body=item.get("text", "") or item.get("content", ""),
-                source=item.get("site", "FMP"),
+                headline=headline,
+                body=(body[:20_000] if isinstance(body, str) else ""),
+                source=source if isinstance(source, str) and source.strip() else "FMP",
                 published_at=self._parse_time(item.get("publishedDate")),
             )
-            if len(article.headline) >= 3 and self._accept(article):
+            if self._accept(article):
                 articles.append(article)
         if not articles:
             self.last_error = self.last_error or "پاسخ سرویس خبری خالی بود"
@@ -91,10 +109,12 @@ class NewsAggregator:
         return True
 
     @staticmethod
-    def _parse_time(value: str | None) -> datetime:
-        if not value:
-            return datetime.now(timezone.utc)
+    def _parse_time(value: str | None) -> datetime | None:
+        """Missing/bad provider timestamps stay unknown; never replace them with now()."""
+        if not isinstance(value, str) or not value.strip():
+            return None
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
-            return datetime.now(timezone.utc)
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
