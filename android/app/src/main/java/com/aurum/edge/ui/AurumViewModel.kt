@@ -118,6 +118,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private val _tradeChart = MutableStateFlow(TradeChartState())
     val tradeChart: StateFlow<TradeChartState> = _tradeChart.asStateFlow()
 
+    /** Result of the one-tap AI connectivity probe from the API settings tab. */
+    private val _aiProbe = MutableStateFlow(AiProbeState())
+    val aiProbe: StateFlow<AiProbeState> = _aiProbe.asStateFlow()
+
+    /** Allowed model IDs for the user's key, fetched live from the service catalogue. */
+    private val _aiModels = MutableStateFlow(AiModelsState())
+    val aiModels: StateFlow<AiModelsState> = _aiModels.asStateFlow()
+
     init {
         viewModelScope.launch {
             runCatching { container.journalStore.load() }.onFailure {
