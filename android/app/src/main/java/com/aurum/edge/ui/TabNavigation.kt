@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.ViewList
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -71,6 +72,7 @@ internal fun AurumBottomBar(selected: AurumTab, onSelect: (AurumTab) -> Unit, on
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun MoreTabsSheet(onDismiss: () -> Unit, onOpen: (AurumTab) -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = AurumColors.Surface) {
