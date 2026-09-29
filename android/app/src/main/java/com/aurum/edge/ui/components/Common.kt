@@ -62,6 +62,29 @@ fun NewsClassificationRow(classification: NewsClassification, modifier: Modifier
 fun formatPrice(value: Double?): String =
     if (value == null) "—" else String.format(Locale.US, "%,.2f", value)
 
+fun formatQuotePrice(value: Double?): String {
+    if (value == null) return "—"
+    val abs = kotlin.math.abs(value)
+    val digits = when {
+        abs >= 1000.0 -> 2
+        abs >= 100.0 -> 3
+        abs >= 10.0 -> 4
+        else -> 5
+    }
+    return String.format(Locale.US, "%,.${digits}f", value)
+}
+
+fun formatSpread(value: Double?): String {
+    if (value == null) return "—"
+    val abs = kotlin.math.abs(value)
+    val digits = when {
+        abs >= 1.0 -> 2
+        abs >= 0.01 -> 4
+        else -> 5
+    }
+    return String.format(Locale.US, "%,.${digits}f", value)
+}
+
 fun formatSigned(value: Double?, digits: Int = 2): String {
     if (value == null) return "—"
     val sign = if (value >= 0) "+" else "−"
@@ -160,7 +183,7 @@ fun Pill(text: String, color: Color, modifier: Modifier = Modifier) {
 fun FeedBanner(status: FeedStatus, lastPrice: Double?, lastBarTime: Long?, showingCache: Boolean) {
     val (color, title) = when (status.mode) {
         FeedMode.LIVE -> AurumColors.Green to "زنده — ${status.provider}"
-        FeedMode.POLLING -> AurumColors.Gold to "کندل REST دوره‌ای (نه تیک زنده) — ${status.provider}"
+        FeedMode.POLLING -> AurumColors.Gold to "کندل/تاریخچه آنلاین دوره‌ای (نه تیک زنده) — ${status.provider}"
         FeedMode.MARKET_CLOSED -> AurumColors.Gold to "بازار طبق برنامهٔ معمول بسته است — دریافت متوقف"
         FeedMode.DELAYED -> AurumColors.Gold to "دادهٔ بازار دیررس/نامعلوم — ${status.provider}"
         FeedMode.CONNECTING -> AurumColors.Cyan to "در حال اتصال…"
@@ -225,6 +248,17 @@ fun ConfluenceRow(item: ConfluenceItem) {
         Column(Modifier.weight(1f)) {
             Text(item.name, style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
             Text(item.detail, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            item.scorePercent?.let { score ->
+                Text(
+                    "امتیاز این شرط: $score/100",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = when (item.status) {
+                        ConfluenceStatus.CONFIRMED -> AurumColors.Green
+                        ConfluenceStatus.CONFLICT -> AurumColors.Red
+                        ConfluenceStatus.UNKNOWN -> AurumColors.Gold
+                    },
+                )
+            }
         }
     }
 }

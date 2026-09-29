@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities
 import android.os.SystemClock
 import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.Candle
+import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.MarketHours
@@ -27,6 +28,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** A successful REST download is not proof that the market has a current bar. */
 internal fun hasCurrentRestBar(bars: List<Candle>, interval: Interval, now: Long): Boolean {
@@ -34,15 +36,17 @@ internal fun hasCurrentRestBar(bars: List<Candle>, interval: Interval, now: Long
     return now - last.time in 0L..(interval.millis + 90_000L)
 }
 
-/** Never place a delayed provider tick into a bar that had not opened at event time. */
+/** A live tick may arrive a few seconds after its source timestamp, even across a candle boundary. */
 internal fun isCurrentIntervalTick(at: Long, interval: Interval, now: Long): Boolean =
-    at in (now - now % interval.millis)..now && now - at <= 90_000L
+    at in (now - 90_000L)..(now + 10_000L)
 
 data class MarketState(
     val symbol: String = "XAU/USD",
     val interval: Interval = Interval.M5,
     val candles: List<Candle> = emptyList(),
     val lastPrice: Double? = null,
+    val bid: Double? = null,
+    val ask: Double? = null,
     val feed: FeedStatus = FeedStatus(FeedMode.NO_KEY),
     val signal: Signal? = null,
     val showingCachedData: Boolean = false,
@@ -65,9 +69,10 @@ class MarketRepository(
     private val cache: CandleCache,
     private val settings: SettingsStore,
     private val journal: JournalStore,
-    // Automatic, keyless real-price fallback (Swissquote/Gold-API) used only while no Twelve
-    // Data key is configured, so the chart/signal/backtest pipeline never sits idle behind a key.
+    // Public real-price source (Swissquote/Gold-API), attempted before the final Twelve live
+    // fallback. It remains labelled and timestamp-validated; no synthetic tick is ever created.
     private val spotFallback: SpotFallbackClient = SpotFallbackClient(),
+    private val publicHistory: PublicCandleHistoryClient = PublicCandleHistoryClient(),
 ) {
     private val _state = MutableStateFlow(MarketState())
     val state: StateFlow<MarketState> = _state.asStateFlow()
@@ -101,10 +106,10 @@ class MarketRepository(
         if (started && activeKey == current.apiKey && _state.value.symbol == current.symbol &&
             _state.value.interval == current.interval &&
             ((MarketHours.forexWeekendClosed() && _state.value.feed.mode == FeedMode.MARKET_CLOSED) ||
-                // With a key both REST polling and the WebSocket must be alive; the free fallback
-                // has no REST poll job, so only its tick stream needs to still be running.
-                (if (current.hasKey) pollJob?.isActive == true && streamJob?.isActive == true
-                 else streamJob?.isActive == true))) return
+                // Both keyed and keyless modes keep a history-refresh poll plus the live/fallback
+                // tick stream alive; the chart renders its quick 1200-bar window first and grows
+                // the shared cache toward the 3000-bar target in the background.
+                (pollJob?.isActive == true && streamJob?.isActive == true))) return
         stop()
         started = true
         activeKey = current.apiKey
@@ -119,16 +124,16 @@ class MarketRepository(
             feed = FeedStatus(
                 mode = if (closed) FeedMode.MARKET_CLOSED else FeedMode.CONNECTING,
                 detail = if (closed) "تعطیلی معمول پایان هفته؛ قیمت تازه دریافت نمی‌شود" else "در حال دریافت…",
-                // Without a key the free keyless fallback (Swissquote/Gold-API) drives the same
-                // real tick pipeline — the feed is never blocked on the user obtaining a key.
-                provider = if (current.hasKey) "Twelve Data" else "فید رایگان خودکار (Swissquote/Gold-API)",
+                // Without a key the free keyless mode uses public Yahoo history plus the same
+                // Swissquote/Gold-API real-tick pipeline — it is not blocked on Twelve Data.
+                provider = if (current.hasKey) "Yahoo Finance عمومی · Twelve Data فقط fallback + فید زنده" else "Yahoo Finance عمومی + Swissquote/Gold-API",
             ),
             signal = null,
             showingCachedData = closed && _state.value.candles.isNotEmpty(),
         )
         loadCacheThenRefresh(session) // cached real bars are read-only even without the key
-        if (!closed) startStream() // Twelve Data WS with a key, otherwise the free keyless fallback
-        if (current.hasKey) startPolling() // periodic REST refresh only exists for Twelve Data
+        if (!closed) startStream() // public Swissquote/Gold-API first; Twelve WebSocket is final fallback
+        if (!closed) startPolling() // public history first; Twelve REST is final history fallback
         registerNetworkCallback()
         startWatchdog(session) // local clock re-arms the feed at the next scheduled opening
     }
@@ -182,22 +187,32 @@ class MarketRepository(
                 cached.forEach { bar -> if (bar.time !in cachedBars) cachedBars[bar.time] = bar }
                 evaluateAndPublish(showingCache = true)
             }
-            refresh()
+            // Render a useful, real window first. The larger full-history request runs directly
+            // afterwards and grows the same cache without blocking the first chart frame.
+            refresh(
+                requestedSize = HistoryPolicy.CHART_BOOTSTRAP_CANDLES,
+                minimumSize = HistoryPolicy.CHART_BOOTSTRAP_MINIMUM,
+                allowClosedMarketHistory = true,
+            )
+            if (started && generation == session &&
+                cachedBars.values.count { it.closed } < HistoryPolicy.TARGET_CANDLES) {
+                delay(CHART_EXPANSION_DELAY_MS)
+                if (started && generation == session) refresh(allowClosedMarketHistory = true)
+            }
         }
     }
 
-    private suspend fun refresh() = refreshMutex.withLock {
+    private suspend fun refresh(
+        requestedSize: Int = HistoryPolicy.TARGET_CANDLES,
+        minimumSize: Int = HistoryPolicy.TARGET_CANDLES,
+        allowClosedMarketHistory: Boolean = false,
+    ) = refreshMutex.withLock {
         val current = settings.read()
         val session = generation
         if (!started) return@withLock
-        if (MarketHours.forexWeekendClosed()) {
+        if (MarketHours.forexWeekendClosed() && !allowClosedMarketHistory) {
             publishClosed()
-            return@withLock // no REST requests on the scheduled weekend
-        }
-        if (!current.hasKey) {
-            // No REST endpoint exists for the free fallback; its tick stream alone drives the
-            // feed state, so a periodic refresh() here must not clobber a healthy LIVE status.
-            return@withLock
+            return@withLock // no recurring REST requests on the scheduled weekend
         }
         if (!hasInternet()) {
             publishDelayed("شبکهٔ پیش‌فرض موقتاً تأیید نشد؛ اتصال دوباره بررسی می‌شود. تا دریافت جدید، قیمت قابل معامله نیست")
@@ -205,36 +220,88 @@ class MarketRepository(
         }
         if (!hasRecentStream() && !(_state.value.feed.mode == FeedMode.POLLING &&
                 FeedLiveness.hasRecentReceipt(_state.value.feed))) _state.value = _state.value.copy(
-            feed = _state.value.feed.copy(mode = FeedMode.CONNECTING, detail = "دریافت کندل‌های واقعی…"))
+            feed = _state.value.feed.copy(
+                mode = FeedMode.CONNECTING,
+                detail = if (requestedSize < HistoryPolicy.TARGET_CANDLES) {
+                    "دریافت سریع حداقل ${minimumSize} کندل واقعی… سپس تکمیل تا ${HistoryPolicy.TARGET_CANDLES} کندل"
+                } else if (current.hasKey) "دریافت حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی از منبع عمومی؛ Twelve Data فقط fallback آخر…"
+                else "دریافت حداقل ${HistoryPolicy.TARGET_CANDLES} کندل تاریخچهٔ رایگان…",
+            ))
         try {
-            val fetched = client.fetchCandles(current.apiKey, current.symbol, current.interval, outputSize = 1500)
+            var fetched: List<Candle>
+            var historyProvider: String
+            var staleDetail: String
+            try {
+                // Public history is the normal path even when a Twelve Data key exists. The key
+                // is only a final fallback; this keeps the chart/replay provider policy honest.
+                val public = publicHistory.fetchCandles(current.symbol, current.interval,
+                    minimumSize = minimumSize, desiredSize = requestedSize)
+                fetched = public.candles
+                historyProvider = public.provider
+                staleDetail = "تاریخچهٔ عمومی پاسخ داد اما آخرین کندل آن قدیمی است؛ تیک زندهٔ جداگانه باید قیمت فعلی را تأیید کند"
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (publicFailure: Exception) {
+                if (!current.hasKey) throw publicFailure
+                try {
+                    fetched = client.fetchCandles(current.apiKey, current.symbol, current.interval,
+                        outputSize = requestedSize, minimumOutputSize = minimumSize)
+                    if (fetched.size < minimumSize) {
+                        throw DataFeedException("Twelve Data فقط ${fetched.size} کندل داد؛ حداقل ${minimumSize} کندل واقعی لازم است")
+                    }
+                    val gapCount = PublicCandleHistoryClient.detectGaps(fetched, current.interval).size
+                    historyProvider = "Twelve Data · آخرین fallback" +
+                        if (gapCount == 0) " · بدون gap مشاهده‌شده" else " · $gapCount gap واقعی بدون پرکردن"
+                    staleDetail = "منبع عمومی تاریخچه در دسترس نبود (${(publicFailure.message ?: "خطای نامشخص").take(80)})؛ Twelve Data fallback پاسخ داد اما آخرین کندل باید با تیک زنده تأیید شود"
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (fallbackFailure: Exception) {
+                    throw DataFeedException("منبع عمومی و آخرین fallback Twelve Data پاسخ معتبر ندادند: ${(fallbackFailure.message ?: "خطای نامشخص").take(120)}")
+                }
+            }
             if (!started || generation != session ||
                 settings.read().symbol != current.symbol || settings.read().interval != current.interval ||
-                settings.read().apiKey != current.apiKey || _state.value.symbol != current.symbol) return@withLock
-            if (MarketHours.forexWeekendClosed()) { publishClosed(); return@withLock }
+                (current.hasKey && settings.read().apiKey != current.apiKey) ||
+                settings.read().hasKey != current.hasKey || _state.value.symbol != current.symbol) return@withLock
             val receivedAt = System.currentTimeMillis()
             val streamRecent = _state.value.feed.mode == FeedMode.LIVE &&
-                _state.value.feed.lastSuccessAt?.let { receivedAt - it in 0L..90_000L } == true
-            val restCurrent = hasCurrentRestBar(fetched, current.interval, receivedAt)
-            if (!restCurrent && streamRecent) return@withLock // stale REST must not roll back a recent WS tick
+                FeedLiveness.hasRecentReceipt(_state.value.feed, receivedAt)
+            val historyCurrent = hasCurrentRestBar(fetched, current.interval, receivedAt)
             val periodStart = currentPeriodStart(current.interval)
             fetched.forEach { bar ->
                 // The bar whose period is still open is kept as "forming" and excluded from the engine.
-                // A recent WebSocket tick can be newer than this REST response; do not overwrite it.
+                // A recent WebSocket/fallback tick can be newer than this REST response; do not overwrite it.
                 if (streamRecent && bar.time == periodStart) return@forEach
                 cachedBars[bar.time] = bar.copy(closed = bar.time < periodStart)
             }
+            trimCachedBars()
             settings.setLastSync(current.symbol, current.interval, receivedAt)
             persistCache()
-            evaluateAndPublish(showingCache = !restCurrent)
-            if (!restCurrent) {
-                publishDelayed("اتصال پاسخ داد اما آخرین کندل Twelve Data قدیمی است؛ شاید بازار بسته باشد. دریافت دوبارهٔ تاریخچه قیمت زنده/مجوز معامله نیست")
+            val closedCount = cachedBars.values.count { it.closed }
+            val enoughHistory = closedCount >= minimumSize
+            evaluateAndPublish(showingCache = (!historyCurrent && !streamRecent) || !enoughHistory)
+            if (MarketHours.forexWeekendClosed()) {
+                // Historical bars are useful on weekends even though no fresh/live price is
+                // authorized. They are shown as closed/cached, never as an active signal.
+                publishClosed()
+                return@withLock
+            }
+            if (!enoughHistory) {
+                publishDelayed("فقط $closedCount کندل قبلی/بستهٔ واقعی ذخیره شد؛ حداقل ${minimumSize} لازم است و هیچ کندلی ساخته نمی‌شود")
+            } else if (!historyCurrent && streamRecent) {
+                _state.value = _state.value.copy(
+                    feed = _state.value.feed.copy(detail = "$staleDetail؛ آخرین تیک زنده هنوز تازه است"),
+                    showingCachedData = false,
+                )
+            } else if (!historyCurrent) {
+                publishDelayed(staleDetail)
             } else {
                 _state.value = _state.value.copy(
                     feed = FeedStatus(
                         mode = if (streamRecent) FeedMode.LIVE else FeedMode.POLLING,
-                        detail = if (streamRecent) "" else "REST: زمان دریافت تازه است؛ زمان آخرین معاملهٔ درون کندل جداگانه منتشر نشده",
+                        detail = if (streamRecent) "" else "تاریخچه/کندل آنلاین تازه است؛ برای تیک لحظه‌ای، کانال زنده جداگانه بررسی می‌شود",
                         lastSuccessAt = if (streamRecent) _state.value.feed.lastSuccessAt else receivedAt,
+                        provider = if (streamRecent) _state.value.feed.provider else historyProvider,
                     ),
                 )
             }
@@ -264,7 +331,7 @@ class MarketRepository(
         pollJob?.cancel()
         pollJob = scope?.launch {
             while (isActive) {
-                delay(POLL_INTERVAL_MS)
+                delay(if (settings.read().hasKey) POLL_INTERVAL_MS else FREE_HISTORY_POLL_INTERVAL_MS)
                 refresh()
             }
         }
@@ -291,36 +358,60 @@ class MarketRepository(
                 fun stillCurrent(active: com.aurum.edge.core.AppSettings): Boolean =
                     started && generation == session && streamEpoch == epoch &&
                         active.symbol == current.symbol && active.interval == current.interval
-                try {
-                    if (current.hasKey) {
-                        client.streamPrice(current.apiKey, current.symbol).collect { tick ->
-                            // Ignore an already queued tick when the user changed markets/intervals.
-                            val active = settings.read()
-                            if (!stillCurrent(active) || active.apiKey != current.apiKey) return@collect
-                            backoff = 2_000L
-                            onTick(tick.price, tick.at, "Twelve Data")
-                        }
-                    } else {
+                suspend fun collectSpotFallback(provider: String, maxMillis: Long? = null): Boolean {
+                    var emitted = false
+                    val collectBlock: suspend () -> Unit = {
                         spotFallback.streamQuotes(current.symbol).collect { tick ->
                             val active = settings.read()
-                            if (!stillCurrent(active) || active.hasKey) return@collect
+                            if (!stillCurrent(active) || active.hasKey != current.hasKey ||
+                                (current.hasKey && active.apiKey != current.apiKey)) return@collect
+                            emitted = true
                             backoff = 2_000L
-                            onTick(tick.price, tick.at, "فید رایگان خودکار (Swissquote/Gold-API)")
+                            onTick(tick, provider)
                         }
                     }
-                    if (started && generation == session && streamEpoch == epoch)
-                        publishStreamUnavailable(if (current.hasKey)
-                            "جریان WebSocket قطع شد — تلاش مجدد" else "جریان فید رایگان قطع شد — تلاش مجدد")
+                    if (maxMillis == null) collectBlock()
+                    else withTimeoutOrNull(maxMillis) { collectBlock() }
+                    return emitted
+                }
+                try {
+                    if (current.hasKey) {
+                        // Public, keyless live quote is tried first. Twelve Data WebSocket is the
+                        // last live fallback, matching the history provider policy.
+                        val publicWorked = try {
+                            collectSpotFallback("فید زندهٔ عمومی (Swissquote/Gold-API)", TWELVE_WS_FALLBACK_WINDOW_MS)
+                        } catch (_: Exception) {
+                            false
+                        }
+                        if (!publicWorked && started && generation == session && streamEpoch == epoch) {
+                            publishStreamUnavailable("فید زندهٔ عمومی در دسترس نبود؛ آخرین fallback Twelve Data بررسی می‌شود")
+                            try {
+                                client.streamPrice(current.apiKey, current.symbol).collect { tick ->
+                                    // Ignore an already queued tick when the user changed markets/intervals.
+                                    val active = settings.read()
+                                    if (!stillCurrent(active) || active.apiKey != current.apiKey) return@collect
+                                    backoff = 2_000L
+                                    onTick(tick, "Twelve Data WebSocket · آخرین fallback")
+                                }
+                            } catch (e: DataFeedException) {
+                                publishStreamUnavailable(e.message ?: "WebSocket آخرین fallback Twelve Data در دسترس نیست")
+                            }
+                        }
+                    } else {
+                        collectSpotFallback("فید رایگان خودکار (Swissquote/Gold-API)")
+                        if (started && generation == session && streamEpoch == epoch)
+                            publishStreamUnavailable("جریان فید رایگان قطع شد — تلاش مجدد")
+                    }
                 } catch (e: CancellationException) {
                     throw e // cancelling an old market job must not relabel the new market offline
                 } catch (e: DataFeedException) {
                     if (started && generation == session && streamEpoch == epoch)
                         publishStreamUnavailable(e.message
-                            ?: (if (current.hasKey) "قطع جریان WebSocket" else "قطع جریان فید رایگان"))
+                            ?: (if (current.hasKey) "قطع آخرین fallback زنده" else "قطع جریان فید رایگان"))
                 } catch (_: Exception) {
                     if (started && generation == session && streamEpoch == epoch)
                         publishStreamUnavailable(if (current.hasKey)
-                            "اتصال WebSocket قطع شد؛ اینترنت/دسترسی فید را بررسی کنید"
+                            "فید عمومی/آخرین fallback زنده قطع شد؛ اینترنت/دسترسی را بررسی کنید"
                         else "اتصال فید رایگان قطع شد؛ اینترنت را بررسی کنید")
                 }
                 delay(backoff)
@@ -351,10 +442,10 @@ class MarketRepository(
                 if (_state.value.feed.mode == FeedMode.MARKET_CLOSED) {
                     _state.value = _state.value.copy(feed = FeedStatus(
                         FeedMode.CONNECTING, "برنامهٔ معمول بازگشایی شد؛ منتظر تیک/کندل معتبر هستیم",
-                        provider = if (settings.read().hasKey) "Twelve Data" else "فید رایگان خودکار (Swissquote/Gold-API)"),
+                        provider = if (settings.read().hasKey) "Yahoo Finance عمومی · Twelve Data فقط fallback + فید زنده" else "Yahoo Finance عمومی + Swissquote/Gold-API"),
                         signal = null)
                     startStream()
-                    if (settings.read().hasKey) refreshNow() // no REST endpoint exists for the free fallback
+                    refreshNow() // keyed Twelve or keyless public-history backfill
                     continue
                 }
                 val feed = _state.value.feed
@@ -414,18 +505,21 @@ class MarketRepository(
         runCatching { cm.registerDefaultNetworkCallback(callback) }.onSuccess { networkCallback = callback }
     }
 
-    private suspend fun onTick(price: Double, at: Long, provider: String = "Twelve Data") {
+    private suspend fun onTick(tick: com.aurum.edge.core.PriceTick, provider: String = "Twelve Data") {
         val current = settings.read()
         val now = System.currentTimeMillis()
+        val price = tick.price
+        val at = tick.at
         if (MarketHours.forexWeekendClosed(now)) { publishClosed(); return }
         if (!isCurrentIntervalTick(at, current.interval, now)) return
-        val periodStart = now - now % current.interval.millis
+        val wallPeriodStart = now - now % current.interval.millis
+        val periodStart = at - at % current.interval.millis
         val existing = cachedBars[periodStart]
         val bar = existing?.copy(
             high = maxOf(existing.high, price),
             low = minOf(existing.low, price),
             close = price,
-            closed = false,
+            closed = periodStart < wallPeriodStart,
         ) ?: Candle(
             time = periodStart,
             open = price,
@@ -433,9 +527,10 @@ class MarketRepository(
             low = price,
             close = price,
             volume = 0.0,
-            closed = false,
+            closed = periodStart < wallPeriodStart,
         )
         cachedBars[periodStart] = bar
+        trimCachedBars()
 
         // Any older bar still flagged as forming is now finished → keep it as a closed, real bar.
         cachedBars.keys.filter { it < periodStart }.forEach { key ->
@@ -446,6 +541,8 @@ class MarketRepository(
         lastQuietReconnect = SystemClock.elapsedRealtime()
         _state.value = _state.value.copy(
             lastPrice = price,
+            bid = tick.bid,
+            ask = tick.ask,
             feed = FeedStatus(FeedMode.LIVE, "", System.currentTimeMillis(), provider = provider),
             showingCachedData = false,
         )
@@ -465,10 +562,10 @@ class MarketRepository(
         val current = _state.value
         val now = System.currentTimeMillis()
         if (current.feed.mode == FeedMode.POLLING &&
-            current.feed.lastSuccessAt?.let { now - it in 0L..90_000L } == true &&
+            FeedLiveness.hasRecentReceipt(current.feed, now) &&
             hasCurrentRestBar(current.candles, current.interval, now)) {
             _state.value = current.copy(feed = current.feed.copy(detail =
-                "$detail؛ کندل REST دوره‌ای است، نه تیک زنده"))
+                "$detail؛ کندل/تاریخچهٔ دوره‌ای است، نه تیک زنده"))
         } else publishDelayed(detail)
     }
 
@@ -483,9 +580,25 @@ class MarketRepository(
     }
 
     private fun publishDelayed(detail: String) {
-        _state.value = _state.value.copy(
-            feed = _state.value.feed.copy(mode = FeedMode.DELAYED, detail = detail),
-            showingCachedData = _state.value.candles.isNotEmpty(),
+        val current = _state.value
+        val now = System.currentTimeMillis()
+        val displayFeed = FeedLiveness.display(current.feed, now)
+        val recentReceipt = !current.showingCachedData && current.lastPrice != null &&
+            displayFeed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
+            FeedLiveness.hasRecentReceipt(displayFeed, now)
+        if (recentReceipt) {
+            // Do not relabel a one-second Swissquote/Gold-API fallback tick (or a fresh Twelve
+            // tick/candle) as "delayed" merely because another channel just failed/reconnected.
+            // Even if an older path had already set DELAYED with a fresh receipt, normalize it.
+            _state.value = current.copy(
+                feed = displayFeed.copy(detail = "$detail؛ آخرین تیک/کندل دریافتی هنوز تازه است"),
+                showingCachedData = false,
+            )
+            return
+        }
+        _state.value = current.copy(
+            feed = current.feed.copy(mode = FeedMode.DELAYED, detail = detail),
+            showingCachedData = current.candles.isNotEmpty(),
             signal = null, // a disconnected stream never authorizes a new paper entry
         )
     }
@@ -496,6 +609,12 @@ class MarketRepository(
             showingCachedData = _state.value.candles.isNotEmpty(),
             signal = null, // never advertise an old signal as live during an outage
         )
+    }
+
+    private fun trimCachedBars() {
+        if (cachedBars.size <= HistoryPolicy.MAX_CACHED_CANDLES) return
+        val keep = cachedBars.values.sortedBy { it.time }.takeLast(HistoryPolicy.MAX_CACHED_CANDLES)
+        cachedBars = keep.associateBy { it.time }.toMutableMap()
     }
 
     private suspend fun persistCache() {
@@ -515,12 +634,12 @@ class MarketRepository(
         val bars = cachedBars.values.sortedBy { it.time }
         val lastPrice = bars.lastOrNull()?.close ?: _state.value.lastPrice
         if (bars.isEmpty()) {
-            _state.value = _state.value.copy(candles = emptyList(), lastPrice = null, showingCachedData = false)
+            _state.value = _state.value.copy(candles = emptyList(), lastPrice = null, bid = null, ask = null, showingCachedData = false)
             return
         }
         val signal = if (showingCache) null else withContext(Dispatchers.Default) {
             runCatching {
-                SignalEngine.evaluate(bars, current.interval, current.minConfidence, current.spreadPrice)
+                SignalEngine.evaluate(bars, current.interval, current.minConfidence, current.spreadPrice, current.signalProfile)
             }.getOrNull()
         }
         _state.value = _state.value.copy(
@@ -553,7 +672,10 @@ class MarketRepository(
 
     companion object {
         private const val POLL_INTERVAL_MS = 60_000L
+        private const val FREE_HISTORY_POLL_INTERVAL_MS = 5 * 60_000L
         private const val RECONNECT_WHEN_OFFLINE_MS = 15_000L
         private const val QUIET_RECONNECT_MS = 5 * 60_000L
+        private const val TWELVE_WS_FALLBACK_WINDOW_MS = 2 * 60_000L
+        private const val CHART_EXPANSION_DELAY_MS = 250L
     }
 }

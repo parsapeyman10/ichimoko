@@ -31,7 +31,7 @@ class ForexNewsDecisionTest {
             direction = "BUY", confidence = 98.0, model = "unverified", checkedAt = open))
         val untrusted = ForexNewsDecisions.assess(market, config, calendar, fakeModel, open)
         assertFalse(untrusted.canEnterPaper)
-        assertTrue(untrusted.modelOpinion.contains("معتبر نداریم"))
+        assertTrue(untrusted.modelOpinion.contains("معیار سبز کامل ندارد"))
     }
 
     @Test fun `weekend and missing calendar stay closed even if a model string is present`() {

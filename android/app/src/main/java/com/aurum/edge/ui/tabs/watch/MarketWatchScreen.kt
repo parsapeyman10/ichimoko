@@ -78,6 +78,32 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
             )
             state.error?.let { Text(it, color = AurumColors.Red, style = MaterialTheme.typography.bodySmall) }
         }
+        if (state.sourceHealth.isNotEmpty()) {
+            SectionCard("سلامت منابع", "latency شبکه با تازگی زمان ناشر یکی نیست؛ کش سالم صریحاً stale می‌ماند") {
+                state.sourceHealth.values.sortedBy { it.provider }.forEach { health ->
+                    val tone = when (health.state) {
+                        "HEALTHY" -> AurumColors.Green
+                        "DEGRADED" -> AurumColors.Gold
+                        else -> AurumColors.Red
+                    }
+                    Text(
+                        "${health.provider}: ${when (health.state) {
+                            "HEALTHY" -> "سالم"
+                            "DEGRADED" -> "ناقص"
+                            "NO_KEY" -> "بدون کلید"
+                            else -> "قطع"
+                        }} · ${health.freshQuoteCount}/${health.quoteCount} نماد تازه · latency ${health.latencyMs?.let { "${it} ms" } ?: "نامعلوم"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = tone,
+                        modifier = Modifier.padding(vertical = 3.dp),
+                    )
+                    health.detail?.let { detail ->
+                        Text(detail, style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextMuted, modifier = Modifier.padding(bottom = 3.dp))
+                    }
+                }
+            }
+        }
         WatchCatalog.symbols.forEach { symbol ->
             val selected = selections[symbol.id] ?: return@forEach
             val quotes = state.quotes[symbol.id].orEmpty()
@@ -151,7 +177,7 @@ private fun WatchPricesScreen(viewModel: AurumViewModel, onOpenSettings: () -> U
             }
         }
         SectionCard("منابع محدود", "وضعیت شفاف اتصال‌های دیگر") {
-            Text("این دیده‌بان فقط طلا و جفت‌ارزهای اصلی را نشان می‌دهد. Twelve Data منبع اصلی چارت است و Yahoo Finance برای جفت‌ارزهای دلاری منبع مستقل نمایشی دارد؛ سفارش واقعی در اپ فعال نیست.",
+            Text("این دیده‌بان فقط طلا و جفت‌ارزهای اصلی را نشان می‌دهد. Twelve Data و آینهٔ عمومی Yahoo برای همهٔ نمادهای کاری بررسی می‌شوند؛ چارت هم در حالت بدون کلید از تاریخچهٔ عمومی استفاده می‌کند. سفارش واقعی در اپ فعال نیست.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
         }
     }

@@ -9,9 +9,9 @@ import com.aurum.edge.engine.SignalEngine
 
 /** Read-only, independent checks. Green checks are prerequisites, NOT a forecast or an entry. */
 enum class AlertCheckKind(val label: String) {
-    KEY("کلید بازار"), MARKET("قیمت واقعی تازه"), HISTORY("کندل بسته"),
+    KEY("منبع بازار"), MARKET("قیمت واقعی تازه"), HISTORY("کندل بسته"),
     MONITOR("سرویس پایش"), APP_ALERT("هشدار در اپ"), ANDROID_ALERT("اعلان اندروید"),
-    STORAGE("فایل‌های هشدار/ژورنال"), AI_NEWS("آمادگی فید/مدل AI"), NINE_WAY("۹/۹، ICT و ریسک"),
+    STORAGE("فایل‌های هشدار/ژورنال"), AI_NEWS("خبر نزدیک برای ژورنال"), NINE_WAY("۸/۸ فنی، ICT و MTF"),
 }
 
 data class AlertCheck(val kind: AlertCheckKind, val ready: Boolean, val detail: String)
@@ -26,36 +26,26 @@ object AlertDiagnostics {
     ): List<AlertCheck> {
         val priceFresh = !market.showingCachedData &&
             market.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
-            market.feed.lastSuccessAt?.let { now - it in 0L..90_000L } == true
+            FeedLiveness.hasRecentReceipt(market.feed, now)
         val minBars = SignalEngine.minBars(market.interval)
-        val aiFresh = news.lastCheckedAt?.let { now - it in 0L..180_000L } == true
-        // Preliminary feed/model availability only; directional alignment is checked below.
+        // News is now journal-mining context only. It must never erase or block a paper signal.
         val calendarFresh = news.calendarCheckedAt?.let { now - it in 0L..1_200_000L } == true
-        // The ninth condition is per pair: use the SELECTED pair's own model verdict.
         val selectedVerdict = news.aiBySymbol[market.symbol] ?: news.ai.takeIf { it.symbol == market.symbol }
         val modelFresh = selectedVerdict?.checkedAt?.let { at ->
             now - at in 0L..180_000L && news.lastCheckedAt?.let { reviewed -> at <= reviewed } == true
         } == true
         val sourcesOnline = news.sources.isNotEmpty() && news.sources.all { it.state == "online" } &&
             news.sources.any { it.feed == FOREX_CALENDAR_SOURCE_URL }
-        // Either the HTTPS server bridge OR the direct-from-phone client AI counts as configured.
         val newsConfigured = settings.newsBaseUrl.isNotBlank() || settings.hasClientNewsAi
-        val newsReady = newsConfigured && !news.cached && !news.loading &&
-            news.error == null && aiFresh && calendarFresh && sourcesOnline &&
-            news.gate == NewsGate.CLEAR && modelFresh &&
-            selectedVerdict?.let {
-                it.status == "AVAILABLE" && it.confidence in 80.0..100.0 &&
-                    !it.model.isNullOrBlank() && it.model != "deterministic-fallback" &&
-                    it.evidenceIds.isNotEmpty()
-            } == true
+        val noNewsVeto = true
         val signal = market.signal
         val entryBlocker = if (signal?.isActionable == true)
             PaperAlertRules.blocker(market, settings, news, trades, mtf, now)
-        else signal?.blockers?.firstOrNull() ?: "برای این کندل سیگنال تأییدشدهٔ ۹/۹ موجود نیست"
+        else signal?.blockers?.firstOrNull() ?: "برای این کندل سیگنال فنی تأییدشده موجود نیست"
         return listOf(
-            AlertCheck(AlertCheckKind.KEY, settings.hasKey,
-                if (settings.hasKey) "روی همین نصب موجود است؛ اعتبار کلید از اتصال داده مشخص می‌شود" else
-                    "روی این نصب کلیدی نیست؛ در تنظیمات، کلید تازهٔ خواندنی وارد کنید"),
+            AlertCheck(AlertCheckKind.KEY, settings.hasKey || market.closedCount >= HistoryPolicy.TARGET_CANDLES,
+                if (settings.hasKey) "کلید Twelve روی همین نصب موجود است؛ اعتبار آن از اتصال داده مشخص می‌شود" else
+                    "حالت بدون کلید فعال است؛ تاریخچهٔ عمومی/فید رایگان باید حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی بدهد"),
             AlertCheck(AlertCheckKind.MARKET, priceFresh,
                 if (priceFresh) "${market.feed.mode.label}؛ قیمت در ۹۰ ثانیهٔ اخیر دریافت شده" else
                     "${market.feed.mode.label}؛ ${market.feed.detail.ifBlank { "زمان قیمت/اتصال معتبر نیست" }}"),
@@ -69,21 +59,23 @@ object AlertDiagnostics {
                 }),
             AlertCheck(AlertCheckKind.APP_ALERT, settings.notifyOnSignal,
                 if (settings.notifyOnSignal) "هشدار کاندیدا فعال است؛ ورود خودکار کاغذی برای آن لازم نیست" else
-                    "خاموش است؛ گزینهٔ هشدار کاندیدای ۹/۹ را در تنظیمات فعال کنید"),
+                    "خاموش است؛ گزینهٔ هشدار کاندیدای ۸/۸ فنی را در تنظیمات فعال کنید"),
             AlertCheck(AlertCheckKind.ANDROID_ALERT, androidNotificationsReady,
                 if (androidNotificationsReady) "مجوز و کانال باز هستند؛ نمایش/صدا و مزاحم‌نشدن را با اعلان آزمایشی روی گوشی بررسی کنید" else
                     "مجوز اعلان یا کانال هشدار بسته است؛ در تنظیمات اعلان آزمایشی بفرستید"),
             AlertCheck(AlertCheckKind.STORAGE, opportunityError == null && journalError == null,
                 opportunityError ?: journalError ?: "خطای فایل محلی گزارش نشده؛ فرصت‌ها باید قبل از اعلان ثبت شوند"),
-            AlertCheck(AlertCheckKind.AI_NEWS, newsReady,
+            AlertCheck(AlertCheckKind.AI_NEWS, noNewsVeto,
                 when {
-                    settings.newsBaseUrl.isBlank() -> "سرور HTTPS/مدل تنظیم نشده؛ تیترهای RSS تب خبر، تأیید AI نیستند"
-                    news.error != null -> "خطای سرور خبر: ${news.error}"
-                    news.loading -> "سرور در حال بررسی است؛ پاسخ قبلی مجوز هشدار نیست"
-                    news.gate != NewsGate.CLEAR -> "${news.gate}: ${news.reason}"
-                    news.ai.status != "AVAILABLE" -> "مدل AI در دسترس نیست: ${news.ai.reason}"
-                    !newsReady -> "پاسخ AI/تقویم/ناشران ناقص یا قدیمی است؛ جزئیات در تب خبر"
-                    else -> "فید و مدل پاسخ داده‌اند؛ هم‌جهتی با سیگنال همین کندل هنوز جداگانه بررسی می‌شود"
+                    news.gate == NewsGate.BLOCKED || market.symbol in news.vetoedSymbols ->
+                        "خبر/تقویم پرریسک دیده شده: ${news.reason}؛ معاملهٔ کاغذی را مسدود نمی‌کند و فقط ثبت تحلیلی می‌شود"
+                    news.loading -> "خبر در حال بررسی است؛ ورود کاغذی فقط با شروط فنی/آپشن‌ها سنجیده می‌شود"
+                    news.error != null -> "خطای خبر: ${news.error}؛ AI تأییدکننده نداریم اما سیگنال فنی منفی نمی‌شود"
+                    !newsConfigured -> "مدل خبر تنظیم نشده؛ خبر فقط نمایش/هشدار تقویمی است، نه شرط امتیاز فنی"
+                    !sourcesOnline || !calendarFresh -> "خوراک/تقویم کامل یا تازه نیست؛ خبر UNKNOWN است، نه امتیاز منفی فنی"
+                    selectedVerdict?.status == "AVAILABLE" && modelFresh ->
+                        "AI خبر برای ${market.symbol}: ${selectedVerdict.direction} با ${selectedVerdict.confidence.toInt()}٪؛ فقط همراه معامله در ژورنال داده‌کاوی می‌شود"
+                    else -> "خبر معیار تأییدی کامل ندارد؛ شرط ورود نیست و فقط زمینهٔ ژورنال/آموزش است"
                 }),
             AlertCheck(AlertCheckKind.NINE_WAY, signal?.isActionable == true && entryBlocker == null,
                 entryBlocker ?: "شرایط این لحظه تأییدند؛ این به‌تنهایی وقوع هشدار، معامله یا سود را تضمین نمی‌کند"),

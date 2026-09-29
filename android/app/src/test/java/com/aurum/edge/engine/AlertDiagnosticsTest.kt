@@ -21,10 +21,11 @@ class AlertDiagnosticsTest {
         val checks = AlertDiagnostics.checks(MarketState(), AppSettings(), PersianNewsState(),
             monitorRunning = false, androidNotificationsReady = false, trades = emptyList(), mtf = null, now = now)
         for (kind in listOf(AlertCheckKind.KEY, AlertCheckKind.MARKET, AlertCheckKind.HISTORY,
-            AlertCheckKind.MONITOR, AlertCheckKind.ANDROID_ALERT, AlertCheckKind.AI_NEWS, AlertCheckKind.NINE_WAY)) {
+            AlertCheckKind.MONITOR, AlertCheckKind.ANDROID_ALERT, AlertCheckKind.NINE_WAY)) {
             assertFalse(checks.single { it.kind == kind }.ready)
         }
-        assertTrue(checks.single { it.kind == AlertCheckKind.AI_NEWS }.detail.contains("RSS"))
+        assertTrue(checks.single { it.kind == AlertCheckKind.AI_NEWS }.ready)
+        assertTrue(checks.single { it.kind == AlertCheckKind.AI_NEWS }.detail.contains("مدل خبر تنظیم نشده"))
         assertTrue(checks.single { it.kind == AlertCheckKind.APP_ALERT }.ready) // opt-in, but not deliverable yet
     }
 
@@ -43,7 +44,7 @@ class AlertDiagnosticsTest {
         assertTrue(checks.single { it.kind == AlertCheckKind.MARKET }.ready)
         assertTrue(checks.single { it.kind == AlertCheckKind.HISTORY }.ready)
         assertTrue(checks.single { it.kind == AlertCheckKind.MONITOR }.ready)
-        assertFalse(checks.single { it.kind == AlertCheckKind.AI_NEWS }.ready)
+        assertTrue(checks.single { it.kind == AlertCheckKind.AI_NEWS }.ready)
         assertFalse(checks.single { it.kind == AlertCheckKind.NINE_WAY }.ready)
         assertFalse(report(market, running = false).single { it.kind == AlertCheckKind.MONITOR }.ready)
         assertFalse(report(market.copy(showingCachedData = true)).single { it.kind == AlertCheckKind.MARKET }.ready)

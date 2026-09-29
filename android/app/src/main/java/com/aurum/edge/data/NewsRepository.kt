@@ -83,7 +83,7 @@ data class PersianNewsState(
     /** Server calendar receipt time; separately expires even if RSS/model is refreshed. */
     val calendarCheckedAt: Long? = null,
     val ai: AiNewsVerdict = AiNewsVerdict(),
-    /** Ninth-condition verdict per pair (client mode); empty in XAU-only server mode. */
+    /** Journal-context verdict per pair (client mode); empty in XAU-only server mode. */
     val aiBySymbol: Map<String, AiNewsVerdict> = emptyMap(),
     /** Pairs whose own currencies have a High-impact event in the veto window (client mode). */
     val vetoedSymbols: Set<String> = emptySet(),
@@ -319,7 +319,7 @@ class NewsRepository(
     }
 }
 
-/** Parses backend contract without a network call, so nine-way tests exercise the same payload as the APK. */
+/** Parses backend contract without a network call, so journal-context news tests exercise the same payload as the APK. */
 internal fun parseWebNews(root: JsonObject, now: Long): PersianNewsState {
     val status = root["status"] as? JsonObject
     val guard = root["guard"] as? JsonObject

@@ -104,21 +104,30 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             entryBlocker = positionBlocker,
         )
         SectionCard("گیت رنج و زمان خرید/فروش کاغذی",
-            "افزوده بر ۸ شرط فنی + خبر AI؛ خط S/R یا طرح سیگنال، پوزیشن ثبت‌شده نیست") {
+            "افزوده بر ۸ شرط فنی و ریسک خبر/تقویم؛ خط S/R یا طرح سیگنال، پوزیشن ثبت‌شده نیست") {
             val reason = IctEntryRules.assess(market).reason
-            Text(reason ?: "رنج، جاروب/بازپس‌گیری، MSS، FVG، بازآزمایی، جلسهٔ نیویورک و فضای کافی تأیید شدند؛ ۹/۹ و ریسک همچنان جداگانه لازم‌اند.",
+            Text(reason ?: "رنج، جاروب/بازپس‌گیری، MSS، FVG، بازآزمایی، جلسهٔ نیویورک و فضای کافی تأیید شدند؛ ریسک خبر، MTF و مدیریت ریسک همچنان جداگانه دیده می‌شوند.",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (reason == null) AurumColors.Green else AurumColors.Gold)
             Text("دکمهٔ ورود سیگنالی نیز پیش از ذخیره دوباره بررسی می‌شود؛ ورود دستیِ جداگانه ادعای تأیید این گیت ندارد.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
-        SectionCard("خبر وب: شرط نهم سیگنال و وتوی اختیاری دستی", "برای ورود خودکار، خبر AI هم‌جهت همیشه الزامی است؛ سفارش واقعی نداریم") {
-            val blocked = settings.pauseOnNews && (news.gate != NewsGate.CLEAR || news.lastCheckedAt == null ||
+        SectionCard("خبر وب: معیار شفاف ریسک", "خبر امتیاز فنی ۸ شرط را کم نمی‌کند؛ فقط وتوی روشن/قابل توضیح می‌تواند ورود کاغذی را متوقف کند") {
+            val hardVeto = news.gate == NewsGate.BLOCKED || market.symbol in news.vetoedSymbols
+            val manualBlocked = settings.pauseOnNews && (hardVeto || news.lastCheckedAt == null ||
                 System.currentTimeMillis() - news.lastCheckedAt!! > 180_000L)
-            Text(if (!settings.pauseOnNews) "وتوی ورود دستی خاموش است؛ شرط نهم خبر AI برای ورود سیگنالی/خودکار همچنان لازم است."
-                else if (blocked) "ورود کاغذی متوقف: ${news.reason}" else "فقط در منابع RSS بررسی‌شده فعلاً خبر پراثر تازه پیدا نشد؛ تقویم کامل نیست.",
-                style = MaterialTheme.typography.bodySmall, color = if (blocked) AurumColors.Red else AurumColors.TextSecondary)
-            Text("آخرین بررسی: ${relativeTime(news.lastCheckedAt)} · خبر ناقص/قدیمی اجازهٔ ورود نمی‌دهد.",
+            Text(
+                when {
+                    hardVeto -> "خبر/تقویم پرریسک دیده شده: ${news.reason}؛ برای کاغذی فقط در ژورنال داده‌کاوی می‌شود"
+                    manualBlocked -> "وتوی اختیاری دستی روشن است و وضعیت خبر تازه/کامل نیست: ${news.reason}"
+                    else -> "خبر شرط ورود کاغذی نیست؛ اگر AI معتبر هم‌جهت/مخالف باشد فقط به‌عنوان زمینهٔ ژورنال ذخیره و نمایش داده می‌شود."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (hardVeto || manualBlocked) AurumColors.Red else AurumColors.TextSecondary,
+            )
+            Text("معیار: رویداد High و AI معتبر فقط برای داده‌کاوی خبر نزدیک معامله استفاده می‌شوند؛ شرط ورود کاغذی همان موتور ایچیموکو، آپشن‌ها، ICT/MTF و ریسک است.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            Text("آخرین بررسی: ${relativeTime(news.lastCheckedAt)} · تقویم: ${relativeTime(news.calendarCheckedAt)}",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
@@ -126,17 +135,17 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
 
         signal?.let { s ->
             SectionCard(
-                title = "همگرایی ۹ شرط (۸ فنی + خبر AI)",
-                subtitle = "ورود خودکار کاغذی فقط با تأیید هر ۹ شرط؛ امتیاز فنی: ${s.confidence.toInt()} از ۱۰۰ · کندل ${s.interval.label} · ${formatTime(s.barTime)}",
+                title = "۸ شرط فنی اصلی + آپشن‌ها",
+                subtitle = "هر شرط فنی جدا سبز/قرمز و با سهم امتیاز از ۱۰۰ نمایش داده می‌شود؛ خبر شرط ورود نیست و فقط زمینهٔ ژورنال است · امتیاز کل: ${s.confidence.toInt()} از ۱۰۰ · کندل ${s.interval.label} · ${formatTime(s.barTime)}",
             ) {
                 if (s.confluence.isEmpty()) {
                     Text("داده کافی برای نمایش جزئیات نیست", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
                 } else {
-                    s.confluence.take(9).forEach { ConfluenceRow(it) }
-                    if (s.confluence.size > 9) {
-                        Text("کنترل‌های اضافه (امتیاز همگرایی نیستند):", style = MaterialTheme.typography.labelSmall,
+                    s.confluence.take(8).forEach { ConfluenceRow(it) }
+                    if (s.confluence.size > 8) {
+                        Text("آپشن‌ها، کنترل‌های اضافه و داده‌کاوی خبر:", style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.TextMuted, modifier = Modifier.padding(top = 8.dp))
-                        s.confluence.drop(9).forEach { ConfluenceRow(it) }
+                        s.confluence.drop(8).forEach { ConfluenceRow(it) }
                     }
                 }
             }
@@ -285,7 +294,7 @@ internal fun PairRadarCard(scan: PairScanState, onScan: () -> Unit, onSelectSymb
     LaunchedEffect(scan.lastSweepAt) { if (scan.lastSweepAt == null) onScan() }
     SectionCard(
         title = "رادار ۸ جفت‌ارز",
-        subtitle = "اسکن دوره‌ای همهٔ نمادها با همان ۹ شرط؛ کاندیدا فقط اعلان آموزشی است — ورود خودکار کاغذی همچنان فقط با فید زندهٔ نماد انتخابی",
+        subtitle = "اسکن دوره‌ای همهٔ نمادها با همان ۸ شرط فنی و ریسک خبر؛ کاندیدا فقط اعلان آموزشی است — ورود خودکار کاغذی همچنان فقط با فید زندهٔ نماد انتخابی",
         trailing = {
             Pill(
                 when {

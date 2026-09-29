@@ -25,7 +25,7 @@ object ForexNewsDecisions {
         val context = if (!calendar.online(now)) "تقویم Forex Factory تازه نیست؛ اثر خبر نامعلوم" else
             highlight?.let { "${it.title}: ${NewsResearch.gold(it, calendar, now).title}" }
                 ?: "در تقویم دریافتی، رویداد High/USD نزدیک نیست؛ نبود خبر ثابت نشده"
-        // Per-pair ninth condition: probe with the SELECTED pair's own model verdict.
+        // News is journal context, not a hidden replacement or blocker for the eight technical rules.
         val verdict = news.aiBySymbol[market.symbol] ?: news.ai.takeIf { it.symbol == market.symbol }
         val action = when (verdict?.direction) { "BUY" -> SignalAction.BUY; "SELL" -> SignalAction.SELL; else -> null }
         val aligned = if (!closed && action != null) {
@@ -33,15 +33,17 @@ object ForexNewsDecisions {
         } else false
         val blocker = if (closed) "بازار فارکس طبق برنامهٔ معمول بسته است" else
             PaperAutoRules.blocker(market, settings, news, now)
-        val allowed = blocker == null && aligned
+        val allowed = blocker == null
+        val hardVeto = news.gate.name == "BLOCKED" || market.symbol in news.vetoedSymbols
         return ForexNewsDecision(
             context,
-            modelOpinion = if (aligned) "مدل ${verdict?.model} با شاهد معتبر بررسی شد؛ این برداشت تضمین حرکت قیمت نیست"
-                else "نظر AI معتبر نداریم؛ خروجی تقویم به‌تنهایی تحلیل معامله‌گر نیست",
+            modelOpinion = if (aligned) "مدل ${verdict?.model} با شاهد معتبر هم‌جهت شد؛ این فقط زمینهٔ ژورنال است و تضمین حرکت قیمت نیست"
+                else if (hardVeto) "خبر/تقویم پرریسک دیده شده؛ دلیل در تب خبر آمده اما معاملهٔ کاغذی را شرطی/مسدود نمی‌کند"
+                else "AI خبر معیار سبز کامل ندارد؛ این وضعیت فقط زرد است و شرط ورود کاغذی نیست",
             direction = if (aligned) { if (action == SignalAction.BUY) "LONG / خرید" else "SHORT / فروش" }
-                else "نامعلوم؛ جهت از تیتر/پیش‌بینی ساخته نمی‌شود",
-            paperEntry = if (allowed) "شرایط لحظه‌ای ورود کاغذی هم‌جهت است؛ فقط پس از ثبت موفق ژورنال، معامله محسوب می‌شود"
-                else "ورود خودکار کاغذی: خیر · ${blocker ?: "شواهد مدل/جهت تأیید نشده"}",
+                else "نامعلوم؛ جهت از تیتر/پیش‌بینی ساخته نمی‌شود و جهت اصلی از ۸ شرط فنی می‌آید",
+            paperEntry = if (allowed) "ورود خودکار کاغذی وابسته به ۸ شرط فنی، آپشن‌های فعال، قیمت زنده، ICT/MTF و ریسک است؛ خبر فقط در ژورنال تحلیل می‌شود"
+                else "ورود خودکار کاغذی: خیر · $blocker",
             canEnterPaper = allowed,
         )
     }

@@ -47,17 +47,17 @@ class ResearchEvidenceTest {
         autoOpened = true, signalBarTime = barTime, mtf = mtf, newsEvidence = news,
         entryConditions = conditions, priceAction = ict)
 
-    @Test fun `manual older unverified and RSS-only records never enter recorded nine-way group`() {
+    @Test fun `manual older unverified and invalid news records never enter recorded signal group`() {
         assertTrue(ResearchEvidence.hasRecordedNineWay(paper))
         val manual = paper.copy(id = "manual", autoOpened = false, signalBarTime = null,
             newsEvidence = null, entryConditions = emptyList(), priceAction = null)
         assertFalse(ResearchEvidence.hasRecordedNineWay(manual))
-        assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = null)))
+        assertTrue(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = null)))
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = news.copy(model = "deterministic-fallback"))))
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = news.copy(calendarSource = null))))
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = news.copy(checkedAt = paper.openedAt + 1))))
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(priceAction = null)))
-        assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(entryConditions = conditions.dropLast(1))))
+        assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(entryConditions = conditions.drop(1))))
         assertNull(ResearchEvidence.paperCostWhatIf(listOf(manual), 0.30, 0.05))
     }
 

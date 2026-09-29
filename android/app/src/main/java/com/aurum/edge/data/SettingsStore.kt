@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.Interval
+import com.aurum.edge.core.SignalProfile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,9 +21,29 @@ class SettingsStore(context: Context) {
     private val _settings = MutableStateFlow(read())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
-    fun read(): AppSettings = AppSettings(
-        apiKey = prefs.getString(KEY_API, null)?.takeIf { it.isNotBlank() }
-            ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY,
+    fun read(): AppSettings {
+        val legacyProfile = SignalProfile.fromName(prefs.getString(KEY_SIGNAL_PROFILE, null))
+        fun opt(key: String, legacy: Boolean): Boolean =
+            if (prefs.contains(key)) prefs.getBoolean(key, false) else legacy
+        val profile = SignalProfile(
+            momentumVolume = opt(KEY_SIGNAL_MOMENTUM_VOLUME, legacyProfile.momentumVolume),
+            flatSpanB = opt(KEY_SIGNAL_FLAT_SPAN_B, legacyProfile.flatSpanB),
+            rangeChopFilter = opt(KEY_SIGNAL_RANGE_CHOP, legacyProfile.rangeChopFilter),
+            higherTimeframeFilter = opt(KEY_SIGNAL_HIGHER_TIMEFRAME, legacyProfile.higherTimeframeFilter),
+            fakeBreakoutFilter = opt(KEY_SIGNAL_FAKE_BREAKOUT, legacyProfile.fakeBreakoutFilter),
+            dynamicSpreadFilter = opt(KEY_SIGNAL_DYNAMIC_SPREAD, legacyProfile.dynamicSpreadFilter),
+            riskyTimingFilter = opt(KEY_SIGNAL_RISKY_TIMING, legacyProfile.riskyTimingFilter),
+            structureRiskFilter = opt(KEY_SIGNAL_STRUCTURE_RISK, legacyProfile.structureRiskFilter),
+            cooldownFilter = opt(KEY_SIGNAL_COOLDOWN, legacyProfile.cooldownFilter),
+            chikouConfirmation = opt(KEY_SIGNAL_CHIKOU, legacyProfile.chikouConfirmation),
+        )
+        val storedApiKey = prefs.getString(KEY_API, null)?.trim()
+        val storedNewsAiKey = prefs.getString(KEY_NEWS_AI_KEY, null)?.trim().orEmpty()
+        val storedNewsAiUrl = prefs.getString(KEY_NEWS_AI_URL, null)?.trim().orEmpty()
+        val storedNewsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, null)?.trim().orEmpty()
+        return AppSettings(
+        apiKey = storedApiKey?.takeIf { it.isNotBlank() }
+            ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY.trim(),
         // Legacy installs may still hold a removed symbol (crypto/stock); the app is forex-only now.
         symbol = (prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD").takeIf { it in WatchCatalog.chartSymbols } ?: "XAU/USD",
         interval = Interval.fromLabel(prefs.getString(KEY_INTERVAL, null) ?: "5m"),
@@ -35,14 +56,17 @@ class SettingsStore(context: Context) {
         notifyOnSignal = prefs.getBoolean(KEY_NOTIFY, true),
         alertSoundUri = prefs.getString(KEY_ALERT_SOUND_URI, "").orEmpty(),
         alertSoundName = prefs.getString(KEY_ALERT_SOUND_NAME, "").orEmpty(),
-        newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty(),
+        newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty().trim(),
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
         autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
-        newsAiApiKey = prefs.getString(KEY_NEWS_AI_KEY, "").orEmpty(),
-        newsAiBaseUrl = prefs.getString(KEY_NEWS_AI_URL, "").orEmpty(),
-        newsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, "").orEmpty(),
+        autoDownloadUpdates = prefs.getBoolean(KEY_AUTO_DOWNLOAD_UPDATES, false),
+        newsAiApiKey = storedNewsAiKey,
+        newsAiBaseUrl = storedNewsAiUrl,
+        newsAiModel = storedNewsAiModel,
         newsAiFormat = prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" },
+        signalProfile = profile,
     )
+    }
 
     /**
      * Persist the market key and symbol in ONE disk transaction. A successful commit,
@@ -148,8 +172,20 @@ class SettingsStore(context: Context) {
             .putString(KEY_ALERT_SOUND_URI, next.alertSoundUri)
             .putString(KEY_ALERT_SOUND_NAME, next.alertSoundName)
             .putString(KEY_NEWS_URL, next.newsBaseUrl.trim())
+            .putString(KEY_SIGNAL_PROFILE, next.signalProfile.persistName())
+            .putBoolean(KEY_SIGNAL_MOMENTUM_VOLUME, next.signalProfile.momentumVolume)
+            .putBoolean(KEY_SIGNAL_FLAT_SPAN_B, next.signalProfile.flatSpanB)
+            .putBoolean(KEY_SIGNAL_RANGE_CHOP, next.signalProfile.rangeChopFilter)
+            .putBoolean(KEY_SIGNAL_HIGHER_TIMEFRAME, next.signalProfile.higherTimeframeFilter)
+            .putBoolean(KEY_SIGNAL_FAKE_BREAKOUT, next.signalProfile.fakeBreakoutFilter)
+            .putBoolean(KEY_SIGNAL_DYNAMIC_SPREAD, next.signalProfile.dynamicSpreadFilter)
+            .putBoolean(KEY_SIGNAL_RISKY_TIMING, next.signalProfile.riskyTimingFilter)
+            .putBoolean(KEY_SIGNAL_STRUCTURE_RISK, next.signalProfile.structureRiskFilter)
+            .putBoolean(KEY_SIGNAL_COOLDOWN, next.signalProfile.cooldownFilter)
+            .putBoolean(KEY_SIGNAL_CHIKOU, next.signalProfile.chikouConfirmation)
             .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
             .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
+            .putBoolean(KEY_AUTO_DOWNLOAD_UPDATES, next.autoDownloadUpdates)
             .apply()
         _settings.value = next
     }
@@ -177,9 +213,21 @@ class SettingsStore(context: Context) {
         private const val KEY_NEWS_URL = "news_base_url"
         private const val KEY_NEWS_PAUSE = "pause_on_news"
         private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"
+        private const val KEY_AUTO_DOWNLOAD_UPDATES = "auto_download_updates"
         private const val KEY_NEWS_AI_KEY = "news_ai_client_key"
         private const val KEY_NEWS_AI_URL = "news_ai_client_base_url"
         private const val KEY_NEWS_AI_MODEL = "news_ai_client_model"
-    private const val KEY_NEWS_AI_FORMAT = "news_ai_format"
+        private const val KEY_NEWS_AI_FORMAT = "news_ai_format"
+        private const val KEY_SIGNAL_PROFILE = "signal_profile"
+        private const val KEY_SIGNAL_MOMENTUM_VOLUME = "signal_momentum_volume"
+        private const val KEY_SIGNAL_FLAT_SPAN_B = "signal_flat_span_b"
+        private const val KEY_SIGNAL_RANGE_CHOP = "signal_range_chop_filter"
+        private const val KEY_SIGNAL_HIGHER_TIMEFRAME = "signal_higher_timeframe_filter"
+        private const val KEY_SIGNAL_FAKE_BREAKOUT = "signal_fake_breakout_filter"
+        private const val KEY_SIGNAL_DYNAMIC_SPREAD = "signal_dynamic_spread_filter"
+        private const val KEY_SIGNAL_RISKY_TIMING = "signal_risky_timing_filter"
+        private const val KEY_SIGNAL_STRUCTURE_RISK = "signal_structure_risk_filter"
+        private const val KEY_SIGNAL_COOLDOWN = "signal_cooldown_filter"
+        private const val KEY_SIGNAL_CHIKOU = "signal_chikou_confirmation"
     }
 }

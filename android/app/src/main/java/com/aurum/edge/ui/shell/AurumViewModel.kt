@@ -11,7 +11,9 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.aurum.edge.core.AppContainer
 import com.aurum.edge.core.AppSettings
+import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.FeedMode
+import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.data.SourceComparison
 import com.aurum.edge.data.VerificationStatus
 import com.aurum.edge.data.WatchCatalog
@@ -23,22 +25,25 @@ import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.PaperTicket
+import com.aurum.edge.core.ReplayDecision
 import com.aurum.edge.core.Signal
+import com.aurum.edge.core.SignalProfile
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.TradeReplay
 import com.aurum.edge.core.WalkForwardRecord
+import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.data.FreeHistoryCatalog
 import com.aurum.edge.data.FreeHistoryState
 import com.aurum.edge.data.JournalStats
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.NewsRepository
-import com.aurum.edge.data.Quote
 import com.aurum.edge.data.WatchSelection
 import com.aurum.edge.data.WatchState
-import com.aurum.edge.engine.Backtester
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
+import com.aurum.edge.engine.ReplayEngine
+import com.aurum.edge.engine.ReplayEvaluation
 import com.aurum.edge.notify.AlertSoundPlayer
 import com.aurum.edge.service.SignalMonitorService
 import kotlinx.coroutines.CancellationException
@@ -49,48 +54,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.min
-
-sealed interface LearnState {
-    data object Idle : LearnState
-    data class Loading(val step: String) : LearnState
-    data class Done(val result: Backtester.Result, val interval: Interval) : LearnState
-    data class Failed(val message: String) : LearnState
-}
-
-sealed interface WalkForwardState {
-    data object Idle : WalkForwardState
-    data class Loading(val step: String) : WalkForwardState
-    data class Done(val result: Backtester.WalkForward, val interval: Interval, val saved: Boolean) : WalkForwardState
-    data class Failed(val message: String) : WalkForwardState
-}
-
-data class WatchHistory(
-    val symbolId: String = "",
-    val sourceId: String = "",
-    val entries: List<Quote> = emptyList(),
-    val total: Long = 0L,
-    val loading: Boolean = false,
-)
-
-/**
- * Real candles around ONE recorded paper trade, for the journal chart.
- *
- * [window] only ever holds bars that passed the same verification as the live chart; when the
- * device has no history for that period the state stays empty and says so instead of drawing
- * anything invented.
- */
-data class TradeChartState(
-    val tradeId: String = "",
-    val loading: Boolean = false,
-    val downloading: Boolean = false,
-    val window: TradeReplay.Window = TradeReplay.Window(),
-    /** Where the drawn bars came from — cache of this device or a fresh provider download. */
-    val source: String = "",
-    val error: String? = null,
-)
 
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
@@ -100,7 +68,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val news = container.news.state
     val publicWebNews = container.publicWebNews.state // Forex publisher snippets, not ninth-confluence evidence
     val forexCalendar = container.forexCalendar.state
-    /** All-pairs radar: periodic REST sweep status of every catalog pair. */
+    /** All-pairs radar: periodic online candle sweep status of every catalog pair. */
     val pairScan = container.pairScanner.state
     /** The AI trading companion's latest strictly-validated opinion (analysis, never a signal). */
     val traderOpinion = container.traderAdvisor.state
@@ -110,16 +78,24 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val opportunityError: StateFlow<String?> = container.opportunityStore.loadError
     val journalError: StateFlow<String?> = container.journalStore.loadError
     val autoPaperStatus: StateFlow<String> = container.autoPaperTrader.status
+    val updateState: StateFlow<AppUpdateRepository.State> = container.updater.state
 
     /** Walk-forward runs made on this device, kept so the numbers can be re-checked later. */
     val reports: StateFlow<List<WalkForwardRecord>> = container.journalStore.reports
     val reportError: StateFlow<String?> = container.journalStore.reportError
+    val replayDecisions: StateFlow<List<ReplayDecision>> = container.replayJournalStore.entries
 
     private val _stats = MutableStateFlow(container.journalStore.stats())
     val stats: StateFlow<JournalStats> = _stats.asStateFlow()
 
     private val _learn = MutableStateFlow<LearnState>(LearnState.Idle)
     val learn: StateFlow<LearnState> = _learn.asStateFlow()
+
+    private val _replay = MutableStateFlow<ReplayState>(ReplayState.Idle)
+    val replay: StateFlow<ReplayState> = _replay.asStateFlow()
+    private var replayJob: kotlinx.coroutines.Job? = null
+    private val replayOutcomeMutex = Mutex()
+    private var replayRevision: Long = 0L
 
     private val _freeHistory = MutableStateFlow<FreeHistoryState>(FreeHistoryState.Idle)
     val freeHistory: StateFlow<FreeHistoryState> = _freeHistory.asStateFlow()
@@ -142,14 +118,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private val _tradeChart = MutableStateFlow(TradeChartState())
     val tradeChart: StateFlow<TradeChartState> = _tradeChart.asStateFlow()
 
-    /** Result of the one-tap AI connectivity probe from Settings (never carries the key). */
-    data class AiProbeState(val running: Boolean = false, val message: String? = null)
+    /** Result of the one-tap AI connectivity probe from the API settings tab. */
     private val _aiProbe = MutableStateFlow(AiProbeState())
     val aiProbe: StateFlow<AiProbeState> = _aiProbe.asStateFlow()
 
     /** Allowed model IDs for the user's key, fetched live from the service catalogue. */
-    data class AiModelsState(val loading: Boolean = false, val models: List<String> = emptyList(),
-                             val error: String? = null)
     private val _aiModels = MutableStateFlow(AiModelsState())
     val aiModels: StateFlow<AiModelsState> = _aiModels.asStateFlow()
 
@@ -163,6 +136,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             }
             runCatching { container.journalStore.loadReports() }.onFailure {
                 _toast.value = "گزارش پژوهش خوانده نشد؛ فایل قبلی نگه داشته شد"
+            }
+            runCatching { container.replayJournalStore.load() }.onFailure {
+                _toast.value = "ژورنال تصمیم‌های replay خوانده نشد؛ فایل قبلی دست‌نخورده ماند"
             }
             _stats.value = container.journalStore.stats()
         }
@@ -193,8 +169,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Forex is the app's only workspace: start the real feed as soon as the UI is visible. */
     fun startApp(context: Context) {
+        visibleOnlineLoopEnabled = true
         container.market.start()
         container.watch.loadCached()
+        ensureVisibleOnlineLoop()
         // A saved opt-in can outlive a killed service. Re-arm only when the UI is in the
         // foreground again; it stays off otherwise.
         if (settings.value.backgroundMonitor && !SignalMonitorService.running.value) {
@@ -206,19 +184,87 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _toast.value = "سرویس پایش شروع نشد؛ مجوز اعلان یا محدودیت باتری گوشی را بررسی کنید"
             }
         }
+        // Do this once per process, not on every tab change. If the user enabled automatic
+        // download, a verified public APK is downloaded and Android's installer is opened.
+        if (!updateCheckStarted) {
+            updateCheckStarted = true
+            checkForAppUpdate(settings.value.autoDownloadUpdates)
+        }
     }
 
     /** UI resume must not restart a healthy service socket; start() is idempotent. */
     fun resumeVisibleForexFeed() {
+        visibleOnlineLoopEnabled = true
         container.market.start()
     }
 
     /** When no user-enabled foreground service remains, do not keep a headless feed alive. */
     fun pauseInvisibleForexFeed() {
+        visibleOnlineLoopEnabled = false
         if (!SignalMonitorService.running.value) container.market.stop()
     }
 
+    private var visibleOnlineLoopStarted = false
+    private var visibleOnlineLoopEnabled = false
+    private var updateCheckStarted = false
+
+    /**
+     * While the app UI is open (or the user-enabled foreground monitor is running), keep every
+     * data section warm automatically. Individual repositories still enforce their own rate limits.
+     */
+    private fun ensureVisibleOnlineLoop() {
+        if (visibleOnlineLoopStarted) return
+        visibleOnlineLoopStarted = true
+        viewModelScope.launch {
+            var turns = 0
+            while (isActive) {
+                if ((visibleOnlineLoopEnabled || SignalMonitorService.running.value) && !MarketHours.forexWeekendClosed()) {
+                    if (turns % 3 == 0) container.watch.refreshNow()
+                    container.forexCalendar.refreshNow()
+                    if (turns % 5 == 0) container.publicWebNews.refreshNow()
+                    if (settings.value.pauseOnNews &&
+                        (settings.value.newsBaseUrl.isNotBlank() || settings.value.hasClientNewsAi)) {
+                        container.news.refreshNow()
+                    }
+                    container.traderAdvisor.refreshNow()
+                }
+                turns++
+                delay(60_000L)
+            }
+        }
+    }
+
     fun refreshNow() = container.market.refreshNow()
+
+    fun checkForAppUpdate(autoDownload: Boolean = settings.value.autoDownloadUpdates) {
+        viewModelScope.launch {
+            container.updater.checkForUpdate(autoDownload)
+            if (autoDownload && container.updater.state.value.downloadedApkPath != null) {
+                container.updater.installDownloaded()
+            }
+        }
+    }
+
+    fun downloadAppUpdate() {
+        viewModelScope.launch {
+            container.updater.downloadAvailable()
+            if (container.updater.state.value.downloadedApkPath != null) container.updater.installDownloaded()
+        }
+    }
+
+    fun setAutoDownloadUpdates(enabled: Boolean) {
+        container.settingsStore.update { it.copy(autoDownloadUpdates = enabled) }
+        if (enabled) checkForAppUpdate(autoDownload = true)
+        _toast.value = if (enabled)
+            "بررسی و دانلود خودکار فعال شد؛ نصب نهایی با تأیید Android انجام می‌شود"
+        else "دانلود خودکار بروزرسانی خاموش شد"
+    }
+
+    fun installDownloadedUpdate() = container.updater.installDownloaded()
+
+    fun resumeUpdateInstall() = container.updater.resumePendingInstall()
+
+    fun openUpdateInstallPermission() = container.updater.openInstallPermissionSettings()
 
     fun refreshWatch() = container.watch.refreshNow()
 
@@ -314,6 +360,52 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun saveMinConfidence(value: Double) = container.settingsStore.update { it.copy(minConfidence = value.coerceIn(72.0, 95.0)) }
 
+    fun setSignalMomentumVolume(enabled: Boolean) = updateSignalProfile("فیلتر مومنتوم/حجم", enabled) {
+        it.copy(momentumVolume = enabled)
+    }
+
+    fun setSignalFlatSpanB(enabled: Boolean) = updateSignalProfile("سناریوی تختی SpanB52", enabled) {
+        it.copy(flatSpanB = enabled)
+    }
+
+    fun setSignalRangeChop(enabled: Boolean) = updateSignalProfile("فیلتر بازار رنج", enabled) {
+        it.copy(rangeChopFilter = enabled)
+    }
+
+    fun setSignalHigherTimeframe(enabled: Boolean) = updateSignalProfile("تأیید تایم‌فریم بالاتر", enabled) {
+        it.copy(higherTimeframeFilter = enabled)
+    }
+
+    fun setSignalFakeBreakout(enabled: Boolean) = updateSignalProfile("فیلتر فیک‌بریک‌اوت", enabled) {
+        it.copy(fakeBreakoutFilter = enabled)
+    }
+
+    fun setSignalDynamicSpread(enabled: Boolean) = updateSignalProfile("فیلتر اسپرد پویا", enabled) {
+        it.copy(dynamicSpreadFilter = enabled)
+    }
+
+    fun setSignalRiskyTiming(enabled: Boolean) = updateSignalProfile("فیلتر زمان‌های خطرناک", enabled) {
+        it.copy(riskyTimingFilter = enabled)
+    }
+
+    fun setSignalStructureRisk(enabled: Boolean) = updateSignalProfile("فیلتر ریسک ساختار", enabled) {
+        it.copy(structureRiskFilter = enabled)
+    }
+
+    fun setSignalCooldown(enabled: Boolean) = updateSignalProfile("کول‌داون بعد از شکست", enabled) {
+        it.copy(cooldownFilter = enabled)
+    }
+
+    fun setSignalChikou(enabled: Boolean) = updateSignalProfile("تایید چیکو", enabled) {
+        it.copy(chikouConfirmation = enabled)
+    }
+
+    private fun updateSignalProfile(label: String, enabled: Boolean, transform: (SignalProfile) -> SignalProfile) {
+        container.settingsStore.update { it.copy(signalProfile = transform(it.signalProfile)) }
+        container.market.restart()
+        _toast.value = "$label ${if (enabled) "به موتور پایه اضافه شد" else "از افزونه‌های موتور برداشته شد"}"
+    }
+
     /** Cost assumptions are the user's responsibility; they are echoed in every report. */
     fun saveSpread(value: Double) = container.settingsStore.update { it.copy(spreadPrice = value.coerceIn(0.0, 5.0)) }
 
@@ -364,13 +456,13 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun setAutoPaperTrading(enabled: Boolean) {
-        if (enabled && (!settings.value.backgroundMonitor || settings.value.newsBaseUrl.isBlank())) {
-            _toast.value = "برای خودکار کاغذی، پایش و آدرس HTTPS سرور خبر را فعال کنید"
+        if (enabled && !settings.value.backgroundMonitor) {
+            _toast.value = "برای خودکار کاغذی، پایش پس‌زمینه را فعال کنید"
             return
         }
         container.settingsStore.update { it.copy(autoPaperTrading = enabled) }
         if (enabled) container.news.refreshNow()
-        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ بدون مدل AI و ۹/۹ معتبر هیچ ورودی ثبت نمی‌شود"
+        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ ۸ شرط فنی، آپشن‌های فعال، قیمت زنده و ICT/MTF لازم است؛ خبر فقط در ژورنال داده‌کاوی می‌شود"
             else "معاملهٔ خودکار کاغذی خاموش شد"
     }
 
@@ -379,7 +471,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     /** A price received recently is still not an exchange fill; only a paper ticket can use it. */
     private fun freshPaperQuote(current: MarketState): String? {
         val now = System.currentTimeMillis()
-        val received = current.feed.lastSuccessAt
         val lastBar = current.candles.lastOrNull()?.time
         return when {
             current.symbol != settings.value.symbol || current.interval != settings.value.interval ->
@@ -387,7 +478,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             current.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING) || current.showingCachedData ->
                 "قیمت زنده نیست؛ ورود/خروج روی کش ممنوع است"
             current.lastPrice?.let { it.isFinite() && it > 0.0 } != true -> "قیمت معتبر موجود نیست"
-            received == null || now - received !in 0L..90_000L -> "آخرین دریافت قیمت قدیمی است"
+            !FeedLiveness.hasRecentReceipt(current.feed, now) -> "آخرین دریافت قیمت قدیمی است"
             lastBar == null || now - lastBar !in 0L..min(180_000L, current.interval.millis * 2) ->
                 "کندل این نماد برای ورود خیلی قدیمی است"
             else -> null
@@ -453,13 +544,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     abs(price / signal.entry - 1.0) <= 0.005 && _mtf.value?.veto != true) {
                     "سیگنال قدیمی، وتوشده یا دور از قیمت تازه است"
                 }
-                val alignment = NewsConfluence.alignment(current.symbol, signal.action, news.value)
-                require(alignment.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED &&
-                    signal.confluence.size >= 9 &&
-                    signal.confluence.take(8).all { it.ok && it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED } &&
-                    signal.confluence[8].let { it.name == NewsConfluence.NEWS_LABEL && it.ok &&
-                        it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED && it.detail == alignment.detail }) {
-                    "۹ شرط از جمله خبر AI دیگر معتبر نیستند؛ ورود سیگنالی متوقف شد"
+                val technicalConditions = signal.confluence.filterNot { it.name == NewsConfluence.NEWS_LABEL }
+                require(technicalConditions.take(8).size == 8 &&
+                    technicalConditions.take(8).all { it.ok && it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED }) {
+                    "۸ شرط فنی دیگر معتبر نیست؛ ورود سیگنالی متوقف شد"
                 }
                 IctEntryRules.assess(current).reason?.let { throw IllegalArgumentException(it) }
             }
@@ -481,12 +569,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 // Repeat all checks after scheduling; never persist a stale or switched symbol.
                 val (current, price) = verified()
                 val s = container.settingsStore.read()
-                val newsRecord = if (manual) null else {
-                    val latestNews = news.value
-                    require(NewsConfluence.alignment(current.symbol, signal.action, latestNews).status ==
-                        com.aurum.edge.core.ConfluenceStatus.CONFIRMED) { "خبر AI در لحظهٔ ثبت قدیمی شد" }
-                    NewsConfluence.record(latestNews) ?: error("شواهد خبر قابل ذخیره نیست")
-                }
+                val newsRecord = if (manual) null else NewsConfluence.record(news.value, current.symbol)
                 val ict = if (manual) null else (IctEntryRules.approvedEvidence(current)
                     ?: error("شواهد رنج/ICT همین کندل پیش از ثبت معتبر نیست"))
                 val trade = container.journalStore.open(
@@ -499,7 +582,15 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _stats.value = container.journalStore.stats()
                 // Linking is metadata only; a damaged opportunity file must not erase a saved trade.
                 runCatching { container.opportunityStore.linkTrade(trade) }
-                _toast.value = "فقط کاغذی: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} ${trade.symbol} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}"
+                val reviewedTrade = runCatching {
+                    val review = container.traderAdvisor.reviewPaperEntry(trade, current)
+                    container.journalStore.attachAiReview(trade.id, review)
+                }.getOrNull()
+                reviewedTrade?.let { _stats.value = container.journalStore.stats() }
+                val aiLine = reviewedTrade?.aiReview?.let { review ->
+                    " · نظر AI: ${review.verdictFa()}؛ ${review.summary}"
+                } ?: if (s.hasClientNewsAi) " · نظر AI فعلاً ذخیره نشد" else " · برای نظر AI، کلید/مدل را در تنظیمات AI وارد کن"
+                _toast.value = "فقط کاغذی: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} ${trade.symbol} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}$aiLine"
             } catch (e: Exception) {
                 _toast.value = "ورود کاغذی انجام نشد: ${e.message ?: "ذخیره ممکن نیست"}"
             } finally {
@@ -568,13 +659,200 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         commission: Double,
         threshold: Double,
     ) {
+        replayJob?.cancel()
+        val replayRequest = ++replayRevision
         viewModelScope.launch {
-            _learn.value = LearnState.Loading("دانلود $bars کندل واقعی ${interval.label} از Twelve Data…")
+            val requestedBars = HistoryPolicy.providerRequestSize(bars)
+            val displayBars = bars.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)
+            _replay.value = ReplayState.Loading
+            _learn.value = LearnState.Loading("دانلود حداقل $displayBars کندل واقعی ${interval.label} از منبع عمومی؛ Twelve Data فقط fallback آخر…")
             try {
-                val result = container.runBacktest(interval, bars, balance, risk, spread, commission, threshold)
+                // One verified dataset feeds both the batch report and the interactive cursor.
+                val dataset = container.fetchResearchDataset(interval, requestedBars)
+                if (replayRequest != replayRevision) return@launch
+                val result = container.runBacktest(dataset, interval, balance, risk, spread, commission, threshold)
+                if (replayRequest != replayRevision) return@launch
                 _learn.value = LearnState.Done(result, interval)
+                val profile = settings.value.signalProfile
+                val session = ReplayEngine.create(
+                    candles = dataset.candles,
+                    interval = interval,
+                    symbol = result.symbol,
+                    dataSource = dataset.source,
+                    config = ReplayEngine.Config(
+                        initialBalance = balance,
+                        riskPercent = risk,
+                        spreadPrice = spread,
+                        commissionPerOz = commission,
+                        threshold = threshold,
+                        signalProfile = profile,
+                    ),
+                    providerFetchedAt = dataset.fetchedAt,
+                    observedGapCount = dataset.observedGapCount,
+                )
+                val snapshot = withContext(Dispatchers.Default) { ReplayEngine.snapshot(session) }
+                if (replayRequest == replayRevision) {
+                    _replay.value = ReplayState.Ready(snapshot)
+                    refreshReplayOutcomes(session, replayRequest)
+                }
             } catch (e: Exception) {
-                _learn.value = LearnState.Failed(e.message ?: "خطا در دریافت داده واقعی")
+                if (replayRequest == replayRevision) {
+                    _learn.value = LearnState.Failed(e.message ?: "خطا در دریافت داده واقعی")
+                    _replay.value = ReplayState.Failed(e.message ?: "دادهٔ replay آماده نشد")
+                }
+            }
+        }
+    }
+
+    fun seekReplay(cursor: Int) = updateReplay { ReplayEngine.seek(it, cursor) }
+
+    fun stepReplay(amount: Int = 1) = updateReplay { ReplayEngine.step(it, amount) }
+
+    fun resetReplay() = updateReplay(ReplayEngine::reset)
+
+    fun setReplayStartCursor() {
+        val ready = _replay.value as? ReplayState.Ready ?: return
+        val session = ready.snapshot.session
+        replayJob?.cancel()
+        val revision = ++replayRevision
+        val published = ready.snapshot.copy(
+            session = session.copy(startCursor = session.cursor, playing = false),
+        )
+        _replay.value = ReplayState.Ready(published)
+        viewModelScope.launch { refreshReplayOutcomes(published.session, revision) }
+    }
+
+    fun setReplaySpeed(speed: Float) {
+        val ready = _replay.value as? ReplayState.Ready ?: return
+        _replay.value = ReplayState.Ready(ready.snapshot.copy(
+            session = ReplayEngine.setSpeed(ready.snapshot.session, speed),
+        ))
+    }
+
+    fun setReplayPlaying(playing: Boolean) {
+        val ready = _replay.value as? ReplayState.Ready ?: return
+        if (!playing) {
+            replayJob?.cancel()
+            val revision = ++replayRevision
+            val published = ready.snapshot.copy(
+                session = ready.snapshot.session.copy(playing = false),
+            )
+            _replay.value = ReplayState.Ready(published)
+            viewModelScope.launch { refreshReplayOutcomes(published.session, revision) }
+            return
+        }
+        if (ready.snapshot.isAtEnd) return
+        replayJob?.cancel()
+        val playRevision = ++replayRevision
+        _replay.value = ReplayState.Ready(ready.snapshot.copy(
+            session = ready.snapshot.session.copy(playing = true),
+        ))
+        replayJob = viewModelScope.launch {
+            while (isActive && playRevision == replayRevision) {
+                val current = _replay.value as? ReplayState.Ready ?: break
+                val session = current.snapshot.session
+                if (!session.playing || current.snapshot.isAtEnd) break
+                val delayMs = (1000L / session.speed.coerceIn(0.25f, 8.0f)).toLong().coerceAtLeast(80L)
+                delay(delayMs)
+                val afterDelay = _replay.value as? ReplayState.Ready ?: break
+                if (!afterDelay.snapshot.session.playing) break
+                val next = ReplayEngine.step(afterDelay.snapshot.session)
+                val snapshot = withContext(Dispatchers.Default) { ReplayEngine.snapshot(next) }
+                if (playRevision != replayRevision) break
+                val published = snapshot.copy(
+                    session = if (snapshot.isAtEnd) next.copy(playing = false) else next,
+                )
+                _replay.value = ReplayState.Ready(published)
+                refreshReplayOutcomes(published.session, playRevision)
+                if (snapshot.isAtEnd) break
+            }
+        }
+    }
+
+    private fun updateReplay(transform: (ReplayEngine.Session) -> ReplayEngine.Session) {
+        val ready = _replay.value as? ReplayState.Ready ?: return
+        replayJob?.cancel()
+        val revision = ++replayRevision
+        val next = transform(ready.snapshot.session)
+        viewModelScope.launch {
+            val snapshot = withContext(Dispatchers.Default) { ReplayEngine.snapshot(next) }
+            if (revision == replayRevision) {
+                _replay.value = ReplayState.Ready(snapshot)
+                refreshReplayOutcomes(snapshot.session, revision)
+            }
+        }
+    }
+
+    /** Update only decisions belonging to the current immutable replay dataset and cursor. */
+    private suspend fun refreshReplayOutcomes(session: ReplayEngine.Session, expectedRevision: Long) = replayOutcomeMutex.withLock {
+        if (expectedRevision != replayRevision) return@withLock
+        replayDecisions.value
+            .filter { it.symbol == session.symbol && it.interval == session.interval.label && it.dataSource == session.dataSource }
+            .forEach { decision ->
+                val result = ReplayEvaluation.evaluate(decision, session.allBars, session.interval, session.cursor)
+                if (decision.outcomeStatus != result.status ||
+                    decision.fillBarTime != result.fillBarTime ||
+                    decision.fillPrice != result.fillPrice ||
+                    decision.outcomeBarTime != result.outcomeBarTime ||
+                    decision.outcomePrice != result.outcomePrice ||
+                    decision.outcomeReason != result.reason
+                ) {
+                    runCatching {
+                        container.replayJournalStore.updateOutcome(
+                            id = decision.id,
+                            outcomeStatus = result.status,
+                            fillBarTime = result.fillBarTime,
+                            fillPrice = result.fillPrice,
+                            outcomeBarTime = result.outcomeBarTime,
+                            outcomePrice = result.outcomePrice,
+                            outcomeReason = result.reason,
+                        )
+                    }.onFailure {
+                        _toast.value = "نتیجهٔ تست replay ذخیره نشد؛ فایل قبلی حفظ شد"
+                    }
+                }
+            }
+    }
+
+    /** Store a historical strategy decision separately from live-price paper fills. */
+    fun recordReplayDecision() {
+        val ready = _replay.value as? ReplayState.Ready ?: return
+        val signal = ready.snapshot.signal
+        val session = ready.snapshot.session
+        if (signal == null || !signal.isActionable || signal.entry == null || signal.barTime <= 0L) {
+            _toast.value = "این cursor تصمیم ورود قابل ثبت ندارد؛ NO_TRADE یا warm-up است"
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val decision = ReplayDecision(
+                    id = java.util.UUID.randomUUID().toString(),
+                    symbol = session.symbol,
+                    interval = session.interval.label,
+                    barTime = signal.barTime,
+                    action = signal.action.name,
+                    entry = signal.entry,
+                    stopLoss = signal.stopLoss,
+                    takeProfit = signal.takeProfit,
+                    confidence = signal.confidence,
+                    profile = session.config.signalProfile.persistName(),
+                    dataSource = session.dataSource,
+                    recordedAt = System.currentTimeMillis(),
+                )
+                val result = ReplayEvaluation.evaluate(decision, session.allBars, session.interval, session.cursor)
+                container.replayJournalStore.append(
+                    decision.copy(
+                        outcomeStatus = result.status,
+                        fillBarTime = result.fillBarTime,
+                        fillPrice = result.fillPrice,
+                        outcomeBarTime = result.outcomeBarTime,
+                        outcomePrice = result.outcomePrice,
+                        outcomeReason = result.reason,
+                    ),
+                )
+                _toast.value = "تصمیم ${signal.action.name} روی کندل تاریخی در ژورنال آموزشی ثبت شد؛ نتیجه فقط با جلو رفتن replay آشکار می‌شود"
+            } catch (error: Exception) {
+                _toast.value = "ثبت تصمیم replay انجام نشد؛ فایل قبلی حفظ شد: ${error.message ?: "خطای ذخیره"}"
             }
         }
     }
@@ -633,7 +911,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /** Imported MT history is research-only: never written to the live chart/candle cache. */
+    /** Imported MT/educational OHLC history is research-only: never written to the live chart/candle cache. */
     fun importMetaTrader(
         uri: Uri?, link: String?, symbol: String, interval: Interval, timezone: String,
         balance: Double, risk: Double, spread: Double, commission: Double, threshold: Double,
@@ -643,18 +921,18 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             return
         }
         viewModelScope.launch {
-            _learn.value = LearnState.Loading("خواندن CSV متاتریدر برای پژوهش؛ منشأ فایل تأیید نشده است…")
+            _learn.value = LearnState.Loading("خواندن CSV آموزشی/متاتریدر برای پژوهش؛ منشأ فایل تأیید نشده است…")
             try {
                 val csv = when {
                     uri != null -> container.metaTraderImporter.fromFile(uri)
                     !link.isNullOrBlank() -> container.metaTraderImporter.fromHttps(link)
-                    else -> throw IllegalArgumentException("فایل یا لینک CSV را انتخاب کنید")
+                    else -> throw IllegalArgumentException("فایل یا لینک CSV آموزشی/متاتریدر را انتخاب کنید")
                 }
                 val result = container.runImportedBacktest(csv, symbol, interval, timezone,
                     balance, risk.coerceIn(0.1, 5.0), spread, commission, threshold)
                 _learn.value = LearnState.Done(result, interval)
             } catch (e: Exception) {
-                _learn.value = LearnState.Failed(e.message ?: "فایل/لینک متاتریدر قابل تحلیل نیست")
+                _learn.value = LearnState.Failed(e.message ?: "فایل/لینک CSV آموزشی/متاتریدر قابل تحلیل نیست")
             }
         }
     }
@@ -669,9 +947,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         threshold: Double,
     ) {
         viewModelScope.launch {
-            _walkForward.value = WalkForwardState.Loading("دانلود $bars کندل واقعی ${interval.label} و تقسیم به داخل/خارج نمونه…")
+            val requestedBars = HistoryPolicy.providerRequestSize(bars)
+            val displayBars = bars.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)
+            _walkForward.value = WalkForwardState.Loading("دانلود حداقل $displayBars کندل واقعی ${interval.label} و تقسیم به داخل/خارج نمونه…")
             try {
-                val result = container.runWalkForward(interval, bars, balance, risk, spread, commission, threshold)
+                val result = container.runWalkForward(interval, requestedBars, balance, risk, spread, commission, threshold)
                 val saved = try {
                     container.journalStore.saveReport(WalkForwardRecord.from(result))
                     true
@@ -781,20 +1061,16 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun downloadTradeChart(trade: PaperTrade) {
         val current = _tradeChart.value
         if (current.tradeId != trade.id || current.downloading) return
-        if (!settings.value.hasKey) {
-            _toast.value = "برای دریافت کندل‌های گذشته، کلید Twelve Data را در تنظیمات وارد کنید"
-            return
-        }
         _tradeChart.value = current.copy(downloading = true, error = null)
         viewModelScope.launch {
             try {
-                val bars = container.fetchTradeCandles(trade.symbol, trade.interval)
+                val (bars, source) = container.fetchTradeCandles(trade.symbol, trade.interval)
                 if (_tradeChart.value.tradeId != trade.id) return@launch
                 val window = withContext(Dispatchers.Default) { TradeReplay.window(trade, bars) }
                 _tradeChart.value = TradeChartState(
                     tradeId = trade.id,
                     window = window,
-                    source = if (window.bars.isEmpty()) "" else "دریافت تازه از Twelve Data (همان منبع چارت)",
+                    source = if (window.bars.isEmpty()) "" else "دریافت تازه از $source",
                 )
                 if (window.bars.isEmpty()) {
                     _toast.value = "ناشر برای این بازه کندلی برنگرداند؛ تاریخچهٔ این معامله در دسترس نیست"
@@ -902,8 +1178,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 return@launch
             }
             container.news.resetAndRefresh()
-            _toast.value = if (url.isBlank()) "سرور خبر جدا شد؛ تیترهای وب در تب خبر بدون سرور قابل دریافت‌اند، ولی هشدار ۹/۹ مسدود است"
-                else "آدرس سرور ذخیره شد؛ پاسخ فید و مدل AI را در تب خبر جداگانه بررسی کنید"
+            _toast.value = if (url.isBlank()) "سرور خبر جدا شد؛ تیترهای وب در تب خبر بدون سرور قابل دریافت‌اند؛ خبر فقط ریسک زرد/وتو می‌دهد"
+                else "آدرس سرور ذخیره شد؛ پاسخ فید، مدل AI و ریسک خبر را در تب خبر جداگانه بررسی کنید"
         }
     }
 
@@ -932,4 +1208,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 class AurumViewModelFactory(private val container: AppContainer) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = AurumViewModel(container) as T
+}
+
+private fun com.aurum.edge.core.PaperAiReview.verdictFa(): String = when (verdict) {
+    "WORTHY" -> "شرایط مناسب بوده"
+    "RISKY" -> "پرریسک/مرزی بوده"
+    "NOT_WORTHY" -> "شرایط کافی نبوده"
+    else -> verdict
 }

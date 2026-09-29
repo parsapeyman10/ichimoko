@@ -8,10 +8,12 @@ import com.aurum.edge.core.IctPriceActionRecord
 import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PaperNewsRecord
+import com.aurum.edge.core.PaperAiReview
 import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.WalkForwardRecord
+import com.aurum.edge.engine.NewsConfluence
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -139,14 +141,12 @@ class JournalStore(context: Context, private val file: File = File(context.files
         newsEvidence: PaperNewsRecord? = null,
         priceAction: IctPriceActionRecord? = null,
     ): PaperTrade {
+        val technicalConditions = signal.confluence.filterNot { it.name == NewsConfluence.NEWS_LABEL }
         require(!automatic || (!manual && signal.isActionable && signal.barTime > 0 &&
-            newsEvidence != null && newsEvidence.evidence.isNotEmpty() &&
-            newsEvidence.calendarSource == FOREX_CALENDAR_SOURCE_URL && newsEvidence.calendarCheckedAt != null &&
-            signal.confluence.size >= 9 && signal.confluence.take(9).all {
+            technicalConditions.take(8).size == 8 && technicalConditions.take(8).all {
                 it.ok && it.status == ConfluenceStatus.CONFIRMED
-            } && signal.confluence[8].name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL &&
-            mtf != null && !mtf.veto && mtf.barTime == signal.barTime && mtf.frames.isNotEmpty())) {
-            "۹ شرط، تقویم/خبر AI یا چندتایم‌فریم برای ورود خودکار کاغذی کامل نیست"
+            } && mtf != null && !mtf.veto && mtf.barTime == signal.barTime && mtf.frames.isNotEmpty())) {
+            "۸ شرط فنی و چندتایم‌فریم برای ورود خودکار کاغذی کامل نیست"
         }
         val stop = signal.stopLoss ?: throw IllegalArgumentException("حد ضرر وجود ندارد")
         val target = signal.takeProfit ?: throw IllegalArgumentException("حد سود وجود ندارد")
@@ -169,14 +169,14 @@ class JournalStore(context: Context, private val file: File = File(context.files
             positionUnit = draft.unit,
             note = when {
                 manual -> "ورود دستی کاغذی؛ بدون تأیید موتور/بروکر"
-                automatic -> "ورود خودکار کاغذی با ۸ شرط فنی + خبر AI و شواهد رنج/ICT؛ بدون سفارش بروکر"
+                automatic -> "ورود خودکار کاغذی با ۸ شرط فنی، گزینه‌های فعال و شواهد رنج/ICT؛ خبر فقط داده‌کاوی ژورنال است؛ بدون سفارش بروکر"
                 else -> "سیگنال کاغذی روی قیمت دریافتی — ${signal.interval.label}"
             },
             mtf = if (manual) null else mtf,
             autoOpened = automatic,
             signalBarTime = if (manual) null else signal.barTime,
             newsEvidence = if (manual) null else newsEvidence,
-            entryConditions = if (manual) emptyList() else signal.confluence.take(9).map {
+            entryConditions = if (manual) emptyList() else technicalConditions.map {
                 com.aurum.edge.core.PaperConditionRecord.from(it)
             },
             priceAction = if (manual) null else priceAction,
@@ -196,6 +196,15 @@ class JournalStore(context: Context, private val file: File = File(context.files
             persist(_trades.value + trade)
         }
         return trade
+    }
+
+    suspend fun attachAiReview(tradeId: String, review: PaperAiReview): PaperTrade = mutex.withLock {
+        val current = _trades.value
+        val index = current.indexOfFirst { it.id == tradeId }
+        require(index >= 0) { "معاملهٔ کاغذی برای ثبت نظر AI پیدا نشد" }
+        val updated = current[index].copy(aiReview = review)
+        persist(current.toMutableList().also { it[index] = updated })
+        updated
     }
 
     /**

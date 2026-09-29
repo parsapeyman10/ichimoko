@@ -12,28 +12,74 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 /** Research-only historical import. An unverified user file can NEVER become a live price. */
-data class ImportedHistory(val candles: List<Candle>, val totalRows: Int, val timezone: String)
+data class ImportedHistory(
+    val candles: List<Candle>,
+    val totalRows: Int,
+    val timezone: String,
+    val formatLabel: String = "MT4/MT5 CSV",
+    val volumeProvided: Boolean = true,
+)
 
 object MetaTraderCsv {
     private val dateTimes = listOf(
         "yyyy.MM.dd HH:mm:ss", "yyyy.MM.dd HH:mm", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm",
-        "yyyyMMdd HH:mm:ss", "yyyyMMdd HH:mm", "yyyy-MM-dd'T'HH:mm:ss",
+        "yyyy/MM/dd HH:mm:ss", "yyyy/MM/dd HH:mm", "yyyyMMdd HH:mm:ss", "yyyyMMdd HH:mm",
+        "yyyy-MM-dd'T'HH:mm:ss",
     ).map { DateTimeFormatter.ofPattern(it) }
 
-    /** MT4/MT5 CSV/TSV with DATE+TIME or DATETIME columns; reject malformed/ambiguous bars. */
+    private fun normalizeHeader(value: String): String = value
+        .removePrefix("<")
+        .removeSuffix(">")
+        .trim()
+        .lowercase()
+        .replace(Regex("""[\s_./-]+"""), "")
+
+
+    private fun timestampUsesEmbeddedZone(raw: String): Boolean {
+        val text = raw.trim().trim('"')
+        if (text.toLongOrNull() != null) return true
+        if (text.endsWith("Z", ignoreCase = true)) return true
+        return Regex(""".*[T ]\d{1,2}:\d{2}(:\d{2})?([+-]\d{2}:?\d{2})${'$'}""").matches(text)
+    }
+
+    private fun parseTimestamp(raw: String, offset: ZoneOffset): Long {
+        val text = raw.trim().trim('"')
+        text.toLongOrNull()?.let { epoch ->
+            return if (epoch > 10_000_000_000L) epoch else epoch * 1000L
+        }
+        runCatching { Instant.parse(text).toEpochMilli() }.getOrNull()?.let { return it }
+        runCatching { OffsetDateTime.parse(text).toInstant().toEpochMilli() }.getOrNull()?.let { return it }
+        runCatching { LocalDate.parse(text.replace('/', '-')).atStartOfDay().toInstant(offset).toEpochMilli() }
+            .getOrNull()?.let { return it }
+        val cleaned = text.replace('/', '-').replace('T', ' ')
+        val local = dateTimes.firstNotNullOfOrNull { format ->
+            runCatching { LocalDateTime.parse(cleaned, format) }.getOrNull()
+        } ?: throw IllegalArgumentException("date")
+        return local.toInstant(offset).toEpochMilli()
+    }
+
+    /**
+     * Research-only CSV/TSV import. Accepts strict MT4/MT5 exports plus common educational
+     * OHLC datasets: timestamp/datetime/date+time with OPEN/HIGH/LOW/CLOSE and optional volume.
+     * Missing rows, malformed prices and timeframe mismatches fail closed; imported bars never
+     * become the live chart/feed/cache.
+     */
     fun parse(raw: String, interval: Interval, timezone: String, now: Long = System.currentTimeMillis()): ImportedHistory {
         val offset = try { ZoneOffset.of(timezone.trim()) } catch (_: Exception) {
-            throw DataFeedException("منطقه زمانی سرور متاتریدر معتبر نیست؛ مثال +03:30 یا +00:00")
+            throw DataFeedException("منطقه زمانی دیتاست معتبر نیست؛ مثال +03:30 یا +00:00")
         }
         val rows = raw.lineSequence().map { it.trim().trimStart('\uFEFF') }.filter { it.isNotBlank() }.iterator()
-        if (!rows.hasNext()) throw DataFeedException("فایل متاتریدر خالی است")
+        if (!rows.hasNext()) throw DataFeedException("فایل CSV خالی است")
         val header = rows.next()
         val delimiter = when {
             '\t' in header -> '\t'
@@ -41,18 +87,26 @@ object MetaTraderCsv {
             else -> ','
         }
         fun columns(line: String): List<String> = line.split(delimiter).map { it.trim().trim('"').trim() }
-        val fields = columns(header).map { it.removePrefix("<").removeSuffix(">").lowercase() }
-        fun index(vararg names: String): Int = fields.indexOfFirst { it in names }
-        val dateIdx = index("date", "datetime", "time")
-        val timeIdx = if (index("date") >= 0) index("time") else -1
-        val openIdx = index("open")
-        val highIdx = index("high")
-        val lowIdx = index("low")
-        val closeIdx = index("close")
-        val volIdx = index("tickvol", "tick_volume", "volume", "vol")
-        if (dateIdx < 0 || volIdx < 0 || listOf(openIdx, highIdx, lowIdx, closeIdx).any { it < 0 }) {
-            throw DataFeedException("ستون‌های DATE/TIME/OPEN/HIGH/LOW/CLOSE/VOL در CSV پیدا نشد؛ خروجی MT4/MT5 را بررسی کنید")
+        val fields = columns(header).map { normalizeHeader(it) }
+        fun index(vararg names: String): Int {
+            val wanted = names.map(::normalizeHeader).toSet()
+            return fields.indexOfFirst { it in wanted }
         }
+        val explicitDateIdx = index("date")
+        val explicitTimeIdx = index("time")
+        val dateIdx = index("date", "datetime", "timestamp", "gmt time", "local time", "date time", "date/time", "time")
+        val timeIdx = if (explicitDateIdx >= 0 && explicitTimeIdx >= 0 && explicitTimeIdx != explicitDateIdx) explicitTimeIdx else -1
+        val openIdx = index("open", "o")
+        val highIdx = index("high", "h")
+        val lowIdx = index("low", "l")
+        val closeIdx = index("close", "c", "last")
+        val volIdx = index("tickvol", "tick_volume", "tick volume", "volume", "vol", "real volume")
+        if (dateIdx < 0 || listOf(openIdx, highIdx, lowIdx, closeIdx).any { it < 0 }) {
+            throw DataFeedException("ستون‌های زمان/OPEN/HIGH/LOW/CLOSE در CSV پیدا نشد؛ CSV آموزشی باید هدر روشن OHLC داشته باشد")
+        }
+        val hasVolumeColumn = volIdx >= 0
+        var volumeWasProvided = false
+        var embeddedTimestampZone = false
         val parsed = ArrayList<Candle>()
         var lineNumber = 1
         while (rows.hasNext()) {
@@ -60,20 +114,24 @@ object MetaTraderCsv {
             val row = columns(rows.next())
             try {
                 val timestamp = listOfNotNull(row[dateIdx], if (timeIdx >= 0) row[timeIdx] else null).joinToString(" ")
-                val local = dateTimes.firstNotNullOfOrNull { format ->
-                    runCatching { LocalDateTime.parse(timestamp, format) }.getOrNull()
-                } ?: error("date")
-                val time = local.toInstant(offset).toEpochMilli()
+                if (timestampUsesEmbeddedZone(timestamp)) embeddedTimestampZone = true
+                val time = parseTimestamp(timestamp, offset)
                 fun price(index: Int): Double = row[index].toDouble().takeIf { it.isFinite() && it > 0 } ?: error("price")
                 val o = price(openIdx)
                 val h = price(highIdx)
                 val l = price(lowIdx)
                 val c = price(closeIdx)
                 require(h >= maxOf(o, c) && l <= minOf(o, c) && l > 0 && time in 1L..now)
-                val volume = row[volIdx].toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 } ?: error("volume")
+                val volume = if (hasVolumeColumn) {
+                    val rawVolume = row.getOrNull(volIdx).orEmpty().trim()
+                    if (rawVolume.isBlank()) 0.0 else {
+                        volumeWasProvided = true
+                        rawVolume.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 } ?: error("volume")
+                    }
+                } else 0.0
                 parsed += Candle(time, o, h, l, c, volume, closed = true)
             } catch (_: Exception) {
-                throw DataFeedException("ردیف $lineNumber فایل متاتریدر تاریخ یا OHLC معتبر ندارد (بدون حذف پنهانی ردیف)")
+                throw DataFeedException("ردیف $lineNumber فایل CSV تاریخ یا OHLC معتبر ندارد (بدون حذف پنهانی ردیف)")
             }
             if (parsed.size > 60_000) throw DataFeedException("بیش از ۶۰هزار کندل در یک فایل پشتیبانی نمی‌شود")
         }
@@ -87,7 +145,10 @@ object MetaTraderCsv {
         if (abs(median - interval.millis) > interval.millis / 5) {
             throw DataFeedException("تایم‌فریم انتخابی ${interval.label} با فاصلهٔ معمول کندل‌های فایل مطابقت ندارد")
         }
-        return ImportedHistory(parsed.takeLast(HistDataCsv.MAX_RESEARCH_CANDLES), parsed.size, offset.id)
+        val formatLabel = if (fields.any { it in setOf("tickvol", "tickvolume") }) "MT4/MT5 CSV" else "CSV آموزشی OHLC"
+        val timezoneLabel = if (embeddedTimestampZone) "embedded timestamp / UTC" else offset.id
+        return ImportedHistory(parsed.takeLast(HistDataCsv.MAX_RESEARCH_CANDLES), parsed.size, timezoneLabel,
+            formatLabel = formatLabel, volumeProvided = volumeWasProvided)
     }
 }
 

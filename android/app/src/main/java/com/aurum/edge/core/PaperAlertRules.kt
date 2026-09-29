@@ -3,7 +3,6 @@ package com.aurum.edge.core
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.PersianNewsState
 import com.aurum.edge.engine.MtfAnalyzer
-import com.aurum.edge.engine.NewsConfluence
 
 /** Exact pre-alert checks. No alert is an entry, and none of these checks sends an order. */
 object PaperAlertRules {
@@ -25,7 +24,7 @@ object PaperAlertRules {
         val totalRisk = trades.filter { it.isOpen }.sumOf { it.riskUsd }
         if (totalRisk + draft.actualRiskUsd > settings.accountBalance * 0.05 + 1e-8)
             return "مجموع ریسک پوزیشن‌های کاغذی از سقف ۵٪ می‌گذرد"
-        if (NewsConfluence.record(news, market.symbol) == null) return "شواهد خبر در دسترس نیست"
+        // News never blocks a paper alert/entry; it is attached later as journal-mining evidence.
         return null
     }
 }

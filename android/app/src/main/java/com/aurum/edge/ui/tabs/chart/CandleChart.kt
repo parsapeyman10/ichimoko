@@ -46,8 +46,8 @@ import kotlin.math.min
 
 /**
  * Native candlestick chart. Draws only real candles handed to it — no placeholder series.
- * Ichimoku / EMA200 / VWAP are overlaid for reading; the execution engine reads the
- * displacement-correct cloud and may therefore disagree with the drawn cloud on purpose.
+ * Ichimoku / EMA200 / VWAP are overlaid for reading. The five Ichimoku lines use the same
+ * displacement mapping as the execution-safe engine; future values are left null.
  */
 @Composable
 fun CandleChart(
@@ -152,8 +152,10 @@ fun CandleChart(
                 minPrice = min(minPrice, candles[i].low)
                 maxPrice = max(maxPrice, candles[i].high)
                 if (showIchimoku) {
-                    ichimoku.senkouA.getOrNull(i)?.let { minPrice = min(minPrice, it); maxPrice = max(maxPrice, it) }
-                    ichimoku.senkouB.getOrNull(i)?.let { minPrice = min(minPrice, it); maxPrice = max(maxPrice, it) }
+                    ichimoku.cloudAt(i)?.let { (a, b) ->
+                        minPrice = min(minPrice, min(a, b)); maxPrice = max(maxPrice, max(a, b))
+                    }
+                    ichimoku.chikou.getOrNull(i)?.let { minPrice = min(minPrice, it); maxPrice = max(maxPrice, it) }
                 }
             }
             if (signal?.stopLoss != null && showLevels) {
@@ -217,13 +219,13 @@ fun CandleChart(
                 val cloudPath = Path()
                 var started = false
                 for (i in max(0, firstVisible)..min(lastIndex, lastVisible)) {
-                    val a = ichimoku.senkouA.getOrNull(i) ?: continue
+                    val (a, _) = ichimoku.cloudAt(i) ?: continue
                     if (!started) {
                         cloudPath.moveTo(xOf(i), yOf(a)); started = true
                     } else cloudPath.lineTo(xOf(i), yOf(a))
                 }
                 for (i in min(lastIndex, lastVisible) downTo max(0, firstVisible)) {
-                    val b = ichimoku.senkouB.getOrNull(i) ?: continue
+                    val (_, b) = ichimoku.cloudAt(i) ?: continue
                     cloudPath.lineTo(xOf(i), yOf(b))
                 }
                 if (started) {
@@ -249,6 +251,9 @@ fun CandleChart(
             if (showIchimoku) {
                 drawSeries(ichimoku.tenkan, AurumColors.Cyan, 2.4f)
                 drawSeries(ichimoku.kijun, AurumColors.Purple, 2.4f)
+                drawSeries(candles.indices.map { ichimoku.spanAAt(it) }, AurumColors.Green.copy(alpha = 0.85f), 1.6f)
+                drawSeries(candles.indices.map { ichimoku.spanBAt(it) }, AurumColors.Red.copy(alpha = 0.85f), 1.6f)
+                drawSeries(ichimoku.chikou, AurumColors.Gold, 1.8f)
             }
             if (showLevels) {
                 drawSeries(vwap, AurumColors.Gold, 2.2f)

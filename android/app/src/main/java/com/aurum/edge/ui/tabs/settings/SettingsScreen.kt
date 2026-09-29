@@ -118,7 +118,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     ) {
         SectionCard(
             title = "منبع دیتای واقعی",
-            subtitle = "Twelve Data برای چارت، سیگنال و بک‌تست؛ بدون کلید هم فید رایگان خودکار (Swissquote/Gold-API) وصل می‌شود؛ دیده‌بان پایین منابع جدا دارد",
+            subtitle = "Twelve Data برای کندل اصلی اختیاری است؛ بدون کلید هم تاریخچهٔ Yahoo و فید رایگان Swissquote/Gold-API وصل می‌شود؛ دیده‌بان پایین منابع جدا دارد",
         ) {
             Text(if (settings.hasKey) "✓ کلید خواندنی در همین نصب موجود است؛ اعتبارش فقط با دریافت دادهٔ تازه مشخص می‌شود."
                 else "کلید روی این نصب ذخیره نشده است؛ به‌طور خودکار از فید رایگان قیمت لحظه‌ای (Swissquote، و در صورت نیاز Gold-API برای طلا) استفاده می‌شود — بدون تاریخچهٔ REST جداگانه.",
@@ -163,7 +163,81 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
 
         WatchSettingsSection(viewModel)
 
-        SectionCard("گیت خبر و AI فارکس", "تقویم Forex Factory و خبرهای واقعی وب بی‌نیاز از سرور؛ شرط نهم با سرور HTTPS یا کلید مستقیم زیر تأمین می‌شود") {
+        SectionCard("افزونه‌های موتور سیگنال", "هستهٔ ایچیموکو/کانفلوئنس همیشه روشن است؛ تیک‌های زیر به همان موتور اضافه می‌شوند، جای آن را نمی‌گیرند") {
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("هسته پایه ایچیموکو", style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+                    Text("همیشه فعال: کراس/ابر/چیکو/EMA/VWAP/RSI و مدیریت ریسک فعلی",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                }
+                Text("فعال", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
+            }
+            SignalAddonRow(
+                title = "تأیید Chikou Span",
+                detail = "گزینهٔ استاندارد ایچیموکو: خرید فقط با عبور close از سقف ساختار ۲۶ کندل قبل و فروش زیر کف همان ساختار؛ خاموش‌کردن فقط برای آزمایش پروفایل است.",
+                checked = settings.signalProfile.chikouConfirmation,
+                onCheckedChange = viewModel::setSignalChikou,
+            )
+            SignalAddonRow(
+                title = "افزودن فیلتر مومنتوم/حجم",
+                detail = "سیگنال پایه فقط وقتی اجازه ورود می‌گیرد که MACD/ADX هم‌جهت باشند و حجم نسبیِ معتبر ضعیف نباشد؛ حجم جعلی ساخته نمی‌شود.",
+                checked = settings.signalProfile.momentumVolume,
+                onCheckedChange = viewModel::setSignalMomentumVolume,
+            )
+            SignalAddonRow(
+                title = "افزودن سناریوی تختی SpanB52",
+                detail = "به‌جز سیگنال‌های پایه، اگر خط ۵۲ مدتی تخت باشد و قیمت از رنج خارج شود، یک مسیر ورود جدا هم بررسی می‌شود.",
+                checked = settings.signalProfile.flatSpanB,
+                onCheckedChange = viewModel::setSignalFlatSpanB,
+            )
+            SignalAddonRow(
+                title = "فیلتر بازار رنج / Chop",
+                detail = "وقتی ADX پایین، باند/رنج فشرده و شکست معتبر نداریم، ورود متوقف می‌شود تا سیگنال‌های داخل بازار خنثی کمتر شوند.",
+                checked = settings.signalProfile.rangeChopFilter,
+                onCheckedChange = viewModel::setSignalRangeChop,
+            )
+            SignalAddonRow(
+                title = "تأیید تایم‌فریم بالاتر",
+                detail = "از شیب EMA200 و موقعیت قیمت نسبت به ساختار بزرگ‌تر همین داده‌ها کمک می‌گیرد تا سیگنال خلاف روند غالب رد شود.",
+                checked = settings.signalProfile.higherTimeframeFilter,
+                onCheckedChange = viewModel::setSignalHigherTimeframe,
+            )
+            SignalAddonRow(
+                title = "فیلتر فیک‌بریک‌اوت / Retest",
+                detail = "کندل باید بسته‌شدن سالم، ویک غیرمشکوک و شکست/ری‌تست معتبر نسبت به ساختار نزدیک داشته باشد.",
+                checked = settings.signalProfile.fakeBreakoutFilter,
+                onCheckedChange = viewModel::setSignalFakeBreakout,
+            )
+            SignalAddonRow(
+                title = "فیلتر اسپرد و نقدشوندگی پویا",
+                detail = "اگر هزینهٔ اسپرد نسبت به ATR همان لحظه زیاد باشد، سیگنال اجرا متوقف می‌شود؛ قیمت یا اسپرد ساختگی تولید نمی‌شود.",
+                checked = settings.signalProfile.dynamicSpreadFilter,
+                onCheckedChange = viewModel::setSignalDynamicSpread,
+            )
+            SignalAddonRow(
+                title = "فیلتر زمان‌های خطرناک",
+                detail = "ورود نزدیک رول‌اور، باز/بسته‌شدن آخر هفته و پنجره‌های معمول خبرهای سنگین آمریکا محدود می‌شود؛ جایگزین تقویم واقعی خبر نیست.",
+                checked = settings.signalProfile.riskyTimingFilter,
+                onCheckedChange = viewModel::setSignalRiskyTiming,
+            )
+            SignalAddonRow(
+                title = "فیلتر ریسک ساختار و حد ضرر",
+                detail = "اگر حد ضرر نسبت به ATR/ساختار خیلی نزدیک یا خیلی دور باشد، ورود رد می‌شود تا R/R ظاهری فریبنده نشود.",
+                checked = settings.signalProfile.structureRiskFilter,
+                onCheckedChange = viewModel::setSignalStructureRisk,
+            )
+            SignalAddonRow(
+                title = "کول‌داون بعد از شکست/نوسان رفت‌وبرگشتی",
+                detail = "اگر اخیراً کراس مخالف یا چند چرخش تنکان/کیجون دیده شود، چند کندل صبر می‌کند تا overtrade کمتر شود.",
+                checked = settings.signalProfile.cooldownFilter,
+                onCheckedChange = viewModel::setSignalCooldown,
+            )
+            Text("تختی SpanB 52 همان میانگین ۵۲ کندل ایچیموکو است: اگر چند کندل ثابت بماند یعنی سقف/کف ۵۲تایی عوض نشده؛ فقط وقتی قیمت از آن و از رنج کوتاه خارج شود به‌عنوان سناریوی رشد/ریزش بررسی می‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 6.dp))
+        }
+
+        SectionCard("ریسک خبر و AI فارکس", "تقویم Forex Factory و خبرهای واقعی وب بی‌نیاز از سرور؛ AI فقط تأیید/هشدار کمکی است، نه امتیاز منفی فنی") {
             OutlinedTextField(
                 value = newsUrl, onValueChange = { newsUrl = it }, singleLine = true,
                 label = { Text("نشانی HTTPS سرور خبر فارکس (اختیاری)") },
@@ -177,7 +251,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
                 Switch(checked = settings.pauseOnNews, onCheckedChange = viewModel::setPauseOnNews)
             }
-            Text("خبرهای مستقیم فقط برای مطالعه‌اند؛ ورود سیگنالی/خودکار بدون مدل و شاهد معتبر متوقف است. وتوی دستی جداست؛ سفارش واقعی غیرفعال.",
+            Text("خبرهای مستقیم فقط برای مطالعه‌اند؛ ورود سیگنالی/خودکار با ۸ شرط فنی سنجیده می‌شود و خبر فقط وقتی وتوی شفاف دارد مانع می‌شود. AI معتبر اگر هم‌جهت و با شاهد باشد سبز می‌شود؛ UNKNOWN زرد است. وتوی دستی جداست؛ سفارش واقعی غیرفعال.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             Text("جایگزین بدون سرور: اگر نشانی بالا خالی باشد و کلید زیر را پر کنید، خودِ گوشی مستقیماً با RSS همین‌جا + کلید شما تحلیل می‌کند. همین کلید، «همراه تریدر AI» صفحهٔ خانه را هم روشن می‌کند (نظر خودکار هر ۱۰ دقیقه + اعلان تغییر جهت).",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold, modifier = Modifier.padding(top = 6.dp))
@@ -369,8 +443,8 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("هشدار ورود کاغذی / کاندیدای ۹/۹", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
-                    Text("با ورود خودکار روشن: اعلان فقط پس از ثبت موفق معاملهٔ کاغذی؛ با آن خاموش: اعلان کاندیدای ۹/۹ (نه معامله).",
+                    Text("هشدار ورود کاغذی / کاندیدای ۸/۸ فنی", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
+                    Text("با ورود خودکار روشن: اعلان فقط پس از ثبت موفق معاملهٔ کاغذی؛ با آن خاموش: اعلان کاندیدای فنی/آموزشی (نه معامله).",
                         style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
                 Switch(
@@ -378,7 +452,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     onCheckedChange = viewModel::setNotifyOnSignal,
                 )
             }
-            Text("خبر High/USD با اعلام قبلی یا انتشار عدد (فقط اگر در تقویم باشد) در کانال مستقل «خبر پژوهشی · نه معامله» اطلاع داده می‌شود؛ عنوان/مقایسهٔ عددی سیگنال یا شرط نهم AI نیست. علت بی‌هشداری معامله در تب «معامله» است. هنگام قفل بودن، تغییر شبکه/سکوت فید بازیابی با تأخیر و برچسب دادهٔ قدیمی می‌گیرد، نه LIVE جعلی. Doze، سهمیهٔ ناشر و محدودیت dataSync در Android 15 (حدود ۶ ساعت مجموع در ۲۴ ساعتِ پس‌زمینه) قابل دورزدن نیستند.",
+            Text("خبر High/USD با اعلام قبلی یا انتشار عدد (فقط اگر در تقویم باشد) در کانال مستقل «خبر پژوهشی · نه معامله» اطلاع داده می‌شود؛ عنوان/مقایسهٔ عددی سیگنال یا امتیاز فنی نیست. علت بی‌هشداری معامله در تب «معامله» است. هنگام قفل بودن، تغییر شبکه/سکوت فید بازیابی با تأخیر و برچسب دادهٔ قدیمی می‌گیرد، نه LIVE جعلی. Doze، سهمیهٔ ناشر و محدودیت dataSync در Android 15 (حدود ۶ ساعت مجموع در ۲۴ ساعتِ پس‌زمینه) قابل دورزدن نیستند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             OutlinedButton(onClick = { runCatching {
                 context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
@@ -420,9 +494,9 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
-        SectionCard("ورود خودکار کاغذی · فقط ۹/۹", "پیش‌فرض خاموش؛ بدون بروکر، بدون سفارش واقعی") {
+        SectionCard("ورود خودکار کاغذی · فقط آموزشی", "پیش‌فرض خاموش؛ بدون بروکر، بدون سفارش واقعی") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("باز کردن خودکار LONG/SHORT کاغذی پس از ۸ شرط فنی و تأیید خبر AI",
+                Text("باز کردن خودکار LONG/SHORT کاغذی پس از ۸ شرط فنی، آپشن‌های فعال و تأییدهای ICT/MTF؛ خبر فقط داده‌کاوی ژورنال",
                     modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
                     color = AurumColors.TextPrimary)
                 Switch(checked = settings.autoPaperTrading, onCheckedChange = { enabled ->
@@ -433,7 +507,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             Text(if (settings.autoPaperTrading) autoStatus else "خاموش؛ خطوط روی چارت معامله نیستند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 6.dp))
-            Text("پایش پس‌زمینه، سرور HTTPS و کلید/رضایت مدل روی سرور لازم‌اند. نبود حتی یک شرط، فید ناقص یا خبر پراثر = بدون ورود. نتیجه در ژورنال روی گوشی ذخیره می‌شود؛ خروج با تیک واقعی SL/TP است. مدل و ناشران بازده یا معاملهٔ واقعی را تضمین نمی‌کنند.",
+            Text("پایش پس‌زمینه، قیمت زنده، ۸ شرط فنی پایهٔ ایچیموکو، آپشن‌های فعال و تأیید ICT/MTF لازم‌اند. AI/تقویم خبر شرط ورود نیست؛ فقط اگر نزدیک معامله شاهد معتبر داشته باشد در ژورنال برای داده‌کاوی ذخیره می‌شود. نتیجه در ژورنال روی گوشی ذخیره می‌شود؛ خروج با تیک واقعی SL/TP است. مدل و ناشران بازده یا معاملهٔ واقعی را تضمین نمی‌کنند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
@@ -479,10 +553,10 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     if (confirmAuto) {
         AlertDialog(onDismissRequest = { confirmAuto = false },
             title = { Text("ورود خودکار فقط کاغذی") },
-            text = { Text("هیچ سفارشی به بروکر ارسال نمی‌شود. فقط با ۹ تأیید تازه و مدل AI فعال روی سرور، یک رکورد LONG/SHORT کاغذی در ژورنال ایجاد می‌شود. اگر سرویس/فید قطع شود ورودی تازه نداریم؛ خروجِ پوزیشن باز نیازمند قیمت واقعی است. فعال شود؟") },
+            text = { Text("هیچ سفارشی به بروکر ارسال نمی‌شود. فقط با ۸ شرط فنی، آپشن‌های فعال، قیمت زنده و تأییدهای MTF/ICT، یک رکورد LONG/SHORT کاغذی در ژورنال ایجاد می‌شود. خبر و AI فقط برای داده‌کاوی رکورد هستند و شرط ورود نیستند. اگر سرویس/فید قطع شود ورودی تازه نداریم؛ خروجِ پوزیشن باز نیز به قیمت واقعی نیاز دارد. فعال شود؟") },
             confirmButton = { TextButton(onClick = {
                 confirmAuto = false
-                if (settings.backgroundMonitor) viewModel.setAutoPaperTrading(true)
+                if (settings.backgroundMonitor && monitorRunning) viewModel.setAutoPaperTrading(true)
                 else startMonitorIfAllowed(alsoEnableAuto = true)
             }) { Text("فعال‌کردن کاغذی") } },
             dismissButton = { TextButton(onClick = { confirmAuto = false }) { Text("انصراف") } })
@@ -493,6 +567,23 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             text = { Text("همهٔ پوزیشن‌های باز و بسته‌شدهٔ ثبت‌شده روی این گوشی حذف می‌شوند. این کار برگشت‌پذیر نیست؛ سیگنال‌های چارت اصلاً معاملهٔ ثبت‌شده نیستند.") },
             confirmButton = { TextButton(onClick = { viewModel.clearJournal(); confirmJournalClear = false }) { Text("حذف قطعی") } },
             dismissButton = { TextButton(onClick = { confirmJournalClear = false }) { Text("انصراف") } })
+    }
+}
+
+@Composable
+private fun SignalAddonRow(
+    title: String,
+    detail: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodySmall,
+                color = if (checked) AurumColors.Gold else AurumColors.TextPrimary)
+            Text(detail, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 

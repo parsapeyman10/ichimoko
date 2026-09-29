@@ -1,6 +1,8 @@
+# Reference snapshot only; the active workflow is .github/workflows/main.yml.
+# Keep this file for documentation, not for copying a stale release pipeline.
 name: Android APK
 
-# این ورک‌فلو فقط یک کار مهم دارد: ساخت APK آمادهٔ نصب و گذاشتنش در Artifacts.
+# این snapshot فقط برای مستندسازی ساخت APK است؛ workflow فعال در .github/workflows/main.yml قرار دارد.
 # روی هر push که پوشه android/ را تغییر بدهد (مثل merge همین PR) و روی PRها اجرا می‌شود،
 # و هر وقت خواستی می‌توانی از تب Actions دستی هم اجرا کنی (Run workflow).
 on:
@@ -82,14 +84,14 @@ jobs:
         run: |
           mkdir -p out
           cp android/app/build/outputs/apk/debug/app-debug.apk out/AurumEdge-debug.apk 2>/dev/null || true
-          cp android/app/build/outputs/apk/release/app-release.apk out/AurumEdge-release.apk 2>/dev/null || true
+          cp android/app/build/outputs/apk/release/app-release.apk out/AurumEdge-vX.Y.Z.apk 2>/dev/null || true
           ls -la out
 
       - name: Upload APKs
         if: steps.guard.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: aurum-edge-apk
+          name: aurum-edge-apk-<commit>
           if-no-files-found: error
           retention-days: 30
           path: out/*.apk
@@ -104,7 +106,7 @@ jobs:
             echo ""
             echo "| فایل | توضیح |"
             echo "|---|---|"
-            echo "| \`AurumEdge-release.apk\` | نسخهٔ اصلی — روی گوشی نصب می‌شود |"
+            echo "| \`AurumEdge-vX.Y.Z.apk\` | نسخهٔ اصلی — روی گوشی نصب می‌شود |"
             echo "| \`AurumEdge-debug.apk\` | نسخهٔ دیباگ (پکیج جدا: com.aurum.edge.debug) |"
             echo ""
             echo "Release با کلید دیباگ امضا شده تا بدون keystore روی گوشی نصب شود؛ هنگام نصب اجازهٔ «نصب از منبع ناشناس» را بده."

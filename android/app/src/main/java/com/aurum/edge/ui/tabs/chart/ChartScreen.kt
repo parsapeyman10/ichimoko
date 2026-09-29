@@ -38,7 +38,10 @@ import com.aurum.edge.engine.IctRangeAnalyzer
 import com.aurum.edge.ui.components.EmptyState
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.SignalSummaryCard
+import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatPrice
+import com.aurum.edge.ui.components.formatQuotePrice
+import com.aurum.edge.ui.components.formatSpread
 import com.aurum.edge.ui.components.formatTime
 import com.aurum.edge.ui.theme.AurumColors
 
@@ -80,7 +83,7 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
         if (!settings.hasKey) {
             KeyOnboarding(onSave = viewModel::saveApiKey, onOpenSettings = onOpenSettings)
             Text(
-                "بدون کلید، کندل‌ها به‌صورت زنده از فید رایگان Swissquote ساخته می‌شوند؛ تاریخچهٔ REST، MTF و بک‌تست نیازمند کلید Twelve Data هستند.",
+                "بدون کلید هم اپ ابتدا بیش از ۱۰۰۰ کندل واقعی Yahoo Finance را سریع نمایش می‌دهد و بعد همان تاریخچه را تا هدف ۳۰۰۰ کندل تکمیل می‌کند؛ تیک زندهٔ Swissquote/Gold-API روی آن اعمال می‌شود و هیچ کندلی ساخته نمی‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
@@ -99,6 +102,25 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
             val change = previousClose?.let { shown.close - it }
             val structure = remember(market.candles, market.interval) {
                 IctRangeAnalyzer.analyze(market.candles, market.interval)
+            }
+            val liveTick = market.feed.mode == FeedMode.LIVE && !market.showingCachedData
+            val spread = market.bid?.let { bid -> market.ask?.let { ask -> ask - bid } }
+            SectionCard(
+                title = if (liveTick) "تیک زنده · ${market.feed.provider}" else "تیک زنده در دسترس نیست",
+                subtitle = if (liveTick) "چارت با هر تیک واقعی به‌روزرسانی می‌شود؛ تغییر فقط وقتی منبع قیمت جدید بدهد دیده می‌شود"
+                    else market.feed.detail.ifBlank { "کندل/تاریخچه آنلاین یا کش جای تیک لحظه‌ای نیست" },
+            ) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StatTile("LAST", formatQuotePrice(market.lastPrice), if (liveTick) AurumColors.Cyan else AurumColors.TextMuted, Modifier.weight(1f))
+                    StatTile("BID", formatQuotePrice(market.bid), if (liveTick) AurumColors.Green else AurumColors.TextMuted, Modifier.weight(1f))
+                    StatTile("ASK", formatQuotePrice(market.ask), if (liveTick) AurumColors.Red else AurumColors.TextMuted, Modifier.weight(1f))
+                    StatTile("SPREAD", formatSpread(spread), AurumColors.Gold, Modifier.weight(1f))
+                }
+                Text(
+                    if (market.bid != null && market.ask != null) "bid/ask/spread از فید زندهٔ فعلی است. مسیر جایگزین Swissquote هر ۱ ثانیه فقط نماد فعال را می‌خواند؛ قیمت ساخته نمی‌شود."
+                    else "این منبع bid/ask جدا ندارد؛ اگر Twelve WebSocket ندهد، فید جایگزین Swissquote/Gold-API با bid/ask برچسب‌دار فعال می‌شود.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                    modifier = Modifier.padding(top = 6.dp))
             }
 
             CandleChart(
@@ -168,11 +190,11 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
                 }
                 market.signal?.takeIf { it.isActionable }?.let {
                     val gate = IctEntryRules.assess(market)
-                    Text("اثر بر ورود سیگنالی paper: ${gate.reason ?: "گیت ICT تأیید است؛ ۹/۹، خبر AI و ریسک هنوز جداگانه بررسی می‌شوند"}",
+                    Text("اثر بر ورود سیگنالی paper: ${gate.reason ?: "گیت ICT تأیید است؛ ۸ شرط فنی، ریسک خبر و مدیریت ریسک هنوز جداگانه بررسی می‌شوند"}",
                         style = MaterialTheme.typography.bodySmall,
                         color = if (gate.allowed) AurumColors.Green else AurumColors.Red)
                 }
-                Text("حتی «آماده» فقط یک الگوی تقریبی است؛ ورود خودکار paper به قیمت زنده، ۹/۹ از جمله خبر AI، و گیت رنجِ همین کندل نیاز دارد. معاملهٔ واقعی وجود ندارد.",
+                Text("حتی «آماده» فقط یک الگوی تقریبی است؛ ورود خودکار paper به قیمت زنده، ۸ شرط فنی، آپشن‌های فعال و گیت رنجِ همین کندل نیاز دارد. خبر فقط در ژورنال داده‌کاوی می‌شود و معاملهٔ واقعی وجود ندارد.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             }
 
@@ -218,7 +240,7 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
                     Text("خودکار کاغذی: $autoStatus", style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.TextSecondary)
                 } else {
-                    Text("خودکار خاموش است؛ با تأیید خودت در تنظیمات می‌توانی ورود خودکار کاغذی ۹/۹ را روشن کنی. سفارش واقعی وجود ندارد.",
+                    Text("خودکار خاموش است؛ با تأیید خودت در تنظیمات می‌توانی ورود خودکار کاغذی آموزشی را روشن کنی. سفارش واقعی وجود ندارد.",
                         style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
                 sameSymbol.firstOrNull()?.let { trade ->
@@ -237,7 +259,7 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
                 Text("منبع: ${market.feed.provider}", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
                 Text("حالت: ${market.feed.mode.label}", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 2.dp))
                 Text(
-                    "کندل‌های واقعی دریافت‌شده: ${market.candles.size} (بسته: ${market.closedCount})",
+                    "کندل‌های واقعی دریافت‌شده: ${market.candles.size} از هدف ۳۰۰۰ (بسته: ${market.closedCount})",
                     style = MaterialTheme.typography.bodySmall,
                     color = AurumColors.TextSecondary,
                     modifier = Modifier.padding(top = 2.dp),
@@ -314,11 +336,11 @@ fun KeyOnboarding(onSave: (String) -> Unit, onOpenSettings: () -> Unit) {
     var key by remember { mutableStateOf("") }
     Column(modifier = Modifier.padding(top = 8.dp)) {
         SectionCard(
-            title = "برای شروع، کلید دیتای واقعی لازم است",
-            subtitle = "چارت زندهٔ رایگان فعال است؛ کلید Twelve Data تاریخچهٔ REST، MTF و بک‌تست را اضافه می‌کند",
+            title = "کلید Twelve Data اختیاری است",
+            subtitle = "ابتدا بیش از ۱۰۰۰ کندل عمومی Yahoo سریع نمایش داده می‌شود و سپس تا ۳۰۰۰ کندل تکمیل می‌گردد؛ کلید Twelve Data فقط آخرین fallback تاریخچه/فید زنده را فعال می‌کند",
         ) {
             Text(
-                "کلید رایگان Twelve Data را از twelvedata.com دریافت کن و اینجا وارد کن. این کلید فقط برای خواندن دیتای بازار است و دسترسی معاملاتی ندارد. بدون کلید هم چارت با تیک‌های زندهٔ فید رایگان Swissquote کار می‌کند.",
+                "کلید رایگان Twelve Data را از twelvedata.com دریافت کن و اینجا وارد کن. این کلید فقط برای خواندن دیتای بازار است و دسترسی معاملاتی ندارد. بدون کلید هم چارت با تاریخچهٔ عمومی Yahoo و تیک‌های زندهٔ فید رایگان Swissquote/Gold-API کار می‌کند.",
                 style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextSecondary,
             )
@@ -341,7 +363,7 @@ fun KeyOnboarding(onSave: (String) -> Unit, onOpenSettings: () -> Unit) {
                 Text("ذخیره و دریافت دیتای واقعی", fontWeight = FontWeight.Bold)
             }
             Text(
-                "بدون اینترنت یا بدون کلید معتبر، وضعیت «آفلاین» نمایش داده می‌شود — هیچ کندل یا سیگنال ساختگی ساخته نمی‌شود.",
+                "بدون اینترنت یا وقتی هیچ منبع عمومی/کلیددار پاسخ معتبر ندهد، وضعیت دیررس/آفلاین نمایش داده می‌شود — هیچ کندل یا سیگنال ساختگی ساخته نمی‌شود.",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 8.dp),

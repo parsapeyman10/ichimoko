@@ -68,7 +68,7 @@ def _resample_hourly_to_h4(hourly: list[Candle]) -> list[Candle]:
 
 
 async def fetch_futures_history(
-    client: httpx.AsyncClient, timeframe: Timeframe, limit: int = 1500
+    client: httpx.AsyncClient, timeframe: Timeframe, limit: int = 3000
 ) -> list[Candle]:
     """Real COMEX gold futures OHLC (Yahoo Finance chart API). 4h bars are resampled from 1h."""
     base_timeframe = Timeframe.H1 if timeframe is Timeframe.H4 else timeframe

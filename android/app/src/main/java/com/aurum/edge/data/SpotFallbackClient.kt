@@ -17,9 +17,10 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
- * Automatic, keyless real spot-price fallback used only when no Twelve Data key is configured
- * on this installation. Mirrors the backend's app/services/spot_feed.py: Swissquote's public
- * BBO quote feed first, then gold-api.com (gold only) as a second real source.
+ * Automatic real spot-price source. Mirrors the backend's app/services/spot_feed.py:
+ * Swissquote's public BBO quote feed first, then gold-api.com (gold only) as a second real
+ * source. MarketRepository tries this public source before its final Twelve Data live fallback,
+ * whether or not a key is configured.
  *
  * This is not a mock/synthetic generator: every value returned is parsed from a live provider
  * response, and any parsing/staleness problem raises [DataFeedException] — never a fabricated
@@ -82,7 +83,7 @@ class SpotFallbackClient(
         val at = tsRaw.toLong()
         val age = System.currentTimeMillis() - at
         if (age !in -10_000L..MAX_QUOTE_AGE_MS) throw DataFeedException("قیمت Swissquote قدیمی یا با زمان نامعتبر است")
-        return PriceTick((bid + ask) / 2.0, at)
+        return PriceTick((bid + ask) / 2.0, at, bid = bid, ask = ask)
     }
 
     /** gold-api.com: a second, independent, keyless source — gold (XAU/USD) only. */
@@ -143,6 +144,6 @@ class SpotFallbackClient(
 
     companion object {
         private const val MAX_QUOTE_AGE_MS = 45_000L
-        const val POLL_INTERVAL_MS = 5_000L
+        const val POLL_INTERVAL_MS = 1_000L
     }
 }

@@ -5,6 +5,7 @@ import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.Interval
+import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperAlertRules
@@ -12,6 +13,7 @@ import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.engine.SignalEngine
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -23,10 +25,10 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/** One row of the all-pairs radar: what the last REST sweep actually observed for this pair. */
+/** One row of the all-pairs radar: what the last online candle sweep actually observed for this pair. */
 data class PairScanStatus(
     val symbol: String,
-    /** pending | needs_key | closed | error | no_signal | blocked | candidate */
+    /** pending | closed | error | no_signal | blocked | candidate */
     val state: String,
     val detail: String,
     val lastScanAt: Long? = null,
@@ -43,19 +45,19 @@ data class PairScanState(
 )
 
 /**
- * Periodic REST sweep over the whole watch catalog (gold + majors) so no pair's 9/9 opportunity
- * goes unnoticed while the live WebSocket feed follows only the selected chart symbol.
+ * Periodic 3000-candle sweep over the whole watch catalog (gold + majors) so no strong
+ * technical/risk-screened opportunity goes unnoticed while the live tick feed follows only the selected chart symbol.
  *
  * Honest limits, identical to the single-symbol pipeline:
- * - REST candles justify an educational CANDIDATE + notification, never an automatic paper
- *   fill (auto entry stays WebSocket-tick only, on the selected symbol).
- * - Every pair is evaluated with the SAME nine conditions (8 technical + per-pair AI news),
- *   the SAME ICT gate and the SAME MTF veto; a missing key or a failed fetch is an explicit
- *   status, never a fabricated signal.
- * - Calls are spaced to respect Twelve Data free-tier credit limits (≤7 requests/minute).
+ * - REST/public-history candles justify an educational CANDIDATE + notification, never an automatic paper
+ *   fill (auto entry stays live-tick only, on the selected symbol).
+ * - Every pair is evaluated with the SAME eight technical conditions, enabled optional filters,
+ *   the SAME ICT gate and the SAME MTF veto. News is mined only as journal context, never as an entry gate.
+ * - Calls are spaced to respect Twelve/Yahoo provider limits (≤7 requests/minute).
  */
 class PairScanner(
     private val client: TwelveDataClient,
+    private val publicHistory: PublicCandleHistoryClient,
     private val settings: SettingsStore,
     private val news: NewsRepository,
     private val journal: JournalStore,
@@ -91,9 +93,9 @@ class PairScanner(
             _state.value = _state.value.copy(sweeping = true, lastError = null)
             try {
                 sweepAll(onCandidate)
-            } catch (error: Exception) {
+            } catch (_: Exception) {
                 _state.value = _state.value.copy(
-                    lastError = "اسکن دوره‌ای ناموفق بود: ${(error.message ?: "خطا").take(100)}")
+                    lastError = "اسکن دوره‌ای ناموفق بود؛ پاسخ یا اتصال provider معتبر نبود")
             } finally {
                 _state.value = _state.value.copy(sweeping = false, lastSweepAt = System.currentTimeMillis())
             }
@@ -112,16 +114,10 @@ class PairScanner(
             WatchCatalog.chartSymbols.forEach { update(it, "closed", "بازار فارکس تعطیل است؛ اسکن ارسال نشد") }
             return
         }
-        if (config.apiKey.isBlank()) {
-            WatchCatalog.chartSymbols.forEach {
-                update(it, "needs_key", "اسکن دوره‌ای به کلید خواندنی Twelve Data نیاز دارد (کندل REST)")
-            }
-            return
-        }
         val headlines = news.state.value
         val trades = journal.trades.value
-        // One REST call per pair (1 credit each), spaced so a full sweep stays under the
-        // provider's per-minute quota even on the free tier.
+        // One online candle-history call per pair, spaced so a full sweep stays under the
+        // provider's per-minute quota even on free/public paths.
         WatchCatalog.chartSymbols.forEachIndexed { index, symbol ->
             if (index > 0) delay(PAIR_SPACING_MS)
             val now = System.currentTimeMillis()
@@ -131,14 +127,28 @@ class PairScanner(
                 return@forEachIndexed
             }
             val candles = try {
-                client.fetchCandles(config.apiKey, symbol, interval, outputSize = 1500)
+                if (config.hasKey) {
+                    try {
+                        client.fetchCandles(config.apiKey, symbol, interval, outputSize = HistoryPolicy.TARGET_CANDLES)
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (_: Exception) {
+                        publicHistory.fetchCandles(symbol, interval, minimumSize = HistoryPolicy.TARGET_CANDLES).candles
+                    }
+                } else {
+                    publicHistory.fetchCandles(symbol, interval, minimumSize = HistoryPolicy.TARGET_CANDLES).candles
+                }
             } catch (error: Exception) {
                 update(symbol, "error", (error.message ?: "خطای دریافت کندل").take(100))
                 return@forEachIndexed
             }
+            if (candles.size < HistoryPolicy.TARGET_CANDLES) {
+                update(symbol, "error", "ناشر فقط ${candles.size} کندل داد؛ حداقل ${HistoryPolicy.TARGET_CANDLES} کندل لازم است")
+                return@forEachIndexed
+            }
             val price = candles.lastOrNull()?.close
             val evaluated = withContext(Dispatchers.Default) {
-                runCatching { SignalEngine.evaluate(candles, interval, config.minConfidence, config.spreadPrice) }.getOrNull()
+                runCatching { SignalEngine.evaluate(candles, interval, config.minConfidence, config.spreadPrice, config.signalProfile) }.getOrNull()
             }
             if (evaluated == null) { update(symbol, "error", "ارزیابی سیگنال روی کندل‌های دریافتی ممکن نشد", price); return@forEachIndexed }
             val combined = NewsConfluence.apply(evaluated, symbol, headlines, now)!!
@@ -149,11 +159,13 @@ class PairScanner(
                     price, score)
                 return@forEachIndexed
             }
-            // REST data: the provider's newest CLOSED bar may be up to one interval old.
+            // Sweep data: the provider's newest CLOSED bar may be up to one interval old.
             val graceMs = interval.millis + 90_000L
             val market = MarketState(
                 symbol = symbol, interval = interval, candles = candles, lastPrice = price,
-                feed = FeedStatus(FeedMode.POLLING, "اسکن دوره‌ای REST", System.currentTimeMillis()),
+                feed = FeedStatus(FeedMode.POLLING,
+                    if (config.hasKey) "اسکن دوره‌ای Twelve/public fallback" else "اسکن دوره‌ای تاریخچهٔ عمومی",
+                    System.currentTimeMillis()),
                 signal = combined,
             )
             val mtf = withContext(Dispatchers.Default) {
@@ -168,10 +180,10 @@ class PairScanner(
             val evidence = NewsConfluence.record(headlines, symbol)
             val ict = IctEntryRules.approvedEvidence(market, System.currentTimeMillis(), graceMs)
             val fresh = settings.read() // re-read: the sweep itself can take over a minute
-            if (evidence == null || ict == null || mtf == null || price == null ||
+            if (ict == null || mtf == null || price == null ||
                 PaperAlertRules.blocker(market, fresh, news.state.value, journal.trades.value, mtf,
                     System.currentTimeMillis(), WatchCatalog.chartSymbols, graceMs) != null) {
-                update(symbol, "blocked", "شواهد کامل ۹/۹ در لحظهٔ ثبت در دسترس نبود", price, score)
+                update(symbol, "blocked", "شواهد فنی/ICT/MTF کاندیدای آموزشی در لحظهٔ ثبت در دسترس نبود", price, score)
                 return@forEachIndexed
             }
             val item = runCatching {
@@ -180,7 +192,7 @@ class PairScanner(
             if (item == null) { update(symbol, "blocked", "ساخت رکورد فرصت آموزشی ممکن نشد", price, score); return@forEachIndexed }
             val recorded = runCatching { opportunities.record(item) }.getOrDefault(false)
             if (recorded) onCandidate?.invoke(item)
-            update(symbol, "candidate", "کاندیدای آموزشی ۹/۹ ثبت شد؛ اعلان/ژورنال را ببینید — ورود خودکار فقط با فید زندهٔ همین نماد", price, score)
+            update(symbol, "candidate", "کاندیدای آموزشی ۸/۸ فنی ثبت شد؛ خبر نزدیک فقط در ژورنال داده‌کاوی می‌شود — ورود خودکار فقط با فید زندهٔ همین نماد", price, score)
         }
     }
 

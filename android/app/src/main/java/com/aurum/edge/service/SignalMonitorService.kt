@@ -123,6 +123,7 @@ class SignalMonitorService : Service() {
                 if (!notificationsPermitted()) { stopSelf(); break }
                 if (!MarketHours.forexWeekendClosed()) {
                     container.forexCalendar.refreshNow() // weekly export, 1m near release only
+                    if (turns % 3 == 0) container.watch.refreshNow() // display/radar cards stay warm under their own throttle
                     if (turns++ % 15 == 0) container.publicWebNews.refreshNow()
                     // The ninth condition expires after ~3 minutes: refresh in server OR client
                     // mode (user's own on-device key) whenever alerts/auto-paper depend on it.
@@ -147,16 +148,16 @@ class SignalMonitorService : Service() {
             }
         }
 
-        // Periodic all-pairs REST sweep: same nine conditions per pair, educational candidates
-        // only — automatic paper fills stay WebSocket-tick-only on the selected symbol.
+        // Periodic all-pairs online candle sweep: same nine conditions per pair, educational candidates
+        // only — automatic paper fills stay live-tick-only on the selected symbol.
         sweepJob?.cancel()
         sweepJob = scope.launch {
             while (isActive) {
                 if (!notificationsPermitted()) { stopSelf(); break }
                 val config = container.settingsStore.read()
                 if (config.backgroundMonitor && !MarketHours.forexWeekendClosed()) {
-                    if (config.apiKey.isBlank() || !config.notifyOnSignal) {
-                        container.pairScanner.refreshNow() // records honest needs_key / alert-off statuses
+                    if (!config.notifyOnSignal) {
+                        container.pairScanner.refreshNow() // records honest online/error/alert-off statuses
                     } else {
                         try {
                             container.pairScanner.sweepOnce { candidate ->
@@ -192,7 +193,7 @@ class SignalMonitorService : Service() {
                 }
                 val text = when (state.feed.mode) {
                     FeedMode.LIVE -> "زنده · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
-                    FeedMode.POLLING -> "آخرین کندل REST (نه تیک زنده) · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
+                    FeedMode.POLLING -> "آخرین کندل/تاریخچه آنلاین (نه تیک زنده) · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
                     FeedMode.MARKET_CLOSED -> "بازار طبق برنامهٔ معمول بسته است؛ قیمت/ورود بررسی نمی‌شود"
                     FeedMode.DELAYED -> "دادهٔ دیررس؛ اتصال در حال بررسی (معامله مسدود)"
                     FeedMode.CONNECTING -> "در حال اتصال…"
@@ -214,7 +215,7 @@ class SignalMonitorService : Service() {
                     val headlines = container.news.state.value
                     if (PaperAlertRules.blocker(state, config, headlines,
                             container.journalStore.trades.value, snapshot) == null) {
-                        // Re-check after computation: a veto/news/price can change between flows.
+                        // Re-check after computation: technical/price/MTF state can change between flows.
                         val latest = container.verifiedMarket.value
                         val recentNews = container.news.state.value
                         val recentConfig = container.settingsStore.read()
@@ -224,7 +225,7 @@ class SignalMonitorService : Service() {
                                 container.journalStore.trades.value, snapshot) == null) {
                             val evidence = NewsConfluence.record(recentNews, latest.symbol)
                             val ict = IctEntryRules.approvedEvidence(latest)
-                            if (evidence != null && ict != null && snapshot != null &&
+                            if (ict != null && snapshot != null &&
                                 Notifier.canNotifyVerified(this@SignalMonitorService, recentConfig.alertSoundUri)) {
                                 val item = runCatching { PaperOpportunity.from(latest.signal!!, latest.symbol,
                                     latest.lastPrice!!, MtfSnapshotRecord.from(snapshot), evidence, ict) }.getOrNull()
@@ -248,8 +249,12 @@ class SignalMonitorService : Service() {
                         newCandidate?.let { container.opportunityStore.record(it) }
                         container.opportunityStore.linkTrade(opened)
                     }
+                    val reviewed = runCatching {
+                        val review = container.traderAdvisor.reviewPaperEntry(opened, state)
+                        container.journalStore.attachAiReview(opened.id, review)
+                    }.getOrNull() ?: opened
                     val currentSettings = container.settingsStore.read()
-                    if (!Notifier.notifyRecordedAutoEntry(this@SignalMonitorService, opened,
+                    if (!Notifier.notifyRecordedAutoEntry(this@SignalMonitorService, reviewed,
                             currentSettings.alertSoundUri)) {
                         container.autoPaperTrader.stopped(
                             "معاملهٔ کاغذی در ژورنال ثبت شد، ولی اعلان توسط سیستم ارسال نشد؛ مجوز/کانال را بررسی کنید")

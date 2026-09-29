@@ -34,12 +34,23 @@ class SourceFetcher(
         symbols: List<SymbolDef> = source.symbols,
         apiKey: String = "",
     ): SourceSnapshot = withContext(Dispatchers.IO) {
+        val startedAt = System.nanoTime()
         require(SourceCatalog.find(source.id) == source) { "منبع ناشناخته است" }
-        if (symbols.isEmpty()) return@withContext SourceSnapshot(source, emptyList(), online = false)
+        if (symbols.isEmpty()) return@withContext SourceSnapshot(
+            source, emptyList(), fetchedAt = System.currentTimeMillis(), online = false,
+            latencyMs = (System.nanoTime() - startedAt) / 1_000_000L,
+        )
         if (source.requiresKey && apiKey.isBlank()) {
-            return@withContext SourceSnapshot(source, symbols.map {
-                Quote(it.code, it.label, error = "کلید خواندنی ${source.title} وارد نشده است", sourceId = source.id)
-            }, online = false, error = "کلید API وارد نشده است")
+            return@withContext SourceSnapshot(
+                source,
+                symbols.map {
+                    Quote(it.code, it.label, error = "کلید خواندنی ${source.title} وارد نشده است", sourceId = source.id)
+                },
+                fetchedAt = System.currentTimeMillis(),
+                online = false,
+                error = "کلید API وارد نشده است",
+                latencyMs = (System.nanoTime() - startedAt) / 1_000_000L,
+            )
         }
         val quotes = if (source.batchTemplate != null) {
             // Batch only requests that share both a provider AND a read-only key. A key is
@@ -52,7 +63,14 @@ class SourceFetcher(
                 error = "پاسخ گروهی منبع در دسترس نیست؛ کش با زمان اصلی باقی می‌ماند",
                 sourceId = source.id) }
         } else coroutineScope { symbols.map { symbol -> async { fetchOne(source, symbol, apiKey) } }.awaitAll() }
-        SourceSnapshot(source, quotes, online = quotes.any { it.price != null }, error = quotes.firstOrNull { it.price == null }?.error)
+        SourceSnapshot(
+            source = source,
+            quotes = quotes,
+            fetchedAt = System.currentTimeMillis(),
+            online = quotes.any { it.price != null },
+            error = quotes.firstOrNull { it.price == null }?.error,
+            latencyMs = (System.nanoTime() - startedAt) / 1_000_000L,
+        )
     }
 
     private suspend fun fetchOne(source: SourceDef, symbol: SymbolDef, apiKey: String): Quote = try {

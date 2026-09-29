@@ -28,7 +28,7 @@ object ResearchEvidence {
         if (result.trades.size < CAUTION_MIN_CLOSED)
             "فقط ${result.trades.size} معاملهٔ بسته؛ نمونهٔ کم"
         else "فقط داخل نمونه؛ شاهدی از سودمندی بیرون از این بازه نیست",
-        "بک‌تستِ قواعد فنی، بدون بازپخش گیت نهم خبر AI/ICT/MTF. حداقل ۳۰ فقط هشدار کم‌نمونگی است؛ " +
+        "بک‌تستِ قواعد فنی، بدون بازپخش لایهٔ خبر/AI، ICT و MTF. حداقل ۳۰ فقط هشدار کم‌نمونگی است؛ " +
             "پوزیشن باز انتهای بازه (${if (result.openAtEnd) 1 else 0}) و ${result.unresolvedGap} پوزیشنِ گرفتار در گپ از سود محقق‌شده حذف شده‌اند.",
     )
 
@@ -116,24 +116,25 @@ object ResearchEvidence {
     /** Recorded evidence, not a fresh verification of a historical publisher or AI model. */
     fun hasRecordedNineWay(trade: PaperTrade): Boolean {
         val bar = trade.signalBarTime ?: return false
-        val news = trade.newsEvidence ?: return false
+        val news = trade.newsEvidence
         val ict = trade.priceAction ?: return false
+        val technicalConditions = trade.entryConditions.filterNot { it.name == NewsConfluence.NEWS_LABEL }
+        val newsEvidenceOk = news == null || (
+            news.model.isNotBlank() && news.model != "deterministic-fallback" &&
+                news.confidence in 80.0..100.0 &&
+                news.checkedAt > 0L && trade.openedAt - news.checkedAt in 0L..180_000L &&
+                news.calendarSource == FOREX_CALENDAR_SOURCE_URL &&
+                news.calendarCheckedAt?.let { trade.openedAt - it in 0L..1_200_000L } == true &&
+                news.evidence.isNotEmpty() && news.evidence.all { it.id.isNotBlank() &&
+                    it.source.isNotBlank() && it.url.startsWith("https://") &&
+                    news.checkedAt - it.publishedAt in 0L..10_800_000L })
         return trade.symbol == "XAU/USD" && trade.unit == "oz" &&
             trade.action != SignalAction.NO_TRADE && bar > 0L &&
             trade.mtf?.let { !it.veto && it.barTime == bar } == true &&
             ict.symbol == trade.symbol && ict.action == trade.action && ict.barTime == bar &&
-            news.model.isNotBlank() && news.model != "deterministic-fallback" &&
-            news.direction == trade.action.name && news.confidence in 80.0..100.0 &&
-            news.checkedAt > 0L && trade.openedAt - news.checkedAt in 0L..180_000L &&
-            trade.openedAt - ict.checkedAt in 0L..180_000L &&
-            news.calendarSource == FOREX_CALENDAR_SOURCE_URL &&
-            news.calendarCheckedAt?.let { trade.openedAt - it in 0L..1_200_000L } == true &&
-            news.evidence.isNotEmpty() && news.evidence.all { it.id.isNotBlank() &&
-                it.source.isNotBlank() && it.url.startsWith("https://") &&
-                news.checkedAt - it.publishedAt in 0L..10_800_000L } &&
-            trade.entryConditions.size == 9 &&
-            trade.entryConditions.all { it.status == "CONFIRMED" } &&
-            trade.entryConditions.last().name == NewsConfluence.NEWS_LABEL
+            trade.openedAt - ict.checkedAt in 0L..180_000L && newsEvidenceOk &&
+            technicalConditions.size >= 8 &&
+            technicalConditions.take(8).all { it.status == "CONFIRMED" }
     }
 
     /** A hypothetical deduction from recorded paper P/L, not a broker fill or a journal edit. */

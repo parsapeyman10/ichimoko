@@ -15,14 +15,15 @@ data class HomeReadout(
             val lastBarAt = market.candles.lastOrNull()?.time?.takeIf { it > 0L }
             val current = price != null && !market.showingCachedData &&
                 market.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
-                market.feed.lastSuccessAt?.let { now - it in 0L..90_000L } == true &&
+                FeedLiveness.hasRecentReceipt(market.feed, now) &&
                 lastBarAt?.let { now - it in 0L..(market.interval.millis + 90_000L) } == true
             return HomeReadout(
                 current = current,
                 value = price?.takeIf { current || lastBarAt != null },
                 observedAt = if (current) market.feed.lastSuccessAt else lastBarAt,
                 label = when {
-                    current && market.feed.mode == FeedMode.LIVE -> "تیک تازهٔ WebSocket"
+                    current && market.feed.mode == FeedMode.LIVE && market.feed.provider.contains("Twelve", ignoreCase = true) -> "تیک تازهٔ Twelve Data WebSocket"
+                    current && market.feed.mode == FeedMode.LIVE -> "تیک تازهٔ زنده از ${market.feed.provider}"
                     current -> "کندل تازهٔ REST؛ نه تیک قابل اجرای سفارش"
                     market.feed.mode == FeedMode.NO_KEY -> "کلید دادهٔ بازار روی این نصب موجود نیست"
                     market.feed.mode == FeedMode.MARKET_CLOSED -> "بازار طبق برنامهٔ معمول بسته است؛ قیمت قبلی است"

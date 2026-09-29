@@ -1,5 +1,6 @@
 package com.aurum.edge.engine
 
+import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.data.FreeHistoryCatalog
 import com.aurum.edge.data.FreeHistoryDownloader
 import com.aurum.edge.data.FreeHistoryResult
@@ -27,7 +28,7 @@ class FreeHistoryTest {
         } + listOf(extra).filter { it.isNotEmpty() }).joinToString(",") + "]"
 
     private fun ohlc(extra: String = "", symbol: String = "XAU/USD") = """{"meta":{"symbol":"$symbol","interval":"1day","currency":"USD"},"values":[""" +
-        ((1..35).map { i ->
+        ((1..HistoryPolicy.TARGET_CANDLES).map { i ->
             """{"datetime":"${today.minusDays(i.toLong())}","open":"101","high":"105","low":"99","close":"104","volume":"200"}"""
         } + listOf(extra).filter { it.isNotEmpty() }).joinToString(",") + "]}"
 
@@ -83,7 +84,7 @@ class FreeHistoryTest {
     @Test fun twelveDailyDropsTodayAndRequiresExactAssetCurrencyAndValidOhlc() {
         val forming = """{"datetime":"$today","open":"101","high":"105","low":"99","close":"104"}"""
         val parsed = client.parseTwelveDaily(ohlc(forming), stock, today)
-        assertEquals(35, parsed.size)
+        assertEquals(HistoryPolicy.TARGET_CANDLES, parsed.size)
         assertEquals(today.minusDays(1), parsed.last().date)
         assertEquals(104.0, parsed.last().close, 0.001)
         assertEquals(200.0, parsed.last().volume!!, 0.001)

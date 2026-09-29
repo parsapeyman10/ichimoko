@@ -16,7 +16,6 @@ import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.data.FOREX_CALENDAR_SOURCE_URL
-import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.ui.components.formatPrice
 
 object Notifier {
@@ -50,7 +49,7 @@ object Notifier {
         }
         val systemTone = NotificationChannel(
             CHANNEL_VERIFIED_DEFAULT, "فرصت آموزشی · صدای سیستم", NotificationManager.IMPORTANCE_HIGH,
-        ).apply { description = "تنها شرط‌های ۹/۹ تاییدشده؛ معاملهٔ واقعی نیست" }
+        ).apply { description = "کاندیدای فنی/آموزشی تأییدشده؛ معاملهٔ واقعی نیست" }
         val fileTone = NotificationChannel(
             CHANNEL_VERIFIED_FILE, "فرصت آموزشی · فایل صوتی گوشی", NotificationManager.IMPORTANCE_HIGH,
         ).apply {
@@ -130,16 +129,17 @@ object Notifier {
     /** Only after the candidate is durably saved. This alert NEVER claims a trade was opened. */
     fun notifyVerifiedOpportunity(context: Context, item: PaperOpportunity, customSoundUri: String): Boolean {
         val title = when (item.action) {
-            SignalAction.BUY -> "فرصت آموزشی خرید XAU/USD · ۹/۹"
-            SignalAction.SELL -> "فرصت آموزشی فروش XAU/USD · ۹/۹"
+            SignalAction.BUY -> "فرصت آموزشی خرید XAU/USD · ۸/۸ فنی"
+            SignalAction.SELL -> "فرصت آموزشی فروش XAU/USD · ۸/۸ فنی"
             SignalAction.NO_TRADE -> return false
         }
         val text = "${item.interval.label} · قیمت ${formatPrice(item.priceAtAlert)}$ · " +
             "SL ${formatPrice(item.stopLoss)} · TP ${formatPrice(item.takeProfit)}"
         if (item.priceAction?.barTime != item.signalBarTime ||
-            item.priceAction?.action != item.action ||
-            item.newsEvidence.calendarSource != FOREX_CALENDAR_SOURCE_URL ||
-            item.newsEvidence.calendarCheckedAt == null) return false
+            item.priceAction?.action != item.action) return false
+        item.newsEvidence?.let { news ->
+            if (news.calendarSource != FOREX_CALENDAR_SOURCE_URL || news.calendarCheckedAt == null) return false
+        }
         return postVerified(context, item.key.hashCode(), title, text,
             "$text\nکاندیدا؛ باز شدن پوزیشن کاغذی یا سفارش واقعی را نشان نمی‌دهد. جزئیات در ژورنال.",
             customSoundUri)
@@ -149,21 +149,21 @@ object Notifier {
     fun notifyRecordedAutoEntry(context: Context, trade: PaperTrade, customSoundUri: String): Boolean {
         if (!trade.autoOpened || !trade.isOpen || trade.symbol != "XAU/USD" ||
             trade.action == SignalAction.NO_TRADE || (trade.signalBarTime ?: 0L) <= 0L ||
-            trade.newsEvidence?.evidence.isNullOrEmpty() ||
-            trade.newsEvidence?.calendarSource != FOREX_CALENDAR_SOURCE_URL ||
-            trade.newsEvidence?.calendarCheckedAt == null || trade.mtf?.veto != false ||
-            trade.entryConditions.size != 9 ||
-            trade.entryConditions.any { it.status != "CONFIRMED" } ||
-            trade.entryConditions[8].name != NewsConfluence.NEWS_LABEL ||
+            trade.mtf?.veto != false ||
+            trade.entryConditions.size < 8 ||
+            trade.entryConditions.take(8).any { it.status != "CONFIRMED" } ||
             trade.priceAction?.barTime != trade.signalBarTime ||
             trade.priceAction?.action != trade.action ||
             trade.priceAction?.quote != trade.entry) return false
         val side = if (trade.action == SignalAction.BUY) "خرید" else "فروش"
         val title = "معاملهٔ آموزشی $side ثبت شد · فقط کاغذی"
         val text = "XAU/USD ${trade.interval.label} · ورود ${formatPrice(trade.entry)}$ · شناسه ${trade.id.take(8)}"
+        val ai = trade.aiReview?.let { review ->
+            "\nنظر AI: ${review.verdictFa()} (${review.confidence}٪) — ${review.summary}"
+        }.orEmpty()
         return postVerified(context, trade.id.hashCode(), title, text,
             "$text\nSL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)} · " +
-                "۹/۹، خبر و شواهد رنج/ICT در ژورنال ثبت شدند. سفارش واقعی ارسال نشد.", customSoundUri)
+                "۸/۸ فنی، گزینه‌های فعال و شواهد رنج/ICT در ژورنال ثبت شدند؛ خبر فقط داده‌کاوی همراه معامله است. سفارش واقعی ارسال نشد.$ai", customSoundUri)
     }
 
     private fun postVerified(context: Context, id: Int, title: String, text: String,
@@ -209,4 +209,11 @@ object Notifier {
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(trade.id.hashCode(), notification) }
     }
+}
+
+private fun com.aurum.edge.core.PaperAiReview.verdictFa(): String = when (verdict) {
+    "WORTHY" -> "شرایط مناسب بوده"
+    "RISKY" -> "پرریسک/مرزی بوده"
+    "NOT_WORTHY" -> "شرایط کافی نبوده"
+    else -> verdict
 }

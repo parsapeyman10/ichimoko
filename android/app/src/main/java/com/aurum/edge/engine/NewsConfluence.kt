@@ -12,12 +12,15 @@ import com.aurum.edge.data.PersianNewsState
 import com.aurum.edge.data.PersianHeadline
 import java.net.URI
 
-/** Live-only, ninth condition: all eight technical confirmations PLUS verifiable model news.
- * Historical backtests have no point-in-time news archive and must NEVER claim 9/9.
+/** Live-only news journal-mining layer: eight technical confirmations are scored separately.
+ * News can add a green/amber/red context row and a journal evidence snapshot, but it is NOT an
+ * entry prerequisite for paper trading. UNKNOWN or CONFLICT news must stay visible and auditable
+ * without converting a valid Ichimoku/options signal into NO_TRADE.
+ * Historical backtests have no point-in-time news archive and must NEVER claim news confirmation.
  */
 object NewsConfluence {
     const val TECHNICAL_COUNT = 8
-    const val NEWS_LABEL = "۹ · خبر AI با شاهد ناشر"
+    const val NEWS_LABEL = "خبر/تقویم · داده‌کاوی ژورنال"
     private const val MAX_REVIEW_AGE_MS = 180_000L
     private const val MAX_EVIDENCE_AGE_MS = 180 * 60_000L
 
@@ -107,20 +110,35 @@ object NewsConfluence {
               now: Long = System.currentTimeMillis()): Signal? {
         if (raw == null) return null
         val core = raw.confluence.take(TECHNICAL_COUNT)
-        val technicalOk = core.size == TECHNICAL_COUNT && core.all { it.ok }
+        val technicalOk = core.size == TECHNICAL_COUNT && core.all { it.ok && it.status == ConfluenceStatus.CONFIRMED }
         val match = alignment(symbol, raw.action, news, now)
-        val item = ConfluenceItem(NEWS_LABEL, match.status == ConfluenceStatus.CONFIRMED,
-            match.detail, match.status)
-        val combined = raw.copy(confluence = core + item + raw.confluence.drop(TECHNICAL_COUNT))
+        val item = ConfluenceItem(
+            NEWS_LABEL,
+            match.status == ConfluenceStatus.CONFIRMED,
+            match.detail,
+            match.status,
+            scorePercent = when (match.status) {
+                ConfluenceStatus.CONFIRMED -> 100
+                ConfluenceStatus.CONFLICT -> 0
+                ConfluenceStatus.UNKNOWN -> null
+            },
+        )
+        val combined = raw.copy(confluence = raw.confluence + item)
         if (!raw.isActionable) return combined
-        val blocker = when {
-            !technicalOk -> "هشت شرط فنی هم‌زمان تأیید نشده‌اند (${core.count { it.ok }}/$TECHNICAL_COUNT)"
-            match.status != ConfluenceStatus.CONFIRMED -> "شرط نهم (خبر AI): ${match.detail}"
-            else -> return combined.copy(reasons = combined.reasons + "شرط نهم: تحلیل مدل و ناشر هم‌جهت و تازه")
+        val blocker = if (!technicalOk)
+            "هشت شرط فنی اصلی هم‌زمان تأیید نشده‌اند (${core.count { it.ok && it.status == ConfluenceStatus.CONFIRMED }}/$TECHNICAL_COUNT)"
+        else null
+        if (blocker != null) {
+            return combined.copy(action = SignalAction.NO_TRADE, entry = null, stopLoss = null,
+                takeProfit = null, riskReward = null, blockers = combined.blockers + blocker)
         }
-        // No entry levels are published as an actionable paper trade when the ninth condition
-        // is missing. The technical score remains informational, NOT nine-way confidence.
-        return combined.copy(action = SignalAction.NO_TRADE, entry = null, stopLoss = null,
-            takeProfit = null, riskReward = null, blockers = combined.blockers + blocker)
+        return when (match.status) {
+            ConfluenceStatus.CONFIRMED -> combined.copy(
+                reasons = combined.reasons + "خبر/مدل نزدیک معامله ثبت شد؛ فقط داده‌کاوی ژورنال است و شرط ورود نیست")
+            ConfluenceStatus.UNKNOWN -> combined.copy(
+                reasons = combined.reasons + "خبر معیار قطعی ندارد؛ برای داده‌کاوی ژورنال زرد می‌ماند و شرط ورود کاغذی نیست")
+            ConfluenceStatus.CONFLICT -> combined.copy(
+                reasons = combined.reasons + "خبر/تقویم با جهت سیگنال تعارض دارد؛ معاملهٔ کاغذی متوقف نمی‌شود و فقط در ژورنال برای تحلیل بعدی ثبت می‌شود")
+        }
     }
 }

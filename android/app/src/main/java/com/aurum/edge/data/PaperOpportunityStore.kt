@@ -15,7 +15,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.io.File
 
-/** Durable dedup for 9/9 alerts; not part of the executed-paper-trade journal statistics. */
+/** Durable dedup for educational signal alerts; not part of the executed-paper-trade journal statistics. */
 class PaperOpportunityStore(context: Context,
                             private val file: File = File(context.filesDir, "paper_opportunities.json")) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }

@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
  * Real market data contracts.
  *
  * Rule of this app: every price that reaches the UI originates from a real provider
- * (Twelve Data REST/WebSocket) or from a local cache of previously received real prices.
+ * (Twelve Data REST/WebSocket, labelled live fallback ticks) or from a local cache of previously received real prices.
  * There is no generator, no random walk, no seeded simulation anywhere in this module.
  */
 @Serializable
@@ -29,7 +29,8 @@ enum class Interval(val api: String, val label: String, val minutes: Int) {
     M15("15min", "15m", 15),
     M30("30min", "30m", 30),
     H1("1h", "1H", 60),
-    H4("4h", "4H", 240);
+    H4("4h", "4H", 240),
+    D1("1day", "1D", 1440);
 
     val millis: Long get() = minutes * 60_000L
 
@@ -38,9 +39,82 @@ enum class Interval(val api: String, val label: String, val minutes: Int) {
     }
 }
 
-data class PriceTick(val price: Double, val at: Long)
+data class PriceTick(val price: Double, val at: Long, val bid: Double? = null, val ask: Double? = null) {
+    val spread: Double? get() = if (bid != null && ask != null && ask >= bid) ask - bid else null
+}
 
 enum class SignalAction { BUY, SELL, NO_TRADE }
+
+/**
+ * The base Ichimoku confluence engine is active by default. These booleans are additive
+ * opt-in safeguards/setups; Chikou can be explicitly disabled only for a named profile experiment.
+ */
+data class SignalProfile(
+    val momentumVolume: Boolean = false,
+    val flatSpanB: Boolean = false,
+    val rangeChopFilter: Boolean = false,
+    val higherTimeframeFilter: Boolean = false,
+    val fakeBreakoutFilter: Boolean = false,
+    val dynamicSpreadFilter: Boolean = false,
+    val riskyTimingFilter: Boolean = false,
+    val structureRiskFilter: Boolean = false,
+    val cooldownFilter: Boolean = false,
+    /** The standard Chikou confirmation can be explicitly disabled for profile experiments. */
+    val chikouConfirmation: Boolean = true,
+) {
+    val isBaseOnly: Boolean get() = !momentumVolume && !flatSpanB && !rangeChopFilter &&
+        !higherTimeframeFilter && !fakeBreakoutFilter && !dynamicSpreadFilter &&
+        !riskyTimingFilter && !structureRiskFilter && !cooldownFilter && chikouConfirmation
+    val title: String get() = activeLabels().joinToString(" + ")
+
+    fun activeLabels(): List<String> = buildList {
+        add("پایه")
+        if (momentumVolume) add("مومنتوم/حجم")
+        if (flatSpanB) add("تختی SpanB52")
+        if (rangeChopFilter) add("ضد رنج")
+        if (higherTimeframeFilter) add("تایم بالاتر")
+        if (fakeBreakoutFilter) add("ضد فیک‌بریک")
+        if (dynamicSpreadFilter) add("اسپرد پویا")
+        if (riskyTimingFilter) add("زمان خطرناک")
+        if (structureRiskFilter) add("ریسک ساختار")
+        if (cooldownFilter) add("کول‌داون")
+        if (!chikouConfirmation) add("بدون تایید چیکو")
+    }
+
+    fun persistName(): String = buildList {
+        if (momentumVolume) add("MOMENTUM_VOLUME")
+        if (flatSpanB) add("FLAT_SPAN_B")
+        if (rangeChopFilter) add("RANGE_CHOP_FILTER")
+        if (higherTimeframeFilter) add("HIGHER_TIMEFRAME_FILTER")
+        if (fakeBreakoutFilter) add("FAKE_BREAKOUT_FILTER")
+        if (dynamicSpreadFilter) add("DYNAMIC_SPREAD_FILTER")
+        if (riskyTimingFilter) add("RISKY_TIMING_FILTER")
+        if (structureRiskFilter) add("STRUCTURE_RISK_FILTER")
+        if (cooldownFilter) add("COOLDOWN_FILTER")
+        if (!chikouConfirmation) add("CHIKOU_OFF")
+    }.ifEmpty { listOf("BASE") }.joinToString(",")
+
+    companion object {
+        val BASE = SignalProfile()
+
+        /** Migrates the previous single-choice enum value, and also accepts comma lists. */
+        fun fromName(raw: String?): SignalProfile {
+            val parts = raw.orEmpty().split(',', '|', '+').map { it.trim().uppercase() }.toSet()
+            return SignalProfile(
+                momentumVolume = "MOMENTUM_VOLUME" in parts,
+                flatSpanB = "FLAT_SPAN_B" in parts,
+                rangeChopFilter = "RANGE_CHOP_FILTER" in parts,
+                higherTimeframeFilter = "HIGHER_TIMEFRAME_FILTER" in parts,
+                fakeBreakoutFilter = "FAKE_BREAKOUT_FILTER" in parts,
+                dynamicSpreadFilter = "DYNAMIC_SPREAD_FILTER" in parts,
+                riskyTimingFilter = "RISKY_TIMING_FILTER" in parts,
+                structureRiskFilter = "STRUCTURE_RISK_FILTER" in parts,
+                cooldownFilter = "COOLDOWN_FILTER" in parts,
+                chikouConfirmation = "CHIKOU_OFF" !in parts,
+            )
+        }
+    }
+}
 
 enum class ConfluenceStatus { CONFIRMED, CONFLICT, UNKNOWN }
 
@@ -49,6 +123,8 @@ data class ConfluenceItem(
     val ok: Boolean,
     val detail: String,
     val status: ConfluenceStatus = if (ok) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+    /** Optional per-condition contribution/health shown in the UI as a percent out of 100. */
+    val scorePercent: Int? = null,
 )
 
 data class Signal(
@@ -72,8 +148,8 @@ data class Signal(
 enum class FeedMode(val label: String) {
     NO_KEY("کلید API وارد نشده"),
     CONNECTING("در حال اتصال"),
-    LIVE("زنده — WebSocket"),
-    POLLING("کندل REST دوره‌ای — نه تیک زنده"),
+    LIVE("زنده — تیک تازه"),
+    POLLING("کندل/تاریخچه آنلاین دوره‌ای — نه تیک زنده"),
     MARKET_CLOSED("تعطیلی معمول بازار؛ دریافت قیمت متوقف"),
     DELAYED("دادهٔ بازار قدیمی؛ اتصال/بازار را بررسی کنید"),
     OFFLINE("آفلاین"),
@@ -105,6 +181,18 @@ data class PaperNewsRecord(
     /** Calendar is a schedule only; retain its verified receipt time, never invent an article. */
     val calendarSource: String? = null,
     val calendarCheckedAt: Long? = null,
+)
+
+@Serializable
+data class PaperAiReview(
+    /** WORTHY | RISKY | NOT_WORTHY */
+    val verdict: String,
+    val confidence: Int,
+    val summary: String,
+    val reasons: List<String>,
+    val cautions: List<String>,
+    val model: String,
+    val checkedAt: Long,
 )
 
 /** Snapshot of an OHLC approximation at the moment a PAPER opportunity/entry was checked. */
@@ -189,6 +277,8 @@ data class PaperTrade(
     val autoOpened: Boolean = false,
     val signalBarTime: Long? = null,
     val newsEvidence: PaperNewsRecord? = null,
+    /** Companion AI's post-open educational review; never a gate and never financial advice. */
+    val aiReview: PaperAiReview? = null,
     /** Snapshot at the moment the paper position was actually saved; never recompute on read. */
     val entryConditions: List<PaperConditionRecord> = emptyList(),
     /** Null on older/manual records; never infer a historical ICT verdict on read. */
@@ -232,19 +322,21 @@ data class PaperOpportunity(
     val alertedAt: Long,
     val conditions: List<PaperConditionRecord>,
     val mtf: MtfSnapshotRecord,
-    val newsEvidence: PaperNewsRecord,
+    val newsEvidence: PaperNewsRecord? = null,
     val paperTradeId: String? = null,
     /** Null only for a candidate written before the new ICT gate. */
     val priceAction: IctPriceActionRecord? = null,
 ) {
     companion object {
         fun from(signal: Signal, symbol: String, price: Double, mtf: MtfSnapshotRecord,
-                 news: PaperNewsRecord, ict: IctPriceActionRecord,
+                 news: PaperNewsRecord?, ict: IctPriceActionRecord,
                  now: Long = System.currentTimeMillis()): PaperOpportunity {
+            val technicalConditions = signal.confluence.filterNot {
+                it.name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL
+            }
             require(PaperOrderRules.paperable(symbol) && signal.isActionable && signal.barTime > 0 &&
-                signal.confluence.take(9).size == 9 &&
-                signal.confluence.take(9).all { it.ok && it.status == ConfluenceStatus.CONFIRMED } &&
-                signal.confluence[8].name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL &&
+                technicalConditions.take(8).size == 8 &&
+                technicalConditions.take(8).all { it.ok && it.status == ConfluenceStatus.CONFIRMED } &&
                 price.isFinite() && price > 0 && signal.stopLoss != null && signal.takeProfit != null &&
                 ict.matches(signal, symbol, price) && !mtf.veto && mtf.barTime == signal.barTime) {
                 "فرصت آموزشی معتبر نیست"
@@ -254,7 +346,7 @@ data class PaperOpportunity(
                 symbol = symbol, interval = signal.interval, action = signal.action,
                 signalBarTime = signal.barTime, priceAtAlert = price,
                 stopLoss = signal.stopLoss, takeProfit = signal.takeProfit,
-                alertedAt = now, conditions = signal.confluence.take(9).map(PaperConditionRecord::from),
+                alertedAt = now, conditions = technicalConditions.map(PaperConditionRecord::from),
                 mtf = mtf, newsEvidence = news, priceAction = ict,
             )
         }
@@ -448,6 +540,8 @@ data class AppSettings(
     val pauseOnNews: Boolean = false,
     /** Explicit opt-in; automatic orders here are local paper records, never broker orders. */
     val autoPaperTrading: Boolean = false,
+    /** Check for a public APK when the app starts and download it when one is available. */
+    val autoDownloadUpdates: Boolean = false,
     /**
      * OPTIONAL alternative to [newsBaseUrl] for the Forex ninth-condition AI gate: instead of your
      * own backend server, the phone calls this endpoint DIRECTLY with your own key - either the
@@ -464,6 +558,7 @@ data class AppSettings(
      * host). Explicit beats guessing for proxy keys with non-standard prefixes.
      */
     val newsAiFormat: String = "AUTO",
+    val signalProfile: SignalProfile = SignalProfile.BASE,
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
     val hasClientNewsAi: Boolean get() = newsAiApiKey.isNotBlank() && newsAiBaseUrl.isNotBlank() && newsAiModel.isNotBlank()

@@ -20,7 +20,7 @@ class HomeReadoutTest {
     private val now = 1_800_000_000_000L
     private val historical = Candle(now - 300_000L, 3000.0, 3002.0, 2998.0, 3001.0)
     private val fresh = MarketState(candles = listOf(historical), lastPrice = 3001.0,
-        feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now - 10_000L))
+        feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now - 10_000L, provider = "Twelve Data WebSocket"))
 
     @Test fun `live and REST are described differently and stale or cached quotes never say current`() {
         val live = HomeReadout.from(fresh, now)
@@ -32,6 +32,11 @@ class HomeReadoutTest {
         assertTrue(rest.current)
         assertTrue(rest.label.contains("REST"))
         assertFalse(rest.label.contains("WebSocket"))
+        val fallback = HomeReadout.from(fresh.copy(feed = FeedStatus(FeedMode.LIVE,
+            lastSuccessAt = now - 15_000L, provider = "فید زندهٔ جایگزین")), now)
+        assertTrue(fallback.current)
+        assertTrue(fallback.label.contains("جایگزین"))
+        assertFalse(fallback.label.contains("WebSocket"))
 
         for (stale in listOf(
             fresh.copy(feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now - 90_001L)),
@@ -61,8 +66,19 @@ class HomeReadoutTest {
             assertFalse(HomeReadout.from(fresh.copy(feed = delayed), now).current)
             assertEquals(mode, FeedLiveness.display(received.copy(lastSuccessAt = now - 1L), now).mode)
         }
+        val freshDelayedTick = FeedLiveness.display(FeedStatus(FeedMode.DELAYED,
+            detail = "بیش از ۹۰ ثانیه تیک تازه دریافت نشده؛ این قیمت آنلاین نیست",
+            lastSuccessAt = now - 1_000L,
+            provider = "فید زندهٔ جایگزین (Swissquote/Gold-API؛ WebSocket Twelve در دسترس نیست)"), now)
+        assertEquals(FeedMode.LIVE, freshDelayedTick.mode)
+        assertFalse(freshDelayedTick.detail.contains("۹۰"))
+        val freshDelayedRest = FeedLiveness.display(FeedStatus(FeedMode.DELAYED,
+            lastSuccessAt = now - 1_000L,
+            provider = "Twelve Data"), now)
+        assertEquals(FeedMode.POLLING, freshDelayedRest.mode)
         assertEquals(FeedMode.OFFLINE, FeedLiveness.display(FeedStatus(FeedMode.OFFLINE), now).mode)
-        assertFalse(FeedLiveness.hasRecentReceipt(FeedStatus(FeedMode.LIVE, lastSuccessAt = now + 1), now))
+        assertTrue(FeedLiveness.hasRecentReceipt(FeedStatus(FeedMode.LIVE, lastSuccessAt = now + 1), now))
+        assertFalse(FeedLiveness.hasRecentReceipt(FeedStatus(FeedMode.LIVE, lastSuccessAt = now + 11_000L), now))
     }
 
     @Test fun `every destination is reachable from the forex navigation`() {
@@ -70,6 +86,7 @@ class HomeReadoutTest {
         assertEquals(AurumTab.Home, primaryTabs.first())
         assertTrue(AurumTab.News in primaryTabs)
         assertTrue(AurumTab.Learn in moreTabs)
+        assertTrue(AurumTab.Update in moreTabs)
         assertTrue(AurumTab.Settings in moreTabs)
         assertTrue(AurumTab.Api in moreTabs)
         assertTrue(primaryTabs.size <= 5) // bottom bar stays usable on small screens
@@ -79,10 +96,9 @@ class HomeReadoutTest {
         assertEquals(listOf("XAU/USD", "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD",
             "USD/JPY", "USD/CHF", "USD/CAD"), WatchCatalog.symbols.map { it.id })
         assertTrue(WatchCatalog.symbols.all { "IRT" !in it.id && it.unit != "تومان" })
-        // USD-quoted pairs have an independent second source for cross-checking
-        assertEquals(2, WatchCatalog.find("EUR/USD")!!.providerCodes.size)
-        // Non-USD-quoted pairs stay Twelve Data only; their Yahoo quotes are in another unit
-        assertEquals(1, WatchCatalog.find("USD/JPY")!!.providerCodes.size)
+        // Every working symbol has a Twelve Data mapping and a fixed public Yahoo mirror.
+        assertTrue(WatchCatalog.symbols.all { it.providerCodes.size == 2 })
+        assertEquals("XAUUSD=X", WatchCatalog.find("XAU/USD")!!.providerCodes["stocks_yahoo"])
         assertEquals("JPY", WatchCatalog.find("USD/JPY")!!.unit)
     }
 }

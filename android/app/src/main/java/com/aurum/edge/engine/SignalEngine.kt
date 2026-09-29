@@ -5,6 +5,11 @@ import com.aurum.edge.core.ConfluenceItem
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.core.SignalProfile
+import com.aurum.edge.core.ConfluenceStatus
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.ZoneId
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -21,6 +26,8 @@ import kotlin.math.min
  * back-test share one single implementation (what you test is what you run).
  */
 object SignalEngine {
+
+    private val newYorkZone: ZoneId = ZoneId.of("America/New_York")
 
     data class IchiSetting(val tenkan: Int, val kijun: Int, val spanB: Int)
 
@@ -106,6 +113,10 @@ object SignalEngine {
         val chikouSellClear: Boolean,
         val bullCross: Boolean,
         val bearCross: Boolean,
+        val spanBFlatBars: Int,
+        val spanBFlatValue: Double?,
+        val rangeBreakoutUp: Boolean,
+        val rangeBreakoutDown: Boolean,
     )
 
     fun snapshot(series: Series, index: Int): Snapshot? {
@@ -139,6 +150,25 @@ object SignalEngine {
         val chikouBuyClear = chikouIndex >= 0 && bars[i].close > bars[chikouIndex].high
         val chikouSellClear = chikouIndex >= 0 && bars[i].close < bars[chikouIndex].low
 
+        val rawSpanB = series.ichimoku.senkouB.getOrNull(i)
+        val flatTolerance = max(atrValue * 0.02, bars[i].close * 0.00005)
+        var spanBFlatBars = 0
+        if (rawSpanB != null) {
+            var j = i
+            while (j >= 0 && spanBFlatBars < 40) {
+                val b = series.ichimoku.senkouB.getOrNull(j) ?: break
+                if (abs(b - rawSpanB) > flatTolerance) break
+                spanBFlatBars++
+                j--
+            }
+        }
+        val rangeStart = max(0, i - 20)
+        val recent = if (rangeStart < i) bars.subList(rangeStart, i) else emptyList()
+        val rangeHigh = recent.maxOfOrNull { it.high } ?: bars[i].high
+        val rangeLow = recent.minOfOrNull { it.low } ?: bars[i].low
+        val rangeBreakoutUp = bars[i].close > rangeHigh + 0.08 * atrValue
+        val rangeBreakoutDown = bars[i].close < rangeLow - 0.08 * atrValue
+
         return Snapshot(
             index = i,
             barTime = bars[i].time,
@@ -163,6 +193,10 @@ object SignalEngine {
             chikouSellClear = chikouSellClear,
             bullCross = crossedUpNow || crossedUpBefore,
             bearCross = crossedDownNow || crossedDownBefore,
+            spanBFlatBars = spanBFlatBars,
+            spanBFlatValue = rawSpanB,
+            rangeBreakoutUp = rangeBreakoutUp,
+            rangeBreakoutDown = rangeBreakoutDown,
         )
     }
 
@@ -176,6 +210,7 @@ object SignalEngine {
         threshold: Double = 72.0,
         spread: Double? = null,
         narrative: Boolean = true,
+        profile: SignalProfile = SignalProfile.BASE,
     ): Signal {
         val interval = series.interval
         val bars = series.bars
@@ -196,29 +231,54 @@ object SignalEngine {
             barTime = bars.getOrNull(index)?.time ?: 0L,
         )
 
-        val direction = when {
+        val crossDirection = when {
             snap.bullCross -> SignalAction.BUY
             snap.bearCross -> SignalAction.SELL
             else -> null
         }
+        val flatLong = snap.spanBFlatBars >= 8 && snap.spanBFlatValue != null &&
+            snap.price > snap.spanBFlatValue + 0.10 * snap.atr &&
+            (snap.rangeBreakoutUp || (snap.adx ?: 0.0) >= 20.0)
+        val flatShort = snap.spanBFlatBars >= 8 && snap.spanBFlatValue != null &&
+            snap.price < snap.spanBFlatValue - 0.10 * snap.atr &&
+            (snap.rangeBreakoutDown || (snap.adx ?: 0.0) >= 20.0)
+        val flatDirection = when {
+            flatLong -> SignalAction.BUY
+            flatShort -> SignalAction.SELL
+            else -> null
+        }
+        val direction = crossDirection ?: if (profile.flatSpanB) flatDirection else null
+        val usedFlatEntry = crossDirection == null && direction != null && flatDirection == direction
         val long = direction == SignalAction.BUY
         val reasons = mutableListOf<String>()
         val blockers = mutableListOf<String>()
         val confluence = mutableListOf<ConfluenceItem>()
         val minThreshold = threshold.coerceAtLeast(72.0)
 
-        var score = 20.0
+        var score = if (usedFlatEntry) 30.0 else 20.0
         if (direction != null) {
-            if (narrative) reasons += if (long) "کراس تازه صعودی تنکان/کیجون" else "کراس تازه نزولی تنکان/کیجون"
+            if (narrative) reasons += when {
+                crossDirection != null -> if (long) "کراس تازه صعودی تنکان/کیجون" else "کراس تازه نزولی تنکان/کیجون"
+                usedFlatEntry -> if (long) "سناریوی تختی SpanB52: شکست رو به بالا پس از سکون خط ۵۲" else "سناریوی تختی SpanB52: شکست رو به پایین پس از سکون خط ۵۲"
+                else -> "جهت سیگنال تأیید شد"
+            }
         } else if (narrative) {
-            blockers += "کراس تازه تنکان/کیجون شکل نگرفته — ورود ممنوع"
+            blockers += if (profile.flatSpanB)
+                "نه کراس تنکان/کیجون داریم، نه شکست معتبر از تختی SpanB52"
+            else "کراس تازه تنکان/کیجون شکل نگرفته — ورود ممنوع"
         }
         if (narrative) {
             confluence += ConfluenceItem(
-                "کراس تنکان/کیجون (${series.setting.tenkan}/${series.setting.kijun})",
-                direction != null,
-                "T ${fmt(snap.tenkan)} / K ${fmt(snap.kijun)}",
+                "۱ · جهت ایچیموکو: کراس تنکان/کیجون (${series.setting.tenkan}/${series.setting.kijun})",
+                crossDirection != null,
+                "T ${fmt(snap.tenkan)} / K ${fmt(snap.kijun)} · سهم امتیاز ۲۰ از ۱۰۰",
+                scorePercent = if (crossDirection != null) 20 else 0,
             )
+        }
+
+        if (profile.flatSpanB && flatDirection == direction && direction != null) {
+            score += 18
+            if (!usedFlatEntry && narrative) reasons += "تأیید افزودهٔ تختی SpanB52 هم‌جهت با سیگنال پایه"
         }
 
         val clearance = 0.08 * snap.atr
@@ -233,7 +293,12 @@ object SignalEngine {
         } else if (direction != null && narrative) {
             blockers += if (long) "قیمت داخل/نزدیک ابر — شکست صعودی تایید نشده" else "قیمت داخل/نزدیک ابر — شکست نزولی تایید نشده"
         }
-        if (narrative) confluence += ConfluenceItem("قبول قیمت خارج ابر", cloudOk, "${fmt(snap.cloudTop)} — ${fmt(snap.cloudBottom)}")
+        if (narrative) confluence += ConfluenceItem(
+            "۲ · قبول قیمت خارج ابر",
+            cloudOk,
+            "${fmt(snap.cloudTop)} — ${fmt(snap.cloudBottom)} · سهم امتیاز ۱۸ از ۱۰۰",
+            scorePercent = if (cloudOk) 18 else 0,
+        )
 
         val spanOk = when (direction) {
             SignalAction.BUY -> snap.spanA > snap.spanB
@@ -244,18 +309,35 @@ object SignalEngine {
             score += 10
             if (narrative) reasons += "ابر آینده هم‌جهت"
         } else if (direction != null && narrative) blockers += "ابر آینده مخالف جهت معامله"
-        if (narrative) confluence += ConfluenceItem("هم‌جهتی Senkou A/B", spanOk, "A ${fmt(snap.spanA)} / B ${fmt(snap.spanB)}")
+        if (narrative) confluence += ConfluenceItem(
+            "۳ · هم‌جهتی Senkou A/B",
+            spanOk,
+            "A ${fmt(snap.spanA)} / B ${fmt(snap.spanB)} · سهم امتیاز ۱۰ از ۱۰۰",
+            scorePercent = if (spanOk) 10 else 0,
+        )
 
-        val chikouOk = when (direction) {
+        val chikouOk = !profile.chikouConfirmation || when (direction) {
             SignalAction.BUY -> snap.chikouBuyClear
             SignalAction.SELL -> snap.chikouSellClear
             else -> false
         }
-        if (chikouOk) {
+        if (!profile.chikouConfirmation) {
+            if (narrative) reasons += "تایید Chikou در این پروفایل خاموش است"
+        } else if (chikouOk) {
             score += 10
             if (narrative) reasons += "تایید چیکو نسبت به ساختار ${series.setting.kijun} کندل قبل"
         } else if (direction != null && narrative) blockers += "چیکو تایید نمی‌کند — ساختار قبلی نقض می‌شود"
-        if (narrative) confluence += ConfluenceItem("تایید Chikou", chikouOk, if (long) "close بالای high قبلی" else "close زیر low قبلی")
+        if (narrative) confluence += ConfluenceItem(
+            "۴ · تایید Chikou",
+            chikouOk,
+            if (profile.chikouConfirmation) {
+                (if (long) "close بالای high قبلی" else "close زیر low قبلی") + " · سهم امتیاز ۱۰ از ۱۰۰"
+            } else "خاموش در پروفایل؛ شرطی به امتیاز اضافه نشد",
+            status = if (profile.chikouConfirmation) {
+                if (chikouOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT
+            } else ConfluenceStatus.UNKNOWN,
+            scorePercent = if (profile.chikouConfirmation && chikouOk) 10 else 0,
+        )
 
         val emaOk = when (direction) {
             SignalAction.BUY -> snap.price > snap.ema200
@@ -266,7 +348,12 @@ object SignalEngine {
             score += 15
             if (narrative) reasons += "هم‌جهت با EMA200"
         } else if (direction != null && narrative) blockers += "خلاف روند EMA200"
-        if (narrative) confluence += ConfluenceItem("EMA200", emaOk, fmt(snap.ema200))
+        if (narrative) confluence += ConfluenceItem(
+            "۵ · EMA200",
+            emaOk,
+            "${fmt(snap.ema200)} · سهم امتیاز ۱۵ از ۱۰۰",
+            scorePercent = if (emaOk) 15 else 0,
+        )
 
         val vwapOk = when (direction) {
             SignalAction.BUY -> snap.price > snap.vwap
@@ -277,7 +364,12 @@ object SignalEngine {
             score += 12
             if (narrative) reasons += "سمت درست VWAP جلسه"
         } else if (direction != null && narrative) blockers += "سمت اشتباه VWAP جلسه"
-        if (narrative) confluence += ConfluenceItem("VWAP جلسه", vwapOk, fmt(snap.vwap))
+        if (narrative) confluence += ConfluenceItem(
+            "۶ · VWAP جلسه",
+            vwapOk,
+            "${fmt(snap.vwap)} · سهم امتیاز ۱۲ از ۱۰۰",
+            scorePercent = if (vwapOk) 12 else 0,
+        )
 
         val rsiOk = when (direction) {
             SignalAction.BUY -> snap.rsi in 52.0..72.0
@@ -288,7 +380,12 @@ object SignalEngine {
             score += 10
             if (narrative) reasons += "RSI7 در ناحیه سالم (${fmt(snap.rsi)})"
         } else if (direction != null && narrative) blockers += "RSI7 اشباع یا بی‌مومنتوم (${fmt(snap.rsi)})"
-        if (narrative) confluence += ConfluenceItem("RSI7", rsiOk, fmt(snap.rsi))
+        if (narrative) confluence += ConfluenceItem(
+            "۷ · RSI7",
+            rsiOk,
+            "${fmt(snap.rsi)} · سهم امتیاز ۱۰ از ۱۰۰",
+            scorePercent = if (rsiOk) 10 else 0,
+        )
 
         val hist = snap.macdHist ?: 0.0
         val momentumOk = (if (long) hist > 0 else hist < 0) && (snap.adx ?: 0.0) >= 20.0
@@ -298,14 +395,22 @@ object SignalEngine {
         } else if (direction != null && narrative) blockers += "مومنتوم کافی نیست (MACD/ADX)"
         if (narrative) {
             confluence += ConfluenceItem(
-                "مومنتوم MACD/ADX",
+                "۸ · مومنتوم MACD/ADX",
                 momentumOk,
-                "hist ${snap.macdHist?.let { fmt(it) } ?: "—"} / ADX ${snap.adx?.let { fmt(it) } ?: "—"}",
+                "hist ${snap.macdHist?.let { fmt(it) } ?: "—"} / ADX ${snap.adx?.let { fmt(it) } ?: "—"} · سهم امتیاز ۵ از ۱۰۰",
+                scorePercent = if (momentumOk) 5 else 0,
             )
             confluence += ConfluenceItem(
-                "نوسان ATR در محدوده",
+                "کنترل اضافه · نوسان ATR در محدوده",
                 !snap.atrShock,
                 "ATR ${fmt(snap.atr)}" + if (snap.atrShock) " — شوک نوسان" else "",
+            )
+            val flatOk = flatDirection == direction && direction != null
+            confluence += ConfluenceItem(
+                "آپشن افزوده · تختی SpanB52",
+                flatOk,
+                "${snap.spanBFlatBars} کندل تخت · B ${snap.spanBFlatValue?.let { fmt(it) } ?: "—"} · شکست ${if (snap.rangeBreakoutUp) "بالا" else if (snap.rangeBreakoutDown) "پایین" else "ندارد"}",
+                status = if (profile.flatSpanB && flatOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
             )
         }
         if (snap.atrShock) {
@@ -318,15 +423,51 @@ object SignalEngine {
             if (spreadBlocked && narrative) blockers += "اسپرد غیرعادی (${fmt(spread)}) — اجرا متوقف"
             if (narrative) confluence += ConfluenceItem("اسپرد", !spreadBlocked, fmt(spread))
         }
+        val volumeOk = snap.relVolume?.let { it >= 0.6 }
         if (narrative) {
-            snap.relVolume?.let { rv -> confluence += ConfluenceItem("حجم نسبی ۳۰ کندل", rv >= 0.6, "${fmt(rv)}×") }
+            confluence += ConfluenceItem("حجم نسبی ۳۰ کندل", volumeOk != false, snap.relVolume?.let { "${fmt(it)}×" } ?: "حجم معتبر از منبع نداریم")
+        }
+        if (profile.momentumVolume && direction != null) {
+            if (!momentumOk) blockers += "پروفایل مومنتوم/حجم: MACD/ADX باید هم‌جهت و قوی باشد"
+            if (volumeOk == false) blockers += "پروفایل مومنتوم/حجم: حجم نسبی کمتر از حداقل است"
+            if (momentumOk && volumeOk != false) score += 8
+        }
+
+        var additiveFiltersOk = !profile.momentumVolume || (momentumOk && volumeOk != false)
+        fun applyGuard(name: String, guard: GuardResult) {
+            if (narrative) confluence += ConfluenceItem(name, guard.ok, guard.detail)
+            if (direction != null && !guard.ok) {
+                additiveFiltersOk = false
+                if (narrative) blockers += guard.blocker
+            }
+        }
+        if (direction != null && profile.rangeChopFilter) {
+            applyGuard("فیلتر ضد رنج/Chop", rangeChopGuard(series, snap))
+        }
+        if (direction != null && profile.higherTimeframeFilter) {
+            applyGuard("تأیید تایم بالاتر", higherTimeframeGuard(series, snap, direction))
+        }
+        if (direction != null && profile.fakeBreakoutFilter) {
+            applyGuard("ضد فیک‌بریک‌اوت", fakeBreakoutGuard(series, snap, direction))
+        }
+        if (direction != null && profile.dynamicSpreadFilter) {
+            applyGuard("اسپرد/نقدشوندگی پویا", dynamicSpreadGuard(snap, spread))
+        }
+        if (direction != null && profile.riskyTimingFilter) {
+            applyGuard("زمان خطرناک", riskyTimingGuard(snap.barTime))
+        }
+        if (direction != null && profile.structureRiskFilter) {
+            applyGuard("ریسک ساختار/حدضرر", structureRiskGuard(series, snap, direction))
+        }
+        if (direction != null && profile.cooldownFilter) {
+            applyGuard("کول‌داون شکست", cooldownGuard(series, snap, direction))
         }
 
         if (direction == null) score = min(score, 69.0)
         score = score.coerceIn(0.0, 100.0)
         val conf = score
 
-        val actionable = direction != null && conf >= minThreshold && !snap.atrShock && !spreadBlocked
+        val actionable = direction != null && conf >= minThreshold && !snap.atrShock && !spreadBlocked && additiveFiltersOk
         if (!actionable) {
             if (narrative && conf < minThreshold && direction != null) {
                 blockers += "امتیاز همگرایی ${fmt(conf)} کمتر از آستانه ${fmt(minThreshold)}"
@@ -370,9 +511,152 @@ object SignalEngine {
     }
 
     /** Convenience for the live path: evaluate the newest closed bar. */
-    fun evaluate(candles: List<Candle>, interval: Interval, threshold: Double = 72.0, spread: Double? = null): Signal {
+    fun evaluate(candles: List<Candle>, interval: Interval, threshold: Double = 72.0, spread: Double? = null,
+                 profile: SignalProfile = SignalProfile.BASE): Signal {
         val s = series(candles, interval)
-        return decide(s, s.lastIndex, threshold, spread)
+        return decide(s, s.lastIndex, threshold, spread, profile = profile)
+    }
+
+    private data class GuardResult(val ok: Boolean, val detail: String, val blocker: String)
+
+    private fun rangeChopGuard(series: Series, snap: Snapshot): GuardResult {
+        val bars = series.bars
+        val from = max(0, snap.index - 20)
+        val window = bars.subList(from, snap.index + 1)
+        val rangeWidth = (window.maxOfOrNull { it.high } ?: snap.price) -
+            (window.minOfOrNull { it.low } ?: snap.price)
+        val bbWidth = if (snap.bbUpper != null && snap.bbLower != null) snap.bbUpper - snap.bbLower else null
+        val adx = snap.adx ?: 0.0
+        val compressed = rangeWidth <= 2.2 * snap.atr || (bbWidth != null && bbWidth <= 1.35 * snap.atr)
+        val noBreakout = !snap.rangeBreakoutUp && !snap.rangeBreakoutDown
+        val choppy = adx < 18.0 && compressed && noBreakout
+        val detail = "ADX ${fmt(adx)} · رنج۲۰ ${fmt(rangeWidth)} · ATR ${fmt(snap.atr)}"
+        return GuardResult(!choppy, detail, "فیلتر رنج/Chop: بازار فشرده و بی‌روند است")
+    }
+
+    private fun higherTimeframeGuard(series: Series, snap: Snapshot, direction: SignalAction): GuardResult {
+        val lookback = when (series.interval) {
+            Interval.M1 -> 45
+            Interval.M5 -> 36
+            Interval.M15 -> 32
+            else -> 24
+        }
+        val past = series.ema200.getOrNull(max(0, snap.index - lookback)) ?: return GuardResult(
+            true, "برای شیب تایم بالاتر دادهٔ کافی نداریم؛ سخت‌گیری اعمال نشد", "")
+        val slope = snap.ema200 - past
+        val tolerance = 0.10 * snap.atr
+        val ok = when (direction) {
+            SignalAction.BUY -> snap.price >= snap.ema200 - 0.05 * snap.atr && slope >= -tolerance
+            SignalAction.SELL -> snap.price <= snap.ema200 + 0.05 * snap.atr && slope <= tolerance
+            else -> true
+        }
+        val detail = "EMA200 ${fmt(snap.ema200)} · شیب ${fmt(slope)} در $lookback کندل"
+        return GuardResult(ok, detail, "فیلتر تایم بالاتر: سیگنال خلاف روند غالب/شیب EMA200 است")
+    }
+
+    private fun fakeBreakoutGuard(series: Series, snap: Snapshot, direction: SignalAction): GuardResult {
+        val bars = series.bars
+        val bar = bars[snap.index]
+        val candleRange = max(bar.high - bar.low, snap.atr * 0.05)
+        val upperWick = bar.high - max(bar.open, bar.close)
+        val lowerWick = min(bar.open, bar.close) - bar.low
+        val closeStrength = if (direction == SignalAction.BUY) {
+            (bar.close - bar.low) / candleRange
+        } else {
+            (bar.high - bar.close) / candleRange
+        }
+        val wickOk = if (direction == SignalAction.BUY) upperWick <= candleRange * 0.45 else lowerWick <= candleRange * 0.45
+        val from = max(0, snap.index - 8)
+        val previous = if (from < snap.index) bars.subList(from, snap.index) else emptyList()
+        val previousHigh = previous.maxOfOrNull { it.high } ?: bar.high
+        val previousLow = previous.minOfOrNull { it.low } ?: bar.low
+        val broke = if (direction == SignalAction.BUY) {
+            bar.close > previousHigh + 0.03 * snap.atr || snap.rangeBreakoutUp
+        } else {
+            bar.close < previousLow - 0.03 * snap.atr || snap.rangeBreakoutDown
+        }
+        val retested = if (direction == SignalAction.BUY) {
+            bar.low <= snap.kijun + 0.20 * snap.atr && bar.close > snap.kijun
+        } else {
+            bar.high >= snap.kijun - 0.20 * snap.atr && bar.close < snap.kijun
+        }
+        val ok = closeStrength >= 0.55 && wickOk && (broke || retested)
+        val detail = "قدرت بسته‌شدن ${fmt(closeStrength * 100)}٪ · ویک ${if (wickOk) "سالم" else "مشکوک"} · ${if (broke) "شکست" else if (retested) "ری‌تست" else "بدون شکست/ری‌تست"}"
+        return GuardResult(ok, detail, "فیلتر فیک‌بریک‌اوت: بسته‌شدن/ویک/شکست یا ری‌تست کافی نیست")
+    }
+
+    private fun dynamicSpreadGuard(snap: Snapshot, spread: Double?): GuardResult {
+        if (spread == null) return GuardResult(
+            true, "اسپرد لحظه‌ای/فرضی در دسترس نیست؛ عددی ساخته نشد", "")
+        val ratio = spread / snap.atr
+        val ok = spread <= 0.60 && ratio <= 0.15
+        val detail = "اسپرد ${fmt(spread)} · ${fmt(ratio * 100)}٪ ATR"
+        return GuardResult(ok, detail, "فیلتر اسپرد پویا: هزینهٔ ورود نسبت به ATR زیاد است")
+    }
+
+    private fun riskyTimingGuard(barTime: Long): GuardResult {
+        val ny = Instant.ofEpochMilli(barTime).atZone(newYorkZone)
+        val minute = ny.hour * 60 + ny.minute
+        val detail = when {
+            ny.dayOfWeek == DayOfWeek.FRIDAY && minute >= 15 * 60 + 30 ->
+                "نزدیک بسته‌شدن جمعه نیویورک"
+            ny.dayOfWeek == DayOfWeek.SUNDAY && minute in (18 * 60)..(19 * 60 + 10) ->
+                "شروع بازار یکشنبه/طلا؛ نقدشوندگی می‌تواند نامنظم باشد"
+            minute in (16 * 60 + 55)..(18 * 60 + 5) ->
+                "پنجره رول‌اور نیویورک"
+            minute in (8 * 60 + 25)..(8 * 60 + 45) || minute in (9 * 60 + 55)..(10 * 60 + 10) ->
+                "پنجره معمول خبرهای سنگین آمریکا؛ تقویم واقعی خبر جدا لازم است"
+            else -> null
+        }
+        return GuardResult(detail == null, detail ?: "زمان کندل در پنجره‌های پرریسک ثابت نیست", "فیلتر زمان خطرناک: ${detail ?: "پنجره پرریسک"}")
+    }
+
+    private fun structureRiskGuard(series: Series, snap: Snapshot, direction: SignalAction): GuardResult {
+        val bars = series.bars
+        val local = bars.subList(max(0, snap.index - 5), snap.index + 1)
+        val structure = if (direction == SignalAction.BUY) {
+            local.minOf { it.low } - 0.15 * snap.atr
+        } else {
+            local.maxOf { it.high } + 0.15 * snap.atr
+        }
+        val rawDistance = abs(snap.price - structure)
+        val distanceOk = rawDistance in (0.45 * snap.atr)..(2.20 * snap.atr)
+        val wider = bars.subList(max(0, snap.index - 20), snap.index + 1)
+        val recentHigh = wider.dropLast(1).maxOfOrNull { it.high } ?: snap.price
+        val recentLow = wider.dropLast(1).minOfOrNull { it.low } ?: snap.price
+        val blockedByOppositeWall = if (direction == SignalAction.BUY) {
+            recentHigh > snap.price && recentHigh - snap.price < 0.25 * snap.atr && !snap.rangeBreakoutUp
+        } else {
+            recentLow < snap.price && snap.price - recentLow < 0.25 * snap.atr && !snap.rangeBreakoutDown
+        }
+        val ok = distanceOk && !blockedByOppositeWall
+        val detail = "فاصله ساختار ${fmt(rawDistance)} (${fmt(rawDistance / snap.atr)}×ATR)"
+        return GuardResult(ok, detail, "فیلتر ساختار: حد ضرر/دیوار مقابل نسبت به ATR منطقی نیست")
+    }
+
+    private fun cooldownGuard(series: Series, snap: Snapshot, direction: SignalAction): GuardResult {
+        val from = max(2, snap.index - max(4, barsValid(series.interval)))
+        var flips = 0
+        var previousSign = 0
+        var oppositeCross = false
+        for (j in from..snap.index) {
+            val t = series.ichimoku.tenkan.getOrNull(j) ?: continue
+            val k = series.ichimoku.kijun.getOrNull(j) ?: continue
+            val sign = when {
+                t > k -> 1
+                t < k -> -1
+                else -> 0
+            }
+            if (previousSign != 0 && sign != 0 && sign != previousSign) flips++
+            if (j < snap.index && previousSign != 0 && sign != 0 && sign != previousSign) {
+                if (direction == SignalAction.BUY && sign < 0) oppositeCross = true
+                if (direction == SignalAction.SELL && sign > 0) oppositeCross = true
+            }
+            if (sign != 0) previousSign = sign
+        }
+        val ok = !oppositeCross && flips < 3
+        val detail = "$flips چرخش تنکان/کیجون در ${snap.index - from + 1} کندل اخیر"
+        return GuardResult(ok, detail, "کول‌داون: بازار اخیراً رفت‌وبرگشتی/کراس مخالف داشته است")
     }
 
     private fun fmt(value: Double): String = String.format("%.2f", value)

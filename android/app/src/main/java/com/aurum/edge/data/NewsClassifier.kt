@@ -7,7 +7,7 @@ data class NewsClassification(val importance: NewsImportance, val direction: New
 
 /**
  * Rule-based keyword scan of an ALREADY-FETCHED real headline (title+excerpt) — never a model,
- * never a fabricated headline, and NEVER the server's AI news gate ([com.aurum.edge] "شرط نهم"),
+ * never a fabricated headline, and NEVER the journal-mining AI/news context,
  * which stays authoritative and fails closed to UNKNOWN on its own. This is a fast, transparent,
  * disclosed heuristic to help a human scan a headline list; it must not be read as a trading
  * signal or an AI verdict, exactly like the backend's own rule: "no keyword fallback may call
