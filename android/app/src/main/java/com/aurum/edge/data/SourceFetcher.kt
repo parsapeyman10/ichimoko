@@ -1,6 +1,5 @@
 package com.aurum.edge.data
 
-import android.os.SystemClock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -35,11 +34,11 @@ class SourceFetcher(
         symbols: List<SymbolDef> = source.symbols,
         apiKey: String = "",
     ): SourceSnapshot = withContext(Dispatchers.IO) {
-        val startedAt = SystemClock.elapsedRealtime()
+        val startedAt = System.nanoTime()
         require(SourceCatalog.find(source.id) == source) { "منبع ناشناخته است" }
         if (symbols.isEmpty()) return@withContext SourceSnapshot(
             source, emptyList(), fetchedAt = System.currentTimeMillis(), online = false,
-            latencyMs = SystemClock.elapsedRealtime() - startedAt,
+            latencyMs = (System.nanoTime() - startedAt) / 1_000_000L,
         )
         if (source.requiresKey && apiKey.isBlank()) {
             return@withContext SourceSnapshot(
@@ -50,7 +49,7 @@ class SourceFetcher(
                 fetchedAt = System.currentTimeMillis(),
                 online = false,
                 error = "کلید API وارد نشده است",
-                latencyMs = SystemClock.elapsedRealtime() - startedAt,
+                latencyMs = (System.nanoTime() - startedAt) / 1_000_000L,
             )
         }
         val quotes = if (source.batchTemplate != null) {
@@ -70,7 +69,7 @@ class SourceFetcher(
             fetchedAt = System.currentTimeMillis(),
             online = quotes.any { it.price != null },
             error = quotes.firstOrNull { it.price == null }?.error,
-            latencyMs = SystemClock.elapsedRealtime() - startedAt,
+            latencyMs = (System.nanoTime() - startedAt) / 1_000_000L,
         )
     }
 
