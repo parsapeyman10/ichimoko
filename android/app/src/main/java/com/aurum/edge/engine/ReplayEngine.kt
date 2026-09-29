@@ -2,6 +2,7 @@ package com.aurum.edge.engine
 
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.Interval
+import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalProfile
 
 /**

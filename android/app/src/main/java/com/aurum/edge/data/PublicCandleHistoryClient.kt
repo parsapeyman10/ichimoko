@@ -96,11 +96,13 @@ class PublicCandleHistoryClient(
         )
     }
 
-    internal fun detectGaps(candles: List<Candle>, interval: Interval): List<Gap> =
-        candles.sortedBy { it.time }.zipWithNext().mapNotNull { (before, after) ->
-            val steps = (after.time - before.time) / interval.millis
-            if (steps > 1L) Gap(before.time, after.time, steps - 1L) else null
-        }
+    companion object {
+        internal fun detectGaps(candles: List<Candle>, interval: Interval): List<Gap> =
+            candles.sortedBy { it.time }.zipWithNext().mapNotNull { (before, after) ->
+                val steps = (after.time - before.time) / interval.millis
+                if (steps > 1L) Gap(before.time, after.time, steps - 1L) else null
+            }
+    }
 
     internal fun parseYahooChart(
         body: String,
