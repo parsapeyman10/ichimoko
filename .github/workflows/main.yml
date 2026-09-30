@@ -98,7 +98,12 @@ jobs:
 
       - name: Set up Android SDK
         if: steps.guard.outputs.ready == 'true'
-        uses: android-actions/setup-android@v3
+        # v4 runs on Node 24 and ships current command-line tools. v3 used Node 20 and
+        # failed before sdkmanager ran on the current GitHub-hosted runner image.
+        uses: android-actions/setup-android@v4.0.4
+        with:
+          cmdline-tools-version: '15859902'
+          packages: 'platform-tools'
 
       - name: Install Android SDK packages
         if: steps.guard.outputs.ready == 'true'
