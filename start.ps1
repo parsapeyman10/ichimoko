@@ -1,10 +1,12 @@
-# Double-click this file → Everything starts
-$ErrorActionPreference = "SilentlyContinue"
+# Double-click this file to start the local API and web terminal.
+# Deliberately does NOT run git pull: pulling a hard-coded branch can overwrite local work.
+$ErrorActionPreference = "Continue"
 $ROOT = $PSScriptRoot
 if (-not $ROOT) { $ROOT = Get-Location }
 Set-Location $ROOT
-Write-Host "Trading — One Click..." -ForegroundColor Yellow
-git pull origin arena/01a09055-ichimoko 2>$null
+$branch = git branch --show-current 2>$null
+Write-Host "Trading — One Click ($branch)" -ForegroundColor Yellow
+Write-Host "Auto-update is disabled; update the current branch intentionally before starting." -ForegroundColor DarkGray
 python run.py
 if ($LASTEXITCODE -ne 0) { py run.py }
 pause

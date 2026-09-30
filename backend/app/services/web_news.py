@@ -102,7 +102,10 @@ class WebNewsFeed:
 
     async def snapshot(self) -> dict:
         async with self._lock:
-            if time.monotonic() - self._last_attempt >= 120:
+            # `_last_attempt` is zero until the first collection. Explicitly test that
+            # sentinel so a newly started server always performs its initial RSS refresh,
+            # even when the host monotonic clock is below the two-minute cache interval.
+            if not self._last_attempt or time.monotonic() - self._last_attempt >= 120:
                 self._last_attempt = time.monotonic()
                 results = await asyncio.gather(*(self._collect_one(source) for source in self.sources))
                 self._source_status = [status for _, status in results]
