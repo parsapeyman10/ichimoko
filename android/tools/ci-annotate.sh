@@ -58,6 +58,9 @@ awk '
             lineno = substr(rest, 1, colon - 1)
             sub(/^[0-9]+: (Error|Warning): /, "", rest)
             sub(/^.*\/android\//, "android/", path)
+            # Scratch builds live under /tmp/.../src, whereas the main checkout lives
+            # under .../android. Normalize both forms to a repository-relative path.
+            if (path !~ /^android\//) sub(/^.*\/src\/app\//, "android/app/", path)
             printf "::error file=%s,line=%s::%s\n", path, lineno, esc(rest)
             total++
         }

@@ -200,11 +200,19 @@ class SignalMonitorService : Service() {
                     FeedMode.OFFLINE -> "آفلاین — آخرین دیتای واقعی: ${state.candles.lastOrNull()?.time ?: "—"}"
                     FeedMode.NO_KEY -> "کلید API لازم است"
                 }
-                runCatching {
-                    NotificationManagerCompat.from(this@SignalMonitorService).notify(
-                        Notifier.MONITOR_NOTIFICATION_ID,
-                        Notifier.buildMonitorNotification(this@SignalMonitorService, text),
-                    )
+                // Permission can be revoked while this long-lived collector is active. Keep a
+                // local check at the protected call rather than relying on the startup check.
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                    ContextCompat.checkSelfPermission(
+                        this@SignalMonitorService,
+                        Manifest.permission.POST_NOTIFICATIONS,
+                    ) == PackageManager.PERMISSION_GRANTED) {
+                    runCatching {
+                        NotificationManagerCompat.from(this@SignalMonitorService).notify(
+                            Notifier.MONITOR_NOTIFICATION_ID,
+                            Notifier.buildMonitorNotification(this@SignalMonitorService, text),
+                        )
+                    }
                 }
                 val signal = state.signal
                 var newCandidate: PaperOpportunity? = null
