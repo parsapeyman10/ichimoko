@@ -44,7 +44,25 @@ awk '
             total++
         }
 
-        # 2) Gradle failure text (task names, resolution failures, version mismatches).
+        # 2) Android lint diagnostics. Unlike Kotlin, lint reports source paths directly
+        # in Gradle output (for example Foo.kt:42: Error: message [IssueId]).
+        # Preserve that location so a failed CI run points at the actual call site.
+        for (i = 1; i <= NR && total < 10; i++) {
+            line = lines[i]
+            if (!match(line, /:[0-9]+: (Error|Warning): /)) continue
+            path = substr(line, 1, RSTART - 1)
+            if (path !~ /\.(kt|java|xml)$/) continue
+            rest = substr(line, RSTART + 1)
+            colon = index(rest, ":")
+            if (colon == 0) continue
+            lineno = substr(rest, 1, colon - 1)
+            sub(/^[0-9]+: (Error|Warning): /, "", rest)
+            sub(/^.*\/android\//, "android/", path)
+            printf "::error file=%s,line=%s::%s\n", path, lineno, esc(rest)
+            total++
+        }
+
+        # 3) Gradle failure text (task names, resolution failures, version mismatches).
         start = 0
         for (i = 1; i <= NR; i++) if (lines[i] ~ /What went wrong:/) { start = i; break }
         shown = 0
@@ -60,7 +78,7 @@ awk '
             }
         }
 
-        # 3) Last resort when nothing above matched: one line that names a failure.
+        # 4) Last resort when nothing above matched: one line that names a failure.
         if (total == 0) {
             for (i = NR; i >= 1; i--) {
                 s = lines[i]
