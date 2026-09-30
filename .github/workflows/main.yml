@@ -153,22 +153,22 @@ jobs:
             exit 1
           fi
           if [[ "$VERSION_NAME" != "$PROJECT_VERSION_NAME" ]]; then
-            python3 - <<PY
-from pathlib import Path
-p = Path('$BUILD_FILE')
-s = p.read_text()
-s = __import__('re').sub(r'versionName\s*=\s*"[^"]+"', 'versionName = "$VERSION_NAME"', s, count=1)
-p.write_text(s)
-PY
+            python3 - "$BUILD_FILE" "$VERSION_NAME" <<'PY'
+          from pathlib import Path
+          import re
+          from sys import argv
+          path = Path(argv[1])
+          path.write_text(re.sub(r'versionName\s*=\s*"[^"]+"', f'versionName = "{argv[2]}"', path.read_text(), count=1))
+          PY
           fi
           if [[ "$VERSION_CODE" != "$PROJECT_VERSION_CODE" ]]; then
-            python3 - <<PY
-from pathlib import Path
-p = Path('$BUILD_FILE')
-s = p.read_text()
-s = __import__('re').sub(r'versionCode\s*=\s*[0-9]+', 'versionCode = $VERSION_CODE', s, count=1)
-p.write_text(s)
-PY
+            python3 - "$BUILD_FILE" "$VERSION_CODE" <<'PY'
+          from pathlib import Path
+          import re
+          from sys import argv
+          path = Path(argv[1])
+          path.write_text(re.sub(r'versionCode\s*=\s*[0-9]+', f'versionCode = {argv[2]}', path.read_text(), count=1))
+          PY
           fi
           {
             echo "name=$VERSION_NAME"
