@@ -71,7 +71,7 @@ jobs:
       AURUM_RELEASE_KEY_PASSWORD: ${{ secrets.AURUM_RELEASE_KEY_PASSWORD }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
 
@@ -91,7 +91,7 @@ jobs:
 
       - name: Set up JDK
         if: steps.guard.outputs.ready == 'true'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6.0.1
         with:
           distribution: ${{ env.JAVA_DISTRIBUTION }}
           java-version: ${{ env.JAVA_VERSION }}
@@ -121,13 +121,13 @@ jobs:
 
       - name: Validate Gradle wrapper
         if: steps.guard.outputs.ready == 'true'
-        uses: gradle/actions/wrapper-validation@v4
+        uses: gradle/actions/wrapper-validation@v6.4.0
         with:
           min-wrapper-count: 1
 
       - name: Set up Gradle cache
         if: steps.guard.outputs.ready == 'true'
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v6.4.0
         with:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
@@ -288,7 +288,7 @@ jobs:
 
       - name: Upload APK artifacts
         if: steps.guard.outputs.ready == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: aurum-edge-${{ steps.collect.outputs.version_name }}-${{ github.run_number }}
           if-no-files-found: error
@@ -300,7 +300,7 @@ jobs:
 
       - name: Upload test and lint reports
         if: always() && steps.guard.outputs.ready == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: aurum-edge-reports-${{ github.run_number }}
           if-no-files-found: ignore
