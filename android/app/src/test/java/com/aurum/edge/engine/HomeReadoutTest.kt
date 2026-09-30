@@ -92,12 +92,14 @@ class HomeReadoutTest {
         assertTrue(primaryTabs.size <= 5) // bottom bar stays usable on small screens
     }
 
-    @Test fun `watch catalog is forex only - gold plus the seven majors`() {
-        assertEquals(listOf("XAU/USD", "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD",
+    @Test fun `watch catalog puts Iran gold and dollar first while chart stays forex`() {
+        assertEquals(listOf("IR_GOLD18", "USD/IRR", "QUICK_GXRL", "PEUGEOT_207_TU5P", "XAU/USD", "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD",
             "USD/JPY", "USD/CHF", "USD/CAD"), WatchCatalog.symbols.map { it.id })
-        assertTrue(WatchCatalog.symbols.all { "IRT" !in it.id && it.unit != "تومان" })
-        // Every working symbol has a Twelve Data mapping and a fixed public Yahoo mirror.
-        assertTrue(WatchCatalog.symbols.all { it.providerCodes.size == 2 })
+        assertEquals(listOf("XAU/USD", "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD",
+            "USD/JPY", "USD/CHF", "USD/CAD"), WatchCatalog.chartSymbols)
+        assertEquals("tgju_public", WatchCatalog.find("IR_GOLD18")!!.defaultSources.single())
+        assertEquals("تومان", WatchCatalog.find("USD/IRR")!!.unit)
+        assertEquals("bama_car_price", WatchCatalog.find("QUICK_GXRL")!!.defaultSources.single())
         assertEquals("XAUUSD=X", WatchCatalog.find("XAU/USD")!!.providerCodes["stocks_yahoo"])
         assertEquals("JPY", WatchCatalog.find("USD/JPY")!!.unit)
     }

@@ -14,38 +14,50 @@ data class WatchSymbol(
 )
 
 object WatchCatalog {
-    /** Forex-only watch: gold plus the seven most-traded currency pairs, all real read-only providers. */
+    /** Watchlist order: Iran gold/USD first, then global gold and the major FX pairs. */
     val symbols = listOf(
+        WatchSymbol("IR_GOLD18", "طلای ۱۸ عیار ایران", "تومان/گرم", linkedMapOf(
+            "tgju_public" to "geram18",
+        ), listOf("tgju_public"), 30 * 60_000L, 2.0),
+        WatchSymbol("USD/IRR", "دلار آزاد ایران", "تومان", linkedMapOf(
+            "tgju_public" to "price_dollar_rl",
+        ), listOf("tgju_public"), 30 * 60_000L, 2.0),
+        WatchSymbol("QUICK_GXRL", "کوییک GXRL / GXR-L", "تومان", linkedMapOf(
+            "bama_car_price" to "quick_gxr_lmt",
+        ), listOf("bama_car_price"), 12 * 60 * 60_000L, 3.0),
+        WatchSymbol("PEUGEOT_207_TU5P", "پژو ۲۰۷ دستی TU5P / TU5Plus", "تومان", linkedMapOf(
+            "bama_car_price" to "peugeot_207_manualtu5p",
+        ), listOf("bama_car_price"), 12 * 60 * 60_000L, 3.0),
         WatchSymbol("XAU/USD", "طلای جهانی (هر انس)", "$",  linkedMapOf(
-            "twelve_data_quote" to "XAU/USD", "stocks_yahoo" to "XAUUSD=X",
-        ), listOf("twelve_data_quote", "stocks_yahoo"), 10 * 60_000L, 0.5),
+            "stocks_yahoo" to "XAUUSD=X", "twelve_data_quote" to "XAU/USD",
+        ), listOf("stocks_yahoo"), 10 * 60_000L, 0.5),
         WatchSymbol("EUR/USD", "یورو / دلار", "$", linkedMapOf(
-            "twelve_data_quote" to "EUR/USD", "stocks_yahoo" to "EURUSD=X",
-        ), listOf("twelve_data_quote", "stocks_yahoo"), 5 * 60_000L, 0.3),
+            "stocks_yahoo" to "EURUSD=X", "twelve_data_quote" to "EUR/USD",
+        ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
         WatchSymbol("GBP/USD", "پوند / دلار", "$", linkedMapOf(
-            "twelve_data_quote" to "GBP/USD", "stocks_yahoo" to "GBPUSD=X",
-        ), listOf("twelve_data_quote", "stocks_yahoo"), 5 * 60_000L, 0.3),
+            "stocks_yahoo" to "GBPUSD=X", "twelve_data_quote" to "GBP/USD",
+        ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
         WatchSymbol("AUD/USD", "دلار استرالیا / دلار", "$", linkedMapOf(
-            "twelve_data_quote" to "AUD/USD", "stocks_yahoo" to "AUDUSD=X",
-        ), listOf("twelve_data_quote", "stocks_yahoo"), 5 * 60_000L, 0.3),
+            "stocks_yahoo" to "AUDUSD=X", "twelve_data_quote" to "AUD/USD",
+        ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
         WatchSymbol("NZD/USD", "دلار نیوزیلند / دلار", "$", linkedMapOf(
-            "twelve_data_quote" to "NZD/USD", "stocks_yahoo" to "NZDUSD=X",
-        ), listOf("twelve_data_quote", "stocks_yahoo"), 5 * 60_000L, 0.3),
+            "stocks_yahoo" to "NZDUSD=X", "twelve_data_quote" to "NZD/USD",
+        ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
         WatchSymbol("USD/JPY", "دلار / ین ژاپن", "JPY", linkedMapOf(
-            "twelve_data_quote" to "USD/JPY", "stocks_yahoo" to "JPY=X",
-        ), listOf("twelve_data_quote", "stocks_yahoo"), 5 * 60_000L, 0.3),
+            "stocks_yahoo" to "JPY=X", "twelve_data_quote" to "USD/JPY",
+        ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
         WatchSymbol("USD/CHF", "دلار / فرانک سوئیس", "CHF", linkedMapOf(
-            "twelve_data_quote" to "USD/CHF", "stocks_yahoo" to "CHF=X",
-        ), listOf("twelve_data_quote", "stocks_yahoo"), 5 * 60_000L, 0.3),
+            "stocks_yahoo" to "CHF=X", "twelve_data_quote" to "USD/CHF",
+        ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
         WatchSymbol("USD/CAD", "دلار / دلار کانادا", "CAD", linkedMapOf(
-            "twelve_data_quote" to "USD/CAD", "stocks_yahoo" to "CAD=X",
-        ), listOf("twelve_data_quote", "stocks_yahoo"), 5 * 60_000L, 0.3),
+            "stocks_yahoo" to "CAD=X", "twelve_data_quote" to "USD/CAD",
+        ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
     )
 
     fun find(id: String): WatchSymbol? = symbols.firstOrNull { it.id == id }
 
-    /** Symbols selectable for the chart/feed, in the same order as the watch. */
-    val chartSymbols: List<String> = symbols.map { it.id }
+    /** Symbols selectable for the chart/feed. Iran cash-board rows are watch-only. */
+    val chartSymbols: List<String> = symbols.filter { "stocks_yahoo" in it.providerCodes || "twelve_data_quote" in it.providerCodes }.map { it.id }
 }
 
 data class DisplayQuote(val quote: Quote?, val sourceId: String, val fallback: Boolean)

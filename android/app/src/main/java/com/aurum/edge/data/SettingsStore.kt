@@ -58,7 +58,7 @@ class SettingsStore(context: Context) {
         alertSoundName = prefs.getString(KEY_ALERT_SOUND_NAME, "").orEmpty(),
         newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty().trim(),
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
-        autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
+        autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, true),
         autoDownloadUpdates = prefs.getBoolean(KEY_AUTO_DOWNLOAD_UPDATES, false),
         newsAiApiKey = storedNewsAiKey,
         newsAiBaseUrl = storedNewsAiUrl,

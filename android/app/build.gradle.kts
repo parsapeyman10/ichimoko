@@ -55,8 +55,8 @@ android {
         applicationId = "com.aurum.edge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.2.8"
+        versionCode = 12
+        versionName = "1.2.9"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
@@ -163,9 +163,8 @@ tasks.withType<Test>().configureEach {
     }
 }
 
-// The published workflow currently makes its separate JVM-test step non-blocking.
-// Enforce a green test suite at the release task itself so it cannot upload an APK
-// after a failed test (including when the workflow patch cannot be pushed).
+// Keep release assembly gated by the pure engine/unit suite as a second guard, even when
+// a caller invokes assembleRelease directly outside the full GitHub Actions workflow.
 tasks.matching { it.name == "assembleRelease" }.configureEach {
     dependsOn("testDebugUnitTest")
 }

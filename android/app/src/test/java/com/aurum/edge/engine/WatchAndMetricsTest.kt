@@ -18,8 +18,18 @@ class WatchAndMetricsTest {
         ts = now, providerAt = at, stale = cached,
     )
 
-    @Test fun twoIndependentFreshSourcesAgree() {
+    @Test fun oneDefaultSourceIsAllowedButNotTwoSourceConfirmed() {
         val ids = eur.defaultSources
+        assertEquals(listOf("stocks_yahoo"), ids)
+        val result = SourceComparison.verify(eur, ids, mapOf(
+            ids[0] to quote(ids[0], 100.0),
+        ), now)
+        assertEquals(VerificationStatus.UNVERIFIED, result.status)
+        assertEquals(1, result.freshSources)
+    }
+
+    @Test fun twoIndependentFreshSourcesAgreeWhenOptionalSecondSourceEnabled() {
+        val ids = eur.providerCodes.keys.toList()
         val result = SourceComparison.verify(eur, ids, mapOf(
             ids[0] to quote(ids[0], 100.0), ids[1] to quote(ids[1], 100.3),
         ), now)
@@ -28,7 +38,7 @@ class WatchAndMetricsTest {
     }
 
     @Test fun conflictCannotBeConfirmedByOldCacheOrMissingTimestamps() {
-        val ids = eur.defaultSources
+        val ids = eur.providerCodes.keys.toList()
         assertEquals(VerificationStatus.CONFLICT, SourceComparison.verify(eur, ids, mapOf(
             ids[0] to quote(ids[0], 100.0), ids[1] to quote(ids[1], 107.0),
         ), now).status)

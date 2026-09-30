@@ -67,7 +67,7 @@ class SignalMonitorService : Service() {
         }
         val container = (application as AurumApplication).container
         if (!notificationsPermitted()) {
-            container.settingsStore.update { it.copy(backgroundMonitor = false, autoPaperTrading = false) }
+            container.settingsStore.update { it.copy(backgroundMonitor = false) }
             stopSelf()
             return START_NOT_STICKY // no hidden user-initiated monitor after notification permission revocation
         }
@@ -92,8 +92,8 @@ class SignalMonitorService : Service() {
         }.getOrElse { false }
         if (!started) {
             _running.value = false
-            container.settingsStore.update { it.copy(backgroundMonitor = false, autoPaperTrading = false) }
-            container.autoPaperTrader.stopped("سرویس پس‌زمینه شروع نشد؛ ورود خودکار خاموش شد")
+            container.settingsStore.update { it.copy(backgroundMonitor = false) }
+            container.autoPaperTrader.stopped("سرویس پس‌زمینه شروع نشد؛ ورود خودکار فقط هنگام باز بودن برنامه بررسی می‌شود")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -200,11 +200,19 @@ class SignalMonitorService : Service() {
                     FeedMode.OFFLINE -> "آفلاین — آخرین دیتای واقعی: ${state.candles.lastOrNull()?.time ?: "—"}"
                     FeedMode.NO_KEY -> "کلید API لازم است"
                 }
-                runCatching {
-                    NotificationManagerCompat.from(this@SignalMonitorService).notify(
-                        Notifier.MONITOR_NOTIFICATION_ID,
-                        Notifier.buildMonitorNotification(this@SignalMonitorService, text),
-                    )
+                // Permission can be revoked while this long-lived collector is active. Keep a
+                // local check at the protected call rather than relying on the startup check.
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                    ContextCompat.checkSelfPermission(
+                        this@SignalMonitorService,
+                        Manifest.permission.POST_NOTIFICATIONS,
+                    ) == PackageManager.PERMISSION_GRANTED) {
+                    runCatching {
+                        NotificationManagerCompat.from(this@SignalMonitorService).notify(
+                            Notifier.MONITOR_NOTIFICATION_ID,
+                            Notifier.buildMonitorNotification(this@SignalMonitorService, text),
+                        )
+                    }
                 }
                 val signal = state.signal
                 var newCandidate: PaperOpportunity? = null
@@ -320,7 +328,7 @@ class SignalMonitorService : Service() {
     override fun onDestroy() {
         _running.value = false
         val container = (application as AurumApplication).container
-        container.settingsStore.update { it.copy(backgroundMonitor = false, autoPaperTrading = false) }
+        container.settingsStore.update { it.copy(backgroundMonitor = false) }
         // Do not leave a headless polling loop alive after Android times out/stops the FGS.
         // The visible Forex screen restarts the feed on foreground resume if needed.
         if (!ProcessLifecycleOwner.get().lifecycle.currentState

@@ -185,7 +185,10 @@ class PersianNewsFeed:
         if url is None:
             return self._payload(False)
         async with self._lock:
-            if time.monotonic() - self._last_attempt >= CACHE_TTL_SECONDS:
+            # `_last_attempt` starts at zero. On hosts whose monotonic clock has not yet
+            # passed the TTL, subtraction alone would defer the *first* fetch and make a
+            # configured feed falsely look unavailable for up to a minute.
+            if not self._last_attempt or time.monotonic() - self._last_attempt >= CACHE_TTL_SECONDS:
                 self._last_attempt = time.monotonic()
                 try:
                     parsed = parse_news_xml(await self._request(url), self.settings.fa_news_source)

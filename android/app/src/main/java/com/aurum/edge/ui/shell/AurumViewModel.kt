@@ -38,6 +38,7 @@ import com.aurum.edge.data.JournalStats
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.NewsRepository
+import com.aurum.edge.data.SignalTuningPlan
 import com.aurum.edge.data.WatchSelection
 import com.aurum.edge.data.WatchState
 import com.aurum.edge.engine.MtfAnalyzer
@@ -60,6 +61,13 @@ import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.min
 
+data class AiSignalTuningState(
+    val loading: Boolean = false,
+    val plan: SignalTuningPlan? = null,
+    val appliedAt: Long? = null,
+    val error: String? = null,
+)
+
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
@@ -72,6 +80,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val pairScan = container.pairScanner.state
     /** The AI trading companion's latest strictly-validated opinion (analysis, never a signal). */
     val traderOpinion = container.traderAdvisor.state
+    private val _aiSignalTuning = MutableStateFlow(AiSignalTuningState())
+    val aiSignalTuning: StateFlow<AiSignalTuningState> = _aiSignalTuning.asStateFlow()
     val market = container.verifiedMarket
     val trades: StateFlow<List<PaperTrade>> = container.journalStore.trades
     val opportunities: StateFlow<List<PaperOpportunity>> = container.opportunityStore.items
@@ -406,6 +416,27 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         _toast.value = "$label ${if (enabled) "به موتور پایه اضافه شد" else "از افزونه‌های موتور برداشته شد"}"
     }
 
+    fun runAiSignalSelfAnalysis(apply: Boolean = true) {
+        viewModelScope.launch {
+            _aiSignalTuning.value = _aiSignalTuning.value.copy(loading = true, error = null)
+            try {
+                val plan = container.traderAdvisor.tuneSignalEngine()
+                if (apply) {
+                    container.settingsStore.update { it.copy(signalProfile = plan.profile) }
+                    container.market.restart()
+                    _aiSignalTuning.value = AiSignalTuningState(plan = plan, appliedAt = System.currentTimeMillis())
+                    _toast.value = "خودتحلیلی AI اعمال شد: ${plan.profile.title}"
+                } else {
+                    _aiSignalTuning.value = AiSignalTuningState(plan = plan)
+                }
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                _aiSignalTuning.value = AiSignalTuningState(error = error.message ?: "خودتحلیلی AI انجام نشد")
+            }
+        }
+    }
+
     /** Cost assumptions are the user's responsibility; they are echoed in every report. */
     fun saveSpread(value: Double) = container.settingsStore.update { it.copy(spreadPrice = value.coerceIn(0.0, 5.0)) }
 
@@ -450,19 +481,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun setMonitorFlag(enabled: Boolean) {
-        container.settingsStore.update { it.copy(backgroundMonitor = enabled,
-            autoPaperTrading = if (enabled) it.autoPaperTrading else false) }
-        if (!enabled) _toast.value = "پایش پس‌زمینه خاموش/ناموفق است؛ ورود خودکار کاغذی غیرفعال ماند"
+        container.settingsStore.update { it.copy(backgroundMonitor = enabled) }
+        if (!enabled) _toast.value = "پایش پس‌زمینه خاموش/ناموفق است؛ ورود کاغذی خودکار در زمان باز بودن برنامه همچنان با قواعد موتور بررسی می‌شود"
     }
 
     fun setAutoPaperTrading(enabled: Boolean) {
-        if (enabled && !settings.value.backgroundMonitor) {
-            _toast.value = "برای خودکار کاغذی، پایش پس‌زمینه را فعال کنید"
-            return
-        }
         container.settingsStore.update { it.copy(autoPaperTrading = enabled) }
         if (enabled) container.news.refreshNow()
-        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ ۸ شرط فنی، آپشن‌های فعال، قیمت زنده و ICT/MTF لازم است؛ خبر فقط در ژورنال داده‌کاوی می‌شود"
+        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ فقط با قواعد کامل موتور، قیمت زنده و ICT/MTF ثبت می‌شود"
             else "معاملهٔ خودکار کاغذی خاموش شد"
     }
 
@@ -587,10 +613,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     container.journalStore.attachAiReview(trade.id, review)
                 }.getOrNull()
                 reviewedTrade?.let { _stats.value = container.journalStore.stats() }
-                val aiLine = reviewedTrade?.aiReview?.let { review ->
-                    " · نظر AI: ${review.verdictFa()}؛ ${review.summary}"
-                } ?: if (s.hasClientNewsAi) " · نظر AI فعلاً ذخیره نشد" else " · برای نظر AI، کلید/مدل را در تنظیمات AI وارد کن"
-                _toast.value = "فقط کاغذی: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} ${trade.symbol} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}$aiLine"
+                val conditions = trade.entryConditions.take(8).joinToString("، ") {
+                    it.name.substringAfter('·').trim()
+                }
+                _toast.value = "کاغذی: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} ${trade.symbol} · شروع: $conditions"
             } catch (e: Exception) {
                 _toast.value = "ورود کاغذی انجام نشد: ${e.message ?: "ذخیره ممکن نیست"}"
             } finally {
@@ -1208,11 +1234,4 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 class AurumViewModelFactory(private val container: AppContainer) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = AurumViewModel(container) as T
-}
-
-private fun com.aurum.edge.core.PaperAiReview.verdictFa(): String = when (verdict) {
-    "WORTHY" -> "شرایط مناسب بوده"
-    "RISKY" -> "پرریسک/مرزی بوده"
-    "NOT_WORTHY" -> "شرایط کافی نبوده"
-    else -> verdict
 }

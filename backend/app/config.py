@@ -71,10 +71,6 @@ class Settings(BaseSettings):
     """
 
     environment: str = "development"
-    cors_origins: str = (
-        "http://localhost:5173,http://127.0.0.1:5173,"
-        "http://localhost:3000,http://127.0.0.1:3000"
-    )
 
     # Real market data (required for every market endpoint)
     twelve_data_api_key: str | None = None
@@ -125,17 +121,12 @@ class Settings(BaseSettings):
         self.market_symbol = self.market_symbol.strip().upper()
         self.gemini_model = self.gemini_model.strip()
         self.openai_model = self.openai_model.strip()
-        self.cors_origins = self.cors_origins.strip()
         if self.openai_base_url:
             self.openai_base_url = self.openai_base_url.strip().rstrip("/")
         if self.fa_news_rss_url:
             self.fa_news_rss_url = self.fa_news_rss_url.strip()
         if self.fa_news_allowed_host:
             self.fa_news_allowed_host = self.fa_news_allowed_host.strip().lower().rstrip(".")
-
-    @property
-    def allowed_origins(self) -> list[str]:
-        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
     @property
     def has_market_key(self) -> bool:

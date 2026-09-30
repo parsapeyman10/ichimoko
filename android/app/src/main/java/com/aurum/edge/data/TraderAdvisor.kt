@@ -5,6 +5,7 @@ import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.PaperAiReview
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.Signal
+import com.aurum.edge.core.SignalProfile
 import com.aurum.edge.engine.MtfAnalyzer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +37,14 @@ data class TraderOpinion(
     val generatedAt: Long,
 )
 
+data class SignalTuningPlan(
+    val profile: SignalProfile,
+    val summary: String,
+    val changes: List<String>,
+    val model: String,
+    val generatedAt: Long,
+)
+
 data class TraderOpinionState(
     val opinion: TraderOpinion? = null,
     val loading: Boolean = false,
@@ -58,8 +67,10 @@ data class TraderOpinionState(
  * Hard boundaries kept identical to the rest of the app:
  * - The opinion is ANALYSIS ONLY: it never creates a signal, never satisfies the ninth
  *   condition, never opens a paper trade and never sends an order.
+ * - The self-analysis endpoint may only return a strictly validated SignalProfile toggle set;
+ *   the app applies those switches locally and then re-runs the normal Ichimoku engine.
  * - Snapshot data is untrusted input for the model; the returned JSON is strictly validated
- *   (bounded sizes, enums) and any failure is an explicit error, never a fabricated view.
+ *   (bounded sizes, enums/booleans) and any failure is an explicit error, never a fabricated view.
  * - Only https endpoints, key never logged, one call per refresh, throttled to 10 minutes.
  */
 class TraderAdvisor(
@@ -114,6 +125,52 @@ class TraderAdvisor(
      */
     suspend fun probe(apiKey: String, baseUrl: String, model: String, format: String = "AUTO"): String =
         AiProvider.probe(http, baseUrl, apiKey, model, format)
+
+    /**
+     * AI self-analysis for the Ichimoku engine options. The model may recommend toggles, but the
+     * app accepts only a strict boolean schema and the ViewModel applies it atomically. No prices,
+     * trades or backtest results are fabricated; missing evidence should produce a conservative
+     * profile with more safeguards enabled.
+     */
+    suspend fun tuneSignalEngine(): SignalTuningPlan {
+        val config = settings.read()
+        if (!config.hasClientNewsAi) throw IllegalStateException("برای خودتحلیلی موتور، کلید/مدل AI را در تنظیمات وارد کنید")
+        val now = System.currentTimeMillis()
+        val marketState = market.state.value
+        val radar = scanner.state.value
+        val headlines = news.state.value
+        val mtf = runCatching { MtfAnalyzer.analyze(marketState.candles, marketState.interval) }.getOrNull()
+        val technicalOk = marketState.signal?.confluence?.take(8)
+            ?.count { it.ok && it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED }
+        val current = config.signalProfile
+        val snapshot = buildString {
+            appendLine("Create a self-analysis tuning plan for the app's Ichimoku signal engine options. Apply no trade, no order, no future claim.")
+            appendLine("current_profile=${current.persistName()}")
+            appendLine("symbol=${marketState.symbol} interval=${marketState.interval.label} feed=${marketState.feed.mode.name} closed_bars=${marketState.closedCount} last_price=${marketState.lastPrice ?: "—"}")
+            appendLine("signal_action=${marketState.signal?.action ?: "NONE"} signal_confidence=${marketState.signal?.confidence ?: "—"} technical_ok=${technicalOk ?: "—"}/8 blockers=${marketState.signal?.blockers?.take(5)?.joinToString(" | ") ?: "—"}")
+            appendLine("mtf_veto=${mtf?.veto ?: "—"} mtf_bias=${mtf?.bias ?: "—"} mtf_alignment=${mtf?.alignment ?: "—"}")
+            appendLine("radar:")
+            radar.statuses.take(12).forEach { row ->
+                appendLine("  ${row.symbol}: state=${row.state} tech=${row.technicalScore ?: "—"}/8 detail=${row.detail.take(100)}")
+            }
+            appendLine("news_gate=${headlines.gate.name} vetoed=${headlines.vetoedSymbols.joinToString(",")}")
+            appendLine("Policy: Chikou confirmation is standard and should normally remain true. Optional filters reduce false entries but may reduce opportunities. Prefer safety when evidence is thin.")
+        }
+        val system = "You are the internal AI self-analysis module for an educational Ichimoku app. " +
+            "Return JSON only. Recommend which engine options should be enabled for the next run, " +
+            "based only on the provided snapshot. Do not invent performance, prices, trades or guarantees. " +
+            "Schema: {\"summary\": Persian string 20..220 chars, " +
+            "\"momentum_volume\": boolean, \"flat_span_b\": boolean, \"range_chop_filter\": boolean, " +
+            "\"higher_timeframe_filter\": boolean, \"fake_breakout_filter\": boolean, " +
+            "\"dynamic_spread_filter\": boolean, \"risky_timing_filter\": boolean, " +
+            "\"structure_risk_filter\": boolean, \"cooldown_filter\": boolean, " +
+            "\"chikou_confirmation\": boolean, \"changes\": array of 1..8 short Persian strings}. " +
+            "Use conservative defaults when data is insufficient."
+        val output = AiProvider.completeJson(http, config.newsAiBaseUrl, config.newsAiApiKey,
+            config.newsAiModel, system, snapshot, maxTokens = 900, format = config.newsAiFormatNormalized)
+        return parseTuningPlan(output, config.newsAiModel, now)
+            ?: throw IllegalStateException("پاسخ خودتحلیلی AI قابل‌راستی‌آزمایی نبود")
+    }
 
     /**
      * Called after a paper trade has already been saved. The review is educational and post-hoc:
@@ -231,6 +288,36 @@ class TraderAdvisor(
 
     companion object {
         const val REFRESH_PERIOD_MS = 10 * 60_000L
+
+        internal fun parseTuningPlan(root: JsonObject, model: String, now: Long): SignalTuningPlan? {
+            fun str(key: String): String? = (root[key] as? JsonPrimitive)?.contentOrNull?.trim()
+            fun bool(key: String): Boolean? = str(key)?.lowercase(Locale.ROOT)?.let {
+                when (it) { "true" -> true; "false" -> false; else -> null }
+            }
+            fun list(key: String): List<String>? {
+                val array = root[key] as? JsonArray ?: return null
+                val items = array.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim() }
+                if (items.size != array.size) return null
+                return items
+            }
+            val summary = str("summary") ?: return null
+            if (summary.length !in 20..220) return null
+            val changes = list("changes") ?: return null
+            if (changes.isEmpty() || changes.size > 8 || changes.any { it.length !in 3..100 }) return null
+            val profile = SignalProfile(
+                momentumVolume = bool("momentum_volume") ?: return null,
+                flatSpanB = bool("flat_span_b") ?: return null,
+                rangeChopFilter = bool("range_chop_filter") ?: return null,
+                higherTimeframeFilter = bool("higher_timeframe_filter") ?: return null,
+                fakeBreakoutFilter = bool("fake_breakout_filter") ?: return null,
+                dynamicSpreadFilter = bool("dynamic_spread_filter") ?: return null,
+                riskyTimingFilter = bool("risky_timing_filter") ?: return null,
+                structureRiskFilter = bool("structure_risk_filter") ?: return null,
+                cooldownFilter = bool("cooldown_filter") ?: return null,
+                chikouConfirmation = bool("chikou_confirmation") ?: return null,
+            )
+            return SignalTuningPlan(profile, summary, changes, model, now)
+        }
 
         /** Strict schema validation: bounded sizes and enums; anything else fails closed. */
         internal fun parseTradeReview(root: JsonObject, model: String, now: Long): PaperAiReview? {

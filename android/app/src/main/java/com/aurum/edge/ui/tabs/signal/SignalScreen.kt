@@ -13,30 +13,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.SignalAction
-import com.aurum.edge.core.AlertDiagnostics
 import com.aurum.edge.core.IctEntryRules
-import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.data.MarketState
-import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.PairScanState
 import com.aurum.edge.engine.MtfAnalyzer
-import com.aurum.edge.notify.Notifier
-import com.aurum.edge.service.SignalMonitorService
-import kotlinx.coroutines.delay
 import com.aurum.edge.ui.components.ConfluenceRow
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
@@ -50,18 +39,8 @@ import com.aurum.edge.ui.theme.AurumColors
 @Composable
 fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () -> Unit) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val mtf by viewModel.mtf.collectAsStateWithLifecycle()
-    val news by viewModel.news.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
-    val opportunityError by viewModel.opportunityError.collectAsStateWithLifecycle()
-    val journalError by viewModel.journalError.collectAsStateWithLifecycle()
-    val monitorRunning by SignalMonitorService.running.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) { while (true) { delay(20_000L); now = System.currentTimeMillis() } }
-    val checks = AlertDiagnostics.checks(market, settings, news, monitorRunning,
-        Notifier.canNotifyVerified(context, settings.alertSoundUri), trades, mtf,
-        opportunityError, journalError, now)
+    val autoStatus by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
     val signal = market.signal
     val positionBlocker = when {
         trades.any { it.symbol == market.symbol && it.isOpen } -> "پوزیشن این نماد هنوز باز است"
@@ -77,129 +56,38 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             .padding(bottom = 12.dp),
     ) {
         SymbolPickerRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
-        PairRadarCard(
-            scan = viewModel.pairScan.collectAsStateWithLifecycle().value,
-            onScan = viewModel::scanPairs,
-            onSelectSymbol = { viewModel.selectChartSymbol(it) },
-            now = now,
-        )
-        SectionCard("چرا هشدار نیامده؟", "وضعیت همین لحظه؛ بدون ساختن سیگنال یا سست‌کردن شرط‌های ورود",
-            trailing = { Pill("${checks.count { it.ready }}/${checks.size} پیش‌نیاز",
-                if (checks.all { it.ready }) AurumColors.Green else AurumColors.Gold) }) {
-            checks.forEach { check ->
-                Text("${if (check.ready) "✓" else "✕"} ${check.kind.label}: ${check.detail}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (check.ready) AurumColors.TextSecondary else AurumColors.Gold,
-                    modifier = Modifier.padding(vertical = 3.dp))
-            }
-            Text("سبز شدن همهٔ موارد هم تضمین وقوع سیگنال یا سود نیست؛ اعلان فقط هنگام کاندیدای واقعیِ تأییدشده ثبت می‌شود. آزمون صدای اعلان و وضعیت باتری را در تنظیمات بررسی کنید.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            OutlinedButton(onClick = onOpenNews, modifier = Modifier.padding(top = 6.dp)) {
-                Text("خبر واقعی و وضعیت خوراک‌ها")
-            }
-        }
         SignalSummaryCard(
             signal = signal,
-            onOpenPaperTrade = { signal?.let(viewModel::openPaperTrade) },
+            onOpenPaperTrade = {},
             entryBlocker = positionBlocker,
+            allowManualPaperTrade = false,
         )
-        SectionCard("گیت رنج و زمان خرید/فروش کاغذی",
-            "افزوده بر ۸ شرط فنی و ریسک خبر/تقویم؛ خط S/R یا طرح سیگنال، پوزیشن ثبت‌شده نیست") {
-            val reason = IctEntryRules.assess(market).reason
-            Text(reason ?: "رنج، جاروب/بازپس‌گیری، MSS، FVG، بازآزمایی، جلسهٔ نیویورک و فضای کافی تأیید شدند؛ ریسک خبر، MTF و مدیریت ریسک همچنان جداگانه دیده می‌شوند.",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (reason == null) AurumColors.Green else AurumColors.Gold)
-            Text("دکمهٔ ورود سیگنالی نیز پیش از ذخیره دوباره بررسی می‌شود؛ ورود دستیِ جداگانه ادعای تأیید این گیت ندارد.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-        }
-        SectionCard("خبر وب: معیار شفاف ریسک", "خبر امتیاز فنی ۸ شرط را کم نمی‌کند؛ فقط وتوی روشن/قابل توضیح می‌تواند ورود کاغذی را متوقف کند") {
-            val hardVeto = news.gate == NewsGate.BLOCKED || market.symbol in news.vetoedSymbols
-            val manualBlocked = settings.pauseOnNews && (hardVeto || news.lastCheckedAt == null ||
-                System.currentTimeMillis() - news.lastCheckedAt!! > 180_000L)
+        SectionCard("معاملهٔ کاغذی خودکار") {
             Text(
-                when {
-                    hardVeto -> "خبر/تقویم پرریسک دیده شده: ${news.reason}؛ برای کاغذی فقط در ژورنال داده‌کاوی می‌شود"
-                    manualBlocked -> "وتوی اختیاری دستی روشن است و وضعیت خبر تازه/کامل نیست: ${news.reason}"
-                    else -> "خبر شرط ورود کاغذی نیست؛ اگر AI معتبر هم‌جهت/مخالف باشد فقط به‌عنوان زمینهٔ ژورنال ذخیره و نمایش داده می‌شود."
-                },
+                if (settings.autoPaperTrading) autoStatus else "خاموش",
                 style = MaterialTheme.typography.bodySmall,
-                color = if (hardVeto || manualBlocked) AurumColors.Red else AurumColors.TextSecondary,
+                color = if (settings.autoPaperTrading) AurumColors.TextSecondary else AurumColors.Gold,
             )
-            Text("معیار: رویداد High و AI معتبر فقط برای داده‌کاوی خبر نزدیک معامله استفاده می‌شوند؛ شرط ورود کاغذی همان موتور ایچیموکو، آپشن‌ها، ICT/MTF و ریسک است.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            Text("آخرین بررسی: ${relativeTime(news.lastCheckedAt)} · تقویم: ${relativeTime(news.calendarCheckedAt)}",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
-
-        PaperTicketSection(viewModel, market)
 
         signal?.let { s ->
             SectionCard(
-                title = "۸ شرط فنی اصلی + آپشن‌ها",
-                subtitle = "هر شرط فنی جدا سبز/قرمز و با سهم امتیاز از ۱۰۰ نمایش داده می‌شود؛ خبر شرط ورود نیست و فقط زمینهٔ ژورنال است · امتیاز کل: ${s.confidence.toInt()} از ۱۰۰ · کندل ${s.interval.label} · ${formatTime(s.barTime)}",
+                title = "شرط‌های موتور · ${s.confidence.toInt()}/100 · ${formatTime(s.barTime)}",
             ) {
                 if (s.confluence.isEmpty()) {
-                    Text("داده کافی برای نمایش جزئیات نیست", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
+                    Text("—", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
                 } else {
                     s.confluence.take(8).forEach { ConfluenceRow(it) }
                     if (s.confluence.size > 8) {
-                        Text("آپشن‌ها، کنترل‌های اضافه و داده‌کاوی خبر:", style = MaterialTheme.typography.labelSmall,
+                        Text("آپشن‌ها", style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.TextMuted, modifier = Modifier.padding(top = 8.dp))
                         s.confluence.drop(8).forEach { ConfluenceRow(it) }
                     }
                 }
             }
 
-            if (s.isActionable) {
-                SectionCard(
-                    title = "حجم فرضی سیگنال (همان قواعد برگهٔ کاغذی)",
-                    subtitle = "موجودی ${formatPrice(settings.accountBalance)}$ · سقف ریسک ${settings.riskPercent}%",
-                ) {
-                    val ticket = runCatching {
-                        PaperOrderRules.preview(s.action, market.symbol, market.lastPrice ?: 0.0,
-                            s.stopLoss ?: 0.0, s.takeProfit ?: 0.0,
-                            settings.accountBalance, settings.riskPercent)
-                    }
-                    ticket.getOrNull()?.let { draft ->
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            StatTile("حجم کاغذی", "${String.format("%.6f", draft.quantity)} ${draft.unit}", AurumColors.TextPrimary, Modifier.weight(1f))
-                            StatTile("ریسک تا SL", "${formatPrice(draft.actualRiskUsd)}$", AurumColors.Gold, Modifier.weight(1f))
-                            StatTile("ارزش فرضی", "${formatPrice(draft.notionalUsd)}$", AurumColors.TextSecondary, Modifier.weight(1f))
-                        }
-                        Text("این حجم کسری ممکن است در بروکر قابل اجرا نباشد؛ حداقل لات، مارجین، کارمزد و لغزش هنوز تأیید نشده‌اند.",
-                            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                            modifier = Modifier.padding(top = 8.dp))
-                    } ?: Text("ورود کاغذی با این قیمت/استاپ امکان ندارد: ${ticket.exceptionOrNull()?.message ?: "حجم نامعتبر"}",
-                        style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
-                }
-            }
-        } ?: SectionCard(
-            title = "سیگنال در دسترس نیست",
-            subtitle = "موتور تنها روی کندل‌های واقعی بسته اجرا می‌شود",
-        ) {
-            Text(
-                "تا وقتی تعداد کندل بسته واقعی کافی دریافت نشود (حداقل ۲۱۰ کندل)، هیچ سیگنالی ساخته نمی‌شود. عمداً هیچ سیگنال نمایشی تولید نمی‌کنیم.",
-                style = MaterialTheme.typography.bodySmall,
-                color = AurumColors.TextSecondary,
-            )
-        }
-
-        mtf?.let { snapshot -> MtfCard(snapshot) }
-
-        SectionCard(
-            title = "قواعد اجرا",
-            subtitle = "قوانین ثابت موتور — بدون استثنا برای «زنده نگه داشتن» نمایش",
-        ) {
-            listOf(
-                "ورود فقط روی کندل بسته؛ کراس تازه تنکان/کیجون الزامی است.",
-                "قیمت باید حداقل 0.08×ATR فراتر از ابر کومو باشد و ابر آینده هم‌جهت باشد.",
-                "چیکو، EMA200 و VWAP جلسه باید تایید کنند؛ RSI7 در ناحیه 52–72 (خرید) یا 28–48 (فروش).",
-                "شوک نوسان (ATR بیش از ۲.۵ برابر میانه) یا اسپرد غیرعادی = توقف کامل ورود.",
-                "حد ضرر ساختاری ۰.۹ تا ۱.۴ ATR و حد سود ۱.۸R (۲.۰R در امتیاز ۸۵+) — بدون جابه‌جایی استاپ.",
-                "خروج: SL/TP، شکست کیجون روی کندل بسته، کراس مخالف، یا پایان زمان مجاز.",
-            ).forEach { rule ->
-                Text("• $rule", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary, modifier = Modifier.padding(vertical = 2.dp))
-            }
+        } ?: SectionCard(title = "سیگنال") {
+            Text("—", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
         }
     }
 }
@@ -294,7 +182,6 @@ internal fun PairRadarCard(scan: PairScanState, onScan: () -> Unit, onSelectSymb
     LaunchedEffect(scan.lastSweepAt) { if (scan.lastSweepAt == null) onScan() }
     SectionCard(
         title = "رادار ۸ جفت‌ارز",
-        subtitle = "اسکن دوره‌ای همهٔ نمادها با همان ۸ شرط فنی و ریسک خبر؛ کاندیدا فقط اعلان آموزشی است — ورود خودکار کاغذی همچنان فقط با فید زندهٔ نماد انتخابی",
         trailing = {
             Pill(
                 when {
@@ -309,9 +196,9 @@ internal fun PairRadarCard(scan: PairScanState, onScan: () -> Unit, onSelectSymb
         scan.statuses.forEach { status ->
             val tone = when (status.state) {
                 "candidate" -> AurumColors.Green
-                "blocked" -> AurumColors.Gold
+                "blocked" -> AurumColors.Orange
                 "error" -> AurumColors.Red
-                "needs_key" -> AurumColors.Gold
+                "needs_key" -> AurumColors.Orange
                 else -> AurumColors.TextMuted
             }
             Row(
@@ -342,10 +229,5 @@ internal fun PairRadarCard(scan: PairScanState, onScan: () -> Unit, onSelectSymb
         Button(onClick = onScan, enabled = !scan.sweeping, modifier = Modifier.padding(top = 6.dp)) {
             Text(if (scan.sweeping) "در حال اسکن…" else "اسکن همگانی ۸ جفت‌ارز")
         }
-        Text(
-            "برای بررسی هر نماد روی ردیفش بزنید؛ فید زنده و ورود خودکار کاغذی همان‌جا فعال می‌شود. اسکن دوره‌ای در پس‌زمینه هر ۵ دقیقه (با پایش روشن و کلید داده) انجام می‌شود و سهمیهٔ منابع را رعایت می‌کند.",
-            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-            modifier = Modifier.padding(top = 4.dp),
-        )
     }
 }

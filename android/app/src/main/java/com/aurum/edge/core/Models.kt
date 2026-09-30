@@ -538,8 +538,8 @@ data class AppSettings(
     val newsBaseUrl: String = "",
     /** Applies to NEW paper entries; real orders remain disabled independently. */
     val pauseOnNews: Boolean = false,
-    /** Explicit opt-in; automatic orders here are local paper records, never broker orders. */
-    val autoPaperTrading: Boolean = false,
+    /** Automatic orders here are local paper records, never broker orders. */
+    val autoPaperTrading: Boolean = true,
     /** Check for a public APK when the app starts and download it when one is available. */
     val autoDownloadUpdates: Boolean = false,
     /**

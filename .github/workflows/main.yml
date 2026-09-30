@@ -1,131 +1,370 @@
 name: Android APK
 
-# این ورکفلو فقط یک کار مهم دارد: ساخت APK آمادهٔ نصب و گذاشتنش در Artifacts.
-# روی هر push که پوشه android/ را تغییر بدهد (مثل merge همین PR) و روی PRها اجرا میشود،
-# و هر وقت خواستی میتوانی از تب Actions دستی هم اجرا کنی (Run workflow).
+# Versioned Android CI/CD pipeline for Aurum Edge.
+# It installs every build prerequisite explicitly, validates the Gradle wrapper, runs lint/tests,
+# builds debug + release APKs, creates updater metadata, and can publish a signed GitHub Release.
 on:
   push:
-    branches: [main]
+    branches: [main, 'arena/**']
+    tags: ['v*']
     paths:
       - 'android/**'
+      - 'update/**'
+      - '.github/workflows/main.yml'
   pull_request:
     paths:
       - 'android/**'
+      - 'update/**'
+      - '.github/workflows/main.yml'
   workflow_dispatch:
+    inputs:
+      version_name:
+        description: 'Optional app versionName for this run, for example 1.2.10. Blank = use android/app/build.gradle.kts.'
+        required: false
+        default: ''
+        type: string
+      version_code:
+        description: 'Optional numeric versionCode for this run. Blank = use android/app/build.gradle.kts.'
+        required: false
+        default: ''
+        type: string
+      publish_release:
+        description: 'Publish/refresh GitHub Release assets for the in-app updater. Requires stable signing secrets.'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
-  contents: read
+  contents: write
 
-# اگر چند بار پشتسرهم اجرا شد، اجراهای قدیمیتر لغو میشوند تا وقت runner هدر نرود.
 concurrency:
   group: android-apk-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    shell: bash
+
+# All runner/tool versions are declared here so upgrades are intentional and visible.
+env:
+  JAVA_DISTRIBUTION: temurin
+  JAVA_VERSION: '17'
+  ANDROID_API_LEVEL: '35'
+  ANDROID_BUILD_TOOLS: '35.0.0'
+  ANDROID_CMDLINE_TOOLS: latest
+  PROJECT_DIR: android
+  APP_MODULE: app
+  APPLICATION_ID: com.aurum.edge
+  RELEASE_APK_PREFIX: AurumEdge
+  GRADLE_FLAGS: --no-daemon --stacktrace --warning-mode=all
+
 jobs:
   apk:
-    name: Build APK
+    name: Build, test, package APK
     runs-on: ubuntu-latest
+    timeout-minutes: 55
     env:
-      # اختیاری: یک secret با نام TD_API_KEY بساز تا APK با کلید Twelve Data ساخته شود.
-      # اگر نگذاری، اپ موقع اولین اجرا کلید را در تب «تنظیمات» میپرسد.
-      TD_API_KEY: ${{ secrets.TD_API_KEY }}
+      # Optional stable release signing secrets. In-app updates require the same signing key every time.
+      AURUM_RELEASE_KEYSTORE_BASE64: ${{ secrets.AURUM_RELEASE_KEYSTORE_BASE64 }}
+      AURUM_RELEASE_STORE_PASSWORD: ${{ secrets.AURUM_RELEASE_STORE_PASSWORD }}
+      AURUM_RELEASE_KEY_ALIAS: ${{ secrets.AURUM_RELEASE_KEY_ALIAS }}
+      AURUM_RELEASE_KEY_PASSWORD: ${{ secrets.AURUM_RELEASE_KEY_PASSWORD }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
 
-      # اگر این ورکفلو دستی روی شاخهای اجرا شود که هنوز android/ ندارد،
-      # بهجای خطای گنگ، یک پیام روشن در Summary میگذاریم و بقیه مراحل رد میشوند.
-      - name: Check the Android sources are present
+      - name: Guard Android project
         id: guard
         run: |
-          if [ -d android ]; then
+          set -euo pipefail
+          if [[ -d "$PROJECT_DIR" && -f "$PROJECT_DIR/gradlew" && -f "$PROJECT_DIR/app/build.gradle.kts" ]]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
             {
-              echo "## Android APK — اجرا نشد"
-              echo ""
-              echo "پوشهٔ \`android/\` در این شاخه وجود ندارد (PR اندروید هنوز merge نشده است)."
-              echo "بعد از merge شدن، همین ورکفلو خودکار اجرا میشود و APK در Artifacts آماده است."
+              echo "## Android APK — skipped"
+              echo "The Android project was not found on this ref."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Set up JDK 17
+      - name: Set up JDK
         if: steps.guard.outputs.ready == 'true'
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6.0.1
         with:
-          distribution: temurin
-          java-version: '17'
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          java-version: ${{ env.JAVA_VERSION }}
 
-      - name: Set up Gradle
+      - name: Set up Android SDK
         if: steps.guard.outputs.ready == 'true'
-        uses: gradle/actions/setup-gradle@v4
+        # v4 runs on Node 24 and ships current command-line tools. v3 used Node 20 and
+        # failed before sdkmanager ran on the current GitHub-hosted runner image.
+        uses: android-actions/setup-android@v4.0.4
         with:
-          gradle-version: '8.9'
+          cmdline-tools-version: '15859902'
+          packages: 'platform-tools'
 
-      # رانرهای GitHub اندروید SDK دارند، ولی برای اطمینان پلتفرم/بیلدتولز لازم را هم نصب میکنیم.
-      - name: Ensure Android SDK packages
+      - name: Install Android SDK packages
         if: steps.guard.outputs.ready == 'true'
         run: |
+          set -euo pipefail
           SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
-          if [ -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
-            yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
-            "$SDK/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0" > /dev/null 2>&1 || true
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "cmdline-tools;${ANDROID_CMDLINE_TOOLS}" \
+            "platform-tools" \
+            "platforms;android-${ANDROID_API_LEVEL}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}"
+
+      - name: Validate Gradle wrapper
+        if: steps.guard.outputs.ready == 'true'
+        uses: gradle/actions/wrapper-validation@v6.4.0
+        with:
+          min-wrapper-count: 1
+
+      - name: Set up Gradle cache
+        if: steps.guard.outputs.ready == 'true'
+        uses: gradle/actions/setup-gradle@v6.4.0
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Make Gradle wrapper executable
+        if: steps.guard.outputs.ready == 'true'
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: chmod +x ./gradlew
+
+      - name: Resolve and validate app version
+        if: steps.guard.outputs.ready == 'true'
+        id: version
+        env:
+          INPUT_VERSION_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.version_name || '' }}
+          INPUT_VERSION_CODE: ${{ github.event_name == 'workflow_dispatch' && inputs.version_code || '' }}
+        run: |
+          set -euo pipefail
+          BUILD_FILE="$PROJECT_DIR/app/build.gradle.kts"
+          PROJECT_VERSION_NAME=$(grep -m1 'versionName = ' "$BUILD_FILE" | sed -E 's/.*"([^"]+)".*/\1/')
+          PROJECT_VERSION_CODE=$(grep -m1 'versionCode = ' "$BUILD_FILE" | sed -E 's/[^0-9]*([0-9]+).*/\1/')
+          VERSION_NAME="${INPUT_VERSION_NAME:-$PROJECT_VERSION_NAME}"
+          VERSION_CODE="${INPUT_VERSION_CODE:-$PROJECT_VERSION_CODE}"
+          if [[ ! "$VERSION_NAME" =~ ^[0-9]+(\.[0-9]+){1,3}([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error title=Invalid versionName::Use a semantic version such as 1.2.10"
+            exit 1
           fi
+          if [[ ! "$VERSION_CODE" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error title=Invalid versionCode::versionCode must be a positive integer"
+            exit 1
+          fi
+          if [[ "$VERSION_NAME" != "$PROJECT_VERSION_NAME" ]]; then
+            python3 - "$BUILD_FILE" "$VERSION_NAME" <<'PY'
+          from pathlib import Path
+          import re
+          from sys import argv
+          path = Path(argv[1])
+          path.write_text(re.sub(r'versionName\s*=\s*"[^"]+"', f'versionName = "{argv[2]}"', path.read_text(), count=1))
+          PY
+          fi
+          if [[ "$VERSION_CODE" != "$PROJECT_VERSION_CODE" ]]; then
+            python3 - "$BUILD_FILE" "$VERSION_CODE" <<'PY'
+          from pathlib import Path
+          import re
+          from sys import argv
+          path = Path(argv[1])
+          path.write_text(re.sub(r'versionCode\s*=\s*[0-9]+', f'versionCode = {argv[2]}', path.read_text(), count=1))
+          PY
+          fi
+          {
+            echo "name=$VERSION_NAME"
+            echo "code=$VERSION_CODE"
+            echo "tag=v$VERSION_NAME"
+            echo "apk_name=${RELEASE_APK_PREFIX}-v${VERSION_NAME}.apk"
+          } >> "$GITHUB_OUTPUT"
 
-      - name: Build debug + release APK
-        if: steps.guard.outputs.ready == 'true'
-        working-directory: android
-        run: gradle assembleDebug assembleRelease --no-daemon --stacktrace
-
-      # تستهای JVM موتور؛ عمداً non-blocking تا نبود APK بهخاطر یک تست از دست نرود.
-      - name: Unit tests (engine truth checks)
-        if: steps.guard.outputs.ready == 'true'
-        continue-on-error: true
-        working-directory: android
-        run: gradle testDebugUnitTest --no-daemon --stacktrace
-
-      # نامگذاری ساده برای دانلود راحتتر.
-      - name: Collect APKs
+      - name: Verify project SDK configuration
         if: steps.guard.outputs.ready == 'true'
         run: |
+          set -euo pipefail
+          BUILD_FILE="$PROJECT_DIR/app/build.gradle.kts"
+          COMPILE_SDK=$(grep -m1 'compileSdk = ' "$BUILD_FILE" | sed -E 's/[^0-9]*([0-9]+).*/\1/')
+          TARGET_SDK=$(grep -m1 'targetSdk = ' "$BUILD_FILE" | sed -E 's/[^0-9]*([0-9]+).*/\1/')
+          if [[ "$COMPILE_SDK" != "$ANDROID_API_LEVEL" || "$TARGET_SDK" != "$ANDROID_API_LEVEL" ]]; then
+            echo "::error title=SDK version mismatch::Workflow ANDROID_API_LEVEL=$ANDROID_API_LEVEL but Gradle compileSdk=$COMPILE_SDK targetSdk=$TARGET_SDK"
+            exit 1
+          fi
+
+      - name: Toolchain report
+        if: steps.guard.outputs.ready == 'true'
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -euo pipefail
+          java -version
+          ./gradlew --version $GRADLE_FLAGS
+          echo "ANDROID_HOME=${ANDROID_HOME}"
+          sdkmanager --list_installed | sed -n '1,120p'
+
+      - name: Decode optional release signing keystore
+        if: steps.guard.outputs.ready == 'true' && env.AURUM_RELEASE_KEYSTORE_BASE64 != ''
+        run: |
+          set -euo pipefail
+          printf '%s' "$AURUM_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/aurum-release.jks"
+          echo "AURUM_RELEASE_STORE_FILE=$RUNNER_TEMP/aurum-release.jks" >> "$GITHUB_ENV"
+          echo "AURUM_RELEASE_STORE_PASSWORD=$AURUM_RELEASE_STORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "AURUM_RELEASE_KEY_ALIAS=$AURUM_RELEASE_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "AURUM_RELEASE_KEY_PASSWORD=$AURUM_RELEASE_KEY_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Resolve Android dependencies
+        if: steps.guard.outputs.ready == 'true'
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: ./gradlew :${APP_MODULE}:dependencies --configuration debugRuntimeClasspath $GRADLE_FLAGS
+
+      - name: Lint Android sources
+        if: steps.guard.outputs.ready == 'true'
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: ./gradlew :${APP_MODULE}:lintDebug $GRADLE_FLAGS
+
+      - name: Unit tests
+        if: steps.guard.outputs.ready == 'true'
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: ./gradlew :${APP_MODULE}:testDebugUnitTest $GRADLE_FLAGS
+
+      - name: Build debug and release APKs
+        if: steps.guard.outputs.ready == 'true'
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: ./gradlew :${APP_MODULE}:assembleDebug :${APP_MODULE}:assembleRelease $GRADLE_FLAGS
+
+      - name: Collect APKs and updater metadata
+        if: steps.guard.outputs.ready == 'true'
+        id: collect
+        run: |
+          set -euo pipefail
           mkdir -p out
-          cp android/app/build/outputs/apk/debug/app-debug.apk out/AurumEdge-debug.apk 2>/dev/null || true
-          cp android/app/build/outputs/apk/release/app-release.apk out/AurumEdge-release.apk 2>/dev/null || true
+          VERSION_NAME='${{ steps.version.outputs.name }}'
+          VERSION_CODE='${{ steps.version.outputs.code }}'
+          TAG='${{ steps.version.outputs.tag }}'
+          APK_NAME='${{ steps.version.outputs.apk_name }}'
+          RELEASE_APK="out/${APK_NAME}"
+          DEBUG_APK="out/${RELEASE_APK_PREFIX}-debug-v${VERSION_NAME}.apk"
+          cp "$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk" "$RELEASE_APK"
+          cp "$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk" "$DEBUG_APK"
+          SHA256=$(sha256sum "$RELEASE_APK" | awk '{print $1}')
+          DEBUG_SHA256=$(sha256sum "$DEBUG_APK" | awk '{print $1}')
+          SIZE_BYTES=$(stat -c%s "$RELEASE_APK")
+          APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${APK_NAME}"
+          {
+            echo "version_name=$VERSION_NAME"
+            echo "version_code=$VERSION_CODE"
+            echo "tag=$TAG"
+            echo "apk_name=$APK_NAME"
+            echo "debug_apk_name=$(basename "$DEBUG_APK")"
+            echo "apk_url=$APK_URL"
+            echo "sha256=$SHA256"
+            echo "debug_sha256=$DEBUG_SHA256"
+            echo "size_bytes=$SIZE_BYTES"
+          } >> "$GITHUB_OUTPUT"
+          cat > "out/${APK_NAME}.json" <<JSON
+          {
+            "applicationId": "${APPLICATION_ID}",
+            "versionCode": ${VERSION_CODE},
+            "versionName": "${VERSION_NAME}",
+            "tagName": "${TAG}",
+            "commitSha": "${GITHUB_SHA}",
+            "publishedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "artifactName": "${APK_NAME}",
+            "notes": "Aurum Edge Android APK built by the versioned GitHub Actions workflow. The in-app updater verifies package name, signing certificate, versionCode, size and SHA-256 before opening Android Installer.",
+            "apkUrl": "${APK_URL}",
+            "sha256": "${SHA256}",
+            "sizeBytes": ${SIZE_BYTES}
+          }
+          JSON
+          cp "out/${APK_NAME}.json" out/aurum-edge.json
+          {
+            sha256sum "$RELEASE_APK"
+            sha256sum "$DEBUG_APK"
+            sha256sum "out/${APK_NAME}.json"
+          } > out/checksums.sha256
           ls -la out
 
-      - name: Upload APKs
+      - name: Upload APK artifacts
         if: steps.guard.outputs.ready == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.1
         with:
-          name: aurum-edge-apk
+          name: aurum-edge-${{ steps.collect.outputs.version_name }}-${{ github.run_number }}
           if-no-files-found: error
           retention-days: 30
-          path: out/*.apk
+          path: |
+            out/*.apk
+            out/*.json
+            out/checksums.sha256
+
+      - name: Upload test and lint reports
+        if: always() && steps.guard.outputs.ready == 'true'
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: aurum-edge-reports-${{ github.run_number }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            android/app/build/reports/lint-results-debug.html
+            android/app/build/reports/tests/testDebugUnitTest/**
+            android/app/build/test-results/testDebugUnitTest/**
+
+      - name: Require stable signing for public updater release
+        if: steps.guard.outputs.ready == 'true' && (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))
+        run: |
+          set -euo pipefail
+          if [[ -z "$AURUM_RELEASE_KEYSTORE_BASE64" || -z "$AURUM_RELEASE_STORE_PASSWORD" || -z "$AURUM_RELEASE_KEY_ALIAS" || -z "$AURUM_RELEASE_KEY_PASSWORD" ]]; then
+            echo "::error title=Stable signing required::Set AURUM_RELEASE_KEYSTORE_BASE64, AURUM_RELEASE_STORE_PASSWORD, AURUM_RELEASE_KEY_ALIAS and AURUM_RELEASE_KEY_PASSWORD before publishing an updater release."
+            exit 1
+          fi
+
+      - name: Publish GitHub Release for in-app updater
+        if: steps.guard.outputs.ready == 'true' && (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.collect.outputs.tag }}
+          APK_NAME: ${{ steps.collect.outputs.apk_name }}
+          VERSION_NAME: ${{ steps.collect.outputs.version_name }}
+          SHA256: ${{ steps.collect.outputs.sha256 }}
+          SIZE_BYTES: ${{ steps.collect.outputs.size_bytes }}
+        run: |
+          set -euo pipefail
+          NOTES=$'Aurum Edge Android APK.\n\nVersion: '"$VERSION_NAME"$'\nSHA-256: '"$SHA256"$'\nSize bytes: '"$SIZE_BYTES"$'\n\nThe in-app updater accepts only this release-asset route and then verifies package name, signing certificate, versionCode, size and SHA-256.'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes "$NOTES"
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "$NOTES"
+          fi
+          gh release upload "$TAG" "out/${APK_NAME}" "out/${APK_NAME}.json" "out/checksums.sha256" --clobber
 
       - name: Job summary
         if: always() && steps.guard.outputs.ready == 'true'
         run: |
           {
-            echo "## Aurum Edge — Android"
+            echo "## Aurum Edge — Android APK"
             echo ""
-            echo "APKها در بخش **Artifacts** همین اجرا هستند (فایل zip شامل دو APK):"
+            echo "### Versions"
+            echo "| Item | Version |"
+            echo "|---|---:|"
+            echo "| App versionName | ${{ steps.collect.outputs.version_name }} |"
+            echo "| App versionCode | ${{ steps.collect.outputs.version_code }} |"
+            echo "| Java | ${JAVA_DISTRIBUTION} ${JAVA_VERSION} |"
+            echo "| Android API | ${ANDROID_API_LEVEL} |"
+            echo "| Android build-tools | ${ANDROID_BUILD_TOOLS} |"
             echo ""
-            echo "| فایل | توضیح |"
-            echo "|---|---|"
-            echo "| \`AurumEdge-release.apk\` | نسخهٔ اصلی — روی گوشی نصب میشود |"
-            echo "| \`AurumEdge-debug.apk\` | نسخهٔ دیباگ (پکیج جدا: com.aurum.edge.debug) |"
+            echo "### Artifacts"
+            echo "| File | Purpose | SHA-256 |"
+            echo "|---|---|---|"
+            echo "| \`${{ steps.collect.outputs.apk_name }}\` | Release APK for install/update | \`${{ steps.collect.outputs.sha256 }}\` |"
+            echo "| \`${{ steps.collect.outputs.debug_apk_name }}\` | Debug APK with separate applicationId | \`${{ steps.collect.outputs.debug_sha256 }}\` |"
+            echo "| \`${{ steps.collect.outputs.apk_name }}.json\` | Updater sidecar metadata | — |"
             echo ""
-            echo "Release با کلید دیباگ امضا شده تا بدون keystore روی گوشی نصب شود؛ هنگام نصب اجازهٔ «نصب از منبع ناشناس» را بده."
-            echo ""
-            echo "اگر مرحلهٔ تست موتور قرمز شد، APKها با این حال ساخته شدهاند؛ لاگ تست را بفرست تا بررسی شود."
-            if [ -n "$TD_API_KEY" ]; then
-              echo ""
-              echo "کلید Twelve Data در این بیلد داخل APK قرار گرفته است (secret TD_API_KEY)."
+            if [[ -n "$AURUM_RELEASE_KEYSTORE_BASE64" ]]; then
+              echo "Release signing: stable repository keystore secret was used."
             else
-              echo ""
-              echo "کلید Twelve Data داخل APK نیست: اول در تب «تنظیمات» کلید را وارد کن."
+              echo "Release signing: preview/debug signing only. For in-app updates on installed releases, configure AURUM_RELEASE_KEYSTORE_BASE64, AURUM_RELEASE_STORE_PASSWORD, AURUM_RELEASE_KEY_ALIAS and AURUM_RELEASE_KEY_PASSWORD."
             fi
+            echo ""
+            echo "No market or AI API keys are embedded in the APK. Users enter optional keys only on their own device."
           } >> "$GITHUB_STEP_SUMMARY"

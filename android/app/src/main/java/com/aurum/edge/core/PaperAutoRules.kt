@@ -12,7 +12,7 @@ object PaperAutoRules {
         // REST publishes a recent BAR, not a timestamped last trade within that bar.
         // It can justify an educational candidate, never an automatic paper fill.
         if (market.feed.mode != FeedMode.LIVE) return "ورود خودکار کاغذی فقط با تیک تازهٔ زنده مجاز است؛ کندل/تاریخچهٔ دوره‌ای فقط نامزد آموزشی است"
-        return opportunityBlocker(market, settings, news, now)
+        return opportunityBlocker(market, settings, news, now, requireMonitor = false)
     }
 
     /**
@@ -26,9 +26,10 @@ object PaperAutoRules {
     fun opportunityBlocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
                            now: Long = System.currentTimeMillis(),
                            allowedSymbols: List<String>? = null,
-                           barAgeGraceMs: Long = 90_000L): String? {
+                           barAgeGraceMs: Long = 90_000L,
+                           requireMonitor: Boolean = true): String? {
         if (MarketHours.forexWeekendClosed(now)) return "بازار فارکس طبق برنامهٔ معمول پایان هفته بسته است؛ ورود/اعلان معاملاتی نداریم"
-        if (!settings.backgroundMonitor) return "برای هشدار/ورود، پایش پس‌زمینه باید روشن باشد"
+        if (requireMonitor && !settings.backgroundMonitor) return "برای هشدار/ورود، پایش پس‌زمینه باید روشن باشد"
         if (allowedSymbols != null) {
             if (market.symbol !in allowedSymbols || market.interval != settings.interval) return "نماد/بازه اسکن معتبر نیست"
         } else if (market.symbol != settings.symbol || market.interval != settings.interval) {

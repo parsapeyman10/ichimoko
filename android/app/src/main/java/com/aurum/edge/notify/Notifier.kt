@@ -1,15 +1,18 @@
 package com.aurum.edge.notify
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.aurum.edge.MainActivity
 import com.aurum.edge.R
 import com.aurum.edge.core.PaperOpportunity
@@ -26,6 +29,12 @@ object Notifier {
     const val CHANNEL_VERIFIED_DEFAULT = "aurum_verified_system_v1"
     const val CHANNEL_VERIFIED_FILE = "aurum_verified_file_v1"
     const val MONITOR_NOTIFICATION_ID = 4201
+
+    /** Android 13+ requires this runtime grant before posting any app notification. */
+    private fun notificationPermissionGranted(context: Context): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+                PackageManager.PERMISSION_GRANTED
 
     fun ensureChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
@@ -92,6 +101,9 @@ object Notifier {
     /** Separate informational channel: a publisher observation is NEVER an entry/candidate alert. */
     fun notifyResearch(context: Context, evidenceId: String, title: String, text: String): Boolean {
         ensureChannels(context)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED) return false
         val manager = context.getSystemService(NotificationManager::class.java) ?: return false
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled() ||
             manager.getNotificationChannel(CHANNEL_RESEARCH)?.importance?.let {
@@ -113,6 +125,7 @@ object Notifier {
 
     fun canNotifyVerified(context: Context, customSoundUri: String): Boolean {
         ensureChannels(context)
+        if (!notificationPermissionGranted(context)) return false
         val manager = context.getSystemService(NotificationManager::class.java) ?: return false
         val channel = if (customSoundUri.isNotBlank() && AlertSoundPlayer.canOpen(context, customSoundUri))
             CHANNEL_VERIFIED_FILE else CHANNEL_VERIFIED_DEFAULT
@@ -158,16 +171,19 @@ object Notifier {
         val side = if (trade.action == SignalAction.BUY) "خرید" else "فروش"
         val title = "معاملهٔ آموزشی $side ثبت شد · فقط کاغذی"
         val text = "XAU/USD ${trade.interval.label} · ورود ${formatPrice(trade.entry)}$ · شناسه ${trade.id.take(8)}"
-        val ai = trade.aiReview?.let { review ->
-            "\nنظر AI: ${review.verdictFa()} (${review.confidence}٪) — ${review.summary}"
-        }.orEmpty()
+        val conditions = trade.entryConditions.take(8).joinToString("، ") {
+            it.name.substringAfter('·').trim()
+        }
         return postVerified(context, trade.id.hashCode(), title, text,
-            "$text\nSL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)} · " +
-                "۸/۸ فنی، گزینه‌های فعال و شواهد رنج/ICT در ژورنال ثبت شدند؛ خبر فقط داده‌کاوی همراه معامله است. سفارش واقعی ارسال نشد.$ai", customSoundUri)
+            "$text\nشروع معامله: $conditions\nSL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)}",
+            customSoundUri)
     }
 
     private fun postVerified(context: Context, id: Int, title: String, text: String,
                              expanded: String, customSoundUri: String): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED) return false
         if (!canNotifyVerified(context, customSoundUri)) return false
         val manager = context.getSystemService(NotificationManager::class.java) ?: return false
         val custom = customSoundUri.isNotBlank() && AlertSoundPlayer.canOpen(context, customSoundUri)
@@ -196,6 +212,9 @@ object Notifier {
     }
 
     fun notifyClosedTrade(context: Context, trade: PaperTrade) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+                PackageManager.PERMISSION_GRANTED) return
         val pnl = trade.pnlUsd ?: 0.0
         val title = if (pnl >= 0) "پوزیشن کاغذی با سود بسته شد" else "پوزیشن کاغذی با ضرر بسته شد"
         val text = "${trade.action.name} ${trade.interval.label} · خروج ${formatPrice(trade.exitPrice)} · " +
@@ -209,11 +228,4 @@ object Notifier {
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(trade.id.hashCode(), notification) }
     }
-}
-
-private fun com.aurum.edge.core.PaperAiReview.verdictFa(): String = when (verdict) {
-    "WORTHY" -> "شرایط مناسب بوده"
-    "RISKY" -> "پرریسک/مرزی بوده"
-    "NOT_WORTHY" -> "شرایط کافی نبوده"
-    else -> verdict
 }

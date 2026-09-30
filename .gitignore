@@ -1,13 +1,13 @@
-node_modules/
-dist/
+# Python companion API
 .env
 .venv/
+backend/.env
+backend/.venv/
 __pycache__/
 .pytest_cache/
 *.py[cod]
-*.tsbuildinfo
+.coverage
 .DS_Store
-coverage/
 
 # Android
 android/.gradle/
