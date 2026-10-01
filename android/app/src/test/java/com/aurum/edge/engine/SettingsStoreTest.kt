@@ -20,7 +20,8 @@ class SettingsStoreTest {
         context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit().clear().commit()
         val store = SettingsStore(context)
         assertFalse(store.read().hasKey)
-        assertFalse(store.saveMarketCredentials("", "XAU/USD"))
+        // Empty key is valid keyless mode: it saves/reconnects the symbol without creating a key.
+        assertTrue(store.saveMarketCredentials("", "XAU/USD"))
         assertFalse(store.saveMarketCredentials("synthetic key", "XAU/USD"))
         assertFalse(store.read().hasKey)
 
