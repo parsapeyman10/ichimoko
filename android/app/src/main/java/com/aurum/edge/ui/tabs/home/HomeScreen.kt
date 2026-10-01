@@ -19,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -57,7 +58,11 @@ fun HomeScreen(
     }
     val session = MarketHours.sessionWindow(now)
     val price = HomeReadout.from(market, now)
-    val spread = market.bid?.let { bid -> market.ask?.let { ask -> ask - bid } }
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val configuredSpread = settings.spreadPrice.takeIf { it.isFinite() && it > 0.0 && price.value != null }
+    val displayBid = market.bid ?: configuredSpread?.let { spread -> price.value?.minus(spread / 2.0) }
+    val displayAsk = market.ask ?: configuredSpread?.let { spread -> price.value?.plus(spread / 2.0) }
+    val spread = displayBid?.let { bid -> displayAsk?.let { ask -> ask - bid } }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 14.dp)) {
         Column(
@@ -139,8 +144,8 @@ fun HomeScreen(
                 modifier = Modifier.padding(top = 4.dp),
             )
             Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatTile("BID", formatQuotePrice(market.bid), if (price.current) AurumColors.Green else AurumColors.TextMuted, Modifier.weight(1f))
-                StatTile("ASK", formatQuotePrice(market.ask), if (price.current) AurumColors.Red else AurumColors.TextMuted, Modifier.weight(1f))
+                StatTile("BID", formatQuotePrice(displayBid), if (price.current) AurumColors.Green else AurumColors.TextMuted, Modifier.weight(1f))
+                StatTile("ASK", formatQuotePrice(displayAsk), if (price.current) AurumColors.Red else AurumColors.TextMuted, Modifier.weight(1f))
                 StatTile("SPREAD", formatSpread(spread), AurumColors.Gold, Modifier.weight(1f))
             }
             market.feed.detail.takeIf { it.isNotBlank() }?.let {

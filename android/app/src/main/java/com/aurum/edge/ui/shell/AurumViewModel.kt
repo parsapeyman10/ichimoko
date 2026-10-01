@@ -335,10 +335,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     /** One verified write, one feed restart; never echo a credential into a toast or log. */
     fun saveMarketCredentials(key: String, symbol: String) {
         if (marketSaveInFlight) return
-        if (key.isBlank() && !settings.value.hasKey) {
-            _toast.value = "ابتدا کلید تازهٔ Twelve Data را روی همین گوشی وارد کنید"
-            return
-        }
         if (key.trim().any { it.isWhitespace() }) {
             _toast.value = "کلید نباید فاصله یا خط جدید داشته باشد؛ چیزی ذخیره نشد"
             return
@@ -353,7 +349,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 }
                 container.market.restart()
                 container.watch.refreshNow()
-                _toast.value = "کلید و نماد روی همین نصب ذخیره و بازخوانی شدند؛ برای اعتبار کلید، وضعیت اتصال بازار را بررسی کنید"
+                _toast.value = if (key.isBlank() && !settings.value.hasKey)
+                    "نماد ذخیره شد؛ اتصال رایگان Yahoo/TradingView/Swissquote بازخوانی شد"
+                else "کلید و نماد روی همین نصب ذخیره و بازخوانی شدند؛ وضعیت اتصال بازار را بررسی کنید"
             } catch (_: Exception) {
                 _toast.value = "ذخیره/اتصال مجدد ناموفق بود؛ وضعیت دادهٔ بازار را بررسی کنید"
             } finally {

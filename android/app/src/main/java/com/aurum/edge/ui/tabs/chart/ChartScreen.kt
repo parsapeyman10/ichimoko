@@ -2,6 +2,8 @@ package com.aurum.edge.ui
 
 import android.annotation.SuppressLint
 import android.graphics.Color as AndroidColor
+import android.webkit.CookieManager
+import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -176,33 +178,49 @@ private fun EntryScoreCard(market: MarketState) {
 @Composable
 private fun TradingViewWidget(symbol: String, interval: Interval, modifier: Modifier = Modifier) {
     val html = tradingViewHtml(symbol, interval)
+    val loadKey = "$symbol|${interval.label}"
     AndroidView(
         modifier = modifier,
         factory = { context ->
             WebView(context).apply {
                 setBackgroundColor(AndroidColor.TRANSPARENT)
                 webViewClient = WebViewClient()
+                webChromeClient = WebChromeClient()
+                CookieManager.getInstance().setAcceptCookie(true)
+                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
+                settings.databaseEnabled = true
+                settings.loadsImagesAutomatically = true
+                settings.javaScriptCanOpenWindowsAutomatically = true
                 settings.cacheMode = WebSettings.LOAD_DEFAULT
                 settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                loadDataWithBaseURL("https://s.tradingview.com", html, "text/html", "UTF-8", null)
+                settings.userAgentString = settings.userAgentString + " AurumEdgeTradingView/1"
+                tag = loadKey
+                loadDataWithBaseURL("https://www.tradingview.com", html, "text/html", "UTF-8", null)
             }
         },
-        update = { webView -> webView.loadDataWithBaseURL("https://s.tradingview.com", html, "text/html", "UTF-8", null) },
+        update = { webView ->
+            // AndroidView.update runs on every Compose recomposition. Market prices can recompose
+            // every second; reloading here kept TradingView in a permanent loading/no-data state.
+            if (webView.tag != loadKey) {
+                webView.tag = loadKey
+                webView.loadDataWithBaseURL("https://www.tradingview.com", html, "text/html", "UTF-8", null)
+            }
+        },
     )
 }
 
 private fun tradingViewHtml(symbol: String, interval: Interval): String {
     val tvSymbol = when (symbol) {
         "XAU/USD" -> "OANDA:XAUUSD"
-        "EUR/USD" -> "FX:EURUSD"
-        "GBP/USD" -> "FX:GBPUSD"
-        "AUD/USD" -> "FX:AUDUSD"
-        "NZD/USD" -> "FX:NZDUSD"
-        "USD/JPY" -> "FX:USDJPY"
-        "USD/CHF" -> "FX:USDCHF"
-        "USD/CAD" -> "FX:USDCAD"
+        "EUR/USD" -> "OANDA:EURUSD"
+        "GBP/USD" -> "OANDA:GBPUSD"
+        "AUD/USD" -> "OANDA:AUDUSD"
+        "NZD/USD" -> "OANDA:NZDUSD"
+        "USD/JPY" -> "OANDA:USDJPY"
+        "USD/CHF" -> "OANDA:USDCHF"
+        "USD/CAD" -> "OANDA:USDCAD"
         else -> "OANDA:XAUUSD"
     }
     val tvInterval = when (interval) {

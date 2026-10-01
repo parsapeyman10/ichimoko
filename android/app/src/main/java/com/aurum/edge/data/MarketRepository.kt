@@ -538,11 +538,14 @@ class MarketRepository(
             if (value != null && !value.closed) cachedBars[key] = value.copy(closed = true)
         }
 
+        val configuredSpread = current.spreadPrice.takeIf { it.isFinite() && it > 0.0 }
+        val displayBid = tick.bid ?: configuredSpread?.let { price - it / 2.0 }
+        val displayAsk = tick.ask ?: configuredSpread?.let { price + it / 2.0 }
         lastQuietReconnect = SystemClock.elapsedRealtime()
         _state.value = _state.value.copy(
             lastPrice = price,
-            bid = tick.bid,
-            ask = tick.ask,
+            bid = displayBid,
+            ask = displayAsk,
             feed = FeedStatus(FeedMode.LIVE, "", System.currentTimeMillis(), provider = provider),
             showingCachedData = false,
         )

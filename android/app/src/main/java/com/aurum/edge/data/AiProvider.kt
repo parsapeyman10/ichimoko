@@ -98,7 +98,8 @@ internal object AiProvider {
     suspend fun completeJson(httpClient: OkHttpClient, baseUrl: String, apiKey: String, model: String,
                               system: String, user: String, maxTokens: Int = 1024,
                               format: String = "AUTO"): JsonObject {
-        val content = completeText(httpClient, baseUrl, apiKey, model, system, user, maxTokens, format)
+        val content = completeText(httpClient, baseUrl, apiKey, model, system, user, maxTokens, format,
+            requireJson = true)
         return parseJsonObjectLoose(content) ?: throw IllegalStateException("خروجی مدل JSON معتبر نیست")
     }
 
@@ -110,17 +111,18 @@ internal object AiProvider {
                       format: String = "AUTO"): String =
         completeText(httpClient, baseUrl, apiKey, model,
             "You are a connectivity test. Reply with the single word: OK",
-            "ping", 16, format).take(60)
+            "ping", 16, format, requireJson = false).take(60)
 
     private suspend fun completeText(httpClient: OkHttpClient, baseUrl: String, apiKey: String, model: String,
-                                     system: String, user: String, maxTokens: Int, format: String): String {
+                                     system: String, user: String, maxTokens: Int, format: String,
+                                     requireJson: Boolean): String {
         val base = baseUrl.trim().trimEnd('/')
         val uri = runCatching { URI(base) }.getOrNull()
         require(uri?.scheme == "https" && !uri.host.isNullOrBlank() && uri.rawUserInfo == null &&
             uri.port in listOf(-1, 443)) { "نشانی سرویس مدل معتبر نیست (فقط HTTPS معمول)" }
         val anthropic = usesAnthropic(base, format)
         val url = if (anthropic) anthropicMessagesUrl(base) else openAiChatUrl(base)
-        val body = if (anthropic) buildJsonObject {
+        fun requestBody(useJsonMode: Boolean) = if (anthropic) buildJsonObject {
             put("model", model)
             put("max_tokens", maxTokens)
             put("temperature", 0)
@@ -131,24 +133,36 @@ internal object AiProvider {
         } else buildJsonObject {
             put("model", model)
             put("temperature", 0)
-            put("response_format", buildJsonObject { put("type", "json_object") })
+            if (useJsonMode) put("response_format", buildJsonObject { put("type", "json_object") })
             put("messages", buildJsonArray {
                 add(buildJsonObject { put("role", "system"); put("content", system) })
                 add(buildJsonObject { put("role", "user"); put("content", user) })
             })
         }
-        val response = withContext(Dispatchers.IO) {
+        suspend fun post(bodyText: String): String = withContext(Dispatchers.IO) {
             val builder = Request.Builder().url(url)
                 .header("Content-Type", "application/json")
             if (anthropic) builder.header("x-api-key", apiKey).header("anthropic-version", ANTHROPIC_VERSION)
             else builder.header("Authorization", "Bearer $apiKey")
-            val request = builder.post(body.toString().toRequestBody("application/json".toMediaType())).build()
+            val request = builder.post(bodyText.toRequestBody("application/json".toMediaType())).build()
             httpClient.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) throw IllegalStateException("سرویس مدل پاسخ معتبر نداد (HTTP ${resp.code})")
                 val text = resp.peekBody(64_000L).string()
                 if (text.isBlank()) throw IllegalStateException("پاسخ سرویس مدل خالی بود")
                 text
             }
+        }
+        val response = if (!anthropic && requireJson) {
+            try {
+                post(requestBody(useJsonMode = true).toString())
+            } catch (_: IllegalStateException) {
+                // Some OpenAI-compatible gateways reject response_format=json_object, and the
+                // connectivity probe must not use JSON mode at all. The caller still validates
+                // strict JSON after this fallback, so unsupported JSON-mode does not become trust.
+                post(requestBody(useJsonMode = false).toString())
+            }
+        } else {
+            post(requestBody(useJsonMode = false).toString())
         }
         val root = runCatching { Json.parseToJsonElement(response) as? JsonObject }
             .getOrNull() ?: throw IllegalStateException("پاسخ سرویس مدل ساختار JSON ندارد")

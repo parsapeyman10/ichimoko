@@ -69,18 +69,20 @@ class SettingsStore(context: Context) {
     }
 
     /**
-     * Persist the market key and symbol in ONE disk transaction. A successful commit,
+     * Persist the optional market key and symbol in ONE disk transaction. A successful commit,
      * not merely an in-memory SharedPreferences.apply(), is required before reconnecting.
-     * Empty input preserves an existing key; it never silently erases credentials.
+     * Empty input preserves an existing/default key; if no key exists it explicitly enters the
+     * keyless public-feed mode instead of blocking the Yahoo/Swissquote connection.
      */
     @Synchronized
     fun saveMarketCredentials(keyInput: String, symbolInput: String): Boolean {
-        val key = keyInput.trim().ifBlank { read().apiKey }
-        if (key.isBlank() || key.any { it.isWhitespace() }) return false
+        val existing = read().apiKey.trim()
+        val key = keyInput.trim().ifBlank { existing }
+        if (key.any { it.isWhitespace() }) return false
         val symbol = symbolInput.trim().uppercase(java.util.Locale.ROOT).ifBlank { "XAU/USD" }
         if (symbol !in WatchCatalog.chartSymbols) return false
         val saved = prefs.edit().putString(KEY_API, key).putString(KEY_SYMBOL, symbol).commit()
-        if (saved && prefs.getString(KEY_API, null) == key && prefs.getString(KEY_SYMBOL, null) == symbol) {
+        if (saved && prefs.getString(KEY_API, null).orEmpty() == key && prefs.getString(KEY_SYMBOL, null) == symbol) {
             _settings.value = read()
             return true
         }

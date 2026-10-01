@@ -128,7 +128,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             OutlinedTextField(
                 value = key,
                 onValueChange = { key = it },
-                label = { Text(if (settings.hasKey) "کلید جدید برای جایگزینی (خالی = کلید قبلی)" else "Twelve Data API Key") },
+                label = { Text(if (settings.hasKey) "کلید جدید برای جایگزینی (خالی = کلید قبلی)" else "Twelve Data API Key اختیاری") },
                 visualTransformation = PasswordVisualTransformation(),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -146,7 +146,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             }
             Button(
                 onClick = { viewModel.saveMarketCredentials(key, symbol) },
-                enabled = key.isNotBlank() || settings.hasKey,
+                enabled = true,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 10.dp),
