@@ -1,11 +1,11 @@
 package com.aurum.edge.ui
 
-import android.annotation.SuppressLint
-import android.graphics.Color as AndroidColor
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -13,133 +13,260 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.core.HistoryPolicy
+import com.aurum.edge.core.Interval
+import com.aurum.edge.engine.PerformanceMetrics
 import com.aurum.edge.ui.components.SectionCard
+import com.aurum.edge.ui.components.formatDateTime
+import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.theme.AurumColors
+import java.time.YearMonth
+import java.time.ZoneOffset
 
-/** Learning is now only chart replay/backtest through GoCharting. */
+/** Native candle chart/replay: app-owned candles in, app-owned SignalEngine out. */
 @Composable
 fun LearnScreen(viewModel: AurumViewModel) {
-    val clipboard = LocalClipboardManager.current
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val market by viewModel.market.collectAsStateWithLifecycle()
+    val learn by viewModel.learn.collectAsStateWithLifecycle()
+    val replay by viewModel.replay.collectAsStateWithLifecycle()
+    val replayDecisions by viewModel.replayDecisions.collectAsStateWithLifecycle()
+    val walkForward by viewModel.walkForward.collectAsStateWithLifecycle()
+    val uriHandler = LocalUriHandler.current
+
+    var interval by remember { mutableStateOf(settings.interval) }
+    var bars by remember { mutableStateOf(HistoryPolicy.chartTargetCandles(settings.symbol, settings.interval)) }
+    var balance by remember { mutableStateOf(settings.accountBalance.toString()) }
+    var risk by remember { mutableStateOf(settings.riskPercent.toString()) }
+    var spread by remember { mutableStateOf(settings.spreadPrice.toString()) }
+    var commission by remember { mutableStateOf(settings.commissionPerOz.toString()) }
+
+    var mtLink by remember { mutableStateOf("") }
+    var mtSymbol by remember { mutableStateOf(settings.symbol) }
+    var mtTimezone by remember { mutableStateOf("+00:00") }
+    var mtUri by remember { mutableStateOf<Uri?>(null) }
+    val csvPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> mtUri = uri }
+
+    val lastCompleteMonth = remember { YearMonth.now(ZoneOffset.UTC).minusMonths(1) }
+    var histYear by remember { mutableStateOf(lastCompleteMonth.year.toString()) }
+    var histMonth by remember { mutableStateOf(lastCompleteMonth.monthValue.toString()) }
+    var histUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var histInterval by remember { mutableStateOf(Interval.M5) }
+    val histPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        histUris = uris.sortedBy { it.toString() }
+    }
+
+    val runBalance = balance.toDoubleOrNull() ?: settings.accountBalance
+    val runRisk = (risk.toDoubleOrNull() ?: settings.riskPercent).coerceIn(0.1, 5.0)
+    val runSpread = spread.toDoubleOrNull() ?: settings.spreadPrice
+    val runCommission = commission.toDoubleOrNull() ?: settings.commissionPerOz
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         SectionCard(
-            title = "Replay و Backtest روی نمودار",
-            subtitle = "GoCharting داخل برنامه؛ برای تمرین قواعد موتور ایچیموکو روی چارت",
+            title = "چارت داخلی موتور",
+            subtitle = "${market.symbol} · ${market.interval.label} · ${market.candles.size} کندل · ${market.feed.provider}",
         ) {
-            Text(
-                "از ابزارهای Replay / Backtest خود GoCharting روی نمودار استفاده کن و قواعد موتور ایچیموکو را مرحله‌به‌مرحله تست کن. این بخش دیتای ساختگی یا فرم جداگانه ندارد.",
-                style = MaterialTheme.typography.bodySmall,
-                color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(bottom = 8.dp),
+            if (market.candles.isEmpty()) {
+                Text("کندل واقعی هنوز آماده نیست.", style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+            } else {
+                CandleChart(
+                    candles = market.candles,
+                    interval = market.interval,
+                    signal = market.signal,
+                    modifier = Modifier.fillMaxWidth().height(360.dp),
+                    showIchimoku = true,
+                    showLevels = true,
+                    showVolume = true,
+                )
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("آخر: ${market.lastPrice?.let(::formatPrice) ?: "—"}", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary, modifier = Modifier.weight(1f))
+                    Text("موتور: ${market.signal?.action?.name ?: "—"}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan, modifier = Modifier.weight(1f))
+                }
+            }
+        }
+
+        SectionCard(
+            title = "Replay / Backtest با همین موتور",
+            subtitle = "کندل واقعی دانلود می‌شود؛ SignalEngine داخل اپ دوباره روی آن محاسبه می‌کند",
+        ) {
+            IntervalRows(interval) { interval = it }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(HistoryPolicy.TARGET_CANDLES, HistoryPolicy.MAX_TWELVE_CANDLES, HistoryPolicy.DEEP_CHART_CANDLES).distinct().forEach { count ->
+                    FilterChip(
+                        selected = bars == count,
+                        onClick = { bars = count },
+                        label = { Text("$count", style = MaterialTheme.typography.labelSmall) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = AurumColors.Cyan.copy(alpha = 0.18f),
+                            selectedLabelColor = AurumColors.Cyan,
+                            labelColor = AurumColors.TextSecondary,
+                        ),
+                    )
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(balance, { balance = it }, label = { Text("موجودی") }, singleLine = true, modifier = Modifier.weight(1f))
+                OutlinedTextField(risk, { risk = it }, label = { Text("ریسک %") }, singleLine = true, modifier = Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(spread, { spread = it }, label = { Text("اسپرد") }, singleLine = true, modifier = Modifier.weight(1f))
+                OutlinedTextField(commission, { commission = it }, label = { Text("کمیسیون") }, singleLine = true, modifier = Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { viewModel.runLearn(interval, bars, runBalance, runRisk, runSpread, runCommission, settings.minConfidence) },
+                    enabled = learn !is LearnState.Loading && walkForward !is WalkForwardState.Loading,
+                    modifier = Modifier.weight(1f),
+                ) { Text("ساخت چارت و محاسبه موتور", fontWeight = FontWeight.Bold) }
+                OutlinedButton(
+                    onClick = { viewModel.runWalkForward(interval, bars, runBalance, runRisk, runSpread, runCommission, settings.minConfidence) },
+                    enabled = learn !is LearnState.Loading && walkForward !is WalkForwardState.Loading,
+                    modifier = Modifier.weight(1f),
+                ) { Text("۷۰/۳۰") }
+            }
+        }
+
+        LearnResult(learn)
+        ReplayPanel(replay, viewModel, replayDecisions)
+        WalkForwardResult(walkForward)
+
+        SectionCard("ورود دیتای کندل", "CSV/MT یا HistData؛ فقط برای پژوهش و همین چارت") {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(mtSymbol, { mtSymbol = it }, label = { Text("نماد") }, singleLine = true, modifier = Modifier.weight(1f))
+                OutlinedTextField(mtTimezone, { mtTimezone = it }, label = { Text("UTC") }, singleLine = true, modifier = Modifier.weight(1f))
+            }
+            OutlinedTextField(
+                mtLink,
+                { mtLink = it },
+                label = { Text("لینک HTTPS CSV اختیاری") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { csvPicker.launch(arrayOf("text/*", "application/octet-stream", "application/vnd.ms-excel")) },
+                    modifier = Modifier.weight(1f),
+                ) { Text("انتخاب CSV") }
+                Button(
+                    onClick = { viewModel.importMetaTrader(mtUri, mtLink, mtSymbol, interval, mtTimezone, runBalance, runRisk, runSpread, runCommission, settings.minConfidence) },
+                    modifier = Modifier.weight(1f),
+                ) { Text("محاسبه فایل") }
+            }
+            mtUri?.let { Text("CSV: ${it.lastPathSegment?.takeLast(42) ?: "انتخاب شد"}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan) }
+
+            Text("HistData XAU/USD M1", style = MaterialTheme.typography.labelMedium, color = AurumColors.Gold, modifier = Modifier.padding(top = 12.dp))
+            IntervalRows(histInterval, entries = listOf(Interval.M1, Interval.M5, Interval.M15, Interval.M30, Interval.H1)) { histInterval = it }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(histYear, { histYear = it.take(4) }, label = { Text("سال") }, singleLine = true, modifier = Modifier.weight(1f))
+                OutlinedTextField(histMonth, { histMonth = it.take(2) }, label = { Text("ماه") }, singleLine = true, modifier = Modifier.weight(1f))
+            }
+            val period = runCatching { YearMonth.of(histYear.toInt(), histMonth.toInt()) }.getOrNull()
+                ?.takeIf { it.year >= 2009 && it <= lastCompleteMonth }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        if (period != null) runCatching {
+                            uriHandler.openUri("https://www.histdata.com/download-free-forex-historical-data/?/ascii/1-minute-bar-quotes/xauusd/${period.year}/${period.monthValue}")
+                        }
+                    },
+                    enabled = period != null,
+                    modifier = Modifier.weight(1f),
+                ) { Text("دانلود رسمی") }
+                OutlinedButton(
+                    onClick = { histPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "text/*", "application/octet-stream")) },
+                    modifier = Modifier.weight(1f),
+                ) { Text("انتخاب ZIP/CSV") }
+            }
+            if (histUris.isNotEmpty()) Text("${histUris.size} فایل انتخاب شد", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
             Button(
-                onClick = { clipboard.setText(AnnotatedString(AURUM_ICHIMOKU_STRATEGY)) },
-                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-            ) { Text("کپی موتور ایچیموکو برای GoCharting / TradingView") }
-            Text(
-                "بعد از باز شدن GoCharting: بخش Lipi Script را باز کن، کد را Paste کن و به‌عنوان Strategy اجرا/Backtest بگیر. همین کد Pine-compatible برای TradingView Strategy Tester هم قابل استفاده است.",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.Gold,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
-            GoChartingWebView(Modifier.fillMaxWidth().height(620.dp))
+                onClick = { viewModel.importHistData(histUris, histInterval, runBalance, runRisk, runSpread, runCommission, settings.minConfidence) },
+                enabled = histUris.isNotEmpty() && learn !is LearnState.Loading,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            ) { Text("محاسبه HistData روی چارت") }
         }
     }
 }
 
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun GoChartingWebView(modifier: Modifier = Modifier) {
-    AndroidView(
-        modifier = modifier,
-        factory = { context ->
-            WebView(context).apply {
-                setBackgroundColor(AndroidColor.TRANSPARENT)
-                webViewClient = WebViewClient()
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.cacheMode = WebSettings.LOAD_DEFAULT
-                settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                loadUrl("https://gocharting.com/terminal")
+private fun IntervalRows(
+    selected: Interval,
+    entries: List<Interval> = Interval.entries.toList(),
+    onSelect: (Interval) -> Unit,
+) {
+    entries.chunked(4).forEach { row ->
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            row.forEach { entry ->
+                FilterChip(
+                    selected = selected == entry,
+                    onClick = { onSelect(entry) },
+                    label = { Text(entry.label, style = MaterialTheme.typography.labelSmall) },
+                    modifier = Modifier.weight(1f),
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AurumColors.Gold.copy(alpha = 0.18f),
+                        selectedLabelColor = AurumColors.Gold,
+                        labelColor = AurumColors.TextSecondary,
+                    ),
+                )
             }
-        },
-        update = { webView ->
-            if (webView.url.isNullOrBlank()) webView.loadUrl("https://gocharting.com/terminal")
-        },
-    )
+            repeat(4 - row.size) { Column(Modifier.weight(1f)) {} }
+        }
+    }
 }
 
-private val AURUM_ICHIMOKU_STRATEGY = """
-//@version=5
-strategy("AURUM Ichimoku Engine - Paper Rules", overlay=true, initial_capital=10000, commission_type=strategy.commission.cash_per_contract, commission_value=0.05)
+@Composable
+private fun LearnResult(state: LearnState) {
+    when (state) {
+        LearnState.Idle -> Unit
+        is LearnState.Loading -> SectionCard("دریافت کندل", state.step) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CircularProgressIndicator(color = AurumColors.Gold, strokeWidth = 2.dp, modifier = Modifier.height(20.dp))
+                Text("بدون کندل معتبر نتیجه ساخته نمی‌شود.", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            }
+        }
+        is LearnState.Failed -> SectionCard("محاسبه نشد", "دیتا معتبر نبود") {
+            Text(state.message, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
+        }
+        is LearnState.Done -> {
+            BacktestReport(state)
+            PerformancePanel(PerformanceMetrics.fromBacktest(state.result), "${state.result.symbol} · ${state.result.dataSource}")
+        }
+    }
+}
 
-// Engine settings: 1m uses 7/22/44; 5m+ uses 9/26/52. Change manually if needed.
-tenkanLen = input.int(9, "Tenkan", minval=1)
-kijunLen  = input.int(26, "Kijun", minval=1)
-spanBLen  = input.int(52, "Span B", minval=1)
-disp      = input.int(26, "Displacement", minval=0)
-minScore  = input.int(72, "Minimum score", minval=50, maxval=100)
-
-atr = ta.atr(14)
-tenkan = (ta.highest(high, tenkanLen) + ta.lowest(low, tenkanLen)) / 2.0
-kijun = (ta.highest(high, kijunLen) + ta.lowest(low, kijunLen)) / 2.0
-spanA = (tenkan + kijun) / 2.0
-spanB = (ta.highest(high, spanBLen) + ta.lowest(low, spanBLen)) / 2.0
-ema200 = ta.ema(close, 200)
-vwapValue = ta.vwap(hlc3)
-rsi7 = ta.rsi(close, 7)
-cloudTop = math.max(spanA[disp], spanB[disp])
-cloudBot = math.min(spanA[disp], spanB[disp])
-
-freshBullCross = (ta.crossover(tenkan, kijun) or (tenkan > kijun and tenkan[1] > kijun[1] and tenkan[2] <= kijun[2]))
-freshBearCross = (ta.crossunder(tenkan, kijun) or (tenkan < kijun and tenkan[1] < kijun[1] and tenkan[2] >= kijun[2]))
-priceAboveCloud = close > cloudTop + 0.08 * atr
-priceBelowCloud = close < cloudBot - 0.08 * atr
-cloudBull = spanA > spanB
-cloudBear = spanA < spanB
-chikouBuy = close > high[kijunLen]
-chikouSell = close < low[kijunLen]
-emaBuy = close > ema200
-emaSell = close < ema200
-vwapBuy = close > vwapValue
-vwapSell = close < vwapValue
-rsiBuy = rsi7 >= 52 and rsi7 <= 72
-rsiSell = rsi7 >= 28 and rsi7 <= 48
-
-buyScore = (freshBullCross ? 20 : 0) + (priceAboveCloud ? 18 : 0) + (cloudBull ? 10 : 0) + (chikouBuy ? 10 : 0) + (emaBuy ? 15 : 0) + (vwapBuy ? 12 : 0) + (rsiBuy ? 10 : 0)
-sellScore = (freshBearCross ? 20 : 0) + (priceBelowCloud ? 18 : 0) + (cloudBear ? 10 : 0) + (chikouSell ? 10 : 0) + (emaSell ? 15 : 0) + (vwapSell ? 12 : 0) + (rsiSell ? 10 : 0)
-
-atrWindow = ta.sma(atr, 60)
-atrShock = atrWindow > 0 and atr > 2.5 * atrWindow
-longOk = buyScore >= minScore and not atrShock
-shortOk = sellScore >= minScore and not atrShock
-
-longSL = close - 1.2 * atr
-longTP = close + 1.8 * (close - longSL)
-shortSL = close + 1.2 * atr
-shortTP = close - 1.8 * (shortSL - close)
-
-if longOk and strategy.position_size <= 0
-    strategy.entry("AURUM-LONG", strategy.long)
-    strategy.exit("AURUM-LONG-EXIT", "AURUM-LONG", stop=longSL, limit=longTP)
-if shortOk and strategy.position_size >= 0
-    strategy.entry("AURUM-SHORT", strategy.short)
-    strategy.exit("AURUM-SHORT-EXIT", "AURUM-SHORT", stop=shortSL, limit=shortTP)
-
-plot(tenkan, "Tenkan", color=color.aqua)
-plot(kijun, "Kijun", color=color.purple)
-plot(ema200, "EMA200", color=color.gray)
-plot(vwapValue, "VWAP", color=color.orange)
-pA = plot(spanA, "Senkou A", color=color.new(color.green, 30), offset=disp)
-pB = plot(spanB, "Senkou B", color=color.new(color.red, 30), offset=disp)
-fill(pA, pB, color=spanA > spanB ? color.new(color.green, 85) : color.new(color.red, 85))
-plotshape(longOk, "AURUM BUY", shape.triangleup, location.belowbar, color=color.lime, size=size.small, text="BUY")
-plotshape(shortOk, "AURUM SELL", shape.triangledown, location.abovebar, color=color.red, size=size.small, text="SELL")
-""".trimIndent()
+@Composable
+private fun WalkForwardResult(state: WalkForwardState) {
+    when (state) {
+        WalkForwardState.Idle -> Unit
+        is WalkForwardState.Loading -> SectionCard("تست خارج از نمونه", state.step) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CircularProgressIndicator(color = AurumColors.Cyan, strokeWidth = 2.dp, modifier = Modifier.height(20.dp))
+                Text("۷۰٪ داخل نمونه، ۳۰٪ خارج نمونه.", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            }
+        }
+        is WalkForwardState.Failed -> SectionCard("۷۰/۳۰ اجرا نشد", "خطای دیتا") {
+            Text(state.message, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
+        }
+        is WalkForwardState.Done -> {
+            WalkForwardReport(state)
+            PerformancePanel(PerformanceMetrics.fromBacktest(state.result.outOfSample), "${state.result.outOfSample.symbol} · خارج نمونه · ${formatDateTime(state.result.splitTime)}")
+        }
+    }
+}
