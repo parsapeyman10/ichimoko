@@ -75,6 +75,6 @@ class CandleCache(context: Context) {
     }
 
     companion object {
-        private const val MAX_FILE_BYTES = 2_000_000
+        private const val MAX_FILE_BYTES = 8_000_000
     }
 }

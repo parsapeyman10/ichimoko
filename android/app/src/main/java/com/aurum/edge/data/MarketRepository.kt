@@ -73,6 +73,7 @@ class MarketRepository(
     // fallback. It remains labelled and timestamp-validated; no synthetic tick is ever created.
     private val spotFallback: SpotFallbackClient = SpotFallbackClient(),
     private val publicHistory: PublicCandleHistoryClient = PublicCandleHistoryClient(),
+    private val dukascopyHistory: DukascopyHistoryClient = DukascopyHistoryClient(),
 ) {
     private val _state = MutableStateFlow(MarketState())
     val state: StateFlow<MarketState> = _state.asStateFlow()
@@ -126,7 +127,7 @@ class MarketRepository(
                 detail = if (closed) "تعطیلی معمول پایان هفته؛ قیمت تازه دریافت نمی‌شود" else "در حال دریافت…",
                 // Without a key the free keyless mode uses public Yahoo history plus the same
                 // Swissquote/Gold-API real-tick pipeline — it is not blocked on Twelve Data.
-                provider = if (current.hasKey) "Yahoo Finance عمومی · Twelve Data فقط fallback + فید زنده" else "Yahoo Finance عمومی + Swissquote/Gold-API",
+                provider = if (current.hasKey) "Yahoo/Dukascopy عمومی · Twelve Data فقط fallback + فید زنده" else "Yahoo/Dukascopy عمومی + Swissquote/Gold-API",
             ),
             signal = null,
             showingCachedData = closed && _state.value.candles.isNotEmpty(),
@@ -194,10 +195,15 @@ class MarketRepository(
                 minimumSize = HistoryPolicy.CHART_BOOTSTRAP_MINIMUM,
                 allowClosedMarketHistory = true,
             )
+            val chartTarget = HistoryPolicy.chartTargetCandles(current.symbol, current.interval)
             if (started && generation == session &&
-                cachedBars.values.count { it.closed } < HistoryPolicy.TARGET_CANDLES) {
+                cachedBars.values.count { it.closed } < chartTarget) {
                 delay(CHART_EXPANSION_DELAY_MS)
-                if (started && generation == session) refresh(allowClosedMarketHistory = true)
+                if (started && generation == session) refresh(
+                    requestedSize = chartTarget,
+                    minimumSize = HistoryPolicy.TARGET_CANDLES,
+                    allowClosedMarketHistory = true,
+                )
             }
         }
     }
@@ -223,14 +229,16 @@ class MarketRepository(
             feed = _state.value.feed.copy(
                 mode = FeedMode.CONNECTING,
                 detail = if (requestedSize < HistoryPolicy.TARGET_CANDLES) {
-                    "دریافت سریع حداقل ${minimumSize} کندل واقعی… سپس تکمیل تا ${HistoryPolicy.TARGET_CANDLES} کندل"
+                    "دریافت سریع حداقل ${minimumSize} کندل واقعی… سپس تکمیل تاریخچه"
+                } else if (requestedSize > HistoryPolicy.TARGET_CANDLES) {
+                    "تکمیل تاریخچهٔ عمیق با کندل واقعی تا $requestedSize کندل؛ برای طلا Dukascopy هم بررسی می‌شود"
                 } else if (current.hasKey) "دریافت حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی از منبع عمومی؛ Twelve Data فقط fallback آخر…"
                 else "دریافت حداقل ${HistoryPolicy.TARGET_CANDLES} کندل تاریخچهٔ رایگان…",
             ))
         try {
-            var fetched: List<Candle>
-            var historyProvider: String
-            var staleDetail: String
+            var fetched: List<Candle> = emptyList()
+            var historyProvider = ""
+            var staleDetail = "تاریخچهٔ آنلاین پاسخ داد اما آخرین کندل آن باید با تیک زنده تأیید شود"
             try {
                 // Public history is the normal path even when a Twelve Data key exists. The key
                 // is only a final fallback; this keeps the chart/replay provider policy honest.
@@ -239,26 +247,59 @@ class MarketRepository(
                 fetched = public.candles
                 historyProvider = public.provider
                 staleDetail = "تاریخچهٔ عمومی پاسخ داد اما آخرین کندل آن قدیمی است؛ تیک زندهٔ جداگانه باید قیمت فعلی را تأیید کند"
+                if (requestedSize > HistoryPolicy.TARGET_CANDLES && fetched.size < requestedSize &&
+                    DukascopyHistoryClient.instrument(current.symbol) != null) {
+                    try {
+                        val deep = dukascopyHistory.fetchCandles(current.symbol, current.interval,
+                            minimumSize = minimumSize, desiredSize = requestedSize)
+                        if (deep.candles.size > fetched.size) {
+                            fetched = deep.candles
+                            historyProvider = deep.provider
+                            staleDetail = "Dukascopy تاریخچهٔ عمیق واقعی داد اما آخرین کندل آن باید با تیک زنده تأیید شود"
+                        }
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (_: Exception) {
+                        // Keep the valid Yahoo window if deep backfill is temporarily unavailable.
+                    }
+                }
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (publicFailure: Exception) {
-                if (!current.hasKey) throw publicFailure
-                try {
-                    fetched = client.fetchCandles(current.apiKey, current.symbol, current.interval,
-                        outputSize = requestedSize, minimumOutputSize = minimumSize)
-                    if (fetched.size < minimumSize) {
-                        throw DataFeedException("Twelve Data فقط ${fetched.size} کندل داد؛ حداقل ${minimumSize} کندل واقعی لازم است")
-                    }
-                    val gapCount = PublicCandleHistoryClient.detectGaps(fetched, current.interval).size
-                    historyProvider = "Twelve Data · آخرین fallback" +
-                        if (gapCount == 0) " · بدون gap مشاهده‌شده" else " · $gapCount gap واقعی بدون پرکردن"
-                    staleDetail = "منبع عمومی تاریخچه در دسترس نبود (${(publicFailure.message ?: "خطای نامشخص").take(80)})؛ Twelve Data fallback پاسخ داد اما آخرین کندل باید با تیک زنده تأیید شود"
+                val dukascopyFailure = try {
+                    val deep = dukascopyHistory.fetchCandles(current.symbol, current.interval,
+                        minimumSize = minimumSize, desiredSize = requestedSize)
+                    fetched = deep.candles
+                    historyProvider = deep.provider
+                    staleDetail = "Dukascopy تاریخچهٔ واقعی داد اما آخرین کندل آن باید با تیک زنده تأیید شود"
+                    null
                 } catch (cancel: CancellationException) {
                     throw cancel
-                } catch (fallbackFailure: Exception) {
-                    throw DataFeedException("منبع عمومی و آخرین fallback Twelve Data پاسخ معتبر ندادند: ${(fallbackFailure.message ?: "خطای نامشخص").take(120)}")
+                } catch (deepFailure: Exception) {
+                    deepFailure
+                }
+                if (dukascopyFailure != null) {
+                    if (!current.hasKey) {
+                        throw DataFeedException("Yahoo و Dukascopy تاریخچهٔ معتبر ندادند: ${(dukascopyFailure.message ?: publicFailure.message ?: "خطای نامشخص").take(120)}")
+                    }
+                    try {
+                        fetched = client.fetchCandles(current.apiKey, current.symbol, current.interval,
+                            outputSize = requestedSize, minimumOutputSize = minimumSize)
+                        if (fetched.size < minimumSize) {
+                            throw DataFeedException("Twelve Data فقط ${fetched.size} کندل داد؛ حداقل ${minimumSize} کندل واقعی لازم است")
+                        }
+                        val gapCount = PublicCandleHistoryClient.detectGaps(fetched, current.interval).size
+                        historyProvider = "Twelve Data · آخرین fallback" +
+                            if (gapCount == 0) " · بدون gap مشاهده‌شده" else " · $gapCount gap واقعی بدون پرکردن"
+                        staleDetail = "Yahoo/Dukascopy در دسترس نبودند (${(publicFailure.message ?: "خطای نامشخص").take(80)})؛ Twelve Data fallback پاسخ داد اما آخرین کندل باید با تیک زنده تأیید شود"
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (fallbackFailure: Exception) {
+                        throw DataFeedException("Yahoo، Dukascopy و آخرین fallback Twelve Data پاسخ معتبر ندادند: ${(fallbackFailure.message ?: "خطای نامشخص").take(120)}")
+                    }
                 }
             }
+            if (fetched.isEmpty()) throw DataFeedException("تاریخچهٔ واقعی از هیچ منبعی دریافت نشد")
             if (!started || generation != session ||
                 settings.read().symbol != current.symbol || settings.read().interval != current.interval ||
                 (current.hasKey && settings.read().apiKey != current.apiKey) ||
@@ -442,7 +483,7 @@ class MarketRepository(
                 if (_state.value.feed.mode == FeedMode.MARKET_CLOSED) {
                     _state.value = _state.value.copy(feed = FeedStatus(
                         FeedMode.CONNECTING, "برنامهٔ معمول بازگشایی شد؛ منتظر تیک/کندل معتبر هستیم",
-                        provider = if (settings.read().hasKey) "Yahoo Finance عمومی · Twelve Data فقط fallback + فید زنده" else "Yahoo Finance عمومی + Swissquote/Gold-API"),
+                        provider = if (settings.read().hasKey) "Yahoo/Dukascopy عمومی · Twelve Data فقط fallback + فید زنده" else "Yahoo/Dukascopy عمومی + Swissquote/Gold-API"),
                         signal = null)
                     startStream()
                     refreshNow() // keyed Twelve or keyless public-history backfill

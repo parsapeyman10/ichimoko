@@ -686,10 +686,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         replayJob?.cancel()
         val replayRequest = ++replayRevision
         viewModelScope.launch {
-            val requestedBars = HistoryPolicy.providerRequestSize(bars)
-            val displayBars = bars.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)
+            val requestedBars = HistoryPolicy.deepProviderRequestSize(bars)
+            val displayBars = requestedBars.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)
             _replay.value = ReplayState.Loading
-            _learn.value = LearnState.Loading("دانلود حداقل $displayBars کندل واقعی ${interval.label} از منبع عمومی؛ Twelve Data فقط fallback آخر…")
+            _learn.value = LearnState.Loading("دانلود حداقل $displayBars کندل واقعی ${interval.label} از منبع عمومی/Dukascopy؛ Twelve Data فقط fallback آخر…")
             try {
                 // One verified dataset feeds both the batch report and the interactive cursor.
                 val dataset = container.fetchResearchDataset(interval, requestedBars)
@@ -971,9 +971,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         threshold: Double,
     ) {
         viewModelScope.launch {
-            val requestedBars = HistoryPolicy.providerRequestSize(bars)
-            val displayBars = bars.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)
-            _walkForward.value = WalkForwardState.Loading("دانلود حداقل $displayBars کندل واقعی ${interval.label} و تقسیم به داخل/خارج نمونه…")
+            val requestedBars = HistoryPolicy.deepProviderRequestSize(bars)
+            val displayBars = requestedBars.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)
+            _walkForward.value = WalkForwardState.Loading("دانلود حداقل $displayBars کندل واقعی ${interval.label} از منبع عمومی/Dukascopy و تقسیم به داخل/خارج نمونه…")
             try {
                 val result = container.runWalkForward(interval, requestedBars, balance, risk, spread, commission, threshold)
                 val saved = try {

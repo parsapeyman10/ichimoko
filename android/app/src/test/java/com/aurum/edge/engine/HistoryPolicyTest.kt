@@ -6,15 +6,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HistoryPolicyTest {
-    @Test fun `chart bootstrap requests more than one thousand without changing full history floor`() {
+    @Test fun `chart bootstrap opens fast while gold chart can request deep history`() {
         assertEquals(1200, HistoryPolicy.providerRequestSize(
             HistoryPolicy.CHART_BOOTSTRAP_CANDLES,
             HistoryPolicy.CHART_BOOTSTRAP_CANDLES,
         ))
         assertTrue(HistoryPolicy.CHART_BOOTSTRAP_MINIMUM > 1000)
-        assertEquals(HistoryPolicy.MAX_CACHED_CANDLES,
-            HistoryPolicy.providerRequestSize(100))
-        assertEquals(HistoryPolicy.MAX_CACHED_CANDLES,
+        assertEquals(HistoryPolicy.TARGET_CANDLES, HistoryPolicy.providerRequestSize(100))
+        assertEquals(HistoryPolicy.TARGET_CANDLES,
             HistoryPolicy.providerRequestSize(HistoryPolicy.TARGET_CANDLES))
+        assertEquals(HistoryPolicy.MAX_TWELVE_CANDLES,
+            HistoryPolicy.providerRequestSize(HistoryPolicy.DEEP_CHART_CANDLES))
+        assertEquals(HistoryPolicy.DEEP_CHART_CANDLES,
+            HistoryPolicy.deepProviderRequestSize(HistoryPolicy.DEEP_CHART_CANDLES))
+        assertEquals(HistoryPolicy.DEEP_CHART_CANDLES,
+            HistoryPolicy.chartTargetCandles("XAU/USD", com.aurum.edge.core.Interval.M5))
     }
 }

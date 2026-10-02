@@ -54,7 +54,7 @@ class PublicCandleHistoryClient(
     ): Result = withContext(Dispatchers.IO) {
         val yahoo = yahooSymbol(symbol)
             ?: throw DataFeedException("برای این نماد تاریخچهٔ رایگانِ بدون کلید تعریف نشده است")
-        val keepSize = desiredSize.coerceAtLeast(minimumSize).coerceAtMost(HistoryPolicy.MAX_PROVIDER_CANDLES)
+        val keepSize = HistoryPolicy.deepProviderRequestSize(desiredSize, minimumSize)
         val requestInterval = requestInterval(interval)
         val url = "https://query1.finance.yahoo.com/v8/finance/chart/" +
             encodeYahooPath(yahoo) +
@@ -84,7 +84,7 @@ class PublicCandleHistoryClient(
         } else parsed
         val trimmed = finalBars.sortedBy { it.time }.takeLast(keepSize)
         if (trimmed.size < minimumSize) {
-            throw DataFeedException("تاریخچهٔ رایگان فقط ${trimmed.size} کندل واقعی داد؛ حداقل ${HistoryPolicy.TARGET_CANDLES} لازم است")
+            throw DataFeedException("تاریخچهٔ رایگان فقط ${trimmed.size} کندل واقعی داد؛ حداقل $minimumSize لازم است")
         }
         val gaps = detectGaps(trimmed, interval)
         Result(
