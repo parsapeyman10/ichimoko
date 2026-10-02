@@ -192,7 +192,7 @@ class AppUpdateRepository(
                 installedSigners.intersect(downloadedSigners).isEmpty()
             ) {
                 throw DataFeedException(
-                    "امضای APK جدید با نسخهٔ نصب‌شده یکی نیست؛ فایل release باید با همان کلید ثابت امضا شود.",
+                    "امضای نسخهٔ نصب‌شده با کانال Release یکی نیست. این نصب از artifact/کلید قدیمی آمده و Android اجازهٔ بروزرسانی مستقیم نمی‌دهد. راه درست: یک‌بار نسخهٔ فعلی را حذف کن و APK رسمی GitHub Release را نصب کن؛ از نصب بعدی، بروزرسانی داخل اپ با همین کلید ثابت انجام می‌شود.",
                 )
             }
             val versionCode = PackageInfoCompat.getLongVersionCode(packageInfo)
@@ -336,9 +336,6 @@ class AppUpdateRepository(
             val tag = release.string("tag_name").orEmpty()
             val releaseName = release.string("name")?.takeIf { it.isNotBlank() } ?: tag
             val displayVersion = tag.ifBlank { releaseName.ifBlank { "GitHub Release" } }
-            if (currentVersion != null && semanticVersion(displayVersion)?.let {
-                    compareVersions(it, currentVersion) <= 0
-                } == true) return@mapNotNull null
             val assets = release["assets"]?.jsonArray?.mapNotNull { it as? JsonObject }.orEmpty()
             val asset = assets.firstOrNull { candidate ->
                 val name = candidate.string("name").orEmpty()
@@ -347,9 +344,8 @@ class AppUpdateRepository(
             } ?: return@mapNotNull null
             val downloadUrl = asset.string("browser_download_url")!!
             val artifactName = asset.string("name")!!
-            // The release asset carries the immutable versionCode/commit metadata produced by CI.
-            // If an older release has no metadata sidecar, the APK remains eligible but the missing
-            // fields stay visibly unknown instead of being guessed from versionName.
+            // The sidecar metadata is authoritative for rolling updater releases: the tag can stay
+            // v1.2.9 while CI raises versionCode on every published build.
             val metadata = assets.firstOrNull { candidate ->
                 val name = candidate.string("name").orEmpty()
                 val url = candidate.string("browser_download_url").orEmpty()
@@ -357,13 +353,19 @@ class AppUpdateRepository(
             }?.string("browser_download_url")?.let { metadataUrl ->
                 runCatching { requestJson(metadataUrl).jsonObject }.getOrNull()
             }
+            val metadataVersionCode = metadata?.long("versionCode")
+            if (metadataVersionCode != null) {
+                if (metadataVersionCode <= BuildConfig.VERSION_CODE.toLong()) return@mapNotNull null
+            } else if (currentVersion != null && semanticVersion(displayVersion)?.let {
+                    compareVersions(it, currentVersion) <= 0
+                } == true) return@mapNotNull null
             val commitish = metadata?.string("commitSha")?.takeIf { it.isNotBlank() }
                 ?: release.string("target_commitish")
             UpdateInfo(
                 source = SourceKind.RELEASE_APK,
                 sourceLabel = "GitHub Release عمومی",
-                versionName = displayVersion,
-                versionCode = metadata?.long("versionCode"),
+                versionName = metadata?.string("versionName")?.takeIf { it.isNotBlank() } ?: displayVersion,
+                versionCode = metadataVersionCode,
                 commitSha = commitish,
                 notes = release.string("body")?.take(500).orEmpty().ifBlank {
                     metadata?.string("notes")?.take(500).orEmpty().ifBlank {

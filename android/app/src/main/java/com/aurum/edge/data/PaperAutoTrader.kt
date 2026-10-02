@@ -18,7 +18,7 @@ class PaperAutoTrader(
     private val news: NewsRepository,
     private val journal: JournalStore,
 ) {
-    private val _status = MutableStateFlow("خاموش؛ هیچ معاملهٔ خودکاری در بروکر یا ژورنال باز نشده است")
+    private val _status = MutableStateFlow("فعال")
     val status: StateFlow<String> = _status.asStateFlow()
 
     fun stopped(reason: String) { _status.value = reason }
@@ -69,7 +69,10 @@ class PaperAutoTrader(
                 recentSettings.accountBalance, recentSettings.riskPercent,
                 mtf = MtfSnapshotRecord.from(mtf), automatic = true,
                 newsEvidence = newsRecord, priceAction = ict)
-            _status.value = "کاغذی ثبت شد: ${trade.symbol} ${trade.action} · شناسهٔ ${trade.id.take(8)}؛ در ژورنال قابل مشاهده است"
+            val conditions = trade.entryConditions.take(8).joinToString("، ") {
+                it.name.substringAfter('·').trim()
+            }
+            _status.value = "کاغذی ثبت شد: ${trade.symbol} ${trade.action} · شروع: $conditions"
             trade
         } catch (e: Exception) {
             _status.value = "ورود خودکار کاغذی انجام نشد: ${e.message ?: "ژورنال یا ریسک نامعتبر است"}"

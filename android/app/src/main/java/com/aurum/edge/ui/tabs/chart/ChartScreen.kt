@@ -1,8 +1,16 @@
 package com.aurum.edge.ui
 
+import android.annotation.SuppressLint
+import android.graphics.Color as AndroidColor
+import android.webkit.CookieManager
+import android.webkit.WebChromeClient
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,60 +18,48 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.aurum.edge.core.Candle
-import com.aurum.edge.core.FeedMode
-import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.Interval
+import com.aurum.edge.core.PaperTrade
+import com.aurum.edge.core.SignalAction
 import com.aurum.edge.data.MarketState
+import com.aurum.edge.engine.SignalEngine
 import com.aurum.edge.data.WatchCatalog
-import com.aurum.edge.engine.IctRangeAnalyzer
-import com.aurum.edge.ui.components.EmptyState
+import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
-import com.aurum.edge.ui.components.SignalSummaryCard
 import com.aurum.edge.ui.components.StatTile
+import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
-import com.aurum.edge.ui.components.formatQuotePrice
-import com.aurum.edge.ui.components.formatSpread
 import com.aurum.edge.ui.components.formatTime
 import com.aurum.edge.ui.theme.AurumColors
 
 @Composable
-fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: () -> Unit,
-                onOpenJournal: () -> Unit) {
-    val settings by viewModel.settings.collectAsStateWithLifecycle()
+fun ChartScreen(
+    viewModel: AurumViewModel,
+    market: MarketState,
+    onOpenSettings: () -> Unit,
+    onOpenJournal: () -> Unit,
+) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
-    val autoStatus by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
-    var crosshair by remember { mutableStateOf<Candle?>(null) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(bottom = 12.dp),
-    ) {
+    val openTrade = trades.firstOrNull { it.symbol == market.symbol && it.isOpen }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         SymbolPickerRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Interval.entries.forEach { interval ->
@@ -80,297 +76,217 @@ fun ChartScreen(viewModel: AurumViewModel, market: MarketState, onOpenSettings: 
             }
         }
 
-        if (!settings.hasKey) {
-            KeyOnboarding(onSave = viewModel::saveApiKey, onOpenSettings = onOpenSettings)
-            Text(
-                "بدون کلید هم اپ ابتدا بیش از ۱۰۰۰ کندل واقعی Yahoo Finance را سریع نمایش می‌دهد و بعد همان تاریخچه را تا هدف ۳۰۰۰ کندل تکمیل می‌کند؛ تیک زندهٔ Swissquote/Gold-API روی آن اعمال می‌شود و هیچ کندلی ساخته نمی‌شود.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                modifier = Modifier.padding(horizontal = 12.dp),
-            )
+        SectionCard(
+            title = "چارت TradingView · ${market.symbol}",
+        ) {
+            Box(Modifier.fillMaxWidth().height(460.dp)) {
+                // TradingView may be blocked/slow in some networks. Keep the app's own verified
+                // candle chart behind the WebView so the chart area is never an empty black panel.
+                if (market.candles.isNotEmpty()) {
+                    CandleChart(
+                        candles = market.candles.takeLast(800),
+                        interval = market.interval,
+                        signal = market.signal,
+                        modifier = Modifier.fillMaxSize(),
+                        showVolume = false,
+                    )
+                }
+                TradingViewWidget(
+                    symbol = market.symbol,
+                    interval = market.interval,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                EngineOverlay(
+                    market = market,
+                    openTrade = openTrade,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                )
+            }
         }
-        if (market.candles.isEmpty()) {
-            EmptyState(
-                title = "هیچ کندل واقعی‌ای در دسترس نیست",
-                message = market.feed.detail.ifBlank {
-                    "در حال تلاش برای دریافت داده واقعی از Twelve Data و فید رایگان. این اپ در نبود اینترنت هیچ داده ساختگی نمی‌سازد."
-                },
-            )
-        } else {
-            val last = market.candles.last()
-            val shown = crosshair ?: last
-            val previousClose = market.candles.dropLast(1).lastOrNull()?.close
-            val change = previousClose?.let { shown.close - it }
-            val structure = remember(market.candles, market.interval) {
-                IctRangeAnalyzer.analyze(market.candles, market.interval)
-            }
-            val liveTick = market.feed.mode == FeedMode.LIVE && !market.showingCachedData
-            val spread = market.bid?.let { bid -> market.ask?.let { ask -> ask - bid } }
-            SectionCard(
-                title = if (liveTick) "تیک زنده · ${market.feed.provider}" else "تیک زنده در دسترس نیست",
-                subtitle = if (liveTick) "چارت با هر تیک واقعی به‌روزرسانی می‌شود؛ تغییر فقط وقتی منبع قیمت جدید بدهد دیده می‌شود"
-                    else market.feed.detail.ifBlank { "کندل/تاریخچه آنلاین یا کش جای تیک لحظه‌ای نیست" },
-            ) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatTile("LAST", formatQuotePrice(market.lastPrice), if (liveTick) AurumColors.Cyan else AurumColors.TextMuted, Modifier.weight(1f))
-                    StatTile("BID", formatQuotePrice(market.bid), if (liveTick) AurumColors.Green else AurumColors.TextMuted, Modifier.weight(1f))
-                    StatTile("ASK", formatQuotePrice(market.ask), if (liveTick) AurumColors.Red else AurumColors.TextMuted, Modifier.weight(1f))
-                    StatTile("SPREAD", formatSpread(spread), AurumColors.Gold, Modifier.weight(1f))
-                }
-                Text(
-                    if (market.bid != null && market.ask != null) "bid/ask/spread از فید زندهٔ فعلی است. مسیر جایگزین Swissquote هر ۱ ثانیه فقط نماد فعال را می‌خواند؛ قیمت ساخته نمی‌شود."
-                    else "این منبع bid/ask جدا ندارد؛ اگر Twelve WebSocket ندهد، فید جایگزین Swissquote/Gold-API با bid/ask برچسب‌دار فعال می‌شود.",
-                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                    modifier = Modifier.padding(top = 6.dp))
-            }
 
-            CandleChart(
-                candles = market.candles,
-                interval = market.interval,
-                signal = market.signal,
-                structure = structure,
-                onCrosshairChange = { crosshair = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(320.dp)
-                    .padding(horizontal = 6.dp),
-            )
+        EntryScoreCard(market)
+    }
+}
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                Legend("Tenkan", AurumColors.Cyan)
-                Legend("Kijun", AurumColors.Purple)
-                Legend("VWAP", AurumColors.Gold)
-                Legend("EMA200", AurumColors.TextSecondary)
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Legend("S حمایت", AurumColors.Green)
-                Legend("R مقاومت", AurumColors.Red)
-                Legend("FVG", AurumColors.Cyan)
-                Legend("OB احتمالی", AurumColors.Purple)
-            }
+@Composable
+private fun EngineOverlay(market: MarketState, openTrade: PaperTrade?, modifier: Modifier = Modifier) {
+    val setting = SignalEngine.ichimokuSetting(market.interval)
+    val signal = market.signal
+    val action = signal?.action ?: SignalAction.NO_TRADE
+    val color = when (action) {
+        SignalAction.BUY -> AurumColors.Green
+        SignalAction.SELL -> AurumColors.Red
+        SignalAction.NO_TRADE -> AurumColors.Gold
+    }
+    Column(
+        modifier = modifier
+            .background(AurumColors.Surface.copy(alpha = 0.92f), RoundedCornerShape(10.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        Text("AURUM ICHIMOKU", style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+        Text("${setting.tenkan}/${setting.kijun}/${setting.spanB} · امتیاز ${(signal?.confidence ?: 0.0).toInt()}/100",
+            style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.Bold)
+        Text(when (action) {
+            SignalAction.BUY -> "سیگنال موتور: BUY"
+            SignalAction.SELL -> "سیگنال موتور: SELL"
+            SignalAction.NO_TRADE -> "سیگنال موتور: NO TRADE"
+        }, style = MaterialTheme.typography.labelSmall, color = color)
+        if (signal?.isActionable == true) {
+            Text("E ${formatPrice(signal.entry)} · SL ${formatPrice(signal.stopLoss)} · TP ${formatPrice(signal.takeProfit)}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextPrimary)
+        }
+        openTrade?.let { trade ->
+            Text("Paper باز: ${trade.action} · ${formatDateTime(trade.openedAt)}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
+            Text("E ${formatPrice(trade.entry)} · SL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextPrimary)
+        }
+    }
+}
 
-            SectionCard(
-                title = "حمایت/مقاومت و پرایس‌اکشن ICT",
-                subtitle = "تقریب آموزشی بر پایهٔ OHLC بسته؛ خطوط، سفارش یا معاملهٔ ثبت‌شده نیستند",
-            ) {
-                val level = structure.range
-                if (level == null) {
-                    Text("رنجِ دوطرفهٔ تأییدشده یافت نشد؛ سطح قابل اتکا ترسیم/استفاده نمی‌شود.",
-                        style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
-                } else {
-                    Text("حمایت ${formatPrice(level.support)} (${level.supportTouches} برخورد جداگانه) · مقاومت ${formatPrice(level.resistance)} (${level.resistanceTouches} برخورد جداگانه)",
-                        style = MaterialTheme.typography.bodySmall, color = AurumColors.Purple)
-                    Text("میانهٔ رنج ${formatPrice(level.midpoint)}؛ لمس حمایت یا خرید در میانهٔ رنج، مجوز ورود نیست.",
-                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-                }
-                val selected = listOf(structure.buy, structure.sell).maxByOrNull { it.sweepAt ?: 0L }
-                Text("پنجره: ${structure.window?.label ?: "داده/بازهٔ ناکافی"} · ${structure.window?.localTime ?: "—"} به وقت نیویورک (ساعت رویدادها: دستگاه)",
-                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-                Text("BUY: ${ictStatus(structure.buy.state)} · SELL: ${ictStatus(structure.sell.state)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (structure.buy.ready || structure.sell.ready) AurumColors.Gold else AurumColors.TextSecondary)
-                selected?.takeIf { it.sweepAt != null }?.let { setup ->
-                    Text("${if (setup.side == IctRangeAnalyzer.Side.BUY) "کف" else "سقف"} جاروب/بازپس‌گرفته: ${setup.sweepAt?.let(::formatTime)} · شکست ساختار MSS: ${setup.shiftAt?.let(::formatTime) ?: "هنوز نه"}",
-                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-                    Text("FVG سه‌کندلی: ${setup.fvg?.let { "${formatPrice(it.low)}–${formatPrice(it.high)}" } ?: "تأیید نشده"} · اردربلاک احتمالی: ${setup.orderBlock?.let { "${formatPrice(it.low)}–${formatPrice(it.high)}" } ?: "یافت نشد"}",
-                        style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
-                    Text("بازآزمایی: ${setup.retestAt?.let(::formatTime) ?: "هنوز نه"} · پاداش/ریسک تا سمت مقابل: ${setup.rewardRisk?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "—"}",
-                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                }
-                if (market.showingCachedData || market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING)) {
-                    Text("نمایش تحلیل تاریخی/کش؛ ورود یا اعلان زنده از آن مجاز نیست.",
-                        style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
-                }
-                market.signal?.takeIf { it.isActionable }?.let {
-                    val gate = IctEntryRules.assess(market)
-                    Text("اثر بر ورود سیگنالی paper: ${gate.reason ?: "گیت ICT تأیید است؛ ۸ شرط فنی، ریسک خبر و مدیریت ریسک هنوز جداگانه بررسی می‌شوند"}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (gate.allowed) AurumColors.Green else AurumColors.Red)
-                }
-                Text("حتی «آماده» فقط یک الگوی تقریبی است؛ ورود خودکار paper به قیمت زنده، ۸ شرط فنی، آپشن‌های فعال و گیت رنجِ همین کندل نیاز دارد. خبر فقط در ژورنال داده‌کاوی می‌شود و معاملهٔ واقعی وجود ندارد.",
-                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(AurumColors.SurfaceAlt, androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                    .padding(horizontal = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Text("O ${formatPrice(shown.open)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-                Text("H ${formatPrice(shown.high)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-                Text("L ${formatPrice(shown.low)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-                Text(
-                    "C ${formatPrice(shown.close)}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (change != null && change < 0) AurumColors.Red else AurumColors.Green,
-                )
-                Text(formatTime(shown.time), style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            }
-
-            val signalBlocker = when {
-                trades.any { it.symbol == market.symbol && it.isOpen } -> "پوزیشن این نماد هنوز باز است"
-                market.signal != null && trades.any { it.symbol == market.symbol && it.signalBarTime != null &&
-                    it.signalBarTime == market.signal?.barTime } ->
-                    "این کندل قبلاً معامله شده است"
-                else -> IctEntryRules.assess(market).reason
-            }
-            SignalSummaryCard(
-                signal = market.signal,
-                onOpenPaperTrade = { market.signal?.let(viewModel::openPaperTrade) },
-                entryBlocker = signalBlocker,
-            )
-
-            SectionCard("معاملهٔ ثبت‌شده یا فقط خطوط سیگنال؟", "خط‌های «طرح ورود/SL/TP» معامله نیستند و به‌تنهایی ژورنال نمی‌سازند") {
-                val sameSymbol = trades.filter { it.symbol == market.symbol }
-                val openCount = sameSymbol.count { it.isOpen }
-                Text("${sameSymbol.count { !it.isOpen }} معاملهٔ کاغذی بسته · $openCount باز، ثبت‌شده در ژورنال برای ${market.symbol}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (sameSymbol.isEmpty()) AurumColors.Gold else AurumColors.Green)
-                if (settings.autoPaperTrading) {
-                    Text("خودکار کاغذی: $autoStatus", style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.TextSecondary)
-                } else {
-                    Text("خودکار خاموش است؛ با تأیید خودت در تنظیمات می‌توانی ورود خودکار کاغذی آموزشی را روشن کنی. سفارش واقعی وجود ندارد.",
-                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                }
-                sameSymbol.firstOrNull()?.let { trade ->
-                    Text("آخرین ثبت: ${trade.id.take(8)} · ${if (trade.autoOpened) "خودکار کاغذی" else "کاغذی"} · ${if (trade.isOpen) "باز" else "بسته"}",
-                        style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
-                }
-                Button(onClick = onOpenJournal, modifier = Modifier.padding(top = 5.dp)) {
-                    Text("دیدن رکوردهای ژورنال")
-                }
-            }
-
-            SectionCard(
-                title = "وضعیت دیتا",
-                subtitle = "فقط منبع واقعی — بدون هیچ fallback ساختگی",
-            ) {
-                Text("منبع: ${market.feed.provider}", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-                Text("حالت: ${market.feed.mode.label}", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 2.dp))
-                Text(
-                    "کندل‌های واقعی دریافت‌شده: ${market.candles.size} از هدف ۳۰۰۰ (بسته: ${market.closedCount})",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = AurumColors.TextSecondary,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-                Text(
-                    "کندل جاری: ${formatTime(last.time)} · آخرین قیمت واقعی: ${formatPrice(market.lastPrice)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = AurumColors.TextSecondary,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-                Text(
-                    "نکته: اگر اینترنت قطع شود، همان کندل‌های واقعیِ ذخیره‌شده نمایش داده می‌شود و اپ هرگز قیمت مصنوعی نمی‌سازد.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.TextMuted,
-                    modifier = Modifier.padding(top = 6.dp),
-                )
+@Composable
+private fun EntryScoreCard(market: MarketState) {
+    val signal = market.signal
+    val action = signal?.action ?: SignalAction.NO_TRADE
+    val color = when (action) {
+        SignalAction.BUY -> AurumColors.Green
+        SignalAction.SELL -> AurumColors.Red
+        SignalAction.NO_TRADE -> AurumColors.TextSecondary
+    }
+    val score = signal?.confidence ?: 0.0
+    SectionCard(
+        title = "امتیاز ورود به معامله",
+        trailing = { Pill("${score.toInt()}/100", color) },
+    ) {
+        Text(
+            when (action) {
+                SignalAction.BUY -> "امتیاز خرید"
+                SignalAction.SELL -> "امتیاز فروش"
+                SignalAction.NO_TRADE -> "فعلاً ورود مجاز نیست"
+            },
+            style = MaterialTheme.typography.titleMedium,
+            color = color,
+            fontWeight = FontWeight.Bold,
+        )
+        LinearProgressIndicator(
+            progress = { (score / 100.0).toFloat().coerceIn(0f, 1f) },
+            color = color,
+            trackColor = AurumColors.SurfaceAlt,
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+        )
+        if (signal?.isActionable == true) {
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatTile("ورود", formatPrice(signal.entry), AurumColors.Gold, Modifier.weight(1f))
+                StatTile("SL", formatPrice(signal.stopLoss), AurumColors.Red, Modifier.weight(1f))
+                StatTile("TP", formatPrice(signal.takeProfit), AurumColors.Green, Modifier.weight(1f))
+                StatTile("کندل", formatTime(signal.barTime), AurumColors.TextSecondary, Modifier.weight(1f))
             }
         }
     }
 }
 
-/** Quick pair switcher: gold plus the seven majors, always visible above the chart. */
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun TradingViewWidget(symbol: String, interval: Interval, modifier: Modifier = Modifier) {
+    val html = tradingViewHtml(symbol, interval)
+    val loadKey = "$symbol|${interval.label}"
+    AndroidView(
+        modifier = modifier,
+        factory = { context ->
+            WebView(context).apply {
+                setBackgroundColor(AndroidColor.TRANSPARENT)
+                webViewClient = WebViewClient()
+                webChromeClient = WebChromeClient()
+                CookieManager.getInstance().setAcceptCookie(true)
+                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.databaseEnabled = true
+                settings.loadsImagesAutomatically = true
+                settings.javaScriptCanOpenWindowsAutomatically = true
+                settings.cacheMode = WebSettings.LOAD_DEFAULT
+                settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                settings.userAgentString = settings.userAgentString + " AurumEdgeTradingView/1"
+                tag = loadKey
+                loadDataWithBaseURL("https://www.tradingview.com", html, "text/html", "UTF-8", null)
+            }
+        },
+        update = { webView ->
+            // AndroidView.update runs on every Compose recomposition. Market prices can recompose
+            // every second; reloading here kept TradingView in a permanent loading/no-data state.
+            if (webView.tag != loadKey) {
+                webView.tag = loadKey
+                webView.loadDataWithBaseURL("https://www.tradingview.com", html, "text/html", "UTF-8", null)
+            }
+        },
+    )
+}
+
+private fun tradingViewHtml(symbol: String, interval: Interval): String {
+    val tvSymbol = when (symbol) {
+        "XAU/USD" -> "OANDA:XAUUSD"
+        "EUR/USD" -> "OANDA:EURUSD"
+        "GBP/USD" -> "OANDA:GBPUSD"
+        "AUD/USD" -> "OANDA:AUDUSD"
+        "NZD/USD" -> "OANDA:NZDUSD"
+        "USD/JPY" -> "OANDA:USDJPY"
+        "USD/CHF" -> "OANDA:USDCHF"
+        "USD/CAD" -> "OANDA:USDCAD"
+        else -> "OANDA:XAUUSD"
+    }
+    val tvInterval = when (interval) {
+        Interval.M1 -> "1"
+        Interval.M5 -> "5"
+        Interval.M15 -> "15"
+        Interval.M30 -> "30"
+        Interval.H1 -> "60"
+        Interval.H4 -> "240"
+        Interval.D1 -> "D"
+    }
+    val encodedSymbol = tvSymbol.replace(":", "%3A")
+    val widgetUrl = "https://s.tradingview.com/widgetembed/?frameElementId=tradingview_chart" +
+        "&symbol=$encodedSymbol&interval=$tvInterval&hidesidetoolbar=0&symboledit=1" +
+        "&saveimage=0&toolbarbg=0b0e13&studies=IchimokuCloud%40tv-basicstudies" +
+        "&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1"
+    return """
+        <!doctype html>
+        <html>
+        <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+          <style>
+            html, body, #tradingview_chart, iframe {
+              margin:0; padding:0; width:100%; height:100%; overflow:hidden;
+              background:transparent; border:0;
+            }
+          </style>
+        </head>
+        <body>
+          <div id="tradingview_chart">
+            <iframe title="TradingView" src="$widgetUrl" allowtransparency="true" scrolling="no"></iframe>
+          </div>
+        </body>
+        </html>
+    """.trimIndent()
+}
+
+/** Quick pair switcher: global gold plus the major FX pairs. Iran rows are watch-only. */
 @Composable
 internal fun SymbolPickerRow(selected: String, onSelect: (String) -> Unit) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
-            .horizontalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        WatchCatalog.symbols.forEach { item ->
+        WatchCatalog.chartSymbols.forEach { id ->
             FilterChip(
-                selected = selected == item.id,
-                onClick = { if (selected != item.id) onSelect(item.id) },
-                label = { Text(item.id, style = MaterialTheme.typography.labelSmall) },
+                selected = selected == id,
+                onClick = { if (selected != id) onSelect(id) },
+                label = { Text(id, style = MaterialTheme.typography.labelSmall) },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = AurumColors.Gold.copy(alpha = 0.18f),
                     selectedLabelColor = AurumColors.Gold,
                     labelColor = AurumColors.TextSecondary,
                 ),
             )
-        }
-    }
-}
-
-internal fun ictStatus(state: IctRangeAnalyzer.State): String = when (state) {
-    IctRangeAnalyzer.State.INVALID_DATA -> "داده/بازه ناکافی یا نامعتبر"
-    IctRangeAnalyzer.State.NO_RANGE -> "رنج تأیید نشده"
-    IctRangeAnalyzer.State.WAIT_SWEEP -> "در انتظار جاروب و بازپس‌گیری"
-    IctRangeAnalyzer.State.BROKEN_RANGE -> "خروج از محدوده"
-    IctRangeAnalyzer.State.WAIT_MSS -> "در انتظار شکست ساختار با حرکت قوی"
-    IctRangeAnalyzer.State.WAIT_FVG -> "در انتظار FVG"
-    IctRangeAnalyzer.State.WAIT_RETEST -> "در انتظار بازآزمایی نزدیک لبهٔ رنج"
-    IctRangeAnalyzer.State.OUTSIDE_SESSION -> "بیرون جلسهٔ مجاز"
-    IctRangeAnalyzer.State.POOR_REWARD_RISK -> "فضای ناکافی تا سطح مقابل"
-    IctRangeAnalyzer.State.READY -> "الگوی تأییدشده؛ نه مجوز معامله"
-}
-
-@Composable
-internal fun Legend(label: String, color: Color) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        androidx.compose.foundation.layout.Box(
-            modifier = Modifier
-                .background(color, androidx.compose.foundation.shape.CircleShape)
-                .padding(3.dp),
-        )
-        Text(label, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-    }
-}
-
-@Composable
-fun KeyOnboarding(onSave: (String) -> Unit, onOpenSettings: () -> Unit) {
-    var key by remember { mutableStateOf("") }
-    Column(modifier = Modifier.padding(top = 8.dp)) {
-        SectionCard(
-            title = "کلید Twelve Data اختیاری است",
-            subtitle = "ابتدا بیش از ۱۰۰۰ کندل عمومی Yahoo سریع نمایش داده می‌شود و سپس تا ۳۰۰۰ کندل تکمیل می‌گردد؛ کلید Twelve Data فقط آخرین fallback تاریخچه/فید زنده را فعال می‌کند",
-        ) {
-            Text(
-                "کلید رایگان Twelve Data را از twelvedata.com دریافت کن و اینجا وارد کن. این کلید فقط برای خواندن دیتای بازار است و دسترسی معاملاتی ندارد. بدون کلید هم چارت با تاریخچهٔ عمومی Yahoo و تیک‌های زندهٔ فید رایگان Swissquote/Gold-API کار می‌کند.",
-                style = MaterialTheme.typography.bodySmall,
-                color = AurumColors.TextSecondary,
-            )
-            OutlinedTextField(
-                value = key,
-                onValueChange = { key = it },
-                label = { Text("Twelve Data API Key") },
-                singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp),
-            )
-            Button(
-                onClick = { onSave(key) },
-                enabled = key.isNotBlank(),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp),
-            ) {
-                Text("ذخیره و دریافت دیتای واقعی", fontWeight = FontWeight.Bold)
-            }
-            Text(
-                "بدون اینترنت یا وقتی هیچ منبع عمومی/کلیددار پاسخ معتبر ندهد، وضعیت دیررس/آفلاین نمایش داده می‌شود — هیچ کندل یا سیگنال ساختگی ساخته نمی‌شود.",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
-        Button(onClick = onOpenSettings, modifier = Modifier.padding(horizontal = 12.dp)) {
-            Text("تنظیمات پیشرفته")
         }
     }
 }

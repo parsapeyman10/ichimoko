@@ -54,6 +54,7 @@ import com.aurum.edge.ui.theme.AurumColors
 fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     val context = LocalContext.current
     val monitorRunning by SignalMonitorService.running.collectAsStateWithLifecycle()
+    val aiSignalTuning by viewModel.aiSignalTuning.collectAsStateWithLifecycle()
     // Never prefill a saved secret in an editable Compose field. Blank means keep the stored key.
     var key by remember { mutableStateOf("") }
     var symbol by remember { mutableStateOf(settings.symbol) }
@@ -127,7 +128,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             OutlinedTextField(
                 value = key,
                 onValueChange = { key = it },
-                label = { Text(if (settings.hasKey) "کلید جدید برای جایگزینی (خالی = کلید قبلی)" else "Twelve Data API Key") },
+                label = { Text(if (settings.hasKey) "کلید جدید برای جایگزینی (خالی = کلید قبلی)" else "Twelve Data API Key اختیاری") },
                 visualTransformation = PasswordVisualTransformation(),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -145,7 +146,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             }
             Button(
                 onClick = { viewModel.saveMarketCredentials(key, symbol) },
-                enabled = key.isNotBlank() || settings.hasKey,
+                enabled = true,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 10.dp),
@@ -171,6 +172,31 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                         style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
                 Text("فعال", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
+            }
+            Button(
+                onClick = { viewModel.runAiSignalSelfAnalysis(apply = true) },
+                enabled = !aiSignalTuning.loading && settings.hasClientNewsAi,
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+            ) {
+                Text(if (aiSignalTuning.loading) "در حال خودتحلیلی AI…" else "خودتحلیلی AI و تنظیم خودکار آپشن‌ها")
+            }
+            if (!settings.hasClientNewsAi) {
+                Text("AI تنظیم نشده", style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Gold, modifier = Modifier.padding(top = 5.dp))
+            }
+            aiSignalTuning.plan?.let { plan ->
+                Text("آخرین خودتحلیلی: ${plan.summary}", style = MaterialTheme.typography.bodySmall,
+                    color = AurumColors.Cyan, modifier = Modifier.padding(top = 6.dp))
+                Text("پروفایل اعمال‌شده: ${plan.profile.title}", style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Gold, modifier = Modifier.padding(top = 3.dp))
+                plan.changes.take(4).forEach { change ->
+                    Text("• $change", style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 2.dp))
+                }
+            }
+            aiSignalTuning.error?.let { error ->
+                Text(error, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red,
+                    modifier = Modifier.padding(top = 6.dp))
             }
             SignalAddonRow(
                 title = "تأیید Chikou Span",
@@ -494,7 +520,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
-        SectionCard("ورود خودکار کاغذی · فقط آموزشی", "پیش‌فرض خاموش؛ بدون بروکر، بدون سفارش واقعی") {
+        SectionCard("ورود خودکار کاغذی · فقط آموزشی", "بدون فرم دستی؛ بدون بروکر، بدون سفارش واقعی") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("باز کردن خودکار LONG/SHORT کاغذی پس از ۸ شرط فنی، آپشن‌های فعال و تأییدهای ICT/MTF؛ خبر فقط داده‌کاوی ژورنال",
                     modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
@@ -507,7 +533,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             Text(if (settings.autoPaperTrading) autoStatus else "خاموش؛ خطوط روی چارت معامله نیستند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 6.dp))
-            Text("پایش پس‌زمینه، قیمت زنده، ۸ شرط فنی پایهٔ ایچیموکو، آپشن‌های فعال و تأیید ICT/MTF لازم‌اند. AI/تقویم خبر شرط ورود نیست؛ فقط اگر نزدیک معامله شاهد معتبر داشته باشد در ژورنال برای داده‌کاوی ذخیره می‌شود. نتیجه در ژورنال روی گوشی ذخیره می‌شود؛ خروج با تیک واقعی SL/TP است. مدل و ناشران بازده یا معاملهٔ واقعی را تضمین نمی‌کنند.",
+            Text("قیمت زنده، ۸ شرط فنی پایهٔ ایچیموکو، آپشن‌های فعال و تأیید ICT/MTF لازم‌اند. پایش پس‌زمینه فقط برای ادامهٔ بررسی بعد از بستن اپ است؛ در زمان باز بودن برنامه هم ورود کاغذی خودکار با همین قواعد بررسی می‌شود. AI/تقویم خبر شرط ورود نیست؛ فقط اگر نزدیک معامله شاهد معتبر داشته باشد در ژورنال برای داده‌کاوی ذخیره می‌شود. نتیجه در ژورنال روی گوشی ذخیره می‌شود؛ خروج با تیک واقعی SL/TP است. مدل و ناشران بازده یا معاملهٔ واقعی را تضمین نمی‌کنند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
@@ -556,8 +582,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             text = { Text("هیچ سفارشی به بروکر ارسال نمی‌شود. فقط با ۸ شرط فنی، آپشن‌های فعال، قیمت زنده و تأییدهای MTF/ICT، یک رکورد LONG/SHORT کاغذی در ژورنال ایجاد می‌شود. خبر و AI فقط برای داده‌کاوی رکورد هستند و شرط ورود نیستند. اگر سرویس/فید قطع شود ورودی تازه نداریم؛ خروجِ پوزیشن باز نیز به قیمت واقعی نیاز دارد. فعال شود؟") },
             confirmButton = { TextButton(onClick = {
                 confirmAuto = false
-                if (settings.backgroundMonitor && monitorRunning) viewModel.setAutoPaperTrading(true)
-                else startMonitorIfAllowed(alsoEnableAuto = true)
+                viewModel.setAutoPaperTrading(true)
             }) { Text("فعال‌کردن کاغذی") } },
             dismissButton = { TextButton(onClick = { confirmAuto = false }) { Text("انصراف") } })
     }

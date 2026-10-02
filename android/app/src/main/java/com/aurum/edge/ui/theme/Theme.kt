@@ -13,6 +13,7 @@ import androidx.compose.ui.unit.sp
 
 object AurumColors {
     val Gold = Color(0xFFF1BC4B)
+    val Orange = Color(0xFFFF9F1C)
     val Green = Color(0xFF24C69A)
     val Red = Color(0xFFEF5D6C)
     val Cyan = Color(0xFF57C7D4)

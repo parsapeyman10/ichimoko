@@ -5,6 +5,7 @@ import android.net.Uri
 import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.data.CandleCache
 import com.aurum.edge.data.DataFeedException
+import com.aurum.edge.data.DukascopyHistoryClient
 import com.aurum.edge.data.FreeHistoryDownloader
 import com.aurum.edge.data.FreeHistoryResult
 import com.aurum.edge.data.ForexCalendarRepository
@@ -37,8 +38,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.stateIn
@@ -46,7 +49,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Process-wide wiring. Single source of truth for settings, real market data, journal and engine.
- * Forex/currency-pair workspace only: gold (XAU/USD) plus the major FX pairs.
+ * Chart/signal workspace is forex/gold; watchlist also includes Iran gold and USD cash-board rows.
  */
 class AppContainer(context: Context) {
 
@@ -59,8 +62,9 @@ class AppContainer(context: Context) {
     val opportunityStore = PaperOpportunityStore(appContext)
     val client = TwelveDataClient()
     val publicHistory = PublicCandleHistoryClient()
+    val dukascopyHistory = DukascopyHistoryClient()
     val market = MarketRepository(appContext, client, candleCache, settingsStore, journalStore,
-        publicHistory = publicHistory)
+        publicHistory = publicHistory, dukascopyHistory = dukascopyHistory)
     val updater = AppUpdateRepository(appContext)
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -90,7 +94,7 @@ class AppContainer(context: Context) {
     }.stateIn(appScope, SharingStarted.Eagerly, market.state.value.copy(signal = null))
     val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore)
     /** Periodic all-pairs online candle sweep: candidates + radar status for every catalog pair. */
-    val pairScanner = PairScanner(client, publicHistory, settingsStore, news, journalStore, opportunityStore, appScope)
+    val pairScanner = PairScanner(client, publicHistory, settingsStore, news, journalStore, opportunityStore, appScope, dukascopyHistory)
     /** The user's own AI (Claude or OpenAI-compatible) as an educational trading companion. */
     val traderAdvisor = TraderAdvisor(settingsStore, market, pairScanner, news, appScope)
     val freeHistory = FreeHistoryDownloader()
@@ -98,6 +102,19 @@ class AppContainer(context: Context) {
 
     init {
         market.attach(appScope)
+        appScope.launch {
+            verifiedMarket.collect { state ->
+                if (settingsStore.read().autoPaperTrading) {
+                    try {
+                        autoPaperTrader.onMarketUpdate(state)
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (_: Exception) {
+                        autoPaperTrader.stopped("ورود خودکار کاغذی در این به‌روزرسانی با خطا متوقف شد")
+                    }
+                }
+            }
+        }
     }
 
     suspend fun exportFreeHistory(uri: Uri, result: FreeHistoryResult) = withContext(Dispatchers.IO) {
@@ -129,30 +146,56 @@ class AppContainer(context: Context) {
      */
     private suspend fun downloadCandles(symbol: String, interval: Interval, outputSize: Int): CandleDownload {
         val s = settingsStore.read()
-        val requested = HistoryPolicy.providerRequestSize(outputSize)
+        val requested = HistoryPolicy.deepProviderRequestSize(outputSize)
+        val twelveRequested = HistoryPolicy.providerRequestSize(outputSize)
         return try {
             val result = publicHistory.fetchCandles(symbol, interval,
                 minimumSize = HistoryPolicy.TARGET_CANDLES, desiredSize = requested)
+            if (requested > HistoryPolicy.TARGET_CANDLES && result.candles.size < requested &&
+                DukascopyHistoryClient.instrument(symbol) != null) {
+                try {
+                    val deep = dukascopyHistory.fetchCandles(symbol, interval,
+                        minimumSize = HistoryPolicy.TARGET_CANDLES, desiredSize = requested)
+                    if (deep.candles.size > result.candles.size) {
+                        return CandleDownload(deep.candles, deep.provider, deep.fetchedAt,
+                            PublicCandleHistoryClient.detectGaps(deep.candles, interval).size)
+                    }
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    // The verified Yahoo window remains valid; do not invent a deeper one.
+                }
+            }
             CandleDownload(result.candles, result.provider, result.fetchedAt, result.gaps.size)
         } catch (cancel: CancellationException) {
             throw cancel
         } catch (publicFailure: Exception) {
+            val dukascopyFailure = try {
+                val deep = dukascopyHistory.fetchCandles(symbol, interval,
+                    minimumSize = HistoryPolicy.TARGET_CANDLES, desiredSize = requested)
+                return CandleDownload(deep.candles, deep.provider, deep.fetchedAt,
+                    PublicCandleHistoryClient.detectGaps(deep.candles, interval).size)
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (deepFailure: Exception) {
+                deepFailure
+            }
             if (!s.hasKey) {
                 throw DataFeedException(
-                    "منبع عمومی تاریخچه پاسخ معتبر نداد و کلید fallback تنظیم نشده است: " +
-                        (publicFailure.message ?: "خطای نامشخص").take(140)
+                    "Yahoo و Dukascopy تاریخچهٔ معتبر ندادند و کلید fallback تنظیم نشده است: " +
+                        (dukascopyFailure.message ?: publicFailure.message ?: "خطای نامشخص").take(140)
                 )
             }
             try {
-                val candles = client.fetchCandles(s.apiKey, symbol, interval, requested)
+                val candles = client.fetchCandles(s.apiKey, symbol, interval, twelveRequested)
                 if (candles.size < HistoryPolicy.TARGET_CANDLES) {
                     throw DataFeedException("Twelve Data فقط ${candles.size} کندل داد؛ حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی لازم است")
                 }
-                val sorted = candles.sortedBy { it.time }.takeLast(requested)
+                val sorted = candles.sortedBy { it.time }.takeLast(twelveRequested)
                 val gaps = PublicCandleHistoryClient.detectGaps(sorted, interval)
                 CandleDownload(
                     candles = sorted,
-                    source = "Twelve Data · آخرین fallback پس از خطای منبع عمومی: ${(publicFailure.message ?: "نامشخص").take(80)}" +
+                    source = "Twelve Data · آخرین fallback پس از خطای Yahoo/Dukascopy: ${(publicFailure.message ?: "نامشخص").take(80)}" +
                         if (gaps.isEmpty()) " · بدون gap مشاهده‌شده" else " · ${gaps.size} gap واقعی بدون پرکردن",
                     fetchedAt = System.currentTimeMillis(),
                     observedGapCount = gaps.size,
@@ -161,7 +204,7 @@ class AppContainer(context: Context) {
                 throw cancel
             } catch (fallbackFailure: Exception) {
                 throw DataFeedException(
-                    "منبع عمومی و آخرین fallback Twelve Data تاریخچهٔ معتبر ندادند؛ دادهٔ ساختگی/پرکننده مجاز نیست: " +
+                    "Yahoo، Dukascopy و آخرین fallback Twelve Data تاریخچهٔ معتبر ندادند؛ دادهٔ ساختگی/پرکننده مجاز نیست: " +
                         (fallbackFailure.message ?: "خطای نامشخص").take(140)
                 )
             }

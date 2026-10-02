@@ -66,11 +66,6 @@ class WatchRepository(
 
     private suspend fun refresh() = mutex.withLock {
         ensureLoaded()
-        if (MarketHours.forexWeekendClosed()) {
-            _state.value = _state.value.copy(refreshing = false,
-                error = "تعطیلی معمول فارکس؛ درخواست قیمت جدید ارسال نشد")
-            return@withLock
-        }
         val elapsed = SystemClock.elapsedRealtime()
         if (attemptedAtElapsed != 0L && elapsed - attemptedAtElapsed in 0L until 180_000L) {
             _state.value = _state.value.copy(error = "برای سهمیهٔ منابع، حداقل سه دقیقه بین دریافت‌های دیده‌بان صبر کنید")

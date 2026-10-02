@@ -247,19 +247,26 @@ object SignalEngine {
             flatShort -> SignalAction.SELL
             else -> null
         }
-        val direction = crossDirection ?: if (profile.flatSpanB) flatDirection else null
-        val usedFlatEntry = crossDirection == null && direction != null && flatDirection == direction
+        // A profile option is an additional AND-gate, not an alternate entry rule. Direction must
+        // always come from the base Tenkan/Kijun cross so enabled options cannot bypass core rules.
+        val direction = crossDirection
         val long = direction == SignalAction.BUY
         val reasons = mutableListOf<String>()
         val blockers = mutableListOf<String>()
         val confluence = mutableListOf<ConfluenceItem>()
         val minThreshold = threshold.coerceAtLeast(72.0)
+        fun conditionStatus(ok: Boolean, likely: Boolean = false): ConfluenceStatus = when {
+            ok -> ConfluenceStatus.CONFIRMED
+            likely -> ConfluenceStatus.UNKNOWN
+            else -> ConfluenceStatus.CONFLICT
+        }
+        fun near(value: Double, target: Double, atrMultiple: Double): Boolean =
+            abs(value - target) <= snap.atr * atrMultiple
 
-        var score = if (usedFlatEntry) 30.0 else 20.0
+        var score = 20.0
         if (direction != null) {
             if (narrative) reasons += when {
                 crossDirection != null -> if (long) "کراس تازه صعودی تنکان/کیجون" else "کراس تازه نزولی تنکان/کیجون"
-                usedFlatEntry -> if (long) "سناریوی تختی SpanB52: شکست رو به بالا پس از سکون خط ۵۲" else "سناریوی تختی SpanB52: شکست رو به پایین پس از سکون خط ۵۲"
                 else -> "جهت سیگنال تأیید شد"
             }
         } else if (narrative) {
@@ -268,17 +275,26 @@ object SignalEngine {
             else "کراس تازه تنکان/کیجون شکل نگرفته — ورود ممنوع"
         }
         if (narrative) {
+            val crossOk = crossDirection != null
+            val crossLikely = !crossOk && near(snap.tenkan, snap.kijun, 0.18)
             confluence += ConfluenceItem(
-                "۱ · جهت ایچیموکو: کراس تنکان/کیجون (${series.setting.tenkan}/${series.setting.kijun})",
-                crossDirection != null,
-                "T ${fmt(snap.tenkan)} / K ${fmt(snap.kijun)} · سهم امتیاز ۲۰ از ۱۰۰",
-                scorePercent = if (crossDirection != null) 20 else 0,
+                "۱ · کراس تنکان/کیجون",
+                crossOk,
+                "T ${fmt(snap.tenkan)} / K ${fmt(snap.kijun)}",
+                status = conditionStatus(crossOk, crossLikely),
+                scorePercent = if (crossOk) 20 else null,
             )
         }
 
-        if (profile.flatSpanB && flatDirection == direction && direction != null) {
-            score += 18
-            if (!usedFlatEntry && narrative) reasons += "تأیید افزودهٔ تختی SpanB52 هم‌جهت با سیگنال پایه"
+        var flatSpanBOptionOk = !profile.flatSpanB
+        if (profile.flatSpanB && direction != null) {
+            flatSpanBOptionOk = flatDirection == direction
+            if (flatSpanBOptionOk) {
+                score += 18
+                if (narrative) reasons += "آپشن SpanB52 هم‌جهت با سیگنال پایه تأیید شد"
+            } else if (narrative) {
+                blockers += "آپشن SpanB52 فعال است و باید هم‌جهت با کراس پایه تأیید شود"
+            }
         }
 
         val clearance = 0.08 * snap.atr
@@ -293,12 +309,21 @@ object SignalEngine {
         } else if (direction != null && narrative) {
             blockers += if (long) "قیمت داخل/نزدیک ابر — شکست صعودی تایید نشده" else "قیمت داخل/نزدیک ابر — شکست نزولی تایید نشده"
         }
-        if (narrative) confluence += ConfluenceItem(
-            "۲ · قبول قیمت خارج ابر",
-            cloudOk,
-            "${fmt(snap.cloudTop)} — ${fmt(snap.cloudBottom)} · سهم امتیاز ۱۸ از ۱۰۰",
-            scorePercent = if (cloudOk) 18 else 0,
-        )
+        if (narrative) {
+            val cloudTarget = when (direction) {
+                SignalAction.BUY -> snap.cloudTop + clearance
+                SignalAction.SELL -> snap.cloudBottom - clearance
+                else -> null
+            }
+            val cloudLikely = !cloudOk && cloudTarget != null && near(snap.price, cloudTarget, 0.20)
+            confluence += ConfluenceItem(
+                "۲ · قیمت خارج ابر",
+                cloudOk,
+                "${fmt(snap.cloudTop)} — ${fmt(snap.cloudBottom)}",
+                status = conditionStatus(cloudOk, cloudLikely),
+                scorePercent = if (cloudOk) 18 else null,
+            )
+        }
 
         val spanOk = when (direction) {
             SignalAction.BUY -> snap.spanA > snap.spanB
@@ -312,8 +337,9 @@ object SignalEngine {
         if (narrative) confluence += ConfluenceItem(
             "۳ · هم‌جهتی Senkou A/B",
             spanOk,
-            "A ${fmt(snap.spanA)} / B ${fmt(snap.spanB)} · سهم امتیاز ۱۰ از ۱۰۰",
-            scorePercent = if (spanOk) 10 else 0,
+            "A ${fmt(snap.spanA)} / B ${fmt(snap.spanB)}",
+            status = conditionStatus(spanOk, direction != null && !spanOk && near(snap.spanA, snap.spanB, 0.15)),
+            scorePercent = if (spanOk) 10 else null,
         )
 
         val chikouOk = !profile.chikouConfirmation || when (direction) {
@@ -327,17 +353,24 @@ object SignalEngine {
             score += 10
             if (narrative) reasons += "تایید چیکو نسبت به ساختار ${series.setting.kijun} کندل قبل"
         } else if (direction != null && narrative) blockers += "چیکو تایید نمی‌کند — ساختار قبلی نقض می‌شود"
-        if (narrative) confluence += ConfluenceItem(
-            "۴ · تایید Chikou",
-            chikouOk,
-            if (profile.chikouConfirmation) {
-                (if (long) "close بالای high قبلی" else "close زیر low قبلی") + " · سهم امتیاز ۱۰ از ۱۰۰"
-            } else "خاموش در پروفایل؛ شرطی به امتیاز اضافه نشد",
-            status = if (profile.chikouConfirmation) {
-                if (chikouOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT
-            } else ConfluenceStatus.UNKNOWN,
-            scorePercent = if (profile.chikouConfirmation && chikouOk) 10 else 0,
-        )
+        if (narrative) {
+            val chikouIndex = snap.index - series.setting.kijun
+            val chikouLevel = if (direction != null && chikouIndex >= 0) {
+                if (long) bars[chikouIndex].high else bars[chikouIndex].low
+            } else null
+            val chikouLikely = profile.chikouConfirmation && !chikouOk && chikouLevel != null &&
+                near(snap.price, chikouLevel, 0.20)
+            confluence += ConfluenceItem(
+                "۴ · تایید Chikou",
+                chikouOk,
+                if (profile.chikouConfirmation) {
+                    if (long) "close بالای high قبلی" else "close زیر low قبلی"
+                } else "خاموش در پروفایل",
+                status = if (profile.chikouConfirmation) conditionStatus(chikouOk, chikouLikely)
+                    else ConfluenceStatus.UNKNOWN,
+                scorePercent = if (profile.chikouConfirmation && chikouOk) 10 else null,
+            )
+        }
 
         val emaOk = when (direction) {
             SignalAction.BUY -> snap.price > snap.ema200
@@ -351,8 +384,9 @@ object SignalEngine {
         if (narrative) confluence += ConfluenceItem(
             "۵ · EMA200",
             emaOk,
-            "${fmt(snap.ema200)} · سهم امتیاز ۱۵ از ۱۰۰",
-            scorePercent = if (emaOk) 15 else 0,
+            fmt(snap.ema200),
+            status = conditionStatus(emaOk, direction != null && !emaOk && near(snap.price, snap.ema200, 0.15)),
+            scorePercent = if (emaOk) 15 else null,
         )
 
         val vwapOk = when (direction) {
@@ -367,8 +401,9 @@ object SignalEngine {
         if (narrative) confluence += ConfluenceItem(
             "۶ · VWAP جلسه",
             vwapOk,
-            "${fmt(snap.vwap)} · سهم امتیاز ۱۲ از ۱۰۰",
-            scorePercent = if (vwapOk) 12 else 0,
+            fmt(snap.vwap),
+            status = conditionStatus(vwapOk, direction != null && !vwapOk && near(snap.price, snap.vwap, 0.12)),
+            scorePercent = if (vwapOk) 12 else null,
         )
 
         val rsiOk = when (direction) {
@@ -380,12 +415,20 @@ object SignalEngine {
             score += 10
             if (narrative) reasons += "RSI7 در ناحیه سالم (${fmt(snap.rsi)})"
         } else if (direction != null && narrative) blockers += "RSI7 اشباع یا بی‌مومنتوم (${fmt(snap.rsi)})"
-        if (narrative) confluence += ConfluenceItem(
-            "۷ · RSI7",
-            rsiOk,
-            "${fmt(snap.rsi)} · سهم امتیاز ۱۰ از ۱۰۰",
-            scorePercent = if (rsiOk) 10 else 0,
-        )
+        if (narrative) {
+            val rsiLikely = when (direction) {
+                SignalAction.BUY -> snap.rsi in 48.0..76.0
+                SignalAction.SELL -> snap.rsi in 24.0..52.0
+                else -> false
+            }
+            confluence += ConfluenceItem(
+                "۷ · RSI7",
+                rsiOk,
+                fmt(snap.rsi),
+                status = conditionStatus(rsiOk, !rsiOk && rsiLikely),
+                scorePercent = if (rsiOk) 10 else null,
+            )
+        }
 
         val hist = snap.macdHist ?: 0.0
         val momentumOk = (if (long) hist > 0 else hist < 0) && (snap.adx ?: 0.0) >= 20.0
@@ -394,11 +437,14 @@ object SignalEngine {
             if (narrative) reasons += "مومنتوم MACD و ADX تایید می‌کند"
         } else if (direction != null && narrative) blockers += "مومنتوم کافی نیست (MACD/ADX)"
         if (narrative) {
+            val histLikely = snap.macdHist?.let { if (long) it > -0.03 * snap.atr else it < 0.03 * snap.atr } == true
+            val adxLikely = (snap.adx ?: 0.0) >= 16.0
             confluence += ConfluenceItem(
                 "۸ · مومنتوم MACD/ADX",
                 momentumOk,
-                "hist ${snap.macdHist?.let { fmt(it) } ?: "—"} / ADX ${snap.adx?.let { fmt(it) } ?: "—"} · سهم امتیاز ۵ از ۱۰۰",
-                scorePercent = if (momentumOk) 5 else 0,
+                "hist ${snap.macdHist?.let { fmt(it) } ?: "—"} / ADX ${snap.adx?.let { fmt(it) } ?: "—"}",
+                status = conditionStatus(momentumOk, direction != null && !momentumOk && histLikely && adxLikely),
+                scorePercent = if (momentumOk) 5 else null,
             )
             confluence += ConfluenceItem(
                 "کنترل اضافه · نوسان ATR در محدوده",
@@ -410,7 +456,7 @@ object SignalEngine {
                 "آپشن افزوده · تختی SpanB52",
                 flatOk,
                 "${snap.spanBFlatBars} کندل تخت · B ${snap.spanBFlatValue?.let { fmt(it) } ?: "—"} · شکست ${if (snap.rangeBreakoutUp) "بالا" else if (snap.rangeBreakoutDown) "پایین" else "ندارد"}",
-                status = if (profile.flatSpanB && flatOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
+                status = if (profile.flatSpanB) conditionStatus(flatOk) else ConfluenceStatus.UNKNOWN,
             )
         }
         if (snap.atrShock) {
@@ -425,7 +471,16 @@ object SignalEngine {
         }
         val volumeOk = snap.relVolume?.let { it >= 0.6 }
         if (narrative) {
-            confluence += ConfluenceItem("حجم نسبی ۳۰ کندل", volumeOk != false, snap.relVolume?.let { "${fmt(it)}×" } ?: "حجم معتبر از منبع نداریم")
+            confluence += ConfluenceItem(
+                "حجم نسبی ۳۰ کندل",
+                volumeOk != false,
+                snap.relVolume?.let { "${fmt(it)}×" } ?: "—",
+                status = when (volumeOk) {
+                    true -> ConfluenceStatus.CONFIRMED
+                    false -> ConfluenceStatus.CONFLICT
+                    null -> ConfluenceStatus.UNKNOWN
+                },
+            )
         }
         if (profile.momentumVolume && direction != null) {
             if (!momentumOk) blockers += "پروفایل مومنتوم/حجم: MACD/ADX باید هم‌جهت و قوی باشد"
@@ -433,7 +488,7 @@ object SignalEngine {
             if (momentumOk && volumeOk != false) score += 8
         }
 
-        var additiveFiltersOk = !profile.momentumVolume || (momentumOk && volumeOk != false)
+        var additiveFiltersOk = (!profile.momentumVolume || (momentumOk && volumeOk != false)) && flatSpanBOptionOk
         fun applyGuard(name: String, guard: GuardResult) {
             if (narrative) confluence += ConfluenceItem(name, guard.ok, guard.detail)
             if (direction != null && !guard.ok) {
@@ -467,8 +522,14 @@ object SignalEngine {
         score = score.coerceIn(0.0, 100.0)
         val conf = score
 
-        val actionable = direction != null && conf >= minThreshold && !snap.atrShock && !spreadBlocked && additiveFiltersOk
+        val coreConditionsOk = direction != null && cloudOk && spanOk && chikouOk && emaOk &&
+            vwapOk && rsiOk && momentumOk
+        val actionable = direction != null && coreConditionsOk && conf >= minThreshold &&
+            !snap.atrShock && !spreadBlocked && additiveFiltersOk
         if (!actionable) {
+            if (narrative && direction != null && !coreConditionsOk) {
+                blockers += "همهٔ ۸ شرط پایه باید هم‌زمان برقرار باشند"
+            }
             if (narrative && conf < minThreshold && direction != null) {
                 blockers += "امتیاز همگرایی ${fmt(conf)} کمتر از آستانه ${fmt(minThreshold)}"
             }

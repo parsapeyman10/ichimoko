@@ -154,10 +154,11 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                 color = AurumColors.TextMuted,
                             )
                             Text(
-                                "${formatDateTime(trade.openedAt)} · ${if (trade.autoOpened) "خودکار کاغذی" else if (trade.note.startsWith("ورود دستی")) "دستی؛ بدون سیگنال" else "با تأیید کاربر"} · ${trade.id.take(8)}",
+                                "${formatDateTime(trade.openedAt)} · ${if (trade.autoOpened) "خودکار کاغذی" else if (trade.note.startsWith("ورود دستی")) "دستی" else "کاغذی"} · ${trade.id.take(8)}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.TextMuted,
                             )
+                            EntryConditionsLine(trade.entryConditions)
                             trade.newsEvidence?.let { verdict ->
                                 Text("خبر ${verdict.model} · ${verdict.direction} · ${verdict.evidence.joinToString { it.source }}" +
                                     " · تقویم ${formatDateTime(verdict.calendarCheckedAt)}",
@@ -297,6 +298,30 @@ private fun PaperEvidencePanel(recorded: List<PaperTrade>, other: List<PaperTrad
 }
 
 @Composable
+private fun EntryConditionsLine(conditions: List<PaperConditionRecord>) {
+    val started = conditions.take(8).filter { it.status == "CONFIRMED" }
+    if (started.isEmpty()) return
+    Text(
+        "شروع معامله: " + started.joinToString("، ") { it.name.substringAfter('·').trim() },
+        style = MaterialTheme.typography.labelSmall,
+        color = AurumColors.Green,
+        modifier = Modifier.padding(top = 3.dp),
+    )
+}
+
+private fun conditionTone(status: String) = when (status) {
+    "CONFIRMED" -> AurumColors.Green
+    "UNKNOWN" -> AurumColors.Orange
+    else -> AurumColors.Red
+}
+
+private fun conditionLabel(status: String) = when (status) {
+    "CONFIRMED" -> "برقرار"
+    "UNKNOWN" -> "احتمالی"
+    else -> "دور"
+}
+
+@Composable
 private fun TradeRow(trade: PaperTrade) {
     val pnl = trade.pnlUsd ?: 0.0
     val uriHandler = LocalUriHandler.current
@@ -324,6 +349,7 @@ private fun TradeRow(trade: PaperTrade) {
             )
             Text("${trade.exitReason ?: "—"} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            EntryConditionsLine(trade.entryConditions)
             trade.newsEvidence?.let { ai ->
                 Text("خبر ${ai.model} · ${formatDateTime(ai.checkedAt)} · ${ai.evidence.joinToString { it.source }}" +
                     " · بررسی تقویم ${formatDateTime(ai.calendarCheckedAt)}",
@@ -544,21 +570,20 @@ private fun IctDisclosure(key: String, record: IctPriceActionRecord?) {
 
 @Composable
 private fun ConditionDisclosure(key: String, conditions: List<PaperConditionRecord>) {
-    if (conditions.isEmpty()) {
-        Text("شرایط ورود برای این رکورد قدیمی/دستی ذخیره نشده‌اند؛ تأیید سیگنال کامل ادعا نمی‌شود.",
-            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-        return
-    }
+    if (conditions.isEmpty()) return
     var expanded by remember(key) { mutableStateOf(false) }
     OutlinedButton(onClick = { expanded = !expanded }) {
-        Text(if (expanded) "بستن شرایط ثبت‌شده" else "نمایش ${conditions.size} شرط هنگام ثبت",
-            style = MaterialTheme.typography.labelSmall)
+        Text(if (expanded) "بستن شرط‌ها" else "شرط‌های موتور", style = MaterialTheme.typography.labelSmall)
     }
     if (expanded) conditions.forEachIndexed { index, condition ->
-        Text("${index + 1}. ${condition.name} · ${condition.status} · ${condition.detail}",
+        val tone = conditionTone(condition.status)
+        Text(
+            "${index + 1}. ${conditionLabel(condition.status)} · ${condition.name}" +
+                if (condition.detail.isNotBlank()) " · ${condition.detail}" else "",
             style = MaterialTheme.typography.labelSmall,
-            color = if (condition.status == "CONFIRMED") AurumColors.Green else AurumColors.Red,
-            modifier = Modifier.padding(vertical = 2.dp))
+            color = tone,
+            modifier = Modifier.padding(vertical = 2.dp),
+        )
     }
 }
 

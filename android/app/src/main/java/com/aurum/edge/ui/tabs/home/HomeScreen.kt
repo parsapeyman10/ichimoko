@@ -11,10 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -22,19 +19,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.aurum.edge.core.AlertCheckKind
-import com.aurum.edge.core.AlertDiagnostics
 import com.aurum.edge.core.HomeReadout
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.data.MarketState
-import com.aurum.edge.data.TraderOpinionState
-import com.aurum.edge.notify.Notifier
-import com.aurum.edge.service.SignalMonitorService
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
@@ -42,12 +34,10 @@ import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.components.formatQuotePrice
 import com.aurum.edge.ui.components.formatSpread
-import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
-import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.delay
 
-/** Local overview: no backend and no new market/news verdicts are inferred here. */
+/** Home is intentionally minimal: market hours + current live/last price only. */
 @Composable
 fun HomeScreen(
     viewModel: AurumViewModel,
@@ -59,198 +49,109 @@ fun HomeScreen(
     onJournal: () -> Unit,
     onSettings: () -> Unit,
 ) {
-    // "Automatically beside you": refresh the AI companion's opinion every 10 minutes while
-    // Home is visible; throttled inside the advisor, and the monitor service covers background.
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
-            viewModel.refreshTraderOpinion()
-            delay(10 * 60_000L)
+            delay(20_000L)
+            now = System.currentTimeMillis()
         }
     }
-
-    val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val news by viewModel.news.collectAsStateWithLifecycle()
-    val trades by viewModel.trades.collectAsStateWithLifecycle()
-    val reports by viewModel.reports.collectAsStateWithLifecycle()
-    val reportError by viewModel.reportError.collectAsStateWithLifecycle()
-    val mtf by viewModel.mtf.collectAsStateWithLifecycle()
-    val opportunityError by viewModel.opportunityError.collectAsStateWithLifecycle()
-    val journalError by viewModel.journalError.collectAsStateWithLifecycle()
-    val monitorRunning by SignalMonitorService.running.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) { while (true) { delay(20_000L); now = System.currentTimeMillis() } }
-    val price = HomeReadout.from(market, now)
     val session = MarketHours.sessionWindow(now)
-    val checks = AlertDiagnostics.checks(market, settings, news, monitorRunning,
-        Notifier.canNotifyVerified(context, settings.alertSoundUri), trades, mtf,
-        opportunityError, journalError, now)
-    val newsCheck = checks.first { it.kind == AlertCheckKind.AI_NEWS }
-    val monitorCheck = checks.first { it.kind == AlertCheckKind.MONITOR }
-    val notifyCheck = checks.first { it.kind == AlertCheckKind.ANDROID_ALERT }
-    val closedPaper = trades.count { !it.isOpen && it.pnlUsd != null }
+    val price = HomeReadout.from(market, now)
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val configuredSpread = settings.spreadPrice.takeIf { it.isFinite() && it > 0.0 && price.value != null }
+    val displayBid = market.bid ?: configuredSpread?.let { spread -> price.value?.minus(spread / 2.0) }
+    val displayAsk = market.ask ?: configuredSpread?.let { spread -> price.value?.plus(spread / 2.0) }
+    val spread = displayBid?.let { bid -> displayAsk?.let { ask -> ask - bid } }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 14.dp)) {
         Column(
-            Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 6.dp)
-                .background(Brush.horizontalGradient(listOf(AurumColors.SurfaceAlt, AurumColors.Surface)),
-                    RoundedCornerShape(18.dp))
-                .border(1.dp, AurumColors.Gold.copy(alpha = 0.35f), RoundedCornerShape(18.dp))
+            Modifier.fillMaxWidth()
+                .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 6.dp)
+                .background(
+                    Brush.horizontalGradient(listOf(AurumColors.SurfaceAlt, AurumColors.Surface)),
+                    RoundedCornerShape(18.dp),
+                )
+                .border(
+                    1.dp,
+                    (if (session.closed) AurumColors.Red else AurumColors.Green).copy(alpha = 0.35f),
+                    RoundedCornerShape(18.dp),
+                )
                 .padding(18.dp),
         ) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top) {
-                Text("AURUM  /  EDGE", color = AurumColors.Gold,
-                    style = MaterialTheme.typography.labelMedium)
-                Column(horizontalAlignment = Alignment.End,
-                    modifier = Modifier
-                        .background((if (session.closed) AurumColors.Red else AurumColors.Green).copy(alpha = 0.10f),
-                            RoundedCornerShape(12.dp))
-                        .border(1.dp, (if (session.closed) AurumColors.Red else AurumColors.Green).copy(alpha = 0.35f),
-                            RoundedCornerShape(12.dp))
-                        .padding(horizontal = 10.dp, vertical = 7.dp)) {
-                    Text(if (session.closed) "طبق برنامه بسته" else "طبق برنامه باز",
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column {
+                    Text("بازار فارکس", color = AurumColors.Gold, style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        if (session.closed) "بسته است" else "باز است",
                         color = if (session.closed) AurumColors.Red else AurumColors.Green,
-                        style = MaterialTheme.typography.labelMedium)
-                    Text("${session.nextChangeLabel}: ${formatDateTime(session.nextChangeAt)}",
-                        color = AurumColors.TextPrimary, style = MaterialTheme.typography.labelSmall)
-                    Text(session.newYorkTimeLabel, color = AurumColors.TextMuted,
-                        style = MaterialTheme.typography.labelSmall)
+                        style = MaterialTheme.typography.headlineMedium,
+                    )
                 }
-            }
-            Text("نمای کلی", color = AurumColors.TextPrimary,
-                style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 5.dp))
-            Text("وضعیت واقعی داده، هشدار و پژوهش روی همین گوشی · بدون سرور",
-                color = AurumColors.TextSecondary, style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 5.dp))
-            Text(session.detail, color = AurumColors.TextMuted,
-                style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp))
-        }
-
-        SectionCard("بازار · ${market.symbol}", "هر عددی قیمت قابل اجرا یا تضمین معامله نیست",
-            trailing = { Pill(when {
-                price.current -> "دریافت تازه"
-                price.value != null -> "قبلی/کش"
-                else -> "بدون داده"
-            }, if (price.current) AurumColors.Cyan else AurumColors.Gold) }) {
-            Text(formatPrice(price.value), style = MaterialTheme.typography.headlineMedium,
-                color = if (price.current) AurumColors.TextPrimary else AurumColors.TextMuted)
-            Text(if (price.current) "${price.label} · دریافت ${formatDateTime(price.observedAt)}"
-                else "${price.label} · آخرین کندل ${formatDateTime(price.observedAt)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (price.current) AurumColors.Cyan else AurumColors.Gold)
-            val spread = market.bid?.let { bid -> market.ask?.let { ask -> ask - bid } }
-            Row(Modifier.fillMaxWidth().padding(top = 7.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatTile("BID", formatQuotePrice(market.bid), if (price.current) AurumColors.Green else AurumColors.TextMuted, Modifier.weight(1f))
-                StatTile("ASK", formatQuotePrice(market.ask), if (price.current) AurumColors.Red else AurumColors.TextMuted, Modifier.weight(1f))
-                StatTile("SPREAD", formatSpread(spread), AurumColors.Gold, Modifier.weight(1f))
+                Pill(
+                    text = if (session.closed) "CLOSED" else "OPEN",
+                    color = if (session.closed) AurumColors.Red else AurumColors.Green,
+                )
             }
             Text(
-                if (market.bid != null && market.ask != null) "اسپرد از همان تیک زندهٔ منبع فعلی است؛ اگر قیمت دیررس شود، این اعداد هم مجوز ورود نیستند."
-                else "منبع فعلی bid/ask جدا منتشر نکرده؛ وقتی فید Swissquote فعال باشد bid/ask/spread ثانیه‌ای نمایش داده می‌شود.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 4.dp))
-            if (!price.current && market.feed.detail.isNotBlank()) Text(market.feed.detail,
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 5.dp))
-            Button(onClick = onChart,
-                modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
-                Text(if (settings.hasKey) "دیدن چارت و داده‌ها" else "دیدن چارت (۱۲۰۰+ کندل سریع + تکمیل تا ۳۰۰۰)")
-            }
+                "${session.nextChangeLabel}: ${formatDateTime(session.nextChangeAt)}",
+                color = AurumColors.TextPrimary,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 10.dp),
+            )
+            Text(
+                session.newYorkTimeLabel,
+                color = AurumColors.TextMuted,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(top = 3.dp),
+            )
+            Text(
+                session.detail,
+                color = AurumColors.TextSecondary,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier.padding(top = 6.dp),
+            )
         }
 
-        TraderCompanionCard(
-            state = viewModel.traderOpinion.collectAsStateWithLifecycle().value,
-            onRefresh = { viewModel.refreshTraderOpinion(force = true) },
-        )
-
-        SectionCard("هشدار و خبر", "خبر یک معیار ریسک جداست؛ امتیاز فنی ۸ شرط را منفی نمی‌کند",
-            trailing = { Pill(if (newsCheck.ready) "بدون وتوی خبر" else "وتوی خبر",
-                if (newsCheck.ready) AurumColors.Green else AurumColors.Red) }) {
-            Text(newsCheck.detail,
-                style = MaterialTheme.typography.bodySmall, color = if (newsCheck.ready) AurumColors.TextSecondary else AurumColors.Red)
-            Text("پایش: ${if (monitorCheck.ready) "در حال اجرا" else "غیرفعال/متوقف"} · اعلان: ${if (notifyCheck.ready) "کانال باز" else "نیاز به بررسی"}",
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 6.dp))
+        SectionCard(
+            title = "قیمت لحظه‌ای بازار · ${market.symbol}",
+            subtitle = "فقط آخرین عدد واقعی دریافت‌شده؛ بدون سیگنال، خبر یا آمار اضافه",
+            trailing = {
+                Pill(
+                    when {
+                        price.current -> "زنده/تازه"
+                        price.value != null -> "قبلی/کش"
+                        else -> "بدون داده"
+                    },
+                    if (price.current) AurumColors.Cyan else AurumColors.Gold,
+                )
+            },
+        ) {
+            Text(
+                formatPrice(price.value),
+                style = MaterialTheme.typography.headlineMedium,
+                color = if (price.current) AurumColors.TextPrimary else AurumColors.TextMuted,
+            )
+            Text(
+                if (price.current) "${price.label} · دریافت ${formatDateTime(price.observedAt)}"
+                else "${price.label} · آخرین مشاهده ${formatDateTime(price.observedAt)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = if (price.current) AurumColors.Cyan else AurumColors.Gold,
+                modifier = Modifier.padding(top = 4.dp),
+            )
             Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onSignal, modifier = Modifier.weight(1f)) { Text("علت بی‌هشداری") }
-                OutlinedButton(onClick = onNews, modifier = Modifier.weight(1f)) { Text("خبر واقعی") }
+                StatTile("BID", formatQuotePrice(displayBid), if (price.current) AurumColors.Green else AurumColors.TextMuted, Modifier.weight(1f))
+                StatTile("ASK", formatQuotePrice(displayAsk), if (price.current) AurumColors.Red else AurumColors.TextMuted, Modifier.weight(1f))
+                StatTile("SPREAD", formatSpread(spread), AurumColors.Gold, Modifier.weight(1f))
+            }
+            market.feed.detail.takeIf { it.isNotBlank() }?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                    modifier = Modifier.padding(top = 8.dp))
             }
         }
-
-        SectionCard("پژوهش و ژورنال", "فقط نتایج ثبت‌شده؛ نه ادعای سود آینده") {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatTile("بستهٔ کاغذی", "$closedPaper", modifier = Modifier.weight(1f))
-                StatTile("گزارش خارج نمونه", if (reportError == null) "${reports.size}" else "—", modifier = Modifier.weight(1f))
-            }
-            reportError?.let { Text(it, style = MaterialTheme.typography.bodySmall,
-                color = AurumColors.Red, modifier = Modifier.padding(top = 8.dp)) }
-            Text("معاملهٔ دستی، سیگنال فنی ۸/۸ و بک‌تست نباید در یک آمارِ «سوددهی استراتژی» مخلوط شوند. هزینه‌ها و تعداد نمونه را در گزارش پژوهش بررسی کن.",
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 8.dp))
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = onLearn, modifier = Modifier.weight(1f)) { Text("پژوهش") }
-                OutlinedButton(onClick = onJournal, modifier = Modifier.weight(1f)) { Text("ژورنال") }
-            }
-        }
-        Text("سفارش واقعی غیرفعال است. نبود سرور یا دادهٔ تازه نباید با سیگنال ساختگی جبران شود.",
-            modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp),
-            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
     }
 }
-
-/** The AI trading companion: automatic, strictly-validated, educational opinions only. */
-@Composable
-internal fun TraderCompanionCard(state: TraderOpinionState, onRefresh: () -> Unit) {
-    SectionCard(
-        title = "همراه تریدر AI",
-        subtitle = "نظر خودکار مدل خودتان روی دادهٔ واقعی همین اپ — تحلیل آموزشی، نه سیگنال ۸/۸ و نه توصیهٔ معامله",
-        trailing = {
-            val opinion = state.opinion
-            Pill(when {
-                state.loading -> "در حال تحلیل…"
-                opinion == null -> "بدون نظر"
-                opinion.bias == "BUY" -> "خرید ${opinion.confidence}٪"
-                opinion.bias == "SELL" -> "فروش ${opinion.confidence}٪"
-                else -> "بی‌طرف"
-            }, when {
-                state.loading -> AurumColors.Cyan
-                opinion?.bias == "BUY" -> AurumColors.Green
-                opinion?.bias == "SELL" -> AurumColors.Red
-                else -> AurumColors.Gold
-            })
-        },
-    ) {
-        val opinion = state.opinion
-        when {
-            !state.configured -> Text(
-                "برای فعال‌سازی، کلید مدل خود را در تنظیمات وارد کنید — نشانی سرویس با یک دکمهٔ آماده (LLMsRelay/Claude/OpenAI) پر می‌شود و فهرست مدل‌های مجازِ کلیدتان هم همان‌جا می‌آید. کلید فقط روی همین گوشی می‌ماند.",
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
-            state.loading && opinion == null -> CircularProgressIndicator(strokeWidth = 2.dp, modifier = Modifier.padding(vertical = 6.dp))
-            opinion != null -> {
-                Text(opinion.summary, style = MaterialTheme.typography.bodySmall,
-                    color = AurumColors.TextPrimary)
-                if (opinion.keyLevels.isNotEmpty()) Text("سطوح کلیدی: " + opinion.keyLevels.joinToString("، "),
-                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan,
-                    modifier = Modifier.padding(top = 4.dp))
-                if (opinion.risks.isNotEmpty()) Text("ریسک‌ها: " + opinion.risks.joinToString("، "),
-                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
-                    modifier = Modifier.padding(top = 2.dp))
-                Text("نقض‌کنندهٔ این نظر: ${opinion.invalidation}",
-                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
-                    modifier = Modifier.padding(top = 2.dp))
-                Text("مدل: ${opinion.model} · ${opinion.symbol} · ${relativeTime(opinion.generatedAt, System.currentTimeMillis())}",
-                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                    modifier = Modifier.padding(top = 4.dp))
-            }
-        }
-        state.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red,
-            modifier = Modifier.padding(top = 4.dp)) }
-        OutlinedButton(onClick = onRefresh, enabled = state.configured && !state.loading,
-            modifier = Modifier.padding(top = 6.dp)) { Text("تحلیل تازه بگیر") }
-        Text("این نظر با تغییر جهت (خرید↔فروش) یک اعلان اطلاع‌رسانی می‌فرستد؛ هرگز سفارش یا ورود کاغذی ایجاد نمی‌کند و جای ۸ شرط فنی یا معیار ریسک خبر را نمی‌گیرد.",
-            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-            modifier = Modifier.padding(top = 4.dp))
-    }
-}
-

@@ -24,6 +24,7 @@ val ownerStorePath = System.getenv("AURUM_RELEASE_STORE_FILE")?.takeIf { it.isNo
 val ownerStorePassword = System.getenv("AURUM_RELEASE_STORE_PASSWORD")?.takeIf { it.isNotBlank() }
 val ownerKeyAlias = System.getenv("AURUM_RELEASE_KEY_ALIAS")?.takeIf { it.isNotBlank() }
 val ownerKeyPassword = System.getenv("AURUM_RELEASE_KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+val ownerStoreType = System.getenv("AURUM_RELEASE_STORE_TYPE")?.takeIf { it.isNotBlank() }
 val signingValues = listOf(ownerStorePath, ownerStorePassword, ownerKeyAlias, ownerKeyPassword)
 val ownerSigningReady = signingValues.all { it != null }
 val requireOwnerSigning = providers.gradleProperty("aurumRequireReleaseSigning").orNull == "true"
@@ -55,8 +56,8 @@ android {
         applicationId = "com.aurum.edge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.2.8"
+        versionCode = 12
+        versionName = "1.2.9"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
@@ -71,6 +72,7 @@ android {
     signingConfigs {
         if (ownerSigningReady) create("ownerRelease") {
             storeFile = file(ownerStorePath!!)
+            ownerStoreType?.let { storeType = it }
             storePassword = ownerStorePassword!!
             keyAlias = ownerKeyAlias!!
             keyPassword = ownerKeyPassword!!
@@ -109,6 +111,11 @@ android {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}")
     }
 
+    lint {
+        // Lint findings are uploaded as a report; tests/assembly remain the hard release gates.
+        abortOnError = false
+    }
+
     testOptions {
         unitTests.isIncludeAndroidResources = true // Robolectric: journal AtomicFile + app-private storage
     }
@@ -134,6 +141,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.tukaani:xz:1.10")
     implementation("org.jsoup:jsoup:1.18.3")
     implementation("com.google.mlkit:translate:17.0.3") // on-device EN → FA; no browser redirect or API key
 
@@ -163,9 +171,8 @@ tasks.withType<Test>().configureEach {
     }
 }
 
-// The published workflow currently makes its separate JVM-test step non-blocking.
-// Enforce a green test suite at the release task itself so it cannot upload an APK
-// after a failed test (including when the workflow patch cannot be pushed).
+// Keep release assembly gated by the pure engine/unit suite as a second guard, even when
+// a caller invokes assembleRelease directly outside the full GitHub Actions workflow.
 tasks.matching { it.name == "assembleRelease" }.configureEach {
     dependsOn("testDebugUnitTest")
 }

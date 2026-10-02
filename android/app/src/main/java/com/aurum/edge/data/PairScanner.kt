@@ -1,6 +1,7 @@
 package com.aurum.edge.data
 
 import android.os.SystemClock
+import com.aurum.edge.core.Candle
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.IctEntryRules
@@ -53,7 +54,7 @@ data class PairScanState(
  *   fill (auto entry stays live-tick only, on the selected symbol).
  * - Every pair is evaluated with the SAME eight technical conditions, enabled optional filters,
  *   the SAME ICT gate and the SAME MTF veto. News is mined only as journal context, never as an entry gate.
- * - Calls are spaced to respect Twelve/Yahoo provider limits (≤7 requests/minute).
+ * - Calls are spaced to respect Twelve/Yahoo/Dukascopy provider limits (≤7 requests/minute).
  */
 class PairScanner(
     private val client: TwelveDataClient,
@@ -63,6 +64,7 @@ class PairScanner(
     private val journal: JournalStore,
     private val opportunities: PaperOpportunityStore,
     private val scope: CoroutineScope,
+    private val dukascopyHistory: DukascopyHistoryClient = DukascopyHistoryClient(),
 ) {
     private val mutex = Mutex()
     private var lastSweepElapsed = 0L
@@ -126,6 +128,23 @@ class PairScanner(
                 update(symbol, "blocked", "پوزیشن کاغذی این نماد باز است؛ فرصت جدید اسکن نمی‌شود")
                 return@forEachIndexed
             }
+            suspend fun publicOrDukascopy(): List<Candle> = try {
+                publicHistory.fetchCandles(symbol, interval,
+                    minimumSize = HistoryPolicy.TARGET_CANDLES,
+                    desiredSize = HistoryPolicy.TARGET_CANDLES).candles
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (publicFailure: Exception) {
+                try {
+                    dukascopyHistory.fetchCandles(symbol, interval,
+                        minimumSize = HistoryPolicy.TARGET_CANDLES,
+                        desiredSize = HistoryPolicy.TARGET_CANDLES).candles
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (deepFailure: Exception) {
+                    throw DataFeedException((deepFailure.message ?: publicFailure.message ?: "خطای دریافت کندل").take(140))
+                }
+            }
             val candles = try {
                 if (config.hasKey) {
                     try {
@@ -133,10 +152,10 @@ class PairScanner(
                     } catch (cancel: CancellationException) {
                         throw cancel
                     } catch (_: Exception) {
-                        publicHistory.fetchCandles(symbol, interval, minimumSize = HistoryPolicy.TARGET_CANDLES).candles
+                        publicOrDukascopy()
                     }
                 } else {
-                    publicHistory.fetchCandles(symbol, interval, minimumSize = HistoryPolicy.TARGET_CANDLES).candles
+                    publicOrDukascopy()
                 }
             } catch (error: Exception) {
                 update(symbol, "error", (error.message ?: "خطای دریافت کندل").take(100))
@@ -164,7 +183,7 @@ class PairScanner(
             val market = MarketState(
                 symbol = symbol, interval = interval, candles = candles, lastPrice = price,
                 feed = FeedStatus(FeedMode.POLLING,
-                    if (config.hasKey) "اسکن دوره‌ای Twelve/public fallback" else "اسکن دوره‌ای تاریخچهٔ عمومی",
+                    if (config.hasKey) "اسکن دوره‌ای Twelve/public/Dukascopy fallback" else "اسکن دوره‌ای تاریخچهٔ عمومی/Dukascopy",
                     System.currentTimeMillis()),
                 signal = combined,
             )

@@ -24,7 +24,7 @@ import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.theme.AurumColors
 
-/** GoCharting-style historical bar replay controls; every output ends at the cursor. */
+/** Native historical bar replay controls; every output ends at the cursor. */
 @Composable
 internal fun ReplayPanel(state: ReplayState, viewModel: AurumViewModel, decisions: List<ReplayDecision>) {
     when (state) {

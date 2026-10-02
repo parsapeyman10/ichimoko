@@ -154,6 +154,9 @@ class JournalStore(context: Context, private val file: File = File(context.files
             "شواهد همان کندلِ رنج/ICT برای ورود سیگنالی کاغذی ثبت نشده است"
         }
         val draft = PaperOrderRules.preview(signal.action, symbol, price, stop, target, balance, riskPercent)
+        val startConditions = technicalConditions.take(8)
+            .filter { it.status == ConfluenceStatus.CONFIRMED }
+            .joinToString("، ") { it.name.substringAfter('·').trim() }
         val trade = PaperTrade(
             id = UUID.randomUUID().toString(),
             symbol = symbol,
@@ -168,9 +171,9 @@ class JournalStore(context: Context, private val file: File = File(context.files
             positionOz = draft.quantity,
             positionUnit = draft.unit,
             note = when {
-                manual -> "ورود دستی کاغذی؛ بدون تأیید موتور/بروکر"
-                automatic -> "ورود خودکار کاغذی با ۸ شرط فنی، گزینه‌های فعال و شواهد رنج/ICT؛ خبر فقط داده‌کاوی ژورنال است؛ بدون سفارش بروکر"
-                else -> "سیگنال کاغذی روی قیمت دریافتی — ${signal.interval.label}"
+                manual -> "ورود دستی کاغذی"
+                automatic -> "شروع خودکار: $startConditions"
+                else -> "شروع: $startConditions"
             },
             mtf = if (manual) null else mtf,
             autoOpened = automatic,

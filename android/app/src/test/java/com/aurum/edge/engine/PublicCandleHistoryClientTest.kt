@@ -24,7 +24,7 @@ class PublicCandleHistoryClientTest {
         return """{"chart":{"result":[{"meta":{"symbol":"EURUSD=X","currency":"$currency"},"timestamp":[$ts],"indicators":{"quote":[{"open":[$open],"high":[$high],"low":[$low],"close":[$close],"volume":[$volume]}]}}],"error":null}}"""
     }
 
-    @Test fun `yahoo public history is identity checked sorted and trimmed to the 3000 bar contract`() {
+    @Test fun `yahoo public history is identity checked sorted and keeps deep cache window`() {
         val bars = client.parseYahooChart(
             yahooJson(),
             expectedSymbol = "EUR/USD",
@@ -32,8 +32,8 @@ class PublicCandleHistoryClientTest {
             interval = Interval.M1,
             now = startMs + (HistoryPolicy.TARGET_CANDLES + 2L) * Interval.M1.millis,
         )
-        assertEquals(HistoryPolicy.MAX_CACHED_CANDLES, bars.size)
-        assertEquals(startMs + Interval.M1.millis, bars.first().time)
+        assertEquals(HistoryPolicy.TARGET_CANDLES + 2, bars.size)
+        assertEquals(startMs, bars.first().time)
         assertEquals(startMs + (HistoryPolicy.TARGET_CANDLES + 1L) * Interval.M1.millis, bars.last().time)
         assertTrue(bars.all { it.closed && it.high >= it.open && it.low <= it.close })
     }
