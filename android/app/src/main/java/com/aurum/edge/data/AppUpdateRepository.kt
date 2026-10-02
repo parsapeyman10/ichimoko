@@ -192,7 +192,7 @@ class AppUpdateRepository(
                 installedSigners.intersect(downloadedSigners).isEmpty()
             ) {
                 throw DataFeedException(
-                    "امضای APK جدید با نسخهٔ نصب‌شده یکی نیست؛ فایل release باید با همان کلید ثابت امضا شود.",
+                    "امضای نسخهٔ نصب‌شده با کانال Release یکی نیست. این نصب از artifact/کلید قدیمی آمده و Android اجازهٔ بروزرسانی مستقیم نمی‌دهد. راه درست: یک‌بار نسخهٔ فعلی را حذف کن و APK رسمی GitHub Release را نصب کن؛ از نصب بعدی، بروزرسانی داخل اپ با همین کلید ثابت انجام می‌شود.",
                 )
             }
             val versionCode = PackageInfoCompat.getLongVersionCode(packageInfo)

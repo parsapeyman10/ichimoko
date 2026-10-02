@@ -321,7 +321,7 @@ jobs:
           ls -la out
 
       - name: Upload APK artifacts
-        if: steps.guard.outputs.ready == 'true'
+        if: steps.guard.outputs.ready == 'true' && github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: aurum-edge-${{ steps.collect.outputs.version_name }}-${{ github.run_number }}

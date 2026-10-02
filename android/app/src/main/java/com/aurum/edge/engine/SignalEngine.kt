@@ -247,8 +247,9 @@ object SignalEngine {
             flatShort -> SignalAction.SELL
             else -> null
         }
-        val direction = crossDirection ?: if (profile.flatSpanB) flatDirection else null
-        val usedFlatEntry = crossDirection == null && direction != null && flatDirection == direction
+        // A profile option is an additional AND-gate, not an alternate entry rule. Direction must
+        // always come from the base Tenkan/Kijun cross so enabled options cannot bypass core rules.
+        val direction = crossDirection
         val long = direction == SignalAction.BUY
         val reasons = mutableListOf<String>()
         val blockers = mutableListOf<String>()
@@ -262,11 +263,10 @@ object SignalEngine {
         fun near(value: Double, target: Double, atrMultiple: Double): Boolean =
             abs(value - target) <= snap.atr * atrMultiple
 
-        var score = if (usedFlatEntry) 30.0 else 20.0
+        var score = 20.0
         if (direction != null) {
             if (narrative) reasons += when {
                 crossDirection != null -> if (long) "کراس تازه صعودی تنکان/کیجون" else "کراس تازه نزولی تنکان/کیجون"
-                usedFlatEntry -> if (long) "سناریوی تختی SpanB52: شکست رو به بالا پس از سکون خط ۵۲" else "سناریوی تختی SpanB52: شکست رو به پایین پس از سکون خط ۵۲"
                 else -> "جهت سیگنال تأیید شد"
             }
         } else if (narrative) {
@@ -286,9 +286,15 @@ object SignalEngine {
             )
         }
 
-        if (profile.flatSpanB && flatDirection == direction && direction != null) {
-            score += 18
-            if (!usedFlatEntry && narrative) reasons += "تأیید افزودهٔ تختی SpanB52 هم‌جهت با سیگنال پایه"
+        var flatSpanBOptionOk = !profile.flatSpanB
+        if (profile.flatSpanB && direction != null) {
+            flatSpanBOptionOk = flatDirection == direction
+            if (flatSpanBOptionOk) {
+                score += 18
+                if (narrative) reasons += "آپشن SpanB52 هم‌جهت با سیگنال پایه تأیید شد"
+            } else if (narrative) {
+                blockers += "آپشن SpanB52 فعال است و باید هم‌جهت با کراس پایه تأیید شود"
+            }
         }
 
         val clearance = 0.08 * snap.atr
@@ -450,7 +456,7 @@ object SignalEngine {
                 "آپشن افزوده · تختی SpanB52",
                 flatOk,
                 "${snap.spanBFlatBars} کندل تخت · B ${snap.spanBFlatValue?.let { fmt(it) } ?: "—"} · شکست ${if (snap.rangeBreakoutUp) "بالا" else if (snap.rangeBreakoutDown) "پایین" else "ندارد"}",
-                status = if (profile.flatSpanB && flatOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
+                status = if (profile.flatSpanB) conditionStatus(flatOk) else ConfluenceStatus.UNKNOWN,
             )
         }
         if (snap.atrShock) {
@@ -482,7 +488,7 @@ object SignalEngine {
             if (momentumOk && volumeOk != false) score += 8
         }
 
-        var additiveFiltersOk = !profile.momentumVolume || (momentumOk && volumeOk != false)
+        var additiveFiltersOk = (!profile.momentumVolume || (momentumOk && volumeOk != false)) && flatSpanBOptionOk
         fun applyGuard(name: String, guard: GuardResult) {
             if (narrative) confluence += ConfluenceItem(name, guard.ok, guard.detail)
             if (direction != null && !guard.ok) {
@@ -516,8 +522,14 @@ object SignalEngine {
         score = score.coerceIn(0.0, 100.0)
         val conf = score
 
-        val actionable = direction != null && conf >= minThreshold && !snap.atrShock && !spreadBlocked && additiveFiltersOk
+        val coreConditionsOk = direction != null && cloudOk && spanOk && chikouOk && emaOk &&
+            vwapOk && rsiOk && momentumOk
+        val actionable = direction != null && coreConditionsOk && conf >= minThreshold &&
+            !snap.atrShock && !spreadBlocked && additiveFiltersOk
         if (!actionable) {
+            if (narrative && direction != null && !coreConditionsOk) {
+                blockers += "همهٔ ۸ شرط پایه باید هم‌زمان برقرار باشند"
+            }
             if (narrative && conf < minThreshold && direction != null) {
                 blockers += "امتیاز همگرایی ${fmt(conf)} کمتر از آستانه ${fmt(minThreshold)}"
             }

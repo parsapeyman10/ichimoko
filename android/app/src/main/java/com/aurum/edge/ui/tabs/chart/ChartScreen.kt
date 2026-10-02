@@ -80,6 +80,17 @@ fun ChartScreen(
             title = "چارت TradingView · ${market.symbol}",
         ) {
             Box(Modifier.fillMaxWidth().height(460.dp)) {
+                // TradingView may be blocked/slow in some networks. Keep the app's own verified
+                // candle chart behind the WebView so the chart area is never an empty black panel.
+                if (market.candles.isNotEmpty()) {
+                    CandleChart(
+                        candles = market.candles.takeLast(800),
+                        interval = market.interval,
+                        signal = market.signal,
+                        modifier = Modifier.fillMaxSize(),
+                        showVolume = false,
+                    )
+                }
                 TradingViewWidget(
                     symbol = market.symbol,
                     interval = market.interval,
@@ -232,45 +243,27 @@ private fun tradingViewHtml(symbol: String, interval: Interval): String {
         Interval.H4 -> "240"
         Interval.D1 -> "D"
     }
-    val setting = SignalEngine.ichimokuSetting(interval)
+    val encodedSymbol = tvSymbol.replace(":", "%3A")
+    val widgetUrl = "https://s.tradingview.com/widgetembed/?frameElementId=tradingview_chart" +
+        "&symbol=$encodedSymbol&interval=$tvInterval&hidesidetoolbar=0&symboledit=1" +
+        "&saveimage=0&toolbarbg=0b0e13&studies=IchimokuCloud%40tv-basicstudies" +
+        "&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1"
     return """
         <!doctype html>
         <html>
         <head>
           <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
           <style>
-            html, body, .tradingview-widget-container, #tradingview_chart { margin:0; padding:0; width:100%; height:100%; background:#0b0e13; overflow:hidden; }
+            html, body, #tradingview_chart, iframe {
+              margin:0; padding:0; width:100%; height:100%; overflow:hidden;
+              background:transparent; border:0;
+            }
           </style>
         </head>
         <body>
-          <div class="tradingview-widget-container">
-            <div id="tradingview_chart"></div>
+          <div id="tradingview_chart">
+            <iframe title="TradingView" src="$widgetUrl" allowtransparency="true" scrolling="no"></iframe>
           </div>
-          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-          <script type="text/javascript">
-            new TradingView.widget({
-              "autosize": true,
-              "symbol": "$tvSymbol",
-              "interval": "$tvInterval",
-              "timezone": "Etc/UTC",
-              "theme": "dark",
-              "style": "1",
-              "locale": "en",
-              "toolbar_bg": "#0b0e13",
-              "enable_publishing": false,
-              "hide_top_toolbar": false,
-              "hide_side_toolbar": false,
-              "allow_symbol_change": true,
-              "studies": ["IchimokuCloud@tv-basicstudies"],
-              "studies_overrides": {
-                "ichimoku cloud.conversion line periods": ${setting.tenkan},
-                "ichimoku cloud.base line periods": ${setting.kijun},
-                "ichimoku cloud.lagging span": ${setting.kijun},
-                "ichimoku cloud.displacement": ${setting.kijun}
-              },
-              "container_id": "tradingview_chart"
-            });
-          </script>
         </body>
         </html>
     """.trimIndent()
