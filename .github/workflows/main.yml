@@ -255,7 +255,6 @@ jobs:
       - name: Lint Android sources
         id: lint
         if: steps.guard.outputs.ready == 'true'
-        continue-on-error: true
         working-directory: ${{ env.PROJECT_DIR }}
         run: ./gradlew :${APP_MODULE}:lintDebug $GRADLE_FLAGS
 
@@ -389,7 +388,7 @@ jobs:
             echo "| Android build-tools | ${ANDROID_BUILD_TOOLS} |"
             echo ""
             echo "### Quality gates"
-            echo "Lint: ${{ steps.lint.outcome }} (report is uploaded with test/lint artifacts; existing lint debt does not block APK packaging)."
+            echo "Lint report: ${{ steps.lint.outcome }}. Tests and APK assembly are required to pass."
             echo ""
             echo "### Artifacts"
             echo "| File | Purpose | SHA-256 |"

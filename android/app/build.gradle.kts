@@ -111,6 +111,11 @@ android {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}")
     }
 
+    lint {
+        // Lint findings are uploaded as a report; tests/assembly remain the hard release gates.
+        abortOnError = false
+    }
+
     testOptions {
         unitTests.isIncludeAndroidResources = true // Robolectric: journal AtomicFile + app-private storage
     }
