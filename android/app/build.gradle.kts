@@ -24,6 +24,7 @@ val ownerStorePath = System.getenv("AURUM_RELEASE_STORE_FILE")?.takeIf { it.isNo
 val ownerStorePassword = System.getenv("AURUM_RELEASE_STORE_PASSWORD")?.takeIf { it.isNotBlank() }
 val ownerKeyAlias = System.getenv("AURUM_RELEASE_KEY_ALIAS")?.takeIf { it.isNotBlank() }
 val ownerKeyPassword = System.getenv("AURUM_RELEASE_KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+val ownerStoreType = System.getenv("AURUM_RELEASE_STORE_TYPE")?.takeIf { it.isNotBlank() }
 val signingValues = listOf(ownerStorePath, ownerStorePassword, ownerKeyAlias, ownerKeyPassword)
 val ownerSigningReady = signingValues.all { it != null }
 val requireOwnerSigning = providers.gradleProperty("aurumRequireReleaseSigning").orNull == "true"
@@ -71,6 +72,7 @@ android {
     signingConfigs {
         if (ownerSigningReady) create("ownerRelease") {
             storeFile = file(ownerStorePath!!)
+            ownerStoreType?.let { storeType = it }
             storePassword = ownerStorePassword!!
             keyAlias = ownerKeyAlias!!
             keyPassword = ownerKeyPassword!!

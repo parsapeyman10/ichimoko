@@ -69,6 +69,8 @@ jobs:
       AURUM_RELEASE_STORE_PASSWORD: ${{ secrets.AURUM_RELEASE_STORE_PASSWORD }}
       AURUM_RELEASE_KEY_ALIAS: ${{ secrets.AURUM_RELEASE_KEY_ALIAS }}
       AURUM_RELEASE_KEY_PASSWORD: ${{ secrets.AURUM_RELEASE_KEY_PASSWORD }}
+      AURUM_RELEASE_STORE_TYPE: ${{ secrets.AURUM_RELEASE_STORE_TYPE }}
+      CI_SIGNING_CACHE_DIR: ${{ runner.temp }}/aurum-ci-signing
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -148,7 +150,16 @@ jobs:
           PROJECT_VERSION_NAME=$(grep -m1 'versionName = ' "$BUILD_FILE" | sed -E 's/.*"([^"]+)".*/\1/')
           PROJECT_VERSION_CODE=$(grep -m1 'versionCode = ' "$BUILD_FILE" | sed -E 's/[^0-9]*([0-9]+).*/\1/')
           VERSION_NAME="${INPUT_VERSION_NAME:-$PROJECT_VERSION_NAME}"
-          VERSION_CODE="${INPUT_VERSION_CODE:-$PROJECT_VERSION_CODE}"
+          if [[ -n "$INPUT_VERSION_CODE" ]]; then
+            VERSION_CODE="$INPUT_VERSION_CODE"
+          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            VERSION_CODE="$PROJECT_VERSION_CODE"
+          else
+            VERSION_CODE="$PROJECT_VERSION_CODE"
+            if [[ "${GITHUB_RUN_NUMBER}" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_NUMBER" -gt "$VERSION_CODE" ]]; then
+              VERSION_CODE="$GITHUB_RUN_NUMBER"
+            fi
+          fi
           if [[ ! "$VERSION_NAME" =~ ^[0-9]+(\.[0-9]+){1,3}([-+][0-9A-Za-z.-]+)?$ ]]; then
             echo "::error title=Invalid versionName::Use a semantic version such as 1.2.10"
             exit 1
@@ -194,15 +205,47 @@ jobs:
           if [[ ! -x "$SDKMANAGER" ]]; then SDKMANAGER="$(command -v sdkmanager)"; fi
           "$SDKMANAGER" --list_installed | sed -n '1,120p'
 
-      - name: Decode optional release signing keystore
-        if: steps.guard.outputs.ready == 'true' && env.AURUM_RELEASE_KEYSTORE_BASE64 != ''
+      - name: Restore CI updater signing key
+        if: steps.guard.outputs.ready == 'true' && env.AURUM_RELEASE_KEYSTORE_BASE64 == ''
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CI_SIGNING_CACHE_DIR }}
+          key: aurum-ci-updater-signing-v1
+
+      - name: Prepare updater signing key
+        if: steps.guard.outputs.ready == 'true'
         run: |
           set -euo pipefail
-          printf '%s' "$AURUM_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/aurum-release.jks"
-          echo "AURUM_RELEASE_STORE_FILE=$RUNNER_TEMP/aurum-release.jks" >> "$GITHUB_ENV"
-          echo "AURUM_RELEASE_STORE_PASSWORD=$AURUM_RELEASE_STORE_PASSWORD" >> "$GITHUB_ENV"
-          echo "AURUM_RELEASE_KEY_ALIAS=$AURUM_RELEASE_KEY_ALIAS" >> "$GITHUB_ENV"
-          echo "AURUM_RELEASE_KEY_PASSWORD=$AURUM_RELEASE_KEY_PASSWORD" >> "$GITHUB_ENV"
+          if [[ -n "$AURUM_RELEASE_KEYSTORE_BASE64" ]]; then
+            printf '%s' "$AURUM_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/aurum-release-keystore"
+            echo "AURUM_RELEASE_STORE_FILE=$RUNNER_TEMP/aurum-release-keystore" >> "$GITHUB_ENV"
+            echo "AURUM_RELEASE_STORE_PASSWORD=$AURUM_RELEASE_STORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "AURUM_RELEASE_KEY_ALIAS=$AURUM_RELEASE_KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "AURUM_RELEASE_KEY_PASSWORD=$AURUM_RELEASE_KEY_PASSWORD" >> "$GITHUB_ENV"
+            echo "AURUM_RELEASE_STORE_TYPE=${AURUM_RELEASE_STORE_TYPE:-}" >> "$GITHUB_ENV"
+            echo "AURUM_SIGNING_MODE=repository secret" >> "$GITHUB_ENV"
+          else
+            mkdir -p "$CI_SIGNING_CACHE_DIR"
+            STORE_FILE="$CI_SIGNING_CACHE_DIR/aurum-ci-updater.p12"
+            if [[ ! -f "$STORE_FILE" ]]; then
+              keytool -genkeypair \
+                -storetype PKCS12 \
+                -keystore "$STORE_FILE" \
+                -storepass android \
+                -keypass android \
+                -alias aurumciupdater \
+                -keyalg RSA \
+                -keysize 4096 \
+                -validity 3650 \
+                -dname "CN=Aurum Edge CI Updater,O=parsapeyman10,C=US"
+            fi
+            echo "AURUM_RELEASE_STORE_FILE=$STORE_FILE" >> "$GITHUB_ENV"
+            echo "AURUM_RELEASE_STORE_PASSWORD=android" >> "$GITHUB_ENV"
+            echo "AURUM_RELEASE_KEY_ALIAS=aurumciupdater" >> "$GITHUB_ENV"
+            echo "AURUM_RELEASE_KEY_PASSWORD=android" >> "$GITHUB_ENV"
+            echo "AURUM_RELEASE_STORE_TYPE=pkcs12" >> "$GITHUB_ENV"
+            echo "AURUM_SIGNING_MODE=GitHub Actions cache" >> "$GITHUB_ENV"
+          fi
 
       - name: Resolve Android dependencies
         if: steps.guard.outputs.ready == 'true'
@@ -303,16 +346,16 @@ jobs:
             android/app/build/test-results/testDebugUnitTest/**
 
       - name: Require stable signing for public updater release
-        if: steps.guard.outputs.ready == 'true' && (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))
+        if: steps.guard.outputs.ready == 'true' && (github.event_name == 'push' || github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))
         run: |
           set -euo pipefail
-          if [[ -z "$AURUM_RELEASE_KEYSTORE_BASE64" || -z "$AURUM_RELEASE_STORE_PASSWORD" || -z "$AURUM_RELEASE_KEY_ALIAS" || -z "$AURUM_RELEASE_KEY_PASSWORD" ]]; then
-            echo "::error title=Stable signing required::Set AURUM_RELEASE_KEYSTORE_BASE64, AURUM_RELEASE_STORE_PASSWORD, AURUM_RELEASE_KEY_ALIAS and AURUM_RELEASE_KEY_PASSWORD before publishing an updater release."
+          if [[ -z "${AURUM_RELEASE_STORE_FILE:-}" || ! -f "${AURUM_RELEASE_STORE_FILE:-}" || -z "${AURUM_RELEASE_STORE_PASSWORD:-}" || -z "${AURUM_RELEASE_KEY_ALIAS:-}" || -z "${AURUM_RELEASE_KEY_PASSWORD:-}" ]]; then
+            echo "::error title=Stable signing required::No updater signing key was prepared."
             exit 1
           fi
 
       - name: Publish GitHub Release for in-app updater
-        if: steps.guard.outputs.ready == 'true' && (github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))
+        if: steps.guard.outputs.ready == 'true' && (github.event_name == 'push' || github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.collect.outputs.tag }}
@@ -322,7 +365,7 @@ jobs:
           SIZE_BYTES: ${{ steps.collect.outputs.size_bytes }}
         run: |
           set -euo pipefail
-          NOTES=$'Aurum Edge Android APK.\n\nVersion: '"$VERSION_NAME"$'\nSHA-256: '"$SHA256"$'\nSize bytes: '"$SIZE_BYTES"$'\n\nThe in-app updater accepts only this release-asset route and then verifies package name, signing certificate, versionCode, size and SHA-256.'
+          NOTES=$'Aurum Edge Android APK.\n\nVersion: '"$VERSION_NAME"$'\nVersion code: ${{ steps.collect.outputs.version_code }}\nSHA-256: '"$SHA256"$'\nSize bytes: '"$SIZE_BYTES"$'\nSigning: '"${AURUM_SIGNING_MODE:-prepared updater key}"$'\n\nThe in-app updater accepts this public release asset, verifies package name, signing certificate, versionCode, size and SHA-256, then opens Android Installer.'
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "$TAG" --notes "$NOTES"
           else
@@ -355,10 +398,9 @@ jobs:
             echo "| \`${{ steps.collect.outputs.debug_apk_name }}\` | Debug APK with separate applicationId | \`${{ steps.collect.outputs.debug_sha256 }}\` |"
             echo "| \`${{ steps.collect.outputs.apk_name }}.json\` | Updater sidecar metadata | — |"
             echo ""
-            if [[ -n "$AURUM_RELEASE_KEYSTORE_BASE64" ]]; then
-              echo "Release signing: stable repository keystore secret was used."
-            else
-              echo "Release signing: preview/debug signing only. For in-app updates on installed releases, configure AURUM_RELEASE_KEYSTORE_BASE64, AURUM_RELEASE_STORE_PASSWORD, AURUM_RELEASE_KEY_ALIAS and AURUM_RELEASE_KEY_PASSWORD."
+            echo "Release signing: ${AURUM_SIGNING_MODE:-prepared updater key}."
+            if [[ "${AURUM_SIGNING_MODE:-}" == "GitHub Actions cache" ]]; then
+              echo "The first install from this channel establishes the updater signature; later workflow builds reuse the cached key."
             fi
             echo ""
             echo "No market or AI API keys are embedded in the APK. Users enter optional keys only on their own device."
