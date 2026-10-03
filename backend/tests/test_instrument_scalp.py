@@ -170,13 +170,78 @@ def test_pip_and_tick_conventions_per_quote_currency():
     assert inst.decimals_from_tick(1.0) == 0
 
 
-def test_scalp_policy_is_forex_only():
-    """User rule: the scalp panel trades currency pairs; gold and crypto are view-only."""
+def test_scalp_policy_covers_forex_and_liquid_crypto():
+    """Scalping is enabled for currency pairs AND dollar-quoted spot crypto.
+
+    It stays off where the method cannot work: metals (gap-prone), exotics (spread),
+    stable/stable pairs (no range), coin-quoted pairs (second price exposure) and
+    leveraged tokens (they do not track spot linearly).
+    """
     assert inst.get_spec("EUR/USD").is_scalpable()
     assert inst.get_spec("GBP/JPY").is_scalpable()
-    assert not inst.get_spec("XAU/USD").is_scalpable()          # metal
-    assert not inst.get_spec("USD/TRY").is_scalpable()          # exotic, spread too wide
-    assert not inst.get_spec("BTCUSDT", crypto_tick=0.01).is_scalpable()
+    assert inst.get_spec("BTCUSDT", crypto_tick=0.01).is_scalpable()
+    assert inst.get_spec("SOLUSDC", crypto_tick=0.01).is_scalpable()
+
+    assert not inst.get_spec("XAU/USD").is_scalpable()                  # metal
+    assert not inst.get_spec("USD/TRY").is_scalpable()                  # exotic spread
+    assert not inst.get_spec("USDCUSDT", crypto_tick=0.0001).is_scalpable()  # stable/stable
+    assert not inst.get_spec("ETHBTC", crypto_tick=0.00001).is_scalpable()   # coin-quoted
+    assert not inst.get_spec("BTCUPUSDT", crypto_tick=0.001).is_scalpable()  # leveraged token
+
+
+def test_crypto_costs_are_scale_free_and_include_exchange_fees():
+    """A pip-denominated spread is meaningless across BTC ($64k) and SHIB ($0.000009)."""
+    btc = inst.get_spec("BTCUSDT", crypto_tick=0.01)
+    shib = inst.get_spec("SHIBUSDT", crypto_tick=0.00000001)
+    assert btc.cost_unit == "bp" and shib.cost_unit == "bp"
+    assert inst.get_spec("EUR/USD").cost_unit == "pip"
+
+    # Same model → same cost in basis points, wildly different cost in price units.
+    btc_cost = btc.round_trip_cost(64_000.0)
+    shib_cost = shib.round_trip_cost(0.000009)
+    assert btc.to_cost_units(btc_cost, 64_000.0) == pytest.approx(24.0)   # 4 bps book + 20 bps fees
+    assert shib.to_cost_units(shib_cost, 0.000009) == pytest.approx(36.0)  # 16 bps book + 20 bps fees
+    assert btc_cost > shib_cost * 1e6
+
+    # The exchange fee must actually dominate the book on a major.
+    assert btc.model.taker_fee_bps == 10.0
+    assert btc.default_spread(64_000.0) * 2 < 64_000.0 * (btc.model.taker_fee_bps / 10_000) * 2
+
+    # FX carries no separate commission: its cost is the spread, unchanged.
+    fx = inst.get_spec("EUR/USD")
+    assert fx.model.taker_fee_bps == 0.0
+    assert fx.round_trip_cost(1.0834) == pytest.approx(fx.default_spread() * 2)
+
+
+def test_crypto_scalp_is_rejected_when_the_target_cannot_pay_the_fees():
+    """A 20 bps round trip makes many low-volatility crypto crosses unviable by construction."""
+    spec = inst.get_spec("BTCUSDT", crypto_tick=0.01)
+    # ~0.085% ATR per bar: volatile enough to clear the liquidation-distance gate, but a
+    # 1.6R target is still only ~34 bps against a 24 bps round trip (needs >=36).
+    candles = make_series("BTCUSDT", 64_000.0, 40.0)
+    context = StrategyContext(
+        spread=spec.default_spread(64_000.0),
+        typical_spread=spec.default_spread(64_000.0),
+        higher_timeframe_bias=Direction.BUY,
+    )
+    signal = evaluate_scalp(candles, context, spec)
+    assert signal.action is Direction.NO_TRADE
+    assert any("هزینهٔ رفت‌وبرگشت" in b for b in signal.blockers), signal.blockers
+
+
+def test_crypto_produces_a_full_scalp_plan_when_volatility_pays_for_the_fees():
+    spec = inst.get_spec("BTCUSDT", crypto_tick=0.01)
+    candles = make_series("BTCUSDT", 64_000.0, 60.0)
+    context = StrategyContext(
+        spread=spec.default_spread(64_000.0),
+        typical_spread=spec.default_spread(64_000.0),
+        higher_timeframe_bias=Direction.BUY,
+    )
+    signal = evaluate_scalp(candles, context, spec)
+    assert signal.action is Direction.BUY, signal.blockers
+    assert signal.stop_loss < signal.entry < signal.take_profit
+    reward = signal.take_profit - signal.entry
+    assert reward >= spec.round_trip_cost(signal.entry) * 1.5
 
 
 def test_each_pair_gets_its_own_model():

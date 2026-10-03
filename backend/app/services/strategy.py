@@ -387,7 +387,7 @@ def evaluate_scalp(
     raw_distance = entry - (structure - 0.15 * current_atr) if long else (structure + 0.15 * current_atr) - entry
     stop_distance = _clamp(raw_distance, model.stop_atr_low * current_atr, model.stop_atr_high * current_atr)
     # Never risk less than the instrument's own spread+tick, or the stop sits inside noise.
-    stop_distance = max(stop_distance, spec.default_spread() + spec.tick_size)
+    stop_distance = max(stop_distance, spec.default_spread(entry) + spec.tick_size)
     # Dynamic RR with scale-out — reward multiples come from the symbol's own model.
     # Majors can let a runner go to 2.3R; an exotic with a 2 pip spread cannot, and crypto
     # alts need an earlier take. Previously every instrument inherited gold's table.
@@ -407,17 +407,24 @@ def evaluate_scalp(
         target_multiple *= 1.10
     target_multiple = round(target_multiple, 2)
 
-    # A scalp only makes sense if the target clears the round-trip cost with margin.
-    cost = spec.default_spread() * 2
-    if stop_distance * target_multiple < cost * 1.5:
+    # A scalp only makes sense if the target clears the full round-trip cost with margin.
+    # For FX that cost is the spread. For crypto it is spread + 2x the exchange taker fee,
+    # which on Binance spot is ~20 bps and dwarfs the book — plenty of otherwise-valid
+    # 1m crypto crosses simply cannot pay for themselves, and are rejected here.
+    cost = spec.round_trip_cost(entry)
+    reward = stop_distance * target_multiple
+    if reward < cost * 1.5:
+        unit = "پیپ" if spec.cost_unit == "pip" else "بیپ"
         return TradeSignal(
             action=Direction.NO_TRADE, confidence=score, reasons=reasons,
             blockers=blockers + [
-                f"Hard gate: هدف {spec.to_pips(stop_distance * target_multiple):.1f} پیپ کمتر از ۱٫۵ برابر "
-                f"هزینهٔ رفت‌وبرگشت ({spec.to_pips(cost):.1f} پیپ) است — اسکلپ توجیه ندارد"
+                f"Hard gate: هدف {spec.to_cost_units(reward, entry):.1f} {unit} کمتر از ۱٫۵ برابر "
+                f"هزینهٔ رفت‌وبرگشت ({spec.to_cost_units(cost, entry):.1f} {unit}"
+                + (f"، شامل کارمزد {spec.model.taker_fee_bps:.0f} بیپ هر طرف" if spec.model.taker_fee_bps else "")
+                + ") است — اسکلپ توجیه ندارد"
             ],
             confluence=confluence,
-            exit_hint="No entry — spread/target ratio unviable / نسبت هدف به اسپرد ناکافی",
+            exit_hint="No entry — cost/target ratio unviable / نسبت هدف به هزینه ناکافی",
         )
     stop = entry - stop_distance if long else entry + stop_distance
     target = entry + stop_distance * target_multiple if long else entry - stop_distance * target_multiple

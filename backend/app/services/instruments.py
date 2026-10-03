@@ -67,7 +67,18 @@ class SymbolModel:
     # Scalping is only *offered* where the cost structure makes it survivable.
     scalp_enabled: bool = True
     # Round-trip cost in pips used to sanity-check that a target clears the spread.
+    # FX quotes a spread in pips because the pip is a fixed fraction of the price. Crypto
+    # cannot: one "tick" is $0.01 on BTC and $0.00000001 on SHIB, so a pip-denominated
+    # spread is meaningless across the venue. Crypto therefore declares its costs in basis
+    # points of price (scale-free), via `typical_spread_bps` below.
     typical_spread_pips: float = 1.0
+    # When set, costs are measured in bps of price instead of pips (crypto).
+    typical_spread_bps: float | None = None
+    # Exchange commission per side, in bps. On Binance spot this is ~10 bps — roughly a
+    # thousand times the BTCUSDT spread, so ignoring it would make every crypto scalp look
+    # profitable on paper and lose money in practice. FX pairs price their cost in the
+    # spread itself, so this stays 0 there.
+    taker_fee_bps: float = 0.0
     # Tick volume is unreliable/absent on some feeds; skip the volume gate when False.
     volume_reliable: bool = True
     # Notional leverage that is *normal* for this instrument at a sane risk-%.
@@ -134,8 +145,43 @@ class InstrumentSpec:
             return False
         return (atr_value / price) < 0.012  # <1.2% of price per bar
 
-    def default_spread(self) -> float:
+    @property
+    def cost_unit(self) -> str:
+        """'pip' for FX/metals, 'bp' (basis point) for crypto."""
+        return "bp" if self.model.typical_spread_bps is not None else "pip"
+
+    def to_cost_units(self, price_distance: float, price: float | None = None) -> float:
+        """Express a price distance in the unit this instrument quotes its costs in."""
+        if self.model.typical_spread_bps is not None:
+            if not price or price <= 0:
+                return 0.0
+            return price_distance / price * 10_000
+        return self.to_pips(price_distance)
+
+    def default_spread(self, price: float | None = None) -> float:
+        """Typical half-turn spread in price units.
+
+        Crypto needs the current price to convert its bps-denominated spread; FX does not.
+        """
+        if self.model.typical_spread_bps is not None:
+            if not price or price <= 0:
+                # No price to scale against: fall back to one tick rather than guessing.
+                return self.tick_size
+            return price * (self.model.typical_spread_bps / 10_000)
         return self.from_pips(self.model.typical_spread_pips)
+
+    def round_trip_cost(self, price: float | None = None) -> float:
+        """Full in-and-out cost: spread both ways plus commission both ways.
+
+        This is what a scalp target has to clear to be worth taking. For Binance spot the
+        fee term dominates: a 1-minute BTC scalp often cannot cover 20 bps of commission,
+        and the engine should say so instead of issuing the signal.
+        """
+        spread = self.default_spread(price) * 2
+        fee = 0.0
+        if self.model.taker_fee_bps and price and price > 0:
+            fee = price * (self.model.taker_fee_bps / 10_000) * 2
+        return spread + fee
 
     def is_scalpable(self) -> bool:
         return self.model.scalp_enabled
@@ -205,25 +251,28 @@ SILVER_MODEL = replace(GOLD_MODEL, min_adx=20.0, typical_spread_pips=3.0)
 
 # Crypto trades 24/7 — no killzone, no weekend gap. Volume is a real exchange tape.
 CRYPTO_MAJOR_MODEL = SymbolModel(
-    thresholds={"1m": 73.0, "3m": 74.0, "5m": 75.0, "15m": 76.0},
+    thresholds={"1m": 75.0, "3m": 75.0, "5m": 74.0, "15m": 75.0},
     killzones_utc=(),
     weekend_gap_risk=False,
     min_adx=19.0,
     stop_atr_low=1.00, stop_atr_high=1.60,
-    rr_base=1.60, rr_strong=1.90, rr_runner=2.50, rr_chop=1.30,
-    scalp_enabled=False,   # scalp panel is FX-only by request; crypto = data + signals
+    rr_base=1.60, rr_strong=1.90, rr_runner=2.50, rr_chop=1.35,
+    scalp_enabled=True,
     typical_spread_pips=1.0,
+    typical_spread_bps=2.0,    # BTC/ETH books are ~1-2 bps wide
+    taker_fee_bps=10.0,        # Binance spot standard taker fee
     volume_reliable=True,
     max_leverage=10.0,
 )
 
 CRYPTO_ALT_MODEL = replace(
     CRYPTO_MAJOR_MODEL,
-    thresholds={"1m": 76.0, "3m": 77.0, "5m": 78.0, "15m": 78.0},
+    thresholds={"1m": 78.0, "3m": 78.0, "5m": 77.0, "15m": 77.0},
     min_adx=22.0,
     stop_atr_low=1.10, stop_atr_high=1.80,
-    rr_base=1.50, rr_strong=1.80, rr_runner=2.20, rr_chop=1.25,
-    typical_spread_pips=3.0,
+    rr_base=1.70, rr_strong=2.00, rr_runner=2.40, rr_chop=1.40,
+    typical_spread_bps=8.0,    # thinner books, wider quotes
+    taker_fee_bps=10.0,
     max_leverage=8.0,
 )
 
@@ -256,6 +305,26 @@ METALS = ("XAU/USD", "XAG/USD", "XPT/USD", "XPD/USD")
 _TWO_DECIMAL_QUOTES = {"JPY", "KRW", "HUF", "CLP", "IDR", "VND"}
 
 _CRYPTO_MAJOR_BASES = {"BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "AVAX", "LINK", "DOT", "TRX", "LTC", "BCH", "MATIC", "TON"}
+
+# Dollar-pegged assets. A stable/stable pair barely moves, so an ATR-based scalp on it is
+# noise; and a coin quoted in BTC/ETH carries a second, uncontrolled price exposure.
+_CRYPTO_STABLES = {"USDT", "USDC", "FDUSD", "TUSD", "BUSD", "DAI", "USDP", "PYUSD"}
+# Quote assets liquid and dollar-denominated enough to scalp against.
+_SCALPABLE_CRYPTO_QUOTES = {"USDT", "FDUSD", "USDC"}
+# Binance leveraged-token naming. These do not track spot linearly and must never be scalped.
+_LEVERAGED_SUFFIXES = ("UPUSDT", "DOWNUSDT", "BULLUSDT", "BEARUSDT")
+
+
+def crypto_is_scalpable(base: str, quote: str, symbol: str) -> bool:
+    """Only dollar-quoted, non-stable, non-leveraged spot pairs get scalp entries."""
+    base, quote, symbol = base.upper(), quote.upper(), symbol.upper()
+    if quote not in _SCALPABLE_CRYPTO_QUOTES:
+        return False
+    if base in _CRYPTO_STABLES:          # USDC/USDT and friends: no real range
+        return False
+    if symbol.endswith(_LEVERAGED_SUFFIXES):
+        return False
+    return True
 
 
 def _fx_quote_precision(quote: str) -> tuple[int, float, float]:
@@ -325,6 +394,7 @@ def crypto_spec(
     """Build a spec for a Binance SPOT symbol from its real exchange filters."""
     precision = decimals_from_tick(tick_size)
     model = CRYPTO_MAJOR_MODEL if base.upper() in _CRYPTO_MAJOR_BASES else CRYPTO_ALT_MODEL
+    model = replace(model, scalp_enabled=crypto_is_scalpable(base, quote, symbol))
     return InstrumentSpec(
         symbol=symbol.upper(),
         kind=CRYPTO,
@@ -443,6 +513,9 @@ def spec_to_dict(spec: InstrumentSpec) -> dict:
             "rr_runner": spec.model.rr_runner,
             "rr_chop": spec.model.rr_chop,
             "typical_spread_pips": spec.model.typical_spread_pips,
+            "typical_spread_bps": spec.model.typical_spread_bps,
+            "taker_fee_bps": spec.model.taker_fee_bps,
+            "cost_unit": spec.cost_unit,
             "max_leverage": spec.model.max_leverage,
             "volume_reliable": spec.model.volume_reliable,
         },

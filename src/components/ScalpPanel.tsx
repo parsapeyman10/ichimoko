@@ -8,11 +8,14 @@ import { apiGet } from '../lib/api';
 /**
  * Multi-symbol scalping desk.
  *
- * Scalp entries are deliberately restricted to currency pairs (`scalp_enabled` on the
- * backend spec). Metals and crypto are still browsable and still produce signals, but the
- * panel marks them view-only instead of pretending a 2.8-pip gold spread or a 24/7 alt
- * is a scalp. The backend is the single source of that rule — this component only renders
- * what `spec.scalp_enabled` says.
+ * Scalping runs on currency pairs AND dollar-quoted spot crypto, using the same engine.
+ * The two differ in how cost is measured: FX quotes a spread in pips, while crypto costs
+ * are basis points of price plus the exchange taker fee (~20 bps round trip on Binance),
+ * which is what actually decides whether a crypto scalp can pay for itself. The backend
+ * reports `cost_unit` per symbol and this panel just renders it.
+ *
+ * Metals, exotics, stable/stable pairs, coin-quoted pairs and leveraged tokens stay
+ * view-only. `spec.scalp_enabled` is the single source of that rule.
  *
  * Nothing here invents a price. Every failure path shows the backend's explicit error.
  */
@@ -37,6 +40,9 @@ type Instrument = {
     rr_base: number;
     rr_runner: number;
     typical_spread_pips: number;
+    typical_spread_bps: number | null;
+    taker_fee_bps: number;
+    cost_unit: 'pip' | 'bp';
     max_leverage: number;
   };
 };
@@ -66,6 +72,8 @@ type Signal = {
 
 type ExitPlan = {
   has_plan: boolean;
+  cost_unit?: 'pip' | 'bp';
+  round_trip_cost_units?: number;
   risk_pips?: number;
   reward_pips?: number;
   breakeven_trigger?: number;
@@ -101,8 +109,11 @@ type ScalpResult = {
   last_candle?: { timestamp: string; close: number; age_seconds: number };
   quote?: { bid: number; ask: number; spread_pips: number; source: string } | null;
   context?: {
+    cost_unit: 'pip' | 'bp';
     spread_pips: number;
     typical_spread_pips: number;
+    taker_fee_bps: number;
+    round_trip_cost_units: number;
     htf_bias: string;
     volatility_regime: string;
     weekend_gap_risk: boolean;
@@ -127,9 +138,15 @@ type Diagnosis = {
 };
 
 const TIMEFRAMES = ['1m', '3m', '5m', '15m'] as const;
-const DEFAULT_WATCHLIST = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'EUR/JPY'];
+const DEFAULT_WATCHLIST = [
+  'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD',
+  'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT',
+];
 
 const KIND_LABEL: Record<string, string> = { forex: 'جفت‌ارز', metal: 'فلز', crypto: 'کریپتو' };
+
+/** FX is quoted in pips; crypto costs are basis points of price. Never mix the two. */
+const unitLabel = (unit?: string) => (unit === 'bp' ? 'بیپ' : 'پیپ');
 
 function fmt(value: number | null | undefined, precision = 5): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—';
@@ -145,7 +162,7 @@ function ActionBadge({ action }: { action: string }) {
 export default function ScalpPanel() {
   const [universe, setUniverse] = useState<UniverseResponse | null>(null);
   const [universeError, setUniverseError] = useState<string | null>(null);
-  const [kind, setKind] = useState<'all' | 'forex' | 'crypto' | 'metal'>('forex');
+  const [kind, setKind] = useState<'all' | 'forex' | 'crypto' | 'metal'>('all');
   const [query, setQuery] = useState('');
   const [watchlist, setWatchlist] = useState<string[]>(DEFAULT_WATCHLIST);
   const [timeframe, setTimeframe] = useState<(typeof TIMEFRAMES)[number]>('5m');
@@ -235,7 +252,13 @@ export default function ScalpPanel() {
     [scan, selected],
   );
 
-  const scalpableCount = watchlist.filter((s) => s.includes('/')).length;
+  // Which of the picked symbols the backend actually allows scalp entries on.
+  const scalpableLookup = useMemo(() => {
+    const map = new Map<string, boolean>();
+    for (const item of universe?.instruments ?? []) map.set(item.symbol, item.scalp_enabled);
+    return map;
+  }, [universe]);
+  const scalpableCount = watchlist.filter((s) => scalpableLookup.get(s) !== false).length;
 
   return (
     <section className="panel scalp-panel" id="scalp">
@@ -243,8 +266,9 @@ export default function ScalpPanel() {
         <div>
           <h3><Crosshair size={15} /> میز اسکلپ چندنمادی</h3>
           <p>
-            ورود و خروج اسکلپی فقط روی جفت‌ارزها فعال است. هر نماد با مدل مخصوص خودش
-            امتیازدهی می‌شود — آستانه، کیلزون، حداقل ADX، نسبت ریوارد و دقت قیمت برای هر جفت متفاوت است.
+            همان موتور اسکلپ، هم روی جفت‌ارزها و هم روی کریپتوی دلاری بایننس. هر نماد با مدل
+            مخصوص خودش امتیازدهی می‌شود — آستانه، کیلزون، حداقل ADX، نسبت ریوارد و دقت قیمت متفاوت است.
+            هزینهٔ فارکس با پیپ سنجیده می‌شود و هزینهٔ کریپتو با بیپ به‌علاوهٔ کارمزد صرافی.
           </p>
         </div>
         <button type="button" className="scalp-run" onClick={runScan} disabled={scanning}>
@@ -374,7 +398,9 @@ export default function ScalpPanel() {
                       <td className="num red">{fmt(row.signal?.stop_loss, precision)}</td>
                       <td className="num green">{fmt(row.signal?.take_profit, precision)}</td>
                       <td className="num">{row.signal?.risk_reward?.toFixed(2) ?? '—'}</td>
-                      <td className="num">{row.context ? `${row.context.spread_pips} p` : '—'}</td>
+                      <td className="num">
+                        {row.context ? `${row.context.spread_pips} ${unitLabel(row.context.cost_unit)}` : '—'}
+                      </td>
                       <td>
                         <button
                           type="button"
@@ -406,7 +432,21 @@ export default function ScalpPanel() {
                 <div className="scalp-model">
                   <span>آستانهٔ {detail.timeframe}: <b>{detail.spec.model.thresholds[detail.timeframe]}</b></span>
                   <span>حداقل ADX: <b>{detail.spec.model.min_adx}</b></span>
-                  <span>اسپرد معمول: <b>{detail.spec.model.typical_spread_pips} پیپ</b></span>
+                  <span>
+                    اسپرد معمول: <b>
+                      {detail.spec.model.cost_unit === 'bp'
+                        ? `${detail.spec.model.typical_spread_bps} بیپ`
+                        : `${detail.spec.model.typical_spread_pips} پیپ`}
+                    </b>
+                  </span>
+                  {detail.spec.model.taker_fee_bps > 0 && (
+                    <span>کارمزد هر طرف: <b>{detail.spec.model.taker_fee_bps} بیپ</b></span>
+                  )}
+                  {detail.context && (
+                    <span>هزینهٔ رفت‌وبرگشت: <b>
+                      {detail.context.round_trip_cost_units} {unitLabel(detail.context.cost_unit)}
+                    </b></span>
+                  )}
                   <span>سشن: <b>{detail.spec.model.session_24h ? '۲۴ساعته' : 'کیلزون لندن/نیویورک'}</b></span>
                   <span>دقت قیمت: <b>{detail.spec.price_precision} رقم</b></span>
                   <span>سقف اهرم مدل: <b>{detail.spec.model.max_leverage}x</b></span>
@@ -440,8 +480,9 @@ export default function ScalpPanel() {
                     {detail.exit_plan?.has_plan ? (
                       <>
                         <dl>
-                          <div><dt><Target size={10} /> حد سود</dt><dd className="green">{fmt(detail.signal?.take_profit, detail.spec?.price_precision ?? 5)} ({detail.exit_plan.reward_pips} پیپ)</dd></div>
-                          <div><dt>حد ضرر</dt><dd className="red">{fmt(detail.signal?.stop_loss, detail.spec?.price_precision ?? 5)} ({detail.exit_plan.risk_pips} پیپ)</dd></div>
+                          <div><dt><Target size={10} /> حد سود</dt><dd className="green">{fmt(detail.signal?.take_profit, detail.spec?.price_precision ?? 5)} ({detail.exit_plan.reward_pips} {unitLabel(detail.exit_plan.cost_unit)})</dd></div>
+                          <div><dt>حد ضرر</dt><dd className="red">{fmt(detail.signal?.stop_loss, detail.spec?.price_precision ?? 5)} ({detail.exit_plan.risk_pips} {unitLabel(detail.exit_plan.cost_unit)})</dd></div>
+                          <div><dt>هزینهٔ رفت‌وبرگشت</dt><dd>{detail.exit_plan.round_trip_cost_units} {unitLabel(detail.exit_plan.cost_unit)}</dd></div>
                           <div><dt>بریک‌اون در</dt><dd>{fmt(detail.exit_plan.breakeven_trigger, detail.spec?.price_precision ?? 5)}</dd></div>
                           <div><dt>قفل نیم‌R در</dt><dd>{fmt(detail.exit_plan.lock_trigger, detail.spec?.price_precision ?? 5)}</dd></div>
                           <div><dt>تریل کیجون</dt><dd>{fmt(detail.exit_plan.kijun_trail, detail.spec?.price_precision ?? 5)}</dd></div>

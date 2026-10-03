@@ -71,8 +71,9 @@ async def build_context(
     account_equity: float = 100.0,
 ) -> tuple[StrategyContext, dict | None]:
     """Assemble a real StrategyContext for this symbol — real spread, real HTF bias."""
+    price = candles[-1].close
     quote = await universe.live_quote(spec)
-    spread = quote["spread"] if quote else spec.default_spread()
+    spread = quote["spread"] if quote else spec.default_spread(price)
 
     htf_bias = Direction.NEUTRAL
     htf = HTF_FOR.get(timeframe)
@@ -93,7 +94,7 @@ async def build_context(
 
     context = StrategyContext(
         spread=spread,
-        typical_spread=max(spec.default_spread(), spec.tick_size),
+        typical_spread=max(spec.default_spread(price), spec.tick_size),
         higher_timeframe_bias=htf_bias,
         account_equity=account_equity,
         # A 24/7 venue cannot gap over a weekend; the model flag gates this downstream too.
@@ -128,8 +129,11 @@ def _exit_plan(signal: TradeSignal, candles: list[Candle], spec: inst.Instrument
         "stop_loss": signal.stop_loss,
         "take_profit": signal.take_profit,
         "risk_price": spec.round_price(risk),
-        "risk_pips": round(spec.to_pips(risk), 1),
-        "reward_pips": round(spec.to_pips(abs((signal.take_profit or signal.entry) - signal.entry)), 1),
+        "cost_unit": spec.cost_unit,
+        "risk_pips": round(spec.to_cost_units(risk, signal.entry), 1),
+        "reward_pips": round(spec.to_cost_units(
+            abs((signal.take_profit or signal.entry) - signal.entry), signal.entry), 1),
+        "round_trip_cost_units": round(spec.to_cost_units(spec.round_trip_cost(signal.entry), signal.entry), 1),
         "breakeven_trigger": spec.round_price(signal.entry + risk if long else signal.entry - risk),
         "breakeven_stop": spec.round_price(breakeven),
         "lock_trigger": spec.round_price(signal.entry + 1.5 * risk if long else signal.entry - 1.5 * risk),
@@ -182,11 +186,14 @@ async def evaluate_symbol(
 
     policy_block: str | None = None
     if enforce_scalp_policy and not spec.is_scalpable():
-        policy_block = (
-            f"اسکلپ روی {spec.display} در این پنل فعال نیست "
-            f"({'بازار ۲۴ساعته/کریپتو' if spec.kind == inst.CRYPTO else 'اسپرد بالا یا دارایی غیرجفت‌ارزی'})"
-            " — فقط داده و سیگنال نمایش داده می‌شود."
-        )
+        if spec.kind == inst.CRYPTO:
+            why = ("جفت استیبل‌به‌استیبل، توکن اهرمی، یا کوتِ غیردلاری (BTC/ETH/BNB) — "
+                   "رنج واقعی یا نقدشوندگی لازم برای اسکلپ را ندارد")
+        elif spec.kind == inst.METAL:
+            why = "فلز گران‌بها — اسپرد و رفتار گپ‌دار"
+        else:
+            why = "جفت‌ارز exotic با اسپرد بالا"
+        policy_block = f"اسکلپ روی {spec.display} فعال نیست ({why}) — فقط داده و سیگنال نمایش داده می‌شود."
 
     if len(candles) < MIN_BARS:
         return {
@@ -218,8 +225,13 @@ async def evaluate_symbol(
         "quote": quote,
         "context": {
             "spread": spec.round_price(context.spread),
-            "spread_pips": round(spec.to_pips(context.spread), 2),
-            "typical_spread_pips": spec.model.typical_spread_pips,
+            "cost_unit": spec.cost_unit,
+            "spread_pips": round(spec.to_cost_units(context.spread, last.close), 2),
+            "typical_spread_pips": round(
+                spec.to_cost_units(spec.default_spread(last.close), last.close), 2),
+            "taker_fee_bps": spec.model.taker_fee_bps,
+            "round_trip_cost_units": round(
+                spec.to_cost_units(spec.round_trip_cost(last.close), last.close), 2),
             "htf_bias": context.higher_timeframe_bias.value,
             "volatility_regime": context.volatility_regime,
             "weekend_gap_risk": context.is_weekend_gap_risk,
@@ -286,9 +298,17 @@ async def diagnose(settings: Settings, symbol: str, timeframe: Timeframe, bars: 
         "خارج از کیلزون با روند ضعیف، وتوی سخت می‌خورد.")
 
     spread_ok = context.spread <= context.typical_spread * 2
+    unit = "پیپ" if spec.cost_unit == "pip" else "بیپ"
     add("اسپرد لحظه‌ای", spread_ok,
-        f"{spec.to_pips(context.spread):.2f} پیپ (سقف {spec.model.typical_spread_pips * 2:.2f})",
-        "در زمان اسپرد باز (نیویورک کلوز/خبر) ورود بسته است.")
+        f"{spec.to_cost_units(context.spread, last.close):.2f} {unit} "
+        f"(سقف {spec.to_cost_units(context.typical_spread * 2, last.close):.2f})",
+        "در زمان اسپرد باز (نیویورک کلوز/خبر/نقدشوندگی کم) ورود بسته است.")
+
+    cost_units = spec.to_cost_units(spec.round_trip_cost(last.close), last.close)
+    add("هزینهٔ رفت‌وبرگشت", True,
+        f"{cost_units:.1f} {unit}"
+        + (f" (شامل کارمزد {spec.model.taker_fee_bps:.0f} بیپ هر طرف)" if spec.model.taker_fee_bps else ""),
+        "هدف باید حداقل ۱٫۵ برابر این عدد باشد وگرنه ورود رد می‌شود.")
 
     add("تازگی آخرین کندل",
         (datetime.now(timezone.utc) - last.timestamp).total_seconds() < timeframe.seconds * 3,

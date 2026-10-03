@@ -331,12 +331,14 @@ async def live_quote(spec: inst.InstrumentSpec) -> dict | None:
     if not -10 <= age <= 120:
         return None
     spread = ask - bid
+    mid = (bid + ask) / 2
     return {
         "bid": bid,
         "ask": ask,
-        "mid": (bid + ask) / 2,
+        "mid": mid,
         "spread": spread,
-        "spread_pips": round(spec.to_pips(spread), 2),
+        "cost_unit": spec.cost_unit,
+        "spread_pips": round(spec.to_cost_units(spread, mid), 2),
         "at": at.isoformat(),
         "source": "binance:bookTicker" if spec.kind == inst.CRYPTO else "swissquote:bbo",
     }
