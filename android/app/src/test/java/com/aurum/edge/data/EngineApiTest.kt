@@ -54,7 +54,11 @@ class EngineApiTest {
         assertNull(EngineApi.normalizeBase(""))
         assertNull(EngineApi.normalizeBase("   "))
         assertNull(EngineApi.normalizeBase("ftp://my-host.example"))
+        // Regression: trimming the trailing slashes first turned this into "https:",
+        // which was then re-prefixed into the bogus host "https://https".
         assertNull(EngineApi.normalizeBase("https://"))
+        assertNull(EngineApi.normalizeBase("https:"))
+        assertNull(EngineApi.normalizeBase("//"))
         assertNull(EngineApi.normalizeBase("h ttp://broken"))
         assertNull(EngineApi.normalizeBase("x".repeat(500)))
     }

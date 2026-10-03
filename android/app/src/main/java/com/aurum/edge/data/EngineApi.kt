@@ -55,8 +55,12 @@ object EngineApi {
      * widened into an arbitrary request.
      */
     fun normalizeBase(raw: String): String? {
-        val trimmed = raw.trim().trimEnd('/')
+        val trimmed = raw.trim()
         if (trimmed.isEmpty() || trimmed.length > 200) return null
+        // Do NOT strip trailing slashes before deciding whether a scheme is present:
+        // "https://" would collapse to "https:", fail the "://" check, and then get a
+        // second scheme glued on to produce "https://https". The output is rebuilt from
+        // the parsed scheme/host/port below, so a trailing slash is dropped anyway.
         val withScheme = if (trimmed.contains("://")) trimmed else "https://$trimmed"
         val uri = runCatching { URI(withScheme) }.getOrNull() ?: return null
         val host = uri.host?.lowercase() ?: return null
