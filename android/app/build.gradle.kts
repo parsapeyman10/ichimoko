@@ -151,30 +151,19 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.14.1")
 }
 
-// GitHub test logs are hosted externally and may be inaccessible. Surface the failed
-// test and its exception as a check annotation so a broken APK cannot be mistaken for green.
+// GitHub test logs and the HTML report are hosted on storage that is not reachable from
+// every environment, and ::error:: workflow commands printed by a test listener do not
+// reliably become annotations. The Gradle FAILURE MESSAGE does, so the authoritative list
+// of failing tests is parsed out of the JUnit XML and thrown from the build itself.
 tasks.withType<Test>().configureEach {
     if (System.getenv("GITHUB_ACTIONS") == "true") {
+        // Let the task finish so every XML is written, then fail with a message that names
+        // the tests. Without this, a red run says only "there were failing tests".
+        ignoreFailures = true
         addTestListener(object : TestListener {
             override fun beforeSuite(suite: TestDescriptor) = Unit
+            override fun afterSuite(suite: TestDescriptor, result: TestResult) = Unit
             override fun beforeTest(test: TestDescriptor) = Unit
-
-            // A failure can also be raised by the SUITE rather than by an individual test —
-            // a throwing field initialiser, a @BeforeClass, or a class that fails to load.
-            // afterTest never fires for those, so without this hook the run goes red with no
-            // annotation naming anything, which is exactly the dead end it was meant to prevent.
-            override fun afterSuite(suite: TestDescriptor, result: TestResult) {
-                if (result.resultType != TestResult.ResultType.FAILURE) return
-                result.exceptions.forEach { error ->
-                    val detail = "${error.javaClass.name}: ${error.message.orEmpty()}"
-                        .replace('\n', ' ').replace('\r', ' ').take(400)
-                    println("::error title=JVM suite failed::${suite.displayName}: $detail")
-                }
-                if (result.exceptions.isEmpty() && result.failedTestCount > 0) {
-                    println("::error title=JVM suite failed::${suite.displayName}: " +
-                        "${result.failedTestCount} failed of ${result.testCount}")
-                }
-            }
             override fun afterTest(test: TestDescriptor, result: TestResult) {
                 if (result.resultType == TestResult.ResultType.FAILURE) {
                     val detail = result.exceptions.firstOrNull()?.let {
@@ -184,6 +173,32 @@ tasks.withType<Test>().configureEach {
                 }
             }
         })
+        doLast {
+            val resultsDir = reports.junitXml.outputLocation.get().asFile
+            val failures = mutableListOf<String>()
+            resultsDir.listFiles { file -> file.name.endsWith(".xml") }?.sortedBy { it.name }?.forEach { file ->
+                val xml = file.readText()
+                xml.split("<testcase ").drop(1).forEach { block ->
+                    val body = block.substringBefore("</testsuite>")
+                    if (!body.contains("<failure") && !body.contains("<error")) return@forEach
+                    fun attr(name: String, from: String): String =
+                        Regex("$name=\"([^\"]*)\"").find(from)?.groupValues?.get(1).orEmpty()
+                    val testName = attr("name", body.substringBefore(">"))
+                    val className = attr("classname", body.substringBefore(">"))
+                    val marker = body.indexOf("<failure").takeIf { it >= 0 } ?: body.indexOf("<error")
+                    val message = attr("message", body.substring(marker, minOf(body.length, marker + 1200)))
+                        .replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">")
+                        .replace("&amp;", "&").replace('\n', ' ').replace('\r', ' ').trim().take(350)
+                    failures += "$className.$testName :: $message"
+                }
+            }
+            if (failures.isNotEmpty()) {
+                failures.forEach { println("::error title=JVM test failed::$it") }
+                throw GradleException(
+                    "${failures.size} failing test(s):\n" + failures.joinToString("\n") { "  - $it" }
+                )
+            }
+        }
     }
 }
 
