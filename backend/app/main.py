@@ -44,6 +44,8 @@ from app.services.web_news import WebNewsFeed
 from app.services.crypto_scanner import CryptoScanner
 from app.services.sentiment import SentimentEngine
 from app.services.strategy import evaluate_scalp, explain_profitability
+from app.services import autopilot as autopilot_svc
+from app.services import growth_planner as growth_svc
 from app.services import instruments as instruments_svc
 from app.services import scalper as scalper_svc
 from app.services import universe as universe_svc
@@ -468,6 +470,98 @@ async def scalp_scan(
         )
     except (DataUnavailable, ValueError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+# ─── growth planning ──────────────────────────────────────────────────
+@app.get("/api/v1/plan/growth")
+async def plan_growth(
+    start: float = Query(100.0, gt=0, le=10_000_000),
+    target: float = Query(1000.0, gt=0, le=100_000_000),
+    win_rate: float = Query(0.5, gt=0, lt=1, description="کسری، مثلاً 0.5 برای ۵۰٪"),
+    net_rr: float = Query(1.45, gt=0, le=20, description="نسبت سود به ضرر بعد از کسر هزینه"),
+    risk_pct: float = Query(0.5, gt=0, le=20),
+    trades_per_day: float = Query(3.0, gt=0, le=200),
+    sample_size: int = Query(100, ge=5, le=100_000, description="تعداد معاملهٔ واقعی که وین‌ریت از آن اندازه‌گیری شده"),
+    deadline_days: int | None = Query(None, ge=1, le=3650),
+):
+    """What a balance target actually requires — trades, time, risk, and odds of ruin."""
+    edge = growth_svc.EdgeAssumption(
+        win_rate=win_rate, net_rr=net_rr, risk_pct=risk_pct,
+        trades_per_day=trades_per_day, sample_size=sample_size,
+    )
+    return growth_svc.plan(start, target, edge, deadline_days)
+
+
+@app.get("/api/v1/plan/risk-ladder")
+async def plan_risk_ladder(
+    start: float = Query(100.0, gt=0, le=10_000_000),
+    target: float = Query(1000.0, gt=0, le=100_000_000),
+    win_rate: float = Query(0.5, gt=0, lt=1),
+    net_rr: float = Query(1.45, gt=0, le=20),
+    trades_per_day: float = Query(3.0, gt=0, le=200),
+):
+    """The same edge at escalating risk: where faster growth stops paying for its own ruin."""
+    return {"rows": growth_svc.risk_ladder(start, target, win_rate, net_rr, trades_per_day)}
+
+
+# ─── autonomous paper trader ──────────────────────────────────────────
+# The loop below opens and closes PAPER positions against real closed candles, charged the
+# venue's real spread and commission. It never reaches a broker: live submission stays
+# fail-closed in app.services.execution_gate.
+@app.get("/api/v1/autopilot/state")
+async def autopilot_state():
+    state = autopilot_svc.load_state()
+    return {
+        "running": autopilot_svc.autopilot.running,
+        "enabled": state.get("enabled", False),
+        "interval_seconds": autopilot_svc.autopilot.interval_seconds,
+        "balance": round(state["balance"], 2),
+        "starting_balance": state["starting_balance"],
+        "target_balance": state.get("target_balance"),
+        "timeframe": state.get("timeframe"),
+        "profile": state.get("profile"),
+        "watchlist": state.get("watchlist", []),
+        "positions": state.get("positions", []),
+        "closed": state.get("closed", [])[-40:],
+        "log": state.get("log", [])[-60:],
+        "equity_curve": state.get("equity_curve", [])[-300:],
+        "performance": autopilot_svc.performance(state),
+        "execution_mode": "paper",
+        "execution_note": (
+            "اتوپایلوت فقط معاملهٔ کاغذی باز می‌کند. ارسال سفارش واقعی تا نصب احراز هویت سمت "
+            "سرور، idempotency پایدار، تطبیق سفارش و انتشار حسابرسی‌شده بسته است."
+        ),
+    }
+
+
+@app.post("/api/v1/autopilot/start")
+async def autopilot_start():
+    return await autopilot_svc.autopilot.start(settings)
+
+
+@app.post("/api/v1/autopilot/stop")
+async def autopilot_stop():
+    return await autopilot_svc.autopilot.stop()
+
+
+@app.post("/api/v1/autopilot/cycle")
+async def autopilot_cycle():
+    """Run exactly one supervision pass now (useful without the background loop)."""
+    return await autopilot_svc.run_cycle(settings)
+
+
+@app.post("/api/v1/autopilot/reset")
+async def autopilot_reset(
+    balance: float = Query(100.0, gt=0, le=10_000_000),
+    target: float | None = Query(None, gt=0, le=100_000_000),
+    timeframe: Timeframe = Timeframe.M5,
+    profile: str = Query("balanced", pattern="^(conservative|balanced|aggressive)$"),
+    symbols: str = Query("", max_length=600),
+):
+    await autopilot_svc.autopilot.stop()
+    watchlist = [s for s in symbols.split(",") if s.strip()] if symbols.strip() else None
+    state = autopilot_svc.reset(balance, target, watchlist, timeframe.value, profile)
+    return {"reset": True, "balance": state["balance"], "watchlist": state["watchlist"]}
 
 
 # ─── real execution boundary (intentionally disabled until independently audited) ──
