@@ -194,8 +194,10 @@ tasks.withType<Test>().configureEach {
             }
             if (failures.isNotEmpty()) {
                 failures.forEach { println("::error title=JVM test failed::$it") }
+                // One line: annotations are truncated at the first newline, which would
+                // hide the very names this exists to report.
                 throw GradleException(
-                    "${failures.size} failing test(s):\n" + failures.joinToString("\n") { "  - $it" }
+                    "${failures.size} failing test(s): " + failures.joinToString(" ||| ")
                 )
             }
         }
