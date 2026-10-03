@@ -151,10 +151,15 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.14.1")
 }
 
-// GitHub test logs are hosted externally and may be inaccessible. Surface the failed
-// test and its exception as a check annotation so a broken APK cannot be mistaken for green.
+// GitHub test logs and the HTML report are hosted on storage that is not reachable from
+// every environment, and ::error:: workflow commands printed by a test listener do not
+// reliably become annotations. The Gradle FAILURE MESSAGE does, so the authoritative list
+// of failing tests is parsed out of the JUnit XML and thrown from the build itself.
 tasks.withType<Test>().configureEach {
     if (System.getenv("GITHUB_ACTIONS") == "true") {
+        // Let the task finish so every XML is written, then fail with a message that names
+        // the tests. Without this, a red run says only "there were failing tests".
+        ignoreFailures = true
         addTestListener(object : TestListener {
             override fun beforeSuite(suite: TestDescriptor) = Unit
             override fun afterSuite(suite: TestDescriptor, result: TestResult) = Unit
@@ -168,6 +173,34 @@ tasks.withType<Test>().configureEach {
                 }
             }
         })
+        doLast {
+            val resultsDir = reports.junitXml.outputLocation.get().asFile
+            val failures = mutableListOf<String>()
+            resultsDir.listFiles { file -> file.name.endsWith(".xml") }?.sortedBy { it.name }?.forEach { file ->
+                val xml = file.readText()
+                xml.split("<testcase ").drop(1).forEach { block ->
+                    val body = block.substringBefore("</testsuite>")
+                    if (!body.contains("<failure") && !body.contains("<error")) return@forEach
+                    fun attr(name: String, from: String): String =
+                        Regex("$name=\"([^\"]*)\"").find(from)?.groupValues?.get(1).orEmpty()
+                    val testName = attr("name", body.substringBefore(">"))
+                    val className = attr("classname", body.substringBefore(">"))
+                    val marker = body.indexOf("<failure").takeIf { it >= 0 } ?: body.indexOf("<error")
+                    val message = attr("message", body.substring(marker, minOf(body.length, marker + 1200)))
+                        .replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">")
+                        .replace("&amp;", "&").replace('\n', ' ').replace('\r', ' ').trim().take(350)
+                    failures += "$className.$testName :: $message"
+                }
+            }
+            if (failures.isNotEmpty()) {
+                failures.forEach { println("::error title=JVM test failed::$it") }
+                // One line: annotations are truncated at the first newline, which would
+                // hide the very names this exists to report.
+                throw GradleException(
+                    "${failures.size} failing test(s): " + failures.joinToString(" ||| ")
+                )
+            }
+        }
     }
 }
 

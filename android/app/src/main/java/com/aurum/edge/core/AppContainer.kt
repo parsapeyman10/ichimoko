@@ -6,6 +6,7 @@ import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.data.CandleCache
 import com.aurum.edge.data.DataFeedException
 import com.aurum.edge.data.DukascopyHistoryClient
+import com.aurum.edge.data.EngineRepository
 import com.aurum.edge.data.FreeHistoryDownloader
 import com.aurum.edge.data.FreeHistoryResult
 import com.aurum.edge.data.ForexCalendarRepository
@@ -66,6 +67,8 @@ class AppContainer(context: Context) {
     val market = MarketRepository(appContext, client, candleCache, settingsStore, journalStore,
         publicHistory = publicHistory, dukascopyHistory = dukascopyHistory)
     val updater = AppUpdateRepository(appContext)
+    /** OPTIONAL server engine. Idle until the user saves a backend URL; never required. */
+    val engine = EngineRepository()
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val watchSettings = WatchSettingsStore(appContext)

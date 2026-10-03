@@ -44,6 +44,12 @@ from app.services.web_news import WebNewsFeed
 from app.services.crypto_scanner import CryptoScanner
 from app.services.sentiment import SentimentEngine
 from app.services.strategy import evaluate_scalp, explain_profitability
+from app.services import autopilot as autopilot_svc
+from app.services import growth_planner as growth_svc
+from app.services import instruments as instruments_svc
+from app.services import scalper as scalper_svc
+from app.services import setup_lab as lab_svc
+from app.services import universe as universe_svc
 from app.services.ytd_trades import get_ytd_report
 
 settings = get_settings()
@@ -350,6 +356,293 @@ async def web_headlines():
 async def crypto_candidates():
     """Read-only, strict spot-market screening; NOT pump prediction or a trade intent."""
     return await crypto_scanner.snapshot()
+
+
+# ─── multi-symbol universe, candles and scalping ──────────────────────
+# Everything below works for ANY supported symbol. The legacy endpoints above remain
+# bound to AURUM_MARKET_SYMBOL (XAU/USD) so existing clients keep working unchanged.
+
+
+@app.get("/api/v1/instruments")
+async def list_instruments(
+    kind: str = Query("all", pattern="^(all|forex|metal|crypto)$"),
+    q: str = Query("", max_length=30),
+    limit: int = Query(400, ge=1, le=3000),
+):
+    """Full tradable universe: FX pairs + metals + every TRADING Binance SPOT symbol."""
+    try:
+        return await universe_svc.search_universe(settings, kind=kind, query=q, limit=limit)
+    except DataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+@app.get("/api/v1/instruments/spec")
+async def instrument_spec(symbol: str = Query(..., min_length=2, max_length=24)):
+    """Contract spec + the per-symbol strategy model actually used to score it."""
+    try:
+        spec = await universe_svc.resolve_spec(symbol)
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    return instruments_svc.spec_to_dict(spec)
+
+
+@app.get("/api/v1/symbol/candles", response_model=list[Candle])
+async def symbol_candles(
+    symbol: str = Query(..., min_length=2, max_length=24),
+    timeframe: Timeframe = Timeframe.M5,
+    limit: int = Query(500, ge=10, le=2000),
+):
+    """Real closed candles for any symbol — Binance for crypto, Twelve Data for FX/metals."""
+    try:
+        candles, _ = await universe_svc.load_candles(settings, symbol, timeframe, limit=limit)
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    return candles
+
+
+@app.get("/api/v1/symbol/quote")
+async def symbol_quote(symbol: str = Query(..., min_length=2, max_length=24)):
+    """Real live bid/ask used for the spread gate. Never a candle, never interpolated."""
+    try:
+        spec = await universe_svc.resolve_spec(symbol)
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    quote = await universe_svc.live_quote(spec)
+    if not quote:
+        raise HTTPException(status_code=503, detail=f"قیمت زندهٔ {spec.display} از منبع واقعی دریافت نشد")
+    return {"symbol": spec.symbol, "display": spec.display, **quote}
+
+
+@app.get("/api/v1/scalp/signal")
+async def scalp_signal(
+    symbol: str = Query(..., min_length=2, max_length=24),
+    timeframe: Timeframe = Timeframe.M5,
+    bars: int = Query(400, ge=220, le=2000),
+    equity: float = Query(1000.0, gt=0, le=10_000_000, description="موجودی حساب — تنها عدد لازم"),
+    risk_pct: float | None = Query(None, gt=0, le=2, description="خالی بگذارید تا خودکار تعیین شود"),
+    profile: str = Query("balanced", pattern="^(conservative|balanced|aggressive)$"),
+    daily_pnl_pct: float = Query(0.0, ge=-100, le=100),
+    consecutive_losses: int = Query(0, ge=0, le=50),
+    open_positions: int = Query(0, ge=0, le=50),
+):
+    """Entry plan + exit plan + automatically sized risk for one symbol.
+
+    Leave `risk_pct` empty (the default) and the engine chooses the risk itself from the
+    balance, the signal's conviction, the instrument tier and the account's recent state.
+    """
+    try:
+        return await scalper_svc.evaluate_symbol(
+            settings, symbol, timeframe, bars, equity, risk_pct,
+            profile=profile, daily_pnl_pct=daily_pnl_pct,
+            consecutive_losses=consecutive_losses, open_positions=open_positions,
+        )
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+@app.get("/api/v1/scalp/diagnose")
+async def scalp_diagnose(
+    symbol: str = Query(..., min_length=2, max_length=24),
+    timeframe: Timeframe = Timeframe.M5,
+    bars: int = Query(400, ge=220, le=2000),
+):
+    """Gate-by-gate explanation of why this symbol is (or is not) producing a trade."""
+    try:
+        return await scalper_svc.diagnose(settings, symbol, timeframe, bars)
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+@app.get("/api/v1/scalp/scan")
+async def scalp_scan(
+    symbols: str = Query(..., min_length=2, max_length=800),
+    timeframe: Timeframe = Timeframe.M5,
+    bars: int = Query(300, ge=220, le=1000),
+    equity: float = Query(1000.0, gt=0, le=10_000_000),
+    risk_pct: float | None = Query(None, gt=0, le=2),
+    only_signals: bool = Query(False),
+    profile: str = Query("balanced", pattern="^(conservative|balanced|aggressive)$"),
+):
+    """Scan up to 40 comma-separated symbols concurrently and rank them by conviction."""
+    try:
+        return await scalper_svc.scan(
+            settings, symbols.split(","), timeframe, bars, equity, risk_pct,
+            only_signals, profile=profile,
+        )
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+# ─── growth planning ──────────────────────────────────────────────────
+@app.get("/api/v1/plan/growth")
+async def plan_growth(
+    start: float = Query(1000.0, gt=0, le=10_000_000),
+    target: float = Query(10000.0, gt=0, le=100_000_000),
+    win_rate: float = Query(0.5, gt=0, lt=1, description="کسری، مثلاً 0.5 برای ۵۰٪"),
+    net_rr: float = Query(1.45, gt=0, le=20, description="نسبت سود به ضرر بعد از کسر هزینه"),
+    risk_pct: float = Query(0.5, gt=0, le=20),
+    trades_per_day: float = Query(3.0, gt=0, le=200),
+    sample_size: int = Query(100, ge=5, le=100_000, description="تعداد معاملهٔ واقعی که وین‌ریت از آن اندازه‌گیری شده"),
+    deadline_days: int | None = Query(None, ge=1, le=3650),
+):
+    """What a balance target actually requires — trades, time, risk, and odds of ruin."""
+    edge = growth_svc.EdgeAssumption(
+        win_rate=win_rate, net_rr=net_rr, risk_pct=risk_pct,
+        trades_per_day=trades_per_day, sample_size=sample_size,
+    )
+    return growth_svc.plan(start, target, edge, deadline_days)
+
+
+@app.get("/api/v1/plan/risk-ladder")
+async def plan_risk_ladder(
+    start: float = Query(1000.0, gt=0, le=10_000_000),
+    target: float = Query(10000.0, gt=0, le=100_000_000),
+    win_rate: float = Query(0.5, gt=0, lt=1),
+    net_rr: float = Query(1.45, gt=0, le=20),
+    trades_per_day: float = Query(3.0, gt=0, le=200),
+):
+    """The same edge at escalating risk: where faster growth stops paying for its own ruin."""
+    return {"rows": growth_svc.risk_ladder(start, target, win_rate, net_rr, trades_per_day)}
+
+
+# ─── autonomous paper trader ──────────────────────────────────────────
+# The loop below opens and closes PAPER positions against real closed candles, charged the
+# venue's real spread and commission. It never reaches a broker: live submission stays
+# fail-closed in app.services.execution_gate.
+@app.get("/api/v1/autopilot/state")
+async def autopilot_state():
+    state = autopilot_svc.load_state()
+    return {
+        "running": autopilot_svc.autopilot.running,
+        "enabled": state.get("enabled", False),
+        "interval_seconds": autopilot_svc.autopilot.interval_seconds,
+        "balance": round(state["balance"], 2),
+        "starting_balance": state["starting_balance"],
+        "target_balance": state.get("target_balance"),
+        "timeframe": state.get("timeframe"),
+        "profile": state.get("profile"),
+        "watchlist": state.get("watchlist", []),
+        "positions": state.get("positions", []),
+        "closed": state.get("closed", [])[-40:],
+        "log": state.get("log", [])[-60:],
+        "equity_curve": state.get("equity_curve", [])[-300:],
+        "performance": autopilot_svc.performance(state),
+        "execution_mode": "paper",
+        "execution_note": (
+            "اتوپایلوت فقط معاملهٔ کاغذی باز می‌کند. ارسال سفارش واقعی تا نصب احراز هویت سمت "
+            "سرور، idempotency پایدار، تطبیق سفارش و انتشار حسابرسی‌شده بسته است."
+        ),
+    }
+
+
+@app.post("/api/v1/autopilot/start")
+async def autopilot_start():
+    return await autopilot_svc.autopilot.start(settings)
+
+
+@app.post("/api/v1/autopilot/stop")
+async def autopilot_stop():
+    return await autopilot_svc.autopilot.stop()
+
+
+@app.post("/api/v1/autopilot/cycle")
+async def autopilot_cycle():
+    """Run exactly one supervision pass now (useful without the background loop)."""
+    return await autopilot_svc.run_cycle(settings)
+
+
+@app.post("/api/v1/autopilot/reset")
+async def autopilot_reset(
+    balance: float = Query(1000.0, gt=0, le=10_000_000),
+    target: float | None = Query(None, gt=0, le=100_000_000),
+    timeframe: Timeframe = Timeframe.M5,
+    profile: str = Query("balanced", pattern="^(conservative|balanced|aggressive)$"),
+    symbols: str = Query("", max_length=600),
+):
+    await autopilot_svc.autopilot.stop()
+    watchlist = [s for s in symbols.split(",") if s.strip()] if symbols.strip() else None
+    state = autopilot_svc.reset(balance, target, watchlist, timeframe.value, profile)
+    return {"reset": True, "balance": state["balance"], "watchlist": state["watchlist"]}
+
+
+# ─── setup laboratory: learning which Ichimoku opportunities pay ──────
+@app.get("/api/v1/lab/study")
+async def lab_study(
+    symbol: str = Query(..., min_length=2, max_length=24),
+    timeframe: Timeframe = Timeframe.M5,
+    bars: int = Query(3000, ge=600, le=5000),
+    rr: float = Query(1.5, gt=0.1, le=5),
+    stop_atr: float = Query(1.0, gt=0.1, le=5),
+    max_bars: int = Query(24, ge=4, le=200),
+    min_samples: int = Query(40, ge=10, le=500),
+):
+    """Measure every Ichimoku setup x context bucket on real candles, in/out of sample."""
+    try:
+        candles, spec = await universe_svc.load_candles(settings, symbol, timeframe, limit=bars)
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    config = lab_svc.LabelConfig(rr=rr, stop_atr=stop_atr, max_bars=max_bars)
+    return lab_svc.study(candles, spec, config, min_samples=min_samples)
+
+
+@app.get("/api/v1/lab/win-rate-curve")
+async def lab_win_rate_curve(
+    symbol: str = Query(..., min_length=2, max_length=24),
+    timeframe: Timeframe = Timeframe.M5,
+    bars: int = Query(3000, ge=600, le=5000),
+    setup: str | None = Query(None, max_length=30),
+    stop_atr: float = Query(1.0, gt=0.1, le=5),
+    max_bars: int = Query(24, ge=4, le=200),
+):
+    """Win rate vs reward ratio — shows exactly what a 65% target costs in expectancy."""
+    try:
+        candles, spec = await universe_svc.load_candles(settings, symbol, timeframe, limit=bars)
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    return lab_svc.win_rate_curve(candles, spec, setup, stop_atr, max_bars)
+
+
+@app.get("/api/v1/lab/playbook")
+async def lab_playbook(
+    symbol: str = Query(..., min_length=2, max_length=24),
+    timeframe: Timeframe = Timeframe.M5,
+    bars: int = Query(3000, ge=600, le=5000),
+    rr: float = Query(1.5, gt=0.1, le=5),
+    stop_atr: float = Query(1.0, gt=0.1, le=5),
+    max_bars: int = Query(24, ge=4, le=200),
+    target_win_rate: float = Query(0.65, gt=0.3, lt=0.95),
+    min_samples: int = Query(40, ge=10, le=500),
+):
+    """The setups that survive the statistical AND out-of-sample filters — or none."""
+    try:
+        candles, spec = await universe_svc.load_candles(settings, symbol, timeframe, limit=bars)
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    config = lab_svc.LabelConfig(rr=rr, stop_atr=stop_atr, max_bars=max_bars)
+    return lab_svc.playbook(candles, spec, target_win_rate, min_samples, config)
+
+
+@app.get("/api/v1/lab/math")
+async def lab_math(
+    rr: float = Query(1.5, gt=0.05, le=10),
+    target_win_rate: float = Query(0.65, gt=0.05, lt=0.99),
+    cost_r: float = Query(0.0, ge=0, le=1),
+):
+    """The win-rate equation itself, with no data involved."""
+    return {
+        "rr": rr,
+        "random_baseline_win_rate_pct": round(lab_svc.baseline_win_rate(rr) * 100, 2),
+        "breakeven_win_rate_pct": round(lab_svc.required_win_rate(rr, cost_r) * 100, 2),
+        "rr_that_makes_a_coinflip_show_target": round(lab_svc.rr_for_target_win_rate(target_win_rate), 3),
+        "expectancy_of_target_at_that_rr": round(
+            target_win_rate * lab_svc.rr_for_target_win_rate(target_win_rate) - (1 - target_win_rate), 4
+        ),
+        "formula": "P(win | no edge) = 1 / (1 + RR)   ;   breakeven WR = (1 + cost_R) / (1 + RR)",
+        "note": (
+            "وین‌ریت به‌تنهایی معیار نیست: هر سیستم تصادفی با کوچک‌کردن هدف می‌تواند هر "
+            "وین‌ریتی را نشان بدهد. معیار درست، اختلاف وین‌ریت با خط پایهٔ همان RR است."
+        ),
+    }
 
 
 # ─── real execution boundary (intentionally disabled until independently audited) ──

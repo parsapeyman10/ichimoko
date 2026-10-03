@@ -32,6 +32,8 @@ import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.TradeReplay
 import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.data.AppUpdateRepository
+import com.aurum.edge.data.EngineApi
+import com.aurum.edge.data.EngineUiState
 import com.aurum.edge.data.FreeHistoryCatalog
 import com.aurum.edge.data.FreeHistoryState
 import com.aurum.edge.data.JournalStats
@@ -71,6 +73,64 @@ data class AiSignalTuningState(
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
+
+    // ── OPTIONAL server engine ─────────────────────────────────────────
+    // Entirely additive: when no backend URL is configured this stays idle and the
+    // on-device engine behaves exactly as before.
+    val engine: StateFlow<EngineUiState> = container.engine.state
+
+    private fun engineBase(): String? = settings.value.engineBaseUrl.trim().takeIf { it.isNotBlank() }
+
+    /** Validate + persist the backend URL, then immediately prove it is reachable. */
+    fun saveEngineBaseUrl(value: String) {
+        val raw = value.trim()
+        if (raw.isNotBlank() && EngineApi.normalizeBase(raw) == null) {
+            _toast.value = "نشانی باید https و بدون مسیر/پارامتر باشد (مثال: https://my-host.example)"
+            return
+        }
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) { container.settingsStore.saveEngineBaseUrl(raw) }
+            if (!saved) {
+                _toast.value = "ذخیرهٔ نشانی سرور روی دستگاه ناموفق بود"
+                return@launch
+            }
+            if (raw.isBlank()) {
+                _toast.value = "موتور سرور خاموش شد؛ موتور داخلی گوشی مثل قبل کار می‌کند"
+                return@launch
+            }
+            container.engine.checkConnection(raw)
+            val state = container.engine.state.value
+            _toast.value = if (state.connected) "به سرور وصل شد" else (state.error ?: "اتصال برقرار نشد")
+            if (state.connected) container.engine.loadInstruments(raw, "all", "")
+        }
+    }
+
+    fun engineSearchInstruments(kind: String, query: String) {
+        val base = engineBase() ?: return
+        viewModelScope.launch { container.engine.loadInstruments(base, kind, query) }
+    }
+
+    /** Ask the backend for a full entry/exit plan, sized automatically from the balance. */
+    fun engineLoadSignal(symbol: String, timeframe: String) {
+        val base = engineBase() ?: return
+        viewModelScope.launch {
+            container.engine.loadSignal(base, symbol, timeframe, settings.value.accountBalance)
+        }
+    }
+
+    fun engineRefreshAutopilot() {
+        val base = engineBase() ?: return
+        viewModelScope.launch { container.engine.loadAutopilot(base) }
+    }
+
+    /** start | stop | cycle on the BACKEND's paper trader. It never reaches a broker. */
+    fun engineAutopilotAction(action: String) {
+        val base = engineBase() ?: return
+        viewModelScope.launch { container.engine.controlAutopilot(base, action) }
+    }
+
+    fun engineClearError() = container.engine.clearError()
+
     val watchSettings: StateFlow<Map<String, WatchSelection>> = container.watchSettings.selections
     val watch: StateFlow<WatchState> = container.watch.state
     val news = container.news.state

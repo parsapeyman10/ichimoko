@@ -59,6 +59,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     var key by remember { mutableStateOf("") }
     var symbol by remember { mutableStateOf(settings.symbol) }
     var newsUrl by remember { mutableStateOf(settings.newsBaseUrl) }
+    var engineUrl by remember { mutableStateOf(settings.engineBaseUrl) }
     // Never prefill a saved secret in an editable field; blank on entry, like the API key above.
     var newsAiKey by remember { mutableStateOf("") }
     var newsAiBaseUrl by remember { mutableStateOf(settings.newsAiBaseUrl) }
@@ -76,6 +77,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     LaunchedEffect(settings.apiKey) { key = "" } // clear input only after a saved key changes
     LaunchedEffect(settings.symbol) { symbol = settings.symbol }
     LaunchedEffect(settings.newsBaseUrl) { newsUrl = settings.newsBaseUrl }
+    LaunchedEffect(settings.engineBaseUrl) { engineUrl = settings.engineBaseUrl }
     LaunchedEffect(settings.newsAiApiKey) { newsAiKey = "" }
     LaunchedEffect(settings.newsAiBaseUrl) { newsAiBaseUrl = settings.newsAiBaseUrl }
     LaunchedEffect(settings.newsAiModel) { newsAiModel = settings.newsAiModel }
@@ -260,6 +262,21 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             )
             Text("تختی SpanB 52 همان میانگین ۵۲ کندل ایچیموکو است: اگر چند کندل ثابت بماند یعنی سقف/کف ۵۲تایی عوض نشده؛ فقط وقتی قیمت از آن و از رنج کوتاه خارج شود به‌عنوان سناریوی رشد/ریزش بررسی می‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 6.dp))
+        }
+
+        SectionCard("موتور سرور (اختیاری)",
+            "بک‌اند پایتون این پروژه: نمادهای چندگانه، محاسبهٔ خودکار حجم و تریدر خودکار کاغذی. خاموش بودنش هیچ اثری روی موتور داخلی گوشی ندارد") {
+            OutlinedTextField(
+                value = engineUrl, onValueChange = { engineUrl = it }, singleLine = true,
+                label = { Text("نشانی HTTPS بک‌اند (اختیاری)") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Button(onClick = { viewModel.saveEngineBaseUrl(engineUrl) }, modifier = Modifier.padding(top = 8.dp)) {
+                Text("ذخیره/حذف نشانی موتور سرور")
+            }
+            Text("خالی بگذارید تا خاموش شود. فقط https پذیرفته می‌شود (به‌جز localhost)، بدون مسیر یا پارامتر. سفارش واقعی روی سرور هم بسته است و فقط معاملهٔ کاغذی انجام می‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 6.dp))
         }
 
