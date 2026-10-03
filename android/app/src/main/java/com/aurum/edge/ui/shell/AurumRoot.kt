@@ -84,6 +84,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
                     AurumTab.Signal -> SignalScreen(viewModel, market, onOpenNews = { open(AurumTab.News) })
                     AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) })
                     AurumTab.News -> PersianNewsScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) })
+                    AurumTab.Engine -> EngineScreen(viewModel, settings)
                     AurumTab.Learn -> LearnScreen(viewModel)
                     AurumTab.Journal -> JournalScreen(viewModel, market)
                     AurumTab.Update -> UpdateScreen(viewModel)
