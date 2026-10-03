@@ -59,6 +59,7 @@ class EngineApiTest {
         assertNull(EngineApi.normalizeBase("https://"))
         assertNull(EngineApi.normalizeBase("https:"))
         assertNull(EngineApi.normalizeBase("//"))
+        assertNull(EngineApi.normalizeBase("intranet"))      // dotless host, likely a typo
         assertNull(EngineApi.normalizeBase("h ttp://broken"))
         assertNull(EngineApi.normalizeBase("x".repeat(500)))
     }

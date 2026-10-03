@@ -65,6 +65,10 @@ object EngineApi {
         val uri = runCatching { URI(withScheme) }.getOrNull() ?: return null
         val host = uri.host?.lowercase() ?: return null
         if (host.isBlank() || uri.rawUserInfo != null) return null
+        // A dotless host is almost always a typo being rescued into something plausible:
+        // "https:" has no "//", so the scheme prefix turns it into the host "https". Require
+        // a real dotted name or bracketed IPv6, with the known local hosts as the exception.
+        if (!host.contains('.') && !host.startsWith("[") && host !in CLEARTEXT_HOSTS) return null
         if (uri.path.orEmpty() !in listOf("", "/")) return null
         if (uri.rawQuery != null || uri.rawFragment != null) return null
         val scheme = uri.scheme?.lowercase() ?: return null
