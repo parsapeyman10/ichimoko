@@ -112,6 +112,13 @@ class InstrumentSpec:
     contract_unit: str        # "oz", "lot", "coin" — what 1 unit of position means
     unit_label: str           # human label for the sizing panel
     display: str              # pretty name
+    # ── venue execution limits, in units of the BASE asset ──
+    # These decide whether a computed position size is actually tradable. On a small
+    # account the venue minimum frequently forces MORE risk than intended, and that has to
+    # be detected rather than silently rounded away.
+    min_qty: float = 0.0      # smallest tradable quantity
+    qty_step: float = 0.0     # quantity increment
+    min_notional: float = 0.0 # smallest tradable order value, in quote currency
     model: SymbolModel = field(default_factory=SymbolModel)
     venue: str = ""           # where candles come from ("twelve_data", "binance", ...)
 
@@ -185,6 +192,29 @@ class InstrumentSpec:
 
     def is_scalpable(self) -> bool:
         return self.model.scalp_enabled
+
+    def quantize_qty(self, units: float) -> float:
+        """Round a desired quantity DOWN to something the venue will actually accept.
+
+        Rounding down (never up) keeps the realised risk at or below the intended risk.
+        Returns 0.0 when the amount is below the venue minimum — the caller must treat
+        that as "not tradable at this size", not as "trade the minimum anyway".
+        """
+        if units <= 0:
+            return 0.0
+        step = self.qty_step
+        if step > 0:
+            units = math.floor(units / step + 1e-9) * step
+            # Re-round to kill binary float dust (e.g. 0.30000000000000004).
+            units = round(units, max(0, decimals_from_tick(step)))
+        if self.min_qty > 0 and units < self.min_qty:
+            return 0.0
+        return units
+
+    def meets_min_notional(self, units: float, price: float) -> bool:
+        if self.min_notional <= 0:
+            return True
+        return units * price >= self.min_notional
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -390,6 +420,9 @@ def crypto_spec(
     quote: str,
     tick_size: float,
     venue: str = "binance",
+    min_qty: float = 0.0,
+    qty_step: float = 0.0,
+    min_notional: float = 0.0,
 ) -> InstrumentSpec:
     """Build a spec for a Binance SPOT symbol from its real exchange filters."""
     precision = decimals_from_tick(tick_size)
@@ -409,6 +442,9 @@ def crypto_spec(
         display=f"{base.upper()}/{quote.upper()}",
         model=model,
         venue=venue,
+        min_qty=min_qty,
+        qty_step=qty_step,
+        min_notional=min_notional,
     )
 
 
@@ -425,8 +461,11 @@ def forex_spec(symbol: str) -> InstrumentSpec:
         tick_size=tick,
         pip_size=pip,
         contract_unit="lot",
-        unit_label="lot (100k)",
+        unit_label="واحد پایه",
         display=symbol,
+        # 0.01 lot = 1,000 base units is the standard retail micro lot.
+        min_qty=1_000.0,
+        qty_step=1_000.0,
         model=_fx_model(symbol),
         venue="twelve_data",
     )
@@ -447,6 +486,9 @@ def metal_spec(symbol: str) -> InstrumentSpec:
         contract_unit="oz",
         unit_label="troy ounce",
         display=f"{base}/{quote}",
+        # 0.01 lot on gold = 1 troy ounce.
+        min_qty=1.0,
+        qty_step=1.0,
         model=model,
         venue="twelve_data",
     )
@@ -499,6 +541,9 @@ def spec_to_dict(spec: InstrumentSpec) -> dict:
         "pip_size": spec.pip_size,
         "contract_unit": spec.contract_unit,
         "unit_label": spec.unit_label,
+        "min_qty": spec.min_qty,
+        "qty_step": spec.qty_step,
+        "min_notional": spec.min_notional,
         "scalp_enabled": spec.model.scalp_enabled,
         "model": {
             "thresholds": spec.model.thresholds,

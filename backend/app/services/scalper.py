@@ -23,6 +23,7 @@ from app.services import instruments as inst
 from app.services import universe
 from app.services.history import DataUnavailable
 from app.services.indicators import adx, atr, ema, ichimoku, support_resistance
+from app.services.risk_advisor import AccountState, advise
 from app.services.strategy import evaluate_scalp, get_trailing_stop, should_exit
 
 # Scalping needs enough bars for EMA200 + Ichimoku displacement.
@@ -152,36 +153,25 @@ def _exit_plan(signal: TradeSignal, candles: list[Candle], spec: inst.Instrument
     }
 
 
-def _sizing(spec: inst.InstrumentSpec, signal: TradeSignal, equity: float, risk_pct: float) -> dict | None:
-    if signal.entry is None or signal.stop_loss is None:
-        return None
-    risk_price = abs(signal.entry - signal.stop_loss)
-    if risk_price <= 0 or equity <= 0:
-        return None
-    risk_cash = equity * (risk_pct / 100)
-    units = risk_cash / risk_price
-    notional = units * signal.entry
-    return {
-        "risk_pct": risk_pct,
-        "risk_cash": round(risk_cash, 2),
-        "units": round(units, 6),
-        "unit_label": spec.unit_label,
-        "lots": round(units / 100_000, 4) if spec.kind == inst.FOREX else None,
-        "notional": round(notional, 2),
-        "note": "حجم بر پایهٔ فاصلهٔ واقعی حد ضرر همین نماد محاسبه شده است، نه یک عدد ثابت طلا.",
-    }
-
-
 async def evaluate_symbol(
     settings: Settings,
     symbol: str,
     timeframe: Timeframe,
     bars: int = DEFAULT_BARS,
     equity: float = 100.0,
-    risk_pct: float = 0.5,
+    risk_pct: float | None = None,
     enforce_scalp_policy: bool = True,
+    profile: str = "balanced",
+    daily_pnl_pct: float = 0.0,
+    consecutive_losses: int = 0,
+    open_positions: int = 0,
 ) -> dict:
-    """Full scalp assessment for one symbol: entry signal + exit plan + sizing."""
+    """Full scalp assessment for one symbol: entry signal + exit plan + auto-sized risk.
+
+    `risk_pct=None` (the default) means the engine decides the risk itself from the
+    account state, the signal's conviction and the instrument tier — the caller only has
+    to supply a balance.
+    """
     candles, spec = await universe.load_candles(settings, symbol, timeframe, limit=max(bars, MIN_BARS))
 
     policy_block: str | None = None
@@ -207,6 +197,17 @@ async def evaluate_symbol(
 
     context, quote = await build_context(settings, spec, timeframe, candles, equity)
     signal = evaluate_scalp(candles, context, spec)
+
+    account = AccountState(
+        balance=equity, profile=profile, daily_pnl_pct=daily_pnl_pct,
+        consecutive_losses=consecutive_losses, open_positions=open_positions,
+    )
+    risk = advise(
+        spec, signal, account,
+        volatility_regime=context.volatility_regime,
+        timeframe=timeframe.value,
+        manual_risk_pct=risk_pct,
+    )
 
     last = candles[-1]
     return {
@@ -251,7 +252,9 @@ async def evaluate_symbol(
             "expires_after_seconds": signal.expires_after_seconds,
         },
         "exit_plan": _exit_plan(signal, candles, spec),
-        "sizing": _sizing(spec, signal, equity, risk_pct),
+        "risk": risk,
+        # Kept for older callers; the full decision lives under "risk".
+        "sizing": risk["sizing"],
     }
 
 
@@ -357,8 +360,9 @@ async def scan(
     timeframe: Timeframe,
     bars: int = DEFAULT_BARS,
     equity: float = 100.0,
-    risk_pct: float = 0.5,
+    risk_pct: float | None = None,
     only_signals: bool = False,
+    profile: str = "balanced",
 ) -> dict:
     """Evaluate many symbols concurrently and rank by conviction."""
     symbols = [inst.normalize(s) for s in symbols if s and s.strip()][:40]
@@ -370,7 +374,9 @@ async def scan(
     async def one(sym: str) -> dict:
         async with semaphore:
             try:
-                return await evaluate_symbol(settings, sym, timeframe, bars, equity, risk_pct)
+                return await evaluate_symbol(
+                    settings, sym, timeframe, bars, equity, risk_pct, profile=profile,
+                )
             except (DataUnavailable, ValueError) as exc:
                 return {"symbol": sym, "ok": False, "error": str(exc), "timeframe": timeframe.value}
             except Exception as exc:  # never let one bad symbol kill the scan

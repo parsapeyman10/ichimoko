@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, ArrowDownRight, ArrowUpRight, Ban, Crosshair, Gauge,
-  LogIn, LogOut, RefreshCw, Search, Stethoscope, Target, Timer,
+  LogIn, LogOut, RefreshCw, Search, Sparkles, Stethoscope, Target, Timer, Wallet,
 } from 'lucide-react';
 import { apiGet } from '../lib/api';
 
@@ -88,13 +88,47 @@ type ExitPlan = {
 };
 
 type Sizing = {
+  tradable: boolean;
+  reason?: string;
+  blockers?: string[];
+  warnings?: string[];
+  units?: number;
+  unit_label?: string;
+  lots?: number | null;
+  ideal_units?: number;
+  min_units?: number;
+  risk_cash?: number;
+  risk_pct?: number;
+  risk_cash_target?: number;
+  notional?: number;
+  leverage?: number;
+  max_leverage?: number;
+  margin_required?: number;
+  execution_cost?: number;
+  gross_reward?: number;
+  net_reward?: number;
+  net_rr?: number;
+  breakeven_win_rate?: number;
+  stop_distance_units?: number;
+  cost_unit?: 'pip' | 'bp';
+  forced_risk_pct?: number;
+  min_balance_needed?: number;
+};
+
+type RiskAdvice = {
+  auto: boolean;
+  balance: number;
+  profile: string;
   risk_pct: number;
-  risk_cash: number;
-  units: number;
-  unit_label: string;
-  lots: number | null;
-  notional: number;
-  note: string;
+  reasoning: { factor: string; effect: string; why: string }[];
+  sizing: Sizing;
+  guardrails: {
+    max_risk_per_trade_pct: number;
+    daily_loss_limit_pct: number;
+    remaining_daily_budget_pct: number;
+    max_concurrent_positions: number;
+    note: string;
+  };
 };
 
 type ScalpResult = {
@@ -120,6 +154,7 @@ type ScalpResult = {
   };
   signal?: Signal;
   exit_plan?: ExitPlan;
+  risk?: RiskAdvice;
   sizing?: Sizing | null;
 };
 
@@ -166,7 +201,10 @@ export default function ScalpPanel() {
   const [query, setQuery] = useState('');
   const [watchlist, setWatchlist] = useState<string[]>(DEFAULT_WATCHLIST);
   const [timeframe, setTimeframe] = useState<(typeof TIMEFRAMES)[number]>('5m');
-  const [equity, setEquity] = useState(100);
+  const [equity, setEquity] = useState(1000);
+  // Auto by default: the engine picks the risk %, the user only states their balance.
+  const [autoRisk, setAutoRisk] = useState(true);
+  const [profile, setProfile] = useState<'conservative' | 'balanced' | 'aggressive'>('balanced');
   const [riskPct, setRiskPct] = useState(0.5);
   const [onlySignals, setOnlySignals] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -219,9 +257,11 @@ export default function ScalpPanel() {
       symbols: watchlist.join(','),
       timeframe,
       equity: String(equity),
-      risk_pct: String(riskPct),
       only_signals: String(onlySignals),
+      profile,
     });
+    // Omitting risk_pct entirely is what switches the backend into automatic mode.
+    if (!autoRisk) params.set('risk_pct', String(riskPct));
     const result = await apiGet<ScanResponse>(`/api/v1/scalp/scan?${params}`);
     setScanning(false);
     if (result.ok) {
@@ -231,7 +271,7 @@ export default function ScalpPanel() {
       setScan(null);
       setScanError(result.error);
     }
-  }, [watchlist, timeframe, equity, riskPct, onlySignals]);
+  }, [watchlist, timeframe, equity, riskPct, onlySignals, autoRisk, profile]);
 
   const loadDiagnosis = useCallback(async (symbol: string) => {
     setDiagLoading(true);
@@ -269,6 +309,7 @@ export default function ScalpPanel() {
             همان موتور اسکلپ، هم روی جفت‌ارزها و هم روی کریپتوی دلاری بایننس. هر نماد با مدل
             مخصوص خودش امتیازدهی می‌شود — آستانه، کیلزون، حداقل ADX، نسبت ریوارد و دقت قیمت متفاوت است.
             هزینهٔ فارکس با پیپ سنجیده می‌شود و هزینهٔ کریپتو با بیپ به‌علاوهٔ کارمزد صرافی.
+            <b> فقط موجودی حساب را وارد کنید</b> — درصد ریسک، حجم، اهرم و مارجین خودکار محاسبه می‌شوند.
           </p>
         </div>
         <button type="button" className="scalp-run" onClick={runScan} disabled={scanning}>
@@ -290,18 +331,42 @@ export default function ScalpPanel() {
           </div>
         </div>
         <div className="scalp-field">
-          <label htmlFor="scalp-equity">موجودی حساب ($)</label>
+          <label htmlFor="scalp-equity">موجودی حساب ($) — تنها عدد لازم</label>
           <input
             id="scalp-equity" type="number" min={1} step={10} value={equity}
             onChange={(e) => setEquity(Math.max(1, Number(e.target.value) || 1))}
           />
         </div>
         <div className="scalp-field">
-          <label htmlFor="scalp-risk">ریسک هر معامله (٪)</label>
-          <input
-            id="scalp-risk" type="number" min={0.1} max={5} step={0.1} value={riskPct}
-            onChange={(e) => setRiskPct(Math.min(5, Math.max(0.1, Number(e.target.value) || 0.5)))}
-          />
+          <label htmlFor="scalp-profile">محافظه‌کاری</label>
+          <div className="scalp-tfs" id="scalp-profile">
+            {([
+              ['conservative', 'کم‌ریسک'],
+              ['balanced', 'متعادل'],
+              ['aggressive', 'پرریسک'],
+            ] as const).map(([key, label]) => (
+              <button key={key} type="button" className={key === profile ? 'on' : ''} onClick={() => setProfile(key)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="scalp-field">
+          <label htmlFor="scalp-risk">ریسک هر معامله</label>
+          <div className="scalp-risk-mode">
+            <button
+              type="button" className={autoRisk ? 'on' : ''} onClick={() => setAutoRisk(true)}
+            >
+              <Sparkles size={11} /> خودکار
+            </button>
+            <input
+              id="scalp-risk" type="number" min={0.1} max={2} step={0.1} value={riskPct}
+              disabled={autoRisk}
+              onFocus={() => setAutoRisk(false)}
+              onChange={(e) => { setAutoRisk(false); setRiskPct(Math.min(2, Math.max(0.1, Number(e.target.value) || 0.5))); }}
+            />
+            <span>٪</span>
+          </div>
         </div>
         <label className="scalp-check">
           <input type="checkbox" checked={onlySignals} onChange={(e) => setOnlySignals(e.target.checked)} />
@@ -465,11 +530,11 @@ export default function ScalpPanel() {
                       <div><dt>رژیم نوسان</dt><dd>{detail.context?.volatility_regime ?? '—'}</dd></div>
                       <div><dt>کندل‌های واقعی</dt><dd>{detail.bars}</dd></div>
                     </dl>
-                    {detail.sizing && (
+                    {detail.risk?.sizing?.tradable && (
                       <p className="scalp-size">
-                        <Gauge size={11} /> حجم: <b>{detail.sizing.units}</b> {detail.sizing.unit_label}
-                        {detail.sizing.lots !== null && <> · <b>{detail.sizing.lots}</b> لات</>}
-                        {' '}· ریسک ${detail.sizing.risk_cash}
+                        <Gauge size={11} /> حجم: <b>{detail.risk.sizing.units}</b> {detail.risk.sizing.unit_label}
+                        {detail.risk.sizing.lots != null && <> · <b>{detail.risk.sizing.lots}</b> لات</>}
+                        {' '}· ریسک ${detail.risk.sizing.risk_cash}
                       </p>
                     )}
                   </div>
@@ -496,6 +561,94 @@ export default function ScalpPanel() {
                       <p className="scalp-empty">{detail.exit_plan?.note}</p>
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* automatic risk + sizing */}
+              {detail.ok && detail.risk && (
+                <div className="scalp-card risk">
+                  <h5>
+                    <Wallet size={13} /> حجم و ریسک — محاسبهٔ خودکار
+                    {detail.risk.auto
+                      ? <span className="auto-tag"><Sparkles size={9} /> خودکار</span>
+                      : <span className="auto-tag manual">دستی</span>}
+                  </h5>
+
+                  <p className="scalp-verdict">
+                    موجودی <b>${detail.risk.balance.toLocaleString()}</b> ·
+                    ریسک انتخابی موتور <b>{detail.risk.risk_pct}%</b> ·
+                    بودجهٔ باقی‌ماندهٔ امروز <b>{detail.risk.guardrails.remaining_daily_budget_pct}%</b>
+                  </p>
+
+                  {/* why this percentage */}
+                  <ol className="scalp-reasoning">
+                    {detail.risk.reasoning.map((step) => (
+                      <li key={`${step.factor}-${step.effect}`}>
+                        <b>{step.factor}</b>
+                        <code>{step.effect}</code>
+                        <em>{step.why}</em>
+                      </li>
+                    ))}
+                  </ol>
+
+                  {detail.risk.sizing.tradable ? (
+                    <>
+                      <div className="scalp-numbers">
+                        <div>
+                          <span>حجم معامله</span>
+                          <b>{detail.risk.sizing.units} {detail.risk.sizing.unit_label}</b>
+                        </div>
+                        {detail.risk.sizing.lots != null && (
+                          <div><span>معادل لات</span><b>{detail.risk.sizing.lots}</b></div>
+                        )}
+                        <div>
+                          <span>ریسک واقعی</span>
+                          <b className="red">${detail.risk.sizing.risk_cash} ({detail.risk.sizing.risk_pct}%)</b>
+                        </div>
+                        <div>
+                          <span>فاصلهٔ حد ضرر</span>
+                          <b>{detail.risk.sizing.stop_distance_units} {unitLabel(detail.risk.sizing.cost_unit)}</b>
+                        </div>
+                        <div><span>ارزش قرارداد</span><b>${detail.risk.sizing.notional?.toLocaleString()}</b></div>
+                        <div>
+                          <span>اهرم لازم</span>
+                          <b>{detail.risk.sizing.leverage}x <i>از {detail.risk.sizing.max_leverage}x</i></b>
+                        </div>
+                        <div><span>مارجین لازم</span><b>${detail.risk.sizing.margin_required}</b></div>
+                        <div><span>هزینهٔ اجرا</span><b className="red">${detail.risk.sizing.execution_cost}</b></div>
+                        <div>
+                          <span>سود خالص هدف</span>
+                          <b className="green">${detail.risk.sizing.net_reward}</b>
+                        </div>
+                        <div>
+                          <span>R:R بعد از هزینه</span>
+                          <b>{detail.risk.sizing.net_rr}</b>
+                        </div>
+                        <div>
+                          <span>وین‌ریت سربه‌سر</span>
+                          <b>{detail.risk.sizing.breakeven_win_rate}%</b>
+                        </div>
+                      </div>
+                      {detail.risk.sizing.warnings?.map((w) => (
+                        <p key={w} className="scalp-warn"><AlertTriangle size={12} /> {w}</p>
+                      ))}
+                      {detail.risk.sizing.blockers?.map((b) => (
+                        <p key={b} className="scalp-error"><Ban size={12} /> {b}</p>
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      <p className="scalp-error"><Ban size={12} /> {detail.risk.sizing.reason}</p>
+                      {detail.risk.sizing.min_balance_needed != null && (
+                        <p className="scalp-warn">
+                          <Wallet size={12} /> برای معاملهٔ ایمن این نماد با این فاصلهٔ حد ضرر،
+                          حداقل حدود <b>${detail.risk.sizing.min_balance_needed.toLocaleString()}</b> موجودی لازم است.
+                        </p>
+                      )}
+                    </>
+                  )}
+
+                  <p className="scalp-note">{detail.risk.guardrails.note}</p>
                 </div>
               )}
 

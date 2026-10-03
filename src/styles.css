@@ -415,3 +415,33 @@ h1 { margin: 5px 0 0; font-size: 20px; line-height: 1; letter-spacing: -.02em; }
   .scalp-universe { border-right: 0; border-bottom: 1px solid var(--line); }
   .scalp-table { font-size: 9px; }
 }
+
+/* ─── automatic risk / sizing card ───────────────────────────────────── */
+.scalp-risk-mode { display: flex; align-items: center; gap: 5px; }
+.scalp-risk-mode button { display: flex; align-items: center; gap: 4px; height: 29px; padding: 0 9px; border: 1px solid var(--line); border-radius: 5px; background: #0e1116; color: #8b929f; font: 600 9px 'DM Mono'; cursor: pointer; }
+.scalp-risk-mode button.on { border-color: #c18e35; background: #f1bc4b18; color: var(--gold); }
+.scalp-risk-mode input { width: 64px; height: 29px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: #0e1116; color: #e5e7eb; font: 500 11px 'DM Mono'; }
+.scalp-risk-mode input:disabled { opacity: .4; }
+.scalp-risk-mode span { color: #6b7280; font-size: 10px; }
+
+.scalp-card.risk { margin-top: 11px; }
+.scalp-card.risk h5 { justify-content: flex-start; }
+.auto-tag { display: inline-flex; align-items: center; gap: 3px; margin-right: auto; padding: 2px 7px; border-radius: 4px; background: #28c99b18; color: var(--green); font: 700 8px 'DM Mono'; }
+.auto-tag.manual { background: #ffffff0d; color: #6b7280; }
+
+.scalp-reasoning { list-style: none; margin: 0 0 11px; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.scalp-reasoning li { display: grid; grid-template-columns: 90px 110px 1fr; gap: 8px; align-items: center; padding: 5px 8px; border-radius: 5px; background: #ffffff05; font-size: 9px; }
+.scalp-reasoning b { color: #cfd2da; }
+.scalp-reasoning code { font-family: 'DM Mono'; color: var(--gold); font-size: 9px; }
+.scalp-reasoning em { font-style: normal; color: #6b7280; line-height: 1.6; }
+
+.scalp-numbers { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 7px; }
+.scalp-numbers > div { padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: #0e1116; }
+.scalp-numbers span { display: block; color: #6b7280; font-size: 8px; margin-bottom: 4px; }
+.scalp-numbers b { font: 700 11px 'DM Mono'; color: #e5e7eb; }
+.scalp-numbers b i { font-style: normal; font-size: 8px; color: #6b7280; font-weight: 500; }
+.scalp-note { margin: 10px 0 0; padding-top: 8px; border-top: 1px solid var(--line-soft); color: #6b7280; font-size: 8px; line-height: 1.7; }
+
+@media (max-width: 700px) {
+  .scalp-reasoning li { grid-template-columns: 1fr; gap: 2px; }
+}

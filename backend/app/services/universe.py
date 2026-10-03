@@ -63,17 +63,43 @@ _exchange_lock = asyncio.Lock()
 # Binance universe
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _number(value: object) -> float | None:
+    try:
+        parsed = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) and parsed >= 0 else None
+
+
 def _tick_from_filters(filters: object) -> float | None:
     if not isinstance(filters, list):
         return None
     for item in filters:
         if isinstance(item, dict) and item.get("filterType") == "PRICE_FILTER":
-            try:
-                tick = float(item["tickSize"])
-            except (KeyError, TypeError, ValueError):
-                return None
-            return tick if math.isfinite(tick) and tick > 0 else None
+            tick = _number(item.get("tickSize"))
+            return tick if tick and tick > 0 else None
     return None
+
+
+def _lot_limits(filters: object) -> tuple[float, float, float]:
+    """(min_qty, qty_step, min_notional) straight from Binance's own filters.
+
+    These are what make a size actually executable. Guessing them would mean telling the
+    user to place an order the exchange will reject.
+    """
+    min_qty = qty_step = min_notional = 0.0
+    if not isinstance(filters, list):
+        return min_qty, qty_step, min_notional
+    for item in filters:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("filterType")
+        if kind == "LOT_SIZE":
+            min_qty = _number(item.get("minQty")) or 0.0
+            qty_step = _number(item.get("stepSize")) or 0.0
+        elif kind in ("NOTIONAL", "MIN_NOTIONAL"):
+            min_notional = _number(item.get("minNotional")) or 0.0
+    return min_qty, qty_step, min_notional
 
 
 async def load_binance_universe(force: bool = False) -> list[inst.InstrumentSpec]:
@@ -110,7 +136,11 @@ async def load_binance_universe(force: bool = False) -> list[inst.InstrumentSpec
             tick = _tick_from_filters(row.get("filters"))
             if tick is None:
                 continue
-            out.append(inst.crypto_spec(symbol, base, quote, tick))
+            min_qty, qty_step, min_notional = _lot_limits(row.get("filters"))
+            out.append(inst.crypto_spec(
+                symbol, base, quote, tick,
+                min_qty=min_qty, qty_step=qty_step, min_notional=min_notional,
+            ))
 
         if not out:
             raise DataUnavailable("هیچ نماد SPOT فعالی از بایننس دریافت نشد")

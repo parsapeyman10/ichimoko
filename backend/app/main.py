@@ -415,12 +415,24 @@ async def scalp_signal(
     symbol: str = Query(..., min_length=2, max_length=24),
     timeframe: Timeframe = Timeframe.M5,
     bars: int = Query(400, ge=220, le=2000),
-    equity: float = Query(100.0, gt=0, le=10_000_000),
-    risk_pct: float = Query(0.5, gt=0, le=5),
+    equity: float = Query(100.0, gt=0, le=10_000_000, description="موجودی حساب — تنها عدد لازم"),
+    risk_pct: float | None = Query(None, gt=0, le=2, description="خالی بگذارید تا خودکار تعیین شود"),
+    profile: str = Query("balanced", pattern="^(conservative|balanced|aggressive)$"),
+    daily_pnl_pct: float = Query(0.0, ge=-100, le=100),
+    consecutive_losses: int = Query(0, ge=0, le=50),
+    open_positions: int = Query(0, ge=0, le=50),
 ):
-    """Entry plan + exit plan + position size for one symbol, on its own model."""
+    """Entry plan + exit plan + automatically sized risk for one symbol.
+
+    Leave `risk_pct` empty (the default) and the engine chooses the risk itself from the
+    balance, the signal's conviction, the instrument tier and the account's recent state.
+    """
     try:
-        return await scalper_svc.evaluate_symbol(settings, symbol, timeframe, bars, equity, risk_pct)
+        return await scalper_svc.evaluate_symbol(
+            settings, symbol, timeframe, bars, equity, risk_pct,
+            profile=profile, daily_pnl_pct=daily_pnl_pct,
+            consecutive_losses=consecutive_losses, open_positions=open_positions,
+        )
     except (DataUnavailable, ValueError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
 
@@ -444,13 +456,15 @@ async def scalp_scan(
     timeframe: Timeframe = Timeframe.M5,
     bars: int = Query(300, ge=220, le=1000),
     equity: float = Query(100.0, gt=0, le=10_000_000),
-    risk_pct: float = Query(0.5, gt=0, le=5),
+    risk_pct: float | None = Query(None, gt=0, le=2),
     only_signals: bool = Query(False),
+    profile: str = Query("balanced", pattern="^(conservative|balanced|aggressive)$"),
 ):
     """Scan up to 40 comma-separated symbols concurrently and rank them by conviction."""
     try:
         return await scalper_svc.scan(
-            settings, symbols.split(","), timeframe, bars, equity, risk_pct, only_signals
+            settings, symbols.split(","), timeframe, bars, equity, risk_pct,
+            only_signals, profile=profile,
         )
     except (DataUnavailable, ValueError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from None
