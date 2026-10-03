@@ -44,6 +44,9 @@ from app.services.web_news import WebNewsFeed
 from app.services.crypto_scanner import CryptoScanner
 from app.services.sentiment import SentimentEngine
 from app.services.strategy import evaluate_scalp, explain_profitability
+from app.services import instruments as instruments_svc
+from app.services import scalper as scalper_svc
+from app.services import universe as universe_svc
 from app.services.ytd_trades import get_ytd_report
 
 settings = get_settings()
@@ -350,6 +353,107 @@ async def web_headlines():
 async def crypto_candidates():
     """Read-only, strict spot-market screening; NOT pump prediction or a trade intent."""
     return await crypto_scanner.snapshot()
+
+
+# ─── multi-symbol universe, candles and scalping ──────────────────────
+# Everything below works for ANY supported symbol. The legacy endpoints above remain
+# bound to AURUM_MARKET_SYMBOL (XAU/USD) so existing clients keep working unchanged.
+
+
+@app.get("/api/v1/instruments")
+async def list_instruments(
+    kind: str = Query("all", pattern="^(all|forex|metal|crypto)$"),
+    q: str = Query("", max_length=30),
+    limit: int = Query(400, ge=1, le=3000),
+):
+    """Full tradable universe: FX pairs + metals + every TRADING Binance SPOT symbol."""
+    try:
+        return await universe_svc.search_universe(settings, kind=kind, query=q, limit=limit)
+    except DataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+@app.get("/api/v1/instruments/spec")
+async def instrument_spec(symbol: str = Query(..., min_length=2, max_length=24)):
+    """Contract spec + the per-symbol strategy model actually used to score it."""
+    try:
+        spec = await universe_svc.resolve_spec(symbol)
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    return instruments_svc.spec_to_dict(spec)
+
+
+@app.get("/api/v1/symbol/candles", response_model=list[Candle])
+async def symbol_candles(
+    symbol: str = Query(..., min_length=2, max_length=24),
+    timeframe: Timeframe = Timeframe.M5,
+    limit: int = Query(500, ge=10, le=2000),
+):
+    """Real closed candles for any symbol — Binance for crypto, Twelve Data for FX/metals."""
+    try:
+        candles, _ = await universe_svc.load_candles(settings, symbol, timeframe, limit=limit)
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    return candles
+
+
+@app.get("/api/v1/symbol/quote")
+async def symbol_quote(symbol: str = Query(..., min_length=2, max_length=24)):
+    """Real live bid/ask used for the spread gate. Never a candle, never interpolated."""
+    try:
+        spec = await universe_svc.resolve_spec(symbol)
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from None
+    quote = await universe_svc.live_quote(spec)
+    if not quote:
+        raise HTTPException(status_code=503, detail=f"قیمت زندهٔ {spec.display} از منبع واقعی دریافت نشد")
+    return {"symbol": spec.symbol, "display": spec.display, **quote}
+
+
+@app.get("/api/v1/scalp/signal")
+async def scalp_signal(
+    symbol: str = Query(..., min_length=2, max_length=24),
+    timeframe: Timeframe = Timeframe.M5,
+    bars: int = Query(400, ge=220, le=2000),
+    equity: float = Query(100.0, gt=0, le=10_000_000),
+    risk_pct: float = Query(0.5, gt=0, le=5),
+):
+    """Entry plan + exit plan + position size for one symbol, on its own model."""
+    try:
+        return await scalper_svc.evaluate_symbol(settings, symbol, timeframe, bars, equity, risk_pct)
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+@app.get("/api/v1/scalp/diagnose")
+async def scalp_diagnose(
+    symbol: str = Query(..., min_length=2, max_length=24),
+    timeframe: Timeframe = Timeframe.M5,
+    bars: int = Query(400, ge=220, le=2000),
+):
+    """Gate-by-gate explanation of why this symbol is (or is not) producing a trade."""
+    try:
+        return await scalper_svc.diagnose(settings, symbol, timeframe, bars)
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+
+
+@app.get("/api/v1/scalp/scan")
+async def scalp_scan(
+    symbols: str = Query(..., min_length=2, max_length=800),
+    timeframe: Timeframe = Timeframe.M5,
+    bars: int = Query(300, ge=220, le=1000),
+    equity: float = Query(100.0, gt=0, le=10_000_000),
+    risk_pct: float = Query(0.5, gt=0, le=5),
+    only_signals: bool = Query(False),
+):
+    """Scan up to 40 comma-separated symbols concurrently and rank them by conviction."""
+    try:
+        return await scalper_svc.scan(
+            settings, symbols.split(","), timeframe, bars, equity, risk_pct, only_signals
+        )
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
 
 
 # ─── real execution boundary (intentionally disabled until independently audited) ──

@@ -1,20 +1,35 @@
 from statistics import median
+
 from app.models import Candle, Direction, Impact, StrategyContext, TradeSignal
 from app.services.indicators import atr, ema, ichimoku, rsi, session_vwap, macd, bollinger, stochastic, adx, support_resistance
+from app.services.instruments import GOLD_SPEC, InstrumentSpec
 
 
 def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
 
 
-def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSignal:
+def evaluate_scalp(
+    candles: list[Candle],
+    context: StrategyContext,
+    spec: InstrumentSpec | None = None,
+) -> TradeSignal:
     """Evaluate a closed-bar 7/22/44 Ichimoku XAU/USD scalp with complementary confirmation.
 
     مکمل‌ها: Ichimoku (روند) + VWAP/EMA200 (روند کلان) + RSI/Stochastic (مومنتوم) + MACD (تایید) + Bollinger/ATR (نوسان) + ADX (قدرت روند)
 
     Signals are deterministic and only valid after a candle closes. The function
     does not place orders; execution must repeat spread/event/risk checks atomically.
+
+    [spec] describes the instrument actually being traded: quoting precision, tick size,
+    pip size, session windows and the per-symbol model. Every price-scale constant below
+    reads from it. Omitting it keeps the historical XAU/USD behaviour byte-for-byte, which
+    is why the single-symbol callers are unchanged — but passing a real spec is what makes
+    EUR/USD, USD/JPY or BTCUSDT produce a usable trade plan instead of three identical
+    2-decimal numbers.
     """
+    spec = spec or GOLD_SPEC
+    model = spec.model
     if len(candles) < 200:
         return TradeSignal(action=Direction.NO_TRADE, confidence=0, blockers=["At least 200 closed candles required"])
 
@@ -61,7 +76,7 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
         bear_cross = bool(pt2 is not None and pk2 is not None and pt2 >= pk2 and prev_t < prev_k and t < k)
 
     if not bull_cross and not bear_cross:
-        return TradeSignal(action=Direction.NO_TRADE, confidence=38, blockers=["No fresh Tenkan/Kijun cross in last two closed bars"], confluence=_build_confluence(candles, values, ema200, vwap, rsi7, atr14, macd_data, bb, stoch, adx14, Direction.NEUTRAL))
+        return TradeSignal(action=Direction.NO_TRADE, confidence=38, blockers=["No fresh Tenkan/Kijun cross in last two closed bars"], confluence=_build_confluence(candles, values, ema200, vwap, rsi7, atr14, macd_data, bb, stoch, adx14, Direction.NEUTRAL, spec))
 
     direction = Direction.BUY if bull_cross else Direction.SELL
     long = direction is Direction.BUY
@@ -150,9 +165,9 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
     # ADX trend strength
     adx_val = adx14[i]
     if adx_val is not None:
-        if adx_val < 18:
+        if adx_val < model.min_adx:
             score -= 5
-            blockers.append(f"ADX weak trend ({adx_val:.1f}) / قدرت روند ضعیف")
+            blockers.append(f"ADX weak trend ({adx_val:.1f} < {model.min_adx:.0f}) / قدرت روند ضعیف")
         elif adx_val > 25:
             score += 3
             reasons.append(f"ADX confirms trend strength ({adx_val:.1f}) / قدرت روند تایید شد")
@@ -203,10 +218,13 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
             blockers.append("Hard gate: DXY/HTF divergence on 15m — وتو")
         elif adx14[i] is not None and adx14[i] > 20:
             score -= 6
-    # ── Killzone time filter — 70% edge in London 8-11 & NY 13-17 — 3m needs stricter ──
+    # ── Killzone time filter — London/NY edge, per instrument ──
+    # Crypto declares no killzones (`killzones_utc == ()`), so `in_killzone` is always True
+    # and this whole block becomes a no-op. The old hardcoded 8-11/13-17 window vetoed a
+    # 24/7 market for 16 hours a day — one of the reasons non-gold symbols never traded.
     try:
         hour = current.timestamp.hour + current.timestamp.minute/60
-        is_kill = (8 <= hour < 11) or (13 <= hour < 17)
+        is_kill = model.in_killzone(hour)
         if frame.value in ("3m","5m") and not is_kill:
             # 3m stricter
             if frame.value == "3m":
@@ -242,7 +260,8 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
         score -= 6
         blockers.append(f"3 consecutive losses — next trade half size / 3 باخت پیاپی — نیم‌حجم")
     # 3) Weekend gap risk — جمعه شب پوزیشن نگیریم
-    if context.is_weekend_gap_risk:
+    if context.is_weekend_gap_risk and model.weekend_gap_risk:
+        # 24/7 venues (crypto) have no weekly close, so there is no gap to guard against.
         blockers.append("Hard gate: Weekend gap risk (Fri 21:00+) — no new position / ریسک گپ آخر هفته")
     # 4) Shock regime — ATR 3× یا vol_regime=shock → veto
     if context.volatility_regime == "shock" or (recent_atrs and current_atr > median(recent_atrs) * 3.0):
@@ -251,12 +270,14 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
     if context.account_equity and context.account_equity > 0:
         est_stop_dist = 1.1 * current_atr
         if est_stop_dist > 0:
-            est_pos_oz = (context.account_equity * 0.005) / est_stop_dist
-            notional = est_pos_oz * current.close
+            # "oz" was a gold-ism; this is just "units of the base asset" for any symbol.
+            est_pos_units = (context.account_equity * 0.005) / est_stop_dist
+            notional = est_pos_units * current.close
             lev_used = notional / context.account_equity if context.account_equity else 0
-            if lev_used > context.max_leverage * 0.75:
-                blockers.append(f"Hard gate: Leverage {lev_used:.1f}x > 75% of {context.max_leverage}x — liquidation close / اهرم بالا — نزدیک کال")
-            gap_loss_pct = (5 * current_atr * est_pos_oz) / context.account_equity * 100
+            max_lev = context.max_leverage if context.max_leverage else model.max_leverage
+            if lev_used > max_lev * 0.75:
+                blockers.append(f"Hard gate: Leverage {lev_used:.1f}x > 75% of {max_lev}x — liquidation close / اهرم بالا — نزدیک کال")
+            gap_loss_pct = (5 * current_atr * est_pos_units) / context.account_equity * 100
             if gap_loss_pct > 12:
                 blockers.append(f"Hard gate: Gap risk {gap_loss_pct:.1f}% loss on 5×ATR gap — reduce size / ریسک گپ {gap_loss_pct:.0f}%")
     if context.spread > context.typical_spread * 2:
@@ -264,7 +285,10 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
     if recent_atrs and current_atr > median(recent_atrs) * 2.2:
         blockers.append("Hard gate: volatility shock exceeds 2.2× median ATR / شوک نوسان")
 
-    candle_range = max(current.high - current.low, 0.01)
+    # The floor must be the instrument's tick, not gold's 0.01. On EUR/USD a 0.01 floor is
+    # 100 pips, so body_quality collapsed to ~0 for every real candle and every signal ate
+    # the "weak breakout body" penalty.
+    candle_range = max(current.high - current.low, spec.min_candle_range())
     body_quality = abs(current.close - current.open) / candle_range
     volumes = [c.volume for c in candles[-31:-1]]
     # ── POWER weighting — add OTE + CVD + Killzone bonus ──
@@ -277,6 +301,10 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
         reasons.append("Strong body quality / بدنه قوی")
     # Volume — stricter for 3m
     vol_thresh = 0.70 if frame.value == "3m" else 0.60
+    if not model.volume_reliable:
+        # Spot FX has no central tape: "volume" is a per-broker tick count, often all zeros
+        # from the feed. Scoring on it would permanently fail every FX candle.
+        volumes = []
     if volumes and current.volume < median(volumes) * vol_thresh:
         score -= 7 if frame.value != "3m" else 10
         blockers.append("Low tick-volume participation / حجم معاملات کم")
@@ -322,18 +350,19 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
     # Killzone bonus for high conviction
     try:
         hour = current.timestamp.hour + current.timestamp.minute/60
-        is_kill = (8 <= hour < 11) or (13 <= hour < 17)
+        is_kill = model.in_killzone(hour)
         if is_kill and body_quality > 0.50:
             score += 3
             reasons.append("Killzone + strong body / کیلزون + بدنه قوی")
     except Exception:
         pass
     # ── 74-79 Quality Gate — make 74-79 reliable ──
-    if 74 <= score <= 79:
+    marginal_low = model.threshold(frame.value) - 1
+    if marginal_low <= score <= marginal_low + 5:
         # require volume 0.85 and ADX 22 and not near SR
         if volumes and current.volume < median(volumes) * 0.85:
-            blockers.append("Hard gate: 75-79 با حجم کم — شکست فیک / Low volume marginal")
-            score = 73
+            blockers.append("Hard gate: امتیاز مرزی با حجم کم — شکست فیک / Low volume marginal")
+            score = marginal_low - 1
         elif adx_val is not None and adx_val < 22:
             blockers.append("Hard gate: 75-79 با ADX ضعیف <22 — رنج / Weak trend marginal")
             score -= 8
@@ -346,55 +375,50 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
 
     hard_gate = any(item.startswith("Hard gate") for item in blockers)
     score = round(_clamp(score, 0, 100), 1)
-    confluence = _build_confluence(candles, values, ema200, vwap, rsi7, atr14, macd_data, bb, stoch, adx14, direction)
+    confluence = _build_confluence(candles, values, ema200, vwap, rsi7, atr14, macd_data, bb, stoch, adx14, direction, spec)
 
-    # Threshold per TF — 3m 74, 5m 75, 15m 76, 1m 72
-    if frame.value == "3m":
-        thresh = 74
-    elif frame.value == "5m":
-        thresh = 75
-    elif frame.value == "15m":
-        thresh = 76
-    else:
-        thresh = 72
+    # Threshold is declared per symbol in its SymbolModel, not hardcoded for gold.
+    thresh = model.threshold(frame.value)
     if hard_gate or score < thresh:
         return TradeSignal(action=Direction.NO_TRADE, confidence=score, reasons=reasons, blockers=blockers, confluence=confluence, exit_hint=f"No entry — wait for confluence / ورود ممنوع — منتظر همگرایی ({frame.value} {thresh})")
 
     entry = current.close
     structure = min(c.low for c in candles[-6:]) if long else max(c.high for c in candles[-6:])
     raw_distance = entry - (structure - 0.15 * current_atr) if long else (structure + 0.15 * current_atr) - entry
-    stop_distance = _clamp(raw_distance, 0.90 * current_atr, 1.40 * current_atr)
-    # Dynamic RR with scale-out — power tuned per TF
-    if frame.value == "3m":
-        # 3m needs quicker take
-        if score >= 88 and adx_val is not None and adx_val > 30 and body_quality > 0.52:
-            target_multiple = 2.0
-        elif score >= 85:
-            target_multiple = 1.60
-        elif adx_val is not None and adx_val < 18:
-            target_multiple = 1.30
-        else:
-            target_multiple = 1.50  # balanced 3m
-    elif frame.value == "5m":
-        if score >= 88 and adx_val is not None and adx_val > 30 and body_quality > 0.52:
-            target_multiple = 2.2  # trend runner — let profit run
-        elif score >= 85:
-            target_multiple = 1.8
-        elif adx_val is not None and adx_val < 18:
-            target_multiple = 1.35  # chop — quick take
-        else:
-            target_multiple = 1.55  # balanced default for 5m
-    elif frame.value == "15m":
-        if score >= 88 and adx_val is not None and adx_val > 28:
-            target_multiple = 2.30
-        elif score >= 85:
-            target_multiple = 1.95
-        elif adx_val is not None and adx_val < 18:
-            target_multiple = 1.45
-        else:
-            target_multiple = 1.75
+    stop_distance = _clamp(raw_distance, model.stop_atr_low * current_atr, model.stop_atr_high * current_atr)
+    # Never risk less than the instrument's own spread+tick, or the stop sits inside noise.
+    stop_distance = max(stop_distance, spec.default_spread() + spec.tick_size)
+    # Dynamic RR with scale-out — reward multiples come from the symbol's own model.
+    # Majors can let a runner go to 2.3R; an exotic with a 2 pip spread cannot, and crypto
+    # alts need an earlier take. Previously every instrument inherited gold's table.
+    strong_adx = adx_val is not None and adx_val > 30
+    weak_adx = adx_val is not None and adx_val < model.min_adx
+    if score >= 88 and strong_adx and body_quality > 0.52:
+        target_multiple = model.rr_runner
+    elif score >= 85:
+        target_multiple = model.rr_strong
+    elif weak_adx:
+        target_multiple = model.rr_chop
     else:
-        target_multiple = 2.0 if score >= 85 else 1.8
+        target_multiple = model.rr_base
+    if frame.value == "3m":
+        target_multiple *= 0.95   # shorter horizon, take profit sooner
+    elif frame.value == "15m":
+        target_multiple *= 1.10
+    target_multiple = round(target_multiple, 2)
+
+    # A scalp only makes sense if the target clears the round-trip cost with margin.
+    cost = spec.default_spread() * 2
+    if stop_distance * target_multiple < cost * 1.5:
+        return TradeSignal(
+            action=Direction.NO_TRADE, confidence=score, reasons=reasons,
+            blockers=blockers + [
+                f"Hard gate: هدف {spec.to_pips(stop_distance * target_multiple):.1f} پیپ کمتر از ۱٫۵ برابر "
+                f"هزینهٔ رفت‌وبرگشت ({spec.to_pips(cost):.1f} پیپ) است — اسکلپ توجیه ندارد"
+            ],
+            confluence=confluence,
+            exit_hint="No entry — spread/target ratio unviable / نسبت هدف به اسپرد ناکافی",
+        )
     stop = entry - stop_distance if long else entry + stop_distance
     target = entry + stop_distance * target_multiple if long else entry - stop_distance * target_multiple
 
@@ -419,14 +443,15 @@ def evaluate_scalp(candles: list[Candle], context: StrategyContext) -> TradeSign
     exit_hint += dynamic_risk_note
     return TradeSignal(
         action=direction, confidence=score,
-        entry=round(entry, 2), stop_loss=round(stop, 2), take_profit=round(target, 2),
+        entry=spec.round_price(entry), stop_loss=spec.round_price(stop), take_profit=spec.round_price(target),
         risk_reward=target_multiple,
         expires_after_seconds=frame.seconds * (3 if frame.value == "1m" else (2 if frame.value in ("5m","3m") else 2)),
         reasons=reasons, blockers=blockers, confluence=confluence, exit_hint=exit_hint,
     )
 
 
-def _build_confluence(candles, values, ema200, vwap, rsi7, atr14, macd_data, bb, stoch, adx14, direction):
+def _build_confluence(candles, values, ema200, vwap, rsi7, atr14, macd_data, bb, stoch, adx14, direction, spec=None):
+    spec = spec or GOLD_SPEC
     i = len(candles)-1
     closes = candles[i].close
     t,k = values["tenkan"][i], values["kijun"][i]
@@ -452,12 +477,15 @@ def _build_confluence(candles, values, ema200, vwap, rsi7, atr14, macd_data, bb,
     add("MACD مومنتوم مکدی", (macd_hist is not None and ((macd_hist>0 and direction==Direction.BUY) or (macd_hist<0 and direction==Direction.SELL) or direction==Direction.NEUTRAL)), f"{macd_hist:.3f}" if macd_hist is not None else "—")
     add("Bollinger باند نوسان", (bb_up and bb_lo and bb_lo < closes < bb_up) if bb_up and bb_lo else True, f"U{bb_up:.2f} L{bb_lo:.2f}" if bb_up and bb_lo else "—")
     add("Stochastic استوکاستیک", (stoch_k is not None and 20 <= stoch_k <= 80) if stoch_k is not None else True, f"K {stoch_k:.1f}" if stoch_k is not None else "—")
-    add("ADX قدرت روند", (adx_val is not None and adx_val >= 18), f"{adx_val:.1f}" if adx_val is not None else "—")
-    add("ATR نوسان", atr_val is not None and atr_val < 5, f"{atr_val:.2f}" if atr_val else "—")
+    add("ADX قدرت روند", (adx_val is not None and adx_val >= spec.model.min_adx), f"{adx_val:.1f}" if adx_val is not None else "—")
+    # `atr < 5` only ever meant "sane for a $4k instrument". As a share of price it works
+    # for EUR/USD (1.08), USD/JPY (157) and SHIBUSDT (0.000009) alike.
+    add("ATR نوسان", atr_val is not None and spec.volatility_is_sane(atr_val, closes),
+        f"{atr_val:.{spec.price_precision}f} ({atr_val/closes*100:.2f}%)" if atr_val else "—")
     return items
 
 
-def should_exit(signal: TradeSignal, candles_since_entry: list[Candle], kijun: float) -> tuple[bool, str]:
+def should_exit(signal: TradeSignal, candles_since_entry: list[Candle], kijun: float, spec: InstrumentSpec | None = None) -> tuple[bool, str]:
     """Closed-bar exit policy; broker-side protective stops remain authoritative.
     سیاست خروج: حد ضرر، حد سود، شکست کیجون، کراس مخالف، زمان
     """
@@ -493,6 +521,7 @@ def get_trailing_stop(
     kijun: float,
     atr: float,
     initial_stop: float | None = None,
+    spec: InstrumentSpec | None = None,
 ) -> float | None:
     """هوشمند تریلینگ — اگر سود کم می‌شود رهاش کن
     - 1R → SL به ورود (بریک‌اون)
@@ -508,6 +537,7 @@ def get_trailing_stop(
     in the 1.5R / Kijun trail the docstring promises). Callers that omit it keep the old
     (degraded) behaviour so this stays backward compatible.
     """
+    spec = spec or GOLD_SPEC
     if not signal.entry or not signal.stop_loss or not candles_since_entry:
         return None
     latest = candles_since_entry[-1]
@@ -515,7 +545,8 @@ def get_trailing_stop(
     entry = signal.entry
     risk_reference = initial_stop if initial_stop is not None else signal.stop_loss
     stop_dist = abs(entry - risk_reference)
-    if stop_dist < 0.01:
+    # Gold's 0.01 floor is ~8x a normal EUR/USD scalp stop, so trailing silently never ran.
+    if stop_dist < spec.tick_size:
         return None
     # distance from entry — هوشمند: اول 1.5R سپس 1R
     if long:
@@ -528,9 +559,9 @@ def get_trailing_stop(
             candidate = max(locked, kijun_stop) if kijun else locked
             candidate = min(candidate, cur_price - 0.5 * atr)
             if candidate != signal.stop_loss and candidate > signal.stop_loss:
-                return round(candidate, 2)
+                return spec.round_price(candidate)
         if profit_R >= 1.0 and signal.stop_loss < entry:
-            return round(entry, 2)
+            return spec.round_price(entry)
     else:
         peak = min(c.low for c in candles_since_entry)
         profit_R = (entry - peak) / stop_dist
@@ -541,9 +572,9 @@ def get_trailing_stop(
             candidate = min(locked, kijun_stop) if kijun else locked
             candidate = max(candidate, cur_price + 0.5 * atr)
             if candidate != signal.stop_loss and candidate < signal.stop_loss:
-                return round(candidate, 2)
+                return spec.round_price(candidate)
         if profit_R >= 1.0 and signal.stop_loss > entry:
-            return round(entry, 2)
+            return spec.round_price(entry)
     return None
 
 
