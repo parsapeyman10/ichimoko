@@ -157,8 +157,24 @@ tasks.withType<Test>().configureEach {
     if (System.getenv("GITHUB_ACTIONS") == "true") {
         addTestListener(object : TestListener {
             override fun beforeSuite(suite: TestDescriptor) = Unit
-            override fun afterSuite(suite: TestDescriptor, result: TestResult) = Unit
             override fun beforeTest(test: TestDescriptor) = Unit
+
+            // A failure can also be raised by the SUITE rather than by an individual test —
+            // a throwing field initialiser, a @BeforeClass, or a class that fails to load.
+            // afterTest never fires for those, so without this hook the run goes red with no
+            // annotation naming anything, which is exactly the dead end it was meant to prevent.
+            override fun afterSuite(suite: TestDescriptor, result: TestResult) {
+                if (result.resultType != TestResult.ResultType.FAILURE) return
+                result.exceptions.forEach { error ->
+                    val detail = "${error.javaClass.name}: ${error.message.orEmpty()}"
+                        .replace('\n', ' ').replace('\r', ' ').take(400)
+                    println("::error title=JVM suite failed::${suite.displayName}: $detail")
+                }
+                if (result.exceptions.isEmpty() && result.failedTestCount > 0) {
+                    println("::error title=JVM suite failed::${suite.displayName}: " +
+                        "${result.failedTestCount} failed of ${result.testCount}")
+                }
+            }
             override fun afterTest(test: TestDescriptor, result: TestResult) {
                 if (result.resultType == TestResult.ResultType.FAILURE) {
                     val detail = result.exceptions.firstOrNull()?.let {
