@@ -48,6 +48,7 @@ from app.services import autopilot as autopilot_svc
 from app.services import growth_planner as growth_svc
 from app.services import instruments as instruments_svc
 from app.services import scalper as scalper_svc
+from app.services import setup_lab as lab_svc
 from app.services import universe as universe_svc
 from app.services.ytd_trades import get_ytd_report
 
@@ -417,7 +418,7 @@ async def scalp_signal(
     symbol: str = Query(..., min_length=2, max_length=24),
     timeframe: Timeframe = Timeframe.M5,
     bars: int = Query(400, ge=220, le=2000),
-    equity: float = Query(100.0, gt=0, le=10_000_000, description="موجودی حساب — تنها عدد لازم"),
+    equity: float = Query(1000.0, gt=0, le=10_000_000, description="موجودی حساب — تنها عدد لازم"),
     risk_pct: float | None = Query(None, gt=0, le=2, description="خالی بگذارید تا خودکار تعیین شود"),
     profile: str = Query("balanced", pattern="^(conservative|balanced|aggressive)$"),
     daily_pnl_pct: float = Query(0.0, ge=-100, le=100),
@@ -457,7 +458,7 @@ async def scalp_scan(
     symbols: str = Query(..., min_length=2, max_length=800),
     timeframe: Timeframe = Timeframe.M5,
     bars: int = Query(300, ge=220, le=1000),
-    equity: float = Query(100.0, gt=0, le=10_000_000),
+    equity: float = Query(1000.0, gt=0, le=10_000_000),
     risk_pct: float | None = Query(None, gt=0, le=2),
     only_signals: bool = Query(False),
     profile: str = Query("balanced", pattern="^(conservative|balanced|aggressive)$"),
@@ -475,8 +476,8 @@ async def scalp_scan(
 # ─── growth planning ──────────────────────────────────────────────────
 @app.get("/api/v1/plan/growth")
 async def plan_growth(
-    start: float = Query(100.0, gt=0, le=10_000_000),
-    target: float = Query(1000.0, gt=0, le=100_000_000),
+    start: float = Query(1000.0, gt=0, le=10_000_000),
+    target: float = Query(10000.0, gt=0, le=100_000_000),
     win_rate: float = Query(0.5, gt=0, lt=1, description="کسری، مثلاً 0.5 برای ۵۰٪"),
     net_rr: float = Query(1.45, gt=0, le=20, description="نسبت سود به ضرر بعد از کسر هزینه"),
     risk_pct: float = Query(0.5, gt=0, le=20),
@@ -494,8 +495,8 @@ async def plan_growth(
 
 @app.get("/api/v1/plan/risk-ladder")
 async def plan_risk_ladder(
-    start: float = Query(100.0, gt=0, le=10_000_000),
-    target: float = Query(1000.0, gt=0, le=100_000_000),
+    start: float = Query(1000.0, gt=0, le=10_000_000),
+    target: float = Query(10000.0, gt=0, le=100_000_000),
     win_rate: float = Query(0.5, gt=0, lt=1),
     net_rr: float = Query(1.45, gt=0, le=20),
     trades_per_day: float = Query(3.0, gt=0, le=200),
@@ -552,7 +553,7 @@ async def autopilot_cycle():
 
 @app.post("/api/v1/autopilot/reset")
 async def autopilot_reset(
-    balance: float = Query(100.0, gt=0, le=10_000_000),
+    balance: float = Query(1000.0, gt=0, le=10_000_000),
     target: float | None = Query(None, gt=0, le=100_000_000),
     timeframe: Timeframe = Timeframe.M5,
     profile: str = Query("balanced", pattern="^(conservative|balanced|aggressive)$"),
@@ -562,6 +563,86 @@ async def autopilot_reset(
     watchlist = [s for s in symbols.split(",") if s.strip()] if symbols.strip() else None
     state = autopilot_svc.reset(balance, target, watchlist, timeframe.value, profile)
     return {"reset": True, "balance": state["balance"], "watchlist": state["watchlist"]}
+
+
+# ─── setup laboratory: learning which Ichimoku opportunities pay ──────
+@app.get("/api/v1/lab/study")
+async def lab_study(
+    symbol: str = Query(..., min_length=2, max_length=24),
+    timeframe: Timeframe = Timeframe.M5,
+    bars: int = Query(3000, ge=600, le=5000),
+    rr: float = Query(1.5, gt=0.1, le=5),
+    stop_atr: float = Query(1.0, gt=0.1, le=5),
+    max_bars: int = Query(24, ge=4, le=200),
+    min_samples: int = Query(40, ge=10, le=500),
+):
+    """Measure every Ichimoku setup x context bucket on real candles, in/out of sample."""
+    try:
+        candles, spec = await universe_svc.load_candles(settings, symbol, timeframe, limit=bars)
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    config = lab_svc.LabelConfig(rr=rr, stop_atr=stop_atr, max_bars=max_bars)
+    return lab_svc.study(candles, spec, config, min_samples=min_samples)
+
+
+@app.get("/api/v1/lab/win-rate-curve")
+async def lab_win_rate_curve(
+    symbol: str = Query(..., min_length=2, max_length=24),
+    timeframe: Timeframe = Timeframe.M5,
+    bars: int = Query(3000, ge=600, le=5000),
+    setup: str | None = Query(None, max_length=30),
+    stop_atr: float = Query(1.0, gt=0.1, le=5),
+    max_bars: int = Query(24, ge=4, le=200),
+):
+    """Win rate vs reward ratio — shows exactly what a 65% target costs in expectancy."""
+    try:
+        candles, spec = await universe_svc.load_candles(settings, symbol, timeframe, limit=bars)
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    return lab_svc.win_rate_curve(candles, spec, setup, stop_atr, max_bars)
+
+
+@app.get("/api/v1/lab/playbook")
+async def lab_playbook(
+    symbol: str = Query(..., min_length=2, max_length=24),
+    timeframe: Timeframe = Timeframe.M5,
+    bars: int = Query(3000, ge=600, le=5000),
+    rr: float = Query(1.5, gt=0.1, le=5),
+    stop_atr: float = Query(1.0, gt=0.1, le=5),
+    max_bars: int = Query(24, ge=4, le=200),
+    target_win_rate: float = Query(0.65, gt=0.3, lt=0.95),
+    min_samples: int = Query(40, ge=10, le=500),
+):
+    """The setups that survive the statistical AND out-of-sample filters — or none."""
+    try:
+        candles, spec = await universe_svc.load_candles(settings, symbol, timeframe, limit=bars)
+    except (DataUnavailable, ValueError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
+    config = lab_svc.LabelConfig(rr=rr, stop_atr=stop_atr, max_bars=max_bars)
+    return lab_svc.playbook(candles, spec, target_win_rate, min_samples, config)
+
+
+@app.get("/api/v1/lab/math")
+async def lab_math(
+    rr: float = Query(1.5, gt=0.05, le=10),
+    target_win_rate: float = Query(0.65, gt=0.05, lt=0.99),
+    cost_r: float = Query(0.0, ge=0, le=1),
+):
+    """The win-rate equation itself, with no data involved."""
+    return {
+        "rr": rr,
+        "random_baseline_win_rate_pct": round(lab_svc.baseline_win_rate(rr) * 100, 2),
+        "breakeven_win_rate_pct": round(lab_svc.required_win_rate(rr, cost_r) * 100, 2),
+        "rr_that_makes_a_coinflip_show_target": round(lab_svc.rr_for_target_win_rate(target_win_rate), 3),
+        "expectancy_of_target_at_that_rr": round(
+            target_win_rate * lab_svc.rr_for_target_win_rate(target_win_rate) - (1 - target_win_rate), 4
+        ),
+        "formula": "P(win | no edge) = 1 / (1 + RR)   ;   breakeven WR = (1 + cost_R) / (1 + RR)",
+        "note": (
+            "وین‌ریت به‌تنهایی معیار نیست: هر سیستم تصادفی با کوچک‌کردن هدف می‌تواند هر "
+            "وین‌ریتی را نشان بدهد. معیار درست، اختلاف وین‌ریت با خط پایهٔ همان RR است."
+        ),
+    }
 
 
 # ─── real execution boundary (intentionally disabled until independently audited) ──

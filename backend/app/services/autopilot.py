@@ -59,7 +59,7 @@ MAX_CLOSED_TRADES = 1000
 # State
 # ─────────────────────────────────────────────────────────────────────────
 
-def _blank_state(balance: float = 100.0) -> dict[str, Any]:
+def _blank_state(balance: float = 1000.0) -> dict[str, Any]:
     return {
         "enabled": False,
         "starting_balance": balance,
@@ -101,7 +101,7 @@ def save_state(state: dict[str, Any]) -> None:
     STORE.write_text(json.dumps(state, ensure_ascii=False, indent=2, default=str))
 
 
-def reset(balance: float = 100.0, target: float | None = None, watchlist: list[str] | None = None,
+def reset(balance: float = 1000.0, target: float | None = None, watchlist: list[str] | None = None,
           timeframe: str = "5m", profile: str = "balanced") -> dict[str, Any]:
     state = _blank_state(balance)
     state["target_balance"] = target if target else balance * 10

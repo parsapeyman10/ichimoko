@@ -93,7 +93,7 @@ class StrategyContext(BaseModel):
     # ── liquidation guards (unseen tail) ──
     daily_pnl_pct: float = 0.0  # today's PnL % of equity
     consecutive_losses: int = 0
-    account_equity: float = 100.0
+    account_equity: float = 1000.0
     # None = use the instrument's own normal leverage scale (see InstrumentSpec.model).
     # A number here is an explicit account/broker ceiling supplied by the caller.
     max_leverage: float | None = None

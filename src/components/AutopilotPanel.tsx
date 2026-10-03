@@ -122,8 +122,8 @@ export default function AutopilotPanel() {
   const [busy, setBusy] = useState(false);
   const [plan, setPlan] = useState<GrowthPlan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
-  const [startBalance, setStartBalance] = useState(100);
-  const [targetBalance, setTargetBalance] = useState(1000);
+  const [startBalance, setStartBalance] = useState(1000);
+  const [targetBalance, setTargetBalance] = useState(10000);
 
   const load = useCallback(async () => {
     const result = await apiGet<State>('/api/v1/autopilot/state');
@@ -298,12 +298,12 @@ export default function AutopilotPanel() {
               <div className="scalp-field">
                 <label htmlFor="ap-start">سرمایهٔ شروع ($)</label>
                 <input id="ap-start" type="number" min={10} step={10} value={startBalance}
-                  onChange={(e) => setStartBalance(Math.max(10, Number(e.target.value) || 100))} />
+                  onChange={(e) => setStartBalance(Math.max(10, Number(e.target.value) || 1000))} />
               </div>
               <div className="scalp-field">
                 <label htmlFor="ap-target">هدف ($)</label>
                 <input id="ap-target" type="number" min={20} step={100} value={targetBalance}
-                  onChange={(e) => setTargetBalance(Math.max(20, Number(e.target.value) || 1000))} />
+                  onChange={(e) => setTargetBalance(Math.max(20, Number(e.target.value) || 10000))} />
               </div>
               <button type="button" className="ap-ghost" onClick={loadPlan}>محاسبه</button>
             </div>

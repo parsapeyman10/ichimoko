@@ -69,7 +69,7 @@ async def build_context(
     spec: inst.InstrumentSpec,
     timeframe: Timeframe,
     candles: list[Candle],
-    account_equity: float = 100.0,
+    account_equity: float = 1000.0,
 ) -> tuple[StrategyContext, dict | None]:
     """Assemble a real StrategyContext for this symbol — real spread, real HTF bias."""
     price = candles[-1].close
@@ -158,7 +158,7 @@ async def evaluate_symbol(
     symbol: str,
     timeframe: Timeframe,
     bars: int = DEFAULT_BARS,
-    equity: float = 100.0,
+    equity: float = 1000.0,
     risk_pct: float | None = None,
     enforce_scalp_policy: bool = True,
     profile: str = "balanced",
@@ -359,7 +359,7 @@ async def scan(
     symbols: list[str],
     timeframe: Timeframe,
     bars: int = DEFAULT_BARS,
-    equity: float = 100.0,
+    equity: float = 1000.0,
     risk_pct: float | None = None,
     only_signals: bool = False,
     profile: str = "balanced",
