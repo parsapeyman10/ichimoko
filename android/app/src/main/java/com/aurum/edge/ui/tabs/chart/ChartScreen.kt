@@ -51,6 +51,7 @@ import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.data.BinanceUniverse
+import com.aurum.edge.data.SymbolSearch
 import com.aurum.edge.data.CryptoCatalog
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatDateTime
@@ -305,14 +306,14 @@ internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
     var quote by rememberSaveable { mutableStateOf("USDT") }
     var open by rememberSaveable { mutableStateOf(false) }
 
-    val shown = remember(universe, query, quote) {
-        val needle = query.trim().uppercase().replace("/", "")
-        universe.asSequence()
-            .filter { quote == "همه" || it.quote == quote }
-            .filter { needle.isEmpty() || it.binance.contains(needle) || it.base.contains(needle) }
-            .sortedByDescending { needle.isNotEmpty() && it.base.startsWith(needle) }
-            .take(300)
-            .toList()
+    val pool = remember(universe, quote) {
+        if (quote == "همه") universe else universe.filter { it.quote == quote }
+    }
+    val shown = remember(pool, query) { SymbolSearch.rank(query, pool, limit = 300) }
+    // Only propose alternatives once the query has genuinely found nothing.
+    val suggestions = remember(pool, query, shown.size) {
+        if (shown.isNotEmpty() || query.isBlank()) emptyList()
+        else SymbolSearch.suggest(query, if (pool.isEmpty()) universe else pool)
     }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
@@ -346,7 +347,7 @@ internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
             value = query,
             onValueChange = { query = it },
             singleLine = true,
-            label = { Text("جستجو — BTC، PEPE، SOL…", style = MaterialTheme.typography.labelSmall) },
+            label = { Text("جستجو — BTC، پپه، bitcoin، SOL…", style = MaterialTheme.typography.labelSmall) },
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -401,11 +402,29 @@ internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
             if (shown.isEmpty() && universe.isNotEmpty()) {
                 item {
                     Text(
-                        "نمادی با «$query» در $quote پیدا نشد.",
+                        if (suggestions.isEmpty()) "نمادی با «$query» در $quote پیدا نشد."
+                        else "«$query» پیدا نشد. منظورتان این بود؟",
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.TextMuted,
                         modifier = Modifier.padding(vertical = 8.dp),
                     )
+                }
+                items(suggestions, key = { "s-" + it.id }) { pair ->
+                    Row(
+                        Modifier.fillMaxWidth()
+                            .clickable { onSelect(pair.id); open = false; query = "" }
+                            .padding(vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            pair.id,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = AurumColors.Cyan,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text("پیشنهاد", style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextMuted)
+                    }
                 }
             }
         }

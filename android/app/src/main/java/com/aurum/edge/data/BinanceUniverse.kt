@@ -43,6 +43,8 @@ object BinanceUniverse {
         val base: String,
         val quote: String,
         val digits: Int,
+        /** 24h turnover in the quote asset. Drives the default order and tie-breaks. */
+        val volume: Double = 0.0,
     )
 
     /** Quote assets worth charting. USDT first: it is where the liquidity is. */
@@ -138,6 +140,22 @@ object BinanceUniverse {
     }
 
     /**
+     * 24h turnover per symbol, so the default list is ordered by what people actually
+     * trade. Alphabetical order puts 1INCH above BTC, which is not a usable list.
+     */
+    fun parseVolumes(body: String, json: Json = Json { ignoreUnknownKeys = true; isLenient = true }): Map<String, Double> {
+        val rows = runCatching { json.parseToJsonElement(body) as? JsonArray }.getOrNull() ?: return emptyMap()
+        val out = HashMap<String, Double>(rows.size)
+        for (element in rows) {
+            val row = element as? JsonObject ?: continue
+            val symbol = (row["symbol"] as? JsonPrimitive)?.contentOrNull ?: continue
+            val turnover = (row["quoteVolume"] as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull() ?: continue
+            out[symbol.uppercase()] = turnover
+        }
+        return out
+    }
+
+    /**
      * Ensure a universe is available. Disk cache first so the UI is never empty, then a
      * refresh when the cache is stale. A network failure keeps whatever we already had.
      */
@@ -152,8 +170,15 @@ object BinanceUniverse {
 
         _loading.value = true
         val attempt = runCatching { fetch() }
+        val fetched = attempt.getOrNull()?.let { pairs ->
+            // Volume is a best-effort enrichment: if it fails the universe is still usable,
+            // just alphabetical, so a ranking outage must not empty the picker.
+            val volumes = runCatching { fetchVolumes() }.getOrNull().orEmpty()
+            if (volumes.isEmpty()) pairs
+            else pairs.map { it.copy(volume = volumes[it.binance] ?: 0.0) }
+                .sortedWith(compareBy<Pair> { QUOTES.indexOf(it.quote) }.thenByDescending { it.volume })
+        }
         _loading.value = false
-        val fetched = attempt.getOrNull()
         if (fetched != null && fetched.isNotEmpty()) {
             _pairs.value = fetched
             loadedAt = now
@@ -180,6 +205,17 @@ object BinanceUniverse {
         }
     }
 
+    private suspend fun fetchVolumes(): Map<String, Double> = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("${BinanceHistoryClient.HOST}/ticker/24hr")
+            .header("Accept", "application/json")
+            .build()
+        http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) emptyMap()
+            else parseVolumes(response.body?.string().orEmpty(), json)
+        }
+    }
+
     private fun cacheFile(context: Context) = File(context.filesDir, CACHE_FILE)
 
     private fun readCache(context: Context): List<Pair>? = runCatching {
@@ -196,6 +232,7 @@ object BinanceUniverse {
                 base = str("base") ?: id.substringBefore('/'),
                 quote = str("quote") ?: id.substringAfter('/'),
                 digits = str("d")?.toIntOrNull() ?: 2,
+                volume = str("v")?.toDoubleOrNull() ?: 0.0,
             )
         }.takeIf { it.isNotEmpty() }
     }.getOrNull()
@@ -204,22 +241,15 @@ object BinanceUniverse {
         runCatching {
             val text = pairs.joinToString(",", "[", "]") { pair ->
                 """{"id":"${pair.id}","b":"${pair.binance}","base":"${pair.base}",""" +
-                    """"quote":"${pair.quote}","d":"${pair.digits}"}"""
+                    """"quote":"${pair.quote}","d":"${pair.digits}","v":"${pair.volume}"}"""
             }
             cacheFile(context).writeText(text)
         }
     }
 
-    /** Case-insensitive search over ticker and base asset, for a 400-row picker. */
-    fun search(query: String, limit: Int = 60): List<Pair> {
-        val needle = query.trim().uppercase().replace("/", "")
-        val pool = cached
-        if (needle.isEmpty()) return pool.take(limit)
-        return pool.asSequence()
-            .filter { it.binance.contains(needle) || it.base.contains(needle) }
-            // Prefer a prefix hit so typing "BTC" surfaces BTC/USDT before WBTC/USDT.
-            .sortedByDescending { it.base.startsWith(needle) }
-            .take(limit)
-            .toList()
-    }
+    /** Relevance-ranked search, including written names like "bitcoin" or "بیت‌کوین". */
+    fun search(query: String, limit: Int = 60): List<Pair> = SymbolSearch.rank(query, cached, limit)
+
+    /** Nearest tickers for a query that matched nothing, for a "did you mean" row. */
+    fun suggest(query: String, limit: Int = 5): List<Pair> = SymbolSearch.suggest(query, cached, limit)
 }
