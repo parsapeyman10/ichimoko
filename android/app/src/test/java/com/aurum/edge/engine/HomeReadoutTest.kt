@@ -97,6 +97,8 @@ class HomeReadoutTest {
         // workspace follows, and crypto is appended so existing positions in the list do
         // not shift. Crypto is chartable like forex; the Iran rows stay watch-only.
         val forexFirst = listOf("IR_GOLD18", "USD/IRR", "QUICK_GXRL", "PEUGEOT_207_TU5P",
+            "CAR_QUICK", "CAR_SAINA", "CAR_TIBA2", "CAR_PRIDE131",
+            "CAR_207", "CAR_206", "CAR_PARS", "CAR_405",
             "XAU/USD", "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD", "USD/JPY", "USD/CHF", "USD/CAD")
         val ids = WatchCatalog.symbols.map { it.id }
         assertEquals(forexFirst, ids.take(forexFirst.size))

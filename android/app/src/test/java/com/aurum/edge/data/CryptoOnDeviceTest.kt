@@ -251,4 +251,25 @@ class CryptoOnDeviceTest {
         // tens of thousands of years in the future.
         assertEquals(SourceTime.UNIX_MILLIS, SourceCatalog.binance.timestampMode)
     }
+
+    // ---------- car prices ----------
+
+    @Test fun `car rows point at a registered source and use path-style slugs`() {
+        val ids = SourceCatalog.all.map { it.id }.toSet()
+        assertTrue("hamrah_mechanic_car" in ids)
+        WatchCatalog.symbols.filter { it.id.startsWith("CAR_") }.forEach { row ->
+            row.defaultSources.forEach { assertTrue("unknown source for ${row.id}", it in ids) }
+            val code = row.providerCodes["hamrah_mechanic_car"]
+            assertNotNull("no provider code for ${row.id}", code)
+            // brand/model, which the fetcher must keep as a path rather than encode to %2F
+            assertTrue("slug should be brand/model: $code", code!!.contains('/'))
+            assertEquals("تومان", row.unit)
+        }
+    }
+
+    @Test fun `the car source scrapes html, not json`() {
+        assertEquals(SourceKind.HTML_PAGE, SourceCatalog.hamrahMechanic.kind)
+        assertTrue(SourceCatalog.hamrahMechanic.urlTemplate.startsWith("https://"))
+        assertTrue(SourceCatalog.hamrahMechanic.urlTemplate.contains("{symbol}"))
+    }
 }

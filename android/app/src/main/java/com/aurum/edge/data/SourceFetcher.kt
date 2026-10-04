@@ -75,14 +75,22 @@ class SourceFetcher(
     }
 
     private suspend fun fetchOne(source: SourceDef, symbol: SymbolDef, apiKey: String): Quote = try {
-        val url = source.urlTemplate.replace("{symbol}", encode(symbol.code))
-        if (source.id == SourceCatalog.bamaCars.id) parseBamaCarQuote(source, symbol, fetchText(source, url, apiKey))
+        // HTML price pages address a car by PATH ("saipa/quick"), so the separator must
+        // survive encoding; URLEncoder would turn it into %2F and 404. Query-parameter
+        // sources keep the strict encoding they had.
+        val encoded = if (source.kind == SourceKind.HTML_PAGE)
+            symbol.code.split('/').joinToString("/") { encode(it) }
+        else encode(symbol.code)
+        val url = source.urlTemplate.replace("{symbol}", encoded)
+        // Dispatch on the declared kind rather than on one hardcoded source id, so every
+        // HTML price page goes through the same extractor instead of being parsed as JSON.
+        if (source.kind == SourceKind.HTML_PAGE) parseHtmlCarQuote(source, symbol, fetchText(source, url, apiKey))
         else parseJsonQuote(source, symbol, fetchJson(source, url, apiKey))
     } catch (error: Exception) {
         Quote(symbol.code, symbol.label, error = (error.message ?: "خطای دریافت داده").take(100), sourceId = source.id)
     }
 
-    internal fun parseBamaCarQuote(source: SourceDef, symbol: SymbolDef, html: String): Quote {
+    internal fun parseHtmlCarQuote(source: SourceDef, symbol: SymbolDef, html: String): Quote {
         val text = Jsoup.parse(html).text()
         val market = Regex("قیمت\\s+بازار\\s+([0-9۰-۹٠-٩,٬،.\\s]+)\\s*تومان").find(text)
         val price = market?.groupValues?.getOrNull(1)?.let(Num::parse)

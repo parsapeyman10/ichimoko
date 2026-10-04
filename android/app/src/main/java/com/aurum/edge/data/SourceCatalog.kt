@@ -74,6 +74,45 @@ object SourceCatalog {
 
     // Only vetted built-ins can be selected from the UI.
     /**
+     * همراه مکانیک — daily used-car prices.
+     *
+     * The per-model pages are server-rendered (the brand and model/year routes carry the
+     * price in the HTML), so the same Jsoup extractor used for Bama reads them. The
+     * client-rendered routes are deliberately avoided: `/carprice/{brand}/{model}/` and
+     * `/carprice/{brand}/{model}/{year}/` ship the number, the bare `/carprice/` tool does
+     * not.
+     *
+     * Scraping reads a layout, not a contract. If the page changes the row reports
+     * "unavailable" instead of showing a stale or invented price.
+     */
+    val hamrahMechanic = SourceDef(
+        id = "hamrah_mechanic_car",
+        title = "همراه مکانیک · قیمت خودرو",
+        subtitle = "قیمت روز خودروی کارکرده بر پایهٔ معاملات واقعی، بدون کلید",
+        kind = SourceKind.HTML_PAGE,
+        urlTemplate = "https://www.hamrah-mechanic.com/carprice/{symbol}/",
+        unit = "تومان",
+        symbols = listOf(
+            // Every slug below was verified against the live brand listings. Guessed slugs
+            // would render as permanently failing rows, which is worse than omitting them.
+            SymbolDef("saipa/quick", "سایپا کوییک"),
+            SymbolDef("saipa/saina", "سایپا ساینا"),
+            SymbolDef("saipa/tiba2", "سایپا تیبا ۲"),
+            SymbolDef("saipa/atlas", "سایپا اطلس"),
+            SymbolDef("saipa/pride131", "پراید ۱۳۱"),
+            SymbolDef("saipa/pride111", "پراید ۱۱۱"),
+            SymbolDef("saipa/pride151", "پراید ۱۵۱"),
+            SymbolDef("irankhodro/peugeot207", "پژو ۲۰۷"),
+            SymbolDef("irankhodro/peugeot206", "پژو ۲۰۶"),
+            SymbolDef("irankhodro/peugeot206sedan", "پژو ۲۰۶ صندوقدار"),
+            SymbolDef("irankhodro/peugeotpars", "پژو پارس"),
+            SymbolDef("irankhodro/peugeot405", "پژو ۴۰۵"),
+            SymbolDef("irankhodro/405slx", "پژو ۴۰۵ SLX"),
+            SymbolDef("irankhodro/207sd", "پژو ۲۰۷ صندوقدار"),
+        ),
+    )
+
+    /**
      * Binance public 24h ticker, so crypto rows in the watchlist have a real source.
      *
      * Without this the crypto pairs added to [WatchCatalog] would render as permanently
@@ -95,6 +134,6 @@ object SourceCatalog {
         unit = "$",
     )
 
-    val all = listOf(yahoo, tgju, bamaCars, twelveData, binance)
+    val all = listOf(yahoo, tgju, bamaCars, hamrahMechanic, twelveData, binance)
     fun find(id: String): SourceDef? = all.firstOrNull { it.id == id }
 }
