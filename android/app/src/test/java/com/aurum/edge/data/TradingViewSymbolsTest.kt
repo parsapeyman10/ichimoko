@@ -49,4 +49,17 @@ class TradingViewSymbolsTest {
             assertEquals(TradingViewSymbols.of(coin.id), watchCode)
         }
     }
+
+    @Test fun `every forex watch row quotes from the same ticker the chart draws`() {
+        WatchCatalog.symbols
+            .filter { "tradingview_scanner" in it.providerCodes }
+            .forEach { row ->
+                assertEquals(
+                    "watch and chart disagree for ${row.id}",
+                    TradingViewSymbols.of(row.id),
+                    row.providerCodes["tradingview_scanner"],
+                )
+                assertEquals("tradingview_scanner", row.defaultSources.single())
+            }
+    }
 }

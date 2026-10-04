@@ -132,10 +132,11 @@ class CryptoOnDeviceTest {
 
     @Test fun `global gold has a source that serves it`() {
         val row = WatchCatalog.find("XAU/USD")!!
-        assertEquals("gold_api_public", row.defaultSources.single())
-        assertEquals("XAU", row.providerCodes["gold_api_public"])
-        assertTrue(SourceCatalog.all.any { it.id == "gold_api_public" })
-        // Yahoo stays as a secondary mapping rather than being the one that must work.
+        // TradingView is reachable where the exchange APIs are not, and it is the same
+        // feed the chart draws, so it leads. gold-api and Yahoo stay as fallback mappings.
+        assertEquals("tradingview_scanner", row.defaultSources.single())
+        assertEquals("OANDA:XAUUSD", row.providerCodes["tradingview_scanner"])
+        assertTrue("gold_api_public" in row.providerCodes)
         assertTrue("stocks_yahoo" in row.providerCodes)
     }
 }

@@ -29,30 +29,31 @@ object WatchCatalog {
             "bama_car_price" to "peugeot_207_manualtu5p",
         ), listOf("bama_car_price"), 12 * 60 * 60_000L, 3.0),
         WatchSymbol("XAU/USD", "طلای جهانی (هر انس)", "$",  linkedMapOf(
-            // gold-api first: Yahoo's XAUUSD=X left this row permanently empty.
-            "gold_api_public" to "XAU", "stocks_yahoo" to "XAUUSD=X", "twelve_data_quote" to "XAU/USD",
-        ), listOf("gold_api_public"), 10 * 60_000L, 0.5),
+            // TradingView first: it is reachable where the exchange APIs are not,
+            // and it is the same feed the chart draws. gold-api/Yahoo stay as mappings.
+            "tradingview_scanner" to "OANDA:XAUUSD", "gold_api_public" to "XAU", "stocks_yahoo" to "XAUUSD=X", "twelve_data_quote" to "XAU/USD",
+        ), listOf("tradingview_scanner"), 10 * 60_000L, 0.5),
         WatchSymbol("EUR/USD", "یورو / دلار", "$", linkedMapOf(
-            "stocks_yahoo" to "EURUSD=X", "twelve_data_quote" to "EUR/USD",
-        ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
+            "tradingview_scanner" to "OANDA:EURUSD", "stocks_yahoo" to "EURUSD=X", "twelve_data_quote" to "EUR/USD",
+        ), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
         WatchSymbol("GBP/USD", "پوند / دلار", "$", linkedMapOf(
-            "stocks_yahoo" to "GBPUSD=X", "twelve_data_quote" to "GBP/USD",
-        ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
+            "tradingview_scanner" to "OANDA:GBPUSD", "stocks_yahoo" to "GBPUSD=X", "twelve_data_quote" to "GBP/USD",
+        ), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
         WatchSymbol("AUD/USD", "دلار استرالیا / دلار", "$", linkedMapOf(
-            "stocks_yahoo" to "AUDUSD=X", "twelve_data_quote" to "AUD/USD",
-        ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
+            "tradingview_scanner" to "OANDA:AUDUSD", "stocks_yahoo" to "AUDUSD=X", "twelve_data_quote" to "AUD/USD",
+        ), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
         WatchSymbol("NZD/USD", "دلار نیوزیلند / دلار", "$", linkedMapOf(
-            "stocks_yahoo" to "NZDUSD=X", "twelve_data_quote" to "NZD/USD",
-        ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
+            "tradingview_scanner" to "OANDA:NZDUSD", "stocks_yahoo" to "NZDUSD=X", "twelve_data_quote" to "NZD/USD",
+        ), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
         WatchSymbol("USD/JPY", "دلار / ین ژاپن", "JPY", linkedMapOf(
-            "stocks_yahoo" to "JPY=X", "twelve_data_quote" to "USD/JPY",
-        ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
+            "tradingview_scanner" to "OANDA:USDJPY", "stocks_yahoo" to "JPY=X", "twelve_data_quote" to "USD/JPY",
+        ), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
         WatchSymbol("USD/CHF", "دلار / فرانک سوئیس", "CHF", linkedMapOf(
-            "stocks_yahoo" to "CHF=X", "twelve_data_quote" to "USD/CHF",
-        ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
+            "tradingview_scanner" to "OANDA:USDCHF", "stocks_yahoo" to "CHF=X", "twelve_data_quote" to "USD/CHF",
+        ), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
         WatchSymbol("USD/CAD", "دلار / دلار کانادا", "CAD", linkedMapOf(
-            "stocks_yahoo" to "CAD=X", "twelve_data_quote" to "USD/CAD",
-        ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
+            "tradingview_scanner" to "OANDA:USDCAD", "stocks_yahoo" to "CAD=X", "twelve_data_quote" to "USD/CAD",
+        ), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
     ) + CryptoCatalog.watchlistSeed.map { crypto ->
         // Only the majors sit in the watchlist: 45 rows made it unusable and hammered the
         // provider. The full universe stays searchable from the chart picker.
