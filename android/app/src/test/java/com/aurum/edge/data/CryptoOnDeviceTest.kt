@@ -106,10 +106,14 @@ class CryptoOnDeviceTest {
         }
     }
 
-    @Test fun `binance timestamps are read as millis, not seconds`() {
-        // closeTime is already epoch millis; treating it as seconds would put the receipt
-        // tens of thousands of years in the future.
-        assertEquals(SourceTime.UNIX_MILLIS, SourceCatalog.binance.timestampMode)
+    @Test fun `crypto watch rows use the chart's own exchange ticker`() {
+        // Same EXCHANGE:TICKER string the TradingView chart draws, so a quote and the
+        // chart can never refer to different venues.
+        assertTrue(SourceCatalog.all.any { it.id == "tradingview_scanner" })
+        CryptoCatalog.watchlistSeed.forEach { coin ->
+            val code = WatchCatalog.find(coin.id)!!.providerCodes["tradingview_scanner"]
+            assertEquals("BINANCE:${coin.binance}", code)
+        }
     }
 
 
