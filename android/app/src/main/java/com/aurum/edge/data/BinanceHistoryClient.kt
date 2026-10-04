@@ -132,6 +132,13 @@ class BinanceHistoryClient(
             val body = runCatching {
                 client.newCall(request).execute().use { response ->
                     val text = response.body?.string().orEmpty()
+                    if (response.code == 451 || response.code == 403) {
+                        // Geo-block, not an outage. Naming it stops the user hunting a
+                        // bug that is actually a network restriction.
+                        throw DataFeedException(
+                            "بایننس از این شبکه مسدود است (HTTP ${response.code}) — منبع جایگزین بررسی می‌شود"
+                        )
+                    }
                     if (!response.isSuccessful) {
                         throw DataFeedException("بایننس پاسخ نداد (HTTP ${response.code})")
                     }

@@ -33,11 +33,16 @@ class CryptoOnDeviceTest {
         assertEquals("BTCUSDT", CryptoCatalog.find("BTC/USDT")!!.binance)
     }
 
-    @Test fun `crypto appears in the watch catalog and the chart picker`() {
-        CryptoCatalog.ids.forEach { id ->
-            assertNotNull("missing from watch catalog: $id", WatchCatalog.find(id))
-            assertTrue("not chartable: $id", id in WatchCatalog.chartSymbols)
+    @Test fun `only the crypto majors sit in the watchlist, the rest stay searchable`() {
+        // A 45-row watchlist is noise and polls the provider for rows nobody reads.
+        assertTrue(CryptoCatalog.watchlistSeed.size <= 8)
+        CryptoCatalog.watchlistSeed.forEach { coin ->
+            assertNotNull("missing from watch catalog: ${coin.id}", WatchCatalog.find(coin.id))
+            assertTrue("not chartable: ${coin.id}", coin.id in WatchCatalog.chartSymbols)
         }
+        assertTrue("BTC/USDT" in CryptoCatalog.watchlistSeed.map { it.id })
+        // The wider seed is still resolvable even though it is not a watch row.
+        assertNotNull(CryptoCatalog.find("PEPE/USDT"))
         // The existing forex workspace must be untouched.
         assertTrue("XAU/USD" in WatchCatalog.chartSymbols)
         assertTrue("EUR/USD" in WatchCatalog.chartSymbols)
@@ -228,10 +233,10 @@ class CryptoOnDeviceTest {
         }
     }
 
-    @Test fun `every seeded coin is searchable and chartable`() {
+    @Test fun `every seeded coin resolves even when it is not a watch row`() {
         CryptoCatalog.symbols.forEach { coin ->
-            assertNotNull("not in watch catalog: ${coin.id}", WatchCatalog.find(coin.id))
-            assertTrue("not chartable: ${coin.id}", coin.id in WatchCatalog.chartSymbols)
+            assertNotNull("does not resolve: ${coin.id}", CryptoCatalog.find(coin.id))
+            assertTrue("bad digits for ${coin.id}", coin.digits in 0..8)
         }
     }
 
@@ -239,7 +244,7 @@ class CryptoOnDeviceTest {
         // A catalog row naming a provider the fetcher does not know renders as a row that
         // can never load. Every crypto row must point at a registered source.
         val ids = SourceCatalog.all.map { it.id }.toSet()
-        CryptoCatalog.symbols.forEach { coin ->
+        CryptoCatalog.watchlistSeed.forEach { coin ->
             WatchCatalog.find(coin.id)!!.defaultSources.forEach { source ->
                 assertTrue("unknown source '$source' for ${coin.id}", source in ids)
             }

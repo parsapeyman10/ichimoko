@@ -53,9 +53,9 @@ object WatchCatalog {
         WatchSymbol("USD/CAD", "دلار / دلار کانادا", "CAD", linkedMapOf(
             "stocks_yahoo" to "CAD=X", "twelve_data_quote" to "USD/CAD",
         ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
-    ) + CryptoCatalog.symbols.map { crypto ->
-        // Crypto rides the same catalog so it appears in the watchlist, the chart picker and
-        // the signal tab with no parallel plumbing. Binance public data, no key, 24/7.
+    ) + CryptoCatalog.watchlistSeed.map { crypto ->
+        // Only the majors sit in the watchlist: 45 rows made it unusable and hammered the
+        // provider. The full universe stays searchable from the chart picker.
         WatchSymbol(
             id = crypto.id,
             label = crypto.label,

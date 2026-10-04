@@ -69,6 +69,8 @@ fun ChartScreen(
 ) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val openTrade = trades.firstOrNull { it.symbol == market.symbol && it.isOpen }
+    // Reset the probe whenever the instrument or timeframe changes.
+    var tradingViewBlocked by remember(market.symbol, market.interval) { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         SymbolSearchRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
         Row(
@@ -90,7 +92,11 @@ fun ChartScreen(
         }
 
         SectionCard(
-            title = "چارت TradingView · ${market.symbol}",
+            title = if (tradingViewBlocked) "چارت داخلی · ${market.symbol}"
+            else "چارت TradingView · ${market.symbol}",
+            subtitle = if (tradingViewBlocked)
+                "TradingView از این شبکه در دسترس نیست؛ چارت خود اپ روی همان دیتای واقعی نمایش داده می‌شود"
+            else null,
         ) {
             Box(Modifier.fillMaxWidth().height(460.dp)) {
                 // TradingView may be blocked/slow in some networks. Keep the app's own verified
@@ -104,11 +110,14 @@ fun ChartScreen(
                         showVolume = false,
                     )
                 }
-                TradingViewWidget(
-                    symbol = market.symbol,
-                    interval = market.interval,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                if (!tradingViewBlocked) {
+                    TradingViewWidget(
+                        symbol = market.symbol,
+                        interval = market.interval,
+                        modifier = Modifier.fillMaxSize(),
+                        onFailed = { tradingViewBlocked = it },
+                    )
+                }
                 EngineOverlay(
                     market = market,
                     openTrade = openTrade,
@@ -202,7 +211,12 @@ private fun EntryScoreCard(market: MarketState) {
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun TradingViewWidget(symbol: String, interval: Interval, modifier: Modifier = Modifier) {
+private fun TradingViewWidget(
+    symbol: String,
+    interval: Interval,
+    modifier: Modifier = Modifier,
+    onFailed: (Boolean) -> Unit = {},
+) {
     val html = tradingViewHtml(symbol, interval)
     val loadKey = "$symbol|${interval.label}"
     AndroidView(
@@ -210,7 +224,30 @@ private fun TradingViewWidget(symbol: String, interval: Interval, modifier: Modi
         factory = { context ->
             WebView(context).apply {
                 setBackgroundColor(AndroidColor.TRANSPARENT)
-                webViewClient = WebViewClient()
+                // The widget is drawn OVER the app's own candles. Where TradingView is
+                // geo-blocked it answers 451 and the blank error page hid a chart that
+                // was working perfectly underneath. Report the failure so it can be
+                // removed from the stack instead of covering good data.
+                webViewClient = object : WebViewClient() {
+                    override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                        onFailed(false)
+                    }
+                    override fun onReceivedHttpError(
+                        view: WebView?,
+                        request: android.webkit.WebResourceRequest?,
+                        errorResponse: android.webkit.WebResourceResponse?,
+                    ) {
+                        // Only the main document matters; a blocked tracker is irrelevant.
+                        if (request?.isForMainFrame == true) onFailed(true)
+                    }
+                    override fun onReceivedError(
+                        view: WebView?,
+                        request: android.webkit.WebResourceRequest?,
+                        error: android.webkit.WebResourceError?,
+                    ) {
+                        if (request?.isForMainFrame == true) onFailed(true)
+                    }
+                }
                 webChromeClient = WebChromeClient()
                 CookieManager.getInstance().setAcceptCookie(true)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)

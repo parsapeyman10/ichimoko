@@ -71,6 +71,15 @@ object CryptoCatalog {
         CryptoSymbol("ENA/USDT", "ENAUSDT", "اتنا / تتر", 4),
     )
 
+    /**
+     * The handful shown in the watchlist. Everything else stays reachable through the
+     * chart's search; a 45-row watchlist is noise, not coverage, and polls the provider
+     * for instruments nobody is looking at.
+     */
+    val watchlistSeed: List<CryptoSymbol> =
+        listOf("BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "DOGE/USDT", "BNB/USDT")
+            .mapNotNull { id -> symbols.firstOrNull { it.id == id } }
+
     private val byId = symbols.associateBy { it.id }
 
     /**

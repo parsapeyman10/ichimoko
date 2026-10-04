@@ -75,6 +75,7 @@ class MarketRepository(
     private val publicHistory: PublicCandleHistoryClient = PublicCandleHistoryClient(),
     private val dukascopyHistory: DukascopyHistoryClient = DukascopyHistoryClient(),
     private val binanceHistory: BinanceHistoryClient = BinanceHistoryClient(),
+    private val nobitexHistory: NobitexHistoryClient = NobitexHistoryClient(),
 ) {
     /**
      * Weekend gate for the symbol actually being shown.
@@ -251,15 +252,32 @@ class MarketRepository(
             var historyProvider = ""
             var staleDetail = "تاریخچهٔ آنلاین پاسخ داد اما آخرین کندل آن باید با تیک زنده تأیید شود"
             if (CryptoCatalog.isCrypto(current.symbol)) {
-                // Crypto has exactly one real source and it needs no key, so the Yahoo /
-                // Dukascopy / Twelve Data ladder below does not apply. A failure here is
-                // reported as-is rather than silently falling through to a forex provider
-                // that does not carry this instrument.
-                val book = binanceHistory.fetchCandles(current.symbol, current.interval,
-                    desiredSize = requestedSize, minimumSize = minimumSize)
+                // Binance geo-blocks some regions with HTTP 451, which leaves the crypto
+                // chart empty and looking broken. Nobitex serves the same instruments and
+                // is reachable from exactly those networks, so it is the fallback rather
+                // than the forex ladder below, which does not carry these pairs at all.
+                val book = try {
+                    binanceHistory.fetchCandles(current.symbol, current.interval,
+                        desiredSize = requestedSize, minimumSize = minimumSize)
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (binanceFailure: Exception) {
+                    try {
+                        nobitexHistory.fetchCandles(current.symbol, current.interval,
+                            desiredSize = requestedSize, minimumSize = minimumSize)
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (nobitexFailure: Exception) {
+                        throw DataFeedException(
+                            "دیتای ${current.symbol} نیامد — بایننس: " +
+                                "${(binanceFailure.message ?: "خطا").take(60)} · نوبیتکس: " +
+                                (nobitexFailure.message ?: "خطا").take(60)
+                        )
+                    }
+                }
                 fetched = book.candles
                 historyProvider = book.provider
-                staleDetail = "بایننس تاریخچه داد اما آخرین کندل آن باید با قیمت زنده تأیید شود"
+                staleDetail = "${book.provider} تاریخچه داد اما آخرین کندل آن باید با قیمت زنده تأیید شود"
             } else try {
                 // Public history is the normal path even when a Twelve Data key exists. The key
                 // is only a final fallback; this keeps the chart/replay provider policy honest.

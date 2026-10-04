@@ -100,10 +100,11 @@ class HomeReadoutTest {
             "XAU/USD", "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD", "USD/JPY", "USD/CHF", "USD/CAD")
         val ids = WatchCatalog.symbols.map { it.id }
         assertEquals(forexFirst, ids.take(forexFirst.size))
-        assertEquals(com.aurum.edge.data.CryptoCatalog.ids, ids.drop(forexFirst.size))
+        assertEquals(com.aurum.edge.data.CryptoCatalog.watchlistSeed.map { it.id }, ids.drop(forexFirst.size))
 
         assertEquals(listOf("XAU/USD", "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD",
-            "USD/JPY", "USD/CHF", "USD/CAD") + com.aurum.edge.data.CryptoCatalog.ids,
+            "USD/JPY", "USD/CHF", "USD/CAD") +
+            com.aurum.edge.data.CryptoCatalog.watchlistSeed.map { it.id },
             WatchCatalog.chartSymbols)
         assertEquals("tgju_public", WatchCatalog.find("IR_GOLD18")!!.defaultSources.single())
         assertEquals("تومان", WatchCatalog.find("USD/IRR")!!.unit)
