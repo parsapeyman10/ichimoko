@@ -13,22 +13,22 @@ import org.junit.Test
  */
 class SymbolSearchTest {
 
-    private fun pair(base: String, quote: String = "USDT", volume: Double = 0.0) =
+    private fun pair(base: String, quote: String = "USDT") =
         CryptoCatalog.CryptoSymbol(
             id = "$base/$quote", binance = "$base$quote", label = base, digits = 2,
         )
 
     private val universe = listOf(
-        pair("BTC", volume = 9_000_000_000.0),
-        pair("ETH", volume = 5_000_000_000.0),
-        pair("SOL", volume = 2_000_000_000.0),
-        pair("SOLV", volume = 3_000_000.0),
-        pair("WBTC", volume = 20_000_000.0),
-        pair("PEPE", volume = 900_000_000.0),
-        pair("DOGE", volume = 800_000_000.0),
-        pair("SHIB", volume = 400_000_000.0),
-        pair("1INCH", volume = 10_000_000.0),
-        pair("ETH", quote = "BTC", volume = 100_000_000.0),
+        pair("BTC"),
+        pair("ETH"),
+        pair("SOL"),
+        pair("SOLV"),
+        pair("WBTC"),
+        pair("PEPE"),
+        pair("DOGE"),
+        pair("SHIB"),
+        pair("1INCH"),
+        pair("ETH", quote = "BTC"),
     )
 
     // ---------- ranking ----------
@@ -74,10 +74,10 @@ class SymbolSearchTest {
     // ---------- suggestions ----------
 
     @Test fun `a typo proposes the nearest tickers instead of a blank screen`() {
-        val suggestions = SymbolSearch.suggest("dogee", universe).map { it.base }
+        val suggestions = SymbolSearch.suggest("dogee", universe).map { it.id.substringBefore('/') }
         assertTrue("DOGE expected in $suggestions", "DOGE" in suggestions)
 
-        val pepeTypo = SymbolSearch.suggest("peoe", universe).map { it.base }
+        val pepeTypo = SymbolSearch.suggest("peoe", universe).map { it.id.substringBefore('/') }
         assertTrue("PEPE expected in $pepeTypo", "PEPE" in pepeTypo)
     }
 
@@ -88,7 +88,7 @@ class SymbolSearchTest {
 
     @Test fun `suggestions do not repeat the same asset once per quote`() {
         val suggestions = SymbolSearch.suggest("eth", universe)
-        assertEquals(suggestions.map { it.base }.distinct().size, suggestions.size)
+        assertEquals(suggestions.map { it.id.substringBefore('/') }.distinct().size, suggestions.size)
     }
 
     @Test fun `edit distance is correct`() {
