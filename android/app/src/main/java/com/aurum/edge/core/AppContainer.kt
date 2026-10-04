@@ -105,6 +105,11 @@ class AppContainer(context: Context) {
 
     init {
         market.attach(appScope)
+        // Discover the full Binance spot universe once per day, on-device. A failure is
+        // harmless: the curated seed list and the disk cache keep the picker populated.
+        appScope.launch {
+            runCatching { com.aurum.edge.data.BinanceUniverse.ensureLoaded(appContext) }
+        }
         appScope.launch {
             verifiedMarket.collect { state ->
                 if (settingsStore.read().autoPaperTrading) {

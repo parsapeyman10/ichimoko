@@ -45,7 +45,8 @@ class SettingsStore(context: Context) {
         apiKey = storedApiKey?.takeIf { it.isNotBlank() }
             ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY.trim(),
         // Legacy installs may still hold a removed symbol (crypto/stock); the app is forex-only now.
-        symbol = (prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD").takeIf { it in WatchCatalog.chartSymbols } ?: "XAU/USD",
+        symbol = (prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD")
+            .takeIf { it in WatchCatalog.chartSymbols || CryptoCatalog.isCrypto(it) } ?: "XAU/USD",
         interval = Interval.fromLabel(prefs.getString(KEY_INTERVAL, null) ?: "5m"),
         riskPercent = prefs.getFloat(KEY_RISK, 0.5f).toDouble(),
         accountBalance = prefs.getFloat(KEY_BALANCE, 1000f).toDouble(),
@@ -81,7 +82,7 @@ class SettingsStore(context: Context) {
         val key = keyInput.trim().ifBlank { existing }
         if (key.any { it.isWhitespace() }) return false
         val symbol = symbolInput.trim().uppercase(java.util.Locale.ROOT).ifBlank { "XAU/USD" }
-        if (symbol !in WatchCatalog.chartSymbols) return false
+        if (symbol !in WatchCatalog.chartSymbols && !CryptoCatalog.isCrypto(symbol)) return false
         val saved = prefs.edit().putString(KEY_API, key).putString(KEY_SYMBOL, symbol).commit()
         if (saved && prefs.getString(KEY_API, null).orEmpty() == key && prefs.getString(KEY_SYMBOL, null) == symbol) {
             _settings.value = read()
@@ -99,7 +100,8 @@ class SettingsStore(context: Context) {
     @Synchronized
     fun saveChartSymbol(symbolInput: String): Boolean {
         val symbol = symbolInput.trim().uppercase(java.util.Locale.ROOT)
-        if (symbol !in WatchCatalog.chartSymbols) return false
+        // The crypto universe is discovered at runtime, so it cannot be a static list.
+        if (symbol !in WatchCatalog.chartSymbols && !CryptoCatalog.isCrypto(symbol)) return false
         val saved = prefs.edit().putString(KEY_SYMBOL, symbol).commit()
         if (saved && prefs.getString(KEY_SYMBOL, null) == symbol) {
             _settings.value = read()

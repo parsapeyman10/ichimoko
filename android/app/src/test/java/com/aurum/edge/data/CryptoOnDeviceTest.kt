@@ -150,4 +150,64 @@ class CryptoOnDeviceTest {
         assertEquals("15m", BinanceHistoryClient.interval(Interval.M15))
         assertEquals("1h", BinanceHistoryClient.interval(Interval.H1))
     }
+
+    // ---------- the full Binance universe ----------
+
+    private val exchangeInfo = """
+      {"symbols":[
+        {"symbol":"BTCUSDT","status":"TRADING","isSpotTradingAllowed":true,
+         "baseAsset":"BTC","quoteAsset":"USDT",
+         "filters":[{"filterType":"PRICE_FILTER","tickSize":"0.01000000"}]},
+        {"symbol":"SHIBUSDT","status":"TRADING","isSpotTradingAllowed":true,
+         "baseAsset":"SHIB","quoteAsset":"USDT",
+         "filters":[{"filterType":"PRICE_FILTER","tickSize":"0.00000001"}]},
+        {"symbol":"ETHBTC","status":"TRADING","isSpotTradingAllowed":true,
+         "baseAsset":"ETH","quoteAsset":"BTC",
+         "filters":[{"filterType":"PRICE_FILTER","tickSize":"0.00001000"}]},
+        {"symbol":"DEADUSDT","status":"BREAK","isSpotTradingAllowed":true,
+         "baseAsset":"DEAD","quoteAsset":"USDT",
+         "filters":[{"filterType":"PRICE_FILTER","tickSize":"0.01000000"}]},
+        {"symbol":"MARGINONLY","status":"TRADING","isSpotTradingAllowed":false,
+         "baseAsset":"MO","quoteAsset":"USDT",
+         "filters":[{"filterType":"PRICE_FILTER","tickSize":"0.01000000"}]},
+        {"symbol":"XYZRUB","status":"TRADING","isSpotTradingAllowed":true,
+         "baseAsset":"XYZ","quoteAsset":"RUB",
+         "filters":[{"filterType":"PRICE_FILTER","tickSize":"0.01000000"}]}
+      ]}
+    """.trimIndent()
+
+    @Test fun `only actively trading spot pairs on supported quotes are kept`() {
+        val pairs = BinanceUniverse.parseExchangeInfo(exchangeInfo)
+        val ids = pairs.map { it.id }
+        assertTrue("BTC/USDT" in ids)
+        assertTrue("SHIB/USDT" in ids)
+        assertTrue("ETH/BTC" in ids)
+        assertFalse("DEAD/USDT" in ids)   // halted
+        assertFalse("MO/USDT" in ids)     // not spot
+        assertFalse("XYZ/RUB" in ids)     // unsupported quote
+    }
+
+    @Test fun `usdt pairs sort ahead of coin-quoted pairs`() {
+        val pairs = BinanceUniverse.parseExchangeInfo(exchangeInfo)
+        assertEquals("USDT", pairs.first().quote)
+        assertEquals("BTC", pairs.last().quote)
+    }
+
+    @Test fun `decimals come from the exchange tick size, not a guess`() {
+        assertEquals(2, BinanceUniverse.digitsFromTick("0.01000000"))
+        assertEquals(5, BinanceUniverse.digitsFromTick("0.00001000"))
+        assertEquals(8, BinanceUniverse.digitsFromTick("0.00000001"))
+        assertEquals(0, BinanceUniverse.digitsFromTick("1.00000000"))
+
+        val shib = BinanceUniverse.parseExchangeInfo(exchangeInfo).first { it.id == "SHIB/USDT" }
+        assertEquals(8, shib.digits)
+    }
+
+    @Test fun `a malformed exchangeInfo fails loudly`() {
+        assertThrows(DataFeedException::class.java) { BinanceUniverse.parseExchangeInfo("{}") }
+        assertThrows(DataFeedException::class.java) { BinanceUniverse.parseExchangeInfo("nonsense") }
+        assertThrows(DataFeedException::class.java) {
+            BinanceUniverse.parseExchangeInfo("""{"symbols":[]}""")
+        }
+    }
 }

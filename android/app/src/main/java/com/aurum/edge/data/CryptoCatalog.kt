@@ -38,7 +38,18 @@ object CryptoCatalog {
 
     private val byId = symbols.associateBy { it.id }
 
-    fun find(id: String): CryptoSymbol? = byId[id.trim().uppercase()]
+    /**
+     * The curated list above is only the offline seed, so the picker is never empty on a
+     * first launch with no network. Once [BinanceUniverse] has loaded exchangeInfo, the
+     * full set of actively trading pairs is authoritative.
+     */
+    fun find(id: String): CryptoSymbol? {
+        val key = id.trim().uppercase()
+        byId[key]?.let { return it }
+        return BinanceUniverse.find(key)?.let { pair ->
+            CryptoSymbol(id = pair.id, binance = pair.binance, label = pair.id, digits = pair.digits)
+        }
+    }
 
     fun isCrypto(id: String): Boolean = find(id) != null
 

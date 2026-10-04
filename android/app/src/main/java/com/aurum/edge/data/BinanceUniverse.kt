@@ -1,0 +1,200 @@
+package com.aurum.edge.data
+
+import android.content.Context
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.File
+import java.util.concurrent.TimeUnit
+import kotlin.math.max
+
+/**
+ * The COMPLETE Binance spot universe, discovered by the phone itself.
+ *
+ * A hand-written list of ten coins is not "crypto support". This pulls `exchangeInfo`
+ * once, keeps every actively trading spot pair, and caches it on disk so the app still has
+ * a symbol list when offline or when the first launch of the day has no network yet.
+ *
+ * Two things come from the exchange rather than being guessed:
+ *  - the real tick size, which decides how many decimals a price must be shown with
+ *    (BTC two, DOGE five, SHIB eight — a fixed number is wrong for almost everything);
+ *  - which pairs are actually TRADING, so a delisted or halted symbol never appears.
+ *
+ * No key, no account, no backend. Market data only.
+ */
+object BinanceUniverse {
+
+    data class Pair(
+        /** App-facing id, e.g. "BTC/USDT". */
+        val id: String,
+        /** Binance ticker, e.g. "BTCUSDT". */
+        val binance: String,
+        val base: String,
+        val quote: String,
+        val digits: Int,
+    )
+
+    /** Quote assets worth charting. USDT first: it is where the liquidity is. */
+    val QUOTES = listOf("USDT", "FDUSD", "USDC", "BTC", "ETH")
+
+    private const val CACHE_FILE = "binance_universe.json"
+    private const val MAX_AGE_MS = 24 * 60 * 60 * 1000L
+
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .callTimeout(60, TimeUnit.SECONDS)
+        .followRedirects(false)
+        .build()
+
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+    private val mutex = Mutex()
+
+    @Volatile private var cached: List<Pair> = emptyList()
+    @Volatile private var loadedAt: Long = 0L
+
+    /** Everything known right now, without touching the network. */
+    fun snapshot(): List<Pair> = cached
+
+    fun find(id: String): Pair? {
+        val key = id.trim().uppercase()
+        return cached.firstOrNull { it.id == key }
+    }
+
+    fun isCrypto(id: String): Boolean = find(id) != null
+
+    /**
+     * Decimals derived from the exchange's own tick size.
+     *
+     * `tickSize` arrives as "0.00001000"; the number of meaningful decimals is the
+     * position of its last non-zero digit.
+     */
+    fun digitsFromTick(tick: String): Int {
+        val trimmed = tick.trim().trimEnd('0')
+        if (!trimmed.contains('.')) return 0
+        val decimals = trimmed.substringAfter('.').length
+        return decimals.coerceIn(0, 8)
+    }
+
+    /** Parse `exchangeInfo`. Pure, so the contract is testable without a network call. */
+    fun parseExchangeInfo(body: String, json: Json = Json { ignoreUnknownKeys = true; isLenient = true }): List<Pair> {
+        val root = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
+            ?: throw DataFeedException("پاسخ exchangeInfo بایننس معتبر نیست")
+        val symbols = root["symbols"] as? JsonArray
+            ?: throw DataFeedException("فهرست نمادهای بایننس خالی است")
+
+        val out = ArrayList<Pair>(symbols.size)
+        for (element in symbols) {
+            val row = element as? JsonObject ?: continue
+            fun str(key: String) = (row[key] as? JsonPrimitive)?.contentOrNull
+            if (str("status") != "TRADING") continue
+            if ((row["isSpotTradingAllowed"] as? JsonPrimitive)?.contentOrNull != "true") continue
+            val ticker = str("symbol")?.uppercase() ?: continue
+            val base = str("baseAsset")?.uppercase() ?: continue
+            val quote = str("quoteAsset")?.uppercase() ?: continue
+            if (quote !in QUOTES) continue
+
+            val tick = (row["filters"] as? JsonArray)?.firstNotNullOfOrNull { filter ->
+                val obj = filter as? JsonObject ?: return@firstNotNullOfOrNull null
+                if ((obj["filterType"] as? JsonPrimitive)?.contentOrNull != "PRICE_FILTER") null
+                else (obj["tickSize"] as? JsonPrimitive)?.contentOrNull
+            } ?: continue
+
+            out.add(Pair(
+                id = "$base/$quote",
+                binance = ticker,
+                base = base,
+                quote = quote,
+                digits = max(2, digitsFromTick(tick)).coerceAtMost(8),
+            ))
+        }
+        if (out.isEmpty()) throw DataFeedException("هیچ نماد فعالی از بایننس دریافت نشد")
+        // USDT first, then alphabetical: the order the user expects to scroll.
+        return out.sortedWith(compareBy({ QUOTES.indexOf(it.quote) }, { it.id }))
+    }
+
+    /**
+     * Ensure a universe is available. Disk cache first so the UI is never empty, then a
+     * refresh when the cache is stale. A network failure keeps whatever we already had.
+     */
+    suspend fun ensureLoaded(context: Context, force: Boolean = false) = mutex.withLock {
+        val now = System.currentTimeMillis()
+        if (!force && cached.isNotEmpty() && now - loadedAt < MAX_AGE_MS) return@withLock
+
+        if (cached.isEmpty()) {
+            readCache(context)?.let { cached = it }
+        }
+        if (!force && cached.isNotEmpty() && now - loadedAt < MAX_AGE_MS) return@withLock
+
+        val fetched = runCatching { fetch() }.getOrNull()
+        if (fetched != null && fetched.isNotEmpty()) {
+            cached = fetched
+            loadedAt = now
+            writeCache(context, fetched)
+        }
+    }
+
+    private suspend fun fetch(): List<Pair> = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url("${BinanceHistoryClient.HOST}/exchangeInfo?permissions=SPOT")
+            .header("Accept", "application/json")
+            .build()
+        http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw DataFeedException("فهرست نمادهای بایننس دریافت نشد (HTTP ${response.code})")
+            }
+            parseExchangeInfo(response.body?.string().orEmpty(), json)
+        }
+    }
+
+    private fun cacheFile(context: Context) = File(context.filesDir, CACHE_FILE)
+
+    private fun readCache(context: Context): List<Pair>? = runCatching {
+        val file = cacheFile(context)
+        if (!file.exists()) return null
+        val rows = json.parseToJsonElement(file.readText()) as? JsonArray ?: return null
+        rows.mapNotNull { element ->
+            val obj = element as? JsonObject ?: return@mapNotNull null
+            fun str(key: String) = (obj[key] as? JsonPrimitive)?.contentOrNull
+            val id = str("id") ?: return@mapNotNull null
+            Pair(
+                id = id,
+                binance = str("b") ?: return@mapNotNull null,
+                base = str("base") ?: id.substringBefore('/'),
+                quote = str("quote") ?: id.substringAfter('/'),
+                digits = str("d")?.toIntOrNull() ?: 2,
+            )
+        }.takeIf { it.isNotEmpty() }
+    }.getOrNull()
+
+    private fun writeCache(context: Context, pairs: List<Pair>) {
+        runCatching {
+            val text = pairs.joinToString(",", "[", "]") { pair ->
+                """{"id":"${pair.id}","b":"${pair.binance}","base":"${pair.base}",""" +
+                    """"quote":"${pair.quote}","d":"${pair.digits}"}"""
+            }
+            cacheFile(context).writeText(text)
+        }
+    }
+
+    /** Case-insensitive search over ticker and base asset, for a 400-row picker. */
+    fun search(query: String, limit: Int = 60): List<Pair> {
+        val needle = query.trim().uppercase().replace("/", "")
+        val pool = cached
+        if (needle.isEmpty()) return pool.take(limit)
+        return pool.asSequence()
+            .filter { it.binance.contains(needle) || it.base.contains(needle) }
+            // Prefer a prefix hit so typing "BTC" surfaces BTC/USDT before WBTC/USDT.
+            .sortedByDescending { it.base.startsWith(needle) }
+            .take(limit)
+            .toList()
+    }
+}

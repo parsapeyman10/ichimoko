@@ -8,6 +8,13 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,6 +48,8 @@ import com.aurum.edge.engine.SignalEngine
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
+import com.aurum.edge.data.BinanceUniverse
+import com.aurum.edge.data.CryptoCatalog
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
@@ -57,7 +66,7 @@ fun ChartScreen(
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val openTrade = trades.firstOrNull { it.symbol == market.symbol && it.isOpen }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
-        SymbolPickerRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
+        SymbolSearchRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -105,6 +114,9 @@ fun ChartScreen(
         }
 
         EntryScoreCard(market)
+
+        // Trade from the chart itself: manual long/short with stop and target, paper only.
+        PaperTicketSection(viewModel, market)
     }
 }
 
@@ -223,15 +235,20 @@ private fun TradingViewWidget(symbol: String, interval: Interval, modifier: Modi
 }
 
 private fun tradingViewHtml(symbol: String, interval: Interval): String {
-    val tvSymbol = when (symbol) {
-        "XAU/USD" -> "OANDA:XAUUSD"
-        "EUR/USD" -> "OANDA:EURUSD"
-        "GBP/USD" -> "OANDA:GBPUSD"
-        "AUD/USD" -> "OANDA:AUDUSD"
-        "NZD/USD" -> "OANDA:NZDUSD"
-        "USD/JPY" -> "OANDA:USDJPY"
-        "USD/CHF" -> "OANDA:USDCHF"
-        "USD/CAD" -> "OANDA:USDCAD"
+    // Crypto previously fell through to the gold default, so picking BTC drew XAU on the
+    // TradingView pane while the app's own chart drew BTC — two different instruments on
+    // top of each other. Crypto resolves to its real Binance ticker.
+    val crypto = CryptoCatalog.find(symbol)
+    val tvSymbol = when {
+        crypto != null -> "BINANCE:${crypto.binance}"
+        symbol == "XAU/USD" -> "OANDA:XAUUSD"
+        symbol == "EUR/USD" -> "OANDA:EURUSD"
+        symbol == "GBP/USD" -> "OANDA:GBPUSD"
+        symbol == "AUD/USD" -> "OANDA:AUDUSD"
+        symbol == "NZD/USD" -> "OANDA:NZDUSD"
+        symbol == "USD/JPY" -> "OANDA:USDJPY"
+        symbol == "USD/CHF" -> "OANDA:USDCHF"
+        symbol == "USD/CAD" -> "OANDA:USDCAD"
         else -> "OANDA:XAUUSD"
     }
     val tvInterval = when (interval) {
@@ -271,12 +288,59 @@ private fun tradingViewHtml(symbol: String, interval: Interval): String {
 
 /** Quick pair switcher: global gold plus the major FX pairs. Iran rows are watch-only. */
 @Composable
+internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
+    var query by rememberSaveable { mutableStateOf("") }
+    // The crypto universe is several hundred pairs, so a chip row cannot show it. Typing
+    // filters the live Binance list; an empty box keeps the familiar quick chips.
+    val matches = remember(query, BinanceUniverse.snapshot().size) {
+        if (query.isBlank()) emptyList() else BinanceUniverse.search(query, limit = 40)
+    }
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            singleLine = true,
+            label = { Text("جستجوی نماد — مثلاً BTC یا SOL", style = MaterialTheme.typography.labelSmall) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (matches.isNotEmpty()) {
+            Column(Modifier.fillMaxWidth().heightIn(max = 230.dp).verticalScroll(rememberScrollState())) {
+                matches.forEach { pair ->
+                    Text(
+                        "${pair.id}   ·   ${pair.binance}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (pair.id == selected) AurumColors.Gold else AurumColors.TextPrimary,
+                        modifier = Modifier.fillMaxWidth()
+                            .clickable { onSelect(pair.id); query = "" }
+                            .padding(vertical = 9.dp),
+                    )
+                }
+            }
+        } else if (query.isNotBlank()) {
+            Text(
+                if (BinanceUniverse.snapshot().isEmpty())
+                    "فهرست نمادها هنوز دریافت نشده؛ اینترنت را بررسی کنید."
+                else "نمادی با «$query» پیدا نشد.",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
+        }
+    }
+    SymbolPickerRow(selected, onSelect)
+}
+
+@Composable
 internal fun SymbolPickerRow(selected: String, onSelect: (String) -> Unit) {
+    val quick = remember(selected) {
+        (WatchCatalog.chartSymbols + selected).distinct()
+    }
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        WatchCatalog.chartSymbols.forEach { id ->
+        quick.forEach { id ->
             FilterChip(
                 selected = selected == id,
                 onClick = { if (selected != id) onSelect(id) },
