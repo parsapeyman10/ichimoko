@@ -54,6 +54,7 @@ import com.aurum.edge.data.BinanceUniverse
 import com.aurum.edge.data.SymbolSearch
 import com.aurum.edge.data.CryptoCatalog
 import com.aurum.edge.ui.components.StatTile
+import com.aurum.edge.ui.components.formatPriceFor
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.components.formatTime
@@ -115,6 +116,8 @@ fun ChartScreen(
                 )
             }
         }
+
+        StrategyBar(viewModel, market)
 
         EntryScoreCard(market)
     }
@@ -447,6 +450,142 @@ internal fun SymbolPickerRow(selected: String, onSelect: (String) -> Unit) {
                     selectedLabelColor = AurumColors.Gold,
                     labelColor = AurumColors.TextSecondary,
                 ),
+            )
+        }
+    }
+}
+
+/**
+ * Live strategy readout, directly under the chart.
+ *
+ * The engine was already evaluating every closed bar, but the chart only showed a score
+ * with no explanation, so a screen that sat at "no entry" for hours was indistinguishable
+ * from a broken one. This states three things at all times: where the score stands against
+ * the threshold, the single condition currently blocking an entry, and — when one is live
+ * — the exact levels the trade would use.
+ *
+ * Read-only. It reports what the automatic engine decided; it cannot open anything.
+ */
+@Composable
+private fun StrategyBar(viewModel: AurumViewModel, market: MarketState) {
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val autoStatus by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
+    val trades by viewModel.trades.collectAsStateWithLifecycle()
+
+    val signal = market.signal
+    val action = signal?.action ?: SignalAction.NO_TRADE
+    val score = signal?.confidence ?: 0.0
+    val threshold = settings.minConfidence
+    val digits = CryptoCatalog.digitsFor(market.symbol)
+    val open = trades.firstOrNull { it.symbol == market.symbol && it.isOpen }
+
+    val tone = when {
+        open != null -> AurumColors.Cyan
+        action == SignalAction.BUY -> AurumColors.Green
+        action == SignalAction.SELL -> AurumColors.Red
+        else -> AurumColors.TextSecondary
+    }
+
+    // The first unmet condition is far more useful than a list of twelve.
+    val firstBlocker = signal?.blockers?.firstOrNull()
+        ?: signal?.confluence?.firstOrNull { !it.ok }?.let { "${it.name} — ${it.detail}" }
+
+    SectionCard(
+        title = "استراتژی روی ${market.symbol}",
+        subtitle = "ایچیموکو · ${market.interval.label} · خودکار و کاغذی",
+        trailing = {
+            Pill(
+                when {
+                    open != null -> "پوزیشن باز"
+                    action == SignalAction.BUY -> "خرید"
+                    action == SignalAction.SELL -> "فروش"
+                    else -> "منتظر"
+                },
+                tone,
+            )
+        },
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatTile("امتیاز", "${score.toInt()} / ${threshold.toInt()}", tone, Modifier.weight(1f))
+            StatTile("تایم‌فریم", market.interval.label, modifier = Modifier.weight(1f))
+            StatTile(
+                "کندل بسته",
+                market.candles.count { it.closed }.toString(),
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        LinearProgressIndicator(
+            progress = { (score / 100.0).toFloat().coerceIn(0f, 1f) },
+            color = tone,
+            trackColor = AurumColors.Line,
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+        )
+
+        // ── the levels, whether live or hypothetical ──
+        val entry = open?.entry ?: signal?.entry
+        val stop = open?.stopLoss ?: signal?.stopLoss
+        val target = open?.takeProfit ?: signal?.takeProfit
+        if (entry != null && stop != null && target != null) {
+            Text(
+                if (open != null) "حدود پوزیشن باز" else "اگر وارد شود، با این حدود",
+                style = MaterialTheme.typography.labelMedium,
+                color = AurumColors.TextPrimary,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatTile("ورود", formatPriceFor(market.symbol, entry), modifier = Modifier.weight(1f))
+                StatTile("حد ضرر", formatPriceFor(market.symbol, stop), AurumColors.Red, Modifier.weight(1f))
+                StatTile("حد سود", formatPriceFor(market.symbol, target), AurumColors.Green, Modifier.weight(1f))
+            }
+            val risk = kotlin.math.abs(entry - stop)
+            val reward = kotlin.math.abs(target - entry)
+            if (risk > 0) {
+                Text(
+                    "نسبت سود به ضرر ${String.format(java.util.Locale.US, "%.2f", reward / risk)} " +
+                        "· فاصلهٔ حد ضرر ${String.format(java.util.Locale.US, "%,.${digits}f", risk)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+        }
+
+        // ── why it is not entering ──
+        if (open == null) {
+            Text(
+                "چرا وارد نشده",
+                style = MaterialTheme.typography.labelMedium,
+                color = AurumColors.TextPrimary,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+            Text(
+                firstBlocker ?: when {
+                    signal == null -> "هنوز سیگنالی برای این کندل محاسبه نشده است."
+                    score < threshold -> "امتیاز ${score.toInt()} هنوز به آستانهٔ ${threshold.toInt()} نرسیده است."
+                    else -> "همهٔ شرط‌ها برقرار است؛ منتظر تأیید کندل بسته."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            // The auto-trader has its own gate, separate from the signal score.
+            Text(
+                "وضعیت موتور خودکار: $autoStatus",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+
+        // ── remaining conditions, compact ──
+        val pending = signal?.confluence?.filter { !it.ok }.orEmpty()
+        if (pending.isNotEmpty()) {
+            Text(
+                "${pending.size} شرط باقی‌مانده: " + pending.take(4).joinToString("، ") { it.name },
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 8.dp),
             )
         }
     }
