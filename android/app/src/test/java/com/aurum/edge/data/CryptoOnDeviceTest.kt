@@ -210,4 +210,45 @@ class CryptoOnDeviceTest {
             BinanceUniverse.parseExchangeInfo("""{"symbols":[]}""")
         }
     }
+
+    // ---------- the seeded list ----------
+
+    @Test fun `the offline seed covers the major coins and stays consistent`() {
+        assertTrue("seed is too small: ${CryptoCatalog.symbols.size}", CryptoCatalog.symbols.size >= 30)
+        val bases = CryptoCatalog.symbols.map { it.id.substringBefore('/') }
+        listOf("BTC", "ETH", "SOL", "XRP", "DOGE", "SHIB", "PEPE", "TON", "DOT", "LTC",
+            "ATOM", "NEAR", "ARB", "OP", "SUI", "AAVE").forEach {
+            assertTrue("missing from seed: $it", it in bases)
+        }
+        // No duplicates, and every row must be a real Binance USDT ticker.
+        assertEquals(bases.distinct().size, bases.size)
+        CryptoCatalog.symbols.forEach {
+            assertEquals(it.id.replace("/", ""), it.binance)
+            assertTrue("bad digits for ${it.id}", it.digits in 0..8)
+        }
+    }
+
+    @Test fun `every seeded coin is searchable and chartable`() {
+        CryptoCatalog.symbols.forEach { coin ->
+            assertNotNull("not in watch catalog: ${coin.id}", WatchCatalog.find(coin.id))
+            assertTrue("not chartable: ${coin.id}", coin.id in WatchCatalog.chartSymbols)
+        }
+    }
+
+    @Test fun `the watchlist source for crypto actually exists`() {
+        // A catalog row naming a provider the fetcher does not know renders as a row that
+        // can never load. Every crypto row must point at a registered source.
+        val ids = SourceCatalog.all.map { it.id }.toSet()
+        CryptoCatalog.symbols.forEach { coin ->
+            WatchCatalog.find(coin.id)!!.defaultSources.forEach { source ->
+                assertTrue("unknown source '$source' for ${coin.id}", source in ids)
+            }
+        }
+    }
+
+    @Test fun `binance timestamps are read as millis, not seconds`() {
+        // closeTime is already epoch millis; treating it as seconds would put the receipt
+        // tens of thousands of years in the future.
+        assertEquals(SourceTime.UNIX_MILLIS, SourceCatalog.binance.timestampMode)
+    }
 }

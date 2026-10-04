@@ -73,6 +73,28 @@ object SourceCatalog {
     )
 
     // Only vetted built-ins can be selected from the UI.
-    val all = listOf(yahoo, tgju, bamaCars, twelveData)
+    /**
+     * Binance public 24h ticker, so crypto rows in the watchlist have a real source.
+     *
+     * Without this the crypto pairs added to [WatchCatalog] would render as permanently
+     * failing rows: the catalog named a provider that did not exist. Market data only —
+     * no key, no account, and nothing that can place an order.
+     */
+    val binance = SourceDef(
+        id = "binance_public",
+        title = "Binance · عمومی",
+        subtitle = "قیمت و تغییر ۲۴ ساعتهٔ ارز دیجیتال، بدون کلید",
+        kind = SourceKind.JSON_REST,
+        urlTemplate = "https://data-api.binance.vision/api/v3/ticker/24hr?symbol={symbol}",
+        pricePath = "lastPrice",
+        changePath = "priceChangePercent",
+        changeMode = ChangeMode.PERCENT,
+        volumePath = "volume",
+        timestampPath = "closeTime",
+        timestampMode = SourceTime.UNIX_MILLIS,
+        unit = "$",
+    )
+
+    val all = listOf(yahoo, tgju, bamaCars, twelveData, binance)
     fun find(id: String): SourceDef? = all.firstOrNull { it.id == id }
 }

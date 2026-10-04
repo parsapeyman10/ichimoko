@@ -34,6 +34,41 @@ object CryptoCatalog {
         CryptoSymbol("AVAX/USDT", "AVAXUSDT", "آوالانچ / تتر", 3),
         CryptoSymbol("LINK/USDT", "LINKUSDT", "چین‌لینک / تتر", 3),
         CryptoSymbol("TRX/USDT", "TRXUSDT", "ترون / تتر", 5),
+        CryptoSymbol("TON/USDT", "TONUSDT", "تون‌کوین / تتر", 3),
+        CryptoSymbol("DOT/USDT", "DOTUSDT", "پولکادات / تتر", 3),
+        CryptoSymbol("LTC/USDT", "LTCUSDT", "لایت‌کوین / تتر", 2),
+        CryptoSymbol("BCH/USDT", "BCHUSDT", "بیت‌کوین کش / تتر", 2),
+        CryptoSymbol("SHIB/USDT", "SHIBUSDT", "شیبا اینو / تتر", 8),
+        CryptoSymbol("UNI/USDT", "UNIUSDT", "یونی‌سواپ / تتر", 3),
+        CryptoSymbol("ATOM/USDT", "ATOMUSDT", "کازماس / تتر", 3),
+        CryptoSymbol("XLM/USDT", "XLMUSDT", "استلار / تتر", 5),
+        CryptoSymbol("NEAR/USDT", "NEARUSDT", "نیر / تتر", 3),
+        CryptoSymbol("APT/USDT", "APTUSDT", "آپتوس / تتر", 3),
+        CryptoSymbol("ARB/USDT", "ARBUSDT", "آربیتروم / تتر", 4),
+        CryptoSymbol("OP/USDT", "OPUSDT", "اپتیمیسم / تتر", 4),
+        CryptoSymbol("FIL/USDT", "FILUSDT", "فایل‌کوین / تتر", 3),
+        CryptoSymbol("ICP/USDT", "ICPUSDT", "اینترنت کامپیوتر / تتر", 3),
+        CryptoSymbol("ETC/USDT", "ETCUSDT", "اتریوم کلاسیک / تتر", 2),
+        CryptoSymbol("HBAR/USDT", "HBARUSDT", "هدرا / تتر", 5),
+        CryptoSymbol("VET/USDT", "VETUSDT", "وی‌چین / تتر", 5),
+        CryptoSymbol("INJ/USDT", "INJUSDT", "اینجکتیو / تتر", 3),
+        CryptoSymbol("SUI/USDT", "SUIUSDT", "سویی / تتر", 4),
+        CryptoSymbol("SEI/USDT", "SEIUSDT", "سی / تتر", 4),
+        CryptoSymbol("AAVE/USDT", "AAVEUSDT", "آوه / تتر", 2),
+        CryptoSymbol("ALGO/USDT", "ALGOUSDT", "الگورند / تتر", 4),
+        CryptoSymbol("PEPE/USDT", "PEPEUSDT", "پپه / تتر", 8),
+        CryptoSymbol("WIF/USDT", "WIFUSDT", "داگ‌ویف‌هت / تتر", 4),
+        CryptoSymbol("FET/USDT", "FETUSDT", "فچ / تتر", 4),
+        CryptoSymbol("RENDER/USDT", "RENDERUSDT", "رندر / تتر", 3),
+        CryptoSymbol("TIA/USDT", "TIAUSDT", "سلستیا / تتر", 4),
+        CryptoSymbol("LDO/USDT", "LDOUSDT", "لیدو / تتر", 4),
+        CryptoSymbol("GRT/USDT", "GRTUSDT", "گراف / تتر", 5),
+        CryptoSymbol("SAND/USDT", "SANDUSDT", "سندباکس / تتر", 4),
+        CryptoSymbol("MANA/USDT", "MANAUSDT", "دیسنترالند / تتر", 4),
+        CryptoSymbol("AXS/USDT", "AXSUSDT", "اکسی اینفینیتی / تتر", 3),
+        CryptoSymbol("POL/USDT", "POLUSDT", "پالیگان / تتر", 4),
+        CryptoSymbol("RUNE/USDT", "RUNEUSDT", "تورچین / تتر", 4),
+        CryptoSymbol("ENA/USDT", "ENAUSDT", "اتنا / تتر", 4),
     )
 
     private val byId = symbols.associateBy { it.id }
@@ -45,10 +80,19 @@ object CryptoCatalog {
      */
     fun find(id: String): CryptoSymbol? {
         val key = id.trim().uppercase()
-        byId[key]?.let { return it }
-        return BinanceUniverse.find(key)?.let { pair ->
-            CryptoSymbol(id = pair.id, binance = pair.binance, label = pair.id, digits = pair.digits)
+        // The exchange is authoritative: once exchangeInfo has loaded, its real tick size
+        // wins over the seed's hand-written digits. Checking the seed first (as this did)
+        // meant a stale constant could keep overriding the live value forever.
+        BinanceUniverse.find(key)?.let { pair ->
+            val seed = byId[key]
+            return CryptoSymbol(
+                id = pair.id,
+                binance = pair.binance,
+                label = seed?.label ?: pair.id,
+                digits = pair.digits,
+            )
         }
+        return byId[key]
     }
 
     fun isCrypto(id: String): Boolean = find(id) != null

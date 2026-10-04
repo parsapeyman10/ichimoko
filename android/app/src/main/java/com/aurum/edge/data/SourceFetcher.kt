@@ -109,6 +109,10 @@ class SourceFetcher(
         }?.takeIf { it.isFinite() }
         val providerAt = when (source.timestampMode) {
             SourceTime.UNIX_SECONDS -> JsonPath.number(root, source.timestampPath, symbol.code)?.toLong()?.times(1000L)
+            // Binance already reports epoch millis; multiplying again would place the
+            // receipt tens of thousands of years in the future and break every freshness
+            // check that depends on it.
+            SourceTime.UNIX_MILLIS -> JsonPath.number(root, source.timestampPath, symbol.code)?.toLong()
             SourceTime.UTC_DATETIME -> (JsonPath.first(root, source.timestampPath, symbol.code) as? JsonPrimitive)
                 ?.contentOrNull?.let { TwelveDataClient.parseTime(it) }
             SourceTime.NONE -> null
