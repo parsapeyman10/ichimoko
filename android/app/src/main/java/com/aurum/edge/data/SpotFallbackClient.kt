@@ -1,5 +1,6 @@
 package com.aurum.edge.data
 
+import com.aurum.edge.core.Interval
 import com.aurum.edge.core.PriceTick
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -33,7 +34,7 @@ class SpotFallbackClient(
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .build(),
-    private val binance: BinanceHistoryClient = BinanceHistoryClient(),
+    private val nobitex: NobitexHistoryClient = NobitexHistoryClient(),
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -121,14 +122,12 @@ class SpotFallbackClient(
         // Crypto has its own real, keyless book. Swissquote and Gold-API do not carry these
         // instruments at all, so trying them would just produce a misleading error.
         if (CryptoCatalog.isCrypto(symbol)) {
-            val quote = binance.fetchQuote(symbol)
-                ?: throw DataFeedException("قیمت زندهٔ $symbol از بایننس دریافت نشد")
-            return PriceTick(
-                price = (quote.bid + quote.ask) / 2,
-                at = quote.at,
-                bid = quote.bid,
-                ask = quote.ask,
-            )
+            // Last closed candle from the same unblocked source as the history, so the
+            // live price and the chart can never disagree about which venue they mean.
+            val last = nobitex.fetchCandles(symbol, Interval.M1, desiredSize = 2, minimumSize = 1)
+                .candles.lastOrNull()
+                ?: throw DataFeedException("قیمت زندهٔ $symbol دریافت نشد")
+            return PriceTick(price = last.close, at = System.currentTimeMillis())
         }
         return try {
             fetchSwissquote(symbol)

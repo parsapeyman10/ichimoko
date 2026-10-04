@@ -74,7 +74,6 @@ class MarketRepository(
     private val spotFallback: SpotFallbackClient = SpotFallbackClient(),
     private val publicHistory: PublicCandleHistoryClient = PublicCandleHistoryClient(),
     private val dukascopyHistory: DukascopyHistoryClient = DukascopyHistoryClient(),
-    private val binanceHistory: BinanceHistoryClient = BinanceHistoryClient(),
     private val nobitexHistory: NobitexHistoryClient = NobitexHistoryClient(),
 ) {
     /**
@@ -256,25 +255,11 @@ class MarketRepository(
                 // chart empty and looking broken. Nobitex serves the same instruments and
                 // is reachable from exactly those networks, so it is the fallback rather
                 // than the forex ladder below, which does not carry these pairs at all.
-                val book = try {
-                    binanceHistory.fetchCandles(current.symbol, current.interval,
-                        desiredSize = requestedSize, minimumSize = minimumSize)
-                } catch (cancel: CancellationException) {
-                    throw cancel
-                } catch (binanceFailure: Exception) {
-                    try {
-                        nobitexHistory.fetchCandles(current.symbol, current.interval,
-                            desiredSize = requestedSize, minimumSize = minimumSize)
-                    } catch (cancel: CancellationException) {
-                        throw cancel
-                    } catch (nobitexFailure: Exception) {
-                        throw DataFeedException(
-                            "دیتای ${current.symbol} نیامد — بایننس: " +
-                                "${(binanceFailure.message ?: "خطا").take(60)} · نوبیتکس: " +
-                                (nobitexFailure.message ?: "خطا").take(60)
-                        )
-                    }
-                }
+                // One crypto source, chosen because it is reachable from networks that
+                // Binance geo-blocks with HTTP 451. No second provider to fall back to,
+                // so its error is reported as-is rather than hidden behind a retry.
+                val book = nobitexHistory.fetchCandles(current.symbol, current.interval,
+                    desiredSize = requestedSize, minimumSize = minimumSize)
                 fetched = book.candles
                 historyProvider = book.provider
                 staleDetail = "${book.provider} تاریخچه داد اما آخرین کندل آن باید با قیمت زنده تأیید شود"

@@ -14,9 +14,8 @@ import org.junit.Test
 class SymbolSearchTest {
 
     private fun pair(base: String, quote: String = "USDT", volume: Double = 0.0) =
-        BinanceUniverse.Pair(
-            id = "$base/$quote", binance = "$base$quote",
-            base = base, quote = quote, digits = 2, volume = volume,
+        CryptoCatalog.CryptoSymbol(
+            id = "$base/$quote", binance = "$base$quote", label = base, digits = 2,
         )
 
     private val universe = listOf(
@@ -63,14 +62,6 @@ class SymbolSearchTest {
         assertEquals("ETH", SymbolSearch.aliasFor("اتريوم"))
     }
 
-    @Test fun `ties break on real turnover, not the alphabet`() {
-        // Both contain "e"; the busier market must come first.
-        val ranked = SymbolSearch.rank("e", universe)
-        val pepe = ranked.indexOfFirst { it.id == "PEPE/USDT" }
-        val doge = ranked.indexOfFirst { it.id == "DOGE/USDT" }
-        assertTrue(pepe in 0..doge)
-    }
-
     @Test fun `an empty query returns the list untouched so the default order survives`() {
         assertEquals(universe.map { it.id }, SymbolSearch.rank("", universe).map { it.id })
         assertEquals(universe.map { it.id }, SymbolSearch.rank("   ", universe).map { it.id })
@@ -110,21 +101,4 @@ class SymbolSearchTest {
         assertEquals(4, SymbolSearch.distance("abcd", ""))
     }
 
-    // ---------- volume ordering ----------
-
-    @Test fun `24h turnover parses and drives the default order`() {
-        val volumes = BinanceUniverse.parseVolumes("""
-            [{"symbol":"BTCUSDT","quoteVolume":"9000000000.00"},
-             {"symbol":"SOLVUSDT","quoteVolume":"3000000.00"},
-             {"symbol":"BROKEN","quoteVolume":"not-a-number"}]
-        """.trimIndent())
-        assertEquals(9_000_000_000.0, volumes["BTCUSDT"]!!, 1.0)
-        assertEquals(3_000_000.0, volumes["SOLVUSDT"]!!, 1.0)
-        assertTrue("BROKEN" !in volumes)
-    }
-
-    @Test fun `a volume outage leaves the universe usable`() {
-        assertTrue(BinanceUniverse.parseVolumes("nonsense").isEmpty())
-        assertTrue(BinanceUniverse.parseVolumes("{}").isEmpty())
-    }
 }

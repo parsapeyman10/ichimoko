@@ -60,8 +60,8 @@ object WatchCatalog {
             id = crypto.id,
             label = crypto.label,
             unit = "$",
-            providerCodes = linkedMapOf("binance_public" to crypto.binance),
-            defaultSources = listOf("binance_public"),
+            providerCodes = linkedMapOf("tradingview_scanner" to "BINANCE:${crypto.binance}"),
+            defaultSources = listOf("tradingview_scanner"),
             maxAgeMillis = 5 * 60_000L,
             tolerancePct = 1.0,
         )
@@ -72,7 +72,7 @@ object WatchCatalog {
     /** Symbols selectable for the chart/feed. Iran cash-board rows are watch-only. */
     val chartSymbols: List<String> = symbols.filter {
         "stocks_yahoo" in it.providerCodes || "twelve_data_quote" in it.providerCodes ||
-            "binance_public" in it.providerCodes
+            "tradingview_scanner" in it.providerCodes
     }.map { it.id }
 }
 

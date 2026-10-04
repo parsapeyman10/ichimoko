@@ -50,7 +50,6 @@ import com.aurum.edge.engine.SignalEngine
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
-import com.aurum.edge.data.BinanceUniverse
 import com.aurum.edge.data.SymbolSearch
 import com.aurum.edge.data.CryptoCatalog
 import com.aurum.edge.ui.components.StatTile
@@ -327,30 +326,31 @@ private fun tradingViewHtml(symbol: String, interval: Interval): String {
 }
 
 /**
- * Symbol browser for the whole Binance spot universe plus the forex workspace.
+ * Chart symbol browser: gold first, then the FX pairs, then every crypto symbol.
  *
- * Several hundred pairs cannot live in a chip row, and they arrive asynchronously, so this
- * observes [BinanceUniverse.pairs] as state. Reading a plain field here was the bug that
- * made the app look like it only supported a handful of coins: the list loaded a second
- * after launch and Compose was never told.
+ * The list is static and needs no network call, so it can never be emptied by a blocked
+ * exchange API — the previous version fetched the universe from Binance, which answers
+ * 451 here, leaving the picker silently empty. TradingView renders all of these itself,
+ * so what is listed is exactly what the chart can draw.
  */
 @Composable
 internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
-    val universe by BinanceUniverse.pairs.collectAsStateWithLifecycle()
-    val loadError by BinanceUniverse.error.collectAsStateWithLifecycle()
-    val loading by BinanceUniverse.loading.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
-    var quote by rememberSaveable { mutableStateOf("USDT") }
+    var group by rememberSaveable { mutableStateOf("طلا و فارکس") }
     var open by rememberSaveable { mutableStateOf(false) }
 
-    val pool = remember(universe, quote) {
-        if (quote == "همه") universe else universe.filter { it.quote == quote }
+    val forexIds = remember { WatchCatalog.chartSymbols.filter { !CryptoCatalog.isCrypto(it) } }
+    val cryptoList = remember { CryptoCatalog.symbols }
+
+    val forexShown = remember(query) {
+        val needle = SymbolSearch.normalize(query).replace(" ", "").uppercase()
+        if (needle.isEmpty()) forexIds
+        else forexIds.filter { it.replace("/", "").contains(needle, ignoreCase = true) }
     }
-    val shown = remember(pool, query) { SymbolSearch.rank(query, pool, limit = 300) }
-    // Only propose alternatives once the query has genuinely found nothing.
-    val suggestions = remember(pool, query, shown.size) {
-        if (shown.isNotEmpty() || query.isBlank()) emptyList()
-        else SymbolSearch.suggest(query, if (pool.isEmpty()) universe else pool)
+    val cryptoShown = remember(query) { SymbolSearch.rank(query, cryptoList, limit = 300) }
+    val suggestions = remember(query, forexShown.size, cryptoShown.size) {
+        if (query.isBlank() || forexShown.isNotEmpty() || cryptoShown.isNotEmpty()) emptyList()
+        else SymbolSearch.suggest(query, cryptoList)
     }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
@@ -362,11 +362,7 @@ internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
                 modifier = Modifier.weight(1f),
             )
             Text(
-                when {
-                    loading && universe.isEmpty() -> "در حال دریافت فهرست…"
-                    universe.isEmpty() -> "فهرست خالی"
-                    else -> "${universe.size} نماد"
-                },
+                "${forexIds.size + cryptoList.size} نماد",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
             )
@@ -384,7 +380,7 @@ internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
             value = query,
             onValueChange = { query = it },
             singleLine = true,
-            label = { Text("جستجو — BTC، پپه، bitcoin، SOL…", style = MaterialTheme.typography.labelSmall) },
+            label = { Text("جستجو — طلا، EUR، بیت‌کوین، PEPE…", style = MaterialTheme.typography.labelSmall) },
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -392,10 +388,10 @@ internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
             Modifier.fillMaxWidth().padding(top = 6.dp).horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            (BinanceUniverse.QUOTES + "همه").forEach { option ->
+            listOf("طلا و فارکس", "ارز دیجیتال").forEach { option ->
                 FilterChip(
-                    selected = quote == option,
-                    onClick = { quote = option },
+                    selected = group == option,
+                    onClick = { group = option },
                     label = { Text(option, style = MaterialTheme.typography.labelSmall) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = AurumColors.Gold.copy(alpha = 0.18f),
@@ -406,72 +402,58 @@ internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
             }
         }
 
-        loadError?.let { message ->
-            Text(
-                "$message — فهرست کریپتو در دسترس نیست؛ جفت‌ارزها مثل همیشه کار می‌کنند.",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.Red,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-        }
-
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp).padding(top = 6.dp)) {
-            items(shown, key = { it.id }) { pair ->
-                Row(
-                    Modifier.fillMaxWidth()
-                        .clickable { onSelect(pair.id); open = false; query = "" }
-                        .padding(vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        pair.id,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (pair.id == selected) AurumColors.Gold else AurumColors.TextPrimary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        pair.quote,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.TextMuted,
-                    )
+            if (group == "طلا و فارکس") {
+                items(forexShown, key = { "f-$it" }) { id ->
+                    SymbolRow(id, id == selected) { onSelect(id); open = false; query = "" }
+                }
+            } else {
+                items(cryptoShown, key = { "c-" + it.id }) { coin ->
+                    SymbolRow(coin.id, coin.id == selected) { onSelect(coin.id); open = false; query = "" }
                 }
             }
-            if (shown.isEmpty() && universe.isNotEmpty()) {
+            if (suggestions.isNotEmpty()) {
                 item {
                     Text(
-                        if (suggestions.isEmpty()) "نمادی با «$query» در $quote پیدا نشد."
-                        else "«$query» پیدا نشد. منظورتان این بود؟",
+                        "«$query» پیدا نشد. منظورتان این بود؟",
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.TextMuted,
                         modifier = Modifier.padding(vertical = 8.dp),
                     )
                 }
-                items(suggestions, key = { "s-" + it.id }) { pair ->
-                    Row(
-                        Modifier.fillMaxWidth()
-                            .clickable { onSelect(pair.id); open = false; query = "" }
-                            .padding(vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            pair.id,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = AurumColors.Cyan,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Text("پیشنهاد", style = MaterialTheme.typography.labelSmall,
-                            color = AurumColors.TextMuted)
+                items(suggestions, key = { "s-" + it.id }) { coin ->
+                    SymbolRow(coin.id, false, AurumColors.Cyan) {
+                        onSelect(coin.id); open = false; query = ""
                     }
                 }
             }
         }
     }
+    SymbolPickerRow(selected, onSelect)
+}
+
+@Composable
+private fun SymbolRow(
+    id: String,
+    selected: Boolean,
+    tint: androidx.compose.ui.graphics.Color? = null,
+    onClick: () -> Unit,
+) {
+    Text(
+        id,
+        style = MaterialTheme.typography.bodyMedium,
+        color = tint ?: if (selected) AurumColors.Gold else AurumColors.TextPrimary,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 9.dp),
+    )
 }
 
 @Composable
 internal fun SymbolPickerRow(selected: String, onSelect: (String) -> Unit) {
+    // Gold first, then the FX pairs, then crypto — the order asked for.
     val quick = remember(selected) {
-        (WatchCatalog.chartSymbols + selected).distinct()
+        val forex = WatchCatalog.chartSymbols.filter { !CryptoCatalog.isCrypto(it) }
+        val crypto = WatchCatalog.chartSymbols.filter { CryptoCatalog.isCrypto(it) }
+        (listOf("XAU/USD") + forex + crypto + selected).distinct()
     }
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).horizontalScroll(rememberScrollState()),

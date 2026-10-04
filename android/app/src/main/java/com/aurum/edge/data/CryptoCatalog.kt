@@ -87,22 +87,7 @@ object CryptoCatalog {
      * first launch with no network. Once [BinanceUniverse] has loaded exchangeInfo, the
      * full set of actively trading pairs is authoritative.
      */
-    fun find(id: String): CryptoSymbol? {
-        val key = id.trim().uppercase()
-        // The exchange is authoritative: once exchangeInfo has loaded, its real tick size
-        // wins over the seed's hand-written digits. Checking the seed first (as this did)
-        // meant a stale constant could keep overriding the live value forever.
-        BinanceUniverse.find(key)?.let { pair ->
-            val seed = byId[key]
-            return CryptoSymbol(
-                id = pair.id,
-                binance = pair.binance,
-                label = seed?.label ?: pair.id,
-                digits = pair.digits,
-            )
-        }
-        return byId[key]
-    }
+    fun find(id: String): CryptoSymbol? = byId[id.trim().uppercase()]
 
     fun isCrypto(id: String): Boolean = find(id) != null
 

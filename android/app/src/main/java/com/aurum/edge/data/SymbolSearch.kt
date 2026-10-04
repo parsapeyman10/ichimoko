@@ -2,6 +2,8 @@ package com.aurum.edge.data
 
 import kotlin.math.min
 
+import com.aurum.edge.data.CryptoCatalog.CryptoSymbol
+
 /**
  * Finding a coin by a fragment of its name, in Persian or English.
  *
@@ -100,10 +102,10 @@ object SymbolSearch {
      * The ordering is the point: searching "sol" must surface SOL/USDT before SOLV/USDT,
      * and "bitcoin" must find BTC even though the two share no letters in that order.
      */
-    fun score(query: String, pair: BinanceUniverse.Pair): Int? {
+    fun score(query: String, pair: CryptoSymbol): Int? {
         val needle = normalize(query).replace(" ", "")
         if (needle.isEmpty()) return 0
-        val base = pair.base.lowercase()
+        val base = pair.id.substringBefore('/').lowercase()
         val ticker = pair.binance.lowercase()
         val alias = aliasFor(query)?.lowercase()
 
@@ -125,14 +127,15 @@ object SymbolSearch {
      */
     fun rank(
         query: String,
-        pairs: List<BinanceUniverse.Pair>,
+        pairs: List<CryptoSymbol>,
         limit: Int = 300,
-    ): List<BinanceUniverse.Pair> {
+    ): List<CryptoSymbol> {
         if (normalize(query).isEmpty()) return pairs.take(limit)
+        // The catalog is already ordered by importance, so a stable sort on relevance
+        // keeps the majors ahead without needing a turnover feed.
         return pairs.asSequence()
             .mapNotNull { pair -> score(query, pair)?.let { pair to it } }
-            .sortedWith(compareByDescending<kotlin.Pair<BinanceUniverse.Pair, Int>> { it.second }
-                .thenByDescending { it.first.volume })
+            .sortedByDescending { it.second }
             .map { it.first }
             .take(limit)
             .toList()
@@ -164,20 +167,19 @@ object SymbolSearch {
      */
     fun suggest(
         query: String,
-        pairs: List<BinanceUniverse.Pair>,
+        pairs: List<CryptoSymbol>,
         limit: Int = 5,
-    ): List<BinanceUniverse.Pair> {
+    ): List<CryptoSymbol> {
         val needle = normalize(query).replace(" ", "")
         if (needle.length < 2) return emptyList()
         return pairs.asSequence()
-            .map { it to distance(needle, it.base.lowercase()) }
+            .map { it to distance(needle, it.id.substringBefore('/').lowercase()) }
             // Allow roughly one edit per two characters, so "bitcon" reaches BTC-length
             // tickers without returning the entire exchange for a one-letter query.
             .filter { it.second <= maxOf(1, needle.length / 2) }
-            .sortedWith(compareBy<kotlin.Pair<BinanceUniverse.Pair, Int>> { it.second }
-                .thenByDescending { it.first.volume })
+            .sortedBy { it.second }
             .map { it.first }
-            .distinctBy { it.base }
+            .distinctBy { it.id.substringBefore('/') }
             .take(limit)
             .toList()
     }

@@ -95,25 +95,30 @@ object SourceCatalog {
     )
 
     /**
-     * Binance public 24h ticker, so crypto rows in the watchlist have a real source.
+     * TradingView's public symbol scanner.
      *
-     * Market data only — no key, no account, and nothing that can place an order.
+     * One source for gold, FX and crypto alike, and reachable from networks that
+     * geo-block the exchanges directly — which is why the previous crypto rows returned
+     * nothing at all. The symbol code is the same "EXCHANGE:TICKER" the chart already
+     * uses, so the watchlist and the chart can never disagree about which venue a price
+     * came from.
+     *
+     * Quote data only; it cannot place an order.
      */
-    val binance = SourceDef(
-        id = "binance_public",
-        title = "Binance · عمومی",
-        subtitle = "قیمت و تغییر ۲۴ ساعتهٔ ارز دیجیتال، بدون کلید",
+    val tradingView = SourceDef(
+        id = "tradingview_scanner",
+        title = "TradingView · عمومی",
+        subtitle = "قیمت و تغییر روزانه برای طلا، جفت‌ارز و ارز دیجیتال، بدون کلید",
         kind = SourceKind.JSON_REST,
-        urlTemplate = "https://data-api.binance.vision/api/v3/ticker/24hr?symbol={symbol}",
-        pricePath = "lastPrice",
-        changePath = "priceChangePercent",
+        urlTemplate = "https://scanner.tradingview.com/symbol?symbol={symbol}" +
+            "&fields=close,change,high,low,volume&no_404=true",
+        pricePath = "close",
+        changePath = "change",
         changeMode = ChangeMode.PERCENT,
         volumePath = "volume",
-        timestampPath = "closeTime",
-        timestampMode = SourceTime.UNIX_MILLIS,
         unit = "$",
     )
 
-    val all = listOf(yahoo, tgju, bamaCars, goldApi, twelveData, binance)
+    val all = listOf(yahoo, tgju, bamaCars, goldApi, twelveData, tradingView)
     fun find(id: String): SourceDef? = all.firstOrNull { it.id == id }
 }
