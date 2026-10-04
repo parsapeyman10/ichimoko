@@ -15,6 +15,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -286,49 +288,128 @@ private fun tradingViewHtml(symbol: String, interval: Interval): String {
     """.trimIndent()
 }
 
-/** Quick pair switcher: global gold plus the major FX pairs. Iran rows are watch-only. */
+/**
+ * Symbol browser for the whole Binance spot universe plus the forex workspace.
+ *
+ * Several hundred pairs cannot live in a chip row, and they arrive asynchronously, so this
+ * observes [BinanceUniverse.pairs] as state. Reading a plain field here was the bug that
+ * made the app look like it only supported a handful of coins: the list loaded a second
+ * after launch and Compose was never told.
+ */
 @Composable
 internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
+    val universe by BinanceUniverse.pairs.collectAsStateWithLifecycle()
+    val loadError by BinanceUniverse.error.collectAsStateWithLifecycle()
+    val loading by BinanceUniverse.loading.collectAsStateWithLifecycle()
     var query by rememberSaveable { mutableStateOf("") }
-    // The crypto universe is several hundred pairs, so a chip row cannot show it. Typing
-    // filters the live Binance list; an empty box keeps the familiar quick chips.
-    val matches = remember(query, BinanceUniverse.snapshot().size) {
-        if (query.isBlank()) emptyList() else BinanceUniverse.search(query, limit = 40)
+    var quote by rememberSaveable { mutableStateOf("USDT") }
+    var open by rememberSaveable { mutableStateOf(false) }
+
+    val shown = remember(universe, query, quote) {
+        val needle = query.trim().uppercase().replace("/", "")
+        universe.asSequence()
+            .filter { quote == "همه" || it.quote == quote }
+            .filter { needle.isEmpty() || it.binance.contains(needle) || it.base.contains(needle) }
+            .sortedByDescending { needle.isNotEmpty() && it.base.startsWith(needle) }
+            .take(300)
+            .toList()
     }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "نماد: $selected",
+                style = MaterialTheme.typography.titleSmall,
+                color = AurumColors.Gold,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                when {
+                    loading && universe.isEmpty() -> "در حال دریافت فهرست…"
+                    universe.isEmpty() -> "فهرست خالی"
+                    else -> "${universe.size} نماد"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+            )
+            Text(
+                if (open) "  بستن" else "  تغییر نماد",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.Cyan,
+                modifier = Modifier.clickable { open = !open }.padding(6.dp),
+            )
+        }
+
+        if (!open) return@Column
+
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
             singleLine = true,
-            label = { Text("جستجوی نماد — مثلاً BTC یا SOL", style = MaterialTheme.typography.labelSmall) },
+            label = { Text("جستجو — BTC، PEPE، SOL…", style = MaterialTheme.typography.labelSmall) },
             modifier = Modifier.fillMaxWidth(),
         )
-        if (matches.isNotEmpty()) {
-            Column(Modifier.fillMaxWidth().heightIn(max = 230.dp).verticalScroll(rememberScrollState())) {
-                matches.forEach { pair ->
+
+        Row(
+            Modifier.fillMaxWidth().padding(top = 6.dp).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            (BinanceUniverse.QUOTES + "همه").forEach { option ->
+                FilterChip(
+                    selected = quote == option,
+                    onClick = { quote = option },
+                    label = { Text(option, style = MaterialTheme.typography.labelSmall) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AurumColors.Gold.copy(alpha = 0.18f),
+                        selectedLabelColor = AurumColors.Gold,
+                        labelColor = AurumColors.TextSecondary,
+                    ),
+                )
+            }
+        }
+
+        loadError?.let { message ->
+            Text(
+                "$message — فهرست کریپتو در دسترس نیست؛ جفت‌ارزها مثل همیشه کار می‌کنند.",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.Red,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp).padding(top = 6.dp)) {
+            items(shown, key = { it.id }) { pair ->
+                Row(
+                    Modifier.fillMaxWidth()
+                        .clickable { onSelect(pair.id); open = false; query = "" }
+                        .padding(vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        "${pair.id}   ·   ${pair.binance}",
+                        pair.id,
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (pair.id == selected) AurumColors.Gold else AurumColors.TextPrimary,
-                        modifier = Modifier.fillMaxWidth()
-                            .clickable { onSelect(pair.id); query = "" }
-                            .padding(vertical = 9.dp),
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        pair.quote,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
                     )
                 }
             }
-        } else if (query.isNotBlank()) {
-            Text(
-                if (BinanceUniverse.snapshot().isEmpty())
-                    "فهرست نمادها هنوز دریافت نشده؛ اینترنت را بررسی کنید."
-                else "نمادی با «$query» پیدا نشد.",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.padding(vertical = 8.dp),
-            )
+            if (shown.isEmpty() && universe.isNotEmpty()) {
+                item {
+                    Text(
+                        "نمادی با «$query» در $quote پیدا نشد.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                        modifier = Modifier.padding(vertical = 8.dp),
+                    )
+                }
+            }
         }
     }
-    SymbolPickerRow(selected, onSelect)
 }
 
 @Composable

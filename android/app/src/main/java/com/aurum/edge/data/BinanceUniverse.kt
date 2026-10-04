@@ -2,6 +2,9 @@ package com.aurum.edge.data
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -58,8 +61,21 @@ object BinanceUniverse {
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val mutex = Mutex()
 
-    @Volatile private var cached: List<Pair> = emptyList()
+    // Observable, NOT a plain field. The universe arrives a second or two after launch;
+    // with a bare `var` Compose never recomposes, so the picker kept showing only the
+    // hardcoded seed symbols and looked like crypto support had not shipped at all.
+    private val _pairs = MutableStateFlow<List<Pair>>(emptyList())
+    val pairs: StateFlow<List<Pair>> = _pairs.asStateFlow()
+
+    private val _error = MutableStateFlow<String?>(null)
+    val error: StateFlow<String?> = _error.asStateFlow()
+
+    private val _loading = MutableStateFlow(false)
+    val loading: StateFlow<Boolean> = _loading.asStateFlow()
+
     @Volatile private var loadedAt: Long = 0L
+
+    private val cached: List<Pair> get() = _pairs.value
 
     /** Everything known right now, without touching the network. */
     fun snapshot(): List<Pair> = cached
@@ -130,15 +146,24 @@ object BinanceUniverse {
         if (!force && cached.isNotEmpty() && now - loadedAt < MAX_AGE_MS) return@withLock
 
         if (cached.isEmpty()) {
-            readCache(context)?.let { cached = it }
+            readCache(context)?.let { _pairs.value = it }
         }
         if (!force && cached.isNotEmpty() && now - loadedAt < MAX_AGE_MS) return@withLock
 
-        val fetched = runCatching { fetch() }.getOrNull()
+        _loading.value = true
+        val attempt = runCatching { fetch() }
+        _loading.value = false
+        val fetched = attempt.getOrNull()
         if (fetched != null && fetched.isNotEmpty()) {
-            cached = fetched
+            _pairs.value = fetched
             loadedAt = now
+            _error.value = null
             writeCache(context, fetched)
+        } else {
+            // Never fail silently: an empty picker with no explanation is indistinguishable
+            // from a missing feature.
+            _error.value = attempt.exceptionOrNull()?.message
+                ?: "فهرست نمادهای بایننس دریافت نشد"
         }
     }
 
