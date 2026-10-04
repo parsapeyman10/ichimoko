@@ -499,7 +499,9 @@ class Autopilot:
                 async with self._lock:
                     state = load_state()
                     if not state.get("enabled"):
-                        save_state(state)
+                        # Just stand down. Persisting here would write a fresh blank state
+                        # whose enabled=False looks exactly like a deliberate user stop,
+                        # which then suppresses the auto-resume on the next boot.
                         return
                     await run_cycle(settings, state)
                     save_state(state)
