@@ -57,3 +57,42 @@ pytest -q
 
 ## نکته PowerShell
 اگر `uvicorn` پیدا نشد: `python -m pip install uvicorn fastapi` یا `pip install -r backend/requirements.txt`
+
+---
+
+## معاملهٔ خودکار — بدون هیچ تنظیمی
+
+اتوپایلوت **همراه با سرور خودش روشن می‌شود**. کاری لازم نیست بکنید:
+
+```bash
+python run.py
+```
+
+همین. از لحظه‌ای که بالا می‌آید، هر **۱۵ ثانیه** بازار را بررسی می‌کند، پوزیشن کاغذی باز و
+بسته می‌کند، حجم را خودکار حساب می‌کند و اگر شرایط بد شد خودش می‌ایستد.
+
+پیش‌فرض‌ها (بدون نیاز به هیچ کلید API، چون بایننس عمومی است):
+
+| تنظیم | پیش‌فرض | متغیر محیطی |
+|---|---|---|
+| موجودی | ۱۰۰۰ دلار | `AURUM_AUTOPILOT_BALANCE` |
+| فاصلهٔ بررسی | ۱۵ ثانیه | `AURUM_AUTOPILOT_INTERVAL_SECONDS` |
+| تایم‌فریم | 5m | `AURUM_AUTOPILOT_TIMEFRAME` |
+| نمادها | BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT, XRPUSDT | `AURUM_AUTOPILOT_SYMBOLS` |
+| روشن/خاموش | روشن | `AURUM_AUTOPILOT_ENABLED` |
+
+برای افزودن جفت‌ارز، `AURUM_TWELVE_DATA_API_KEY` را در `backend/.env` بگذارید و نمادها را
+به `AURUM_AUTOPILOT_SYMBOLS` اضافه کنید.
+
+**دیدن وضعیت:** `http://127.0.0.1:5173` → تب «تریدر خودکار»، یا:
+
+```bash
+curl http://127.0.0.1:8000/api/v1/autopilot/state
+```
+
+**خاموش کردن:** دکمهٔ توقف در UI (یا `POST /api/v1/autopilot/stop`). این تصمیم بعد از
+ری‌استارت هم حفظ می‌شود؛ ولی اگر سرور کرش کند یا سیستم ری‌استارت شود، اتوپایلوت خودش
+ادامه می‌دهد.
+
+> معاملات **کاغذی**اند: روی کندل واقعی و با کسر اسپرد و کارمزد واقعی، ولی هیچ سفارشی به
+> بروکر نمی‌رود. `/api/v1/execution/orders` همیشه ۵۰۳ برمی‌گرداند.

@@ -87,6 +87,17 @@ class Settings(BaseSettings):
     # dark. Set to false to force the strict "no key -> unavailable" behaviour instead.
     market_free_fallback_enabled: bool = True
 
+    # ── autopilot (paper) ──────────────────────────────────────────────
+    # The autonomous paper trader starts with the server so that "run the app" is the
+    # whole setup. Set AURUM_AUTOPILOT_ENABLED=false to keep it off.
+    autopilot_enabled: bool = True
+    autopilot_interval_seconds: int = 15
+    autopilot_balance: float = 1000.0
+    autopilot_timeframe: str = "5m"
+    # Default universe is Binance spot: it needs no API key, so the autopilot works on a
+    # fresh clone. FX pairs require AURUM_TWELVE_DATA_API_KEY and can be added here.
+    autopilot_symbols: str = "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT"
+
     # Optional licensed news / calendar provider
     fmp_api_key: str | None = None
     # Legacy /news/fa: user-provided licensed Persian feed with an exact allowed host.

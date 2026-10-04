@@ -399,6 +399,24 @@ async def run_cycle(settings: Settings, state: dict | None = None) -> dict:
             if decision:
                 decisions.append(decision)
 
+    # A silent log is the worst outcome: the UI says "running" while the user cannot tell
+    # whether anything is being evaluated. Summarise each pass, but only write a new line
+    # when the summary actually changes, so a 15-second loop does not flood the journal.
+    if decisions:
+        tally: dict[str, int] = {}
+        for item in decisions:
+            tally[item["decision"]] = tally.get(item["decision"], 0) + 1
+        label = {
+            "opened": "ورود", "no_trade": "بدون سیگنال", "skip": "رد شد",
+            "unsizable": "حجم غیرقابل اجرا", "error": "داده در دسترس نیست",
+        }
+        summary = "، ".join(f"{label.get(k, k)}: {v}" for k, v in sorted(tally.items()))
+        sample = next((d["why"] for d in decisions if d.get("why")), "")
+        message = f"{len(decisions)} نماد بررسی شد — {summary}" + (f" · {sample[:90]}" if sample else "")
+        if state.get("_last_summary") != message:
+            state["_last_summary"] = message
+            _log(state, "scan", message)
+
     if own_state:
         save_state(state)
 
@@ -469,7 +487,7 @@ class Autopilot:
     def __init__(self) -> None:
         self._task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
-        self.interval_seconds = 60
+        self.interval_seconds = 15
 
     @property
     def running(self) -> bool:
@@ -492,12 +510,36 @@ class Autopilot:
             await asyncio.sleep(self.interval_seconds)
 
     async def start(self, settings: Settings) -> dict:
+        self.interval_seconds = max(5, min(int(settings.autopilot_interval_seconds), 3600))
         state = load_state()
         state["enabled"] = True
         save_state(state)
         if not self.running:
             self._task = asyncio.create_task(self._loop(settings))
         return {"running": True, "interval_seconds": self.interval_seconds}
+
+    async def boot(self, settings: Settings) -> dict:
+        """Called once by the server at startup so running the app IS the whole setup.
+
+        First launch configures the account from settings; later launches keep whatever
+        the user changed and only resume if they had not explicitly stopped it.
+        """
+        if not settings.autopilot_enabled:
+            return {"running": False, "reason": "AURUM_AUTOPILOT_ENABLED=false"}
+
+        first_run = not STORE.exists()
+        if first_run:
+            reset(
+                balance=settings.autopilot_balance,
+                target=settings.autopilot_balance * 10,
+                watchlist=[s.strip() for s in settings.autopilot_symbols.split(",") if s.strip()],
+                timeframe=settings.autopilot_timeframe,
+            )
+        elif not load_state().get("enabled"):
+            # The user pressed stop. Respect it across restarts.
+            return {"running": False, "reason": "توسط کاربر متوقف شده است"}
+
+        return await self.start(settings)
 
     async def shutdown(self) -> None:
         """Cancel the loop WITHOUT clearing `enabled`, so a restart resumes trading.

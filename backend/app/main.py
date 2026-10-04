@@ -209,8 +209,12 @@ async def lifespan(_: FastAPI):
     # process. After a restart, reboot or crash the flag would still read true while
     # nothing was actually running — an autopilot that silently stopped trading is worse
     # than one that was never started, so resume it here.
-    if autopilot_svc.load_state().get("enabled"):
-        await autopilot_svc.autopilot.start(settings)
+    with contextlib.suppress(Exception):
+        booted = await autopilot_svc.autopilot.boot(settings)
+        if booted.get("running"):
+            print(f"🤖 اتوپایلوت کاغذی روشن شد — هر {autopilot_svc.autopilot.interval_seconds} ثانیه یک بررسی")
+        else:
+            print(f"🤖 اتوپایلوت خاموش است ({booted.get('reason', '-')})")
     yield
     with contextlib.suppress(Exception):
         await autopilot_svc.autopilot.shutdown()
