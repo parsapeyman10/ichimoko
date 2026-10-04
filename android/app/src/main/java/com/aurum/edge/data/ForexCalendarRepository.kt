@@ -67,7 +67,14 @@ internal fun parseForexCalendar(root: JsonArray, now: Long): List<ForexEvent> {
 
 /** Independent direct HTTPS display even when the optional backend news URL is not configured. */
 class ForexCalendarRepository(private val scope: CoroutineScope) {
-    private val client = OkHttpClient.Builder().callTimeout(20, TimeUnit.SECONDS).followRedirects(false).build()
+    // The calendar host redirects to its CDN, which a no-redirect client reports as a
+    // failure, and the weekly feed is comfortably larger than the old 512 KB peek cap.
+    // Both made the tab look permanently broken.
+    private val client = OkHttpClient.Builder()
+        .callTimeout(25, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .build()
     private val json = Json { ignoreUnknownKeys = true }
     private val mutex = Mutex()
     private var attemptedAt = 0L
@@ -90,8 +97,8 @@ class ForexCalendarRepository(private val scope: CoroutineScope) {
                 val request = Request.Builder().url(FOREX_CALENDAR_SOURCE_URL).header("Accept", "application/json").build()
                 client.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) error("تقویم HTTP ${response.code}")
-                    val text = response.peekBody(512_001L).string()
-                    require(text.length <= 512_000) { "پاسخ تقویم بزرگ است" }
+                    val text = response.peekBody(4_000_001L).string()
+                    require(text.length <= 4_000_000) { "پاسخ تقویم بزرگ است" }
                     json.parseToJsonElement(text) as? JsonArray ?: error("قالب تقویم نامعتبر است")
                 }
             }

@@ -24,12 +24,12 @@ class MarketHoursTest {
         val open = MarketHours.sessionWindow(at("2026-09-24T12:00:00Z")) // Thursday EDT
         assertFalse(open.closed)
         assertEquals("بسته‌شدن بازار", open.nextChangeLabel)
-        assertEquals(at("2026-09-25T21:00:00Z"), open.nextChangeAt)
+        assertEquals(at("2026-09-25T21:00:00Z"), open.nextChangeAt!!)
 
         val closed = MarketHours.sessionWindow(at("2026-09-26T12:00:00Z")) // Saturday EDT
         assertTrue(closed.closed)
         assertEquals("بازشدن بازار", closed.nextChangeLabel)
-        assertEquals(at("2026-09-27T22:00:00Z"), closed.nextChangeAt)
+        assertEquals(at("2026-09-27T22:00:00Z"), closed.nextChangeAt!!)
     }
 
 }

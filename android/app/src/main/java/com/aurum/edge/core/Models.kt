@@ -524,7 +524,7 @@ data class AppSettings(
     val symbol: String = "XAU/USD",
     val interval: Interval = Interval.M5,
     val riskPercent: Double = 0.5,
-    val accountBalance: Double = 100.0,
+    val accountBalance: Double = 1000.0,
     val minConfidence: Double = 72.0,
     /** Cost assumptions in USD. They must match your broker; every report states them. */
     val spreadPrice: Double = 0.30,

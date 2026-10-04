@@ -9,7 +9,7 @@ enum class SourceKind { JSON_REST, HTML_PAGE }
 enum class ChangeMode { PERCENT, ABSOLUTE, PREV_CLOSE, NONE }
 
 @Serializable
-enum class SourceTime { NONE, UNIX_SECONDS, UTC_DATETIME }
+enum class SourceTime { NONE, UNIX_SECONDS, UNIX_MILLIS, UTC_DATETIME }
 
 @Serializable
 data class SymbolDef(

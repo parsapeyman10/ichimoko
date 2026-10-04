@@ -8,6 +8,15 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -41,7 +50,11 @@ import com.aurum.edge.engine.SignalEngine
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
+import com.aurum.edge.data.SymbolSearch
+import com.aurum.edge.data.TradingViewSymbols
+import com.aurum.edge.data.CryptoCatalog
 import com.aurum.edge.ui.components.StatTile
+import com.aurum.edge.ui.components.formatPriceFor
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.components.formatTime
@@ -56,8 +69,10 @@ fun ChartScreen(
 ) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val openTrade = trades.firstOrNull { it.symbol == market.symbol && it.isOpen }
+    // Reset the probe whenever the instrument or timeframe changes.
+    var tradingViewBlocked by remember(market.symbol, market.interval) { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
-        SymbolPickerRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
+        SymbolSearchRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -77,12 +92,19 @@ fun ChartScreen(
         }
 
         SectionCard(
-            title = "چارت TradingView · ${market.symbol}",
+            title = if (tradingViewBlocked) "چارت داخلی · ${market.symbol}"
+            else "چارت TradingView · ${market.symbol}",
+            subtitle = if (tradingViewBlocked)
+                "TradingView از این شبکه در دسترس نیست؛ چارت خود اپ روی همان دیتای واقعی نمایش داده می‌شود"
+            else null,
         ) {
-            Box(Modifier.fillMaxWidth().height(460.dp)) {
+            Box(Modifier.fillMaxWidth().height(520.dp)) {
                 // TradingView may be blocked/slow in some networks. Keep the app's own verified
                 // candle chart behind the WebView so the chart area is never an empty black panel.
-                if (market.candles.isNotEmpty()) {
+                // The app's own candles are the FALLBACK, drawn only when TradingView is
+                // unavailable. Previously both rendered and the WebView sat on top, so a
+                // blocked widget hid a working chart.
+                if (tradingViewBlocked && market.candles.isNotEmpty()) {
                     CandleChart(
                         candles = market.candles.takeLast(800),
                         interval = market.interval,
@@ -91,11 +113,14 @@ fun ChartScreen(
                         showVolume = false,
                     )
                 }
-                TradingViewWidget(
-                    symbol = market.symbol,
-                    interval = market.interval,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                if (!tradingViewBlocked) {
+                    TradingViewWidget(
+                        symbol = market.symbol,
+                        interval = market.interval,
+                        modifier = Modifier.fillMaxSize(),
+                        onFailed = { tradingViewBlocked = it },
+                    )
+                }
                 EngineOverlay(
                     market = market,
                     openTrade = openTrade,
@@ -103,6 +128,8 @@ fun ChartScreen(
                 )
             }
         }
+
+        StrategyBar(viewModel, market)
 
         EntryScoreCard(market)
     }
@@ -187,7 +214,12 @@ private fun EntryScoreCard(market: MarketState) {
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun TradingViewWidget(symbol: String, interval: Interval, modifier: Modifier = Modifier) {
+private fun TradingViewWidget(
+    symbol: String,
+    interval: Interval,
+    modifier: Modifier = Modifier,
+    onFailed: (Boolean) -> Unit = {},
+) {
     val html = tradingViewHtml(symbol, interval)
     val loadKey = "$symbol|${interval.label}"
     AndroidView(
@@ -195,7 +227,30 @@ private fun TradingViewWidget(symbol: String, interval: Interval, modifier: Modi
         factory = { context ->
             WebView(context).apply {
                 setBackgroundColor(AndroidColor.TRANSPARENT)
-                webViewClient = WebViewClient()
+                // The widget is drawn OVER the app's own candles. Where TradingView is
+                // geo-blocked it answers 451 and the blank error page hid a chart that
+                // was working perfectly underneath. Report the failure so it can be
+                // removed from the stack instead of covering good data.
+                webViewClient = object : WebViewClient() {
+                    override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                        onFailed(false)
+                    }
+                    override fun onReceivedHttpError(
+                        view: WebView?,
+                        request: android.webkit.WebResourceRequest?,
+                        errorResponse: android.webkit.WebResourceResponse?,
+                    ) {
+                        // Only the main document matters; a blocked tracker is irrelevant.
+                        if (request?.isForMainFrame == true) onFailed(true)
+                    }
+                    override fun onReceivedError(
+                        view: WebView?,
+                        request: android.webkit.WebResourceRequest?,
+                        error: android.webkit.WebResourceError?,
+                    ) {
+                        if (request?.isForMainFrame == true) onFailed(true)
+                    }
+                }
                 webChromeClient = WebChromeClient()
                 CookieManager.getInstance().setAcceptCookie(true)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
@@ -223,17 +278,10 @@ private fun TradingViewWidget(symbol: String, interval: Interval, modifier: Modi
 }
 
 private fun tradingViewHtml(symbol: String, interval: Interval): String {
-    val tvSymbol = when (symbol) {
-        "XAU/USD" -> "OANDA:XAUUSD"
-        "EUR/USD" -> "OANDA:EURUSD"
-        "GBP/USD" -> "OANDA:GBPUSD"
-        "AUD/USD" -> "OANDA:AUDUSD"
-        "NZD/USD" -> "OANDA:NZDUSD"
-        "USD/JPY" -> "OANDA:USDJPY"
-        "USD/CHF" -> "OANDA:USDCHF"
-        "USD/CAD" -> "OANDA:USDCAD"
-        else -> "OANDA:XAUUSD"
-    }
+    // Crypto previously fell through to the gold default, so picking BTC drew XAU on the
+    // TradingView pane while the app's own chart drew BTC — two different instruments on
+    // top of each other. Crypto resolves to its real Binance ticker.
+    val tvSymbol = TradingViewSymbols.of(symbol)
     val tvInterval = when (interval) {
         Interval.M1 -> "1"
         Interval.M5 -> "5"
@@ -269,14 +317,141 @@ private fun tradingViewHtml(symbol: String, interval: Interval): String {
     """.trimIndent()
 }
 
-/** Quick pair switcher: global gold plus the major FX pairs. Iran rows are watch-only. */
+/**
+ * Chart symbol browser: gold first, then the FX pairs, then every crypto symbol.
+ *
+ * The list is static and needs no network call, so it can never be emptied by a blocked
+ * exchange API — the previous version fetched the universe from Binance, which answers
+ * 451 here, leaving the picker silently empty. TradingView renders all of these itself,
+ * so what is listed is exactly what the chart can draw.
+ */
+@Composable
+internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var group by rememberSaveable { mutableStateOf("طلا و فارکس") }
+    var open by rememberSaveable { mutableStateOf(false) }
+
+    val forexIds = remember { WatchCatalog.chartSymbols.filter { !CryptoCatalog.isCrypto(it) } }
+    val cryptoList = remember { CryptoCatalog.symbols }
+
+    val forexShown = remember(query) {
+        val needle = SymbolSearch.normalize(query).replace(" ", "").uppercase()
+        if (needle.isEmpty()) forexIds
+        else forexIds.filter { it.replace("/", "").contains(needle, ignoreCase = true) }
+    }
+    val cryptoShown = remember(query) { SymbolSearch.rank(query, cryptoList, limit = 300) }
+    val suggestions = remember(query, forexShown.size, cryptoShown.size) {
+        if (query.isBlank() || forexShown.isNotEmpty() || cryptoShown.isNotEmpty()) emptyList()
+        else SymbolSearch.suggest(query, cryptoList)
+    }
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "نماد: $selected",
+                style = MaterialTheme.typography.titleSmall,
+                color = AurumColors.Gold,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "${forexIds.size + cryptoList.size} نماد",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+            )
+            Text(
+                if (open) "  بستن" else "  تغییر نماد",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.Cyan,
+                modifier = Modifier.clickable { open = !open }.padding(6.dp),
+            )
+        }
+
+        if (!open) return@Column
+
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            singleLine = true,
+            label = { Text("جستجو — طلا، EUR، بیت‌کوین، PEPE…", style = MaterialTheme.typography.labelSmall) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Row(
+            Modifier.fillMaxWidth().padding(top = 6.dp).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            listOf("طلا و فارکس", "ارز دیجیتال").forEach { option ->
+                FilterChip(
+                    selected = group == option,
+                    onClick = { group = option },
+                    label = { Text(option, style = MaterialTheme.typography.labelSmall) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AurumColors.Gold.copy(alpha = 0.18f),
+                        selectedLabelColor = AurumColors.Gold,
+                        labelColor = AurumColors.TextSecondary,
+                    ),
+                )
+            }
+        }
+
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp).padding(top = 6.dp)) {
+            if (group == "طلا و فارکس") {
+                items(forexShown, key = { "f-$it" }) { id ->
+                    SymbolRow(id, id == selected) { onSelect(id); open = false; query = "" }
+                }
+            } else {
+                items(cryptoShown, key = { "c-" + it.id }) { coin ->
+                    SymbolRow(coin.id, coin.id == selected) { onSelect(coin.id); open = false; query = "" }
+                }
+            }
+            if (suggestions.isNotEmpty()) {
+                item {
+                    Text(
+                        "«$query» پیدا نشد. منظورتان این بود؟",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                        modifier = Modifier.padding(vertical = 8.dp),
+                    )
+                }
+                items(suggestions, key = { "s-" + it.id }) { coin ->
+                    SymbolRow(coin.id, false, AurumColors.Cyan) {
+                        onSelect(coin.id); open = false; query = ""
+                    }
+                }
+            }
+        }
+    }
+    SymbolPickerRow(selected, onSelect)
+}
+
+@Composable
+private fun SymbolRow(
+    id: String,
+    selected: Boolean,
+    tint: androidx.compose.ui.graphics.Color? = null,
+    onClick: () -> Unit,
+) {
+    Text(
+        id,
+        style = MaterialTheme.typography.bodyMedium,
+        color = tint ?: if (selected) AurumColors.Gold else AurumColors.TextPrimary,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 9.dp),
+    )
+}
+
 @Composable
 internal fun SymbolPickerRow(selected: String, onSelect: (String) -> Unit) {
+    // Gold first, then the FX pairs, then crypto — the order asked for.
+    val quick = remember(selected) {
+        val forex = WatchCatalog.chartSymbols.filter { !CryptoCatalog.isCrypto(it) }
+        val crypto = WatchCatalog.chartSymbols.filter { CryptoCatalog.isCrypto(it) }
+        (listOf("XAU/USD") + forex + crypto + selected).distinct()
+    }
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        WatchCatalog.chartSymbols.forEach { id ->
+        quick.forEach { id ->
             FilterChip(
                 selected = selected == id,
                 onClick = { if (selected != id) onSelect(id) },
@@ -286,6 +461,142 @@ internal fun SymbolPickerRow(selected: String, onSelect: (String) -> Unit) {
                     selectedLabelColor = AurumColors.Gold,
                     labelColor = AurumColors.TextSecondary,
                 ),
+            )
+        }
+    }
+}
+
+/**
+ * Live strategy readout, directly under the chart.
+ *
+ * The engine was already evaluating every closed bar, but the chart only showed a score
+ * with no explanation, so a screen that sat at "no entry" for hours was indistinguishable
+ * from a broken one. This states three things at all times: where the score stands against
+ * the threshold, the single condition currently blocking an entry, and — when one is live
+ * — the exact levels the trade would use.
+ *
+ * Read-only. It reports what the automatic engine decided; it cannot open anything.
+ */
+@Composable
+private fun StrategyBar(viewModel: AurumViewModel, market: MarketState) {
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val autoStatus by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
+    val trades by viewModel.trades.collectAsStateWithLifecycle()
+
+    val signal = market.signal
+    val action = signal?.action ?: SignalAction.NO_TRADE
+    val score = signal?.confidence ?: 0.0
+    val threshold = settings.minConfidence
+    val digits = CryptoCatalog.digitsFor(market.symbol)
+    val open = trades.firstOrNull { it.symbol == market.symbol && it.isOpen }
+
+    val tone = when {
+        open != null -> AurumColors.Cyan
+        action == SignalAction.BUY -> AurumColors.Green
+        action == SignalAction.SELL -> AurumColors.Red
+        else -> AurumColors.TextSecondary
+    }
+
+    // The first unmet condition is far more useful than a list of twelve.
+    val firstBlocker = signal?.blockers?.firstOrNull()
+        ?: signal?.confluence?.firstOrNull { !it.ok }?.let { "${it.name} — ${it.detail}" }
+
+    SectionCard(
+        title = "استراتژی روی ${market.symbol}",
+        subtitle = "ایچیموکو · ${market.interval.label} · خودکار و کاغذی",
+        trailing = {
+            Pill(
+                when {
+                    open != null -> "پوزیشن باز"
+                    action == SignalAction.BUY -> "خرید"
+                    action == SignalAction.SELL -> "فروش"
+                    else -> "منتظر"
+                },
+                tone,
+            )
+        },
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatTile("امتیاز", "${score.toInt()} / ${threshold.toInt()}", tone, Modifier.weight(1f))
+            StatTile("تایم‌فریم", market.interval.label, modifier = Modifier.weight(1f))
+            StatTile(
+                "کندل بسته",
+                market.candles.count { it.closed }.toString(),
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        LinearProgressIndicator(
+            progress = { (score / 100.0).toFloat().coerceIn(0f, 1f) },
+            color = tone,
+            trackColor = AurumColors.Line,
+            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+        )
+
+        // ── the levels, whether live or hypothetical ──
+        val entry = open?.entry ?: signal?.entry
+        val stop = open?.stopLoss ?: signal?.stopLoss
+        val target = open?.takeProfit ?: signal?.takeProfit
+        if (entry != null && stop != null && target != null) {
+            Text(
+                if (open != null) "حدود پوزیشن باز" else "اگر وارد شود، با این حدود",
+                style = MaterialTheme.typography.labelMedium,
+                color = AurumColors.TextPrimary,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatTile("ورود", formatPriceFor(market.symbol, entry), modifier = Modifier.weight(1f))
+                StatTile("حد ضرر", formatPriceFor(market.symbol, stop), AurumColors.Red, Modifier.weight(1f))
+                StatTile("حد سود", formatPriceFor(market.symbol, target), AurumColors.Green, Modifier.weight(1f))
+            }
+            val risk = kotlin.math.abs(entry - stop)
+            val reward = kotlin.math.abs(target - entry)
+            if (risk > 0) {
+                Text(
+                    "نسبت سود به ضرر ${String.format(java.util.Locale.US, "%.2f", reward / risk)} " +
+                        "· فاصلهٔ حد ضرر ${String.format(java.util.Locale.US, "%,.${digits}f", risk)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+        }
+
+        // ── why it is not entering ──
+        if (open == null) {
+            Text(
+                "چرا وارد نشده",
+                style = MaterialTheme.typography.labelMedium,
+                color = AurumColors.TextPrimary,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+            Text(
+                firstBlocker ?: when {
+                    signal == null -> "هنوز سیگنالی برای این کندل محاسبه نشده است."
+                    score < threshold -> "امتیاز ${score.toInt()} هنوز به آستانهٔ ${threshold.toInt()} نرسیده است."
+                    else -> "همهٔ شرط‌ها برقرار است؛ منتظر تأیید کندل بسته."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            // The auto-trader has its own gate, separate from the signal score.
+            Text(
+                "وضعیت موتور خودکار: $autoStatus",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+
+        // ── remaining conditions, compact ──
+        val pending = signal?.confluence?.filter { !it.ok }.orEmpty()
+        if (pending.isNotEmpty()) {
+            Text(
+                "${pending.size} شرط باقی‌مانده: " + pending.take(4).joinToString("، ") { it.name },
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 8.dp),
             )
         }
     }

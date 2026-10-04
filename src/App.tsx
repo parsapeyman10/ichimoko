@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Activity, AlertTriangle, BarChart3, Bell, BookOpen, Brain, Calculator, ChevronDown, CircleDollarSign,
-  Clock3, Flame, Gauge, HelpCircle, History, Layers, LayoutDashboard, LogOut, Menu, Newspaper,
+  Activity, AlertTriangle, BarChart3, Bell, BookOpen, Bot, Brain, Calculator, ChevronDown, CircleDollarSign,
+  Clock3, Crosshair, Flame, FlaskConical, Gauge, HelpCircle, History, Layers, LayoutDashboard, LogOut, Menu, Newspaper,
   Rss, Search, Settings, ShieldCheck, Signal, Sparkles,
   TrendingDown, TrendingUp, Users, WalletCards, WifiOff, X, Zap
 } from 'lucide-react';
@@ -11,6 +11,9 @@ import PredictionPanel from './components/PredictionPanel';
 import TopTradersPanel from './components/TopTradersPanel';
 import MTFPanel from './components/MTFPanel';
 import CryptoPumpScanner from './components/CryptoPumpScanner';
+import ScalpPanel from './components/ScalpPanel';
+import AutopilotPanel from './components/AutopilotPanel';
+import SetupLabPanel from './components/SetupLabPanel';
 import RiskPanel from './components/RiskPanel';
 import FeatureInspectorPanel from './components/FeatureInspectorPanel';
 import { apiGet, apiPost, barIsCurrent, toBackendCandles, type DataStatus } from './lib/api';
@@ -56,6 +59,9 @@ function Sidebar({ active, setActive, open, close, feedState, provider }: { acti
     { key: 'traders', label: 'اجماع سبک‌ها', sub: 'Rule ensemble', icon: Users },
     { key: 'backtest', label: 'بک‌تست دیتای واقعی', sub: 'Real-candle replay', icon: BarChart3 },
     { key: 'confluence', label: 'روش‌های مکمل', sub: 'Confluence', icon: Layers },
+    { key: 'autopilot', label: 'تریدر خودکار', sub: 'Autonomous paper trader', icon: Bot },
+    { key: 'setup-lab', label: 'آزمایشگاه ستاپ‌ها', sub: 'Edge measurement lab', icon: FlaskConical },
+    { key: 'scalp', label: 'میز اسکلپ چندنمادی', sub: 'Multi-symbol scalp desk', icon: Crosshair },
     { key: 'pump-scanner', label: 'اسکن میم‌کوین / پامپ', sub: 'Crypto momentum scan', icon: Flame },
     { key: 'feature-inspector', label: 'شفافیت ویژگی‌های موتور', sub: 'Feature transparency', icon: Sparkles },
     { key: 'news', label: 'هوش خبری', sub: 'News (auto)', icon: Newspaper },
@@ -632,6 +638,9 @@ export default function App() {
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><MTFPanel timeframe={timeframe}/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><TopTradersPanel timeframe={timeframe}/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><BacktestPanel/></div>
+        <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><AutopilotPanel/></div>
+        <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><SetupLabPanel/></div>
+        <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><ScalpPanel/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><CryptoPumpScanner/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><RiskPanel/></div>
         <div style={{ display: 'grid', gap: 13, marginTop: 13 }}><FeatureInspectorPanel timeframe={timeframe}/></div>

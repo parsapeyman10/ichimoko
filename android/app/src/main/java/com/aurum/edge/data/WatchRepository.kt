@@ -38,7 +38,29 @@ class WatchRepository(
 
     fun loadCached() {
         scope.launch { mutex.withLock { ensureLoaded() } }
+        startAutoRefresh()
     }
+
+    private var autoRefresh: kotlinx.coroutines.Job? = null
+
+    /**
+     * Keep the watchlist live.
+     *
+     * Previously it only refreshed when something called [refreshNow], behind a 3-minute
+     * lock, so the screen sat on stale numbers and felt frozen. A short loop keeps it
+     * moving; the per-source throttle below still prevents hammering any provider.
+     */
+    fun startAutoRefresh(intervalMs: Long = 20_000L) {
+        if (autoRefresh?.isActive == true) return
+        autoRefresh = scope.launch {
+            while (true) {
+                runCatching { refresh() }
+                kotlinx.coroutines.delay(intervalMs)
+            }
+        }
+    }
+
+    fun stopAutoRefresh() { autoRefresh?.cancel(); autoRefresh = null }
 
     fun refreshNow() {
         scope.launch { refresh() }
@@ -67,7 +89,7 @@ class WatchRepository(
     private suspend fun refresh() = mutex.withLock {
         ensureLoaded()
         val elapsed = SystemClock.elapsedRealtime()
-        if (attemptedAtElapsed != 0L && elapsed - attemptedAtElapsed in 0L until 180_000L) {
+        if (attemptedAtElapsed != 0L && elapsed - attemptedAtElapsed in 0L until 15_000L) {
             _state.value = _state.value.copy(error = "برای سهمیهٔ منابع، حداقل سه دقیقه بین دریافت‌های دیده‌بان صبر کنید")
             return@withLock
         }

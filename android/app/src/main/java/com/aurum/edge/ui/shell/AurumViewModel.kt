@@ -71,6 +71,8 @@ data class AiSignalTuningState(
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
+
+
     val watchSettings: StateFlow<Map<String, WatchSelection>> = container.watchSettings.selections
     val watch: StateFlow<WatchState> = container.watch.state
     val news = container.news.state
@@ -159,7 +161,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
         viewModelScope.launch {
             while (isActive) {
-                if (!MarketHours.forexWeekendClosed() &&
+                if (!MarketHours.weekendClosedFor(settings.value.symbol) &&
                     settings.value.pauseOnNews && settings.value.newsBaseUrl.isNotBlank()) container.news.refreshNow()
                 delay(120_000L)
             }
@@ -228,7 +230,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             var turns = 0
             while (isActive) {
-                if ((visibleOnlineLoopEnabled || SignalMonitorService.running.value) && !MarketHours.forexWeekendClosed()) {
+                if ((visibleOnlineLoopEnabled || SignalMonitorService.running.value) && !MarketHours.weekendClosedFor(settings.value.symbol)) {
                     if (turns % 3 == 0) container.watch.refreshNow()
                     container.forexCalendar.refreshNow()
                     if (turns % 5 == 0) container.publicWebNews.refreshNow()

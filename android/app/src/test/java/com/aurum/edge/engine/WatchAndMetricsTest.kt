@@ -20,7 +20,9 @@ class WatchAndMetricsTest {
 
     @Test fun oneDefaultSourceIsAllowedButNotTwoSourceConfirmed() {
         val ids = eur.defaultSources
-        assertEquals(listOf("stocks_yahoo"), ids)
+        // What matters here is that ONE default source stays unverified, not which
+        // provider it happens to be; naming it made this fail on a routine source swap.
+        assertEquals(1, ids.size)
         val result = SourceComparison.verify(eur, ids, mapOf(
             ids[0] to quote(ids[0], 100.0),
         ), now)

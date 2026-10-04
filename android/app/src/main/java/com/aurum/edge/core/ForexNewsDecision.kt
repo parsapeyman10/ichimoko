@@ -18,7 +18,7 @@ data class ForexNewsDecision(
 object ForexNewsDecisions {
     fun assess(market: MarketState, settings: AppSettings, calendar: ForexCalendarState,
                news: PersianNewsState, now: Long = System.currentTimeMillis()): ForexNewsDecision {
-        val closed = MarketHours.forexWeekendClosed(now)
+        val closed = MarketHours.weekendClosedFor(market.symbol, now)
         val highlight = calendar.events.filter { it.country == "USD" && it.impact == "High" &&
             it.at in (now - 6 * 3_600_000L)..(now + 7 * 86_400_000L) }
             .minByOrNull { kotlin.math.abs(it.at - now) }
