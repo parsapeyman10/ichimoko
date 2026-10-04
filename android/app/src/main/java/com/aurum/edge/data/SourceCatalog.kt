@@ -95,24 +95,23 @@ object SourceCatalog {
     )
 
     /**
-     * Spot gold, from the same keyless feed the live chart already trusts.
+     * Binance public 24h ticker, so crypto rows in the watchlist have a real source.
      *
-     * Yahoo's XAUUSD=X row returns no usable quote for this workspace, so the watchlist
-     * showed global gold as permanently empty. gold-api serves a plain price with its own
-     * update timestamp and needs no key.
+     * Market data only — no key, no account, and nothing that can place an order.
      */
-    val goldApi = SourceDef(
-        id = "gold_api_public",
-        title = "Gold-API · طلای جهانی",
-        subtitle = "قیمت لحظه‌ای انس طلا، بدون کلید",
+    val binance = SourceDef(
+        id = "binance_public",
+        title = "Binance · عمومی",
+        subtitle = "قیمت و تغییر ۲۴ ساعتهٔ ارز دیجیتال، بدون کلید",
         kind = SourceKind.JSON_REST,
-        urlTemplate = "https://api.gold-api.com/price/{symbol}",
-        pricePath = "price",
-        changeMode = ChangeMode.NONE,
-        timestampPath = "updatedAt",
-        timestampMode = SourceTime.UTC_DATETIME,
+        urlTemplate = "https://data-api.binance.vision/api/v3/ticker/24hr?symbol={symbol}",
+        pricePath = "lastPrice",
+        changePath = "priceChangePercent",
+        changeMode = ChangeMode.PERCENT,
+        volumePath = "volume",
+        timestampPath = "closeTime",
+        timestampMode = SourceTime.UNIX_MILLIS,
         unit = "$",
-        symbols = listOf(SymbolDef("XAU", "طلای جهانی (هر انس)"), SymbolDef("XAG", "نقره (هر انس)")),
     )
 
     val all = listOf(yahoo, tgju, bamaCars, goldApi, twelveData, binance)
