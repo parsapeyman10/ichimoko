@@ -69,12 +69,18 @@ fun ChartScreen(
 ) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val openTrade = trades.firstOrNull { it.symbol == market.symbol && it.isOpen }
-    // Reset the probe whenever the instrument or timeframe changes.
     var tradingViewBlocked by remember(market.symbol, market.interval) { mutableStateOf(false) }
+    var preferNativeChart by rememberSaveable { mutableStateOf(true) }
+    var showIchimoku by rememberSaveable { mutableStateOf(true) }
+    var showLevels by rememberSaveable { mutableStateOf(true) }
+    var showVolume by rememberSaveable { mutableStateOf(true) }
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         SymbolSearchRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
+
+        // ── Timeframe selector ─────────────────────────────────────────────
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Interval.entries.forEach { interval ->
@@ -91,35 +97,104 @@ fun ChartScreen(
             }
         }
 
+        // ── Chart Source & Display Toggles ─────────────────────────────────
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            FilterChip(
+                selected = preferNativeChart || tradingViewBlocked,
+                onClick = { preferNativeChart = true },
+                label = { Text("چارت زنده و جامع (گذشته تا لحظه حال)", style = MaterialTheme.typography.labelSmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = AurumColors.Cyan.copy(alpha = 0.20f),
+                    selectedLabelColor = AurumColors.Cyan,
+                    labelColor = AurumColors.TextSecondary,
+                ),
+            )
+            FilterChip(
+                selected = !preferNativeChart && !tradingViewBlocked,
+                onClick = { preferNativeChart = false },
+                label = { Text("TradingView", style = MaterialTheme.typography.labelSmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = AurumColors.Gold.copy(alpha = 0.20f),
+                    selectedLabelColor = AurumColors.Gold,
+                    labelColor = AurumColors.TextSecondary,
+                ),
+            )
+            if (preferNativeChart || tradingViewBlocked) {
+                FilterChip(
+                    selected = showIchimoku,
+                    onClick = { showIchimoku = !showIchimoku },
+                    label = { Text("ایچیموکو", style = MaterialTheme.typography.labelSmall) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AurumColors.Purple.copy(alpha = 0.20f),
+                        selectedLabelColor = AurumColors.Purple,
+                        labelColor = AurumColors.TextMuted,
+                    ),
+                )
+                FilterChip(
+                    selected = showLevels,
+                    onClick = { showLevels = !showLevels },
+                    label = { Text("سطوح و سیگنال", style = MaterialTheme.typography.labelSmall) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AurumColors.Gold.copy(alpha = 0.20f),
+                        selectedLabelColor = AurumColors.Gold,
+                        labelColor = AurumColors.TextMuted,
+                    ),
+                )
+                FilterChip(
+                    selected = showVolume,
+                    onClick = { showVolume = !showVolume },
+                    label = { Text("حجم", style = MaterialTheme.typography.labelSmall) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AurumColors.Green.copy(alpha = 0.20f),
+                        selectedLabelColor = AurumColors.Green,
+                        labelColor = AurumColors.TextMuted,
+                    ),
+                )
+            }
+        }
+
+        val isNative = preferNativeChart || tradingViewBlocked
         SectionCard(
-            title = if (tradingViewBlocked) "چارت داخلی · ${market.symbol}"
+            title = if (isNative) "چارت اختصاصی · ${market.symbol} (${market.interval.label})"
             else "چارت TradingView · ${market.symbol}",
-            subtitle = if (tradingViewBlocked)
-                "TradingView از این شبکه در دسترس نیست؛ چارت خود اپ روی همان دیتای واقعی نمایش داده می‌شود"
+            subtitle = if (isNative)
+                "${market.candles.size} کندل واقعی از گذشته تا لحظه حال (${market.closedCount} کندل بسته + کندل جاری)"
+            else if (tradingViewBlocked)
+                "TradingView در دسترس نیست؛ چارت اختصاصی با دیتای واقعی نمایش داده شد"
             else null,
         ) {
             Box(Modifier.fillMaxWidth().height(520.dp)) {
-                // TradingView may be blocked/slow in some networks. Keep the app's own verified
-                // candle chart behind the WebView so the chart area is never an empty black panel.
-                // The app's own candles are the FALLBACK, drawn only when TradingView is
-                // unavailable. Previously both rendered and the WebView sat on top, so a
-                // blocked widget hid a working chart.
-                if (tradingViewBlocked && market.candles.isNotEmpty()) {
+                if (isNative && market.candles.isNotEmpty()) {
                     CandleChart(
-                        candles = market.candles.takeLast(800),
+                        candles = market.candles,
                         interval = market.interval,
                         signal = market.signal,
                         modifier = Modifier.fillMaxSize(),
-                        showVolume = false,
+                        showIchimoku = showIchimoku,
+                        showLevels = showLevels,
+                        showVolume = showVolume,
                     )
-                }
-                if (!tradingViewBlocked) {
+                } else if (!isNative) {
                     TradingViewWidget(
                         symbol = market.symbol,
                         interval = market.interval,
                         modifier = Modifier.fillMaxSize(),
                         onFailed = { tradingViewBlocked = it },
                     )
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(AurumColors.ChartBg, RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "در حال دریافت دیتای کندل‌های واقعی ${market.symbol}…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = AurumColors.TextSecondary,
+                        )
+                    }
                 }
                 EngineOverlay(
                     market = market,
