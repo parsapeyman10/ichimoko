@@ -76,6 +76,16 @@ class MarketRepository(
     private val dukascopyHistory: DukascopyHistoryClient = DukascopyHistoryClient(),
     private val binanceHistory: BinanceHistoryClient = BinanceHistoryClient(),
 ) {
+    /**
+     * Weekend gate for the symbol actually being shown.
+     *
+     * This used to call the global forex check in 15 different places, so selecting a
+     * crypto pair still produced "market closed" on the chart, froze the feed, and
+     * stopped automatic entries for two days a week on a venue that never shuts.
+     */
+    private fun marketClosed(now: Long = System.currentTimeMillis()): Boolean =
+        MarketHours.weekendClosedFor(settings.read().symbol, now)
+
     private val _state = MutableStateFlow(MarketState())
     val state: StateFlow<MarketState> = _state.asStateFlow()
 
@@ -107,7 +117,7 @@ class MarketRepository(
         // tear down a healthy socket, roll back its last tick, or duplicate REST requests.
         if (started && activeKey == current.apiKey && _state.value.symbol == current.symbol &&
             _state.value.interval == current.interval &&
-            ((MarketHours.forexWeekendClosed() && _state.value.feed.mode == FeedMode.MARKET_CLOSED) ||
+            ((marketClosed() && _state.value.feed.mode == FeedMode.MARKET_CLOSED) ||
                 // Both keyed and keyless modes keep a history-refresh poll plus the live/fallback
                 // tick stream alive; the chart renders its quick 1200-bar window first and grows
                 // the shared cache toward the 3000-bar target in the background.
@@ -121,7 +131,7 @@ class MarketRepository(
             cachedBars.clear() // never reuse a different instrument's bars or signal
             _state.value = MarketState(symbol = current.symbol, interval = current.interval)
         }
-        val closed = MarketHours.forexWeekendClosed()
+        val closed = marketClosed()
         _state.value = _state.value.copy(
             feed = FeedStatus(
                 mode = if (closed) FeedMode.MARKET_CLOSED else FeedMode.CONNECTING,
@@ -332,7 +342,7 @@ class MarketRepository(
             val closedCount = cachedBars.values.count { it.closed }
             val enoughHistory = closedCount >= minimumSize
             evaluateAndPublish(showingCache = (!historyCurrent && !streamRecent) || !enoughHistory)
-            if (MarketHours.forexWeekendClosed()) {
+            if (marketClosed()) {
                 // Historical bars are useful on weekends even though no fresh/live price is
                 // authorized. They are shown as closed/cached, never as an active signal.
                 publishClosed()
@@ -370,7 +380,7 @@ class MarketRepository(
         _state.value.feed.mode == FeedMode.LIVE && FeedLiveness.hasRecentReceipt(_state.value.feed, now)
 
     private fun reportRestFailure(detail: String) {
-        if (MarketHours.forexWeekendClosed()) { publishClosed(); return }
+        if (marketClosed()) { publishClosed(); return }
         val current = _state.value
         if (current.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
             !current.showingCachedData && FeedLiveness.hasRecentReceipt(current.feed)) {
@@ -392,7 +402,7 @@ class MarketRepository(
     @Synchronized
     private fun startStream() {
         if (!started) return
-        if (MarketHours.forexWeekendClosed()) { publishClosed(); return }
+        if (marketClosed()) { publishClosed(); return }
         val epoch = ++streamEpoch
         streamJob?.cancel()
         val session = generation
@@ -400,7 +410,7 @@ class MarketRepository(
             var backoff = 2_000L
             while (isActive && started && generation == session && streamEpoch == epoch) {
                 val current = settings.read()
-                if (MarketHours.forexWeekendClosed()) { publishClosed(); delay(60_000L); continue }
+                if (marketClosed()) { publishClosed(); delay(60_000L); continue }
                 if (!hasInternet()) {
                     publishDelayed(if (current.hasKey)
                         "شبکه موقتاً در دسترس نیست؛ WebSocket بعد از بازگشت شبکه دوباره وصل می‌شود"
@@ -483,7 +493,7 @@ class MarketRepository(
                 delay(20_000L)
                 if (!started || generation != session) break
                 val now = System.currentTimeMillis()
-                if (MarketHours.forexWeekendClosed(now)) {
+                if (marketClosed(now)) {
                     if (_state.value.feed.mode != FeedMode.MARKET_CLOSED || streamJob?.isActive == true) {
                         synchronized(this@MarketRepository) { ++streamEpoch; streamJob?.cancel(); streamJob = null }
                         recoveryJob?.cancel()
@@ -533,7 +543,7 @@ class MarketRepository(
                 recoveryJob?.cancel()
                 recoveryJob = scope?.launch {
                     delay(750L) // a default network may be announced before it can actually route
-                    if (!started || generation != session || MarketHours.forexWeekendClosed()) return@launch
+                    if (!started || generation != session || marketClosed()) return@launch
                     if (cm.activeNetwork != network || !hasInternet()) return@launch
                     lastNetwork = network
                     publishDelayed("شبکه تغییر کرد؛ تیک قدیمی قابل معامله نیست. اتصال WebSocket/REST بازیابی می‌شود")
@@ -548,7 +558,7 @@ class MarketRepository(
                 recoveryJob?.cancel()
                 recoveryJob = scope?.launch {
                     delay(1_500L) // allow Android to switch to a new default network first
-                    if (started && generation == session && !MarketHours.forexWeekendClosed() && !hasInternet()) {
+                    if (started && generation == session && !marketClosed() && !hasInternet()) {
                         publishDelayed("شبکه در حال تغییر/قطع است؛ تا رسیدن دادهٔ تازه آنلاین نیست")
                     }
                 }
@@ -562,7 +572,7 @@ class MarketRepository(
         val now = System.currentTimeMillis()
         val price = tick.price
         val at = tick.at
-        if (MarketHours.forexWeekendClosed(now)) { publishClosed(); return }
+        if (marketClosed(now)) { publishClosed(); return }
         if (!isCurrentIntervalTick(at, current.interval, now)) return
         val wallPeriodStart = now - now % current.interval.millis
         val periodStart = at - at % current.interval.millis
@@ -613,7 +623,7 @@ class MarketRepository(
     }
 
     private fun publishStreamUnavailable(detail: String) {
-        if (MarketHours.forexWeekendClosed()) { publishClosed(); return }
+        if (marketClosed()) { publishClosed(); return }
         val current = _state.value
         val now = System.currentTimeMillis()
         if (current.feed.mode == FeedMode.POLLING &&

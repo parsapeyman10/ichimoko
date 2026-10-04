@@ -95,66 +95,26 @@ object SourceCatalog {
     )
 
     /**
-     * همراه مکانیک — daily used-car prices.
+     * Spot gold, from the same keyless feed the live chart already trusts.
      *
-     * The per-model pages are server-rendered (the brand and model/year routes carry the
-     * price in the HTML), so the same Jsoup extractor used for Bama reads them. The
-     * client-rendered routes are deliberately avoided: `/carprice/{brand}/{model}/` and
-     * `/carprice/{brand}/{model}/{year}/` ship the number, the bare `/carprice/` tool does
-     * not.
-     *
-     * Scraping reads a layout, not a contract. If the page changes the row reports
-     * "unavailable" instead of showing a stale or invented price.
+     * Yahoo's XAUUSD=X row returns no usable quote for this workspace, so the watchlist
+     * showed global gold as permanently empty. gold-api serves a plain price with its own
+     * update timestamp and needs no key.
      */
-    val hamrahMechanic = SourceDef(
-        id = "hamrah_mechanic_car",
-        title = "همراه مکانیک · قیمت خودرو",
-        subtitle = "قیمت روز خودروی کارکرده بر پایهٔ معاملات واقعی، بدون کلید",
-        kind = SourceKind.HTML_PAGE,
-        urlTemplate = "https://www.hamrah-mechanic.com/carprice/{symbol}/",
-        unit = "تومان",
-        symbols = listOf(
-            // Every slug below was verified against the live brand listings. Guessed slugs
-            // would render as permanently failing rows, which is worse than omitting them.
-            SymbolDef("saipa/quick", "سایپا کوییک"),
-            SymbolDef("saipa/saina", "سایپا ساینا"),
-            SymbolDef("saipa/tiba2", "سایپا تیبا ۲"),
-            SymbolDef("saipa/atlas", "سایپا اطلس"),
-            SymbolDef("saipa/pride131", "پراید ۱۳۱"),
-            SymbolDef("saipa/pride111", "پراید ۱۱۱"),
-            SymbolDef("saipa/pride151", "پراید ۱۵۱"),
-            SymbolDef("irankhodro/peugeot207", "پژو ۲۰۷"),
-            SymbolDef("irankhodro/peugeot206", "پژو ۲۰۶"),
-            SymbolDef("irankhodro/peugeot206sedan", "پژو ۲۰۶ صندوقدار"),
-            SymbolDef("irankhodro/peugeotpars", "پژو پارس"),
-            SymbolDef("irankhodro/peugeot405", "پژو ۴۰۵"),
-            SymbolDef("irankhodro/405slx", "پژو ۴۰۵ SLX"),
-            SymbolDef("irankhodro/207sd", "پژو ۲۰۷ صندوقدار"),
-        ),
-    )
-
-    /**
-     * Binance public 24h ticker, so crypto rows in the watchlist have a real source.
-     *
-     * Without this the crypto pairs added to [WatchCatalog] would render as permanently
-     * failing rows: the catalog named a provider that did not exist. Market data only —
-     * no key, no account, and nothing that can place an order.
-     */
-    val binance = SourceDef(
-        id = "binance_public",
-        title = "Binance · عمومی",
-        subtitle = "قیمت و تغییر ۲۴ ساعتهٔ ارز دیجیتال، بدون کلید",
+    val goldApi = SourceDef(
+        id = "gold_api_public",
+        title = "Gold-API · طلای جهانی",
+        subtitle = "قیمت لحظه‌ای انس طلا، بدون کلید",
         kind = SourceKind.JSON_REST,
-        urlTemplate = "https://data-api.binance.vision/api/v3/ticker/24hr?symbol={symbol}",
-        pricePath = "lastPrice",
-        changePath = "priceChangePercent",
-        changeMode = ChangeMode.PERCENT,
-        volumePath = "volume",
-        timestampPath = "closeTime",
-        timestampMode = SourceTime.UNIX_MILLIS,
+        urlTemplate = "https://api.gold-api.com/price/{symbol}",
+        pricePath = "price",
+        changeMode = ChangeMode.NONE,
+        timestampPath = "updatedAt",
+        timestampMode = SourceTime.UTC_DATETIME,
         unit = "$",
+        symbols = listOf(SymbolDef("XAU", "طلای جهانی (هر انس)"), SymbolDef("XAG", "نقره (هر انس)")),
     )
 
-    val all = listOf(yahoo, tgju, bamaCars, hamrahMechanic, goldApi, twelveData, binance)
+    val all = listOf(yahoo, tgju, bamaCars, goldApi, twelveData, binance)
     fun find(id: String): SourceDef? = all.firstOrNull { it.id == id }
 }

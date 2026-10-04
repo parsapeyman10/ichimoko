@@ -111,6 +111,16 @@ android {
         resources.excludes += setOf("/META-INF/{AL2.0,LGPL2.1}")
     }
 
+    // Ship only the CPU architectures real phones use. Without this every native library
+    // is bundled four times (arm64, armeabi-v7a, x86, x86_64) and three of them are dead
+    // weight on any given device. Code is NOT obfuscated or shrunk: isMinifyEnabled stays
+    // false, so nothing can break at runtime that the JVM tests would not catch.
+    defaultConfig {
+        ndk {
+            abiFilters += setOf("arm64-v8a", "armeabi-v7a")
+        }
+    }
+
     lint {
         // Lint findings are uploaded as a report; tests/assembly remain the hard release gates.
         abortOnError = false
@@ -143,7 +153,6 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.tukaani:xz:1.10")
     implementation("org.jsoup:jsoup:1.18.3")
-    implementation("com.google.mlkit:translate:17.0.3") // on-device EN → FA; no browser redirect or API key
 
     // JVM unit tests for the pure engine code and read-only data validation.
     // They never run inside the APK; release assembly requires them to pass below.

@@ -28,30 +28,6 @@ object WatchCatalog {
         WatchSymbol("PEUGEOT_207_TU5P", "پژو ۲۰۷ دستی TU5P / TU5Plus", "تومان", linkedMapOf(
             "bama_car_price" to "peugeot_207_manualtu5p",
         ), listOf("bama_car_price"), 12 * 60 * 60_000L, 3.0),
-        WatchSymbol("CAR_QUICK", "سایپا کوییک", "تومان", linkedMapOf(
-            "hamrah_mechanic_car" to "saipa/quick",
-        ), listOf("hamrah_mechanic_car"), 12 * 60 * 60_000L, 3.0),
-        WatchSymbol("CAR_SAINA", "سایپا ساینا", "تومان", linkedMapOf(
-            "hamrah_mechanic_car" to "saipa/saina",
-        ), listOf("hamrah_mechanic_car"), 12 * 60 * 60_000L, 3.0),
-        WatchSymbol("CAR_TIBA2", "سایپا تیبا ۲", "تومان", linkedMapOf(
-            "hamrah_mechanic_car" to "saipa/tiba2",
-        ), listOf("hamrah_mechanic_car"), 12 * 60 * 60_000L, 3.0),
-        WatchSymbol("CAR_PRIDE131", "پراید ۱۳۱", "تومان", linkedMapOf(
-            "hamrah_mechanic_car" to "saipa/pride131",
-        ), listOf("hamrah_mechanic_car"), 12 * 60 * 60_000L, 3.0),
-        WatchSymbol("CAR_207", "پژو ۲۰۷", "تومان", linkedMapOf(
-            "hamrah_mechanic_car" to "irankhodro/peugeot207",
-        ), listOf("hamrah_mechanic_car"), 12 * 60 * 60_000L, 3.0),
-        WatchSymbol("CAR_206", "پژو ۲۰۶", "تومان", linkedMapOf(
-            "hamrah_mechanic_car" to "irankhodro/peugeot206",
-        ), listOf("hamrah_mechanic_car"), 12 * 60 * 60_000L, 3.0),
-        WatchSymbol("CAR_PARS", "پژو پارس", "تومان", linkedMapOf(
-            "hamrah_mechanic_car" to "irankhodro/peugeotpars",
-        ), listOf("hamrah_mechanic_car"), 12 * 60 * 60_000L, 3.0),
-        WatchSymbol("CAR_405", "پژو ۴۰۵", "تومان", linkedMapOf(
-            "hamrah_mechanic_car" to "irankhodro/peugeot405",
-        ), listOf("hamrah_mechanic_car"), 12 * 60 * 60_000L, 3.0),
         WatchSymbol("XAU/USD", "طلای جهانی (هر انس)", "$",  linkedMapOf(
             // gold-api first: Yahoo's XAUUSD=X left this row permanently empty.
             "gold_api_public" to "XAU", "stocks_yahoo" to "XAUUSD=X", "twelve_data_quote" to "XAU/USD",

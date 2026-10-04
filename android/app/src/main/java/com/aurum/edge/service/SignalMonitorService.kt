@@ -112,7 +112,7 @@ class SignalMonitorService : Service() {
         researchAlertJob?.cancel()
         researchAlertJob = scope.launch {
             container.forexCalendar.state.collect { state ->
-                if (container.settingsStore.read().backgroundMonitor && !MarketHours.forexWeekendClosed())
+                if (container.settingsStore.read().backgroundMonitor && !MarketHours.weekendClosedFor(container.settingsStore.read().symbol))
                     ResearchAlerts.forex(state, System.currentTimeMillis()).forEach(::postResearchAlert)
             }
         }
@@ -121,7 +121,7 @@ class SignalMonitorService : Service() {
             var turns = 0
             while (isActive) {
                 if (!notificationsPermitted()) { stopSelf(); break }
-                if (!MarketHours.forexWeekendClosed()) {
+                if (!MarketHours.weekendClosedFor(container.settingsStore.read().symbol)) {
                     container.forexCalendar.refreshNow() // weekly export, 1m near release only
                     if (turns % 3 == 0) container.watch.refreshNow() // display/radar cards stay warm under their own throttle
                     if (turns++ % 15 == 0) container.publicWebNews.refreshNow()
@@ -155,7 +155,7 @@ class SignalMonitorService : Service() {
             while (isActive) {
                 if (!notificationsPermitted()) { stopSelf(); break }
                 val config = container.settingsStore.read()
-                if (config.backgroundMonitor && !MarketHours.forexWeekendClosed()) {
+                if (config.backgroundMonitor && !MarketHours.weekendClosedFor(config.symbol)) {
                     if (!config.notifyOnSignal) {
                         container.pairScanner.refreshNow() // records honest online/error/alert-off statuses
                     } else {

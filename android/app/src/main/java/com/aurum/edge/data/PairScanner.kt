@@ -112,9 +112,13 @@ class PairScanner(
 
         val config = settings.read()
         val interval: Interval = config.interval
+        // Mark only the instruments that are genuinely shut. Aborting the whole sweep
+        // here meant crypto was never scanned at the weekend even though it trades.
         if (MarketHours.forexWeekendClosed()) {
-            WatchCatalog.chartSymbols.forEach { update(it, "closed", "بازار فارکس تعطیل است؛ اسکن ارسال نشد") }
-            return
+            WatchCatalog.chartSymbols
+                .filter { MarketHours.weekendClosedFor(it) }
+                .forEach { update(it, "closed", "بازار فارکس تعطیل است؛ اسکن ارسال نشد") }
+            if (WatchCatalog.chartSymbols.none { !MarketHours.weekendClosedFor(it) }) return
         }
         val headlines = news.state.value
         val trades = journal.trades.value
@@ -123,7 +127,7 @@ class PairScanner(
         WatchCatalog.chartSymbols.forEachIndexed { index, symbol ->
             if (index > 0) delay(PAIR_SPACING_MS)
             val now = System.currentTimeMillis()
-            if (MarketHours.forexWeekendClosed(now)) { update(symbol, "closed", "بازار تعطیل شد؛ اسکن متوقف شد"); return@forEachIndexed }
+            if (MarketHours.weekendClosedFor(symbol, now)) { update(symbol, "closed", "بازار تعطیل شد؛ اسکن متوقف شد"); return@forEachIndexed }
             if (trades.any { it.symbol == symbol && it.isOpen }) {
                 update(symbol, "blocked", "پوزیشن کاغذی این نماد باز است؛ فرصت جدید اسکن نمی‌شود")
                 return@forEachIndexed

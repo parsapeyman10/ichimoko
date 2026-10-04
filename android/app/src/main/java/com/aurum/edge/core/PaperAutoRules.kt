@@ -28,7 +28,8 @@ object PaperAutoRules {
                            allowedSymbols: List<String>? = null,
                            barAgeGraceMs: Long = 90_000L,
                            requireMonitor: Boolean = true): String? {
-        if (MarketHours.forexWeekendClosed(now)) return "بازار فارکس طبق برنامهٔ معمول پایان هفته بسته است؛ ورود/اعلان معاملاتی نداریم"
+        // Per symbol: a 24/7 crypto venue must not inherit the forex weekend.
+        if (MarketHours.weekendClosedFor(market.symbol, now)) return "بازار فارکس طبق برنامهٔ معمول پایان هفته بسته است؛ ورود/اعلان معاملاتی نداریم"
         if (requireMonitor && !settings.backgroundMonitor) return "برای هشدار/ورود، پایش پس‌زمینه باید روشن باشد"
         if (allowedSymbols != null) {
             if (market.symbol !in allowedSymbols || market.interval != settings.interval) return "نماد/بازه اسکن معتبر نیست"
