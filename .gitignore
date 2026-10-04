@@ -12,6 +12,7 @@ coverage/
 # Runtime state written by the backend (paper-trading account, provider candle cache).
 # This is per-machine data, not source.
 backend/app/data/autopilot.json
+edge_report.json
 backend/app/data/journal.json
 backend/app/data/cache/
 
