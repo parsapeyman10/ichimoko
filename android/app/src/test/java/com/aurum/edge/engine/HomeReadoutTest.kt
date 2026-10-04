@@ -92,11 +92,19 @@ class HomeReadoutTest {
         assertTrue(primaryTabs.size <= 5) // bottom bar stays usable on small screens
     }
 
-    @Test fun `watch catalog puts Iran gold and dollar first while chart stays forex`() {
-        assertEquals(listOf("IR_GOLD18", "USD/IRR", "QUICK_GXRL", "PEUGEOT_207_TU5P", "XAU/USD", "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD",
-            "USD/JPY", "USD/CHF", "USD/CAD"), WatchCatalog.symbols.map { it.id })
+    @Test fun `watch catalog keeps Iran cash rows first, then forex, then crypto`() {
+        // Order matters: the Iran cash board is what the user opens the app for, the forex
+        // workspace follows, and crypto is appended so existing positions in the list do
+        // not shift. Crypto is chartable like forex; the Iran rows stay watch-only.
+        val forexFirst = listOf("IR_GOLD18", "USD/IRR", "QUICK_GXRL", "PEUGEOT_207_TU5P",
+            "XAU/USD", "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD", "USD/JPY", "USD/CHF", "USD/CAD")
+        val ids = WatchCatalog.symbols.map { it.id }
+        assertEquals(forexFirst, ids.take(forexFirst.size))
+        assertEquals(com.aurum.edge.data.CryptoCatalog.ids, ids.drop(forexFirst.size))
+
         assertEquals(listOf("XAU/USD", "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD",
-            "USD/JPY", "USD/CHF", "USD/CAD"), WatchCatalog.chartSymbols)
+            "USD/JPY", "USD/CHF", "USD/CAD") + com.aurum.edge.data.CryptoCatalog.ids,
+            WatchCatalog.chartSymbols)
         assertEquals("tgju_public", WatchCatalog.find("IR_GOLD18")!!.defaultSources.single())
         assertEquals("تومان", WatchCatalog.find("USD/IRR")!!.unit)
         assertEquals("bama_car_price", WatchCatalog.find("QUICK_GXRL")!!.defaultSources.single())

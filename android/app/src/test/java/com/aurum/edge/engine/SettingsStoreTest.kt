@@ -37,21 +37,25 @@ class SettingsStoreTest {
         assertTrue(reopened.backgroundMonitor)
     }
 
-    @Test fun `symbol writes accept only catalog pairs and legacy symbols migrate to gold`() {
+    @Test fun `symbol writes accept catalog pairs including crypto, and removed symbols migrate to gold`() {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit().clear().commit()
         val store = SettingsStore(context)
-        // Non-catalog symbols (crypto/stocks of removed workspaces) are rejected, key untouched.
-        assertFalse(store.saveMarketCredentials("another-synthetic-key", "BTC/USDT"))
+        // Symbols outside the catalog are still rejected, key untouched.
         assertFalse(store.saveChartSymbol("AAPL"))
-        assertFalse(store.saveChartSymbol("XAG/USD")) // silver is not in this forex-only catalog
+        assertFalse(store.saveChartSymbol("XAG/USD")) // silver is not in the catalog
         assertTrue(store.saveChartSymbol(" eur/usd "))
         assertEquals("EUR/USD", store.read().symbol)
         // Keyless quick switch: no key required, symbol persists for a fresh store.
         assertEquals("EUR/USD", SettingsStore(context).read().symbol)
-        // A legacy stored symbol (old install) is coerced to the catalog default on read.
+        // Crypto is a first-class catalog symbol now and must be accepted and persisted.
+        assertTrue(store.saveChartSymbol("BTC/USDT"))
+        assertEquals("BTC/USDT", SettingsStore(context).read().symbol)
+        assertTrue(store.saveMarketCredentials("another-synthetic-key", "ETH/USDT"))
+        assertEquals("ETH/USDT", SettingsStore(context).read().symbol)
+        // A genuinely removed symbol (old install) is still coerced to the default on read.
         context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit()
-            .putString("symbol", "BTC/USDT").commit()
+            .putString("symbol", "AAPL").commit()
         assertEquals("XAU/USD", SettingsStore(context).read().symbol)
     }
 
