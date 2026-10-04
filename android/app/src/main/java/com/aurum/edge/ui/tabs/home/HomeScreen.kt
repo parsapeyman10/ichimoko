@@ -1,6 +1,7 @@
 package com.aurum.edge.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -12,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -31,6 +33,7 @@ import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatDateTime
+import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.components.formatQuotePrice
 import com.aurum.edge.ui.components.formatSpread
@@ -117,6 +120,8 @@ fun HomeScreen(
             )
         }
 
+        AutoPaperCard(viewModel, onJournal)
+
         SectionCard(
             title = "قیمت لحظه‌ای بازار · ${market.symbol}",
             subtitle = "فقط آخرین عدد واقعی دریافت‌شده؛ بدون سیگنال، خبر یا آمار اضافه",
@@ -153,5 +158,103 @@ fun HomeScreen(
                     modifier = Modifier.padding(top = 8.dp))
             }
         }
+    }
+}
+
+
+/**
+ * Automatic paper trading, front and centre.
+ *
+ * The engine was already opening paper trades on its own, but nothing on the home screen
+ * said so, so the app looked idle while it was in fact working. Trust is built by showing
+ * the running tally and, when nothing is being entered, the actual reason why.
+ *
+ * Everything here is simulated money against real prices. No broker is contacted.
+ */
+@Composable
+private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit) {
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val stats by viewModel.stats.collectAsStateWithLifecycle()
+    val status by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
+    val trades by viewModel.trades.collectAsStateWithLifecycle()
+    val enabled = settings.autoPaperTrading
+    val lastTrade = trades.maxByOrNull { it.openedAt }
+
+    SectionCard(
+        title = "معاملهٔ خودکار کاغذی",
+        subtitle = "با پول غیرواقعی روی قیمت واقعی — هیچ سفارشی به بروکر نمی‌رود",
+        trailing = {
+            Pill(
+                if (enabled) "روشن" else "خاموش",
+                if (enabled) AurumColors.Green else AurumColors.TextMuted,
+            )
+        },
+    ) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (enabled) "موتور خودش بازار را می‌بیند و معامله باز و بسته می‌کند."
+                else "خاموش است؛ هیچ معاملهٔ خودکاری ثبت نمی‌شود.",
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.bodySmall,
+                color = AurumColors.TextSecondary,
+            )
+            Switch(checked = enabled, onCheckedChange = viewModel::setAutoPaperTrading)
+        }
+
+        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatTile("سرمایهٔ فرضی", "$" + settings.accountBalance.toInt(), modifier = Modifier.weight(1f))
+            StatTile(
+                "سود/ضرر",
+                (if (stats.netPnl >= 0) "+" else "") + String.format("%.2f", stats.netPnl) + "$",
+                if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red,
+                Modifier.weight(1f),
+            )
+            StatTile("باز", stats.open.toString(), modifier = Modifier.weight(1f))
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatTile("معاملات", stats.total.toString(), modifier = Modifier.weight(1f))
+            StatTile("برد/باخت", "${stats.wins}/${stats.losses}", modifier = Modifier.weight(1f))
+            StatTile(
+                "وین‌ریت",
+                stats.winRate?.let { String.format("%.0f%%", it) } ?: "—",
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        if (lastTrade != null) {
+            Text(
+                "آخرین معامله: ${lastTrade.symbol} · ${relativeTime(lastTrade.openedAt)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 10.dp),
+            )
+        }
+
+        // When the engine is NOT entering, say why. A silent screen is what makes an
+        // automated system feel broken even when it is behaving correctly.
+        if (enabled) {
+            Text(
+                "وضعیت الان: $status",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+
+        if (stats.total < 100) {
+            Text(
+                "تا ${100 - stats.total} معاملهٔ دیگر، آمار بالا هنوز برای قضاوت دربارهٔ سودده بودن کافی نیست.",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+
+        Text(
+            "دیدن همهٔ معاملات در تب ژورنال",
+            style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.Cyan,
+            modifier = Modifier.padding(top = 8.dp).clickable { onJournal() },
+        )
     }
 }

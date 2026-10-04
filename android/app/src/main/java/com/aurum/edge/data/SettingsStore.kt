@@ -48,7 +48,7 @@ class SettingsStore(context: Context) {
         symbol = (prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD").takeIf { it in WatchCatalog.chartSymbols } ?: "XAU/USD",
         interval = Interval.fromLabel(prefs.getString(KEY_INTERVAL, null) ?: "5m"),
         riskPercent = prefs.getFloat(KEY_RISK, 0.5f).toDouble(),
-        accountBalance = prefs.getFloat(KEY_BALANCE, 100f).toDouble(),
+        accountBalance = prefs.getFloat(KEY_BALANCE, 1000f).toDouble(),
         minConfidence = prefs.getFloat(KEY_MIN_CONF, 72f).toDouble(),
         spreadPrice = prefs.getFloat(KEY_SPREAD, 0.30f).toDouble(),
         commissionPerOz = prefs.getFloat(KEY_COMMISSION, 0.05f).toDouble(),
