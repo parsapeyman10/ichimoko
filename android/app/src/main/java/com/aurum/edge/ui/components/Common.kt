@@ -62,6 +62,14 @@ fun NewsClassificationRow(classification: NewsClassification, modifier: Modifier
 fun formatPrice(value: Double?): String =
     if (value == null) "—" else String.format(Locale.US, "%,.2f", value)
 
+/**
+ * Price with the decimals the instrument is actually quoted in. Two decimals is right for
+ * gold and BTC, wrong for EUR/USD, and useless for DOGE.
+ */
+fun formatPriceFor(symbol: String, value: Double?): String =
+    if (value == null) "—"
+    else String.format(Locale.US, "%,.${com.aurum.edge.data.CryptoCatalog.digitsFor(symbol)}f", value)
+
 fun formatQuotePrice(value: Double?): String {
     if (value == null) return "—"
     val abs = kotlin.math.abs(value)

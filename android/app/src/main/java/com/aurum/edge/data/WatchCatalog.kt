@@ -52,12 +52,27 @@ object WatchCatalog {
         WatchSymbol("USD/CAD", "دلار / دلار کانادا", "CAD", linkedMapOf(
             "stocks_yahoo" to "CAD=X", "twelve_data_quote" to "USD/CAD",
         ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
-    )
+    ) + CryptoCatalog.symbols.map { crypto ->
+        // Crypto rides the same catalog so it appears in the watchlist, the chart picker and
+        // the signal tab with no parallel plumbing. Binance public data, no key, 24/7.
+        WatchSymbol(
+            id = crypto.id,
+            label = crypto.label,
+            unit = "$",
+            providerCodes = linkedMapOf("binance_public" to crypto.binance),
+            defaultSources = listOf("binance_public"),
+            maxAgeMillis = 5 * 60_000L,
+            tolerancePct = 1.0,
+        )
+    }
 
     fun find(id: String): WatchSymbol? = symbols.firstOrNull { it.id == id }
 
     /** Symbols selectable for the chart/feed. Iran cash-board rows are watch-only. */
-    val chartSymbols: List<String> = symbols.filter { "stocks_yahoo" in it.providerCodes || "twelve_data_quote" in it.providerCodes }.map { it.id }
+    val chartSymbols: List<String> = symbols.filter {
+        "stocks_yahoo" in it.providerCodes || "twelve_data_quote" in it.providerCodes ||
+            "binance_public" in it.providerCodes
+    }.map { it.id }
 }
 
 data class DisplayQuote(val quote: Quote?, val sourceId: String, val fallback: Boolean)

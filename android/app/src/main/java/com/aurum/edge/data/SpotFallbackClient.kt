@@ -33,6 +33,7 @@ class SpotFallbackClient(
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .build(),
+    private val binance: BinanceHistoryClient = BinanceHistoryClient(),
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -117,6 +118,18 @@ class SpotFallbackClient(
 
     /** One real quote: Swissquote first, gold-api.com only as a gold-only backup. Never fabricated. */
     suspend fun fetchQuote(symbol: String): PriceTick {
+        // Crypto has its own real, keyless book. Swissquote and Gold-API do not carry these
+        // instruments at all, so trying them would just produce a misleading error.
+        if (CryptoCatalog.isCrypto(symbol)) {
+            val quote = binance.fetchQuote(symbol)
+                ?: throw DataFeedException("قیمت زندهٔ $symbol از بایننس دریافت نشد")
+            return PriceTick(
+                price = (quote.bid + quote.ask) / 2,
+                at = quote.at,
+                bid = quote.bid,
+                ask = quote.ask,
+            )
+        }
         return try {
             fetchSwissquote(symbol)
         } catch (cancel: CancellationException) {

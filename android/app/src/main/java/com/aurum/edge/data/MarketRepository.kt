@@ -74,6 +74,7 @@ class MarketRepository(
     private val spotFallback: SpotFallbackClient = SpotFallbackClient(),
     private val publicHistory: PublicCandleHistoryClient = PublicCandleHistoryClient(),
     private val dukascopyHistory: DukascopyHistoryClient = DukascopyHistoryClient(),
+    private val binanceHistory: BinanceHistoryClient = BinanceHistoryClient(),
 ) {
     private val _state = MutableStateFlow(MarketState())
     val state: StateFlow<MarketState> = _state.asStateFlow()
@@ -216,7 +217,7 @@ class MarketRepository(
         val current = settings.read()
         val session = generation
         if (!started) return@withLock
-        if (MarketHours.forexWeekendClosed() && !allowClosedMarketHistory) {
+        if (MarketHours.weekendClosedFor(current.symbol) && !allowClosedMarketHistory) {
             publishClosed()
             return@withLock // no recurring REST requests on the scheduled weekend
         }
@@ -239,7 +240,17 @@ class MarketRepository(
             var fetched: List<Candle> = emptyList()
             var historyProvider = ""
             var staleDetail = "تاریخچهٔ آنلاین پاسخ داد اما آخرین کندل آن باید با تیک زنده تأیید شود"
-            try {
+            if (CryptoCatalog.isCrypto(current.symbol)) {
+                // Crypto has exactly one real source and it needs no key, so the Yahoo /
+                // Dukascopy / Twelve Data ladder below does not apply. A failure here is
+                // reported as-is rather than silently falling through to a forex provider
+                // that does not carry this instrument.
+                val book = binanceHistory.fetchCandles(current.symbol, current.interval,
+                    desiredSize = requestedSize, minimumSize = minimumSize)
+                fetched = book.candles
+                historyProvider = book.provider
+                staleDetail = "بایننس تاریخچه داد اما آخرین کندل آن باید با قیمت زنده تأیید شود"
+            } else try {
                 // Public history is the normal path even when a Twelve Data key exists. The key
                 // is only a final fallback; this keeps the chart/replay provider policy honest.
                 val public = publicHistory.fetchCandles(current.symbol, current.interval,

@@ -22,6 +22,14 @@ object MarketHours {
         val detail: String,
     )
 
+    /**
+     * Crypto venues do not close, so the weekend gate must be asked per symbol. Treating a
+     * 24/7 market as shut would mute the engine for two days every week.
+     */
+    fun weekendClosedFor(symbol: String, now: Long = System.currentTimeMillis()): Boolean =
+        if (com.aurum.edge.data.CryptoCatalog.tradesAroundTheClock(symbol)) false
+        else forexWeekendClosed(now)
+
     fun forexWeekendClosed(now: Long = System.currentTimeMillis()): Boolean {
         val local = Instant.ofEpochMilli(now).atZone(newYork)
         return when (local.dayOfWeek) {
