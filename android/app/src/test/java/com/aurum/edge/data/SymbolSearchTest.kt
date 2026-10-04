@@ -102,10 +102,12 @@ class SymbolSearchTest {
 
     @Test fun `edit distance is correct`() {
         assertEquals(0, SymbolSearch.distance("btc", "btc"))
-        assertEquals(1, SymbolSearch.distance("btc", "btcc"))
-        assertEquals(2, SymbolSearch.distance("kitten", "sitten".replace("sitten", "kitteng")) - 0)
+        assertEquals(1, SymbolSearch.distance("btc", "btcc"))      // one insertion
+        assertEquals(1, SymbolSearch.distance("doge", "dogo"))     // one substitution
+        assertEquals(1, SymbolSearch.distance("pepe", "pee"))      // one deletion
         assertEquals(3, SymbolSearch.distance("kitten", "sitting"))
         assertEquals(4, SymbolSearch.distance("", "abcd"))
+        assertEquals(4, SymbolSearch.distance("abcd", ""))
     }
 
     // ---------- volume ordering ----------
