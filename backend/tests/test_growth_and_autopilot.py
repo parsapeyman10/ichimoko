@@ -226,3 +226,23 @@ def test_new_day_resets_the_daily_budget(tmp_path, monkeypatch):
     assert state["day"] != "2000-01-01"
     assert state["day_start_balance"] == 950.0
     assert ap._daily_pnl_pct(state) == 0.0
+
+
+def test_shutdown_keeps_enabled_so_a_restart_resumes_but_stop_does_not(tmp_path, monkeypatch):
+    """A process restart must not silently leave the autopilot dead while it reads enabled.
+
+    `shutdown` is the process going away; `stop` is the user standing it down. Only the
+    second may clear the persisted flag.
+    """
+    monkeypatch.setattr(ap, "STORE", tmp_path / "autopilot.json")
+    ap.reset(balance=1_000.0)
+
+    state = ap.load_state()
+    state["enabled"] = True
+    ap.save_state(state)
+
+    run(ap.autopilot.shutdown())
+    assert ap.load_state()["enabled"] is True      # a restart will resume
+
+    run(ap.autopilot.stop())
+    assert ap.load_state()["enabled"] is False     # an explicit stop stays stopped

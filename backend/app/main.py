@@ -205,7 +205,15 @@ async def lifespan(_: FastAPI):
         asyncio.create_task(run_market_pipeline(), name="market-pipeline"),
         asyncio.create_task(run_news_pipeline(), name="news-pipeline"),
     ]
+    # The autopilot's "enabled" flag is persisted, but the supervision loop lives in this
+    # process. After a restart, reboot or crash the flag would still read true while
+    # nothing was actually running — an autopilot that silently stopped trading is worse
+    # than one that was never started, so resume it here.
+    if autopilot_svc.load_state().get("enabled"):
+        await autopilot_svc.autopilot.start(settings)
     yield
+    with contextlib.suppress(Exception):
+        await autopilot_svc.autopilot.shutdown()
     for task in tasks:
         task.cancel()
     for task in tasks:

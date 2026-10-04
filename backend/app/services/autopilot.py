@@ -28,6 +28,7 @@ Two boundaries that are deliberate and not negotiable here:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import uuid
 from datetime import datetime, timezone
@@ -497,6 +498,17 @@ class Autopilot:
         if not self.running:
             self._task = asyncio.create_task(self._loop(settings))
         return {"running": True, "interval_seconds": self.interval_seconds}
+
+    async def shutdown(self) -> None:
+        """Cancel the loop WITHOUT clearing `enabled`, so a restart resumes trading.
+
+        Distinct from `stop`, which is the user saying "stand down" and must persist.
+        """
+        if self._task:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+            self._task = None
 
     async def stop(self) -> dict:
         state = load_state()
