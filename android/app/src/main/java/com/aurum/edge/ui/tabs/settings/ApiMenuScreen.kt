@@ -6,10 +6,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.aurum.edge.core.AppSettings
@@ -21,9 +24,9 @@ import com.aurum.edge.ui.theme.AurumColors
  * Read-only credentials are entered only in Settings; no trade secret is accepted.
  */
 @Composable
-fun ApiMenuScreen(settings: AppSettings, onForexSettings: () -> Unit) {
+fun ApiMenuScreen(viewModel: AurumViewModel, settings: AppSettings, onForexSettings: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
-        AiStatusCard(settings)
+        AiStatusCard(viewModel, settings)
         SectionCard("منابع و APIهای فارکس", "فقط منابع تعریف‌شده، نه «همهٔ سایت‌ها»") {
             Text("کلید API اختصاصیِ دستیار وجود ندارد. کلید خواندنی خود را فقط در تنظیمات وارد کنید؛ کلید معاملاتی یا کلید افشاشده را وارد نکنید.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
@@ -55,7 +58,10 @@ fun ApiMenuScreen(settings: AppSettings, onForexSettings: () -> Unit) {
  * from a broken feature. Every condition that can stop it is listed here explicitly.
  */
 @Composable
-private fun AiStatusCard(settings: AppSettings) {
+private fun AiStatusCard(viewModel: AurumViewModel, settings: AppSettings) {
+    val probe by viewModel.aiProbe.collectAsStateWithLifecycle()
+    val opinion by viewModel.traderOpinion.collectAsStateWithLifecycle()
+    val news by viewModel.news.collectAsStateWithLifecycle()
     val configured = settings.hasClientNewsAi
     val host = runCatching { java.net.URI(settings.newsAiBaseUrl.trim()).host }.getOrNull().orEmpty()
     val directProvider = host.endsWith("openai.com") || host.endsWith("anthropic.com")
@@ -115,6 +121,55 @@ private fun AiStatusCard(settings: AppSettings) {
                 modifier = Modifier.padding(top = 8.dp),
             )
         }
+
+        // ── a real call, so the actual error is visible instead of silence ──
+        Button(
+            onClick = { viewModel.testNewsAiConnection("", "", "") },
+            enabled = !probe.running,
+            modifier = Modifier.padding(top = 12.dp),
+        ) { Text(if (probe.running) "در حال تست…" else "تست اتصال به سرویس") }
+
+        probe.message?.let { message ->
+            Text(
+                message,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (message.startsWith("اتصال تأیید")) AurumColors.Green else AurumColors.Red,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        }
+
+        // ── live status of each task, not a description of them ──
+        Text("وضعیت زندهٔ وظایف",
+            style = MaterialTheme.typography.labelMedium, color = AurumColors.TextPrimary,
+            modifier = Modifier.padding(top = 14.dp))
+
+        val newsAiRows = news.articles.count { it.analysisSource.contains("AI", ignoreCase = true) }
+        Text(
+            "۱) تحلیل خبر: " + when {
+                !configured -> "اجرا نمی‌شود (پیکربندی ناقص)"
+                newsAiRows > 0 -> "$newsAiRows تیتر با AI تحلیل شد"
+                else -> "هنوز نتیجه‌ای ثبت نشده"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = if (newsAiRows > 0) AurumColors.Green else AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 5.dp),
+        )
+        Text(
+            "۲) نظر تریدر: " + when {
+                !opinion.configured -> "اجرا نمی‌شود (پیکربندی ناقص)"
+                opinion.loading -> "در حال دریافت…"
+                opinion.error != null -> "خطا — ${opinion.error}"
+                opinion.opinion != null -> "آخرین نظر دریافت شد"
+                else -> "هنوز اجرا نشده"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = when {
+                opinion.error != null -> AurumColors.Red
+                opinion.opinion != null -> AurumColors.Green
+                else -> AurumColors.TextMuted
+            },
+            modifier = Modifier.padding(top = 5.dp),
+        )
 
         Text(
             "کلید روی همین گوشی می‌ماند و هرگز در لاگ نوشته نمی‌شود. فقط متن تیتر خبر برای سرویس فرستاده می‌شود.",

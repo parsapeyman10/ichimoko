@@ -88,7 +88,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
                     AurumTab.Journal -> JournalScreen(viewModel, market)
                     AurumTab.Update -> UpdateScreen(viewModel)
                     AurumTab.Settings -> SettingsScreen(viewModel, settings)
-                    AurumTab.Api -> ApiMenuScreen(settings, onForexSettings = { open(AurumTab.Settings) })
+                    AurumTab.Api -> ApiMenuScreen(viewModel, settings, onForexSettings = { open(AurumTab.Settings) })
                 }
             }
         }
