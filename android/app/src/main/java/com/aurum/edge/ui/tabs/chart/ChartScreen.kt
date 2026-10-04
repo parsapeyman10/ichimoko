@@ -117,9 +117,6 @@ fun ChartScreen(
         }
 
         EntryScoreCard(market)
-
-        // Trade from the chart itself: manual long/short with stop and target, paper only.
-        PaperTicketSection(viewModel, market)
     }
 }
 

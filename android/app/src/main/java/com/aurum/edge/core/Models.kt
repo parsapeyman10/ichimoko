@@ -536,13 +536,6 @@ data class AppSettings(
     val alertSoundName: String = "",
     /** Optional HTTPS URL of this project's backend (licensed Persian news). */
     val newsBaseUrl: String = "",
-    /**
-     * Optional HTTPS URL of this project's Python backend for the OPTIONAL server engine:
-     * multi-symbol instruments, automatic position sizing that knows each venue's real lot
-     * step, and the autonomous paper trader. Blank = feature off; the on-device engine is
-     * unaffected either way. See [com.aurum.edge.data.EngineApi].
-     */
-    val engineBaseUrl: String = "",
     /** Applies to NEW paper entries; real orders remain disabled independently. */
     val pauseOnNews: Boolean = false,
     /** Automatic orders here are local paper records, never broker orders. */

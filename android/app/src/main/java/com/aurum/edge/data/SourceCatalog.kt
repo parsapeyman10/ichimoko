@@ -74,6 +74,27 @@ object SourceCatalog {
 
     // Only vetted built-ins can be selected from the UI.
     /**
+     * Spot gold, from the same keyless feed the live chart already trusts.
+     *
+     * Yahoo's XAUUSD=X row returns no usable quote for this workspace, so the watchlist
+     * showed global gold as permanently empty. gold-api serves a plain price with its own
+     * update timestamp and needs no key.
+     */
+    val goldApi = SourceDef(
+        id = "gold_api_public",
+        title = "Gold-API · طلای جهانی",
+        subtitle = "قیمت لحظه‌ای انس طلا، بدون کلید",
+        kind = SourceKind.JSON_REST,
+        urlTemplate = "https://api.gold-api.com/price/{symbol}",
+        pricePath = "price",
+        changeMode = ChangeMode.NONE,
+        timestampPath = "updatedAt",
+        timestampMode = SourceTime.UTC_DATETIME,
+        unit = "$",
+        symbols = listOf(SymbolDef("XAU", "طلای جهانی (هر انس)"), SymbolDef("XAG", "نقره (هر انس)")),
+    )
+
+    /**
      * همراه مکانیک — daily used-car prices.
      *
      * The per-model pages are server-rendered (the brand and model/year routes carry the
@@ -134,6 +155,6 @@ object SourceCatalog {
         unit = "$",
     )
 
-    val all = listOf(yahoo, tgju, bamaCars, hamrahMechanic, twelveData, binance)
+    val all = listOf(yahoo, tgju, bamaCars, hamrahMechanic, goldApi, twelveData, binance)
     fun find(id: String): SourceDef? = all.firstOrNull { it.id == id }
 }

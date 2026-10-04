@@ -16,7 +16,8 @@ object MarketHours {
 
     data class SessionWindow(
         val closed: Boolean,
-        val nextChangeAt: Long,
+        /** Null for a 24/7 venue: there is no next open or close. */
+        val nextChangeAt: Long?,
         val nextChangeLabel: String,
         val newYorkTimeLabel: String,
         val detail: String,
@@ -39,6 +40,23 @@ object MarketHours {
             DayOfWeek.SUNDAY -> local.toLocalTime().isBefore(openTime)
             else -> false
         }
+    }
+
+    /**
+     * Session state for a SPECIFIC instrument. Crypto trades around the clock, so showing
+     * it a forex weekend-closed banner is simply wrong.
+     */
+    fun sessionWindowFor(symbol: String, now: Long = System.currentTimeMillis()): SessionWindow {
+        if (com.aurum.edge.data.CryptoCatalog.tradesAroundTheClock(symbol)) {
+            return SessionWindow(
+                closed = false,
+                nextChangeAt = null,
+                nextChangeLabel = "بازار ۲۴ ساعته",
+                newYorkTimeLabel = "کریپتو تعطیلی ندارد",
+                detail = "بازار ارز دیجیتال ۲۴ ساعته و ۷ روز هفته باز است.",
+            )
+        }
+        return sessionWindow(now)
     }
 
     fun sessionWindow(now: Long = System.currentTimeMillis()): SessionWindow {

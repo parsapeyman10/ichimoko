@@ -53,8 +53,9 @@ object WatchCatalog {
             "hamrah_mechanic_car" to "irankhodro/peugeot405",
         ), listOf("hamrah_mechanic_car"), 12 * 60 * 60_000L, 3.0),
         WatchSymbol("XAU/USD", "طلای جهانی (هر انس)", "$",  linkedMapOf(
-            "stocks_yahoo" to "XAUUSD=X", "twelve_data_quote" to "XAU/USD",
-        ), listOf("stocks_yahoo"), 10 * 60_000L, 0.5),
+            // gold-api first: Yahoo's XAUUSD=X left this row permanently empty.
+            "gold_api_public" to "XAU", "stocks_yahoo" to "XAUUSD=X", "twelve_data_quote" to "XAU/USD",
+        ), listOf("gold_api_public"), 10 * 60_000L, 0.5),
         WatchSymbol("EUR/USD", "یورو / دلار", "$", linkedMapOf(
             "stocks_yahoo" to "EURUSD=X", "twelve_data_quote" to "EUR/USD",
         ), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),

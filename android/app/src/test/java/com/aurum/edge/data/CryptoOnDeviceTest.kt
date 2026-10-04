@@ -272,4 +272,26 @@ class CryptoOnDeviceTest {
         assertTrue(SourceCatalog.hamrahMechanic.urlTemplate.startsWith("https://"))
         assertTrue(SourceCatalog.hamrahMechanic.urlTemplate.contains("{symbol}"))
     }
+
+    // ---------- the fixes requested after field use ----------
+
+    @Test fun `a 24-7 venue is never shown a weekend-closed banner`() {
+        val saturday = ZonedDateTime.of(2026, 10, 3, 12, 0, 0, 0, ZoneId.of("UTC"))
+            .toInstant().toEpochMilli()
+        val crypto = MarketHours.sessionWindowFor("BTC/USDT", saturday)
+        assertFalse(crypto.closed)
+        assertNull(crypto.nextChangeAt)      // nothing to wait for
+
+        val gold = MarketHours.sessionWindowFor("XAU/USD", saturday)
+        assertTrue(gold.closed)              // forex genuinely is shut
+    }
+
+    @Test fun `global gold has a source that serves it`() {
+        val row = WatchCatalog.find("XAU/USD")!!
+        assertEquals("gold_api_public", row.defaultSources.single())
+        assertEquals("XAU", row.providerCodes["gold_api_public"])
+        assertTrue(SourceCatalog.all.any { it.id == "gold_api_public" })
+        // Yahoo stays as a secondary mapping rather than being the one that must work.
+        assertTrue("stocks_yahoo" in row.providerCodes)
+    }
 }

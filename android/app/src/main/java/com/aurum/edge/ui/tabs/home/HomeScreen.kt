@@ -59,7 +59,7 @@ fun HomeScreen(
             now = System.currentTimeMillis()
         }
     }
-    val session = MarketHours.sessionWindow(now)
+    val session = MarketHours.sessionWindowFor(market.symbol, now)
     val price = HomeReadout.from(market, now)
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val configuredSpread = settings.spreadPrice.takeIf { it.isFinite() && it > 0.0 && price.value != null }

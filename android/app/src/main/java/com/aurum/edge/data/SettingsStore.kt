@@ -58,7 +58,6 @@ class SettingsStore(context: Context) {
         alertSoundUri = prefs.getString(KEY_ALERT_SOUND_URI, "").orEmpty(),
         alertSoundName = prefs.getString(KEY_ALERT_SOUND_NAME, "").orEmpty(),
         newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty().trim(),
-        engineBaseUrl = prefs.getString(KEY_ENGINE_URL, "").orEmpty().trim(),
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
         autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, true),
         autoDownloadUpdates = prefs.getBoolean(KEY_AUTO_DOWNLOAD_UPDATES, false),
@@ -104,23 +103,6 @@ class SettingsStore(context: Context) {
         if (symbol !in WatchCatalog.chartSymbols && !CryptoCatalog.isCrypto(symbol)) return false
         val saved = prefs.edit().putString(KEY_SYMBOL, symbol).commit()
         if (saved && prefs.getString(KEY_SYMBOL, null) == symbol) {
-            _settings.value = read()
-            return true
-        }
-        return false
-    }
-
-    /**
-     * Backend URL for the OPTIONAL server engine. An empty value switches the feature off.
-     * A non-empty value must pass [EngineApi.normalizeBase] — we store the normalised form,
-     * so a saved setting can never later be widened into an arbitrary request path.
-     */
-    @Synchronized
-    fun saveEngineBaseUrl(url: String): Boolean {
-        val trimmed = url.trim()
-        val value = if (trimmed.isEmpty()) "" else EngineApi.normalizeBase(trimmed) ?: return false
-        val saved = prefs.edit().putString(KEY_ENGINE_URL, value).commit()
-        if (saved && prefs.getString(KEY_ENGINE_URL, null) == value) {
             _settings.value = read()
             return true
         }
@@ -194,7 +176,6 @@ class SettingsStore(context: Context) {
             .putString(KEY_ALERT_SOUND_URI, next.alertSoundUri)
             .putString(KEY_ALERT_SOUND_NAME, next.alertSoundName)
             .putString(KEY_NEWS_URL, next.newsBaseUrl.trim())
-            .putString(KEY_ENGINE_URL, next.engineBaseUrl.trim())
             .putString(KEY_SIGNAL_PROFILE, next.signalProfile.persistName())
             .putBoolean(KEY_SIGNAL_MOMENTUM_VOLUME, next.signalProfile.momentumVolume)
             .putBoolean(KEY_SIGNAL_FLAT_SPAN_B, next.signalProfile.flatSpanB)
@@ -234,7 +215,6 @@ class SettingsStore(context: Context) {
         private const val KEY_ALERT_SOUND_URI = "verified_alert_sound_uri"
         private const val KEY_ALERT_SOUND_NAME = "verified_alert_sound_name"
         private const val KEY_NEWS_URL = "news_base_url"
-        private const val KEY_ENGINE_URL = "engine_base_url"
         private const val KEY_NEWS_PAUSE = "pause_on_news"
         private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"
         private const val KEY_AUTO_DOWNLOAD_UPDATES = "auto_download_updates"

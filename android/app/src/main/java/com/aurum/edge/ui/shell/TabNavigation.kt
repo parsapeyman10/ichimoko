@@ -4,7 +4,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Bookmarks
-import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Refresh
@@ -36,7 +35,6 @@ enum class AurumTab(val label: String, val icon: ImageVector) {
     Signal("معامله", Icons.Filled.Bolt),
     Watch("دیده‌بان", Icons.Filled.ViewList),
     News("خبر", Icons.Filled.Article),
-    Engine("موتور سرور", Icons.Filled.Dns),
     Learn("یادگیری", Icons.Filled.School),
     Journal("ژورنال", Icons.Filled.Bookmarks),
     Update("بروزرسانی", Icons.Filled.Refresh),
@@ -49,7 +47,7 @@ internal val primaryTabs = listOf(
 )
 
 internal val moreTabs = listOf(
-    AurumTab.Engine, AurumTab.Learn, AurumTab.Journal, AurumTab.Update, AurumTab.Settings, AurumTab.Api,
+    AurumTab.Learn, AurumTab.Journal, AurumTab.Update, AurumTab.Settings, AurumTab.Api,
 )
 
 @Composable
