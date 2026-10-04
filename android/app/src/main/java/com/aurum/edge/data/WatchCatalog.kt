@@ -60,7 +60,7 @@ object WatchCatalog {
             id = crypto.id,
             label = crypto.label,
             unit = "$",
-            providerCodes = linkedMapOf("tradingview_scanner" to "BINANCE:${crypto.binance}"),
+            providerCodes = linkedMapOf("tradingview_scanner" to TradingViewSymbols.of(crypto.id)),
             defaultSources = listOf("tradingview_scanner"),
             maxAgeMillis = 5 * 60_000L,
             tolerancePct = 1.0,

@@ -51,6 +51,7 @@ import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.data.SymbolSearch
+import com.aurum.edge.data.TradingViewSymbols
 import com.aurum.edge.data.CryptoCatalog
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatPriceFor
@@ -97,10 +98,13 @@ fun ChartScreen(
                 "TradingView از این شبکه در دسترس نیست؛ چارت خود اپ روی همان دیتای واقعی نمایش داده می‌شود"
             else null,
         ) {
-            Box(Modifier.fillMaxWidth().height(460.dp)) {
+            Box(Modifier.fillMaxWidth().height(520.dp)) {
                 // TradingView may be blocked/slow in some networks. Keep the app's own verified
                 // candle chart behind the WebView so the chart area is never an empty black panel.
-                if (market.candles.isNotEmpty()) {
+                // The app's own candles are the FALLBACK, drawn only when TradingView is
+                // unavailable. Previously both rendered and the WebView sat on top, so a
+                // blocked widget hid a working chart.
+                if (tradingViewBlocked && market.candles.isNotEmpty()) {
                     CandleChart(
                         candles = market.candles.takeLast(800),
                         interval = market.interval,
@@ -277,19 +281,7 @@ private fun tradingViewHtml(symbol: String, interval: Interval): String {
     // Crypto previously fell through to the gold default, so picking BTC drew XAU on the
     // TradingView pane while the app's own chart drew BTC — two different instruments on
     // top of each other. Crypto resolves to its real Binance ticker.
-    val crypto = CryptoCatalog.find(symbol)
-    val tvSymbol = when {
-        crypto != null -> "BINANCE:${crypto.binance}"
-        symbol == "XAU/USD" -> "OANDA:XAUUSD"
-        symbol == "EUR/USD" -> "OANDA:EURUSD"
-        symbol == "GBP/USD" -> "OANDA:GBPUSD"
-        symbol == "AUD/USD" -> "OANDA:AUDUSD"
-        symbol == "NZD/USD" -> "OANDA:NZDUSD"
-        symbol == "USD/JPY" -> "OANDA:USDJPY"
-        symbol == "USD/CHF" -> "OANDA:USDCHF"
-        symbol == "USD/CAD" -> "OANDA:USDCAD"
-        else -> "OANDA:XAUUSD"
-    }
+    val tvSymbol = TradingViewSymbols.of(symbol)
     val tvInterval = when (interval) {
         Interval.M1 -> "1"
         Interval.M5 -> "5"
