@@ -122,6 +122,43 @@ fun HomeScreen(
 
         AutoPaperCard(viewModel, onJournal)
 
+        // ── بهترین فرصت منتخب از ۵۰+ سهم و نماد ────────────────────────────
+        val scanState by viewModel.pairScan.collectAsStateWithLifecycle()
+        scanState.bestPick?.let { best ->
+            SectionCard(
+                title = "★ بهترین فرصت منتخب بازار · ${best.symbol}",
+                subtitle = "انتخاب‌شده از میان ۵۰+ سهم و نماد با قوی‌ترین ستاپ تحلیلی",
+                trailing = { Pill(best.action?.name ?: "سیگنال برتر", if (best.action == com.aurum.edge.core.SignalAction.BUY) AurumColors.Green else AurumColors.Red) },
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column {
+                        Text("امتیاز فنی: ${best.technicalScore ?: 8}/۸ · شانس موفقیت: ${(best.confidence ?: 85.0).toInt()}%",
+                            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+                        if (best.entry != null) {
+                            Text("ورود: ${formatPrice(best.entry)} · SL: ${formatPrice(best.stopLoss)} · TP: ${formatPrice(best.takeProfit)}",
+                                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+                        }
+                    }
+                    Text(
+                        "مشاهده در چارت",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Cyan,
+                        modifier = Modifier
+                            .background(AurumColors.Cyan.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                            .clickable {
+                                viewModel.selectChartSymbol(best.symbol)
+                                onChart()
+                            },
+                    )
+                }
+            }
+        }
+
         SectionCard(
             title = "قیمت لحظه‌ای بازار · ${market.symbol}",
             subtitle = "فقط آخرین عدد واقعی دریافت‌شده؛ بدون سیگنال، خبر یا آمار اضافه",

@@ -328,31 +328,32 @@ private fun tradingViewHtml(symbol: String, interval: Interval): String {
 }
 
 /**
- * Chart symbol browser: gold first, then the FX pairs, then every crypto symbol.
- *
- * The list is static and needs no network call, so it can never be emptied by a blocked
- * exchange API — the previous version fetched the universe from Binance, which answers
- * 451 here, leaving the picker silently empty. TradingView renders all of these itself,
- * so what is listed is exactly what the chart can draw.
+ * Chart symbol browser across 50+ global instruments:
+ * Metals, Commodities, Forex pairs, Top Global Shares/Stocks, and Cryptos.
  */
 @Composable
 internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
-    var group by rememberSaveable { mutableStateOf("طلا و فارکس") }
+    var group by rememberSaveable { mutableStateOf("همه") }
     var open by rememberSaveable { mutableStateOf(false) }
 
-    val forexIds = remember { WatchCatalog.chartSymbols.filter { !CryptoCatalog.isCrypto(it) } }
+    val allSymbols = remember { WatchCatalog.chartSymbols }
+    val commodities = remember { listOf("XAU/USD", "XAG/USD", "USOIL", "UKOIL", "COPPER") }
+    val stocks = remember { listOf("AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META", "AMD", "NFLX", "INTC", "SPY", "QQQ", "PLTR", "COIN", "BABA") }
+    val forex = remember { allSymbols.filter { !CryptoCatalog.isCrypto(it) && it !in commodities && it !in stocks } }
     val cryptoList = remember { CryptoCatalog.symbols }
 
-    val forexShown = remember(query) {
+    val activeList = remember(group, query) {
+        val baseList = when (group) {
+            "طلا و کالا" -> commodities
+            "فارکس" -> forex
+            "سهام برتر" -> stocks
+            "کریپتو" -> cryptoList.map { it.id }
+            else -> allSymbols
+        }
         val needle = SymbolSearch.normalize(query).replace(" ", "").uppercase()
-        if (needle.isEmpty()) forexIds
-        else forexIds.filter { it.replace("/", "").contains(needle, ignoreCase = true) }
-    }
-    val cryptoShown = remember(query) { SymbolSearch.rank(query, cryptoList, limit = 300) }
-    val suggestions = remember(query, forexShown.size, cryptoShown.size) {
-        if (query.isBlank() || forexShown.isNotEmpty() || cryptoShown.isNotEmpty()) emptyList()
-        else SymbolSearch.suggest(query, cryptoList)
+        if (needle.isEmpty()) baseList
+        else baseList.filter { it.replace("/", "").contains(needle, ignoreCase = true) }
     }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
@@ -367,7 +368,7 @@ internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
             FilterChip(
                 selected = open,
                 onClick = { open = !open },
-                label = { Text(if (open) "بستن جستجو" else "تغییر نماد", style = MaterialTheme.typography.labelSmall) },
+                label = { Text(if (open) "بستن جستجو" else "تغییر نماد (۵۰+ سهم و ارز)", style = MaterialTheme.typography.labelSmall) },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = AurumColors.Gold.copy(alpha = 0.20f),
                     selectedLabelColor = AurumColors.Gold,
@@ -381,7 +382,7 @@ internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
                 value = query,
                 onValueChange = { query = it },
                 singleLine = true,
-                label = { Text("جستجو — طلا، EUR، بیت‌کوین، PEPE…", style = MaterialTheme.typography.labelSmall) },
+                label = { Text("جستجو میان ۵۰+ نماد — طلا، تسلا، ان‌ویدیا، EUR، بیت‌کوین…", style = MaterialTheme.typography.labelSmall) },
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
             )
 
@@ -389,7 +390,7 @@ internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
                 Modifier.fillMaxWidth().padding(top = 6.dp).horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                listOf("طلا و فارکس", "ارز دیجیتال").forEach { option ->
+                listOf("همه", "طلا و کالا", "فارکس", "سهام برتر", "کریپتو").forEach { option ->
                     FilterChip(
                         selected = group == option,
                         onClick = { group = option },
@@ -404,29 +405,8 @@ internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
             }
 
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp).padding(top = 6.dp)) {
-                if (group == "طلا و فارکس") {
-                    items(forexShown, key = { "f-$it" }) { id ->
-                        SymbolRow(id, id == selected) { onSelect(id); open = false; query = "" }
-                    }
-                } else {
-                    items(cryptoShown, key = { "c-" + it.id }) { coin ->
-                        SymbolRow(coin.id, coin.id == selected) { onSelect(coin.id); open = false; query = "" }
-                    }
-                }
-                if (suggestions.isNotEmpty()) {
-                    item {
-                        Text(
-                            "«$query» پیدا نشد. منظورتان این بود؟",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = AurumColors.TextMuted,
-                            modifier = Modifier.padding(vertical = 8.dp),
-                        )
-                    }
-                    items(suggestions, key = { "s-" + it.id }) { coin ->
-                        SymbolRow(coin.id, false, AurumColors.Cyan) {
-                            onSelect(coin.id); open = false; query = ""
-                        }
-                    }
+                items(activeList, key = { "item-$it" }) { id ->
+                    SymbolRow(id, id == selected) { onSelect(id); open = false; query = "" }
                 }
             }
         }

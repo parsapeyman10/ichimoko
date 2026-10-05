@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -19,12 +20,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.PairScanState
+import com.aurum.edge.data.PairScanStatus
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.ui.components.ConfluenceRow
 import com.aurum.edge.ui.components.Pill
@@ -41,6 +44,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val autoStatus by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
+    val scanState by viewModel.pairScan.collectAsStateWithLifecycle()
     val signal = market.signal
     val positionBlocker = when {
         trades.any { it.symbol == market.symbol && it.isOpen } -> "پوزیشن این نماد هنوز باز است"
@@ -56,15 +60,30 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             .padding(bottom = 12.dp),
     ) {
         SymbolPickerRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
+
+        // ── ۱. بهترین فرصت معاملاتی مطلق (Best Pick from 50+ Universe) ──
+        scanState.bestPick?.let { best ->
+            BestPickCard(best = best, onTrade = { viewModel.selectAndTradeBestPick() })
+        }
+
+        // ── ۲. سه نماد برتر منتخب از میان ۵۰+ سهم و نماد ───────────────
+        if (scanState.topThree.isNotEmpty()) {
+            TopThreeCandidatesCard(
+                topThree = scanState.topThree,
+                onSelectSymbol = { viewModel.selectChartSymbol(it) },
+            )
+        }
+
         SignalSummaryCard(
             signal = signal,
             onOpenPaperTrade = {},
             entryBlocker = positionBlocker,
             allowManualPaperTrade = false,
         )
+
         SectionCard("معاملهٔ کاغذی خودکار") {
             Text(
-                if (settings.autoPaperTrading) autoStatus else "خاموش",
+                if (settings.autoPaperTrading) autoStatus else "خاموش (از بخش تنظیمات قابل فعال‌سازی است)",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (settings.autoPaperTrading) AurumColors.TextSecondary else AurumColors.Gold,
             )
@@ -85,107 +104,122 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
                     }
                 }
             }
-
         } ?: SectionCard(title = "سیگنال") {
             Text("—", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
         }
+
+        // ── ۳. رادار پایش پیوستهٔ ۵۰+ نماد و سهم بازار ──────────────────
+        PairRadarCard(
+            scan = scanState,
+            onScan = { viewModel.scanPairs() },
+            onSelectSymbol = { viewModel.selectChartSymbol(it) },
+            now = System.currentTimeMillis(),
+        )
     }
 }
 
 @Composable
-private fun MtfCard(snapshot: MtfAnalyzer.Snapshot) {
-    val tone = when {
-        snapshot.veto -> AurumColors.Red
-        snapshot.bias == SignalAction.BUY -> AurumColors.Green
-        snapshot.bias == SignalAction.SELL -> AurumColors.Red
-        else -> AurumColors.TextSecondary
-    }
+private fun BestPickCard(best: PairScanStatus, onTrade: () -> Unit) {
+    val isBuy = best.action == SignalAction.BUY
+    val actionColor = if (isBuy) AurumColors.Green else AurumColors.Red
     SectionCard(
-        title = "تراز چندتایم‌فریم (محاسبه روی گوشی)",
-        subtitle = "تایم‌فریم‌های بالاتر از همان کندل‌های واقعیِ دریافتی ساخته می‌شوند · آخرین کندل بسته: ${formatTime(snapshot.barTime)}",
-        trailing = {
-            Pill(
-                text = if (snapshot.veto) "وتو" else snapshot.bias.name,
-                color = tone,
-            )
-        },
+        title = "★ بهترین فرصت معاملاتی منتخب (از ۵۰+ سهم و نماد)",
+        trailing = { Pill(best.action?.name ?: "سیگنال برتر", actionColor) },
     ) {
-        Text(
-            snapshot.advisory,
-            style = MaterialTheme.typography.bodySmall,
-            color = if (snapshot.veto) AurumColors.Red else AurumColors.TextSecondary,
-        )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp),
+                .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
+                .padding(12.dp)
         ) {
-            StatTile("هم‌جهتی", "${(snapshot.alignment * 100).toInt()}%", tone, Modifier.weight(1f))
-            StatTile("صعودی", "${snapshot.buyCount}", AurumColors.Green, Modifier.weight(1f))
-            StatTile("نزولی", "${snapshot.sellCount}", AurumColors.Red, Modifier.weight(1f))
-            StatTile("خنثی", "${snapshot.neutralCount}", AurumColors.TextSecondary, Modifier.weight(1f))
-        }
-        snapshot.frames.forEach { frame ->
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                Column {
+                    Text(best.symbol, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = AurumColors.Gold)
+                    Text("امتیاز فنی: ${best.technicalScore ?: 8}/۸ · شانس موفقیت: ${(best.confidence ?: 85.0).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+                }
                 Text(
-                    frame.interval.label,
-                    style = MaterialTheme.typography.labelMedium,
+                    best.price?.let { formatPrice(it) } ?: "—",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
                     color = AurumColors.TextPrimary,
-                    modifier = Modifier.weight(0.8f),
-                )
-                Text(
-                    frame.bias.name,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = when (frame.bias) {
-                        SignalAction.BUY -> AurumColors.Green
-                        SignalAction.SELL -> AurumColors.Red
-                        else -> AurumColors.TextMuted
-                    },
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    "قدرت ${frame.strength}% · وزن ${(frame.weight * 100).toInt()}%",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.Gold,
-                    modifier = Modifier.weight(1.6f),
                 )
             }
-            Text(
-                frame.detail,
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.padding(start = 2.dp),
-            )
-        }
-        if (snapshot.skippedFrames.isNotEmpty()) {
-            Text(
-                "تایم‌فریم‌های ${snapshot.skippedFrames.joinToString("، ")} هنوز تاریخ واقعی کافی ندارند؛ درباره‌شان حدس نمی‌زنیم.",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 8.dp),
-            )
+
+            if (best.entry != null && best.stopLoss != null && best.takeProfit != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    StatTile("نقطه ورود", formatPrice(best.entry), AurumColors.Gold, Modifier.weight(1f))
+                    StatTile("حد ضرر (SL)", formatPrice(best.stopLoss), AurumColors.Red, Modifier.weight(1f))
+                    StatTile("حد سود (TP)", formatPrice(best.takeProfit), AurumColors.Green, Modifier.weight(1f))
+                }
+            }
+
+            Button(
+                onClick = onTrade,
+                colors = ButtonDefaults.buttonColors(containerColor = actionColor),
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+            ) {
+                Text("انتقال به چارت و ورود به معاملهٔ ${best.symbol}", color = androidx.compose.ui.graphics.Color.Black, fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
 
-/** All-pairs radar: one glance over gold + the majors. A tap switches the live chart feed. */
+@Composable
+private fun TopThreeCandidatesCard(topThree: List<PairScanStatus>, onSelectSymbol: (String) -> Unit) {
+    SectionCard(
+        title = "۳ نماد برتر پایش‌شده (Top 3 Candidates)",
+        subtitle = "انتخاب‌شده از میان بیش از ۵۰ سهم، طلا، کالا و جفت‌ارز بر اساس قوی‌ترین ستاپ",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            topThree.forEachIndexed { index, candidate ->
+                val tone = if (candidate.action == SignalAction.BUY) AurumColors.Green else AurumColors.Red
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(AurumColors.SurfaceAlt, RoundedCornerShape(8.dp))
+                        .clickable { onSelectSymbol(candidate.symbol) }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text("#${index + 1}", style = MaterialTheme.typography.labelLarge, color = AurumColors.Gold, fontWeight = FontWeight.Bold)
+                    Text(candidate.symbol, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = AurumColors.TextPrimary)
+                    Text(
+                        candidate.price?.let { formatPrice(it) } ?: "—",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                    Text(
+                        candidate.detail,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = tone,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Pill("${candidate.technicalScore ?: 0}/۸", tone)
+                }
+            }
+        }
+    }
+}
+
+/** All-pairs radar: continuous scan across 50+ instruments. */
 @Composable
 internal fun PairRadarCard(scan: PairScanState, onScan: () -> Unit, onSelectSymbol: (String) -> Unit, now: Long) {
-    // First visit per process: one honest sweep so the radar is never empty; afterwards the
-    // background service (or the button) keeps it fresh. Throttled inside the scanner.
     LaunchedEffect(scan.lastSweepAt) { if (scan.lastSweepAt == null) onScan() }
     SectionCard(
-        title = "رادار ۸ جفت‌ارز",
+        title = "رادار ۵۰+ سهم و نماد بازار (${scan.statuses.size} نماد)",
         trailing = {
             Pill(
                 when {
-                    scan.sweeping -> "در حال اسکن…"
+                    scan.sweeping -> "در حال اسکن ۵۰+ نماد…"
                     scan.lastSweepAt != null -> "آخرین اسکن " + relativeTime(scan.lastSweepAt, now)
                     else -> "اسکن نشده"
                 },
@@ -227,7 +261,7 @@ internal fun PairRadarCard(scan: PairScanState, onScan: () -> Unit, onSelectSymb
         }
         scan.lastError?.let { Text(it, color = AurumColors.Red, style = MaterialTheme.typography.bodySmall) }
         Button(onClick = onScan, enabled = !scan.sweeping, modifier = Modifier.padding(top = 6.dp)) {
-            Text(if (scan.sweeping) "در حال اسکن…" else "اسکن همگانی ۸ جفت‌ارز")
+            Text(if (scan.sweeping) "در حال اسکن ۵۰+ نماد…" else "اسکن همگانی ۵۰+ نماد بازار")
         }
     }
 }

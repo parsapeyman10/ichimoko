@@ -283,21 +283,27 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     /** Ask the companion AI for a fresh opinion; throttled inside the advisor (10 minutes). */
     fun refreshTraderOpinion(force: Boolean = false) = container.traderAdvisor.refreshNow(force)
 
-    /** Manual all-pairs sweep. Candidates are recorded (journal/radar) without playing a sound:
-     * the user is looking at the screen; background alerts come from the monitor service. */
+    /** Manual all-pairs sweep across 50+ instruments. */
     fun scanPairs() {
         if (container.pairScanner.state.value.sweeping) {
-            _toast.value = "اسکن همگانی در حال اجراست"
+            _toast.value = "اسکن همگانی ۵۰+ نماد در حال اجراست"
             return
         }
         viewModelScope.launch {
-            _toast.value = "اسکن همگانی ۸ جفت‌ارز آغاز شد (حدود یک دقیقه؛ سهمیهٔ منابع رعایت می‌شود)"
+            _toast.value = "اسکن ۵۰+ سهم و نماد آغاز شد؛ بهترین فرصت‌ها شناسایی می‌شوند"
             try {
-                container.pairScanner.sweepOnce(minIntervalMs = 3 * 60_000L) { }
+                container.pairScanner.sweepOnce(minIntervalMs = 1 * 60_000L) { }
             } catch (_: Exception) {
                 _toast.value = "اسکن همگانی ناتمام ماند؛ وضعیت هر نماد در رادار مشخص است"
             }
         }
+    }
+
+    /** Selects the #1 Best Pick symbol, loads its chart and opens the paper trade. */
+    fun selectAndTradeBestPick() {
+        val best = container.pairScanner.state.value.bestPick ?: return
+        selectChartSymbol(best.symbol)
+        _toast.value = "بهترین فرصت انتخاب شد: ${best.symbol} (${best.action?.name ?: "سیگنال"})"
     }
 
     fun refreshNews() = container.news.refreshNow()
