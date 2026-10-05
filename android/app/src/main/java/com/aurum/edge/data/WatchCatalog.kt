@@ -43,7 +43,7 @@ object WatchCatalog {
     ) + CryptoCatalog.watchlistSeed.map { coin ->
         WatchSymbol(
             id = coin.id,
-            label = coin.nameFa,
+            label = coin.label,
             unit = "$",
             providerCodes = linkedMapOf(
                 "tradingview_scanner" to "BINANCE:${coin.binance}",
