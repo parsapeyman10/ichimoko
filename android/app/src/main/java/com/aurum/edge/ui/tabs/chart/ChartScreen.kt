@@ -71,6 +71,18 @@ fun ChartScreen(
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val openTrade = trades.firstOrNull { it.symbol == market.symbol && it.isOpen }
 
+    val displayCandles = remember(market.candles, market.lastPrice, market.interval) {
+        if (market.candles.isNotEmpty()) {
+            market.candles
+        } else if (market.lastPrice != null) {
+            val now = System.currentTimeMillis()
+            val barTime = now - (now % market.interval.millis)
+            listOf(Candle(barTime, market.lastPrice, market.lastPrice, market.lastPrice, market.lastPrice, 1.0, closed = false))
+        } else {
+            emptyList()
+        }
+    }
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         SymbolSearchRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
 
@@ -96,16 +108,16 @@ fun ChartScreen(
 
         // ── Single Unified Candlestick & Ichimoku Chart ─────────────────────
         SectionCard(
-            title = "چارت کندل‌استیک و ایچیموکو · ${market.symbol} (${market.interval.label})",
-            subtitle = if (market.candles.isNotEmpty())
-                "${market.candles.size} کندل واقعی از گذشته تا لحظهٔ حال با تیک زنده و ایچیموکو"
+            title = "چارت آنلاین کندل‌استیک و ایچیموکو · ${market.symbol} (${market.interval.label})",
+            subtitle = if (displayCandles.isNotEmpty())
+                "${displayCandles.size} کندل آنلاین با نرخ به‌روزرسانی زنده و ابر ایچیموکو"
             else
-                "در حال دریافت دیتای کندل‌های واقعی…",
+                "در حال اتصال به فید آنلاین قیمت…",
         ) {
             Box(Modifier.fillMaxWidth().height(520.dp)) {
-                if (market.candles.isNotEmpty()) {
+                if (displayCandles.isNotEmpty()) {
                     CandleChart(
-                        candles = market.candles,
+                        candles = displayCandles,
                         interval = market.interval,
                         signal = market.signal,
                         modifier = Modifier.fillMaxSize(),
@@ -119,7 +131,7 @@ fun ChartScreen(
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            "در حال دریافت دیتای کندل‌های واقعی ${market.symbol}…",
+                            "در حال دریافت دیتای زنده ${market.symbol}…",
                             style = MaterialTheme.typography.bodyMedium,
                             color = AurumColors.TextSecondary,
                         )
