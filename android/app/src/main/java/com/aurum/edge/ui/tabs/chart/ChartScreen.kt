@@ -95,13 +95,13 @@ fun ChartScreen(
 
         // ── Unified Trading Chart (Past to Present) ────────────────────────
         SectionCard(
-            title = "چارت معاملاتی · ${market.symbol} (${market.interval.label})",
+            title = "چارت رسمی TradingView · ${market.symbol} (${market.interval.label})",
             subtitle = if (tradingViewBlocked && market.candles.isNotEmpty())
-                "${market.candles.size} کندل واقعی از گذشته تا لحظهٔ حال"
+                "${market.candles.size} کندل واقعی بومی از گذشته تا لحظهٔ حال"
             else
-                "دیتای کامل از گذشته تا لحظهٔ حال با تیک زنده",
+                "ویجت رسمی تریدینگ‌ویو با دیتای کامل چندماهه و اندیکاتور ایچیموکو",
         ) {
-            Box(Modifier.fillMaxWidth().height(520.dp)) {
+            Box(Modifier.fillMaxWidth().height(540.dp)) {
                 if (tradingViewBlocked && market.candles.isNotEmpty()) {
                     CandleChart(
                         candles = market.candles,
@@ -131,12 +131,13 @@ fun ChartScreen(
                         )
                     }
                 }
-                EngineOverlay(
-                    market = market,
-                    openTrade = openTrade,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
-                )
             }
+
+            EngineOverlay(
+                market = market,
+                openTrade = openTrade,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            )
         }
 
         StrategyBar(viewModel, market)
@@ -155,29 +156,22 @@ private fun EngineOverlay(market: MarketState, openTrade: PaperTrade?, modifier:
         SignalAction.SELL -> AurumColors.Red
         SignalAction.NO_TRADE -> AurumColors.Gold
     }
-    Column(
+    Row(
         modifier = modifier
-            .background(AurumColors.Surface.copy(alpha = 0.92f), RoundedCornerShape(10.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
+            .background(AurumColors.SurfaceAlt, RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("AURUM ICHIMOKU", style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
-        Text("${setting.tenkan}/${setting.kijun}/${setting.spanB} · امتیاز ${(signal?.confidence ?: 0.0).toInt()}/100",
-            style = MaterialTheme.typography.labelSmall, color = color, fontWeight = FontWeight.Bold)
-        Text(when (action) {
-            SignalAction.BUY -> "سیگنال موتور: BUY"
-            SignalAction.SELL -> "سیگنال موتور: SELL"
-            SignalAction.NO_TRADE -> "سیگنال موتور: NO TRADE"
-        }, style = MaterialTheme.typography.labelSmall, color = color)
-        if (signal?.isActionable == true) {
-            Text("E ${formatPrice(signal.entry)} · SL ${formatPrice(signal.stopLoss)} · TP ${formatPrice(signal.takeProfit)}",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextPrimary)
+        Column {
+            Text("ایچیموکو (${setting.tenkan}/${setting.kijun}/${setting.spanB}) · وضعیت موتور: ${action.name}",
+                style = MaterialTheme.typography.labelMedium, color = color, fontWeight = FontWeight.Bold)
+            if (signal?.isActionable == true) {
+                Text("ورود: ${formatPrice(signal.entry)} · حد ضرر: ${formatPrice(signal.stopLoss)} · حد سود: ${formatPrice(signal.takeProfit)}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+            }
         }
-        openTrade?.let { trade ->
-            Text("Paper باز: ${trade.action} · ${formatDateTime(trade.openedAt)}",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
-            Text("E ${formatPrice(trade.entry)} · SL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)}",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextPrimary)
-        }
+        Pill("امتیاز ${(signal?.confidence ?: 0.0).toInt()}%", color)
     }
 }
 
@@ -236,11 +230,7 @@ private fun TradingViewWidget(
         modifier = modifier,
         factory = { context ->
             WebView(context).apply {
-                setBackgroundColor(AndroidColor.TRANSPARENT)
-                // The widget is drawn OVER the app's own candles. Where TradingView is
-                // geo-blocked it answers 451 and the blank error page hid a chart that
-                // was working perfectly underneath. Report the failure so it can be
-                // removed from the stack instead of covering good data.
+                setBackgroundColor(AndroidColor.parseColor("#0b0e13"))
                 webViewClient = object : WebViewClient() {
                     override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                         onFailed(false)
@@ -250,7 +240,6 @@ private fun TradingViewWidget(
                         request: android.webkit.WebResourceRequest?,
                         errorResponse: android.webkit.WebResourceResponse?,
                     ) {
-                        // Only the main document matters; a blocked tracker is irrelevant.
                         if (request?.isForMainFrame == true) onFailed(true)
                     }
                     override fun onReceivedError(
@@ -270,15 +259,13 @@ private fun TradingViewWidget(
                 settings.loadsImagesAutomatically = true
                 settings.javaScriptCanOpenWindowsAutomatically = true
                 settings.cacheMode = WebSettings.LOAD_DEFAULT
-                settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                settings.userAgentString = settings.userAgentString + " AurumEdgeTradingView/1"
+                settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
                 tag = loadKey
                 loadDataWithBaseURL("https://www.tradingview.com", html, "text/html", "UTF-8", null)
             }
         },
         update = { webView ->
-            // AndroidView.update runs on every Compose recomposition. Market prices can recompose
-            // every second; reloading here kept TradingView in a permanent loading/no-data state.
             if (webView.tag != loadKey) {
                 webView.tag = loadKey
                 webView.loadDataWithBaseURL("https://www.tradingview.com", html, "text/html", "UTF-8", null)
@@ -288,9 +275,6 @@ private fun TradingViewWidget(
 }
 
 private fun tradingViewHtml(symbol: String, interval: Interval): String {
-    // Crypto previously fell through to the gold default, so picking BTC drew XAU on the
-    // TradingView pane while the app's own chart drew BTC — two different instruments on
-    // top of each other. Crypto resolves to its real Binance ticker.
     val tvSymbol = TradingViewSymbols.of(symbol)
     val tvInterval = when (interval) {
         Interval.M1 -> "1"
@@ -301,26 +285,52 @@ private fun tradingViewHtml(symbol: String, interval: Interval): String {
         Interval.H4 -> "240"
         Interval.D1 -> "D"
     }
-    val encodedSymbol = tvSymbol.replace(":", "%3A")
-    val widgetUrl = "https://s.tradingview.com/widgetembed/?frameElementId=tradingview_chart" +
-        "&symbol=$encodedSymbol&interval=$tvInterval&hidesidetoolbar=0&symboledit=1" +
-        "&saveimage=1&toolbarbg=0b0e13&studies=IchimokuCloud%40tv-basicstudies" +
-        "&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1"
+
     return """
-        <!doctype html>
-        <html>
+        <!DOCTYPE html>
+        <html lang="fa">
         <head>
-          <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
           <style>
-            html, body, #tradingview_chart, iframe {
-              margin:0; padding:0; width:100%; height:100%; overflow:hidden;
-              background:#0b0e13; border:0;
-            }
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e13; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+            .tradingview-widget-container { width: 100% !important; height: 100% !important; position: relative; }
+            .tradingview-widget-container__widget { width: 100% !important; height: calc(100% - 24px) !important; }
+            .tradingview-widget-copyright { height: 24px; line-height: 24px; font-size: 11px; text-align: center; color: #787b86; background: #0b0e13; }
+            .tradingview-widget-copyright a { color: #2962ff; text-decoration: none; font-weight: 500; }
           </style>
         </head>
         <body>
-          <div id="tradingview_chart">
-            <iframe title="TradingView" src="$widgetUrl" allowtransparency="true" scrolling="no"></iframe>
+          <div class="tradingview-widget-container">
+            <div class="tradingview-widget-container__widget"></div>
+            <div class="tradingview-widget-copyright">
+              <a href="https://www.tradingview.com/" rel="noopener nofollow" target="_blank">
+                <span class="blue-text">نمای رسمی TradingView</span>
+              </a>
+            </div>
+            <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
+            {
+              "autosize": true,
+              "symbol": "$tvSymbol",
+              "interval": "$tvInterval",
+              "timezone": "Etc/UTC",
+              "theme": "dark",
+              "style": "1",
+              "locale": "en",
+              "enable_publishing": false,
+              "allow_symbol_change": true,
+              "withdateranges": true,
+              "hide_side_toolbar": false,
+              "details": true,
+              "hotlist": false,
+              "calendar": false,
+              "studies": [
+                "STD;Ichimoku%1Cloud"
+              ],
+              "support_host": "https://www.tradingview.com"
+            }
+            </script>
           </div>
         </body>
         </html>
