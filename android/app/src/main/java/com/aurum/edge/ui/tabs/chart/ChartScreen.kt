@@ -2,6 +2,7 @@ package com.aurum.edge.ui
 
 import android.annotation.SuppressLint
 import android.graphics.Color as AndroidColor
+import android.view.View
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -69,41 +70,16 @@ fun ChartScreen(
 ) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val openTrade = trades.firstOrNull { it.symbol == market.symbol && it.isOpen }
-    var chartMode by rememberSaveable { mutableStateOf("tradingview") } // "tradingview" | "native"
-    var tradingViewBlocked by remember(market.symbol, market.interval) { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         SymbolSearchRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
 
-        // ── Timeframe & Chart Mode Row ──────────────────────────────────────
+        // ── Timeframe selector ─────────────────────────────────────────────
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // Mode switcher
-            FilterChip(
-                selected = chartMode == "tradingview",
-                onClick = { chartMode = "tradingview" },
-                label = { Text("چارت TradingView", style = MaterialTheme.typography.labelSmall) },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = AurumColors.Cyan.copy(alpha = 0.22f),
-                    selectedLabelColor = AurumColors.Cyan,
-                    labelColor = AurumColors.TextSecondary,
-                ),
-            )
-            FilterChip(
-                selected = chartMode == "native",
-                onClick = { chartMode = "native" },
-                label = { Text("کندل‌استیک بومی (${market.candles.size} کندل)", style = MaterialTheme.typography.labelSmall) },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = AurumColors.Gold.copy(alpha = 0.22f),
-                    selectedLabelColor = AurumColors.Gold,
-                    labelColor = AurumColors.TextSecondary,
-                ),
-            )
-
-            // Timeframes
             Interval.entries.forEach { interval ->
                 FilterChip(
                     selected = market.interval == interval,
@@ -118,47 +94,17 @@ fun ChartScreen(
             }
         }
 
-        // ── Unified Trading Chart (Past to Present) ────────────────────────
+        // ── Single Unified TradingView Chart ───────────────────────────────
         SectionCard(
-            title = if (chartMode == "tradingview" && !tradingViewBlocked)
-                "چارت رسمی TradingView · ${market.symbol} (${market.interval.label})"
-            else
-                "چارت کندل‌استیک زنده · ${market.symbol} (${market.interval.label})",
-            subtitle = if (chartMode == "native" || tradingViewBlocked)
-                "${market.candles.size} کندل واقعی از گذشته تا لحظهٔ حال با محاسبهٔ ایچیموکو"
-            else
-                "ویجت رسمی تریدینگ‌ویو با دیتای کامل چندماهه و اندیکاتور ایچیموکو",
+            title = "چارت زنده TradingView · ${market.symbol} (${market.interval.label})",
+            subtitle = "دیتای پیوستهٔ چندماهه، ابر ایچیموکو و تیک‌های زنده مستقیماً از TradingView",
         ) {
             Box(Modifier.fillMaxWidth().height(540.dp)) {
-                if (chartMode == "native" || (tradingViewBlocked && market.candles.isNotEmpty())) {
-                    CandleChart(
-                        candles = market.candles,
-                        interval = market.interval,
-                        signal = market.signal,
-                        modifier = Modifier.fillMaxSize(),
-                        showIchimoku = true,
-                        showLevels = true,
-                        showVolume = true,
-                    )
-                } else if (!tradingViewBlocked) {
-                    TradingViewWidget(
-                        symbol = market.symbol,
-                        interval = market.interval,
-                        modifier = Modifier.fillMaxSize(),
-                        onFailed = { tradingViewBlocked = it },
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier.fillMaxSize().background(AurumColors.ChartBg, RoundedCornerShape(10.dp)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            "در حال دریافت دیتای کندل‌های واقعی ${market.symbol}…",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = AurumColors.TextSecondary,
-                        )
-                    }
-                }
+                TradingViewWidget(
+                    symbol = market.symbol,
+                    interval = market.interval,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
 
             EngineOverlay(
@@ -250,7 +196,6 @@ private fun TradingViewWidget(
     symbol: String,
     interval: Interval,
     modifier: Modifier = Modifier,
-    onFailed: (Boolean) -> Unit = {},
 ) {
     val html = tradingViewHtml(symbol, interval)
     val loadKey = "$symbol|${interval.label}"
@@ -258,25 +203,10 @@ private fun TradingViewWidget(
         modifier = modifier,
         factory = { context ->
             WebView(context).apply {
+                setLayerType(View.LAYER_TYPE_HARDWARE, null)
                 setBackgroundColor(AndroidColor.parseColor("#0b0e13"))
                 webViewClient = object : WebViewClient() {
-                    override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                        onFailed(false)
-                    }
-                    override fun onReceivedHttpError(
-                        view: WebView?,
-                        request: android.webkit.WebResourceRequest?,
-                        errorResponse: android.webkit.WebResourceResponse?,
-                    ) {
-                        if (request?.isForMainFrame == true) onFailed(true)
-                    }
-                    override fun onReceivedError(
-                        view: WebView?,
-                        request: android.webkit.WebResourceRequest?,
-                        error: android.webkit.WebResourceError?,
-                    ) {
-                        if (request?.isForMainFrame == true) onFailed(true)
-                    }
+                    override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean = false
                 }
                 webChromeClient = WebChromeClient()
                 CookieManager.getInstance().setAcceptCookie(true)
@@ -284,19 +214,21 @@ private fun TradingViewWidget(
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.databaseEnabled = true
+                settings.allowContentAccess = true
+                settings.allowFileAccess = true
                 settings.loadsImagesAutomatically = true
                 settings.javaScriptCanOpenWindowsAutomatically = true
                 settings.cacheMode = WebSettings.LOAD_DEFAULT
                 settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
                 tag = loadKey
-                loadDataWithBaseURL("https://www.tradingview.com", html, "text/html", "UTF-8", null)
+                loadDataWithBaseURL("https://www.tradingview.com", html, "text/html", "UTF-8", "https://www.tradingview.com")
             }
         },
         update = { webView ->
             if (webView.tag != loadKey) {
                 webView.tag = loadKey
-                webView.loadDataWithBaseURL("https://www.tradingview.com", html, "text/html", "UTF-8", null)
+                webView.loadDataWithBaseURL("https://www.tradingview.com", html, "text/html", "UTF-8", "https://www.tradingview.com")
             }
         },
     )
@@ -451,7 +383,6 @@ private fun SymbolRow(
 
 @Composable
 internal fun SymbolPickerRow(selected: String, onSelect: (String) -> Unit) {
-    // Gold first, then the FX pairs, then crypto — the order asked for.
     val quick = remember(selected) {
         val forex = WatchCatalog.chartSymbols.filter { !CryptoCatalog.isCrypto(it) }
         val crypto = WatchCatalog.chartSymbols.filter { CryptoCatalog.isCrypto(it) }
@@ -478,14 +409,6 @@ internal fun SymbolPickerRow(selected: String, onSelect: (String) -> Unit) {
 
 /**
  * Live strategy readout, directly under the chart.
- *
- * The engine was already evaluating every closed bar, but the chart only showed a score
- * with no explanation, so a screen that sat at "no entry" for hours was indistinguishable
- * from a broken one. This states three things at all times: where the score stands against
- * the threshold, the single condition currently blocking an entry, and — when one is live
- * — the exact levels the trade would use.
- *
- * Read-only. It reports what the automatic engine decided; it cannot open anything.
  */
 @Composable
 private fun StrategyBar(viewModel: AurumViewModel, market: MarketState) {
@@ -507,7 +430,6 @@ private fun StrategyBar(viewModel: AurumViewModel, market: MarketState) {
         else -> AurumColors.TextSecondary
     }
 
-    // The first unmet condition is far more useful than a list of twelve.
     val firstBlocker = signal?.blockers?.firstOrNull()
         ?: signal?.confluence?.firstOrNull { !it.ok }?.let { "${it.name} — ${it.detail}" }
 
@@ -543,7 +465,6 @@ private fun StrategyBar(viewModel: AurumViewModel, market: MarketState) {
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
         )
 
-        // ── the levels, whether live or hypothetical ──
         val entry = open?.entry ?: signal?.entry
         val stop = open?.stopLoss ?: signal?.stopLoss
         val target = open?.takeProfit ?: signal?.takeProfit
@@ -572,7 +493,6 @@ private fun StrategyBar(viewModel: AurumViewModel, market: MarketState) {
             }
         }
 
-        // ── why it is not entering ──
         if (open == null) {
             Text(
                 "چرا وارد نشده",
@@ -590,7 +510,6 @@ private fun StrategyBar(viewModel: AurumViewModel, market: MarketState) {
                 color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 4.dp),
             )
-            // The auto-trader has its own gate, separate from the signal score.
             Text(
                 "وضعیت موتور خودکار: $autoStatus",
                 style = MaterialTheme.typography.labelSmall,
@@ -599,7 +518,6 @@ private fun StrategyBar(viewModel: AurumViewModel, market: MarketState) {
             )
         }
 
-        // ── remaining conditions, compact ──
         val pending = signal?.confluence?.filter { !it.ok }.orEmpty()
         if (pending.isNotEmpty()) {
             Text(
