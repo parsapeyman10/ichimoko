@@ -266,7 +266,7 @@ private fun tradingViewHtml(tvSymbol: String, tvInterval: String): String {
     val encoded = tvSymbol.replace(":", "%3A")
     val iframeUrl = "https://s.tradingview.com/widgetembed/?frameElementId=tradingview_chart" +
         "&symbol=$encoded&interval=$tvInterval&hidesidetoolbar=0&symboledit=1" +
-        "&saveimage=0&toolbarbg=0b0e13&studies=Volume%40tv-basicstudies" +
+        "&saveimage=0&toolbarbg=0b0e13" +
         "&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1&locale=en"
 
     return """
@@ -302,9 +302,7 @@ private fun tradingViewHtml(tvSymbol: String, tvInterval: String): String {
                     "hide_side_toolbar": false,
                     "allow_symbol_change": true,
                     "save_image": false,
-                    "studies": [
-                      "Volume@tv-basicstudies"
-                    ],
+                    "studies": [],
                     "container_id": "tv_chart_container"
                   });
                   return;

@@ -21,11 +21,8 @@ import java.net.URI
  * chosen by the configured base URL:
  *  - Anthropic (Claude): host `api.anthropic.com` -> POST /v1/messages with `x-api-key` and
  *    `anthropic-version` headers, `system` parameter and a `content[]` response.
- *  - Anything else (OpenAI-compatible proxies): POST {base}/chat/completions with a Bearer
- *    token and a `choices[0].message.content` response.
- *
- * Both paths return ONLY strictly-JSON objects; callers validate the schema themselves and
- * fail closed. No key, URL or model output is ever logged.
+ *  - Anything else (OpenAI-compatible proxies, DeepSeek, OpenRouter, Groq, Gemini): POST {base}/chat/completions
+ *    with a Bearer token and a `choices[0].message.content` response.
  */
 internal object AiProvider {
     private const val ANTHROPIC_HOST = "api.anthropic.com"
@@ -33,7 +30,7 @@ internal object AiProvider {
 
     fun isAnthropic(baseUrl: String): Boolean =
         runCatching { URI(baseUrl.trim()) }.getOrNull()
-            ?.host?.equals(ANTHROPIC_HOST, ignoreCase = true) == true
+            ?.host?.contains("anthropic", ignoreCase = true) == true
 
     /**
      * Which wire format to speak: an EXPLICIT "ANTHROPIC"/"OPENAI" wins (relay services host
@@ -47,38 +44,44 @@ internal object AiProvider {
 
     /** Anthropic Messages endpoint on ANY host; tolerates a base that already ends in /v1. */
     internal fun anthropicMessagesUrl(base: String): String =
-        base.removeSuffix("/v1") + "/v1/messages"
+        if (base.endsWith("/messages")) base
+        else if (base.endsWith("/v1")) "$base/messages"
+        else "$base/v1/messages"
 
-    /**
-     * OpenAI-compatible chat endpoint. OpenAI-style bases usually already end in /v1
-     * (https://api.openai.com/v1); Anthropic-relay gateways such as LLMsRelay do NOT
-     * (https://api.llmsrelay.com hosts /v1/chat/completions), so the missing /v1 is added.
-     */
+    /** OpenAI-compatible chat endpoint. */
     internal fun openAiChatUrl(base: String): String =
-        if (base.endsWith("/v1")) "$base/chat/completions" else "$base/v1/chat/completions"
+        if (base.endsWith("/chat/completions")) base
+        else if (base.endsWith("/v1")) "$base/chat/completions"
+        else "$base/v1/chat/completions"
 
     /** Models catalogue endpoint both protocols expose as {data:[{id:…}]}. */
     internal fun modelsUrl(base: String): String =
-        if (base.endsWith("/v1")) "$base/models" else "$base/v1/models"
+        if (base.endsWith("/models")) base
+        else if (base.endsWith("/v1")) "$base/models"
+        else "$base/v1/models"
 
     /**
      * Model IDs this key may actually use (the catalogue is key-filtered on relay gateways,
-     * so it is the source of truth - no guessing model names). One GET, never logs the key.
+     * so it is the source of truth - no guessing model names).
      */
     suspend fun listModels(httpClient: OkHttpClient, baseUrl: String, apiKey: String,
                            format: String = "AUTO"): List<String> {
         val base = baseUrl.trim().trimEnd('/')
         val uri = runCatching { URI(base) }.getOrNull()
-        require(uri?.scheme == "https" && !uri.host.isNullOrBlank() && uri.rawUserInfo == null &&
-            uri.port in listOf(-1, 443)) { "نشانی سرویس مدل معتبر نیست (فقط HTTPS معمول)" }
+        require(uri != null && (uri.scheme == "https" || uri.scheme == "http") && !uri.host.isNullOrBlank()) {
+            "نشانی سرویس هوش مصنوعی معتبر نیست (باید با https:// یا http:// آغاز شود)"
+        }
         val anthropic = usesAnthropic(base, format)
         val response = withContext(Dispatchers.IO) {
-            val builder = Request.Builder().url(modelsUrl(base)).header("Accept", "application/json")
+            val builder = Request.Builder().url(modelsUrl(base))
+                .header("Accept", "application/json")
+                .header("HTTP-Referer", "https://aurum.edge")
+                .header("X-Title", "Aurum Edge")
             if (anthropic) builder.header("x-api-key", apiKey).header("anthropic-version", ANTHROPIC_VERSION)
             else builder.header("Authorization", "Bearer $apiKey")
             httpClient.newCall(builder.get().build()).execute().use { resp ->
-                if (!resp.isSuccessful) throw IllegalStateException("سرویس مدل پاسخ معتبر نداد (HTTP ${resp.code})")
-                resp.peekBody(256_000L).string()
+                if (!resp.isSuccessful) throw IllegalStateException("سرویس مدل خطا داد (HTTP ${resp.code})؛ کلید یا نشانی را بررسی کنید")
+                resp.peekBody(512_000L).string()
             }
         }
         val root = runCatching { Json.parseToJsonElement(response) as? JsonObject }.getOrNull()
@@ -91,7 +94,7 @@ internal object AiProvider {
         val data = root["data"] as? JsonArray ?: return emptyList()
         return data.mapNotNull { item ->
             ((item as? JsonObject)?.get("id") as? JsonPrimitive)?.contentOrNull?.trim()
-        }.filter { it.isNotBlank() }.distinct().take(40)
+        }.filter { it.isNotBlank() }.distinct().take(60)
     }
 
     /** One completion whose textual output must be a JSON object. Throws on any transport error. */
@@ -105,7 +108,7 @@ internal object AiProvider {
 
     /**
      * Minimal connectivity probe with the user's OWN key: one tiny prompt, no JSON contract.
-     * Returns the model's short reply so settings can show proof of life. Never logs the key.
+     * Returns the model's short reply so settings can show proof of life.
      */
     suspend fun probe(httpClient: OkHttpClient, baseUrl: String, apiKey: String, model: String,
                       format: String = "AUTO"): String =
@@ -118,8 +121,9 @@ internal object AiProvider {
                                      requireJson: Boolean): String {
         val base = baseUrl.trim().trimEnd('/')
         val uri = runCatching { URI(base) }.getOrNull()
-        require(uri?.scheme == "https" && !uri.host.isNullOrBlank() && uri.rawUserInfo == null &&
-            uri.port in listOf(-1, 443)) { "نشانی سرویس مدل معتبر نیست (فقط HTTPS معمول)" }
+        require(uri != null && (uri.scheme == "https" || uri.scheme == "http") && !uri.host.isNullOrBlank()) {
+            "نشانی سرویس هوش مصنوعی معتبر نیست (باید با https:// یا http:// آغاز شود)"
+        }
         val anthropic = usesAnthropic(base, format)
         val url = if (anthropic) anthropicMessagesUrl(base) else openAiChatUrl(base)
         fun requestBody(useJsonMode: Boolean) = if (anthropic) buildJsonObject {
@@ -142,24 +146,36 @@ internal object AiProvider {
         suspend fun post(bodyText: String): String = withContext(Dispatchers.IO) {
             val builder = Request.Builder().url(url)
                 .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .header("HTTP-Referer", "https://aurum.edge")
+                .header("X-Title", "Aurum Edge")
             if (anthropic) builder.header("x-api-key", apiKey).header("anthropic-version", ANTHROPIC_VERSION)
             else builder.header("Authorization", "Bearer $apiKey")
             val request = builder.post(bodyText.toRequestBody("application/json".toMediaType())).build()
             httpClient.newCall(request).execute().use { resp ->
-                if (!resp.isSuccessful) throw IllegalStateException("سرویس مدل پاسخ معتبر نداد (HTTP ${resp.code})")
+                if (!resp.isSuccessful) {
+                    val errorDetail = runCatching { resp.peekBody(2000L).string() }.getOrNull().orEmpty()
+                    val friendlyMsg = when (resp.code) {
+                        401 -> "کلید API نامعتبر است یا منقضی شده (HTTP 401)"
+                        403 -> "دسترسی مجاز نیست یا منطقه جغرافیایی محدود شده (HTTP 403)"
+                        404 -> "آدرس اندپوینت یا مدل یافت نشد (HTTP 404)"
+                        429 -> "محدودیت سهمیه/نرخ فراخوانی (Rate Limit / Quota Exceeded) (HTTP 429)"
+                        else -> "خطای سرویس هوش مصنوعی (HTTP ${resp.code}) ${errorDetail.take(60)}"
+                    }
+                    throw IllegalStateException(friendlyMsg)
+                }
                 val text = resp.peekBody(64_000L).string()
-                if (text.isBlank()) throw IllegalStateException("پاسخ سرویس مدل خالی بود")
+                if (text.isBlank()) throw IllegalStateException("پاسخ دریافتی از هوش مصنوعی خالی بود")
                 text
             }
         }
         val response = if (!anthropic && requireJson) {
             try {
                 post(requestBody(useJsonMode = true).toString())
-            } catch (_: IllegalStateException) {
-                // Some OpenAI-compatible gateways reject response_format=json_object, and the
-                // connectivity probe must not use JSON mode at all. The caller still validates
-                // strict JSON after this fallback, so unsupported JSON-mode does not become trust.
-                post(requestBody(useJsonMode = false).toString())
+            } catch (ex: IllegalStateException) {
+                if (ex.message?.contains("400") == true || ex.message?.contains("json") == true) {
+                    post(requestBody(useJsonMode = false).toString())
+                } else throw ex
             }
         } else {
             post(requestBody(useJsonMode = false).toString())
@@ -191,8 +207,7 @@ internal object AiProvider {
 
     /**
      * Models occasionally wrap JSON in markdown fences or short prose; extract the outermost
-     * {...} block. Returns null when the text is not parseable as a JSON object at all —
-     * callers must treat that as a failed (fail-closed) analysis.
+     * {...} block.
      */
     internal fun parseJsonObjectLoose(text: String): JsonObject? {
         val trimmed = text.trim()
