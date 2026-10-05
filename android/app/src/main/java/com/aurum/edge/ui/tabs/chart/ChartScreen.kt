@@ -69,16 +69,41 @@ fun ChartScreen(
 ) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val openTrade = trades.firstOrNull { it.symbol == market.symbol && it.isOpen }
+    var chartMode by rememberSaveable { mutableStateOf("tradingview") } // "tradingview" | "native"
     var tradingViewBlocked by remember(market.symbol, market.interval) { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         SymbolSearchRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
 
-        // ── Timeframe selector ─────────────────────────────────────────────
+        // ── Timeframe & Chart Mode Row ──────────────────────────────────────
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Mode switcher
+            FilterChip(
+                selected = chartMode == "tradingview",
+                onClick = { chartMode = "tradingview" },
+                label = { Text("چارت TradingView", style = MaterialTheme.typography.labelSmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = AurumColors.Cyan.copy(alpha = 0.22f),
+                    selectedLabelColor = AurumColors.Cyan,
+                    labelColor = AurumColors.TextSecondary,
+                ),
+            )
+            FilterChip(
+                selected = chartMode == "native",
+                onClick = { chartMode = "native" },
+                label = { Text("کندل‌استیک بومی (${market.candles.size} کندل)", style = MaterialTheme.typography.labelSmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = AurumColors.Gold.copy(alpha = 0.22f),
+                    selectedLabelColor = AurumColors.Gold,
+                    labelColor = AurumColors.TextSecondary,
+                ),
+            )
+
+            // Timeframes
             Interval.entries.forEach { interval ->
                 FilterChip(
                     selected = market.interval == interval,
@@ -95,14 +120,17 @@ fun ChartScreen(
 
         // ── Unified Trading Chart (Past to Present) ────────────────────────
         SectionCard(
-            title = "چارت رسمی TradingView · ${market.symbol} (${market.interval.label})",
-            subtitle = if (tradingViewBlocked && market.candles.isNotEmpty())
-                "${market.candles.size} کندل واقعی بومی از گذشته تا لحظهٔ حال"
+            title = if (chartMode == "tradingview" && !tradingViewBlocked)
+                "چارت رسمی TradingView · ${market.symbol} (${market.interval.label})"
+            else
+                "چارت کندل‌استیک زنده · ${market.symbol} (${market.interval.label})",
+            subtitle = if (chartMode == "native" || tradingViewBlocked)
+                "${market.candles.size} کندل واقعی از گذشته تا لحظهٔ حال با محاسبهٔ ایچیموکو"
             else
                 "ویجت رسمی تریدینگ‌ویو با دیتای کامل چندماهه و اندیکاتور ایچیموکو",
         ) {
             Box(Modifier.fillMaxWidth().height(540.dp)) {
-                if (tradingViewBlocked && market.candles.isNotEmpty()) {
+                if (chartMode == "native" || (tradingViewBlocked && market.candles.isNotEmpty())) {
                     CandleChart(
                         candles = market.candles,
                         interval = market.interval,
@@ -285,52 +313,34 @@ private fun tradingViewHtml(symbol: String, interval: Interval): String {
         Interval.H4 -> "240"
         Interval.D1 -> "D"
     }
+    val encodedSymbol = tvSymbol.replace(":", "%3A")
+    val iframeUrl = "https://s.tradingview.com/widgetembed/?frameElementId=tradingview_chart" +
+        "&symbol=$encodedSymbol&interval=$tvInterval&hidesidetoolbar=0&symboledit=1" +
+        "&saveimage=0&toolbarbg=0b0e13&studies=IchimokuCloud%40tv-basicstudies" +
+        "&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1&locale=en"
 
     return """
         <!DOCTYPE html>
-        <html lang="fa">
+        <html lang="en">
         <head>
           <meta charset="utf-8" />
           <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
           <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e13; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-            .tradingview-widget-container { width: 100% !important; height: 100% !important; position: relative; }
-            .tradingview-widget-container__widget { width: 100% !important; height: calc(100% - 24px) !important; }
-            .tradingview-widget-copyright { height: 24px; line-height: 24px; font-size: 11px; text-align: center; color: #787b86; background: #0b0e13; }
-            .tradingview-widget-copyright a { color: #2962ff; text-decoration: none; font-weight: 500; }
+            html, body, #container { width: 100%; height: 100%; overflow: hidden; background: #0b0e13; }
+            iframe { width: 100%; height: 100%; border: 0; display: block; }
           </style>
         </head>
         <body>
-          <div class="tradingview-widget-container">
-            <div class="tradingview-widget-container__widget"></div>
-            <div class="tradingview-widget-copyright">
-              <a href="https://www.tradingview.com/" rel="noopener nofollow" target="_blank">
-                <span class="blue-text">نمای رسمی TradingView</span>
-              </a>
-            </div>
-            <script type="text/javascript" src="https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js" async>
-            {
-              "autosize": true,
-              "symbol": "$tvSymbol",
-              "interval": "$tvInterval",
-              "timezone": "Etc/UTC",
-              "theme": "dark",
-              "style": "1",
-              "locale": "en",
-              "enable_publishing": false,
-              "allow_symbol_change": true,
-              "withdateranges": true,
-              "hide_side_toolbar": false,
-              "details": true,
-              "hotlist": false,
-              "calendar": false,
-              "studies": [
-                "STD;Ichimoku%1Cloud"
-              ],
-              "support_host": "https://www.tradingview.com"
-            }
-            </script>
+          <div id="container">
+            <iframe
+              id="tradingview_chart"
+              name="tradingview_chart"
+              src="$iframeUrl"
+              allowtransparency="true"
+              scrolling="no"
+              allowfullscreen="true">
+            </iframe>
           </div>
         </body>
         </html>
