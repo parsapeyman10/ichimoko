@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.core.Candle
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
