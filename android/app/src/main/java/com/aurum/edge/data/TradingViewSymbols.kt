@@ -63,16 +63,13 @@ object TradingViewSymbols {
 
     fun find(symbol: String): String? {
         val key = symbol.trim().uppercase(Locale.ROOT)
+        if (key.isBlank()) return null
         FIXED_SYMBOLS[key]?.let { return it }
         CryptoCatalog.find(key)?.let { return "BINANCE:${it.binance}" }
-        if (key.contains("/")) {
-            val base = key.substringBefore("/")
-            val quote = key.substringAfter("/")
-            return if (quote == "USDT" || quote == "BUSD") "BINANCE:$base$quote"
-            else "OANDA:$base$quote"
-        }
-        if (key.length in 1..6 && key.all { it.isLetterOrDigit() }) {
-            return key
+        val watch = WatchCatalog.find(key)
+        if (watch != null) {
+            val tv = watch.providerCodes["tradingview_scanner"]
+            if (tv != null) return tv
         }
         return null
     }

@@ -75,7 +75,7 @@ class PairScanner(
     private val mutex = Mutex()
     private var lastSweepElapsed = 0L
     private val _state = MutableStateFlow(PairScanState(
-        statuses = WatchCatalog.chartSymbols.map { PairScanStatus(it, "pending", "هنوز اسکن نشده") }))
+        statuses = WatchCatalog.scannerSymbols.map { PairScanStatus(it, "pending", "هنوز اسکن نشده") }))
     val state: StateFlow<PairScanState> = _state.asStateFlow()
 
     fun refreshNow(minIntervalMs: Long = SWEEP_PERIOD_MS) {
@@ -151,7 +151,7 @@ class PairScanner(
                 takeProfit = tp,
                 riskReward = rr,
             )
-            val currentList = WatchCatalog.chartSymbols.mapNotNull { statuses[it] }
+            val currentList = WatchCatalog.scannerSymbols.mapNotNull { statuses[it] }
             val ranked = rankOpportunities(currentList)
             _state.value = _state.value.copy(
                 statuses = currentList,
@@ -165,7 +165,7 @@ class PairScanner(
         val headlines = news.state.value
         val trades = journal.trades.value
 
-        WatchCatalog.chartSymbols.forEachIndexed { index, symbol ->
+        WatchCatalog.scannerSymbols.forEachIndexed { index, symbol ->
             if (index > 0) delay(PAIR_SPACING_MS)
             val now = System.currentTimeMillis()
             if (MarketHours.weekendClosedFor(symbol, now)) {
@@ -257,7 +257,7 @@ class PairScanner(
                 runCatching { MtfAnalyzer.analyze(candles, interval) }.getOrNull()
             }
             val blocker = PaperAlertRules.blocker(market, config, headlines, trades, mtf,
-                System.currentTimeMillis(), allowedSymbols = WatchCatalog.chartSymbols, barAgeGraceMs = graceMs)
+                System.currentTimeMillis(), allowedSymbols = WatchCatalog.scannerSymbols, barAgeGraceMs = graceMs)
             if (blocker != null) {
                 update(
                     symbol = symbol,
@@ -280,7 +280,7 @@ class PairScanner(
             val fresh = settings.read()
             if (ict == null || mtf == null || price == null ||
                 PaperAlertRules.blocker(market, fresh, news.state.value, journal.trades.value, mtf,
-                    System.currentTimeMillis(), WatchCatalog.chartSymbols, graceMs) != null) {
+                    System.currentTimeMillis(), WatchCatalog.scannerSymbols, graceMs) != null) {
                 update(symbol, "blocked", "شواهد فنی/ICT/MTF کاندیدای آموزشی در لحظهٔ ثبت در دسترس نبود", price, score)
                 return@forEachIndexed
             }

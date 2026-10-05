@@ -14,7 +14,7 @@ data class WatchSymbol(
 )
 
 object WatchCatalog {
-    /** Watchlist order: Iran gold/USD, Commodities, Forex pairs, Top Global Shares/Stocks, and Cryptos. */
+    /** Watchlist order: Iran cash rows first, then forex, then crypto. */
     val symbols = listOf(
         WatchSymbol("IR_GOLD18", "طلای ۱۸ عیار ایران", "تومان/گرم", linkedMapOf(
             "tgju_public" to "geram18",
@@ -22,25 +22,17 @@ object WatchCatalog {
         WatchSymbol("USD/IRR", "دلار آزاد ایران", "تومان", linkedMapOf(
             "tgju_public" to "price_dollar_rl",
         ), listOf("tgju_public"), 30 * 60_000L, 2.0),
+        WatchSymbol("QUICK_GXRL", "کوییک GX L دنده‌ای", "تومان", linkedMapOf(
+            "bama_car_price" to "saipa-quick-gx_l",
+        ), listOf("bama_car_price"), 4 * 3600_000L, 3.0),
+        WatchSymbol("PEUGEOT_207_TU5P", "پژو ۲۰۷ اتوماتیک TU5P", "تومان", linkedMapOf(
+            "bama_car_price" to "peugeot-207-automatic_tu5p",
+        ), listOf("bama_car_price"), 4 * 3600_000L, 3.0),
 
-        // ── فلزات و کالاها ────────────────────────────────────────────────
+        // ── جفت‌ارزهای اصلی و طلا ─────────────────────────────────────────
         WatchSymbol("XAU/USD", "طلای جهانی (هر انس)", "$", linkedMapOf(
-            "tradingview_scanner" to "OANDA:XAUUSD", "gold_api_public" to "XAU", "stocks_yahoo" to "GC=F", "twelve_data_quote" to "XAU/USD",
+            "tradingview_scanner" to "OANDA:XAUUSD", "gold_api_public" to "XAU", "stocks_yahoo" to "XAUUSD=X", "twelve_data_quote" to "XAU/USD",
         ), listOf("tradingview_scanner"), 10 * 60_000L, 0.5),
-        WatchSymbol("XAG/USD", "نقره جهانی (هر انس)", "$", linkedMapOf(
-            "tradingview_scanner" to "OANDA:XAGUSD", "stocks_yahoo" to "SI=F", "twelve_data_quote" to "XAG/USD",
-        ), listOf("tradingview_scanner"), 10 * 60_000L, 0.8),
-        WatchSymbol("USOIL", "نفت خام WTI", "$", linkedMapOf(
-            "tradingview_scanner" to "TVC:USOIL", "stocks_yahoo" to "CL=F",
-        ), listOf("tradingview_scanner"), 10 * 60_000L, 0.8),
-        WatchSymbol("UKOIL", "نفت برنت", "$", linkedMapOf(
-            "tradingview_scanner" to "TVC:UKOIL", "stocks_yahoo" to "BZ=F",
-        ), listOf("tradingview_scanner"), 10 * 60_000L, 0.8),
-        WatchSymbol("COPPER", "مس جهانی", "$", linkedMapOf(
-            "tradingview_scanner" to "CAPITALCOM:COPPER", "stocks_yahoo" to "HG=F",
-        ), listOf("tradingview_scanner"), 10 * 60_000L, 0.8),
-
-        // ── جفت‌ارزهای اصلی و کراس فارکس ──────────────────────────────────
         WatchSymbol("EUR/USD", "یورو / دلار", "$", linkedMapOf("tradingview_scanner" to "OANDA:EURUSD", "stocks_yahoo" to "EURUSD=X", "twelve_data_quote" to "EUR/USD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
         WatchSymbol("GBP/USD", "پوند / دلار", "$", linkedMapOf("tradingview_scanner" to "OANDA:GBPUSD", "stocks_yahoo" to "GBPUSD=X", "twelve_data_quote" to "GBP/USD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
         WatchSymbol("AUD/USD", "دلار استرالیا / دلار", "$", linkedMapOf("tradingview_scanner" to "OANDA:AUDUSD", "stocks_yahoo" to "AUDUSD=X", "twelve_data_quote" to "AUD/USD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
@@ -48,67 +40,41 @@ object WatchCatalog {
         WatchSymbol("USD/JPY", "دلار / ین ژاپن", "JPY", linkedMapOf("tradingview_scanner" to "OANDA:USDJPY", "stocks_yahoo" to "JPY=X", "twelve_data_quote" to "USD/JPY"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
         WatchSymbol("USD/CHF", "دلار / فرانک سوئیس", "CHF", linkedMapOf("tradingview_scanner" to "OANDA:USDCHF", "stocks_yahoo" to "CHF=X", "twelve_data_quote" to "USD/CHF"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
         WatchSymbol("USD/CAD", "دلار / دلار کانادا", "CAD", linkedMapOf("tradingview_scanner" to "OANDA:USDCAD", "stocks_yahoo" to "CAD=X", "twelve_data_quote" to "USD/CAD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("EUR/GBP", "یورو / پوند", "GBP", linkedMapOf("tradingview_scanner" to "OANDA:EURGBP", "stocks_yahoo" to "EURGBP=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("EUR/JPY", "یورو / ین", "JPY", linkedMapOf("tradingview_scanner" to "OANDA:EURJPY", "stocks_yahoo" to "EURJPY=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("GBP/JPY", "پوند / ین", "JPY", linkedMapOf("tradingview_scanner" to "OANDA:GBPJPY", "stocks_yahoo" to "GBPJPY=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("AUD/JPY", "دلار استرالیا / ین", "JPY", linkedMapOf("tradingview_scanner" to "OANDA:AUDJPY", "stocks_yahoo" to "AUDJPY=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("CAD/JPY", "دلار کانادا / ین", "JPY", linkedMapOf("tradingview_scanner" to "OANDA:CADJPY", "stocks_yahoo" to "CADJPY=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("CHF/JPY", "فرانک سوئیس / ین", "JPY", linkedMapOf("tradingview_scanner" to "OANDA:CHFJPY", "stocks_yahoo" to "CHFJPY=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("NZD/JPY", "دلار نیوزیلند / ین", "JPY", linkedMapOf("tradingview_scanner" to "OANDA:NZDJPY", "stocks_yahoo" to "NZDJPY=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("EUR/AUD", "یورو / دلار استرالیا", "AUD", linkedMapOf("tradingview_scanner" to "OANDA:EURAUD", "stocks_yahoo" to "EURAUD=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("EUR/CAD", "یورو / دلار کانادا", "CAD", linkedMapOf("tradingview_scanner" to "OANDA:EURCAD", "stocks_yahoo" to "EURCAD=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("EUR/CHF", "یورو / فرانک سوئیس", "CHF", linkedMapOf("tradingview_scanner" to "OANDA:EURCHF", "stocks_yahoo" to "EURCHF=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("GBP/AUD", "پوند / دلار استرالیا", "AUD", linkedMapOf("tradingview_scanner" to "OANDA:GBPAUD", "stocks_yahoo" to "GBPAUD=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("GBP/CAD", "پوند / دلار کانادا", "CAD", linkedMapOf("tradingview_scanner" to "OANDA:GBPCAD", "stocks_yahoo" to "GBPCAD=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("GBP/CHF", "پوند / فرانک سوئیس", "CHF", linkedMapOf("tradingview_scanner" to "OANDA:GBPCHF", "stocks_yahoo" to "GBPCHF=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("AUD/CAD", "دلار استرالیا / دلار کانادا", "CAD", linkedMapOf("tradingview_scanner" to "OANDA:AUDCAD", "stocks_yahoo" to "AUDCAD=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("AUD/CHF", "دلار استرالیا / فرانک", "CHF", linkedMapOf("tradingview_scanner" to "OANDA:AUDCHF", "stocks_yahoo" to "AUDCHF=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("AUD/NZD", "دلار استرالیا / دلار نیوزیلند", "NZD", linkedMapOf("tradingview_scanner" to "OANDA:AUDNZD", "stocks_yahoo" to "AUDNZD=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("CAD/CHF", "دلار کانادا / فرانک", "CHF", linkedMapOf("tradingview_scanner" to "OANDA:CADCHF", "stocks_yahoo" to "CADCHF=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("NZD/CAD", "دلار نیوزیلند / دلار کانادا", "CAD", linkedMapOf("tradingview_scanner" to "OANDA:NZDCAD", "stocks_yahoo" to "NZDCAD=X"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
+    ) + CryptoCatalog.watchlistSeed.map { coin ->
+        WatchSymbol(
+            id = coin.id,
+            label = coin.nameFa,
+            unit = "$",
+            providerCodes = linkedMapOf(
+                "tradingview_scanner" to "BINANCE:${coin.binance}",
+                "stocks_yahoo" to "${coin.id.substringBefore('/')}-USD",
+                "twelve_data_quote" to coin.id,
+            ),
+            defaultSources = listOf("tradingview_scanner"),
+            maxAgeMillis = 5 * 60_000L,
+            tolerancePct = 0.5,
+        )
+    }
 
-        // ── سهام‌های برتر جهانی و شاخص‌ها ────────────────────────────────
-        WatchSymbol("AAPL", "اپل (Apple Inc)", "$", linkedMapOf("tradingview_scanner" to "NASDAQ:AAPL", "stocks_yahoo" to "AAPL"), listOf("tradingview_scanner"), 15 * 60_000L, 1.0),
-        WatchSymbol("TSLA", "تسلا (Tesla Inc)", "$", linkedMapOf("tradingview_scanner" to "NASDAQ:TSLA", "stocks_yahoo" to "TSLA"), listOf("tradingview_scanner"), 15 * 60_000L, 1.0),
-        WatchSymbol("NVDA", "ان‌ویدیا (NVIDIA Corp)", "$", linkedMapOf("tradingview_scanner" to "NASDAQ:NVDA", "stocks_yahoo" to "NVDA"), listOf("tradingview_scanner"), 15 * 60_000L, 1.0),
-        WatchSymbol("MSFT", "مایکروسافت (Microsoft)", "$", linkedMapOf("tradingview_scanner" to "NASDAQ:MSFT", "stocks_yahoo" to "MSFT"), listOf("tradingview_scanner"), 15 * 60_000L, 1.0),
-        WatchSymbol("AMZN", "آمازون (Amazon.com)", "$", linkedMapOf("tradingview_scanner" to "NASDAQ:AMZN", "stocks_yahoo" to "AMZN"), listOf("tradingview_scanner"), 15 * 60_000L, 1.0),
-        WatchSymbol("GOOGL", "گوگل (Alphabet Inc)", "$", linkedMapOf("tradingview_scanner" to "NASDAQ:GOOGL", "stocks_yahoo" to "GOOGL"), listOf("tradingview_scanner"), 15 * 60_000L, 1.0),
-        WatchSymbol("META", "متا / فیس‌بوک (Meta Platforms)", "$", linkedMapOf("tradingview_scanner" to "NASDAQ:META", "stocks_yahoo" to "META"), listOf("tradingview_scanner"), 15 * 60_000L, 1.0),
-        WatchSymbol("AMD", "ای‌ام‌دی (Advanced Micro Devices)", "$", linkedMapOf("tradingview_scanner" to "NASDAQ:AMD", "stocks_yahoo" to "AMD"), listOf("tradingview_scanner"), 15 * 60_000L, 1.0),
-        WatchSymbol("NFLX", "نتفلیکس (Netflix Inc)", "$", linkedMapOf("tradingview_scanner" to "NASDAQ:NFLX", "stocks_yahoo" to "NFLX"), listOf("tradingview_scanner"), 15 * 60_000L, 1.0),
-        WatchSymbol("INTC", "اینتل (Intel Corp)", "$", linkedMapOf("tradingview_scanner" to "NASDAQ:INTC", "stocks_yahoo" to "INTC"), listOf("tradingview_scanner"), 15 * 60_000L, 1.0),
-        WatchSymbol("SPY", "شاخص SPDR S&P 500 ETF", "$", linkedMapOf("tradingview_scanner" to "AMEX:SPY", "stocks_yahoo" to "SPY"), listOf("tradingview_scanner"), 15 * 60_000L, 0.5),
-        WatchSymbol("QQQ", "شاخص Invesco QQQ (Nasdaq 100)", "$", linkedMapOf("tradingview_scanner" to "NASDAQ:QQQ", "stocks_yahoo" to "QQQ"), listOf("tradingview_scanner"), 15 * 60_000L, 0.5),
-        WatchSymbol("PLTR", "پالانتیر (Palantir Tech)", "$", linkedMapOf("tradingview_scanner" to "NYSE:PLTR", "stocks_yahoo" to "PLTR"), listOf("tradingview_scanner"), 15 * 60_000L, 1.2),
-        WatchSymbol("COIN", "کوین‌بیس (Coinbase Global)", "$", linkedMapOf("tradingview_scanner" to "NASDAQ:COIN", "stocks_yahoo" to "COIN"), listOf("tradingview_scanner"), 15 * 60_000L, 1.2),
-        WatchSymbol("BABA", "علی‌بابا (Alibaba Group)", "$", linkedMapOf("tradingview_scanner" to "NYSE:BABA", "stocks_yahoo" to "BABA"), listOf("tradingview_scanner"), 15 * 60_000L, 1.2),
-
-        // ── ارزهای دیجیتال برتر ───────────────────────────────────────────
-        WatchSymbol("BTC/USDT", "بیت‌کوین / تتر", "$", linkedMapOf("tradingview_scanner" to "BINANCE:BTCUSDT", "stocks_yahoo" to "BTC-USD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.5),
-        WatchSymbol("ETH/USDT", "اتریوم / تتر", "$", linkedMapOf("tradingview_scanner" to "BINANCE:ETHUSDT", "stocks_yahoo" to "ETH-USD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.5),
-        WatchSymbol("SOL/USDT", "سولانا / تتر", "$", linkedMapOf("tradingview_scanner" to "BINANCE:SOLUSDT", "stocks_yahoo" to "SOL-USD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.8),
-        WatchSymbol("BNB/USDT", "بی‌ان‌بی / تتر", "$", linkedMapOf("tradingview_scanner" to "BINANCE:BNBUSDT", "stocks_yahoo" to "BNB-USD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.8),
-        WatchSymbol("XRP/USDT", "ریپل / تتر", "$", linkedMapOf("tradingview_scanner" to "BINANCE:XRPUSDT", "stocks_yahoo" to "XRP-USD"), listOf("tradingview_scanner"), 5 * 60_000L, 1.0),
-        WatchSymbol("DOGE/USDT", "دوج‌کوین / تتر", "$", linkedMapOf("tradingview_scanner" to "BINANCE:DOGEUSDT", "stocks_yahoo" to "DOGE-USD"), listOf("tradingview_scanner"), 5 * 60_000L, 1.0),
-        WatchSymbol("ADA/USDT", "کاردانو / تتر", "$", linkedMapOf("tradingview_scanner" to "BINANCE:ADAUSDT", "stocks_yahoo" to "ADA-USD"), listOf("tradingview_scanner"), 5 * 60_000L, 1.0),
-        WatchSymbol("AVAX/USDT", "آوالانچ / تتر", "$", linkedMapOf("tradingview_scanner" to "BINANCE:AVAXUSDT", "stocks_yahoo" to "AVAX-USD"), listOf("tradingview_scanner"), 5 * 60_000L, 1.0),
-        WatchSymbol("LINK/USDT", "چین‌لینک / تتر", "$", linkedMapOf("tradingview_scanner" to "BINANCE:LINKUSDT", "stocks_yahoo" to "LINK-USD"), listOf("tradingview_scanner"), 5 * 60_000L, 1.0),
-        WatchSymbol("SUI/USDT", "سویی / تتر", "$", linkedMapOf("tradingview_scanner" to "BINANCE:SUIUSDT", "stocks_yahoo" to "SUI-USD"), listOf("tradingview_scanner"), 5 * 60_000L, 1.2),
-        WatchSymbol("NEAR/USDT", "نیر / تتر", "$", linkedMapOf("tradingview_scanner" to "BINANCE:NEARUSDT", "stocks_yahoo" to "NEAR-USD"), listOf("tradingview_scanner"), 5 * 60_000L, 1.2),
-        WatchSymbol("PEPE/USDT", "پپه / تتر", "$", linkedMapOf("tradingview_scanner" to "BINANCE:PEPEUSDT", "stocks_yahoo" to "PEPE-USD"), listOf("tradingview_scanner"), 5 * 60_000L, 1.5),
-        WatchSymbol("TON/USDT", "تون‌کوین / تتر", "$", linkedMapOf("tradingview_scanner" to "BINANCE:TONUSDT", "stocks_yahoo" to "TON-USD"), listOf("tradingview_scanner"), 5 * 60_000L, 1.2),
-        WatchSymbol("DOT/USDT", "پولکادات / تتر", "$", linkedMapOf("tradingview_scanner" to "BINANCE:DOTUSDT", "stocks_yahoo" to "DOT-USD"), listOf("tradingview_scanner"), 5 * 60_000L, 1.2),
-        WatchSymbol("LTC/USDT", "لایت‌کوین / تتر", "$", linkedMapOf("tradingview_scanner" to "BINANCE:LTCUSDT", "stocks_yahoo" to "LTC-USD"), listOf("tradingview_scanner"), 5 * 60_000L, 1.0),
+    /** 50+ Extended Universe for continuous scanner & multi-asset analysis */
+    val scannerSymbols: List<String> = listOf(
+        "XAU/USD", "XAG/USD", "USOIL", "UKOIL", "COPPER",
+        "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD", "USD/JPY", "USD/CHF", "USD/CAD",
+        "EUR/GBP", "EUR/JPY", "GBP/JPY", "AUD/JPY", "CAD/JPY", "CHF/JPY", "NZD/JPY",
+        "EUR/AUD", "EUR/CAD", "EUR/CHF", "GBP/AUD", "GBP/CAD", "GBP/CHF",
+        "AUD/CAD", "AUD/CHF", "AUD/NZD", "CAD/CHF", "NZD/CAD",
+        "AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META", "AMD", "NFLX", "INTC",
+        "SPY", "QQQ", "PLTR", "COIN", "BABA",
+        "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "DOGE/USDT", "ADA/USDT",
+        "AVAX/USDT", "LINK/USDT", "SUI/USDT", "NEAR/USDT", "PEPE/USDT", "TON/USDT", "DOT/USDT", "LTC/USDT"
     )
 
     fun find(id: String): WatchSymbol? = symbols.firstOrNull { it.id == id }
 
     /** Symbols selectable for the chart/feed. Iran cash-board rows are watch-only. */
-    val chartSymbols: List<String> = symbols.filter {
-        "stocks_yahoo" in it.providerCodes || "twelve_data_quote" in it.providerCodes ||
-            "tradingview_scanner" in it.providerCodes
-    }.map { it.id }
+    val chartSymbols: List<String> = listOf(
+        "XAU/USD", "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD", "USD/JPY", "USD/CHF", "USD/CAD"
+    ) + CryptoCatalog.watchlistSeed.map { it.id }
 }
 
 data class DisplayQuote(val quote: Quote?, val sourceId: String, val fallback: Boolean)
@@ -121,14 +87,11 @@ data class QuoteAssessment(val state: QuoteDisplayState, val detail: String) {
     val verifiable: Boolean get() = state == QuoteDisplayState.DATED
 }
 
-    /** Retrieval time alone does not prove a price is fresh. Cached, undated and mismatched quotes cannot confirm. */
-    object SourceComparison {
-        // providerCodes is the unit contract: each mapping is the *same* instrument and quote unit
-        // at that provider. SourceDef.unit is only a static label and cannot express multi-unit
-        // providers (Twelve Data serves both $ and JPY/CHF/CAD pairs), so it is not compared here.
-        fun assess(symbol: WatchSymbol, sourceId: String, quote: Quote?, now: Long = System.currentTimeMillis()): QuoteAssessment {
-            if (sourceId !in symbol.providerCodes)
-                return QuoteAssessment(QuoteDisplayState.INVALID, "نماد/واحد این منبع برای این کارت تعریف نشده")
+/** Retrieval time alone does not prove a price is fresh. Cached, undated and mismatched quotes cannot confirm. */
+object SourceComparison {
+    fun assess(symbol: WatchSymbol, sourceId: String, quote: Quote?, now: Long = System.currentTimeMillis()): QuoteAssessment {
+        if (sourceId !in symbol.providerCodes)
+            return QuoteAssessment(QuoteDisplayState.INVALID, "نماد/واحد این منبع برای این کارت تعریف نشده")
         if (quote == null) return QuoteAssessment(QuoteDisplayState.NO_DATA, "هنوز پاسخی دریافت نشده")
         if (quote.sourceId != sourceId || quote.unit != symbol.unit)
             return QuoteAssessment(QuoteDisplayState.INVALID, "شناسهٔ منبع یا واحد قیمت ناهماهنگ است")
@@ -153,7 +116,6 @@ data class QuoteAssessment(val state: QuoteDisplayState, val detail: String) {
         if (enabled.isEmpty()) return Verification(VerificationStatus.NO_DATA, 0,
             reason = "منبعی برای این نماد فعال نیست؛ از تنظیمات انتخاب کنید", badge = "منبع ندارد")
         val assessed = enabled.associateWith { assess(symbol, it, quotes[it], now) }
-        // Map keys alone do not prove independence: the quote's own sourceId must match too.
         val valid = enabled.mapNotNull { id -> quotes[id]?.takeIf { assessed[id]?.verifiable == true } }
         if (valid.size < 2) {
             val issues = enabled.mapNotNull { id -> assessed[id]?.takeUnless { it.verifiable }?.let {
@@ -184,7 +146,6 @@ data class QuoteAssessment(val state: QuoteDisplayState, val detail: String) {
             return Verification(if (hasPrice) VerificationStatus.UNVERIFIED else VerificationStatus.NO_DATA,
                 valid.size, reason = reason, badge = badge)
         }
-        // SourceCatalog IDs are independent; never combine different units or spot with futures.
         val values = valid.mapNotNull { it.price }
         val min = values.minOrNull() ?: error("قیمت منبع تازه باید موجود باشد")
         val max = values.maxOrNull() ?: error("قیمت منبع تازه باید موجود باشد")
@@ -204,7 +165,6 @@ data class Verification(
     val freshSources: Int,
     val spreadPct: Double? = null,
     val reason: String,
-    /** Human-readable display diagnosis; status stays conservative for any safety consumers. */
     val badge: String,
 )
 

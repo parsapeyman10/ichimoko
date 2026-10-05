@@ -347,7 +347,7 @@ internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
     var group by rememberSaveable { mutableStateOf("همه") }
     var open by rememberSaveable { mutableStateOf(false) }
 
-    val allSymbols = remember { WatchCatalog.chartSymbols }
+    val allSymbols = remember { WatchCatalog.scannerSymbols }
     val commodities = remember { listOf("XAU/USD", "XAG/USD", "USOIL", "UKOIL", "COPPER") }
     val stocks = remember { listOf("AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META", "AMD", "NFLX", "INTC", "SPY", "QQQ", "PLTR", "COIN", "BABA") }
     val forex = remember { allSymbols.filter { !CryptoCatalog.isCrypto(it) && it !in commodities && it !in stocks } }
