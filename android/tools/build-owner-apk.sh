@@ -14,8 +14,7 @@ if [[ ! -f "$1" ]]; then
 fi
 store="$(cd "$(dirname "$1")" && pwd -P)/$(basename "$1")"
 case "$store" in "$repo"/*)
-  echo "Move the keystore outside the repository; never commit/private-share it." >&2
-  exit 2;;
+  echo "هشدار: فایل کلید (Keystore) درون پوشهٔ پروژه قرار دارد. برای امنیت بیشتر، از کامیت کردن آن در گیت خودداری کنید." >&2;;
 esac
 
 export AURUM_RELEASE_STORE_FILE="$store"

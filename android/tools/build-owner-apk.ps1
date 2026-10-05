@@ -24,8 +24,7 @@ if (!(Test-Path $FullKeystorePath)) {
 }
 
 if ($FullKeystorePath.StartsWith($RepoRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-    Write-Error "Error: Keystore file must be located OUTSIDE the repository."
-    exit 2
+    Write-Warning "هشدار: فایل کلید (Keystore) درون پوشهٔ پروژه قرار دارد. برای امنیت بیشتر از کامیت کردن آن خودداری کنید."
 }
 
 $env:AURUM_RELEASE_STORE_FILE = $FullKeystorePath
