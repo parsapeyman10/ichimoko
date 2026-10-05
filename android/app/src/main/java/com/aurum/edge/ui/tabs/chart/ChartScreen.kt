@@ -204,12 +204,29 @@ private fun TradingViewWidget(
     interval: Interval,
     modifier: Modifier = Modifier,
 ) {
-    val html = tradingViewHtml(symbol, interval)
-    val loadKey = "$symbol|${interval.label}"
+    val tvSymbol = remember(symbol) { TradingViewSymbols.of(symbol) }
+    val tvInterval = remember(interval) {
+        when (interval) {
+            Interval.M1 -> "1"
+            Interval.M5 -> "5"
+            Interval.M15 -> "15"
+            Interval.M30 -> "30"
+            Interval.H1 -> "60"
+            Interval.H4 -> "240"
+            Interval.D1 -> "D"
+        }
+    }
+    val html = remember(tvSymbol, tvInterval) { tradingViewHtml(tvSymbol, tvInterval) }
+    val loadKey = "$tvSymbol|$tvInterval"
+
     AndroidView(
         modifier = modifier,
         factory = { context ->
             WebView(context).apply {
+                layoutParams = android.view.ViewGroup.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                )
                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
                 setBackgroundColor(AndroidColor.parseColor("#0b0e13"))
                 webViewClient = object : WebViewClient() {
@@ -218,43 +235,37 @@ private fun TradingViewWidget(
                 webChromeClient = WebChromeClient()
                 CookieManager.getInstance().setAcceptCookie(true)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.databaseEnabled = true
-                settings.allowContentAccess = true
-                settings.allowFileAccess = true
-                settings.loadsImagesAutomatically = true
-                settings.javaScriptCanOpenWindowsAutomatically = true
-                settings.cacheMode = WebSettings.LOAD_DEFAULT
-                settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
+                settings.apply {
+                    javaScriptEnabled = true
+                    domStorageEnabled = true
+                    databaseEnabled = true
+                    allowContentAccess = true
+                    allowFileAccess = true
+                    loadsImagesAutomatically = true
+                    javaScriptCanOpenWindowsAutomatically = true
+                    loadWithOverviewMode = true
+                    useWideViewPort = true
+                    cacheMode = WebSettings.LOAD_DEFAULT
+                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
+                }
                 tag = loadKey
-                loadDataWithBaseURL("https://www.tradingview.com", html, "text/html", "UTF-8", "https://www.tradingview.com")
+                loadDataWithBaseURL("https://s3.tradingview.com", html, "text/html", "UTF-8", "https://s3.tradingview.com")
             }
         },
         update = { webView ->
             if (webView.tag != loadKey) {
                 webView.tag = loadKey
-                webView.loadDataWithBaseURL("https://www.tradingview.com", html, "text/html", "UTF-8", "https://www.tradingview.com")
+                webView.loadDataWithBaseURL("https://s3.tradingview.com", html, "text/html", "UTF-8", "https://s3.tradingview.com")
             }
         },
     )
 }
 
-private fun tradingViewHtml(symbol: String, interval: Interval): String {
-    val tvSymbol = TradingViewSymbols.of(symbol)
-    val tvInterval = when (interval) {
-        Interval.M1 -> "1"
-        Interval.M5 -> "5"
-        Interval.M15 -> "15"
-        Interval.M30 -> "30"
-        Interval.H1 -> "60"
-        Interval.H4 -> "240"
-        Interval.D1 -> "D"
-    }
-    val encodedSymbol = tvSymbol.replace(":", "%3A")
+private fun tradingViewHtml(tvSymbol: String, tvInterval: String): String {
+    val encoded = tvSymbol.replace(":", "%3A")
     val iframeUrl = "https://s.tradingview.com/widgetembed/?frameElementId=tradingview_chart" +
-        "&symbol=$encodedSymbol&interval=$tvInterval&hidesidetoolbar=0&symboledit=1" +
+        "&symbol=$encoded&interval=$tvInterval&hidesidetoolbar=0&symboledit=1" +
         "&saveimage=0&toolbarbg=0b0e13&studies=Volume%40tv-basicstudies" +
         "&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1&locale=en"
 
@@ -266,21 +277,60 @@ private fun tradingViewHtml(symbol: String, interval: Interval): String {
           <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
           <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
-            html, body, #container { width: 100%; height: 100%; overflow: hidden; background: #0b0e13; }
+            html, body { width: 100%; height: 100%; background: #0b0e13; overflow: hidden; }
+            #tv_chart_container { width: 100%; height: 100%; position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
             iframe { width: 100%; height: 100%; border: 0; display: block; }
           </style>
+          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
         </head>
         <body>
-          <div id="container">
-            <iframe
-              id="tradingview_chart"
-              name="tradingview_chart"
-              src="$iframeUrl"
-              allowtransparency="true"
-              scrolling="no"
-              allowfullscreen="true">
-            </iframe>
-          </div>
+          <div id="tv_chart_container"></div>
+          <script type="text/javascript">
+            function initWidget() {
+              try {
+                if (typeof TradingView !== 'undefined' && TradingView.widget) {
+                  new TradingView.widget({
+                    "autosize": true,
+                    "symbol": "$tvSymbol",
+                    "interval": "$tvInterval",
+                    "timezone": "Etc/UTC",
+                    "theme": "dark",
+                    "style": "1",
+                    "locale": "en",
+                    "toolbar_bg": "#0b0e13",
+                    "enable_publishing": false,
+                    "hide_side_toolbar": false,
+                    "allow_symbol_change": true,
+                    "save_image": false,
+                    "studies": [
+                      "Volume@tv-basicstudies"
+                    ],
+                    "container_id": "tv_chart_container"
+                  });
+                  return;
+                }
+              } catch (e) {}
+              // Direct fallback iframe if script execution is blocked
+              var container = document.getElementById('tv_chart_container');
+              if (container) {
+                var iframe = document.createElement('iframe');
+                iframe.id = 'tradingview_chart';
+                iframe.src = '$iframeUrl';
+                iframe.style.width = '100%';
+                iframe.style.height = '100%';
+                iframe.style.border = '0';
+                iframe.setAttribute('allowtransparency', 'true');
+                iframe.setAttribute('scrolling', 'no');
+                iframe.setAttribute('allowfullscreen', 'true');
+                container.appendChild(iframe);
+              }
+            }
+            if (document.readyState === 'loading') {
+              document.addEventListener('DOMContentLoaded', initWidget);
+            } else {
+              initWidget();
+            }
+          </script>
         </body>
         </html>
     """.trimIndent()
