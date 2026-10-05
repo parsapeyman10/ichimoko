@@ -70,10 +70,6 @@ fun ChartScreen(
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val openTrade = trades.firstOrNull { it.symbol == market.symbol && it.isOpen }
     var tradingViewBlocked by remember(market.symbol, market.interval) { mutableStateOf(false) }
-    var preferNativeChart by rememberSaveable { mutableStateOf(true) }
-    var showIchimoku by rememberSaveable { mutableStateOf(true) }
-    var showLevels by rememberSaveable { mutableStateOf(true) }
-    var showVolume by rememberSaveable { mutableStateOf(true) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         SymbolSearchRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
@@ -97,87 +93,26 @@ fun ChartScreen(
             }
         }
 
-        // ── Chart Source & Display Toggles ─────────────────────────────────
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp).horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            FilterChip(
-                selected = preferNativeChart || tradingViewBlocked,
-                onClick = { preferNativeChart = true },
-                label = { Text("چارت زنده و جامع (گذشته تا لحظه حال)", style = MaterialTheme.typography.labelSmall) },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = AurumColors.Cyan.copy(alpha = 0.20f),
-                    selectedLabelColor = AurumColors.Cyan,
-                    labelColor = AurumColors.TextSecondary,
-                ),
-            )
-            FilterChip(
-                selected = !preferNativeChart && !tradingViewBlocked,
-                onClick = { preferNativeChart = false },
-                label = { Text("TradingView", style = MaterialTheme.typography.labelSmall) },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = AurumColors.Gold.copy(alpha = 0.20f),
-                    selectedLabelColor = AurumColors.Gold,
-                    labelColor = AurumColors.TextSecondary,
-                ),
-            )
-            if (preferNativeChart || tradingViewBlocked) {
-                FilterChip(
-                    selected = showIchimoku,
-                    onClick = { showIchimoku = !showIchimoku },
-                    label = { Text("ایچیموکو", style = MaterialTheme.typography.labelSmall) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = AurumColors.Purple.copy(alpha = 0.20f),
-                        selectedLabelColor = AurumColors.Purple,
-                        labelColor = AurumColors.TextMuted,
-                    ),
-                )
-                FilterChip(
-                    selected = showLevels,
-                    onClick = { showLevels = !showLevels },
-                    label = { Text("سطوح و سیگنال", style = MaterialTheme.typography.labelSmall) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = AurumColors.Gold.copy(alpha = 0.20f),
-                        selectedLabelColor = AurumColors.Gold,
-                        labelColor = AurumColors.TextMuted,
-                    ),
-                )
-                FilterChip(
-                    selected = showVolume,
-                    onClick = { showVolume = !showVolume },
-                    label = { Text("حجم", style = MaterialTheme.typography.labelSmall) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = AurumColors.Green.copy(alpha = 0.20f),
-                        selectedLabelColor = AurumColors.Green,
-                        labelColor = AurumColors.TextMuted,
-                    ),
-                )
-            }
-        }
-
-        val isNative = preferNativeChart || tradingViewBlocked
+        // ── Unified Trading Chart (Past to Present) ────────────────────────
         SectionCard(
-            title = if (isNative) "چارت اختصاصی · ${market.symbol} (${market.interval.label})"
-            else "چارت TradingView · ${market.symbol}",
-            subtitle = if (isNative)
-                "${market.candles.size} کندل واقعی از گذشته تا لحظه حال (${market.closedCount} کندل بسته + کندل جاری)"
-            else if (tradingViewBlocked)
-                "TradingView در دسترس نیست؛ چارت اختصاصی با دیتای واقعی نمایش داده شد"
-            else null,
+            title = "چارت معاملاتی · ${market.symbol} (${market.interval.label})",
+            subtitle = if (tradingViewBlocked && market.candles.isNotEmpty())
+                "${market.candles.size} کندل واقعی از گذشته تا لحظهٔ حال"
+            else
+                "دیتای کامل از گذشته تا لحظهٔ حال با تیک زنده",
         ) {
             Box(Modifier.fillMaxWidth().height(520.dp)) {
-                if (isNative && market.candles.isNotEmpty()) {
+                if (tradingViewBlocked && market.candles.isNotEmpty()) {
                     CandleChart(
                         candles = market.candles,
                         interval = market.interval,
                         signal = market.signal,
                         modifier = Modifier.fillMaxSize(),
-                        showIchimoku = showIchimoku,
-                        showLevels = showLevels,
-                        showVolume = showVolume,
+                        showIchimoku = true,
+                        showLevels = true,
+                        showVolume = true,
                     )
-                } else if (!isNative) {
+                } else if (!tradingViewBlocked) {
                     TradingViewWidget(
                         symbol = market.symbol,
                         interval = market.interval,
@@ -369,17 +304,17 @@ private fun tradingViewHtml(symbol: String, interval: Interval): String {
     val encodedSymbol = tvSymbol.replace(":", "%3A")
     val widgetUrl = "https://s.tradingview.com/widgetembed/?frameElementId=tradingview_chart" +
         "&symbol=$encodedSymbol&interval=$tvInterval&hidesidetoolbar=0&symboledit=1" +
-        "&saveimage=0&toolbarbg=0b0e13&studies=IchimokuCloud%40tv-basicstudies" +
+        "&saveimage=1&toolbarbg=0b0e13&studies=IchimokuCloud%40tv-basicstudies" +
         "&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1"
     return """
         <!doctype html>
         <html>
         <head>
-          <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+          <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
           <style>
             html, body, #tradingview_chart, iframe {
               margin:0; padding:0; width:100%; height:100%; overflow:hidden;
-              background:transparent; border:0;
+              background:#0b0e13; border:0;
             }
           </style>
         </head>
@@ -423,74 +358,74 @@ internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "نماد: $selected",
-                style = MaterialTheme.typography.titleSmall,
-                color = AurumColors.Gold,
+                "نماد فعال: $selected",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = AurumColors.TextPrimary,
                 modifier = Modifier.weight(1f),
             )
-            Text(
-                "${forexIds.size + cryptoList.size} نماد",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-            )
-            Text(
-                if (open) "  بستن" else "  تغییر نماد",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.Cyan,
-                modifier = Modifier.clickable { open = !open }.padding(6.dp),
+            FilterChip(
+                selected = open,
+                onClick = { open = !open },
+                label = { Text(if (open) "بستن جستجو" else "تغییر نماد", style = MaterialTheme.typography.labelSmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = AurumColors.Gold.copy(alpha = 0.20f),
+                    selectedLabelColor = AurumColors.Gold,
+                    labelColor = AurumColors.TextSecondary,
+                ),
             )
         }
 
-        if (!open) return@Column
+        if (open) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                singleLine = true,
+                label = { Text("جستجو — طلا، EUR، بیت‌کوین، PEPE…", style = MaterialTheme.typography.labelSmall) },
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            )
 
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            singleLine = true,
-            label = { Text("جستجو — طلا، EUR، بیت‌کوین، PEPE…", style = MaterialTheme.typography.labelSmall) },
-            modifier = Modifier.fillMaxWidth(),
-        )
-
-        Row(
-            Modifier.fillMaxWidth().padding(top = 6.dp).horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            listOf("طلا و فارکس", "ارز دیجیتال").forEach { option ->
-                FilterChip(
-                    selected = group == option,
-                    onClick = { group = option },
-                    label = { Text(option, style = MaterialTheme.typography.labelSmall) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = AurumColors.Gold.copy(alpha = 0.18f),
-                        selectedLabelColor = AurumColors.Gold,
-                        labelColor = AurumColors.TextSecondary,
-                    ),
-                )
-            }
-        }
-
-        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp).padding(top = 6.dp)) {
-            if (group == "طلا و فارکس") {
-                items(forexShown, key = { "f-$it" }) { id ->
-                    SymbolRow(id, id == selected) { onSelect(id); open = false; query = "" }
-                }
-            } else {
-                items(cryptoShown, key = { "c-" + it.id }) { coin ->
-                    SymbolRow(coin.id, coin.id == selected) { onSelect(coin.id); open = false; query = "" }
-                }
-            }
-            if (suggestions.isNotEmpty()) {
-                item {
-                    Text(
-                        "«$query» پیدا نشد. منظورتان این بود؟",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.TextMuted,
-                        modifier = Modifier.padding(vertical = 8.dp),
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp).horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                listOf("طلا و فارکس", "ارز دیجیتال").forEach { option ->
+                    FilterChip(
+                        selected = group == option,
+                        onClick = { group = option },
+                        label = { Text(option, style = MaterialTheme.typography.labelSmall) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = AurumColors.Gold.copy(alpha = 0.18f),
+                            selectedLabelColor = AurumColors.Gold,
+                            labelColor = AurumColors.TextSecondary,
+                        ),
                     )
                 }
-                items(suggestions, key = { "s-" + it.id }) { coin ->
-                    SymbolRow(coin.id, false, AurumColors.Cyan) {
-                        onSelect(coin.id); open = false; query = ""
+            }
+
+            LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp).padding(top = 6.dp)) {
+                if (group == "طلا و فارکس") {
+                    items(forexShown, key = { "f-$it" }) { id ->
+                        SymbolRow(id, id == selected) { onSelect(id); open = false; query = "" }
+                    }
+                } else {
+                    items(cryptoShown, key = { "c-" + it.id }) { coin ->
+                        SymbolRow(coin.id, coin.id == selected) { onSelect(coin.id); open = false; query = "" }
+                    }
+                }
+                if (suggestions.isNotEmpty()) {
+                    item {
+                        Text(
+                            "«$query» پیدا نشد. منظورتان این بود؟",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextMuted,
+                            modifier = Modifier.padding(vertical = 8.dp),
+                        )
+                    }
+                    items(suggestions, key = { "s-" + it.id }) { coin ->
+                        SymbolRow(coin.id, false, AurumColors.Cyan) {
+                            onSelect(coin.id); open = false; query = ""
+                        }
                     }
                 }
             }
