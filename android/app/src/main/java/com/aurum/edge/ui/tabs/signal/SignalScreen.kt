@@ -76,9 +76,9 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
 
         SignalSummaryCard(
             signal = signal,
-            onOpenPaperTrade = {},
+            onOpenPaperTrade = { signal?.let { viewModel.openPaperTrade(it) } },
             entryBlocker = positionBlocker,
-            allowManualPaperTrade = false,
+            allowManualPaperTrade = true,
         )
 
         SectionCard("معاملهٔ کاغذی خودکار") {

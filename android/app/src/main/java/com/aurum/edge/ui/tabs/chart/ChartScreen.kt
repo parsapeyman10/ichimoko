@@ -107,44 +107,18 @@ fun ChartScreen(
             }
         }
 
-        // ── Single Unified Candlestick & Ichimoku Chart ─────────────────────
+        // ── Unified TradingView Live Streaming Chart (Pure Candles + Volume) ──
         SectionCard(
-            title = "چارت آنلاین کندل‌استیک و ایچیموکو · ${market.symbol} (${market.interval.label})",
-            subtitle = if (displayCandles.isNotEmpty())
-                "${displayCandles.size} کندل آنلاین با نرخ به‌روزرسانی زنده و ابر ایچیموکو"
-            else
-                "در حال اتصال به فید آنلاین قیمت…",
+            title = "چارت آنلاین و زنده · ${market.symbol} (${market.interval.label})",
+            subtitle = "جریان آنلاین داده‌ها، حجم و کندل‌های زنده از منبع رسمی TradingView",
         ) {
             Box(Modifier.fillMaxWidth().height(520.dp)) {
-                if (displayCandles.isNotEmpty()) {
-                    CandleChart(
-                        candles = displayCandles,
-                        interval = market.interval,
-                        signal = market.signal,
-                        modifier = Modifier.fillMaxSize(),
-                        showIchimoku = true,
-                        showLevels = true,
-                        showVolume = true,
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier.fillMaxSize().background(AurumColors.ChartBg, RoundedCornerShape(10.dp)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            "در حال دریافت دیتای زنده ${market.symbol}…",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = AurumColors.TextSecondary,
-                        )
-                    }
-                }
+                TradingViewWidget(
+                    symbol = market.symbol,
+                    interval = market.interval,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
-
-            EngineOverlay(
-                market = market,
-                openTrade = openTrade,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            )
         }
 
         StrategyBar(viewModel, market)
@@ -281,7 +255,7 @@ private fun tradingViewHtml(symbol: String, interval: Interval): String {
     val encodedSymbol = tvSymbol.replace(":", "%3A")
     val iframeUrl = "https://s.tradingview.com/widgetembed/?frameElementId=tradingview_chart" +
         "&symbol=$encodedSymbol&interval=$tvInterval&hidesidetoolbar=0&symboledit=1" +
-        "&saveimage=0&toolbarbg=0b0e13&studies=IchimokuCloud%40tv-basicstudies" +
+        "&saveimage=0&toolbarbg=0b0e13&studies=Volume%40tv-basicstudies" +
         "&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1&locale=en"
 
     return """
