@@ -94,17 +94,37 @@ fun ChartScreen(
             }
         }
 
-        // ── Single Unified TradingView Chart ───────────────────────────────
+        // ── Single Unified Candlestick & Ichimoku Chart ─────────────────────
         SectionCard(
-            title = "چارت زنده TradingView · ${market.symbol} (${market.interval.label})",
-            subtitle = "دیتای پیوستهٔ چندماهه، ابر ایچیموکو و تیک‌های زنده مستقیماً از TradingView",
+            title = "چارت کندل‌استیک و ایچیموکو · ${market.symbol} (${market.interval.label})",
+            subtitle = if (market.candles.isNotEmpty())
+                "${market.candles.size} کندل واقعی از گذشته تا لحظهٔ حال با تیک زنده و ایچیموکو"
+            else
+                "در حال دریافت دیتای کندل‌های واقعی…",
         ) {
-            Box(Modifier.fillMaxWidth().height(540.dp)) {
-                TradingViewWidget(
-                    symbol = market.symbol,
-                    interval = market.interval,
-                    modifier = Modifier.fillMaxSize(),
-                )
+            Box(Modifier.fillMaxWidth().height(520.dp)) {
+                if (market.candles.isNotEmpty()) {
+                    CandleChart(
+                        candles = market.candles,
+                        interval = market.interval,
+                        signal = market.signal,
+                        modifier = Modifier.fillMaxSize(),
+                        showIchimoku = true,
+                        showLevels = true,
+                        showVolume = true,
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxSize().background(AurumColors.ChartBg, RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "در حال دریافت دیتای کندل‌های واقعی ${market.symbol}…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = AurumColors.TextSecondary,
+                        )
+                    }
+                }
             }
 
             EngineOverlay(
