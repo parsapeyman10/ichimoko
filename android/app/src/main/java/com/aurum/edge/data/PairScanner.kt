@@ -219,7 +219,7 @@ class PairScanner(
 
             val price = candles.lastOrNull()?.close
             val evaluated = withContext(Dispatchers.Default) {
-                runCatching { SignalEngine.evaluate(candles, interval, config.minConfidence, config.spreadPrice, config.signalProfile) }.getOrNull()
+                runCatching { SignalEngine.evaluate(candles, interval, config.minConfidence, config.spreadPrice, config.signalProfile, config.activeStrategy) }.getOrNull()
             }
             if (evaluated == null) {
                 update(symbol, "error", "ارزیابی سیگنال روی کندل‌های دریافتی ممکن نشد", price)
