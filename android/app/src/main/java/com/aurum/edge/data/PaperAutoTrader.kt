@@ -46,13 +46,12 @@ class PaperAutoTrader(
             _status.value = "برای نماد ${state.symbol} از قبل پوزیشن کاغذی باز است"
             return null
         }
-        // Computing higher-timeframe bars is read-only; an unavailable/vetoed MTF cannot open.
+        // Computing higher-timeframe bars is read-only.
         val mtf = withContext(Dispatchers.Default) {
             runCatching { MtfAnalyzer.analyze(state.candles, state.interval) }.getOrNull()
         }
-        if (mtf == null || mtf.frames.isEmpty() || mtf.veto ||
-            mtf.barTime != state.signal?.barTime || mtf.baseInterval != state.interval) {
-            _status.value = "تراز چندتایم‌فریم همین کندل در دسترس نیست یا ورود را وتو کرده است"
+        if (mtf?.veto == true) {
+            _status.value = "تراز چندتایم‌فریم ورود را وتو کرده است: ${mtf.vetoReason}"
             return null
         }
         // Re-verify against the SAME emission plus freshly read settings/news snapshot. News is

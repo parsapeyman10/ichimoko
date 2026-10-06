@@ -9,10 +9,11 @@ object PaperAutoRules {
     fun blocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
                 now: Long = System.currentTimeMillis()): String? {
         if (!settings.autoPaperTrading) return "معاملهٔ خودکار کاغذی خاموش است"
-        // REST publishes a recent BAR, not a timestamped last trade within that bar.
-        // It can justify an educational candidate, never an automatic paper fill.
-        if (market.feed.mode != FeedMode.LIVE) return "ورود خودکار کاغذی فقط با تیک تازهٔ زنده مجاز است؛ کندل/تاریخچهٔ دوره‌ای فقط نامزد آموزشی است"
-        return opportunityBlocker(market, settings, news, now, requireMonitor = false)
+        if (market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))
+            return "فید معتبر در دسترس نیست (وضعیت فید: ${market.feed.mode.label})"
+        return opportunityBlocker(market, settings, news, now, requireMonitor = false,
+            allowedSymbols = WatchCatalog.scannerSymbols,
+            barAgeGraceMs = market.interval.millis + 300_000L)
     }
 
     /**
@@ -29,17 +30,15 @@ object PaperAutoRules {
                            barAgeGraceMs: Long = 90_000L,
                            requireMonitor: Boolean = true): String? {
         // Per symbol: a 24/7 crypto venue must not inherit the forex weekend.
-        if (MarketHours.weekendClosedFor(market.symbol, now)) return "بازار فارکس طبق برنامهٔ معمول پایان هفته بسته است؛ ورود/اعلان معاملاتی نداریم"
+        if (MarketHours.weekendClosedFor(market.symbol, now)) return "بازار برای نماد ${market.symbol} بسته است"
         if (requireMonitor && !settings.backgroundMonitor) return "برای هشدار/ورود، پایش پس‌زمینه باید روشن باشد"
         if (allowedSymbols != null) {
-            if (market.symbol !in allowedSymbols || market.interval != settings.interval) return "نماد/بازه اسکن معتبر نیست"
+            if (market.symbol !in allowedSymbols && market.symbol != settings.symbol) return "نماد ${market.symbol} در لیست معتبر نیست"
         } else if (market.symbol != settings.symbol || market.interval != settings.interval) {
             return "نماد/بازه عوض شده است"
         }
-        if (market.showingCachedData || market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))
-            return "فید واقعی زنده نیست؛ کش برای ورود ممنوع"
-        if (!FeedLiveness.hasRecentReceipt(market.feed, now))
-            return "قیمت دریافتی قدیمی است"
+        if (market.showingCachedData && market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))
+            return "فید واقعی در دسترس نیست؛ کش برای ورود ممنوع"
         val signal = market.signal ?: return "سیگنال محاسبه نشده است"
         if (!signal.isActionable || signal.entry == null || signal.stopLoss == null || signal.takeProfit == null)
             return "سیگنال فنی قابل معامله موجود نیست"
@@ -59,7 +58,7 @@ object PaperAutoRules {
             return "سیگنال روی تازه‌ترین کندل بسته نیست یا اعتبار آن گذشته است"
         val price = market.lastPrice
         if (price == null || !price.isFinite() || price <= 0.0 || !signal.entry.isFinite() ||
-            signal.entry <= 0.0 || abs(price / signal.entry - 1.0) > 0.005)
+            signal.entry <= 0.0 || abs(price / signal.entry - 1.0) > 0.02)
             return "قیمت تازه از ورود سیگنال فاصله گرفته است"
         // An additional gate for legacy 8-condition / ICT setups.
         if (techItems.size == 8) {
