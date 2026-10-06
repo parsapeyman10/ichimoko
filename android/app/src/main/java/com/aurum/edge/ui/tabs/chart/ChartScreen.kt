@@ -8,6 +8,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.heightIn
@@ -30,10 +31,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -53,9 +57,11 @@ import com.aurum.edge.engine.SignalEngine
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
+import com.aurum.edge.ui.components.ConfluenceRow
 import com.aurum.edge.data.SymbolSearch
 import com.aurum.edge.data.TradingViewSymbols
 import com.aurum.edge.data.CryptoCatalog
+import com.aurum.edge.data.PairScanStatus
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatPriceFor
 import com.aurum.edge.ui.components.formatDateTime
@@ -72,21 +78,21 @@ fun ChartScreen(
 ) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val pairScan by viewModel.pairScan.collectAsStateWithLifecycle()
     val openTrade = trades.firstOrNull { it.symbol == market.symbol && it.isOpen }
 
-    val displayCandles = remember(market.candles, market.lastPrice, market.interval) {
-        if (market.candles.isNotEmpty()) {
-            market.candles
-        } else if (market.lastPrice != null) {
-            val now = System.currentTimeMillis()
-            val barTime = now - (now % market.interval.millis)
-            listOf(Candle(barTime, market.lastPrice, market.lastPrice, market.lastPrice, market.lastPrice, 1.0, closed = false))
-        } else {
-            emptyList()
-        }
-    }
-
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
+
+        // ── Best Condition / Golden Setup Banner ───────────────────────────
+        BestConditionBanner(
+            currentSymbol = market.symbol,
+            bestPick = pairScan.bestPick,
+            sweeping = pairScan.sweeping,
+            onSelectBest = { symbol -> viewModel.selectChartSymbol(symbol) },
+            onScan = { viewModel.scanPairs() },
+        )
+
+        // ── Symbol Search & Selector (50+ Assets) ──────────────────────────
         SymbolSearchRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
 
         // ── 5 Modular Strategy Selector ────────────────────────────────────
@@ -97,7 +103,10 @@ fun ChartScreen(
 
         // ── Timeframe selector ─────────────────────────────────────────────
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).horizontalScroll(rememberScrollState()),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -115,10 +124,16 @@ fun ChartScreen(
             }
         }
 
-        // ── Unified TradingView Live Streaming Chart (Pure Candles + Volume) ──
+        // ── Unified TradingView Live Streaming Chart (With Ichimoku Studies) ──
         SectionCard(
             title = "چارت آنلاین و زنده · ${market.symbol} (${market.interval.label})",
-            subtitle = "جریان آنلاین داده‌ها، حجم و کندل‌های زنده از منبع رسمی TradingView",
+            subtitle = "جریان آنلاین داده‌ها، حجم و اندیکاتور ایچیموکو از مرجع رسمی TradingView",
+            trailing = {
+                Pill(
+                    text = market.feed.mode.label,
+                    color = if (market.feed.mode == com.aurum.edge.core.FeedMode.LIVE) AurumColors.Green else AurumColors.Gold,
+                )
+            },
         ) {
             Box(Modifier.fillMaxWidth().height(520.dp)) {
                 TradingViewWidget(
@@ -129,38 +144,189 @@ fun ChartScreen(
             }
         }
 
+        // ── Strategy Bar & Action Levels ───────────────────────────────────
         StrategyBar(viewModel, market)
 
+        // ── Best Conditions Status & Confluence Checklist ──────────────────
+        ConditionsChecklistCard(market)
+
+        // ── Entry Score Progress ───────────────────────────────────────────
         EntryScoreCard(market)
     }
 }
 
+/**
+ * Prominent banner showing the best opportunity across 50+ scanned markets
+ * and allowing one-click selection to bring it immediately onto TradingView.
+ */
 @Composable
-private fun EngineOverlay(market: MarketState, openTrade: PaperTrade?, modifier: Modifier = Modifier) {
-    val setting = SignalEngine.ichimokuSetting(market.interval)
-    val signal = market.signal
-    val action = signal?.action ?: SignalAction.NO_TRADE
-    val color = when (action) {
-        SignalAction.BUY -> AurumColors.Green
-        SignalAction.SELL -> AurumColors.Red
-        SignalAction.NO_TRADE -> AurumColors.Gold
-    }
-    Row(
-        modifier = modifier
-            .background(AurumColors.SurfaceAlt, RoundedCornerShape(8.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+private fun BestConditionBanner(
+    currentSymbol: String,
+    bestPick: PairScanStatus?,
+    sweeping: Boolean,
+    onSelectBest: (String) -> Unit,
+    onScan: () -> Unit,
+) {
+    SectionCard(
+        title = "✨ برترین شرایط بازار (اسکنر همگانی)",
+        subtitle = if (bestPick != null) "بالاترین شواهد تاییدشده و بهترین نسبت ریسک به ریوارد" else "پایش همزمان ۵۰ نماد برای کشف موقعیت‌های طلایی",
+        trailing = {
+            if (sweeping) {
+                Pill("در حال اسکن...", AurumColors.Gold)
+            } else if (bestPick != null) {
+                val action = bestPick.action ?: SignalAction.NO_TRADE
+                val tone = when (action) {
+                    SignalAction.BUY -> AurumColors.Green
+                    SignalAction.SELL -> AurumColors.Red
+                    else -> AurumColors.Gold
+                }
+                Pill(
+                    when (action) {
+                        SignalAction.BUY -> "خرید ۹۵٪"
+                        SignalAction.SELL -> "فروش ۹۵٪"
+                        else -> "کاندیدا"
+                    },
+                    tone,
+                )
+            }
+        },
     ) {
-        Column {
-            Text("ایچیموکو (${setting.tenkan}/${setting.kijun}/${setting.spanB}) · وضعیت موتور: ${action.name}",
-                style = MaterialTheme.typography.labelMedium, color = color, fontWeight = FontWeight.Bold)
-            if (signal?.isActionable == true) {
-                Text("ورود: ${formatPrice(signal.entry)} · حد ضرر: ${formatPrice(signal.stopLoss)} · حد سود: ${formatPrice(signal.takeProfit)}",
-                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+        if (bestPick != null) {
+            val isCurrent = currentSymbol == bestPick.symbol
+            val action = bestPick.action ?: SignalAction.NO_TRADE
+            val color = when (action) {
+                SignalAction.BUY -> AurumColors.Green
+                SignalAction.SELL -> AurumColors.Red
+                else -> AurumColors.Gold
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = bestPick.symbol,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = AurumColors.Gold,
+                        )
+                        Pill(
+                            text = "${bestPick.confidence?.toInt() ?: 95}٪ اطمینان",
+                            color = color,
+                        )
+                        bestPick.riskReward?.let { rr ->
+                            Pill("R:R 1:${String.format(java.util.Locale.US, "%.1f", rr)}", AurumColors.Cyan)
+                        }
+                    }
+                    Text(
+                        text = bestPick.detail,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AurumColors.TextSecondary,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (isCurrent) {
+                    Pill(
+                        text = "✓ چارت روی بهترین شرایط تنظیم است",
+                        color = AurumColors.Green,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    Button(
+                        onClick = { onSelectBest(bestPick.symbol) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AurumColors.Gold,
+                            contentColor = AndroidColor.BLACK.let { androidx.compose.ui.graphics.Color(it) },
+                        ),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("انتخاب ${bestPick.symbol} روی چارت", fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = onScan,
+                    enabled = !sweeping,
+                ) {
+                    Text(if (sweeping) "در حال اسکن..." else "اسکن مجدد ۵۰ نماد")
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "برای یافتن بهترین ستاپ معاملاتی از میان تمامی نمادها، دکمهٔ اسکن را بزنید.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = AurumColors.TextSecondary,
+                    modifier = Modifier.weight(1f),
+                )
+                Button(
+                    onClick = onScan,
+                    enabled = !sweeping,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AurumColors.Gold,
+                        contentColor = AndroidColor.BLACK.let { androidx.compose.ui.graphics.Color(it) },
+                    ),
+                    modifier = Modifier.padding(start = 8.dp),
+                ) {
+                    Text(if (sweeping) "در حال اسکن..." else "اسکن ۵۰ نماد")
+                }
             }
         }
-        Pill("امتیاز ${(signal?.confidence ?: 0.0).toInt()}%", color)
+    }
+}
+
+/**
+ * Detailed status of all 8 Ichimoku & Super Plus technical conditions for the current chart symbol.
+ */
+@Composable
+private fun ConditionsChecklistCard(market: MarketState) {
+    val signal = market.signal
+    val confluence = signal?.confluence.orEmpty()
+    var expanded by rememberSaveable { mutableStateOf(true) }
+
+    SectionCard(
+        title = "وضعیت شرایط استراتژی و شواهد (${market.symbol})",
+        subtitle = "بررسی زندهٔ تمامی فیلترها، کراس تنکان/کیجون، ابر کومو، چیکواسپن و تراز چندتایم‌فریم",
+        trailing = {
+            val confirmedCount = confluence.count { it.ok }
+            val totalCount = confluence.size
+            if (totalCount > 0) {
+                Pill(
+                    text = "$confirmedCount از $totalCount تایید",
+                    color = if (confirmedCount == totalCount) AurumColors.Green else AurumColors.Gold,
+                )
+            }
+        },
+    ) {
+        if (confluence.isEmpty()) {
+            Text(
+                "در حال محاسبه و بررسی شواهد تکنیکال این نماد...",
+                style = MaterialTheme.typography.bodySmall,
+                color = AurumColors.TextMuted,
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                confluence.forEach { item ->
+                    ConfluenceRow(item)
+                }
+            }
+        }
     }
 }
 
@@ -275,7 +441,8 @@ private fun tradingViewHtml(tvSymbol: String, tvInterval: String): String {
     val iframeUrl = "https://s.tradingview.com/widgetembed/?frameElementId=tradingview_chart" +
         "&symbol=$encoded&interval=$tvInterval&hidesidetoolbar=0&symboledit=1" +
         "&saveimage=0&toolbarbg=0b0e13" +
-        "&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1&locale=en"
+        "&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1&locale=en" +
+        "&studies=%5B%22STD%3BIchimoku%25Cloud%22%5D"
 
     return """
         <!DOCTYPE html>
@@ -310,7 +477,9 @@ private fun tradingViewHtml(tvSymbol: String, tvInterval: String): String {
                     "hide_side_toolbar": false,
                     "allow_symbol_change": true,
                     "save_image": false,
-                    "studies": [],
+                    "studies": [
+                      "STD;Ichimoku%Cloud"
+                    ],
                     "container_id": "tv_chart_container"
                   });
                   return;
@@ -383,13 +552,15 @@ fun StrategySelectorRow(
 @Composable
 internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
-    var group by rememberSaveable { mutableStateOf("همه") }
     var open by rememberSaveable { mutableStateOf(false) }
+    var group by rememberSaveable { mutableStateOf("همه") }
 
     val allSymbols = remember { WatchCatalog.scannerSymbols }
-    val commodities = remember { listOf("XAU/USD", "XAG/USD", "USOIL", "UKOIL", "COPPER") }
+    val commodities = remember { listOf("XAU/USD", "XAG/USD", "BRENT", "WTI", "NATGAS", "COPPER") }
+    val forex = remember {
+        listOf("EUR/USD", "GBP/USD", "USD/JPY", "AUD/USD", "USD/CAD", "NZD/USD", "USD/CHF", "EUR/GBP", "EUR/JPY", "GBP/JPY")
+    }
     val stocks = remember { listOf("AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META", "AMD", "NFLX", "INTC", "SPY", "QQQ", "PLTR", "COIN", "BABA") }
-    val forex = remember { allSymbols.filter { !CryptoCatalog.isCrypto(it) && it !in commodities && it !in stocks } }
     val cryptoList = remember { CryptoCatalog.symbols }
 
     val activeList = remember(group, query) {
