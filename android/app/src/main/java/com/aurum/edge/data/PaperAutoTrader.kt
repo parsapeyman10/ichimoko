@@ -17,6 +17,7 @@ class PaperAutoTrader(
     private val settings: SettingsStore,
     private val news: NewsRepository,
     private val journal: JournalStore,
+    private val advisor: TraderAdvisor? = null,
 ) {
     private val _status = MutableStateFlow("فعال")
     val status: StateFlow<String> = _status.asStateFlow()
@@ -69,15 +70,53 @@ class PaperAutoTrader(
         } else {
             IctEntryRules.approvedEvidence(current)
         }
+
+        // ── برنامه ریزی توسط AI یا استفاده از مقادیر فنی پایه ──
+        val (finalSignal, entryNote) = if (recentSettings.hasClientNewsAi && advisor != null) {
+            val aiPlan = runCatching {
+                advisor.planTradeWithAi(signal, current)
+            }.getOrNull()
+            if (aiPlan != null) {
+                Pair(
+                    signal.copy(
+                        entry = aiPlan.entry,
+                        stopLoss = aiPlan.stopLoss,
+                        takeProfit = aiPlan.takeProfit,
+                        riskReward = aiPlan.riskReward,
+                        confidence = aiPlan.confidence,
+                    ),
+                    "طرح ورود توسط هوش مصنوعی (${aiPlan.model}) · نسبت ریسک به ریوارد ۱:${String.format(java.util.Locale.US, "%.1f", aiPlan.riskReward)} · ${aiPlan.summary}"
+                )
+            } else {
+                Pair(
+                    signal,
+                    "بدون هوش مصنوعی ترید شده (خطای ارتباط با مدل AI)؛ مقادیر طبق محاسبات فنی ایچیموکو (SL کیجون ± 0.5 ATR و TP ۱:۱.۸) تنظیم شدند."
+                )
+            }
+        } else {
+            Pair(
+                signal,
+                "بدون هوش مصنوعی ترید شده؛ مقادیر طبق محاسبات فنی ایچیموکو (SL کیجون ± 0.5 ATR و TP با نسبت ۱:۱.۸) تنظیم شده است."
+            )
+        }
+
         return try {
-            val trade = journal.open(signal, current.symbol, current.lastPrice!!,
-                recentSettings.accountBalance, recentSettings.riskPercent,
-                mtf = MtfSnapshotRecord.from(mtf), automatic = true,
-                newsEvidence = newsRecord, priceAction = ict)
+            val trade = journal.open(
+                signal = finalSignal,
+                symbol = current.symbol,
+                price = finalSignal.entry ?: current.lastPrice!!,
+                balance = recentSettings.accountBalance,
+                riskPercent = recentSettings.riskPercent,
+                mtf = MtfSnapshotRecord.from(mtf),
+                automatic = true,
+                newsEvidence = newsRecord,
+                priceAction = ict,
+                customNote = entryNote,
+            )
             val conditions = trade.entryConditions.take(8).joinToString("، ") {
                 it.name.substringAfter('·').trim()
             }
-            _status.value = "کاغذی ثبت شد: ${trade.symbol} ${trade.action} (${signal.confidence.toInt()}٪) · شروع: $conditions"
+            _status.value = "کاغذی ثبت شد: ${trade.symbol} ${trade.action} (${finalSignal.confidence.toInt()}٪) · $entryNote"
             trade
         } catch (e: Exception) {
             _status.value = "ورود خودکار کاغذی انجام نشد: ${e.message ?: "ژورنال یا ریسک نامعتبر است"}"

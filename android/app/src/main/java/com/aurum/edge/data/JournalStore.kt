@@ -140,6 +140,7 @@ class JournalStore(context: Context, private val file: File = File(context.files
         automatic: Boolean = false,
         newsEvidence: PaperNewsRecord? = null,
         priceAction: IctPriceActionRecord? = null,
+        customNote: String? = null,
     ): PaperTrade {
         val technicalConditions = signal.confluence.filterNot { it.name == NewsConfluence.NEWS_LABEL }
         val isLegacyEight = technicalConditions.size == 8
@@ -175,6 +176,7 @@ class JournalStore(context: Context, private val file: File = File(context.files
             positionOz = draft.quantity,
             positionUnit = draft.unit,
             note = when {
+                customNote != null -> customNote
                 manual -> "ورود دستی کاغذی"
                 automatic -> "شروع خودکار: $startConditions"
                 else -> "شروع: $startConditions"

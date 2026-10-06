@@ -158,6 +158,15 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.TextMuted,
                             )
+                            trade.note.takeIf { it.isNotBlank() }?.let { note ->
+                                val isAi = note.contains("هوش مصنوعی") && !note.contains("بدون هوش مصنوعی")
+                                Text(
+                                    text = if (isAi) "✦ $note" else "ℹ $note",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isAi) AurumColors.Gold else AurumColors.TextSecondary,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
                             EntryConditionsLine(trade.entryConditions)
                             trade.newsEvidence?.let { verdict ->
                                 Text("★ رویداد/خبر همراه: ${verdict.model} · ${verdict.direction} · ${verdict.evidence.joinToString { it.source }}" +
@@ -349,6 +358,15 @@ private fun TradeRow(trade: PaperTrade) {
             )
             Text("${trade.exitReason ?: "—"} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            trade.note.takeIf { it.isNotBlank() }?.let { note ->
+                val isAi = note.contains("هوش مصنوعی") && !note.contains("بدون هوش مصنوعی")
+                Text(
+                    text = if (isAi) "✦ $note" else "ℹ $note",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isAi) AurumColors.Gold else AurumColors.TextSecondary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
             EntryConditionsLine(trade.entryConditions)
             trade.newsEvidence?.let { ai ->
                 Text("★ رویداد/خبر همراه: ${ai.model} · ${formatDateTime(ai.checkedAt)} · ${ai.evidence.joinToString { it.source }}" +

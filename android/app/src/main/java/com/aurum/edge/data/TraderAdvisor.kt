@@ -45,6 +45,17 @@ data class SignalTuningPlan(
     val generatedAt: Long,
 )
 
+data class AiTradePlan(
+    val entry: Double,
+    val stopLoss: Double,
+    val takeProfit: Double,
+    val riskReward: Double,
+    val confidence: Double,
+    val summary: String,
+    val model: String,
+    val generatedAt: Long,
+)
+
 data class TraderOpinionState(
     val opinion: TraderOpinion? = null,
     val loading: Boolean = false,
@@ -170,6 +181,72 @@ class TraderAdvisor(
             config.newsAiModel, system, snapshot, maxTokens = 900, format = config.newsAiFormatNormalized)
         return parseTuningPlan(output, config.newsAiModel, now)
             ?: throw IllegalStateException("پاسخ خودتحلیلی AI قابل‌راستی‌آزمایی نبود")
+    }
+
+    /**
+     * AI-based dynamic trade planning: determines optimal entry, structural stop loss,
+     * and take profit target for a verified technical signal.
+     */
+    suspend fun planTradeWithAi(signal: Signal, marketState: MarketState): AiTradePlan {
+        val config = settings.read()
+        if (!config.hasClientNewsAi) throw IllegalStateException("برای تعیین مقادیر توسط AI، کلید/مدل در تنظیمات وارد نشده است")
+        val now = System.currentTimeMillis()
+        val symbol = marketState.symbol
+        val defaultStop = signal.stopLoss ?: throw IllegalArgumentException("حد ضرر پایه وجود ندارد")
+        val defaultTarget = signal.takeProfit ?: throw IllegalArgumentException("حد سود پایه وجود ندارد")
+        val currentPrice = marketState.lastPrice ?: signal.entry ?: throw IllegalArgumentException("قیمت لحظه‌ای وجود ندارد")
+        val isBuy = signal.action == com.aurum.edge.core.SignalAction.BUY
+
+        val snapshot = buildString {
+            appendLine("Market setup for AI Trade Planning:")
+            appendLine("symbol=$symbol action=${signal.action} interval=${marketState.interval.label}")
+            appendLine("current_price=$currentPrice")
+            appendLine("default_technical_plan: entry=${signal.entry} stop_loss=$defaultStop take_profit=$defaultTarget rr=${signal.riskReward ?: 1.8} confidence=${signal.confidence}")
+            appendLine("recent_conditions:")
+            signal.confluence.forEach {
+                appendLine("  ${it.name}: ${it.detail} (status=${it.status})")
+            }
+        }
+
+        val system = "You are the AI trading execution optimizer for an educational trading app. " +
+            "Given a valid technical trade setup, return the optimal entry, structural stop loss, and take profit target. " +
+            "Rules: " +
+            "1. For BUY: stop_loss MUST be strictly lower than entry, and take_profit MUST be strictly higher than entry. " +
+            "2. For SELL: stop_loss MUST be strictly higher than entry, and take_profit MUST be strictly lower than entry. " +
+            "3. The Reward-to-Risk ratio (TP distance / SL distance) MUST be between 1.5 and 3.5. " +
+            "4. Numbers must be realistic and close to the market price. " +
+            "Return JSON only: {\"entry\": number, \"stop_loss\": number, \"take_profit\": number, \"confidence\": number 70..99, \"summary\": Persian string 10..180 chars describing why these levels were chosen}."
+
+        val output = AiProvider.completeJson(http, config.newsAiBaseUrl, config.newsAiApiKey,
+            config.newsAiModel, system, snapshot, maxTokens = 400, format = config.newsAiFormatNormalized)
+
+        fun num(key: String): Double? = ((output[key] as? JsonPrimitive)?.contentOrNull)?.toDoubleOrNull()
+        val entry = num("entry") ?: currentPrice
+        val sl = num("stop_loss") ?: defaultStop
+        val tp = num("take_profit") ?: defaultTarget
+        val conf = num("confidence") ?: signal.confidence
+        val summary = (output["summary"] as? JsonPrimitive)?.contentOrNull?.trim()
+            ?: "تنظیم سطوح معاملاتی بر اساس ساختار جریان نقدینگی و مومنتوم"
+
+        val risk = kotlin.math.abs(entry - sl)
+        val reward = kotlin.math.abs(tp - entry)
+        val rr = if (risk > 0) reward / risk else 1.8
+        val validDirection = if (isBuy) sl < entry && tp > entry else sl > entry && tp < entry
+
+        if (!validDirection || risk <= 0 || reward <= 0 || rr < 1.2 || !entry.isFinite() || !sl.isFinite() || !tp.isFinite()) {
+            throw IllegalStateException("سطوح بازگشتی از مدل هوش مصنوعی دارای نسبت ریسک/ریوارد نامعتبر بودند")
+        }
+
+        return AiTradePlan(
+            entry = entry,
+            stopLoss = sl,
+            takeProfit = tp,
+            riskReward = rr,
+            confidence = conf.coerceIn(70.0, 99.0),
+            summary = summary,
+            model = config.newsAiModel,
+            generatedAt = now,
+        )
     }
 
     /**
