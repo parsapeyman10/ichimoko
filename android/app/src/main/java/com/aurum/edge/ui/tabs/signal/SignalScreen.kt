@@ -61,6 +61,11 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
     ) {
         SymbolPickerRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
 
+        StrategySelectorRow(
+            activeStrategy = settings.activeStrategy,
+            onSelect = { viewModel.setActiveStrategy(it) },
+        )
+
         // ── ۱. بهترین فرصت معاملاتی مطلق (Best Pick from 50+ Universe) ──
         scanState.bestPick?.let { best ->
             BestPickCard(best = best, onTrade = { viewModel.selectAndTradeBestPick() })

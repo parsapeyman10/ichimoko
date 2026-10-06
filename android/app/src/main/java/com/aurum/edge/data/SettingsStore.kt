@@ -41,6 +41,7 @@ class SettingsStore(context: Context) {
         val storedNewsAiKey = prefs.getString(KEY_NEWS_AI_KEY, null)?.trim().orEmpty()
         val storedNewsAiUrl = prefs.getString(KEY_NEWS_AI_URL, null)?.trim().orEmpty()
         val storedNewsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, null)?.trim().orEmpty()
+        val storedStrategy = com.aurum.edge.core.StrategyKind.fromId(prefs.getString(KEY_ACTIVE_STRATEGY, "ICHIMOKU"))
         return AppSettings(
         apiKey = storedApiKey?.takeIf { it.isNotBlank() }
             ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY.trim(),
@@ -66,6 +67,7 @@ class SettingsStore(context: Context) {
         newsAiModel = storedNewsAiModel,
         newsAiFormat = prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" },
         signalProfile = profile,
+        activeStrategy = storedStrategy,
     )
     }
 
@@ -187,6 +189,7 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_SIGNAL_STRUCTURE_RISK, next.signalProfile.structureRiskFilter)
             .putBoolean(KEY_SIGNAL_COOLDOWN, next.signalProfile.cooldownFilter)
             .putBoolean(KEY_SIGNAL_CHIKOU, next.signalProfile.chikouConfirmation)
+            .putString(KEY_ACTIVE_STRATEGY, next.activeStrategy.id)
             .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
             .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
             .putBoolean(KEY_AUTO_DOWNLOAD_UPDATES, next.autoDownloadUpdates)
@@ -233,5 +236,6 @@ class SettingsStore(context: Context) {
         private const val KEY_SIGNAL_STRUCTURE_RISK = "signal_structure_risk_filter"
         private const val KEY_SIGNAL_COOLDOWN = "signal_cooldown_filter"
         private const val KEY_SIGNAL_CHIKOU = "signal_chikou_confirmation"
+        private const val KEY_ACTIVE_STRATEGY = "active_strategy"
     }
 }

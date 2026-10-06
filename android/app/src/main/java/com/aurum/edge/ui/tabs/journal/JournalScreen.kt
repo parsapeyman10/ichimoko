@@ -160,7 +160,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                             )
                             EntryConditionsLine(trade.entryConditions)
                             trade.newsEvidence?.let { verdict ->
-                                Text("خبر ${verdict.model} · ${verdict.direction} · ${verdict.evidence.joinToString { it.source }}" +
+                                Text("★ رویداد/خبر همراه: ${verdict.model} · ${verdict.direction} · ${verdict.evidence.joinToString { it.source }}" +
                                     " · تقویم ${formatDateTime(verdict.calendarCheckedAt)}",
                                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
                             }
@@ -351,7 +351,7 @@ private fun TradeRow(trade: PaperTrade) {
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             EntryConditionsLine(trade.entryConditions)
             trade.newsEvidence?.let { ai ->
-                Text("خبر ${ai.model} · ${formatDateTime(ai.checkedAt)} · ${ai.evidence.joinToString { it.source }}" +
+                Text("★ رویداد/خبر همراه: ${ai.model} · ${formatDateTime(ai.checkedAt)} · ${ai.evidence.joinToString { it.source }}" +
                     " · بررسی تقویم ${formatDateTime(ai.calendarCheckedAt)}",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
                 ai.evidence.forEach { evidence ->

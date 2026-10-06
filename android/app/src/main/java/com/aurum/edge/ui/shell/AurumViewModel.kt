@@ -376,6 +376,17 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun saveMinConfidence(value: Double) = container.settingsStore.update { it.copy(minConfidence = value.coerceIn(72.0, 95.0)) }
 
+    fun setActiveStrategy(strategy: com.aurum.edge.core.StrategyKind) {
+        container.settingsStore.update {
+            it.copy(
+                activeStrategy = strategy,
+                signalProfile = SignalProfile.forStrategy(strategy),
+            )
+        }
+        container.market.restart()
+        scanPairs()
+    }
+
     fun setSignalMomentumVolume(enabled: Boolean) = updateSignalProfile("فیلتر مومنتوم/حجم", enabled) {
         it.copy(momentumVolume = enabled)
     }

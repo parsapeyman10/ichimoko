@@ -47,6 +47,7 @@ import com.aurum.edge.core.Candle
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.core.StrategyKind
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.engine.SignalEngine
 import com.aurum.edge.data.WatchCatalog
@@ -70,6 +71,7 @@ fun ChartScreen(
     onOpenJournal: () -> Unit,
 ) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
     val openTrade = trades.firstOrNull { it.symbol == market.symbol && it.isOpen }
 
     val displayCandles = remember(market.candles, market.lastPrice, market.interval) {
@@ -86,6 +88,12 @@ fun ChartScreen(
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         SymbolSearchRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
+
+        // ── 5 Modular Strategy Selector ────────────────────────────────────
+        StrategySelectorRow(
+            activeStrategy = settings.activeStrategy,
+            onSelect = { viewModel.setActiveStrategy(it) },
+        )
 
         // ── Timeframe selector ─────────────────────────────────────────────
         Row(
@@ -332,6 +340,40 @@ private fun tradingViewHtml(tvSymbol: String, tvInterval: String): String {
         </body>
         </html>
     """.trimIndent()
+}
+
+@Composable
+fun StrategySelectorRow(
+    activeStrategy: StrategyKind,
+    onSelect: (StrategyKind) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            StrategyKind.entries.forEach { strategy ->
+                FilterChip(
+                    selected = activeStrategy == strategy,
+                    onClick = { onSelect(strategy) },
+                    label = { Text(strategy.label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AurumColors.Cyan.copy(alpha = 0.22f),
+                        selectedLabelColor = AurumColors.Cyan,
+                        labelColor = AurumColors.TextSecondary,
+                    ),
+                )
+            }
+        }
+        Text(
+            activeStrategy.description,
+            style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 2.dp, start = 4.dp),
+        )
+    }
 }
 
 /**
