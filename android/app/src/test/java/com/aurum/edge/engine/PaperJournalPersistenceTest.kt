@@ -16,6 +16,7 @@ import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.MarketState
+import com.aurum.edge.data.SettingsStore
 import com.aurum.edge.data.parseWebNews
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
