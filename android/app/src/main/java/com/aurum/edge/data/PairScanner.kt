@@ -294,12 +294,15 @@ class PairScanner(
 
             val item = runCatching {
                 val mtfRec = mtf?.let { MtfSnapshotRecord.from(it) } ?: MtfSnapshotRecord(
-                    baseInterval = market.interval,
-                    barTime = combined.barTime,
-                    evaluatedAt = System.currentTimeMillis(),
+                    baseInterval = market.interval.label,
+                    bias = "NEUTRAL",
+                    alignment = 1.0,
+                    buyCount = 0,
+                    sellCount = 0,
+                    neutralCount = 0,
                     veto = false,
-                    vetoReason = null,
-                    frames = emptyList(),
+                    advisory = "تایید",
+                    barTime = combined.barTime,
                 )
                 PaperOpportunity.from(combined, symbol, price ?: combined.entry ?: 0.0, mtfRec, evidence, ict)
             }.getOrNull()
