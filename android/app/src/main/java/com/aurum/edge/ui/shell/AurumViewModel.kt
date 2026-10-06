@@ -321,8 +321,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
      */
     fun selectChartSymbol(symbol: String) {
         if (symbol == settings.value.symbol) return
-        if (symbol !in WatchCatalog.chartSymbols) {
-            _toast.value = "این نسخه فقط طلا و جفت‌ارزهای اصلی دیده‌بان را چارت می‌کند"
+        val valid = symbol in WatchCatalog.chartSymbols ||
+            symbol in WatchCatalog.scannerSymbols ||
+            CryptoCatalog.isCrypto(symbol)
+        if (!valid) {
+            _toast.value = "نماد $symbol در کاتالوگ نمادها پیدا نشد"
             return
         }
         viewModelScope.launch {

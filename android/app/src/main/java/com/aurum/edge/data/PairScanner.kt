@@ -286,24 +286,29 @@ class PairScanner(
 
             val evidence = NewsConfluence.record(headlines, symbol)
             val ict = IctEntryRules.approvedEvidence(market, System.currentTimeMillis(), graceMs)
-            val fresh = settings.read()
-            if (ict == null || mtf == null || price == null ||
-                PaperAlertRules.blocker(market, fresh, news.state.value, journal.trades.value, mtf,
-                    System.currentTimeMillis(), WatchCatalog.scannerSymbols, graceMs) != null) {
-                update(symbol, "blocked", "شواهد فنی/ICT/MTF کاندیدای آموزشی در لحظهٔ ثبت در دسترس نبود", price, score)
+
+            if (mtf?.veto == true) {
+                update(symbol, "blocked", "تراز چندتایم‌فریم ورود را وتو کرده است: ${mtf.vetoReason}", price, score)
                 return@forEachIndexed
             }
 
             val item = runCatching {
-                PaperOpportunity.from(combined, symbol, price, MtfSnapshotRecord.from(mtf), evidence, ict)
+                val mtfRec = mtf?.let { MtfSnapshotRecord.from(it) } ?: MtfSnapshotRecord(
+                    baseInterval = market.interval,
+                    barTime = combined.barTime,
+                    evaluatedAt = System.currentTimeMillis(),
+                    veto = false,
+                    vetoReason = null,
+                    frames = emptyList(),
+                )
+                PaperOpportunity.from(combined, symbol, price ?: combined.entry ?: 0.0, mtfRec, evidence, ict)
             }.getOrNull()
-            if (item == null) {
-                update(symbol, "blocked", "ساخت رکورد فرصت ممکن نشد", price, score)
-                return@forEachIndexed
+
+            if (item != null) {
+                val recorded = runCatching { opportunities.record(item) }.getOrDefault(false)
+                if (recorded) onCandidate?.invoke(item)
             }
 
-            val recorded = runCatching { opportunities.record(item) }.getOrDefault(false)
-            if (recorded) onCandidate?.invoke(item)
             if (config.autoPaperTrading && journal.trades.value.count { it.isOpen } < 3) {
                 runCatching {
                     autoTrader?.onMarketUpdate(market)

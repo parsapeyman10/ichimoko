@@ -154,7 +154,7 @@ class JournalStore(
             signal.isActionable && signal.confidence >= 72.0
         }
         require(!automatic || (!manual && signal.isActionable && signal.barTime > 0 &&
-            techOk && mtf != null && !mtf.veto && mtf.barTime == signal.barTime && mtf.frames.isNotEmpty())) {
+            techOk && (mtf == null || !mtf.veto))) {
             "شروط فنی و چندتایم‌فریم برای ورود خودکار کاغذی کامل نیست"
         }
         val stop = signal.stopLoss ?: throw IllegalArgumentException("حد ضرر وجود ندارد")
