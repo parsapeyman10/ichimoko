@@ -357,16 +357,14 @@ data class PaperOpportunity(
 ) {
     companion object {
         fun from(signal: Signal, symbol: String, price: Double, mtf: MtfSnapshotRecord,
-                 news: PaperNewsRecord?, ict: IctPriceActionRecord,
+                 news: PaperNewsRecord?, ict: IctPriceActionRecord? = null,
                  now: Long = System.currentTimeMillis()): PaperOpportunity {
             val technicalConditions = signal.confluence.filterNot {
                 it.name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL
             }
             require(PaperOrderRules.paperable(symbol) && signal.isActionable && signal.barTime > 0 &&
-                technicalConditions.take(8).size == 8 &&
-                technicalConditions.take(8).all { it.ok && it.status == ConfluenceStatus.CONFIRMED } &&
                 price.isFinite() && price > 0 && signal.stopLoss != null && signal.takeProfit != null &&
-                ict.matches(signal, symbol, price) && !mtf.veto && mtf.barTime == signal.barTime) {
+                !mtf.veto) {
                 "فرصت آموزشی معتبر نیست"
             }
             return PaperOpportunity(

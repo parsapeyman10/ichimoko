@@ -14,6 +14,7 @@ import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.HistoryPolicy
+import com.aurum.edge.data.CryptoCatalog
 import com.aurum.edge.data.SourceComparison
 import com.aurum.edge.data.VerificationStatus
 import com.aurum.edge.data.WatchCatalog
