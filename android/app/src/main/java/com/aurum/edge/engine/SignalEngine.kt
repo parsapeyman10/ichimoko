@@ -885,7 +885,6 @@ object SignalEngine {
             barTime = lastBar.time,
         )
     }
-    }
 
     private data class GuardResult(val ok: Boolean, val detail: String, val blocker: String)
 
