@@ -239,10 +239,13 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit) {
         }
 
         Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile("سرمایهٔ فرضی", "$" + settings.accountBalance.toInt(), modifier = Modifier.weight(1f))
+            val balanceStr = String.format(java.util.Locale.US, "$%.2f", settings.accountBalance).let {
+                if (it.endsWith(".00")) it.substringBefore(".00") else it
+            }
+            StatTile("موجودی حساب", balanceStr, modifier = Modifier.weight(1f))
             StatTile(
                 "سود/ضرر",
-                (if (stats.netPnl >= 0) "+" else "") + String.format("%.2f", stats.netPnl) + "$",
+                (if (stats.netPnl >= 0) "+" else "") + String.format(java.util.Locale.US, "%.2f", stats.netPnl) + "$",
                 if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red,
                 Modifier.weight(1f),
             )

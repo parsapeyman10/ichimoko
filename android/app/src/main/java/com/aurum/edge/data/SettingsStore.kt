@@ -161,6 +161,19 @@ class SettingsStore(context: Context) {
         return false
     }
 
+    /**
+     * Real-time continuous balance adjustment upon settled paper trade (profit or loss).
+     * Ensures position sizing and compounding dynamically track actual account equity.
+     */
+    @Synchronized
+    fun adjustBalance(deltaUsd: Double) {
+        if (!deltaUsd.isFinite() || deltaUsd == 0.0) return
+        val current = read()
+        val updated = kotlin.math.round((current.accountBalance + deltaUsd) * 100.0) / 100.0
+        val finalBalance = maxOf(10.0, updated)
+        update { it.copy(accountBalance = finalBalance) }
+    }
+
     @Synchronized
     fun update(transform: (AppSettings) -> AppSettings) {
         val next = transform(_settings.value)

@@ -57,7 +57,7 @@ class AppContainer(context: Context) {
 
     val settingsStore = SettingsStore(appContext)
     val candleCache = CandleCache(appContext)
-    val journalStore = JournalStore(appContext)
+    val journalStore = JournalStore(appContext, settingsStore = settingsStore)
     val replayJournalStore = ReplayJournalStore(appContext)
     val opportunityStore = PaperOpportunityStore(appContext)
     val client = TwelveDataClient()

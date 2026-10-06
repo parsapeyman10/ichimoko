@@ -188,6 +188,19 @@ class PaperJournalPersistenceTest {
         assertEquals(closed, JournalStore(context, file).also { it.load() }.trades.value.single())
     }
 
+    @Test fun journalSettlementAdjustsSettingsBalanceContinuously() = runBlocking {
+        val file = journalFile()
+        val settingsStore = SettingsStore(context)
+        settingsStore.update { it.copy(accountBalance = 1000.0) }
+        val store = JournalStore(context, file, settingsStore = settingsStore)
+        store.load()
+        val opened = store.open(signal, "XAU/USD", 3000.0, 1000.0, 1.0, manual = true)
+        // Close with a 10 dollar loss
+        store.close(opened.id, 2990.0, "بستن دستی با ضرر")
+        val currentBal = settingsStore.read().accountBalance
+        assertTrue("balance should decrease after a loss (was 1000, now $currentBal)", currentBal < 1000.0)
+    }
+
     @Test fun damagedOnDiskJournalIsKeptAndCannotBeOverwrittenByAnEmptyList() = runBlocking {
         val file = journalFile()
         val corrupt = "{invalid,do not erase}"

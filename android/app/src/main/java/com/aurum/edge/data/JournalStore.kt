@@ -34,7 +34,11 @@ import java.util.UUID
  * an open position is marked to market with the last real price, and closes only when a
  * real price touches the stop or the target.
  */
-class JournalStore(context: Context, private val file: File = File(context.filesDir, "paper_journal.json")) {
+class JournalStore(
+    context: Context,
+    private val file: File = File(context.filesDir, "paper_journal.json"),
+    private val settingsStore: SettingsStore? = null,
+) {
 
     private val reportsFile = File(context.filesDir, "walk_forward_reports.json")
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -232,6 +236,7 @@ class JournalStore(context: Context, private val file: File = File(context.files
         val current = _trades.value
         if (current.none { it.isOpen }) return@withLock
         var changed = false
+        var settledPnlDelta = 0.0
         val updated = current.map { t ->
             // A different symbol or a bar opened before this position must never settle it.
             // In particular, caching/replaying historical bars cannot close a new position.
@@ -254,16 +259,23 @@ class JournalStore(context: Context, private val file: File = File(context.files
             } else {
                 t.entry - exit
             }
+            val pnl = kotlin.math.round(
+                PaperOrderRules.quotePnlToUsd(t.symbol, pnlPerOz * t.positionOz, exit) * 100.0) / 100.0
+            settledPnlDelta += pnl
             changed = true
             t.copy(
                 closedAt = observedAt,
                 exitPrice = exit,
                 exitReason = if (hitStop) "حد ضرر (قیمت واقعی)" else "حد سود (قیمت واقعی)",
-                pnlUsd = kotlin.math.round(
-                    PaperOrderRules.quotePnlToUsd(t.symbol, pnlPerOz * t.positionOz, exit) * 100.0) / 100.0,
+                pnlUsd = pnl,
             )
         }
-        if (changed) persist(updated)
+        if (changed) {
+            persist(updated)
+            if (settledPnlDelta != 0.0) {
+                settingsStore?.adjustBalance(settledPnlDelta)
+            }
+        }
     }
 
     suspend fun close(tradeId: String, price: Double, reason: String): PaperTrade = mutex.withLock {
@@ -271,12 +283,16 @@ class JournalStore(context: Context, private val file: File = File(context.files
         val trade = _trades.value.singleOrNull { it.id == tradeId && it.isOpen }
             ?: throw IllegalArgumentException("پوزیشن باز در ژورنال پیدا نشد یا قبلاً بسته شده است")
         val pnlPerOz = if (trade.action == SignalAction.BUY) price - trade.entry else trade.entry - price
+        val pnl = kotlin.math.round(
+            PaperOrderRules.quotePnlToUsd(trade.symbol, pnlPerOz * trade.positionOz, price) * 100.0) / 100.0
         val closed = trade.copy(
             closedAt = System.currentTimeMillis(), exitPrice = price, exitReason = reason,
-            pnlUsd = kotlin.math.round(
-                PaperOrderRules.quotePnlToUsd(trade.symbol, pnlPerOz * trade.positionOz, price) * 100.0) / 100.0,
+            pnlUsd = pnl,
         )
         persist(_trades.value.map { if (it.id == tradeId) closed else it })
+        if (pnl != 0.0) {
+            settingsStore?.adjustBalance(pnl)
+        }
         closed
     }
 
