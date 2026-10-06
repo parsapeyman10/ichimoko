@@ -653,9 +653,52 @@ object SignalEngine {
         val tkBullish = (tenkan8 >= kijun24) || (prevTenkan <= prevKijun && tenkan8 > kijun24)
         val tkBearish = (tenkan8 <= kijun24) || (prevTenkan >= prevKijun && tenkan8 < kijun24)
 
-        // H1 Multi-Timeframe trend check
+        // ── ۱. پنجره زمانی تازگی کراس (حداکثر ۵ کندل پس از کراس یا پولبک تعادل) ──
+        var crossBarsAgoBull = 999
+        var crossBarsAgoBear = 999
+        for (offset in 0..15) {
+            val idx = lastIdx - offset
+            if (idx < 25) break
+            val t = donchian(8, idx)
+            val k = donchian(24, idx)
+            val pt = donchian(8, idx - 1)
+            val pk = donchian(24, idx - 1)
+            if (crossBarsAgoBull == 999 && pt <= pk && t > k) {
+                crossBarsAgoBull = offset
+            }
+            if (crossBarsAgoBear == 999 && pt >= pk && t < k) {
+                crossBarsAgoBear = offset
+            }
+        }
+        val isFreshBull = crossBarsAgoBull <= 5
+        val isFreshBear = crossBarsAgoBear <= 5
+        val isPullbackBull = distKijun <= currentAtr * 1.5 && close >= kijun24 && close >= prevBar.close
+        val isPullbackBear = distKijun <= currentAtr * 1.5 && close <= kijun24 && close <= prevBar.close
+        val timingBullOk = isFreshBull || isPullbackBull
+        val timingBearOk = isFreshBear || isPullbackBear
+
+        // ── ۲. هم‌جهتی کامل تایم‌فریم‌های M15 و H1 با M5 ──
+        val m15Bars = if (bars.size >= 45) MtfAnalyzer.resample(bars, Interval.M15, interval) else emptyList()
+        val (m15Bullish, m15Bearish) = if (m15Bars.size >= 26) {
+            val m15Last = m15Bars.last()
+            val m15Idx = m15Bars.size - 1
+            fun m15Donchian(len: Int): Double {
+                val sub = m15Bars.subList(max(0, m15Idx - len + 1), m15Idx + 1)
+                return (sub.minOf { it.low } + sub.maxOf { it.high }) / 2.0
+            }
+            val m15Tenkan = m15Donchian(9)
+            val m15Kijun = m15Donchian(26)
+            val m15SpanA = (m15Tenkan + m15Kijun) / 2.0
+            val m15SpanB = m15Donchian(52)
+            val bull = m15Last.close >= min(m15SpanA, m15SpanB) && m15Tenkan >= m15Kijun
+            val bear = m15Last.close <= max(m15SpanA, m15SpanB) && m15Tenkan <= m15Kijun
+            Pair(bull, bear)
+        } else {
+            Pair(true, true)
+        }
+
         val h1Bars = if (bars.size >= 60) MtfAnalyzer.resample(bars, Interval.H1, interval) else emptyList()
-        val (h1Bullish, h1Bearish) = if (h1Bars.size >= 30) {
+        val (h1Bullish, h1Bearish) = if (h1Bars.size >= 26) {
             val h1Last = h1Bars.last()
             val h1Idx = h1Bars.size - 1
             fun h1Donchian(len: Int): Double {
@@ -673,27 +716,36 @@ object SignalEngine {
             Pair(true, true)
         }
 
-        val longWeightCloud = if (priceAboveCloud) 35.0 else 0.0
+        val mtfDualBullish = m15Bullish && h1Bullish
+        val mtfDualBearish = m15Bearish && h1Bearish
+
+        // ── ۳. آزادی مسیر چیکو اسپن (Chikou Clearance) ──
+        val chikouIdx = lastIdx - 24
+        val pastBar = if (chikouIdx >= 0) bars[chikouIdx] else null
+        val chikouBull = pastBar == null || close > pastBar.high
+        val chikouBear = pastBar == null || close < pastBar.low
+
+        // ── تخصیص دقیق وزن‌ها و امتیازدهی تجمعی ──
+        val longWeightCloud = if (priceAboveCloud) 25.0 else 0.0
         val longWeightTk = if (tkBullish) 20.0 else 0.0
-        val longWeightVwap = if (vwapBull) 15.0 else 0.0
-        val longWeightElasticity = if (elasticityOk) 10.0 else 0.0
-        val longWeightH1 = if (h1Bullish) 10.0 else 0.0
-        val longWeightAdx = if (adxOk) 5.0 else 0.0
-        val longWeightVol = if (volOk) 5.0 else 0.0
-        val totalLongScore = longWeightCloud + longWeightTk + longWeightVwap + longWeightElasticity + longWeightH1 + longWeightAdx + longWeightVol
+        val longWeightTiming = if (timingBullOk) 15.0 else 0.0
+        val longWeightMtf = if (mtfDualBullish) 15.0 else 0.0
+        val longWeightVwap = if (vwapBull) 10.0 else 0.0
+        val longWeightChikou = if (chikouBull) 5.0 else 0.0
+        val longWeightMomentum = if (elasticityOk && (adxOk || volOk)) 10.0 else 0.0
+        val totalLongScore = longWeightCloud + longWeightTk + longWeightTiming + longWeightMtf + longWeightVwap + longWeightChikou + longWeightMomentum
 
-        val shortWeightCloud = if (priceBelowCloud) 35.0 else 0.0
+        val shortWeightCloud = if (priceBelowCloud) 25.0 else 0.0
         val shortWeightTk = if (tkBearish) 20.0 else 0.0
-        val shortWeightVwap = if (vwapBear) 15.0 else 0.0
-        val shortWeightElasticity = if (elasticityOk) 10.0 else 0.0
-        val shortWeightH1 = if (h1Bearish) 10.0 else 0.0
-        val shortWeightAdx = if (adxOk) 5.0 else 0.0
-        val shortWeightVol = if (volOk) 5.0 else 0.0
-        val totalShortScore = shortWeightCloud + shortWeightTk + shortWeightVwap + shortWeightElasticity + shortWeightH1 + shortWeightAdx + shortWeightVol
+        val shortWeightTiming = if (timingBearOk) 15.0 else 0.0
+        val shortWeightMtf = if (mtfDualBearish) 15.0 else 0.0
+        val shortWeightVwap = if (vwapBear) 10.0 else 0.0
+        val shortWeightChikou = if (chikouBear) 5.0 else 0.0
+        val shortWeightMomentum = if (elasticityOk && (adxOk || volOk)) 10.0 else 0.0
+        val totalShortScore = shortWeightCloud + shortWeightTk + shortWeightTiming + shortWeightMtf + shortWeightVwap + shortWeightChikou + shortWeightMomentum
 
-        // ارکان بنیادین: ابر کومو (35%) + تنکان/کیجون (20%) + کشسانی (10%) = 65% پایه
-        val isLongCandidate = priceAboveCloud && tkBullish && elasticityOk && totalLongScore >= 72.0
-        val isShortCandidate = priceBelowCloud && tkBearish && elasticityOk && totalShortScore >= 72.0
+        val isLongCandidate = priceAboveCloud && tkBullish && timingBullOk && totalLongScore >= 72.0
+        val isShortCandidate = priceBelowCloud && tkBearish && timingBearOk && totalShortScore >= 72.0
 
         val confluence = listOf(
             ConfluenceItem(
@@ -701,7 +753,7 @@ object SignalEngine {
                 ok = priceAboveCloud || priceBelowCloud,
                 detail = if (priceAboveCloud) "بالای ابر کومو" else if (priceBelowCloud) "زیر ابر کومو" else "داخل ابر کومو",
                 status = if (priceAboveCloud || priceBelowCloud) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
-                scorePercent = 35,
+                scorePercent = 25,
             ),
             ConfluenceItem(
                 name = "تنکان/کیجون (۸ و ۲۴)",
@@ -711,44 +763,50 @@ object SignalEngine {
                 scorePercent = 20,
             ),
             ConfluenceItem(
+                name = "تازگی کراس و نقطه ورود به موج (Freshness <= 5)",
+                ok = if (isLongCandidate) timingBullOk else if (isShortCandidate) timingBearOk else (timingBullOk || timingBearOk),
+                detail = if (isFreshBull) "کراس تازه (${crossBarsAgoBull} کندل قبل)"
+                         else if (isFreshBear) "کراس تازه (${crossBarsAgoBear} کندل قبل)"
+                         else if (isPullbackBull || isPullbackBear) "پولبک و بازآزمایی تعادل کیجون"
+                         else "فاصله از کراس زیاد است (بیش از ۵ کندل)",
+                status = if (timingBullOk || timingBearOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+                scorePercent = 15,
+            ),
+            ConfluenceItem(
+                name = "هم‌جهتی تایم‌های بالاتر (M15 + H1)",
+                ok = if (isLongCandidate) mtfDualBullish else if (isShortCandidate) mtfDualBearish else (mtfDualBullish || mtfDualBearish),
+                detail = if (mtfDualBullish) "M15 و H1 هر دو هم‌راستا با صعود"
+                         else if (mtfDualBearish) "M15 و H1 هر دو هم‌راستا با نزول"
+                         else "تضاد در تایم‌های ۱۵ دقیقه یا ۱ ساعته",
+                status = if (mtfDualBullish || mtfDualBearish) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
+                scorePercent = 15,
+            ),
+            ConfluenceItem(
                 name = "جریان نقدینگی نسبت به VWAP",
                 ok = if (isLongCandidate) vwapBull else if (isShortCandidate) vwapBear else (vwapBull || vwapBear),
                 detail = "قیمت ${String.format(java.util.Locale.US, "%.2f", close)} / خط VWAP ${String.format(java.util.Locale.US, "%.2f", currentVwap)}",
                 status = if (vwapBull || vwapBear) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
-                scorePercent = 15,
-            ),
-            ConfluenceItem(
-                name = "کشسانی کیجون (Elasticity Guard)",
-                ok = elasticityOk,
-                detail = "فاصله تا کیجون: ${String.format(java.util.Locale.US, "%.2f", distKijun)} (سقف مجاز: ${String.format(java.util.Locale.US, "%.2f", currentAtr * 3.8)})",
-                status = if (elasticityOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
                 scorePercent = 10,
             ),
             ConfluenceItem(
-                name = "روند کلان H1",
-                ok = if (isLongCandidate) h1Bullish else if (isShortCandidate) h1Bearish else (h1Bullish || h1Bearish),
-                detail = if (h1Bullish) "H1 هم‌راستا با صعود" else if (h1Bearish) "H1 هم‌راستا با نزول" else "H1 خنثی",
-                status = if (h1Bullish || h1Bearish) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
+                name = "آزادی مسیر چیکو اسپن (Chikou Clearance)",
+                ok = if (isLongCandidate) chikouBull else if (isShortCandidate) chikouBear else (chikouBull || chikouBear),
+                detail = if (chikouBull) "مسیر چیکو اسپن باز و بالای کندل‌ها" else if (chikouBear) "مسیر چیکو اسپن زیر کندل‌ها" else "چیکو داخل بدنه کندل گذشته",
+                status = if (chikouBull || chikouBear) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
+                scorePercent = 5,
+            ),
+            ConfluenceItem(
+                name = "کشسانی کیجون و مومنتوم حجم/ADX",
+                ok = elasticityOk && (adxOk || volOk),
+                detail = "فاصله تا کیجون: ${String.format(java.util.Locale.US, "%.2f", distKijun)} · ADX: ${String.format(java.util.Locale.US, "%.1f", currentAdx)}",
+                status = if (elasticityOk && (adxOk || volOk)) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
                 scorePercent = 10,
-            ),
-            ConfluenceItem(
-                name = "قدرت روند ADX (14)",
-                ok = adxOk,
-                detail = "ADX: ${String.format(java.util.Locale.US, "%.1f", currentAdx)} (حد نصاب: ۲۰)",
-                status = if (adxOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
-                scorePercent = 5,
-            ),
-            ConfluenceItem(
-                name = "حجم معاملات نسبت به میانگین",
-                ok = volOk,
-                detail = "حجم: ${String.format(java.util.Locale.US, "%.1f", lastBar.volume)} / میانگین: ${String.format(java.util.Locale.US, "%.1f", volSma20)}",
-                status = if (volOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
-                scorePercent = 5,
             ),
         )
 
         val blockers = mutableListOf<String>()
         if (!priceAboveCloud && !priceBelowCloud) blockers.add("قیمت داخل ابر کومو ۸/۲۴/۷۲ قرار دارد")
+        if (!timingBullOk && !timingBearOk) blockers.add("بیش از ۵ کندل از کراس گذشته و پولبک تایید نشده است")
         if (!elasticityOk) blockers.add("فاصله از کیجون زیاد است (خطر اصلاح قیمتی)")
 
         if (isLongCandidate) {
@@ -762,7 +820,7 @@ object SignalEngine {
                 stopLoss = stopLoss,
                 takeProfit = takeProfit,
                 riskReward = 1.8,
-                reasons = listOf("تایید ایچیموکو نهادی M5", "شکست ابر کومو ۸/۲۴/۷۲", "تایید هم‌جهتی با VWAP"),
+                reasons = listOf("تایید ایچیموکو نهادی M5", "شکست ابر کومو ۸/۲۴/۷۲", "تایید هم‌جهتی M15 و H1", "ورود در پنجره زمانی کراس"),
                 blockers = emptyList(),
                 confluence = confluence,
                 interval = interval,
@@ -779,7 +837,7 @@ object SignalEngine {
                 stopLoss = stopLoss,
                 takeProfit = takeProfit,
                 riskReward = 1.8,
-                reasons = listOf("تایید ایچیموکو نهادی M5", "شکست ابر کومو ۸/۲۴/۷۲", "تایید هم‌جهتی با VWAP"),
+                reasons = listOf("تایید ایچیموکو نهادی M5", "شکست ابر کومو ۸/۲۴/۷۲", "تایید هم‌جهتی M15 و H1", "ورود در پنجره زمانی کراس"),
                 blockers = emptyList(),
                 confluence = confluence,
                 interval = interval,

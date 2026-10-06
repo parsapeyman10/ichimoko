@@ -544,6 +544,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 return "قیمت منابع مستقل با هم تعارض دارد"
             }
         }
+        if (trades.value.count { it.isOpen } >= 3) return "سقف ۳ معاملهٔ همزمان باز پر شده است (${trades.value.count { it.isOpen }}/3)"
         if (trades.value.any { it.isOpen && it.symbol == current.symbol }) return "برای این نماد یک پوزیشن کاغذی باز است"
         return null
     }

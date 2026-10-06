@@ -37,8 +37,13 @@ class PaperAutoTrader(
             _status.value = "سیگنال این کندل قبلاً در ژورنال ثبت شده است؛ ورود تکراری نداریم"
             return null
         }
-        if (journal.trades.value.any { it.symbol == state.symbol && it.isOpen }) {
-            _status.value = "برای این نماد از قبل پوزیشن کاغذی باز است"
+        val openTrades = journal.trades.value.filter { it.isOpen }
+        if (openTrades.size >= 3) {
+            _status.value = "سقف ۳ معاملهٔ همزمان باز پر شده است (${openTrades.size}/3)"
+            return null
+        }
+        if (openTrades.any { it.symbol == state.symbol }) {
+            _status.value = "برای نماد ${state.symbol} از قبل پوزیشن کاغذی باز است"
             return null
         }
         // Computing higher-timeframe bars is read-only; an unavailable/vetoed MTF cannot open.

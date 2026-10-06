@@ -47,6 +47,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
     val scanState by viewModel.pairScan.collectAsStateWithLifecycle()
     val signal = market.signal
     val positionBlocker = when {
+        trades.count { it.isOpen } >= 3 -> "سقف ۳ معاملهٔ همزمان باز پر شده است (${trades.count { it.isOpen }}/3)"
         trades.any { it.symbol == market.symbol && it.isOpen } -> "پوزیشن این نماد هنوز باز است"
         signal != null && trades.any { it.symbol == market.symbol && it.signalBarTime != null &&
             it.signalBarTime == signal.barTime } -> "این کندل قبلاً معامله شده است"

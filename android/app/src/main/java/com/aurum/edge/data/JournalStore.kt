@@ -191,9 +191,13 @@ class JournalStore(context: Context, private val file: File = File(context.files
             priceAction = if (manual) null else priceAction,
         )
         mutex.withLock {
-            // Serialize the check and append. No pyramiding or duplicate position per symbol.
-            require(_trades.value.none { it.isOpen && it.symbol == symbol }) {
-                "برای این نماد پوزیشن کاغذی باز دارید؛ ابتدا آن را ببندید"
+            // Serialize the check and append. Up to 3 concurrent open positions allowed.
+            val openTrades = _trades.value.filter { it.isOpen }
+            require(openTrades.size < 3) {
+                "سقف ۳ معاملهٔ همزمان باز پر شده است (${openTrades.size}/3)؛ ابتدا یکی از معاملات را ببندید"
+            }
+            require(openTrades.none { it.symbol == symbol }) {
+                "برای نماد $symbol از قبل پوزیشن کاغذی باز دارید؛ ابتدا آن را ببندید"
             }
             if (automatic) require(_trades.value.none {
                 it.symbol == symbol && it.signalBarTime == signal.barTime
