@@ -603,7 +603,13 @@ object SignalEngine {
         interval: Interval,
     ): Signal {
         val bars = candles.filter { it.closed }
-        if (bars.size < 75) return Signal.noTrade(bars.lastOrNull()?.time ?: 0L, interval, listOf("کندل‌های کافی برای ایچیموکو نهادی M5 وجود ندارد"))
+        if (bars.size < 75) return Signal(
+            action = SignalAction.NO_TRADE,
+            confidence = 0.0,
+            interval = interval,
+            barTime = bars.lastOrNull()?.time ?: 0L,
+            blockers = listOf("کندل‌های کافی برای ایچیموکو نهادی M5 وجود ندارد"),
+        )
         val lastIdx = bars.size - 1
         val lastBar = bars[lastIdx]
         val prevBar = bars[lastIdx - 1]
@@ -674,27 +680,48 @@ object SignalEngine {
         val shortCondition = h1Bearish && adxFilter && vwapBear && elasticityOk && priceBelowCloud && shortTrigger && volFilter
 
         val confluence = listOf(
-            ConfluenceItem("روند کلان H1 (ایچیموکو)", if (longCondition) h1Bullish else if (shortCondition) h1Bearish else (h1Bullish || h1Bearish),
-                if (h1Bullish) ConfluenceStatus.CONFIRMED else ConfluenceStatus.REJECTED,
-                if (h1Bullish) "H1 صعودی بالای ابر کومو" else if (h1Bearish) "H1 نزولی زیر ابر کومو" else "روند H1 خنثی/نامشخص"),
-            ConfluenceItem("قدرت روند ADX > 22", adxFilter,
-                if (adxFilter) ConfluenceStatus.CONFIRMED else ConfluenceStatus.REJECTED,
-                "ADX فعلی: ${String.format(java.util.Locale.US, "%.1f", currentAdx)} (حداقل ۲۲)"),
-            ConfluenceItem("جایگاه نسبت به VWAP", if (longCondition) vwapBull else if (shortCondition) vwapBear else true,
-                if (vwapBull || vwapBear) ConfluenceStatus.CONFIRMED else ConfluenceStatus.REJECTED,
-                "قیمت ${close} نسبت به VWAP ${String.format(java.util.Locale.US, "%.2f", currentVwap)}"),
-            ConfluenceItem("کشسانی کیجون (Elasticity < 3.5 ATR)", elasticityOk,
-                if (elasticityOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.REJECTED,
-                "فاصله تا کیجون: ${String.format(java.util.Locale.US, "%.2f", distKijun)} (سقف مجاز: ${String.format(java.util.Locale.US, "%.2f", currentAtr * 3.5)})"),
-            ConfluenceItem("موقعیت نسبت به ابر M5 (8/24/72)", if (longCondition) priceAboveCloud else if (shortCondition) priceBelowCloud else (priceAboveCloud || priceBelowCloud),
-                if (priceAboveCloud || priceBelowCloud) ConfluenceStatus.CONFIRMED else ConfluenceStatus.REJECTED,
-                if (priceAboveCloud) "بالای ابر SpanA/SpanB" else if (priceBelowCloud) "زیر ابر SpanA/SpanB" else "داخل ابر کومو"),
-            ConfluenceItem("حجم تاییدیه (Vol > SMA20)", volFilter,
-                if (volFilter) ConfluenceStatus.CONFIRMED else ConfluenceStatus.REJECTED,
-                "حجم کندل: ${String.format(java.util.Locale.US, "%.1f", lastBar.volume)} / میانگین: ${String.format(java.util.Locale.US, "%.1f", volSma20)}"),
-            ConfluenceItem("تریگر کراس تنکان/کیجون M5", longTrigger || shortTrigger,
-                if (longTrigger || shortTrigger) ConfluenceStatus.CONFIRMED else ConfluenceStatus.REJECTED,
-                if (longTrigger) "کراس صعودی تنکان ۸ از کیجون ۲۴" else if (shortTrigger) "کراس نزولی تنکان ۸ از کیجون ۲۴" else "بدون تریگر کراس"),
+            ConfluenceItem(
+                name = "روند کلان H1 (ایچیموکو)",
+                ok = if (longCondition) h1Bullish else if (shortCondition) h1Bearish else (h1Bullish || h1Bearish),
+                detail = if (h1Bullish) "H1 صعودی بالای ابر کومو" else if (h1Bearish) "H1 نزولی زیر ابر کومو" else "روند H1 خنثی/نامشخص",
+                status = if (h1Bullish || h1Bearish) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+            ),
+            ConfluenceItem(
+                name = "قدرت روند ADX > 22",
+                ok = adxFilter,
+                detail = "ADX فعلی: ${String.format(java.util.Locale.US, "%.1f", currentAdx)} (حداقل ۲۲)",
+                status = if (adxFilter) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+            ),
+            ConfluenceItem(
+                name = "جایگاه نسبت به VWAP",
+                ok = if (longCondition) vwapBull else if (shortCondition) vwapBear else true,
+                detail = "قیمت ${close} نسبت به VWAP ${String.format(java.util.Locale.US, "%.2f", currentVwap)}",
+                status = if (vwapBull || vwapBear) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+            ),
+            ConfluenceItem(
+                name = "کشسانی کیجون (Elasticity < 3.5 ATR)",
+                ok = elasticityOk,
+                detail = "فاصله تا کیجون: ${String.format(java.util.Locale.US, "%.2f", distKijun)} (سقف مجاز: ${String.format(java.util.Locale.US, "%.2f", currentAtr * 3.5)})",
+                status = if (elasticityOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+            ),
+            ConfluenceItem(
+                name = "موقعیت نسبت به ابر M5 (8/24/72)",
+                ok = if (longCondition) priceAboveCloud else if (shortCondition) priceBelowCloud else (priceAboveCloud || priceBelowCloud),
+                detail = if (priceAboveCloud) "بالای ابر SpanA/SpanB" else if (priceBelowCloud) "زیر ابر SpanA/SpanB" else "داخل ابر کومو",
+                status = if (priceAboveCloud || priceBelowCloud) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+            ),
+            ConfluenceItem(
+                name = "حجم تاییدیه (Vol > SMA20)",
+                ok = volFilter,
+                detail = "حجم کندل: ${String.format(java.util.Locale.US, "%.1f", lastBar.volume)} / میانگین: ${String.format(java.util.Locale.US, "%.1f", volSma20)}",
+                status = if (volFilter) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+            ),
+            ConfluenceItem(
+                name = "تریگر کراس تنکان/کیجون M5",
+                ok = longTrigger || shortTrigger,
+                detail = if (longTrigger) "کراس صعودی تنکان ۸ از کیجون ۲۴" else if (shortTrigger) "کراس نزولی تنکان ۸ از کیجون ۲۴" else "بدون تریگر کراس",
+                status = if (longTrigger || shortTrigger) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+            ),
         )
 
         val blockers = mutableListOf<String>()

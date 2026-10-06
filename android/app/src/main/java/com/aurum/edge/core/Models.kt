@@ -46,6 +46,7 @@ data class PriceTick(val price: Double, val at: Long, val bid: Double? = null, v
 enum class SignalAction { BUY, SELL, NO_TRADE }
 
 enum class StrategyKind(val id: String, val label: String, val description: String) {
+    SUPER_PLUS("SUPER_PLUS", "سوپر پلاس (Institutional M5)", "موتور نهادی M5: ایچیموکو ۸/۲۴/۷۲ + تایید H1 + فیلتر ADX بالای ۲۲ + حجم و VWAP + کشسانی کیجون"),
     ICHIMOKU("ICHIMOKU", "ایچیموکو ابر و روند", "کراس تنکان/کیجون + خروج از کومو + تایید چیکو اسپن و تایم بالاتر"),
     ICT_SMC("ICT_SMC", "اسمارت مانی و ICT", "شکار نقدینگی + شکست ساختار MSS + ورود در FVG و اوردر بلاک"),
     EMA_VWAP("EMA_VWAP", "سه‌گانه EMA و VWAP", "روند EMA 20/50/200 + اصلاح به ناحیه VWAP + تاییدیه RSI"),
@@ -54,7 +55,7 @@ enum class StrategyKind(val id: String, val label: String, val description: Stri
 
     companion object {
         fun fromId(raw: String?): StrategyKind =
-            entries.firstOrNull { it.name.equals(raw, ignoreCase = true) || it.id.equals(raw, ignoreCase = true) } ?: ICHIMOKU
+            entries.firstOrNull { it.name.equals(raw, ignoreCase = true) || it.id.equals(raw, ignoreCase = true) } ?: SUPER_PLUS
     }
 }
 
@@ -111,6 +112,13 @@ data class SignalProfile(
         val BASE = SignalProfile()
 
         fun forStrategy(kind: StrategyKind): SignalProfile = when (kind) {
+            StrategyKind.SUPER_PLUS -> SignalProfile(
+                momentumVolume = true,
+                higherTimeframeFilter = true,
+                rangeChopFilter = true,
+                dynamicSpreadFilter = true,
+                chikouConfirmation = false,
+            )
             StrategyKind.ICHIMOKU -> SignalProfile(
                 chikouConfirmation = true,
                 flatSpanB = true,
