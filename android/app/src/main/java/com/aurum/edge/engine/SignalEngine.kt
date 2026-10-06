@@ -673,20 +673,27 @@ object SignalEngine {
             Pair(true, true)
         }
 
-        // ── ۳ شرط اصلی و اصولی ورود (Core Pillars) ──
-        val longCore = priceAboveCloud && tkBullish && elasticityOk && vwapBull
-        val shortCore = priceBelowCloud && tkBearish && elasticityOk && vwapBear
+        val longWeightCloud = if (priceAboveCloud) 35.0 else 0.0
+        val longWeightTk = if (tkBullish) 20.0 else 0.0
+        val longWeightVwap = if (vwapBull) 15.0 else 0.0
+        val longWeightElasticity = if (elasticityOk) 10.0 else 0.0
+        val longWeightH1 = if (h1Bullish) 10.0 else 0.0
+        val longWeightAdx = if (adxOk) 5.0 else 0.0
+        val longWeightVol = if (volOk) 5.0 else 0.0
+        val totalLongScore = longWeightCloud + longWeightTk + longWeightVwap + longWeightElasticity + longWeightH1 + longWeightAdx + longWeightVol
 
-        // محاسبه امتیاز همگرایی
-        var scoreLong = 70.0
-        if (h1Bullish) scoreLong += 10.0
-        if (adxOk) scoreLong += 10.0
-        if (volOk) scoreLong += 10.0
+        val shortWeightCloud = if (priceBelowCloud) 35.0 else 0.0
+        val shortWeightTk = if (tkBearish) 20.0 else 0.0
+        val shortWeightVwap = if (vwapBear) 15.0 else 0.0
+        val shortWeightElasticity = if (elasticityOk) 10.0 else 0.0
+        val shortWeightH1 = if (h1Bearish) 10.0 else 0.0
+        val shortWeightAdx = if (adxOk) 5.0 else 0.0
+        val shortWeightVol = if (volOk) 5.0 else 0.0
+        val totalShortScore = shortWeightCloud + shortWeightTk + shortWeightVwap + shortWeightElasticity + shortWeightH1 + shortWeightAdx + shortWeightVol
 
-        var scoreShort = 70.0
-        if (h1Bearish) scoreShort += 10.0
-        if (adxOk) scoreShort += 10.0
-        if (volOk) scoreShort += 10.0
+        // ارکان بنیادین: ابر کومو (35%) + تنکان/کیجون (20%) + کشسانی (10%) = 65% پایه
+        val isLongCandidate = priceAboveCloud && tkBullish && elasticityOk && totalLongScore >= 72.0
+        val isShortCandidate = priceBelowCloud && tkBearish && elasticityOk && totalShortScore >= 72.0
 
         val confluence = listOf(
             ConfluenceItem(
@@ -694,42 +701,49 @@ object SignalEngine {
                 ok = priceAboveCloud || priceBelowCloud,
                 detail = if (priceAboveCloud) "بالای ابر کومو" else if (priceBelowCloud) "زیر ابر کومو" else "داخل ابر کومو",
                 status = if (priceAboveCloud || priceBelowCloud) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+                scorePercent = 35,
             ),
             ConfluenceItem(
                 name = "تنکان/کیجون (۸ و ۲۴)",
                 ok = tkBullish || tkBearish,
                 detail = if (tkBullish) "تنکان بالای کیجون (صعودی)" else "تنکان زیر کیجون (نزولی)",
                 status = if (tkBullish || tkBearish) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+                scorePercent = 20,
             ),
             ConfluenceItem(
                 name = "جریان نقدینگی نسبت به VWAP",
-                ok = if (longCore) vwapBull else if (shortCore) vwapBear else true,
+                ok = if (isLongCandidate) vwapBull else if (isShortCandidate) vwapBear else (vwapBull || vwapBear),
                 detail = "قیمت ${String.format(java.util.Locale.US, "%.2f", close)} / خط VWAP ${String.format(java.util.Locale.US, "%.2f", currentVwap)}",
                 status = if (vwapBull || vwapBear) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+                scorePercent = 15,
             ),
             ConfluenceItem(
                 name = "کشسانی کیجون (Elasticity Guard)",
                 ok = elasticityOk,
                 detail = "فاصله تا کیجون: ${String.format(java.util.Locale.US, "%.2f", distKijun)} (سقف مجاز: ${String.format(java.util.Locale.US, "%.2f", currentAtr * 3.8)})",
                 status = if (elasticityOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+                scorePercent = 10,
             ),
             ConfluenceItem(
                 name = "روند کلان H1",
-                ok = if (longCore) h1Bullish else if (shortCore) h1Bearish else (h1Bullish || h1Bearish),
+                ok = if (isLongCandidate) h1Bullish else if (isShortCandidate) h1Bearish else (h1Bullish || h1Bearish),
                 detail = if (h1Bullish) "H1 هم‌راستا با صعود" else if (h1Bearish) "H1 هم‌راستا با نزول" else "H1 خنثی",
                 status = if (h1Bullish || h1Bearish) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
+                scorePercent = 10,
             ),
             ConfluenceItem(
                 name = "قدرت روند ADX (14)",
                 ok = adxOk,
-                detail = "ADX: ${String.format(java.util.Locale.US, "%.1f", currentAdx)}",
+                detail = "ADX: ${String.format(java.util.Locale.US, "%.1f", currentAdx)} (حد نصاب: ۲۰)",
                 status = if (adxOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
+                scorePercent = 5,
             ),
             ConfluenceItem(
-                name = "حجم معاملات",
+                name = "حجم معاملات نسبت به میانگین",
                 ok = volOk,
                 detail = "حجم: ${String.format(java.util.Locale.US, "%.1f", lastBar.volume)} / میانگین: ${String.format(java.util.Locale.US, "%.1f", volSma20)}",
                 status = if (volOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
+                scorePercent = 5,
             ),
         )
 
@@ -737,13 +751,13 @@ object SignalEngine {
         if (!priceAboveCloud && !priceBelowCloud) blockers.add("قیمت داخل ابر کومو ۸/۲۴/۷۲ قرار دارد")
         if (!elasticityOk) blockers.add("فاصله از کیجون زیاد است (خطر اصلاح قیمتی)")
 
-        if (longCore) {
+        if (isLongCandidate) {
             val stopLoss = kijun24 - (currentAtr * 0.5)
             val risk = close - stopLoss
             val takeProfit = close + (risk * 1.8)
             return Signal(
                 action = SignalAction.BUY,
-                confidence = scoreLong.coerceIn(75.0, 95.0),
+                confidence = totalLongScore.coerceIn(72.0, 95.0),
                 entry = close,
                 stopLoss = stopLoss,
                 takeProfit = takeProfit,
@@ -754,13 +768,13 @@ object SignalEngine {
                 interval = interval,
                 barTime = lastBar.time,
             )
-        } else if (shortCore) {
+        } else if (isShortCandidate) {
             val stopLoss = kijun24 + (currentAtr * 0.5)
             val risk = stopLoss - close
             val takeProfit = close - (risk * 1.8)
             return Signal(
                 action = SignalAction.SELL,
-                confidence = scoreShort.coerceIn(75.0, 95.0),
+                confidence = totalShortScore.coerceIn(72.0, 95.0),
                 entry = close,
                 stopLoss = stopLoss,
                 takeProfit = takeProfit,
@@ -775,7 +789,7 @@ object SignalEngine {
 
         return Signal(
             action = SignalAction.NO_TRADE,
-            confidence = if (confluence.count { it.ok } >= 4) 55.0 else 30.0,
+            confidence = max(totalLongScore, totalShortScore).coerceIn(0.0, 65.0),
             entry = null,
             stopLoss = null,
             takeProfit = null,

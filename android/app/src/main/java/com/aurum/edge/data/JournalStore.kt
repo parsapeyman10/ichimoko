@@ -142,15 +142,19 @@ class JournalStore(context: Context, private val file: File = File(context.files
         priceAction: IctPriceActionRecord? = null,
     ): PaperTrade {
         val technicalConditions = signal.confluence.filterNot { it.name == NewsConfluence.NEWS_LABEL }
+        val isLegacyEight = technicalConditions.size == 8
+        val techOk = if (isLegacyEight) {
+            technicalConditions.all { it.ok && it.status == ConfluenceStatus.CONFIRMED }
+        } else {
+            signal.isActionable && signal.confidence >= 72.0
+        }
         require(!automatic || (!manual && signal.isActionable && signal.barTime > 0 &&
-            technicalConditions.take(8).size == 8 && technicalConditions.take(8).all {
-                it.ok && it.status == ConfluenceStatus.CONFIRMED
-            } && mtf != null && !mtf.veto && mtf.barTime == signal.barTime && mtf.frames.isNotEmpty())) {
-            "۸ شرط فنی و چندتایم‌فریم برای ورود خودکار کاغذی کامل نیست"
+            techOk && mtf != null && !mtf.veto && mtf.barTime == signal.barTime && mtf.frames.isNotEmpty())) {
+            "شروط فنی و چندتایم‌فریم برای ورود خودکار کاغذی کامل نیست"
         }
         val stop = signal.stopLoss ?: throw IllegalArgumentException("حد ضرر وجود ندارد")
         val target = signal.takeProfit ?: throw IllegalArgumentException("حد سود وجود ندارد")
-        require(manual || priceAction?.matches(signal, symbol, price) == true) {
+        require(manual || !isLegacyEight || priceAction?.matches(signal, symbol, price) == true) {
             "شواهد همان کندلِ رنج/ICT برای ورود سیگنالی کاغذی ثبت نشده است"
         }
         val draft = PaperOrderRules.preview(signal.action, symbol, price, stop, target, balance, riskPercent)

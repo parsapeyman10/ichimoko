@@ -60,9 +60,14 @@ class PaperAutoTrader(
         }
         val signal = current.signal ?: return null
         val newsRecord = NewsConfluence.record(recentNews, current.symbol)
-        val ict = IctEntryRules.approvedEvidence(current) ?: run {
-            _status.value = "شواهد رنج/ICT همین کندل برای ژورنال تأیید نشد"
-            return null
+        val isLegacyEight = signal.confluence.filterNot { it.name == NewsConfluence.NEWS_LABEL }.size == 8
+        val ict = if (isLegacyEight) {
+            IctEntryRules.approvedEvidence(current) ?: run {
+                _status.value = "شواهد رنج/ICT همین کندل برای ژورنال تأیید نشد"
+                return null
+            }
+        } else {
+            IctEntryRules.approvedEvidence(current)
         }
         return try {
             val trade = journal.open(signal, current.symbol, current.lastPrice!!,
@@ -72,7 +77,7 @@ class PaperAutoTrader(
             val conditions = trade.entryConditions.take(8).joinToString("، ") {
                 it.name.substringAfter('·').trim()
             }
-            _status.value = "کاغذی ثبت شد: ${trade.symbol} ${trade.action} · شروع: $conditions"
+            _status.value = "کاغذی ثبت شد: ${trade.symbol} ${trade.action} (${signal.confidence.toInt()}٪) · شروع: $conditions"
             trade
         } catch (e: Exception) {
             _status.value = "ورود خودکار کاغذی انجام نشد: ${e.message ?: "ژورنال یا ریسک نامعتبر است"}"

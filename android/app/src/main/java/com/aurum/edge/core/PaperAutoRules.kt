@@ -43,9 +43,14 @@ object PaperAutoRules {
         val signal = market.signal ?: return "سیگنال محاسبه نشده است"
         if (!signal.isActionable || signal.entry == null || signal.stopLoss == null || signal.takeProfit == null)
             return "سیگنال فنی قابل معامله موجود نیست"
-        if (signal.confluence.take(8).size != 8 ||
-            signal.confluence.take(8).any { !it.ok || it.status != ConfluenceStatus.CONFIRMED })
-            return "تمام هشت شرط فنی اصلی هم‌زمان تأیید نشده‌اند"
+        val techItems = signal.confluence.filterNot { it.name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL }
+        if (techItems.size == 8) {
+            if (techItems.any { !it.ok || it.status != ConfluenceStatus.CONFIRMED })
+                return "تمام هشت شرط فنی اصلی هم‌زمان تأیید نشده‌اند"
+        } else {
+            if (signal.confidence < settings.minConfidence)
+                return "احتمال سیگنال (${signal.confidence.toInt()}٪) از حد آستانه (${settings.minConfidence.toInt()}٪) کمتر است"
+        }
         // News is deliberately not an entry condition for paper trading. It is mined separately
         // into the journal when it is near the trade, so technical/option gates stay deterministic.
         val lastClosed = market.candles.lastOrNull { it.closed }
@@ -56,7 +61,10 @@ object PaperAutoRules {
         if (price == null || !price.isFinite() || price <= 0.0 || !signal.entry.isFinite() ||
             signal.entry <= 0.0 || abs(price / signal.entry - 1.0) > 0.005)
             return "قیمت تازه از ورود سیگنال فاصله گرفته است"
-        // An additional gate, never a substitute for the eight technical checks.
-        return IctEntryRules.assess(market, now, maxBarAgeMs = barAgeGraceMs).reason
+        // An additional gate for legacy 8-condition / ICT setups.
+        if (techItems.size == 8) {
+            return IctEntryRules.assess(market, now, maxBarAgeMs = barAgeGraceMs).reason
+        }
+        return null
     }
 }
