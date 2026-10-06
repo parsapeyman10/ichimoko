@@ -35,7 +35,7 @@ data class PairScanStatus(
     val detail: String,
     val lastScanAt: Long? = null,
     val price: Double? = null,
-    /** How many of the eight technical conditions passed on the latest closed bar. */
+    /** How many of the technical conditions passed on the latest closed bar. */
     val technicalScore: Int? = null,
     val action: SignalAction? = null,
     val confidence: Double? = null,
@@ -116,11 +116,6 @@ class PairScanner(
             }
         }
 
-    private fun rankOpportunities(statuses: List<PairScanStatus>): List<PairScanStatus> {
-        return statuses
-            .filter { it.price != null && (it.state == "candidate" || (it.technicalScore ?: 0) >= 5) }
-            .sortedWith(
-                compareByDescending<PairScanStatus> { it.state == "candidate" }
     private fun rankOpportunities(statuses: List<PairScanStatus>): List<PairScanStatus> {
         return statuses
             .filter { it.price != null && (it.state == "candidate" || (it.technicalScore ?: 0) >= 5) }
@@ -246,7 +241,7 @@ class PairScanner(
                 update(
                     symbol = symbol,
                     state = "no_signal",
-                    detail = if (score >= 5) "شواهد فنی $score از ۸؛ هنوز به آستانهٔ ورود نرسیده" else "بدون سیگنال؛ شواهد فنی $score از ۸",
+                    detail = if (score >= 5) "شواهد فنی $score از ۷؛ هنوز به آستانهٔ ورود نرسیده" else "بدون سیگنال؛ شواهد فنی $score از ۷",
                     price = price,
                     score = score,
                     action = combined.action,
@@ -276,7 +271,7 @@ class PairScanner(
                 update(
                     symbol = symbol,
                     state = "blocked",
-                    detail = "سیگنال $score/۸ · ${blocker.take(120)}",
+                    detail = "سیگنال $score/۷ · ${blocker.take(120)}",
                     price = price,
                     score = score,
                     action = combined.action,
@@ -325,7 +320,7 @@ class PairScanner(
             update(
                 symbol = symbol,
                 state = "candidate",
-                detail = "فرصت معاملاتی تایید شد · شانس موفقیت ${(combined.confidence).toInt()}% · R:R ${String.format(java.util.Locale.US, "%.2f", combined.riskReward ?: 1.8)}",
+                detail = "فرصت معاملاتی تایید شد · شانس موفقیت ${(combined.confidence).toInt()}% · R:R 1:${String.format(java.util.Locale.US, "%.1f", combined.riskReward ?: 2.0)}",
                 price = price,
                 score = score,
                 action = combined.action,
