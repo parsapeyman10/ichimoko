@@ -513,35 +513,34 @@ private fun tradingViewHtml(tvSymbol: String, tvInterval: String): String {
 
 @Composable
 fun StrategySelectorRow(
-    activeStrategy: StrategyKind,
-    onSelect: (StrategyKind) -> Unit,
+    activeStrategy: StrategyKind = StrategyKind.ICHIMOKU_PRICE_ACTION,
+    onSelect: (StrategyKind) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            StrategyKind.entries.forEach { strategy ->
-                FilterChip(
-                    selected = activeStrategy == strategy,
-                    onClick = { onSelect(strategy) },
-                    label = { Text(strategy.label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = AurumColors.Cyan.copy(alpha = 0.22f),
-                        selectedLabelColor = AurumColors.Cyan,
-                        labelColor = AurumColors.TextSecondary,
-                    ),
-                )
-            }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .background(AurumColors.SurfaceAlt, RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                "استراتژی معاملاتی: ایچیموکو + پرایس اکشن",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                color = AurumColors.Gold,
+            )
+            Text(
+                "ایچیموکو نهادی · پرایس اکشن · حجم · تراز ۳ تایم‌فریم · فیلتر قفل ضد ساید",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 2.dp),
+            )
         }
-        Text(
-            activeStrategy.description,
-            style = MaterialTheme.typography.labelSmall,
-            color = AurumColors.TextMuted,
-            modifier = Modifier.padding(top = 2.dp, start = 4.dp),
-        )
+        Pill("تک‌استراتژی فعال", AurumColors.Green)
     }
 }
 

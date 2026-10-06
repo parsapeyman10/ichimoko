@@ -46,16 +46,21 @@ data class PriceTick(val price: Double, val at: Long, val bid: Double? = null, v
 enum class SignalAction { BUY, SELL, NO_TRADE }
 
 enum class StrategyKind(val id: String, val label: String, val description: String) {
-    SUPER_PLUS("SUPER_PLUS", "سوپر پلاس (Institutional M5)", "موتور نهادی M5: ایچیموکو ۸/۲۴/۷۲ + تایید H1 + فیلتر ADX بالای ۲۲ + حجم و VWAP + کشسانی کیجون"),
-    ICHIMOKU("ICHIMOKU", "ایچیموکو ابر و روند", "کراس تنکان/کیجون + خروج از کومو + تایید چیکو اسپن و تایم بالاتر"),
-    ICT_SMC("ICT_SMC", "اسمارت مانی و ICT", "شکار نقدینگی + شکست ساختار MSS + ورود در FVG و اوردر بلاک"),
-    EMA_VWAP("EMA_VWAP", "سه‌گانه EMA و VWAP", "روند EMA 20/50/200 + اصلاح به ناحیه VWAP + تاییدیه RSI"),
-    VOLUME_BREAKOUT("VOLUME_BREAKOUT", "شکست مومنتوم حجم", "شکست کانال رنج همراه با پرش حجم بیش از ۲ برابر میانگین"),
-    MEAN_REVERSION("MEAN_REVERSION", "بازگشت به میانگین", "خروج قیمت از باندهای بولینگر + تایید واگرایی در RSI");
+    ICHIMOKU_PRICE_ACTION(
+        "ICHIMOKU_PRICE_ACTION",
+        "ایچیموکو + پرایس اکشن",
+        "موتور واحد: ایچیموکو نهادی ۸/۲۴/۷۲ + تاییدیه پرایس‌اکشن + حجم و مومنتوم + تراز روند ۳ تایم‌فریم + فیلتر قفل ضد ساید",
+    );
 
     companion object {
-        fun fromId(raw: String?): StrategyKind =
-            entries.firstOrNull { it.name.equals(raw, ignoreCase = true) || it.id.equals(raw, ignoreCase = true) } ?: SUPER_PLUS
+        val SUPER_PLUS = ICHIMOKU_PRICE_ACTION
+        val ICHIMOKU = ICHIMOKU_PRICE_ACTION
+        val ICT_SMC = ICHIMOKU_PRICE_ACTION
+        val EMA_VWAP = ICHIMOKU_PRICE_ACTION
+        val VOLUME_BREAKOUT = ICHIMOKU_PRICE_ACTION
+        val MEAN_REVERSION = ICHIMOKU_PRICE_ACTION
+
+        fun fromId(raw: String?): StrategyKind = ICHIMOKU_PRICE_ACTION
     }
 }
 
@@ -111,40 +116,14 @@ data class SignalProfile(
     companion object {
         val BASE = SignalProfile()
 
-        fun forStrategy(kind: StrategyKind): SignalProfile = when (kind) {
-            StrategyKind.SUPER_PLUS -> SignalProfile(
-                momentumVolume = true,
-                higherTimeframeFilter = true,
-                rangeChopFilter = true,
-                dynamicSpreadFilter = true,
-                chikouConfirmation = false,
-            )
-            StrategyKind.ICHIMOKU -> SignalProfile(
-                chikouConfirmation = true,
-                flatSpanB = true,
-                higherTimeframeFilter = true,
-                rangeChopFilter = true,
-            )
-            StrategyKind.ICT_SMC -> SignalProfile(
-                structureRiskFilter = true,
-                riskyTimingFilter = true,
-                fakeBreakoutFilter = true,
-            )
-            StrategyKind.EMA_VWAP -> SignalProfile(
-                higherTimeframeFilter = true,
-                dynamicSpreadFilter = true,
-                rangeChopFilter = true,
-            )
-            StrategyKind.VOLUME_BREAKOUT -> SignalProfile(
-                momentumVolume = true,
-                fakeBreakoutFilter = true,
-            )
-            StrategyKind.MEAN_REVERSION -> SignalProfile(
-                rangeChopFilter = false,
-                momentumVolume = false,
-                cooldownFilter = true,
-            )
-        }
+        fun forStrategy(kind: StrategyKind): SignalProfile = SignalProfile(
+            momentumVolume = true,
+            higherTimeframeFilter = true,
+            rangeChopFilter = true,
+            dynamicSpreadFilter = true,
+            chikouConfirmation = true,
+            flatSpanB = true,
+        )
 
         /** Migrates the previous single-choice enum value, and also accepts comma lists. */
         fun fromName(raw: String?): SignalProfile {
