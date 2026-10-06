@@ -590,13 +590,12 @@ object SignalEngine {
 
     /**
      * Institutional M5 Ichimoku Engine (Engineering Grade):
-     * Tenkan 8, Kijun 24, Senkou Span B 72, Displacement 24
-     * + H1 Multi-Timeframe Kumo confirmation
-     * + ADX(14) > 22.0
-     * + Volume > SMA(Volume, 20)
-     * + Session VWAP
-     * + Kijun Elasticity (< 3.5 ATR)
-     * + SL = Kijun +- 0.5 ATR, TP = 1.8 R:R
+     * Core Pillars (اصولی‌های هم‌جهت):
+     * 1. M5 Cloud Breakout (8/24/72) + TK Alignment
+     * 2. Momentum & Session VWAP direction
+     * 3. Kijun Elasticity Guard (< 3.8 ATR)
+     * + Additive Confluence (H1 Trend, ADX Strength, Volume)
+     * + Dynamic Risk Management: SL = Kijun +- 0.5 ATR, TP = 1.8 R:R
      */
     fun evaluateSuperPlus(
         candles: List<Candle>,
@@ -632,33 +631,31 @@ object SignalEngine {
 
         val adxList = Indicators.adx(bars, 14)
         val currentAdx = adxList.lastOrNull() ?: 0.0
-        val adxFilter = currentAdx > 22.0
+        val adxOk = currentAdx >= 20.0
 
         val atrList = Indicators.atr(bars, 14)
         val currentAtr = (atrList.lastOrNull() ?: (0.01 * close)).coerceAtLeast(1e-6)
 
         val volSma20 = if (bars.isNotEmpty()) bars.takeLast(20).map { it.volume }.average() else 0.0
-        val volFilter = lastBar.volume >= volSma20
+        val volOk = lastBar.volume >= volSma20 * 0.85
 
         val vwapList = Indicators.sessionVwap(bars)
         val currentVwap = vwapList.lastOrNull() ?: close
-        val vwapBull = close > currentVwap
-        val vwapBear = close < currentVwap
+        val vwapBull = close >= currentVwap * 0.9985
+        val vwapBear = close <= currentVwap * 1.0015
 
         val distKijun = abs(close - kijun24)
-        val elasticityOk = distKijun < (currentAtr * 3.5)
+        val elasticityOk = distKijun <= (currentAtr * 3.8)
 
         val priceAboveCloud = close > max(spanA, spanB72)
         val priceBelowCloud = close < min(spanA, spanB72)
 
-        val longTrigger = (prevTenkan <= prevKijun && tenkan8 > kijun24) ||
-            (tenkan8 > kijun24 && prevBar.close <= prevTenkan && close > tenkan8)
-        val shortTrigger = (prevTenkan >= prevKijun && tenkan8 < kijun24) ||
-            (tenkan8 < kijun24 && prevBar.close >= prevTenkan && close < tenkan8)
+        val tkBullish = (tenkan8 >= kijun24) || (prevTenkan <= prevKijun && tenkan8 > kijun24)
+        val tkBearish = (tenkan8 <= kijun24) || (prevTenkan >= prevKijun && tenkan8 < kijun24)
 
-        // H1 Multi-Timeframe security
+        // H1 Multi-Timeframe trend check
         val h1Bars = if (bars.size >= 60) MtfAnalyzer.resample(bars, Interval.H1, interval) else emptyList()
-        val (h1Bullish, h1Bearish) = if (h1Bars.size >= 52) {
+        val (h1Bullish, h1Bearish) = if (h1Bars.size >= 30) {
             val h1Last = h1Bars.last()
             val h1Idx = h1Bars.size - 1
             fun h1Donchian(len: Int): Double {
@@ -669,96 +666,106 @@ object SignalEngine {
             val h1Kijun = h1Donchian(26)
             val h1SpanA = (h1Tenkan + h1Kijun) / 2.0
             val h1SpanB = h1Donchian(52)
-            val bull = h1Last.close > max(h1SpanA, h1SpanB) && h1Tenkan > h1Kijun
-            val bear = h1Last.close < min(h1SpanA, h1SpanB) && h1Tenkan < h1Kijun
+            val bull = h1Last.close >= min(h1SpanA, h1SpanB) && h1Tenkan >= h1Kijun
+            val bear = h1Last.close <= max(h1SpanA, h1SpanB) && h1Tenkan <= h1Kijun
             Pair(bull, bear)
         } else {
             Pair(true, true)
         }
 
-        val longCondition = h1Bullish && adxFilter && vwapBull && elasticityOk && priceAboveCloud && longTrigger && volFilter
-        val shortCondition = h1Bearish && adxFilter && vwapBear && elasticityOk && priceBelowCloud && shortTrigger && volFilter
+        // ── ۳ شرط اصلی و اصولی ورود (Core Pillars) ──
+        val longCore = priceAboveCloud && tkBullish && elasticityOk && vwapBull
+        val shortCore = priceBelowCloud && tkBearish && elasticityOk && vwapBear
+
+        // محاسبه امتیاز همگرایی
+        var scoreLong = 70.0
+        if (h1Bullish) scoreLong += 10.0
+        if (adxOk) scoreLong += 10.0
+        if (volOk) scoreLong += 10.0
+
+        var scoreShort = 70.0
+        if (h1Bearish) scoreShort += 10.0
+        if (adxOk) scoreShort += 10.0
+        if (volOk) scoreShort += 10.0
 
         val confluence = listOf(
             ConfluenceItem(
-                name = "روند کلان H1 (ایچیموکو)",
-                ok = if (longCondition) h1Bullish else if (shortCondition) h1Bearish else (h1Bullish || h1Bearish),
-                detail = if (h1Bullish) "H1 صعودی بالای ابر کومو" else if (h1Bearish) "H1 نزولی زیر ابر کومو" else "روند H1 خنثی/نامشخص",
-                status = if (h1Bullish || h1Bearish) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
-            ),
-            ConfluenceItem(
-                name = "قدرت روند ADX > 22",
-                ok = adxFilter,
-                detail = "ADX فعلی: ${String.format(java.util.Locale.US, "%.1f", currentAdx)} (حداقل ۲۲)",
-                status = if (adxFilter) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
-            ),
-            ConfluenceItem(
-                name = "جایگاه نسبت به VWAP",
-                ok = if (longCondition) vwapBull else if (shortCondition) vwapBear else true,
-                detail = "قیمت ${close} نسبت به VWAP ${String.format(java.util.Locale.US, "%.2f", currentVwap)}",
-                status = if (vwapBull || vwapBear) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
-            ),
-            ConfluenceItem(
-                name = "کشسانی کیجون (Elasticity < 3.5 ATR)",
-                ok = elasticityOk,
-                detail = "فاصله تا کیجون: ${String.format(java.util.Locale.US, "%.2f", distKijun)} (سقف مجاز: ${String.format(java.util.Locale.US, "%.2f", currentAtr * 3.5)})",
-                status = if (elasticityOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
-            ),
-            ConfluenceItem(
                 name = "موقعیت نسبت به ابر M5 (8/24/72)",
-                ok = if (longCondition) priceAboveCloud else if (shortCondition) priceBelowCloud else (priceAboveCloud || priceBelowCloud),
-                detail = if (priceAboveCloud) "بالای ابر SpanA/SpanB" else if (priceBelowCloud) "زیر ابر SpanA/SpanB" else "داخل ابر کومو",
+                ok = priceAboveCloud || priceBelowCloud,
+                detail = if (priceAboveCloud) "بالای ابر کومو" else if (priceBelowCloud) "زیر ابر کومو" else "داخل ابر کومو",
                 status = if (priceAboveCloud || priceBelowCloud) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
             ),
             ConfluenceItem(
-                name = "حجم تاییدیه (Vol > SMA20)",
-                ok = volFilter,
-                detail = "حجم کندل: ${String.format(java.util.Locale.US, "%.1f", lastBar.volume)} / میانگین: ${String.format(java.util.Locale.US, "%.1f", volSma20)}",
-                status = if (volFilter) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+                name = "تنکان/کیجون (۸ و ۲۴)",
+                ok = tkBullish || tkBearish,
+                detail = if (tkBullish) "تنکان بالای کیجون (صعودی)" else "تنکان زیر کیجون (نزولی)",
+                status = if (tkBullish || tkBearish) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
             ),
             ConfluenceItem(
-                name = "تریگر کراس تنکان/کیجون M5",
-                ok = longTrigger || shortTrigger,
-                detail = if (longTrigger) "کراس صعودی تنکان ۸ از کیجون ۲۴" else if (shortTrigger) "کراس نزولی تنکان ۸ از کیجون ۲۴" else "بدون تریگر کراس",
-                status = if (longTrigger || shortTrigger) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+                name = "جریان نقدینگی نسبت به VWAP",
+                ok = if (longCore) vwapBull else if (shortCore) vwapBear else true,
+                detail = "قیمت ${String.format(java.util.Locale.US, "%.2f", close)} / خط VWAP ${String.format(java.util.Locale.US, "%.2f", currentVwap)}",
+                status = if (vwapBull || vwapBear) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+            ),
+            ConfluenceItem(
+                name = "کشسانی کیجون (Elasticity Guard)",
+                ok = elasticityOk,
+                detail = "فاصله تا کیجون: ${String.format(java.util.Locale.US, "%.2f", distKijun)} (سقف مجاز: ${String.format(java.util.Locale.US, "%.2f", currentAtr * 3.8)})",
+                status = if (elasticityOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+            ),
+            ConfluenceItem(
+                name = "روند کلان H1",
+                ok = if (longCore) h1Bullish else if (shortCore) h1Bearish else (h1Bullish || h1Bearish),
+                detail = if (h1Bullish) "H1 هم‌راستا با صعود" else if (h1Bearish) "H1 هم‌راستا با نزول" else "H1 خنثی",
+                status = if (h1Bullish || h1Bearish) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
+            ),
+            ConfluenceItem(
+                name = "قدرت روند ADX (14)",
+                ok = adxOk,
+                detail = "ADX: ${String.format(java.util.Locale.US, "%.1f", currentAdx)}",
+                status = if (adxOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
+            ),
+            ConfluenceItem(
+                name = "حجم معاملات",
+                ok = volOk,
+                detail = "حجم: ${String.format(java.util.Locale.US, "%.1f", lastBar.volume)} / میانگین: ${String.format(java.util.Locale.US, "%.1f", volSma20)}",
+                status = if (volOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
             ),
         )
 
         val blockers = mutableListOf<String>()
-        if (!adxFilter) blockers.add("قدرت روند ADX (${String.format(java.util.Locale.US, "%.1f", currentAdx)}) زیر ۲۲ است")
-        if (!elasticityOk) blockers.add("فاصله از کیجون زیاد است (خطر تله بازگشت به میانگین)")
-        if (!volFilter) blockers.add("حجم معاملات از میانگین ۲۰ کندل کمتر است")
         if (!priceAboveCloud && !priceBelowCloud) blockers.add("قیمت داخل ابر کومو ۸/۲۴/۷۲ قرار دارد")
+        if (!elasticityOk) blockers.add("فاصله از کیجون زیاد است (خطر اصلاح قیمتی)")
 
-        if (longCondition) {
+        if (longCore) {
             val stopLoss = kijun24 - (currentAtr * 0.5)
             val risk = close - stopLoss
             val takeProfit = close + (risk * 1.8)
             return Signal(
                 action = SignalAction.BUY,
-                confidence = 92.0,
+                confidence = scoreLong.coerceIn(75.0, 95.0),
                 entry = close,
                 stopLoss = stopLoss,
                 takeProfit = takeProfit,
                 riskReward = 1.8,
-                reasons = listOf("تایید سوپر پلاس M5", "روند H1 صعودی", "ADX بالای ۲۲", "کراس تنکان ۸ / کیجون ۲۴"),
+                reasons = listOf("تایید ایچیموکو نهادی M5", "شکست ابر کومو ۸/۲۴/۷۲", "تایید هم‌جهتی با VWAP"),
                 blockers = emptyList(),
                 confluence = confluence,
                 interval = interval,
                 barTime = lastBar.time,
             )
-        } else if (shortCondition) {
+        } else if (shortCore) {
             val stopLoss = kijun24 + (currentAtr * 0.5)
             val risk = stopLoss - close
             val takeProfit = close - (risk * 1.8)
             return Signal(
                 action = SignalAction.SELL,
-                confidence = 92.0,
+                confidence = scoreShort.coerceIn(75.0, 95.0),
                 entry = close,
                 stopLoss = stopLoss,
                 takeProfit = takeProfit,
                 riskReward = 1.8,
-                reasons = listOf("تایید سوپر پلاس M5", "روند H1 نزولی", "ADX بالای ۲۲", "کراس تنکان ۸ / کیجون ۲۴"),
+                reasons = listOf("تایید ایچیموکو نهادی M5", "شکست ابر کومو ۸/۲۴/۷۲", "تایید هم‌جهتی با VWAP"),
                 blockers = emptyList(),
                 confluence = confluence,
                 interval = interval,
@@ -768,13 +775,13 @@ object SignalEngine {
 
         return Signal(
             action = SignalAction.NO_TRADE,
-            confidence = if (confluence.count { it.ok } >= 5) 60.0 else 30.0,
+            confidence = if (confluence.count { it.ok } >= 4) 55.0 else 30.0,
             entry = null,
             stopLoss = null,
             takeProfit = null,
             riskReward = 1.8,
             reasons = emptyList(),
-            blockers = blockers.ifEmpty { listOf("شرایط ۷ گانهٔ ورود سوپر پلاس هنوز تکمیل نشده است") },
+            blockers = blockers.ifEmpty { listOf("منتظر خروج قیمت از ابر و تایید جهت تنکان/کیجون") },
             confluence = confluence,
             interval = interval,
             barTime = lastBar.time,
