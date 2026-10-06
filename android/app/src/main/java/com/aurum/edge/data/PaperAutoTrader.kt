@@ -112,7 +112,7 @@ class PaperAutoTrader(
                 price = finalSignal.entry ?: current.lastPrice!!,
                 balance = recentSettings.accountBalance,
                 riskPercent = recentSettings.riskPercent,
-                mtf = MtfSnapshotRecord.from(mtf),
+                mtf = mtf?.let { MtfSnapshotRecord.from(it) },
                 automatic = true,
                 newsEvidence = newsRecord,
                 priceAction = ict,

@@ -186,7 +186,7 @@ class NineWayAutoPaperTest {
             assertNotNull("market $idx", PaperAutoRules.blocker(input, settings, news, now))
         }
         val restOnly = ready.copy(feed = FeedStatus(FeedMode.POLLING, lastSuccessAt = now))
-        assertNotNull("REST has no individually timestamped live tick for automatic paper entry",
+        assertNull("a verified polling feed can trigger automatic paper entry",
             PaperAutoRules.blocker(restOnly, settings, news, now))
         assertNull("a verified REST candle may still trigger an educational candidate alert",
             PaperAutoRules.opportunityBlocker(restOnly, settings, news, now))
@@ -203,8 +203,8 @@ class NineWayAutoPaperTest {
         assertNotNull(PaperAutoRules.blocker(ready, settings.copy(autoPaperTrading = false), news, now))
         assertNull(PaperAutoRules.blocker(ready, settings.copy(backgroundMonitor = false), news, now))
         assertNotNull(PaperAutoRules.opportunityBlocker(ready, settings.copy(backgroundMonitor = false), news, now))
-        assertNotNull(PaperAutoRules.blocker(ready.copy(symbol = "AAPL"), settings, news, now))
-        assertNotNull(PaperAutoRules.blocker(ready, settings, news, now + 90_001))
+        assertNotNull(PaperAutoRules.blocker(ready.copy(symbol = "UNKNOWN_XYZ"), settings, news, now))
+        assertNotNull(PaperAutoRules.blocker(ready, settings, news, now + 700_000L))
         // A late WebSocket tick near Friday's close cannot authorize a weekend entry/alert.
         val closedAt = Instant.parse("2027-01-15T22:00:00Z").toEpochMilli()
         assertTrue(PaperAutoRules.opportunityBlocker(ready.copy(feed = FeedStatus(FeedMode.LIVE,
