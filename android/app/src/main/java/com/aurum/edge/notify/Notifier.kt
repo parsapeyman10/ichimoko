@@ -149,14 +149,23 @@ object Notifier {
     fun notifyRecordedAutoEntry(context: Context, trade: PaperTrade, customSoundUri: String): Boolean {
         if (!trade.autoOpened || !trade.isOpen || trade.action == SignalAction.NO_TRADE || (trade.signalBarTime ?: 0L) <= 0L ||
             trade.mtf?.veto == true) return false
+        val tech = trade.entryConditions.filterNot { it.name.contains("خبر") || it.name.contains("رویداد") }
+        if (tech.size == 8) {
+            if (tech.any { it.status != "CONFIRMED" } || trade.priceAction == null ||
+                trade.priceAction.barTime != trade.signalBarTime ||
+                trade.priceAction.action != trade.action ||
+                trade.priceAction.quote != trade.entry) return false
+        } else if (tech.isEmpty() || tech.any { it.status == "CONFLICT" }) {
+            return false
+        }
         val side = if (trade.action == SignalAction.BUY) "خرید" else "فروش"
-        val title = "معاملهٔ ${trade.symbol} $side ثبت شد · خودکار"
+        val title = "معاملهٔ آموزشی $side ثبت شد · فقط کاغذی"
         val text = "${trade.symbol} ${trade.interval.label} · ورود ${formatPrice(trade.entry)}$ · شناسه ${trade.id.take(8)}"
         val conditions = trade.entryConditions.take(8).joinToString("، ") {
             it.name.substringAfter('·').trim()
         }
         return postVerified(context, trade.id.hashCode(), title, text,
-            "$text\nشروع معامله: $conditions\nSL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)}\n${trade.note}",
+            "$text\nشروع معامله: $conditions\nSL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)}",
             customSoundUri)
     }
 
