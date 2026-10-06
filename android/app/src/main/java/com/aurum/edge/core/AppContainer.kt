@@ -101,6 +101,7 @@ class AppContainer(context: Context) {
     val metaTraderImporter = MetaTraderImporter(appContext)
 
     init {
+        pairScanner.attachAutoTrader(autoPaperTrader)
         market.attach(appScope)
         appScope.launch {
             verifiedMarket.collect { state ->

@@ -74,9 +74,14 @@ class PairScanner(
 ) {
     private val mutex = Mutex()
     private var lastSweepElapsed = 0L
+    private var autoTrader: PaperAutoTrader? = null
     private val _state = MutableStateFlow(PairScanState(
         statuses = WatchCatalog.scannerSymbols.map { PairScanStatus(it, "pending", "هنوز اسکن نشده") }))
     val state: StateFlow<PairScanState> = _state.asStateFlow()
+
+    fun attachAutoTrader(trader: PaperAutoTrader) {
+        autoTrader = trader
+    }
 
     fun refreshNow(minIntervalMs: Long = SWEEP_PERIOD_MS) {
         scope.launch { runSweep(minIntervalMs, onCandidate = null) }
@@ -218,6 +223,10 @@ class PairScanner(
             }
 
             val price = candles.lastOrNull()?.close
+            val lastClosed = candles.lastOrNull { it.closed }
+            if (lastClosed != null) {
+                journal.settle(lastClosed, symbol, now)
+            }
             val evaluated = withContext(Dispatchers.Default) {
                 runCatching { SignalEngine.evaluate(candles, interval, config.minConfidence, config.spreadPrice, config.signalProfile, config.activeStrategy) }.getOrNull()
             }
@@ -295,10 +304,15 @@ class PairScanner(
 
             val recorded = runCatching { opportunities.record(item) }.getOrDefault(false)
             if (recorded) onCandidate?.invoke(item)
+            if (config.autoPaperTrading && journal.trades.value.count { it.isOpen } < 3) {
+                runCatching {
+                    autoTrader?.onMarketUpdate(market)
+                }
+            }
             update(
                 symbol = symbol,
                 state = "candidate",
-                detail = "کاندیدای برتر ۸/۸ فنی ثبت شد · امتیاز ${(combined.confidence).toInt()}% · R:R ${String.format(java.util.Locale.US, "%.2f", combined.riskReward ?: 1.5)}",
+                detail = "فرصت معاملاتی تایید شد · شانس موفقیت ${(combined.confidence).toInt()}% · R:R ${String.format(java.util.Locale.US, "%.2f", combined.riskReward ?: 1.8)}",
                 price = price,
                 score = score,
                 action = combined.action,
