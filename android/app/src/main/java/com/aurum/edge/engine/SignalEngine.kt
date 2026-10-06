@@ -731,43 +731,48 @@ object SignalEngine {
         val isLowAdx = currentAdx < 18.0
         val isSideways = isInsideCloud || (isLowAdx && (isFlatKijun || isFlatCloud))
 
-        // ── ۴. آزادی مسیر چیکو اسپن (Chikou Clearance) ──
+        // ── ۴. آزادی قطعی و کامل مسیر چیکو اسپن (Chikou Clearance) ──
         val chikouIdx = lastIdx - 24
-        val pastBar = if (chikouIdx >= 0) bars[chikouIdx] else null
-        val chikouBull = pastBar == null || close > pastBar.high
-        val chikouBear = pastBar == null || close < pastBar.low
+        val chikouWindowStart = max(0, chikouIdx - 2)
+        val chikouWindowEnd = min(bars.size - 1, chikouIdx + 2)
+        val chikouPastBars = if (chikouIdx >= 0) bars.subList(chikouWindowStart, chikouWindowEnd + 1) else emptyList()
+        val pastMaxHigh = chikouPastBars.maxOfOrNull { it.high } ?: (bars.getOrNull(chikouIdx)?.high ?: close)
+        val pastMinLow = chikouPastBars.minOfOrNull { it.low } ?: (bars.getOrNull(chikouIdx)?.low ?: close)
 
-        // ── تخصیص دقیق وزن‌ها و امتیازدهی تجمعی ──
+        // شرط آزادی چیکو اسپن: برای خرید باید بالاتر از سقف‌های ۲۴ دوره قبل باشد؛ برای فروش باید زیر کف‌های ۲۴ دوره قبل باشد
+        val chikouBull = chikouIdx < 0 || (close > pastMaxHigh)
+        val chikouBear = chikouIdx < 0 || (close < pastMinLow)
+
+        // ── تخصیص دقیق وزن‌ها و امتیازدهی تجمعی (تاییدیه ایچیموکو + پرایس اکشن) ──
         val longWeightCloud = if (priceAboveCloud) 20.0 else 0.0
-        val longWeightTk = if (tkBullish) 20.0 else 0.0
+        val longWeightTk = if (tkBullish) 15.0 else 0.0
+        val longWeightChikou = if (chikouBull) 15.0 else 0.0
         val longWeightTiming = if (timingBullOk) 15.0 else 0.0
         val longWeightMtf = if (mtfDualBullish) 15.0 else 0.0
         val longWeightVwap = if (vwapBull) 10.0 else 0.0
-        val longWeightChikou = if (chikouBull) 5.0 else 0.0
-        val longWeightVolume = if (volOk) 5.0 else 0.0
         val longWeightAntiSideways = if (!isSideways) 10.0 else 0.0
-        val totalLongScore = longWeightCloud + longWeightTk + longWeightTiming + longWeightMtf +
-            longWeightVwap + longWeightChikou + longWeightVolume + longWeightAntiSideways
+        val totalLongScore = longWeightCloud + longWeightTk + longWeightChikou + longWeightTiming +
+            longWeightMtf + longWeightVwap + longWeightAntiSideways
 
         val shortWeightCloud = if (priceBelowCloud) 20.0 else 0.0
-        val shortWeightTk = if (tkBearish) 20.0 else 0.0
+        val shortWeightTk = if (tkBearish) 15.0 else 0.0
+        val shortWeightChikou = if (chikouBear) 15.0 else 0.0
         val shortWeightTiming = if (timingBearOk) 15.0 else 0.0
         val shortWeightMtf = if (mtfDualBearish) 15.0 else 0.0
         val shortWeightVwap = if (vwapBear) 10.0 else 0.0
-        val shortWeightChikou = if (chikouBear) 5.0 else 0.0
-        val shortWeightVolume = if (volOk) 5.0 else 0.0
         val shortWeightAntiSideways = if (!isSideways) 10.0 else 0.0
-        val totalShortScore = shortWeightCloud + shortWeightTk + shortWeightTiming + shortWeightMtf +
-            shortWeightVwap + shortWeightChikou + shortWeightVolume + shortWeightAntiSideways
+        val totalShortScore = shortWeightCloud + shortWeightTk + shortWeightChikou + shortWeightTiming +
+            shortWeightMtf + shortWeightVwap + shortWeightAntiSideways
 
-        val isLongCandidate = !isSideways && priceAboveCloud && tkBullish && timingBullOk && totalLongScore >= 72.0
-        val isShortCandidate = !isSideways && priceBelowCloud && tkBearish && timingBearOk && totalShortScore >= 72.0
+        // آزادی چیکو اسپن شرط قطعی و الزامی برای ورود است
+        val isLongCandidate = !isSideways && priceAboveCloud && tkBullish && timingBullOk && chikouBull && totalLongScore >= 72.0
+        val isShortCandidate = !isSideways && priceBelowCloud && tkBearish && timingBearOk && chikouBear && totalShortScore >= 72.0
 
         val confluence = listOf(
             ConfluenceItem(
                 name = "موقعیت نسبت به ابر کومو (8/24/72)",
                 ok = priceAboveCloud || priceBelowCloud,
-                detail = if (priceAboveCloud) "بالای ابر کومو (روند صعودی)" else if (priceBelowCloud) "زیر ابر کومو (روند نزولی)" else "داخل ابر کومو (ناحیه بیابانی)",
+                detail = if (priceAboveCloud) "بالای ابر کومو (روند صعودی)" else if (priceBelowCloud) "زیر ابر کومو (روند نزولی)" else "داخل ابر کومو (ناحیه رنج/بیابانی)",
                 status = if (priceAboveCloud || priceBelowCloud) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
                 scorePercent = 20,
             ),
@@ -776,7 +781,16 @@ object SignalEngine {
                 ok = tkBullish || tkBearish,
                 detail = if (tkBullish) "تنکان بالای کیجون (شتاب صعودی)" else "تنکان زیر کیجون (شتاب نزولی)",
                 status = if (tkBullish || tkBearish) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
-                scorePercent = 20,
+                scorePercent = 15,
+            ),
+            ConfluenceItem(
+                name = "آزادی مسیر چیکو اسپن (Chikou Clearance)",
+                ok = if (isLongCandidate) chikouBull else if (isShortCandidate) chikouBear else (chikouBull || chikouBear),
+                detail = if (chikouBull) "چیکو اسپن کاملاً آزاد و بالای کندل‌های گذشته (${String.format(java.util.Locale.US, "%.2f", pastMaxHigh)})"
+                         else if (chikouBear) "چیکو اسپن کاملاً آزاد و زیر کندل‌های گذشته (${String.format(java.util.Locale.US, "%.2f", pastMinLow)})"
+                         else "چیکو اسپن آزاد نیست و درگیر بدنه/سقف کندل‌های ۲۴ دوره قبل است",
+                status = if (chikouBull || chikouBear) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+                scorePercent = 15,
             ),
             ConfluenceItem(
                 name = "فیلتر قفل ضد ساید و رنج (Anti-Sideways)",
@@ -813,57 +827,61 @@ object SignalEngine {
                 status = if (volOk && (vwapBull || vwapBear)) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
                 scorePercent = 10,
             ),
-            ConfluenceItem(
-                name = "آزادی مسیر چیکو اسپن (Chikou Clearance)",
-                ok = if (isLongCandidate) chikouBull else if (isShortCandidate) chikouBear else (chikouBull || chikouBear),
-                detail = if (chikouBull) "مسیر چیکو اسپن باز و بالای کندل‌ها" else if (chikouBear) "مسیر چیکو اسپن زیر کندل‌ها" else "چیکو داخل بدنه کندل گذشته",
-                status = if (chikouBull || chikouBear) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
-                scorePercent = 5,
-            ),
-            ConfluenceItem(
-                name = "پرایس‌اکشن و کشسانی کیجون",
-                ok = elasticityOk,
-                detail = "فاصله تا کیجون: ${String.format(java.util.Locale.US, "%.2f", distKijun)} (کمتر از حد مجاز ${String.format(java.util.Locale.US, "%.2f", currentAtr * 3.8)})",
-                status = if (elasticityOk) ConfluenceStatus.CONFIRMED else ConfluenceStatus.UNKNOWN,
-                scorePercent = 5,
-            ),
         )
 
         val blockers = mutableListOf<String>()
         if (isSideways) blockers.add("بازار در وضعیت رنج/ساید فرسایشی است؛ ورود ممنوع (فیلتر ضد ساید)")
         if (!priceAboveCloud && !priceBelowCloud) blockers.add("قیمت داخل ابر کومو ۸/۲۴/۷۲ قرار دارد")
+        if (priceAboveCloud && tkBullish && !chikouBull) blockers.add("چیکو اسپن آزاد نشده است و درگیر مانع/سقف کندل‌های ۲۴ دوره قبل است")
+        if (priceBelowCloud && tkBearish && !chikouBear) blockers.add("چیکو اسپن آزاد نشده است و درگیر مانع/کف کندل‌های ۲۴ دوره قبل است")
         if (!timingBullOk && !timingBearOk) blockers.add("بیش از ۵ کندل از کراس گذشته و پولبک تایید نشده است")
         if (!elasticityOk) blockers.add("فاصله از کیجون زیاد است (خطر اصلاح قیمتی)")
 
         if (isLongCandidate) {
-            val stopLoss = kijun24 - (currentAtr * 0.5)
-            val risk = close - stopLoss
-            val takeProfit = close + (risk * 1.8)
+            val baseSl = min(kijun24, min(spanA, spanB72)) - (currentAtr * 0.35)
+            val stopLoss = max(baseSl, close - (currentAtr * 2.5))
+            val risk = max(close * 0.0005, close - stopLoss)
+            val targetRR = when {
+                mtfDualBullish && volOk && (close > kijun24 + currentAtr * 0.4) -> 2.6
+                mtfDualBullish && volOk -> 2.4
+                mtfDualBullish -> 2.2
+                else -> 2.0
+            }
+            val takeProfit = close + (risk * targetRR)
+            val finalRR = (((takeProfit - close) / risk) * 10.0).let { kotlin.math.round(it) / 10.0 }
             return Signal(
                 action = SignalAction.BUY,
-                confidence = totalLongScore.coerceIn(72.0, 95.0),
+                confidence = totalLongScore.coerceIn(72.0, 96.0),
                 entry = close,
                 stopLoss = stopLoss,
                 takeProfit = takeProfit,
-                riskReward = 1.8,
-                reasons = listOf("تایید ایچیموکو + پرایس اکشن", "شکست ابر کومو", "تایید هم‌جهتی M15 و H1", "حجم بالاتر از میانگین", "خروج از ساید"),
+                riskReward = finalRR,
+                reasons = listOf("تایید ایچیموکو + پرایس اکشن", "آزادی کامل چیکو اسپن", "شکست ابر کومو", "هم‌جهتی M15 و H1", "نسبت ریسک به ریوارد ۱:$finalRR"),
                 blockers = emptyList(),
                 confluence = confluence,
                 interval = interval,
                 barTime = lastBar.time,
             )
         } else if (isShortCandidate) {
-            val stopLoss = kijun24 + (currentAtr * 0.5)
-            val risk = stopLoss - close
-            val takeProfit = close - (risk * 1.8)
+            val baseSl = max(kijun24, max(spanA, spanB72)) + (currentAtr * 0.35)
+            val stopLoss = min(baseSl, close + (currentAtr * 2.5))
+            val risk = max(close * 0.0005, stopLoss - close)
+            val targetRR = when {
+                mtfDualBearish && volOk && (close < kijun24 - currentAtr * 0.4) -> 2.6
+                mtfDualBearish && volOk -> 2.4
+                mtfDualBearish -> 2.2
+                else -> 2.0
+            }
+            val takeProfit = close - (risk * targetRR)
+            val finalRR = (((close - takeProfit) / risk) * 10.0).let { kotlin.math.round(it) / 10.0 }
             return Signal(
                 action = SignalAction.SELL,
-                confidence = totalShortScore.coerceIn(72.0, 95.0),
+                confidence = totalShortScore.coerceIn(72.0, 96.0),
                 entry = close,
                 stopLoss = stopLoss,
                 takeProfit = takeProfit,
-                riskReward = 1.8,
-                reasons = listOf("تایید ایچیموکو + پرایس اکشن", "شکست ابر کومو", "تایید هم‌جهتی M15 و H1", "حجم بالاتر از میانگین", "خروج از ساید"),
+                riskReward = finalRR,
+                reasons = listOf("تایید ایچیموکو + پرایس اکشن", "آزادی کامل چیکو اسپن", "شکست ابر کومو", "هم‌جهتی M15 و H1", "نسبت ریسک به ریوارد ۱:$finalRR"),
                 blockers = emptyList(),
                 confluence = confluence,
                 interval = interval,
@@ -877,9 +895,9 @@ object SignalEngine {
             entry = null,
             stopLoss = null,
             takeProfit = null,
-            riskReward = 1.8,
+            riskReward = 2.0,
             reasons = emptyList(),
-            blockers = blockers.ifEmpty { listOf("منتظر خروج قیمت از ابر و تایید جهت تنکان/کیجون") },
+            blockers = blockers.ifEmpty { listOf("منتظر خروج قیمت از ابر و تایید جهت تنکان/کیجون و آزادی چیکو اسپن") },
             confluence = confluence,
             interval = interval,
             barTime = lastBar.time,

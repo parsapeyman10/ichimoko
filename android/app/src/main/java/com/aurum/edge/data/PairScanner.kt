@@ -121,9 +121,14 @@ class PairScanner(
             .filter { it.price != null && (it.state == "candidate" || (it.technicalScore ?: 0) >= 5) }
             .sortedWith(
                 compareByDescending<PairScanStatus> { it.state == "candidate" }
-                    .thenByDescending { it.technicalScore ?: 0 }
-                    .thenByDescending { it.confidence ?: 0.0 }
+    private fun rankOpportunities(statuses: List<PairScanStatus>): List<PairScanStatus> {
+        return statuses
+            .filter { it.price != null && (it.state == "candidate" || (it.technicalScore ?: 0) >= 5) }
+            .sortedWith(
+                compareByDescending<PairScanStatus> { it.state == "candidate" }
                     .thenByDescending { it.riskReward ?: 0.0 }
+                    .thenByDescending { it.confidence ?: 0.0 }
+                    .thenByDescending { it.technicalScore ?: 0 }
             )
     }
 
