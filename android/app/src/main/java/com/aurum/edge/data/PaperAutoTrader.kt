@@ -72,9 +72,10 @@ class PaperAutoTrader(
         }
 
         // ── برنامه ریزی توسط AI یا استفاده از مقادیر فنی پایه ──
-        val (finalSignal, entryNote) = if (recentSettings.hasClientNewsAi && advisor != null) {
+        val adv = advisor
+        val (finalSignal, entryNote) = if (recentSettings.hasClientNewsAi && adv != null) {
             val aiPlan = runCatching {
-                advisor.planTradeWithAi(signal, current)
+                adv.planTradeWithAi(signal, current)
             }.getOrNull()
             if (aiPlan != null) {
                 Pair(
