@@ -767,7 +767,7 @@ private fun SymbolSearchRow(
 ) {
     var expanded by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
-    val results = remember(query) { SymbolSearch.rank(query, CryptoCatalog.SYMBOLS, 15) }
+    val results = remember(query) { SymbolSearch.rank(query, CryptoCatalog.symbols, 15) }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
         Row(
@@ -818,9 +818,9 @@ private fun SymbolSearchRow(
                         ) {
                             Column {
                                 Text(item.id, style = MaterialTheme.typography.bodyMedium, color = AurumColors.TextPrimary)
-                                Text(item.nameFa, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+                                Text(item.label, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
                             }
-                            Pill(item.category, AurumColors.Surface)
+                            Pill(AssetClass.of(item.id).label, AurumColors.Surface)
                         }
                     }
                 }
