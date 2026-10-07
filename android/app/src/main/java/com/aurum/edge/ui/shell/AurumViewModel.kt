@@ -255,8 +255,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     /**
-     * Continuous 1.5s real-time price loop for ALL open trades across all symbols.
-     * Guarantees every open position is refreshed tick-by-tick and automatically
+     * Continuous multi-symbol parallel price ticker:
+     * Fetches real-time market prices concurrently for ALL open trades and active symbols,
+     * updates live PnL and gauge animations on Home Screen, and automatically
      * settles Take Profit (TP) and Stop Loss (SL) in real-time as prices move.
      */
     private fun ensureLiveTickerLoop() {
@@ -281,20 +282,26 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                         }
                     }
 
-                    for (trade in openTradesList) {
-                        val sym = trade.symbol
-                        val price = if (sym == currentMarket.symbol && currentMarket.lastPrice != null && currentMarket.lastPrice!! > 0.0) {
-                            currentMarket.lastPrice!!
-                        } else {
-                            runCatching { spot.fetchQuote(sym).price }.getOrNull()
-                        }
-                        if (price != null && price.isFinite() && price > 0.0) {
-                            currentMap[sym] = price
-                            val closedList = container.journalStore.settleTick(sym, price)
-                            if (closedList.isNotEmpty()) {
-                                _stats.value = container.journalStore.stats()
-                                closedList.forEach { closed ->
-                                    _toast.value = "معاملهٔ ${closed.symbol} (${closed.exitReason}) بسته و تسویه شد: ${closed.pnlUsd}$"
+                    // Parallel multi-processing quote fetching across all open trade symbols
+                    val symbolsToFetch = openTradesList.map { it.symbol }.distinct().filter { it != currentMarket.symbol }
+                    if (symbolsToFetch.isNotEmpty()) {
+                        kotlinx.coroutines.coroutineScope {
+                            val deferreds = symbolsToFetch.map { sym ->
+                                async(Dispatchers.IO) {
+                                    val quote = runCatching { spot.fetchQuote(sym) }.getOrNull()
+                                    sym to quote?.price
+                                }
+                            }
+                            deferreds.awaitAll().forEach { (sym, price) ->
+                                if (price != null && price.isFinite() && price > 0.0) {
+                                    currentMap[sym] = price
+                                    val closedList = container.journalStore.settleTick(sym, price)
+                                    if (closedList.isNotEmpty()) {
+                                        _stats.value = container.journalStore.stats()
+                                        closedList.forEach { closed ->
+                                            _toast.value = "معاملهٔ ${closed.symbol} (${closed.exitReason}) بسته و تسویه شد: ${closed.pnlUsd}$"
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -310,7 +317,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
                     _livePrices.value = currentMap
                 } catch (_: Exception) {}
-                delay(1_500L)
+                delay(800L)
             }
         }
     }

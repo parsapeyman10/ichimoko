@@ -61,6 +61,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     var confirmClear by remember { mutableStateOf(false) }
     var confirmOpportunityClear by remember { mutableStateOf(false) }
     var showCombined by remember { mutableStateOf(false) }
+    var selectedCategory by remember { mutableStateOf<AssetClass?>(null) }
     var pendingPdf by remember { mutableStateOf<Pair<String, List<PaperTrade>>?>(null) }
     val savePdf = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         val request = pendingPdf
@@ -77,15 +78,70 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             } == true
     }
 
+    val filteredTrades = remember(trades, selectedCategory) {
+        if (selectedCategory == null) trades else trades.filter { it.assetClass == selectedCategory }
+    }
+    val filteredClosed = remember(filteredTrades) { filteredTrades.filter { !it.isOpen } }
+    val filteredOpen = remember(filteredTrades) { filteredTrades.filter { it.isOpen } }
+
+    val categoryWins = filteredClosed.count { (it.pnlUsd ?: 0.0) > 0.0 }
+    val categoryLosses = filteredClosed.count { (it.pnlUsd ?: 0.0) < 0.0 }
+    val categoryNetPnl = filteredClosed.sumOf { it.pnlUsd ?: 0.0 }
+    val categoryWinRate = if (filteredClosed.isNotEmpty()) (categoryWins.toDouble() / filteredClosed.size) * 100.0 else null
+    val totalGains = filteredClosed.filter { (it.pnlUsd ?: 0.0) > 0 }.sumOf { it.pnlUsd ?: 0.0 }
+    val totalLosses = kotlin.math.abs(filteredClosed.filter { (it.pnlUsd ?: 0.0) < 0 }.sumOf { it.pnlUsd ?: 0.0 })
+    val categoryProfitFactor = if (totalLosses > 0.0) totalGains / totalLosses else if (totalGains > 0.0) totalGains else null
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(bottom = 12.dp),
     ) {
+
+        // ── ۱. تفکیک و فیلتر دسته‌بندی‌های ژورنال (طلا/کالا، فارکس، رمزارز، سهام) ──
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FilterChip(
+                selected = selectedCategory == null,
+                onClick = { selectedCategory = null },
+                label = { Text("همه بازارها (${trades.size})", style = MaterialTheme.typography.labelSmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = AurumColors.Gold.copy(alpha = 0.2f),
+                    selectedLabelColor = AurumColors.Gold,
+                    labelColor = AurumColors.TextSecondary,
+                ),
+            )
+            listOf(
+                AssetClass.COMMODITY to "طلا و کالا",
+                AssetClass.FOREX to "فارکس",
+                AssetClass.CRYPTO to "رمزارزها",
+                AssetClass.STOCK to "سهام بین‌المللی",
+            ).forEach { (cls, label) ->
+                val countInClass = trades.count { it.assetClass == cls }
+                FilterChip(
+                    selected = selectedCategory == cls,
+                    onClick = { selectedCategory = cls },
+                    label = { Text("$label ($countInClass)", style = MaterialTheme.typography.labelSmall) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AurumColors.Cyan.copy(alpha = 0.2f),
+                        selectedLabelColor = AurumColors.Cyan,
+                        labelColor = AurumColors.TextSecondary,
+                    ),
+                )
+            }
+        }
+
+        // ── ۲. آمار و خلاصه عملکرد ژورنال دستهٔ انتخاب‌شده ───────────────
         SectionCard(
-            title = "ژورنال معاملات کاغذی",
-            subtitle = "جمع فعالیت دستی و سیگنال فنی؛ فقط کاغذیِ ذخیره‌شده، نه سود استراتژی یا خط چارت",
+            title = "ژورنال معاملات کاغذی · ${selectedCategory?.label ?: "همهٔ بازارها"}",
+            subtitle = "آمار نتایج واقعی بر اساس تسویهٔ قیمت‌های بازار در دستهٔ انتخاب‌شده",
         ) {
             loadError?.let { Text(it, style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.Red, modifier = Modifier.padding(bottom = 8.dp)) }
@@ -94,9 +150,9 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                     if (it.endsWith(".00")) it.substringBefore(".00") else it
                 }
                 StatTile("موجودی حساب", balanceStr, AurumColors.Gold, Modifier.weight(1f))
-                StatTile("بسته‌شده", "${stats.total}", AurumColors.TextPrimary, Modifier.weight(1f))
-                StatTile("باز", "${stats.open}", AurumColors.TextPrimary, Modifier.weight(1f))
-                StatTile("برد/باخت", "${stats.wins}/${stats.losses}", AurumColors.Green, Modifier.weight(1f))
+                StatTile("بسته‌شده", "${filteredClosed.size}", AurumColors.TextPrimary, Modifier.weight(1f))
+                StatTile("باز", "${filteredOpen.size}", AurumColors.TextPrimary, Modifier.weight(1f))
+                StatTile("برد/باخت", "$categoryWins/$categoryLosses", AurumColors.Green, Modifier.weight(1f))
             }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -104,13 +160,13 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                     .fillMaxWidth()
                     .padding(top = 8.dp),
             ) {
-                StatTile("نرخ برد", stats.winRate?.let { "${String.format("%.1f", it)}%" } ?: "—", AurumColors.Green, Modifier.weight(1f))
-                StatTile("فاکتور سود", stats.profitFactor?.let { String.format("%.2f", it) } ?: "—", AurumColors.Gold, Modifier.weight(1f))
-                StatTile("خالص خامِ کل", "${formatPrice(stats.netPnl)}$",  if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
+                StatTile("نرخ برد", categoryWinRate?.let { "${String.format("%.1f", it)}%" } ?: "—", AurumColors.Green, Modifier.weight(1f))
+                StatTile("فاکتور سود", categoryProfitFactor?.let { String.format("%.2f", it) } ?: "—", AurumColors.Gold, Modifier.weight(1f))
+                StatTile("خالص سود/زیان", "${formatPrice(categoryNetPnl)}$", if (categoryNetPnl >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
             }
-            if (stats.total == 0 && loadError == null) {
+            if (filteredClosed.isEmpty() && loadError == null) {
                 Text(
-                    "هنوز معامله بسته‌شده‌ای نیست. آمار فقط از نتایج واقعی ساخته می‌شود؛ عدد نمایشی نداریم.",
+                    "هنوز معامله بسته‌شده‌ای در این دسته ثبت نشده است. آمار فقط از نتایج واقعی بازار محاسبه می‌شود.",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                     modifier = Modifier.padding(top = 8.dp),
@@ -118,25 +174,31 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             }
         }
 
-        if (opportunities.isNotEmpty() || opportunityError != null) {
-            SectionCard("فرصت‌های آموزشی بررسی‌شده", "بعضی به معاملهٔ کاغذی وصل‌اند؛ خودِ کاندیدا معامله نیست و در آمار محاسبه نمی‌شود") {
+        val filteredOpportunities = remember(opportunities, selectedCategory) {
+            if (selectedCategory == null) opportunities else opportunities.filter { AssetClass.of(it.symbol) == selectedCategory }
+        }
+
+        if (filteredOpportunities.isNotEmpty() || opportunityError != null) {
+            SectionCard(
+                title = "فرصت‌های آموزشی بررسی‌شده · ${selectedCategory?.label ?: "همهٔ بازارها"}",
+                subtitle = "کاندیداهای اسکن‌شده در دستهٔ انتخاب‌شده (خودِ کاندیدا تا زمان تایید ورود معامله نیست)",
+            ) {
                 opportunityError?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = AurumColors.Red) }
-                opportunities.take(30).forEach { item ->
+                filteredOpportunities.take(30).forEach { item ->
                     OpportunityRow(item, trades.any { it.id == item.paperTradeId })
                 }
-                if (opportunities.size > 30) Text("۳۰ مورد اخیر از ${opportunities.size} کاندیدای ذخیره‌شده",
+                if (filteredOpportunities.size > 30) Text("۳۰ مورد اخیر از ${filteredOpportunities.size} کاندیدای ذخیره‌شده",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                if (opportunities.isNotEmpty()) OutlinedButton(onClick = { confirmOpportunityClear = true }) {
+                if (filteredOpportunities.isNotEmpty()) OutlinedButton(onClick = { confirmOpportunityClear = true }) {
                     Text("پاک کردن تاریخچهٔ کاندیداها (نه معاملات)")
                 }
             }
         }
 
-        val open = trades.filter { it.isOpen }
         val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
-        if (open.isNotEmpty()) {
-            SectionCard("پوزیشن‌های باز", "ارزش‌گذاری با آخرین قیمت واقعی دریافتی") {
-                open.forEach { trade ->
+        if (filteredOpen.isNotEmpty()) {
+            SectionCard("پوزیشن‌های باز · ${selectedCategory?.label ?: "همهٔ بازارها"}", "ارزش‌گذاری با آخرین قیمت واقعی دریافتی") {
+                filteredOpen.forEach { trade ->
                     val currentPrice = livePrices[trade.symbol] ?: (if (trade.symbol == market.symbol) livePrice else null)
                     val unrealized = currentPrice?.let { price ->
                         val perOz = if (trade.action == SignalAction.BUY) price - trade.entry else trade.entry - price
@@ -213,10 +275,9 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             }
         }
 
-        val closed = trades.filter { !it.isOpen }
-        if (closed.isNotEmpty()) {
-            SectionCard("معاملات بسته‌شده", "خروج فرضی بر اساس قیمت دریافتی؛ نه اجرای بروکر/هزینهٔ واقعی") {
-                closed.forEach { trade: PaperTrade ->
+        if (filteredClosed.isNotEmpty()) {
+            SectionCard("معاملات بسته‌شده · ${selectedCategory?.label ?: "همهٔ بازارها"}", "خروج فرضی بر اساس قیمت دریافتی؛ نه اجرای بروکر/هزینهٔ واقعی") {
+                filteredClosed.forEach { trade: PaperTrade ->
                     TradeRow(trade)
                     TradeChartDisclosure(viewModel, trade)
                 }
@@ -228,8 +289,9 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             ) { Text("پاک کردن ژورنال") }
             OutlinedButton(
                 onClick = {
-                    pendingPdf = "Aurum Edge - Paper Journal (Forex)" to trades
-                    savePdf.launch("aurum_forex_journal_${System.currentTimeMillis()}.pdf")
+                    val catName = selectedCategory?.name?.lowercase() ?: "all"
+                    pendingPdf = "Aurum Edge - Paper Journal ($catName)" to filteredTrades
+                    savePdf.launch("aurum_${catName}_journal_${System.currentTimeMillis()}.pdf")
                 },
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
             ) { Text("خروجی PDF ژورنال") }

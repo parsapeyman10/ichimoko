@@ -281,6 +281,32 @@ class SignalMonitorService : Service() {
                 }
             }
         }
+
+        // Background multi-processing tick monitor for ALL open trades (active both in-app and out-of-app)
+        scope.launch(Dispatchers.IO) {
+            val spot = SpotFallbackClient()
+            while (isActive) {
+                try {
+                    val openTrades = container.journalStore.trades.value.filter { it.isOpen }
+                    if (openTrades.isNotEmpty()) {
+                        kotlinx.coroutines.coroutineScope {
+                            val deferreds = openTrades.map { t ->
+                                async(Dispatchers.IO) {
+                                    val q = runCatching { spot.fetchQuote(t.symbol) }.getOrNull()
+                                    t.symbol to q?.price
+                                }
+                            }
+                            deferreds.awaitAll().forEach { (sym, price) ->
+                                if (price != null && price > 0.0) {
+                                    container.journalStore.settleTick(sym, price)
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+                delay(1_000L)
+            }
+        }
         return START_STICKY
     }
 
