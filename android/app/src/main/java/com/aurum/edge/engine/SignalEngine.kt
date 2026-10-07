@@ -634,6 +634,20 @@ object SignalEngine {
         val prevTenkan = donchian(8, lastIdx - 1)
         val prevKijun = donchian(24, lastIdx - 1)
 
+        val closes = bars.map { it.close }
+        val ema200List = Indicators.ema(closes, 200)
+        val ema50List = Indicators.ema(closes, 50)
+        val currentEma200 = ema200List.lastOrNull() ?: close
+        val currentEma50 = ema50List.lastOrNull() ?: close
+        val prevEma200 = ema200List.getOrNull(lastIdx - 1) ?: currentEma200
+        val prevEma50 = ema50List.getOrNull(lastIdx - 1) ?: currentEma50
+
+        // فیلتر روند کلان: تراز میانگین‌های متحرک بلندمدت و موقعیت قیمت
+        val emaBull = (close >= currentEma200 * 0.999 || (close >= currentEma50 && currentEma50 >= prevEma50)) &&
+            !(close < currentEma200 * 0.995 && currentEma50 < currentEma200)
+        val emaBear = (close <= currentEma200 * 1.001 || (close <= currentEma50 && currentEma50 <= prevEma50)) &&
+            !(close > currentEma200 * 1.005 && currentEma50 > currentEma200)
+
         val adxList = Indicators.adx(bars, 14)
         val currentAdx = adxList.lastOrNull() ?: 0.0
         val adxOk = currentAdx >= 20.0
@@ -657,6 +671,10 @@ object SignalEngine {
 
         val tkBullish = (tenkan8 >= kijun24) || (prevTenkan <= prevKijun && tenkan8 > kijun24)
         val tkBearish = (tenkan8 <= kijun24) || (prevTenkan >= prevKijun && tenkan8 < kijun24)
+
+        // شیب خط تعادل کیجون (Kijun-sen Slope): نباید در جهت مخالف روند شیب تند داشته باشد
+        val kijunSlopeBull = kijun24 >= prevKijun - (currentAtr * 0.05)
+        val kijunSlopeBear = kijun24 <= prevKijun + (currentAtr * 0.05)
 
         // ── ۱. پنجره زمانی تازگی کراس (حداکثر ۵ کندل پس از کراس یا پولبک تعادل پرایس‌اکشن) ──
         var crossBarsAgoBull = 999
@@ -682,7 +700,7 @@ object SignalEngine {
         val timingBullOk = isFreshBull || isPullbackBull
         val timingBearOk = isFreshBear || isPullbackBear
 
-        // ── ۲. هم‌جهتی کامل روند تایم‌فریم‌های M15 و H1 با M5 (فیلتر روند) ──
+        // ── ۲. هم‌جهتی کامل روند تایم‌فریم‌های M15 و H1 با M5 (فیلتر قطعی روند چندتایم‌فریم) ──
         val m15Bars = if (bars.size >= 45) MtfAnalyzer.resample(bars, Interval.M15, interval) else emptyList()
         val (m15Bullish, m15Bearish) = if (m15Bars.size >= 26) {
             val m15Last = m15Bars.last()
@@ -695,11 +713,14 @@ object SignalEngine {
             val m15Kijun = m15Donchian(26)
             val m15SpanA = (m15Tenkan + m15Kijun) / 2.0
             val m15SpanB = m15Donchian(52)
-            val bull = m15Last.close >= min(m15SpanA, m15SpanB) && m15Tenkan >= m15Kijun
-            val bear = m15Last.close <= max(m15SpanA, m15SpanB) && m15Tenkan <= m15Kijun
+            val m15Closes = m15Bars.map { it.close }
+            val m15Ema50 = Indicators.ema(m15Closes, 50).lastOrNull() ?: m15Last.close
+
+            val bull = m15Last.close > min(m15SpanA, m15SpanB) && m15Tenkan >= m15Kijun && m15Last.close >= m15Ema50 * 0.998
+            val bear = m15Last.close < max(m15SpanA, m15SpanB) && m15Tenkan <= m15Kijun && m15Last.close <= m15Ema50 * 1.002
             Pair(bull, bear)
         } else {
-            Pair(true, true)
+            Pair(true, false)
         }
 
         val h1Bars = if (bars.size >= 60) MtfAnalyzer.resample(bars, Interval.H1, interval) else emptyList()
@@ -714,15 +735,19 @@ object SignalEngine {
             val h1Kijun = h1Donchian(26)
             val h1SpanA = (h1Tenkan + h1Kijun) / 2.0
             val h1SpanB = h1Donchian(52)
-            val bull = h1Last.close >= min(h1SpanA, h1SpanB) && h1Tenkan >= h1Kijun
-            val bear = h1Last.close <= max(h1SpanA, h1SpanB) && h1Tenkan <= h1Kijun
+            val h1Closes = h1Bars.map { it.close }
+            val h1Ema50 = Indicators.ema(h1Closes, 50).lastOrNull() ?: h1Last.close
+
+            val bull = h1Last.close >= min(h1SpanA, h1SpanB) && h1Tenkan >= h1Kijun && h1Last.close >= h1Ema50 * 0.997
+            val bear = h1Last.close <= max(h1SpanA, h1SpanB) && h1Tenkan <= h1Kijun && h1Last.close <= h1Ema50 * 1.003
             Pair(bull, bear)
         } else {
-            Pair(true, true)
+            Pair(true, false)
         }
 
-        val mtfDualBullish = m15Bullish && h1Bullish
-        val mtfDualBearish = m15Bearish && h1Bearish
+        // وتوی قطعی در صورت تضاد با تایم‌فریم‌های بالاتر: در صورت روند نزولی M15 لانگ ممنوع و در صورت روند صعودی M15 شورت ممنوع است
+        val mtfDualBullish = !m15Bearish && (m15Bullish || h1Bullish)
+        val mtfDualBearish = !m15Bullish && (m15Bearish || h1Bearish)
 
         // ── ۳. فیلتر قفل ضد ساید و رنج فرسایشی (Anti-Sideways Guard) ──
         val isInsideCloud = close in min(spanA, spanB72)..max(spanA, spanB72)
@@ -744,29 +769,31 @@ object SignalEngine {
         val chikouBear = chikouIdx < 0 || (close < pastMinLow)
 
         // ── تخصیص دقیق وزن‌ها و امتیازدهی تجمعی (تاییدیه ایچیموکو + پرایس اکشن) ──
-        val longWeightCloud = if (priceAboveCloud) 20.0 else 0.0
-        val longWeightTk = if (tkBullish) 15.0 else 0.0
+        val longWeightCloud = if (priceAboveCloud && spanA >= spanB72 * 0.999) 20.0 else if (priceAboveCloud) 12.0 else 0.0
+        val longWeightTk = if (tkBullish && kijunSlopeBull) 15.0 else if (tkBullish) 8.0 else 0.0
         val longWeightChikou = if (chikouBull) 15.0 else 0.0
         val longWeightTiming = if (timingBullOk) 15.0 else 0.0
         val longWeightMtf = if (mtfDualBullish) 15.0 else 0.0
-        val longWeightVwap = if (vwapBull) 10.0 else 0.0
+        val longWeightVwap = if (vwapBull && emaBull) 15.0 else if (vwapBull) 8.0 else 0.0
         val longWeightAntiSideways = if (!isSideways) 10.0 else 0.0
         val totalLongScore = longWeightCloud + longWeightTk + longWeightChikou + longWeightTiming +
             longWeightMtf + longWeightVwap + longWeightAntiSideways
 
-        val shortWeightCloud = if (priceBelowCloud) 20.0 else 0.0
-        val shortWeightTk = if (tkBearish) 15.0 else 0.0
+        val shortWeightCloud = if (priceBelowCloud && spanA <= spanB72 * 1.001) 20.0 else if (priceBelowCloud) 12.0 else 0.0
+        val shortWeightTk = if (tkBearish && kijunSlopeBear) 15.0 else if (tkBearish) 8.0 else 0.0
         val shortWeightChikou = if (chikouBear) 15.0 else 0.0
         val shortWeightTiming = if (timingBearOk) 15.0 else 0.0
         val shortWeightMtf = if (mtfDualBearish) 15.0 else 0.0
-        val shortWeightVwap = if (vwapBear) 10.0 else 0.0
+        val shortWeightVwap = if (vwapBear && emaBear) 15.0 else if (vwapBear) 8.0 else 0.0
         val shortWeightAntiSideways = if (!isSideways) 10.0 else 0.0
         val totalShortScore = shortWeightCloud + shortWeightTk + shortWeightChikou + shortWeightTiming +
             shortWeightMtf + shortWeightVwap + shortWeightAntiSideways
 
-        // آزادی چیکو اسپن شرط قطعی و الزامی برای ورود است
-        val isLongCandidate = !isSideways && priceAboveCloud && tkBullish && timingBullOk && chikouBull && totalLongScore >= 72.0
-        val isShortCandidate = !isSideways && priceBelowCloud && tkBearish && timingBearOk && chikouBear && totalShortScore >= 72.0
+        // شرایط قطعی و الزامی برای ورود: هم‌جهتی کامل روند، آزادی چیکو، عدم ساید، تایید تایم بالاتر
+        val isLongCandidate = !isSideways && priceAboveCloud && tkBullish && emaBull && kijunSlopeBull &&
+            !m15Bearish && (m15Bullish || h1Bullish) && timingBullOk && chikouBull && totalLongScore >= 75.0
+        val isShortCandidate = !isSideways && priceBelowCloud && tkBearish && emaBear && kijunSlopeBear &&
+            !m15Bullish && (m15Bearish || h1Bearish) && timingBearOk && chikouBear && totalShortScore >= 75.0
 
         val confluence = listOf(
             ConfluenceItem(
@@ -832,6 +859,12 @@ object SignalEngine {
         val blockers = mutableListOf<String>()
         if (isSideways) blockers.add("بازار در وضعیت رنج/ساید فرسایشی است؛ ورود ممنوع (فیلتر ضد ساید)")
         if (!priceAboveCloud && !priceBelowCloud) blockers.add("قیمت داخل ابر کومو ۸/۲۴/۷۲ قرار دارد")
+        if (!emaBull && priceAboveCloud) blockers.add("خلاف روند کلان EMA200/EMA50 — روند کلی بازار نزولی است")
+        if (!emaBear && priceBelowCloud) blockers.add("خلاف روند کلان EMA200/EMA50 — روند کلی بازار صعودی است")
+        if (m15Bearish && priceAboveCloud) blockers.add("تضاد چندتایم‌فریم: تایم‌فریم M15 در روند نزولی است")
+        if (m15Bullish && priceBelowCloud) blockers.add("تضاد چندتایم‌فریم: تایم‌فریم M15 در روند صعودی است")
+        if (!kijunSlopeBull && priceAboveCloud) blockers.add("شیب کیجون نزولی است — ورود لانگ مجاز نیست")
+        if (!kijunSlopeBear && priceBelowCloud) blockers.add("شیب کیجون صعودی است — ورود شورت مجاز نیست")
         if (priceAboveCloud && tkBullish && !chikouBull) blockers.add("چیکو اسپن آزاد نشده است و درگیر مانع/سقف کندل‌های ۲۴ دوره قبل است")
         if (priceBelowCloud && tkBearish && !chikouBear) blockers.add("چیکو اسپن آزاد نشده است و درگیر مانع/کف کندل‌های ۲۴ دوره قبل است")
         if (!timingBullOk && !timingBearOk) blockers.add("بیش از ۵ کندل از کراس گذشته و پولبک تایید نشده است")
