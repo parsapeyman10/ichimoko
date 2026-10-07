@@ -62,7 +62,7 @@ object PaperOrderRules {
         }
         require(entry.isFinite() && stop.isFinite() && target.isFinite() &&
             entry > 0.0 && stop > 0.0 && target > 0.0) { "قیمت یا حد ضرر/سود معتبر نیست" }
-        require(balance.isFinite() && balance >= 5.0 && riskPercent.isFinite() && riskPercent in 0.1..5.0) {
+        require(balance.isFinite() && balance >= 10.0 && riskPercent.isFinite() && riskPercent in 0.1..5.0) {
             "موجودی یا درصد ریسک معتبر نیست (حداکثر ۵٪)"
         }
         require((side == SignalAction.BUY && stop < entry && target > entry) ||
