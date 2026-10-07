@@ -218,7 +218,7 @@ class PaperJournalPersistenceTest {
         val closedTrade = closedList.single()
         assertFalse(closedTrade.isOpen)
         assertEquals(3020.0, closedTrade.exitPrice!!, 1e-6)
-        assertTrue(closedTrade.exitReason.contains("حد سود"))
+        assertTrue(closedTrade.exitReason?.contains("حد سود") == true)
         assertTrue(closedTrade.pnlUsd!! > 0.0)
 
         // 2. Short position: Entry 3000, SL 3010, TP 2980
@@ -232,7 +232,7 @@ class PaperJournalPersistenceTest {
         val slClosedTrade = slClosedList.single()
         assertFalse(slClosedTrade.isOpen)
         assertEquals(3010.0, slClosedTrade.exitPrice!!, 1e-6)
-        assertTrue(slClosedTrade.exitReason.contains("حد ضرر"))
+        assertTrue(slClosedTrade.exitReason?.contains("حد ضرر") == true)
         assertTrue(slClosedTrade.pnlUsd!! < 0.0)
     }
 
