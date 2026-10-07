@@ -21,6 +21,7 @@ import com.aurum.edge.core.PaperAlertRules
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.data.ResearchAlert
 import com.aurum.edge.data.ResearchAlerts
+import com.aurum.edge.data.SpotFallbackClient
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.notify.AlertSoundPlayer
@@ -29,6 +30,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
