@@ -251,12 +251,18 @@ fun ConfluenceRow(item: ConfluenceItem) {
     ) {
         Text(label, color = tone, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(end = 10.dp))
         Column(Modifier.weight(1f)) {
-            Text(item.name, style = MaterialTheme.typography.bodySmall, color = tone)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(item.name, style = MaterialTheme.typography.bodySmall, color = tone)
+                item.scorePercent?.let { score ->
+                    Text("وزن: $score٪", style = MaterialTheme.typography.labelSmall, color = if (item.ok) tone else AurumColors.TextMuted)
+                }
+            }
             if (item.detail.isNotBlank()) {
                 Text(item.detail, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            }
-            item.scorePercent?.let { score ->
-                Text("سهم $score/100", style = MaterialTheme.typography.labelSmall, color = tone)
             }
         }
     }

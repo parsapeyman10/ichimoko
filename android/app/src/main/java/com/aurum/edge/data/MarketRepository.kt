@@ -622,6 +622,7 @@ class MarketRepository(
             persistCache()
         }
         // settle paper trades against real prices as they arrive
+        journal.settleTick(current.symbol, price, at)
         journal.settle(Candle(time = at, open = price, high = price, low = price, close = price), current.symbol, at)
     }
 
@@ -707,7 +708,7 @@ class MarketRepository(
         }
         val signal = if (showingCache) null else withContext(Dispatchers.Default) {
             runCatching {
-                SignalEngine.evaluate(bars, current.interval, current.minConfidence, current.spreadPrice, current.signalProfile)
+                SignalEngine.evaluate(bars, current.interval, current.minConfidence, current.spreadPrice, current.signalProfile, current.activeStrategy)
             }.getOrNull()
         }
         _state.value = _state.value.copy(

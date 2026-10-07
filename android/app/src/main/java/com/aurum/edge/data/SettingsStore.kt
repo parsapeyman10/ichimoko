@@ -41,12 +41,13 @@ class SettingsStore(context: Context) {
         val storedNewsAiKey = prefs.getString(KEY_NEWS_AI_KEY, null)?.trim().orEmpty()
         val storedNewsAiUrl = prefs.getString(KEY_NEWS_AI_URL, null)?.trim().orEmpty()
         val storedNewsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, null)?.trim().orEmpty()
+        val storedStrategy = com.aurum.edge.core.StrategyKind.fromId(prefs.getString(KEY_ACTIVE_STRATEGY, "ICHIMOKU"))
         return AppSettings(
         apiKey = storedApiKey?.takeIf { it.isNotBlank() }
             ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY.trim(),
-        // Legacy installs may still hold a removed symbol (crypto/stock); the app is forex-only now.
+        // Symbol can be any instrument in the 50+ global universe (forex, commodities, stocks, crypto)
         symbol = (prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD")
-            .takeIf { it in WatchCatalog.chartSymbols || CryptoCatalog.isCrypto(it) } ?: "XAU/USD",
+            .takeIf { it in WatchCatalog.chartSymbols || it in WatchCatalog.scannerSymbols || CryptoCatalog.isCrypto(it) } ?: "XAU/USD",
         interval = Interval.fromLabel(prefs.getString(KEY_INTERVAL, null) ?: "5m"),
         riskPercent = prefs.getFloat(KEY_RISK, 0.5f).toDouble(),
         accountBalance = prefs.getFloat(KEY_BALANCE, 1000f).toDouble(),
@@ -66,6 +67,7 @@ class SettingsStore(context: Context) {
         newsAiModel = storedNewsAiModel,
         newsAiFormat = prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" },
         signalProfile = profile,
+        activeStrategy = storedStrategy,
     )
     }
 
@@ -81,7 +83,8 @@ class SettingsStore(context: Context) {
         val key = keyInput.trim().ifBlank { existing }
         if (key.any { it.isWhitespace() }) return false
         val symbol = symbolInput.trim().uppercase(java.util.Locale.ROOT).ifBlank { "XAU/USD" }
-        if (symbol !in WatchCatalog.chartSymbols && !CryptoCatalog.isCrypto(symbol)) return false
+        val valid = symbol in WatchCatalog.chartSymbols || symbol in WatchCatalog.scannerSymbols || CryptoCatalog.isCrypto(symbol)
+        if (!valid) return false
         val saved = prefs.edit().putString(KEY_API, key).putString(KEY_SYMBOL, symbol).commit()
         if (saved && prefs.getString(KEY_API, null).orEmpty() == key && prefs.getString(KEY_SYMBOL, null) == symbol) {
             _settings.value = read()
@@ -92,15 +95,14 @@ class SettingsStore(context: Context) {
     }
 
     /**
-     * Switch ONLY the chart/signal symbol, without touching the stored key. Allowed set is the
-     * watch catalog (gold + major pairs); the write is commit-verified like every other setting.
-     * Works keyless: the Swissquote fallback feed serves ticks for any catalog pair.
+     * Switch ONLY the chart/signal symbol, without touching the stored key.
+     * Allowed set is the 50+ instrument universe (gold, commodities, forex, crypto, stocks).
      */
     @Synchronized
     fun saveChartSymbol(symbolInput: String): Boolean {
         val symbol = symbolInput.trim().uppercase(java.util.Locale.ROOT)
-        // The crypto universe is discovered at runtime, so it cannot be a static list.
-        if (symbol !in WatchCatalog.chartSymbols && !CryptoCatalog.isCrypto(symbol)) return false
+        val valid = symbol in WatchCatalog.chartSymbols || symbol in WatchCatalog.scannerSymbols || CryptoCatalog.isCrypto(symbol)
+        if (!valid) return false
         val saved = prefs.edit().putString(KEY_SYMBOL, symbol).commit()
         if (saved && prefs.getString(KEY_SYMBOL, null) == symbol) {
             _settings.value = read()
@@ -159,6 +161,19 @@ class SettingsStore(context: Context) {
         return false
     }
 
+    /**
+     * Real-time continuous balance adjustment upon settled paper trade (profit or loss).
+     * Ensures position sizing and compounding dynamically track actual account equity.
+     */
+    @Synchronized
+    fun adjustBalance(deltaUsd: Double) {
+        if (!deltaUsd.isFinite() || deltaUsd == 0.0) return
+        val current = read()
+        val updated = kotlin.math.round((current.accountBalance + deltaUsd) * 100.0) / 100.0
+        val finalBalance = maxOf(10.0, updated)
+        update { it.copy(accountBalance = finalBalance) }
+    }
+
     @Synchronized
     fun update(transform: (AppSettings) -> AppSettings) {
         val next = transform(_settings.value)
@@ -187,6 +202,7 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_SIGNAL_STRUCTURE_RISK, next.signalProfile.structureRiskFilter)
             .putBoolean(KEY_SIGNAL_COOLDOWN, next.signalProfile.cooldownFilter)
             .putBoolean(KEY_SIGNAL_CHIKOU, next.signalProfile.chikouConfirmation)
+            .putString(KEY_ACTIVE_STRATEGY, next.activeStrategy.id)
             .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
             .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
             .putBoolean(KEY_AUTO_DOWNLOAD_UPDATES, next.autoDownloadUpdates)
@@ -233,5 +249,6 @@ class SettingsStore(context: Context) {
         private const val KEY_SIGNAL_STRUCTURE_RISK = "signal_structure_risk_filter"
         private const val KEY_SIGNAL_COOLDOWN = "signal_cooldown_filter"
         private const val KEY_SIGNAL_CHIKOU = "signal_chikou_confirmation"
+        private const val KEY_ACTIVE_STRATEGY = "active_strategy"
     }
 }

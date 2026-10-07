@@ -22,9 +22,7 @@ object HistoryPolicy {
     const val MAX_PROVIDER_CANDLES: Int = DEEP_CHART_CANDLES
 
     fun chartTargetCandles(symbol: String, interval: Interval): Int =
-        if (symbol.trim().equals("XAU/USD", ignoreCase = true) && interval.minutes >= Interval.M1.minutes) {
-            DEEP_CHART_CANDLES
-        } else TARGET_CANDLES
+        DEEP_CHART_CANDLES
 
     /** Request size for Twelve Data and other single-call providers that cannot deliver deep history. */
     fun providerRequestSize(requested: Int, minimum: Int = TARGET_CANDLES): Int =

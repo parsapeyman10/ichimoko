@@ -86,7 +86,7 @@ fun SignalSummaryCard(
                 StatTile("ورود", formatPrice(signal.entry), AurumColors.Gold, Modifier.weight(1f))
                 StatTile("حد ضرر", formatPrice(signal.stopLoss), AurumColors.Red, Modifier.weight(1f))
                 StatTile("حد سود", formatPrice(signal.takeProfit), AurumColors.Green, Modifier.weight(1f))
-                StatTile("R:R", "1:${String.format("%.1f", signal.riskReward ?: 0.0)}", AurumColors.TextPrimary, Modifier.weight(1f))
+                StatTile("R:R", "1:${String.format(java.util.Locale.US, "%.1f", signal.riskReward ?: 0.0)}", AurumColors.TextPrimary, Modifier.weight(1f))
             }
             if (signal.reasons.isNotEmpty()) {
                 Column(modifier = Modifier.padding(top = 10.dp)) {

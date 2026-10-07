@@ -6,9 +6,16 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -16,6 +23,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -45,9 +53,8 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Native candlestick chart. Draws only real candles handed to it — no placeholder series.
- * Ichimoku / EMA200 / VWAP are overlaid for reading. The five Ichimoku lines use the same
- * displacement mapping as the execution-safe engine; future values are left null.
+ * Native candlestick chart displaying verified market data from the past up to the current moment.
+ * Ichimoku / EMA200 / VWAP / ICT structures and live price tracking are drawn in real time.
  */
 @Composable
 fun CandleChart(
@@ -81,288 +88,364 @@ fun CandleChart(
     var rightOffset by remember { mutableIntStateOf(6) }
     var crosshairX by remember { mutableFloatStateOf(-1f) }
     var crosshairY by remember { mutableFloatStateOf(-1f) }
+    var activeCandle by remember { mutableStateOf<Candle?>(null) }
 
-    val textPaint = remember {
-        Paint().apply {
-            isAntiAlias = true
-            textSize = 26f
-            typeface = Typeface.MONOSPACE
-        }
-    }
+    val displayedCandle = activeCandle ?: candles.lastOrNull()
+
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.US) }
     val dateFormat = remember { SimpleDateFormat("MM-dd HH:mm", Locale.US) }
 
-    Box(
+    Column(
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
             .background(AurumColors.ChartBg)
-            .pointerInput(candles.size) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    if (zoom != 1f) {
-                        visibleCount = (visibleCount / zoom).toInt().coerceIn(25, 400)
-                    }
-                    if (abs(pan.x) > 0.5f) {
-                        val barsPerPixel = visibleCount.toFloat() / size.width
-                        rightOffset = (rightOffset - (pan.x * barsPerPixel)).toInt().coerceIn(-visibleCount + 20, 400)
-                    }
-                }
-            }
-            .pointerInput(candles.size) {
-                fun indexAt(x: Float): Int {
-                    val lastIndex = candles.size - 1
-                    val lastVisible = lastIndex + rightOffset
-                    val firstVisible = lastVisible - visibleCount + 1
-                    val plotWidth = (size.width - 72f).coerceAtLeast(10f)
-                    return (firstVisible + (x / plotWidth) * visibleCount).toInt().coerceIn(0, lastIndex)
-                }
-                detectTapGestures(
-                    onTap = { offset ->
-                        if (crosshairX < 0f) {
-                            crosshairX = offset.x; crosshairY = offset.y
-                            onCrosshairChange(candles.getOrNull(indexAt(offset.x)))
-                        } else {
-                            crosshairX = -1f; crosshairY = -1f; onCrosshairChange(null)
-                        }
-                    },
-                    onLongPress = { offset ->
-                        crosshairX = offset.x; crosshairY = offset.y
-                        onCrosshairChange(candles.getOrNull(indexAt(offset.x)))
-                    },
-                )
-            },
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val width = size.width
-            val height = size.height
-            val priceHeight = if (showVolume) height * 0.80f else height
-            val volumeTop = priceHeight + 6f
-            val axisWidth = 72f
-            val timeAxisHeight = 34f
-            val plotWidth = (width - axisWidth).coerceAtLeast(10f)
-            val plotBottom = priceHeight - timeAxisHeight
-            val plotHeight = (plotBottom - 8f).coerceAtLeast(10f)
-
-            val lastIndex = candles.size - 1
-            val lastVisible = lastIndex + rightOffset
-            val firstVisible = lastVisible - visibleCount + 1
-
-            var minPrice = Double.MAX_VALUE
-            var maxPrice = -Double.MAX_VALUE
-            for (i in max(0, firstVisible)..min(lastIndex, lastVisible)) {
-                minPrice = min(minPrice, candles[i].low)
-                maxPrice = max(maxPrice, candles[i].high)
-                if (showIchimoku) {
-                    ichimoku.cloudAt(i)?.let { (a, b) ->
-                        minPrice = min(minPrice, min(a, b)); maxPrice = max(maxPrice, max(a, b))
-                    }
-                    ichimoku.chikou.getOrNull(i)?.let { minPrice = min(minPrice, it); maxPrice = max(maxPrice, it) }
+        // ── Top OHLC info bar ──────────────────────────────────────────────
+        displayedCandle?.let { bar ->
+            val diff = bar.close - bar.open
+            val pct = if (bar.open > 0.0) (diff / bar.open) * 100.0 else 0.0
+            val color = if (diff >= 0) AurumColors.Green else AurumColors.Red
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(AurumColors.Surface.copy(alpha = 0.85f))
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        if (interval.minutes >= 60) dateFormat.format(Date(bar.time)) else timeFormat.format(Date(bar.time)),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                    Text("O: ${formatPrice(bar.open)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextPrimary)
+                    Text("H: ${formatPrice(bar.high)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextPrimary)
+                    Text("L: ${formatPrice(bar.low)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextPrimary)
+                    Text("C: ${formatPrice(bar.close)}", style = MaterialTheme.typography.labelSmall, color = color)
                 }
-            }
-            if (signal?.stopLoss != null && showLevels) {
-                minPrice = min(minPrice, signal.stopLoss)
-                maxPrice = max(maxPrice, signal.stopLoss)
-            }
-            if (signal?.takeProfit != null && showLevels) {
-                minPrice = min(minPrice, signal.takeProfit)
-                maxPrice = max(maxPrice, signal.takeProfit)
-            }
-            if (!minPrice.isFinite() || !maxPrice.isFinite() || maxPrice <= minPrice) {
-                minPrice = 0.0; maxPrice = 1.0
-            }
-            val pad = (maxPrice - minPrice) * 0.06
-            minPrice -= pad; maxPrice += pad
-            val range = (maxPrice - minPrice).coerceAtLeast(0.0001)
-
-            fun xOf(index: Int): Float =
-                ((index - firstVisible) + 0.5f) / visibleCount * plotWidth
-
-            fun yOf(price: Double): Float =
-                (plotHeight * (1.0 - (price - minPrice) / range)).toFloat() + 8f
-
-            // ── grid + price axis ─────────────────────────────────────────
-            val axisPaint = Paint().apply {
-                color = 0xFF6B7280.toInt(); textSize = 24f; isAntiAlias = true
-                typeface = Typeface.MONOSPACE
-            }
-            val steps = 5
-            for (s in 0..steps) {
-                val y = 8f + plotHeight * s / steps
-                drawLine(AurumColors.Grid, Offset(0f, y), Offset(plotWidth, y), strokeWidth = 1f)
-                val price = maxPrice - range * s / steps
-                drawContext.canvas.nativeCanvas.drawText(
-                    String.format(Locale.US, "%,.2f", price), plotWidth + 6f, y + 8f, axisPaint,
+                Text(
+                    "${if (diff >= 0) "+" else ""}${String.format(Locale.US, "%.2f", diff)} (${if (diff >= 0) "+" else ""}${String.format(Locale.US, "%.2f", pct)}%)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = color,
                 )
             }
+        }
 
-            // ── volume pane ───────────────────────────────────────────────
-            if (showVolume) {
-                var maxVolume = 0.0
-                for (i in max(0, firstVisible)..min(lastIndex, lastVisible)) maxVolume = max(maxVolume, candles[i].volume)
-                if (maxVolume > 0.0) {
-                    val volumeHeight = (height - volumeTop - 2f).coerceAtLeast(4f)
-                    val barWidth = (plotWidth / visibleCount) * 0.65f
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(candles.size) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        if (zoom != 1f) {
+                            visibleCount = (visibleCount / zoom).toInt().coerceIn(20, 500)
+                        }
+                        if (abs(pan.x) > 0.5f) {
+                            val barsPerPixel = visibleCount.toFloat() / size.width
+                            rightOffset = (rightOffset - (pan.x * barsPerPixel)).toInt().coerceIn(-visibleCount + 10, candles.size)
+                        }
+                    }
+                }
+                .pointerInput(candles.size) {
+                    fun indexAt(x: Float): Int {
+                        val lastIndex = candles.size - 1
+                        val lastVisible = lastIndex + rightOffset
+                        val firstVisible = lastVisible - visibleCount + 1
+                        val plotWidth = (size.width - 76f).coerceAtLeast(10f)
+                        return (firstVisible + (x / plotWidth) * visibleCount).toInt().coerceIn(0, lastIndex)
+                    }
+                    detectTapGestures(
+                        onTap = { offset ->
+                            if (crosshairX < 0f) {
+                                crosshairX = offset.x; crosshairY = offset.y
+                                val picked = candles.getOrNull(indexAt(offset.x))
+                                activeCandle = picked
+                                onCrosshairChange(picked)
+                            } else {
+                                crosshairX = -1f; crosshairY = -1f
+                                activeCandle = null
+                                onCrosshairChange(null)
+                            }
+                        },
+                        onLongPress = { offset ->
+                            crosshairX = offset.x; crosshairY = offset.y
+                            val picked = candles.getOrNull(indexAt(offset.x))
+                            activeCandle = picked
+                            onCrosshairChange(picked)
+                        },
+                    )
+                },
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val width = size.width
+                val height = size.height
+                val priceHeight = if (showVolume) height * 0.82f else height
+                val volumeTop = priceHeight + 4f
+                val axisWidth = 76f
+                val timeAxisHeight = 30f
+                val plotWidth = (width - axisWidth).coerceAtLeast(10f)
+                val plotBottom = priceHeight - timeAxisHeight
+                val plotHeight = (plotBottom - 8f).coerceAtLeast(10f)
+
+                val lastIndex = candles.size - 1
+                val lastVisible = lastIndex + rightOffset
+                val firstVisible = lastVisible - visibleCount + 1
+
+                var minPrice = Double.MAX_VALUE
+                var maxPrice = -Double.MAX_VALUE
+                for (i in max(0, firstVisible)..min(lastIndex, lastVisible)) {
+                    minPrice = min(minPrice, candles[i].low)
+                    maxPrice = max(maxPrice, candles[i].high)
+                    if (showIchimoku) {
+                        ichimoku.cloudAt(i)?.let { (a, b) ->
+                            minPrice = min(minPrice, min(a, b)); maxPrice = max(maxPrice, max(a, b))
+                        }
+                        ichimoku.chikou.getOrNull(i)?.let { minPrice = min(minPrice, it); maxPrice = max(maxPrice, it) }
+                    }
+                }
+                if (signal?.stopLoss != null && showLevels) {
+                    minPrice = min(minPrice, signal.stopLoss)
+                    maxPrice = max(maxPrice, signal.stopLoss)
+                }
+                if (signal?.takeProfit != null && showLevels) {
+                    minPrice = min(minPrice, signal.takeProfit)
+                    maxPrice = max(maxPrice, signal.takeProfit)
+                }
+                if (!minPrice.isFinite() || !maxPrice.isFinite() || maxPrice <= minPrice) {
+                    minPrice = 0.0; maxPrice = 1.0
+                }
+                val pad = (maxPrice - minPrice) * 0.06
+                minPrice -= pad; maxPrice += pad
+                val range = (maxPrice - minPrice).coerceAtLeast(0.0001)
+
+                fun xOf(index: Int): Float =
+                    ((index - firstVisible) + 0.5f) / visibleCount * plotWidth
+
+                fun yOf(price: Double): Float =
+                    (plotHeight * (1.0 - (price - minPrice) / range)).toFloat() + 8f
+
+                // ── grid + price axis ─────────────────────────────────────────
+                val axisPaint = Paint().apply {
+                    color = 0xFF6B7280.toInt(); textSize = 22f; isAntiAlias = true
+                    typeface = Typeface.MONOSPACE
+                }
+                val steps = 5
+                for (s in 0..steps) {
+                    val y = 8f + plotHeight * s / steps
+                    drawLine(AurumColors.Grid, Offset(0f, y), Offset(plotWidth, y), strokeWidth = 1f)
+                    val price = maxPrice - range * s / steps
+                    drawContext.canvas.nativeCanvas.drawText(
+                        String.format(Locale.US, "%,.2f", price), plotWidth + 6f, y + 8f, axisPaint,
+                    )
+                }
+
+                // ── volume pane ───────────────────────────────────────────────
+                if (showVolume) {
+                    var maxVolume = 0.0
+                    for (i in max(0, firstVisible)..min(lastIndex, lastVisible)) maxVolume = max(maxVolume, candles[i].volume)
+                    if (maxVolume > 0.0) {
+                        val volumeHeight = (height - volumeTop - 2f).coerceAtLeast(4f)
+                        val barWidth = (plotWidth / visibleCount) * 0.65f
+                        for (i in max(0, firstVisible)..min(lastIndex, lastVisible)) {
+                            val c = candles[i]
+                            val h = (volumeHeight * (c.volume / maxVolume)).toFloat()
+                            val colour = if (c.close >= c.open) AurumColors.Green.copy(alpha = 0.30f) else AurumColors.Red.copy(alpha = 0.30f)
+                            drawRect(
+                                color = colour,
+                                topLeft = Offset(xOf(i) - barWidth / 2f, volumeTop + volumeHeight - h),
+                                size = Size(barWidth, h),
+                            )
+                        }
+                    }
+                }
+
+                // ── Ichimoku cloud (display alignment) ────────────────────────
+                if (showIchimoku) {
+                    val cloudPath = Path()
+                    var started = false
                     for (i in max(0, firstVisible)..min(lastIndex, lastVisible)) {
-                        val c = candles[i]
-                        val h = (volumeHeight * (c.volume / maxVolume)).toFloat()
-                        val colour = if (c.close >= c.open) AurumColors.Green.copy(alpha = 0.30f) else AurumColors.Red.copy(alpha = 0.30f)
-                        drawRect(
-                            color = colour,
-                            topLeft = Offset(xOf(i) - barWidth / 2f, volumeTop + volumeHeight - h),
-                            size = Size(barWidth, h),
+                        val (a, _) = ichimoku.cloudAt(i) ?: continue
+                        if (!started) {
+                            cloudPath.moveTo(xOf(i), yOf(a)); started = true
+                        } else cloudPath.lineTo(xOf(i), yOf(a))
+                    }
+                    for (i in min(lastIndex, lastVisible) downTo max(0, firstVisible)) {
+                        val (_, b) = ichimoku.cloudAt(i) ?: continue
+                        cloudPath.lineTo(xOf(i), yOf(b))
+                    }
+                    if (started) {
+                        cloudPath.close()
+                        drawPath(cloudPath, color = AurumColors.Cyan.copy(alpha = 0.12f))
+                    }
+                }
+
+                // ── indicator lines ───────────────────────────────────────────
+                fun drawSeries(values: List<Double?>, color: Color, strokeWidth: Float) {
+                    var previous: Offset? = null
+                    for (i in max(0, firstVisible - 1)..min(lastIndex, lastVisible)) {
+                        val v = values.getOrNull(i)
+                        if (v == null) {
+                            previous = null
+                            continue
+                        }
+                        val point = Offset(xOf(i), yOf(v))
+                        previous?.let { drawLine(color, it, point, strokeWidth = strokeWidth) }
+                        previous = point
+                    }
+                }
+                if (showIchimoku) {
+                    drawSeries(ichimoku.tenkan, AurumColors.Cyan, 2.4f)
+                    drawSeries(ichimoku.kijun, AurumColors.Purple, 2.4f)
+                    drawSeries(candles.indices.map { ichimoku.spanAAt(it) }, AurumColors.Green.copy(alpha = 0.85f), 1.6f)
+                    drawSeries(candles.indices.map { ichimoku.spanBAt(it) }, AurumColors.Red.copy(alpha = 0.85f), 1.6f)
+                    drawSeries(ichimoku.chikou, AurumColors.Gold, 1.8f)
+                }
+                if (showLevels) {
+                    drawSeries(vwap, AurumColors.Gold, 2.2f)
+                    drawSeries(ema200, AurumColors.TextSecondary, 2.0f)
+                }
+
+                // ── confirmed range and ICT zones ─────────────────────────────
+                val currentStructure = structure?.takeIf {
+                    it.barTime == candles.lastOrNull { bar -> bar.closed }?.time
+                }
+                val confirmedRange = currentStructure?.range
+                val rangeStart = confirmedRange?.let { level ->
+                    candles.indexOfFirst { it.time >= level.confirmedAt }
+                } ?: -1
+                val activeSetup = currentStructure?.let { snapshot ->
+                    listOf(snapshot.buy, snapshot.sell).filter { it.sweepAt != null }
+                        .maxByOrNull { it.sweepAt!! }
+                }
+                fun zoneOverlay(zone: IctRangeAnalyzer.Zone?, colour: Color) {
+                    if (zone == null || rangeStart < 0) return
+                    val start = candles.indexOfFirst { it.time >= zone.at }
+                    if (start < 0 || start > lastVisible) return
+                    val top = yOf(zone.high).coerceAtLeast(8f)
+                    val bottom = yOf(zone.low).coerceAtMost(plotBottom)
+                    val x = xOf(max(firstVisible, start)).coerceAtLeast(0f)
+                    if (bottom > top && x < plotWidth) {
+                        drawRect(colour.copy(alpha = 0.17f), Offset(x, top),
+                            Size(plotWidth - x, bottom - top))
+                    }
+                }
+                zoneOverlay(activeSetup?.orderBlock, AurumColors.Purple)
+                zoneOverlay(activeSetup?.fvg, AurumColors.Cyan)
+
+                // ── candles (historical to current forming bar) ───────────────
+                val candleWidth = (plotWidth / visibleCount) * 0.62f
+                for (i in max(0, firstVisible)..min(lastIndex, lastVisible)) {
+                    val c = candles[i]
+                    val up = c.close >= c.open
+                    val colour = if (up) AurumColors.Green else AurumColors.Red
+                    val x = xOf(i)
+                    val bodyTop = yOf(max(c.open, c.close))
+                    val bodyBottom = yOf(min(c.open, c.close))
+                    drawLine(colour, Offset(x, yOf(c.high)), Offset(x, yOf(c.low)), strokeWidth = 1.6f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                    drawRect(
+                        color = if (c.closed) colour else colour.copy(alpha = 0.65f),
+                        topLeft = Offset(x - candleWidth / 2f, bodyTop),
+                        size = Size(candleWidth, max(1.5f, bodyBottom - bodyTop)),
+                    )
+                }
+
+                // ── latest live price line + badge ────────────────────────────
+                val latestCandle = candles.lastOrNull()
+                if (latestCandle != null) {
+                    val currentPrice = latestCandle.close
+                    val liveY = yOf(currentPrice)
+                    if (liveY in 8f..plotBottom) {
+                        val priceColor = if (latestCandle.close >= latestCandle.open) AurumColors.Green else AurumColors.Red
+                        val priceDash = PathEffect.dashPathEffect(floatArrayOf(6f, 4f), 0f)
+                        drawLine(
+                            color = priceColor.copy(alpha = 0.80f),
+                            start = Offset(0f, liveY),
+                            end = Offset(plotWidth, liveY),
+                            strokeWidth = 1.2f,
+                            pathEffect = priceDash,
+                        )
+                        val badgePaint = Paint().apply {
+                            color = priceColor.toArgbSafe()
+                            style = Paint.Style.FILL
+                        }
+                        val textOnBadgePaint = Paint().apply {
+                            color = android.graphics.Color.BLACK
+                            textSize = 21f
+                            typeface = Typeface.DEFAULT_BOLD
+                            isAntiAlias = true
+                        }
+                        val priceText = String.format(Locale.US, "%,.2f", currentPrice)
+                        val textWidth = textOnBadgePaint.measureText(priceText)
+                        val badgeLeft = plotWidth + 3f
+                        val badgeTop = liveY - 13f
+                        val badgeRight = badgeLeft + textWidth + 8f
+                        val badgeBottom = liveY + 13f
+                        drawContext.canvas.nativeCanvas.drawRoundRect(
+                            badgeLeft, badgeTop, badgeRight, badgeBottom, 5f, 5f, badgePaint,
+                        )
+                        drawContext.canvas.nativeCanvas.drawText(
+                            priceText, badgeLeft + 4f, liveY + 7f, textOnBadgePaint,
                         )
                     }
                 }
-            }
 
-            // ── Ichimoku cloud (display alignment) ────────────────────────
-            if (showIchimoku) {
-                val cloudPath = Path()
-                var started = false
-                for (i in max(0, firstVisible)..min(lastIndex, lastVisible)) {
-                    val (a, _) = ichimoku.cloudAt(i) ?: continue
-                    if (!started) {
-                        cloudPath.moveTo(xOf(i), yOf(a)); started = true
-                    } else cloudPath.lineTo(xOf(i), yOf(a))
-                }
-                for (i in min(lastIndex, lastVisible) downTo max(0, firstVisible)) {
-                    val (_, b) = ichimoku.cloudAt(i) ?: continue
-                    cloudPath.lineTo(xOf(i), yOf(b))
-                }
-                if (started) {
-                    cloudPath.close()
-                    drawPath(cloudPath, color = AurumColors.Cyan.copy(alpha = 0.12f))
-                }
-            }
-
-            // ── indicator lines ───────────────────────────────────────────
-            fun drawSeries(values: List<Double?>, color: Color, strokeWidth: Float) {
-                var previous: Offset? = null
-                for (i in max(0, firstVisible - 1)..min(lastIndex, lastVisible)) {
-                    val v = values.getOrNull(i)
-                    if (v == null) {
-                        previous = null
-                        continue
+                // S/R levels
+                if (rangeStart >= 0 && rangeStart <= lastVisible && confirmedRange != null) {
+                    fun boundary(price: Double, colour: Color, label: String) {
+                        val y = yOf(price)
+                        if (y !in 8f..plotBottom) return
+                        val from = xOf(max(firstVisible, rangeStart)).coerceAtLeast(0f)
+                        if (from >= plotWidth) return
+                        drawLine(colour.copy(alpha = 0.86f), Offset(from, y), Offset(plotWidth, y),
+                            strokeWidth = 2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 5f), 0f))
+                        val paint = Paint(axisPaint).apply { color = colour.toArgbSafe() }
+                        drawContext.canvas.nativeCanvas.drawText("$label ${formatPrice(price)}",
+                            (from + 6f).coerceAtMost((plotWidth - 110f).coerceAtLeast(0f)), y - 7f, paint)
                     }
-                    val point = Offset(xOf(i), yOf(v))
-                    previous?.let { drawLine(color, it, point, strokeWidth = strokeWidth) }
-                    previous = point
+                    boundary(confirmedRange.support, AurumColors.Green, "S")
+                    boundary(confirmedRange.resistance, AurumColors.Red, "R")
                 }
-            }
-            if (showIchimoku) {
-                drawSeries(ichimoku.tenkan, AurumColors.Cyan, 2.4f)
-                drawSeries(ichimoku.kijun, AurumColors.Purple, 2.4f)
-                drawSeries(candles.indices.map { ichimoku.spanAAt(it) }, AurumColors.Green.copy(alpha = 0.85f), 1.6f)
-                drawSeries(candles.indices.map { ichimoku.spanBAt(it) }, AurumColors.Red.copy(alpha = 0.85f), 1.6f)
-                drawSeries(ichimoku.chikou, AurumColors.Gold, 1.8f)
-            }
-            if (showLevels) {
-                drawSeries(vwap, AurumColors.Gold, 2.2f)
-                drawSeries(ema200, AurumColors.TextSecondary, 2.0f)
-            }
 
-            // ── confirmed range and *approximate* ICT zones ──────────────
-            // Start at confirmation, never paint a level back into bars before it existed.
-            val currentStructure = structure?.takeIf {
-                it.barTime == candles.lastOrNull { bar -> bar.closed }?.time
-            }
-            val confirmedRange = currentStructure?.range
-            val rangeStart = confirmedRange?.let { level ->
-                candles.indexOfFirst { it.time >= level.confirmedAt }
-            } ?: -1
-            val activeSetup = currentStructure?.let { snapshot ->
-                listOf(snapshot.buy, snapshot.sell).filter { it.sweepAt != null }
-                    .maxByOrNull { it.sweepAt!! }
-            }
-            fun zoneOverlay(zone: IctRangeAnalyzer.Zone?, colour: Color) {
-                if (zone == null || rangeStart < 0) return
-                val start = candles.indexOfFirst { it.time >= zone.at }
-                if (start < 0 || start > lastVisible) return
-                val top = yOf(zone.high).coerceAtLeast(8f)
-                val bottom = yOf(zone.low).coerceAtMost(plotBottom)
-                val x = xOf(max(firstVisible, start)).coerceAtLeast(0f)
-                if (bottom > top && x < plotWidth) {
-                    drawRect(colour.copy(alpha = 0.17f), Offset(x, top),
-                        Size(plotWidth - x, bottom - top))
+                // ── signal levels ─────────────────────────────────────────────
+                if (showLevels && signal != null && signal.isActionable) {
+                    val dash = PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f)
+                    fun levelLine(price: Double?, color: Color, label: String) {
+                        if (price == null) return
+                        val y = yOf(price)
+                        drawLine(color.copy(alpha = 0.85f), Offset(0f, y), Offset(plotWidth, y), strokeWidth = 1.6f, pathEffect = dash)
+                        val labelPaint = Paint(axisPaint).apply { this.color = color.toArgbSafe() }
+                        drawContext.canvas.nativeCanvas.drawText("$label ${formatPrice(price)}", 6f, y - 6f, labelPaint)
+                    }
+                    levelLine(signal.entry, AurumColors.Gold, "طرح ورود")
+                    levelLine(signal.stopLoss, AurumColors.Red, "طرح SL")
+                    levelLine(signal.takeProfit, AurumColors.Green, "طرح TP")
                 }
-            }
-            zoneOverlay(activeSetup?.orderBlock, AurumColors.Purple)
-            zoneOverlay(activeSetup?.fvg, AurumColors.Cyan)
 
-            // ── candles ───────────────────────────────────────────────────
-            val candleWidth = (plotWidth / visibleCount) * 0.62f
-            for (i in max(0, firstVisible)..min(lastIndex, lastVisible)) {
-                val c = candles[i]
-                val up = c.close >= c.open
-                val colour = if (up) AurumColors.Green else AurumColors.Red
-                val x = xOf(i)
-                val bodyTop = yOf(max(c.open, c.close))
-                val bodyBottom = yOf(min(c.open, c.close))
-                drawLine(colour, Offset(x, yOf(c.high)), Offset(x, yOf(c.low)), strokeWidth = 1.6f, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                drawRect(
-                    color = if (c.closed) colour else colour.copy(alpha = 0.55f),
-                    topLeft = Offset(x - candleWidth / 2f, bodyTop),
-                    size = Size(candleWidth, max(1.5f, bodyBottom - bodyTop)),
-                )
-            }
-
-            // S/R is not a trade or an entry line. Show it only since its second
-            // separated touch was confirmed, and only when its price is on screen.
-            if (rangeStart >= 0 && rangeStart <= lastVisible && confirmedRange != null) {
-                fun boundary(price: Double, colour: Color, label: String) {
-                    val y = yOf(price)
-                    if (y !in 8f..plotBottom) return
-                    val from = xOf(max(firstVisible, rangeStart)).coerceAtLeast(0f)
-                    if (from >= plotWidth) return
-                    drawLine(colour.copy(alpha = 0.86f), Offset(from, y), Offset(plotWidth, y),
-                        strokeWidth = 2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 5f), 0f))
-                    val paint = Paint(axisPaint).apply { color = colour.toArgbSafe() }
-                    drawContext.canvas.nativeCanvas.drawText("$label ${formatPrice(price)}",
-                        (from + 6f).coerceAtMost((plotWidth - 110f).coerceAtLeast(0f)), y - 7f, paint)
+                // ── time axis ─────────────────────────────────────────────────
+                val labelStep = max(1, visibleCount / 5)
+                var i = max(0, firstVisible)
+                while (i <= min(lastIndex, lastVisible)) {
+                    val c = candles[i]
+                    val label = if (interval.minutes >= 60) {
+                        dateFormat.format(Date(c.time))
+                    } else {
+                        timeFormat.format(Date(c.time))
+                    }
+                    drawContext.canvas.nativeCanvas.drawText(label, xOf(i) - 22f, height - 8f, axisPaint)
+                    i += labelStep
                 }
-                boundary(confirmedRange.support, AurumColors.Green, "S")
-                boundary(confirmedRange.resistance, AurumColors.Red, "R")
-            }
 
-            // ── signal levels ─────────────────────────────────────────────
-            if (showLevels && signal != null && signal.isActionable) {
-                val dash = PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f)
-                fun levelLine(price: Double?, color: Color, label: String) {
-                    if (price == null) return
-                    val y = yOf(price)
-                    drawLine(color.copy(alpha = 0.85f), Offset(0f, y), Offset(plotWidth, y), strokeWidth = 1.6f, pathEffect = dash)
-                    val labelPaint = Paint(axisPaint).apply { this.color = color.toArgbSafe() }
-                    drawContext.canvas.nativeCanvas.drawText("$label ${formatPrice(price)}", 6f, y - 6f, labelPaint)
-                }
-                // These are a SIGNAL PLAN, not an executed paper/broker transaction.
-                levelLine(signal.entry, AurumColors.Gold, "طرح ورود")
-                levelLine(signal.stopLoss, AurumColors.Red, "طرح SL")
-                levelLine(signal.takeProfit, AurumColors.Green, "طرح TP")
-            }
-
-            // ── time axis ─────────────────────────────────────────────────
-            val labelStep = max(1, visibleCount / 5)
-            var i = max(0, firstVisible)
-            while (i <= min(lastIndex, lastVisible)) {
-                val c = candles[i]
-                val label = if (interval.minutes >= 60) {
-                    dateFormat.format(Date(c.time))
-                } else {
-                    timeFormat.format(Date(c.time))
-                }
-                drawContext.canvas.nativeCanvas.drawText(label, xOf(i) - 22f, height - 10f, axisPaint)
-                i += labelStep
-            }
-
-            // ── crosshair ─────────────────────────────────────────────────
-            if (crosshairX >= 0f && crosshairX <= plotWidth) {
-                val dash = PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f)
-                drawLine(AurumColors.TextSecondary, Offset(crosshairX, 0f), Offset(crosshairX, height), strokeWidth = 1.4f, pathEffect = dash)
-                if (crosshairY in 0f..priceHeight) {
-                    drawLine(AurumColors.TextSecondary, Offset(0f, crosshairY), Offset(plotWidth, crosshairY), strokeWidth = 1.4f, pathEffect = dash)
-                    val price = maxPrice - (crosshairY - 8f) / plotHeight * range
-                    drawContext.canvas.nativeCanvas.drawText(
-                        String.format(Locale.US, "%,.2f", price), plotWidth + 6f, crosshairY + 8f, axisPaint,
-                    )
+                // ── crosshair ─────────────────────────────────────────────────
+                if (crosshairX >= 0f && crosshairX <= plotWidth) {
+                    val dash = PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f)
+                    drawLine(AurumColors.TextSecondary, Offset(crosshairX, 0f), Offset(crosshairX, height), strokeWidth = 1.4f, pathEffect = dash)
+                    if (crosshairY in 0f..priceHeight) {
+                        drawLine(AurumColors.TextSecondary, Offset(0f, crosshairY), Offset(plotWidth, crosshairY), strokeWidth = 1.4f, pathEffect = dash)
+                        val price = maxPrice - (crosshairY - 8f) / plotHeight * range
+                        drawContext.canvas.nativeCanvas.drawText(
+                            String.format(Locale.US, "%,.2f", price), plotWidth + 6f, crosshairY + 8f, axisPaint,
+                        )
+                    }
                 }
             }
         }
@@ -375,3 +458,4 @@ private fun Color.toArgbSafe(): Int = android.graphics.Color.argb(
     (green * 255).toInt().coerceIn(0, 255),
     (blue * 255).toInt().coerceIn(0, 255),
 )
+
