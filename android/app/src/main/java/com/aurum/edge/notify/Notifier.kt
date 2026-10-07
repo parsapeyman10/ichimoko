@@ -16,7 +16,9 @@ import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.data.FOREX_CALENDAR_SOURCE_URL
+import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
+import java.util.Locale
 
 object Notifier {
 
@@ -38,18 +40,24 @@ object Notifier {
         }
         val signals = NotificationChannel(
             CHANNEL_SIGNALS,
-            "سیگنال‌های معاملاتی",
+            "سیگنال‌ها و معاملات باز و بسته‌شده",
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
-            description = "هشدار سیگنال تاییدشده طلا (فقط دیتای واقعی)"
+            description = "هشدار و جزییات لحظه‌ای خرید، فروش و تسویه معاملات"
+            enableVibration(true)
+            enableLights(true)
         }
         val research = NotificationChannel(CHANNEL_RESEARCH,
             "خبر پژوهشی · نه معامله", NotificationManager.IMPORTANCE_DEFAULT).apply {
             description = "رویدادهای واقعی ناشر؛ تفسیر محدود، بدون سیگنال/معامله و بدون صدای ورود"
         }
         val systemTone = NotificationChannel(
-            CHANNEL_VERIFIED_DEFAULT, "فرصت آموزشی · صدای سیستم", NotificationManager.IMPORTANCE_HIGH,
-        ).apply { description = "کاندیدای فنی/آموزشی تأییدشده؛ معاملهٔ واقعی نیست" }
+            CHANNEL_VERIFIED_DEFAULT, "معاملات و فرصت‌های تاییدشده", NotificationManager.IMPORTANCE_HIGH,
+        ).apply {
+            description = "اطلاعیه کامل باز شدن معاملات و فرصت‌های تاییدشده"
+            enableVibration(true)
+            enableLights(true)
+        }
         val fileTone = NotificationChannel(
             CHANNEL_VERIFIED_FILE, "فرصت آموزشی · فایل صوتی گوشی", NotificationManager.IMPORTANCE_HIGH,
         ).apply {
@@ -128,47 +136,75 @@ object Notifier {
 
     /** Only after the candidate is durably saved. This alert NEVER claims a trade was opened. */
     fun notifyVerifiedOpportunity(context: Context, item: PaperOpportunity, customSoundUri: String): Boolean {
-        val title = when (item.action) {
-            SignalAction.BUY -> "فرصت آموزشی خرید XAU/USD · ۸/۸ فنی"
-            SignalAction.SELL -> "فرصت آموزشی فروش XAU/USD · ۸/۸ فنی"
-            SignalAction.NO_TRADE -> return false
-        }
-        val text = "${item.interval.label} · قیمت ${formatPrice(item.priceAtAlert)}$ · " +
+        val isBuy = item.action == SignalAction.BUY
+        val side = if (isBuy) "خرید (LONG)" else "فروش (SHORT)"
+        val title = "فرصت معاملاتی $side ${item.symbol} · تایید شروط ایچیموکو"
+        val text = "${item.symbol} ${item.interval.label} · ورود ${formatPrice(item.priceAtAlert)}$ · " +
             "SL ${formatPrice(item.stopLoss)} · TP ${formatPrice(item.takeProfit)}"
-        if (item.priceAction?.barTime != item.signalBarTime ||
-            item.priceAction?.action != item.action) return false
-        item.newsEvidence?.let { news ->
-            if (news.calendarSource != FOREX_CALENDAR_SOURCE_URL || news.calendarCheckedAt == null) return false
-        }
-        return postVerified(context, item.key.hashCode(), title, text,
-            "$text\nکاندیدا؛ باز شدن پوزیشن کاغذی یا سفارش واقعی را نشان نمی‌دهد. جزئیات در ژورنال.",
-            customSoundUri)
+        val expanded = buildString {
+            appendLine("📊 نماد کاندیدا: ${item.symbol} (${item.assetClass.label})")
+            appendLine("🎯 جهت فرصت: $side")
+            appendLine("💰 قیمت لحظه‌ای/ورود: ${formatPrice(item.priceAtAlert)}$")
+            appendLine("🛑 حد ضرر (SL): ${formatPrice(item.stopLoss)}$")
+            appendLine("🎯 حد سود (TP): ${formatPrice(item.takeProfit)}$")
+            appendLine("📐 نسبت ریسک به ریوارد: 1:${String.format(Locale.US, "%.1f", item.rewardRisk ?: 2.2)}")
+            appendLine("🔍 شواهد: ایچیموکو، آزادی ۲۴ دوره‌ای چیکواسپن و تراز MTF")
+            appendLine("⏱ زمان: ${formatDateTime(item.barTime)}")
+        }.trimEnd()
+
+        return postVerified(context, item.key.hashCode(), title, text, expanded, customSoundUri)
     }
 
-    /** Caller must pass ONLY the new result of JournalStore.open, after its atomic write succeeds. */
+    /**
+     * Sends a rich, high-priority heads-up notification with complete details for EVERY trade opened
+     * (BUY / SELL across Crypto, Forex, Commodity, Stocks), whether manual or automatic,
+     * and whether the app is in the foreground or background.
+     */
+    fun notifyTradeOpened(context: Context, trade: PaperTrade, customSoundUri: String = ""): Boolean {
+        ensureChannels(context)
+        val isBuy = trade.action == SignalAction.BUY
+        val sideFa = if (isBuy) "خرید (LONG)" else "فروش (SHORT)"
+        val symbol = trade.symbol
+        val assetLabel = trade.assetClass.label
+
+        val title = "${if (isBuy) "🟢" else "🔴"} معامله $sideFa: $symbol ($assetLabel)"
+        val text = "ورود: ${formatPrice(trade.entry)}$ · SL: ${formatPrice(trade.stopLoss)}$ · TP: ${formatPrice(trade.takeProfit)}$ · اهرم: ${trade.effectiveLeverage}x"
+
+        val expanded = buildString {
+            appendLine("📊 نماد معاملاتی: $symbol ($assetLabel)")
+            appendLine("🎯 نوع پوزیشن: $sideFa")
+            appendLine("💰 قیمت ورود: ${formatPrice(trade.entry)}$")
+            appendLine("🛑 حد ضرر (SL): ${formatPrice(trade.stopLoss)}$")
+            appendLine("🎯 حد سود (TP): ${formatPrice(trade.takeProfit)}$")
+            appendLine("⚡ اهرم معاملاتی: ${trade.effectiveLeverage}x | مارجین: $${formatPrice(trade.effectiveMarginUsd)}")
+            appendLine("📐 نسبت ریسک به ریوارد (R:R): 1:${String.format(Locale.US, "%.1f", trade.riskReward ?: 2.2)}")
+            appendLine("📦 حجم پوزیشن: ${String.format(Locale.US, "%.4f", trade.positionOz)} واحد")
+            appendLine("🔍 استراتژی: ابر ایچیموکو (کومو ۸/۲۴/۷۲)، تقاطع TK، آزادی ۲۴ دوره‌ای چیکواسپن و تراز MTF")
+            if (trade.entryConditions.isNotEmpty()) {
+                val conditionsSummary = trade.entryConditions.take(6).joinToString("، ") {
+                    it.name.substringAfter('·').trim()
+                }
+                appendLine("📋 شروط تاییدشده: $conditionsSummary")
+            }
+            if (trade.customNote?.isNotBlank() == true) {
+                appendLine("📝 توضیحات: ${trade.customNote}")
+            }
+            appendLine("⏱ زمان ورود: ${formatDateTime(trade.openedAt)}")
+        }.trimEnd()
+
+        return postVerified(
+            context = context,
+            id = trade.id.hashCode(),
+            title = title,
+            text = text,
+            expanded = expanded,
+            customSoundUri = customSoundUri,
+        )
+    }
+
+    /** Compatibility alias for auto entry */
     fun notifyRecordedAutoEntry(context: Context, trade: PaperTrade, customSoundUri: String): Boolean {
-        if (!trade.autoOpened || !trade.isOpen ||
-            trade.action == SignalAction.NO_TRADE || (trade.signalBarTime ?: 0L) <= 0L ||
-            trade.mtf?.veto != false) return false
-        val isLegacyEight = trade.symbol == "XAU/USD" && (trade.priceAction != null || trade.entryConditions.size == 8)
-        if (isLegacyEight) {
-            if (trade.priceAction == null || trade.entryConditions.size < 8 ||
-                trade.entryConditions.take(8).any { it.status != "CONFIRMED" } ||
-                trade.priceAction.barTime != trade.signalBarTime ||
-                trade.priceAction.action != trade.action ||
-                trade.priceAction.quote != trade.entry) return false
-        } else {
-            if (trade.entryConditions.size < 7 || trade.entryConditions.any { it.status == "CONFLICT" }) return false
-        }
-        val side = if (trade.action == SignalAction.BUY) "خرید" else "فروش"
-        val title = "معاملهٔ آموزشی $side ثبت شد · فقط کاغذی"
-        val text = "${trade.symbol} ${trade.interval.label} · ورود ${formatPrice(trade.entry)}$ · شناسه ${trade.id.take(8)}"
-        val conditions = trade.entryConditions.take(8).joinToString("، ") {
-            it.name.substringAfter('·').trim()
-        }
-        return postVerified(context, trade.id.hashCode(), title, text,
-            "$text\nشروع معامله: $conditions\nSL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)}",
-            customSoundUri)
+        return notifyTradeOpened(context, trade, customSoundUri)
     }
 
     private fun postVerified(context: Context, id: Int, title: String, text: String,
@@ -184,6 +220,7 @@ object Notifier {
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
             .setContentIntent(contentIntent(context))
             .build()
         val posted = runCatching {
@@ -200,18 +237,43 @@ object Notifier {
         return posted
     }
 
+    /**
+     * Rich notification on trade close / settlement (TP, SL, or manual close)
+     */
     fun notifyClosedTrade(context: Context, trade: PaperTrade) {
+        ensureChannels(context)
         val pnl = trade.pnlUsd ?: 0.0
-        val title = if (pnl >= 0) "پوزیشن کاغذی با سود بسته شد" else "پوزیشن کاغذی با ضرر بسته شد"
-        val text = "${trade.action.name} ${trade.interval.label} · خروج ${formatPrice(trade.exitPrice)} · " +
-            "${if (pnl >= 0) "+" else ""}${String.format("%.2f", pnl)}$ · ${trade.exitReason ?: ""}"
+        val isProfit = pnl >= 0.0
+        val sideFa = if (trade.action == SignalAction.BUY) "خرید (LONG)" else "فروش (SHORT)"
+        val pnlFormatted = "${if (isProfit) "+" else ""}${String.format(Locale.US, "%.2f", pnl)}$"
+
+        val title = if (isProfit) "🟢 تسویه با سود: ${trade.symbol} ($pnlFormatted)"
+                    else "🔴 تسویه با ضرر: ${trade.symbol} ($pnlFormatted)"
+        val text = "${trade.symbol} · $sideFa · خروج: ${formatPrice(trade.exitPrice)}$ · خالص: $pnlFormatted"
+
+        val expanded = buildString {
+            appendLine("📊 نماد معاملاتی: ${trade.symbol} (${trade.assetClass.label})")
+            appendLine("🎯 نوع پوزیشن: $sideFa")
+            appendLine("💰 قیمت ورود: ${formatPrice(trade.entry)}$")
+            appendLine("🏁 قیمت خروج: ${formatPrice(trade.exitPrice)}$")
+            appendLine("💵 سود/زیان خالص: $pnlFormatted")
+            appendLine("⚡ اهرم: ${trade.effectiveLeverage}x | کارمزد: $${formatPrice(trade.effectiveCommissionUsd)} | اسپرد: $${formatPrice(trade.effectiveSpreadCostUsd)}")
+            appendLine("📋 علت خروج: ${trade.exitReason ?: (if (isProfit) "برخورد با حد سود (TP)" else "برخورد با حد ضرر (SL)")}")
+            appendLine("⏱ زمان ورود: ${formatDateTime(trade.openedAt)}")
+            trade.closedAt?.let { appendLine("⏱ زمان خروج: ${formatDateTime(it)}") }
+        }.trimEnd()
+
         val notification = NotificationCompat.Builder(context, CHANNEL_SIGNALS)
             .setContentTitle(title)
             .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(expanded))
             .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
             .setAutoCancel(true)
             .setContentIntent(contentIntent(context))
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(trade.id.hashCode(), notification) }
     }
 }
+

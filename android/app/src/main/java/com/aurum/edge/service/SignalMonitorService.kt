@@ -56,6 +56,7 @@ class SignalMonitorService : Service() {
     private var sweepJob: Job? = null
     private val notifiedResearch = mutableSetOf<String>()
     private val notifiedTrades = mutableSetOf<String>()
+    private val notifiedOpenTrades = mutableSetOf<String>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -271,12 +272,21 @@ class SignalMonitorService : Service() {
         journalJob = scope.launch {
             try { container.journalStore.load() } catch (_: Exception) { return@launch }
             val canLink = runCatching { container.opportunityStore.load(); true }.getOrDefault(false)
-            // A service restart must not re-notify all old, already closed paper trades.
+            // A service restart must not re-notify all old, already processed paper trades.
             notifiedTrades.addAll(container.journalStore.trades.value.filterNot { it.isOpen }.map { it.id })
+            notifiedOpenTrades.addAll(container.journalStore.trades.value.filter { it.isOpen }.map { it.id })
             container.journalStore.trades.collect { trades ->
+                val currentSettings = container.settingsStore.read()
                 if (canLink) trades.filter { it.signalBarTime != null }.forEach { trade ->
                     runCatching { container.opportunityStore.linkTrade(trade) }
                 }
+                // Notify with rich details on EVERY newly opened trade (even if user is in-app)
+                trades.filter { it.isOpen }.forEach { trade ->
+                    if (notifiedOpenTrades.add(trade.id)) {
+                        Notifier.notifyTradeOpened(this@SignalMonitorService, trade, currentSettings.alertSoundUri)
+                    }
+                }
+                // Notify on trade closed / settled (TP, SL, manual close)
                 trades.filter { !it.isOpen }.forEach { trade ->
                     if (notifiedTrades.add(trade.id)) {
                         Notifier.notifyClosedTrade(this@SignalMonitorService, trade)

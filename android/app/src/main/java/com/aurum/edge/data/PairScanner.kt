@@ -1,5 +1,6 @@
 package com.aurum.edge.data
 
+import android.content.Context
 import android.os.SystemClock
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.FeedMode
@@ -15,6 +16,7 @@ import com.aurum.edge.core.SignalAction
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.engine.SignalEngine
+import com.aurum.edge.notify.Notifier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -73,6 +75,7 @@ class PairScanner(
     private val opportunities: PaperOpportunityStore,
     private val scope: CoroutineScope,
     private val dukascopyHistory: DukascopyHistoryClient = DukascopyHistoryClient(),
+    private val context: Context? = null,
 ) {
     private val mutex = Mutex()
     private var lastSweepElapsed = 0L
@@ -330,7 +333,10 @@ class PairScanner(
 
             if (config.autoPaperTrading && totalOpen < 4 && currentOpenInClass < targetCategory.maxSlots) {
                 runCatching {
-                    autoTrader?.onMarketUpdate(market)
+                    val openedTrade = autoTrader?.onMarketUpdate(market)
+                    if (openedTrade != null && context != null) {
+                        Notifier.notifyTradeOpened(context, openedTrade, config.alertSoundUri)
+                    }
                 }
             }
             update(

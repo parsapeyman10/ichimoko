@@ -48,6 +48,7 @@ import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.engine.ReplayEngine
 import com.aurum.edge.engine.ReplayEvaluation
 import com.aurum.edge.notify.AlertSoundPlayer
+import com.aurum.edge.notify.Notifier
 import com.aurum.edge.service.SignalMonitorService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -717,6 +718,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     it.name.substringAfter('·').trim()
                 }
                 _toast.value = "کاغذی: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} ${trade.symbol} · شروع: $conditions"
+                Notifier.notifyTradeOpened(container.appContext, reviewedTrade ?: trade, s.alertSoundUri)
             } catch (e: Exception) {
                 _toast.value = "ورود کاغذی انجام نشد: ${e.message ?: "ذخیره ممکن نیست"}"
             } finally {
@@ -734,6 +736,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 val closed = container.journalStore.close(trade.id, exitPrice, "بستن دستی روی قیمت دریافتی")
                 _stats.value = container.journalStore.stats()
                 _toast.value = "پوزیشن کاغذی ${trade.symbol} با سود/ضرر ${String.format(java.util.Locale.US, "%.2f", closed.pnlUsd ?: 0.0)}$ بسته شد"
+                Notifier.notifyClosedTrade(container.appContext, closed)
             } catch (error: Exception) {
                 _toast.value = "بستن انجام نشد: ${error.message ?: "خطا در ذخیره"}"
             }
