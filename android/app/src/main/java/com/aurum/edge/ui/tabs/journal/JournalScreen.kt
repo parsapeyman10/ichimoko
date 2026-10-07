@@ -2,7 +2,12 @@ package com.aurum.edge.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,9 +15,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -20,14 +28,18 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.PaperConditionRecord
 import com.aurum.edge.core.IctPriceActionRecord
 import com.aurum.edge.core.PaperOpportunity
@@ -42,11 +54,15 @@ import com.aurum.edge.data.MarketState
 import com.aurum.edge.engine.EvidenceGrade
 import com.aurum.edge.engine.PerformanceMetrics
 import com.aurum.edge.engine.ResearchEvidence
+import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.theme.AurumColors
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
 @Composable
 fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
@@ -61,6 +77,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     var confirmClear by remember { mutableStateOf(false) }
     var confirmOpportunityClear by remember { mutableStateOf(false) }
     var showCombined by remember { mutableStateOf(false) }
+    var selectedCategory by remember { mutableStateOf<AssetClass?>(null) }
     var pendingPdf by remember { mutableStateOf<Pair<String, List<PaperTrade>>?>(null) }
     val savePdf = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         val request = pendingPdf
@@ -77,22 +94,81 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             } == true
     }
 
+    val filteredTrades = remember(trades, selectedCategory) {
+        if (selectedCategory == null) trades else trades.filter { it.assetClass == selectedCategory }
+    }
+    val filteredClosed = remember(filteredTrades) { filteredTrades.filter { !it.isOpen } }
+    val filteredOpen = remember(filteredTrades) { filteredTrades.filter { it.isOpen } }
+
+    val categoryWins = filteredClosed.count { (it.pnlUsd ?: 0.0) > 0.0 }
+    val categoryLosses = filteredClosed.count { (it.pnlUsd ?: 0.0) < 0.0 }
+    val categoryNetPnl = filteredClosed.sumOf { it.pnlUsd ?: 0.0 }
+    val categoryWinRate = if (filteredClosed.isNotEmpty()) (categoryWins.toDouble() / filteredClosed.size) * 100.0 else null
+    val totalGains = filteredClosed.filter { (it.pnlUsd ?: 0.0) > 0 }.sumOf { it.pnlUsd ?: 0.0 }
+    val totalLosses = kotlin.math.abs(filteredClosed.filter { (it.pnlUsd ?: 0.0) < 0 }.sumOf { it.pnlUsd ?: 0.0 })
+    val categoryProfitFactor = if (totalLosses > 0.0) totalGains / totalLosses else if (totalGains > 0.0) totalGains else null
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(bottom = 12.dp),
     ) {
+
+        // ── ۱. تفکیک و فیلتر دسته‌بندی‌های ژورنال (طلا/کالا، فارکس، رمزارز، سهام) ──
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FilterChip(
+                selected = selectedCategory == null,
+                onClick = { selectedCategory = null },
+                label = { Text("همه بازارها (${trades.size})", style = MaterialTheme.typography.labelSmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = AurumColors.Gold.copy(alpha = 0.2f),
+                    selectedLabelColor = AurumColors.Gold,
+                    labelColor = AurumColors.TextSecondary,
+                ),
+            )
+            listOf(
+                AssetClass.COMMODITY to "طلا و کالا",
+                AssetClass.FOREX to "فارکس",
+                AssetClass.CRYPTO to "رمزارزها",
+                AssetClass.STOCK to "سهام بین‌المللی",
+            ).forEach { (cls, label) ->
+                val countInClass = trades.count { it.assetClass == cls }
+                FilterChip(
+                    selected = selectedCategory == cls,
+                    onClick = { selectedCategory = cls },
+                    label = { Text("$label ($countInClass)", style = MaterialTheme.typography.labelSmall) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AurumColors.Cyan.copy(alpha = 0.2f),
+                        selectedLabelColor = AurumColors.Cyan,
+                        labelColor = AurumColors.TextSecondary,
+                    ),
+                )
+            }
+        }
+
+        // ── ۲. آمار و خلاصه عملکرد ژورنال دستهٔ انتخاب‌شده ───────────────
         SectionCard(
-            title = "ژورنال معاملات کاغذی",
-            subtitle = "جمع فعالیت دستی و سیگنال فنی؛ فقط کاغذیِ ذخیره‌شده، نه سود استراتژی یا خط چارت",
+            title = "ژورنال معاملات کاغذی · ${selectedCategory?.label ?: "همهٔ بازارها"}",
+            subtitle = "آمار نتایج واقعی بر اساس تسویهٔ قیمت‌های بازار در دستهٔ انتخاب‌شده",
         ) {
             loadError?.let { Text(it, style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.Red, modifier = Modifier.padding(bottom = 8.dp)) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                StatTile("بسته‌شده", "${stats.total}", AurumColors.TextPrimary, Modifier.weight(1f))
-                StatTile("باز", "${stats.open}", AurumColors.Gold, Modifier.weight(1f))
-                StatTile("برد/باخت", "${stats.wins}/${stats.losses}", AurumColors.Green, Modifier.weight(1f))
+                val balanceStr = String.format(java.util.Locale.US, "$%.2f", settings.accountBalance).let {
+                    if (it.endsWith(".00")) it.substringBefore(".00") else it
+                }
+                StatTile("موجودی حساب", balanceStr, AurumColors.Gold, Modifier.weight(1f))
+                StatTile("بسته‌شده", "${filteredClosed.size}", AurumColors.TextPrimary, Modifier.weight(1f))
+                StatTile("باز", "${filteredOpen.size}", AurumColors.TextPrimary, Modifier.weight(1f))
+                StatTile("برد/باخت", "$categoryWins/$categoryLosses", AurumColors.Green, Modifier.weight(1f))
             }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -100,13 +176,13 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                     .fillMaxWidth()
                     .padding(top = 8.dp),
             ) {
-                StatTile("نرخ برد", stats.winRate?.let { "${String.format("%.1f", it)}%" } ?: "—", AurumColors.Green, Modifier.weight(1f))
-                StatTile("فاکتور سود", stats.profitFactor?.let { String.format("%.2f", it) } ?: "—", AurumColors.Gold, Modifier.weight(1f))
-                StatTile("خالص خامِ کل", "${formatPrice(stats.netPnl)}$",  if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
+                StatTile("نرخ برد", categoryWinRate?.let { "${String.format("%.1f", it)}%" } ?: "—", AurumColors.Green, Modifier.weight(1f))
+                StatTile("فاکتور سود", categoryProfitFactor?.let { String.format("%.2f", it) } ?: "—", AurumColors.Gold, Modifier.weight(1f))
+                StatTile("خالص سود/زیان", "${formatPrice(categoryNetPnl)}$", if (categoryNetPnl >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
             }
-            if (stats.total == 0 && loadError == null) {
+            if (filteredClosed.isEmpty() && loadError == null) {
                 Text(
-                    "هنوز معامله بسته‌شده‌ای نیست. آمار فقط از نتایج واقعی ساخته می‌شود؛ عدد نمایشی نداریم.",
+                    "هنوز معامله بسته‌شده‌ای در این دسته ثبت نشده است. آمار فقط از نتایج واقعی بازار محاسبه می‌شود.",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                     modifier = Modifier.padding(top = 8.dp),
@@ -114,25 +190,39 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             }
         }
 
-        if (opportunities.isNotEmpty() || opportunityError != null) {
-            SectionCard("فرصت‌های آموزشی بررسی‌شده", "بعضی به معاملهٔ کاغذی وصل‌اند؛ خودِ کاندیدا معامله نیست و در آمار محاسبه نمی‌شود") {
+        // ── ۳. تقویم درآمد و سود/زیان روزانه و ماهانه (PnL Calendar) ───────────
+        PnlIncomeCalendarSection(
+            closedTrades = filteredClosed,
+            categoryLabel = selectedCategory?.label ?: "همهٔ بازارها",
+        )
+
+        val filteredOpportunities = remember(opportunities, selectedCategory) {
+            if (selectedCategory == null) opportunities else opportunities.filter { AssetClass.of(it.symbol) == selectedCategory }
+        }
+
+        if (filteredOpportunities.isNotEmpty() || opportunityError != null) {
+            SectionCard(
+                title = "فرصت‌های آموزشی بررسی‌شده · ${selectedCategory?.label ?: "همهٔ بازارها"}",
+                subtitle = "کاندیداهای اسکن‌شده در دستهٔ انتخاب‌شده (خودِ کاندیدا تا زمان تایید ورود معامله نیست)",
+            ) {
                 opportunityError?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = AurumColors.Red) }
-                opportunities.take(30).forEach { item ->
+                filteredOpportunities.take(30).forEach { item ->
                     OpportunityRow(item, trades.any { it.id == item.paperTradeId })
                 }
-                if (opportunities.size > 30) Text("۳۰ مورد اخیر از ${opportunities.size} کاندیدای ذخیره‌شده",
+                if (filteredOpportunities.size > 30) Text("۳۰ مورد اخیر از ${filteredOpportunities.size} کاندیدای ذخیره‌شده",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                if (opportunities.isNotEmpty()) OutlinedButton(onClick = { confirmOpportunityClear = true }) {
+                if (filteredOpportunities.isNotEmpty()) OutlinedButton(onClick = { confirmOpportunityClear = true }) {
                     Text("پاک کردن تاریخچهٔ کاندیداها (نه معاملات)")
                 }
             }
         }
 
-        val open = trades.filter { it.isOpen }
-        if (open.isNotEmpty()) {
-            SectionCard("پوزیشن‌های باز", "ارزش‌گذاری با آخرین قیمت واقعی دریافتی") {
-                open.forEach { trade ->
-                    val unrealized = livePrice?.takeIf { trade.symbol == market.symbol }?.let { price ->
+        val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
+        if (filteredOpen.isNotEmpty()) {
+            SectionCard("پوزیشن‌های باز · ${selectedCategory?.label ?: "همهٔ بازارها"}", "ارزش‌گذاری با آخرین قیمت واقعی دریافتی") {
+                filteredOpen.forEach { trade ->
+                    val currentPrice = livePrices[trade.symbol] ?: (if (trade.symbol == market.symbol) livePrice else null)
+                    val unrealized = currentPrice?.let { price ->
                         val perOz = if (trade.action == SignalAction.BUY) price - trade.entry else trade.entry - price
                         perOz * trade.positionOz
                     }
@@ -158,9 +248,18 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.TextMuted,
                             )
+                            trade.note.takeIf { it.isNotBlank() }?.let { note ->
+                                val isAi = note.contains("هوش مصنوعی") && !note.contains("بدون هوش مصنوعی")
+                                Text(
+                                    text = if (isAi) "✦ $note" else "ℹ $note",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isAi) AurumColors.Gold else AurumColors.TextSecondary,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
                             EntryConditionsLine(trade.entryConditions)
                             trade.newsEvidence?.let { verdict ->
-                                Text("خبر ${verdict.model} · ${verdict.direction} · ${verdict.evidence.joinToString { it.source }}" +
+                                Text("★ رویداد/خبر همراه: ${verdict.model} · ${verdict.direction} · ${verdict.evidence.joinToString { it.source }}" +
                                     " · تقویم ${formatDateTime(verdict.calendarCheckedAt)}",
                                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
                             }
@@ -188,7 +287,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                             )
                             OutlinedButton(
                                 onClick = { viewModel.closePaperTrade(trade) },
-                                enabled = livePrice != null && trade.symbol == market.symbol,
+                                enabled = currentPrice != null,
                                 modifier = Modifier.padding(top = 4.dp),
                             ) { Text("بستن", style = MaterialTheme.typography.labelSmall) }
                         }
@@ -198,10 +297,9 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             }
         }
 
-        val closed = trades.filter { !it.isOpen }
-        if (closed.isNotEmpty()) {
-            SectionCard("معاملات بسته‌شده", "خروج فرضی بر اساس قیمت دریافتی؛ نه اجرای بروکر/هزینهٔ واقعی") {
-                closed.forEach { trade: PaperTrade ->
+        if (filteredClosed.isNotEmpty()) {
+            SectionCard("معاملات بسته‌شده · ${selectedCategory?.label ?: "همهٔ بازارها"}", "خروج فرضی بر اساس قیمت دریافتی؛ نه اجرای بروکر/هزینهٔ واقعی") {
+                filteredClosed.forEach { trade: PaperTrade ->
                     TradeRow(trade)
                     TradeChartDisclosure(viewModel, trade)
                 }
@@ -213,8 +311,9 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             ) { Text("پاک کردن ژورنال") }
             OutlinedButton(
                 onClick = {
-                    pendingPdf = "Aurum Edge - Paper Journal (Forex)" to trades
-                    savePdf.launch("aurum_forex_journal_${System.currentTimeMillis()}.pdf")
+                    val catName = selectedCategory?.name?.lowercase() ?: "all"
+                    pendingPdf = "Aurum Edge - Paper Journal ($catName)" to filteredTrades
+                    savePdf.launch("aurum_${catName}_journal_${System.currentTimeMillis()}.pdf")
                 },
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
             ) { Text("خروجی PDF ژورنال") }
@@ -347,11 +446,22 @@ private fun TradeRow(trade: PaperTrade) {
                 style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextPrimary,
             )
+            Text("اهرم ${trade.effectiveLeverage}x · مارجین: $${formatPrice(trade.effectiveMarginUsd)} · کارمزد: $${formatPrice(trade.effectiveCommissionUsd)} · اسپرد: $${formatPrice(trade.effectiveSpreadCostUsd)}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
             Text("${trade.exitReason ?: "—"} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            trade.note.takeIf { it.isNotBlank() }?.let { note ->
+                val isAi = note.contains("هوش مصنوعی") && !note.contains("بدون هوش مصنوعی")
+                Text(
+                    text = if (isAi) "✦ $note" else "ℹ $note",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isAi) AurumColors.Gold else AurumColors.TextSecondary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
             EntryConditionsLine(trade.entryConditions)
             trade.newsEvidence?.let { ai ->
-                Text("خبر ${ai.model} · ${formatDateTime(ai.checkedAt)} · ${ai.evidence.joinToString { it.source }}" +
+                Text("★ رویداد/خبر همراه: ${ai.model} · ${formatDateTime(ai.checkedAt)} · ${ai.evidence.joinToString { it.source }}" +
                     " · بررسی تقویم ${formatDateTime(ai.calendarCheckedAt)}",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
                 ai.evidence.forEach { evidence ->
@@ -615,3 +725,273 @@ private fun StoredReportCard(report: WalkForwardRecord) {
         }
     }
 }
+
+/**
+ * Daily and monthly PnL / Income calendar for closed trades.
+ * Allows month-by-month navigation, visualizing daily profit/loss with green/red badges,
+ * and inspecting individual trades per selected day.
+ */
+@Composable
+private fun PnlIncomeCalendarSection(
+    closedTrades: List<PaperTrade>,
+    categoryLabel: String,
+) {
+    var calendarMonthOffset by remember { mutableIntStateOf(0) }
+    var selectedDayKey by remember { mutableStateOf<String?>(null) }
+
+    val cal = remember(calendarMonthOffset) {
+        Calendar.getInstance().apply {
+            add(Calendar.MONTH, calendarMonthOffset)
+            set(Calendar.DAY_OF_MONTH, 1)
+            set(Calendar.HOUR_OF_DAY, 0)
+            set(Calendar.MINUTE, 0)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+        }
+    }
+
+    val currentMonth = cal.get(Calendar.MONTH)
+    val currentYear = cal.get(Calendar.YEAR)
+    val maxDaysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
+    val firstDayOfWeek = cal.get(Calendar.DAY_OF_WEEK) // 1=Sunday, 7=Saturday
+
+    val monthLabel = remember(cal) {
+        val enFormat = SimpleDateFormat("MMMM yyyy", Locale.US)
+        enFormat.format(cal.time)
+    }
+
+    // Group trades for this month by day of month
+    val monthTrades = remember(closedTrades, currentMonth, currentYear) {
+        closedTrades.filter { t ->
+            val closedTime = t.closedAt
+            if (closedTime == null) {
+                false
+            } else {
+                val tCal = Calendar.getInstance().apply { timeInMillis = closedTime }
+                tCal.get(Calendar.MONTH) == currentMonth && tCal.get(Calendar.YEAR) == currentYear
+            }
+        }
+    }
+
+    val dailyPnlMap = remember(monthTrades) {
+        val map = mutableMapOf<Int, Double>()
+        monthTrades.forEach { t ->
+            val day = Calendar.getInstance().apply { timeInMillis = t.closedAt ?: 0L }.get(Calendar.DAY_OF_MONTH)
+            map[day] = (map[day] ?: 0.0) + (t.pnlUsd ?: 0.0)
+        }
+        map
+    }
+
+    val dailyTradesMap = remember(monthTrades) {
+        val map = mutableMapOf<Int, MutableList<PaperTrade>>()
+        monthTrades.forEach { t ->
+            val day = Calendar.getInstance().apply { timeInMillis = t.closedAt ?: 0L }.get(Calendar.DAY_OF_MONTH)
+            map.getOrPut(day) { mutableListOf() }.add(t)
+        }
+        map
+    }
+
+    val monthNetPnl = monthTrades.sumOf { it.pnlUsd ?: 0.0 }
+    val greenDays = dailyPnlMap.values.count { it > 0.0 }
+    val redDays = dailyPnlMap.values.count { it < 0.0 }
+
+    SectionCard(
+        title = "📅 تقویم درآمد و سود/زیان · $categoryLabel",
+        subtitle = "عملکرد روزانه و ماهانه بر اساس تقویم معاملاتی ($monthLabel)",
+        trailing = {
+            Pill(
+                text = (if (monthNetPnl >= 0) "+$" else "-$") + String.format(Locale.US, "%.2f", kotlin.math.abs(monthNetPnl)),
+                color = if (monthNetPnl >= 0) AurumColors.Green else AurumColors.Red,
+            )
+        },
+    ) {
+        // Month Navigation
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedButton(onClick = { calendarMonthOffset-- }) {
+                Text("◀ ماه قبل", style = MaterialTheme.typography.labelSmall)
+            }
+            Text(
+                text = monthLabel,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = AurumColors.Gold,
+            )
+            OutlinedButton(onClick = { calendarMonthOffset++ }, enabled = calendarMonthOffset < 0) {
+                Text("ماه بعد ▶", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+
+        // Monthly Stats
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            StatTile(
+                "سود/زیان ماه",
+                (if (monthNetPnl >= 0) "+$" else "-$") + String.format(Locale.US, "%.2f", kotlin.math.abs(monthNetPnl)),
+                if (monthNetPnl >= 0) AurumColors.Green else AurumColors.Red,
+                Modifier.weight(1f),
+            )
+            StatTile("معاملات ماه", "${monthTrades.size}", AurumColors.TextPrimary, Modifier.weight(1f))
+            StatTile("روزهای سبز/قرمز", "$greenDays / $redDays", if (greenDays >= redDays) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
+        }
+
+        // Days of week header
+        val dayNames = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            dayNames.forEach { name ->
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+
+        // 7-column Calendar Grid
+        val leadingBlanks = (firstDayOfWeek - 1).coerceAtLeast(0)
+        val totalCells = leadingBlanks + maxDaysInMonth
+        val rows = (totalCells + 6) / 7
+
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            for (r in 0 until rows) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    for (c in 0 until 7) {
+                        val cellIndex = r * 7 + c
+                        val dayNumber = cellIndex - leadingBlanks + 1
+                        if (dayNumber in 1..maxDaysInMonth) {
+                            val pnlForDay = dailyPnlMap[dayNumber]
+                            val tradesForDay = dailyTradesMap[dayNumber] ?: emptyList<PaperTrade>()
+                            val isPositive = (pnlForDay ?: 0.0) > 0.0
+                            val isNegative = (pnlForDay ?: 0.0) < 0.0
+                            val dayKey = "$currentYear-$currentMonth-$dayNumber"
+                            val isSelected = selectedDayKey == dayKey
+
+                            val cellBg = when {
+                                isSelected -> AurumColors.Gold.copy(alpha = 0.25f)
+                                isPositive -> AurumColors.Green.copy(alpha = 0.18f)
+                                isNegative -> AurumColors.Red.copy(alpha = 0.18f)
+                                else -> AurumColors.SurfaceAlt
+                            }
+                            val borderCol = when {
+                                isSelected -> AurumColors.Gold
+                                isPositive -> AurumColors.Green.copy(alpha = 0.5f)
+                                isNegative -> AurumColors.Red.copy(alpha = 0.5f)
+                                else -> AurumColors.Line
+                            }
+
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .background(cellBg, RoundedCornerShape(6.dp))
+                                    .border(1.dp, borderCol, RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        selectedDayKey = if (isSelected) null else dayKey
+                                    }
+                                    .padding(2.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = "$dayNumber",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (tradesForDay.isNotEmpty()) AurumColors.TextPrimary else AurumColors.TextMuted,
+                                    fontWeight = if (tradesForDay.isNotEmpty()) FontWeight.Bold else FontWeight.Normal,
+                                )
+                                if (pnlForDay != null) {
+                                    Text(
+                                        text = (if (pnlForDay >= 0) "+" else "") + String.format(Locale.US, "%.0f$", pnlForDay),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = androidx.compose.ui.unit.TextUnit(9f, androidx.compose.ui.unit.TextUnitType.Sp),
+                                        color = if (pnlForDay >= 0) AurumColors.Green else AurumColors.Red,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                    )
+                                } else {
+                                    Text("—", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted.copy(alpha = 0.3f))
+                                }
+                            }
+                        } else {
+                            Box(modifier = Modifier.weight(1f).height(48.dp))
+                        }
+                    }
+                }
+            }
+        }
+
+        // Selected Day Details
+        if (selectedDayKey != null) {
+            val parts = selectedDayKey!!.split("-")
+            val selDay = parts.getOrNull(2)?.toIntOrNull() ?: 1
+            val dayTrades = dailyTradesMap[selDay] ?: emptyList()
+            val dayPnl = dailyPnlMap[selDay] ?: 0.0
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp)
+                    .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
+                    .padding(10.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "جزئیات روز $selDay $monthLabel (${dayTrades.size} معامله)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AurumColors.Gold,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Pill(
+                        text = (if (dayPnl >= 0) "+$" else "-$") + String.format(Locale.US, "%.2f", kotlin.math.abs(dayPnl)),
+                        color = if (dayPnl >= 0) AurumColors.Green else AurumColors.Red,
+                    )
+                }
+                if (dayTrades.isEmpty()) {
+                    Text(
+                        "معامله‌ای در این روز ثبت نشده است.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                } else {
+                    dayTrades.forEach { t ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "${t.symbol} · ${t.action.name} (ورود: ${formatPrice(t.entry)} | خروج: ${formatPrice(t.exitPrice)})",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextSecondary,
+                            )
+                            Text(
+                                text = "${if ((t.pnlUsd ?: 0.0) >= 0) "+" else ""}${formatPrice(t.pnlUsd)}$",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if ((t.pnlUsd ?: 0.0) >= 0) AurumColors.Green else AurumColors.Red,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

@@ -44,7 +44,23 @@ npm run build         # TypeScript + production build
 
 ## Build Android
 
+Prerequisites: JDK 17 and Android SDK 35 with build-tools 35.0.0.
+Full guide for stable signing and chart capabilities: [docs/BUILD_SIGNING_FA.md](docs/BUILD_SIGNING_FA.md).
+
 ```bash
+# Verify environment setup
+./android/tools/check-env.sh
+
+# Generate stable owner keystore (outside repository)
+./android/tools/generate-keystore.sh ~/aurum-private/aurum-edge.jks aurum-edge
+
+# Build APK signed with the stable owner key (Linux/macOS)
+./android/tools/build-owner-apk.sh ~/aurum-private/aurum-edge.jks aurum-edge
+
+# Build on Windows (PowerShell)
+.\android\tools\build-owner-apk.ps1 -KeystorePath "$HOME\aurum-private\aurum-edge.jks" -Alias "aurum-edge"
+
+# Or standard debug build
 cd android
 ./gradlew testDebugUnitTest assembleDebug
 ```

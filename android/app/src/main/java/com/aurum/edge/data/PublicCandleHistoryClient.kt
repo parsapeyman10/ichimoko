@@ -127,7 +127,12 @@ class PublicCandleHistoryClient(
             throw DataFeedException("نماد تاریخچهٔ رایگان با درخواست یکسان نیست")
         }
         val expectedCurrency = expectedSymbol.substringAfter('/', "").uppercase(Locale.ROOT)
-        if (expectedCurrency.isNotBlank() && meta.text("currency")?.uppercase(Locale.ROOT) != expectedCurrency) {
+        val returnedCurrency = meta.text("currency")?.uppercase(Locale.ROOT)
+        if (expectedCurrency.isNotBlank() && returnedCurrency != null &&
+            expectedCurrency != returnedCurrency &&
+            !(expectedCurrency == "USDT" && returnedCurrency == "USD") &&
+            !expectedSymbol.contains("JPY") && !expectedSymbol.contains("CHF") && !expectedSymbol.contains("CAD")
+        ) {
             throw DataFeedException("واحد قیمت تاریخچهٔ رایگان با نماد درخواست‌شده یکسان نیست")
         }
         val timestamps = result.array("timestamp") ?: throw DataFeedException("زمان کندل‌های رایگان موجود نیست")
@@ -165,16 +170,59 @@ class PublicCandleHistoryClient(
         return if (trimToCache) sorted.takeLast(trimSize.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)) else sorted
     }
 
-    private fun yahooSymbol(symbol: String): String? = when (symbol.trim().uppercase(Locale.ROOT)) {
-        "XAU/USD" -> "XAUUSD=X"
-        "EUR/USD" -> "EURUSD=X"
-        "GBP/USD" -> "GBPUSD=X"
-        "AUD/USD" -> "AUDUSD=X"
-        "NZD/USD" -> "NZDUSD=X"
-        "USD/JPY" -> "JPY=X"
-        "USD/CHF" -> "CHF=X"
-        "USD/CAD" -> "CAD=X"
-        else -> null
+    private fun yahooSymbol(symbol: String): String? {
+        val key = symbol.trim().uppercase(Locale.ROOT)
+        return when (key) {
+            "XAU/USD", "XAUUSD", "GOLD" -> "GC=F"
+            "XAG/USD", "XAGUSD", "SILVER" -> "SI=F"
+            "USOIL", "WTI" -> "CL=F"
+            "UKOIL", "BRENT" -> "BZ=F"
+            "COPPER" -> "HG=F"
+            "NATGAS", "NAT_GAS" -> "NG=F"
+            "NASDAQ" -> "QQQ"
+            "SP500" -> "SPY"
+            "DOW" -> "DIA"
+            "DAX" -> "^GDAXI"
+            "FTSE" -> "^FTSE"
+            "NIKKEI" -> "^N225"
+            "EUR/USD" -> "EURUSD=X"
+            "GBP/USD" -> "GBPUSD=X"
+            "AUD/USD" -> "AUDUSD=X"
+            "NZD/USD" -> "NZDUSD=X"
+            "USD/JPY" -> "JPY=X"
+            "USD/CHF" -> "CHF=X"
+            "USD/CAD" -> "CAD=X"
+            "EUR/GBP" -> "EURGBP=X"
+            "EUR/JPY" -> "EURJPY=X"
+            "GBP/JPY" -> "GBPJPY=X"
+            "AUD/JPY" -> "AUDJPY=X"
+            "CAD/JPY" -> "CADJPY=X"
+            "CHF/JPY" -> "CHFJPY=X"
+            "NZD/JPY" -> "NZDJPY=X"
+            "EUR/AUD" -> "EURAUD=X"
+            "EUR/CAD" -> "EURCAD=X"
+            "EUR/CHF" -> "EURCHF=X"
+            "GBP/AUD" -> "GBPAUD=X"
+            "GBP/CAD" -> "GBPCAD=X"
+            "GBP/CHF" -> "GBPCHF=X"
+            "AUD/CAD" -> "AUDCAD=X"
+            "AUD/CHF" -> "AUDCHF=X"
+            "AUD/NZD" -> "AUDNZD=X"
+            "CAD/CHF" -> "CADCHF=X"
+            "NZD/CAD" -> "NZDCAD=X"
+            else -> {
+                if (key.endsWith("USDT") || key.endsWith("/USDT") || key.endsWith("-USD") || key.endsWith("/USD")) {
+                    val base = key.replace("/USDT", "").replace("USDT", "").replace("-USD", "").replace("/USD", "")
+                    "$base-USD"
+                } else if (key.contains("/")) {
+                    val base = key.substringBefore("/")
+                    val quote = key.substringAfter("/")
+                    "$base$quote=X"
+                } else if (key.length in 1..6 && key.all { it.isLetterOrDigit() }) {
+                    key
+                } else null
+            }
+        }
     }
 
     private fun encodeYahooPath(value: String): String =

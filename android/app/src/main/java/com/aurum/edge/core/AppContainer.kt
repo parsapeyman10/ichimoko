@@ -33,6 +33,7 @@ import com.aurum.edge.data.WatchRepository
 import com.aurum.edge.data.WatchSettingsStore
 import com.aurum.edge.engine.Backtester
 import com.aurum.edge.engine.NewsConfluence
+import com.aurum.edge.notify.Notifier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,11 +54,11 @@ import kotlinx.coroutines.withContext
  */
 class AppContainer(context: Context) {
 
-    private val appContext: Context = context.applicationContext
+    val appContext: Context = context.applicationContext
 
     val settingsStore = SettingsStore(appContext)
     val candleCache = CandleCache(appContext)
-    val journalStore = JournalStore(appContext)
+    val journalStore = JournalStore(appContext, settingsStore = settingsStore)
     val replayJournalStore = ReplayJournalStore(appContext)
     val opportunityStore = PaperOpportunityStore(appContext)
     val client = TwelveDataClient()
@@ -92,21 +93,26 @@ class AppContainer(context: Context) {
             signal = if (delayed) null else NewsConfluence.apply(raw.signal, raw.symbol, headlines, now))
         IctEntryRules.withSafePlan(verified)
     }.stateIn(appScope, SharingStarted.Eagerly, market.state.value.copy(signal = null))
-    val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore)
     /** Periodic all-pairs online candle sweep: candidates + radar status for every catalog pair. */
-    val pairScanner = PairScanner(client, publicHistory, settingsStore, news, journalStore, opportunityStore, appScope, dukascopyHistory)
+    val pairScanner = PairScanner(client, publicHistory, settingsStore, news, journalStore, opportunityStore, appScope, dukascopyHistory, appContext)
     /** The user's own AI (Claude or OpenAI-compatible) as an educational trading companion. */
     val traderAdvisor = TraderAdvisor(settingsStore, market, pairScanner, news, appScope)
+    val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore, traderAdvisor)
     val freeHistory = FreeHistoryDownloader()
     val metaTraderImporter = MetaTraderImporter(appContext)
 
     init {
+        pairScanner.attachAutoTrader(autoPaperTrader)
         market.attach(appScope)
         appScope.launch {
             verifiedMarket.collect { state ->
-                if (settingsStore.read().autoPaperTrading) {
+                val cfg = settingsStore.read()
+                if (cfg.autoPaperTrading) {
                     try {
-                        autoPaperTrader.onMarketUpdate(state)
+                        val opened = autoPaperTrader.onMarketUpdate(state)
+                        if (opened != null) {
+                            Notifier.notifyTradeOpened(appContext, opened, cfg.alertSoundUri)
+                        }
                     } catch (cancel: CancellationException) {
                         throw cancel
                     } catch (_: Exception) {

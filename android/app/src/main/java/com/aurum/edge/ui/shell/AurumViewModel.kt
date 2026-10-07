@@ -14,6 +14,7 @@ import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.HistoryPolicy
+import com.aurum.edge.data.CryptoCatalog
 import com.aurum.edge.data.SourceComparison
 import com.aurum.edge.data.VerificationStatus
 import com.aurum.edge.data.WatchCatalog
@@ -37,6 +38,7 @@ import com.aurum.edge.data.FreeHistoryState
 import com.aurum.edge.data.JournalStats
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
+import com.aurum.edge.data.SpotFallbackClient
 import com.aurum.edge.data.NewsRepository
 import com.aurum.edge.data.SignalTuningPlan
 import com.aurum.edge.data.WatchSelection
@@ -46,9 +48,13 @@ import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.engine.ReplayEngine
 import com.aurum.edge.engine.ReplayEvaluation
 import com.aurum.edge.notify.AlertSoundPlayer
+import com.aurum.edge.notify.Notifier
 import com.aurum.edge.service.SignalMonitorService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -96,6 +102,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val reports: StateFlow<List<WalkForwardRecord>> = container.journalStore.reports
     val reportError: StateFlow<String?> = container.journalStore.reportError
     val replayDecisions: StateFlow<List<ReplayDecision>> = container.replayJournalStore.entries
+
+    private val _livePrices = MutableStateFlow<Map<String, Double>>(emptyMap())
+    val livePrices: StateFlow<Map<String, Double>> = _livePrices.asStateFlow()
+    private var liveTickerLoopStarted = false
 
     private val _stats = MutableStateFlow(container.journalStore.stats())
     val stats: StateFlow<JournalStats> = _stats.asStateFlow()
@@ -177,6 +187,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _mtf.value = snapshot
             }
         }
+        ensureLiveTickerLoop()
     }
 
     /** Forex is the app's only workspace: start the real feed as soon as the UI is visible. */
@@ -185,6 +196,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         container.market.start()
         container.watch.loadCached()
         ensureVisibleOnlineLoop()
+        ensureLiveTickerLoop()
         // A saved opt-in can outlive a killed service. Re-arm only when the UI is in the
         // foreground again; it stays off otherwise.
         if (settings.value.backgroundMonitor && !SignalMonitorService.running.value) {
@@ -246,6 +258,74 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /**
+     * Continuous multi-symbol parallel price ticker:
+     * Fetches real-time market prices concurrently for ALL open trades and active symbols,
+     * updates live PnL and gauge animations on Home Screen, and automatically
+     * settles Take Profit (TP) and Stop Loss (SL) in real-time as prices move.
+     */
+    private fun ensureLiveTickerLoop() {
+        if (liveTickerLoopStarted) return
+        liveTickerLoopStarted = true
+        viewModelScope.launch(Dispatchers.IO) {
+            val spot = SpotFallbackClient()
+            while (isActive) {
+                try {
+                    val currentMarket = container.verifiedMarket.value
+                    val openTradesList = container.journalStore.trades.value.filter { it.isOpen }
+                    val currentMap = _livePrices.value.toMutableMap()
+
+                    if (currentMarket.lastPrice != null && currentMarket.lastPrice!! > 0.0) {
+                        currentMap[currentMarket.symbol] = currentMarket.lastPrice!!
+                        val closedList = container.journalStore.settleTick(currentMarket.symbol, currentMarket.lastPrice!!)
+                        if (closedList.isNotEmpty()) {
+                            _stats.value = container.journalStore.stats()
+                            closedList.forEach { closed ->
+                                _toast.value = "معاملهٔ ${closed.symbol} (${closed.exitReason}) بسته و تسویه شد: ${closed.pnlUsd}$"
+                            }
+                        }
+                    }
+
+                    // Parallel multi-processing quote fetching across all open trade symbols
+                    val symbolsToFetch = openTradesList.map { it.symbol }.distinct().filter { it != currentMarket.symbol }
+                    if (symbolsToFetch.isNotEmpty()) {
+                        kotlinx.coroutines.coroutineScope {
+                            val deferreds = symbolsToFetch.map { sym ->
+                                async(Dispatchers.IO) {
+                                    val quote = runCatching { spot.fetchQuote(sym) }.getOrNull()
+                                    sym to quote?.price
+                                }
+                            }
+                            deferreds.awaitAll().forEach { (sym, price) ->
+                                if (price != null && price.isFinite() && price > 0.0) {
+                                    currentMap[sym] = price
+                                    val closedList = container.journalStore.settleTick(sym, price)
+                                    if (closedList.isNotEmpty()) {
+                                        _stats.value = container.journalStore.stats()
+                                        closedList.forEach { closed ->
+                                            _toast.value = "معاملهٔ ${closed.symbol} (${closed.exitReason}) بسته و تسویه شد: ${closed.pnlUsd}$"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Also pull prices from scanner if available
+                    container.pairScanner.state.value.statuses.forEach { st ->
+                        if (st.price != null && st.price > 0.0) {
+                            currentMap.putIfAbsent(st.symbol, st.price)
+                            container.journalStore.settleTick(st.symbol, st.price)
+                        }
+                    }
+
+                    _livePrices.value = currentMap
+                } catch (_: Exception) {}
+                delay(800L)
+            }
+        }
+    }
+
     fun refreshNow() = container.market.refreshNow()
 
     fun checkForAppUpdate(autoDownload: Boolean = settings.value.autoDownloadUpdates) {
@@ -283,21 +363,27 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     /** Ask the companion AI for a fresh opinion; throttled inside the advisor (10 minutes). */
     fun refreshTraderOpinion(force: Boolean = false) = container.traderAdvisor.refreshNow(force)
 
-    /** Manual all-pairs sweep. Candidates are recorded (journal/radar) without playing a sound:
-     * the user is looking at the screen; background alerts come from the monitor service. */
+    /** Manual all-pairs sweep across 50+ instruments. */
     fun scanPairs() {
         if (container.pairScanner.state.value.sweeping) {
-            _toast.value = "اسکن همگانی در حال اجراست"
+            _toast.value = "اسکن همگانی ۵۰+ نماد در حال اجراست"
             return
         }
         viewModelScope.launch {
-            _toast.value = "اسکن همگانی ۸ جفت‌ارز آغاز شد (حدود یک دقیقه؛ سهمیهٔ منابع رعایت می‌شود)"
+            _toast.value = "اسکن ۵۰+ سهم و نماد آغاز شد؛ بهترین فرصت‌ها شناسایی می‌شوند"
             try {
-                container.pairScanner.sweepOnce(minIntervalMs = 3 * 60_000L) { }
+                container.pairScanner.sweepOnce(minIntervalMs = 1 * 60_000L) { }
             } catch (_: Exception) {
                 _toast.value = "اسکن همگانی ناتمام ماند؛ وضعیت هر نماد در رادار مشخص است"
             }
         }
+    }
+
+    /** Selects the #1 Best Pick symbol, loads its chart and opens the paper trade. */
+    fun selectAndTradeBestPick() {
+        val best = container.pairScanner.state.value.bestPick ?: return
+        selectChartSymbol(best.symbol)
+        _toast.value = "بهترین فرصت انتخاب شد: ${best.symbol} (${best.action?.name ?: "سیگنال"})"
     }
 
     fun refreshNews() = container.news.refreshNow()
@@ -315,8 +401,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
      */
     fun selectChartSymbol(symbol: String) {
         if (symbol == settings.value.symbol) return
-        if (symbol !in WatchCatalog.chartSymbols) {
-            _toast.value = "این نسخه فقط طلا و جفت‌ارزهای اصلی دیده‌بان را چارت می‌کند"
+        val valid = symbol in WatchCatalog.chartSymbols ||
+            symbol in WatchCatalog.scannerSymbols ||
+            CryptoCatalog.isCrypto(symbol)
+        if (!valid) {
+            _toast.value = "نماد $symbol در کاتالوگ نمادها پیدا نشد"
             return
         }
         viewModelScope.launch {
@@ -369,6 +458,17 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun saveBalance(value: Double) = container.settingsStore.update { it.copy(accountBalance = value.coerceAtLeast(10.0)) }
 
     fun saveMinConfidence(value: Double) = container.settingsStore.update { it.copy(minConfidence = value.coerceIn(72.0, 95.0)) }
+
+    fun setActiveStrategy(strategy: com.aurum.edge.core.StrategyKind) {
+        container.settingsStore.update {
+            it.copy(
+                activeStrategy = strategy,
+                signalProfile = SignalProfile.forStrategy(strategy),
+            )
+        }
+        container.market.restart()
+        scanPairs()
+    }
 
     fun setSignalMomentumVolume(enabled: Boolean) = updateSignalProfile("فیلتر مومنتوم/حجم", enabled) {
         it.copy(momentumVolume = enabled)
@@ -527,6 +627,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 return "قیمت منابع مستقل با هم تعارض دارد"
             }
         }
+        if (trades.value.count { it.isOpen } >= 3) return "سقف ۳ معاملهٔ همزمان باز پر شده است (${trades.value.count { it.isOpen }}/3)"
         if (trades.value.any { it.isOpen && it.symbol == current.symbol }) return "برای این نماد یک پوزیشن کاغذی باز است"
         return null
     }
@@ -617,6 +718,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     it.name.substringAfter('·').trim()
                 }
                 _toast.value = "کاغذی: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} ${trade.symbol} · شروع: $conditions"
+                Notifier.notifyTradeOpened(container.appContext, reviewedTrade ?: trade, s.alertSoundUri)
             } catch (e: Exception) {
                 _toast.value = "ورود کاغذی انجام نشد: ${e.message ?: "ذخیره ممکن نیست"}"
             } finally {
@@ -626,19 +728,15 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun closePaperTrade(trade: PaperTrade) {
-        val current = market.value
-        val blocked = freshPaperQuote(current)
-        if (trade.symbol != current.symbol || blocked != null) {
-            _toast.value = "بستن کاغذی متوقف: ${blocked ?: "نماد قیمت با پوزیشن فرق دارد"}"
-            return
-        }
+        val currentPrice = _livePrices.value[trade.symbol] ?: (if (trade.symbol == market.value.symbol) market.value.lastPrice else null)
         viewModelScope.launch {
             try {
-                val latest = market.value
-                require(trade.symbol == latest.symbol && freshPaperQuote(latest) == null) { "قیمت خروج تازهٔ همان نماد نیست" }
-                val closed = container.journalStore.close(trade.id, latest.lastPrice!!, "بستن دستی روی قیمت دریافتی")
+                val exitPrice = currentPrice ?: runCatching { SpotFallbackClient().fetchQuote(trade.symbol).price }.getOrNull()
+                require(exitPrice != null && exitPrice.isFinite() && exitPrice > 0.0) { "قیمت خروج تازه برای ${trade.symbol} در دسترس نیست" }
+                val closed = container.journalStore.close(trade.id, exitPrice, "بستن دستی روی قیمت دریافتی")
                 _stats.value = container.journalStore.stats()
-                _toast.value = "پوزیشن کاغذی ${closed.id.take(8)} با ${closed.pnlUsd} دلار بسته و در ژورنال ذخیره شد"
+                _toast.value = "پوزیشن کاغذی ${trade.symbol} با سود/ضرر ${String.format(java.util.Locale.US, "%.2f", closed.pnlUsd ?: 0.0)}$ بسته شد"
+                Notifier.notifyClosedTrade(container.appContext, closed)
             } catch (error: Exception) {
                 _toast.value = "بستن انجام نشد: ${error.message ?: "خطا در ذخیره"}"
             }

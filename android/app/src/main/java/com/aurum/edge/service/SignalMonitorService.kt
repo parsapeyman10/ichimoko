@@ -21,6 +21,7 @@ import com.aurum.edge.core.PaperAlertRules
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.data.ResearchAlert
 import com.aurum.edge.data.ResearchAlerts
+import com.aurum.edge.data.SpotFallbackClient
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.notify.AlertSoundPlayer
@@ -29,6 +30,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -53,6 +56,7 @@ class SignalMonitorService : Service() {
     private var sweepJob: Job? = null
     private val notifiedResearch = mutableSetOf<String>()
     private val notifiedTrades = mutableSetOf<String>()
+    private val notifiedOpenTrades = mutableSetOf<String>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -148,14 +152,13 @@ class SignalMonitorService : Service() {
             }
         }
 
-        // Periodic all-pairs online candle sweep: same nine conditions per pair, educational candidates
-        // only — automatic paper fills stay live-tick-only on the selected symbol.
+        // Periodic 50+ universe continuous sweep across commodities, forex, crypto, stocks:
         sweepJob?.cancel()
         sweepJob = scope.launch {
             while (isActive) {
                 if (!notificationsPermitted()) { stopSelf(); break }
                 val config = container.settingsStore.read()
-                if (config.backgroundMonitor && !MarketHours.weekendClosedFor(config.symbol)) {
+                if (config.backgroundMonitor) {
                     if (!config.notifyOnSignal) {
                         container.pairScanner.refreshNow() // records honest online/error/alert-off statuses
                     } else {
@@ -239,11 +242,7 @@ class SignalMonitorService : Service() {
                 val autoEnabled = currentSettings.autoPaperTrading
                 val canAlert = currentSettings.notifyOnSignal &&
                     Notifier.canNotifyVerified(this@SignalMonitorService, currentSettings.alertSoundUri)
-                // A silent automatic entry is worse than no entry. Permissions/channel can
-                // be revoked while the service is running; stop BEFORE touching the journal.
-                val opened = if (autoEnabled && canAlert) container.autoPaperTrader.onMarketUpdate(state) else null
-                if (autoEnabled && !canAlert) container.autoPaperTrader.stopped(
-                    "اعلان گوشی مجاز/فعال نیست؛ ورود خودکار کاغذی متوقف است")
+                val opened = if (autoEnabled) container.autoPaperTrader.onMarketUpdate(state) else null
                 if (opened != null) {
                     if (alertsAvailable) runCatching {
                         newCandidate?.let { container.opportunityStore.record(it) }
@@ -253,11 +252,9 @@ class SignalMonitorService : Service() {
                         val review = container.traderAdvisor.reviewPaperEntry(opened, state)
                         container.journalStore.attachAiReview(opened.id, review)
                     }.getOrNull() ?: opened
-                    val currentSettings = container.settingsStore.read()
-                    if (!Notifier.notifyRecordedAutoEntry(this@SignalMonitorService, reviewed,
-                            currentSettings.alertSoundUri)) {
-                        container.autoPaperTrader.stopped(
-                            "معاملهٔ کاغذی در ژورنال ثبت شد، ولی اعلان توسط سیستم ارسال نشد؛ مجوز/کانال را بررسی کنید")
+                    if (canAlert) {
+                        Notifier.notifyRecordedAutoEntry(this@SignalMonitorService, reviewed,
+                            currentSettings.alertSoundUri)
                     }
                 } else if (!autoEnabled) {
                     val candidate = newCandidate
@@ -275,17 +272,52 @@ class SignalMonitorService : Service() {
         journalJob = scope.launch {
             try { container.journalStore.load() } catch (_: Exception) { return@launch }
             val canLink = runCatching { container.opportunityStore.load(); true }.getOrDefault(false)
-            // A service restart must not re-notify all old, already closed paper trades.
+            // A service restart must not re-notify all old, already processed paper trades.
             notifiedTrades.addAll(container.journalStore.trades.value.filterNot { it.isOpen }.map { it.id })
+            notifiedOpenTrades.addAll(container.journalStore.trades.value.filter { it.isOpen }.map { it.id })
             container.journalStore.trades.collect { trades ->
+                val currentSettings = container.settingsStore.read()
                 if (canLink) trades.filter { it.signalBarTime != null }.forEach { trade ->
                     runCatching { container.opportunityStore.linkTrade(trade) }
                 }
+                // Notify with rich details on EVERY newly opened trade (even if user is in-app)
+                trades.filter { it.isOpen }.forEach { trade ->
+                    if (notifiedOpenTrades.add(trade.id)) {
+                        Notifier.notifyTradeOpened(this@SignalMonitorService, trade, currentSettings.alertSoundUri)
+                    }
+                }
+                // Notify on trade closed / settled (TP, SL, manual close)
                 trades.filter { !it.isOpen }.forEach { trade ->
                     if (notifiedTrades.add(trade.id)) {
                         Notifier.notifyClosedTrade(this@SignalMonitorService, trade)
                     }
                 }
+            }
+        }
+
+        // Background multi-processing tick monitor for ALL open trades (active both in-app and out-of-app)
+        scope.launch(Dispatchers.IO) {
+            val spot = SpotFallbackClient()
+            while (isActive) {
+                try {
+                    val openTrades = container.journalStore.trades.value.filter { it.isOpen }
+                    if (openTrades.isNotEmpty()) {
+                        kotlinx.coroutines.coroutineScope {
+                            val deferreds = openTrades.map { t ->
+                                async(Dispatchers.IO) {
+                                    val q = runCatching { spot.fetchQuote(t.symbol) }.getOrNull()
+                                    t.symbol to q?.price
+                                }
+                            }
+                            deferreds.awaitAll().forEach { (sym, price) ->
+                                if (price != null && price > 0.0) {
+                                    container.journalStore.settleTick(sym, price)
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+                delay(1_000L)
             }
         }
         return START_STICKY

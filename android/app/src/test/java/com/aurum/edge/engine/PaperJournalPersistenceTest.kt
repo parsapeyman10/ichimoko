@@ -16,6 +16,7 @@ import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.MarketState
+import com.aurum.edge.data.SettingsStore
 import com.aurum.edge.data.parseWebNews
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -186,6 +187,53 @@ class PaperJournalPersistenceTest {
             throw AssertionError("closing an already closed position must fail")
         } catch (_: IllegalArgumentException) { /* must reject */ }
         assertEquals(closed, JournalStore(context, file).also { it.load() }.trades.value.single())
+    }
+
+    @Test fun journalSettlementAdjustsSettingsBalanceContinuously() = runBlocking {
+        val file = journalFile()
+        val settingsStore = SettingsStore(context)
+        settingsStore.update { it.copy(accountBalance = 50_000.0) }
+        val store = JournalStore(context, file, settingsStore = settingsStore)
+        store.load()
+        val opened = store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5, manual = true)
+        // Close with a loss
+        store.close(opened.id, 2990.0, "بستن دستی با ضرر")
+        val currentBal = settingsStore.read().accountBalance
+        assertTrue("balance should decrease after a loss (was 50000, now $currentBal)", currentBal < 50_000.0)
+    }
+
+    @Test fun liveTickSettlementClosesTradeAtTakeProfitAndStopLoss() = runBlocking {
+        val file = journalFile()
+        val store = JournalStore(context, file)
+        store.load()
+
+        // 1. Long position: Entry 3000, SL 2990, TP 3020
+        val longSignal = signal.copy(action = SignalAction.BUY, entry = 3000.0, stopLoss = 2990.0, takeProfit = 3020.0)
+        val longTrade = store.open(longSignal, "XAU/USD", 3000.0, 50_000.0, 0.5, manual = true)
+        assertTrue(longTrade.isOpen)
+
+        // Price reaches 3021 (TP hit!)
+        val closedList = store.settleTick("XAU/USD", 3021.0, longTrade.openedAt + 1000L)
+        assertEquals(1, closedList.size)
+        val closedTrade = closedList.single()
+        assertFalse(closedTrade.isOpen)
+        assertEquals(3020.0, closedTrade.exitPrice!!, 1e-6)
+        assertTrue(closedTrade.exitReason?.contains("حد سود") == true)
+        assertTrue(closedTrade.pnlUsd!! > 0.0)
+
+        // 2. Short position: Entry 3000, SL 3010, TP 2980
+        val shortSignal = signal.copy(action = SignalAction.SELL, entry = 3000.0, stopLoss = 3010.0, takeProfit = 2980.0)
+        val shortTrade = store.open(shortSignal, "XAU/USD", 3000.0, 50_000.0, 0.5, manual = true)
+        assertTrue(shortTrade.isOpen)
+
+        // Price rises to 3011 (SL hit!)
+        val slClosedList = store.settleTick("XAU/USD", 3011.0, shortTrade.openedAt + 1000L)
+        assertEquals(1, slClosedList.size)
+        val slClosedTrade = slClosedList.single()
+        assertFalse(slClosedTrade.isOpen)
+        assertEquals(3010.0, slClosedTrade.exitPrice!!, 1e-6)
+        assertTrue(slClosedTrade.exitReason?.contains("حد ضرر") == true)
+        assertTrue(slClosedTrade.pnlUsd!! < 0.0)
     }
 
     @Test fun damagedOnDiskJournalIsKeptAndCannotBeOverwrittenByAnEmptyList() = runBlocking {

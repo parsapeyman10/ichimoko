@@ -43,7 +43,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
 import com.aurum.edge.BuildConfig
 import com.aurum.edge.core.AppSettings
-import com.aurum.edge.data.SourceCatalog
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.service.SignalMonitorService
 import com.aurum.edge.notify.Notifier
@@ -161,8 +160,6 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan,
                 modifier = Modifier.padding(top = 4.dp))
         }
-
-        WatchSettingsSection(viewModel)
 
         SectionCard("افزونه‌های موتور سیگنال", "هستهٔ ایچیموکو/کانفلوئنس همیشه روشن است؛ تیک‌های زیر به همان موتور اضافه می‌شوند، جای آن را نمی‌گیرند") {
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -609,77 +606,5 @@ private fun SignalAddonRow(
             Text(detail, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
         Switch(checked = checked, onCheckedChange = onCheckedChange)
-    }
-}
-
-@Composable
-private fun WatchSettingsSection(viewModel: AurumViewModel) {
-    val selections by viewModel.watchSettings.collectAsStateWithLifecycle()
-    val available = WatchCatalog.symbols
-    var symbolId by remember { mutableStateOf(available.firstOrNull()?.id.orEmpty()) }
-    val symbol = available.firstOrNull { it.id == symbolId } ?: return
-    val selected = selections[symbolId] ?: return
-    var key by remember(symbolId) { mutableStateOf(viewModel.watchKeyOverride(symbolId)) }
-    var confirmClear by remember { mutableStateOf(false) }
-
-    SectionCard(
-        title = "منابع هر نماد و کلید جداگانه",
-        subtitle = "فقط خواندنی · هر نماد انتخاب و تاریخچهٔ مستقل دارد",
-    ) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            available.forEach { item ->
-                FilterChip(selected = symbolId == item.id, onClick = { symbolId = item.id },
-                    label = { Text(item.id) })
-            }
-        }
-        Text("${symbol.label} · ${symbol.unit} · آستانه اختلاف ${symbol.tolerancePct}%",
-            style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
-            modifier = Modifier.padding(vertical = 6.dp))
-        symbol.providerCodes.forEach { (sourceId, code) ->
-            val source = SourceCatalog.find(sourceId) ?: return@forEach
-            val enabled = sourceId in selected.enabledSources
-            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("${source.title} · $code", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
-                    Text(source.subtitle, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                }
-                Switch(checked = enabled, onCheckedChange = { viewModel.selectWatchSource(symbolId, sourceId, it) })
-            }
-            if (enabled) {
-                OutlinedButton(onClick = { viewModel.setWatchPreferred(symbolId, sourceId) }) {
-                    Text(if (selected.preferredSourceId == sourceId) "✓ قیمت نمایشی از ${source.title}" else "انتخاب ${source.title} برای قیمت نمایشی")
-                }
-            }
-        }
-        if (SourceCatalog.twelveData.id in symbol.providerCodes) {
-            OutlinedTextField(
-                value = key, onValueChange = { key = it }, singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                label = { Text("کلید اختصاصی ${symbol.id} (خالی = حذف)") },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            )
-            Text("این فیلد مختص دیده‌بان است و بر چارت/هشدار تأثیر ندارد. اگر کلید اختصاصی را خالی ذخیره کنید، کلید چارت استفاده می‌شود؛ فقط به Twelve Data ارسال می‌شود.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            OutlinedButton(onClick = { viewModel.setWatchKeyOverride(symbol.id, key) }) { Text("ذخیره کلید این نماد") }
-        }
-        Text("تاریخچهٔ کامل مشاهدات هر منبع روی همین دستگاه در SQLite نگهداری می‌شود و در دیده‌بان صفحه‌به‌صفحه قابل مشاهده است؛ بک‌فیل تاریخی از سرویس‌دهنده نیست.",
-            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
-            modifier = Modifier.padding(top = 8.dp))
-        Text("فقط منابع نمایشی همین نمادها اینجا انتخاب می‌شوند. کلید معاملاتی بروکر را هرگز اینجا وارد نکنید؛ این اپ سفارش واقعی ارسال نمی‌کند.",
-            style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
-            modifier = Modifier.padding(top = 6.dp))
-        OutlinedButton(onClick = { confirmClear = true }, modifier = Modifier.padding(top = 8.dp)) {
-            Text("پاک کردن تاریخچهٔ همین فضا")
-        }
-    }
-    if (confirmClear) {
-        AlertDialog(
-            onDismissRequest = { confirmClear = false },
-            title = { Text("حذف تاریخچهٔ دیده‌بان؟") },
-            text = { Text("فقط قیمت‌های قبلاً دریافت‌شدهٔ نمادهای دیده‌بان روی گوشی حذف می‌شود؛ ژورنال و تنظیمات دست‌نخورده می‌مانند. این کار قابل بازگشت نیست.") },
-            confirmButton = { TextButton(onClick = { viewModel.clearWatchHistory(); confirmClear = false }) { Text("حذف") } },
-            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("انصراف") } },
-        )
     }
 }

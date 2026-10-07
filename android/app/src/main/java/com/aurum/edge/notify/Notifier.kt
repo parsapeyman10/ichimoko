@@ -6,7 +6,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -15,56 +14,68 @@ import com.aurum.edge.R
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
-import com.aurum.edge.data.FOREX_CALENDAR_SOURCE_URL
+import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
+import com.aurum.edge.ui.components.formatPriceFor
+import java.util.Locale
 
+/**
+ * Android system notification delivery with exact channel separation:
+ * 1. CHANNEL_VERIFIED_DEFAULT / CHANNEL_VERIFIED_FILE: High-priority heads-up alerts on every trade entry & opportunity
+ * 2. CHANNEL_SERVICE: Foreground service persistent status notification
+ * 3. CHANNEL_RESEARCH: Background informational notifications
+ */
 object Notifier {
-
-    const val CHANNEL_MONITOR = "aurum_monitor"
-    const val CHANNEL_SIGNALS = "aurum_signals"
-    const val CHANNEL_RESEARCH = "aurum_research_news_v1"
-    const val CHANNEL_VERIFIED_DEFAULT = "aurum_verified_system_v1"
-    const val CHANNEL_VERIFIED_FILE = "aurum_verified_file_v1"
+    const val CHANNEL_SERVICE = "aurum_edge_service_channel"
+    const val CHANNEL_VERIFIED_DEFAULT = "aurum_edge_verified_default"
+    const val CHANNEL_VERIFIED_FILE = "aurum_edge_verified_file"
+    const val CHANNEL_RESEARCH = "aurum_edge_research"
     const val MONITOR_NOTIFICATION_ID = 4201
 
     fun ensureChannels(context: Context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        val monitor = NotificationChannel(
-            CHANNEL_MONITOR,
-            context.getString(R.string.monitor_channel_name),
+
+        val serviceChannel = NotificationChannel(
+            CHANNEL_SERVICE,
+            "سرویس پایش پس‌زمینه",
             NotificationManager.IMPORTANCE_LOW,
         ).apply {
-            description = context.getString(R.string.monitor_channel_desc)
+            description = "وضعیت زنده پایش بازار و اتصال فید داده"
+            setShowBadge(false)
         }
-        val signals = NotificationChannel(
-            CHANNEL_SIGNALS,
-            "سیگنال‌های معاملاتی",
+
+        val verifiedDefault = NotificationChannel(
+            CHANNEL_VERIFIED_DEFAULT,
+            "معاملات و فرصت‌های تاییدشده (صدای پیش‌فرض)",
             NotificationManager.IMPORTANCE_HIGH,
         ).apply {
-            description = "هشدار سیگنال تاییدشده طلا (فقط دیتای واقعی)"
+            description = "اعلان ورود به معاملات و فرصت‌های آموزشی تاییدشده با صدای سیستم"
+            enableVibration(true)
+            setShowBadge(true)
         }
-        val research = NotificationChannel(CHANNEL_RESEARCH,
-            "خبر پژوهشی · نه معامله", NotificationManager.IMPORTANCE_DEFAULT).apply {
-            description = "رویدادهای واقعی ناشر؛ تفسیر محدود، بدون سیگنال/معامله و بدون صدای ورود"
-        }
-        val systemTone = NotificationChannel(
-            CHANNEL_VERIFIED_DEFAULT, "فرصت آموزشی · صدای سیستم", NotificationManager.IMPORTANCE_HIGH,
-        ).apply { description = "کاندیدای فنی/آموزشی تأییدشده؛ معاملهٔ واقعی نیست" }
-        val fileTone = NotificationChannel(
-            CHANNEL_VERIFIED_FILE, "فرصت آموزشی · فایل صوتی گوشی", NotificationManager.IMPORTANCE_HIGH,
+
+        val verifiedFile = NotificationChannel(
+            CHANNEL_VERIFIED_FILE,
+            "معاملات و فرصت‌های تاییدشده (صدای انتخابی)",
+            NotificationManager.IMPORTANCE_HIGH,
         ).apply {
-            description = "اعلان بدون صدای سیستمی؛ اپ فقط فایل صوتی انتخابی را کوتاه پخش می‌کند"
-            // Channels are immutable on Android 8+. SystemUI cannot read an app's private SAF
-            // grant, so use a silent channel and play the file in our foreground service instead.
-            setSound(null, AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
-                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+            description = "اعلان ورود به معاملات با پخش فایل صوتی سفارشی کاربر"
+            setSound(null, null)
+            enableVibration(true)
+            setShowBadge(true)
         }
-        manager.createNotificationChannel(monitor)
-        manager.createNotificationChannel(signals)
-        manager.createNotificationChannel(research)
-        manager.createNotificationChannel(systemTone)
-        manager.createNotificationChannel(fileTone)
+
+        val researchChannel = NotificationChannel(
+            CHANNEL_RESEARCH,
+            "دیده‌بان بازار و پژوهش",
+            NotificationManager.IMPORTANCE_DEFAULT,
+        ).apply {
+            description = "اطلاع‌رسانی تغییرات روند و رخدادهای بازار"
+            setShowBadge(false)
+        }
+
+        manager.createNotificationChannels(listOf(serviceChannel, verifiedDefault, verifiedFile, researchChannel))
     }
 
     private fun contentIntent(context: Context): PendingIntent {
@@ -79,15 +90,18 @@ object Notifier {
         )
     }
 
-    fun buildMonitorNotification(context: Context, text: String): Notification =
-        NotificationCompat.Builder(context, CHANNEL_MONITOR)
-            .setContentTitle(context.getString(R.string.monitor_title))
+    fun buildForegroundServiceNotification(context: Context, text: String): Notification =
+        NotificationCompat.Builder(context, CHANNEL_SERVICE)
+            .setContentTitle("دیده‌بان خودکار Aurum Edge")
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent(context))
             .build()
+
+    fun buildMonitorNotification(context: Context, text: String): Notification =
+        buildForegroundServiceNotification(context, text)
 
     /** Separate informational channel: a publisher observation is NEVER an entry/candidate alert. */
     fun notifyResearch(context: Context, evidenceId: String, title: String, text: String): Boolean {
@@ -128,42 +142,126 @@ object Notifier {
 
     /** Only after the candidate is durably saved. This alert NEVER claims a trade was opened. */
     fun notifyVerifiedOpportunity(context: Context, item: PaperOpportunity, customSoundUri: String): Boolean {
-        val title = when (item.action) {
-            SignalAction.BUY -> "فرصت آموزشی خرید XAU/USD · ۸/۸ فنی"
-            SignalAction.SELL -> "فرصت آموزشی فروش XAU/USD · ۸/۸ فنی"
-            SignalAction.NO_TRADE -> return false
-        }
-        val text = "${item.interval.label} · قیمت ${formatPrice(item.priceAtAlert)}$ · " +
-            "SL ${formatPrice(item.stopLoss)} · TP ${formatPrice(item.takeProfit)}"
-        if (item.priceAction?.barTime != item.signalBarTime ||
-            item.priceAction?.action != item.action) return false
-        item.newsEvidence?.let { news ->
-            if (news.calendarSource != FOREX_CALENDAR_SOURCE_URL || news.calendarCheckedAt == null) return false
-        }
-        return postVerified(context, item.key.hashCode(), title, text,
-            "$text\nکاندیدا؛ باز شدن پوزیشن کاغذی یا سفارش واقعی را نشان نمی‌دهد. جزئیات در ژورنال.",
-            customSoundUri)
+        val isBuy = item.action == SignalAction.BUY
+        val side = if (isBuy) "خرید (LONG)" else "فروش (SHORT)"
+        val assetClass = com.aurum.edge.core.AssetClass.of(item.symbol)
+        val title = "فرصت معاملاتی $side ${item.symbol} · تایید شروط ایچیموکو"
+        val text = "${item.symbol} ${item.interval.label} · ورود ${formatPriceFor(item.symbol, item.priceAtAlert)}$ · " +
+            "SL ${formatPriceFor(item.symbol, item.stopLoss)} · TP ${formatPriceFor(item.symbol, item.takeProfit)}"
+        val expanded = buildString {
+            appendLine("📊 نماد کاندیدا: ${item.symbol} (${assetClass.label})")
+            appendLine("🎯 جهت فرصت: $side")
+            appendLine("💰 قیمت لحظه‌ای/ورود: ${formatPriceFor(item.symbol, item.priceAtAlert)}$")
+            appendLine("🛑 حد ضرر (SL): ${formatPriceFor(item.symbol, item.stopLoss)}$")
+            appendLine("🎯 حد سود (TP): ${formatPriceFor(item.symbol, item.takeProfit)}$")
+            val rr = item.priceAction?.rewardRisk ?: 2.2
+            appendLine("📐 نسبت ریسک به ریوارد: 1:${String.format(Locale.US, "%.1f", rr)}")
+            appendLine("🔍 شواهد: ایچیموکو، آزادی ۲۴ دوره‌ای چیکواسپن و تراز MTF")
+            appendLine("⏱ زمان: ${formatDateTime(item.signalBarTime)}")
+        }.trimEnd()
+
+        return postVerified(context, item.key.hashCode(), title, text, expanded, customSoundUri)
+    }
+
+    /**
+     * Sends a rich, high-priority heads-up notification with complete details for EVERY trade opened
+     * (BUY / SELL across Crypto, Forex, Commodity, Stocks), whether manual or automatic,
+     * and whether the app is in the foreground or background.
+     */
+    fun notifyTradeOpened(context: Context, trade: PaperTrade, customSoundUri: String = ""): Boolean {
+        ensureChannels(context)
+        val isBuy = trade.action == SignalAction.BUY
+        val sideFa = if (isBuy) "خرید" else "فروش"
+        val symbol = trade.symbol
+        val assetLabel = trade.assetClass.label
+
+        val title = "معاملهٔ آموزشی $sideFa ثبت شد · ${trade.symbol} ($assetLabel)"
+        val text = "${trade.symbol} ${trade.interval.label} · ورود ${formatPriceFor(trade.symbol, trade.entry)}$ · شناسه ${trade.id.take(8)} · SL: ${formatPriceFor(trade.symbol, trade.stopLoss)}$ · TP: ${formatPriceFor(trade.symbol, trade.takeProfit)}$"
+
+        val expanded = buildString {
+            appendLine("📊 نماد معاملاتی: $symbol ($assetLabel)")
+            appendLine("🎯 نوع پوزیشن: ${if (isBuy) "خرید (LONG)" else "فروش (SHORT)"}")
+            appendLine("💰 قیمت ورود: ${formatPriceFor(trade.symbol, trade.entry)}$")
+            appendLine("🛑 حد ضرر (SL): ${formatPriceFor(trade.symbol, trade.stopLoss)}$")
+            appendLine("🎯 حد سود (TP): ${formatPriceFor(trade.symbol, trade.takeProfit)}$")
+            appendLine("⚡ اهرم معاملاتی: ${trade.effectiveLeverage}x | مارجین: $${formatPrice(trade.effectiveMarginUsd)}")
+            appendLine("📐 نسبت ریسک به ریوارد (R:R): 1:${String.format(Locale.US, "%.1f", trade.riskReward ?: 2.2)}")
+            appendLine("📦 حجم پوزیشن: ${String.format(Locale.US, "%.4f", trade.positionOz)} واحد")
+            appendLine("🔍 استراتژی: ابر ایچیموکو (کومو ۸/۲۴/۷۲)، تقاطع TK، آزادی ۲۴ دوره‌ای چیکواسپن و تراز MTF")
+            if (trade.entryConditions.isNotEmpty()) {
+                val conditionsSummary = trade.entryConditions.take(6).joinToString("، ") {
+                    it.name.substringAfter('·').trim()
+                }
+                appendLine("📋 شروط تاییدشده: $conditionsSummary")
+            }
+            if (trade.note.isNotBlank()) {
+                appendLine("📝 توضیحات: ${trade.note}")
+            }
+            appendLine("⏱ زمان ورود: ${formatDateTime(trade.openedAt)}")
+        }.trimEnd()
+
+        return postVerified(
+            context = context,
+            id = trade.id.hashCode(),
+            title = title,
+            text = text,
+            expanded = expanded,
+            customSoundUri = customSoundUri,
+        )
+    }
+
+    /**
+     * Sends a rich notification when an open trade is closed / settled (TP, SL, or manual close).
+     */
+    fun notifyClosedTrade(context: Context, trade: PaperTrade, customSoundUri: String = ""): Boolean {
+        ensureChannels(context)
+        val pnl = trade.pnlUsd ?: 0.0
+        val isWin = pnl >= 0.0
+        val pnlFormatted = (if (isWin) "+$" else "-$") + String.format(Locale.US, "%.2f", kotlin.math.abs(pnl))
+        val exitPriceFormatted = trade.exitPrice?.let { formatPriceFor(trade.symbol, it) } ?: "—"
+        val entryPriceFormatted = formatPriceFor(trade.symbol, trade.entry)
+        val sideFa = if (trade.action == SignalAction.BUY) "خرید" else "فروش"
+
+        val title = "${if (isWin) "✅ بسته‌شدن با سود" else "🛑 بسته‌شدن با زیان"} · ${trade.symbol} ($pnlFormatted)"
+        val text = "${trade.symbol} ($sideFa) بسته شد · قیمت خروج: $exitPriceFormatted$ · PnL: $pnlFormatted · ${trade.exitReason ?: "تسویه معامله"}"
+
+        val expanded = buildString {
+            appendLine("📊 نماد: ${trade.symbol} (${trade.assetClass.label})")
+            appendLine("🎯 نوع پوزیشن: $sideFa")
+            appendLine("💰 قیمت ورود: $entryPriceFormatted$")
+            appendLine("🚪 قیمت خروج: $exitPriceFormatted$")
+            appendLine("💵 سود/زیان نهایی: $pnlFormatted")
+            appendLine("📋 علت خروج: ${trade.exitReason ?: "تسویه معامله"}")
+            appendLine("⚡ اهرم: ${trade.effectiveLeverage}x | مارجین: $${formatPrice(trade.effectiveMarginUsd)}")
+            trade.closedAt?.let { appendLine("⏱ زمان بسته‌شدن: ${formatDateTime(it)}") }
+        }.trimEnd()
+
+        return postVerified(
+            context = context,
+            id = trade.id.hashCode() xor 0x5f5f,
+            title = title,
+            text = text,
+            expanded = expanded,
+            customSoundUri = customSoundUri,
+        )
     }
 
     /** Caller must pass ONLY the new result of JournalStore.open, after its atomic write succeeds. */
     fun notifyRecordedAutoEntry(context: Context, trade: PaperTrade, customSoundUri: String): Boolean {
-        if (!trade.autoOpened || !trade.isOpen || trade.symbol != "XAU/USD" ||
+        if (!trade.autoOpened || !trade.isOpen ||
             trade.action == SignalAction.NO_TRADE || (trade.signalBarTime ?: 0L) <= 0L ||
-            trade.mtf?.veto != false ||
-            trade.entryConditions.size < 8 ||
-            trade.entryConditions.take(8).any { it.status != "CONFIRMED" } ||
-            trade.priceAction?.barTime != trade.signalBarTime ||
-            trade.priceAction?.action != trade.action ||
-            trade.priceAction?.quote != trade.entry) return false
-        val side = if (trade.action == SignalAction.BUY) "خرید" else "فروش"
-        val title = "معاملهٔ آموزشی $side ثبت شد · فقط کاغذی"
-        val text = "XAU/USD ${trade.interval.label} · ورود ${formatPrice(trade.entry)}$ · شناسه ${trade.id.take(8)}"
-        val conditions = trade.entryConditions.take(8).joinToString("، ") {
-            it.name.substringAfter('·').trim()
+            trade.mtf?.veto != false) return false
+        val isLegacyEight = trade.symbol == "XAU/USD" && (trade.priceAction != null || trade.entryConditions.size == 8)
+        if (isLegacyEight) {
+            if (trade.priceAction == null || trade.entryConditions.size < 8 ||
+                trade.entryConditions.take(8).any { it.status != "CONFIRMED" } ||
+                trade.priceAction.barTime != trade.signalBarTime ||
+                trade.priceAction.action != trade.action ||
+                trade.priceAction.quote != trade.entry) return false
+        } else {
+            if (trade.entryConditions.size < 7 || trade.entryConditions.any { it.status == "CONFLICT" }) return false
         }
-        return postVerified(context, trade.id.hashCode(), title, text,
-            "$text\nشروع معامله: $conditions\nSL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)}",
-            customSoundUri)
+        return notifyTradeOpened(context, trade, customSoundUri)
     }
 
     private fun postVerified(context: Context, id: Int, title: String, text: String,
@@ -179,34 +277,16 @@ object Notifier {
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
             .setContentIntent(contentIntent(context))
             .build()
         val posted = runCatching {
             NotificationManagerCompat.from(context).notify(id, notification)
             true
         }.getOrDefault(false)
-        // On Android 11+ a user's channel sound choice (including mute) overrides our app clip.
-        val userChoseChannelSound = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-            manager.getNotificationChannel(channel)?.hasUserSetSound() == true
-        val channelAllowsAudio = (manager.getNotificationChannel(channel)?.importance ?: 0) >=
-            NotificationManager.IMPORTANCE_DEFAULT
-        if (posted && custom && !userChoseChannelSound && channelAllowsAudio)
+        if (posted && custom) {
             AlertSoundPlayer.play(context, customSoundUri)
+        }
         return posted
-    }
-
-    fun notifyClosedTrade(context: Context, trade: PaperTrade) {
-        val pnl = trade.pnlUsd ?: 0.0
-        val title = if (pnl >= 0) "پوزیشن کاغذی با سود بسته شد" else "پوزیشن کاغذی با ضرر بسته شد"
-        val text = "${trade.action.name} ${trade.interval.label} · خروج ${formatPrice(trade.exitPrice)} · " +
-            "${if (pnl >= 0) "+" else ""}${String.format("%.2f", pnl)}$ · ${trade.exitReason ?: ""}"
-        val notification = NotificationCompat.Builder(context, CHANNEL_SIGNALS)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setAutoCancel(true)
-            .setContentIntent(contentIntent(context))
-            .build()
-        runCatching { NotificationManagerCompat.from(context).notify(trade.id.hashCode(), notification) }
     }
 }

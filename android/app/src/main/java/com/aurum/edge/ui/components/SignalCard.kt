@@ -28,6 +28,7 @@ fun SignalSummaryCard(
     signal: Signal?,
     onOpenPaperTrade: () -> Unit,
     modifier: Modifier = Modifier,
+    symbol: String = "",
     showBlockers: Boolean = true,
     entryBlocker: String? = null,
     allowManualPaperTrade: Boolean = true,
@@ -43,6 +44,8 @@ fun SignalSummaryCard(
         SignalAction.SELL -> "فروش (SELL)"
         SignalAction.NO_TRADE -> "عدم ورود (NO TRADE)"
     }
+    val assetClass = if (symbol.isNotBlank()) com.aurum.edge.core.AssetClass.of(symbol) else null
+    val defaultLev = if (symbol.isNotBlank()) com.aurum.edge.core.PaperOrderRules.defaultLeverageFor(symbol) else 20
 
     Column(
         modifier = modifier
@@ -54,7 +57,15 @@ fun SignalSummaryCard(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("موتور تلفیقی ایچیموکو", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        if (symbol.isNotBlank()) "موتور تلفیقی ایچیموکو · $symbol" else "موتور تلفیقی ایچیموکو",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Gold,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    assetClass?.let { Pill(it.label, AurumColors.SurfaceAlt) }
+                }
                 Text(title, style = MaterialTheme.typography.titleMedium, color = color, fontWeight = FontWeight.Bold)
             }
             Pill(
@@ -86,8 +97,23 @@ fun SignalSummaryCard(
                 StatTile("ورود", formatPrice(signal.entry), AurumColors.Gold, Modifier.weight(1f))
                 StatTile("حد ضرر", formatPrice(signal.stopLoss), AurumColors.Red, Modifier.weight(1f))
                 StatTile("حد سود", formatPrice(signal.takeProfit), AurumColors.Green, Modifier.weight(1f))
-                StatTile("R:R", "1:${String.format("%.1f", signal.riskReward ?: 0.0)}", AurumColors.TextPrimary, Modifier.weight(1f))
+                StatTile("R:R", "1:${String.format(java.util.Locale.US, "%.1f", signal.riskReward ?: 0.0)}", AurumColors.TextPrimary, Modifier.weight(1f))
             }
+
+            // Realistic Leverage & Cost Info
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .background(AurumColors.SurfaceAlt, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("اهرم معاملاتی: ${defaultLev}x", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
+                Text("کارمزد: ۰٫۰۴٪ · اسپرد: ۰٫۰۲٪", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            }
+
             if (signal.reasons.isNotEmpty()) {
                 Column(modifier = Modifier.padding(top = 10.dp)) {
                     signal.reasons.take(4).forEach { reason ->

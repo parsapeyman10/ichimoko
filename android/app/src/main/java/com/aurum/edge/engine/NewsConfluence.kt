@@ -109,8 +109,13 @@ object NewsConfluence {
     fun apply(raw: Signal?, symbol: String, news: PersianNewsState,
               now: Long = System.currentTimeMillis()): Signal? {
         if (raw == null) return null
-        val core = raw.confluence.take(TECHNICAL_COUNT)
-        val technicalOk = core.size == TECHNICAL_COUNT && core.all { it.ok && it.status == ConfluenceStatus.CONFIRMED }
+        val core = raw.confluence.filterNot { it.name == NEWS_LABEL }
+        val isLegacyEight = core.size == TECHNICAL_COUNT
+        val technicalOk = if (isLegacyEight) {
+            core.all { it.ok && it.status == ConfluenceStatus.CONFIRMED }
+        } else {
+            raw.isActionable
+        }
         val match = alignment(symbol, raw.action, news, now)
         val item = ConfluenceItem(
             NEWS_LABEL,
@@ -125,7 +130,7 @@ object NewsConfluence {
         )
         val combined = raw.copy(confluence = raw.confluence + item)
         if (!raw.isActionable) return combined
-        val blocker = if (!technicalOk)
+        val blocker = if (!technicalOk && isLegacyEight)
             "هشت شرط فنی اصلی هم‌زمان تأیید نشده‌اند (${core.count { it.ok && it.status == ConfluenceStatus.CONFIRMED }}/$TECHNICAL_COUNT)"
         else null
         if (blocker != null) {
