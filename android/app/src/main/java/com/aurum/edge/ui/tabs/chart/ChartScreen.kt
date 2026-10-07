@@ -728,7 +728,7 @@ private fun StrategyBar(viewModel: AurumViewModel, market: MarketState) {
             )
         },
     ) {
-        if (!hasSignal) {
+        if (!hasSignal || signal == null) {
             Text(
                 "در کندل فعلی شرایط قطعی ورود صادر نشده است. فیلترهای استراتژی با دقت بالا وضعیت را پایش می‌کنند.",
                 style = MaterialTheme.typography.bodySmall,
@@ -746,13 +746,13 @@ private fun StrategyBar(viewModel: AurumViewModel, market: MarketState) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Button(
-                        onClick = { viewModel.openPaperTrade(market, manual = true) },
+                        onClick = { viewModel.openPaperTrade(signal) },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (action == SignalAction.BUY) AurumColors.Green else AurumColors.Red,
                         ),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(if (action == SignalAction.BUY) "ورود دستی به معامله خرید LONG" else "ورود دستی به معامله فروش SHORT")
+                        Text(if (action == SignalAction.BUY) "ورود به معامله خرید LONG" else "ورود به معامله فروش SHORT")
                     }
                 }
             }
@@ -767,7 +767,7 @@ private fun SymbolSearchRow(
 ) {
     var expanded by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
-    val results = remember(query) { SymbolSearch.search(query, 10) }
+    val results = remember(query) { SymbolSearch.rank(query, CryptoCatalog.SYMBOLS, 15) }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
         Row(
@@ -810,14 +810,14 @@ private fun SymbolSearchRow(
                             Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    onSelect(item.symbol)
+                                    onSelect(item.id)
                                     expanded = false
                                 }
                                 .padding(vertical = 8.dp, horizontal = 4.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
                             Column {
-                                Text(item.symbol, style = MaterialTheme.typography.bodyMedium, color = AurumColors.TextPrimary)
+                                Text(item.id, style = MaterialTheme.typography.bodyMedium, color = AurumColors.TextPrimary)
                                 Text(item.nameFa, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
                             }
                             Pill(item.category, AurumColors.Surface)
