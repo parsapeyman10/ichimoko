@@ -45,6 +45,54 @@ data class PriceTick(val price: Double, val at: Long, val bid: Double? = null, v
 
 enum class SignalAction { BUY, SELL, NO_TRADE }
 
+enum class AssetClass(val code: String, val label: String, val maxSlots: Int) {
+    CRYPTO("CRYPTO", "رمزارز", 1),
+    FOREX("FOREX", "جفت‌ارز فارکس", 1),
+    COMMODITY("COMMODITY", "کالا و انرژی", 1),
+    STOCK("STOCK", "سهام و شاخص", 1);
+
+    companion object {
+        fun of(symbol: String): AssetClass {
+            val s = symbol.trim().uppercase()
+            return when {
+                s.contains("USDT") || s.startsWith("BTC") || s.startsWith("ETH") || s.startsWith("SOL") ||
+                    s.startsWith("BNB") || s.startsWith("XRP") || s.startsWith("DOGE") || s.startsWith("ADA") ||
+                    s.startsWith("AVAX") || s.startsWith("LINK") || s.startsWith("TON") || s.startsWith("DOT") ||
+                    s.startsWith("SHIB") || s.startsWith("PEPE") || s.startsWith("SUI") || s.startsWith("NEAR") ||
+                    s.endsWith("/USDT") -> CRYPTO
+
+                s.startsWith("XAU") || s.startsWith("XAG") || s.startsWith("BRENT") || s.startsWith("WTI") ||
+                    s.startsWith("USOIL") || s.startsWith("UKOIL") || s.startsWith("NATGAS") || s.startsWith("COPPER") ||
+                    s == "GOLD" || s == "SILVER" -> COMMODITY
+
+                s in setOf("AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "GOOGL", "NASDAQ", "SP500", "DOW", "DAX", "FTSE", "NIKKEI") ||
+                    (!s.contains("/") && !s.contains("USDT") && s.length in 1..6) -> STOCK
+
+                else -> FOREX
+            }
+        }
+    }
+}
+
+enum class StrategyKind(val id: String, val label: String, val description: String) {
+    ICHIMOKU_PRICE_ACTION(
+        "ICHIMOKU_PRICE_ACTION",
+        "ایچیموکو + پرایس اکشن",
+        "موتور واحد: ایچیموکو نهادی ۸/۲۴/۷۲ + تاییدیه پرایس‌اکشن + حجم و مومنتوم + تراز روند ۳ تایم‌فریم + فیلتر قفل ضد ساید",
+    );
+
+    companion object {
+        val SUPER_PLUS = ICHIMOKU_PRICE_ACTION
+        val ICHIMOKU = ICHIMOKU_PRICE_ACTION
+        val ICT_SMC = ICHIMOKU_PRICE_ACTION
+        val EMA_VWAP = ICHIMOKU_PRICE_ACTION
+        val VOLUME_BREAKOUT = ICHIMOKU_PRICE_ACTION
+        val MEAN_REVERSION = ICHIMOKU_PRICE_ACTION
+
+        fun fromId(raw: String?): StrategyKind = ICHIMOKU_PRICE_ACTION
+    }
+}
+
 /**
  * The base Ichimoku confluence engine is active by default. These booleans are additive
  * opt-in safeguards/setups; Chikou can be explicitly disabled only for a named profile experiment.
@@ -96,6 +144,15 @@ data class SignalProfile(
 
     companion object {
         val BASE = SignalProfile()
+
+        fun forStrategy(kind: StrategyKind): SignalProfile = SignalProfile(
+            momentumVolume = true,
+            higherTimeframeFilter = true,
+            rangeChopFilter = true,
+            dynamicSpreadFilter = true,
+            chikouConfirmation = true,
+            flatSpanB = true,
+        )
 
         /** Migrates the previous single-choice enum value, and also accepts comma lists. */
         fun fromName(raw: String?): SignalProfile {
@@ -329,16 +386,14 @@ data class PaperOpportunity(
 ) {
     companion object {
         fun from(signal: Signal, symbol: String, price: Double, mtf: MtfSnapshotRecord,
-                 news: PaperNewsRecord?, ict: IctPriceActionRecord,
+                 news: PaperNewsRecord?, ict: IctPriceActionRecord? = null,
                  now: Long = System.currentTimeMillis()): PaperOpportunity {
             val technicalConditions = signal.confluence.filterNot {
                 it.name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL
             }
             require(PaperOrderRules.paperable(symbol) && signal.isActionable && signal.barTime > 0 &&
-                technicalConditions.take(8).size == 8 &&
-                technicalConditions.take(8).all { it.ok && it.status == ConfluenceStatus.CONFIRMED } &&
                 price.isFinite() && price > 0 && signal.stopLoss != null && signal.takeProfit != null &&
-                ict.matches(signal, symbol, price) && !mtf.veto && mtf.barTime == signal.barTime) {
+                !mtf.veto) {
                 "فرصت آموزشی معتبر نیست"
             }
             return PaperOpportunity(
@@ -559,6 +614,7 @@ data class AppSettings(
      */
     val newsAiFormat: String = "AUTO",
     val signalProfile: SignalProfile = SignalProfile.BASE,
+    val activeStrategy: StrategyKind = StrategyKind.ICHIMOKU,
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
     val hasClientNewsAi: Boolean get() = newsAiApiKey.isNotBlank() && newsAiBaseUrl.isNotBlank() && newsAiModel.isNotBlank()

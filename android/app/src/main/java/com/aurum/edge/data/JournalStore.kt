@@ -34,7 +34,11 @@ import java.util.UUID
  * an open position is marked to market with the last real price, and closes only when a
  * real price touches the stop or the target.
  */
-class JournalStore(context: Context, private val file: File = File(context.filesDir, "paper_journal.json")) {
+class JournalStore(
+    context: Context,
+    private val file: File = File(context.filesDir, "paper_journal.json"),
+    private val settingsStore: SettingsStore? = null,
+) {
 
     private val reportsFile = File(context.filesDir, "walk_forward_reports.json")
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
@@ -140,17 +144,22 @@ class JournalStore(context: Context, private val file: File = File(context.files
         automatic: Boolean = false,
         newsEvidence: PaperNewsRecord? = null,
         priceAction: IctPriceActionRecord? = null,
+        customNote: String? = null,
     ): PaperTrade {
         val technicalConditions = signal.confluence.filterNot { it.name == NewsConfluence.NEWS_LABEL }
+        val isLegacyEight = technicalConditions.size == 8
+        val techOk = if (isLegacyEight) {
+            technicalConditions.all { it.ok && it.status == ConfluenceStatus.CONFIRMED }
+        } else {
+            signal.isActionable && signal.confidence >= 72.0
+        }
         require(!automatic || (!manual && signal.isActionable && signal.barTime > 0 &&
-            technicalConditions.take(8).size == 8 && technicalConditions.take(8).all {
-                it.ok && it.status == ConfluenceStatus.CONFIRMED
-            } && mtf != null && !mtf.veto && mtf.barTime == signal.barTime && mtf.frames.isNotEmpty())) {
-            "۸ شرط فنی و چندتایم‌فریم برای ورود خودکار کاغذی کامل نیست"
+            techOk && (mtf == null || !mtf.veto))) {
+            "شروط فنی و چندتایم‌فریم برای ورود خودکار کاغذی کامل نیست"
         }
         val stop = signal.stopLoss ?: throw IllegalArgumentException("حد ضرر وجود ندارد")
         val target = signal.takeProfit ?: throw IllegalArgumentException("حد سود وجود ندارد")
-        require(manual || priceAction?.matches(signal, symbol, price) == true) {
+        require(manual || !isLegacyEight || priceAction?.matches(signal, symbol, price) == true) {
             "شواهد همان کندلِ رنج/ICT برای ورود سیگنالی کاغذی ثبت نشده است"
         }
         val draft = PaperOrderRules.preview(signal.action, symbol, price, stop, target, balance, riskPercent)
@@ -171,6 +180,7 @@ class JournalStore(context: Context, private val file: File = File(context.files
             positionOz = draft.quantity,
             positionUnit = draft.unit,
             note = when {
+                customNote != null -> customNote
                 manual -> "ورود دستی کاغذی"
                 automatic -> "شروع خودکار: $startConditions"
                 else -> "شروع: $startConditions"
@@ -185,16 +195,25 @@ class JournalStore(context: Context, private val file: File = File(context.files
             priceAction = if (manual) null else priceAction,
         )
         mutex.withLock {
-            // Serialize the check and append. No pyramiding or duplicate position per symbol.
-            require(_trades.value.none { it.isOpen && it.symbol == symbol }) {
-                "برای این نماد پوزیشن کاغذی باز دارید؛ ابتدا آن را ببندید"
+            // Serialize the check and append. Up to 4 concurrent open positions allowed (1 Crypto, 1 Forex, 1 Commodity, 1 Stock).
+            val openTrades = _trades.value.filter { it.isOpen }
+            require(openTrades.size < 4) {
+                "سقف ۴ معاملهٔ همزمان باز پورتفو پر شده است (${openTrades.size}/4)؛ ابتدا یکی از معاملات را ببندید"
+            }
+            require(openTrades.none { it.symbol == symbol }) {
+                "برای نماد $symbol از قبل پوزیشن کاغذی باز دارید؛ ابتدا آن را ببندید"
+            }
+            val targetClass = com.aurum.edge.core.AssetClass.of(symbol)
+            val openInClass = openTrades.count { com.aurum.edge.core.AssetClass.of(it.symbol) == targetClass }
+            require(openInClass < targetClass.maxSlots) {
+                "ظرفیت معاملهٔ همزمان در دستهٔ «${targetClass.label}» تکمیل است (حداکثر ۱ پوزیشن در هر دسته دارایی)"
             }
             if (automatic) require(_trades.value.none {
                 it.symbol == symbol && it.signalBarTime == signal.barTime
             }) { "در همین کندل سیگنال، معاملهٔ کاغذی قبلاً ثبت شده است" }
             val totalRisk = _trades.value.filter { it.isOpen }.sumOf { it.riskUsd }
-            require(totalRisk + draft.actualRiskUsd <= balance * 0.05 + 1e-8) {
-                "مجموع ریسک پوزیشن‌های کاغذی از ۵٪ موجودی عبور می‌کند"
+            require(totalRisk + draft.actualRiskUsd <= balance * 0.15 + 1e-4) {
+                "مجموع ریسک پوزیشن‌های کاغذی از سقف بودجه پورتفو عبور می‌کند"
             }
             persist(_trades.value + trade)
         }
@@ -214,27 +233,29 @@ class JournalStore(context: Context, private val file: File = File(context.files
      * Mark open trades against the newest real candle.
      * A trade closes only when a real price actually reached its stop or target.
      */
-    suspend fun settle(candle: Candle, symbol: String, observedAt: Long) = mutex.withLock {
-        if (!loaded || candle.time <= 0 || observedAt < candle.time ||
+    suspend fun settle(candle: Candle, symbol: String, observedAt: Long): List<PaperTrade> = mutex.withLock {
+        if (!loaded || candle.time <= 0 ||
             !listOf(candle.open, candle.high, candle.low, candle.close).all { it.isFinite() && it > 0 } ||
             candle.high < maxOf(candle.open, candle.close) ||
-            candle.low > minOf(candle.open, candle.close) || candle.low > candle.high) return@withLock
+            candle.low > minOf(candle.open, candle.close) || candle.low > candle.high) return@withLock emptyList()
         val current = _trades.value
-        if (current.none { it.isOpen }) return@withLock
+        if (current.none { it.isOpen && it.symbol == symbol }) return@withLock emptyList()
         var changed = false
+        var settledPnlDelta = 0.0
+        val newlyClosed = mutableListOf<PaperTrade>()
         val updated = current.map { t ->
-            // A different symbol or a bar opened before this position must never settle it.
-            // In particular, caching/replaying historical bars cannot close a new position.
-            if (!t.isOpen || t.symbol != symbol || candle.time <= t.openedAt) return@map t
+            // A historical candle timestamped before the trade was opened cannot settle this position.
+            if (!t.isOpen || t.symbol != symbol || candle.time < t.openedAt) return@map t
+
             val hitStop = if (t.action == SignalAction.BUY) {
-                candle.low <= t.stopLoss
+                candle.low <= t.stopLoss + 1e-9
             } else {
-                candle.high >= t.stopLoss
+                candle.high >= t.stopLoss - 1e-9
             }
             val hitTarget = if (t.action == SignalAction.BUY) {
-                candle.high >= t.takeProfit
+                candle.high >= t.takeProfit - 1e-9
             } else {
-                candle.low <= t.takeProfit
+                candle.low <= t.takeProfit + 1e-9
             }
             if (!hitStop && !hitTarget) return@map t
             // If both were touched inside one bar, assume the stop was hit first (conservative).
@@ -244,16 +265,84 @@ class JournalStore(context: Context, private val file: File = File(context.files
             } else {
                 t.entry - exit
             }
+            val pnl = kotlin.math.round(
+                PaperOrderRules.quotePnlToUsd(t.symbol, pnlPerOz * t.positionOz, exit) * 100.0) / 100.0
+            settledPnlDelta += pnl
             changed = true
-            t.copy(
+            val closed = t.copy(
                 closedAt = observedAt,
                 exitPrice = exit,
                 exitReason = if (hitStop) "حد ضرر (قیمت واقعی)" else "حد سود (قیمت واقعی)",
-                pnlUsd = kotlin.math.round(
-                    PaperOrderRules.quotePnlToUsd(t.symbol, pnlPerOz * t.positionOz, exit) * 100.0) / 100.0,
+                pnlUsd = pnl,
             )
+            newlyClosed.add(closed)
+            closed
         }
-        if (changed) persist(updated)
+        if (changed) {
+            persist(updated)
+            if (settledPnlDelta != 0.0) {
+                settingsStore?.adjustBalance(settledPnlDelta)
+            }
+        }
+        return@withLock newlyClosed
+    }
+
+    /**
+     * Direct live-tick settlement: whenever a fresh real-time quote arrives for any symbol,
+     * immediately checks if Stop Loss or Take Profit has been touched and closes the trade automatically.
+     */
+    suspend fun settleTick(symbol: String, price: Double, observedAt: Long = System.currentTimeMillis()): List<PaperTrade> = mutex.withLock {
+        if (!loaded || !price.isFinite() || price <= 0.0) return@withLock emptyList()
+        val current = _trades.value
+        val openForSymbol = current.filter { it.isOpen && it.symbol == symbol }
+        if (openForSymbol.isEmpty()) return@withLock emptyList()
+
+        var changed = false
+        var settledPnlDelta = 0.0
+        val newlyClosed = mutableListOf<PaperTrade>()
+        val updated = current.map { t ->
+            if (!t.isOpen || t.symbol != symbol) return@map t
+            if (observedAt < t.openedAt - 10_000L) return@map t
+
+            val hitStop = if (t.action == SignalAction.BUY) {
+                price <= t.stopLoss + 1e-9
+            } else {
+                price >= t.stopLoss - 1e-9
+            }
+            val hitTarget = if (t.action == SignalAction.BUY) {
+                price >= t.takeProfit - 1e-9
+            } else {
+                price <= t.takeProfit + 1e-9
+            }
+
+            if (!hitStop && !hitTarget) return@map t
+
+            val exit = if (hitStop) t.stopLoss else t.takeProfit
+            val pnlPerOz = if (t.action == SignalAction.BUY) {
+                exit - t.entry
+            } else {
+                t.entry - exit
+            }
+            val pnl = kotlin.math.round(
+                PaperOrderRules.quotePnlToUsd(t.symbol, pnlPerOz * t.positionOz, exit) * 100.0) / 100.0
+            settledPnlDelta += pnl
+            changed = true
+            val closed = t.copy(
+                closedAt = observedAt,
+                exitPrice = exit,
+                exitReason = if (hitStop) "حد ضرر (قیمت لحظه‌ای)" else "حد سود (قیمت لحظه‌ای)",
+                pnlUsd = pnl,
+            )
+            newlyClosed.add(closed)
+            closed
+        }
+        if (changed) {
+            persist(updated)
+            if (settledPnlDelta != 0.0) {
+                settingsStore?.adjustBalance(settledPnlDelta)
+            }
+        }
+        return@withLock newlyClosed
     }
 
     suspend fun close(tradeId: String, price: Double, reason: String): PaperTrade = mutex.withLock {
@@ -261,12 +350,16 @@ class JournalStore(context: Context, private val file: File = File(context.files
         val trade = _trades.value.singleOrNull { it.id == tradeId && it.isOpen }
             ?: throw IllegalArgumentException("پوزیشن باز در ژورنال پیدا نشد یا قبلاً بسته شده است")
         val pnlPerOz = if (trade.action == SignalAction.BUY) price - trade.entry else trade.entry - price
+        val pnl = kotlin.math.round(
+            PaperOrderRules.quotePnlToUsd(trade.symbol, pnlPerOz * trade.positionOz, price) * 100.0) / 100.0
         val closed = trade.copy(
             closedAt = System.currentTimeMillis(), exitPrice = price, exitReason = reason,
-            pnlUsd = kotlin.math.round(
-                PaperOrderRules.quotePnlToUsd(trade.symbol, pnlPerOz * trade.positionOz, price) * 100.0) / 100.0,
+            pnlUsd = pnl,
         )
         persist(_trades.value.map { if (it.id == tradeId) closed else it })
+        if (pnl != 0.0) {
+            settingsStore?.adjustBalance(pnl)
+        }
         closed
     }
 
