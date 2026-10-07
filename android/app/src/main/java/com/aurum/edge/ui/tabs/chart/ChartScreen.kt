@@ -54,16 +54,14 @@ import com.aurum.edge.data.TradingViewSymbols
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.formatPrice
+import com.aurum.edge.ui.components.formatPriceFor
 import com.aurum.edge.ui.theme.AurumColors
 
 /**
- * صفحه چارت‌ها (Multi-Chart Screen):
- * شامل ۵ پنجره آنلاین تریدینگ‌ویو همزمان:
- * ۱. پنجره اصلی در بالاترین بخش (پیش‌فرض طلای جهانی XAU/USD با قابلیت تغییر به ۵۰+ نماد دلخواه)
- * ۲ الی ۵. چهار پنجره اختصاصی زنده برای ۴ دسته دارایی (کالا، فارکس، رمزارز، سهام):
- *    - در صورت باز بودن معامله: نمایش چارت زنده همان معامله باز
- *    - در صورت نبود معامله باز: نمایش چارت نمادی که موتور در لایه پنهان در حال ارزیابی آن است
- * همراه با درج مقادیر حد ضرر (SL)، حد سود (TP)، قیمت ورود و اهرم مستقیماً روی چارت‌ها.
+ * صفحه چارت‌ها (Multi-Chart Studio):
+ * ۱. چارت اصلی و اختصاصی دستی (پیش‌فرض طلای جهانی XAU/USD با قابلیت تغییر به ۵۰+ نماد دلخواه)
+ * ۲. استودیو زنده ۴ دسته دارایی (کالا، فارکس، رمزارز، سهام) با سویچر تب بهینه‌شده و فوق‌سریع
+ * همراه با درج داینامیک و ظریف سطوح حد ضرر (SL)، حد سود (TP)، قیمت ورود و اهرم با دقت اعشاری بالا.
  */
 @Composable
 fun ChartScreen(
@@ -76,6 +74,7 @@ fun ChartScreen(
     val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
     val scanState by viewModel.pairScan.collectAsStateWithLifecycle()
     val openTrades = remember(trades) { trades.filter { it.isOpen } }
+    var selectedCategoryTab by remember { mutableStateOf(AssetClass.COMMODITY) }
 
     Column(
         modifier = Modifier
@@ -128,7 +127,7 @@ fun ChartScreen(
                 }
             }
 
-            // ۱.۳ سطوح ورود، حد ضرر و حد سود در بالای چارت
+            // ۱.۳ سطوح ورود، حد ضرر و حد سود در بالای چارت با اعشار دقیق
             if (primarySignal?.entry != null && primarySignal.stopLoss != null && primarySignal.takeProfit != null) {
                 Row(
                     modifier = Modifier
@@ -139,9 +138,9 @@ fun ChartScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("ورود: ${formatPrice(primarySignal.entry)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold, fontWeight = FontWeight.Bold)
-                    Text("SL: ${formatPrice(primarySignal.stopLoss)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Red, fontWeight = FontWeight.Bold)
-                    Text("TP: ${formatPrice(primarySignal.takeProfit)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Green, fontWeight = FontWeight.Bold)
+                    Text("ورود: ${formatPriceFor(market.symbol, primarySignal.entry)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold, fontWeight = FontWeight.Bold)
+                    Text("SL: ${formatPriceFor(market.symbol, primarySignal.stopLoss)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Red, fontWeight = FontWeight.Bold)
+                    Text("TP: ${formatPriceFor(market.symbol, primarySignal.takeProfit)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Green, fontWeight = FontWeight.Bold)
                     Text("اهرم: ${PaperOrderRules.defaultLeverageFor(market.symbol)}x", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
                 }
             }
@@ -171,8 +170,7 @@ fun ChartScreen(
         }
 
         // ═════════════════════════════════════════════════════════════════════
-        // چارت‌های شماره ۲ الی ۵: چهار پنجره تریدینگ‌ویو اختصاصی برای ۴ دسته دارایی
-        // اگر معامله باز باشد نماد آن معامله؛ در غیر این صورت نماد تحت ارزیابی زنده
+        // استودیو چارت ۴ دسته دارایی (کالا، فارکس، رمزارزها، سهام)
         // ═════════════════════════════════════════════════════════════════════
         val categories = listOf(
             AssetClass.COMMODITY to "XAU/USD",
@@ -181,122 +179,152 @@ fun ChartScreen(
             AssetClass.STOCK to "AAPL",
         )
 
-        categories.forEachIndexed { index, (assetClass, defaultBenchmark) ->
-            val tradeForClass = openTrades.firstOrNull { it.assetClass == assetClass }
-            val evaluatingCandidate = scanState.topThree.firstOrNull { it.assetClass == assetClass }
-                ?: scanState.statuses.firstOrNull { it.assetClass == assetClass && it.price != null && (it.technicalScore ?: 0) >= 3 }
-                ?: scanState.statuses.firstOrNull { it.assetClass == assetClass && it.state != "closed" }
+        val activeAssetClass = selectedCategoryTab
+        val defaultBenchmark = categories.firstOrNull { it.first == activeAssetClass }?.second ?: "XAU/USD"
 
-            val chartNumber = index + 2
-            val activeSymbol = tradeForClass?.symbol ?: evaluatingCandidate?.symbol ?: defaultBenchmark
-            val activeInterval = tradeForClass?.interval ?: market.interval
-            val isTradeOpen = tradeForClass != null
+        val tradeForClass = openTrades.firstOrNull { it.assetClass == activeAssetClass }
+        val evaluatingCandidate = scanState.topThree.firstOrNull { it.assetClass == activeAssetClass }
+            ?: scanState.statuses.firstOrNull { it.assetClass == activeAssetClass && it.price != null && (it.technicalScore ?: 0) >= 3 }
+            ?: scanState.statuses.firstOrNull { it.assetClass == activeAssetClass && it.state != "closed" }
 
-            val activeEntry = tradeForClass?.entry ?: evaluatingCandidate?.entry
-            val activeSL = tradeForClass?.stopLoss ?: evaluatingCandidate?.stopLoss
-            val activeTP = tradeForClass?.takeProfit ?: evaluatingCandidate?.takeProfit
-            val activeAction = tradeForClass?.action ?: evaluatingCandidate?.action
-            val activeLeverage = tradeForClass?.effectiveLeverage ?: PaperOrderRules.defaultLeverageFor(activeSymbol)
-            val activeRR = tradeForClass?.riskReward ?: evaluatingCandidate?.riskReward
+        val activeSymbol = tradeForClass?.symbol ?: evaluatingCandidate?.symbol ?: defaultBenchmark
+        val activeInterval = tradeForClass?.interval ?: market.interval
+        val isTradeOpen = tradeForClass != null
 
-            SectionCard(
-                title = "چارت $chartNumber (${assetClass.label}) · $activeSymbol",
-                subtitle = if (isTradeOpen) "پنجره زنده معاملهٔ فعال در پورتفو با ابر ایچیموکو و سطوح ورود/SL/TP"
-                           else "پایش و ارزیابی زنده در پس‌زمینه · نماد کاندیدا: $activeSymbol",
-                trailing = {
-                    Pill(
-                        text = if (isTradeOpen) "● معامله باز (${tradeForClass?.action?.name})"
-                               else "🔍 در حال ارزیابی (${evaluatingCandidate?.technicalScore ?: 5}/7)",
-                        color = if (isTradeOpen) AurumColors.Green else AurumColors.Cyan,
-                    )
-                },
+        val activeEntry = tradeForClass?.entry ?: evaluatingCandidate?.entry
+        val activeSL = tradeForClass?.stopLoss ?: evaluatingCandidate?.stopLoss
+        val activeTP = tradeForClass?.takeProfit ?: evaluatingCandidate?.takeProfit
+        val activeAction = tradeForClass?.action ?: evaluatingCandidate?.action
+        val activeLeverage = tradeForClass?.effectiveLeverage ?: PaperOrderRules.defaultLeverageFor(activeSymbol)
+        val activeRR = tradeForClass?.riskReward ?: evaluatingCandidate?.riskReward
+
+        SectionCard(
+            title = "📊 استودیو چارت اختصاصی دسته‌ها · ${activeAssetClass.label}",
+            subtitle = if (isTradeOpen) "معاملهٔ فعال: $activeSymbol (با سطوح زنده ورود، حد سود و ضرر)"
+                       else "پایش و ارزیابی زنده در پس‌زمینه · نماد کاندیدا: $activeSymbol",
+            trailing = {
+                Pill(
+                    text = if (isTradeOpen) "● معامله باز (${tradeForClass?.action?.name})"
+                           else "🔍 رصد زنده (${evaluatingCandidate?.technicalScore ?: 5}/7)",
+                    color = if (isTradeOpen) AurumColors.Green else AurumColors.Cyan,
+                )
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+        ) {
+            // تب‌بار سوئیچ سریع بین ۴ دسته دارایی
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 12.dp),
+                    .padding(bottom = 8.dp)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (isTradeOpen && tradeForClass != null) {
-                    val currentPrice = livePrices[tradeForClass.symbol] ?: tradeForClass.entry
-                    val pnlPerUnit = if (tradeForClass.action == SignalAction.BUY) currentPrice - tradeForClass.entry else tradeForClass.entry - currentPrice
-                    val grossPnl = tradeForClass.positionOz * pnlPerUnit
-                    val netPnl = grossPnl - (tradeForClass.effectiveCommissionUsd + tradeForClass.effectiveSpreadCostUsd)
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Pill("اهرم ${tradeForClass.effectiveLeverage}x", AurumColors.Cyan)
-                            Pill("مارجین $${String.format(java.util.Locale.US, "%.1f", tradeForClass.effectiveMarginUsd)}", AurumColors.Gold)
-                        }
-                        Pill(
-                            text = "PnL خالص: " + (if (netPnl >= 0) "+$" else "-$") + String.format(java.util.Locale.US, "%.2f", kotlin.math.abs(netPnl)),
-                            color = if (netPnl >= 0) AurumColors.Green else AurumColors.Red,
-                        )
-                    }
-                } else {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "بدون پوزیشن باز در این دسته · نماد در حال رصد آنلاین: $activeSymbol",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = AurumColors.TextSecondary,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Pill("اهرم ${activeLeverage}x", AurumColors.Cyan)
-                    }
-                }
-
-                // نوار سطوح ورود، حد ضرر و حد سود اختصاصی روی چارت
-                if (activeEntry != null && activeSL != null && activeTP != null) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 6.dp)
-                            .background(AurumColors.Surface, RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 5.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("ورود: ${formatPrice(activeEntry)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold, fontWeight = FontWeight.Bold)
-                        Text("SL: ${formatPrice(activeSL)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Red, fontWeight = FontWeight.Bold)
-                        Text("TP: ${formatPrice(activeTP)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Green, fontWeight = FontWeight.Bold)
-                        activeRR?.let { Text("R:R 1:${String.format(java.util.Locale.US, "%.1f", it)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan) }
-                    }
-                }
-
-                // پنجره اختصاصی تریدینگ‌ویو
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(420.dp)
-                        .background(AurumColors.SurfaceAlt, RoundedCornerShape(12.dp))
-                        .border(
-                            1.dp,
-                            (if (isTradeOpen) AurumColors.Green else AurumColors.Surface).copy(alpha = 0.4f),
-                            RoundedCornerShape(12.dp),
+                categories.forEach { (cls, _) ->
+                    val isOpenInThisCls = openTrades.any { it.assetClass == cls }
+                    FilterChip(
+                        selected = selectedCategoryTab == cls,
+                        onClick = { selectedCategoryTab = cls },
+                        label = {
+                            Text(
+                                text = "${cls.label}${if (isOpenInThisCls) " (فعال)" else ""}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (selectedCategoryTab == cls) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = (if (isOpenInThisCls) AurumColors.Green else AurumColors.Cyan).copy(alpha = 0.2f),
+                            selectedLabelColor = if (isOpenInThisCls) AurumColors.Green else AurumColors.Cyan,
+                            labelColor = AurumColors.TextSecondary,
                         ),
-                ) {
-                    TradingViewWidget(
-                        symbol = activeSymbol,
-                        interval = activeInterval,
-                        widgetId = "chart_slot_$chartNumber",
-                        entry = activeEntry,
-                        stopLoss = activeSL,
-                        takeProfit = activeTP,
-                        action = activeAction,
-                        leverage = activeLeverage,
-                        riskReward = activeRR,
-                        modifier = Modifier.fillMaxSize(),
                     )
                 }
+            }
+
+            if (isTradeOpen && tradeForClass != null) {
+                val currentPrice = livePrices[tradeForClass.symbol] ?: tradeForClass.entry
+                val pnlPerUnit = if (tradeForClass.action == SignalAction.BUY) currentPrice - tradeForClass.entry else tradeForClass.entry - currentPrice
+                val grossPnl = tradeForClass.positionOz * pnlPerUnit
+                val netPnl = grossPnl - (tradeForClass.effectiveCommissionUsd + tradeForClass.effectiveSpreadCostUsd)
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Pill("اهرم ${tradeForClass.effectiveLeverage}x", AurumColors.Cyan)
+                        Pill("مارجین $${formatPrice(tradeForClass.effectiveMarginUsd)}", AurumColors.Gold)
+                    }
+                    Pill(
+                        text = "PnL خالص: " + (if (netPnl >= 0) "+$" else "-$") + String.format(java.util.Locale.US, "%.2f", kotlin.math.abs(netPnl)),
+                        color = if (netPnl >= 0) AurumColors.Green else AurumColors.Red,
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "نماد در حال رصد آنلاین: $activeSymbol",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Pill("اهرم ${activeLeverage}x", AurumColors.Cyan)
+                }
+            }
+
+            // نوار سطوح ورود، حد ضرر و حد سود اختصاصی روی چارت با اعشار دقیق
+            if (activeEntry != null && activeSL != null && activeTP != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 6.dp)
+                        .background(AurumColors.Surface, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("ورود: ${formatPriceFor(activeSymbol, activeEntry)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold, fontWeight = FontWeight.Bold)
+                    Text("SL: ${formatPriceFor(activeSymbol, activeSL)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Red, fontWeight = FontWeight.Bold)
+                    Text("TP: ${formatPriceFor(activeSymbol, activeTP)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Green, fontWeight = FontWeight.Bold)
+                    activeRR?.let { Text("R:R 1:${String.format(java.util.Locale.US, "%.1f", it)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan) }
+                }
+            }
+
+            // پنجره اختصاصی تریدینگ‌ویو
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(440.dp)
+                    .background(AurumColors.SurfaceAlt, RoundedCornerShape(12.dp))
+                    .border(
+                        1.dp,
+                        (if (isTradeOpen) AurumColors.Green else AurumColors.Surface).copy(alpha = 0.4f),
+                        RoundedCornerShape(12.dp),
+                    ),
+            ) {
+                TradingViewWidget(
+                    symbol = activeSymbol,
+                    interval = activeInterval,
+                    widgetId = "chart_cat_${activeAssetClass.name}",
+                    entry = activeEntry,
+                    stopLoss = activeSL,
+                    takeProfit = activeTP,
+                    action = activeAction,
+                    leverage = activeLeverage,
+                    riskReward = activeRR,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
         }
     }
@@ -328,55 +356,55 @@ private fun TradingViewWidget(
             Interval.D1 -> "D"
         }
     }
-    val html = remember(tvSymbol, tvInterval, widgetId, entry, stopLoss, takeProfit, leverage) {
-        tradingViewHtml(tvSymbol, tvInterval, widgetId, entry, stopLoss, takeProfit, action, leverage, riskReward)
+
+    val html = remember(tvSymbol, tvInterval, widgetId, entry, stopLoss, takeProfit, action) {
+        tradingViewHtml(
+            symbol = symbol,
+            tvSymbol = tvSymbol,
+            tvInterval = tvInterval,
+            widgetId = widgetId,
+            entry = entry,
+            stopLoss = stopLoss,
+            takeProfit = takeProfit,
+            action = action,
+            leverage = leverage,
+            riskReward = riskReward,
+        )
     }
-    val loadKey = "$tvSymbol|$tvInterval|$widgetId|$entry|$stopLoss|$takeProfit"
 
     AndroidView(
         modifier = modifier,
-        factory = { context ->
-            WebView(context).apply {
-                layoutParams = android.view.ViewGroup.LayoutParams(
-                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                )
-                setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        factory = { ctx ->
+            WebView(ctx).apply {
                 setBackgroundColor(AndroidColor.parseColor("#0b0e13"))
-                webViewClient = object : WebViewClient() {
-                    override fun shouldOverrideUrlLoading(view: WebView?, request: android.webkit.WebResourceRequest?): Boolean = false
-                }
-                webChromeClient = WebChromeClient()
-                CookieManager.getInstance().setAcceptCookie(true)
-                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                isVerticalScrollBarEnabled = false
+                isHorizontalScrollBarEnabled = false
                 settings.apply {
                     javaScriptEnabled = true
                     domStorageEnabled = true
-                    databaseEnabled = true
-                    allowContentAccess = true
-                    allowFileAccess = true
-                    loadsImagesAutomatically = true
-                    javaScriptCanOpenWindowsAutomatically = true
                     loadWithOverviewMode = true
                     useWideViewPort = true
+                    setSupportZoom(false)
+                    builtInZoomControls = false
+                    displayZoomControls = false
                     cacheMode = WebSettings.LOAD_DEFAULT
                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
                 }
-                tag = loadKey
-                loadDataWithBaseURL("https://s3.tradingview.com", html, "text/html", "UTF-8", "https://s3.tradingview.com")
+                setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                webChromeClient = WebChromeClient()
+                webViewClient = object : WebViewClient() {}
+                loadDataWithBaseURL("https://s.tradingview.com", html, "text/html", "UTF-8", null)
             }
         },
         update = { webView ->
-            if (webView.tag != loadKey) {
-                webView.tag = loadKey
-                webView.loadDataWithBaseURL("https://s3.tradingview.com", html, "text/html", "UTF-8", "https://s3.tradingview.com")
-            }
+            webView.loadDataWithBaseURL("https://s.tradingview.com", html, "text/html", "UTF-8", null)
         },
     )
 }
 
 private fun tradingViewHtml(
+    symbol: String,
     tvSymbol: String,
     tvInterval: String,
     widgetId: String,
@@ -395,32 +423,29 @@ private fun tradingViewHtml(
         "&studies=%5B%22STD%3BIchimoku%25Cloud%22%5D"
 
     val hudHtml = if (entry != null && stopLoss != null && takeProfit != null) {
-        val entryFormatted = String.format(java.util.Locale.US, "%,.2f", entry)
-        val slFormatted = String.format(java.util.Locale.US, "%,.2f", stopLoss)
-        val tpFormatted = String.format(java.util.Locale.US, "%,.2f", takeProfit)
+        val entryFormatted = formatPriceFor(symbol, entry)
+        val slFormatted = formatPriceFor(symbol, stopLoss)
+        val tpFormatted = formatPriceFor(symbol, takeProfit)
         val isBuy = action == SignalAction.BUY
 
-        val tpY = if (isBuy) "22%" else "74%"
+        val tpY = if (isBuy) "20%" else "75%"
         val entryY = "48%"
-        val slY = if (isBuy) "74%" else "22%"
+        val slY = if (isBuy) "75%" else "20%"
 
         """
-        <!-- SVG Horizontal Dashed Lines across the Chart: White (Entry), Green (TP), Red (SL) -->
-        <svg style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:900;">
-          <!-- Take Profit: Green Dashed Line -->
-          <line x1="0" y1="$tpY" x2="100%" y2="$tpY" stroke="#00e676" stroke-width="2.2" stroke-dasharray="6,4" />
-          <rect x="calc(100% - 145px)" y="calc($tpY - 11px)" width="140" height="22" rx="4" fill="#00e676" fill-opacity="0.95" />
-          <text x="calc(100% - 75px)" y="calc($tpY + 4px)" fill="#0b0e13" font-size="11" font-weight="bold" font-family="tahoma,sans-serif" text-anchor="middle">TP: $$tpFormatted</text>
-
-          <!-- Entry Price: White Dashed Line -->
-          <line x1="0" y1="$entryY" x2="100%" y2="$entryY" stroke="#ffffff" stroke-width="2.2" stroke-dasharray="6,4" />
-          <rect x="calc(100% - 145px)" y="calc($entryY - 11px)" width="140" height="22" rx="4" fill="#ffffff" fill-opacity="0.95" />
-          <text x="calc(100% - 75px)" y="calc($entryY + 4px)" fill="#0b0e13" font-size="11" font-weight="bold" font-family="tahoma,sans-serif" text-anchor="middle">ورود: $$entryFormatted</text>
-
-          <!-- Stop Loss: Red Dashed Line -->
-          <line x1="0" y1="$slY" x2="100%" y2="$slY" stroke="#ff5252" stroke-width="2.2" stroke-dasharray="6,4" />
-          <rect x="calc(100% - 145px)" y="calc($slY - 11px)" width="140" height="22" rx="4" fill="#ff5252" fill-opacity="0.95" />
-          <text x="calc(100% - 75px)" y="calc($slY + 4px)" fill="#ffffff" font-size="11" font-weight="bold" font-family="tahoma,sans-serif" text-anchor="middle">SL: $$slFormatted</text>
+        <!-- Sleek Floating HUD & Thin Dynamic Dashed Lines -->
+        <div style="position:absolute; top:8px; right:8px; z-index:900; pointer-events:none; display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+          <span style="background:rgba(255,255,255,0.92); color:#0b0e13; font-size:11px; font-weight:bold; font-family:tahoma,sans-serif; padding:3px 8px; border-radius:4px; box-shadow:0 2px 4px rgba(0,0,0,0.5);">ورود: $$entryFormatted</span>
+          <span style="background:rgba(0,230,118,0.92); color:#0b0e13; font-size:11px; font-weight:bold; font-family:tahoma,sans-serif; padding:3px 8px; border-radius:4px; box-shadow:0 2px 4px rgba(0,0,0,0.5);">TP: $$tpFormatted</span>
+          <span style="background:rgba(255,82,82,0.92); color:#ffffff; font-size:11px; font-weight:bold; font-family:tahoma,sans-serif; padding:3px 8px; border-radius:4px; box-shadow:0 2px 4px rgba(0,0,0,0.5);">SL: $$slFormatted</span>
+        </div>
+        <svg style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:850; opacity:0.85;">
+          <!-- Take Profit: Green Thin Dashed Line -->
+          <line x1="0" y1="$tpY" x2="100%" y2="$tpY" stroke="#00e676" stroke-width="1.2" stroke-dasharray="4,4" />
+          <!-- Entry Price: White Thin Dashed Line -->
+          <line x1="0" y1="$entryY" x2="100%" y2="$entryY" stroke="#ffffff" stroke-width="1.2" stroke-dasharray="4,4" />
+          <!-- Stop Loss: Red Thin Dashed Line -->
+          <line x1="0" y1="$slY" x2="100%" y2="$slY" stroke="#ff5252" stroke-width="1.2" stroke-dasharray="4,4" />
         </svg>
         """.trimIndent()
     } else ""

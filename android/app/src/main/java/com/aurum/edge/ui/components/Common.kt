@@ -60,12 +60,24 @@ fun NewsClassificationRow(classification: NewsClassification, modifier: Modifier
     }
 }
 
-fun formatPrice(value: Double?): String =
-    if (value == null) "—" else String.format(Locale.US, "%,.2f", value)
+fun formatPrice(value: Double?): String {
+    if (value == null) return "—"
+    val abs = kotlin.math.abs(value)
+    val digits = when {
+        abs >= 1000.0 -> 2
+        abs >= 100.0 -> 2
+        abs >= 10.0 -> 3
+        abs >= 1.0 -> 4
+        abs >= 0.001 -> 5
+        abs > 0.0 -> 6
+        else -> 2
+    }
+    return String.format(Locale.US, "%,.${digits}f", value)
+}
 
 /**
- * Price with the decimals the instrument is actually quoted in. Two decimals is right for
- * gold and BTC, wrong for EUR/USD, and useless for DOGE.
+ * Price with the exact decimals the instrument is actually quoted in.
+ * Forex: 5 decimals, JPY: 3 decimals, Gold/Oil: 2 decimals, Silver: 3 decimals, Crypto: 2-6 decimals.
  */
 fun formatPriceFor(symbol: String, value: Double?): String =
     if (value == null) "—"
