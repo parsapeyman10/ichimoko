@@ -412,13 +412,13 @@ fun CandleChart(
                     fun levelLine(price: Double?, color: Color, label: String) {
                         if (price == null) return
                         val y = yOf(price)
-                        drawLine(color.copy(alpha = 0.85f), Offset(0f, y), Offset(plotWidth, y), strokeWidth = 1.6f, pathEffect = dash)
+                        drawLine(color.copy(alpha = 0.95f), Offset(0f, y), Offset(plotWidth, y), strokeWidth = 1.8f, pathEffect = dash)
                         val labelPaint = Paint(axisPaint).apply { this.color = color.toArgbSafe() }
                         drawContext.canvas.nativeCanvas.drawText("$label ${formatPrice(price)}", 6f, y - 6f, labelPaint)
                     }
-                    levelLine(signal.entry, AurumColors.Gold, "طرح ورود")
-                    levelLine(signal.stopLoss, AurumColors.Red, "طرح SL")
-                    levelLine(signal.takeProfit, AurumColors.Green, "طرح TP")
+                    levelLine(signal.entry, Color.White, "ورود")
+                    levelLine(signal.stopLoss, AurumColors.Red, "SL")
+                    levelLine(signal.takeProfit, AurumColors.Green, "TP")
                 }
 
                 // ── time axis ─────────────────────────────────────────────────

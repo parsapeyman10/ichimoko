@@ -398,24 +398,30 @@ private fun tradingViewHtml(
         val entryFormatted = String.format(java.util.Locale.US, "%,.2f", entry)
         val slFormatted = String.format(java.util.Locale.US, "%,.2f", stopLoss)
         val tpFormatted = String.format(java.util.Locale.US, "%,.2f", takeProfit)
-        val levText = leverage?.let { "اهرم ${it}x" } ?: "اهرم 20x"
-        val rrText = riskReward?.let { "R:R 1:${String.format(java.util.Locale.US, "%.1f", it)}" } ?: "R:R 1:2.0"
-        val dirText = if (action == SignalAction.BUY) "LONG ↗" else "SHORT ↘"
-        val dirColor = if (action == SignalAction.BUY) "#00e676" else "#ff5252"
+        val isBuy = action == SignalAction.BUY
+
+        val tpY = if (isBuy) "22%" else "74%"
+        val entryY = "48%"
+        val slY = if (isBuy) "74%" else "22%"
 
         """
-        <div id="price-levels-hud" style="position:absolute; top:6px; left:6px; right:6px; z-index:9999; background:rgba(11,14,19,0.88); backdrop-filter:blur(8px); border:1px solid rgba(255,215,0,0.35); border-radius:8px; padding:6px 10px; display:flex; justify-content:space-between; align-items:center; font-family:tahoma,sans-serif; font-size:11px; direction:rtl; box-shadow:0 4px 12px rgba(0,0,0,0.5);">
-          <div style="display:flex; gap:10px; align-items:center;">
-            <span style="color:$dirColor; font-weight:bold; background:rgba(255,255,255,0.06); padding:2px 6px; border-radius:4px;">$dirText</span>
-            <span style="color:#00e676; font-weight:bold;">TP: $$tpFormatted</span>
-            <span style="color:#ffd700; font-weight:bold;">ورود: $$entryFormatted</span>
-            <span style="color:#ff5252; font-weight:bold;">SL: $$slFormatted</span>
-          </div>
-          <div style="display:flex; gap:6px;">
-            <span style="background:rgba(0,229,255,0.15); color:#00e5ff; padding:2px 6px; border-radius:4px; font-weight:bold;">$levText</span>
-            <span style="background:rgba(255,215,0,0.15); color:#ffd700; padding:2px 6px; border-radius:4px; font-weight:bold;">$rrText</span>
-          </div>
-        </div>
+        <!-- SVG Horizontal Dashed Lines across the Chart: White (Entry), Green (TP), Red (SL) -->
+        <svg style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:900;">
+          <!-- Take Profit: Green Dashed Line -->
+          <line x1="0" y1="$tpY" x2="100%" y2="$tpY" stroke="#00e676" stroke-width="2.2" stroke-dasharray="6,4" />
+          <rect x="calc(100% - 145px)" y="calc($tpY - 11px)" width="140" height="22" rx="4" fill="#00e676" fill-opacity="0.95" />
+          <text x="calc(100% - 75px)" y="calc($tpY + 4px)" fill="#0b0e13" font-size="11" font-weight="bold" font-family="tahoma,sans-serif" text-anchor="middle">TP: $$tpFormatted</text>
+
+          <!-- Entry Price: White Dashed Line -->
+          <line x1="0" y1="$entryY" x2="100%" y2="$entryY" stroke="#ffffff" stroke-width="2.2" stroke-dasharray="6,4" />
+          <rect x="calc(100% - 145px)" y="calc($entryY - 11px)" width="140" height="22" rx="4" fill="#ffffff" fill-opacity="0.95" />
+          <text x="calc(100% - 75px)" y="calc($entryY + 4px)" fill="#0b0e13" font-size="11" font-weight="bold" font-family="tahoma,sans-serif" text-anchor="middle">ورود: $$entryFormatted</text>
+
+          <!-- Stop Loss: Red Dashed Line -->
+          <line x1="0" y1="$slY" x2="100%" y2="$slY" stroke="#ff5252" stroke-width="2.2" stroke-dasharray="6,4" />
+          <rect x="calc(100% - 145px)" y="calc($slY - 11px)" width="140" height="22" rx="4" fill="#ff5252" fill-opacity="0.95" />
+          <text x="calc(100% - 75px)" y="calc($slY + 4px)" fill="#ffffff" font-size="11" font-weight="bold" font-family="tahoma,sans-serif" text-anchor="middle">SL: $$slFormatted</text>
+        </svg>
         """.trimIndent()
     } else ""
 
