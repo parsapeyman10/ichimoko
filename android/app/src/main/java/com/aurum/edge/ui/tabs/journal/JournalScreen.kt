@@ -90,8 +90,12 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             loadError?.let { Text(it, style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.Red, modifier = Modifier.padding(bottom = 8.dp)) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                val balanceStr = String.format(java.util.Locale.US, "$%.2f", settings.accountBalance).let {
+                    if (it.endsWith(".00")) it.substringBefore(".00") else it
+                }
+                StatTile("موجودی حساب", balanceStr, AurumColors.Gold, Modifier.weight(1f))
                 StatTile("بسته‌شده", "${stats.total}", AurumColors.TextPrimary, Modifier.weight(1f))
-                StatTile("باز", "${stats.open}", AurumColors.Gold, Modifier.weight(1f))
+                StatTile("باز", "${stats.open}", AurumColors.TextPrimary, Modifier.weight(1f))
                 StatTile("برد/باخت", "${stats.wins}/${stats.losses}", AurumColors.Green, Modifier.weight(1f))
             }
             Row(
@@ -158,9 +162,18 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.TextMuted,
                             )
+                            trade.note.takeIf { it.isNotBlank() }?.let { note ->
+                                val isAi = note.contains("هوش مصنوعی") && !note.contains("بدون هوش مصنوعی")
+                                Text(
+                                    text = if (isAi) "✦ $note" else "ℹ $note",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isAi) AurumColors.Gold else AurumColors.TextSecondary,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
                             EntryConditionsLine(trade.entryConditions)
                             trade.newsEvidence?.let { verdict ->
-                                Text("خبر ${verdict.model} · ${verdict.direction} · ${verdict.evidence.joinToString { it.source }}" +
+                                Text("★ رویداد/خبر همراه: ${verdict.model} · ${verdict.direction} · ${verdict.evidence.joinToString { it.source }}" +
                                     " · تقویم ${formatDateTime(verdict.calendarCheckedAt)}",
                                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
                             }
@@ -349,9 +362,18 @@ private fun TradeRow(trade: PaperTrade) {
             )
             Text("${trade.exitReason ?: "—"} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            trade.note.takeIf { it.isNotBlank() }?.let { note ->
+                val isAi = note.contains("هوش مصنوعی") && !note.contains("بدون هوش مصنوعی")
+                Text(
+                    text = if (isAi) "✦ $note" else "ℹ $note",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isAi) AurumColors.Gold else AurumColors.TextSecondary,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
             EntryConditionsLine(trade.entryConditions)
             trade.newsEvidence?.let { ai ->
-                Text("خبر ${ai.model} · ${formatDateTime(ai.checkedAt)} · ${ai.evidence.joinToString { it.source }}" +
+                Text("★ رویداد/خبر همراه: ${ai.model} · ${formatDateTime(ai.checkedAt)} · ${ai.evidence.joinToString { it.source }}" +
                     " · بررسی تقویم ${formatDateTime(ai.calendarCheckedAt)}",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
                 ai.evidence.forEach { evidence ->
