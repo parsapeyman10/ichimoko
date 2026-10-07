@@ -30,6 +30,7 @@ object Notifier {
     const val CHANNEL_VERIFIED_DEFAULT = "aurum_edge_verified_default"
     const val CHANNEL_VERIFIED_FILE = "aurum_edge_verified_file"
     const val CHANNEL_RESEARCH = "aurum_edge_research"
+    const val MONITOR_NOTIFICATION_ID = 4201
 
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -98,6 +99,9 @@ object Notifier {
             .setOnlyAlertOnce(true)
             .setContentIntent(contentIntent(context))
             .build()
+
+    fun buildMonitorNotification(context: Context, text: String): Notification =
+        buildForegroundServiceNotification(context, text)
 
     /** Separate informational channel: a publisher observation is NEVER an entry/candidate alert. */
     fun notifyResearch(context: Context, evidenceId: String, title: String, text: String): Boolean {
@@ -199,6 +203,42 @@ object Notifier {
         return postVerified(
             context = context,
             id = trade.id.hashCode(),
+            title = title,
+            text = text,
+            expanded = expanded,
+            customSoundUri = customSoundUri,
+        )
+    }
+
+    /**
+     * Sends a rich notification when an open trade is closed / settled (TP, SL, or manual close).
+     */
+    fun notifyClosedTrade(context: Context, trade: PaperTrade, customSoundUri: String = ""): Boolean {
+        ensureChannels(context)
+        val pnl = trade.pnlUsd ?: 0.0
+        val isWin = pnl >= 0.0
+        val pnlFormatted = (if (isWin) "+$" else "-$") + String.format(Locale.US, "%.2f", kotlin.math.abs(pnl))
+        val exitPriceFormatted = trade.exitPrice?.let { formatPriceFor(trade.symbol, it) } ?: "—"
+        val entryPriceFormatted = formatPriceFor(trade.symbol, trade.entry)
+        val sideFa = if (trade.action == SignalAction.BUY) "خرید" else "فروش"
+
+        val title = "${if (isWin) "✅ بسته‌شدن با سود" else "🛑 بسته‌شدن با زیان"} · ${trade.symbol} ($pnlFormatted)"
+        val text = "${trade.symbol} ($sideFa) بسته شد · قیمت خروج: $exitPriceFormatted$ · PnL: $pnlFormatted · ${trade.exitReason ?: "تسویه معامله"}"
+
+        val expanded = buildString {
+            appendLine("📊 نماد: ${trade.symbol} (${trade.assetClass.label})")
+            appendLine("🎯 نوع پوزیشن: $sideFa")
+            appendLine("💰 قیمت ورود: $entryPriceFormatted$")
+            appendLine("🚪 قیمت خروج: $exitPriceFormatted$")
+            appendLine("💵 سود/زیان نهایی: $pnlFormatted")
+            appendLine("📋 علت خروج: ${trade.exitReason ?: "تسویه معامله"}")
+            appendLine("⚡ اهرم: ${trade.effectiveLeverage}x | مارجین: $${formatPrice(trade.effectiveMarginUsd)}")
+            trade.closedAt?.let { appendLine("⏱ زمان بسته‌شدن: ${formatDateTime(it)}") }
+        }.trimEnd()
+
+        return postVerified(
+            context = context,
+            id = trade.id.hashCode() xor 0x5f5f,
             title = title,
             text = text,
             expanded = expanded,
