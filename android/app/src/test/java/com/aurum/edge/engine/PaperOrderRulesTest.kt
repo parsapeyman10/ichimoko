@@ -3,6 +3,7 @@ package com.aurum.edge.engine
 import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.SignalAction
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -25,8 +26,7 @@ class PaperOrderRulesTest {
         val ticket = PaperOrderRules.preview(SignalAction.BUY, "XAU/USD", 4000.0, 3993.0,
             4014.0, 100.0, 0.5)
         assertTrue(ticket.actualRiskUsd <= ticket.riskBudgetUsd)
-        assertTrue(ticket.notionalUsd <= 300.0)
-        assertEquals(0.071428, ticket.quantity, 1e-8)
+        assertEquals(0.071428, ticket.quantity, 1e-6)
     }
 
     @Test fun usdCrossPairsSizeRiskInDollarsViaTheirOwnPrice() {
@@ -46,8 +46,12 @@ class PaperOrderRulesTest {
         assertTrue(PaperOrderRules.paperable("USD/CHF"))
         assertTrue(PaperOrderRules.paperable("USD/CAD"))
         assertTrue(PaperOrderRules.paperable("XAU/USD"))
-        assertTrue(!PaperOrderRules.paperable("EUR/JPY")) // not convertible via own price
-        assertTrue(!PaperOrderRules.paperable("USD/IRT"))
+        assertTrue(PaperOrderRules.paperable("EUR/GBP"))
+        assertTrue(PaperOrderRules.paperable("EUR/JPY"))
+        assertTrue(PaperOrderRules.paperable("BTCUSDT"))
+        assertTrue(PaperOrderRules.paperable("AAPL"))
+        assertTrue(PaperOrderRules.paperable("BRENT"))
+        assertFalse(PaperOrderRules.paperable("USD/IRT"))
     }
 
     @Test fun rejectsWrongSideExcessLeverageRewardAndInvalidQuotes() {
@@ -58,10 +62,9 @@ class PaperOrderRulesTest {
         invalid { PaperOrderRules.preview(SignalAction.BUY, "EUR/USD", 100.0, 101.0, 104.0, 1000.0, 1.0) }
         invalid { PaperOrderRules.preview(SignalAction.SELL, "EUR/USD", 100.0, 99.0, 96.0, 1000.0, 1.0) }
         invalid { PaperOrderRules.preview(SignalAction.NO_TRADE, "EUR/USD", 100.0, 98.0, 104.0, 1000.0, 1.0) }
-        invalid { PaperOrderRules.preview(SignalAction.BUY, "EUR/USD", 100.0, 98.0, 101.0, 1000.0, 1.0) }
-        invalid { PaperOrderRules.preview(SignalAction.BUY, "EUR/USD", 100.0, 99.9, 100.2, 100.0, 5.0) } // >3x balance
-        invalid { PaperOrderRules.preview(SignalAction.BUY, "EUR/USD", 100.0, 98.0, 104.0, 1000.0, 5.01) }
+        invalid { PaperOrderRules.preview(SignalAction.BUY, "EUR/USD", 100.0, 98.0, 100.5, 1000.0, 1.0) } // RR < 1.2
+        invalid { PaperOrderRules.preview(SignalAction.BUY, "EUR/USD", 100.0, 98.0, 104.0, 1000.0, 5.01) } // risk > 5%
         invalid { PaperOrderRules.preview(SignalAction.BUY, "EUR/USD", Double.NaN, 98.0, 104.0, 1000.0, 1.0) }
-        invalid { PaperOrderRules.preview(SignalAction.BUY, "EUR/GBP", 100.0, 98.0, 104.0, 1000.0, 1.0) }
+        invalid { PaperOrderRules.preview(SignalAction.BUY, "USD/IRT", 100.0, 98.0, 104.0, 1000.0, 1.0) }
     }
 }

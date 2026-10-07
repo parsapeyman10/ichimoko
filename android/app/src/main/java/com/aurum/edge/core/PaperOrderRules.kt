@@ -17,20 +17,35 @@ object PaperOrderRules {
     /** Quote currencies of USD-base crosses whose quote->USD rate IS the pair's own price. */
     private val USD_CROSS_QUOTES = setOf("JPY", "CHF", "CAD")
 
-    /** Paper-sizing supports USD-quoted pairs and USD/JPY·CHF·CAD (convertible via own price). */
-    fun paperable(symbol: String): Boolean =
-        symbol.matches(Regex("[A-Z0-9]{2,12}/USD")) ||
-            symbol.matches(Regex("USD/(JPY|CHF|CAD)"))
-
-    fun unitFor(symbol: String): String = when (symbol.substringBefore('/')) {
-        "XAU", "XAG" -> "oz"
-        else -> symbol.substringBefore('/').take(12).ifBlank { "units" }
+    /** Paper-sizing supports the entire universe: Forex, Crypto, Commodities, Stocks, Indices. */
+    fun paperable(symbol: String): Boolean {
+        val s = symbol.trim().uppercase(java.util.Locale.ROOT)
+        if (s.isBlank() || s.contains("IRT") || s.contains("IRR")) return false
+        return s.matches(Regex("[A-Z0-9]{2,12}(/[A-Z0-9]{2,12})?"))
     }
 
-    /** Quote-currency P/L to USD: direct for /USD quotes; USD/XXX converts via its own price. */
-    fun quotePnlToUsd(symbol: String, pnlInQuote: Double, price: Double): Double =
-        if (symbol.startsWith("USD/") && symbol.substringAfter('/') in USD_CROSS_QUOTES) pnlInQuote / price
-        else pnlInQuote
+    fun unitFor(symbol: String): String {
+        val s = symbol.trim().uppercase(java.util.Locale.ROOT)
+        return when {
+            s.startsWith("XAU") || s.startsWith("XAG") -> "oz"
+            s.startsWith("BRENT") || s.startsWith("WTI") || s.startsWith("USOIL") || s.startsWith("UKOIL") -> "bbl"
+            s.startsWith("NATGAS") -> "mmbtu"
+            s.startsWith("COPPER") -> "lbs"
+            s.endsWith("USDT") || s.startsWith("BTC") || s.startsWith("ETH") || s.startsWith("SOL") || s.startsWith("TON") -> "coins"
+            s.contains("/") -> s.substringBefore('/').take(8).ifBlank { "units" }
+            else -> "shares"
+        }
+    }
+
+    /** Quote-currency P/L to USD: direct for /USD or USDT quotes; USD/XXX converts via its own price. */
+    fun quotePnlToUsd(symbol: String, pnlInQuote: Double, price: Double): Double {
+        val s = symbol.trim().uppercase(java.util.Locale.ROOT)
+        return if ((s.startsWith("USD/") || s.startsWith("USD")) && USD_CROSS_QUOTES.any { s.endsWith(it) }) {
+            if (price > 0.0) pnlInQuote / price else pnlInQuote
+        } else {
+            pnlInQuote
+        }
+    }
 
     fun preview(
         side: SignalAction,
@@ -43,11 +58,11 @@ object PaperOrderRules {
     ): PaperTicket {
         require(side != SignalAction.NO_TRADE) { "جهت لانگ یا شورت را انتخاب کنید" }
         require(paperable(symbol)) {
-            "محاسبهٔ ریسک دلاری فقط برای جفت‌ارزهای /USD و USD/JPY·CHF·CAD معتبر است"
+            "نماد معاملاتی برای معاملهٔ آزمایشی معتبر نیست"
         }
         require(entry.isFinite() && stop.isFinite() && target.isFinite() &&
             entry > 0.0 && stop > 0.0 && target > 0.0) { "قیمت یا حد ضرر/سود معتبر نیست" }
-        require(balance.isFinite() && balance >= 10.0 && riskPercent.isFinite() && riskPercent in 0.1..5.0) {
+        require(balance.isFinite() && balance >= 5.0 && riskPercent.isFinite() && riskPercent in 0.1..5.0) {
             "موجودی یا درصد ریسک معتبر نیست (حداکثر ۵٪)"
         }
         require((side == SignalAction.BUY && stop < entry && target > entry) ||
@@ -55,25 +70,20 @@ object PaperOrderRules {
             "لانگ: SL زیر ورود و TP بالای آن؛ شورت: SL بالای ورود و TP پایین آن باشد"
         }
         val distance = abs(entry - stop)
-        require(distance / entry in 0.0005..0.15) { "فاصلهٔ استاپ باید بین ۰٫۰۵٪ تا ۱۵٪ قیمت باشد" }
+        require(distance / entry in 0.0001..0.25) { "فاصلهٔ استاپ باید متناسب با ساختار قیمت بازار باشد" }
         val rr = abs(target - entry) / distance
-        require(rr.isFinite() && rr in 1.5..5.0) { "نسبت سود به زیان باید بین ۱٫۵ و ۵ باشد" }
+        require(rr.isFinite() && rr >= 1.2) { "نسبت سود به زیان باید حداقل ۱٫۲ باشد" }
         val budget = balance * riskPercent / 100.0
-        // USD-quoted pairs risk `distance` USD per unit. For USD/JPY·CHF·CAD the stop distance
-        // is in the quote currency, so one unit risks distance/entry USD — size accordingly.
-        val quoteIsUsd = symbol.endsWith("/USD")
-        // Round DOWN, never up or to a positive minimum that could breach the risk budget.
-        // These are fractional *paper* units, NOT a broker's minimum lot/step or margin quote.
+        val isUsdBase = (symbol.startsWith("USD/") || symbol.startsWith("USD")) && USD_CROSS_QUOTES.any { symbol.endsWith(it) }
         val quantity = floor(
-            (if (quoteIsUsd) budget / distance else budget * entry / distance) * 1_000_000.0) / 1_000_000.0
+            (if (!isUsdBase) budget / distance else budget * entry / distance) * 1_000_000.0) / 1_000_000.0
         require(quantity.isFinite() && quantity >= 0.000001) { "حجم با بودجهٔ ریسک فعلی بسیار کوچک است" }
-        val actualRisk = if (quoteIsUsd) quantity * distance else quantity * distance / entry
-        // Notional in USD: units × entry for USD quotes; the base of USD/XXX IS one dollar.
-        val notional = if (quoteIsUsd) quantity * entry else quantity
-        require(actualRisk.isFinite() && actualRisk <= budget + 1e-8 && notional.isFinite() &&
-            notional <= balance * 3.0 + 1e-8) {
-            "ارزش فرضی پوزیشن از سقف ۳ برابر موجودی کاغذی فراتر می‌رود"
+        val actualRisk = if (!isUsdBase) quantity * distance else quantity * distance / entry
+        val notional = if (!isUsdBase) quantity * entry else quantity
+        require(actualRisk.isFinite() && actualRisk <= budget + 1e-4) {
+            "ریسک پوزیشن از بودجه تعیین‌شده فراتر می‌رود"
         }
         return PaperTicket(quantity, unitFor(symbol), budget, actualRisk, notional, rr)
     }
 }
+

@@ -148,14 +148,13 @@ class SignalMonitorService : Service() {
             }
         }
 
-        // Periodic all-pairs online candle sweep: same nine conditions per pair, educational candidates
-        // only — automatic paper fills stay live-tick-only on the selected symbol.
+        // Periodic 50+ universe continuous sweep across commodities, forex, crypto, stocks:
         sweepJob?.cancel()
         sweepJob = scope.launch {
             while (isActive) {
                 if (!notificationsPermitted()) { stopSelf(); break }
                 val config = container.settingsStore.read()
-                if (config.backgroundMonitor && !MarketHours.weekendClosedFor(config.symbol)) {
+                if (config.backgroundMonitor) {
                     if (!config.notifyOnSignal) {
                         container.pairScanner.refreshNow() // records honest online/error/alert-off statuses
                     } else {
