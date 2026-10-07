@@ -15,6 +15,7 @@ object PaperAlertRules {
         val signal = market.signal ?: return "سیگنال در دسترس نیست"
         if (mtf == null || mtf.frames.isEmpty() || mtf.veto || mtf.barTime != signal.barTime || mtf.baseInterval != signal.interval)
             return "تراز چندتایم‌فریم برای همین کندل تأیید نشده است"
+        if (trades.count { it.isOpen } >= 3) return "سقف ۳ معاملهٔ همزمان باز پر شده است"
         if (trades.any { it.isOpen && it.symbol == market.symbol }) return "پوزیشن کاغذی این نماد باز است"
         if (trades.any { it.symbol == market.symbol && it.signalBarTime == signal.barTime })
             return "این کندل پیش‌تر در ژورنال معامله شده است"

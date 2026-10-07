@@ -17,6 +17,7 @@ class PaperAutoTrader(
     private val settings: SettingsStore,
     private val news: NewsRepository,
     private val journal: JournalStore,
+    private val advisor: TraderAdvisor? = null,
 ) {
     private val _status = MutableStateFlow("فعال")
     val status: StateFlow<String> = _status.asStateFlow()
@@ -36,17 +37,27 @@ class PaperAutoTrader(
             _status.value = "سیگنال این کندل قبلاً در ژورنال ثبت شده است؛ ورود تکراری نداریم"
             return null
         }
-        if (journal.trades.value.any { it.symbol == state.symbol && it.isOpen }) {
-            _status.value = "برای این نماد از قبل پوزیشن کاغذی باز است"
+        val openTrades = journal.trades.value.filter { it.isOpen }
+        if (openTrades.size >= 4) {
+            _status.value = "سقف ۴ معاملهٔ همزمان پورتفو پر شده است (${openTrades.size}/4)"
             return null
         }
-        // Computing higher-timeframe bars is read-only; an unavailable/vetoed MTF cannot open.
+        if (openTrades.any { it.symbol == state.symbol }) {
+            _status.value = "برای نماد ${state.symbol} از قبل پوزیشن کاغذی باز است"
+            return null
+        }
+        val targetClass = com.aurum.edge.core.AssetClass.of(state.symbol)
+        val openInClass = openTrades.count { com.aurum.edge.core.AssetClass.of(it.symbol) == targetClass }
+        if (openInClass >= targetClass.maxSlots) {
+            _status.value = "ظرفیت پوزیشن باز برای دستهٔ «${targetClass.label}» تکمیل است (۱/۱)"
+            return null
+        }
+        // Computing higher-timeframe bars is read-only.
         val mtf = withContext(Dispatchers.Default) {
             runCatching { MtfAnalyzer.analyze(state.candles, state.interval) }.getOrNull()
         }
-        if (mtf == null || mtf.frames.isEmpty() || mtf.veto ||
-            mtf.barTime != state.signal?.barTime || mtf.baseInterval != state.interval) {
-            _status.value = "تراز چندتایم‌فریم همین کندل در دسترس نیست یا ورود را وتو کرده است"
+        if (mtf?.veto == true) {
+            _status.value = "تراز چندتایم‌فریم ورود را وتو کرده است: ${mtf.vetoReason}"
             return null
         }
         // Re-verify against the SAME emission plus freshly read settings/news snapshot. News is
@@ -60,19 +71,63 @@ class PaperAutoTrader(
         }
         val signal = current.signal ?: return null
         val newsRecord = NewsConfluence.record(recentNews, current.symbol)
-        val ict = IctEntryRules.approvedEvidence(current) ?: run {
-            _status.value = "شواهد رنج/ICT همین کندل برای ژورنال تأیید نشد"
-            return null
+        val isLegacyEight = signal.confluence.filterNot { it.name == NewsConfluence.NEWS_LABEL }.size == 8
+        val ict = if (isLegacyEight) {
+            IctEntryRules.approvedEvidence(current) ?: run {
+                _status.value = "شواهد رنج/ICT همین کندل برای ژورنال تأیید نشد"
+                return null
+            }
+        } else {
+            IctEntryRules.approvedEvidence(current)
         }
+
+        // ── برنامه ریزی توسط AI یا استفاده از مقادیر فنی پایه ──
+        val adv = advisor
+        val (finalSignal, entryNote) = if (recentSettings.hasClientNewsAi && adv != null) {
+            val aiPlan = runCatching {
+                adv.planTradeWithAi(signal, current)
+            }.getOrNull()
+            if (aiPlan != null) {
+                Pair(
+                    signal.copy(
+                        entry = aiPlan.entry,
+                        stopLoss = aiPlan.stopLoss,
+                        takeProfit = aiPlan.takeProfit,
+                        riskReward = aiPlan.riskReward,
+                        confidence = aiPlan.confidence,
+                    ),
+                    "طرح ورود توسط هوش مصنوعی (${aiPlan.model}) · نسبت ریسک به ریوارد ۱:${String.format(java.util.Locale.US, "%.1f", aiPlan.riskReward)} · ${aiPlan.summary}"
+                )
+            } else {
+                Pair(
+                    signal,
+                    "بدون هوش مصنوعی ترید شده (خطای ارتباط با مدل AI)؛ مقادیر طبق محاسبات فنی ایچیموکو (SL کیجون ± 0.5 ATR و TP ۱:۱.۸) تنظیم شدند."
+                )
+            }
+        } else {
+            Pair(
+                signal,
+                "بدون هوش مصنوعی ترید شده؛ مقادیر طبق محاسبات فنی ایچیموکو (SL کیجون ± 0.5 ATR و TP با نسبت ۱:۱.۸) تنظیم شده است."
+            )
+        }
+
         return try {
-            val trade = journal.open(signal, current.symbol, current.lastPrice!!,
-                recentSettings.accountBalance, recentSettings.riskPercent,
-                mtf = MtfSnapshotRecord.from(mtf), automatic = true,
-                newsEvidence = newsRecord, priceAction = ict)
+            val trade = journal.open(
+                signal = finalSignal,
+                symbol = current.symbol,
+                price = finalSignal.entry ?: current.lastPrice!!,
+                balance = recentSettings.accountBalance,
+                riskPercent = recentSettings.riskPercent,
+                mtf = mtf?.let { MtfSnapshotRecord.from(it) },
+                automatic = true,
+                newsEvidence = newsRecord,
+                priceAction = ict,
+                customNote = entryNote,
+            )
             val conditions = trade.entryConditions.take(8).joinToString("، ") {
                 it.name.substringAfter('·').trim()
             }
-            _status.value = "کاغذی ثبت شد: ${trade.symbol} ${trade.action} · شروع: $conditions"
+            _status.value = "کاغذی ثبت شد: ${trade.symbol} ${trade.action} (${finalSignal.confidence.toInt()}٪) · $entryNote"
             trade
         } catch (e: Exception) {
             _status.value = "ورود خودکار کاغذی انجام نشد: ${e.message ?: "ژورنال یا ریسک نامعتبر است"}"

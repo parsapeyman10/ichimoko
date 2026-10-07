@@ -16,6 +16,7 @@ import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.MarketState
+import com.aurum.edge.data.SettingsStore
 import com.aurum.edge.data.parseWebNews
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -186,6 +187,19 @@ class PaperJournalPersistenceTest {
             throw AssertionError("closing an already closed position must fail")
         } catch (_: IllegalArgumentException) { /* must reject */ }
         assertEquals(closed, JournalStore(context, file).also { it.load() }.trades.value.single())
+    }
+
+    @Test fun journalSettlementAdjustsSettingsBalanceContinuously() = runBlocking {
+        val file = journalFile()
+        val settingsStore = SettingsStore(context)
+        settingsStore.update { it.copy(accountBalance = 50_000.0) }
+        val store = JournalStore(context, file, settingsStore = settingsStore)
+        store.load()
+        val opened = store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5, manual = true)
+        // Close with a loss
+        store.close(opened.id, 2990.0, "بستن دستی با ضرر")
+        val currentBal = settingsStore.read().accountBalance
+        assertTrue("balance should decrease after a loss (was 50000, now $currentBal)", currentBal < 50_000.0)
     }
 
     @Test fun damagedOnDiskJournalIsKeptAndCannotBeOverwrittenByAnEmptyList() = runBlocking {

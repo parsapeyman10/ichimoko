@@ -1,13 +1,13 @@
 {
   "applicationId": "com.aurum.edge",
-  "versionCode": 12,
-  "versionName": "1.2.9",
-  "tagName": "v1.2.9",
+  "versionCode": 13,
+  "versionName": "1.3.0",
+  "tagName": "v1.3.0",
   "commitSha": "",
   "publishedAt": "",
-  "artifactName": "AurumEdge-v1.2.9.apk",
-  "notes": "Manifest پایدار برای تب بروزرسانی. GitHub Actions همین نام APK و فایل metadata کنار آن را می‌سازد؛ وقتی Release عمومی v1.2.9 منتشر شود، اپ از داخل خودش دانلود می‌کند و Android Installer را باز می‌کند. برای ارتقای بدون حذف نصب، APK باید با همان کلید ثابت امضا شده باشد.",
-  "apkUrl": "https://github.com/parsapeyman10/ichimoko/releases/download/v1.2.9/AurumEdge-v1.2.9.apk",
+  "artifactName": "AurumEdge-v1.3.0.apk",
+  "notes": "نسخه 1.3.0 - چارت آنلاین کندل‌استیک بومی بدون تاخیر با استریم زنده تیک‌ها و ایچیموکو، پایش همزمان بیش از ۵۰ نماد و انتخاب ۳ فرصت برتر و بهترین معامله (#1 Best Pick).",
+  "apkUrl": "https://github.com/parsapeyman10/ichimoko/releases/download/v1.3.0/AurumEdge-v1.3.0.apk",
   "sha256": "",
   "sizeBytes": null
 }

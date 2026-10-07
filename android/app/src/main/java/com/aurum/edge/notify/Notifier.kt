@@ -147,17 +147,22 @@ object Notifier {
 
     /** Caller must pass ONLY the new result of JournalStore.open, after its atomic write succeeds. */
     fun notifyRecordedAutoEntry(context: Context, trade: PaperTrade, customSoundUri: String): Boolean {
-        if (!trade.autoOpened || !trade.isOpen || trade.symbol != "XAU/USD" ||
+        if (!trade.autoOpened || !trade.isOpen ||
             trade.action == SignalAction.NO_TRADE || (trade.signalBarTime ?: 0L) <= 0L ||
-            trade.mtf?.veto != false ||
-            trade.entryConditions.size < 8 ||
-            trade.entryConditions.take(8).any { it.status != "CONFIRMED" } ||
-            trade.priceAction?.barTime != trade.signalBarTime ||
-            trade.priceAction?.action != trade.action ||
-            trade.priceAction?.quote != trade.entry) return false
+            trade.mtf?.veto != false) return false
+        val isLegacyEight = trade.symbol == "XAU/USD" && (trade.priceAction != null || trade.entryConditions.size == 8)
+        if (isLegacyEight) {
+            if (trade.priceAction == null || trade.entryConditions.size < 8 ||
+                trade.entryConditions.take(8).any { it.status != "CONFIRMED" } ||
+                trade.priceAction.barTime != trade.signalBarTime ||
+                trade.priceAction.action != trade.action ||
+                trade.priceAction.quote != trade.entry) return false
+        } else {
+            if (trade.entryConditions.size < 7 || trade.entryConditions.any { it.status == "CONFLICT" }) return false
+        }
         val side = if (trade.action == SignalAction.BUY) "خرید" else "فروش"
         val title = "معاملهٔ آموزشی $side ثبت شد · فقط کاغذی"
-        val text = "XAU/USD ${trade.interval.label} · ورود ${formatPrice(trade.entry)}$ · شناسه ${trade.id.take(8)}"
+        val text = "${trade.symbol} ${trade.interval.label} · ورود ${formatPrice(trade.entry)}$ · شناسه ${trade.id.take(8)}"
         val conditions = trade.entryConditions.take(8).joinToString("، ") {
             it.name.substringAfter('·').trim()
         }

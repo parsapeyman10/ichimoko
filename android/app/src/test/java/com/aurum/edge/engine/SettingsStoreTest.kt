@@ -41,9 +41,10 @@ class SettingsStoreTest {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit().clear().commit()
         val store = SettingsStore(context)
-        // Symbols outside the catalog are still rejected, key untouched.
-        assertFalse(store.saveChartSymbol("AAPL"))
-        assertFalse(store.saveChartSymbol("XAG/USD")) // silver is not in the catalog
+        // Symbols outside the 50+ catalog are rejected, key untouched.
+        assertFalse(store.saveChartSymbol("TOTALLY_INVALID_XYZ"))
+        assertTrue(store.saveChartSymbol("AAPL"))
+        assertTrue(store.saveChartSymbol("XAG/USD"))
         assertTrue(store.saveChartSymbol(" eur/usd "))
         assertEquals("EUR/USD", store.read().symbol)
         // Keyless quick switch: no key required, symbol persists for a fresh store.
@@ -53,9 +54,9 @@ class SettingsStoreTest {
         assertEquals("BTC/USDT", SettingsStore(context).read().symbol)
         assertTrue(store.saveMarketCredentials("another-synthetic-key", "ETH/USDT"))
         assertEquals("ETH/USDT", SettingsStore(context).read().symbol)
-        // A genuinely removed symbol (old install) is still coerced to the default on read.
+        // An unknown invalid symbol is coerced to the default on read.
         context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit()
-            .putString("symbol", "AAPL").commit()
+            .putString("symbol", "INVALID_XYZ_PAIR").commit()
         assertEquals("XAU/USD", SettingsStore(context).read().symbol)
     }
 

@@ -1,22 +1,22 @@
 package com.aurum.edge.data
 
+import java.util.Locale
+
 /**
- * The one place that maps an app symbol to a TradingView ticker.
- *
- * It used to live inline in the chart with a `else -> OANDA:XAUUSD` fallback, so any
- * symbol the list forgot silently rendered GOLD instead — the chart showed a different
- * instrument from the one selected, with no error. A total mapping plus a null for the
- * unknown case makes that impossible.
- *
- * The same string is used for the chart and for the TradingView quote in the watchlist,
- * so a price and a chart can never refer to different venues.
+ * Universal resolution of any app symbol (Forex, Metals, Commodities, Global Stocks, Cryptos)
+ * to its exact TradingView chart ticker.
  */
 object TradingViewSymbols {
 
-    /** Spot FX and metals quoted by OANDA, which TradingView carries for every pair here. */
-    private val FOREX = mapOf(
+    private val FIXED_SYMBOLS = mapOf(
+        // Commodities & Metals
         "XAU/USD" to "OANDA:XAUUSD",
         "XAG/USD" to "OANDA:XAGUSD",
+        "USOIL" to "TVC:USOIL",
+        "UKOIL" to "TVC:UKOIL",
+        "COPPER" to "CAPITALCOM:COPPER",
+
+        // Forex Major & Cross Pairs
         "EUR/USD" to "OANDA:EURUSD",
         "GBP/USD" to "OANDA:GBPUSD",
         "AUD/USD" to "OANDA:AUDUSD",
@@ -24,23 +24,56 @@ object TradingViewSymbols {
         "USD/JPY" to "OANDA:USDJPY",
         "USD/CHF" to "OANDA:USDCHF",
         "USD/CAD" to "OANDA:USDCAD",
+        "EUR/GBP" to "OANDA:EURGBP",
         "EUR/JPY" to "OANDA:EURJPY",
         "GBP/JPY" to "OANDA:GBPJPY",
-        "EUR/GBP" to "OANDA:EURGBP",
+        "AUD/JPY" to "OANDA:AUDJPY",
+        "CAD/JPY" to "OANDA:CADJPY",
+        "CHF/JPY" to "OANDA:CHFJPY",
+        "NZD/JPY" to "OANDA:NZDJPY",
+        "EUR/AUD" to "OANDA:EURAUD",
+        "EUR/CAD" to "OANDA:EURCAD",
+        "EUR/CHF" to "OANDA:EURCHF",
+        "GBP/AUD" to "OANDA:GBPAUD",
+        "GBP/CAD" to "OANDA:GBPCAD",
+        "GBP/CHF" to "OANDA:GBPCHF",
+        "AUD/CAD" to "OANDA:AUDCAD",
+        "AUD/CHF" to "OANDA:AUDCHF",
+        "AUD/NZD" to "OANDA:AUDNZD",
+        "CAD/CHF" to "OANDA:CADCHF",
+        "NZD/CAD" to "OANDA:NZDCAD",
+
+        // Top Global Stocks & ETFs
+        "AAPL" to "NASDAQ:AAPL",
+        "TSLA" to "NASDAQ:TSLA",
+        "NVDA" to "NASDAQ:NVDA",
+        "MSFT" to "NASDAQ:MSFT",
+        "AMZN" to "NASDAQ:AMZN",
+        "GOOGL" to "NASDAQ:GOOGL",
+        "META" to "NASDAQ:META",
+        "AMD" to "NASDAQ:AMD",
+        "NFLX" to "NASDAQ:NFLX",
+        "INTC" to "NASDAQ:INTC",
+        "SPY" to "AMEX:SPY",
+        "QQQ" to "NASDAQ:QQQ",
+        "PLTR" to "NYSE:PLTR",
+        "COIN" to "NASDAQ:COIN",
+        "BABA" to "NYSE:BABA",
     )
 
-    /** Null when the symbol is not chartable, so a caller must handle it explicitly. */
     fun find(symbol: String): String? {
-        val key = symbol.trim().uppercase()
-        FOREX[key]?.let { return it }
+        val key = symbol.trim().uppercase(Locale.ROOT)
+        if (key.isBlank()) return null
+        FIXED_SYMBOLS[key]?.let { return it }
         CryptoCatalog.find(key)?.let { return "BINANCE:${it.binance}" }
+        val watch = WatchCatalog.find(key)
+        if (watch != null) {
+            val tv = watch.providerCodes["tradingview_scanner"]
+            if (tv != null) return tv
+        }
         return null
     }
 
-    /**
-     * Chart-safe resolution. Gold is the documented default for an unknown symbol, but
-     * unlike the old inline fallback the caller can tell the difference via [find].
-     */
     fun of(symbol: String): String = find(symbol) ?: "OANDA:XAUUSD"
 
     fun isChartable(symbol: String): Boolean = find(symbol) != null

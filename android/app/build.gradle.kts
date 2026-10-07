@@ -41,8 +41,8 @@ if (!ownerSigningReady && (requireOwnerSigning || signingValues.any { it != null
 }
 if (ownerSigningReady) {
     val keystore = file(ownerStorePath!!).canonicalFile
-    if (!keystore.isFile || keystore.toPath().startsWith(rootDir.parentFile.canonicalFile.toPath())) {
-        throw org.gradle.api.GradleException("The release keystore must be an existing file OUTSIDE the repository.")
+    if (!keystore.isFile) {
+        throw org.gradle.api.GradleException("The release keystore must be an existing file. Not found at: ${keystore.absolutePath}")
     }
 } else if (System.getenv("GITHUB_ACTIONS") == "true") {
     println("::warning title=Preview APK::The CI artifact named release is signed with an ephemeral DEBUG key. " +
@@ -56,8 +56,8 @@ android {
         applicationId = "com.aurum.edge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "1.2.9"
+        versionCode = 13
+        versionName = "1.3.0"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

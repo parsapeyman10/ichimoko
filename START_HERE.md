@@ -68,9 +68,14 @@ npm run dev
 
 اگر کلید نباشد یا اینترنت قطع شود، همه‌جا پیام صریح «آفلاین / بدون کلید» دیده می‌شود — نه دیتای ساختگی.
 
-## ساخت اپ اندروید (APK)
-راهنمای کامل: [`docs/ANDROID.md`](docs/ANDROID.md) — APK در GitHub Actions ساخته می‌شود و از بخش
-Artifacts همان اجرا دانلود می‌شود.
+## ساخت اپ اندروید (APK با همان امضای ثابت)
+راهنمای ساخت با امضای ثابت و نیازمندی‌های نصبی: [`docs/BUILD_SIGNING_FA.md`](docs/BUILD_SIGNING_FA.md) و [`docs/ANDROID.md`](docs/ANDROID.md).
+- برای ساخت کلید ثابت در لینوکس/مک: `./android/tools/generate-keystore.sh`
+- برای ساخت کلید ثابت در ویندوز: `.\android\tools\generate-keystore.ps1`
+- برای بیلد محلی امضاشده در لینوکس/مک: `./android/tools/build-owner-apk.sh ~/aurum-private/aurum-edge.jks aurum-edge`
+- برای بیلد محلی امضاشده در ویندوز: `.\android\tools\build-owner-apk.ps1 -KeystorePath "$HOME\aurum-private\aurum-edge.jks" -Alias "aurum-edge"`
+- بررسی نیازمندی‌های محیط: `./android/tools/check-env.sh`
+- APKهای پیش‌نمایش تستی هم در GitHub Actions ساخته می‌شوند.
 
 اگر باز هم بالا نیومد، همین ۲ تا خروجی رو بفرست:
 ```powershell
