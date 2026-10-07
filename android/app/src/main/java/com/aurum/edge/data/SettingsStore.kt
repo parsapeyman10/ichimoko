@@ -22,20 +22,21 @@ class SettingsStore(context: Context) {
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
     fun read(): AppSettings {
-        val legacyProfile = SignalProfile.fromName(prefs.getString(KEY_SIGNAL_PROFILE, null))
-        fun opt(key: String, legacy: Boolean): Boolean =
-            if (prefs.contains(key)) prefs.getBoolean(key, false) else legacy
+        // The engine options were removed from the UI on purpose: their protective value is
+        // now part of the always-on core. Stored per-option preferences are deliberately
+        // ignored (never read) so an older install can not run a weaker engine than the one
+        // the settings screen describes, and a user can not switch a fake-cross guard off.
         val profile = SignalProfile(
-            momentumVolume = opt(KEY_SIGNAL_MOMENTUM_VOLUME, legacyProfile.momentumVolume),
-            flatSpanB = opt(KEY_SIGNAL_FLAT_SPAN_B, legacyProfile.flatSpanB),
-            rangeChopFilter = opt(KEY_SIGNAL_RANGE_CHOP, legacyProfile.rangeChopFilter),
-            higherTimeframeFilter = opt(KEY_SIGNAL_HIGHER_TIMEFRAME, legacyProfile.higherTimeframeFilter),
-            fakeBreakoutFilter = opt(KEY_SIGNAL_FAKE_BREAKOUT, legacyProfile.fakeBreakoutFilter),
-            dynamicSpreadFilter = opt(KEY_SIGNAL_DYNAMIC_SPREAD, legacyProfile.dynamicSpreadFilter),
-            riskyTimingFilter = opt(KEY_SIGNAL_RISKY_TIMING, legacyProfile.riskyTimingFilter),
-            structureRiskFilter = opt(KEY_SIGNAL_STRUCTURE_RISK, legacyProfile.structureRiskFilter),
-            cooldownFilter = opt(KEY_SIGNAL_COOLDOWN, legacyProfile.cooldownFilter),
-            chikouConfirmation = opt(KEY_SIGNAL_CHIKOU, legacyProfile.chikouConfirmation),
+            momentumVolume = true,
+            flatSpanB = true,
+            rangeChopFilter = true,
+            higherTimeframeFilter = true,
+            fakeBreakoutFilter = true,
+            dynamicSpreadFilter = true,
+            riskyTimingFilter = true,
+            structureRiskFilter = true,
+            cooldownFilter = true,
+            chikouConfirmation = true,
         )
         val storedApiKey = prefs.getString(KEY_API, null)?.trim()
         val storedNewsAiKey = prefs.getString(KEY_NEWS_AI_KEY, null)?.trim().orEmpty()
@@ -52,8 +53,8 @@ class SettingsStore(context: Context) {
         riskPercent = prefs.getFloat(KEY_RISK, 0.5f).toDouble(),
         accountBalance = prefs.getFloat(KEY_BALANCE, 1000f).toDouble(),
         minConfidence = prefs.getFloat(KEY_MIN_CONF, 72f).toDouble(),
-        spreadPrice = prefs.getFloat(KEY_SPREAD, 0.30f).toDouble(),
-        commissionPerOz = prefs.getFloat(KEY_COMMISSION, 0.05f).toDouble(),
+        spreadPrice = prefs.getFloat(KEY_SPREAD, 0.12f).toDouble(),
+        commissionPerOz = prefs.getFloat(KEY_COMMISSION, 0.035f).toDouble(),
         backgroundMonitor = prefs.getBoolean(KEY_MONITOR, false),
         notifyOnSignal = prefs.getBoolean(KEY_NOTIFY, true),
         alertSoundUri = prefs.getString(KEY_ALERT_SOUND_URI, "").orEmpty(),

@@ -181,13 +181,14 @@ class RiskCalculation(BaseModel):
 
 class BrokerConfig(BaseModel):
     name: str = Field(description="Broker name")
-    leverage: int = Field(default=500, ge=1, le=3000, description="Max leverage e.g. 500")
-    spread_gold: float = Field(default=0.30, ge=0, description="Spread in USD for XAU")
-    commission_per_oz: float = Field(default=0.06, ge=0, description="Commission per oz per side")
-    commission_per_lot: float = Field(default=6.0, ge=0, description="Commission per lot round-trip (for display)")
+    leverage: int = Field(default=30, ge=1, le=3000,
+        description="Max retail leverage of the venue (ESMA caps: 30 major FX, 20 gold/non-major FX, 10 other commodities, 5 equities, 2 crypto)")
+    spread_gold: float = Field(default=0.12, ge=0, description="Real average XAU/USD spread in USD per ounce")
+    commission_per_oz: float = Field(default=0.035, ge=0, description="Commission per oz per side ($3.50 per 100 oz lot)")
+    commission_per_lot: float = Field(default=3.5, ge=0, description="Commission per standard lot per side (as the venue publishes it)")
     min_lot: float = Field(default=0.01, description="Min lot 0.01 = 1oz")
-    swap_long_per_night: float = Field(default=-0.018, description="Swap long per night % of notional")
-    swap_short_per_night: float = Field(default=0.008, description="Swap short per night")
+    swap_long_per_night: float = Field(default=0.0, description="Overnight funding is NOT modelled (0 = real data unavailable)")
+    swap_short_per_night: float = Field(default=0.0, description="Overnight funding is NOT modelled (0 = real data unavailable)")
     min_deposit: float = Field(default=10)
     description: str = Field(default="")
 

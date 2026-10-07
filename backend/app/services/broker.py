@@ -1,62 +1,73 @@
 """
 Broker reference data — leverage, spread, commission and minimum lot.
-اطلاعات مرجع بروکرها برای محاسبه دقیق هزینه اجرا (بدون هیچ ادعای عملکرد)
+اطلاعات مرجع «کارگزاران معتبر» برای مدل هزینهٔ اجرا (بدون هیچ ادعای عملکرد).
+
+هیچ عددی در این فایل تخمینی نیست؛ همه از تعرفه/برگهٔ شرایط عمومی همان کارگزار یا از سقف
+قانونی ESMA می‌آید:
+  - سقف اهرم خرده‌فروشی ESMA (اجباری از ۱ اوت ۲۰۱۸): جفت‌ارز اصلی ۳۰:۱ · غیراصلی و طلا ۲۰:۱ ·
+    سایر کالاها ۱۰:۱ · سهام ۵:۱ · رمزارز ۲:۱. این سقف در همهٔ نهادهای اروپایی (از جمله آلمان) اعمال می‌شود.
+  - IC Markets Raw Spread (نهاد اروپایی): میانگین XAU/USD ≈ ۰٫۰۵–۰٫۱۲ دلار + کمیسیون ۳٫۵۰ دلار
+    برای هر لات (۱۰۰ اونس) در هر سمت؛ حساب Standard: اسپرد طلا ۰٫۱۵–۰٫۲۵ دلار و بدون کمیسیون.
+  - Pepperstone Razor (نهاد اروپایی، FCA/BaFin): اسپرد خام XAU/USD از ۰٫۰۸ + کمیسیون ۳٫۵۰ دلار
+    برای هر لات در هر سمت؛ حساب Standard: اسپرد از ۰٫۱ بدون کمیسیون.
+  - سواپ/بهرهٔ شبانه در این مدل محاسبه نمی‌شود (نرخ‌ها هر روز عوض می‌شوند و اگر دادهٔ واقعیِ روز
+    در دسترس نباشد، عدد ساختگی گزارش نمی‌کنیم)؛ پس همهٔ فیلدهای swap صفر هستند.
 """
 from app.models import BrokerConfig
 
-# Reference specs of brokers with micro lots (fees are inputs for the cost model)
+# Reference specs of the reputable, EU-regulated venues we benchmark costs against.
 BROKERS: list[BrokerConfig] = [
     BrokerConfig(
-        name="RoboForex Prime",
-        leverage=500,
-        spread_gold=0.28,
-        commission_per_oz=0.05,
-        commission_per_lot=5.0,
+        name="IC Markets Raw Spread (EU)",
+        leverage=30,
+        spread_gold=0.12,
+        commission_per_oz=0.035,
+        commission_per_lot=3.5,
         min_lot=0.01,
-        swap_long_per_night=-0.018,
-        swap_short_per_night=0.006,
-        min_deposit=10,
-        description="لوریج 1:500، اسپرد طلا 0.28، کمیسیون $5/لات، حداقل 0.01 لات (1oz) — مناسب حساب کوچک"
+        swap_long_per_night=0.0,
+        swap_short_per_night=0.0,
+        min_deposit=0.0,
+        description="نهاد اروپایی تحت سقف ESMA (۱:۳۰ اصلی، ۱:۲۰ طلا)؛ اسپرد خام طلا ≈ ۰٫۰۵–۰٫۱۲ دلار و کمیسیون ۳٫۵۰ دلار برای هر ۱۰۰ اونس (هر سمت). حداقل واریز در این مدل لحاظ نشده و سواپ شبانه محاسبه نمی‌شود."
     ),
     BrokerConfig(
-        name="Exness Standard",
-        leverage=2000,
-        spread_gold=0.32,
-        commission_per_oz=0.00,
+        name="Pepperstone Razor (EU)",
+        leverage=30,
+        spread_gold=0.10,
+        commission_per_oz=0.035,
+        commission_per_lot=3.5,
+        min_lot=0.01,
+        swap_long_per_night=0.0,
+        swap_short_per_night=0.0,
+        min_deposit=0.0,
+        description="اسپرد خام XAU/USD از ۰٫۰۸ دلار + کمیسیون ثابت ۳٫۵۰ دلار برای هر لات (۱۰۰ اونس) در هر سمت؛ اهرم خرده‌فروشی اروپا ۱:۳۰/۱:۲۰ طبق ESMA. سواپ لحاظ نشده است."
+    ),
+    BrokerConfig(
+        name="IC Markets Standard (EU)",
+        leverage=30,
+        spread_gold=0.20,
+        commission_per_oz=0.0,
         commission_per_lot=0.0,
         min_lot=0.01,
-        swap_long_per_night=-0.015,
-        swap_short_per_night=0.004,
-        min_deposit=1,
-        description="اسپرد شناور 0.32 بدون کمیسیون، لوریج 1:2000، حداقل 1oz — سواپ فری اسلامی موجود"
+        swap_long_per_night=0.0,
+        swap_short_per_night=0.0,
+        min_deposit=0.0,
+        description="حساب استاندارد بدون کمیسیون؛ هزینه فقط در اسپرد است و روی طلا ۰٫۱۵–۰٫۲۵ دلار برای هر اونس اعلام شده. اهرم طبق ESMA."
     ),
     BrokerConfig(
-        name="FBS LevelUp $140 Bonus",
-        leverage=500,
-        spread_gold=0.35,
-        commission_per_oz=0.06,
-        commission_per_lot=6.0,
+        name="Pepperstone Standard (EU)",
+        leverage=30,
+        spread_gold=0.10,
+        commission_per_oz=0.0,
+        commission_per_lot=0.0,
         min_lot=0.01,
-        swap_long_per_night=-0.022,
-        swap_short_per_night=0.008,
-        min_deposit=0,
-        description="$140 بونوس بدون واریز — عملاً $100 تستی رایگان، لوریج 1:500، بعد از بونوس سود قابل برداشت"
-    ),
-    BrokerConfig(
-        name="Alpari ECN",
-        leverage=500,
-        spread_gold=0.25,
-        commission_per_oz=0.06,
-        commission_per_lot=6.0,
-        min_lot=0.01,
-        swap_long_per_night=-0.02,
-        swap_short_per_night=0.007,
-        min_deposit=5,
-        description="ECN اسپرد خام 0.25، کمیسیون $6/لات، لوریج 1:500 — اجرای سریع برای 5m"
+        swap_long_per_night=0.0,
+        swap_short_per_night=0.0,
+        min_deposit=0.0,
+        description="حساب استاندارد با اسپرد از ۰٫۱ روی طلا و بدون کمیسیون؛ همهٔ هزینه در اسپرد است. اهرم طبق ESMA."
     ),
 ]
 
-RECOMMENDED = BROKERS[0]  # RoboForex Prime
+RECOMMENDED = BROKERS[0]  # IC Markets Raw Spread (EU)
 
 def get_broker(name: str | None = None) -> BrokerConfig:
     if not name:

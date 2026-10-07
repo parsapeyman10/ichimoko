@@ -30,16 +30,25 @@ def make_series(
     bars: int = 320,
     timeframe: Timeframe = Timeframe.M5,
     seed: int = 5,
+    confirm_bars: int = 1,
 ) -> list[Candle]:
-    """Uptrend → pullback → resume, so a fresh bullish Tenkan/Kijun cross lands on the last bar."""
+    """Uptrend → pullback → resume, so a fresh bullish Tenkan/Kijun cross is followed by
+    `confirm_bars` extra bars of the same trend.
+
+    The extra bars matter: the engine refuses to build direction from a single crossing
+    (anti fake-cross gate), so a real signal only exists once the crossing bar itself is
+    confirmed by at least one further closed bar on the same side.
+    """
     rnd = random.Random(seed)
     end = datetime(2026, 9, 15, 15, 0, tzinfo=timezone.utc)  # inside every killzone
+    total = bars + max(0, confirm_bars)
     first = datetime.fromtimestamp(
-        (int(end.timestamp()) // timeframe.seconds - bars) * timeframe.seconds, timezone.utc
+        (int(end.timestamp()) // timeframe.seconds - total) * timeframe.seconds, timezone.utc
     )
     out: list[Candle] = []
     price = start
-    for i in range(bars):
+    for i in range(total):
+        resume_index = i > bars - resume
         if i < bars - pullback - resume:
             drift = step * 0.9
         elif i < bars - resume:
@@ -52,7 +61,7 @@ def make_series(
             timestamp=first + timedelta(seconds=timeframe.seconds * i),
             open=open_, high=max(open_, close) + abs(step) * 0.22,
             low=min(open_, close) - abs(step) * 0.22, close=close,
-            volume=1200 + (900 if i > bars - resume else 0) + rnd.random() * 200,
+            volume=1200 + (900 if resume_index else 0) + rnd.random() * 200,
             complete=True,
         ))
         price = close

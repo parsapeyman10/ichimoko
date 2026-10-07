@@ -602,8 +602,10 @@ data class AppSettings(
     val accountBalance: Double = 1000.0,
     val minConfidence: Double = 72.0,
     /** Cost assumptions in USD. They must match your broker; every report states them. */
-    val spreadPrice: Double = 0.30,
-    val commissionPerOz: Double = 0.05,
+    // Defaults are the REAL reference costs of the most liquid gold venue pair we quote:
+    // IC Markets Raw Spread (EU): XAU/USD ≈ $0.12/oz spread + $3.50 per 100 oz lot/side = $0.035/oz.
+    val spreadPrice: Double = 0.12,
+    val commissionPerOz: Double = 0.035,
     val backgroundMonitor: Boolean = false,
     val notifyOnSignal: Boolean = true,
     /** Persistable SAF content Uri; blank uses the device's system notification tone. */

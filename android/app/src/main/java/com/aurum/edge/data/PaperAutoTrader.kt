@@ -82,11 +82,23 @@ class PaperAutoTrader(
         }
 
         // ── برنامه ریزی توسط AI یا استفاده از مقادیر فنی پایه ──
+        // The connection is probed FIRST. If the model answers, its worthiness verdict gates the
+        // entry; if it is unreachable the trade continues on the technical rules alone.
         val adv = advisor
-        val (finalSignal, entryNote) = if (recentSettings.hasClientNewsAi && adv != null) {
+        val aiOnline = adv != null && adv.ensureConnection()
+        val (finalSignal, entryNote) = if (aiOnline && adv != null) {
             val aiPlan = runCatching {
                 adv.planTradeWithAi(signal, current)
             }.getOrNull()
+            // The AI is consulted first, exactly as asked: when it answers, it decides whether
+            // this setup is worth taking at all. A "not worth it" verdict blocks the paper
+            // entry instead of only re-pricing it. When the model cannot be reached the call
+            // returns null and the entry continues on the technical rules alone.
+            if (aiPlan != null && !aiPlan.worth) {
+                _status.value = "ارزنده‌بودن معامله از نظر AI تأیید نشد: " +
+                    aiPlan.worthReason.ifBlank { "دلیل ارزنده‌نبودن اعلام نشد" }
+                return null
+            }
             if (aiPlan != null) {
                 Pair(
                     signal.copy(
@@ -101,13 +113,13 @@ class PaperAutoTrader(
             } else {
                 Pair(
                     signal,
-                    "بدون هوش مصنوعی ترید شده (خطای ارتباط با مدل AI)؛ مقادیر طبق محاسبات فنی ایچیموکو (SL کیجون ± 0.5 ATR و TP ۱:۱.۸) تنظیم شدند."
+                    "اتصال AI برقرار شد اما طرح ورود معتبر برنگشت (پاسخ نامعتبر/خطای میانی)؛ ورود با محاسبات فنی ایچیموکو و بدون AI انجام شد (SL کیجون ± ۰٫۵×ATR و TP ۱:۱٫۸)."
                 )
             }
         } else {
             Pair(
                 signal,
-                "بدون هوش مصنوعی ترید شده؛ مقادیر طبق محاسبات فنی ایچیموکو (SL کیجون ± 0.5 ATR و TP با نسبت ۱:۱.۸) تنظیم شده است."
+                "اتصال AI بررسی شد و مدل در دسترس نبود؛ ورود بدون AI و طبق محاسبات فنی ایچیموکو انجام شد (SL کیجون ± ۰٫۵×ATR و TP ۱:۱٫۸)."
             )
         }
 

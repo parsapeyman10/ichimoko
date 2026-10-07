@@ -28,7 +28,6 @@ import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.PaperTicket
 import com.aurum.edge.core.ReplayDecision
 import com.aurum.edge.core.Signal
-import com.aurum.edge.core.SignalProfile
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.TradeReplay
 import com.aurum.edge.core.WalkForwardRecord
@@ -40,7 +39,6 @@ import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.SpotFallbackClient
 import com.aurum.edge.data.NewsRepository
-import com.aurum.edge.data.SignalTuningPlan
 import com.aurum.edge.data.WatchSelection
 import com.aurum.edge.data.WatchState
 import com.aurum.edge.engine.MtfAnalyzer
@@ -67,13 +65,6 @@ import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.min
 
-data class AiSignalTuningState(
-    val loading: Boolean = false,
-    val plan: SignalTuningPlan? = null,
-    val appliedAt: Long? = null,
-    val error: String? = null,
-)
-
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
@@ -88,8 +79,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val pairScan = container.pairScanner.state
     /** The AI trading companion's latest strictly-validated opinion (analysis, never a signal). */
     val traderOpinion = container.traderAdvisor.state
-    private val _aiSignalTuning = MutableStateFlow(AiSignalTuningState())
-    val aiSignalTuning: StateFlow<AiSignalTuningState> = _aiSignalTuning.asStateFlow()
+    /** Reachability of the model, checked before any AI judgement of a trade. */
+    val aiConnection = container.traderAdvisor.connection
     val market = container.verifiedMarket
     val trades: StateFlow<List<PaperTrade>> = container.journalStore.trades
     val opportunities: StateFlow<List<PaperOpportunity>> = container.opportunityStore.items
@@ -458,84 +449,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun saveBalance(value: Double) = container.settingsStore.update { it.copy(accountBalance = value.coerceAtLeast(10.0)) }
 
     fun saveMinConfidence(value: Double) = container.settingsStore.update { it.copy(minConfidence = value.coerceIn(72.0, 95.0)) }
-
-    fun setActiveStrategy(strategy: com.aurum.edge.core.StrategyKind) {
-        container.settingsStore.update {
-            it.copy(
-                activeStrategy = strategy,
-                signalProfile = SignalProfile.forStrategy(strategy),
-            )
-        }
-        container.market.restart()
-        scanPairs()
-    }
-
-    fun setSignalMomentumVolume(enabled: Boolean) = updateSignalProfile("فیلتر مومنتوم/حجم", enabled) {
-        it.copy(momentumVolume = enabled)
-    }
-
-    fun setSignalFlatSpanB(enabled: Boolean) = updateSignalProfile("سناریوی تختی SpanB52", enabled) {
-        it.copy(flatSpanB = enabled)
-    }
-
-    fun setSignalRangeChop(enabled: Boolean) = updateSignalProfile("فیلتر بازار رنج", enabled) {
-        it.copy(rangeChopFilter = enabled)
-    }
-
-    fun setSignalHigherTimeframe(enabled: Boolean) = updateSignalProfile("تأیید تایم‌فریم بالاتر", enabled) {
-        it.copy(higherTimeframeFilter = enabled)
-    }
-
-    fun setSignalFakeBreakout(enabled: Boolean) = updateSignalProfile("فیلتر فیک‌بریک‌اوت", enabled) {
-        it.copy(fakeBreakoutFilter = enabled)
-    }
-
-    fun setSignalDynamicSpread(enabled: Boolean) = updateSignalProfile("فیلتر اسپرد پویا", enabled) {
-        it.copy(dynamicSpreadFilter = enabled)
-    }
-
-    fun setSignalRiskyTiming(enabled: Boolean) = updateSignalProfile("فیلتر زمان‌های خطرناک", enabled) {
-        it.copy(riskyTimingFilter = enabled)
-    }
-
-    fun setSignalStructureRisk(enabled: Boolean) = updateSignalProfile("فیلتر ریسک ساختار", enabled) {
-        it.copy(structureRiskFilter = enabled)
-    }
-
-    fun setSignalCooldown(enabled: Boolean) = updateSignalProfile("کول‌داون بعد از شکست", enabled) {
-        it.copy(cooldownFilter = enabled)
-    }
-
-    fun setSignalChikou(enabled: Boolean) = updateSignalProfile("تایید چیکو", enabled) {
-        it.copy(chikouConfirmation = enabled)
-    }
-
-    private fun updateSignalProfile(label: String, enabled: Boolean, transform: (SignalProfile) -> SignalProfile) {
-        container.settingsStore.update { it.copy(signalProfile = transform(it.signalProfile)) }
-        container.market.restart()
-        _toast.value = "$label ${if (enabled) "به موتور پایه اضافه شد" else "از افزونه‌های موتور برداشته شد"}"
-    }
-
-    fun runAiSignalSelfAnalysis(apply: Boolean = true) {
-        viewModelScope.launch {
-            _aiSignalTuning.value = _aiSignalTuning.value.copy(loading = true, error = null)
-            try {
-                val plan = container.traderAdvisor.tuneSignalEngine()
-                if (apply) {
-                    container.settingsStore.update { it.copy(signalProfile = plan.profile) }
-                    container.market.restart()
-                    _aiSignalTuning.value = AiSignalTuningState(plan = plan, appliedAt = System.currentTimeMillis())
-                    _toast.value = "خودتحلیلی AI اعمال شد: ${plan.profile.title}"
-                } else {
-                    _aiSignalTuning.value = AiSignalTuningState(plan = plan)
-                }
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (error: Exception) {
-                _aiSignalTuning.value = AiSignalTuningState(error = error.message ?: "خودتحلیلی AI انجام نشد")
-            }
-        }
-    }
 
     /** Cost assumptions are the user's responsibility; they are echoed in every report. */
     fun saveSpread(value: Double) = container.settingsStore.update { it.copy(spreadPrice = value.coerceIn(0.0, 5.0)) }

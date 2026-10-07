@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from statistics import median
 
 from app.models import Candle, Direction, Impact, StrategyContext, TradeSignal
@@ -7,6 +8,118 @@ from app.services.instruments import GOLD_SPEC, InstrumentSpec
 
 def _clamp(value: float, low: float, high: float) -> float:
     return max(low, min(high, value))
+
+
+@dataclass(frozen=True)
+class CrossQuality:
+    """Verdict for one Tenkan/Kijun crossing — the anti fake-cross gate.
+
+    A single crossing of the two lines is NOT a direction: in a range the lines trade
+    places repeatedly and most crossings are noise. A cross may only become the signal
+    direction when several independent facts about the crossing itself agree.
+    """
+
+    ok: bool
+    checks: dict[str, bool]
+    blockers: list[str]
+    detail: str
+
+
+CROSS_QUALITY_LABEL = "کیفیت کراس تنکان/کیجون (ضد کراس فیک)"
+
+
+def assess_cross_quality(
+    values: dict,
+    i: int,
+    atr: float,
+    tick: float,
+    close: float,
+    cloud_top: float,
+    cloud_bottom: float,
+    is_long: bool,
+    whipsaw_lookback: int = 6,
+) -> CrossQuality:
+    """Judge the crossing that produced `is_long`, using only closed bars up to `i`.
+
+    All six checks must pass; each failure is returned as a human-readable blocker and
+    the caller must answer NO_TRADE — never a weaker BUY/SELL.
+    """
+    tenkan, kijun = values.get("tenkan") or [], values.get("kijun") or []
+
+    def _at(seq: list, idx: int) -> float | None:
+        if idx < 0 or idx >= len(seq):
+            return None
+        item = seq[idx]
+        return float(item) if item is not None else None
+
+    t, k = _at(tenkan, i), _at(kijun, i)
+    prev_t, prev_k = _at(tenkan, i - 1), _at(kijun, i - 1)
+    if None in (t, k, prev_t, prev_k):
+        return CrossQuality(
+            ok=False,
+            checks={"data": False},
+            blockers=["ضد کراس فیک: دادهٔ تنکان/کیجون برای تأیید همین کراس کافی نیست"],
+            detail="دادهٔ ناکافی برای سنجش کیفیت کراس",
+        )
+    assert t is not None and k is not None and prev_t is not None and prev_k is not None
+    sep = abs(t - k)
+    prev_sep = abs(prev_t - prev_k)
+    min_sep = max(0.08 * atr, tick)
+
+    # ۱) دو کندل بستهٔ پیاپی در سمت جدید (کراس لحظه‌ای/داخل‌کندلی پذیرفته نمی‌شود)
+    two_bars_aligned = (t > k and prev_t > prev_k) if is_long else (t < k and prev_t < prev_k)
+    # ۲) جدایی واقعی خطوط؛ یک «بوسهٔ» مرزی کراس نیست
+    real_separation = sep >= min_sep
+    # ۳) جدایی در حال فروپاشی نباشد (برگشت فوری نشانهٔ کراس فیک است)
+    not_collapsing = sep >= prev_sep * 0.6
+    # ۴) شیب کیجون در جهت جدید باشد، نه صاف/مخالف
+    kijun_slope_ok = (k >= prev_k - 0.05 * atr) if is_long else (k <= prev_k + 0.05 * atr)
+    # ۵) ناحیهٔ رفت‌وبرگشت: کراس مخالف تازه در چند کندل اخیر = سیگنال بی‌اعتبار
+    whipsaw = False
+    start = max(1, i - whipsaw_lookback)
+    for j in range(start, i + 1):
+        tj, kj = _at(tenkan, j), _at(kijun, j)
+        tj1, kj1 = _at(tenkan, j - 1), _at(kijun, j - 1)
+        if None in (tj, kj, tj1, kj1):
+            continue
+        assert tj is not None and kj is not None and tj1 is not None and kj1 is not None
+        opposite = (tj1 >= kj1 and tj < kj) if is_long else (tj1 <= kj1 and tj > kj)
+        if opposite:
+            whipsaw = True
+            break
+    no_whipsaw = not whipsaw
+    # ۶) قیمت سمت جدید را «پذیرفته» باشد، نه فقط لمس کرده باشد
+    price_accepted = (close > cloud_top + 0.08 * atr) if is_long else (close < cloud_bottom - 0.08 * atr)
+
+    checks = {
+        "two_bars_aligned": bool(two_bars_aligned),
+        "real_separation": bool(real_separation),
+        "not_collapsing": bool(not_collapsing),
+        "kijun_slope": bool(kijun_slope_ok),
+        "no_whipsaw": bool(no_whipsaw),
+        "price_accepted": bool(price_accepted),
+    }
+    blockers: list[str] = []
+    if not two_bars_aligned:
+        blockers.append("ضد کراس فیک: کراس باید دو کندل بستهٔ پیاپی تأیید شود (کراس لحظه‌ای رد شد)")
+    if not real_separation:
+        blockers.append(f"ضد کراس فیک: جدایی تنکان/کیجون ({sep:.5f}) از حداقل لازم ({min_sep:.5f}) کمتر است — بوسهٔ مرزی")
+    if not not_collapsing:
+        blockers.append("ضد کراس فیک: جدایی کراس در حال فروپاشی است — برگشت فوری")
+    if not kijun_slope_ok:
+        blockers.append("ضد کراس فیک: شیب کیجون با جهت کراس هم‌سو نیست")
+    if not no_whipsaw:
+        blockers.append(f"ضد کراس فیک: کراس مخالف در {whipsaw_lookback} کندل اخیر — ناحیهٔ رفت‌وبرگشت")
+    if not price_accepted:
+        blockers.append("ضد کراس فیک: قیمت سمت جدید ابر را با فاصلهٔ ۰٫۰۸×ATR نپذیرفته است")
+
+    passed = sum(1 for v in checks.values() if v)
+    return CrossQuality(
+        ok=not blockers,
+        checks=checks,
+        blockers=blockers,
+        detail=f"{passed}/{len(checks)} تأیید کراس · T {t:.5f} / K {k:.5f} · جدایی {sep:.5f}",
+    )
 
 
 def evaluate_scalp(
@@ -76,7 +189,26 @@ def evaluate_scalp(
         bear_cross = bool(pt2 is not None and pk2 is not None and pt2 >= pk2 and prev_t < prev_k and t < k)
 
     if not bull_cross and not bear_cross:
-        return TradeSignal(action=Direction.NO_TRADE, confidence=38, blockers=["No fresh Tenkan/Kijun cross in last two closed bars"], confluence=_build_confluence(candles, values, ema200, vwap, rsi7, atr14, macd_data, bb, stoch, adx14, Direction.NEUTRAL, spec))
+        return TradeSignal(action=Direction.NO_TRADE, confidence=38, blockers=["No fresh Tenkan/Kijun cross in last two closed bars / کراس تازه تنکان/کیجون در دو کندل بستهٔ اخیر نیست"], confluence=_build_confluence(candles, values, ema200, vwap, rsi7, atr14, macd_data, bb, stoch, adx14, Direction.NEUTRAL, spec))
+
+    # ── ضد کراس فیک: «یک کراس» به‌تنهایی جهت نمی‌سازد ─────────────────────────
+    # A cross is only a candidate direction; it must be confirmed by the crossing itself
+    # (two closed bars, real separation, non-collapsing gap, Kijun slope, no whipsaw in the
+    # last bars, price acceptance beyond the cloud). Otherwise the answer is NO_TRADE.
+    quality = assess_cross_quality(
+        values, i, current_atr, spec.tick_size, current.close, cloud_top, cloud_bottom, bull_cross,
+    )
+    if not quality.ok:
+        confluence = _build_confluence(candles, values, ema200, vwap, rsi7, atr14, macd_data, bb, stoch, adx14, Direction.NEUTRAL, spec)
+        confluence.append({"name": CROSS_QUALITY_LABEL, "ok": False, "detail": quality.detail})
+        return TradeSignal(
+            action=Direction.NO_TRADE,
+            confidence=32,
+            reasons=[quality.detail],
+            blockers=quality.blockers + ["ضد کراس فیک: تا تأیید کامل کراس، جهت معامله ساخته نمی‌شود"],
+            confluence=confluence,
+            exit_hint="No entry — the cross is not confirmed yet / ورود ممنوع — کراس هنوز تأیید نشده",
+        )
 
     direction = Direction.BUY if bull_cross else Direction.SELL
     long = direction is Direction.BUY
@@ -376,6 +508,7 @@ def evaluate_scalp(
     hard_gate = any(item.startswith("Hard gate") for item in blockers)
     score = round(_clamp(score, 0, 100), 1)
     confluence = _build_confluence(candles, values, ema200, vwap, rsi7, atr14, macd_data, bb, stoch, adx14, direction, spec)
+    confluence.append({"name": CROSS_QUALITY_LABEL, "ok": True, "detail": quality.detail})
 
     # Threshold is declared per symbol in its SymbolModel, not hardcoded for gold.
     thresh = model.threshold(frame.value)

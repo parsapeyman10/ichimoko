@@ -70,6 +70,18 @@ fun PaperTicketSection(viewModel: AurumViewModel, market: MarketState) {
                 color = AurumColors.TextPrimary)
             Text("ریسک تا استاپ ${formatPrice(preview.actualRiskUsd)}$ از سقف ${formatPrice(preview.riskBudgetUsd)}$؛ مجموع ریسک پوزیشن‌ها حداکثر ۵٪ موجودی است.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+            Text("مرجع اعداد: ${preview.venue}",
+                modifier = Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.Cyan)
+            Text(
+                "هزینهٔ واقعی رفت‌وبرگشت ${formatPrice(preview.commissionUsd + preview.spreadCostUsd)}$ " +
+                    "(${String.format(java.util.Locale.US, "%.1f", preview.costBps)}bps از ارزش معامله) · " +
+                    "اهرم ۱:${preview.leverage} · مارجین ${formatPrice(preview.marginUsd)}$",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+            if (preview.venueSource.isNotBlank()) {
+                Text(preview.venueSource,
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            }
         }
         Button(onClick = {
             val price = market.lastPrice
@@ -80,7 +92,7 @@ fun PaperTicketSection(viewModel: AurumViewModel, market: MarketState) {
             Text(if (side == SignalAction.BUY) "بررسی و ثبت لانگ کاغذی" else "بررسی و ثبت شورت کاغذی",
                 fontWeight = FontWeight.Bold)
         }
-        Text("حجم کسری صرفاً فرض پژوهشی است؛ حداقل لات، کارمزد، اسلیپیج و مارجین بروکر بررسی نشده‌اند. سقف ارزش فرضی: ۳× موجودی.",
+        Text("کارمزد، اسپرد و اهرم از مرجع واقعی همان بازار می‌آیند (سقف ESMA + تعرفهٔ کارگزار/صرافی معتبر) و مارجین لازم باید از موجودی جا شود؛ اسلیپیج مدل نشده و هیچ سفارشی ارسال نمی‌شود.",
             modifier = Modifier.padding(top = 7.dp), style = MaterialTheme.typography.labelSmall,
             color = AurumColors.TextMuted)
     }

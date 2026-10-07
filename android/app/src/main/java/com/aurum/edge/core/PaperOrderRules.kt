@@ -15,19 +15,22 @@ data class PaperTicket(
     val marginUsd: Double = 0.0,
     val commissionUsd: Double = 0.0,
     val spreadCostUsd: Double = 0.0,
+    /** مرجع واقعی اعداد: کارگزار/صرافی معتبر و سقف قانونی همان بازار. */
+    val venue: String = "",
+    val venueSource: String = "",
+    /** هزینهٔ کل رفت‌وبرگشت (کمیسیون دو سمت + اسپرد) بر حسب bps از ارزش معامله. */
+    val costBps: Double = 0.0,
 )
 
 object PaperOrderRules {
     /** Quote currencies of USD-base crosses whose quote->USD rate IS the pair's own price. */
     private val USD_CROSS_QUOTES = setOf("JPY", "CHF", "CAD")
 
-    /** Default leverage by asset class: Forex 30x, Commodities 20x, Crypto 10x, Stocks 5x */
-    fun defaultLeverageFor(symbol: String): Int = when (AssetClass.of(symbol)) {
-        AssetClass.COMMODITY -> 20
-        AssetClass.FOREX -> 30
-        AssetClass.CRYPTO -> 10
-        AssetClass.STOCK -> 5
-    }
+    /**
+     * سقف اهرم همان بازار، از [VenueSpecs]: جفت‌ارز اصلی ۳۰:۱ · جفت‌ارز غیراصلی و طلا ۲۰:۱ ·
+     * سایر کالاها ۱۰:۱ · رمزارز ۲:۱ · سهام ۵:۱ (سقف قانونی ESMA برای مشتری خرده‌فروشی).
+     */
+    fun defaultLeverageFor(symbol: String): Int = VenueSpecs.of(symbol).leverageCap
 
     /** Paper-sizing supports the entire universe: Forex, Crypto, Commodities, Stocks, Indices. */
     fun paperable(symbol: String): Boolean {
@@ -81,8 +84,13 @@ object PaperOrderRules {
             (side == SignalAction.SELL && stop > entry && target < entry)) {
             "لانگ: SL زیر ورود و TP بالای آن؛ شورت: SL بالای ورود و TP پایین آن باشد"
         }
+        val spec = VenueSpecs.of(symbol)
         val distance = abs(entry - stop)
         require(distance / entry in 0.0001..0.25) { "فاصلهٔ استاپ باید متناسب با ساختار قیمت بازار باشد" }
+        require(distance >= spec.minStopDistance(entry)) {
+            "حد ضرر داخل اسپرد/نویز بازار است؛ حداقل فاصلهٔ مجاز روی ${symbol} برابر " +
+                String.format(java.util.Locale.US, "%.6f", spec.minStopDistance(entry)) + " است"
+        }
         val rr = abs(target - entry) / distance
         require(rr.isFinite() && rr >= 1.2) { "نسبت سود به زیان باید حداقل ۱٫۲ باشد" }
         val budget = balance * riskPercent / 100.0
@@ -95,10 +103,19 @@ object PaperOrderRules {
         require(actualRisk.isFinite() && actualRisk <= budget + 1e-4) {
             "ریسک پوزیشن از بودجه تعیین‌شده فراتر می‌رود"
         }
-        val leverage = defaultLeverageFor(symbol)
+        val leverage = spec.leverageCap
         val margin = kotlin.math.round((notional / leverage) * 100.0) / 100.0
-        val commission = kotlin.math.round((notional * 0.0004) * 100.0) / 100.0
-        val spreadCost = kotlin.math.round((notional * 0.0002) * 100.0) / 100.0
+        // قانون واقعی کارگزار: بدون مارجین کافی، پوزیشن باز نمی‌شود (و ESMA در ۵۰٪ مارجین
+        // پوزیشن را می‌بندد). اینجا فقط شرط بازکردن بررسی می‌شود.
+        require(margin.isFinite() && margin <= balance) {
+            "مارجین لازم " + String.format(java.util.Locale.US, "%.2f", margin) +
+                "$ از موجودی " + String.format(java.util.Locale.US, "%.2f", balance) +
+                "$ بیشتر است؛ با اهرم واقعی ۱:" + leverage + " این پوزیشن باز نمی‌شود"
+        }
+        val commission = kotlin.math.round((spec.commissionUsd(entry, quantity) * 2.0) * 10000.0) / 10000.0
+        val spreadCost = kotlin.math.round(spec.spreadCostUsd(entry, quantity) * 10000.0) / 10000.0
+        val roundTrip = commission + spreadCost
+        val costBps = if (notional > 0.0) kotlin.math.round((roundTrip / notional) * 10_000.0 * 100.0) / 100.0 else 0.0
         return PaperTicket(
             quantity = quantity,
             unit = unitFor(symbol),
@@ -110,6 +127,9 @@ object PaperOrderRules {
             marginUsd = margin,
             commissionUsd = commission,
             spreadCostUsd = spreadCost,
+            venue = spec.venue,
+            venueSource = spec.source,
+            costBps = costBps,
         )
     }
 }

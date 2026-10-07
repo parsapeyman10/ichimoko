@@ -54,6 +54,24 @@ data class AiTradePlan(
     val summary: String,
     val model: String,
     val generatedAt: Long,
+    /**
+     * The model's own verdict on whether this setup is worth taking at all. It is asked for
+     * every plan; a `false` blocks the paper entry instead of only re-pricing it. When the
+     * model is unreachable the caller proceeds on the technical rules alone (never invented).
+     */
+    val worth: Boolean = true,
+    val worthReason: String = "",
+)
+
+/**
+ * Reachability of the user's own model, checked by the app BEFORE it asks the AI to judge a
+ * trade. [reachable] is null until the first check of this process.
+ */
+data class AiConnectionState(
+    val configured: Boolean = false,
+    val reachable: Boolean? = null,
+    val detail: String = "",
+    val checkedAt: Long? = null,
 )
 
 data class TraderOpinionState(
@@ -97,6 +115,46 @@ class TraderAdvisor(
         .followRedirects(false).build()
     private val _state = MutableStateFlow(TraderOpinionState())
     val state: StateFlow<TraderOpinionState> = _state.asStateFlow()
+
+    private var lastReachableElapsed = 0L
+    private val _connection = MutableStateFlow(AiConnectionState())
+    val connection: StateFlow<AiConnectionState> = _connection.asStateFlow()
+
+    /**
+     * The connection is checked BEFORE the AI is asked anything, exactly as required: a cached
+     * success (5 minutes) short-circuits the check so an entry never pays for two calls,
+     * otherwise one cheap probe line is sent. `false` means "do not wait for the AI" and the
+     * caller keeps trading on the technical rules alone.
+     */
+    suspend fun ensureConnection(): Boolean {
+        val config = settings.read()
+        if (!config.hasClientNewsAi) {
+            _connection.value = AiConnectionState(
+                configured = false, reachable = false,
+                detail = "کلید/مدل AI در تنظیمات وارد نشده است", checkedAt = System.currentTimeMillis())
+            return false
+        }
+        val now = SystemClock.elapsedRealtime()
+        if (lastReachableElapsed != 0L && now - lastReachableElapsed < CONNECTION_TTL_MS) return true
+        return try {
+            val reply = withContext(Dispatchers.Default) {
+                AiProvider.probe(http, config.newsAiBaseUrl, config.newsAiApiKey,
+                    config.newsAiModel, config.newsAiFormat)
+            }
+            lastReachableElapsed = SystemClock.elapsedRealtime()
+            _connection.value = AiConnectionState(
+                configured = true, reachable = true,
+                detail = reply.trim().take(80), checkedAt = System.currentTimeMillis())
+            true
+        } catch (error: Exception) {
+            lastReachableElapsed = 0L
+            _connection.value = AiConnectionState(
+                configured = true, reachable = false,
+                detail = (error.message ?: "اتصال برقرار نشد").take(120),
+                checkedAt = System.currentTimeMillis())
+            false
+        }
+    }
 
     fun refreshNow(force: Boolean = false) { scope.launch { refresh(force) } }
 
@@ -209,13 +267,15 @@ class TraderAdvisor(
         }
 
         val system = "You are the AI trading execution optimizer for an educational trading app. " +
-            "Given a valid technical trade setup, return the optimal entry, structural stop loss, and take profit target. " +
+            "Given a valid technical trade setup, first decide whether the trade is WORTH taking, then return the optimal entry, structural stop loss, and take profit target. " +
             "Rules: " +
             "1. For BUY: stop_loss MUST be strictly lower than entry, and take_profit MUST be strictly higher than entry. " +
             "2. For SELL: stop_loss MUST be strictly higher than entry, and take_profit MUST be strictly lower than entry. " +
             "3. The Reward-to-Risk ratio (TP distance / SL distance) MUST be between 1.5 and 3.5. " +
             "4. Numbers must be realistic and close to the market price. " +
-            "Return JSON only: {\"entry\": number, \"stop_loss\": number, \"take_profit\": number, \"confidence\": number 70..99, \"summary\": Persian string 10..180 chars describing why these levels were chosen}."
+            "5. Worthiness: judge ONLY from the supplied snapshot. Set worth=false when the location is poor (price stretched from Kijun, the move already extended, the levels crowd the opposing structure), when the listed conditions disagree with each other, or when the evidence is too thin — and say why in worth_reason. Set worth=true only when you would personally accept this setup at these levels. " +
+            "6. Never invent prices, news, performance or guarantees. " +
+            "Return JSON only: {\"worth\": boolean, \"worth_reason\": Persian string 10..180 chars, \"entry\": number, \"stop_loss\": number, \"take_profit\": number, \"confidence\": number 70..99, \"summary\": Persian string 10..180 chars describing why these levels were chosen}."
 
         val output = AiProvider.completeJson(http, config.newsAiBaseUrl, config.newsAiApiKey,
             config.newsAiModel, system, snapshot, maxTokens = 400, format = config.newsAiFormatNormalized)
@@ -227,6 +287,10 @@ class TraderAdvisor(
         val conf = num("confidence") ?: signal.confidence
         val summary = (output["summary"] as? JsonPrimitive)?.contentOrNull?.trim()
             ?: "تنظیم سطوح معاملاتی بر اساس ساختار جریان نقدینگی و مومنتوم"
+        // Worthiness is answered by the model itself. A missing/ambiguous answer stays
+        // "worth=true" so an older model can never silently block every entry.
+        val worth = (output["worth"] as? JsonPrimitive)?.booleanOrNull ?: true
+        val worthReason = (output["worth_reason"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
 
         val risk = kotlin.math.abs(entry - sl)
         val reward = kotlin.math.abs(tp - entry)
@@ -246,6 +310,8 @@ class TraderAdvisor(
             summary = summary,
             model = config.newsAiModel,
             generatedAt = now,
+            worth = worth,
+            worthReason = worthReason,
         )
     }
 
@@ -365,6 +431,7 @@ class TraderAdvisor(
 
     companion object {
         const val REFRESH_PERIOD_MS = 10 * 60_000L
+        const val CONNECTION_TTL_MS = 5 * 60_000L
 
         internal fun parseTuningPlan(root: JsonObject, model: String, now: Long): SignalTuningPlan? {
             fun str(key: String): String? = (root[key] as? JsonPrimitive)?.contentOrNull?.trim()
