@@ -258,6 +258,7 @@ class PairScanner(
                     sl = combined.stopLoss,
                     tp = combined.takeProfit,
                     rr = combined.riskReward,
+                    conditions = combined.confluence,
                 )
                 return@forEachIndexed
             }
@@ -288,6 +289,7 @@ class PairScanner(
                     sl = combined.stopLoss,
                     tp = combined.takeProfit,
                     rr = combined.riskReward,
+                    conditions = combined.confluence,
                 )
                 return@forEachIndexed
             }
@@ -296,7 +298,7 @@ class PairScanner(
             val ict = IctEntryRules.approvedEvidence(market, System.currentTimeMillis(), graceMs)
 
             if (mtf?.veto == true) {
-                update(symbol, "blocked", "تراز چندتایم‌فریم ورود را وتو کرده است: ${mtf.vetoReason}", price, score)
+                update(symbol = symbol, state = "blocked", detail = "تراز چندتایم‌فریم ورود را وتو کرده است: ${mtf.vetoReason}", price = price, score = score, conditions = combined.confluence)
                 return@forEachIndexed
             }
 
@@ -320,7 +322,13 @@ class PairScanner(
                 if (recorded) onCandidate?.invoke(item)
             }
 
-            if (config.autoPaperTrading && journal.trades.value.count { it.isOpen } < 4) {
+            // Independent category auto-trading: each of the 4 asset categories (Crypto, Forex, Commodity, Stock)
+            // operates independently with 1 dedicated slot without blocking other categories.
+            val targetCategory = com.aurum.edge.core.AssetClass.of(symbol)
+            val currentOpenInClass = journal.trades.value.count { it.isOpen && com.aurum.edge.core.AssetClass.of(it.symbol) == targetCategory }
+            val totalOpen = journal.trades.value.count { it.isOpen }
+
+            if (config.autoPaperTrading && totalOpen < 4 && currentOpenInClass < targetCategory.maxSlots) {
                 runCatching {
                     autoTrader?.onMarketUpdate(market)
                 }
@@ -343,7 +351,7 @@ class PairScanner(
     }
 
     companion object {
-        const val SWEEP_PERIOD_MS = 3 * 60_000L
-        const val PAIR_SPACING_MS = 2_000L
+        const val SWEEP_PERIOD_MS = 30_000L
+        const val PAIR_SPACING_MS = 1_000L
     }
 }
