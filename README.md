@@ -5,6 +5,7 @@ Native Android (Kotlin/Compose), React/Vite web terminal and FastAPI research ba
 > **2026-09-27:** the Android app was redesigned to be **forex-only** — XAU/USD plus the major pairs (EUR/USD, GBP/USD, USD/JPY, AUD/USD, USD/CHF, USD/CAD, NZD/USD). The Nobitex, Iranian stocks/Agah and crypto workspaces were fully removed from the Android code. The web terminal and backend are unchanged and out of scope for this pass.
 
 **راهنمای فارسی وضعیت دقیق قابلیت‌ها و نیازهای ادامه:** [docs/ROADMAP_FA.md](docs/ROADMAP_FA.md).
+**پاسخ ساده به «اساس ترید این اپ چیست؟»:** [docs/TRADING_BASICS_FA.md](docs/TRADING_BASICS_FA.md).
 
 ## Current capabilities
 
