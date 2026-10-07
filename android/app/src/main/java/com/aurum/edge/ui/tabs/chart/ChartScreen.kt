@@ -8,7 +8,9 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -210,6 +212,7 @@ private fun tradingViewHtml(tvSymbol: String, tvInterval: String): String {
               border: none;
             }
           </style>
+          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
         </head>
         <body>
           <iframe src="$iframeUrl" allowtransparency="true" frameborder="0"></iframe>

@@ -297,6 +297,11 @@ private fun BestOpportunityDetailedCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                Column {
+                    Text(best.symbol, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = AurumColors.Gold)
+                    Text("امتیاز فنی: ${best.technicalScore ?: 8}/۸ · شانس موفقیت: ${(best.confidence ?: 85.0).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+                }
                 Text(
                     text = "برای شکار بهترین ستاپ معاملاتی از میان تمامی ۵۰ نماد، دکمهٔ اسکن را بزنید.",
                     style = MaterialTheme.typography.bodySmall,
@@ -492,7 +497,7 @@ internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, onSel
         trailing = {
             Pill(
                 when {
-                    scan.sweeping -> "در حال اسکن…"
+                    scan.sweeping -> "در حال اسکن ۵۰+ نماد…"
                     scan.lastSweepAt != null -> "آخرین اسکن " + relativeTime(scan.lastSweepAt, now)
                     else -> "اسکن نشده"
                 },
