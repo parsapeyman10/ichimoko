@@ -36,7 +36,7 @@ object PaperAutoRules {
             return "نماد/بازه عوض شده است"
         }
         if (market.showingCachedData) return "فید واقعی در دسترس نیست؛ کش برای ورود ممنوع"
-        if (!FeedLiveness.hasRecentReceipt(market.feed, now, maxAgeMs = 90_000L))
+        if (!FeedLiveness.hasRecentReceipt(market.feed, now))
             return "قیمت زنده/تازه در دسترس نیست"
         val signal = market.signal ?: return "سیگنال محاسبه نشده است"
         if (!signal.isActionable || signal.entry == null || signal.stopLoss == null || signal.takeProfit == null)
