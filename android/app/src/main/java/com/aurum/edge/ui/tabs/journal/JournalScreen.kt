@@ -63,11 +63,6 @@ import com.aurum.edge.ui.theme.AurumColors
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
-import com.aurum.edge.ui.components.SectionCard
-import com.aurum.edge.ui.components.StatTile
-import com.aurum.edge.ui.components.formatDateTime
-import com.aurum.edge.ui.components.formatPrice
-import com.aurum.edge.ui.theme.AurumColors
 
 @Composable
 fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
