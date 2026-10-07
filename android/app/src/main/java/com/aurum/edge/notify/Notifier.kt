@@ -138,18 +138,20 @@ object Notifier {
     fun notifyVerifiedOpportunity(context: Context, item: PaperOpportunity, customSoundUri: String): Boolean {
         val isBuy = item.action == SignalAction.BUY
         val side = if (isBuy) "خرید (LONG)" else "فروش (SHORT)"
+        val assetClass = com.aurum.edge.core.AssetClass.of(item.symbol)
         val title = "فرصت معاملاتی $side ${item.symbol} · تایید شروط ایچیموکو"
         val text = "${item.symbol} ${item.interval.label} · ورود ${formatPrice(item.priceAtAlert)}$ · " +
             "SL ${formatPrice(item.stopLoss)} · TP ${formatPrice(item.takeProfit)}"
         val expanded = buildString {
-            appendLine("📊 نماد کاندیدا: ${item.symbol} (${item.assetClass.label})")
+            appendLine("📊 نماد کاندیدا: ${item.symbol} (${assetClass.label})")
             appendLine("🎯 جهت فرصت: $side")
             appendLine("💰 قیمت لحظه‌ای/ورود: ${formatPrice(item.priceAtAlert)}$")
             appendLine("🛑 حد ضرر (SL): ${formatPrice(item.stopLoss)}$")
             appendLine("🎯 حد سود (TP): ${formatPrice(item.takeProfit)}$")
-            appendLine("📐 نسبت ریسک به ریوارد: 1:${String.format(Locale.US, "%.1f", item.rewardRisk ?: 2.2)}")
+            val rr = item.priceAction?.rewardRisk ?: 2.2
+            appendLine("📐 نسبت ریسک به ریوارد: 1:${String.format(Locale.US, "%.1f", rr)}")
             appendLine("🔍 شواهد: ایچیموکو، آزادی ۲۴ دوره‌ای چیکواسپن و تراز MTF")
-            appendLine("⏱ زمان: ${formatDateTime(item.barTime)}")
+            appendLine("⏱ زمان: ${formatDateTime(item.signalBarTime)}")
         }.trimEnd()
 
         return postVerified(context, item.key.hashCode(), title, text, expanded, customSoundUri)
@@ -186,8 +188,8 @@ object Notifier {
                 }
                 appendLine("📋 شروط تاییدشده: $conditionsSummary")
             }
-            if (trade.customNote?.isNotBlank() == true) {
-                appendLine("📝 توضیحات: ${trade.customNote}")
+            if (trade.note.isNotBlank()) {
+                appendLine("📝 توضیحات: ${trade.note}")
             }
             appendLine("⏱ زمان ورود: ${formatDateTime(trade.openedAt)}")
         }.trimEnd()
