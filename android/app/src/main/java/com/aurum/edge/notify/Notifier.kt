@@ -165,16 +165,16 @@ object Notifier {
     fun notifyTradeOpened(context: Context, trade: PaperTrade, customSoundUri: String = ""): Boolean {
         ensureChannels(context)
         val isBuy = trade.action == SignalAction.BUY
-        val sideFa = if (isBuy) "خرید (LONG)" else "فروش (SHORT)"
+        val sideFa = if (isBuy) "خرید" else "فروش"
         val symbol = trade.symbol
         val assetLabel = trade.assetClass.label
 
-        val title = "${if (isBuy) "🟢" else "🔴"} معامله $sideFa: $symbol ($assetLabel)"
-        val text = "ورود: ${formatPrice(trade.entry)}$ · SL: ${formatPrice(trade.stopLoss)}$ · TP: ${formatPrice(trade.takeProfit)}$ · اهرم: ${trade.effectiveLeverage}x"
+        val title = "معاملهٔ آموزشی $sideFa ثبت شد · ${trade.symbol} ($assetLabel)"
+        val text = "${trade.symbol} ${trade.interval.label} · ورود ${formatPrice(trade.entry)}$ · شناسه ${trade.id.take(8)} · SL: ${formatPrice(trade.stopLoss)}$ · TP: ${formatPrice(trade.takeProfit)}$"
 
         val expanded = buildString {
             appendLine("📊 نماد معاملاتی: $symbol ($assetLabel)")
-            appendLine("🎯 نوع پوزیشن: $sideFa")
+            appendLine("🎯 نوع پوزیشن: ${if (isBuy) "خرید (LONG)" else "فروش (SHORT)"}")
             appendLine("💰 قیمت ورود: ${formatPrice(trade.entry)}$")
             appendLine("🛑 حد ضرر (SL): ${formatPrice(trade.stopLoss)}$")
             appendLine("🎯 حد سود (TP): ${formatPrice(trade.takeProfit)}$")
@@ -204,8 +204,21 @@ object Notifier {
         )
     }
 
-    /** Compatibility alias for auto entry */
+    /** Caller must pass ONLY the new result of JournalStore.open, after its atomic write succeeds. */
     fun notifyRecordedAutoEntry(context: Context, trade: PaperTrade, customSoundUri: String): Boolean {
+        if (!trade.autoOpened || !trade.isOpen ||
+            trade.action == SignalAction.NO_TRADE || (trade.signalBarTime ?: 0L) <= 0L ||
+            trade.mtf?.veto != false) return false
+        val isLegacyEight = trade.symbol == "XAU/USD" && (trade.priceAction != null || trade.entryConditions.size == 8)
+        if (isLegacyEight) {
+            if (trade.priceAction == null || trade.entryConditions.size < 8 ||
+                trade.entryConditions.take(8).any { it.status != "CONFIRMED" } ||
+                trade.priceAction.barTime != trade.signalBarTime ||
+                trade.priceAction.action != trade.action ||
+                trade.priceAction.quote != trade.entry) return false
+        } else {
+            if (trade.entryConditions.size < 7 || trade.entryConditions.any { it.status == "CONFLICT" }) return false
+        }
         return notifyTradeOpened(context, trade, customSoundUri)
     }
 
