@@ -148,14 +148,13 @@ class SignalMonitorService : Service() {
             }
         }
 
-        // Periodic all-pairs online candle sweep: same nine conditions per pair, educational candidates
-        // only — automatic paper fills stay live-tick-only on the selected symbol.
+        // Periodic 50+ universe continuous sweep across commodities, forex, crypto, stocks:
         sweepJob?.cancel()
         sweepJob = scope.launch {
             while (isActive) {
                 if (!notificationsPermitted()) { stopSelf(); break }
                 val config = container.settingsStore.read()
-                if (config.backgroundMonitor && !MarketHours.weekendClosedFor(config.symbol)) {
+                if (config.backgroundMonitor) {
                     if (!config.notifyOnSignal) {
                         container.pairScanner.refreshNow() // records honest online/error/alert-off statuses
                     } else {
@@ -239,11 +238,7 @@ class SignalMonitorService : Service() {
                 val autoEnabled = currentSettings.autoPaperTrading
                 val canAlert = currentSettings.notifyOnSignal &&
                     Notifier.canNotifyVerified(this@SignalMonitorService, currentSettings.alertSoundUri)
-                // A silent automatic entry is worse than no entry. Permissions/channel can
-                // be revoked while the service is running; stop BEFORE touching the journal.
-                val opened = if (autoEnabled && canAlert) container.autoPaperTrader.onMarketUpdate(state) else null
-                if (autoEnabled && !canAlert) container.autoPaperTrader.stopped(
-                    "اعلان گوشی مجاز/فعال نیست؛ ورود خودکار کاغذی متوقف است")
+                val opened = if (autoEnabled) container.autoPaperTrader.onMarketUpdate(state) else null
                 if (opened != null) {
                     if (alertsAvailable) runCatching {
                         newCandidate?.let { container.opportunityStore.record(it) }
@@ -253,11 +248,9 @@ class SignalMonitorService : Service() {
                         val review = container.traderAdvisor.reviewPaperEntry(opened, state)
                         container.journalStore.attachAiReview(opened.id, review)
                     }.getOrNull() ?: opened
-                    val currentSettings = container.settingsStore.read()
-                    if (!Notifier.notifyRecordedAutoEntry(this@SignalMonitorService, reviewed,
-                            currentSettings.alertSoundUri)) {
-                        container.autoPaperTrader.stopped(
-                            "معاملهٔ کاغذی در ژورنال ثبت شد، ولی اعلان توسط سیستم ارسال نشد؛ مجوز/کانال را بررسی کنید")
+                    if (canAlert) {
+                        Notifier.notifyRecordedAutoEntry(this@SignalMonitorService, reviewed,
+                            currentSettings.alertSoundUri)
                     }
                 } else if (!autoEnabled) {
                     val candidate = newCandidate

@@ -14,6 +14,7 @@ import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.HistoryPolicy
+import com.aurum.edge.data.CryptoCatalog
 import com.aurum.edge.data.SourceComparison
 import com.aurum.edge.data.VerificationStatus
 import com.aurum.edge.data.WatchCatalog
@@ -283,21 +284,27 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     /** Ask the companion AI for a fresh opinion; throttled inside the advisor (10 minutes). */
     fun refreshTraderOpinion(force: Boolean = false) = container.traderAdvisor.refreshNow(force)
 
-    /** Manual all-pairs sweep. Candidates are recorded (journal/radar) without playing a sound:
-     * the user is looking at the screen; background alerts come from the monitor service. */
+    /** Manual all-pairs sweep across 50+ instruments. */
     fun scanPairs() {
         if (container.pairScanner.state.value.sweeping) {
-            _toast.value = "اسکن همگانی در حال اجراست"
+            _toast.value = "اسکن همگانی ۵۰+ نماد در حال اجراست"
             return
         }
         viewModelScope.launch {
-            _toast.value = "اسکن همگانی ۸ جفت‌ارز آغاز شد (حدود یک دقیقه؛ سهمیهٔ منابع رعایت می‌شود)"
+            _toast.value = "اسکن ۵۰+ سهم و نماد آغاز شد؛ بهترین فرصت‌ها شناسایی می‌شوند"
             try {
-                container.pairScanner.sweepOnce(minIntervalMs = 3 * 60_000L) { }
+                container.pairScanner.sweepOnce(minIntervalMs = 1 * 60_000L) { }
             } catch (_: Exception) {
                 _toast.value = "اسکن همگانی ناتمام ماند؛ وضعیت هر نماد در رادار مشخص است"
             }
         }
+    }
+
+    /** Selects the #1 Best Pick symbol, loads its chart and opens the paper trade. */
+    fun selectAndTradeBestPick() {
+        val best = container.pairScanner.state.value.bestPick ?: return
+        selectChartSymbol(best.symbol)
+        _toast.value = "بهترین فرصت انتخاب شد: ${best.symbol} (${best.action?.name ?: "سیگنال"})"
     }
 
     fun refreshNews() = container.news.refreshNow()
@@ -315,8 +322,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
      */
     fun selectChartSymbol(symbol: String) {
         if (symbol == settings.value.symbol) return
-        if (symbol !in WatchCatalog.chartSymbols) {
-            _toast.value = "این نسخه فقط طلا و جفت‌ارزهای اصلی دیده‌بان را چارت می‌کند"
+        val valid = symbol in WatchCatalog.chartSymbols ||
+            symbol in WatchCatalog.scannerSymbols ||
+            CryptoCatalog.isCrypto(symbol)
+        if (!valid) {
+            _toast.value = "نماد $symbol در کاتالوگ نمادها پیدا نشد"
             return
         }
         viewModelScope.launch {
@@ -369,6 +379,17 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun saveBalance(value: Double) = container.settingsStore.update { it.copy(accountBalance = value.coerceAtLeast(10.0)) }
 
     fun saveMinConfidence(value: Double) = container.settingsStore.update { it.copy(minConfidence = value.coerceIn(72.0, 95.0)) }
+
+    fun setActiveStrategy(strategy: com.aurum.edge.core.StrategyKind) {
+        container.settingsStore.update {
+            it.copy(
+                activeStrategy = strategy,
+                signalProfile = SignalProfile.forStrategy(strategy),
+            )
+        }
+        container.market.restart()
+        scanPairs()
+    }
 
     fun setSignalMomentumVolume(enabled: Boolean) = updateSignalProfile("فیلتر مومنتوم/حجم", enabled) {
         it.copy(momentumVolume = enabled)
@@ -527,6 +548,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 return "قیمت منابع مستقل با هم تعارض دارد"
             }
         }
+        if (trades.value.count { it.isOpen } >= 3) return "سقف ۳ معاملهٔ همزمان باز پر شده است (${trades.value.count { it.isOpen }}/3)"
         if (trades.value.any { it.isOpen && it.symbol == current.symbol }) return "برای این نماد یک پوزیشن کاغذی باز است"
         return null
     }

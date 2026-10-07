@@ -707,7 +707,7 @@ class MarketRepository(
         }
         val signal = if (showingCache) null else withContext(Dispatchers.Default) {
             runCatching {
-                SignalEngine.evaluate(bars, current.interval, current.minConfidence, current.spreadPrice, current.signalProfile)
+                SignalEngine.evaluate(bars, current.interval, current.minConfidence, current.spreadPrice, current.signalProfile, current.activeStrategy)
             }.getOrNull()
         }
         _state.value = _state.value.copy(
