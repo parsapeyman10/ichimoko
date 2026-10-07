@@ -38,6 +38,7 @@ import com.aurum.edge.data.FreeHistoryState
 import com.aurum.edge.data.JournalStats
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
+import com.aurum.edge.data.SpotFallbackClient
 import com.aurum.edge.data.NewsRepository
 import com.aurum.edge.data.SignalTuningPlan
 import com.aurum.edge.data.WatchSelection
