@@ -70,6 +70,10 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
         else -> IctEntryRules.assess(market).reason
     }
 
+    val trades by viewModel.trades.collectAsStateWithLifecycle()
+    val openTrades = remember(trades) { trades.filter { it.isOpen } }
+    val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -77,7 +81,14 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             .padding(bottom = 14.dp),
     ) {
 
-        // ── ۱. بهترین فرصت معاملاتی (#1 Best Opportunity) با تشریح کامل شروط ──
+        // ── ۱. بنر وضعیت ۴ دسته دارایی (رمزارز، فارکس، طلا/کالا، سهام) در ۴ مستطیل بالا ──
+        com.aurum.edge.ui.components.AssetClass4SlotsBanner(
+            openTrades = openTrades,
+            livePrices = livePrices,
+            onSelectSymbol = { symbol -> viewModel.selectChartSymbol(symbol) },
+        )
+
+        // ── ۲. بهترین فرصت معاملاتی (#1 Best Opportunity) با تشریح کامل شروط ──
         BestOpportunityDetailedCard(
             best = scanState.bestPick,
             sweeping = scanState.sweeping,
@@ -88,7 +99,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             },
         )
 
-        // ── ۲. سه کاندیدای برتر بازار (Top 3 Candidates) با تفکیک دسته و شروط ──
+        // ── ۳. سه کاندیدای برتر بازار (Top 3 Candidates) با تفکیک دسته و شروط ──
         if (scanState.topThree.isNotEmpty()) {
             TopCandidatesDetailedSection(
                 candidates = scanState.topThree,
@@ -97,15 +108,16 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             )
         }
 
-        // ── ۳. خلاصه سیگنال نماد انتخابی و ورود به معامله ─────────────────
+        // ── ۴. خلاصه سیگنال نماد انتخابی و موتور تلفیقی ایچیموکو ─────────
         SignalSummaryCard(
             signal = signal,
+            symbol = market.symbol,
             onOpenPaperTrade = { signal?.let { viewModel.openPaperTrade(it) } },
             entryBlocker = positionBlocker,
             allowManualPaperTrade = true,
         )
 
-        // ── ۴. وضعیت معامله خودکار کاغذی ─────────────────────────────────
+        // ── ۵. وضعیت معامله خودکار کاغذی ─────────────────────────────────
         SectionCard("معاملهٔ خودکار کاغذی (تخصیص متوازن ۴ بازار)") {
             Text(
                 if (settings.autoPaperTrading) autoStatus else "خاموش (از بخش تنظیمات یا صفحه اصلی قابل فعال‌سازی است)",
@@ -114,11 +126,11 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             )
         }
 
-        // ── ۵. چک‌لیست شواهد و شروط تکنیکال نماد انتخابی ──────────────────
+        // ── ۶. چک‌لیست کامل شواهد و شروط تکنیکال نماد انتخابی ──────────────
         signal?.let { s ->
             SectionCard(
-                title = "شروط تکنیکال ایچیموکو · ${market.symbol} · ${s.confidence.toInt()}/100",
-                subtitle = "بررسی ابر کومو ۸/۲۴/۷۲، تقاطع TK، آزادی چیکو اسپن، فیلتر ضد ساید و تراز MTF",
+                title = "چک‌لیست شروط تکنیکال ایچیموکو و پرایس‌اکشن · ${market.symbol}",
+                subtitle = "ابر کومو ۸/۲۴/۷۲، تقاطع TK، آزادی ۲۴ دوره‌ای چیکو، فیلتر ضد رنج، مومنتوم و تراز MTF",
                 trailing = {
                     val count = s.confluence.count { it.ok }
                     Pill("$count از ${s.confluence.size} تایید", if (count == s.confluence.size) AurumColors.Green else AurumColors.Gold)
@@ -134,7 +146,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             }
         }
 
-        // ── ۶. وضعیت پایش پیوسته ۵۰+ نماد در پس‌زمینه (رادار خودکار) ───────
+        // ── ۷. وضعیت پایش پیوسته ۵۰+ نماد در پس‌زمینه (رادار خودکار) ───────
         PairRadarSummaryCard(
             scan = scanState,
             onScan = { viewModel.scanPairs() },

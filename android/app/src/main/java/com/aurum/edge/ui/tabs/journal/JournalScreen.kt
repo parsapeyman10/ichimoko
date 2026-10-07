@@ -362,6 +362,8 @@ private fun TradeRow(trade: PaperTrade) {
                 style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextPrimary,
             )
+            Text("اهرم ${trade.effectiveLeverage}x · مارجین: $${formatPrice(trade.effectiveMarginUsd)} · کارمزد: $${formatPrice(trade.effectiveCommissionUsd)} · اسپرد: $${formatPrice(trade.effectiveSpreadCostUsd)}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
             Text("${trade.exitReason ?: "—"} · ${String.format("%.6f", trade.positionOz)} ${trade.unit}",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             trade.note.takeIf { it.isNotBlank() }?.let { note ->

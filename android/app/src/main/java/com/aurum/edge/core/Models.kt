@@ -340,15 +340,35 @@ data class PaperTrade(
     val entryConditions: List<PaperConditionRecord> = emptyList(),
     /** Null on older/manual records; never infer a historical ICT verdict on read. */
     val priceAction: IctPriceActionRecord? = null,
+    val leverage: Int = 20,
+    val marginUsd: Double = 0.0,
+    val commissionUsd: Double = 0.0,
+    val spreadCostUsd: Double = 0.0,
 ) {
     val isOpen: Boolean get() = closedAt == null
     val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }
+    val assetClass: AssetClass get() = AssetClass.of(symbol)
 
     val riskPerOz: Double get() = kotlin.math.abs(entry - stopLoss)
 
     /** Risk in QUOTE currency per unit; convert to USD before comparing with the budget. */
     val riskUsd: Double
         get() = PaperOrderRules.quotePnlToUsd(symbol, riskPerOz * positionOz, entry)
+
+    val effectiveLeverage: Int
+        get() = if (leverage > 0) leverage else PaperOrderRules.defaultLeverageFor(symbol)
+
+    val notionalValueUsd: Double
+        get() = PaperOrderRules.quotePnlToUsd(symbol, positionOz * entry, entry)
+
+    val effectiveMarginUsd: Double
+        get() = if (marginUsd > 0.0) marginUsd else (notionalValueUsd / effectiveLeverage)
+
+    val effectiveCommissionUsd: Double
+        get() = if (commissionUsd > 0.0) commissionUsd else (notionalValueUsd * 0.0004)
+
+    val effectiveSpreadCostUsd: Double
+        get() = if (spreadCostUsd > 0.0) spreadCostUsd else (notionalValueUsd * 0.0002)
 
     val rMultiple: Double?
         get() {

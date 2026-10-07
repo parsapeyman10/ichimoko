@@ -11,11 +11,23 @@ data class PaperTicket(
     val actualRiskUsd: Double,
     val notionalUsd: Double,
     val rewardRisk: Double,
+    val leverage: Int = 20,
+    val marginUsd: Double = 0.0,
+    val commissionUsd: Double = 0.0,
+    val spreadCostUsd: Double = 0.0,
 )
 
 object PaperOrderRules {
     /** Quote currencies of USD-base crosses whose quote->USD rate IS the pair's own price. */
     private val USD_CROSS_QUOTES = setOf("JPY", "CHF", "CAD")
+
+    /** Default leverage by asset class: Forex 30x, Commodities 20x, Crypto 10x, Stocks 5x */
+    fun defaultLeverageFor(symbol: String): Int = when (AssetClass.of(symbol)) {
+        AssetClass.COMMODITY -> 20
+        AssetClass.FOREX -> 30
+        AssetClass.CRYPTO -> 10
+        AssetClass.STOCK -> 5
+    }
 
     /** Paper-sizing supports the entire universe: Forex, Crypto, Commodities, Stocks, Indices. */
     fun paperable(symbol: String): Boolean {
@@ -83,7 +95,22 @@ object PaperOrderRules {
         require(actualRisk.isFinite() && actualRisk <= budget + 1e-4) {
             "ریسک پوزیشن از بودجه تعیین‌شده فراتر می‌رود"
         }
-        return PaperTicket(quantity, unitFor(symbol), budget, actualRisk, notional, rr)
+        val leverage = defaultLeverageFor(symbol)
+        val margin = kotlin.math.round((notional / leverage) * 100.0) / 100.0
+        val commission = kotlin.math.round((notional * 0.0004) * 100.0) / 100.0
+        val spreadCost = kotlin.math.round((notional * 0.0002) * 100.0) / 100.0
+        return PaperTicket(
+            quantity = quantity,
+            unit = unitFor(symbol),
+            riskBudgetUsd = budget,
+            actualRiskUsd = actualRisk,
+            notionalUsd = notional,
+            rewardRisk = rr,
+            leverage = leverage,
+            marginUsd = margin,
+            commissionUsd = commission,
+            spreadCostUsd = spreadCost,
+        )
     }
 }
 

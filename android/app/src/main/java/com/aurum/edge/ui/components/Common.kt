@@ -288,3 +288,133 @@ fun EmptyState(title: String, message: String, modifier: Modifier = Modifier) {
         )
     }
 }
+
+/**
+ * بنر وضعیت ۴ دسته دارایی (طلا/کالا، فارکس، رمزارز، سهام)
+ * نمایش در ۴ مستطیل بالا؛ در صورت وجود معامله باز سبز و در غیر این صورت قرمز.
+ */
+@Composable
+fun AssetClass4SlotsBanner(
+    openTrades: List<com.aurum.edge.core.PaperTrade>,
+    livePrices: Map<String, Double> = emptyMap(),
+    onSelectSymbol: (String) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    val categories = listOf(
+        com.aurum.edge.core.AssetClass.COMMODITY to "طلا و کالا",
+        com.aurum.edge.core.AssetClass.FOREX to "جفت‌ارزها",
+        com.aurum.edge.core.AssetClass.CRYPTO to "رمزارزها",
+        com.aurum.edge.core.AssetClass.STOCK to "سهام جهانی",
+    )
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "تخصیص متوازن ۴ بازار (حداکثر ۱ پوزیشن در هر دسته)",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.Gold,
+                fontWeight = FontWeight.Bold,
+            )
+            val openCount = openTrades.size
+            Pill("$openCount از ۴ فعال", if (openCount > 0) AurumColors.Green else AurumColors.TextMuted)
+        }
+
+        // ۴ مستطیل به صورت گرید دو در دو
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            val pairs = categories.chunked(2)
+            pairs.forEach { rowCategories ->
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    rowCategories.forEach { (assetClass, title) ->
+                        val trade = openTrades.firstOrNull { it.assetClass == assetClass }
+                        val isOpen = trade != null
+                        val defaultLev = com.aurum.edge.core.PaperOrderRules.defaultLeverageFor(
+                            when (assetClass) {
+                                com.aurum.edge.core.AssetClass.COMMODITY -> "XAU/USD"
+                                com.aurum.edge.core.AssetClass.FOREX -> "EUR/USD"
+                                com.aurum.edge.core.AssetClass.CRYPTO -> "BTCUSDT"
+                                com.aurum.edge.core.AssetClass.STOCK -> "AAPL"
+                            }
+                        )
+
+                        val borderColor = if (isOpen) AurumColors.Green else AurumColors.Red.copy(alpha = 0.5f)
+                        val bgColor = if (isOpen) AurumColors.Green.copy(alpha = 0.12f) else AurumColors.Red.copy(alpha = 0.06f)
+
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(bgColor, RoundedCornerShape(10.dp))
+                                .border(1.2.dp, borderColor, RoundedCornerShape(10.dp))
+                                .clickable { trade?.let { onSelectSymbol(it.symbol) } }
+                                .padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = title,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isOpen) AurumColors.Green else AurumColors.TextPrimary,
+                                )
+                                Pill(
+                                    text = if (isOpen) "● فعال" else "○ غیرفعال",
+                                    color = if (isOpen) AurumColors.Green else AurumColors.Red,
+                                )
+                            }
+
+                            if (isOpen && trade != null) {
+                                val currentPrice = livePrices[trade.symbol] ?: trade.entry
+                                val pnlPerUnit = if (trade.action == com.aurum.edge.core.SignalAction.BUY) currentPrice - trade.entry else trade.entry - currentPrice
+                                val grossPnl = trade.positionOz * pnlPerUnit
+                                val netPnl = grossPnl - (trade.effectiveCommissionUsd + trade.effectiveSpreadCostUsd)
+
+                                Text(
+                                    text = "${trade.symbol} · ${if (trade.action == com.aurum.edge.core.SignalAction.BUY) "BUY ↗" else "SELL ↘"}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AurumColors.Gold,
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text("اهرم ${trade.effectiveLeverage}x", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
+                                    Text(
+                                        (if (netPnl >= 0) "+$" else "-$") + String.format(Locale.US, "%.2f", kotlin.math.abs(netPnl)),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (netPnl >= 0) AurumColors.Green else AurumColors.Red,
+                                    )
+                                }
+                            } else {
+                                Text(
+                                    text = "آماده ورود خودکار",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AurumColors.TextMuted,
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text("اهرم: ${defaultLev}x", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                                    Text("پایش ۵۰+ نماد", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

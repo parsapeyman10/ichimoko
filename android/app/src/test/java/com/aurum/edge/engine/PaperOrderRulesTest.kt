@@ -61,6 +61,16 @@ class PaperOrderRulesTest {
         assertEquals(com.aurum.edge.core.AssetClass.STOCK, com.aurum.edge.core.AssetClass.of("AAPL"))
         assertEquals(com.aurum.edge.core.AssetClass.STOCK, com.aurum.edge.core.AssetClass.of("NASDAQ"))
         assertEquals(com.aurum.edge.core.AssetClass.FOREX, com.aurum.edge.core.AssetClass.of("EUR/USD"))
+
+        // Financial realism: leverage, margin, commission, and spread cost checks
+        val goldTicket = PaperOrderRules.preview(SignalAction.BUY, "XAU/USD", 2500.0, 2490.0, 2530.0, 1000.0, 1.0)
+        assertEquals(20, goldTicket.leverage)
+        assertTrue(goldTicket.marginUsd > 0.0)
+        assertTrue(goldTicket.commissionUsd > 0.0)
+        assertTrue(goldTicket.spreadCostUsd > 0.0)
+
+        val cryptoTicket = PaperOrderRules.preview(SignalAction.BUY, "BTCUSDT", 60000.0, 59000.0, 63000.0, 1000.0, 1.0)
+        assertEquals(10, cryptoTicket.leverage)
     }
 
     @Test fun rejectsWrongSideExcessLeverageRewardAndInvalidQuotes() {

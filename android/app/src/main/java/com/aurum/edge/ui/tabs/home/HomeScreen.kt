@@ -142,7 +142,21 @@ fun HomeScreen(
             )
         }
 
-        // ── ۲. ترکینگ زنده و کامل تمامی معاملات باز پورتفو ──────────────────
+        // ── ۲. بنر وضعیت ۴ دسته دارایی (رمزارز، فارکس، طلا/کالا، سهام) در ۴ مستطیل بالا ──
+        val tradesState by viewModel.trades.collectAsStateWithLifecycle()
+        val openTradesList = remember(tradesState) { tradesState.filter { it.isOpen } }
+        val livePricesMap by viewModel.livePrices.collectAsStateWithLifecycle()
+
+        com.aurum.edge.ui.components.AssetClass4SlotsBanner(
+            openTrades = openTradesList,
+            livePrices = livePricesMap,
+            onSelectSymbol = { symbol ->
+                viewModel.selectChartSymbol(symbol)
+                onChart()
+            },
+        )
+
+        // ── ۳. ترکینگ زنده و کامل تمامی معاملات باز پورتفو ──────────────────
         LiveOpenTradesTrackingSection(
             viewModel = viewModel,
             currentMarket = market,
@@ -153,10 +167,10 @@ fun HomeScreen(
             },
         )
 
-        // ── ۳. پنل معاملهٔ خودکار کاغذی و تخصیص ۴ بازار ────────────────────
+        // ── ۴. پنل معاملهٔ خودکار کاغذی و تخصیص ۴ بازار ────────────────────
         AutoPaperCard(viewModel, onJournal)
 
-        // ── ۴. قیمت لحظه‌ای و اسپرد بازار ──────────────────────────────────
+        // ── ۵. قیمت لحظه‌ای و اسپرد بازار ──────────────────────────────────
         SectionCard(
             title = "قیمت لحظه‌ای بازار · ${market.symbol}",
             subtitle = "فقط آخرین عدد واقعی دریافت‌شده؛ بدون داده‌های شبیه‌سازی‌شده",
@@ -290,7 +304,8 @@ private fun LiveTradeGaugeCard(
     val target = trade.takeProfit
 
     val pnlPerUnit = if (isBuy) livePrice - entry else entry - livePrice
-    val unrealizedPnlUsd = pnlPerUnit * trade.positionOz
+    val grossPnl = pnlPerUnit * trade.positionOz
+    val netPnl = grossPnl - (trade.effectiveCommissionUsd + trade.effectiveSpreadCostUsd)
     val pnlPercent = if (entry > 0) (pnlPerUnit / entry) * 100.0 else 0.0
 
     // Calculate progression on scale from SL (0%) to TP (100%)
@@ -307,16 +322,16 @@ private fun LiveTradeGaugeCard(
         ((stop - entry) / totalRange).toFloat().coerceIn(0.05f, 0.95f)
     }
 
-    val isProfitable = unrealizedPnlUsd >= 0.0
+    val isProfitable = netPnl >= 0.0
     val statusColor = when {
-        unrealizedPnlUsd > 0.0 -> AurumColors.Green
-        unrealizedPnlUsd < 0.0 -> AurumColors.Red
+        netPnl > 0.0 -> AurumColors.Green
+        netPnl < 0.0 -> AurumColors.Red
         else -> AurumColors.Gold
     }
 
     val movementLabel = when {
-        unrealizedPnlUsd > 0.0 -> "↗ در مسیر حد سود (TP)"
-        unrealizedPnlUsd < 0.0 -> "↘ در مسیر حد ضرر (SL)"
+        grossPnl > 0.0 -> "↗ در مسیر حد سود (TP)"
+        grossPnl < 0.0 -> "↘ در مسیر حد ضرر (SL)"
         else -> "⚪ در نقطه ورود (Entry)"
     }
 
@@ -347,11 +362,40 @@ private fun LiveTradeGaugeCard(
                     color = if (isBuy) AurumColors.Green else AurumColors.Red,
                 )
             }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = "${if (netPnl >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.2f", netPnl)}$",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = statusColor,
+                )
+                Text(
+                    text = "سود/زیان خالص (${String.format(java.util.Locale.US, "%.2f", pnlPercent)}%)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                )
+            }
+        }
+
+        // Financial Details: Leverage, Margin, Volume, Commission & Spread
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp)
+                .background(AurumColors.Surface, RoundedCornerShape(8.dp))
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
-                text = "${if (unrealizedPnlUsd >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.2f", unrealizedPnlUsd)}$ (${String.format(java.util.Locale.US, "%.2f", pnlPercent)}%)",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = statusColor,
+                "اهرم: ${trade.effectiveLeverage}x · مارجین: $${formatPrice(trade.effectiveMarginUsd)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.Cyan,
+            )
+            Text(
+                "کارمزد: $${formatPrice(trade.effectiveCommissionUsd)} · اسپرد: $${formatPrice(trade.effectiveSpreadCostUsd)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
             )
         }
 
@@ -498,11 +542,24 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit) {
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val status by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
+    val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
     val enabled = settings.autoPaperTrading
+    val openTrades = remember(trades) { trades.filter { it.isOpen } }
     val lastTrade = trades.maxByOrNull { it.openedAt }
 
+    val totalMarginUsed = openTrades.sumOf { it.effectiveMarginUsd }
+    val freeMargin = (settings.accountBalance - totalMarginUsed).coerceAtLeast(0.0)
+
+    val unrealizedTotal = openTrades.sumOf { t ->
+        val price = livePrices[t.symbol] ?: t.entry
+        val pnlPerUnit = if (t.action == SignalAction.BUY) price - t.entry else t.entry - price
+        val gross = pnlPerUnit * t.positionOz
+        gross - (t.effectiveCommissionUsd + t.effectiveSpreadCostUsd)
+    }
+    val equity = settings.accountBalance + unrealizedTotal
+
     SectionCard(
-        title = "معاملهٔ خودکار کاغذی",
+        title = "مدیریت حساب و معاملهٔ خودکار کاغذی",
         subtitle = "تخصیص متوازن در ۴ دسته: ۱ رمزارز · ۱ فارکس · ۱ کالا · ۱ سهام",
         trailing = {
             Pill(
@@ -523,18 +580,26 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit) {
         }
 
         Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val balanceStr = String.format(java.util.Locale.US, "$%.2f", settings.accountBalance).let {
-                if (it.endsWith(".00")) it.substringBefore(".00") else it
-            }
-            StatTile("موجودی حساب", balanceStr, modifier = Modifier.weight(1f))
+            val balanceStr = String.format(java.util.Locale.US, "$%.2f", settings.accountBalance)
+            val equityStr = String.format(java.util.Locale.US, "$%.2f", equity)
+            val freeMarginStr = String.format(java.util.Locale.US, "$%.2f", freeMargin)
+            StatTile("موجودی کل (Balance)", balanceStr, modifier = Modifier.weight(1f))
+            StatTile("اکوئیتی (Equity)", equityStr, if (unrealizedTotal >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
+            StatTile("مارجین آزاد", freeMarginStr, AurumColors.Cyan, Modifier.weight(1f))
+        }
+
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val usedMarginStr = String.format(java.util.Locale.US, "$%.2f", totalMarginUsed)
+            StatTile("مارجین درگیر", usedMarginStr, AurumColors.Gold, Modifier.weight(1f))
             StatTile(
-                "سود/ضرر",
+                "سود/ضرر محقق‌شده",
                 (if (stats.netPnl >= 0) "+" else "") + String.format(java.util.Locale.US, "%.2f", stats.netPnl) + "$",
                 if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red,
                 Modifier.weight(1f),
             )
-            StatTile("پوزیشن‌های باز", "${stats.open}/۴", modifier = Modifier.weight(1f))
+            StatTile("پوزیشن‌های باز", "${openTrades.size}/۴", modifier = Modifier.weight(1f))
         }
+
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatTile("کل معاملات", stats.total.toString(), modifier = Modifier.weight(1f))
             StatTile("برد/باخت", "${stats.wins}/${stats.losses}", modifier = Modifier.weight(1f))

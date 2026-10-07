@@ -193,6 +193,10 @@ class JournalStore(
                 com.aurum.edge.core.PaperConditionRecord.from(it)
             },
             priceAction = if (manual) null else priceAction,
+            leverage = draft.leverage,
+            marginUsd = draft.marginUsd,
+            commissionUsd = draft.commissionUsd,
+            spreadCostUsd = draft.spreadCostUsd,
         )
         mutex.withLock {
             // Serialize the check and append. Up to 4 concurrent open positions allowed (1 Crypto, 1 Forex, 1 Commodity, 1 Stock).
@@ -265,8 +269,9 @@ class JournalStore(
             } else {
                 t.entry - exit
             }
-            val pnl = kotlin.math.round(
-                PaperOrderRules.quotePnlToUsd(t.symbol, pnlPerOz * t.positionOz, exit) * 100.0) / 100.0
+            val grossPnl = PaperOrderRules.quotePnlToUsd(t.symbol, pnlPerOz * t.positionOz, exit)
+            val totalFees = t.effectiveCommissionUsd + t.effectiveSpreadCostUsd
+            val pnl = kotlin.math.round((grossPnl - totalFees) * 100.0) / 100.0
             settledPnlDelta += pnl
             changed = true
             val closed = t.copy(
@@ -323,8 +328,9 @@ class JournalStore(
             } else {
                 t.entry - exit
             }
-            val pnl = kotlin.math.round(
-                PaperOrderRules.quotePnlToUsd(t.symbol, pnlPerOz * t.positionOz, exit) * 100.0) / 100.0
+            val grossPnl = PaperOrderRules.quotePnlToUsd(t.symbol, pnlPerOz * t.positionOz, exit)
+            val totalFees = t.effectiveCommissionUsd + t.effectiveSpreadCostUsd
+            val pnl = kotlin.math.round((grossPnl - totalFees) * 100.0) / 100.0
             settledPnlDelta += pnl
             changed = true
             val closed = t.copy(
@@ -350,8 +356,9 @@ class JournalStore(
         val trade = _trades.value.singleOrNull { it.id == tradeId && it.isOpen }
             ?: throw IllegalArgumentException("پوزیشن باز در ژورنال پیدا نشد یا قبلاً بسته شده است")
         val pnlPerOz = if (trade.action == SignalAction.BUY) price - trade.entry else trade.entry - price
-        val pnl = kotlin.math.round(
-            PaperOrderRules.quotePnlToUsd(trade.symbol, pnlPerOz * trade.positionOz, price) * 100.0) / 100.0
+        val grossPnl = PaperOrderRules.quotePnlToUsd(trade.symbol, pnlPerOz * trade.positionOz, price)
+        val totalFees = trade.effectiveCommissionUsd + trade.effectiveSpreadCostUsd
+        val pnl = kotlin.math.round((grossPnl - totalFees) * 100.0) / 100.0
         val closed = trade.copy(
             closedAt = System.currentTimeMillis(), exitPrice = price, exitReason = reason,
             pnlUsd = pnl,
