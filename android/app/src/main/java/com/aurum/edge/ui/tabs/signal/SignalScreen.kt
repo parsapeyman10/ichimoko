@@ -55,6 +55,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val autoStatus by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
     val scanState by viewModel.pairScan.collectAsStateWithLifecycle()
+    val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
     val signal = market.signal
 
     val openTrades = trades.filter { it.isOpen }
@@ -69,10 +70,6 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             it.signalBarTime == signal.barTime } -> "این کندل قبلاً معامله شده است"
         else -> IctEntryRules.assess(market).reason
     }
-
-    val trades by viewModel.trades.collectAsStateWithLifecycle()
-    val openTrades = remember(trades) { trades.filter { it.isOpen } }
-    val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier
