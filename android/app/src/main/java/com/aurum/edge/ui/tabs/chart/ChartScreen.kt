@@ -696,6 +696,7 @@ private fun tradingViewHtml(tvSymbol: String, tvInterval: String): String {
               border: none;
             }
           </style>
+          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
         </head>
         <body>
           <iframe src="$iframeUrl" allowtransparency="true" frameborder="0"></iframe>
