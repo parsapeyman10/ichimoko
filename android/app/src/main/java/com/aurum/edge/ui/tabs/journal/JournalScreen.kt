@@ -658,15 +658,16 @@ private fun PaperAiReview.verdictFa(): String = when (verdict) {
  */
 @Composable
 private fun HoldReviewStatus(cycle: HoldReviewCycle, onReview: () -> Unit) {
+    val checkedAt = cycle.checkedAt
     Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 when {
                     cycle.alerts.isNotEmpty() ->
                         "نظر AI: ادامهٔ ${cycle.alerts.size} پوزیشن توصیه نمی‌شود — فقط هشدار، معامله بسته نشده"
-                    cycle.reviewed > 0 && cycle.checkedAt != null ->
-                        "آخرین بازبینی AI پوزیشن‌های باز: ${cycle.reviewed} مورد · ${formatDateTime(cycle.checkedAt)}"
-                    cycle.checkedAt != null -> "بازبینی AI در ${formatDateTime(cycle.checkedAt)} نتیجهٔ معتبری نداد"
+                    cycle.reviewed > 0 && checkedAt != null ->
+                        "آخرین بازبینی AI پوزیشن‌های باز: ${cycle.reviewed} مورد · ${formatDateTime(checkedAt)}"
+                    checkedAt != null -> "بازبینی AI در ${formatDateTime(checkedAt)} نتیجهٔ معتبری نداد"
                     else -> "بازبینی AI پوزیشن‌های باز هنوز انجام نشده است"
                 },
                 style = MaterialTheme.typography.labelSmall,
