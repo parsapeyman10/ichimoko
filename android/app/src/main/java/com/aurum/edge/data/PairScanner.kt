@@ -10,6 +10,10 @@ import com.aurum.edge.core.Interval
 import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.MarketPlaybook
+import com.aurum.edge.core.MarketTrend
+import com.aurum.edge.core.MarketTrendRead
+import com.aurum.edge.core.SymbolTrend
+import com.aurum.edge.core.TrendAlignment
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperAlertRules
 import com.aurum.edge.core.PaperOpportunity
@@ -53,6 +57,12 @@ data class PairScanStatus(
     val playbookAllowed: Boolean? = null,
     /** The playbook's own reason when this market/method says stand aside. */
     val playbookReason: String? = null,
+    /** «روند کلی بازار»: the measured trend of this instrument on its reference timeframe. */
+    val trendLabel: String? = null,
+    val trendStrength: Int? = null,
+    /** Was the latest actionable side WITH the measured trend? null = never got a side. */
+    val trendAligned: Boolean? = null,
+    val trendNote: String? = null,
 )
 
 data class PairScanState(
@@ -64,6 +74,12 @@ data class PairScanState(
     val topThree: List<PairScanStatus> = emptyList(),
     /** The single #1 absolute best opportunity to trade. */
     val bestPick: PairScanStatus? = null,
+    /**
+     * «روند کلی بازار» — built from the SAME continuous sweep: every symbol whose real closed
+     * candles were measured votes on breadth, and the six majors plus gold/crypto/equities give
+     * the dollar direction and the risk tone. null until one sweep has measured anything.
+     */
+    val marketTrend: MarketTrendRead? = null,
 )
 
 /**
@@ -84,6 +100,8 @@ class PairScanner(
     private val context: Context? = null,
 ) {
     private val mutex = Mutex()
+    /** Trends measured during the running sweep; published as one market-wide read at the end. */
+    private val trendSample = mutableListOf<SymbolTrend>()
     private var lastSweepElapsed = 0L
     private var autoTrader: PaperAutoTrader? = null
     private val _state = MutableStateFlow(PairScanState(
@@ -92,6 +110,9 @@ class PairScanner(
 
     fun attachAutoTrader(trader: PaperAutoTrader) {
         autoTrader = trader
+        // «روند کلی بازار» از همین پویشِ پیوسته می‌آید؛ پس آخرین خوانشِ عرض بازار/دلار/جوّ ریسک
+        // در لحظهٔ ورود خودکار هم در دسترس همان گیتِ روند قرار می‌گیرد.
+        trader.attachTrendSource { _state.value.marketTrend }
     }
 
     fun refreshNow(minIntervalMs: Long = SWEEP_PERIOD_MS) {
@@ -118,11 +139,15 @@ class PairScanner(
             } finally {
                 val currentStatuses = _state.value.statuses
                 val ranked = rankOpportunities(currentStatuses)
+                // Nothing measured this sweep ⇒ keep the previous read instead of inventing one.
+                val read = if (trendSample.isEmpty()) _state.value.marketTrend
+                else runCatching { MarketTrend.overall(trendSample) }.getOrNull() ?: _state.value.marketTrend
                 _state.value = _state.value.copy(
                     sweeping = false,
                     lastSweepAt = System.currentTimeMillis(),
                     topThree = ranked.take(3),
                     bestPick = ranked.firstOrNull(),
+                    marketTrend = read,
                 )
             }
         }
@@ -133,6 +158,7 @@ class PairScanner(
             .sortedWith(
                 compareByDescending<PairScanStatus> { it.state == "candidate" }
                     .thenByDescending { it.playbookAllowed == true }
+                    .thenByDescending { it.trendAligned == true }
                     .thenByDescending { it.riskReward ?: 0.0 }
                     .thenByDescending { it.confidence ?: 0.0 }
                     .thenByDescending { it.technicalScore ?: 0 }
@@ -140,6 +166,12 @@ class PairScanner(
     }
 
     private suspend fun sweepAll(onCandidate: (suspend (PaperOpportunity) -> Unit)?) {
+        trendSample.clear()
+        // The market-wide read of the PREVIOUS sweep: the breadth of the current one is only
+        // complete after the last symbol, so entries during this sweep are checked against the
+        // latest published read (≤ ۳۰ ثانیه پیش). On the first sweep it is null, and then only
+        // the instrument's own reference-timeframe trend is used — never a guessed market bias.
+        val overallTrend = _state.value.marketTrend
         val statuses = _state.value.statuses.associateBy { it.symbol }.toMutableMap()
         fun update(
             symbol: String,
@@ -157,6 +189,9 @@ class PairScanner(
             methodLabel: String? = null,
             playbookAllowed: Boolean? = null,
             playbookReason: String? = null,
+            trend: SymbolTrend? = null,
+            trendAligned: Boolean? = null,
+            trendNote: String? = null,
         ) {
             statuses[symbol] = PairScanStatus(
                 symbol = symbol,
@@ -176,6 +211,10 @@ class PairScanner(
                 methodLabel = methodLabel,
                 playbookAllowed = playbookAllowed,
                 playbookReason = playbookReason,
+                trendLabel = trend?.shortFa,
+                trendStrength = trend?.strength,
+                trendAligned = trendAligned,
+                trendNote = trendNote ?: trend?.detailFa?.take(200),
             )
             val currentList = WatchCatalog.scannerSymbols.mapNotNull { statuses[it] }
             val ranked = rankOpportunities(currentList)
@@ -251,6 +290,13 @@ class PairScanner(
             if (lastClosed != null) {
                 journal.settle(lastClosed, symbol, now)
             }
+            // «روند کلی بازار چطور به دست می‌آید؟» — لایهٔ اول: از همان کندل‌های بستهٔ واقعیِ
+            // همین نماد، هم روی تایم‌فریم پایه و هم روی تایم‌فریم مرجع (تجمیع‌شده، نه ساخته‌شده).
+            val trend = withContext(Dispatchers.Default) {
+                runCatching { MarketTrend.symbolTrend(symbol, candles, interval) }.getOrNull()
+            }
+            if (trend != null && trend.known) trendSample += trend
+
             // «متناسب با همان استراتژی پویش کن»: the per-market method router is asked FIRST, from
             // the real closed candles and the real session clock. A market whose method says
             // stand aside (weekend, rollover, spike, dead tape, crypto range, closed equities,
@@ -271,6 +317,7 @@ class PairScanner(
                     methodLabel = playbook.method.label,
                     playbookAllowed = false,
                     playbookReason = playbookBlocker.take(160),
+                    trend = trend,
                 )
                 return@forEachIndexed
             }
@@ -302,18 +349,58 @@ class PairScanner(
                     methodLabel = playbook?.method?.label,
                     playbookAllowed = playbook?.allowed,
                     playbookReason = playbook?.reasonFa?.take(160),
+                    trend = trend,
+                )
+                return@forEachIndexed
+            }
+
+            // ── لایهٔ دوم و سوم: عرض بازار + جهت دلار + جوّ ریسک، و اثرشان روی همین ورود ──
+            // روش‌های روندی خلاف جهتِ اندازه‌گیری‌شده مسدود می‌شوند؛ بازگشت به میانگین فقط در
+            // بازارِ بدون روند؛ و ورودِ دارایی ریسکی خلافِ جوّ بازار با کف اطمینانِ سخت‌تر.
+            val alignment = withContext(Dispatchers.Default) {
+                runCatching { MarketTrend.alignmentOf(combined.action, trend) }.getOrNull()
+            }
+            val trendGate = withContext(Dispatchers.Default) {
+                runCatching {
+                    MarketTrend.entryGate(combined.action, playbook?.method, trend, overallTrend)
+                }.getOrNull()
+            }
+            val aligned = alignment == TrendAlignment.WITH
+            if (trendGate != null && !trendGate.allowed) {
+                update(
+                    symbol = symbol,
+                    state = "blocked",
+                    detail = "روند بازار: ${(trendGate.blockerFa ?: "ورود خلاف جهتِ روندِ اندازه‌گیری‌شده").take(120)}",
+                    price = price,
+                    score = score,
+                    action = combined.action,
+                    confidence = combined.confidence,
+                    entry = combined.entry,
+                    sl = combined.stopLoss,
+                    tp = combined.takeProfit,
+                    rr = combined.riskReward,
+                    conditions = combined.confluence,
+                    methodLabel = playbook?.method?.label,
+                    playbookAllowed = playbook?.allowed,
+                    playbookReason = playbook?.reasonFa?.take(160),
+                    trend = trend,
+                    trendAligned = false,
+                    trendNote = trendGate.blockerFa?.take(200),
                 )
                 return@forEachIndexed
             }
 
             // The method also raises the confidence bar per market/session (thin weekend crypto,
             // a range fade, an Asian session …). Below that bar the symbol is not "worthy".
-            if (playbook != null && combined.confidence < playbook.minConfidence) {
+            val trendConfidenceAdd = trendGate?.minConfidenceAdd ?: 0.0
+            val requiredConfidence = (playbook?.minConfidence ?: config.minConfidence) + trendConfidenceAdd
+            if (playbook != null && combined.confidence < requiredConfidence) {
                 update(
                     symbol = symbol,
                     state = "blocked",
                     detail = "متد ${playbook.method.label}: اطمینان ${combined.confidence.toInt()}٪ از کفِ " +
-                        "${playbook.minConfidence.toInt()}٪ این بازار/سشن کمتر است",
+                        "${requiredConfidence.toInt()}٪ این بازار/سشن کمتر است" +
+                        (if (trendConfidenceAdd > 0.0) " (لایهٔ روند +${trendConfidenceAdd.toInt()})" else ""),
                     price = price,
                     score = score,
                     action = combined.action,
@@ -326,6 +413,9 @@ class PairScanner(
                     methodLabel = playbook.method.label,
                     playbookAllowed = true,
                     playbookReason = playbook.reasonFa.take(160),
+                    trend = trend,
+                    trendAligned = aligned,
+                    trendNote = trendGate?.noteFa?.take(200),
                 )
                 return@forEachIndexed
             }
@@ -357,6 +447,12 @@ class PairScanner(
                     tp = combined.takeProfit,
                     rr = combined.riskReward,
                     conditions = combined.confluence,
+                    methodLabel = playbook?.method?.label,
+                    playbookAllowed = playbook?.allowed,
+                    playbookReason = playbook?.reasonFa?.take(160),
+                    trend = trend,
+                    trendAligned = aligned,
+                    trendNote = trendGate?.noteFa?.take(200),
                 )
                 return@forEachIndexed
             }
@@ -365,7 +461,7 @@ class PairScanner(
             val ict = IctEntryRules.approvedEvidence(market, System.currentTimeMillis(), graceMs)
 
             if (mtf?.veto == true) {
-                update(symbol = symbol, state = "blocked", detail = "تراز چندتایم‌فریم ورود را وتو کرده است: ${mtf.vetoReason}", price = price, score = score, conditions = combined.confluence)
+                update(symbol = symbol, state = "blocked", detail = "تراز چندتایم‌فریم ورود را وتو کرده است: ${mtf.vetoReason}", price = price, score = score, conditions = combined.confluence, trend = trend, trendAligned = aligned)
                 return@forEachIndexed
             }
 
@@ -408,6 +504,8 @@ class PairScanner(
                 state = "candidate",
                 detail = "فرصت معاملاتی تایید شد" +
                     (playbook?.let { " · متد ${it.method.label}" } ?: "") +
+                    (trend?.let { " · روند ${it.direction.label} ${it.strength}٪" } ?: "") +
+                    (overallTrend?.takeIf { it.known }?.let { " · بازار ${it.bias.label}" } ?: "") +
                     " · شانس موفقیت ${(combined.confidence).toInt()}% · R:R 1:${String.format(java.util.Locale.US, "%.1f", combined.riskReward ?: 2.0)}",
                 price = price,
                 score = score,
@@ -421,6 +519,9 @@ class PairScanner(
                 methodLabel = playbook?.method?.label,
                 playbookAllowed = playbook?.allowed,
                 playbookReason = playbook?.reasonFa?.take(160),
+                trend = trend,
+                trendAligned = aligned,
+                trendNote = trendGate?.noteFa?.take(200),
             )
         }
     }

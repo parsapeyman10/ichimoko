@@ -13,6 +13,7 @@ enum class AlertCheckKind(val label: String) {
     MONITOR("سرویس پایش"), APP_ALERT("هشدار در اپ"), ANDROID_ALERT("اعلان اندروید"),
     STORAGE("فایل‌های هشدار/ژورنال"), AI_NEWS("خبر نزدیک برای ژورنال"), NINE_WAY("۸/۸ فنی، ICT و MTF"),
     SCAN("اسکن پیوستهٔ نمادها"),
+    TREND("روند کلی بازار"),
 }
 
 data class AlertCheck(val kind: AlertCheckKind, val ready: Boolean, val detail: String)
@@ -47,6 +48,46 @@ object AlertDiagnostics {
         val entryBlocker = if (signal?.isActionable == true)
             PaperAlertRules.blocker(market, settings, news, trades, mtf, now)
         else signal?.blockers?.firstOrNull() ?: "برای این کندل سیگنال فنی تأییدشده موجود نیست"
+
+        // ── «روند کلی بازار» به‌عنوان یک پیش‌نیازِ دیده‌شدنی ──────────────────────────
+        // فقط وقتی قرمز می‌شود که واقعاً جلوی ورود را گرفته باشد؛ «اندازه گرفته نشد» قرمز نیست
+        // چون ورود را مسدود نمی‌کند (فقط کف اطمینان را بالا می‌برد) و صریحاً همان را می‌گوید.
+        val trendSymbol = runCatching {
+            MarketTrend.symbolTrend(market.symbol, market.candles, market.interval)
+        }.getOrNull()
+        val trendOverall = scan?.marketTrend
+        val trendSummary = buildString {
+            append(trendSymbol?.let { "روند ${market.symbol}: ${it.shortFa} روی ${it.higherLabel ?: it.intervalLabel}" }
+                ?: "روند ${market.symbol}: اندازه گرفته نشد (کندل بستهٔ کافی نیست)")
+            append(trendOverall?.let {
+                " · روند کلی بازار: ${it.bias.label} ${it.strength}٪ (${it.breadthFa}) · دلار " +
+                    "${it.dollarBias.label} · جوّ ${it.riskTone.label}"
+            } ?: " · روند کلی بازار: هنوز از پویشِ نمادها اندازه گرفته نشد")
+        }
+        val trendSide = signal?.takeIf { it.isActionable }?.action
+        val trendCheck = if (trendSide == null) {
+            AlertCheck(AlertCheckKind.TREND, true, "سیگنال قابل‌اقدامی نیست تا با روند سنجیده شود · $trendSummary")
+        } else {
+            val trendMethod = runCatching {
+                MarketPlaybook.assess(market.symbol, market.candles, market.interval, now).method
+            }.getOrNull()
+            val trendGate = runCatching {
+                MarketTrend.entryGate(trendSide, trendMethod, trendSymbol, trendOverall)
+            }.getOrNull()
+            when {
+                trendGate == null -> AlertCheck(AlertCheckKind.TREND, true,
+                    "لایهٔ روند ارزیابی نشد؛ ورود با همان آستانه‌های قبلی سنجیده می‌شود · $trendSummary")
+                !trendGate.allowed -> AlertCheck(AlertCheckKind.TREND, false,
+                    "${MarketTrend.sideLabel(trendSide)} با روندِ اندازه‌گیری‌شده نمی‌خواند: " +
+                        (trendGate.blockerFa ?: "—"))
+                trendGate.minConfidenceAdd > 0.0 -> AlertCheck(AlertCheckKind.TREND, true,
+                    "${MarketTrend.sideLabel(trendSide)} مسدود نشد ولی کف اطمینان " +
+                        "+${trendGate.minConfidenceAdd.toInt()} رفت · $trendSummary")
+                else -> AlertCheck(AlertCheckKind.TREND, true,
+                    "${MarketTrend.sideLabel(trendSide)} هم‌جهت با روندِ اندازه‌گیری‌شده است · $trendSummary")
+            }
+        }
+
         return listOf(
             AlertCheck(AlertCheckKind.KEY, settings.hasKey || market.closedCount >= HistoryPolicy.TARGET_CANDLES,
                 if (settings.hasKey) "کلید Twelve روی همین نصب موجود است؛ اعتبار آن از اتصال داده مشخص می‌شود" else
@@ -97,6 +138,7 @@ object AlertDiagnostics {
                 }),
             AlertCheck(AlertCheckKind.NINE_WAY, signal?.isActionable == true && entryBlocker == null,
                 entryBlocker ?: "شرایط این لحظه تأییدند؛ این به‌تنهایی وقوع هشدار، معامله یا سود را تضمین نمی‌کند"),
+            trendCheck,
         )
     }
 

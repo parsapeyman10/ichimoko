@@ -51,7 +51,13 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.MarketPlaybook
+import com.aurum.edge.core.MarketTrendRead
 import com.aurum.edge.core.PaperOrderRules
+import com.aurum.edge.core.RiskTone
+import com.aurum.edge.core.SymbolTrend
+import com.aurum.edge.core.TrendAlignment
+import com.aurum.edge.core.TrendContext
+import com.aurum.edge.core.TrendDirection
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.VenueSpecs
@@ -80,6 +86,11 @@ fun ChartScreen(
 ) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
+    // «روند کلی بازار»: خوانشِ عرض بازار/دلار/جوّ ریسک + روندِ خودِ این نماد. زیر چارت
+    // نشان داده می‌شود، نه روی ویدجت TradingView — چارت دقیقاً با مشخصات خودش می‌ماند.
+    val marketTrend by viewModel.marketTrend.collectAsStateWithLifecycle()
+    val symbolTrend by viewModel.symbolTrend.collectAsStateWithLifecycle()
+    val trendContext by viewModel.trendContext.collectAsStateWithLifecycle()
     val openTrade = trades.firstOrNull { it.symbol == market.symbol && it.isOpen }
     val context = LocalContext.current
     // Reset the probe whenever the instrument or timeframe changes.
@@ -221,6 +232,13 @@ fun ChartScreen(
             )
         }
 
+        MarketTrendStrip(
+            read = marketTrend,
+            symbolTrend = symbolTrend,
+            context = trendContext,
+            symbol = market.symbol,
+        )
+
         // ── پنجرهٔ هر معاملهٔ باز: همان لحظه که ورود ثبت می‌شود اینجا باز می‌شود ──────
         OpenTradeWindows(
             openTrades = trades.filter { it.isOpen }.sortedByDescending { it.openedAt },
@@ -231,6 +249,8 @@ fun ChartScreen(
             chartSymbol = market.symbol,
             chartInterval = market.interval,
             chartCandles = market.candles,
+            marketTrend = marketTrend,
+            liveSymbolTrend = symbolTrend,
         )
 
         StrategyBar(viewModel, market)
@@ -557,6 +577,8 @@ private fun OpenTradeWindows(
     chartSymbol: String,
     chartInterval: Interval,
     chartCandles: List<com.aurum.edge.core.Candle>,
+    marketTrend: MarketTrendRead?,
+    liveSymbolTrend: SymbolTrend?,
 ) {
     if (openTrades.isEmpty()) {
         SectionCard(
@@ -580,6 +602,8 @@ private fun OpenTradeWindows(
             chartSymbol = chartSymbol,
             chartInterval = chartInterval,
             chartCandles = chartCandles,
+            marketTrend = marketTrend,
+            liveSymbolTrend = liveSymbolTrend,
         )
     }
 }
@@ -594,6 +618,8 @@ private fun TradeWindowCard(
     chartSymbol: String,
     chartInterval: Interval,
     chartCandles: List<com.aurum.edge.core.Candle>,
+    marketTrend: MarketTrendRead?,
+    liveSymbolTrend: SymbolTrend?,
 ) {
     val context = LocalContext.current
     val tvSymbol = remember(trade.symbol) { TradingViewSymbols.find(trade.symbol) }
@@ -707,6 +733,12 @@ private fun TradeWindowCard(
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 4.dp))
         }
+        TradeTrendLines(
+            trade = trade,
+            chartSymbol = chartSymbol,
+            marketTrend = marketTrend,
+            liveSymbolTrend = liveSymbolTrend,
+        )
         Text("خروج فقط با قیمت واقعی و در ژورنال ثبت می‌شود؛ این پنجره هیچ سفارشی نمی‌فرستد.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
             modifier = Modifier.padding(top = 4.dp))
@@ -761,6 +793,170 @@ private fun TradeWindowCard(
             }
         }
     }
+}
+
+/**
+ * «روند کلی بازار» روی صفحهٔ چارت: فشرده و **زیر** ویدجت TradingView، تا خودِ چارت با همان
+ * مشخصات رسمی‌اش دیده شود. هر عدد اینجا اندازه‌گیریِ کندل‌های بستهٔ واقعی است.
+ */
+@Composable
+private fun MarketTrendStrip(read: MarketTrendRead?, symbolTrend: SymbolTrend?, context: TrendContext?, symbol: String) {
+    val biasColor = when (read?.bias) {
+        TrendDirection.UP -> AurumColors.Green
+        TrendDirection.DOWN -> AurumColors.Red
+        TrendDirection.SIDEWAYS -> AurumColors.Gold
+        else -> AurumColors.TextMuted
+    }
+    SectionCard(
+        title = "روند کلی بازار · $symbol",
+        subtitle = "از عرضِ ۵۰+ نمادِ پویش‌شده + جهت دلار از ۶ جفت اصلی + جوّ ریسک‌پذیری؛ " +
+            "همه از کندل‌های بستهٔ واقعی، بدون حدس",
+        trailing = {
+            Pill(read?.let { "${it.bias.label} ${it.strength}٪" } ?: "اندازه گرفته نشد", biasColor)
+        },
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            StatTile("جهت بازار", read?.bias?.label ?: "—", biasColor, Modifier.weight(1f))
+            StatTile("عرض بازار", read?.let { "${it.breadthUp}↑/${it.breadthDown}↓/${it.breadthFlat}→" } ?: "—",
+                AurumColors.Cyan, Modifier.weight(1f))
+            StatTile("دلار", read?.dollarBias?.label ?: "—", AurumColors.TextPrimary, Modifier.weight(1f))
+            StatTile("جوّ بازار", read?.riskTone?.label ?: "—",
+                when (read?.riskTone) {
+                    RiskTone.RISK_ON -> AurumColors.Green
+                    RiskTone.RISK_OFF -> AurumColors.Red
+                    else -> AurumColors.Gold
+                }, Modifier.weight(1f))
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            StatTile("روندِ $symbol", symbolTrend?.direction?.label ?: "—",
+                when (symbolTrend?.direction) {
+                    TrendDirection.UP -> AurumColors.Green
+                    TrendDirection.DOWN -> AurumColors.Red
+                    TrendDirection.SIDEWAYS -> AurumColors.Gold
+                    else -> AurumColors.TextMuted
+                }, Modifier.weight(1f))
+            StatTile("تایم‌فریم مرجع", symbolTrend?.higherLabel ?: "—",
+                AurumColors.TextPrimary, Modifier.weight(1f))
+            StatTile("قدرت روند", symbolTrend?.let { "${it.strength}٪" } ?: "—",
+                AurumColors.TextPrimary, Modifier.weight(1f))
+            StatTile("جایگاه سیگنال", context?.alignment?.label ?: "—",
+                when (context?.alignment) {
+                    TrendAlignment.WITH -> AurumColors.Green
+                    TrendAlignment.AGAINST -> AurumColors.Red
+                    TrendAlignment.NEUTRAL -> AurumColors.Gold
+                    else -> AurumColors.TextMuted
+                }, Modifier.weight(1f))
+        }
+        if (read != null) {
+            Text(read.reasonFa, style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 6.dp))
+        } else {
+            Text("تا وقتی یک پویشِ پیوسته کندل بستهٔ کافیِ دست‌کم ۵ نماد را اندازه نگیرد، روند کلی " +
+                    "بازار گزارش نمی‌شود (به‌جایش جهت حدس زده نمی‌شود).",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 6.dp))
+        }
+        if (symbolTrend != null) {
+            Text(symbolTrend.detailFa, style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted, modifier = Modifier.padding(top = 4.dp))
+        }
+        if (context != null && context.alignment != TrendAlignment.UNKNOWN) {
+            val gate = context.gate
+            val effect = gate.blockerFa ?: when {
+                gate.minConfidenceAdd > 0.0 || gate.minScoreAdd > 0 ->
+                    "ورود مجاز است ولی کف امتیاز +${gate.minScoreAdd} و کف اطمینان " +
+                        "+${gate.minConfidenceAdd.toInt()} سخت‌تر شد"
+                else -> "ورود هم‌جهت با روند است و کفی به آستانه‌ها اضافه نمی‌شود"
+            }
+            Text("اثرش روی معامله: $effect",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (gate.allowed) AurumColors.TextSecondary else AurumColors.Red,
+                modifier = Modifier.padding(top = 4.dp))
+        }
+    }
+}
+
+/**
+ * روندِ بازار برای **همان معامله**: اول عکسِ ثبت‌شده در ژورنال (لحظهٔ ورود)، و فقط اگر آن رکورد
+ * قدیمی و خالی باشد، خوانشِ زندهٔ همان نماد — آن هم تنها وقتی نمودارِ بالا همان نماد است.
+ */
+@Composable
+private fun TradeTrendLines(
+    trade: PaperTrade,
+    chartSymbol: String,
+    marketTrend: MarketTrendRead?,
+    liveSymbolTrend: SymbolTrend?,
+) {
+    val recorded = trade.marketTrend
+    if (recorded != null) {
+        val color = when {
+            recorded.alignment == "WITH" -> AurumColors.Green
+            recorded.alignment == "AGAINST" -> AurumColors.Red
+            else -> AurumColors.Gold
+        }
+        val alignmentLabel = when (recorded.alignment) {
+            "WITH" -> "هم‌جهت با روند"
+            "AGAINST" -> "خلاف جهت روند"
+            "NEUTRAL" -> "روند خنثی"
+            else -> "روند اندازه گرفته نشد"
+        }
+        Text(
+            "روند بازار در لحظهٔ ورود: $alignmentLabel · روند کلی بازار " +
+                "${biasLabel(recorded.bias)} (قدرت ${recorded.strength}٪) · عرض بازار " +
+                "${recorded.breadthUp}↑/${recorded.breadthDown}↓ از ${recorded.measured} نماد · دلار " +
+                "${biasLabel(recorded.dollarBias)} · جوّ ${toneLabel(recorded.riskTone)}",
+            style = MaterialTheme.typography.labelSmall, color = color,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        recorded.symbol?.let { sym ->
+            Text("روندِ ${trade.symbol} روی ${sym.higherLabel ?: sym.intervalLabel}: " +
+                    "${biasLabel(sym.direction)} (قدرت ${sym.strength}٪، ER=" +
+                    (sym.efficiencyRatio?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "—") + ")",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 2.dp))
+        }
+        if (recorded.noteFa.isNotBlank()) {
+            Text(recorded.noteFa, style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted, modifier = Modifier.padding(top = 2.dp))
+        }
+        return
+    }
+    val live = liveSymbolTrend?.takeIf { it.symbol == trade.symbol && trade.symbol == chartSymbol }
+    if (live != null) {
+        Text("روندِ زندهٔ ${trade.symbol} (${live.higherLabel ?: live.intervalLabel}): ${live.shortFa}" +
+                (marketTrend?.takeIf { it.known }?.let { " · روند کلی بازار ${it.bias.label} ${it.strength}٪ · جوّ ${it.riskTone.label}" } ?: ""),
+            style = MaterialTheme.typography.labelSmall,
+            color = when (live.direction) {
+                TrendDirection.UP -> AurumColors.Green
+                TrendDirection.DOWN -> AurumColors.Red
+                TrendDirection.SIDEWAYS -> AurumColors.Gold
+                else -> AurumColors.TextMuted
+            },
+            modifier = Modifier.padding(top = 4.dp))
+        Text("این معامله پیش از ثبتِ لایهٔ روند باز شده، پس عکسِ لحظهٔ ورود در ژورنال ندارد؛ " +
+                "آنچه می‌بینی خوانشِ زندهٔ الان است.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 2.dp))
+    } else {
+        Text("برای دیدن روندِ این معامله، همین نماد را در چارت بالا انتخاب کن تا از کندل‌های بستهٔ " +
+                "واقعیِ خودش اندازه گرفته شود (نه از نمادی دیگر).",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+private fun biasLabel(name: String): String = when (name) {
+    "UP" -> "صعودی"
+    "DOWN" -> "نزولی"
+    "SIDEWAYS" -> "خنثی/رنج"
+    else -> "اندازه گرفته نشد"
+}
+
+private fun toneLabel(name: String): String = when (name) {
+    "RISK_ON" -> "ریسک‌پذیر"
+    "RISK_OFF" -> "ریسک‌گریز"
+    "MIXED" -> "مختلط"
+    else -> "اندازه گرفته نشد"
 }
 
 @Composable

@@ -369,6 +369,12 @@ data class PaperTrade(
     val marginUsd: Double = 0.0,
     val commissionUsd: Double = 0.0,
     val spreadCostUsd: Double = 0.0,
+    /**
+     * «روند کلی بازار» در همان لحظهٔ ورود: روندِ تایم‌فریم مرجعِ خودِ نماد + خوانشِ عرض بازار/
+     * دلار/جوّ ریسک + اینکه این ورود هم‌جهت بود یا خلاف جهت. یک عکسِ ثبت‌شده است و هرگز
+     * بعد از ورود دوباره محاسبه نمی‌شود. برای رکوردهای قدیمی‌تر null است.
+     */
+    val marketTrend: MarketTrendRecord? = null,
 ) {
     val isOpen: Boolean get() = closedAt == null
     val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }
@@ -451,6 +457,84 @@ data class PaperOpportunity(
                 stopLoss = signal.stopLoss, takeProfit = signal.takeProfit,
                 alertedAt = now, conditions = technicalConditions.map(PaperConditionRecord::from),
                 mtf = mtf, newsEvidence = news, priceAction = ict,
+            )
+        }
+    }
+}
+
+/**
+ * «روند کلی بازار» — عکسِ اندازه‌گیری‌شدهٔ لحظهٔ ورود.
+ *
+ * هر فیلد اینجا یک عددِ اندازه‌گیری‌شده از کندل‌های بستهٔ واقعی است (نه پیش‌بینی):
+ * جهتِ روندِ تایم‌فریم مرجعِ همان نماد، قدرتِ آن، جهتِ کلی بازار از عرضِ ۵۰+ نماد،
+ * جهت دلار از شش جفت اصلی، جوّ ریسک‌پذیری، و جایگاه این ورود نسبت به همهٔ این‌ها.
+ */
+@Serializable
+data class SymbolTrendRecord(
+    val direction: String,
+    val strength: Int,
+    val intervalLabel: String,
+    val higherLabel: String? = null,
+    val efficiencyRatio: Double? = null,
+    val conflict: Boolean = false,
+    val closedBars: Int = 0,
+    val higherBars: Int = 0,
+    val detailFa: String = "",
+) {
+    companion object {
+        fun from(trend: com.aurum.edge.core.SymbolTrend): SymbolTrendRecord = SymbolTrendRecord(
+            direction = trend.direction.name,
+            strength = trend.strength,
+            intervalLabel = trend.intervalLabel,
+            higherLabel = trend.higherLabel,
+            efficiencyRatio = trend.efficiencyRatio,
+            conflict = trend.conflict,
+            closedBars = trend.closedBars,
+            higherBars = trend.higherBars,
+            detailFa = trend.detailFa,
+        )
+    }
+}
+
+@Serializable
+data class MarketTrendRecord(
+    /** جهت کلی بازار از عرضِ نمادهای پویش‌شده. */
+    val bias: String,
+    val strength: Int = 0,
+    /** جهت دلار از شش جفت اصلی. */
+    val dollarBias: String = "UNKNOWN",
+    /** RISK_ON | RISK_OFF | MIXED | UNKNOWN */
+    val riskTone: String = "UNKNOWN",
+    val breadthUp: Int = 0,
+    val breadthDown: Int = 0,
+    val breadthFlat: Int = 0,
+    val measured: Int = 0,
+    /** WITH | AGAINST | NEUTRAL | UNKNOWN — جایگاه همین معامله نسبت به روند. */
+    val alignment: String = "UNKNOWN",
+    /** روندِ خودِ این نماد؛ برای رکوردهای قدیمی null. */
+    val symbol: SymbolTrendRecord? = null,
+    val noteFa: String = "",
+    val computedAt: Long = 0L,
+) {
+    val aligned: Boolean get() = alignment == "WITH"
+    val against: Boolean get() = alignment == "AGAINST"
+
+    companion object {
+        fun from(context: com.aurum.edge.core.TrendContext): MarketTrendRecord {
+            val overall = context.overall
+            return MarketTrendRecord(
+                bias = overall?.bias?.name ?: "UNKNOWN",
+                strength = overall?.strength ?: 0,
+                dollarBias = overall?.dollarBias?.name ?: "UNKNOWN",
+                riskTone = overall?.riskTone?.name ?: "UNKNOWN",
+                breadthUp = overall?.breadthUp ?: 0,
+                breadthDown = overall?.breadthDown ?: 0,
+                breadthFlat = overall?.breadthFlat ?: 0,
+                measured = overall?.measured ?: 0,
+                alignment = context.alignment.name,
+                symbol = context.symbol?.let { SymbolTrendRecord.from(it) },
+                noteFa = context.noteFa,
+                computedAt = overall?.computedAt ?: System.currentTimeMillis(),
             )
         }
     }

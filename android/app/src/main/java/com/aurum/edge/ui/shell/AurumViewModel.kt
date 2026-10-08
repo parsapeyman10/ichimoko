@@ -111,6 +111,40 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
+     * «روند کلی بازار» — خوانشِ عرض بازار از همان پویشِ پیوستهٔ ۵۰+ نماد: چند نماد صعودی/نزولی/
+     * خنثی اندازه گرفته شد، جهت دلار از شش جفت اصلی، و جوّ ریسک‌پذیری از دارایی‌های ریسکی در
+     * برابر طلا و دلار. null تا وقتی یک پویش چیزی اندازه نگرفته باشد (و هرگز حدس زده نمی‌شود).
+     */
+    val marketTrend: StateFlow<com.aurum.edge.core.MarketTrendRead?> = pairScan
+        .map { it.marketTrend }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * لایهٔ اولِ همان روند: جهتِ اندازه‌گیری‌شدهٔ **خودِ نمادِ انتخابی** روی تایم‌فریم پایه و
+     * تایم‌فریم مرجع (تجمیع‌شده از همان کندل‌های واقعی)، با ER و شیب EMA50 بر حسب ATR.
+     */
+    val symbolTrend: StateFlow<com.aurum.edge.core.SymbolTrend?> = container.verifiedMarket
+        .map { state ->
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    com.aurum.edge.core.MarketTrend.symbolTrend(state.symbol, state.candles, state.interval)
+                }.getOrNull()
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** جایگاه آخرین سیگنالِ همین نماد نسبت به روندِ بازار — برای نمایش و ثبت، نه برای ساخت سیگنال. */
+    val trendContext: StateFlow<com.aurum.edge.core.TrendContext?> = combine(
+        symbolTrend, marketTrend, container.verifiedMarket, playbook,
+    ) { trend, overall, state, decision ->
+        val side = state.signal?.action ?: com.aurum.edge.core.SignalAction.NO_TRADE
+        if (trend != null && trend.symbol != state.symbol) return@combine null
+        runCatching {
+            com.aurum.edge.core.MarketTrend.contextOf(side, trend, overall, decision?.method)
+        }.getOrNull()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
      * «چرا معامله/هشدار نداریم؟» — the honest prerequisites (feed, history, monitor, notification
      * channels, storage, news/AI, the 8/8 technical gate and the CONTINUOUS SYMBOL SCAN itself),
      * computed from live app state.
@@ -704,12 +738,24 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 val newsRecord = if (manual) null else NewsConfluence.record(news.value, current.symbol)
                 val ict = if (manual) null else (IctEntryRules.approvedEvidence(current)
                     ?: error("شواهد رنج/ICT همین کندل پیش از ثبت معتبر نیست"))
+                // «روند کلی بازار» در همان لحظهٔ ورود عکس گرفته و در ژورنال ثبت می‌شود تا برای
+                // هر معامله معلوم باشد با روند بوده یا خلافش. فقط ثبت است؛ گیتِ ورود همان‌جاست
+                // که تصمیم گرفته می‌شود (پویشگر و ورود خودکار)، نه بعد از ذخیره.
+                val trendRecord = runCatching {
+                    val trend = symbolTrend.value?.takeIf { it.symbol == current.symbol }
+                    com.aurum.edge.core.MarketTrendRecord.from(
+                        com.aurum.edge.core.MarketTrend.contextOf(
+                            signal.action, trend, marketTrend.value, playbook.value?.method,
+                        ),
+                    )
+                }.getOrNull()
                 val trade = container.journalStore.open(
                     signal = signal, symbol = current.symbol, price = price,
                     balance = s.accountBalance, riskPercent = s.riskPercent,
                     mtf = if (manual) null else _mtf.value?.let { MtfSnapshotRecord.from(it) },
                     manual = manual,
                     newsEvidence = newsRecord, priceAction = ict,
+                    marketTrend = trendRecord,
                 )
                 _stats.value = container.journalStore.stats()
                 // Linking is metadata only; a damaged opportunity file must not erase a saved trade.

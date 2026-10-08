@@ -28,8 +28,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AlertCheck
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.IctEntryRules
+import com.aurum.edge.core.MarketTrendRead
 import com.aurum.edge.core.PlaybookDecision
+import com.aurum.edge.core.RiskTone
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.core.SymbolTrend
+import com.aurum.edge.core.TrendAlignment
+import com.aurum.edge.core.TrendContext
+import com.aurum.edge.core.TrendDirection
 import com.aurum.edge.core.TradeMethod
 import com.aurum.edge.data.AiConnectionState
 import com.aurum.edge.data.MarketState
@@ -60,6 +66,9 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
     val autoStatus by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
     val scanState by viewModel.pairScan.collectAsStateWithLifecycle()
     val playbook by viewModel.playbook.collectAsStateWithLifecycle()
+    val marketTrend by viewModel.marketTrend.collectAsStateWithLifecycle()
+    val symbolTrend by viewModel.symbolTrend.collectAsStateWithLifecycle()
+    val trendContext by viewModel.trendContext.collectAsStateWithLifecycle()
     val entryDiagnostics by viewModel.entryDiagnostics.collectAsStateWithLifecycle()
     val aiConnection by viewModel.aiConnection.collectAsStateWithLifecycle()
     val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
@@ -133,7 +142,10 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
         // ── ۵٫۱ «کدام روش برای کدام بازار» — روتر متد بازار ──────────────────
         MarketPlaybookCard(playbook, market.symbol)
 
-        // ── ۵٫۲ «چرا الان معامله/هشدار نداریم؟» — پیش‌نیازهای صادقانه ─────────
+        // ── ۵٫۲ «روند کلی بازار» — چطور به دست می‌آید و چطور به معامله اضافه می‌شود ──
+        MarketTrendCard(marketTrend, symbolTrend, trendContext, market.symbol)
+
+        // ── ۵٫۳ «چرا الان معامله/هشدار نداریم؟» — پیش‌نیازهای صادقانه ─────────
         WhyNoTradeCard(entryDiagnostics, aiConnection)
 
         // ── ۶. چک‌لیست کامل شواهد و شروط تکنیکال نماد انتخابی ──────────────
@@ -209,6 +221,122 @@ private fun MarketPlaybookCard(decision: PlaybookDecision?, symbol: String) {
             }
             if (decision.allowed) {
                 Text("✅ ورود با این متد مجاز است؛ بقیهٔ گیت‌ها (کراس تأییدشده، MTF، ICT، تازگی قیمت، مارجین و اسپرد) جداگانه بررسی می‌شوند.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            }
+        }
+    }
+}
+
+/**
+ * «روند کلی بازار» — how the market-wide trend is measured and exactly how it is added to a trade.
+ * Everything on this card is a measurement of real closed candles: breadth across the scanned
+ * universe, the dollar direction from the six majors, and the risk tone from risk assets versus
+ * gold. A missing read is shown as missing — never replaced with a guess.
+ */
+@Composable
+private fun MarketTrendCard(
+    read: MarketTrendRead?,
+    symbolTrend: SymbolTrend?,
+    context: TrendContext?,
+    symbol: String,
+) {
+    val biasColor = when (read?.bias) {
+        TrendDirection.UP -> AurumColors.Green
+        TrendDirection.DOWN -> AurumColors.Red
+        TrendDirection.SIDEWAYS -> AurumColors.Gold
+        else -> AurumColors.TextMuted
+    }
+    SectionCard(
+        title = "روند کلی بازار · $symbol",
+        subtitle = "سه لایهٔ اندازه‌گیری از کندل‌های بستهٔ واقعی: روندِ تایم‌فریم مرجعِ خودِ نماد، " +
+            "عرض بازار در ۵۰+ نماد، و جهت دلار + جوّ ریسک‌پذیری",
+        trailing = {
+            Pill(
+                if (read == null) "هنوز اندازه گرفته نشد" else "${read.bias.label} · ${read.strength}٪",
+                biasColor,
+            )
+        },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("چطور به دست می‌آید؟ (۱) کندل‌های تایم‌فریم پایه به تایم‌فریم مرجع تجمیع می‌شوند " +
+                    "(M5→H1، M15→H4، H1→H4، H4→D1) و شش رأی مستقل شمرده می‌شود: قیمت نسبت به EMA50، " +
+                    "EMA20 نسبت به EMA50، شیب EMA50 بر حسب ATR، Efficiency Ratio، ساختار سقف/کف " +
+                    "(HH/HL یا LH/LL) و جابه‌جایی خالص بر حسب ATR. مجموع ≥+۲ صعودی و ≤−۲ نزولی است. " +
+                    "(۲) همان اندازه‌گیری برای همهٔ نمادهای پویش‌شده تکرار می‌شود و «عرض بازار» را می‌سازد. " +
+                    "(۳) جهت دلار از شش جفت اصلی و جوّ ریسک از رمزارز/سهام در برابر طلا خوانده می‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                StatTile("جهت بازار", read?.bias?.label ?: "—", biasColor, Modifier.weight(1f))
+                StatTile("قدرت", read?.let { "${it.strength}٪" } ?: "—", AurumColors.TextPrimary, Modifier.weight(1f))
+                StatTile("عرض بازار", read?.let { "${it.breadthUp}↑/${it.breadthDown}↓" } ?: "—",
+                    AurumColors.Cyan, Modifier.weight(1f))
+                StatTile("دلار", read?.dollarBias?.label ?: "—", AurumColors.TextPrimary, Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                StatTile("جوّ بازار", read?.riskTone?.label ?: "—",
+                    when (read?.riskTone) {
+                        RiskTone.RISK_ON -> AurumColors.Green
+                        RiskTone.RISK_OFF -> AurumColors.Red
+                        else -> AurumColors.Gold
+                    }, Modifier.weight(1f))
+                StatTile("نمادِ سنجیده", read?.let { "${it.measured}" } ?: "—",
+                    AurumColors.TextPrimary, Modifier.weight(1f))
+                StatTile("روندِ خودِ نماد", symbolTrend?.direction?.label ?: "—",
+                    when (symbolTrend?.direction) {
+                        TrendDirection.UP -> AurumColors.Green
+                        TrendDirection.DOWN -> AurumColors.Red
+                        TrendDirection.SIDEWAYS -> AurumColors.Gold
+                        else -> AurumColors.TextMuted
+                    }, Modifier.weight(1f))
+                StatTile("قدرتِ نماد", symbolTrend?.let { "${it.strength}٪" } ?: "—",
+                    AurumColors.TextPrimary, Modifier.weight(1f))
+            }
+
+            if (read == null) {
+                Text("هنوز هیچ پویشی چیزی اندازه نگرفته است (یا کندل بستهٔ کافی نرسیده). تا وقتی " +
+                        "روند کلی بازار مجهول است، معامله‌ها فقط با روندِ خودِ نماد و بقیهٔ گیت‌ها " +
+                        "سنجیده می‌شوند و هیچ جهتِ کلیِ حدسی ساخته نمی‌شود.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+            } else {
+                read.drivers.forEach { driver ->
+                    Text("• $driver", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+                }
+                read.families.forEach { family ->
+                    Text(family.summaryFa + " · قدرت ${family.strength}٪",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                }
+            }
+
+            if (symbolTrend != null) {
+                Text("روند $symbol: ${symbolTrend.shortFa} · " +
+                        (symbolTrend.higherLabel?.let { "مرجع $it" } ?: "بدون تایم‌فریم بالاتر") +
+                        " · ER=${symbolTrend.efficiencyRatio?.let { String.format(java.util.Locale.US, "%.2f", it) } ?: "—"}" +
+                        if (symbolTrend.conflict) " · پایه و مرجع هم‌جهت نیستند" else "",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+                Text(symbolTrend.detailFa, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            }
+
+            if (context != null) {
+                val aligned = context.alignment == TrendAlignment.WITH
+                Text("چطور به معامله اضافه می‌شود: ${context.alignment.label}" +
+                        if (context.gate.allowed) "" else " → ورود مسدود شد",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = when {
+                        !context.gate.allowed -> AurumColors.Red
+                        aligned -> AurumColors.Green
+                        context.alignment == TrendAlignment.AGAINST -> AurumColors.Red
+                        else -> AurumColors.Gold
+                    })
+                Text(context.noteFa, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                Text("قاعدهٔ اجرا: روش روندی (پولبک/شکست/درایو بازگشایی) خلاف جهتِ اندازه‌گیری‌شده مسدود " +
+                        "می‌شود؛ بازگشت به میانگین فقط در بازارِ بی‌روند مجاز است؛ ورودِ دارایی ریسکی " +
+                        "خلافِ جوّ بازار منع نمی‌شود ولی کف امتیاز +۶ و کف اطمینان +۵ می‌گیرد. همین خوانش " +
+                        "در لحظهٔ ورود در ژورنال ثبت و در پنجرهٔ همان معامله روی صفحهٔ چارت نشان داده می‌شود.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            } else {
+                Text("برای دیدن جایگاهِ ورود نسبت به روند، باید سیگنالِ همین نماد و یک پویشِ " +
+                        "انجام‌شده در دسترس باشد.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             }
         }
@@ -336,6 +464,22 @@ private fun BestOpportunityDetailedCard(
                             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                         Pill(method, if (best.playbookAllowed == true) AurumColors.Cyan else AurumColors.Gold)
                     }
+                }
+
+                // «روند کلی بازار» برای همان کاندیدا: هم‌جهت بودن، یک شرطِ دیده‌شدنی است نه یک ادعا.
+                best.trendLabel?.let { trend ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("روند اندازه‌گیری‌شدهٔ این نماد (تایم‌فریم مرجع)",
+                            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                        Pill(trend, if (best.trendAligned == true) AurumColors.Green else AurumColors.Gold)
+                    }
+                }
+                best.trendNote?.let { note ->
+                    Text(note, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
 
                 // Price levels: Entry, SL, TP
