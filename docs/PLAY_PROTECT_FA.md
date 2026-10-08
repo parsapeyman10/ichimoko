@@ -17,9 +17,14 @@ mkdir -p "$HOME/aurum-private"
 keytool -genkeypair -v -keystore "$HOME/aurum-private/aurum-edge.jks" \
   -alias aurum-edge -keyalg RSA -keysize 3072 -validity 10000
 # رمزها را فقط در اعلان تعاملی keytool وارد کنید؛ این فایل و رمزها را امن پشتیبان بگیرید.
-./android/tools/build-owner-apk.sh "$HOME/aurum-private/aurum-edge.jks" aurum-edge
+cd android
+export AURUM_RELEASE_STORE_FILE="$HOME/aurum-private/aurum-edge.jks"
+export AURUM_RELEASE_STORE_PASSWORD='<رمز keystore>'
+export AURUM_RELEASE_KEY_ALIAS='aurum-edge'
+export AURUM_RELEASE_KEY_PASSWORD='<رمز کلید>'
+./gradlew testDebugUnitTest assembleRelease -PaurumRequireReleaseSigning=true
 ```
 
-اسکریپت آزمون‌های JVM را اجرا می‌کند، با **همان کلید مالک** `app-release.apk` می‌سازد، امضای APK را با `apksigner` بررسی و SHA-256 فایل را چاپ می‌کند. رمزها از ترمینال بدون echo گرفته می‌شوند، نه از آرگومان یا فایل Gradle. گزینهٔ `-PaurumRequireReleaseSigning=true` در نبود هر یک از چهار مقدار لازم **fail-closed** است. بیلد CI همچنان *preview با debug key* می‌ماند و نباید نسخهٔ رسمی نامیده شود. گواهی/اثر انگشت چاپ‌شدهٔ اولین بیلد را با بیلدهای بعدی مقایسه کنید؛ کلید گم‌شده/تغییریافته به‌روزرسانی با حفظ داده را ناممکن می‌کند. برای گذار از نصب‌های debug قبلی به کلید مالک، معمولاً حذف نصب لازم است؛ **نسخهٔ debug را صرفاً برای حذف هشدار Play Protect با کلید دیگری دوباره امضا نکنید**.
+همین چهار متغیر محیطی + Gradle Wrapper، آزمون‌های JVM را اجرا می‌کند و با **همان کلید مالک** `app-release.apk` می‌سازد؛ امضا و SHA-256 را با `apksigner verify --print-certs` خودِ SDK بررسی کنید. رمزها را فقط در شِلِ خودتان export کنید، نه در آرگومان یا فایل Gradle. گزینهٔ `-PaurumRequireReleaseSigning=true` در نبود هر یک از چهار مقدار لازم **fail-closed** است. بیلد CI همچنان *preview با debug key* می‌ماند و نباید نسخهٔ رسمی نامیده شود. گواهی/اثر انگشت چاپ‌شدهٔ اولین بیلد را با بیلدهای بعدی مقایسه کنید؛ کلید گم‌شده/تغییریافته به‌روزرسانی با حفظ داده را ناممکن می‌کند. برای گذار از نصب‌های debug قبلی به کلید مالک، معمولاً حذف نصب لازم است؛ **نسخهٔ debug را صرفاً برای حذف هشدار Play Protect با کلید دیگری دوباره امضا نکنید**.
 
 امضای خصوصیِ پایدار به‌تنهایی Google Play را ناشرِ برنامه نمی‌کند و اخطار نصب مستقیم APK می‌تواند باز هم ظاهر شود. برای نصب بدون مسیر sideload، راه رسمی **Play Console و مسیر internal testing / Play App Signing** است، که فعلاً برای این تحویل انتخاب نشده است. [راهنمای رسمی امضای اندروید](https://developer.android.com/studio/publish/app-signing)، [تست داخلی Google Play](https://support.google.com/googleplay/android-developer/answer/9845334?hl=en). اگر Play Protect به‌اشتباه نسخهٔ معتبر را مشخصاً مخرب طبقه‌بندی کرد، از [درخواست بازبینی رسمی](https://support.google.com/googleplay/android-developer/answer/2992033) استفاده کنید، نه دورزدن بررسی‌ها.

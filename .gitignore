@@ -1,22 +1,4 @@
-node_modules/
-dist/
-.env
-.venv/
-__pycache__/
-.pytest_cache/
-*.py[cod]
-*.tsbuildinfo
-.DS_Store
-coverage/
-
-# Runtime state written by the backend (paper-trading account, provider candle cache).
-# This is per-machine data, not source.
-backend/app/data/autopilot.json
-edge_report.json
-backend/app/data/journal.json
-backend/app/data/cache/
-
-# Android
+# Android / Gradle
 android/.gradle/
 android/build/
 android/app/build/
@@ -30,3 +12,6 @@ android/.idea/
 *.pfx
 # Signing material must be stored outside the repository, not merely ignored.
 android/keystores/
+
+# OS / editor noise
+.DS_Store

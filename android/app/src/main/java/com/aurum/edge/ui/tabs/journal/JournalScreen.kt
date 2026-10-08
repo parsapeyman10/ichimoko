@@ -277,6 +277,20 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                     color = AurumColors.Gold,
                                 )
                             }
+                            // «روند کلی بازار» در همان لحظهٔ ورود: عکسِ ثبت‌شده، نه محاسبهٔ دوبارهٔ امروز.
+                            trade.marketTrend?.let { read ->
+                                Text(
+                                    "روند بازار هنگام ورود: ${trendAlignmentFa(read.alignment)} · روند کلی " +
+                                        "${trendDirectionFa(read.bias)} ${read.strength}٪ · عرض بازار " +
+                                        "${read.breadthUp}↑/${read.breadthDown}↓ از ${read.measured} نماد · دلار " +
+                                        "${trendDirectionFa(read.dollarBias)} · جوّ ${riskToneFa(read.riskTone)}" +
+                                        (read.symbol?.let { " · روندِ ${trade.symbol} ${trendDirectionFa(it.direction)} ${it.strength}٪" } ?: ""),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (read.alignment == "WITH") AurumColors.Green
+                                            else if (read.alignment == "AGAINST") AurumColors.Red
+                                            else AurumColors.TextMuted,
+                                )
+                            }
                             ConditionDisclosure(trade.id, trade.entryConditions)
                             IctDisclosure(trade.id, trade.priceAction)
                         }
@@ -481,6 +495,14 @@ private fun TradeRow(trade: PaperTrade) {
             HoldReviewDisclosure(trade.holdReview, showEmptyHint = false)
             trade.mtf?.let { Text("MTF هنگام ورود: ${it.bias} · ${(it.alignment * 100).toInt()}٪ هم‌جهتی",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted) }
+            trade.marketTrend?.let { read ->
+                Text("روند بازار هنگام ورود: ${trendAlignmentFa(read.alignment)} · روند کلی " +
+                        "${trendDirectionFa(read.bias)} ${read.strength}٪ · جوّ ${riskToneFa(read.riskTone)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (read.alignment == "WITH") AurumColors.Green
+                            else if (read.alignment == "AGAINST") AurumColors.Red
+                            else AurumColors.TextMuted)
+            }
             ConditionDisclosure(trade.id, trade.entryConditions)
             IctDisclosure(trade.id, trade.priceAction)
         }
@@ -1083,3 +1105,25 @@ private fun PnlIncomeCalendarSection(
     }
 }
 
+
+/** برچسب فارسیِ عکسِ ثبت‌شدهٔ «روند کلی بازار»؛ همان چیزی که در لحظهٔ ورود اندازه گرفته شد. */
+private fun trendDirectionFa(name: String): String = when (name) {
+    "UP" -> "صعودی"
+    "DOWN" -> "نزولی"
+    "SIDEWAYS" -> "خنثی/رنج"
+    else -> "اندازه گرفته نشد"
+}
+
+private fun trendAlignmentFa(name: String): String = when (name) {
+    "WITH" -> "هم‌جهت با روند"
+    "AGAINST" -> "خلاف جهت روند"
+    "NEUTRAL" -> "روند خنثی"
+    else -> "روند اندازه گرفته نشد"
+}
+
+private fun riskToneFa(name: String): String = when (name) {
+    "RISK_ON" -> "ریسک‌پذیر"
+    "RISK_OFF" -> "ریسک‌گریز"
+    "MIXED" -> "مختلط"
+    else -> "اندازه گرفته نشد"
+}

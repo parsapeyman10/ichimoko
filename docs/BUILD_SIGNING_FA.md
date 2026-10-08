@@ -33,7 +33,7 @@
   ```
 
 ### ۳. ابزار گریدل (Gradle)
-- نیازی به نصب جداگانه گریدل ندارید؛ اسکریپت `gradlew` (در لینوکس/مک) و `gradlew.bat` (در ویندوز) نسخهٔ متناسب گریدل (Gradle 8.9) را خودکار دانلود و استفاده می‌کنند.
+- نیازی به نصب جداگانه گریدل ندارید؛ `android/gradlew` (همان Gradle Wrapper) نسخهٔ متناسب گریدل (Gradle 8.9) را خودکار دانلود و استفاده می‌کند. این تنها فایل اسکریپتِ باقی‌مانده در مخزن است، چون بدون آن هیچ بیلد اندرویدی ممکن نیست.
 
 ---
 
@@ -45,20 +45,9 @@
 2. **امضای گواهی یکسان (Certificate Match):** اثر انگشت گواهی SHA-256 فایل APK جدید باید دقیقاً با نسخهٔ نصب‌شده مطابقت داشته باشد. اگر امضا تغییر کند، خطای `INSTALL_FAILED_UPDATE_INCOMPATIBLE` رخ می‌دهد و کاربر مجبور به حذف اپ و از دست رفتن دیتای ژورنال خواهد شد.
 3. **نسخه بالاتر:** مقدار `versionCode` باید اکیداً از نسخهٔ قبلی بزرگتر باشد.
 
-### روش خودکار ساخت کلید امضا
+### ساخت کلید امضا با `keytool`
 
-#### در لینوکس / مک:
-```bash
-./android/tools/generate-keystore.sh
-```
-این اسکریپت پوشهٔ ایمن `~/aurum-private/aurum-edge.jks` را بیرون از مخزن ایجاد کرده و کلید RSA 3072 با اعتبار ۱۰۰۰۰ روز می‌سازد و مقادیر مورد نیاز برای GitHub Secrets را چاپ می‌کند.
-
-#### در ویندوز (PowerShell):
-```powershell
-.\android\tools\generate-keystore.ps1
-```
-
-#### روش دستی با `keytool`:
+کلید بیرون از مخزن ساخته می‌شود (RSA 3072، اعتبار ۱۰۰۰۰ روز):
 ```bash
 mkdir -p "$HOME/aurum-private"
 keytool -genkeypair -v \
@@ -76,16 +65,27 @@ keytool -genkeypair -v \
 
 ## بخش سوم: ساخت فایل APK امضاشده (Owner Release Build)
 
-### بیلد در لینوکس / مک:
-```bash
-./android/tools/build-owner-apk.sh "$HOME/aurum-private/aurum-edge.jks" aurum-edge
-```
-اسکریپت به صورت امن رمزها را درخواست کرده، تست‌های واحد JVM را اجرا می‌کند و در صورت موفقیت، خروجی `android/app/build/outputs/apk/release/app-release.apk` را با کلید شما امضا و با `apksigner` اعتبارسنجی می‌کند.
+اسکریپت جداگانه‌ای در مخزن نیست؛ بیلدِ مالک‌امضا فقط چهار متغیر محیطی + Gradle Wrapper است.
+`android/app/build.gradle.kts` این متغیرها را می‌خواند و اگر هر چهار تا حاضر باشند، buildType
+«release» را با کلیدِ شما امضا می‌کند؛ اگر حتی یکی غایب باشد و
+`-PaurumRequireReleaseSigning=true` داده باشید، بیلد **fail-closed** متوقف می‌شود.
 
-### بیلد در ویندوز (PowerShell):
-```powershell
-.\android\tools\build-owner-apk.ps1 -KeystorePath "$HOME\aurum-private\aurum-edge.jks" -Alias "aurum-edge"
+```bash
+cd android
+export AURUM_RELEASE_STORE_FILE="$HOME/aurum-private/aurum-edge.jks"
+export AURUM_RELEASE_STORE_PASSWORD='<رمز keystore>'
+export AURUM_RELEASE_KEY_ALIAS='aurum-edge'
+export AURUM_RELEASE_KEY_PASSWORD='<رمز کلید>'
+./gradlew testDebugUnitTest assembleRelease -PaurumRequireReleaseSigning=true
+# خروجی: app/build/outputs/apk/release/app-release.apk
 ```
+
+اعتبارسنجی امضا با `apksigner` خودِ SDK:
+```bash
+"$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs \
+  android/app/build/outputs/apk/release/app-release.apk
+```
+SHA-256 چاپ‌شده باید با نسخهٔ نصب‌شده روی گوشی برابر باشد، وگرنه آپدیت درجا انجام نمی‌شود.
 
 ---
 
