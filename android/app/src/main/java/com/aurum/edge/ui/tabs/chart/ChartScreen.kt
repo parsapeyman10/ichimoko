@@ -1,7 +1,9 @@
 package com.aurum.edge.ui
 
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.graphics.Color as AndroidColor
+import android.net.Uri
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
@@ -34,18 +36,26 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.Interval
+import com.aurum.edge.core.MarketPlaybook
+import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.core.VenueSpecs
+import kotlinx.coroutines.delay
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.engine.SignalEngine
 import com.aurum.edge.data.WatchCatalog
@@ -69,9 +79,31 @@ fun ChartScreen(
     onOpenJournal: () -> Unit,
 ) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
+    val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
     val openTrade = trades.firstOrNull { it.symbol == market.symbol && it.isOpen }
+    val context = LocalContext.current
     // Reset the probe whenever the instrument or timeframe changes.
-    var tradingViewBlocked by remember(market.symbol, market.interval) { mutableStateOf(false) }
+    var chartSource by remember(market.symbol, market.interval) { mutableStateOf(ChartSource.TRADINGVIEW) }
+    var widgetLoaded by remember(market.symbol, market.interval) { mutableStateOf(false) }
+    var widgetProblem by remember(market.symbol, market.interval) { mutableStateOf<String?>(null) }
+    var widgetAttempt by remember(market.symbol, market.interval) { mutableStateOf(0) }
+    /** null = این نماد در نگاشت رسمی TradingView اپ نیست؛ هرگز نماد دیگری جایش نشان داده نمی‌شود. */
+    val tvSymbol = remember(market.symbol) { TradingViewSymbols.find(market.symbol) }
+    val tvChartable = tvSymbol != null
+    val effectiveSource = if (tvChartable) chartSource else ChartSource.NATIVE
+    /** Which trade window is open; a NEW entry opens its own window automatically. */
+    var expandedTradeId by rememberSaveable { mutableStateOf<String?>(null) }
+    var lastAutoExpanded by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(trades) {
+        val newest = trades.filter { it.isOpen }.maxByOrNull { it.openedAt }
+        if (newest != null && newest.id != lastAutoExpanded) {
+            // «هر وقت معامله‌ای شروع شد و ورود کرد، عیناً در صفحهٔ چارت یک پنجره باز می‌شود»
+            lastAutoExpanded = newest.id
+            expandedTradeId = newest.id
+        } else if (expandedTradeId != null && trades.none { it.id == expandedTradeId && it.isOpen }) {
+            expandedTradeId = null // that position was settled; its window closes with it
+        }
+    }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         SymbolSearchRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
         Row(
@@ -92,47 +124,114 @@ fun ChartScreen(
             }
         }
 
-        SectionCard(
-            title = if (tradingViewBlocked) "چارت داخلی · ${market.symbol}"
-            else "چارت TradingView · ${market.symbol}",
-            subtitle = if (tradingViewBlocked)
-                "TradingView از این شبکه در دسترس نیست؛ چارت خود اپ روی همان دیتای واقعی نمایش داده می‌شود"
-            else null,
-        ) {
-            Box(Modifier.fillMaxWidth().height(520.dp)) {
-                // TradingView may be blocked/slow in some networks. Keep the app's own verified
-                // candle chart behind the WebView so the chart area is never an empty black panel.
-                // The app's own candles are the FALLBACK, drawn only when TradingView is
-                // unavailable. Previously both rendered and the WebView sat on top, so a
-                // blocked widget hid a working chart.
-                if (tradingViewBlocked && market.candles.isNotEmpty()) {
-                    CandleChart(
-                        candles = market.candles.takeLast(800),
-                        interval = market.interval,
-                        signal = market.signal,
-                        modifier = Modifier.fillMaxSize(),
-                        showVolume = false,
-                    )
-                }
-                if (!tradingViewBlocked) {
-                    TradingViewWidget(
-                        symbol = market.symbol,
-                        interval = market.interval,
-                        entry = market.signal?.entry,
-                        stopLoss = market.signal?.stopLoss,
-                        takeProfit = market.signal?.takeProfit,
-                        action = market.signal?.action,
-                        modifier = Modifier.fillMaxSize(),
-                        onFailed = { tradingViewBlocked = it },
-                    )
-                }
-                EngineOverlay(
-                    market = market,
-                    openTrade = openTrade,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
-                )
+        // A silent dark box is the worst possible answer, so the widget gets an honest watchdog:
+        // if TradingView has not finished loading in time, the app says so and offers a retry,
+        // the real TradingView site, or the app's own candles — chosen by the user, never silently.
+        LaunchedEffect(chartSource, widgetAttempt, market.symbol, market.interval) {
+            if (chartSource != ChartSource.TRADINGVIEW || !tvChartable) return@LaunchedEffect
+            widgetLoaded = false
+            widgetProblem = null
+            delay(WIDGET_TIMEOUT_MS)
+            if (!widgetLoaded && widgetProblem == null) {
+                widgetProblem = "ویدجت TradingView در ${WIDGET_TIMEOUT_MS / 1000} ثانیه بارگذاری نشد؛ " +
+                    "شبکه/فیلتر یا VPN را بررسی کنید"
             }
         }
+
+        SectionCard(
+            title = when (effectiveSource) {
+                ChartSource.TRADINGVIEW -> "چارت TradingView · ${market.symbol}"
+                ChartSource.NATIVE -> "چارت داخلی اپ · ${market.symbol}"
+            },
+            subtitle = when {
+                !tvChartable -> "نماد ${market.symbol} در نگاشت رسمی TradingView اپ نیست؛ برای اینکه نماد " +
+                    "دیگری (مثلاً طلا) جایش نمایش داده نشود، چارت داخلی اپ روی همان کندل‌های واقعی آمده است"
+                effectiveSource == ChartSource.NATIVE ->
+                    "چارت داخلی را خودت انتخاب کردی؛ کندل‌ها همان دادهٔ واقعی دریافتی اپ است"
+                widgetProblem != null -> widgetProblem
+                else -> "ویدجت رسمی TradingView با همان مشخصات خودش (کندل‌ها، تایم‌فریم، ایچیموکو) — " +
+                    "هیچ خط یا لایهٔ دست‌سازی روی چارت کشیده نمی‌شود"
+            },
+            trailing = {
+                Pill(
+                    when {
+                        !tvChartable -> "نگاشت نشده"
+                        effectiveSource == ChartSource.NATIVE -> "چارت داخلی"
+                        widgetLoaded -> "TradingView بارگذاری شد"
+                        else -> "در حال بارگذاری"
+                    },
+                    when {
+                        !tvChartable -> AurumColors.Red
+                        effectiveSource == ChartSource.NATIVE -> AurumColors.TextMuted
+                        widgetLoaded -> AurumColors.Green
+                        else -> AurumColors.Gold
+                    },
+                )
+            },
+        ) {
+            Box(Modifier.fillMaxWidth().height(520.dp)) {
+                when (effectiveSource) {
+                    ChartSource.NATIVE ->
+                        if (market.candles.isNotEmpty()) {
+                            CandleChart(
+                                candles = market.candles.takeLast(800),
+                                interval = market.interval,
+                                signal = market.signal,
+                                modifier = Modifier.fillMaxSize(),
+                                showVolume = false,
+                            )
+                        } else {
+                            Text("کندل واقعی در دسترس نیست؛ چارت داخلی بدون داده چیزی نمی‌کشد.",
+                                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted,
+                                modifier = Modifier.align(Alignment.Center).padding(16.dp))
+                        }
+                    ChartSource.TRADINGVIEW -> key(widgetAttempt) {
+                        TradingViewWidget(
+                            symbol = market.symbol,
+                            interval = market.interval,
+                            modifier = Modifier.fillMaxSize(),
+                            onLoaded = { widgetLoaded = true; widgetProblem = null },
+                            onFailed = { blocked ->
+                                if (blocked) {
+                                    widgetProblem = "TradingView از این شبکه پاسخ نداد (خطای اصلی قاب/۴۵۱)؛ " +
+                                        "چارت را در مرورگر باز کن یا چارت داخلی اپ را ببین"
+                                }
+                            },
+                        )
+                    }
+                }
+                if (effectiveSource == ChartSource.TRADINGVIEW && !widgetLoaded) {
+                    WidgetStatusPanel(
+                        problem = widgetProblem,
+                        onRetry = { widgetAttempt++ },
+                        onOpenBrowser = { context.openTradingView(tvSymbol) },
+                        onFallback = { chartSource = ChartSource.NATIVE },
+                        fallbackLabel = "چارت داخلی اپ",
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+
+            // اطلاعات موتور زیر چارت می‌نشیند، نه روی کندل‌ها: هیچ چیزی روی ویدجت TradingView
+            // قرار نمی‌گیرد تا چارت دقیقاً با مشخصات خودش دیده شود.
+            EngineOverlay(
+                market = market,
+                openTrade = openTrade,
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+            )
+        }
+
+        // ── پنجرهٔ هر معاملهٔ باز: همان لحظه که ورود ثبت می‌شود اینجا باز می‌شود ──────
+        OpenTradeWindows(
+            openTrades = trades.filter { it.isOpen }.sortedByDescending { it.openedAt },
+            livePrices = livePrices,
+            expandedId = expandedTradeId,
+            onExpand = { expandedTradeId = it },
+            onShowOnChart = { symbol -> viewModel.selectChartSymbol(symbol) },
+            chartSymbol = market.symbol,
+            chartInterval = market.interval,
+            chartCandles = market.candles,
+        )
 
         StrategyBar(viewModel, market)
 
@@ -230,16 +329,20 @@ private fun TradingViewWidget(
     symbol: String,
     interval: Interval,
     widgetId: String = "chart_primary",
-    entry: Double? = null,
-    stopLoss: Double? = null,
-    takeProfit: Double? = null,
-    action: SignalAction? = null,
-    leverage: Int? = null,
-    riskReward: Double? = null,
     modifier: Modifier = Modifier,
+    onLoaded: () -> Unit = {},
     onFailed: (Boolean) -> Unit = {},
 ) {
-    val tvSymbol = remember(symbol) { TradingViewSymbols.of(symbol) }
+    val tvSymbol = remember(symbol) { TradingViewSymbols.find(symbol) }
+    if (tvSymbol == null) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Text("نماد $symbol در نگاشت رسمی TradingView اپ نیست؛ هیچ نماد جایگزینی (مثلاً طلا) " +
+                    "نشان داده نمی‌شود.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(16.dp))
+        }
+        return
+    }
     val tvInterval = remember(interval) {
         when (interval) {
             Interval.M1 -> "1"
@@ -251,25 +354,11 @@ private fun TradingViewWidget(
             Interval.D1 -> "D"
         }
     }
+    val html = remember(tvSymbol, tvInterval, widgetId) { tradingViewHtml(tvSymbol, tvInterval, widgetId) }
 
-    val html = remember(tvSymbol, tvInterval, widgetId, entry, stopLoss, takeProfit, action) {
-        tradingViewHtml(
-            symbol = symbol,
-            tvSymbol = tvSymbol,
-            tvInterval = tvInterval,
-            widgetId = widgetId,
-            entry = entry,
-            stopLoss = stopLoss,
-            takeProfit = takeProfit,
-            action = action,
-            leverage = leverage,
-            riskReward = riskReward,
-        )
-    }
-
-    // Reload only when the instrument/timeframe/level set really changed: an unconditional
-    // reload on every recomposition is what kept TradingView stuck on "loading".
-    val loadKey = "$tvSymbol|$tvInterval|$widgetId|$entry|$stopLoss|$takeProfit"
+    // Reload only when the instrument/timeframe really changed: an unconditional reload on every
+    // recomposition is what kept TradingView stuck on "loading".
+    val loadKey = "$tvSymbol|$tvInterval|$widgetId"
     AndroidView(
         modifier = modifier,
         factory = { ctx ->
@@ -287,30 +376,54 @@ private fun TradingViewWidget(
                     displayZoomControls = false
                     cacheMode = WebSettings.LOAD_DEFAULT
                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    // The widget renders its full desktop layout (side toolbar, studies, scales)
+                    // for a desktop agent; a mobile agent gets a stripped chart. Same TradingView,
+                    // same data — only the layout it serves changes.
+                    userAgentString = DESKTOP_USER_AGENT
+                    textZoom = 100
                 }
                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                 webChromeClient = WebChromeClient()
-                // Where TradingView is geo-blocked it answers 451 and a blank error page would
-                // sit on top of the app's own verified candles. Report the failure so the
-                // native chart is used instead of covering good data.
+                // Where TradingView is geo-blocked it answers 451 and a blank error page would sit
+                // on top of an honest "not loaded" state. Report real failures, never guess.
                 webViewClient = object : WebViewClient() {
                     override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                         onFailed(false)
                     }
+
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        onLoaded()
+                    }
+
                     override fun onReceivedHttpError(
                         view: WebView?,
                         request: android.webkit.WebResourceRequest?,
                         errorResponse: android.webkit.WebResourceResponse?,
                     ) {
-                        if (request?.isForMainFrame == true) onFailed(true)
+                        if (request?.isForMainFrame == true) {
+                            onFailed(true)
+                        }
                     }
+
                     override fun onReceivedError(
                         view: WebView?,
                         request: android.webkit.WebResourceRequest?,
                         error: android.webkit.WebResourceError?,
                     ) {
-                        if (request?.isForMainFrame == true) onFailed(true)
+                        if (request?.isForMainFrame == true) {
+                            onFailed(true)
+                        }
+                    }
+
+                    override fun onReceivedSslError(
+                        view: WebView?,
+                        handler: android.webkit.SslErrorHandler?,
+                        error: android.net.http.SslError?,
+                    ) {
+                        // A certificate problem is never ignored: cancel and report it.
+                        handler?.cancel()
+                        onFailed(true)
                     }
                 }
                 tag = loadKey
@@ -318,7 +431,7 @@ private fun TradingViewWidget(
             }
         },
         update = { webView ->
-            // update runs on every recomposition; only a real instrument/level change reloads.
+            // update runs on every recomposition; only a real instrument/timeframe change reloads.
             if (webView.tag != loadKey) {
                 webView.tag = loadKey
                 webView.loadDataWithBaseURL("https://s.tradingview.com", html, "text/html", "UTF-8", null)
@@ -327,53 +440,20 @@ private fun TradingViewWidget(
     )
 }
 
-private fun tradingViewHtml(
-    symbol: String,
-    tvSymbol: String,
-    tvInterval: String,
-    widgetId: String,
-    entry: Double? = null,
-    stopLoss: Double? = null,
-    takeProfit: Double? = null,
-    action: SignalAction? = null,
-    leverage: Int? = null,
-    riskReward: Double? = null,
-): String {
+/**
+ * ONLY the official TradingView widget: its own candles, its own scales, its own Ichimoku study.
+ *
+ * قبلاً روی همین ویدجت یک HUD و سه خط چین با درصدهای ثابت (۲۰٪/۴۸٪/۷۵٪) کشیده می‌شد؛ آن خط‌ها
+ * جای واقعی ورود/حد ضرر/حد سود روی چارت نبودند و فقط چارت را شلوغ و گمراه‌کننده می‌کردند.
+ * عددهای واقعی معامله حالا در نوار بالای همان پنجره (از ژورنال) نوشته می‌شوند، نه روی کندل‌ها.
+ */
+private fun tradingViewHtml(tvSymbol: String, tvInterval: String, widgetId: String): String {
     val encoded = tvSymbol.replace(":", "%3A")
     val iframeUrl = "https://s.tradingview.com/widgetembed/?frameElementId=tv_$widgetId" +
         "&symbol=$encoded&interval=$tvInterval&hidesidetoolbar=0&symboledit=1" +
         "&saveimage=0&toolbarbg=0b0e13" +
         "&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1&locale=en" +
         "&studies=%5B%22STD%3BIchimoku%25Cloud%22%5D"
-
-    val hudHtml = if (entry != null && stopLoss != null && takeProfit != null) {
-        val entryFormatted = formatPriceFor(symbol, entry)
-        val slFormatted = formatPriceFor(symbol, stopLoss)
-        val tpFormatted = formatPriceFor(symbol, takeProfit)
-        val isBuy = action == SignalAction.BUY
-
-        val tpY = if (isBuy) "20%" else "75%"
-        val entryY = "48%"
-        val slY = if (isBuy) "75%" else "20%"
-
-        """
-        <!-- Sleek Floating HUD & Thin Dynamic Dashed Lines -->
-        <div style="position:absolute; top:8px; right:8px; z-index:900; pointer-events:none; display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
-          <span style="background:rgba(255,255,255,0.92); color:#0b0e13; font-size:11px; font-weight:bold; font-family:tahoma,sans-serif; padding:3px 8px; border-radius:4px; box-shadow:0 2px 4px rgba(0,0,0,0.5);">ورود: $$entryFormatted</span>
-          <span style="background:rgba(0,230,118,0.92); color:#0b0e13; font-size:11px; font-weight:bold; font-family:tahoma,sans-serif; padding:3px 8px; border-radius:4px; box-shadow:0 2px 4px rgba(0,0,0,0.5);">TP: $$tpFormatted</span>
-          <span style="background:rgba(255,82,82,0.92); color:#ffffff; font-size:11px; font-weight:bold; font-family:tahoma,sans-serif; padding:3px 8px; border-radius:4px; box-shadow:0 2px 4px rgba(0,0,0,0.5);">SL: $$slFormatted</span>
-        </div>
-        <svg style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:850; opacity:0.85;">
-          <!-- Take Profit: Green Thin Dashed Line -->
-          <line x1="0" y1="$tpY" x2="100%" y2="$tpY" stroke="#00e676" stroke-width="1.2" stroke-dasharray="4,4" />
-          <!-- Entry Price: White Thin Dashed Line -->
-          <line x1="0" y1="$entryY" x2="100%" y2="$entryY" stroke="#ffffff" stroke-width="1.2" stroke-dasharray="4,4" />
-          <!-- Stop Loss: Red Thin Dashed Line -->
-          <line x1="0" y1="$slY" x2="100%" y2="$slY" stroke="#ff5252" stroke-width="1.2" stroke-dasharray="4,4" />
-        </svg>
-        """.trimIndent()
-    } else ""
-
     return """
         <!DOCTYPE html>
         <html lang="en">
@@ -388,22 +468,299 @@ private fun tradingViewHtml(
               height: 100%;
               overflow: hidden;
               background-color: #0b0e13;
-              position: relative;
             }
-            iframe {
-              width: 100%;
-              height: 100%;
-              border: none;
-            }
+            iframe { width: 100%; height: 100%; border: none; display: block; }
           </style>
-          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
         </head>
         <body>
-          $hudHtml
-          <iframe src="$iframeUrl" allowtransparency="true" frameborder="0"></iframe>
+          <iframe id="tv_frame" src="$iframeUrl" allowtransparency="true" frameborder="0"
+                  allow="fullscreen"></iframe>
         </body>
         </html>
     """.trimIndent()
+}
+
+/** Which chart the user is looking at; TradingView is always the default. */
+private enum class ChartSource { TRADINGVIEW, NATIVE }
+
+private const val WIDGET_TIMEOUT_MS = 20_000L
+
+private const val DESKTOP_USER_AGENT =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+        "Chrome/126.0.0.0 Safari/537.36"
+
+/**
+ * Honest loading/failure state for the TradingView widget. It never pretends the chart loaded and
+ * never silently swaps in another renderer: retry, the real TradingView site, or the app's own
+ * candles are the user's choice.
+ */
+@Composable
+private fun WidgetStatusPanel(
+    problem: String?,
+    onRetry: () -> Unit,
+    onOpenBrowser: () -> Unit,
+    onFallback: () -> Unit,
+    fallbackLabel: String,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier.background(AurumColors.Surface.copy(alpha = 0.88f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (problem == null) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth(0.5f))
+                Text("در حال بارگذاری ویدجت رسمی TradingView…",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
+                Text("کندل‌ها، تایم‌فریم و ایچیموکو مستقیم از خود TradingView می‌آید؛ اگر بارگذاری " +
+                        "تمام نشود دلیلش را همین‌جا می‌نویسیم.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            } else {
+                Text(problem, style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(onClick = onRetry) { Text("تلاش دوباره", style = MaterialTheme.typography.labelSmall) }
+                    OutlinedButton(onClick = onOpenBrowser) { Text("در مرورگر", style = MaterialTheme.typography.labelSmall) }
+                    OutlinedButton(onClick = onFallback) { Text(fallbackLabel, style = MaterialTheme.typography.labelSmall) }
+                }
+            }
+        }
+    }
+}
+
+private fun android.content.Context.openTradingView(tvSymbol: String?, query: String? = null) {
+    val url = when {
+        !tvSymbol.isNullOrBlank() -> "https://www.tradingview.com/chart/?symbol=${Uri.encode(tvSymbol)}"
+        !query.isNullOrBlank() -> "https://www.tradingview.com/search/?q=${Uri.encode(query)}"
+        else -> "https://www.tradingview.com/chart/"
+    }
+    runCatching {
+        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+}
+
+/**
+ * «برای هر معامله یک پنجره»: one window per OPEN paper trade, on the chart page, each with its own
+ * official TradingView widget for that trade's symbol and timeframe. Windows appear the moment an
+ * entry is recorded and close when the position is settled.
+ */
+@Composable
+private fun OpenTradeWindows(
+    openTrades: List<PaperTrade>,
+    livePrices: Map<String, Double>,
+    expandedId: String?,
+    onExpand: (String?) -> Unit,
+    onShowOnChart: (String) -> Unit,
+    chartSymbol: String,
+    chartInterval: Interval,
+    chartCandles: List<com.aurum.edge.core.Candle>,
+) {
+    if (openTrades.isEmpty()) {
+        SectionCard(
+            title = "پنجرهٔ معاملات باز",
+            subtitle = "به‌محض ثبت ورود، پنجرهٔ همان معامله با چارت TradingView همین‌جا باز می‌شود",
+        ) {
+            Text("الان معاملهٔ بازی در ژورنال نیست. وقتی پویشگر یا ورود دستی معامله‌ای باز کند، " +
+                    "پنجرهٔ مخصوص همان معامله (چارت TradingView + عددهای واقعی ورود/حد ضرر/حد سود) " +
+                    "به‌صورت خودکار در همین صفحه باز می‌شود.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+        }
+        return
+    }
+    openTrades.forEach { trade ->
+        TradeWindowCard(
+            trade = trade,
+            livePrice = livePrices[trade.symbol],
+            expanded = expandedId == trade.id,
+            onToggle = { onExpand(if (expandedId == trade.id) null else trade.id) },
+            onShowOnChart = { onShowOnChart(trade.symbol) },
+            chartSymbol = chartSymbol,
+            chartInterval = chartInterval,
+            chartCandles = chartCandles,
+        )
+    }
+}
+
+@Composable
+private fun TradeWindowCard(
+    trade: PaperTrade,
+    livePrice: Double?,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onShowOnChart: () -> Unit,
+    chartSymbol: String,
+    chartInterval: Interval,
+    chartCandles: List<com.aurum.edge.core.Candle>,
+) {
+    val context = LocalContext.current
+    val tvSymbol = remember(trade.symbol) { TradingViewSymbols.find(trade.symbol) }
+    val tvChartable = tvSymbol != null
+    val spec = remember(trade.symbol) { VenueSpecs.of(trade.symbol) }
+    var widgetLoaded by remember(trade.id, trade.symbol, trade.interval) { mutableStateOf(false) }
+    var widgetProblem by remember(trade.id, trade.symbol, trade.interval) { mutableStateOf<String?>(null) }
+    var widgetAttempt by remember(trade.id, trade.symbol, trade.interval) { mutableStateOf(0) }
+
+    LaunchedEffect(expanded, widgetAttempt, trade.id) {
+        if (!expanded || !tvChartable) return@LaunchedEffect
+        widgetLoaded = false
+        widgetProblem = null
+        delay(WIDGET_TIMEOUT_MS)
+        if (!widgetLoaded && widgetProblem == null) {
+            widgetProblem = "ویدجت TradingView در ${WIDGET_TIMEOUT_MS / 1000} ثانیه بارگذاری نشد؛ " +
+                "شبکه/فیلتر یا VPN را بررسی کنید"
+        }
+    }
+
+    // The method of THIS market is measured only from real candles of the same symbol; otherwise we
+    // say so instead of guessing from another instrument's chart.
+    val playbook = remember(trade.symbol, chartSymbol, chartInterval, chartCandles.size) {
+        if (trade.symbol != chartSymbol || chartCandles.size < 40) null
+        else runCatching {
+            MarketPlaybook.assess(trade.symbol, chartCandles.takeLast(120), chartInterval)
+        }.getOrNull()
+    }
+
+    val isBuy = trade.action == SignalAction.BUY
+    val pnlUsd = livePrice?.let { price ->
+        val perUnit = if (isBuy) price - trade.entry else trade.entry - price
+        kotlin.math.round(PaperOrderRules.quotePnlToUsd(trade.symbol, perUnit * trade.positionOz, price) * 100.0) / 100.0
+    }
+    val roundTripCost = livePrice?.let { price ->
+        kotlin.math.round((spec.spreadCostUsd(price, trade.positionOz) +
+                spec.commissionUsd(price, trade.positionOz) * 2.0) * 100.0) / 100.0
+    }
+    val spreadPrice = livePrice?.let { price ->
+        if (spec.spreadBps > 0.0) price * spec.spreadBps / 10_000.0 else spec.spreadPrice
+    }
+    val ageMinutes = ((System.currentTimeMillis() - trade.openedAt) / 60_000L).coerceAtLeast(0L)
+
+    SectionCard(
+        title = "پنجرهٔ معاملهٔ ${trade.symbol} · ${if (isBuy) "خرید LONG" else "فروش SHORT"}",
+        subtitle = "چارت و کندل‌ها فقط از ویدجت رسمی TradingView با همان مشخصات خودش؛ عددهای معامله از ژورنال واقعی دستگاه",
+        trailing = {
+            Pill(
+                when {
+                    !tvChartable -> "نگاشت نشده"
+                    !expanded -> "چارت بسته است"
+                    widgetLoaded -> "TradingView بارگذاری شد"
+                    else -> "در حال بارگذاری"
+                },
+                when {
+                    !tvChartable -> AurumColors.Red
+                    !expanded -> AurumColors.TextMuted
+                    widgetLoaded -> AurumColors.Green
+                    else -> AurumColors.Gold
+                },
+            )
+        },
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            StatTile("ورود", formatPriceFor(trade.symbol, trade.entry), AurumColors.Gold, Modifier.weight(1f))
+            StatTile("حد ضرر", formatPriceFor(trade.symbol, trade.stopLoss), AurumColors.Red, Modifier.weight(1f))
+            StatTile("حد سود", formatPriceFor(trade.symbol, trade.takeProfit), AurumColors.Green, Modifier.weight(1f))
+            StatTile("R:R", String.format(java.util.Locale.US, "%.2f", trade.riskReward),
+                AurumColors.Cyan, Modifier.weight(1f))
+        }
+        Text(
+            "حجم ${String.format(java.util.Locale.US, "%.6f", trade.positionOz)} ${trade.unit} · اهرم 1:${trade.leverage} · " +
+                "مارجین ${String.format(java.util.Locale.US, "%.2f", trade.marginUsd)}$ · " +
+                "باز شده ${formatDateTime(trade.openedAt)} (${if (ageMinutes < 60) "$ageMinutes دقیقه" else "${ageMinutes / 60} ساعت و ${ageMinutes % 60} دقیقه"} پیش) · " +
+                if (trade.autoOpened) "ورود خودکار کاغذی" else "ورود دستی کاغذی",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+        if (livePrice != null && livePrice > 0.0) {
+            val stopDistance = kotlin.math.abs(livePrice - trade.stopLoss)
+            val targetDistance = kotlin.math.abs(trade.takeProfit - livePrice)
+            val spreadText = if (spreadPrice != null && spreadPrice > 0.0)
+                " (≈${String.format(java.util.Locale.US, "%.1f", stopDistance / spreadPrice)} برابر اسپرد تا SL)" else ""
+            Text(
+                "آخرین قیمت ${formatPriceFor(trade.symbol, livePrice)} · سود/زیان باز " +
+                    "${String.format(java.util.Locale.US, "%.2f", pnlUsd ?: 0.0)}$" +
+                    (roundTripCost?.let { " · هزینهٔ رفت‌وبرگشت ${String.format(java.util.Locale.US, "%.2f", it)}$" } ?: "") +
+                    " · فاصله تا حد ضرر ${formatPriceFor(trade.symbol, stopDistance)}$spreadText" +
+                    " · فاصله تا حد سود ${formatPriceFor(trade.symbol, targetDistance)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = if ((pnlUsd ?: 0.0) >= 0.0) AurumColors.Green else AurumColors.Red,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        } else {
+            Text("قیمت زندهٔ این نماد الان در دسترس نیست؛ سود/زیان باز فقط با قیمت واقعی نشان داده می‌شود، نه با حدس.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 4.dp))
+        }
+        if (playbook != null) {
+            Text(
+                "متد این بازار: ${playbook.family.label} · ${playbook.session.label} · ${playbook.regime.label} → " +
+                    "${playbook.method.label}" + if (playbook.allowed) "" else " (الان ورود مجاز نیست: " +
+                    (playbook.blockers.firstOrNull() ?: "—") + ")",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (playbook.allowed) AurumColors.Cyan else AurumColors.Gold,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        } else {
+            Text("برای دیدن متدِ این بازار، همین نماد را در چارت بالا انتخاب کن تا از کندل‌های بستهٔ واقعیِ " +
+                    "خودش اندازه گرفته شود (نه از کندلِ نمادی دیگر).",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 4.dp))
+        }
+        Text("خروج فقط با قیمت واقعی و در ژورنال ثبت می‌شود؛ این پنجره هیچ سفارشی نمی‌فرستد.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 4.dp))
+
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(onClick = onToggle) {
+                Text(if (expanded) "بستن چارت این معامله" else "باز کردن چارت این معامله",
+                    style = MaterialTheme.typography.labelSmall)
+            }
+            OutlinedButton(onClick = onShowOnChart) {
+                Text("انتخاب این نماد در چارت بالا", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+
+        if (expanded && !tvChartable) {
+            Text("چارت TradingView برای ${trade.symbol} در دسترس نیست چون این نماد در نگاشت رسمی اپ " +
+                    "نیست؛ به‌جایش نماد دیگری نشان داده نمی‌شود. می‌توانی همین نماد را در TradingView " +
+                    "جست‌وجو کنی یا چارت داخلی اپ را در بالا ببینی.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 8.dp))
+            OutlinedButton(
+                onClick = { context.openTradingView(null, trade.symbol) },
+                modifier = Modifier.padding(top = 6.dp),
+            ) { Text("جست‌وجوی ${trade.symbol} در TradingView", style = MaterialTheme.typography.labelSmall) }
+        } else if (expanded) {
+            Box(Modifier.fillMaxWidth().height(400.dp).padding(top = 8.dp)) {
+                key(widgetAttempt) {
+                    TradingViewWidget(
+                        symbol = trade.symbol,
+                        interval = trade.interval,
+                        widgetId = "trade_" + trade.id.takeLast(8),
+                        modifier = Modifier.fillMaxSize(),
+                        onLoaded = { widgetLoaded = true; widgetProblem = null },
+                        onFailed = { blocked ->
+                            if (blocked) {
+                                widgetProblem = "TradingView برای ${trade.symbol} از این شبکه پاسخ نداد " +
+                                    "(خطای اصلی قاب/۴۵۱)"
+                            }
+                        },
+                    )
+                }
+                if (!widgetLoaded) {
+                    WidgetStatusPanel(
+                        problem = widgetProblem,
+                        onRetry = { widgetAttempt++ },
+                        onOpenBrowser = { context.openTradingView(tvSymbol) },
+                        onFallback = onShowOnChart,
+                        fallbackLabel = "چارت اصلی اپ",
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable

@@ -9,6 +9,7 @@ import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.MarketHours
+import com.aurum.edge.core.MarketPlaybook
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperAlertRules
 import com.aurum.edge.core.PaperOpportunity
@@ -47,6 +48,11 @@ data class PairScanStatus(
     val riskReward: Double? = null,
     val conditions: List<com.aurum.edge.core.ConfluenceItem> = emptyList(),
     val assetClass: com.aurum.edge.core.AssetClass = com.aurum.edge.core.AssetClass.of(symbol),
+    /** «کدام روش برای کدام بازار»: the method the playbook measured for this instrument. */
+    val methodLabel: String? = null,
+    val playbookAllowed: Boolean? = null,
+    /** The playbook's own reason when this market/method says stand aside. */
+    val playbookReason: String? = null,
 )
 
 data class PairScanState(
@@ -126,6 +132,7 @@ class PairScanner(
             .filter { it.price != null && (it.state == "candidate" || (it.technicalScore ?: 0) >= 5) }
             .sortedWith(
                 compareByDescending<PairScanStatus> { it.state == "candidate" }
+                    .thenByDescending { it.playbookAllowed == true }
                     .thenByDescending { it.riskReward ?: 0.0 }
                     .thenByDescending { it.confidence ?: 0.0 }
                     .thenByDescending { it.technicalScore ?: 0 }
@@ -147,6 +154,9 @@ class PairScanner(
             tp: Double? = null,
             rr: Double? = null,
             conditions: List<com.aurum.edge.core.ConfluenceItem> = emptyList(),
+            methodLabel: String? = null,
+            playbookAllowed: Boolean? = null,
+            playbookReason: String? = null,
         ) {
             statuses[symbol] = PairScanStatus(
                 symbol = symbol,
@@ -163,6 +173,9 @@ class PairScanner(
                 riskReward = rr,
                 conditions = conditions,
                 assetClass = com.aurum.edge.core.AssetClass.of(symbol),
+                methodLabel = methodLabel,
+                playbookAllowed = playbookAllowed,
+                playbookReason = playbookReason,
             )
             val currentList = WatchCatalog.scannerSymbols.mapNotNull { statuses[it] }
             val ranked = rankOpportunities(currentList)
@@ -238,6 +251,30 @@ class PairScanner(
             if (lastClosed != null) {
                 journal.settle(lastClosed, symbol, now)
             }
+            // «متناسب با همان استراتژی پویش کن»: the per-market method router is asked FIRST, from
+            // the real closed candles and the real session clock. A market whose method says
+            // stand aside (weekend, rollover, spike, dead tape, crypto range, closed equities,
+            // spread wider than 25% of ATR) never reaches the engine, so the radar reports the
+            // strategy reason instead of a low-quality signal.
+            val playbook = withContext(Dispatchers.Default) {
+                runCatching { MarketPlaybook.assess(symbol, candles, interval, now) }.getOrNull()
+            }
+            val playbookBlocker = if (playbook != null && !playbook.allowed) {
+                playbook.blockers.firstOrNull() ?: playbook.reasonFa
+            } else null
+            if (playbookBlocker != null && playbook != null) {
+                update(
+                    symbol = symbol,
+                    state = "blocked",
+                    detail = "متد بازار: ${playbook.method.label} — ${playbookBlocker.take(120)}",
+                    price = price,
+                    methodLabel = playbook.method.label,
+                    playbookAllowed = false,
+                    playbookReason = playbookBlocker.take(160),
+                )
+                return@forEachIndexed
+            }
+
             val evaluated = withContext(Dispatchers.Default) {
                 runCatching { SignalEngine.evaluate(candles, interval, config.minConfidence, config.spreadPrice, config.signalProfile, config.activeStrategy) }.getOrNull()
             }
@@ -262,6 +299,33 @@ class PairScanner(
                     tp = combined.takeProfit,
                     rr = combined.riskReward,
                     conditions = combined.confluence,
+                    methodLabel = playbook?.method?.label,
+                    playbookAllowed = playbook?.allowed,
+                    playbookReason = playbook?.reasonFa?.take(160),
+                )
+                return@forEachIndexed
+            }
+
+            // The method also raises the confidence bar per market/session (thin weekend crypto,
+            // a range fade, an Asian session …). Below that bar the symbol is not "worthy".
+            if (playbook != null && combined.confidence < playbook.minConfidence) {
+                update(
+                    symbol = symbol,
+                    state = "blocked",
+                    detail = "متد ${playbook.method.label}: اطمینان ${combined.confidence.toInt()}٪ از کفِ " +
+                        "${playbook.minConfidence.toInt()}٪ این بازار/سشن کمتر است",
+                    price = price,
+                    score = score,
+                    action = combined.action,
+                    confidence = combined.confidence,
+                    entry = combined.entry,
+                    sl = combined.stopLoss,
+                    tp = combined.takeProfit,
+                    rr = combined.riskReward,
+                    conditions = combined.confluence,
+                    methodLabel = playbook.method.label,
+                    playbookAllowed = true,
+                    playbookReason = playbook.reasonFa.take(160),
                 )
                 return@forEachIndexed
             }
@@ -342,7 +406,9 @@ class PairScanner(
             update(
                 symbol = symbol,
                 state = "candidate",
-                detail = "فرصت معاملاتی تایید شد · شانس موفقیت ${(combined.confidence).toInt()}% · R:R 1:${String.format(java.util.Locale.US, "%.1f", combined.riskReward ?: 2.0)}",
+                detail = "فرصت معاملاتی تایید شد" +
+                    (playbook?.let { " · متد ${it.method.label}" } ?: "") +
+                    " · شانس موفقیت ${(combined.confidence).toInt()}% · R:R 1:${String.format(java.util.Locale.US, "%.1f", combined.riskReward ?: 2.0)}",
                 price = price,
                 score = score,
                 action = combined.action,
@@ -352,6 +418,9 @@ class PairScanner(
                 tp = combined.takeProfit,
                 rr = combined.riskReward,
                 conditions = combined.confluence,
+                methodLabel = playbook?.method?.label,
+                playbookAllowed = playbook?.allowed,
+                playbookReason = playbook?.reasonFa?.take(160),
             )
         }
     }

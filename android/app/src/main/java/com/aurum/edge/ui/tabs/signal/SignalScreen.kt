@@ -324,6 +324,20 @@ private fun BestOpportunityDetailedCard(
                     }
                 }
 
+                // «متناسب با همان استراتژی»: which per-market method approved this symbol, so a
+                // candidate is never shown without the strategy that makes it tradable.
+                best.methodLabel?.let { method ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text("متد این بازار (استراتژی مخصوص همان بازار)",
+                            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                        Pill(method, if (best.playbookAllowed == true) AurumColors.Cyan else AurumColors.Gold)
+                    }
+                }
+
                 // Price levels: Entry, SL, TP
                 if (best.entry != null) {
                     Row(
