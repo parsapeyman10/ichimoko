@@ -70,6 +70,40 @@ class PaperAutoTrader(
             return null
         }
         val signal = current.signal ?: return null
+
+        // ── «کدام روش برای کدام بازار» ────────────────────────────────────────
+        // Before anything else, the market itself decides WHICH method is even legal right now:
+        // gold/FX trend-pullback in London/NY, FX range-fade in Asia, crypto breakout, equity
+        // opening drive, and STAND_ASIDE during rollover/thin sessions/volatility spikes.
+        // Everything here is measured from real closed candles + real session clocks.
+        val playbook = withContext(Dispatchers.Default) {
+            runCatching {
+                com.aurum.edge.core.MarketPlaybook.assess(
+                    current.symbol, current.candles, current.interval, System.currentTimeMillis())
+            }.getOrNull()
+        }
+        if (playbook != null) {
+            if (!playbook.allowed) {
+                _status.value = "بازار ${current.symbol} · ${playbook.family.label} · ${playbook.session.label} · " +
+                    "${playbook.regime.label} → ${playbook.method.label}: " +
+                    (playbook.blockers.firstOrNull() ?: "ورود مجاز نیست")
+                return null
+            }
+            if (signal.confidence < playbook.minConfidence) {
+                _status.value = "اطمینان سیگنال (${signal.confidence.toInt()}٪) از کفِ این بازار/سشن " +
+                    "(${playbook.minConfidence.toInt()}٪ برای ${playbook.method.label}) کمتر است"
+                return null
+            }
+            val rewardBps = signal.entry?.takeIf { it > 0.0 }?.let { entryPrice ->
+                signal.takeProfit?.let { target -> kotlin.math.abs(target - entryPrice) / entryPrice * 10_000.0 }
+            }
+            if (rewardBps != null && rewardBps < playbook.minRewardBps) {
+                _status.value = "هدف سیگنال ${String.format(java.util.Locale.US, "%.1f", rewardBps)}bps است؛ " +
+                    "کفِ سودِ واقعیِ ${playbook.family.label} ${String.format(java.util.Locale.US, "%.1f", playbook.minRewardBps)}bps"
+                return null
+            }
+        }
+
         val newsRecord = NewsConfluence.record(recentNews, current.symbol)
         val isLegacyEight = signal.confluence.filterNot { it.name == NewsConfluence.NEWS_LABEL }.size == 8
         val ict = if (isLegacyEight) {

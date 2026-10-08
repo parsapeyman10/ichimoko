@@ -25,9 +25,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.core.AlertCheck
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.IctEntryRules
+import com.aurum.edge.core.PlaybookDecision
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.core.TradeMethod
+import com.aurum.edge.data.AiConnectionState
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.PairScanState
 import com.aurum.edge.data.PairScanStatus
@@ -55,6 +59,9 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val autoStatus by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
     val scanState by viewModel.pairScan.collectAsStateWithLifecycle()
+    val playbook by viewModel.playbook.collectAsStateWithLifecycle()
+    val entryDiagnostics by viewModel.entryDiagnostics.collectAsStateWithLifecycle()
+    val aiConnection by viewModel.aiConnection.collectAsStateWithLifecycle()
     val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
     val signal = market.signal
 
@@ -123,6 +130,12 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             )
         }
 
+        // ── ۵٫۱ «کدام روش برای کدام بازار» — روتر متد بازار ──────────────────
+        MarketPlaybookCard(playbook, market.symbol)
+
+        // ── ۵٫۲ «چرا الان معامله/هشدار نداریم؟» — پیش‌نیازهای صادقانه ─────────
+        WhyNoTradeCard(entryDiagnostics, aiConnection)
+
         // ── ۶. چک‌لیست کامل شواهد و شروط تکنیکال نماد انتخابی ──────────────
         signal?.let { s ->
             SectionCard(
@@ -152,6 +165,109 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
         )
     }
 }
+
+/**
+ * «کدام روش برای کدام بازار»: the per-market method router, measured from real closed candles and
+ * real session clocks. Read-only — it says which method is legal now, and why not when it isn't.
+ */
+@Composable
+private fun MarketPlaybookCard(decision: PlaybookDecision?, symbol: String) {
+    val method = decision?.method
+    val color = when (method) {
+        TradeMethod.TREND_PULLBACK -> AurumColors.Green
+        TradeMethod.BREAKOUT_MOMENTUM -> AurumColors.Cyan
+        TradeMethod.OPENING_DRIVE -> AurumColors.Gold
+        TradeMethod.RANGE_MEAN_REVERSION -> AurumColors.Gold
+        TradeMethod.STAND_ASIDE -> AurumColors.Red
+        null -> AurumColors.TextMuted
+    }
+    SectionCard(
+        title = "متد مناسب این بازار · $symbol",
+        subtitle = "هر بازار یک روش دارد: طلا/فارکس در لندن و نیویورک روند، فارکس در آسیا رنج، رمزارز شکست مومنتوم، سهام درایو بازگشایی",
+        trailing = { Pill(method?.label ?: "در حال ارزیابی", color) },
+    ) {
+        if (decision == null) {
+            Text("دادهٔ کافی برای تعیین متد نیست؛ منتظر کندل‌های بستهٔ واقعی هستیم.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
+            return@SectionCard
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("خانوادهٔ بازار: ${decision.family.label} · سشن واقعی: ${decision.session.label} · رژیم اندازه‌گیری‌شده: ${decision.regime.label}" +
+                    if (decision.thinLiquidity) " · نقدشوندگی نازک (آخر هفتهٔ کریپتو)" else "",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            Text("اندازه‌گیری‌های واقعی: ER=${fmt2(decision.efficiencyRatio)} · ATR/میانه=${fmt2(decision.atrRatio)} · اسپرد/ATR=" +
+                    (decision.spreadAtrRatio?.let { fmt2(it * 100.0) + "٪" } ?: "—"),
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            Text("پارامترهای مجاز این متد: کف امتیاز ${decision.minScore} · کف اطمینان ${decision.minConfidence.toInt()}٪ · " +
+                    "R:R بین ${fmt2(decision.rrMin)} و ${fmt2(decision.rrMax)} · استاپ بین ${fmt2(decision.stopAtrMin)} و ${fmt2(decision.stopAtrMax)} برابر ATR",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            Text("کف سود واقعی: ${fmt2(decision.minRewardBps)}bps و حداقل ${fmt2(decision.costRewardMultiple)} برابر هزینهٔ رفت‌وبرگشت · مرجع هزینه: ${decision.venue}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            Text(decision.reasonFa, style = MaterialTheme.typography.labelSmall, color = color)
+            decision.blockers.forEach { blocker ->
+                Text("⛔ $blocker", style = MaterialTheme.typography.labelSmall, color = AurumColors.Red)
+            }
+            if (decision.allowed) {
+                Text("✅ ورود با این متد مجاز است؛ بقیهٔ گیت‌ها (کراس تأییدشده، MTF، ICT، تازگی قیمت، مارجین و اسپرد) جداگانه بررسی می‌شوند.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            }
+        }
+    }
+}
+
+/**
+ * «چرا الان معامله/هشدار نداریم؟» — the nine honest prerequisites plus the AI connection truth.
+ * Green checks are prerequisites, never a forecast; a red row is the actual reason nothing opened.
+ */
+@Composable
+private fun WhyNoTradeCard(checks: List<AlertCheck>, ai: AiConnectionState) {
+    val failed = checks.count { !it.ready }
+    SectionCard(
+        title = "چرا الان معامله/هشدار نداریم؟",
+        subtitle = "پیش‌نیازهای زندهٔ اپ — هر ردیف قرمز یعنی همان دلیل، بدون حدس",
+        trailing = {
+            Pill(if (checks.isEmpty()) "در حال بررسی" else if (failed == 0) "همهٔ پیش‌نیازها سبز" else "$failed مورد قرمز",
+                if (checks.isEmpty()) AurumColors.TextMuted else if (failed == 0) AurumColors.Green else AurumColors.Red)
+        },
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (checks.isEmpty()) {
+                Text("هنوز دادهٔ کافی برای ارزیابی پیش‌نیازها نیست.",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
+            }
+            checks.forEach { check ->
+                Text("${if (check.ready) "✅" else "⛔"} ${check.kind.label}: ${check.detail}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (check.ready) AurumColors.TextSecondary else AurumColors.Red)
+            }
+            Text(
+                when {
+                    !ai.configured -> "🤖 اتصال AI: کلید/مدل تنظیم نشده — معاملات کاغذی بدون AI و فقط با شرط‌های فنی انجام می‌شوند."
+                    ai.reachable == true -> "🤖 اتصال AI: برقرار است — ارزنده‌بودن ورود و بازبینی پوزیشن باز از مدل پرسیده می‌شود."
+                    ai.reachable == false -> "🤖 اتصال AI: قطع است (${ai.detail.ifBlank { "اتصال برقرار نشد" }}) — معاملات بدون AI ادامه دارند و این وضعیت اعلان می‌شود."
+                    else -> "🤖 اتصال AI: هنوز در این اجرا بررسی نشده است."
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = when (ai.reachable) {
+                    true -> AurumColors.Green
+                    false -> if (ai.configured) AurumColors.Red else AurumColors.Gold
+                    null -> AurumColors.TextMuted
+                },
+            )
+            ai.checkedAt?.let { at ->
+                Text("آخرین بررسی اتصال AI: " + relativeTime(at, System.currentTimeMillis()),
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            }
+            if (failed == 0 && checks.isNotEmpty()) {
+                Text("اگر همه‌چیز سبز است و معامله‌ای باز نشد، دلیل لحظه‌ای‌اش در بخش «معاملهٔ خودکار کاغذی» پایین نوشته می‌شود (مثلاً کراس تأییدنشده یا گیت متد بازار).",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            }
+        }
+    }
+}
+
+private fun fmt2(value: Double?): String =
+    if (value == null) "—" else String.format(java.util.Locale.US, "%.2f", value)
 
 /**
  * کارت بهترین فرصت معاملاتی با تشریح کامل شروط تکنیکال و تفکیک نماد/دسته دارایی.

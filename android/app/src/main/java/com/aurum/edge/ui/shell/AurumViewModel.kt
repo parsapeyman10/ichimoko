@@ -56,8 +56,12 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -83,12 +87,53 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val aiConnection = container.traderAdvisor.connection
     /** «ادامه بده یا نه» — the companion AI's advisory pass over the OPEN paper positions. */
     val holdReview = container.traderAdvisor.holdReviews
+
     val market = container.verifiedMarket
     val trades: StateFlow<List<PaperTrade>> = container.journalStore.trades
     val opportunities: StateFlow<List<PaperOpportunity>> = container.opportunityStore.items
     val opportunityError: StateFlow<String?> = container.opportunityStore.loadError
     val journalError: StateFlow<String?> = container.journalStore.loadError
     val autoPaperStatus: StateFlow<String> = container.autoPaperTrader.status
+
+    /**
+     * «کدام روش برای کدام بازار» — per-market method router for the SELECTED symbol, recomputed
+     * on every market emission from real closed candles + the real session clocks. Read-only: it
+     * never creates a signal, it says which method is legal right now and why not when it isn't.
+     */
+    val playbook: StateFlow<com.aurum.edge.core.PlaybookDecision?> = container.verifiedMarket
+        .map { state ->
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    com.aurum.edge.core.MarketPlaybook.assess(state.symbol, state.candles, state.interval)
+                }.getOrNull()
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * «چرا معامله/هشدار نداریم؟» — the honest prerequisites (feed, history, monitor, notification
+     * channels, storage, news/AI, the 8/8 technical gate and the CONTINUOUS SYMBOL SCAN itself),
+     * computed from live app state.
+     * Green checks are prerequisites, never a forecast.
+     */
+    val entryDiagnostics: StateFlow<List<com.aurum.edge.core.AlertCheck>> = combine(
+        container.verifiedMarket, settings, trades, news, pairScan,
+    ) { market, config, openTrades, headlines, scan ->
+        withContext(Dispatchers.Default) {
+            val mtf = runCatching { MtfAnalyzer.analyze(market.candles, market.interval) }.getOrNull()
+            runCatching {
+                com.aurum.edge.core.AlertDiagnostics.checks(
+                    market = market, settings = config, news = headlines,
+                    monitorRunning = SignalMonitorService.running.value,
+                    androidNotificationsReady = Notifier.canNotifyVerified(
+                        container.appContext, config.alertSoundUri),
+                    trades = openTrades, mtf = mtf,
+                    opportunityError = opportunityError.value, journalError = journalError.value,
+                    scan = scan,
+                )
+            }.getOrElse { emptyList() }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val updateState: StateFlow<AppUpdateRepository.State> = container.updater.state
 
     /** Walk-forward runs made on this device, kept so the numbers can be re-checked later. */
@@ -156,6 +201,23 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _toast.value = "ژورنال تصمیم‌های replay خوانده نشد؛ فایل قبلی دست‌نخورده ماند"
             }
             _stats.value = container.journalStore.stats()
+        }
+        viewModelScope.launch {
+            // «وضعیت اتصال هوش مصنوعی را چک کن و اگر قطع بود اعلام کن»: announced in the app
+            // itself, once per real change of state — never on every tick, never as a guess.
+            var announced: Boolean? = null
+            container.traderAdvisor.connection.collect { connection ->
+                val reachable = connection.reachable
+                if (connection.configured && reachable != null && reachable != announced) {
+                    announced = reachable
+                    _toast.value = if (reachable) {
+                        "🤖 اتصال AI برقرار شد — ارزنده‌بودن ورودها و بازبینی پوزیشن‌های باز دوباره از مدل پرسیده می‌شود"
+                    } else {
+                        "🤖 اتصال AI قطع است (${connection.detail.ifBlank { "پاسخی از مدل نگرفتیم" }}) — " +
+                            "معاملات کاغذی بدون AI و فقط با شرط‌های فنی ادامه پیدا می‌کنند"
+                    }
+                }
+            }
         }
         viewModelScope.launch {
             // Automatic SL/TP settlement happens in MarketRepository, not in this ViewModel.
@@ -244,6 +306,16 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                         container.news.refreshNow()
                     }
                     container.traderAdvisor.refreshNow()
+                    // وضعیت اتصال AI در پیش‌زمینه هم تازه می‌ماند (TTL پنج دقیقه + cooldown روی
+                    // پروب ناموفق)، تا اگر قطع شد هم در کارت «چرا معامله نداریم؟» و هم با پیام
+                    // روی صفحه اعلام شود.
+                    if (settings.value.hasClientNewsAi) {
+                        runCatching { container.traderAdvisor.ensureConnection() }.getOrNull()
+                    }
+                    // پایش پیوستهٔ نمادها: the 50+ symbol radar keeps sweeping while the app is
+                    // visible, independently of the background-monitor switch (PairScanner enforces
+                    // its own 30s throttle and records honest online/error statuses per symbol).
+                    container.pairScanner.refreshNow()
                     // Advisory review of the open positions while the app is visible (the monitor
                     // service does the same when it runs). Never closes or re-prices a trade.
                     runCatching { container.traderAdvisor.reviewOpenPositions() }.getOrNull()

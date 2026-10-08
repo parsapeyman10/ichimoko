@@ -123,6 +123,8 @@ class SignalMonitorService : Service() {
         newsJob?.cancel()
         newsJob = scope.launch {
             var turns = 0
+            /** Last announced AI reachability; null = nothing announced yet. */
+            var lastAiReachable: Boolean? = null
             while (isActive) {
                 if (!notificationsPermitted()) { stopSelf(); break }
                 if (!MarketHours.weekendClosedFor(container.settingsStore.read().symbol)) {
@@ -145,6 +147,28 @@ class SignalMonitorService : Service() {
                                 "trader-ai|" + flip.symbol + "|" + flip.generatedAt,
                                 "همراه تریدر AI · تغییر جهت ${flip.symbol}",
                                 "جهت از $from به ${flip.bias} تغییر کرد — ${flip.summary}")
+                        }
+                    }
+                    // ── وضعیت اتصال AI ────────────────────────────────────────
+                    // The connection is checked FIRST and a drop is ANNOUNCED, exactly as asked:
+                    // when the model stops answering the user is told, and paper trading simply
+                    // continues on the technical rules (never on an invented AI opinion).
+                    val aiConfig = container.settingsStore.read()
+                    if (aiConfig.hasClientNewsAi && (aiConfig.autoPaperTrading || aiConfig.notifyOnSignal)) {
+                        runCatching { container.traderAdvisor.ensureConnection() }
+                        val conn = container.traderAdvisor.connection.value
+                        if (notificationsPermitted() && conn.reachable != null &&
+                            conn.reachable != lastAiReachable) {
+                            lastAiReachable = conn.reachable
+                            Notifier.notifyResearch(this@SignalMonitorService,
+                                "ai-connection|" + conn.reachable + "|" + (conn.checkedAt ?: 0L),
+                                if (conn.reachable == true) "همراه تریدر AI · اتصال برقرار شد"
+                                else "همراه تریدر AI · اتصال قطع است",
+                                if (conn.reachable == true)
+                                    "مدل پاسخ داد؛ ارزنده‌بودن ورودها و بازبینی پوزیشن‌های باز دوباره از AI پرسیده می‌شود."
+                                else
+                                    "مدل در دسترس نیست (${conn.detail.ifBlank { "اتصال برقرار نشد" }}) — " +
+                                        "معاملات کاغذی بدون AI و فقط با شرط‌های فنی ادامه پیدا می‌کنند.")
                         }
                     }
                     // «ادامه بده یا نه»: the companion AI reviews the OPEN paper positions on its own

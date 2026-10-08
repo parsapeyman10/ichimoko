@@ -4,6 +4,7 @@ import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.SignalAction
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -86,6 +87,27 @@ class PaperOrderRulesTest {
         assertTrue(goldTicket.venue.startsWith("LMAX/IC Markets"))
         assertTrue(goldTicket.costBps > 0.0)
         assertEquals("oz", PaperOrderRules.unitFor("XAU/USD"))
+    }
+
+    @Test fun aTargetSmallerThanTheRealCostFloorOfItsMarketIsRefused() {
+        // BTCUSDT costs ~10 bps per side plus a 1 bp spread, so a round trip is ~21 bps. Crypto
+        // therefore needs at least 5x that (and the 60 bps family floor) before a ticket may even
+        // exist: a 25 bps target is a fee donation, not a trade.
+        val refused = try {
+            PaperOrderRules.preview(SignalAction.BUY, "BTCUSDT", 60000.0, 59900.0, 60150.0, 1000.0, 0.1)
+            null
+        } catch (error: IllegalArgumentException) {
+            error.message
+        }
+        assertNotNull(refused)
+        assertTrue(refused!!.contains("کفِ"))
+        assertTrue(refused.contains("بازار «"))
+
+        // The same shape with a target that actually pays for the fee is accepted unchanged.
+        val ticket = PaperOrderRules.preview(SignalAction.BUY, "BTCUSDT", 60000.0, 59900.0, 60900.0, 1000.0, 0.1)
+        assertTrue(ticket.rewardRisk >= 1.2)
+        assertTrue(ticket.costBps > 0.0)
+        assertEquals("coins", ticket.unit)
     }
 
     @Test fun rejectsWrongSideExcessLeverageRewardAndInvalidQuotes() {

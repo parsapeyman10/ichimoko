@@ -149,6 +149,8 @@ class TraderAdvisor(
     val state: StateFlow<TraderOpinionState> = _state.asStateFlow()
 
     private var lastReachableElapsed = 0L
+    /** A failed probe is cached too, so a background loop never hammers the provider every tick. */
+    private var lastUnreachableElapsed = 0L
     private val _connection = MutableStateFlow(AiConnectionState())
     val connection: StateFlow<AiConnectionState> = _connection.asStateFlow()
 
@@ -174,18 +176,23 @@ class TraderAdvisor(
         }
         val now = SystemClock.elapsedRealtime()
         if (lastReachableElapsed != 0L && now - lastReachableElapsed < CONNECTION_TTL_MS) return true
+        val previous = _connection.value
+        if (lastUnreachableElapsed != 0L && now - lastUnreachableElapsed < CONNECTION_TTL_MS &&
+            previous.reachable == false && previous.detail.isNotBlank()) return false
         return try {
             val reply = withContext(Dispatchers.Default) {
                 AiProvider.probe(http, config.newsAiBaseUrl, config.newsAiApiKey,
                     config.newsAiModel, config.newsAiFormat)
             }
             lastReachableElapsed = SystemClock.elapsedRealtime()
+            lastUnreachableElapsed = 0L
             _connection.value = AiConnectionState(
                 configured = true, reachable = true,
                 detail = reply.trim().take(80), checkedAt = System.currentTimeMillis())
             true
         } catch (error: Exception) {
             lastReachableElapsed = 0L
+            lastUnreachableElapsed = SystemClock.elapsedRealtime()
             _connection.value = AiConnectionState(
                 configured = true, reachable = false,
                 detail = (error.message ?: "اتصال برقرار نشد").take(120),

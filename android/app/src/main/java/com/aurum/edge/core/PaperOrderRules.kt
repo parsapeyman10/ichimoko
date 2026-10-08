@@ -2,6 +2,7 @@ package com.aurum.edge.core
 
 import kotlin.math.abs
 import kotlin.math.floor
+import kotlin.math.max
 
 /** Pure validation for a two-sided *paper-only* ticket. No venue order is ever sent. */
 data class PaperTicket(
@@ -116,6 +117,19 @@ object PaperOrderRules {
         val spreadCost = kotlin.math.round(spec.spreadCostUsd(entry, quantity) * 10000.0) / 10000.0
         val roundTrip = commission + spreadCost
         val costBps = if (notional > 0.0) kotlin.math.round((roundTrip / notional) * 10_000.0 * 100.0) / 100.0 else 0.0
+        // ── کف سودِ واقعیِ هر بازار ────────────────────────────────────────────
+        // یک هدفِ کوچک‌تر از «کف bps همان بازار» یا «چند برابر هزینهٔ واقعی رفت‌وبرگشت»، حتی اگر
+        // RR ریاضی‌اش خوب باشد، در عمل به‌خاطر اسپرد/کمیسیون از بین می‌رود. این قید ساعت‌محور نیست
+        // (فقط به خانوادهٔ بازار و هزینهٔ واقعی همان نماد نگاه می‌کند) پس برای بلیت دستی هم صادق است.
+        val rewardBps = abs(target - entry) / entry * 10_000.0
+        val familyFloorBps = MarketPlaybook.minRewardBpsFor(symbol)
+        val costFloorBps = MarketPlaybook.costRewardMultipleFor(symbol) * costBps
+        val requiredBps = max(familyFloorBps, costFloorBps)
+        require(rewardBps.isFinite() && rewardBps >= requiredBps) {
+            "هدف این معامله ${String.format(java.util.Locale.US, "%.1f", rewardBps)}bps است ولی کفِ " +
+                "بازار «${MarketPlaybook.familyOf(symbol).label}» ${String.format(java.util.Locale.US, "%.1f", requiredBps)}bps " +
+                "(هزینهٔ واقعی رفت‌وبرگشت ${String.format(java.util.Locale.US, "%.2f", costBps)}bps) — سود از هزینه جدا نمی‌شود"
+        }
         return PaperTicket(
             quantity = quantity,
             unit = unitFor(symbol),

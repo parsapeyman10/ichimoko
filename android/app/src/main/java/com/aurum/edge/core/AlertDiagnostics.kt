@@ -12,6 +12,7 @@ enum class AlertCheckKind(val label: String) {
     KEY("منبع بازار"), MARKET("قیمت واقعی تازه"), HISTORY("کندل بسته"),
     MONITOR("سرویس پایش"), APP_ALERT("هشدار در اپ"), ANDROID_ALERT("اعلان اندروید"),
     STORAGE("فایل‌های هشدار/ژورنال"), AI_NEWS("خبر نزدیک برای ژورنال"), NINE_WAY("۸/۸ فنی، ICT و MTF"),
+    SCAN("اسکن پیوستهٔ نمادها"),
 }
 
 data class AlertCheck(val kind: AlertCheckKind, val ready: Boolean, val detail: String)
@@ -22,8 +23,12 @@ object AlertDiagnostics {
         monitorRunning: Boolean, androidNotificationsReady: Boolean,
         trades: List<PaperTrade>, mtf: MtfAnalyzer.Snapshot?,
         opportunityError: String? = null, journalError: String? = null,
+        /** Continuous 50+ symbol radar state; scanning itself must be monitored, not assumed. */
+        scan: com.aurum.edge.data.PairScanState? = null,
         now: Long = System.currentTimeMillis(),
     ): List<AlertCheck> {
+        val lastSweepAt = scan?.lastSweepAt
+        val scanAgeMs = if (lastSweepAt != null) now - lastSweepAt else null
         val priceFresh = !market.showingCachedData &&
             market.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
             FeedLiveness.hasRecentReceipt(market.feed, now)
@@ -77,8 +82,31 @@ object AlertDiagnostics {
                         "AI خبر برای ${market.symbol}: ${selectedVerdict.direction} با ${selectedVerdict.confidence.toInt()}٪؛ فقط همراه معامله در ژورنال داده‌کاوی می‌شود"
                     else -> "خبر معیار تأییدی کامل ندارد؛ شرط ورود نیست و فقط زمینهٔ ژورنال/آموزش است"
                 }),
+            AlertCheck(AlertCheckKind.SCAN,
+                scan != null && scanAgeMs != null && scanAgeMs in 0L..180_000L && scan.lastError == null,
+                when {
+                    scan == null -> "اسکنر نمادها در این فرایند هنوز وضعیت ندارد"
+                    scanAgeMs == null -> "هنوز هیچ پاس اسکنی کامل نشده است؛ فید/تاریخچهٔ نمادها را بررسی کنید"
+                    scan.sweeping -> "اسکن پیوسته در جریان است؛ آخرین پاس کامل ${ago(scanAgeMs)}"
+                    scanAgeMs > 180_000L -> "اسکن پیوسته متوقف شده است: آخرین پاس ${ago(scanAgeMs)} — " +
+                        "اپ را در پیش‌زمینه نگه دارید یا پایش پس‌زمینه را روشن کنید"
+                    scan.lastError != null -> "آخرین پاس اسکن با خطا: ${scan.lastError}"
+                    else -> "آخرین پاس ${ago(scanAgeMs)}؛ ${scan.statuses.size} نماد پایش شد، " +
+                        "${scan.statuses.count { it.state == "candidate" }} کاندیدا، " +
+                        "${scan.statuses.count { it.state == "error" }} خطای دریافت داده"
+                }),
             AlertCheck(AlertCheckKind.NINE_WAY, signal?.isActionable == true && entryBlocker == null,
                 entryBlocker ?: "شرایط این لحظه تأییدند؛ این به‌تنهایی وقوع هشدار، معامله یا سود را تضمین نمی‌کند"),
         )
+    }
+
+    /** «چقدر پیش» به فارسی — برای اینکه توقف اسکن پیوسته با عدد واقعی دیده شود. */
+    private fun ago(ageMs: Long): String {
+        val seconds = (ageMs / 1000L).coerceAtLeast(0L)
+        return when {
+            seconds < 60 -> "$seconds ثانیه پیش"
+            seconds < 3_600 -> "${seconds / 60} دقیقه پیش"
+            else -> "${seconds / 3_600} ساعت پیش"
+        }
     }
 }
