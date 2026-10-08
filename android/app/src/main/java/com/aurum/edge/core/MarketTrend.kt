@@ -171,8 +171,16 @@ data class TrendContext(
 
 object MarketTrend {
 
-    /** پنجرهٔ اندازه‌گیری: آخرین کندل‌های بستهٔ معتبر (نه همهٔ ۳۰۰۰ کندل، برای سرعت). */
+    /** پنجرهٔ اندازه‌گیری روی تایم‌فریم پایه: آخرین کندل‌های بستهٔ معتبر (نه همهٔ ۳۰۰۰، برای سرعت). */
     private const val MAX_BARS = 500
+
+    /**
+     * تایم‌فریم مرجع به **خودش** [MIN_BARS] کندل بسته نیاز دارد، پس پنجرهٔ تجمیع به اندازهٔ
+     * همین چند برابر گشادتر می‌شود. با M5→H1 یک پنجرهٔ ۵۰۰ کندلی فقط ۴۱ کندل ساعتی می‌داد و
+     * تایم‌فریم مرجع برای همیشه UNKNOWN می‌ماند؛ یعنی لایهٔ روند عملاً هیچ‌وقت اندازه گرفته
+     * نمی‌شد. کندل‌ها همچنان فقط تجمیع می‌شوند، هرگز ساخته نمی‌شوند.
+     */
+    private const val HTF_WINDOW_FACTOR = 2
 
     /** کمتر از این تعداد کندل بسته ⇒ UNKNOWN. زیر ۶۰ کندل، EMA50 خودش معنا ندارد. */
     const val MIN_BARS = 60
@@ -230,7 +238,8 @@ object MarketTrend {
         higher: Interval? = higherFor(interval),
     ): SymbolTrend {
         val family = MarketPlaybook.familyOf(symbol)
-        val closed = candles.filter { it.closed }.takeLast(MAX_BARS)
+        val allClosed = candles.filter { it.closed }
+        val closed = allClosed.takeLast(MAX_BARS)
         val base = measure(closed)
         if (base == null) {
             return SymbolTrend(
@@ -247,7 +256,10 @@ object MarketTrend {
         val canResample = higher != null && higher.minutes > interval.minutes &&
             higher.minutes % interval.minutes == 0
         val higherBars = if (canResample && higher != null) {
-            MtfAnalyzer.resample(closed, higher, interval).filter { it.closed }
+            val ratio = higher.minutes / interval.minutes
+            val needed = MIN_BARS * ratio * HTF_WINDOW_FACTOR
+            val source = allClosed.takeLast(maxOf(MAX_BARS, needed))
+            MtfAnalyzer.resample(source, higher, interval).filter { it.closed }
         } else emptyList()
         val higherMeasure = if (higherBars.size >= MIN_BARS) measure(higherBars) else null
 
