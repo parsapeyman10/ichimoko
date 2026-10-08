@@ -206,6 +206,7 @@ jobs:
           "$SDKMANAGER" --list_installed | sed -n '1,120p'
 
       - name: Restore CI updater signing key
+        id: signing_cache
         if: steps.guard.outputs.ready == 'true' && env.AURUM_RELEASE_KEYSTORE_BASE64 == ''
         uses: actions/cache@v4
         with:
@@ -267,6 +268,53 @@ jobs:
         if: steps.guard.outputs.ready == 'true'
         working-directory: ${{ env.PROJECT_DIR }}
         run: ./gradlew :${APP_MODULE}:assembleDebug :${APP_MODULE}:assembleRelease $GRADLE_FLAGS
+
+      # The in-app updater refuses an APK whose signing certificate differs from the installed one,
+      # so a rotated/lost keystore must fail HERE — never publish an APK nobody can install over.
+      - name: Verify signing continuity with the published release
+        if: steps.guard.outputs.ready == 'true'
+        id: signing_check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          APKSIGNER="$SDK/build-tools/${ANDROID_BUILD_TOOLS}/apksigner"
+          NEW_APK="$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk"
+          cert_of() {
+            "$APKSIGNER" verify --print-certs "$1" \
+              | awk -F': ' '/certificate SHA-256 digest/ { print tolower($2); exit }'
+          }
+          NEW_CERT="$(cert_of "$NEW_APK")"
+          if [[ -z "$NEW_CERT" ]]; then
+            echo "::error title=Unreadable signer::apksigner could not print the certificate of the built release APK"
+            exit 1
+          fi
+          echo "Release APK signer SHA-256: $NEW_CERT (mode: ${AURUM_SIGNING_MODE:-unknown})"
+          echo "new_cert_sha256=$NEW_CERT" >> "$GITHUB_OUTPUT"
+          FILTER='[.[] | select(.draft == false and .prerelease == false) | .assets[] | select((.name | startswith("'"$RELEASE_APK_PREFIX"'-v")) and (.name | endswith(".apk"))) | "\(.url) \(.name)"] | .[0] // empty'
+          PUBLISHED="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=10" --jq "$FILTER" || true)"
+          if [[ -z "${PUBLISHED// }" ]]; then
+            echo "No published release APK yet — this build establishes the updater signature."
+            echo "published_cert_sha256=" >> "$GITHUB_OUTPUT"
+            echo "continuity=first signed build on this channel" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          PREV_URL="${PUBLISHED%% *}"
+          PREV_NAME="${PUBLISHED##* }"
+          gh api --header "Accept: application/octet-stream" "$PREV_URL" > "$RUNNER_TEMP/published-release.apk"
+          PREV_CERT="$(cert_of "$RUNNER_TEMP/published-release.apk")"
+          echo "Published $PREV_NAME signer SHA-256: ${PREV_CERT:-unreadable}"
+          echo "published_cert_sha256=$PREV_CERT" >> "$GITHUB_OUTPUT"
+          if [[ -z "$PREV_CERT" ]]; then
+            echo "::error title=Unreadable published signer::Could not read the certificate of $PREV_NAME, so signing continuity cannot be proven"
+            exit 1
+          fi
+          if [[ "$NEW_CERT" != "$PREV_CERT" ]]; then
+            echo "::error title=Signing key changed::The new APK is signed with $NEW_CERT but the published $PREV_NAME uses $PREV_CERT. In-app updates need the SAME key, so nothing is published. Restore the AURUM_RELEASE_* repository secrets or the aurum-ci-updater-signing-v1 cache from the default branch."
+            exit 1
+          fi
+          echo "continuity=verified: identical signer to $PREV_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Collect APKs and updater metadata
         if: steps.guard.outputs.ready == 'true'
@@ -401,6 +449,14 @@ jobs:
             if [[ "${AURUM_SIGNING_MODE:-}" == "GitHub Actions cache" ]]; then
               echo "The first install from this channel establishes the updater signature; later workflow builds reuse the cached key."
             fi
+            echo ""
+            echo "### Signing continuity (in-app updates need the SAME key)"
+            echo "| Check | Value |"
+            echo "|---|---|"
+            echo "| Signing key cache hit | `${{ steps.signing_cache.outputs.cache-hit }}` |"
+            echo "| New release APK signer SHA-256 | `${{ steps.signing_check.outputs.new_cert_sha256 }}` |"
+            echo "| Published release APK signer SHA-256 | `${{ steps.signing_check.outputs.published_cert_sha256 }}` |"
+            echo "| Verdict | ${{ steps.signing_check.outputs.continuity }} |"
             echo ""
             echo "No market or AI API keys are embedded in the APK. Users enter optional keys only on their own device."
           } >> "$GITHUB_STEP_SUMMARY"

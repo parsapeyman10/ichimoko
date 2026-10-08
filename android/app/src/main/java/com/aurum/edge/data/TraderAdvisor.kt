@@ -1,11 +1,16 @@
 package com.aurum.edge.data
 
 import android.os.SystemClock
+import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.PaperAiReview
+import com.aurum.edge.core.PaperHoldReview
+import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.Signal
+import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.SignalProfile
+import com.aurum.edge.core.VenueSpecs
 import com.aurum.edge.engine.MtfAnalyzer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,6 +24,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import okhttp3.OkHttpClient
 import java.util.Locale
@@ -54,6 +60,49 @@ data class AiTradePlan(
     val summary: String,
     val model: String,
     val generatedAt: Long,
+    /**
+     * The model's own verdict on whether this setup is worth taking at all. It is asked for
+     * every plan; a `false` blocks the paper entry instead of only re-pricing it. When the
+     * model is unreachable the caller proceeds on the technical rules alone (never invented).
+     */
+    val worth: Boolean = true,
+    val worthReason: String = "",
+)
+
+/**
+ * Reachability of the user's own model, checked by the app BEFORE it asks the AI to judge a
+ * trade. [reachable] is null until the first check of this process.
+ */
+data class AiConnectionState(
+    val configured: Boolean = false,
+    val reachable: Boolean? = null,
+    val detail: String = "",
+    val checkedAt: Long? = null,
+)
+
+/**
+ * One advisory alert about an OPEN paper position. It is a NOTIFICATION, never an order: the app
+ * does not close, edit or re-price the trade because of it.
+ */
+data class HoldAlert(
+    val tradeId: String,
+    val symbol: String,
+    /** DO_NOT_CONTINUE — the only verdict that raises an alert. */
+    val verdict: String,
+    val summary: String,
+    val checkedAt: Long,
+)
+
+/**
+ * Truth of the last "continue or not" pass over the open positions, for the UI. [skipped] carries
+ * the honest reason when nothing could be reviewed (no model, no fresh quote, throttled, ...).
+ */
+data class HoldReviewCycle(
+    val openCount: Int = 0,
+    val reviewed: Int = 0,
+    val alerts: List<HoldAlert> = emptyList(),
+    val skipped: String = "",
+    val checkedAt: Long? = null,
 )
 
 data class TraderOpinionState(
@@ -89,6 +138,7 @@ class TraderAdvisor(
     private val market: MarketRepository,
     private val scanner: PairScanner,
     private val news: NewsRepository,
+    private val journal: JournalStore,
     private val scope: CoroutineScope,
 ) {
     private val mutex = Mutex()
@@ -97,6 +147,59 @@ class TraderAdvisor(
         .followRedirects(false).build()
     private val _state = MutableStateFlow(TraderOpinionState())
     val state: StateFlow<TraderOpinionState> = _state.asStateFlow()
+
+    private var lastReachableElapsed = 0L
+    /** A failed probe is cached too, so a background loop never hammers the provider every tick. */
+    private var lastUnreachableElapsed = 0L
+    private val _connection = MutableStateFlow(AiConnectionState())
+    val connection: StateFlow<AiConnectionState> = _connection.asStateFlow()
+
+    private val _holdReviews = MutableStateFlow(HoldReviewCycle())
+    val holdReviews: StateFlow<HoldReviewCycle> = _holdReviews.asStateFlow()
+    /** tradeId -> wall-clock time of its last successful hold review (per-trade throttle). */
+    private val holdReviewedAt = mutableMapOf<String, Long>()
+    private var lastHoldCycleElapsed = 0L
+
+    /**
+     * The connection is checked BEFORE the AI is asked anything, exactly as required: a cached
+     * success (5 minutes) short-circuits the check so an entry never pays for two calls,
+     * otherwise one cheap probe line is sent. `false` means "do not wait for the AI" and the
+     * caller keeps trading on the technical rules alone.
+     */
+    suspend fun ensureConnection(): Boolean {
+        val config = settings.read()
+        if (!config.hasClientNewsAi) {
+            _connection.value = AiConnectionState(
+                configured = false, reachable = false,
+                detail = "کلید/مدل AI در تنظیمات وارد نشده است", checkedAt = System.currentTimeMillis())
+            return false
+        }
+        val now = SystemClock.elapsedRealtime()
+        if (lastReachableElapsed != 0L && now - lastReachableElapsed < CONNECTION_TTL_MS) return true
+        val previous = _connection.value
+        if (lastUnreachableElapsed != 0L && now - lastUnreachableElapsed < CONNECTION_TTL_MS &&
+            previous.reachable == false && previous.detail.isNotBlank()) return false
+        return try {
+            val reply = withContext(Dispatchers.Default) {
+                AiProvider.probe(http, config.newsAiBaseUrl, config.newsAiApiKey,
+                    config.newsAiModel, config.newsAiFormat)
+            }
+            lastReachableElapsed = SystemClock.elapsedRealtime()
+            lastUnreachableElapsed = 0L
+            _connection.value = AiConnectionState(
+                configured = true, reachable = true,
+                detail = reply.trim().take(80), checkedAt = System.currentTimeMillis())
+            true
+        } catch (error: Exception) {
+            lastReachableElapsed = 0L
+            lastUnreachableElapsed = SystemClock.elapsedRealtime()
+            _connection.value = AiConnectionState(
+                configured = true, reachable = false,
+                detail = (error.message ?: "اتصال برقرار نشد").take(120),
+                checkedAt = System.currentTimeMillis())
+            false
+        }
+    }
 
     fun refreshNow(force: Boolean = false) { scope.launch { refresh(force) } }
 
@@ -209,13 +312,15 @@ class TraderAdvisor(
         }
 
         val system = "You are the AI trading execution optimizer for an educational trading app. " +
-            "Given a valid technical trade setup, return the optimal entry, structural stop loss, and take profit target. " +
+            "Given a valid technical trade setup, first decide whether the trade is WORTH taking, then return the optimal entry, structural stop loss, and take profit target. " +
             "Rules: " +
             "1. For BUY: stop_loss MUST be strictly lower than entry, and take_profit MUST be strictly higher than entry. " +
             "2. For SELL: stop_loss MUST be strictly higher than entry, and take_profit MUST be strictly lower than entry. " +
             "3. The Reward-to-Risk ratio (TP distance / SL distance) MUST be between 1.5 and 3.5. " +
             "4. Numbers must be realistic and close to the market price. " +
-            "Return JSON only: {\"entry\": number, \"stop_loss\": number, \"take_profit\": number, \"confidence\": number 70..99, \"summary\": Persian string 10..180 chars describing why these levels were chosen}."
+            "5. Worthiness: judge ONLY from the supplied snapshot. Set worth=false when the location is poor (price stretched from Kijun, the move already extended, the levels crowd the opposing structure), when the listed conditions disagree with each other, or when the evidence is too thin — and say why in worth_reason. Set worth=true only when you would personally accept this setup at these levels. " +
+            "6. Never invent prices, news, performance or guarantees. " +
+            "Return JSON only: {\"worth\": boolean, \"worth_reason\": Persian string 10..180 chars, \"entry\": number, \"stop_loss\": number, \"take_profit\": number, \"confidence\": number 70..99, \"summary\": Persian string 10..180 chars describing why these levels were chosen}."
 
         val output = AiProvider.completeJson(http, config.newsAiBaseUrl, config.newsAiApiKey,
             config.newsAiModel, system, snapshot, maxTokens = 400, format = config.newsAiFormatNormalized)
@@ -227,6 +332,10 @@ class TraderAdvisor(
         val conf = num("confidence") ?: signal.confidence
         val summary = (output["summary"] as? JsonPrimitive)?.contentOrNull?.trim()
             ?: "تنظیم سطوح معاملاتی بر اساس ساختار جریان نقدینگی و مومنتوم"
+        // Worthiness is answered by the model itself. A missing/ambiguous answer stays
+        // "worth=true" so an older model can never silently block every entry.
+        val worth = (output["worth"] as? JsonPrimitive)?.booleanOrNull ?: true
+        val worthReason = (output["worth_reason"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
 
         val risk = kotlin.math.abs(entry - sl)
         val reward = kotlin.math.abs(tp - entry)
@@ -246,6 +355,8 @@ class TraderAdvisor(
             summary = summary,
             model = config.newsAiModel,
             generatedAt = now,
+            worth = worth,
+            worthReason = worthReason,
         )
     }
 
@@ -295,6 +406,163 @@ class TraderAdvisor(
             config.newsAiModel, system, snapshot, format = config.newsAiFormatNormalized)
         return parseTradeReview(output, config.newsAiModel, now)
             ?: throw IllegalStateException("پاسخ نظر AI قابل‌راستی‌آزمایی نبود")
+    }
+
+    /**
+     * «ادامه بده یا نه» — the companion AI looks at the OPEN paper positions and says whether the
+     * thesis still holds.
+     *
+     * Boundaries, identical to the rest of the app:
+     *  - the connection is probed FIRST ([ensureConnection]); unreachable model => positions are
+     *    left exactly as they are and the cycle reports that honestly (no invented opinion);
+     *  - the verdict is a NOTE plus at most one research notification. It never closes a position,
+     *    never moves a stop and never sends an order — exits stay 100% price-driven
+     *    (`JournalStore.settle` / `settleTick`);
+     *  - a position is only reviewed against a FRESH real quote of its own symbol. No fresh data
+     *    for that symbol => no review, with the reason recorded instead of a guessed verdict.
+     */
+    suspend fun reviewOpenPositions(now: Long = System.currentTimeMillis()): HoldReviewCycle = mutex.withLock {
+        val open = journal.trades.value.filter { it.isOpen }
+        if (open.isEmpty()) {
+            holdReviewedAt.clear()
+            val idle = HoldReviewCycle(skipped = "پوزیشن بازی وجود ندارد")
+            _holdReviews.value = idle
+            return@withLock idle
+        }
+        val elapsed = SystemClock.elapsedRealtime()
+        if (lastHoldCycleElapsed != 0L && elapsed - lastHoldCycleElapsed < HOLD_CYCLE_MS) {
+            return@withLock _holdReviews.value.copy(openCount = open.size)
+        }
+        // Throttled BEFORE the probe so an unreachable model is not re-probed every loop tick.
+        lastHoldCycleElapsed = elapsed
+
+        // 1) ALWAYS check the connection before asking anything.
+        if (!ensureConnection()) {
+            val offline = HoldReviewCycle(openCount = open.size,
+                skipped = "AI در دسترس نیست (${_connection.value.detail.ifBlank { "اتصال برقرار نشد" }}) — " +
+                    "پوزیشن‌های باز بدون نظر AI و فقط با قوانین قیمتی مدیریت می‌شوند",
+                checkedAt = now)
+            _holdReviews.value = offline
+            return@withLock offline
+        }
+
+        // 2) Only a symbol with a fresh real quote can be reviewed honestly.
+        val state = market.state.value
+        val price = state.lastPrice
+        val reviewable = open.filter { it.symbol == state.symbol }
+        if (reviewable.isEmpty()) {
+            val cycle = HoldReviewCycle(openCount = open.size,
+                skipped = "قیمت زنده فقط برای ${state.symbol} در دسترس است؛ ${open.size} پوزیشن باز روی نمادهای دیگر بدون نظر AI ماند",
+                checkedAt = now)
+            _holdReviews.value = cycle
+            return@withLock cycle
+        }
+        if (price == null || !price.isFinite() || price <= 0.0 || state.showingCachedData ||
+            !FeedLiveness.hasRecentReceipt(state.feed, now)) {
+            val cycle = HoldReviewCycle(openCount = open.size,
+                skipped = "قیمت تازه/زنده برای ${state.symbol} در دسترس نیست؛ نظر AI بدون دادهٔ واقعی ساخته نمی‌شود",
+                checkedAt = now)
+            _holdReviews.value = cycle
+            return@withLock cycle
+        }
+
+        // 3) Per-trade throttle: one opinion per position per HOLD_REVIEW_TTL_MS.
+        val due = reviewable.filter { trade ->
+            val at = holdReviewedAt[trade.id] ?: 0L
+            at == 0L || now - at >= HOLD_REVIEW_TTL_MS
+        }
+        if (due.isEmpty()) return@withLock _holdReviews.value.copy(openCount = open.size)
+
+        val alerts = mutableListOf<HoldAlert>()
+        var reviewed = 0
+        var failure = ""
+        for (trade in due) {
+            val review = runCatching { reviewOpenPosition(trade, state, price, now) }.getOrNull()
+            if (review == null) {
+                failure = "پاسخ مدل دربارهٔ پوزیشن ${trade.symbol} معتبر/قابل‌راستی‌آزمایی نبود؛ معامله دست‌نخورده ماند"
+                continue
+            }
+            holdReviewedAt[trade.id] = now
+            reviewed++
+            val saved = runCatching { journal.attachHoldReview(trade.id, review) }.getOrNull()
+            if (saved != null && review.verdict == "DO_NOT_CONTINUE") {
+                alerts += HoldAlert(saved.id, saved.symbol, review.verdict, review.summary, review.checkedAt)
+            }
+        }
+        val cycle = HoldReviewCycle(openCount = open.size, reviewed = reviewed, alerts = alerts,
+            skipped = if (reviewed == 0) failure else "", checkedAt = now)
+        _holdReviews.value = cycle
+        return@withLock cycle
+    }
+
+    /** Consumed once by the monitor service so a "do not continue" opinion notifies a single time. */
+    fun consumeHoldAlerts(): List<HoldAlert> {
+        val current = _holdReviews.value
+        if (current.alerts.isEmpty()) return emptyList()
+        _holdReviews.value = current.copy(alerts = emptyList())
+        return current.alerts
+    }
+
+    /**
+     * ONE call per position: the real recorded evidence of that trade plus the live quote, and the
+     * model's strictly validated verdict. Returns null-equivalent by throwing when the reply cannot
+     * be verified, so an unverifiable answer never becomes a note.
+     */
+    private suspend fun reviewOpenPosition(trade: PaperTrade, state: MarketState,
+                                          price: Double, now: Long): PaperHoldReview {
+        val config = settings.read()
+        if (!config.hasClientNewsAi) throw IllegalStateException("کلید/مدل AI وارد نشده است")
+        val isBuy = trade.action == SignalAction.BUY
+        val spec = VenueSpecs.of(trade.symbol)
+        val spreadPrice = if (spec.spreadBps > 0.0) price * spec.spreadBps / 10_000.0 else spec.spreadPrice
+        val pnlPerUnit = if (isBuy) price - trade.entry else trade.entry - price
+        val unrealized = kotlin.math.round(
+            PaperOrderRules.quotePnlToUsd(trade.symbol, pnlPerUnit * trade.positionOz, price) * 100.0) / 100.0
+        val stopDistance = kotlin.math.abs(price - trade.stopLoss)
+        val targetDistance = kotlin.math.abs(trade.takeProfit - price)
+        val ageMinutes = ((now - trade.openedAt) / 60_000L).coerceAtLeast(0L)
+        val technicalAtEntry = trade.entryConditions.take(8).count { it.status == "CONFIRMED" }
+        val currentSignal = state.signal
+        val mtf = runCatching { MtfAnalyzer.analyze(state.candles, state.interval) }.getOrNull()
+        val roundTripCost = kotlin.math.round(
+            (spec.spreadCostUsd(price, trade.positionOz) + spec.commissionUsd(price, trade.positionOz) * 2.0) * 100.0) / 100.0
+
+        val snapshot = buildString {
+            appendLine("Open paper position — decide ONLY whether its thesis still holds. Advisory: the app closes a position exclusively when a REAL price touches its stop or target; your answer is a note plus at most one notification. Do not authorize, close, edit, re-price or claim profit.")
+            appendLine("trade_id=${trade.id.take(8)} symbol=${trade.symbol} action=${trade.action} interval=${trade.interval.label} auto=${trade.autoOpened} age_minutes=$ageMinutes")
+            appendLine("entry=${trade.entry} stop=${trade.stopLoss} target=${trade.takeProfit} rr=${trade.riskReward} units=${trade.positionOz}${trade.unit} leverage=1:${trade.effectiveLeverage}")
+            appendLine("last_real_price=$price unrealized_pnl_usd=$unrealized live_feed=${state.feed.mode.name} closed_bars=${state.closedCount}")
+            appendLine("distance_to_stop=$stopDistance distance_to_target=$targetDistance real_spread=$spreadPrice stop_distance_in_spreads=" +
+                (if (spreadPrice > 0.0) kotlin.math.round(stopDistance / spreadPrice * 10.0) / 10.0 else "—"))
+            appendLine("real_round_trip_cost_usd=$roundTripCost venue=${spec.venue}")
+            appendLine("technical_confirmed_at_entry=$technicalAtEntry/8")
+            trade.entryConditions.take(8).forEachIndexed { index, item ->
+                appendLine("entry_condition_${index + 1}=${item.name}|${item.status}")
+            }
+            appendLine("now_signal_action=${currentSignal?.action ?: "—"} now_technical_ok=" +
+                (currentSignal?.confluence?.take(8)?.count { it.ok }?.let { "$it/8" } ?: "—"))
+            appendLine("now_mtf_veto=${mtf?.veto ?: "—"} now_mtf_bias=${mtf?.bias ?: "—"} now_mtf_alignment=${mtf?.alignment ?: "—"}")
+            trade.aiReview?.let { appendLine("entry_ai_verdict=${it.verdict} entry_ai_confidence=${it.confidence}") }
+            trade.newsEvidence?.let { appendLine("news_at_entry=${it.direction}(${it.confidence}%) model=${it.model}") }
+            appendLine("Policy: news is journal context only. Judge from the recorded evidence, the live quote, the real venue cost and the current technical/MTF state.")
+        }
+
+        val system = "You are the companion AI inside an educational paper-trading app. " +
+            "A paper position is ALREADY OPEN and the app exits it only when a real price touches its stop or target. " +
+            "Answer whether the trade thesis still holds: HOLD (thesis intact), WATCH (fragile but intact), " +
+            "DO_NOT_CONTINUE (key evidence is now missing or contradictory). " +
+            "Rules: never invent prices, fills, news or outcomes; never claim you closed or will close anything; " +
+            "base the verdict only on the supplied real numbers; a DO_NOT_CONTINUE needs a concrete reason such as the " +
+            "higher timeframe turning against the position, the entry structure being invalidated, the remaining target " +
+            "distance no longer covering the real round-trip cost, or the recorded conditions now contradicting each other. " +
+            "Return JSON only: {\"verdict\":\"HOLD\"|\"WATCH\"|\"DO_NOT_CONTINUE\",\"confidence\":0..100," +
+            "\"summary\": max 180 chars in Persian, \"reasons\": array of 1..4 short Persian reasons, " +
+            "\"cautions\": array of 0..3 short Persian cautions}."
+
+        val output = AiProvider.completeJson(http, config.newsAiBaseUrl, config.newsAiApiKey,
+            config.newsAiModel, system, snapshot, format = config.newsAiFormatNormalized)
+        return parseHoldReview(output, config.newsAiModel, now, price, unrealized)
+            ?: throw IllegalStateException("پاسخ مدل دربارهٔ ادامهٔ معامله قابل‌راستی‌آزمایی نبود")
     }
 
     /** Atomically read+clear the flip flag so the service notifies each flip exactly once. */
@@ -365,6 +633,37 @@ class TraderAdvisor(
 
     companion object {
         const val REFRESH_PERIOD_MS = 10 * 60_000L
+        const val CONNECTION_TTL_MS = 5 * 60_000L
+        /** How often the open positions may be re-reviewed at all. */
+        const val HOLD_CYCLE_MS = 5 * 60_000L
+        /** One opinion per position per this window; keeps a single open trade from being re-asked. */
+        const val HOLD_REVIEW_TTL_MS = 10 * 60_000L
+
+        val HOLD_VERDICTS = setOf("HOLD", "WATCH", "DO_NOT_CONTINUE")
+
+        /** Strict schema validation for the hold verdict; anything unverifiable fails closed (null). */
+        internal fun parseHoldReview(root: JsonObject, model: String, now: Long,
+                                     lastPrice: Double, unrealizedUsd: Double): PaperHoldReview? {
+            fun str(key: String): String? = (root[key] as? JsonPrimitive)?.contentOrNull?.trim()
+            fun list(key: String): List<String>? {
+                val array = root[key] as? JsonArray ?: return null
+                val items = array.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim() }
+                if (items.size != array.size) return null
+                return items
+            }
+            val verdict = str("verdict")?.uppercase(Locale.ROOT) ?: return null
+            if (verdict !in HOLD_VERDICTS) return null
+            val confidence = str("confidence")?.toDoubleOrNull() ?: return null
+            if (!confidence.isFinite() || confidence < 0.0 || confidence > 100.0) return null
+            val summary = str("summary") ?: return null
+            if (summary.length !in 10..180) return null
+            val reasons = list("reasons") ?: return null
+            if (reasons.isEmpty() || reasons.size > 4 || reasons.any { it.length !in 3..90 }) return null
+            val cautions = list("cautions") ?: emptyList()
+            if (cautions.size > 3 || cautions.any { it.length !in 3..90 }) return null
+            return PaperHoldReview(verdict, confidence.toInt(), summary, reasons, cautions,
+                lastPrice, unrealizedUsd, model, now)
+        }
 
         internal fun parseTuningPlan(root: JsonObject, model: String, now: Long): SignalTuningPlan? {
             fun str(key: String): String? = (root[key] as? JsonPrimitive)?.contentOrNull?.trim()

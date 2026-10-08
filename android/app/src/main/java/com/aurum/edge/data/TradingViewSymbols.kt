@@ -74,7 +74,10 @@ object TradingViewSymbols {
         return null
     }
 
-    fun of(symbol: String): String = find(symbol) ?: "OANDA:XAUUSD"
-
+    /**
+     * قبلاً `of()` برای نمادِ نگاشت‌نشده بی‌صدا «OANDA:XAUUSD» برمی‌گرداند؛ یعنی چارت یک نماد
+     * دیگر (طلا) به‌جای نماد انتخابی کاربر نمایش داده می‌شد. این تابع حذف شد: تنها راه، [find]
+     * است که `null` می‌دهد و فراخوان باید صریحاً بگوید «این نماد نگاشت ندارد».
+     */
     fun isChartable(symbol: String): Boolean = find(symbol) != null
 }

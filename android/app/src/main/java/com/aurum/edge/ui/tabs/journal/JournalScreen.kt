@@ -45,11 +45,13 @@ import com.aurum.edge.core.IctPriceActionRecord
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PaperAiReview
+import com.aurum.edge.core.PaperHoldReview
 import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.TradeReplay
 import com.aurum.edge.core.WalkForwardRecord
+import com.aurum.edge.data.HoldReviewCycle
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.engine.EvidenceGrade
 import com.aurum.edge.engine.PerformanceMetrics
@@ -74,6 +76,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     val reportError by viewModel.reportError.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val loadError by viewModel.journalError.collectAsStateWithLifecycle()
+    val holdReview by viewModel.holdReview.collectAsStateWithLifecycle()
     var confirmClear by remember { mutableStateOf(false) }
     var confirmOpportunityClear by remember { mutableStateOf(false) }
     var showCombined by remember { mutableStateOf(false) }
@@ -220,6 +223,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
         val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
         if (filteredOpen.isNotEmpty()) {
             SectionCard("پوزیشن‌های باز · ${selectedCategory?.label ?: "همهٔ بازارها"}", "ارزش‌گذاری با آخرین قیمت واقعی دریافتی") {
+                HoldReviewStatus(holdReview) { viewModel.reviewOpenPositionsNow() }
                 filteredOpen.forEach { trade ->
                     val currentPrice = livePrices[trade.symbol] ?: (if (trade.symbol == market.symbol) livePrice else null)
                     val unrealized = currentPrice?.let { price ->
@@ -264,12 +268,27 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
                             }
                             AiReviewDisclosure(trade.aiReview)
+                            HoldReviewDisclosure(trade.holdReview)
                             trade.mtf?.let { snapshot ->
                                 Text(
                                     "تراز چندتایم‌فریم هنگام ورود: ${snapshot.bias} · هم‌جهتی ${(snapshot.alignment * 100).toInt()}%" +
                                         (if (snapshot.veto) " · وتو داشته" else ""),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = AurumColors.Gold,
+                                )
+                            }
+                            // «روند کلی بازار» در همان لحظهٔ ورود: عکسِ ثبت‌شده، نه محاسبهٔ دوبارهٔ امروز.
+                            trade.marketTrend?.let { read ->
+                                Text(
+                                    "روند بازار هنگام ورود: ${trendAlignmentFa(read.alignment)} · روند کلی " +
+                                        "${trendDirectionFa(read.bias)} ${read.strength}٪ · عرض بازار " +
+                                        "${read.breadthUp}↑/${read.breadthDown}↓ از ${read.measured} نماد · دلار " +
+                                        "${trendDirectionFa(read.dollarBias)} · جوّ ${riskToneFa(read.riskTone)}" +
+                                        (read.symbol?.let { " · روندِ ${trade.symbol} ${trendDirectionFa(it.direction)} ${it.strength}٪" } ?: ""),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (read.alignment == "WITH") AurumColors.Green
+                                            else if (read.alignment == "AGAINST") AurumColors.Red
+                                            else AurumColors.TextMuted,
                                 )
                             }
                             ConditionDisclosure(trade.id, trade.entryConditions)
@@ -473,8 +492,17 @@ private fun TradeRow(trade: PaperTrade) {
                 }
             }
             AiReviewDisclosure(trade.aiReview)
+            HoldReviewDisclosure(trade.holdReview, showEmptyHint = false)
             trade.mtf?.let { Text("MTF هنگام ورود: ${it.bias} · ${(it.alignment * 100).toInt()}٪ هم‌جهتی",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted) }
+            trade.marketTrend?.let { read ->
+                Text("روند بازار هنگام ورود: ${trendAlignmentFa(read.alignment)} · روند کلی " +
+                        "${trendDirectionFa(read.bias)} ${read.strength}٪ · جوّ ${riskToneFa(read.riskTone)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (read.alignment == "WITH") AurumColors.Green
+                            else if (read.alignment == "AGAINST") AurumColors.Red
+                            else AurumColors.TextMuted)
+            }
             ConditionDisclosure(trade.id, trade.entryConditions)
             IctDisclosure(trade.id, trade.priceAction)
         }
@@ -643,6 +671,88 @@ private fun PaperAiReview.verdictFa(): String = when (verdict) {
     "WORTHY" -> "شرایط مناسب بوده"
     "RISKY" -> "پرریسک/مرزی بوده"
     "NOT_WORTHY" -> "شرایط کافی نبوده"
+    else -> verdict
+}
+
+/**
+ * «ادامه بده یا نه» — status of the companion AI's advisory pass over the OPEN positions.
+ * Purely informational: the button only asks for an opinion; exits stay price-driven.
+ */
+@Composable
+private fun HoldReviewStatus(cycle: HoldReviewCycle, onReview: () -> Unit) {
+    val checkedAt = cycle.checkedAt
+    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when {
+                    cycle.alerts.isNotEmpty() ->
+                        "نظر AI: ادامهٔ ${cycle.alerts.size} پوزیشن توصیه نمی‌شود — فقط هشدار، معامله بسته نشده"
+                    cycle.reviewed > 0 && checkedAt != null ->
+                        "آخرین بازبینی AI پوزیشن‌های باز: ${cycle.reviewed} مورد · ${formatDateTime(checkedAt)}"
+                    checkedAt != null -> "بازبینی AI در ${formatDateTime(checkedAt)} نتیجهٔ معتبری نداد"
+                    else -> "بازبینی AI پوزیشن‌های باز هنوز انجام نشده است"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = when {
+                    cycle.alerts.isNotEmpty() -> AurumColors.Red
+                    cycle.reviewed > 0 -> AurumColors.Gold
+                    else -> AurumColors.TextMuted
+                },
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedButton(onClick = onReview) {
+                Text("بازبینی AI", style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        cycle.skipped.takeIf { it.isNotBlank() }?.let { reason ->
+            Text(reason, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        }
+        Text("خروج معامله فقط با لمس قیمت واقعی حد ضرر/حد سود انجام می‌شود؛ نظر AI هیچ معامله‌ای را نمی‌بندد و حد ضرر را جابه‌جا نمی‌کند.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+    }
+}
+
+@Composable
+private fun HoldReviewDisclosure(review: PaperHoldReview?, showEmptyHint: Boolean = true) {
+    if (review == null) {
+        if (showEmptyHint) {
+            Text("نظر AI دربارهٔ ادامهٔ این پوزیشن ثبت نشده؛ با «بازبینی AI» یا روشن بودن پایش پس‌زمینه گرفته می‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        }
+        return
+    }
+    val color = when (review.verdict) {
+        "HOLD" -> AurumColors.Green
+        "WATCH" -> AurumColors.Gold
+        "DO_NOT_CONTINUE" -> AurumColors.Red
+        else -> AurumColors.TextSecondary
+    }
+    var expanded by remember("hold-review-${review.checkedAt}") { mutableStateOf(false) }
+    Text("نظر AI دربارهٔ ادامه: ${review.verdictFa()} · ${review.confidence}٪ · ${review.summary}",
+        style = MaterialTheme.typography.labelSmall, color = color)
+    OutlinedButton(onClick = { expanded = !expanded }) {
+        Text(if (expanded) "بستن چرایی ادامه" else "چرایی نظر ادامه", style = MaterialTheme.typography.labelSmall)
+    }
+    if (expanded) {
+        Text("مدل ${review.model} · ${formatDateTime(review.checkedAt)}" +
+                (review.lastPrice?.let { " · قیمت واقعی هنگام نظر ${formatPrice(it)}" } ?: "") +
+                (review.unrealizedUsd?.let { " · سود/زیان باز ${formatPrice(it)}$" } ?: ""),
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        review.reasons.forEachIndexed { index, reason ->
+            Text("دلیل ${index + 1}: $reason", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+        }
+        review.cautions.forEachIndexed { index, caution ->
+            Text("احتیاط ${index + 1}: $caution", style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+        }
+        Text("این نظر فقط تحلیل آموزشی است: معامله را نمی‌بندد، حد ضرر/حد سود را تغییر نمی‌دهد و سفارش واقعی نمی‌فرستد.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+    }
+}
+
+private fun PaperHoldReview.verdictFa(): String = when (verdict) {
+    "HOLD" -> "ادامه بده"
+    "WATCH" -> "مراقب باش"
+    "DO_NOT_CONTINUE" -> "ادامه توصیه نمی‌شود"
     else -> verdict
 }
 
@@ -995,3 +1105,25 @@ private fun PnlIncomeCalendarSection(
     }
 }
 
+
+/** برچسب فارسیِ عکسِ ثبت‌شدهٔ «روند کلی بازار»؛ همان چیزی که در لحظهٔ ورود اندازه گرفته شد. */
+private fun trendDirectionFa(name: String): String = when (name) {
+    "UP" -> "صعودی"
+    "DOWN" -> "نزولی"
+    "SIDEWAYS" -> "خنثی/رنج"
+    else -> "اندازه گرفته نشد"
+}
+
+private fun trendAlignmentFa(name: String): String = when (name) {
+    "WITH" -> "هم‌جهت با روند"
+    "AGAINST" -> "خلاف جهت روند"
+    "NEUTRAL" -> "روند خنثی"
+    else -> "روند اندازه گرفته نشد"
+}
+
+private fun riskToneFa(name: String): String = when (name) {
+    "RISK_ON" -> "ریسک‌پذیر"
+    "RISK_OFF" -> "ریسک‌گریز"
+    "MIXED" -> "مختلط"
+    else -> "اندازه گرفته نشد"
+}

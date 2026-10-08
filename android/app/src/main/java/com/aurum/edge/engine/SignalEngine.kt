@@ -232,9 +232,31 @@ object SignalEngine {
             barTime = bars.getOrNull(index)?.time ?: 0L,
         )
 
+        // ── ضد کراس فیک: «یک کراس تنها» جهت نمی‌سازد ──────────────────────────────
+        // The crossing bar on its own is noise — in a range Tenkan/Kijun trade places again
+        // and again. It only becomes direction when the NEXT closed bar stays on the same
+        // side, when the lines really separate (≥ 0.08×ATR, never a marginal "kiss"), and
+        // when no opposite crossing happened in the bars right before it (flip-zone).
+        val prevSnap = snapshot(series, index - 1)
+        val rawCross = snap.bullCross || snap.bearCross
+        val crossSeparation = abs(snap.tenkan - snap.kijun)
+        val crossSeparationOk = crossSeparation >= max(0.08 * snap.atr, 1e-12)
+        val prevAlignedBull = prevSnap != null && prevSnap.tenkan > prevSnap.kijun
+        val prevAlignedBear = prevSnap != null && prevSnap.tenkan < prevSnap.kijun
+        var crossFlipZone = false
+        for (back in 1..6) {
+            val older = snapshot(series, index - back) ?: continue
+            val olderPrev = snapshot(series, index - back - 1) ?: continue
+            if ((older.tenkan > older.kijun) != (olderPrev.tenkan > olderPrev.kijun)) {
+                crossFlipZone = true
+                break
+            }
+        }
+        val crossQualityBull = snap.bullCross && prevAlignedBull && crossSeparationOk && !crossFlipZone
+        val crossQualityBear = snap.bearCross && prevAlignedBear && crossSeparationOk && !crossFlipZone
         val crossDirection = when {
-            snap.bullCross -> SignalAction.BUY
-            snap.bearCross -> SignalAction.SELL
+            crossQualityBull -> SignalAction.BUY
+            crossQualityBear -> SignalAction.SELL
             else -> null
         }
         val flatLong = snap.spanBFlatBars >= 8 && snap.spanBFlatValue != null &&
@@ -274,14 +296,22 @@ object SignalEngine {
             blockers += if (profile.flatSpanB)
                 "نه کراس تنکان/کیجون داریم، نه شکست معتبر از تختی SpanB52"
             else "کراس تازه تنکان/کیجون شکل نگرفته — ورود ممنوع"
+            if (rawCross) blockers += "ضد کراس فیک: کراس این کندل با کندل بستهٔ بعدی/جدایی کافی تأیید نشد — از یک کراس تنها جهت ساخته نمی‌شود"
         }
         if (narrative) {
             val crossOk = crossDirection != null
             val crossLikely = !crossOk && near(snap.tenkan, snap.kijun, 0.18)
+            val crossState = when {
+                crossOk -> "کراس تأییدشده (دو کندل هم‌سو + جدایی ≥ ۰٫۰۸×ATR + بدون کراس مخالف تازه)"
+                rawCross && crossFlipZone -> "کراس تأیید نشده — کراس مخالف تازه در ۶ کندل اخیر (ناحیهٔ رفت‌وبرگشت)"
+                rawCross && !crossSeparationOk -> "کراس تأیید نشده — جدایی تنکان/کیجون کمتر از ۰٫۰۸×ATR (کراس بوسه‌ای)"
+                rawCross -> "کراس تأیید نشده — کندل بستهٔ بعدی هنوز هم‌سو نشده است"
+                else -> "بدون کراس"
+            }
             confluence += ConfluenceItem(
                 "۱ · کراس تنکان/کیجون",
                 crossOk,
-                "T ${fmt(snap.tenkan)} / K ${fmt(snap.kijun)}",
+                "T ${fmt(snap.tenkan)} / K ${fmt(snap.kijun)} · $crossState",
                 status = conditionStatus(crossOk, crossLikely),
                 scorePercent = if (crossOk) 20 else null,
             )
@@ -768,6 +798,31 @@ object SignalEngine {
         val chikouBull = chikouIdx < 0 || (close > pastMaxHigh)
         val chikouBear = chikouIdx < 0 || (close < pastMinLow)
 
+        // ── ۴٫۵. ضد کراس فیک: «یک کراس تنها» جهت نمی‌سازد ─────────────────────────
+        // A single crossing of Tenkan/Kijun is not a trend: in a range the two lines trade
+        // places several times and most crossings are noise. A crossing only counts when the
+        // next closed bar confirms it, when the lines really separate (>= 0.08×ATR, never a
+        // marginal "kiss"), and when no fresh opposite cross happened in the bars before it.
+        val crossSeparation = abs(tenkan8 - kijun24)
+        val crossSeparationOk = crossSeparation >= max(0.08 * currentAtr, 1e-12)
+        val twoBarsAlignedBull = tenkan8 > kijun24 && prevTenkan > prevKijun
+        val twoBarsAlignedBear = tenkan8 < kijun24 && prevTenkan < prevKijun
+        var freshCrossInFlipzone = false
+        for (offset in 2..6) {
+            val idx = lastIdx - offset
+            if (idx < 27) break
+            val t = donchian(8, idx)
+            val k = donchian(24, idx)
+            val pt = donchian(8, idx - 1)
+            val pk = donchian(24, idx - 1)
+            if ((pt <= pk && t > k) || (pt >= pk && t < k)) {
+                freshCrossInFlipzone = true
+                break
+            }
+        }
+        val crossQualityBull = twoBarsAlignedBull && crossSeparationOk && !freshCrossInFlipzone
+        val crossQualityBear = twoBarsAlignedBear && crossSeparationOk && !freshCrossInFlipzone
+
         // ── تخصیص دقیق وزن‌ها و امتیازدهی تجمعی (تاییدیه ایچیموکو + پرایس اکشن) ──
         val longWeightCloud = if (priceAboveCloud && spanA >= spanB72 * 0.999) 20.0 else if (priceAboveCloud) 12.0 else 0.0
         val longWeightTk = if (tkBullish && kijunSlopeBull) 15.0 else if (tkBullish) 8.0 else 0.0
@@ -789,11 +844,13 @@ object SignalEngine {
         val totalShortScore = shortWeightCloud + shortWeightTk + shortWeightChikou + shortWeightTiming +
             shortWeightMtf + shortWeightVwap + shortWeightAntiSideways
 
-        // شرایط قطعی و الزامی برای ورود: هم‌جهتی کامل روند، آزادی چیکو، عدم ساید، تایید تایم بالاتر
+        // شرایط قطعی و الزامی برای ورود: هم‌جهتی کامل روند، آزادی چیکو، عدم ساید، تایید تایم بالاتر، کراس تأییدشده
         val isLongCandidate = !isSideways && priceAboveCloud && tkBullish && emaBull && kijunSlopeBull &&
-            !m15Bearish && (m15Bullish || h1Bullish) && timingBullOk && chikouBull && totalLongScore >= 75.0
+            !m15Bearish && (m15Bullish || h1Bullish) && timingBullOk && chikouBull &&
+            crossQualityBull && totalLongScore >= 75.0
         val isShortCandidate = !isSideways && priceBelowCloud && tkBearish && emaBear && kijunSlopeBear &&
-            !m15Bullish && (m15Bearish || h1Bearish) && timingBearOk && chikouBear && totalShortScore >= 75.0
+            !m15Bullish && (m15Bearish || h1Bearish) && timingBearOk && chikouBear &&
+            crossQualityBear && totalShortScore >= 75.0
 
         val confluence = listOf(
             ConfluenceItem(
@@ -805,9 +862,25 @@ object SignalEngine {
             ),
             ConfluenceItem(
                 name = "تنکان/کیجون (۸ و ۲۴)",
-                ok = tkBullish || tkBearish,
-                detail = if (tkBullish) "تنکان بالای کیجون (شتاب صعودی)" else "تنکان زیر کیجون (شتاب نزولی)",
-                status = if (tkBullish || tkBearish) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
+                // The row only confirms "aligned AND the crossing itself is trustworthy" — a lone
+                // crossing never confirms. Kept inside the existing row (no new row) so the
+                // eight-condition accounting in the journal news gate is untouched.
+                ok = (tkBullish && crossQualityBull) || (tkBearish && crossQualityBear),
+                detail = when {
+                    tkBullish && crossQualityBull ->
+                        "تنکان بالای کیجون — کراس صعودی تأییدشده (دو کندل هم‌سو، جدایی ${String.format(java.util.Locale.US, "%.2f", crossSeparation)} ≥ ${String.format(java.util.Locale.US, "%.2f", 0.08 * currentAtr)}، بدون کراس مخالف تازه)"
+                    tkBearish && crossQualityBear ->
+                        "تنکان زیر کیجون — کراس نزولی تأییدشده (دو کندل هم‌سو، جدایی ${String.format(java.util.Locale.US, "%.2f", crossSeparation)} ≥ ${String.format(java.util.Locale.US, "%.2f", 0.08 * currentAtr)}، بدون کراس مخالف تازه)"
+                    tkBullish || tkBearish ->
+                        "تنکان/کیجون هم‌سو است اما کراس تأیید نشده: " + when {
+                            freshCrossInFlipzone -> "کراس مخالف تازه در ۶ کندل اخیر (ناحیهٔ رفت‌وبرگشت)"
+                            !crossSeparationOk -> "جدایی خطوط کمتر از ۰٫۰۸×ATR (کراس بوسه‌ای/مرزی)"
+                            else -> "کندل بستهٔ تأییدکننده هنوز هم‌سو نشده است"
+                        }
+                    else -> "تنکان و کیجون هنوز هم‌سو نشده‌اند"
+                },
+                status = if ((tkBullish && crossQualityBull) || (tkBearish && crossQualityBear))
+                    ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
                 scorePercent = 15,
             ),
             ConfluenceItem(
@@ -869,6 +942,12 @@ object SignalEngine {
         if (priceBelowCloud && tkBearish && !chikouBear) blockers.add("چیکو اسپن آزاد نشده است و درگیر مانع/کف کندل‌های ۲۴ دوره قبل است")
         if (!timingBullOk && !timingBearOk) blockers.add("بیش از ۵ کندل از کراس گذشته و پولبک تایید نشده است")
         if (!elasticityOk) blockers.add("فاصله از کیجون زیاد است (خطر اصلاح قیمتی)")
+        if (priceAboveCloud && tkBullish && !crossQualityBull) blockers.add(
+            "ضد کراس فیک: کراس صعودی تأیید نشده — کندل بستهٔ بعدی، جدایی ≥ ۰٫۰۸×ATR یا نبود کراس مخالف تازه لازم است"
+        )
+        if (priceBelowCloud && tkBearish && !crossQualityBear) blockers.add(
+            "ضد کراس فیک: کراس نزولی تأیید نشده — کندل بستهٔ بعدی، جدایی ≥ ۰٫۰۸×ATR یا نبود کراس مخالف تازه لازم است"
+        )
 
         if (isLongCandidate) {
             val baseSl = min(kijun24, min(spanA, spanB72)) - (currentAtr * 0.35)

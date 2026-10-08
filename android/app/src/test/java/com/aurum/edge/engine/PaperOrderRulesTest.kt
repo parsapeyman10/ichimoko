@@ -4,6 +4,7 @@ import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.SignalAction
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -70,7 +71,43 @@ class PaperOrderRulesTest {
         assertTrue(goldTicket.spreadCostUsd > 0.0)
 
         val cryptoTicket = PaperOrderRules.preview(SignalAction.BUY, "BTCUSDT", 60000.0, 59000.0, 63000.0, 1000.0, 1.0)
-        assertEquals(10, cryptoTicket.leverage)
+        // Real reference: Binance Spot is 1:1, and the ESMA cap for retail crypto CFDs is 2:1.
+        assertEquals(2, cryptoTicket.leverage)
+        // Binance Spot VIP0 taker fee is 0.10% per side, so a round trip costs ~21 bps of notional.
+        assertTrue(cryptoTicket.costBps > 20.0)
+        assertTrue(cryptoTicket.commissionUsd > cryptoTicket.spreadCostUsd)
+
+        // ESMA tiering is per underlying, not per "commodity": gold 20:1, oil/other commodities 10:1,
+        // major FX 30:1, non-major FX (AUD/USD is not an ESMA "major") 20:1.
+        assertEquals(10, PaperOrderRules.defaultLeverageFor("USOIL"))
+        assertEquals(30, PaperOrderRules.defaultLeverageFor("EUR/USD"))
+        assertEquals(20, PaperOrderRules.defaultLeverageFor("AUD/USD"))
+        assertEquals(5, PaperOrderRules.defaultLeverageFor("AAPL"))
+        // The ticket names the venue the numbers came from and its cost in bps of notional.
+        assertTrue(goldTicket.venue.startsWith("LMAX/IC Markets"))
+        assertTrue(goldTicket.costBps > 0.0)
+        assertEquals("oz", PaperOrderRules.unitFor("XAU/USD"))
+    }
+
+    @Test fun aTargetSmallerThanTheRealCostFloorOfItsMarketIsRefused() {
+        // BTCUSDT costs ~10 bps per side plus a 1 bp spread, so a round trip is ~21 bps. Crypto
+        // therefore needs at least 5x that (and the 60 bps family floor) before a ticket may even
+        // exist: a 25 bps target is a fee donation, not a trade.
+        val refused = try {
+            PaperOrderRules.preview(SignalAction.BUY, "BTCUSDT", 60000.0, 59900.0, 60150.0, 1000.0, 0.1)
+            null
+        } catch (error: IllegalArgumentException) {
+            error.message
+        }
+        assertNotNull(refused)
+        assertTrue(refused!!.contains("کفِ"))
+        assertTrue(refused.contains("بازار «"))
+
+        // The same shape with a target that actually pays for the fee is accepted unchanged.
+        val ticket = PaperOrderRules.preview(SignalAction.BUY, "BTCUSDT", 60000.0, 59900.0, 60900.0, 1000.0, 0.1)
+        assertTrue(ticket.rewardRisk >= 1.2)
+        assertTrue(ticket.costBps > 0.0)
+        assertEquals("coins", ticket.unit)
     }
 
     @Test fun rejectsWrongSideExcessLeverageRewardAndInvalidQuotes() {
@@ -85,5 +122,8 @@ class PaperOrderRulesTest {
         invalid { PaperOrderRules.preview(SignalAction.BUY, "EUR/USD", 100.0, 98.0, 104.0, 1000.0, 5.01) } // risk > 5%
         invalid { PaperOrderRules.preview(SignalAction.BUY, "EUR/USD", Double.NaN, 98.0, 104.0, 1000.0, 1.0) }
         invalid { PaperOrderRules.preview(SignalAction.BUY, "USD/IRT", 100.0, 98.0, 104.0, 1000.0, 1.0) }
+        // Real margin rule: with gold at 20:1 a 2.5 oz position needs $500 of margin, which a
+        // $100 account cannot post — the ticket must be refused instead of silently oversized.
+        invalid { PaperOrderRules.preview(SignalAction.BUY, "XAU/USD", 4000.0, 3998.0, 4008.0, 100.0, 5.0) }
     }
 }

@@ -39,14 +39,15 @@ class TradingViewSymbolsTest {
         assertNull(TradingViewSymbols.find("NOT/REAL"))
         assertNull(TradingViewSymbols.find(""))
         assertTrue(!TradingViewSymbols.isChartable("NOT/REAL"))
-        // of() still yields something drawable, but find() is how a caller detects it.
-        assertEquals("OANDA:XAUUSD", TradingViewSymbols.of("NOT/REAL"))
+        // `of()` used to return OANDA:XAUUSD for anything unmapped, so a caller could draw a
+        // wrong-but-plausible chart by accident. It is gone: `find()` returning null is the only
+        // answer, and the UI must say "this symbol has no TradingView mapping".
     }
 
     @Test fun `the watchlist quote and the chart use the same ticker`() {
         CryptoCatalog.watchlistSeed.forEach { coin ->
             val watchCode = WatchCatalog.find(coin.id)!!.providerCodes["tradingview_scanner"]
-            assertEquals(TradingViewSymbols.of(coin.id), watchCode)
+            assertEquals(TradingViewSymbols.find(coin.id), watchCode)
         }
     }
 
@@ -56,7 +57,7 @@ class TradingViewSymbolsTest {
             .forEach { row ->
                 assertEquals(
                     "watch and chart disagree for ${row.id}",
-                    TradingViewSymbols.of(row.id),
+                    TradingViewSymbols.find(row.id),
                     row.providerCodes["tradingview_scanner"],
                 )
                 assertEquals("tradingview_scanner", row.defaultSources.single())

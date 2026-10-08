@@ -47,13 +47,13 @@ import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.service.SignalMonitorService
 import com.aurum.edge.notify.Notifier
 import com.aurum.edge.ui.components.SectionCard
+import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.theme.AurumColors
 
 @Composable
 fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     val context = LocalContext.current
     val monitorRunning by SignalMonitorService.running.collectAsStateWithLifecycle()
-    val aiSignalTuning by viewModel.aiSignalTuning.collectAsStateWithLifecycle()
     // Never prefill a saved secret in an editable Compose field. Blank means keep the stored key.
     var key by remember { mutableStateOf("") }
     var symbol by remember { mutableStateOf(settings.symbol) }
@@ -161,103 +161,44 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 modifier = Modifier.padding(top = 4.dp))
         }
 
-        SectionCard("افزونه‌های موتور سیگنال", "هستهٔ ایچیموکو/کانفلوئنس همیشه روشن است؛ تیک‌های زیر به همان موتور اضافه می‌شوند، جای آن را نمی‌گیرند") {
-            Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("هسته پایه ایچیموکو", style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
-                    Text("همیشه فعال: کراس/ابر/چیکو/EMA/VWAP/RSI و مدیریت ریسک فعلی",
-                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                }
-                Text("فعال", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
-            }
-            Button(
-                onClick = { viewModel.runAiSignalSelfAnalysis(apply = true) },
-                enabled = !aiSignalTuning.loading && settings.hasClientNewsAi,
-                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-            ) {
-                Text(if (aiSignalTuning.loading) "در حال خودتحلیلی AI…" else "خودتحلیلی AI و تنظیم خودکار آپشن‌ها")
-            }
-            if (!settings.hasClientNewsAi) {
-                Text("AI تنظیم نشده", style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.Gold, modifier = Modifier.padding(top = 5.dp))
-            }
-            aiSignalTuning.plan?.let { plan ->
-                Text("آخرین خودتحلیلی: ${plan.summary}", style = MaterialTheme.typography.bodySmall,
-                    color = AurumColors.Cyan, modifier = Modifier.padding(top = 6.dp))
-                Text("پروفایل اعمال‌شده: ${plan.profile.title}", style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.Gold, modifier = Modifier.padding(top = 3.dp))
-                plan.changes.take(4).forEach { change ->
-                    Text("• $change", style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 2.dp))
-                }
-            }
-            aiSignalTuning.error?.let { error ->
-                Text(error, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red,
-                    modifier = Modifier.padding(top = 6.dp))
-            }
-            SignalAddonRow(
-                title = "تأیید Chikou Span",
-                detail = "گزینهٔ استاندارد ایچیموکو: خرید فقط با عبور close از سقف ساختار ۲۶ کندل قبل و فروش زیر کف همان ساختار؛ خاموش‌کردن فقط برای آزمایش پروفایل است.",
-                checked = settings.signalProfile.chikouConfirmation,
-                onCheckedChange = viewModel::setSignalChikou,
+        // موتور تلفیقی: توضیح ثابت. تیک‌های آپشن (و خودتحلیلی تنظیم آپشن) حذف شدند —
+        // محافظ‌های ضد فیک‌کراس همیشه روشن‌اند و توسط کاربر قابل خاموش‌کردن نیستند.
+        SectionCard("موتور تلفیقی ایچیموکو", "توضیح ثابت موتور — بدون آپشن دستی؛ همهٔ محافظ‌ها همیشه روشن") {
+            Text(
+                "موتور واحد: ایچیموکو نهادی ۸/۲۴/۷۲ + تأیید پرایس‌اکشن + حجم/مومنتوم + تراز M15/H1 + قفل ضد ساید.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold,
             )
-            SignalAddonRow(
-                title = "افزودن فیلتر مومنتوم/حجم",
-                detail = "سیگنال پایه فقط وقتی اجازه ورود می‌گیرد که MACD/ADX هم‌جهت باشند و حجم نسبیِ معتبر ضعیف نباشد؛ حجم جعلی ساخته نمی‌شود.",
-                checked = settings.signalProfile.momentumVolume,
-                onCheckedChange = viewModel::setSignalMomentumVolume,
+            Text(
+                "ورود فقط وقتی معتبر است که همهٔ این‌ها هم‌زمان تأیید شوند: قیمت بیرون ابر، تنکان/کیجون هم‌جهت، " +
+                    "آزادی چیکو اسپن (۲۴ دوره)، تازگی کراس یا پولبک کیجون، هم‌جهتی M15/H1، سمت درست EMA200 و VWAP و حجم، " +
+                    "نبود رنج/ساید و امتیاز کافی.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 6.dp),
             )
-            SignalAddonRow(
-                title = "افزودن سناریوی تختی SpanB52",
-                detail = "به‌جز سیگنال‌های پایه، اگر خط ۵۲ مدتی تخت باشد و قیمت از رنج خارج شود، یک مسیر ورود جدا هم بررسی می‌شود.",
-                checked = settings.signalProfile.flatSpanB,
-                onCheckedChange = viewModel::setSignalFlatSpanB,
+            Text(
+                "«یک کراس تنها» هرگز جهت نمی‌سازد: همین کراس باید با کندل بستهٔ بعدی، جدایی واقعی تنکان/کیجون (≥ ۰٫۰۸×ATR)، " +
+                    "هم‌سویی شیب کیجون و نبود کراس مخالف تازه (ناحیهٔ رفت‌وبرگشت) تأیید شود؛ در غیر این صورت NO_TRADE.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 6.dp),
             )
-            SignalAddonRow(
-                title = "فیلتر بازار رنج / Chop",
-                detail = "وقتی ADX پایین، باند/رنج فشرده و شکست معتبر نداریم، ورود متوقف می‌شود تا سیگنال‌های داخل بازار خنثی کمتر شوند.",
-                checked = settings.signalProfile.rangeChopFilter,
-                onCheckedChange = viewModel::setSignalRangeChop,
+            Text(
+                "محافظ‌های همیشه‌فعال (قابل خاموش‌کردن نیستند): ضد فیک‌بریک‌اوت/ری‌تست، اسپرد و نقدشوندگی پویا، " +
+                    "زمان‌های خطرناک، ریسک ساختار/حد ضرر، کول‌داون بعد از کراس مخالف، تأیید تایم‌فریم بالاتر و ضد رنج.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 6.dp),
             )
-            SignalAddonRow(
-                title = "تأیید تایم‌فریم بالاتر",
-                detail = "از شیب EMA200 و موقعیت قیمت نسبت به ساختار بزرگ‌تر همین داده‌ها کمک می‌گیرد تا سیگنال خلاف روند غالب رد شود.",
-                checked = settings.signalProfile.higherTimeframeFilter,
-                onCheckedChange = viewModel::setSignalHigherTimeframe,
+            Text(
+                "ارزنده‌بودن معامله با AI: اگر کلید مدل در بخش AI تنظیم شده باشد، اول اتصال بررسی و نظر مدل دربارهٔ «ارزنده‌بودن» " +
+                    "همین ستاپ گرفته می‌شود؛ اگر مدل بگوید ارزنده نیست، ورود کاغذی ثبت نمی‌شود. اگر مدل در دسترس نباشد یا خطا بدهد، " +
+                    "ورود با همان شرط‌های فنی و بدون AI ادامه پیدا می‌کند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan,
+                modifier = Modifier.padding(top = 6.dp),
             )
-            SignalAddonRow(
-                title = "فیلتر فیک‌بریک‌اوت / Retest",
-                detail = "کندل باید بسته‌شدن سالم، ویک غیرمشکوک و شکست/ری‌تست معتبر نسبت به ساختار نزدیک داشته باشد.",
-                checked = settings.signalProfile.fakeBreakoutFilter,
-                onCheckedChange = viewModel::setSignalFakeBreakout,
-            )
-            SignalAddonRow(
-                title = "فیلتر اسپرد و نقدشوندگی پویا",
-                detail = "اگر هزینهٔ اسپرد نسبت به ATR همان لحظه زیاد باشد، سیگنال اجرا متوقف می‌شود؛ قیمت یا اسپرد ساختگی تولید نمی‌شود.",
-                checked = settings.signalProfile.dynamicSpreadFilter,
-                onCheckedChange = viewModel::setSignalDynamicSpread,
-            )
-            SignalAddonRow(
-                title = "فیلتر زمان‌های خطرناک",
-                detail = "ورود نزدیک رول‌اور، باز/بسته‌شدن آخر هفته و پنجره‌های معمول خبرهای سنگین آمریکا محدود می‌شود؛ جایگزین تقویم واقعی خبر نیست.",
-                checked = settings.signalProfile.riskyTimingFilter,
-                onCheckedChange = viewModel::setSignalRiskyTiming,
-            )
-            SignalAddonRow(
-                title = "فیلتر ریسک ساختار و حد ضرر",
-                detail = "اگر حد ضرر نسبت به ATR/ساختار خیلی نزدیک یا خیلی دور باشد، ورود رد می‌شود تا R/R ظاهری فریبنده نشود.",
-                checked = settings.signalProfile.structureRiskFilter,
-                onCheckedChange = viewModel::setSignalStructureRisk,
-            )
-            SignalAddonRow(
-                title = "کول‌داون بعد از شکست/نوسان رفت‌وبرگشتی",
-                detail = "اگر اخیراً کراس مخالف یا چند چرخش تنکان/کیجون دیده شود، چند کندل صبر می‌کند تا overtrade کمتر شود.",
-                checked = settings.signalProfile.cooldownFilter,
-                onCheckedChange = viewModel::setSignalCooldown,
-            )
-            Text("تختی SpanB 52 همان میانگین ۵۲ کندل ایچیموکو است: اگر چند کندل ثابت بماند یعنی سقف/کف ۵۲تایی عوض نشده؛ فقط وقتی قیمت از آن و از رنج کوتاه خارج شود به‌عنوان سناریوی رشد/ریزش بررسی می‌شود.",
+            Text(
+                "هیچ سفارش واقعی ارسال نمی‌شود؛ همهٔ ورودها کاغذی و روی قیمت واقعی تسویه می‌شوند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
-                modifier = Modifier.padding(top = 6.dp))
+                modifier = Modifier.padding(top = 6.dp),
+            )
         }
 
         SectionCard("ریسک خبر و AI فارکس", "تقویم Forex Factory و خبرهای واقعی وب بی‌نیاز از سرور؛ AI فقط تأیید/هشدار کمکی است، نه امتیاز منفی فنی") {
@@ -358,6 +299,50 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     color = if (it.startsWith("اتصال تأیید شد")) AurumColors.Green else AurumColors.Red,
                     modifier = Modifier.padding(top = 4.dp))
             }
+            // The gate the auto-trader itself uses before it asks the AI to judge a trade.
+            val aiConnection by viewModel.aiConnection.collectAsStateWithLifecycle()
+            val connectionText = when {
+                !aiConnection.configured -> "اتصال AI: کلید/مدل تنظیم نشده — معاملات کاغذی بدون AI ادامه پیدا می‌کنند"
+                aiConnection.reachable == true -> "اتصال AI: تأییدشده — ارزنده‌بودن هر ورود از مدل پرسیده می‌شود"
+                aiConnection.reachable == false -> "اتصال AI: برقرار نشد — ورودها طبق شرط‌های فنی و بدون AI ثبت می‌شوند"
+                else -> "اتصال AI: هنوز در این اجرا بررسی نشده است"
+            }
+            Text(
+                connectionText,
+                style = MaterialTheme.typography.labelSmall,
+                color = when (aiConnection.reachable) {
+                    true -> AurumColors.Green
+                    false -> if (aiConnection.configured) AurumColors.Red else AurumColors.Gold
+                    null -> AurumColors.TextMuted
+                },
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            aiConnection.checkedAt?.let { at ->
+                Text(
+                    "آخرین بررسی اتصال: ${formatDateTime(at)}" +
+                        if (aiConnection.detail.isNotBlank()) " · ${aiConnection.detail}" else "",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
+            }
+            // «ادامه بده یا نه»: advisory review of the OPEN paper positions.
+            val holdReview by viewModel.holdReview.collectAsStateWithLifecycle()
+            Text(
+                when {
+                    holdReview.alerts.isNotEmpty() ->
+                        "بازبینی پوزیشن‌های باز: نظر AI ادامهٔ ${holdReview.alerts.size} مورد را توصیه نمی‌کند (فقط هشدار)"
+                    holdReview.reviewed > 0 && holdReview.checkedAt != null ->
+                        "بازبینی پوزیشن‌های باز: ${holdReview.reviewed} مورد با AI بررسی شد · ${formatDateTime(holdReview.checkedAt!!)}"
+                    holdReview.skipped.isNotBlank() -> "بازبینی پوزیشن‌های باز: ${holdReview.skipped}"
+                    else -> "بازبینی پوزیشن‌های باز: هنوز انجام نشده (هر ۱۰ دقیقه برای هر پوزیشن، اول اتصال بررسی می‌شود)"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = if (holdReview.alerts.isNotEmpty()) AurumColors.Gold else AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            Text("نظر AI دربارهٔ ادامهٔ معامله فقط یک یادداشت/اعلان است: پوزیشن را نمی‌بندد، حد ضرر را جابه‌جا نمی‌کند و خروج همچنان فقط با لمس قیمت واقعی SL/TP انجام می‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 2.dp))
             Text("⚠️ این کلید روی گوشی ذخیره می‌شود، هرگز به گیت‌هاب نمی‌رود، اما اگر همین APK را با کسی به‌اشتراک بگذارید، کلید همراه آن قابل استخراج است. برای ارائهٔ عمومی از سقف/rate limit سرویس کلید استفاده کنید.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Red)
         }
@@ -589,22 +574,5 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             text = { Text("همهٔ پوزیشن‌های باز و بسته‌شدهٔ ثبت‌شده روی این گوشی حذف می‌شوند. این کار برگشت‌پذیر نیست؛ سیگنال‌های چارت اصلاً معاملهٔ ثبت‌شده نیستند.") },
             confirmButton = { TextButton(onClick = { viewModel.clearJournal(); confirmJournalClear = false }) { Text("حذف قطعی") } },
             dismissButton = { TextButton(onClick = { confirmJournalClear = false }) { Text("انصراف") } })
-    }
-}
-
-@Composable
-private fun SignalAddonRow(
-    title: String,
-    detail: String,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodySmall,
-                color = if (checked) AurumColors.Gold else AurumColors.TextPrimary)
-            Text(detail, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-        }
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }

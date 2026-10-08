@@ -9,6 +9,8 @@ import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.Interval
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
+import com.aurum.edge.data.PairScanState
+import com.aurum.edge.data.PairScanStatus
 import com.aurum.edge.data.PersianNewsState
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -49,5 +51,36 @@ class AlertDiagnosticsTest {
         assertFalse(report(market, running = false).single { it.kind == AlertCheckKind.MONITOR }.ready)
         assertFalse(report(market.copy(showingCachedData = true)).single { it.kind == AlertCheckKind.MARKET }.ready)
         assertFalse(report(market, error = "local file unreadable").single { it.kind == AlertCheckKind.STORAGE }.ready)
+    }
+
+    @Test fun `continuous symbol scanning is itself monitored and goes red when it stalls`() {
+        val settings = AppSettings(backgroundMonitor = true, notifyOnSignal = true)
+        fun report(scan: PairScanState?) =
+            AlertDiagnostics.checks(MarketState(), settings, PersianNewsState(), monitorRunning = true,
+                androidNotificationsReady = true, trades = emptyList(), mtf = null, scan = scan, now = now)
+
+        val fresh = report(PairScanState(
+            statuses = listOf(
+                PairScanStatus(symbol = "XAU/USD", state = "candidate", detail = "۸/۸ تایید"),
+                PairScanStatus(symbol = "EUR/USD", state = "no_signal", detail = "کراس تاییدنشده"),
+            ),
+            lastSweepAt = now - 20_000L))
+        val freshCheck = fresh.single { it.kind == AlertCheckKind.SCAN }
+        assertTrue(freshCheck.ready)
+        assertTrue(freshCheck.detail.contains("2 نماد پایش شد"))
+        assertTrue(freshCheck.detail.contains("1 کاندیدا"))
+
+        // A radar that stopped sweeping is a real fault, and it must be said in numbers.
+        val stalled = report(PairScanState(lastSweepAt = now - 600_000L))
+        val stalledCheck = stalled.single { it.kind == AlertCheckKind.SCAN }
+        assertFalse(stalledCheck.ready)
+        assertTrue(stalledCheck.detail.contains("متوقف شده"))
+
+        val failed = report(PairScanState(lastSweepAt = now - 5_000L, lastError = "network unreachable"))
+        val failedCheck = failed.single { it.kind == AlertCheckKind.SCAN }
+        assertFalse(failedCheck.ready)
+        assertTrue(failedCheck.detail.contains("network unreachable"))
+
+        assertFalse(report(null).single { it.kind == AlertCheckKind.SCAN }.ready)
     }
 }

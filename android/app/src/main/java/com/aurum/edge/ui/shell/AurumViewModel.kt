@@ -28,7 +28,6 @@ import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.PaperTicket
 import com.aurum.edge.core.ReplayDecision
 import com.aurum.edge.core.Signal
-import com.aurum.edge.core.SignalProfile
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.TradeReplay
 import com.aurum.edge.core.WalkForwardRecord
@@ -40,7 +39,6 @@ import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.SpotFallbackClient
 import com.aurum.edge.data.NewsRepository
-import com.aurum.edge.data.SignalTuningPlan
 import com.aurum.edge.data.WatchSelection
 import com.aurum.edge.data.WatchState
 import com.aurum.edge.engine.MtfAnalyzer
@@ -58,21 +56,18 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.min
-
-data class AiSignalTuningState(
-    val loading: Boolean = false,
-    val plan: SignalTuningPlan? = null,
-    val appliedAt: Long? = null,
-    val error: String? = null,
-)
 
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
@@ -88,14 +83,91 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val pairScan = container.pairScanner.state
     /** The AI trading companion's latest strictly-validated opinion (analysis, never a signal). */
     val traderOpinion = container.traderAdvisor.state
-    private val _aiSignalTuning = MutableStateFlow(AiSignalTuningState())
-    val aiSignalTuning: StateFlow<AiSignalTuningState> = _aiSignalTuning.asStateFlow()
+    /** Reachability of the model, checked before any AI judgement of a trade. */
+    val aiConnection = container.traderAdvisor.connection
+    /** «ادامه بده یا نه» — the companion AI's advisory pass over the OPEN paper positions. */
+    val holdReview = container.traderAdvisor.holdReviews
+
     val market = container.verifiedMarket
     val trades: StateFlow<List<PaperTrade>> = container.journalStore.trades
     val opportunities: StateFlow<List<PaperOpportunity>> = container.opportunityStore.items
     val opportunityError: StateFlow<String?> = container.opportunityStore.loadError
     val journalError: StateFlow<String?> = container.journalStore.loadError
     val autoPaperStatus: StateFlow<String> = container.autoPaperTrader.status
+
+    /**
+     * «کدام روش برای کدام بازار» — per-market method router for the SELECTED symbol, recomputed
+     * on every market emission from real closed candles + the real session clocks. Read-only: it
+     * never creates a signal, it says which method is legal right now and why not when it isn't.
+     */
+    val playbook: StateFlow<com.aurum.edge.core.PlaybookDecision?> = container.verifiedMarket
+        .map { state ->
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    com.aurum.edge.core.MarketPlaybook.assess(state.symbol, state.candles, state.interval)
+                }.getOrNull()
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * «روند کلی بازار» — خوانشِ عرض بازار از همان پویشِ پیوستهٔ ۵۰+ نماد: چند نماد صعودی/نزولی/
+     * خنثی اندازه گرفته شد، جهت دلار از شش جفت اصلی، و جوّ ریسک‌پذیری از دارایی‌های ریسکی در
+     * برابر طلا و دلار. null تا وقتی یک پویش چیزی اندازه نگرفته باشد (و هرگز حدس زده نمی‌شود).
+     */
+    val marketTrend: StateFlow<com.aurum.edge.core.MarketTrendRead?> = pairScan
+        .map { it.marketTrend }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * لایهٔ اولِ همان روند: جهتِ اندازه‌گیری‌شدهٔ **خودِ نمادِ انتخابی** روی تایم‌فریم پایه و
+     * تایم‌فریم مرجع (تجمیع‌شده از همان کندل‌های واقعی)، با ER و شیب EMA50 بر حسب ATR.
+     */
+    val symbolTrend: StateFlow<com.aurum.edge.core.SymbolTrend?> = container.verifiedMarket
+        .map { state ->
+            withContext(Dispatchers.Default) {
+                runCatching {
+                    com.aurum.edge.core.MarketTrend.symbolTrend(state.symbol, state.candles, state.interval)
+                }.getOrNull()
+            }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** جایگاه آخرین سیگنالِ همین نماد نسبت به روندِ بازار — برای نمایش و ثبت، نه برای ساخت سیگنال. */
+    val trendContext: StateFlow<com.aurum.edge.core.TrendContext?> = combine(
+        symbolTrend, marketTrend, container.verifiedMarket, playbook,
+    ) { trend, overall, state, decision ->
+        val side = state.signal?.action ?: com.aurum.edge.core.SignalAction.NO_TRADE
+        if (trend != null && trend.symbol != state.symbol) return@combine null
+        runCatching {
+            com.aurum.edge.core.MarketTrend.contextOf(side, trend, overall, decision?.method)
+        }.getOrNull()
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * «چرا معامله/هشدار نداریم؟» — the honest prerequisites (feed, history, monitor, notification
+     * channels, storage, news/AI, the 8/8 technical gate and the CONTINUOUS SYMBOL SCAN itself),
+     * computed from live app state.
+     * Green checks are prerequisites, never a forecast.
+     */
+    val entryDiagnostics: StateFlow<List<com.aurum.edge.core.AlertCheck>> = combine(
+        container.verifiedMarket, settings, trades, news, pairScan,
+    ) { market, config, openTrades, headlines, scan ->
+        withContext(Dispatchers.Default) {
+            val mtf = runCatching { MtfAnalyzer.analyze(market.candles, market.interval) }.getOrNull()
+            runCatching {
+                com.aurum.edge.core.AlertDiagnostics.checks(
+                    market = market, settings = config, news = headlines,
+                    monitorRunning = SignalMonitorService.running.value,
+                    androidNotificationsReady = Notifier.canNotifyVerified(
+                        container.appContext, config.alertSoundUri),
+                    trades = openTrades, mtf = mtf,
+                    opportunityError = opportunityError.value, journalError = journalError.value,
+                    scan = scan,
+                )
+            }.getOrElse { emptyList() }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val updateState: StateFlow<AppUpdateRepository.State> = container.updater.state
 
     /** Walk-forward runs made on this device, kept so the numbers can be re-checked later. */
@@ -163,6 +235,23 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _toast.value = "ژورنال تصمیم‌های replay خوانده نشد؛ فایل قبلی دست‌نخورده ماند"
             }
             _stats.value = container.journalStore.stats()
+        }
+        viewModelScope.launch {
+            // «وضعیت اتصال هوش مصنوعی را چک کن و اگر قطع بود اعلام کن»: announced in the app
+            // itself, once per real change of state — never on every tick, never as a guess.
+            var announced: Boolean? = null
+            container.traderAdvisor.connection.collect { connection ->
+                val reachable = connection.reachable
+                if (connection.configured && reachable != null && reachable != announced) {
+                    announced = reachable
+                    _toast.value = if (reachable) {
+                        "🤖 اتصال AI برقرار شد — ارزنده‌بودن ورودها و بازبینی پوزیشن‌های باز دوباره از مدل پرسیده می‌شود"
+                    } else {
+                        "🤖 اتصال AI قطع است (${connection.detail.ifBlank { "پاسخی از مدل نگرفتیم" }}) — " +
+                            "معاملات کاغذی بدون AI و فقط با شرط‌های فنی ادامه پیدا می‌کنند"
+                    }
+                }
+            }
         }
         viewModelScope.launch {
             // Automatic SL/TP settlement happens in MarketRepository, not in this ViewModel.
@@ -251,6 +340,19 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                         container.news.refreshNow()
                     }
                     container.traderAdvisor.refreshNow()
+                    // وضعیت اتصال AI در پیش‌زمینه هم تازه می‌ماند (TTL پنج دقیقه + cooldown روی
+                    // پروب ناموفق)، تا اگر قطع شد هم در کارت «چرا معامله نداریم؟» و هم با پیام
+                    // روی صفحه اعلام شود.
+                    if (settings.value.hasClientNewsAi) {
+                        runCatching { container.traderAdvisor.ensureConnection() }.getOrNull()
+                    }
+                    // پایش پیوستهٔ نمادها: the 50+ symbol radar keeps sweeping while the app is
+                    // visible, independently of the background-monitor switch (PairScanner enforces
+                    // its own 30s throttle and records honest online/error statuses per symbol).
+                    container.pairScanner.refreshNow()
+                    // Advisory review of the open positions while the app is visible (the monitor
+                    // service does the same when it runs). Never closes or re-prices a trade.
+                    runCatching { container.traderAdvisor.reviewOpenPositions() }.getOrNull()
                 }
                 turns++
                 delay(60_000L)
@@ -363,6 +465,21 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     /** Ask the companion AI for a fresh opinion; throttled inside the advisor (10 minutes). */
     fun refreshTraderOpinion(force: Boolean = false) = container.traderAdvisor.refreshNow(force)
 
+    /**
+     * Runs the «continue or not» pass on demand (the loops also run it on their own throttle).
+     * Connection is probed first inside; an unreachable model leaves every position untouched.
+     */
+    fun reviewOpenPositionsNow() {
+        viewModelScope.launch {
+            runCatching { container.traderAdvisor.reviewOpenPositions() }.getOrNull()
+            // Alerts are NOT consumed here: the monitor service owns the notification channel, and
+            // the journal keeps showing the verdict either way.
+            container.traderAdvisor.holdReviews.value.alerts.firstOrNull()?.let { alert ->
+                _toast.value = "نظر AI دربارهٔ ${alert.symbol}: ادامه توصیه نمی‌شود — ${alert.summary}"
+            }
+        }
+    }
+
     /** Manual all-pairs sweep across 50+ instruments. */
     fun scanPairs() {
         if (container.pairScanner.state.value.sweeping) {
@@ -458,84 +575,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun saveBalance(value: Double) = container.settingsStore.update { it.copy(accountBalance = value.coerceAtLeast(10.0)) }
 
     fun saveMinConfidence(value: Double) = container.settingsStore.update { it.copy(minConfidence = value.coerceIn(72.0, 95.0)) }
-
-    fun setActiveStrategy(strategy: com.aurum.edge.core.StrategyKind) {
-        container.settingsStore.update {
-            it.copy(
-                activeStrategy = strategy,
-                signalProfile = SignalProfile.forStrategy(strategy),
-            )
-        }
-        container.market.restart()
-        scanPairs()
-    }
-
-    fun setSignalMomentumVolume(enabled: Boolean) = updateSignalProfile("فیلتر مومنتوم/حجم", enabled) {
-        it.copy(momentumVolume = enabled)
-    }
-
-    fun setSignalFlatSpanB(enabled: Boolean) = updateSignalProfile("سناریوی تختی SpanB52", enabled) {
-        it.copy(flatSpanB = enabled)
-    }
-
-    fun setSignalRangeChop(enabled: Boolean) = updateSignalProfile("فیلتر بازار رنج", enabled) {
-        it.copy(rangeChopFilter = enabled)
-    }
-
-    fun setSignalHigherTimeframe(enabled: Boolean) = updateSignalProfile("تأیید تایم‌فریم بالاتر", enabled) {
-        it.copy(higherTimeframeFilter = enabled)
-    }
-
-    fun setSignalFakeBreakout(enabled: Boolean) = updateSignalProfile("فیلتر فیک‌بریک‌اوت", enabled) {
-        it.copy(fakeBreakoutFilter = enabled)
-    }
-
-    fun setSignalDynamicSpread(enabled: Boolean) = updateSignalProfile("فیلتر اسپرد پویا", enabled) {
-        it.copy(dynamicSpreadFilter = enabled)
-    }
-
-    fun setSignalRiskyTiming(enabled: Boolean) = updateSignalProfile("فیلتر زمان‌های خطرناک", enabled) {
-        it.copy(riskyTimingFilter = enabled)
-    }
-
-    fun setSignalStructureRisk(enabled: Boolean) = updateSignalProfile("فیلتر ریسک ساختار", enabled) {
-        it.copy(structureRiskFilter = enabled)
-    }
-
-    fun setSignalCooldown(enabled: Boolean) = updateSignalProfile("کول‌داون بعد از شکست", enabled) {
-        it.copy(cooldownFilter = enabled)
-    }
-
-    fun setSignalChikou(enabled: Boolean) = updateSignalProfile("تایید چیکو", enabled) {
-        it.copy(chikouConfirmation = enabled)
-    }
-
-    private fun updateSignalProfile(label: String, enabled: Boolean, transform: (SignalProfile) -> SignalProfile) {
-        container.settingsStore.update { it.copy(signalProfile = transform(it.signalProfile)) }
-        container.market.restart()
-        _toast.value = "$label ${if (enabled) "به موتور پایه اضافه شد" else "از افزونه‌های موتور برداشته شد"}"
-    }
-
-    fun runAiSignalSelfAnalysis(apply: Boolean = true) {
-        viewModelScope.launch {
-            _aiSignalTuning.value = _aiSignalTuning.value.copy(loading = true, error = null)
-            try {
-                val plan = container.traderAdvisor.tuneSignalEngine()
-                if (apply) {
-                    container.settingsStore.update { it.copy(signalProfile = plan.profile) }
-                    container.market.restart()
-                    _aiSignalTuning.value = AiSignalTuningState(plan = plan, appliedAt = System.currentTimeMillis())
-                    _toast.value = "خودتحلیلی AI اعمال شد: ${plan.profile.title}"
-                } else {
-                    _aiSignalTuning.value = AiSignalTuningState(plan = plan)
-                }
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (error: Exception) {
-                _aiSignalTuning.value = AiSignalTuningState(error = error.message ?: "خودتحلیلی AI انجام نشد")
-            }
-        }
-    }
 
     /** Cost assumptions are the user's responsibility; they are echoed in every report. */
     fun saveSpread(value: Double) = container.settingsStore.update { it.copy(spreadPrice = value.coerceIn(0.0, 5.0)) }
@@ -699,12 +738,24 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 val newsRecord = if (manual) null else NewsConfluence.record(news.value, current.symbol)
                 val ict = if (manual) null else (IctEntryRules.approvedEvidence(current)
                     ?: error("شواهد رنج/ICT همین کندل پیش از ثبت معتبر نیست"))
+                // «روند کلی بازار» در همان لحظهٔ ورود عکس گرفته و در ژورنال ثبت می‌شود تا برای
+                // هر معامله معلوم باشد با روند بوده یا خلافش. فقط ثبت است؛ گیتِ ورود همان‌جاست
+                // که تصمیم گرفته می‌شود (پویشگر و ورود خودکار)، نه بعد از ذخیره.
+                val trendRecord = runCatching {
+                    val trend = symbolTrend.value?.takeIf { it.symbol == current.symbol }
+                    com.aurum.edge.core.MarketTrendRecord.from(
+                        com.aurum.edge.core.MarketTrend.contextOf(
+                            signal.action, trend, marketTrend.value, playbook.value?.method,
+                        ),
+                    )
+                }.getOrNull()
                 val trade = container.journalStore.open(
                     signal = signal, symbol = current.symbol, price = price,
                     balance = s.accountBalance, riskPercent = s.riskPercent,
                     mtf = if (manual) null else _mtf.value?.let { MtfSnapshotRecord.from(it) },
                     manual = manual,
                     newsEvidence = newsRecord, priceAction = ict,
+                    marketTrend = trendRecord,
                 )
                 _stats.value = container.journalStore.stats()
                 // Linking is metadata only; a damaged opportunity file must not erase a saved trade.

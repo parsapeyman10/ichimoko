@@ -8,8 +8,6 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -24,7 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -33,35 +30,46 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.aurum.edge.core.AssetClass
-import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.PaperOrderRules
+import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.data.CryptoCatalog
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.SymbolSearch
 import com.aurum.edge.data.TradingViewSymbols
+import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
-import com.aurum.edge.ui.components.formatPrice
+import com.aurum.edge.ui.components.StatTile
+import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPriceFor
 import com.aurum.edge.ui.theme.AurumColors
 
 /**
- * صفحه چارت‌ها (Multi-Chart Studio):
- * ۱. چارت اصلی و اختصاصی دستی (پیش‌فرض طلای جهانی XAU/USD با قابلیت تغییر به ۵۰+ نماد دلخواه)
- * ۲. استودیو زنده ۴ دسته دارایی (کالا، فارکس، رمزارز، سهام) با سویچر تب بهینه‌شده و فوق‌سریع
- * همراه با درج داینامیک و ظریف سطوح حد ضرر (SL)، حد سود (TP)، قیمت ورود و اهرم با دقت اعشاری بالا.
+ * تب «چارت» — **فقط TradingView**.
+ *
+ * قانونِ صریح این صفحه:
+ *  ۱. چارت و کندل‌ها همیشه از ویدجت رسمی TradingView می‌آیند، با همان مشخصاتِ خودِ TradingView
+ *     (کندل‌ها، تایم‌فریم، مطالعهٔ ایچیموکو، تم و ابزارهای خودش). هیچ چارتِ داخلیِ اپ، هیچ
+ *     لایه/خطِ دست‌ساز و هیچ HUD روی چارت کشیده نمی‌شود.
+ *  ۲. به‌محض ثبت یک معامله، **پنجرهٔ همان معامله** در همین صفحه باز می‌شود و چارت TradingViewِ
+ *     **همان نماد** را نشان می‌دهد. چهار معاملهٔ باز ⇒ چهار پنجره، هر چهار تا هم‌زمان و همیشه باز.
+ *  ۳. هیچ سوئیچ، حالت جایگزین، دکمهٔ «تلاش دوباره/چارت داخلی» یا تایمرِ نگهبانی روی این تب نیست:
+ *     فقط TradingView اجرا می‌شود. عددهای واقعی معامله در نوارِ بالای همان پنجره از ژورنال دستگاه
+ *     خوانده می‌شوند، نه روی کندل‌ها.
+ *  ۴. نمادی که در نگاشت رسمی TradingViewِ اپ نیست، با پیامِ صریح «نگاشت نشده» نشان داده می‌شود و
+ *     هرگز نمادِ دیگری (مثلاً طلا) جایش نمایش داده نمی‌شود.
  */
 @Composable
 fun ChartScreen(
@@ -72,257 +80,133 @@ fun ChartScreen(
 ) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
-    val scanState by viewModel.pairScan.collectAsStateWithLifecycle()
-    val openTrades = remember(trades) { trades.filter { it.isOpen } }
-    var selectedCategoryTab by remember { mutableStateOf(AssetClass.COMMODITY) }
+    val openTrades = trades.filter { it.isOpen }.sortedByDescending { it.openedAt }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(bottom = 24.dp),
-    ) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
+        SymbolSearchRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
 
-        // ═════════════════════════════════════════════════════════════════════
-        // چارت شماره ۱ (بالاترین پنجره): چارت اصلی و اختصاصی دستی
-        // پیش‌فرض روی طلای جهانی (XAU/USD) با امکان تغییر به هر نماد دیگر
-        // ═════════════════════════════════════════════════════════════════════
-        val primarySignal = market.signal
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Interval.entries.forEach { interval ->
+                FilterChip(
+                    selected = market.interval == interval,
+                    onClick = { viewModel.setInterval(interval) },
+                    label = { Text(interval.label, style = MaterialTheme.typography.labelSmall) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AurumColors.Gold.copy(alpha = 0.18f),
+                        selectedLabelColor = AurumColors.Gold,
+                        labelColor = AurumColors.TextSecondary,
+                    ),
+                )
+            }
+        }
+
         SectionCard(
-            title = "⭐ چارت اصلی ۱ (سفارشی و آزاد) · ${market.symbol}",
-            subtitle = "پیش‌فرض روی طلای جهانی · امکان انتخاب هر یک از ۵۰+ نماد با ابر ایچیموکو و سطوح ورود/SL/TP",
+            title = "چارت TradingView · ${market.symbol}",
+            subtitle = "ویدجت رسمی TradingView با همان مشخصات خودش — کندل‌ها، تایم‌فریم و ایچیموکو " +
+                "مستقیم از خود TradingView؛ هیچ خط یا لایهٔ دست‌سازی روی چارت کشیده نمی‌شود",
             trailing = {
                 Pill(
-                    text = market.feed.mode.label,
-                    color = if (market.feed.mode == FeedMode.LIVE) AurumColors.Green else AurumColors.Gold,
+                    if (openTrades.isEmpty()) "معاملهٔ باز ندارد" else "${openTrades.size} پنجرهٔ معاملهٔ باز",
+                    if (openTrades.isEmpty()) AurumColors.TextMuted else AurumColors.Cyan,
                 )
             },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 12.dp),
         ) {
-            // ۱.۱ جستجو و تغییر نماد چارت اصلی
-            SymbolSearchRow(selected = market.symbol) { viewModel.selectChartSymbol(it) }
-
-            // ۱.۲ انتخاب تایم‌فریم برای چارت اصلی
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp)
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Interval.entries.forEach { interval ->
-                    FilterChip(
-                        selected = market.interval == interval,
-                        onClick = { viewModel.setInterval(interval) },
-                        label = { Text(interval.label, style = MaterialTheme.typography.labelSmall) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = AurumColors.Gold.copy(alpha = 0.18f),
-                            selectedLabelColor = AurumColors.Gold,
-                            labelColor = AurumColors.TextSecondary,
-                        ),
-                    )
-                }
-            }
-
-            // ۱.۳ سطوح ورود، حد ضرر و حد سود در بالای چارت با اعشار دقیق
-            if (primarySignal?.entry != null && primarySignal.stopLoss != null && primarySignal.takeProfit != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                        .background(AurumColors.SurfaceAlt, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("ورود: ${formatPriceFor(market.symbol, primarySignal.entry)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold, fontWeight = FontWeight.Bold)
-                    Text("SL: ${formatPriceFor(market.symbol, primarySignal.stopLoss)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Red, fontWeight = FontWeight.Bold)
-                    Text("TP: ${formatPriceFor(market.symbol, primarySignal.takeProfit)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Green, fontWeight = FontWeight.Bold)
-                    Text("اهرم: ${PaperOrderRules.defaultLeverageFor(market.symbol)}x", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
-                }
-            }
-
-            // ۱.۴ پنجره تریدینگ‌ویو چارت اصلی
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(460.dp)
-                    .padding(top = 4.dp)
-                    .background(AurumColors.SurfaceAlt, RoundedCornerShape(12.dp))
-                    .border(1.dp, AurumColors.Gold.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
-            ) {
+            Box(Modifier.fillMaxWidth().height(520.dp)) {
                 TradingViewWidget(
                     symbol = market.symbol,
                     interval = market.interval,
-                    widgetId = "chart_primary",
-                    entry = primarySignal?.entry,
-                    stopLoss = primarySignal?.stopLoss,
-                    takeProfit = primarySignal?.takeProfit,
-                    action = primarySignal?.action,
-                    leverage = PaperOrderRules.defaultLeverageFor(market.symbol),
-                    riskReward = primarySignal?.riskReward,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
         }
 
-        // ═════════════════════════════════════════════════════════════════════
-        // استودیو چارت ۴ دسته دارایی (کالا، فارکس، رمزارزها، سهام)
-        // ═════════════════════════════════════════════════════════════════════
-        val categories = listOf(
-            AssetClass.COMMODITY to "XAU/USD",
-            AssetClass.FOREX to "EUR/USD",
-            AssetClass.CRYPTO to "BTCUSDT",
-            AssetClass.STOCK to "AAPL",
-        )
+        OpenTradeWindows(openTrades = openTrades, livePrices = livePrices)
+    }
+}
 
-        val activeAssetClass = selectedCategoryTab
-        val defaultBenchmark = categories.firstOrNull { it.first == activeAssetClass }?.second ?: "XAU/USD"
-
-        val tradeForClass = openTrades.firstOrNull { it.assetClass == activeAssetClass }
-        val evaluatingCandidate = scanState.topThree.firstOrNull { it.assetClass == activeAssetClass }
-            ?: scanState.statuses.firstOrNull { it.assetClass == activeAssetClass && it.price != null && (it.technicalScore ?: 0) >= 3 }
-            ?: scanState.statuses.firstOrNull { it.assetClass == activeAssetClass && it.state != "closed" }
-
-        val activeSymbol = tradeForClass?.symbol ?: evaluatingCandidate?.symbol ?: defaultBenchmark
-        val activeInterval = tradeForClass?.interval ?: market.interval
-        val isTradeOpen = tradeForClass != null
-
-        val activeEntry = tradeForClass?.entry ?: evaluatingCandidate?.entry
-        val activeSL = tradeForClass?.stopLoss ?: evaluatingCandidate?.stopLoss
-        val activeTP = tradeForClass?.takeProfit ?: evaluatingCandidate?.takeProfit
-        val activeAction = tradeForClass?.action ?: evaluatingCandidate?.action
-        val activeLeverage = tradeForClass?.effectiveLeverage ?: PaperOrderRules.defaultLeverageFor(activeSymbol)
-        val activeRR = tradeForClass?.riskReward ?: evaluatingCandidate?.riskReward
-
+/**
+ * پنجرهٔ معاملات باز: به ازای **هر** معاملهٔ باز یک پنجره، و داخل هر پنجره چارت TradingViewِ
+ * همان نماد و همان تایم‌فریمِ خودِ معامله. هیچ‌کدام تاشو نیستند؛ اگر چهار معامله باز باشد،
+ * چهار چارت TradingView هم‌زمان روی همین صفحه اجرا می‌شود.
+ */
+@Composable
+private fun OpenTradeWindows(openTrades: List<PaperTrade>, livePrices: Map<String, Double>) {
+    if (openTrades.isEmpty()) {
         SectionCard(
-            title = "📊 استودیو چارت اختصاصی دسته‌ها · ${activeAssetClass.label}",
-            subtitle = if (isTradeOpen) "معاملهٔ فعال: $activeSymbol (با سطوح زنده ورود، حد سود و ضرر)"
-                       else "پایش و ارزیابی زنده در پس‌زمینه · نماد کاندیدا: $activeSymbol",
-            trailing = {
-                Pill(
-                    text = if (isTradeOpen) "● معامله باز (${tradeForClass?.action?.name})"
-                           else "🔍 رصد زنده (${evaluatingCandidate?.technicalScore ?: 5}/7)",
-                    color = if (isTradeOpen) AurumColors.Green else AurumColors.Cyan,
-                )
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 12.dp),
+            title = "پنجرهٔ معاملات باز",
+            subtitle = "به‌محض ثبت ورود، پنجرهٔ همان معامله با چارت TradingView همین‌جا باز می‌شود",
         ) {
-            // تب‌بار سوئیچ سریع بین ۴ دسته دارایی
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 8.dp)
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                categories.forEach { (cls, _) ->
-                    val isOpenInThisCls = openTrades.any { it.assetClass == cls }
-                    FilterChip(
-                        selected = selectedCategoryTab == cls,
-                        onClick = { selectedCategoryTab = cls },
-                        label = {
-                            Text(
-                                text = "${cls.label}${if (isOpenInThisCls) " (فعال)" else ""}",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = if (selectedCategoryTab == cls) FontWeight.Bold else FontWeight.Normal,
-                            )
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = (if (isOpenInThisCls) AurumColors.Green else AurumColors.Cyan).copy(alpha = 0.2f),
-                            selectedLabelColor = if (isOpenInThisCls) AurumColors.Green else AurumColors.Cyan,
-                            labelColor = AurumColors.TextSecondary,
-                        ),
-                    )
-                }
-            }
+            Text("الان معاملهٔ بازی در ژورنال نیست. به‌محض اینکه ورودی ثبت شود (خودکار یا دستی)، " +
+                    "پنجرهٔ مخصوص همان معامله با چارت TradingViewِ همان نماد در همین صفحه باز می‌شود؛ " +
+                    "چند معاملهٔ باز یعنی چند پنجره، همه هم‌زمان.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+        }
+        return
+    }
+    openTrades.forEach { trade ->
+        TradeWindowCard(trade = trade, livePrice = livePrices[trade.symbol])
+    }
+}
 
-            if (isTradeOpen && tradeForClass != null) {
-                val currentPrice = livePrices[tradeForClass.symbol] ?: tradeForClass.entry
-                val pnlPerUnit = if (tradeForClass.action == SignalAction.BUY) currentPrice - tradeForClass.entry else tradeForClass.entry - currentPrice
-                val grossPnl = tradeForClass.positionOz * pnlPerUnit
-                val netPnl = grossPnl - (tradeForClass.effectiveCommissionUsd + tradeForClass.effectiveSpreadCostUsd)
+@Composable
+private fun TradeWindowCard(trade: PaperTrade, livePrice: Double?) {
+    val isBuy = trade.action == SignalAction.BUY
+    val pnlUsd = livePrice?.let { price ->
+        val perUnit = if (isBuy) price - trade.entry else trade.entry - price
+        kotlin.math.round(
+            PaperOrderRules.quotePnlToUsd(trade.symbol, perUnit * trade.positionOz, price) * 100.0
+        ) / 100.0
+    }
+    val ageMinutes = ((System.currentTimeMillis() - trade.openedAt) / 60_000L).coerceAtLeast(0L)
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Pill("اهرم ${tradeForClass.effectiveLeverage}x", AurumColors.Cyan)
-                        Pill("مارجین $${formatPrice(tradeForClass.effectiveMarginUsd)}", AurumColors.Gold)
-                    }
-                    Pill(
-                        text = "PnL خالص: " + (if (netPnl >= 0) "+$" else "-$") + String.format(java.util.Locale.US, "%.2f", kotlin.math.abs(netPnl)),
-                        color = if (netPnl >= 0) AurumColors.Green else AurumColors.Red,
-                    )
-                }
-            } else {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "نماد در حال رصد آنلاین: $activeSymbol",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.TextSecondary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Pill("اهرم ${activeLeverage}x", AurumColors.Cyan)
-                }
-            }
+    SectionCard(
+        title = "پنجرهٔ معاملهٔ ${trade.symbol} · ${if (isBuy) "خرید LONG" else "فروش SHORT"}",
+        subtitle = "چارت و کندل‌ها فقط از ویدجت رسمی TradingView با همان مشخصات خودش؛ " +
+            "عددهای معامله از ژورنال واقعی دستگاه",
+        trailing = {
+            Pill(if (isBuy) "LONG" else "SHORT", if (isBuy) AurumColors.Green else AurumColors.Red)
+        },
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            StatTile("ورود", formatPriceFor(trade.symbol, trade.entry), AurumColors.Gold, Modifier.weight(1f))
+            StatTile("حد ضرر", formatPriceFor(trade.symbol, trade.stopLoss), AurumColors.Red, Modifier.weight(1f))
+            StatTile("حد سود", formatPriceFor(trade.symbol, trade.takeProfit), AurumColors.Green, Modifier.weight(1f))
+            StatTile("R:R", String.format(java.util.Locale.US, "%.2f", trade.riskReward),
+                AurumColors.Cyan, Modifier.weight(1f))
+        }
+        Text(
+            "حجم ${String.format(java.util.Locale.US, "%.6f", trade.positionOz)} ${trade.unit} · " +
+                "باز شده ${formatDateTime(trade.openedAt)} " +
+                "(${if (ageMinutes < 60) "$ageMinutes دقیقه" else "${ageMinutes / 60} ساعت و ${ageMinutes % 60} دقیقه"} پیش) · " +
+                if (trade.autoOpened) "ورود خودکار کاغذی" else "ورود دستی کاغذی",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+            modifier = Modifier.padding(top = 6.dp),
+        )
+        if (livePrice != null && livePrice > 0.0) {
+            Text(
+                "آخرین قیمت ${formatPriceFor(trade.symbol, livePrice)} · سود/زیان باز " +
+                    "${String.format(java.util.Locale.US, "%.2f", pnlUsd ?: 0.0)}$",
+                style = MaterialTheme.typography.labelSmall,
+                color = if ((pnlUsd ?: 0.0) >= 0.0) AurumColors.Green else AurumColors.Red,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        } else {
+            Text("قیمت زندهٔ این نماد الان در دسترس نیست؛ سود/زیان باز فقط با قیمت واقعی نشان داده " +
+                    "می‌شود، نه با حدس.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 4.dp))
+        }
 
-            // نوار سطوح ورود، حد ضرر و حد سود اختصاصی روی چارت با اعشار دقیق
-            if (activeEntry != null && activeSL != null && activeTP != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 6.dp)
-                        .background(AurumColors.Surface, RoundedCornerShape(8.dp))
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("ورود: ${formatPriceFor(activeSymbol, activeEntry)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold, fontWeight = FontWeight.Bold)
-                    Text("SL: ${formatPriceFor(activeSymbol, activeSL)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Red, fontWeight = FontWeight.Bold)
-                    Text("TP: ${formatPriceFor(activeSymbol, activeTP)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Green, fontWeight = FontWeight.Bold)
-                    activeRR?.let { Text("R:R 1:${String.format(java.util.Locale.US, "%.1f", it)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan) }
-                }
-            }
-
-            // پنجره اختصاصی تریدینگ‌ویو
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(440.dp)
-                    .background(AurumColors.SurfaceAlt, RoundedCornerShape(12.dp))
-                    .border(
-                        1.dp,
-                        (if (isTradeOpen) AurumColors.Green else AurumColors.Surface).copy(alpha = 0.4f),
-                        RoundedCornerShape(12.dp),
-                    ),
-            ) {
+        // چارتِ خودِ معامله: همان نماد، همان تایم‌فریمِ ثبت‌شده در ژورنال، فقط TradingView.
+        Box(Modifier.fillMaxWidth().height(420.dp).padding(top = 8.dp)) {
+            key(trade.id) {
                 TradingViewWidget(
-                    symbol = activeSymbol,
-                    interval = activeInterval,
-                    widgetId = "chart_cat_${activeAssetClass.name}",
-                    entry = activeEntry,
-                    stopLoss = activeSL,
-                    takeProfit = activeTP,
-                    action = activeAction,
-                    leverage = activeLeverage,
-                    riskReward = activeRR,
+                    symbol = trade.symbol,
+                    interval = trade.interval,
+                    widgetId = "trade_" + trade.id.takeLast(8),
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -330,21 +214,28 @@ fun ChartScreen(
     }
 }
 
+/**
+ * خودِ ویدجت TradingView: یک WebView که فقط iframe رسمی `s.tradingview.com/widgetembed` را
+ * بارگذاری می‌کند. هیچ چیزِ دیگری داخلش نیست و هیچ چیزی رویش کشیده نمی‌شود.
+ */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun TradingViewWidget(
     symbol: String,
     interval: Interval,
-    widgetId: String,
-    entry: Double? = null,
-    stopLoss: Double? = null,
-    takeProfit: Double? = null,
-    action: SignalAction? = null,
-    leverage: Int? = null,
-    riskReward: Double? = null,
+    widgetId: String = "chart_primary",
     modifier: Modifier = Modifier,
 ) {
-    val tvSymbol = remember(symbol) { TradingViewSymbols.of(symbol) }
+    val tvSymbol = remember(symbol) { TradingViewSymbols.find(symbol) }
+    if (tvSymbol == null) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Text("نماد $symbol در نگاشت رسمی TradingView اپ نیست؛ هیچ نماد جایگزینی (مثلاً طلا) " +
+                    "نشان داده نمی‌شود.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(16.dp))
+        }
+        return
+    }
     val tvInterval = remember(interval) {
         when (interval) {
             Interval.M1 -> "1"
@@ -356,22 +247,11 @@ private fun TradingViewWidget(
             Interval.D1 -> "D"
         }
     }
+    val html = remember(tvSymbol, tvInterval, widgetId) { tradingViewHtml(tvSymbol, tvInterval, widgetId) }
 
-    val html = remember(tvSymbol, tvInterval, widgetId, entry, stopLoss, takeProfit, action) {
-        tradingViewHtml(
-            symbol = symbol,
-            tvSymbol = tvSymbol,
-            tvInterval = tvInterval,
-            widgetId = widgetId,
-            entry = entry,
-            stopLoss = stopLoss,
-            takeProfit = takeProfit,
-            action = action,
-            leverage = leverage,
-            riskReward = riskReward,
-        )
-    }
-
+    // Reload only when the instrument/timeframe really changed: an unconditional reload on every
+    // recomposition is what kept TradingView stuck on "loading".
+    val loadKey = "$tvSymbol|$tvInterval|$widgetId"
     AndroidView(
         modifier = modifier,
         factory = { ctx ->
@@ -389,67 +269,50 @@ private fun TradingViewWidget(
                     displayZoomControls = false
                     cacheMode = WebSettings.LOAD_DEFAULT
                     mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    // The widget renders its full desktop layout (side toolbar, studies, scales)
+                    // for a desktop agent; a mobile agent gets a stripped chart. Same TradingView,
+                    // same data — only the layout it serves changes.
+                    userAgentString = DESKTOP_USER_AGENT
+                    textZoom = 100
                 }
                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                 webChromeClient = WebChromeClient()
-                webViewClient = object : WebViewClient() {}
+                webViewClient = object : WebViewClient() {
+                    override fun onReceivedSslError(
+                        view: WebView?,
+                        handler: android.webkit.SslErrorHandler?,
+                        error: android.net.http.SslError?,
+                    ) {
+                        // A certificate problem is never ignored: cancel the load.
+                        handler?.cancel()
+                    }
+                }
+                tag = loadKey
                 loadDataWithBaseURL("https://s.tradingview.com", html, "text/html", "UTF-8", null)
             }
         },
         update = { webView ->
-            webView.loadDataWithBaseURL("https://s.tradingview.com", html, "text/html", "UTF-8", null)
+            // update runs on every recomposition; only a real instrument/timeframe change reloads.
+            if (webView.tag != loadKey) {
+                webView.tag = loadKey
+                webView.loadDataWithBaseURL("https://s.tradingview.com", html, "text/html", "UTF-8", null)
+            }
         },
     )
 }
 
-private fun tradingViewHtml(
-    symbol: String,
-    tvSymbol: String,
-    tvInterval: String,
-    widgetId: String,
-    entry: Double? = null,
-    stopLoss: Double? = null,
-    takeProfit: Double? = null,
-    action: SignalAction? = null,
-    leverage: Int? = null,
-    riskReward: Double? = null,
-): String {
+/**
+ * ONLY the official TradingView widget: its own candles, its own scales, its own Ichimoku study.
+ * هیچ خط، لایه یا عددِ دست‌سازی داخل این HTML نیست.
+ */
+private fun tradingViewHtml(tvSymbol: String, tvInterval: String, widgetId: String): String {
     val encoded = tvSymbol.replace(":", "%3A")
     val iframeUrl = "https://s.tradingview.com/widgetembed/?frameElementId=tv_$widgetId" +
         "&symbol=$encoded&interval=$tvInterval&hidesidetoolbar=0&symboledit=1" +
         "&saveimage=0&toolbarbg=0b0e13" +
         "&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1&locale=en" +
         "&studies=%5B%22STD%3BIchimoku%25Cloud%22%5D"
-
-    val hudHtml = if (entry != null && stopLoss != null && takeProfit != null) {
-        val entryFormatted = formatPriceFor(symbol, entry)
-        val slFormatted = formatPriceFor(symbol, stopLoss)
-        val tpFormatted = formatPriceFor(symbol, takeProfit)
-        val isBuy = action == SignalAction.BUY
-
-        val tpY = if (isBuy) "20%" else "75%"
-        val entryY = "48%"
-        val slY = if (isBuy) "75%" else "20%"
-
-        """
-        <!-- Sleek Floating HUD & Thin Dynamic Dashed Lines -->
-        <div style="position:absolute; top:8px; right:8px; z-index:900; pointer-events:none; display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
-          <span style="background:rgba(255,255,255,0.92); color:#0b0e13; font-size:11px; font-weight:bold; font-family:tahoma,sans-serif; padding:3px 8px; border-radius:4px; box-shadow:0 2px 4px rgba(0,0,0,0.5);">ورود: $$entryFormatted</span>
-          <span style="background:rgba(0,230,118,0.92); color:#0b0e13; font-size:11px; font-weight:bold; font-family:tahoma,sans-serif; padding:3px 8px; border-radius:4px; box-shadow:0 2px 4px rgba(0,0,0,0.5);">TP: $$tpFormatted</span>
-          <span style="background:rgba(255,82,82,0.92); color:#ffffff; font-size:11px; font-weight:bold; font-family:tahoma,sans-serif; padding:3px 8px; border-radius:4px; box-shadow:0 2px 4px rgba(0,0,0,0.5);">SL: $$slFormatted</span>
-        </div>
-        <svg style="position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; z-index:850; opacity:0.85;">
-          <!-- Take Profit: Green Thin Dashed Line -->
-          <line x1="0" y1="$tpY" x2="100%" y2="$tpY" stroke="#00e676" stroke-width="1.2" stroke-dasharray="4,4" />
-          <!-- Entry Price: White Thin Dashed Line -->
-          <line x1="0" y1="$entryY" x2="100%" y2="$entryY" stroke="#ffffff" stroke-width="1.2" stroke-dasharray="4,4" />
-          <!-- Stop Loss: Red Thin Dashed Line -->
-          <line x1="0" y1="$slY" x2="100%" y2="$slY" stroke="#ff5252" stroke-width="1.2" stroke-dasharray="4,4" />
-        </svg>
-        """.trimIndent()
-    } else ""
-
     return """
         <!DOCTYPE html>
         <html lang="en">
@@ -464,89 +327,159 @@ private fun tradingViewHtml(
               height: 100%;
               overflow: hidden;
               background-color: #0b0e13;
-              position: relative;
             }
-            iframe {
-              width: 100%;
-              height: 100%;
-              border: none;
-            }
+            iframe { width: 100%; height: 100%; border: none; display: block; }
           </style>
-          <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
         </head>
         <body>
-          $hudHtml
-          <iframe src="$iframeUrl" allowtransparency="true" frameborder="0"></iframe>
+          <iframe id="tv_frame" src="$iframeUrl" allowtransparency="true" frameborder="0"
+                  allow="fullscreen"></iframe>
         </body>
         </html>
     """.trimIndent()
 }
 
-@Composable
-private fun SymbolSearchRow(
-    selected: String,
-    onSelect: (String) -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    var query by remember { mutableStateOf("") }
-    val results = remember(query) { SymbolSearch.rank(query, CryptoCatalog.symbols, 15) }
+private const val DESKTOP_USER_AGENT =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
+        "Chrome/126.0.0.0 Safari/537.36"
 
-    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clickable { expanded = !expanded }
-                .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(selected, style = MaterialTheme.typography.bodyMedium, color = AurumColors.Gold, fontWeight = FontWeight.Bold)
-                Pill(AssetClass.of(selected).label, AurumColors.Surface)
-            }
+@Composable
+internal fun SymbolSearchRow(selected: String, onSelect: (String) -> Unit) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var group by rememberSaveable { mutableStateOf("طلا و فارکس") }
+    var open by rememberSaveable { mutableStateOf(false) }
+
+    val forexIds = remember { WatchCatalog.chartSymbols.filter { !CryptoCatalog.isCrypto(it) } }
+    val cryptoList = remember { CryptoCatalog.symbols }
+
+    val forexShown = remember(query) {
+        val needle = SymbolSearch.normalize(query).replace(" ", "").uppercase()
+        if (needle.isEmpty()) forexIds
+        else forexIds.filter { it.replace("/", "").contains(needle, ignoreCase = true) }
+    }
+    val cryptoShown = remember(query) { SymbolSearch.rank(query, cryptoList, limit = 300) }
+    val suggestions = remember(query, forexShown.size, cryptoShown.size) {
+        if (query.isBlank() || forexShown.isNotEmpty() || cryptoShown.isNotEmpty()) emptyList()
+        else SymbolSearch.suggest(query, cryptoList)
+    }
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                if (expanded) "▲ بستن لیست نمادها" else "▼ تغییر نماد چارت اصلی (۵۰+ نماد)",
+                "نماد: $selected",
+                style = MaterialTheme.typography.titleSmall,
+                color = AurumColors.Gold,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "${forexIds.size + cryptoList.size} نماد",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+            )
+            Text(
+                if (open) "  بستن" else "  تغییر نماد",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.Cyan,
+                modifier = Modifier.clickable { open = !open }.padding(6.dp),
             )
         }
-        if (expanded) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp)
-                    .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
-                    .padding(8.dp),
-            ) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    placeholder = { Text("جستجوی نماد، طلا، نفت، رمزارزها یا سهام...") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
+
+        if (!open) return@Column
+
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            singleLine = true,
+            label = { Text("جستجو — طلا، EUR، بیت‌کوین، PEPE…", style = MaterialTheme.typography.labelSmall) },
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        Row(
+            Modifier.fillMaxWidth().padding(top = 6.dp).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            listOf("طلا و فارکس", "ارز دیجیتال").forEach { option ->
+                FilterChip(
+                    selected = group == option,
+                    onClick = { group = option },
+                    label = { Text(option, style = MaterialTheme.typography.labelSmall) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AurumColors.Gold.copy(alpha = 0.18f),
+                        selectedLabelColor = AurumColors.Gold,
+                        labelColor = AurumColors.TextSecondary,
+                    ),
                 )
-                LazyColumn(Modifier.heightIn(max = 240.dp).padding(top = 6.dp)) {
-                    items(results) { item ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    onSelect(item.id)
-                                    expanded = false
-                                }
-                                .padding(vertical = 8.dp, horizontal = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                        ) {
-                            Column {
-                                Text(item.id, style = MaterialTheme.typography.bodyMedium, color = AurumColors.TextPrimary)
-                                Text(item.label, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-                            }
-                            Pill(AssetClass.of(item.id).label, AurumColors.Surface)
-                        }
+            }
+        }
+
+        LazyColumn(Modifier.fillMaxWidth().heightIn(max = 320.dp).padding(top = 6.dp)) {
+            if (group == "طلا و فارکس") {
+                items(forexShown, key = { "f-$it" }) { id ->
+                    SymbolRow(id, id == selected) { onSelect(id); open = false; query = "" }
+                }
+            } else {
+                items(cryptoShown, key = { "c-" + it.id }) { coin ->
+                    SymbolRow(coin.id, coin.id == selected) { onSelect(coin.id); open = false; query = "" }
+                }
+            }
+            if (suggestions.isNotEmpty()) {
+                item {
+                    Text(
+                        "«$query» پیدا نشد. منظورتان این بود؟",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                        modifier = Modifier.padding(vertical = 8.dp),
+                    )
+                }
+                items(suggestions, key = { "s-" + it.id }) { coin ->
+                    SymbolRow(coin.id, false, AurumColors.Cyan) {
+                        onSelect(coin.id); open = false; query = ""
                     }
                 }
             }
+        }
+    }
+    SymbolPickerRow(selected, onSelect)
+}
+
+@Composable
+private fun SymbolRow(
+    id: String,
+    selected: Boolean,
+    tint: androidx.compose.ui.graphics.Color? = null,
+    onClick: () -> Unit,
+) {
+    Text(
+        id,
+        style = MaterialTheme.typography.bodyMedium,
+        color = tint ?: if (selected) AurumColors.Gold else AurumColors.TextPrimary,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 9.dp),
+    )
+}
+
+@Composable
+internal fun SymbolPickerRow(selected: String, onSelect: (String) -> Unit) {
+    // Gold first, then the FX pairs, then crypto — the order asked for.
+    val quick = remember(selected) {
+        val forex = WatchCatalog.chartSymbols.filter { !CryptoCatalog.isCrypto(it) }
+        val crypto = WatchCatalog.chartSymbols.filter { CryptoCatalog.isCrypto(it) }
+        (listOf("XAU/USD") + forex + crypto + selected).distinct()
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        quick.forEach { id ->
+            FilterChip(
+                selected = selected == id,
+                onClick = { if (selected != id) onSelect(id) },
+                label = { Text(id, style = MaterialTheme.typography.labelSmall) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = AurumColors.Gold.copy(alpha = 0.18f),
+                    selectedLabelColor = AurumColors.Gold,
+                    labelColor = AurumColors.TextSecondary,
+                ),
+            )
         }
     }
 }
