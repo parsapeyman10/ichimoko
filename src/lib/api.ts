@@ -83,6 +83,15 @@ export type DataStatus = {
 };
 
 export type ChartTimeframe = '1m' | '5m' | '15m' | '1h';
+/**
+ * The legacy candle/tick feed is bound to exactly ONE instrument (`AURUM_MARKET_SYMBOL` on the
+ * backend). Everything that validates or labels those frames — the candle guard, the WebSocket
+ * guard and the chart lockup — reads this same constant, so the chart can never claim a symbol
+ * the feed did not actually send. Multi-symbol data lives on the separate `/api/v1/symbol/*`
+ * endpoints and never reaches this chart.
+ */
+export const MARKET_SYMBOL = 'XAU/USD';
+
 const barSeconds: Record<ChartTimeframe, number> = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600 };
 
 /** Do not relabel another instrument/interval, malformed OHLC or a future bar as live gold. */
@@ -95,7 +104,7 @@ export function toChartCandles(payload: unknown, timeframe: ChartTimeframe, now 
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(row.timestamp)
         ? Date.parse(row.timestamp) : NaN;
     const numbers = [row?.open, row?.high, row?.low, row?.close, row?.volume];
-    if (row?.symbol !== 'XAU/USD' || row?.timeframe !== timeframe || typeof row.complete !== 'boolean' ||
+    if (row?.symbol !== MARKET_SYMBOL || row?.timeframe !== timeframe || typeof row.complete !== 'boolean' ||
         !Number.isFinite(time) || time <= 0 || time > now + 60_000 ||
         time % (barSeconds[timeframe] * 1000) !== 0 || seen.has(time) ||
         numbers.some((item) => typeof item !== 'number' || !Number.isFinite(item)) ||
@@ -115,7 +124,7 @@ export function barIsCurrent(last: Candle | undefined, timeframe: ChartTimeframe
 /** Backend WS frames are untrusted display input, even though they originate on our API host. */
 export function parseSocketUpdate(payload: unknown, timeframe: ChartTimeframe, now = Date.now()): { price: number; at: number; bar: Candle; streaming: boolean } | null {
   const message = payload as { type?: string; tick?: { symbol?: string; timestamp?: string; provider?: string; bid?: number; ask?: number }; candles?: Record<string, BackendCandle> } | null;
-  if (message?.type !== 'market.update' || message.tick?.symbol !== 'XAU/USD' ||
+  if (message?.type !== 'market.update' || message.tick?.symbol !== MARKET_SYMBOL ||
       !['twelve_data:ws', 'twelve_data:rest', 'spot_fallback:swissquote', 'spot_fallback:gold-api'].includes(message.tick?.provider ?? '') ||
       typeof message.tick?.timestamp !== 'string' ||
       !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(message.tick.timestamp)) return null;
@@ -139,7 +148,7 @@ export function parseSocketUpdate(payload: unknown, timeframe: ChartTimeframe, n
 
 export const toBackendCandles = (rows: { time: number; open: number; high: number; low: number; close: number; volume: number }[], timeframe: string) =>
   rows.map((row) => ({
-    symbol: 'XAU/USD',
+    symbol: MARKET_SYMBOL,
     timeframe,
     timestamp: new Date(row.time * 1000).toISOString(),
     open: row.open,

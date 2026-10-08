@@ -16,7 +16,7 @@ import AutopilotPanel from './components/AutopilotPanel';
 import SetupLabPanel from './components/SetupLabPanel';
 import RiskPanel from './components/RiskPanel';
 import FeatureInspectorPanel from './components/FeatureInspectorPanel';
-import { apiGet, apiPost, barIsCurrent, toBackendCandles, type DataStatus } from './lib/api';
+import { apiGet, apiPost, barIsCurrent, MARKET_SYMBOL, toBackendCandles, type DataStatus } from './lib/api';
 import { useMarketFeed } from './lib/feed';
 import type { Candle } from './lib/market';
 
@@ -628,6 +628,7 @@ export default function App() {
             feedLabel={feedLabel}
             feedTone={feedTone}
             lastBarTime={snapshot.lastBarTime}
+            symbol={MARKET_SYMBOL}
           />
           <SignalCard signal={signal} timeframe={timeframe} updatedAt={updatedAt}/>
           <NewsCard/>

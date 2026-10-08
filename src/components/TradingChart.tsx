@@ -9,6 +9,7 @@ import {
 } from 'lightweight-charts';
 import { ChevronDown, ExternalLink, Layers3, RotateCcw } from 'lucide-react';
 import { ema, ichimoku, vwap, type Candle } from '../lib/market';
+import { MARKET_SYMBOL } from '../lib/api';
 
 const colors = {
   gold: '#f4bd48',
@@ -118,7 +119,7 @@ export default function TradingChart({
   feedLabel,
   feedTone,
   lastBarTime,
-  symbol = 'XAU/USD',
+  symbol = MARKET_SYMBOL,
 }: Props) {
   // TradingView is the chart (restored default); the app's own renderer stays one tap away
   // for the bar-by-bar studies view and for offline / blocked-widget situations.
