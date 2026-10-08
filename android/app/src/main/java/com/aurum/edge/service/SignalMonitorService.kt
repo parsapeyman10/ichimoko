@@ -147,6 +147,19 @@ class SignalMonitorService : Service() {
                                 "جهت از $from به ${flip.bias} تغییر کرد — ${flip.summary}")
                         }
                     }
+                    // «ادامه بده یا نه»: the companion AI reviews the OPEN paper positions on its own
+                    // throttle. Advisory ONLY — a DO_NOT_CONTINUE verdict raises one research
+                    // notification; the position is still closed exclusively by a real price touching
+                    // its stop/target (JournalStore.settle / settleTick).
+                    runCatching { container.traderAdvisor.reviewOpenPositions() }.getOrNull()
+                    container.traderAdvisor.consumeHoldAlerts().forEach { alert ->
+                        if (notificationsPermitted()) {
+                            Notifier.notifyResearch(this@SignalMonitorService,
+                                "hold-ai|" + alert.tradeId + "|" + alert.checkedAt,
+                                "همراه تریدر AI · ادامهٔ ${alert.symbol} توصیه نمی‌شود",
+                                "${alert.summary} — این فقط یک نظر است؛ معاملهٔ کاغذی بسته نشده و خروج تنها با لمس قیمت واقعی حد ضرر/حد سود انجام می‌شود.")
+                        }
+                    }
                 }
                 delay(60_000L)
             }

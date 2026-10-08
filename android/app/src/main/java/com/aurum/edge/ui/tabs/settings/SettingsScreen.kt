@@ -325,6 +325,24 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     modifier = Modifier.padding(top = 2.dp),
                 )
             }
+            // «ادامه بده یا نه»: advisory review of the OPEN paper positions.
+            val holdReview by viewModel.holdReview.collectAsStateWithLifecycle()
+            Text(
+                when {
+                    holdReview.alerts.isNotEmpty() ->
+                        "بازبینی پوزیشن‌های باز: نظر AI ادامهٔ ${holdReview.alerts.size} مورد را توصیه نمی‌کند (فقط هشدار)"
+                    holdReview.reviewed > 0 && holdReview.checkedAt != null ->
+                        "بازبینی پوزیشن‌های باز: ${holdReview.reviewed} مورد با AI بررسی شد · ${formatDateTime(holdReview.checkedAt!!)}"
+                    holdReview.skipped.isNotBlank() -> "بازبینی پوزیشن‌های باز: ${holdReview.skipped}"
+                    else -> "بازبینی پوزیشن‌های باز: هنوز انجام نشده (هر ۱۰ دقیقه برای هر پوزیشن، اول اتصال بررسی می‌شود)"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = if (holdReview.alerts.isNotEmpty()) AurumColors.Gold else AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+            Text("نظر AI دربارهٔ ادامهٔ معامله فقط یک یادداشت/اعلان است: پوزیشن را نمی‌بندد، حد ضرر را جابه‌جا نمی‌کند و خروج همچنان فقط با لمس قیمت واقعی SL/TP انجام می‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 2.dp))
             Text("⚠️ این کلید روی گوشی ذخیره می‌شود، هرگز به گیت‌هاب نمی‌رود، اما اگر همین APK را با کسی به‌اشتراک بگذارید، کلید همراه آن قابل استخراج است. برای ارائهٔ عمومی از سقف/rate limit سرویس کلید استفاده کنید.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Red)
         }

@@ -81,6 +81,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val traderOpinion = container.traderAdvisor.state
     /** Reachability of the model, checked before any AI judgement of a trade. */
     val aiConnection = container.traderAdvisor.connection
+    /** «ادامه بده یا نه» — the companion AI's advisory pass over the OPEN paper positions. */
+    val holdReview = container.traderAdvisor.holdReviews
     val market = container.verifiedMarket
     val trades: StateFlow<List<PaperTrade>> = container.journalStore.trades
     val opportunities: StateFlow<List<PaperOpportunity>> = container.opportunityStore.items
@@ -242,6 +244,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                         container.news.refreshNow()
                     }
                     container.traderAdvisor.refreshNow()
+                    // Advisory review of the open positions while the app is visible (the monitor
+                    // service does the same when it runs). Never closes or re-prices a trade.
+                    runCatching { container.traderAdvisor.reviewOpenPositions() }.getOrNull()
                 }
                 turns++
                 delay(60_000L)
@@ -353,6 +358,21 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Ask the companion AI for a fresh opinion; throttled inside the advisor (10 minutes). */
     fun refreshTraderOpinion(force: Boolean = false) = container.traderAdvisor.refreshNow(force)
+
+    /**
+     * Runs the «continue or not» pass on demand (the loops also run it on their own throttle).
+     * Connection is probed first inside; an unreachable model leaves every position untouched.
+     */
+    fun reviewOpenPositionsNow() {
+        viewModelScope.launch {
+            runCatching { container.traderAdvisor.reviewOpenPositions() }.getOrNull()
+            // Alerts are NOT consumed here: the monitor service owns the notification channel, and
+            // the journal keeps showing the verdict either way.
+            container.traderAdvisor.holdReviews.value.alerts.firstOrNull()?.let { alert ->
+                _toast.value = "نظر AI دربارهٔ ${alert.symbol}: ادامه توصیه نمی‌شود — ${alert.summary}"
+            }
+        }
+    }
 
     /** Manual all-pairs sweep across 50+ instruments. */
     fun scanPairs() {

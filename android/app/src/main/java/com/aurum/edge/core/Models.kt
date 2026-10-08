@@ -252,6 +252,29 @@ data class PaperAiReview(
     val checkedAt: Long,
 )
 
+/**
+ * Companion AI's opinion about an ALREADY OPEN paper position ("continue or not").
+ *
+ * Advisory ONLY by design: the app closes a position exclusively when a real price touches its
+ * stop or target ([com.aurum.edge.data.JournalStore.settle] / `settleTick`). This record never
+ * edits, closes or re-prices a trade — it is attached as a note and may raise one research
+ * notification so the user can decide. [lastPrice]/[unrealizedUsd] are the REAL numbers the model
+ * was shown, kept next to the verdict so the note stays auditable later.
+ */
+@Serializable
+data class PaperHoldReview(
+    /** HOLD | WATCH | DO_NOT_CONTINUE */
+    val verdict: String,
+    val confidence: Int,
+    val summary: String,
+    val reasons: List<String>,
+    val cautions: List<String>,
+    val lastPrice: Double? = null,
+    val unrealizedUsd: Double? = null,
+    val model: String,
+    val checkedAt: Long,
+)
+
 /** Snapshot of an OHLC approximation at the moment a PAPER opportunity/entry was checked. */
 @Serializable
 data class IctPriceActionRecord(
@@ -336,6 +359,8 @@ data class PaperTrade(
     val newsEvidence: PaperNewsRecord? = null,
     /** Companion AI's post-open educational review; never a gate and never financial advice. */
     val aiReview: PaperAiReview? = null,
+    /** Latest AI opinion about keeping this OPEN position; advisory note only, never closes it. */
+    val holdReview: PaperHoldReview? = null,
     /** Snapshot at the moment the paper position was actually saved; never recompute on read. */
     val entryConditions: List<PaperConditionRecord> = emptyList(),
     /** Null on older/manual records; never infer a historical ICT verdict on read. */
@@ -364,11 +389,14 @@ data class PaperTrade(
     val effectiveMarginUsd: Double
         get() = if (marginUsd > 0.0) marginUsd else (notionalValueUsd / effectiveLeverage)
 
+    /** Legacy records (saved before the venue model) are re-costed with the SAME real venue specs. */
     val effectiveCommissionUsd: Double
-        get() = if (commissionUsd > 0.0) commissionUsd else (notionalValueUsd * 0.0004)
+        get() = if (commissionUsd > 0.0) commissionUsd
+                else VenueSpecs.of(symbol).commissionUsd(entry, positionOz) * 2.0
 
     val effectiveSpreadCostUsd: Double
-        get() = if (spreadCostUsd > 0.0) spreadCostUsd else (notionalValueUsd * 0.0002)
+        get() = if (spreadCostUsd > 0.0) spreadCostUsd
+                else VenueSpecs.of(symbol).spreadCostUsd(entry, positionOz)
 
     val rMultiple: Double?
         get() {

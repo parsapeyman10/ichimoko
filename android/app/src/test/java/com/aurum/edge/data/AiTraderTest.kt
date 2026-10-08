@@ -195,6 +195,54 @@ class AiTraderTest {
         assertNull(TraderAdvisor.parseTradeReview(tradeReviewJson(reasons = """["a",{"bad":true}]"""), "m", 1L))
     }
 
+    private fun holdReviewJson(
+        verdict: String = "HOLD",
+        confidence: String = "78",
+        summary: String = "ساختار ورود هنوز معتبر است و قیمت بالای کیجون مانده.",
+        reasons: String = """["MTF همسو است","فاصله تا حد ضرر چند برابر اسپرد واقعی است"]""",
+        cautions: String = """["خبر فقط زمینه ژورنال است"]""",
+    ): JsonObject = Json.parseToJsonElement(
+        """{"verdict":"$verdict","confidence":"$confidence","summary":"$summary",""" +
+            """"reasons":$reasons,"cautions":$cautions}"""
+    ).jsonObject
+
+    @Test fun `open position hold review parses and keeps the real price context`() {
+        val review = TraderAdvisor.parseHoldReview(holdReviewJson(), "m", 555L, 2654.31, 12.5)!!
+        assertEquals("HOLD", review.verdict)
+        assertEquals(78, review.confidence)
+        assertEquals(2, review.reasons.size)
+        assertEquals(1, review.cautions.size)
+        assertEquals("m", review.model)
+        assertEquals(555L, review.checkedAt)
+        // The REAL numbers the model was shown are stored next to the verdict (auditable later).
+        assertEquals(2654.31, review.lastPrice!!, 1e-9)
+        assertEquals(12.5, review.unrealizedUsd!!, 1e-9)
+        val numeric = Json.parseToJsonElement(
+            """{"verdict":"do_not_continue","confidence":88,"summary":"تایم بالاتر برگشته و ساختار ورود شکسته است",
+                "reasons":["MTF مخالف شد"],"cautions":[]}"""
+        ).jsonObject
+        val stop = TraderAdvisor.parseHoldReview(numeric, "m", 9L, 2600.0, -34.2)!!
+        assertEquals("DO_NOT_CONTINUE", stop.verdict) // verdict is normalised to upper case
+        assertEquals(88, stop.confidence)
+        assertEquals(-34.2, stop.unrealizedUsd!!, 1e-9)
+        assertTrue(TraderAdvisor.HOLD_VERDICTS == setOf("HOLD", "WATCH", "DO_NOT_CONTINUE"))
+    }
+
+    @Test fun `hold review invalid schema fails closed so no note is invented`() {
+        assertNull(TraderAdvisor.parseHoldReview(holdReviewJson(verdict = "CLOSE_IT"), "m", 1L, 1.0, 0.0))
+        assertNull(TraderAdvisor.parseHoldReview(holdReviewJson(verdict = ""), "m", 1L, 1.0, 0.0))
+        assertNull(TraderAdvisor.parseHoldReview(holdReviewJson(confidence = "101"), "m", 1L, 1.0, 0.0))
+        assertNull(TraderAdvisor.parseHoldReview(holdReviewJson(confidence = "NaN"), "m", 1L, 1.0, 0.0))
+        assertNull(TraderAdvisor.parseHoldReview(holdReviewJson(summary = "کوتاه"), "m", 1L, 1.0, 0.0))
+        assertNull(TraderAdvisor.parseHoldReview(holdReviewJson(reasons = "[]"), "m", 1L, 1.0, 0.0))
+        assertNull(TraderAdvisor.parseHoldReview(
+            holdReviewJson(reasons = """["a",{"bad":true}]"""), "m", 1L, 1.0, 0.0))
+        assertNull(TraderAdvisor.parseHoldReview(
+            holdReviewJson(cautions = """["یک","دو","سه","چهار"]"""), "m", 1L, 1.0, 0.0))
+        val missing = Json.parseToJsonElement("""{"verdict":"HOLD"}""").jsonObject
+        assertNull(TraderAdvisor.parseHoldReview(missing, "m", 1L, 1.0, 0.0))
+    }
+
     @Test fun `signal tuning plan toggles engine profile with strict schema`() {
         val root = Json.parseToJsonElement(
             """{

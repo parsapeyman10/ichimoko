@@ -9,6 +9,7 @@ import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PaperNewsRecord
 import com.aurum.edge.core.PaperAiReview
+import com.aurum.edge.core.PaperHoldReview
 import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.Signal
@@ -229,6 +230,22 @@ class JournalStore(
         val index = current.indexOfFirst { it.id == tradeId }
         require(index >= 0) { "معاملهٔ کاغذی برای ثبت نظر AI پیدا نشد" }
         val updated = current[index].copy(aiReview = review)
+        persist(current.toMutableList().also { it[index] = updated })
+        updated
+    }
+
+    /**
+     * Attach the companion AI's advisory opinion about an OPEN position.
+     *
+     * Deliberately limited to a note: it never touches entry/stop/target, never sets [PaperTrade.closedAt]
+     * and never adjusts the balance. A position still closes ONLY inside [settle]/[settleTick] when a real
+     * price reaches its stop or target.
+     */
+    suspend fun attachHoldReview(tradeId: String, review: PaperHoldReview): PaperTrade? = mutex.withLock {
+        val current = _trades.value
+        val index = current.indexOfFirst { it.id == tradeId && it.isOpen }
+        if (index < 0) return@withLock null // closed meanwhile -> nothing to annotate
+        val updated = current[index].copy(holdReview = review)
         persist(current.toMutableList().also { it[index] = updated })
         updated
     }

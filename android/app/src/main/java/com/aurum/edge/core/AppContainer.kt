@@ -96,7 +96,9 @@ class AppContainer(context: Context) {
     /** Periodic all-pairs online candle sweep: candidates + radar status for every catalog pair. */
     val pairScanner = PairScanner(client, publicHistory, settingsStore, news, journalStore, opportunityStore, appScope, dukascopyHistory, appContext)
     /** The user's own AI (Claude or OpenAI-compatible) as an educational trading companion. */
-    val traderAdvisor = TraderAdvisor(settingsStore, market, pairScanner, news, appScope)
+    // The advisor also reads the journal so it can review OPEN positions ("continue or not"),
+    // which is advisory only: JournalStore.attachHoldReview never closes or re-prices a trade.
+    val traderAdvisor = TraderAdvisor(settingsStore, market, pairScanner, news, journalStore, appScope)
     val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore, traderAdvisor)
     val freeHistory = FreeHistoryDownloader()
     val metaTraderImporter = MetaTraderImporter(appContext)
