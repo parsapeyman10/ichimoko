@@ -444,7 +444,7 @@ private fun PerMarketRecommendations(scan: PairScanState, interval: com.aurum.ed
                                      now: Long, onSelect: (String) -> Unit) {
     val picks = ScanRanking.byMarket(scan.statuses, interval, now)
     SectionCard("بهترین هر بازار + ۳ گزینهٔ بعدی",
-        "رتبه‌بندی فقط از کندل‌های بسته و بررسی همین دور؛ مشاهدهٔ خارج از واچ‌لیست معامله/قیمت لحظه‌ای نیست") {
+        "رتبه‌بندی فقط از کندل‌های بستهٔ همین دور؛ «فقط مشاهده» فاقد مجوز ورود/اعلان یا قیمت لحظه‌ای تأییدشده است") {
         com.aurum.edge.core.AssetClass.entries.forEach { category ->
             val rows = scan.statuses.filter { it.assetClass == category }
             val checked = rows.count { it.state != "pending" }
@@ -474,6 +474,8 @@ private fun PerMarketRecommendations(scan: PairScanState, interval: com.aurum.ed
                         Text("بررسی ↗", style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.Cyan, modifier = Modifier.clickable { onSelect(row.symbol) })
                     }
+                    if (row.state == "observed") Text(row.detail,
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
                 if (ranked.size < 4) Text("${4 - ranked.size} گزینهٔ دیگر با داده/شروط معتبر پیدا نشد؛ موردی ساخته نمی‌شود.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)

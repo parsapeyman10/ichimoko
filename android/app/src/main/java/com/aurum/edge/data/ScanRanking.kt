@@ -4,8 +4,9 @@ import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.MarketHours
 
-/** Rankings only from the *current*, fresh sweep. Observed means technically valid closed
- * candles outside the user's watchlist: never an alert, entry, or verified live quote.
+/** Rankings only from the *current*, fresh sweep. Observed means technically actionable
+ * CLOSED candles without authorization for an alert or paper entry (which may be caused
+ * by watchlist, monitor, quote or portfolio restrictions): never a verified live quote.
  */
 object ScanRanking {
     fun rank(statuses: List<PairScanStatus>, interval: Interval, now: Long,

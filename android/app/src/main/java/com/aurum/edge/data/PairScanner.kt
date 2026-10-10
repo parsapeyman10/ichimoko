@@ -420,40 +420,18 @@ class PairScanner(
             val blocker = PaperAlertRules.blocker(market, config, headlines, trades, mtf,
                 System.currentTimeMillis(), allowedSymbols = config.activeWatchlist, barAgeGraceMs = graceMs)
             if (blocker != null) {
-                // Read-only research across the entire catalog, including symbols outside the
-                // editable watchlist. Apply every other freshness/technical gate unchanged;
-                // only the watchlist permission is relaxed for DISPLAY, not for entry/alert.
-                if (symbol !in config.activeWatchlist &&
-                    PaperAlertRules.blocker(market, config, headlines, trades, mtf,
-                        System.currentTimeMillis(), allowedSymbols = universe, barAgeGraceMs = graceMs) == null) {
-                    update(symbol, "observed",
-                        "سیگنال فنی از کندل بسته؛ خارج از واچ‌لیست. قیمت لحظه‌ای مستقل/مجوز ورود تأیید نشده است",
-                        price, score, combined.action, combined.confidence,
-                        combined.entry, combined.stopLoss, combined.takeProfit, combined.riskReward,
-                        combined.confluence, playbook?.method?.label, playbook?.allowed,
-                        playbook?.reasonFa?.take(160), trend, aligned, trendGate?.noteFa?.take(200))
-                    return@forEachIndexed
-                }
-                update(
-                    symbol = symbol,
-                    state = "blocked",
-                    detail = "سیگنال $score/۴ · ${blocker.take(120)}",
-                    price = price,
-                    score = score,
-                    action = combined.action,
-                    confidence = combined.confidence,
-                    entry = combined.entry,
-                    sl = combined.stopLoss,
-                    tp = combined.takeProfit,
-                    rr = combined.riskReward,
-                    conditions = combined.confluence,
-                    methodLabel = playbook?.method?.label,
+                // A technically actionable closed-bar read is still useful when alerts,
+                // monitor, watchlist, live quote or risk permission are absent. Rank it
+                // read-only; NEVER persist/notify/open it as a paper opportunity.
+                update(symbol = symbol, state = "observed",
+                    detail = "فقط سیگنال فنی؛ ورود/اعلان مجاز نیست: ${blocker.take(160)}",
+                    price = price, score = score, action = combined.action,
+                    confidence = combined.confidence, entry = combined.entry,
+                    sl = combined.stopLoss, tp = combined.takeProfit, rr = combined.riskReward,
+                    conditions = combined.confluence, methodLabel = playbook?.method?.label,
                     playbookAllowed = playbook?.allowed,
-                    playbookReason = playbook?.reasonFa?.take(160),
-                    trend = trend,
-                    trendAligned = aligned,
-                    trendNote = trendGate?.noteFa?.take(200),
-                )
+                    playbookReason = playbook?.reasonFa?.take(160), trend = trend,
+                    trendAligned = aligned, trendNote = trendGate?.noteFa?.take(200))
                 return@forEachIndexed
             }
 
