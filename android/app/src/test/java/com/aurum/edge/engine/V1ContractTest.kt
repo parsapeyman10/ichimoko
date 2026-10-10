@@ -75,7 +75,7 @@ class V1ContractTest {
         val blocked = SignalEngine.evaluate(complete.getValue(Interval.M5), Interval.M5, 60.0,
             symbol = "EUR/USD", timeframes = open)
         assertEquals(SignalAction.NO_TRADE, blocked.action)
-        assertTrue(blocked.blockers.any { it.contains("1h(319/320)") })
+        assertTrue(blocked.blockers.any { it.contains("1H(319/320)") })
     }
 
     private fun trade(id: String, symbol: String, opened: Long, closed: Long? = null,

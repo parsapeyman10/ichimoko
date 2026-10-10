@@ -5,6 +5,7 @@ import com.aurum.edge.core.Interval
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalProfile
 import com.aurum.edge.core.StrategyKind
+import com.aurum.edge.core.HistoryPolicy
 import kotlin.math.max
 
 /**
@@ -15,8 +16,8 @@ import kotlin.math.max
  *  - every branch that used to synthesise a direction to keep the screen busy is gone;
  *  - when conditions are not met the engine returns NO_TRADE plus the exact blockers.
  *
- * Production live, historical and replay decisions all enter through [evaluate]. [Series]
- * remains an indicator cache for chart/MTF and older reports, not a second entry engine.
+ * Production live decisions all enter through [evaluate]. [Series]
+ * remains an indicator cache for chart/MTF, not a second entry engine.
  */
 object SignalEngine {
 
@@ -49,7 +50,7 @@ object SignalEngine {
 
     fun minBars(interval: Interval): Int {
         val s = ichimokuSetting(interval)
-        return max(s.spanB + s.kijun + 20, 210)
+        return max(s.spanB + s.kijun + 20, HistoryPolicy.LIVE_MIN_CANDLES)
     }
 
     fun series(candles: List<Candle>, interval: Interval): Series {
@@ -70,8 +71,8 @@ object SignalEngine {
 
     const val ENGINE_WINDOW = 400
 
-    /** The only entry decision for live, historical and replay paths. Old profile/strategy
-     * parameters are kept for stored-report compatibility; category mode selects V1 behaviour.
+    /** The only entry decision for live signals. Old profile/strategy
+     * parameters remain for persisted settings compatibility; category mode selects V1 behaviour.
      */
     @Suppress("UNUSED_PARAMETER")
     fun evaluate(candles: List<Candle>, interval: Interval, threshold: Double = 85.0,
