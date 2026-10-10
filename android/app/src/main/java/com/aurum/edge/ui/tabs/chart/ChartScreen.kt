@@ -14,6 +14,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -31,7 +32,9 @@ import kotlinx.coroutines.delay
 fun ChartScreen(initialTicker: String) {
     val uriHandler = LocalUriHandler.current
     val widgetUrl = remember(initialTicker) { TradingViewEmbed.widgetUrl(initialTicker) }
+    val browserUrl = remember(initialTicker) { TradingViewEmbed.browserUrl(initialTicker) }
     var failure by remember(initialTicker) { mutableStateOf<String?>(null) }
+    var usingSite by remember(initialTicker) { mutableStateOf(false) }
     var offerBrowser by remember(initialTicker) { mutableStateOf(false) }
     LaunchedEffect(initialTicker) {
         delay(12_000L)
@@ -39,48 +42,51 @@ fun ChartScreen(initialTicker: String) {
         offerBrowser = true
     }
     Box(Modifier.fillMaxSize()) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { context ->
-                WebView(context).apply {
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                        allowFileAccess = false
-                        allowContentAccess = false
-                    }
-                    webChromeClient = WebChromeClient()
-                    webViewClient = object : WebViewClient() {
-                        override fun onReceivedError(view: WebView, request: WebResourceRequest,
-                                                     error: android.webkit.WebResourceError) {
-                            if (request.isForMainFrame) failure = "TradingView در WebView بارگذاری نشد"
+        key(initialTicker) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { context ->
+                    WebView(context).apply {
+                        settings.apply {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                            allowFileAccess = false
+                            allowContentAccess = false
                         }
-                        override fun onReceivedHttpError(view: WebView, request: WebResourceRequest,
-                                                         errorResponse: WebResourceResponse) {
-                            if (request.isForMainFrame) failure = "TradingView پاسخ HTTP ${errorResponse.statusCode} داد"
+                        webChromeClient = WebChromeClient()
+                        webViewClient = object : WebViewClient() {
+                            private fun tryFullSite(view: WebView, message: String) {
+                                if (!usingSite) {
+                                    usingSite = true
+                                    // If the embed endpoint itself is blocked, try TradingView's
+                                    // own full chart in this same WebView before giving up.
+                                    view.loadUrl(browserUrl)
+                                } else failure = message
+                            }
+                            override fun onReceivedError(view: WebView, request: WebResourceRequest,
+                                                         error: android.webkit.WebResourceError) {
+                                if (request.isForMainFrame) tryFullSite(view, "TradingView در WebView بارگذاری نشد")
+                            }
+                            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest,
+                                                             errorResponse: WebResourceResponse) {
+                                if (request.isForMainFrame) tryFullSite(view, "TradingView پاسخ HTTP ${errorResponse.statusCode} داد")
+                            }
                         }
+                        loadUrl(widgetUrl)
                     }
-                    tag = widgetUrl
-                    loadUrl(widgetUrl)
-                }
-            },
-            update = { webView ->
-                if (webView.tag != widgetUrl) {
-                    webView.tag = widgetUrl
-                    webView.loadUrl(widgetUrl)
-                }
-            },
-            onReset = null,
-            onRelease = { webView ->
-                webView.stopLoading()
-                webView.destroy()
-            },
-        )
+                },
+                onReset = null,
+                onRelease = { webView ->
+                    webView.stopLoading()
+                    webView.destroy()
+                },
+            )
+        }
         if (failure != null || offerBrowser) {
             OutlinedButton(
                 onClick = {
-                    runCatching { uriHandler.openUri(TradingViewEmbed.browserUrl(initialTicker)) }
+                    runCatching { uriHandler.openUri(browserUrl) }
                         .onFailure { failure = "مرورگری برای بازکردن TradingView پیدا نشد" }
                 },
                 modifier = Modifier.align(Alignment.BottomEnd).padding(12.dp),
