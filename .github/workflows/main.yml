@@ -448,7 +448,7 @@ jobs:
           (((github.ref == 'refs/heads/main' || github.ref_type == 'tag') &&
             (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))) ||
            (github.event_name == 'push' && github.ref == 'refs/heads/arena/20dbf868-ichimoko' &&
-            startsWith(github.event.head_commit.message, 'release: publish approved v1.3.10 updater')))
+            startsWith(github.event.head_commit.message, 'release: publish approved v1.3.11 updater')))
         run: |
           set -euo pipefail
           # signing_check already verified the built AND published APK against the fixed #403
@@ -465,7 +465,7 @@ jobs:
           (((github.ref == 'refs/heads/main' || github.ref_type == 'tag') &&
             (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))) ||
            (github.event_name == 'push' && github.ref == 'refs/heads/arena/20dbf868-ichimoko' &&
-            startsWith(github.event.head_commit.message, 'release: publish approved v1.3.10 updater')))
+            startsWith(github.event.head_commit.message, 'release: publish approved v1.3.11 updater')))
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.collect.outputs.tag }}
