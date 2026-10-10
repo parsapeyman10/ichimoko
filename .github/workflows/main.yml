@@ -56,6 +56,8 @@ env:
   APP_MODULE: app
   APPLICATION_ID: com.aurum.edge
   RELEASE_APK_PREFIX: AurumEdge
+  # Public SHA-256 of the v1.3.5 APK signing certificate (not the APK digest or private key).
+  UPDATER_CERT_SHA256: '137f3f98f6c85fdd8671d1d2099b095ed82f3f91594ac9e7b1ba22c264ed4a04'
   GRADLE_FLAGS: --no-daemon --stacktrace --warning-mode=all
 
 jobs:
@@ -311,6 +313,10 @@ jobs:
             exit 1
           fi
           echo "Release APK signer SHA-256: $NEW_CERT (mode: ${AURUM_SIGNING_MODE:-unknown})"
+          if [[ "$NEW_CERT" != "$UPDATER_CERT_SHA256" ]]; then
+            echo "::error title=Unexpected updater signer::New APK signer differs from the pinned installed-app certificate. Recover the SAME keystore; do not rotate it silently."
+            exit 1
+          fi
           echo "new_cert_sha256=$NEW_CERT" >> "$GITHUB_OUTPUT"
           FILTER='[.[] | select(.draft == false and .prerelease == false) | .assets[] | select((.name | startswith("'"$RELEASE_APK_PREFIX"'-v")) and (.name | endswith(".apk"))) | "\(.url) \(.name)"] | .[0] // empty'
           PUBLISHED="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=10" --jq "$FILTER")"
@@ -328,12 +334,25 @@ jobs:
             echo "::error title=Unreadable published signer::Could not read the certificate of $PREV_NAME, so signing continuity cannot be proven"
             exit 1
           fi
+          if [[ "$PREV_CERT" != "$UPDATER_CERT_SHA256" ]]; then
+            echo "::error title=Published signer mismatch::The public APK is not signed with the pinned updater certificate; stop rather than accept a rotated/replaced release."
+            exit 1
+          fi
           echo "::notice title=Updater signing certificate::New: $NEW_CERT; published $PREV_NAME: $PREV_CERT"
           if [[ "$NEW_CERT" != "$PREV_CERT" ]]; then
             echo "::error title=Signing key changed::The new APK is signed with $NEW_CERT but the published $PREV_NAME uses $PREV_CERT. In-app updates need the SAME key, so nothing is published. Restore the AURUM_RELEASE_* repository secrets or the aurum-ci-updater-signing-v1 cache from the default branch."
             exit 1
           fi
           AAPT="$SDK/build-tools/${ANDROID_BUILD_TOOLS}/aapt"
+          apk_package() {
+            "$AAPT" dump badging "$1" | sed -n -E "s/^package: name='([^']+)'.*/\1/p" | head -1
+          }
+          NEW_PACKAGE="$(apk_package "$NEW_APK")"
+          PREV_PACKAGE="$(apk_package "$RUNNER_TEMP/published-release.apk")"
+          if [[ "$NEW_PACKAGE" != "$APPLICATION_ID" || "$PREV_PACKAGE" != "$APPLICATION_ID" ]]; then
+            echo "::error title=Incompatible package::New package $NEW_PACKAGE and published package $PREV_PACKAGE must both be $APPLICATION_ID"
+            exit 1
+          fi
           apk_code() {
             "$AAPT" dump badging "$1" | sed -n -E "s/^package: .*versionCode='([0-9]+)'.*/\1/p" | head -1
           }
