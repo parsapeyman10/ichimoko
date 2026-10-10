@@ -448,7 +448,7 @@ jobs:
           (((github.ref == 'refs/heads/main' || github.ref_type == 'tag') &&
             (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))) ||
            (github.event_name == 'push' && github.ref == 'refs/heads/arena/20dbf868-ichimoko' &&
-            startsWith(github.event.head_commit.message, 'release: publish approved v1.3.13 updater')))
+            startsWith(github.event.head_commit.message, 'release: publish approved v1.3.14 updater')))
         run: |
           set -euo pipefail
           # signing_check already verified the built AND published APK against the fixed #403
@@ -465,7 +465,7 @@ jobs:
           (((github.ref == 'refs/heads/main' || github.ref_type == 'tag') &&
             (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))) ||
            (github.event_name == 'push' && github.ref == 'refs/heads/arena/20dbf868-ichimoko' &&
-            startsWith(github.event.head_commit.message, 'release: publish approved v1.3.13 updater')))
+            startsWith(github.event.head_commit.message, 'release: publish approved v1.3.14 updater')))
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.collect.outputs.tag }}
@@ -476,8 +476,8 @@ jobs:
         run: |
           set -euo pipefail
           NOTES=$'Aurum Edge Android APK.\n\nVersion: '"$VERSION_NAME"$'\nVersion code: ${{ steps.collect.outputs.version_code }}\nSHA-256: '"$SHA256"$'\nSize bytes: '"$SIZE_BYTES"$'\nSigning: '"${AURUM_SIGNING_MODE:-prepared updater key}"$'\n\nThe in-app updater accepts this public release asset, verifies package name, signing certificate, versionCode, size and SHA-256, then opens Android Installer.'
-          if [[ "$VERSION_NAME" == "1.3.13" ]]; then
-            NOTES+=$'\n\nChanges: technically valid observations now appear in the four market rankings even when monitor, notifications, watchlist or paper-entry permissions block an alert. Each row shows the actual blocker. No observed row opens a paper position. Includes aligned Ichimoku components and provider-identity checks from v1.3.12.'
+          if [[ "$VERSION_NAME" == "1.3.14" ]]; then
+            NOTES+=$'\n\nChanges: automatic paper-entry evaluation across the supported catalog, not just the selected chart. Only symbols with fresh independently timestamped, same-identity trade ticks AND continuous exit monitoring can open automatically (currently FX pairs and XAU/XAG on the spot fallback). Other catalog markets continue automatic read-only scans with explicit reasons. Requires the existing user opt-in; no broker orders.'
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "$TAG" --notes "$NOTES"
