@@ -264,6 +264,34 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}
         run: ./gradlew :${APP_MODULE}:testDebugUnitTest $GRADLE_FLAGS
 
+      # A failed test should expose its assertion and source line in GitHub's annotations;
+      # raw Actions logs/artifact downloads are not always accessible to contributors.
+      - name: Annotate failing unit tests
+        if: failure() && steps.guard.outputs.ready == 'true'
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import xml.etree.ElementTree as ET
+          for report in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml'):
+              root = ET.parse(report).getroot()
+              for case in root.iter('testcase'):
+                  failure = case.find('failure')
+                  if failure is None:
+                      failure = case.find('error')
+                  if failure is None:
+                      continue
+                  cls = case.get('classname', '')
+                  path = 'app/src/test/java/' + cls.replace('.', '/') + '.kt'
+                  text = failure.text or ''
+                  line_match = re.search(r'\(' + re.escape(cls.split('.')[-1]) + r'\.kt:(\d+)\)', text)
+                  line = line_match.group(1) if line_match else '1'
+                  message = (failure.get('message') or '') + '\n' + '\n'.join(text.splitlines()[:7])
+                  escaped = message[:1300].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                  print(f'::error file={path},line={line},title={cls}.{case.get("name", "test")}::{escaped}')
+          PY
+
       - name: Build debug and release APKs
         if: steps.guard.outputs.ready == 'true'
         working-directory: ${{ env.PROJECT_DIR }}
