@@ -495,7 +495,7 @@ jobs:
   restore_stable_release:
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/arena/20dbf868-ichimoko'
-      && github.event.head_commit.message == 'ci: restore prior stable release asset'
+      && startsWith(github.event.head_commit.message, 'ci: retry stable release restoration')
     needs: apk
     runs-on: ubuntu-latest
     steps:
