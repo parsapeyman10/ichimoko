@@ -46,7 +46,8 @@ class IchimokuAlignmentTest {
     @Test fun `range mode checks compression rather than requiring directional cloud`() {
         val ichi = Ichimoku(List(100) { 101.0 }, List(100) { 100.0 },
             List(100) { 108.0 }, List(100) { 90.0 }, List(100) { null }, 24)
-        val read = IchimokuAlignment.read(candles, ichi, 2.0)!!
+        val rangeBars = candles.dropLast(1) + candles.last().copy(high = 105.0, close = 100.0)
+        val read = IchimokuAlignment.read(rangeBars, ichi, 2.0)!!
         assertFalse(read.rangeAligned(110.0))
         assertTrue(read.rangeAligned(100.0))
     }
