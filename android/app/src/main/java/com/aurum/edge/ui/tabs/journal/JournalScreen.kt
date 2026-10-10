@@ -342,7 +342,7 @@ private fun PaperEvidencePanel(recorded: List<PaperTrade>, other: List<PaperTrad
                                spread: Double, commission: Double) {
     val closed = recorded.count { !it.isOpen && it.pnlUsd != null }
     val cost = ResearchEvidence.paperCostWhatIf(recorded, spread, commission)
-    SectionCard("تفکیک شواهد عملکرد کاغذی", "سوابق همین نصب؛ بک‌تست فنی در این آمار نیست") {
+    SectionCard("تفکیک شواهد عملکرد کاغذی", "سوابق معاملات ثبت‌شده روی همین نصب، جدا از فرصت‌های اسکن‌شده") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatTile("بستهٔ سیگنالی با شاهد", "$closed", modifier = Modifier.weight(1f))
             StatTile("دستی/بدون شاهد", "${other.count { !it.isOpen && it.pnlUsd != null }}",
@@ -734,11 +734,6 @@ private fun ConditionDisclosure(key: String, conditions: List<PaperConditionReco
         )
     }
 }
-
-/**
- * The last walk-forward run kept on this device. It is shown with its own date so the numbers can
- * be re-checked instead of taken on faith.
- */
 
 /**
  * Daily and monthly PnL / Income calendar for closed trades.

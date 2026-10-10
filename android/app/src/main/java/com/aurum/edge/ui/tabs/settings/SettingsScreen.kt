@@ -465,7 +465,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("هشدار کاندیدای چهارلایهٔ کاغذی", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
-                    Text("با ورود خودکار روشن: اعلان فقط پس از ثبت موفق معاملهٔ کاغذی؛ با آن خاموش: اعلان کاندیدای فنی/آموزشی (نه معامله).",
+                    Text("با ورود خودکار روشن: اعلان فقط پس از ثبت موفق معاملهٔ کاغذی؛ با آن خاموش: اعلان کاندیدای فنی (نه معامله).",
                         style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
                 Switch(
@@ -515,7 +515,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
-        SectionCard("ورود خودکار کاغذی · فقط آموزشی", "بدون فرم دستی؛ بدون بروکر، بدون سفارش واقعی") {
+        SectionCard("ورود خودکار کاغذی · بدون سفارش واقعی", "بدون فرم دستی؛ بدون بروکر، بدون سفارش واقعی") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("ورود خودکار کاغذی پس از امتیاز چهارلایه، پشتهٔ ۷ تایم‌فریمی و قفل‌های ریسک/بازار/وتوی AI",
                     modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,

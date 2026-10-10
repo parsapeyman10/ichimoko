@@ -135,11 +135,9 @@ class AppContainer(context: Context) {
     )
 
     /**
-     * Download at least 3000 real candles.
-     *
-     * The keyless public history is deliberately tried first. A Twelve Data key is an explicit
-     * last fallback, never a silent primary: provider identity, timestamp and gaps are still
-     * validated by the provider adapter and a failure stops the research run.
+     * Historical provider bars for displaying a previously saved paper trade on its chart.
+     * They never become a current price, an entry or a source for the live engine.
+     * The keyless public history is tried first; Twelve Data is an explicit last fallback.
      */
     private suspend fun downloadCandles(symbol: String, interval: Interval, outputSize: Int): CandleDownload {
         val s = settingsStore.read()
