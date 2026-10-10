@@ -22,6 +22,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.ui.components.FeedBanner
+import com.aurum.edge.data.TradingViewSymbols
 import com.aurum.edge.ui.theme.AurumColors
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -60,27 +61,14 @@ fun AurumRoot(viewModel: AurumViewModel) {
         }
     }
     val selectedTab = AurumTab.entries.firstOrNull { it.name == tab && it in primaryTabs + moreTabs } ?: primaryTabs.first()
-    // Change one persisted symbol first; only navigate when its real feed has switched.
-    var pendingChartSymbol by rememberSaveable { mutableStateOf<String?>(null) }
+    // This only chooses the widget's opening ticker; it does not select an app feed or trade.
+    var chartTicker by rememberSaveable { mutableStateOf(TradingViewSymbols.find(settings.symbol) ?: settings.symbol) }
     fun open(destination: AurumTab) {
-        if (destination in primaryTabs + moreTabs) {
-            pendingChartSymbol = null
-            tab = destination.name
-        }
+        if (destination in primaryTabs + moreTabs) tab = destination.name
     }
     fun openChartFor(symbol: String) {
-        if (symbol == settings.symbol && symbol == market.symbol) open(AurumTab.Chart)
-        else if (com.aurum.edge.core.V1Universe.valid(symbol)) {
-            pendingChartSymbol = symbol
-            viewModel.selectChartSymbol(symbol)
-        }
-    }
-    LaunchedEffect(settings.symbol, market.symbol, pendingChartSymbol) {
-        if (pendingChartSymbol != null && settings.symbol == pendingChartSymbol &&
-            market.symbol == pendingChartSymbol) {
-            pendingChartSymbol = null
-            open(AurumTab.Chart)
-        }
+        chartTicker = TradingViewSymbols.find(symbol) ?: symbol
+        open(AurumTab.Chart)
     }
 
     Scaffold(containerColor = AurumColors.Bg, snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -98,7 +86,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
                 when (selectedTab) {
                     AurumTab.Home -> HomeScreen(viewModel, market,
                         onChartSymbol = ::openChartFor, onJournal = { open(AurumTab.Journal) })
-                    AurumTab.Chart -> ChartScreen(market.symbol, market.interval)
+                    AurumTab.Chart -> ChartScreen(chartTicker)
                     AurumTab.Signal -> SignalScreen(viewModel, market,
                         onOpenNews = { open(AurumTab.News) }, onOpenChart = { open(AurumTab.Chart) },
                         onChartSymbol = ::openChartFor,

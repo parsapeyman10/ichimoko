@@ -12,7 +12,7 @@ The Compose UI keeps navigation, tab state, and tab presentation separate so a c
 ## Tab entry points
 
 - `ui/tabs/home/HomeScreen.kt`: home dashboard.
-- `ui/tabs/chart/ChartScreen.kt` and `TradingViewEmbed.kt`: one full-tab TradingView Advanced Chart widget; no native chart or trade panels.
+- `ui/tabs/chart/ChartScreen.kt` and `TradingViewEmbed.kt`: one full-tab TradingView Advanced Chart widget with its own controls; app feed and trade rules are not part of the chart.
 - `ui/tabs/signal/SignalScreen.kt` and `PaperTicketSection.kt`: signal and paper-entry view.
 - `ui/tabs/watch/MarketWatchScreen.kt`: watch list and historical watch observations.
 - `ui/tabs/news/PersianNewsScreen.kt`: news and calendar.
