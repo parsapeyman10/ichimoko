@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -39,7 +40,8 @@ import com.aurum.edge.ui.theme.AurumColors
 import kotlinx.coroutines.delay
 
 @Composable
-fun MarketWatchScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
+fun MarketWatchScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit,
+                      onOpenChart: (String) -> Unit) {
     val state by viewModel.watch.collectAsStateWithLifecycle()
     val selections by viewModel.watchSettings.collectAsStateWithLifecycle()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -59,6 +61,7 @@ fun MarketWatchScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 Button(onClick = viewModel::refreshWatch, enabled = !state.refreshing, modifier = Modifier.weight(1f)) {
                     Text(if (state.refreshing) "در حال دریافت…" else "به‌روزرسانی")
                 }
+                OutlinedButton(onClick = onOpenSettings) { Text("تنظیمات منبع") }
             }
             if (state.refreshing) CircularProgressIndicator(modifier = Modifier.padding(top = 8.dp), strokeWidth = 2.dp)
             Text(
@@ -90,6 +93,11 @@ fun MarketWatchScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 trailing = { Pill(badge, tone) },
             ) {
                 QuoteMainLine(quote, symbol.unit, tone)
+                if (symbol.id in WatchCatalog.chartSymbols) {
+                    OutlinedButton(onClick = { onOpenChart(symbol.id) }) {
+                        Text("چارت و سیگنال ${symbol.id}")
+                    }
+                }
                 Text(
                     quote?.changePct?.let { change -> "تغییر: ${String.format(java.util.Locale.US, "%.2f", change)}٪" }
                         ?: "تغییر روزانه از منبع دریافت نشد",

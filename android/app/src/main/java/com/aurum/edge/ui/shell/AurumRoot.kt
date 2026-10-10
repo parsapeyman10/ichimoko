@@ -60,7 +60,28 @@ fun AurumRoot(viewModel: AurumViewModel) {
         }
     }
     val selectedTab = AurumTab.entries.firstOrNull { it.name == tab && it in primaryTabs + moreTabs } ?: primaryTabs.first()
-    fun open(destination: AurumTab) { if (destination in primaryTabs + moreTabs) tab = destination.name }
+    // Change one persisted symbol first; only navigate when its real feed has switched.
+    var pendingChartSymbol by rememberSaveable { mutableStateOf<String?>(null) }
+    fun open(destination: AurumTab) {
+        if (destination in primaryTabs + moreTabs) {
+            pendingChartSymbol = null
+            tab = destination.name
+        }
+    }
+    fun openChartFor(symbol: String) {
+        if (symbol == settings.symbol && symbol == market.symbol) open(AurumTab.Chart)
+        else if (com.aurum.edge.core.V1Universe.valid(symbol)) {
+            pendingChartSymbol = symbol
+            viewModel.selectChartSymbol(symbol)
+        }
+    }
+    LaunchedEffect(settings.symbol, market.symbol, pendingChartSymbol) {
+        if (pendingChartSymbol != null && settings.symbol == pendingChartSymbol &&
+            market.symbol == pendingChartSymbol) {
+            pendingChartSymbol = null
+            open(AurumTab.Chart)
+        }
+    }
 
     Scaffold(containerColor = AurumColors.Bg, snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
@@ -76,14 +97,21 @@ fun AurumRoot(viewModel: AurumViewModel) {
             Box(Modifier.fillMaxSize()) {
                 when (selectedTab) {
                     AurumTab.Home -> HomeScreen(viewModel, market,
-                        onChart = { open(AurumTab.Chart) }, onSignal = { open(AurumTab.Signal) },
+                        onChart = { open(AurumTab.Chart) }, onChartSymbol = ::openChartFor,
+                        onSignal = { open(AurumTab.Signal) },
                         onNews = { open(AurumTab.News) },
                         onJournal = { open(AurumTab.Journal) }, onSettings = { open(AurumTab.Settings) })
                     AurumTab.Chart -> ChartScreen(viewModel, market,
-                        onOpenSettings = { open(AurumTab.Settings) }, onOpenJournal = { open(AurumTab.Journal) })
-                    AurumTab.Signal -> SignalScreen(viewModel, market, onOpenNews = { open(AurumTab.News) })
-                    AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) })
-                    AurumTab.News -> PersianNewsScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) })
+                        onOpenSettings = { open(AurumTab.Settings) }, onOpenJournal = { open(AurumTab.Journal) },
+                        onOpenSignal = { open(AurumTab.Signal) })
+                    AurumTab.Signal -> SignalScreen(viewModel, market,
+                        onOpenNews = { open(AurumTab.News) }, onOpenChart = { open(AurumTab.Chart) },
+                        onChartSymbol = ::openChartFor,
+                        onOpenJournal = { open(AurumTab.Journal) })
+                    AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) },
+                        onOpenChart = ::openChartFor)
+                    AurumTab.News -> PersianNewsScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) },
+                        onOpenSignal = { open(AurumTab.Signal) })
                     AurumTab.Journal -> JournalScreen(viewModel, market)
                     AurumTab.Update -> UpdateScreen(viewModel)
                     AurumTab.Settings -> SettingsScreen(viewModel, settings)

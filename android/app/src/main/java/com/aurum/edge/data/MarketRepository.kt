@@ -8,6 +8,7 @@ import android.os.SystemClock
 import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.HistoryPolicy
+import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.MarketHours
@@ -433,6 +434,7 @@ class MarketRepository(
                             val active = settings.read()
                             if (!stillCurrent(active) || active.hasKey != current.hasKey ||
                                 (current.hasKey && active.apiKey != current.apiKey)) return@collect
+                            if (!TradeQuotePolicy.accepts(tick)) return@collect
                             emitted = true
                             backoff = 2_000L
                             onTick(tick, provider)
@@ -446,7 +448,7 @@ class MarketRepository(
                     if (current.hasKey) {
                         // Public, keyless live quote is tried first. Twelve Data WebSocket is the
                         // last live fallback, matching the history provider policy.
-                        val publicWorked = try {
+                        val publicWorked = if (CryptoCatalog.isCrypto(current.symbol)) false else try {
                             collectSpotFallback("فید زندهٔ عمومی (Swissquote/Gold-API)", TWELVE_WS_FALLBACK_WINDOW_MS)
                         } catch (_: Exception) {
                             false
@@ -465,6 +467,12 @@ class MarketRepository(
                                 publishStreamUnavailable(e.message ?: "WebSocket آخرین fallback Twelve Data در دسترس نیست")
                             }
                         }
+                    } else if (CryptoCatalog.isCrypto(current.symbol)) {
+                        // Nobitex's UDF endpoint supplies candles, not a timestamped tick.
+                        // Keep polling its real history; do not repeatedly fetch and relabel a
+                        // candle close as a tick or allow it to settle an open position.
+                        publishStreamUnavailable("برای این جفت رمزارز تیک زندهٔ مستقل موجود نیست؛ فقط کندل زمان‌دار نمایش داده می‌شود")
+                        delay(60_000L)
                     } else {
                         collectSpotFallback("فید رایگان خودکار (Swissquote/Gold-API)")
                         if (started && generation == session && streamEpoch == epoch)
@@ -574,6 +582,10 @@ class MarketRepository(
     }
 
     private suspend fun onTick(tick: com.aurum.edge.core.PriceTick, provider: String = "Twelve Data") {
+        // The crypto fallback supplies a historical candle close, not a market tick.
+        // REST history displays it with its original timestamp; never create a LIVE candle
+        // or settle a paper position from a re-timestamped close.
+        if (!TradeQuotePolicy.accepts(tick)) return
         val current = settings.read()
         val now = System.currentTimeMillis()
         val price = tick.price

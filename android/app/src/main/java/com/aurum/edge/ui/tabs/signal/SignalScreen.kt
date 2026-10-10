@@ -61,7 +61,9 @@ import com.aurum.edge.ui.theme.AurumColors
  * ۵. وضعیت پایش واچ‌لیست فعال در پس‌زمینه
  */
 @Composable
-fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () -> Unit) {
+fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () -> Unit,
+                 onOpenChart: () -> Unit, onChartSymbol: (String) -> Unit,
+                 onOpenJournal: () -> Unit) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val autoStatus by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
@@ -100,10 +102,8 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             best = scanState.bestPick,
             sweeping = scanState.sweeping,
             onScan = { viewModel.scanPairs() },
-            onTrade = { symbol ->
-                viewModel.selectChartSymbol(symbol)
-                viewModel.selectAndTradeBestPick()
-            },
+            // A scanner candle is not a fresh verified entry; navigate for review only.
+            onTrade = onChartSymbol,
         )
 
         // ── ۳. سه کاندیدای برتر بازار (Top 3 Candidates) با تفکیک دسته و شروط ──
@@ -123,6 +123,15 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             entryBlocker = positionBlocker,
             allowManualPaperTrade = true,
         )
+
+        SectionCard("مسیر مشترک این نماد · ${market.symbol}",
+            "چارت، خبر و ژورنال همگی نماد/معاملات همین دستگاه را می‌خوانند") {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onOpenChart) { Text("چارت") }
+                OutlinedButton(onClick = onOpenNews) { Text("خبر و تقویم") }
+                OutlinedButton(onClick = onOpenJournal) { Text("ژورنال") }
+            }
+        }
 
         // ── ۵. وضعیت معامله خودکار کاغذی ─────────────────────────────────
         SectionCard("معاملهٔ خودکار کاغذی (تخصیص متوازن ۴ بازار)") {
@@ -166,7 +175,6 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
         PairRadarSummaryCard(
             scan = scanState,
             onScan = { viewModel.scanPairs() },
-            onSelectSymbol = { viewModel.selectChartSymbol(it) },
             now = System.currentTimeMillis(),
         )
 
@@ -180,7 +188,8 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             (if (showAllDecisions) decisionLog else latestBySymbol).forEach { record ->
                 Text("${record.symbol} · ${record.interval} · ${formatTime(record.checkedAt)} · " +
                     "${record.action} · ${record.score?.toInt() ?: "—"}/۱۰۰",
-                    style = MaterialTheme.typography.bodySmall)
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.clickable { onChartSymbol(record.symbol) })
                 Text(record.reason, style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextSecondary)
                 record.method?.let { method ->
@@ -441,7 +450,7 @@ private fun BestOpportunityDetailedCard(
                 Pill("در حال اسکن...", AurumColors.Gold)
             } else if (best != null) {
                 Pill(
-                    text = if (isBuy) "خرید LONG (${(best.confidence ?: 95.0).toInt()}%)" else "فروش SHORT (${(best.confidence ?: 95.0).toInt()}%)",
+                    text = if (isBuy) "خرید LONG" else "فروش SHORT",
                     color = actionColor,
                 )
             }
@@ -463,7 +472,7 @@ private fun BestOpportunityDetailedCard(
                             color = AurumColors.Gold,
                         )
                         Pill(assetClass.label, AurumColors.SurfaceAlt)
-                        Pill("شانس ${(best.confidence ?: 95.0).toInt()}%", actionColor)
+                        Pill("امتیاز ${best.confidence?.toInt() ?: 0}/۱۰۰", actionColor)
                     }
                     best.riskReward?.let { rr ->
                         Pill("R:R 1:${String.format(java.util.Locale.US, "%.1f", rr)}", AurumColors.Cyan)
@@ -551,31 +560,8 @@ private fun BestOpportunityDetailedCard(
                             ConfluenceRow(item)
                         }
                     } else {
-                        SignalConditionItemRow(
-                            label = "موقعیت قیمت نسبت به ابر کومو (Kumo 8/24/72)",
-                            detail = if (isBuy) "قیمت بالای ابر صعودی مستقر است" else "قیمت زیر ابر نزولی مستقر است",
-                            ok = true,
-                        )
-                        SignalConditionItemRow(
-                            label = "هم‌جهتی و تقاطع تنکان‌سن و کیجون‌سن (TK Cross)",
-                            detail = if (isBuy) "تنکان بالای کیجون و تراز صعودی" else "تنکان زیر کیجون و تراز نزولی",
-                            ok = true,
-                        )
-                        SignalConditionItemRow(
-                            label = "آزادی کامل چیکواسپن (Chikou Clearance 24)",
-                            detail = if (isBuy) "چیکو اسپن بدون مانع بالای کندل‌های ۲۴ دوره گذشته" else "چیکو اسپن بدون مانع زیر کندل‌های ۲۴ دوره گذشته",
-                            ok = true,
-                        )
-                        SignalConditionItemRow(
-                            label = "فیلتر ضد ساید و قدرت ترند (Anti-Sideways Guard)",
-                            detail = "عدم وجود فشردگی یا رنج، اسلوپ مومنتوم فعال",
-                            ok = true,
-                        )
-                        SignalConditionItemRow(
-                            label = "تراز چندتایم‌فریم و نسبت ریسک به ریوارد (MTF & R:R)",
-                            detail = "تایید تراز بالاتر، نسبت ریوارد 1:${String.format(java.util.Locale.US, "%.1f", best.riskReward ?: 2.2)}",
-                            ok = true,
-                        )
+                        Text("شواهد تفصیلی از فید ثبت نشده‌اند؛ تأیید تکنیکال فرض نمی‌شود.",
+                            style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
                     }
                 }
 
@@ -586,7 +572,7 @@ private fun BestOpportunityDetailedCard(
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 ) {
                     Text(
-                        if (isBuy) "انتقال به چارت و ورود به معامله خرید ${best.symbol}" else "انتقال به چارت و ورود به معامله فروش ${best.symbol}",
+                        "نمایش چارت ${best.symbol} · بررسی پیش از ورود",
                         color = androidx.compose.ui.graphics.Color.Black,
                         fontWeight = FontWeight.Bold,
                     )
@@ -686,7 +672,7 @@ private fun CandidateDetailedItemCard(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Pill("امتیاز ${(candidate.confidence ?: 90.0).toInt()}%", actionColor)
+                Pill("امتیاز ${candidate.confidence?.toInt() ?: 0}/۱۰۰", actionColor)
                 candidate.riskReward?.let { rr ->
                     Pill("R:R 1:${String.format(java.util.Locale.US, "%.1f", rr)}", AurumColors.Cyan)
                 }
@@ -720,14 +706,8 @@ private fun CandidateDetailedItemCard(
                     }
                 }
             } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("کومو ۸/۲۴/۷۲ + تنکان/کیجون + چیکو ۲۴", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-                    Pill("✓ تایید کامل شروط", AurumColors.Green)
-                }
+                Text("شواهد تکنیکال این کاندیدا در دسترس نیست؛ تأیید فرض نمی‌شود.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             }
         }
 
@@ -744,10 +724,10 @@ private fun CandidateDetailedItemCard(
                 color = AurumColors.TextMuted,
             )
             if (isCurrent) {
-                Pill("روی چارت فعال است", AurumColors.Green)
+                Pill("نماد انتخابی", AurumColors.Green)
             } else {
                 Text(
-                    text = "نمایش روی چارت ↗",
+                    text = "انتخاب نماد ↗",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.Cyan,
                     modifier = Modifier
@@ -759,33 +739,9 @@ private fun CandidateDetailedItemCard(
     }
 }
 
-@Composable
-private fun SignalConditionItemRow(
-    label: String,
-    detail: String,
-    ok: Boolean,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.labelMedium, color = AurumColors.TextPrimary)
-            Text(detail, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-        }
-        Pill(
-            text = if (ok) "✓ تایید" else "✗ رد",
-            color = if (ok) AurumColors.Green else AurumColors.Red,
-        )
-    }
-}
-
 /** All-pairs background radar summary */
 @Composable
-internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, onSelectSymbol: (String) -> Unit, now: Long) {
+internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, now: Long) {
     LaunchedEffect(scan.lastSweepAt) { if (scan.lastSweepAt == null) onScan() }
     SectionCard(
         title = "پایش پیوستهٔ ۵۰+ نماد در پس‌زمینه",

@@ -156,8 +156,11 @@ class PairScanner(
         }
 
     private fun rankOpportunities(statuses: List<PairScanStatus>): List<PairScanStatus> {
+        val now = System.currentTimeMillis()
+        val interval = settings.read().interval
         return statuses
-            .filter { it.price != null && it.state == "candidate" }
+            .filter { it.price != null && it.state == "candidate" &&
+                ScanFreshness.current(it.lastScanAt, interval, now) && !MarketHours.closedFor(it.symbol, now) }
             .sortedWith(
                 compareByDescending<PairScanStatus> { it.state == "candidate" }
                     .thenByDescending { it.playbookAllowed == true }

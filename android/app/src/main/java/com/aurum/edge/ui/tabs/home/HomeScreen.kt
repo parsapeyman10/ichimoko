@@ -36,6 +36,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
+import com.aurum.edge.core.FeedLiveness
+import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.HomeReadout
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.PaperTrade
@@ -65,6 +67,7 @@ fun HomeScreen(
     viewModel: AurumViewModel,
     market: MarketState,
     onChart: () -> Unit,
+    onChartSymbol: (String) -> Unit,
     onSignal: () -> Unit,
     onNews: () -> Unit,
     onJournal: () -> Unit,
@@ -149,10 +152,7 @@ fun HomeScreen(
         com.aurum.edge.ui.components.AssetClass4SlotsBanner(
             openTrades = openTradesList,
             livePrices = livePricesMap,
-            onSelectSymbol = { symbol ->
-                viewModel.selectChartSymbol(symbol)
-                onChart()
-            },
+            onSelectSymbol = onChartSymbol,
         )
 
         // ── ۳. ترکینگ زنده و کامل تمامی معاملات باز پورتفو ──────────────────
@@ -160,10 +160,7 @@ fun HomeScreen(
             viewModel = viewModel,
             currentMarket = market,
             onJournal = onJournal,
-            onSelectTrade = { symbol ->
-                viewModel.selectChartSymbol(symbol)
-                onChart()
-            },
+            onSelectTrade = onChartSymbol,
         )
 
         // ── ۴. پنل معاملهٔ خودکار کاغذی و تخصیص ۴ بازار ────────────────────
@@ -294,9 +291,13 @@ private fun LiveTradeGaugeCard(
 ) {
     val isBuy = trade.action == SignalAction.BUY
     val assetClass = AssetClass.of(trade.symbol)
-    val livePrice = livePrices[trade.symbol]
-        ?: (if (currentMarket.symbol == trade.symbol) currentMarket.lastPrice else null)
-        ?: trade.entry
+    val selectedFresh = currentMarket.symbol == trade.symbol &&
+            currentMarket.feed.mode == FeedMode.LIVE &&
+            !currentMarket.showingCachedData && FeedLiveness.hasRecentReceipt(currentMarket.feed) &&
+            currentMarket.lastPrice != null
+    val verifiedLivePrice = livePrices[trade.symbol]
+        ?: currentMarket.lastPrice?.takeIf { selectedFresh }
+    val livePrice = verifiedLivePrice ?: trade.entry
 
     val entry = trade.entry
     val stop = trade.stopLoss
@@ -369,7 +370,8 @@ private fun LiveTradeGaugeCard(
                     color = statusColor,
                 )
                 Text(
-                    text = "سود/زیان خالص (${String.format(java.util.Locale.US, "%.2f", pnlPercent)}%)",
+                    text = (if (verifiedLivePrice == null) "برآورد با قیمت ورود؛ تیک تازه نیست" else "سود/زیان خالص") +
+                        " (${String.format(java.util.Locale.US, "%.2f", pnlPercent)}%)",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                 )
@@ -411,7 +413,8 @@ private fun LiveTradeGaugeCard(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "قیمت لحظه‌ای: ${formatPrice(livePrice)}",
+                text = (if (verifiedLivePrice == null) "قیمت ورود (تیک تازه نیست): " else "قیمت لحظه‌ای: ") +
+                    formatPrice(livePrice),
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextPrimary,
                 fontWeight = FontWeight.Bold,

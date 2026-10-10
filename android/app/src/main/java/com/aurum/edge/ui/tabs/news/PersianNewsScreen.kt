@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.data.ForexEvent
+import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.NewsClassifier
 import com.aurum.edge.data.NewsDirection
 import com.aurum.edge.data.NewsImportance
@@ -36,9 +38,12 @@ import kotlinx.coroutines.delay
 import kotlin.math.abs
 
 @Composable
-fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
+fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit,
+                      onOpenSignal: () -> Unit) {
     val web by viewModel.publicWebNews.collectAsStateWithLifecycle()
     val calendar by viewModel.forexCalendar.collectAsStateWithLifecycle()
+    val decision by viewModel.news.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
     val uriHandler = LocalUriHandler.current
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
@@ -52,6 +57,24 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
+        SectionCard("وضعیت گیت خبر · ${settings.symbol}",
+            "نتیجهٔ نماد فعلی در کنار گیت عمومی؛ تیتر عمومی به‌تنهایی اجازهٔ ورود نیست") {
+            val symbolVerdict = decision.aiBySymbol[settings.symbol]
+            Text("${when (decision.gate) {
+                NewsGate.CLEAR -> "بدون وتوی خبرِ تأییدشده"
+                NewsGate.BLOCKED -> "ورود جدید مسدود"
+                NewsGate.UNKNOWN -> "وضعیت خبر نامشخص"
+            }} · ${decision.reason}", style = MaterialTheme.typography.bodySmall,
+                color = if (decision.gate == NewsGate.BLOCKED) AurumColors.Red else AurumColors.TextSecondary)
+            Text(symbolVerdict?.let { "مدل این نماد: ${it.status} · ${it.reason}" }
+                ?: "برای این نماد نظر مدل ثبت نشده؛ نتیجهٔ عمومی جای آن را نمی‌گیرد.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            Text("آخرین بررسی گیت: ${relativeTime(decision.lastCheckedAt, now)}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            OutlinedButton(onClick = viewModel::refreshNews, enabled = !decision.loading) {
+                Text("بررسی دوبارهٔ گیت خبر")
+            }
+        }
         SectionCard("خبرهای مهم بازار", "اهمیت، اثر احتمالی و توضیح کوتاه به‌صورت خودکار از تیتر/تقویم واقعی") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = viewModel::refreshPublicWebNews, enabled = !web.loading, modifier = Modifier.weight(1f)) {
@@ -68,6 +91,10 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 modifier = Modifier.padding(top = 8.dp),
             )
             calendar.error?.let { Text("تقویم در دسترس نیست: $it", color = AurumColors.Gold, style = MaterialTheme.typography.bodySmall) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onOpenSignal) { Text("بازگشت به بررسی سیگنال") }
+                OutlinedButton(onClick = onOpenSettings) { Text("تنظیمات خبر") }
+            }
         }
 
         calendar.events

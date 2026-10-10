@@ -127,7 +127,9 @@ class SpotFallbackClient(
             val last = nobitex.fetchCandles(symbol, Interval.M1, desiredSize = 2, minimumSize = 1)
                 .candles.lastOrNull()
                 ?: throw DataFeedException("قیمت زندهٔ $symbol دریافت نشد")
-            return PriceTick(price = last.close, at = System.currentTimeMillis())
+            // This is a candle close, not an exchange tick. Never invent its timestamp or
+            // allow it to trigger SL/TP, trailing stops, or a new paper entry.
+            return PriceTick(price = last.close, at = last.time, isTradeTick = false)
         }
         return try {
             fetchSwissquote(symbol)

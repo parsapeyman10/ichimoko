@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -77,6 +78,7 @@ fun ChartScreen(
     market: MarketState,
     onOpenSettings: () -> Unit,
     onOpenJournal: () -> Unit,
+    onOpenSignal: () -> Unit,
 ) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
@@ -101,6 +103,13 @@ fun ChartScreen(
                     ),
                 )
             }
+        }
+
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onOpenSignal) { Text("سیگنال ${market.symbol}") }
+            OutlinedButton(onClick = onOpenJournal) { Text("ژورنال") }
+            OutlinedButton(onClick = onOpenSettings) { Text("تنظیمات فید") }
         }
 
         SectionCard(

@@ -27,6 +27,7 @@ import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.PaperPortfolioPolicy
 import com.aurum.edge.core.TechnicalEvidence
+import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.core.PaperTicket
 import com.aurum.edge.core.ReplayDecision
 import com.aurum.edge.core.Signal
@@ -224,6 +225,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val aiModels: StateFlow<AiModelsState> = _aiModels.asStateFlow()
 
     init {
+        // The market and background service can settle trades without going through a UI
+        // button. Keep Home/Journal statistics attached to the same persisted ledger.
+        viewModelScope.launch {
+            container.journalStore.trades.collect { _stats.value = container.journalStore.stats() }
+        }
         viewModelScope.launch {
             runCatching { container.journalStore.load() }.onFailure {
                 _toast.value = "ژورنال خوانده نشد؛ فایل قبلی برای بازیابی نگه داشته شد"
@@ -376,36 +382,46 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch(Dispatchers.IO) {
             val spot = SpotFallbackClient()
             while (isActive) {
+                if (!visibleOnlineLoopEnabled && !SignalMonitorService.running.value) {
+                    _livePrices.value = emptyMap()
+                    delay(1_000L)
+                    continue
+                }
                 try {
                     val currentMarket = container.verifiedMarket.value
                     val openTradesList = container.journalStore.trades.value.filter { it.isOpen }
-                    val currentMap = _livePrices.value.toMutableMap()
+                    // Rebuild on every pass: a missed provider response must never leave an
+                    // indefinitely "live" cached price in Home/Chart/Journal.
+                    val currentMap = mutableMapOf<String, Double>()
 
-                    if (currentMarket.lastPrice != null && currentMarket.lastPrice!! > 0.0) {
+                    if (currentMarket.lastPrice != null && currentMarket.lastPrice!! > 0.0 &&
+                        !currentMarket.showingCachedData && currentMarket.feed.mode == FeedMode.LIVE &&
+                        FeedLiveness.hasRecentReceipt(currentMarket.feed) &&
+                        !CryptoCatalog.isCrypto(currentMarket.symbol) &&
+                        !MarketHours.closedFor(currentMarket.symbol)) {
                         currentMap[currentMarket.symbol] = currentMarket.lastPrice!!
-                        val closedList = container.journalStore.settleTick(currentMarket.symbol, currentMarket.lastPrice!!)
-                        if (closedList.isNotEmpty()) {
-                            _stats.value = container.journalStore.stats()
-                            closedList.forEach { closed ->
-                                _toast.value = "معاملهٔ ${closed.symbol} (${closed.exitReason}) بسته و تسویه شد: ${closed.pnlUsd}$"
-                            }
-                        }
+                        // MarketRepository already settles the original timestamped tick.
+                        // Replaying the same lastPrice on every UI frame could falsely close
+                        // a position opened after that quote.
                     }
 
                     // Parallel multi-processing quote fetching across all open trade symbols
-                    val symbolsToFetch = openTradesList.map { it.symbol }.distinct().filter { it != currentMarket.symbol }
+                    val symbolsToFetch = openTradesList.map { it.symbol }.distinct().filter {
+                        it != currentMarket.symbol && !CryptoCatalog.isCrypto(it)
+                    }
                     if (symbolsToFetch.isNotEmpty()) {
                         kotlinx.coroutines.coroutineScope {
                             val deferreds = symbolsToFetch.map { sym ->
                                 async(Dispatchers.IO) {
                                     val quote = runCatching { spot.fetchQuote(sym) }.getOrNull()
-                                    sym to quote?.price
+                                    sym to quote?.takeIf { TradeQuotePolicy.accepts(it) }
                                 }
                             }
-                            deferreds.awaitAll().forEach { (sym, price) ->
-                                if (price != null && price.isFinite() && price > 0.0) {
-                                    currentMap[sym] = price
-                                    val closedList = container.journalStore.settleTick(sym, price)
+                            deferreds.awaitAll().forEach { (sym, quote) ->
+                                if (quote != null && quote.price.isFinite() && quote.price > 0.0 &&
+                                    !MarketHours.closedFor(sym)) {
+                                    currentMap[sym] = quote.price
+                                    val closedList = container.journalStore.settleTick(sym, quote.price, quote.at)
                                     if (closedList.isNotEmpty()) {
                                         _stats.value = container.journalStore.stats()
                                         closedList.forEach { closed ->
@@ -417,13 +433,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                         }
                     }
 
-                    // Also pull prices from scanner if available
-                    container.pairScanner.state.value.statuses.forEach { st ->
-                        if (st.price != null && st.price > 0.0) {
-                            currentMap.putIfAbsent(st.symbol, st.price)
-                            container.journalStore.settleTick(st.symbol, st.price)
-                        }
-                    }
+                    // Scanner prices are closed historical bars. They must never enter the
+                    // live PnL map or settle an open position as if they were new ticks.
 
                     _livePrices.value = currentMap
                 } catch (_: Exception) {}
@@ -520,6 +531,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
      * the keyless Swissquote feed serves ticks for every pair; REST history still needs a key.
      * One verified write, one feed restart.
      */
+    private val symbolSelectionMutex = Mutex()
+
     fun selectChartSymbol(symbol: String) {
         if (symbol == settings.value.symbol) return
         val valid = com.aurum.edge.core.V1Universe.valid(symbol)
@@ -528,16 +541,20 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             return
         }
         viewModelScope.launch {
-            try {
-                val saved = withContext(Dispatchers.IO) { container.settingsStore.saveChartSymbol(symbol) }
-                if (!saved) {
-                    _toast.value = "ذخیرهٔ نماد روی دستگاه تأیید نشد؛ دوباره تلاش کنید"
-                    return@launch
+            symbolSelectionMutex.withLock {
+                try {
+                    val saved = withContext(Dispatchers.IO) { container.settingsStore.saveChartSymbol(symbol) }
+                    if (!saved) {
+                        _toast.value = "ذخیرهٔ نماد روی دستگاه تأیید نشد؛ دوباره تلاش کنید"
+                        return@withLock
+                    }
+                    container.market.restart()
+                    _toast.value = "نماد چارت و سیگنال: $symbol"
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    _toast.value = "تغییر نماد ناموفق بود؛ دوباره تلاش کنید"
                 }
-                container.market.restart()
-                _toast.value = "نماد چارت و سیگنال: $symbol"
-            } catch (_: Exception) {
-                _toast.value = "تغییر نماد ناموفق بود؛ دوباره تلاش کنید"
             }
         }
     }
