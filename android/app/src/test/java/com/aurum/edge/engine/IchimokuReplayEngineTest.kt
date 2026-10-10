@@ -39,7 +39,7 @@ class IchimokuReplayEngineTest {
         val futureChanged = prefix + candles(80, offset = 10_000.0).mapIndexed { index, candle ->
             candle.copy(time = prefix.last().time + (index + 1) * Interval.M5.millis)
         }
-        val config = ReplayEngine.Config(1000.0, 1.0, 0.30, 0.05, 72.0, SignalProfile.BASE)
+        val config = ReplayEngine.Config(1000.0, 0.5, 0.30, 0.05, 85.0, SignalProfile.BASE)
         val first = ReplayEngine.create(prefix, Interval.M5, "XAU/USD", "fixture", config, startCursor = 210)
         val second = ReplayEngine.create(futureChanged, Interval.M5, "XAU/USD", "fixture", config, startCursor = 210)
         val a = ReplayEngine.snapshot(first)
@@ -53,7 +53,7 @@ class IchimokuReplayEngineTest {
     }
 
     @Test fun `replay step seek and reset are immutable`() {
-        val config = ReplayEngine.Config(1000.0, 1.0, 0.30, 0.05, 72.0, SignalProfile.BASE)
+        val config = ReplayEngine.Config(1000.0, 0.5, 0.30, 0.05, 85.0, SignalProfile.BASE)
         val original = ReplayEngine.create(candles(300), Interval.M5, "XAU/USD", "fixture", config, 210)
         val moved = ReplayEngine.step(original, 4)
         val rewound = ReplayEngine.seek(moved, 3)

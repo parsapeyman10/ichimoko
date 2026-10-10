@@ -46,10 +46,10 @@ data class PriceTick(val price: Double, val at: Long, val bid: Double? = null, v
 enum class SignalAction { BUY, SELL, NO_TRADE }
 
 enum class AssetClass(val code: String, val label: String, val maxSlots: Int) {
-    CRYPTO("CRYPTO", "رمزارز", 1),
-    FOREX("FOREX", "جفت‌ارز فارکس", 1),
-    COMMODITY("COMMODITY", "کالا و انرژی", 1),
-    STOCK("STOCK", "سهام و شاخص", 1);
+    CRYPTO("CRYPTO", "رمزارز", 2),
+    FOREX("FOREX", "جفت‌ارز فارکس", 2),
+    COMMODITY("COMMODITY", "کالا و انرژی", 2),
+    STOCK("STOCK", "سهام و شاخص", 2);
 
     companion object {
         fun of(symbol: String): AssetClass {
@@ -78,7 +78,7 @@ enum class StrategyKind(val id: String, val label: String, val description: Stri
     ICHIMOKU_PRICE_ACTION(
         "ICHIMOKU_PRICE_ACTION",
         "ایچیموکو + پرایس اکشن",
-        "موتور واحد: ایچیموکو نهادی ۸/۲۴/۷۲ + تاییدیه پرایس‌اکشن + حجم و مومنتوم + تراز روند ۳ تایم‌فریم + فیلتر قفل ضد ساید",
+        "موتور واحد V1: EMA/ایچیموکو + RSI/MACD + واکنش حمایت/مقاومت + هفت تایم‌فریم M1 تا D1",
     );
 
     companion object {
@@ -375,12 +375,15 @@ data class PaperTrade(
      * بعد از ورود دوباره محاسبه نمی‌شود. برای رکوردهای قدیمی‌تر null است.
      */
     val marketTrend: MarketTrendRecord? = null,
+    /** Non-null on V1 records; old positions retain their historic fixed-target exit. */
+    val initialStopLoss: Double? = null,
+    val trailExtreme: Double? = null,
 ) {
     val isOpen: Boolean get() = closedAt == null
     val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }
     val assetClass: AssetClass get() = AssetClass.of(symbol)
 
-    val riskPerOz: Double get() = kotlin.math.abs(entry - stopLoss)
+    val riskPerOz: Double get() = kotlin.math.abs(entry - (initialStopLoss ?: stopLoss))
 
     /** Risk in QUOTE currency per unit; convert to USD before comparing with the budget. */
     val riskUsd: Double
@@ -442,12 +445,12 @@ data class PaperOpportunity(
         fun from(signal: Signal, symbol: String, price: Double, mtf: MtfSnapshotRecord,
                  news: PaperNewsRecord?, ict: IctPriceActionRecord? = null,
                  now: Long = System.currentTimeMillis()): PaperOpportunity {
-            val technicalConditions = signal.confluence.filterNot {
-                it.name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL
-            }
+            val technicalConditions = TechnicalEvidence.items(signal)
             require(PaperOrderRules.paperable(symbol) && signal.isActionable && signal.barTime > 0 &&
+                TechnicalEvidence.confirmed(signal) &&
                 price.isFinite() && price > 0 && signal.stopLoss != null && signal.takeProfit != null &&
-                !mtf.veto) {
+                mtf.frames.isNotEmpty() && mtf.barTime == signal.barTime && mtf.baseInterval == signal.interval.label &&
+                (ict == null || ict.matches(signal, symbol, price))) {
                 "فرصت آموزشی معتبر نیست"
             }
             return PaperOpportunity(
@@ -712,7 +715,7 @@ data class AppSettings(
     val interval: Interval = Interval.M5,
     val riskPercent: Double = 0.5,
     val accountBalance: Double = 1000.0,
-    val minConfidence: Double = 72.0,
+    val minConfidence: Double = 85.0,
     /** Cost assumptions in USD. They must match your broker; every report states them. */
     // Defaults are the REAL reference costs of the most liquid gold venue pair we quote:
     // IC Markets Raw Spread (EU): XAU/USD ≈ $0.12/oz spread + $3.50 per 100 oz lot/side = $0.035/oz.
@@ -728,7 +731,7 @@ data class AppSettings(
     /** Applies to NEW paper entries; real orders remain disabled independently. */
     val pauseOnNews: Boolean = false,
     /** Automatic orders here are local paper records, never broker orders. */
-    val autoPaperTrading: Boolean = true,
+    val autoPaperTrading: Boolean = false,
     /** Check for a public APK when the app starts and download it when one is available. */
     val autoDownloadUpdates: Boolean = false,
     /**
@@ -749,6 +752,8 @@ data class AppSettings(
     val newsAiFormat: String = "AUTO",
     val signalProfile: SignalProfile = SignalProfile.BASE,
     val activeStrategy: StrategyKind = StrategyKind.ICHIMOKU,
+    val activeWatchlist: List<String> = V1Universe.defaults,
+    val categoryStrategies: Map<AssetClass, CategoryStrategy> = AssetClass.entries.associateWith { CategoryStrategy.HYBRID },
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
     val hasClientNewsAi: Boolean get() = newsAiApiKey.isNotBlank() && newsAiBaseUrl.isNotBlank() && newsAiModel.isNotBlank()

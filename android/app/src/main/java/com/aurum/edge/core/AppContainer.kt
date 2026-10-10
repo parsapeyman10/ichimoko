@@ -50,13 +50,14 @@ import kotlinx.coroutines.withContext
 
 /**
  * Process-wide wiring. Single source of truth for settings, real market data, journal and engine.
- * Chart/signal workspace is forex/gold; watchlist also includes Iran gold and USD cash-board rows.
+ * TradingView is visual only; every V1 entry reads independent candles for the four asset groups.
  */
 class AppContainer(context: Context) {
 
     val appContext: Context = context.applicationContext
 
     val settingsStore = SettingsStore(appContext)
+    val decisionLog = com.aurum.edge.data.DecisionLogStore(appContext)
     val candleCache = CandleCache(appContext)
     val journalStore = JournalStore(appContext, settingsStore = settingsStore)
     val replayJournalStore = ReplayJournalStore(appContext)
@@ -91,10 +92,14 @@ class AppContainer(context: Context) {
         val verified = raw.copy(feed = observedFeed,
             showingCachedData = raw.showingCachedData || delayed,
             signal = if (delayed) null else NewsConfluence.apply(raw.signal, raw.symbol, headlines, now))
-        IctEntryRules.withSafePlan(verified)
+        if (raw.candles.isNotEmpty()) decisionLog.append(raw.symbol, raw.interval.label,
+            if (verified.signal?.isActionable == true) "candidate" else "no_signal",
+            verified.signal?.blockers?.joinToString("، ")?.ifBlank { "چهار لایه و AI بررسی شدند" }
+                ?: "دادهٔ زنده/تایم‌فریم معتبر نیست", verified.signal, now, dedupe = true)
+        verified // four-layer engine owns the price plan; ICT remains optional research context
     }.stateIn(appScope, SharingStarted.Eagerly, market.state.value.copy(signal = null))
-    /** Periodic all-pairs online candle sweep: candidates + radar status for every catalog pair. */
-    val pairScanner = PairScanner(client, publicHistory, settingsStore, news, journalStore, opportunityStore, appScope, dukascopyHistory, appContext)
+    /** Periodic sweep of the editable V1 watchlist; only verified independent bars can become candidates. */
+    val pairScanner = PairScanner(client, publicHistory, settingsStore, news, journalStore, opportunityStore, appScope, dukascopyHistory, decisionLog)
     /** The user's own AI (Claude or OpenAI-compatible) as an educational trading companion. */
     // The advisor also reads the journal so it can review OPEN positions ("continue or not"),
     // which is advisory only: JournalStore.attachHoldReview never closes or re-prices a trade.
@@ -104,7 +109,7 @@ class AppContainer(context: Context) {
     val metaTraderImporter = MetaTraderImporter(appContext)
 
     init {
-        pairScanner.attachAutoTrader(autoPaperTrader)
+        autoPaperTrader.attachTrendSource { pairScanner.state.value.marketTrend }
         market.attach(appScope)
         appScope.launch {
             verifiedMarket.collect { state ->
@@ -113,7 +118,7 @@ class AppContainer(context: Context) {
                     try {
                         val opened = autoPaperTrader.onMarketUpdate(state)
                         if (opened != null) {
-                            Notifier.notifyTradeOpened(appContext, opened, cfg.alertSoundUri)
+                            Notifier.notifyRecordedAutoEntry(appContext, opened, cfg.alertSoundUri)
                         }
                     } catch (cancel: CancellationException) {
                         throw cancel

@@ -84,7 +84,7 @@ class MarketRepository(
      * stopped automatic entries for two days a week on a venue that never shuts.
      */
     private fun marketClosed(now: Long = System.currentTimeMillis()): Boolean =
-        MarketHours.weekendClosedFor(settings.read().symbol, now)
+        MarketHours.closedFor(settings.read().symbol, now)
 
     private val _state = MutableStateFlow(MarketState())
     val state: StateFlow<MarketState> = _state.asStateFlow()
@@ -98,6 +98,10 @@ class MarketRepository(
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var lastNetwork: Network? = null
     private val refreshMutex = Mutex()
+    private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client)
+    private var timeframeJob: Job? = null
+    @Volatile private var timeframeSnapshot: Map<Interval, List<Candle>> = emptyMap()
+    private var lastFrameRefreshAt = 0L
     @Volatile private var started = false
     @Volatile private var generation = 0L
     @Volatile private var streamEpoch = 0L
@@ -155,6 +159,9 @@ class MarketRepository(
         started = false
         generation++ // delayed HTTP/old socket responses cannot publish after a restart
         streamEpoch++
+        timeframeJob?.cancel(); timeframeJob = null
+        timeframeSnapshot = emptyMap()
+        lastFrameRefreshAt = 0L
         pollJob?.cancel(); pollJob = null
         streamJob?.cancel(); streamJob = null
         bootstrapJob?.cancel(); bootstrapJob = null
@@ -227,7 +234,7 @@ class MarketRepository(
         val current = settings.read()
         val session = generation
         if (!started) return@withLock
-        if (MarketHours.weekendClosedFor(current.symbol) && !allowClosedMarketHistory) {
+        if (MarketHours.closedFor(current.symbol) && !allowClosedMarketHistory) {
             publishClosed()
             return@withLock // no recurring REST requests on the scheduled weekend
         }
@@ -706,9 +713,29 @@ class MarketRepository(
             _state.value = _state.value.copy(candles = emptyList(), lastPrice = null, bid = null, ask = null, showingCachedData = false)
             return
         }
+        // Never stall the live tick/settlement stream behind six REST history downloads.
+        // Until all seven REAL timeframes arrive the engine returns NO_TRADE, not a guess.
+        val frameNow = System.currentTimeMillis()
+        if (!showingCache && bars.count { it.closed } >= SignalEngine.minBars(current.interval) &&
+            timeframeJob?.isActive != true && frameNow - lastFrameRefreshAt >= 60_000L) {
+            lastFrameRefreshAt = frameNow
+            val session = generation
+            timeframeJob = scope?.launch(Dispatchers.IO) {
+                val fetched = timeframeFeed.fetch(current.symbol, current.interval, bars, current.apiKey)
+                if (started && generation == session && settings.read().symbol == current.symbol &&
+                    settings.read().interval == current.interval) {
+                    timeframeSnapshot = fetched
+                    publishCandles(showingCache = _state.value.showingCachedData)
+                }
+            }
+        }
+        val frames = timeframeSnapshot
         val signal = if (showingCache) null else withContext(Dispatchers.Default) {
             runCatching {
-                SignalEngine.evaluate(bars, current.interval, current.minConfidence, current.spreadPrice, current.signalProfile, current.activeStrategy)
+                SignalEngine.evaluate(bars, current.interval, current.minConfidence, current.spreadPrice,
+                    current.signalProfile, current.activeStrategy, current.symbol,
+                    current.categoryStrategies[com.aurum.edge.core.AssetClass.of(current.symbol)]
+                        ?: com.aurum.edge.core.CategoryStrategy.HYBRID, frames)
             }.getOrNull()
         }
         _state.value = _state.value.copy(

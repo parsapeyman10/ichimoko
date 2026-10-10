@@ -96,19 +96,10 @@ object ReplayEngine {
     /** Compute every visible output from the prefix ending at the current cursor. */
     fun snapshot(session: Session): Snapshot {
         val visible = session.visibleBars
-        val series = if (visible.size >= SignalEngine.minBars(session.interval)) {
-            SignalEngine.series(visible, session.interval)
+        val signal = if (visible.size >= SignalEngine.minBars(session.interval)) {
+            SignalEngine.evaluate(visible, session.interval, session.config.threshold,
+                session.config.spreadPrice, session.config.signalProfile, symbol = session.symbol)
         } else null
-        val signal = series?.let {
-            SignalEngine.decide(
-                it,
-                it.lastIndex,
-                session.config.threshold,
-                session.config.spreadPrice,
-                narrative = true,
-                profile = session.config.signalProfile,
-            )
-        }
         val report = if (visible.size >= SignalEngine.minBars(session.interval)) {
             Backtester.run(
                 candles = visible,

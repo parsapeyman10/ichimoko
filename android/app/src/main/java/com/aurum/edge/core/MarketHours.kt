@@ -28,8 +28,20 @@ object MarketHours {
      * 24/7 market as shut would mute the engine for two days every week.
      */
     fun weekendClosedFor(symbol: String, now: Long = System.currentTimeMillis()): Boolean =
-        if (com.aurum.edge.data.CryptoCatalog.tradesAroundTheClock(symbol)) false
+        if (AssetClass.of(symbol) == AssetClass.CRYPTO) false
         else forexWeekendClosed(now)
+
+    /** Scheduled absolute closure. US shares/indices use DST-aware New York regular hours;
+     * a holiday or halt still needs fresh independent provider evidence to be tradeable.
+     */
+    fun closedFor(symbol: String, now: Long = System.currentTimeMillis()): Boolean {
+        if (AssetClass.of(symbol) == AssetClass.CRYPTO) return false
+        if (forexWeekendClosed(now)) return true
+        val time = Instant.ofEpochMilli(now).atZone(newYork).toLocalTime()
+        if (AssetClass.of(symbol) == AssetClass.STOCK)
+            return time.isBefore(LocalTime.of(9, 30)) || !time.isBefore(LocalTime.of(16, 0))
+        return !time.isBefore(LocalTime.of(17, 0)) && time.isBefore(LocalTime.of(18, 0))
+    }
 
     fun forexWeekendClosed(now: Long = System.currentTimeMillis()): Boolean {
         val local = Instant.ofEpochMilli(now).atZone(newYork)
@@ -47,7 +59,21 @@ object MarketHours {
      * it a forex weekend-closed banner is simply wrong.
      */
     fun sessionWindowFor(symbol: String, now: Long = System.currentTimeMillis()): SessionWindow {
-        if (com.aurum.edge.data.CryptoCatalog.tradesAroundTheClock(symbol)) {
+        if (AssetClass.of(symbol) == AssetClass.STOCK) {
+            val local = Instant.ofEpochMilli(now).atZone(newYork)
+            val opening = LocalTime.of(9, 30)
+            val next = if (closedFor(symbol, now)) {
+                var day = local.toLocalDate()
+                if (!local.toLocalTime().isBefore(LocalTime.of(16, 0))) day = day.plusDays(1)
+                while (day.dayOfWeek in setOf(DayOfWeek.SATURDAY, DayOfWeek.SUNDAY)) day = day.plusDays(1)
+                day.atTime(opening).atZone(newYork).toInstant().toEpochMilli()
+            } else local.toLocalDate().atTime(LocalTime.of(16, 0)).atZone(newYork)
+                .toInstant().toEpochMilli()
+            return SessionWindow(closedFor(symbol, now), next,
+                if (closedFor(symbol, now)) "بازشدن سشن سهام" else "بسته‌شدن سشن سهام",
+                local.toLocalTime().toString(), "ساعات منظم سهام آمریکا ۰۹:۳۰–۱۶:۰۰ نیویورک؛ تعطیلات ویژه با فید معتبر سنجیده شوند")
+        }
+        if (AssetClass.of(symbol) == AssetClass.CRYPTO) {
             return SessionWindow(
                 closed = false,
                 nextChangeAt = null,

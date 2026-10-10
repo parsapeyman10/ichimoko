@@ -31,7 +31,7 @@ import org.junit.Test
 class NineWayAutoPaperTest {
     private val now = 1_800_000_000_000L
     private val barTime = now - Interval.M5.millis
-    private val eight = (1..8).map { ConfluenceItem("فنی $it", true, "دادهٔ آزمون") }
+    private val four = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی").map { ConfluenceItem(it, true, "دادهٔ آزمون", scorePercent = 25) }
     private val settings = AppSettings(symbol = "XAU/USD", interval = Interval.M5,
         backgroundMonitor = true, autoPaperTrading = true)
     private val headline = PersianHeadline("id1", "Gold reacts to dollar weakness", "headline fixture",
@@ -44,8 +44,8 @@ class NineWayAutoPaperTest {
         ai = AiNewsVerdict("AVAILABLE", "XAU/USD", "BUY", 91.0, "test-model",
             "fixture classification", now, listOf("id1")),
     )
-    private val raw = Signal(SignalAction.BUY, 86.0, entry = 3000.0, stopLoss = 2994.5,
-        takeProfit = 3009.0, interval = Interval.M5, barTime = barTime, confluence = eight)
+    private val raw = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2994.5,
+        takeProfit = 3009.0, interval = Interval.M5, barTime = barTime, confluence = four)
 
     private fun market(s: Signal, symbol: String = "XAU/USD") = MarketState(symbol = symbol, interval = Interval.M5,
         candles = IctTestBars.readyAt(barTime),
@@ -95,17 +95,17 @@ class NineWayAutoPaperTest {
     @Test fun everyTechnicalComponentMustPassWhileNewsStaysJournalContext() {
         val result = NewsConfluence.apply(raw, "XAU/USD", news, now)!!
         assertEquals(SignalAction.BUY, result.action)
-        assertEquals(9, result.confluence.size)
-        assertEquals(NewsConfluence.NEWS_LABEL, result.confluence[8].name)
-        assertEquals(ConfluenceStatus.CONFIRMED, result.confluence[8].status)
+        assertEquals(5, result.confluence.size)
+        assertEquals(NewsConfluence.NEWS_LABEL, result.confluence[4].name)
+        assertEquals(ConfluenceStatus.CONFIRMED, result.confluence[4].status)
         assertNotNull(NewsConfluence.record(news))
         assertNull(PaperAutoRules.blocker(market(result), settings, news, now))
-        for (failed in 0 until NewsConfluence.TECHNICAL_COUNT) {
-            val input = raw.copy(confluence = eight.mapIndexed { i, item -> if (i == failed) item.copy(ok = false) else item })
+        for (failed in four.indices) {
+            val input = raw.copy(confluence = four.mapIndexed { i, item -> if (i == failed) item.copy(ok = false, status = ConfluenceStatus.CONFLICT, scorePercent = 0) else item })
             val combined = NewsConfluence.apply(input, "XAU/USD", news, now)!!
             assertEquals("technical $failed", SignalAction.NO_TRADE, combined.action)
             assertNull(combined.entry)
-            assertEquals(9, combined.confluence.size)
+            assertEquals(5, combined.confluence.size)
             assertNotNull(PaperAutoRules.blocker(market(combined), settings, news, now))
         }
     }
@@ -120,7 +120,7 @@ class NineWayAutoPaperTest {
         )
         val combined = NewsConfluence.apply(raw, "EUR/USD", eurNews, now)!!
         assertEquals(SignalAction.BUY, combined.action)
-        assertEquals(ConfluenceStatus.CONFIRMED, combined.confluence[8].status)
+        assertEquals(ConfluenceStatus.CONFIRMED, combined.confluence[4].status)
         assertEquals("id1", NewsConfluence.record(eurNews, "EUR/USD")!!.evidence.single().id)
         assertNull(NewsConfluence.record(eurNews)) // gold verdict absent -> no gold evidence
         // A High-impact event is still labelled CONFLICT, but it no longer blocks paper entry.
@@ -128,11 +128,11 @@ class NineWayAutoPaperTest {
             "SELL", 85.0, "test-model", "jpy context", now, listOf("id1"))))
         val jpyBlocked = NewsConfluence.apply(raw, "USD/JPY", jpyNews, now)!!
         assertEquals(SignalAction.BUY, jpyBlocked.action)
-        assertEquals(ConfluenceStatus.CONFLICT, jpyBlocked.confluence[8].status)
+        assertEquals(ConfluenceStatus.CONFLICT, jpyBlocked.confluence[4].status)
         // Server mode (per-pair map empty): a non-gold pair stays honestly UNKNOWN but technical signal remains visible.
         val serverOnly = NewsConfluence.apply(raw, "EUR/USD", news, now)!!
         assertEquals(SignalAction.BUY, serverOnly.action)
-        assertEquals(ConfluenceStatus.UNKNOWN, serverOnly.confluence[8].status)
+        assertEquals(ConfluenceStatus.UNKNOWN, serverOnly.confluence[4].status)
     }
 
     @Test fun unknownAndConflictNewsStayAdvisoryForPaperEntries() {
@@ -154,8 +154,8 @@ class NineWayAutoPaperTest {
         advisoryCases.forEachIndexed { idx, input ->
             val combined = NewsConfluence.apply(raw, "XAU/USD", input, now)!!
             assertEquals("advisory news $idx", SignalAction.BUY, combined.action)
-            assertFalse("advisory news $idx", combined.confluence[8].ok)
-            assertEquals(ConfluenceStatus.UNKNOWN, combined.confluence[8].status)
+            assertFalse("advisory news $idx", combined.confluence[4].ok)
+            assertEquals(ConfluenceStatus.UNKNOWN, combined.confluence[4].status)
             assertEquals(raw.confidence, combined.confidence, 0.001)
             assertNull(PaperAutoRules.blocker(market(combined), settings, input, now))
         }
@@ -164,12 +164,14 @@ class NineWayAutoPaperTest {
             news.copy(gate = NewsGate.BLOCKED),
         ).forEachIndexed { idx, input ->
             val combined = NewsConfluence.apply(raw, "XAU/USD", input, now)!!
-            assertEquals("conflict news $idx", SignalAction.BUY, combined.action)
-            assertEquals(ConfluenceStatus.CONFLICT, combined.confluence[8].status)
-            assertNull(PaperAutoRules.blocker(market(combined), settings, input, now))
+            assertEquals("opposing validated AI vetoes; calendar-only conflict is context",
+                if (idx == 0) SignalAction.NO_TRADE else SignalAction.BUY, combined.action)
+            assertEquals(ConfluenceStatus.CONFLICT, combined.confluence[4].status)
+            if (idx == 0) assertNotNull(PaperAutoRules.blocker(market(combined), settings, input, now))
+            else assertNull(PaperAutoRules.blocker(market(combined), settings, input, now))
         }
         assertEquals(ConfluenceStatus.UNKNOWN,
-            NewsConfluence.apply(raw, "XAU/USD", news.copy(ai = AiNewsVerdict()), now)!!.confluence[8].status)
+            NewsConfluence.apply(raw, "XAU/USD", news.copy(ai = AiNewsVerdict()), now)!!.confluence[4].status)
     }
 
     @Test fun liveQuoteSettingsSymbolAndClosedBarFreshnessMustAlsoMatch() {
@@ -196,7 +198,7 @@ class NineWayAutoPaperTest {
             })), settings, news, now))
         assertNull(PaperAutoRules.blocker(ready.copy(signal = confirmed.copy(
             confluence = confirmed.confluence.mapIndexed { index, item ->
-                if (index == 8) item.copy(status = ConfluenceStatus.CONFLICT) else item
+                if (index == 4) item.copy(status = ConfluenceStatus.CONFLICT) else item
             })), settings, news, now))
         assertNull(PaperAutoRules.blocker(ready, settings,
             news.copy(ai = news.ai.copy(model = "another-verified-model")), now))

@@ -6,20 +6,21 @@ import com.aurum.edge.core.PaperNewsEvidence
 import com.aurum.edge.core.PaperNewsRecord
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.core.TechnicalEvidence
 import com.aurum.edge.data.FOREX_CALENDAR_SOURCE_URL
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.PersianNewsState
 import com.aurum.edge.data.PersianHeadline
 import java.net.URI
 
-/** Live-only news journal-mining layer: eight technical confirmations are scored separately.
+/** Live-only news journal-mining layer: technical confirmations are scored separately.
  * News can add a green/amber/red context row and a journal evidence snapshot, but it is NOT an
  * entry prerequisite for paper trading. UNKNOWN or CONFLICT news must stay visible and auditable
  * without converting a valid Ichimoku/options signal into NO_TRADE.
  * Historical backtests have no point-in-time news archive and must NEVER claim news confirmation.
  */
 object NewsConfluence {
-    const val TECHNICAL_COUNT = 8
+    const val TECHNICAL_COUNT = TechnicalEvidence.CURRENT_COUNT
     const val NEWS_LABEL = "خبر/تقویم · داده‌کاوی ژورنال"
     private const val MAX_REVIEW_AGE_MS = 180_000L
     private const val MAX_EVIDENCE_AGE_MS = 180 * 60_000L
@@ -29,7 +30,7 @@ object NewsConfluence {
     fun alignment(symbol: String, action: SignalAction, news: PersianNewsState,
                   now: Long = System.currentTimeMillis()): Alignment {
         fun unknown(reason: String) = Alignment(ConfluenceStatus.UNKNOWN, reason)
-        if (action == SignalAction.NO_TRADE) return unknown("ابتدا هشت شرط فنی باید جهت معتبر بدهند")
+        if (action == SignalAction.NO_TRADE) return unknown("ابتدا شروط فنی باید جهت معتبر بدهند")
         if (news.loading || news.cached || news.error != null || news.sources.isEmpty() ||
             news.sources.none { it.feed == FOREX_CALENDAR_SOURCE_URL && it.state == "online" } ||
             news.calendarCheckedAt?.let { now - it in 0L..1_200_000L } != true ||
@@ -109,13 +110,8 @@ object NewsConfluence {
     fun apply(raw: Signal?, symbol: String, news: PersianNewsState,
               now: Long = System.currentTimeMillis()): Signal? {
         if (raw == null) return null
-        val core = raw.confluence.filterNot { it.name == NEWS_LABEL }
-        val isLegacyEight = core.size == TECHNICAL_COUNT
-        val technicalOk = if (isLegacyEight) {
-            core.all { it.ok && it.status == ConfluenceStatus.CONFIRMED }
-        } else {
-            raw.isActionable
-        }
+        val core = TechnicalEvidence.items(raw)
+        val technicalOk = TechnicalEvidence.confirmed(raw)
         val match = alignment(symbol, raw.action, news, now)
         val item = ConfluenceItem(
             NEWS_LABEL,
@@ -128,10 +124,10 @@ object NewsConfluence {
                 ConfluenceStatus.UNKNOWN -> null
             },
         )
-        val combined = raw.copy(confluence = raw.confluence + item)
+        val combined = raw.copy(confluence = core + item)
         if (!raw.isActionable) return combined
-        val blocker = if (!technicalOk && isLegacyEight)
-            "هشت شرط فنی اصلی هم‌زمان تأیید نشده‌اند (${core.count { it.ok && it.status == ConfluenceStatus.CONFIRMED }}/$TECHNICAL_COUNT)"
+        val blocker = if (!technicalOk)
+            "امتیاز چهار لایهٔ فنی معتبر نیست (${core.count { it.ok && it.status == ConfluenceStatus.CONFIRMED }}/${core.size})"
         else null
         if (blocker != null) {
             return combined.copy(action = SignalAction.NO_TRADE, entry = null, stopLoss = null,
@@ -142,8 +138,18 @@ object NewsConfluence {
                 reasons = combined.reasons + "خبر/مدل نزدیک معامله ثبت شد؛ فقط داده‌کاوی ژورنال است و شرط ورود نیست")
             ConfluenceStatus.UNKNOWN -> combined.copy(
                 reasons = combined.reasons + "خبر معیار قطعی ندارد؛ برای داده‌کاوی ژورنال زرد می‌ماند و شرط ورود کاغذی نیست")
-            ConfluenceStatus.CONFLICT -> combined.copy(
-                reasons = combined.reasons + "خبر/تقویم با جهت سیگنال تعارض دارد؛ معاملهٔ کاغذی متوقف نمی‌شود و فقط در ژورنال برای تحلیل بعدی ثبت می‌شود")
+            ConfluenceStatus.CONFLICT -> {
+                // Recheck only the model verdict without the calendar's separate event gate.
+                // The same alignment validator still requires fresh model + trusted evidence.
+                val validatedAi = alignment(symbol, raw.action,
+                    news.copy(gate = NewsGate.CLEAR, vetoedSymbols = emptySet()), now)
+                if (validatedAi.status == ConfluenceStatus.CONFLICT) {
+                    combined.copy(action = SignalAction.NO_TRADE, entry = null, stopLoss = null,
+                        takeProfit = null, riskReward = null,
+                        blockers = combined.blockers + "وتوی AI معتبر: ${validatedAi.detail}")
+                } else combined.copy(reasons = combined.reasons +
+                    "تعارض تقویم/خبر ثبت شد؛ فقط وتوی معتبر AI قفل ورود است")
+            }
         }
     }
 }

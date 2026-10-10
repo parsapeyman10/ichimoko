@@ -8,12 +8,12 @@ import com.aurum.edge.core.SignalProfile
 import kotlin.math.abs
 
 /**
- * Historical replay of the TECHNICAL SignalEngine only, on actual provider/imported OHLC.
- * This is NOT a replay of live AI news/ICT/MTF journal context: historical verdicts for
- * those gates are unavailable. Entries/exits are hypothetical OHLC fills, not broker executions.
+ * Single-frame historical analysis over actual provider/imported OHLC. The V1 seven-frame
+ * stack is not available in this dataset: SignalEngine deliberately yields NO_TRADE.
+ * Hypothetical OHLC fills from the explicit test seam are not live-paper performance.
  */
 object Backtester {
-    const val EXECUTION_MODEL = "NEXT_OPEN_OHLC_V2"
+    const val EXECUTION_MODEL = "SINGLE_FRAME_NO_V1_TRADES_V4"
 
     data class Trade(
         val side: SignalAction,
@@ -72,21 +72,22 @@ object Backtester {
         interval: Interval,
         symbol: String,
         dataSource: String = "Twelve Data (دیتای واقعی)",
-        initialBalance: Double = 100.0,
+        initialBalance: Double = 1000.0,
         riskPercent: Double = 0.5,
         spreadPrice: Double = 0.30,
         commissionPerOz: Double = 0.05,
         leverage: Int = 100,
         minPositionOz: Double = 1.0,
-        threshold: Double = 72.0,
+        threshold: Double = 85.0,
         signalProfile: SignalProfile = SignalProfile.BASE,
         /** First signal bar permitted by walk-forward. Indicators may use earlier real bars. */
         startIndex: Int? = null,
     ): Result {
         require(threshold.isFinite()) { "آستانهٔ سیگنال معتبر نیست" }
         return replay(candles, interval, symbol, dataSource, initialBalance, riskPercent,
-            spreadPrice, commissionPerOz, leverage, minPositionOz, startIndex) { series, index ->
-            SignalEngine.decide(series, index, threshold, spreadPrice, narrative = false, profile = signalProfile)
+            spreadPrice, commissionPerOz, leverage, minPositionOz, startIndex) { bars, index ->
+            SignalEngine.evaluate(bars.subList(maxOf(0, index + 1 - SignalEngine.ENGINE_WINDOW), index + 1),
+                interval, threshold, spreadPrice, signalProfile, symbol = symbol)
         }
     }
 
@@ -101,7 +102,7 @@ object Backtester {
         candles: List<Candle>, interval: Interval, symbol: String, dataSource: String,
         initialBalance: Double, riskPercent: Double, spreadPrice: Double,
         commissionPerOz: Double, leverage: Int, minPositionOz: Double, startIndex: Int?,
-        decideAt: (SignalEngine.Series, Int) -> Signal,
+        decideAt: (List<Candle>, Int) -> Signal,
     ): Result {
         require(initialBalance.isFinite() && initialBalance > 0.0 &&
             riskPercent.isFinite() && riskPercent > 0.0 && riskPercent <= 100.0 &&
@@ -110,8 +111,7 @@ object Backtester {
             minPositionOz.isFinite() && minPositionOz > 0.0 && leverage > 0) {
             "موجودی، ریسک، حجم و هزینه‌های فرضی باید مثبت/معتبر باشند"
         }
-        val series = SignalEngine.series(candles, interval)
-        val bars = series.bars
+        val bars = candles.filter { it.closed }
         require(bars.all { bar ->
             bar.time > 0L && listOf(bar.open, bar.high, bar.low, bar.close).all {
                 it.isFinite() && it > 0.0
@@ -147,7 +147,7 @@ object Backtester {
             if (current == null) {
                 // This decision uses the close of bar[index]; it can NEVER fill on that close.
                 if (index < bars.lastIndex && balance > 0.0) {
-                    val signal = decideAt(series, index)
+                    val signal = decideAt(bars, index)
                     val stop = signal.stopLoss
                     val target = signal.takeProfit
                     if (signal.isActionable && stop != null && target != null) {
@@ -199,11 +199,22 @@ object Backtester {
                     open = null
                 } else {
                     val dir = if (current.side == SignalAction.BUY) 1.0 else -1.0
-                    val kijun = series.ichimoku.kijun.getOrNull(index)
+                    // Exit rules use the same 8/24 lines as the current live engine.
+                    fun midpoint(period: Int, at: Int): Double? {
+                        if (at < period - 1) return null
+                        val window = bars.subList(at - period + 1, at + 1)
+                        return (window.maxOf { it.high } + window.minOf { it.low }) / 2.0
+                    }
+                    val kijun = midpoint(24, index)
                     val kijunBreak = kijun != null &&
                         (if (dir > 0) bar.close < kijun else bar.close > kijun)
-                    val snap = SignalEngine.snapshot(series, index)
-                    val oppositeCross = if (dir > 0) snap?.bearCross == true else snap?.bullCross == true
+                    val tenkan = midpoint(8, index)
+                    val prevTenkan = midpoint(8, index - 1)
+                    val prevKijun = midpoint(24, index - 1)
+                    val oppositeCross = tenkan != null && kijun != null &&
+                        prevTenkan != null && prevKijun != null &&
+                        (if (dir > 0) prevTenkan >= prevKijun && tenkan < kijun
+                         else prevTenkan <= prevKijun && tenkan > kijun)
                     val heldBars = index - current.entryBar
                     val reason = when {
                         kijunBreak -> "شکست کیجون (خروج در open کندل بعد)"
@@ -223,7 +234,7 @@ object Backtester {
         val grossWin = trades.filter { it.pnlUsd > 0 }.sumOf { it.pnlUsd }
         val grossLoss = abs(trades.filter { it.pnlUsd <= 0 }.sumOf { it.pnlUsd })
         val note = buildString {
-            append("بازپخش فنی روی ${bars.size} کندل ${interval.label} از $dataSource؛ بدون بازپخش لایهٔ خبر/AI، ICT و MTF")
+            append("بازپخش روی ${bars.size} کندل ${interval.label} از $dataSource؛ هفت تاریخچهٔ مستقل M1 تا D1 و وتوی AI تاریخی در این دیتاست نیستند؛ موتور V1 فاقد شواهد کافی است و ورود را می‌بندد. صفر معامله، گواه بازده یا بی‌ریسکی نیست")
             append("؛ ورود open کندل بعد، خروج دستورِ close در open بعد، برخورد SL/TP به نفع حد ضرر")
             if (open != null) append("؛ یک پوزیشن انتهای بازه باز ماند و از سود/زیان محقق‌شده حذف شد")
             if (skippedGap > 0) append("؛ $skippedGap ورود روی گپ زمانی رد شد")
@@ -256,10 +267,10 @@ object Backtester {
 
     fun walkForward(
         candles: List<Candle>, interval: Interval, symbol: String,
-        initialBalance: Double = 100.0, riskPercent: Double = 0.5,
+        initialBalance: Double = 1000.0, riskPercent: Double = 0.5,
         spreadPrice: Double = 0.30, commissionPerOz: Double = 0.05,
         leverage: Int = 100, minPositionOz: Double = 1.0,
-        threshold: Double = 72.0, splitFraction: Double = 0.7,
+        threshold: Double = 85.0, splitFraction: Double = 0.7,
         signalProfile: SignalProfile = SignalProfile.BASE,
         dataSource: String = "Twelve Data (دیتای واقعی)",
     ): WalkForward {

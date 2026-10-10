@@ -20,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -57,7 +58,7 @@ import com.aurum.edge.ui.theme.AurumColors
  * ۲. سه کاندیدای برتر بازار با تفکیک دقیق نماد، دسته دارایی و امتیاز شروط
  * ۳. خلاصه سیگنال و دکمه‌های ورود دستی به معامله برای نماد فعلی
  * ۴. چک‌لیست شواهد و شروط تکنیکال نماد فعلی
- * ۵. وضعیت پایش پیوسته ۵۰+ نماد در پس‌زمینه
+ * ۵. وضعیت پایش واچ‌لیست فعال در پس‌زمینه
  */
 @Composable
 fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () -> Unit) {
@@ -65,6 +66,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val autoStatus by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
     val scanState by viewModel.pairScan.collectAsStateWithLifecycle()
+    val decisionLog by viewModel.decisionLog.collectAsStateWithLifecycle()
     val playbook by viewModel.playbook.collectAsStateWithLifecycle()
     val marketTrend by viewModel.marketTrend.collectAsStateWithLifecycle()
     val symbolTrend by viewModel.symbolTrend.collectAsStateWithLifecycle()
@@ -72,20 +74,12 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
     val entryDiagnostics by viewModel.entryDiagnostics.collectAsStateWithLifecycle()
     val aiConnection by viewModel.aiConnection.collectAsStateWithLifecycle()
     val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
+    var showAllDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     val signal = market.signal
 
     val openTrades = trades.filter { it.isOpen }
-    val targetClass = AssetClass.of(market.symbol)
-    val openInClass = openTrades.count { AssetClass.of(it.symbol) == targetClass }
-
-    val positionBlocker = when {
-        openTrades.size >= 4 -> "سقف ۴ معاملهٔ همزمان باز پورتفو پر است (${openTrades.size}/4)"
-        openTrades.any { it.symbol == market.symbol } -> "پوزیشن این نماد هنوز باز است"
-        openInClass >= targetClass.maxSlots -> "ظرفیت پوزیشن در دستهٔ «${targetClass.label}» تکمیل است (۱/۱)"
-        signal != null && trades.any { it.symbol == market.symbol && it.signalBarTime != null &&
-            it.signalBarTime == signal.barTime } -> "این کندل قبلاً معامله شده است"
-        else -> IctEntryRules.assess(market).reason
-    }
+    val positionBlocker = com.aurum.edge.core.PaperPortfolioPolicy.blocker(
+        trades, market.symbol, settings.accountBalance, 0.0, signal?.barTime)
 
     Column(
         modifier = Modifier
@@ -93,6 +87,24 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             .verticalScroll(rememberScrollState())
             .padding(bottom = 14.dp),
     ) {
+
+        SectionCard("Decision Log · دلیل هر بررسی", "روی همین دستگاه؛ بدون کلید API یا سفارش واقعی") {
+            if (decisionLog.isEmpty()) Text("هنوز بررسی ثبت نشده است")
+            if (decisionLog.size > 20) OutlinedButton(onClick = { showAllDecisions = !showAllDecisions }) {
+                Text(if (showAllDecisions) "نمایش ۲۰ مورد اخیر" else "نمایش تمام ${decisionLog.size} بررسی ذخیره‌شده")
+            }
+            decisionLog.take(if (showAllDecisions) 500 else 20).forEach { record ->
+                Text("${record.symbol} · ${record.interval} · ${formatTime(record.checkedAt)} · " +
+                    "${record.action} · ${record.score?.toInt() ?: "—"}/۱۰۰",
+                    style = MaterialTheme.typography.bodySmall)
+                Text(record.reason, style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary)
+                record.layers.forEach { layer ->
+                    Text("${layer.name}: ${layer.points ?: "—"}/۲۵ · ${layer.status} · ${layer.detail}",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                }
+            }
+        }
 
         // ── ۱. بنر وضعیت ۴ دسته دارایی (رمزارز، فارکس، طلا/کالا، سهام) در ۴ مستطیل بالا ──
         com.aurum.edge.ui.components.AssetClass4SlotsBanner(
@@ -151,11 +163,11 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
         // ── ۶. چک‌لیست کامل شواهد و شروط تکنیکال نماد انتخابی ──────────────
         signal?.let { s ->
             SectionCard(
-                title = "چک‌لیست شروط تکنیکال ایچیموکو و پرایس‌اکشن · ${market.symbol}",
-                subtitle = "ابر کومو ۸/۲۴/۷۲، تقاطع TK، آزادی ۲۴ دوره‌ای چیکو، فیلتر ضد رنج، مومنتوم و تراز MTF",
+                title = "چهار لایهٔ امتیاز فنی · ${market.symbol}",
+                subtitle = "EMA/ایچیموکو · RSI/MACD · حمایت/مقاومت · هفت بازهٔ M1 تا D1",
                 trailing = {
                     val count = s.confluence.count { it.ok }
-                    Pill("$count از ${s.confluence.size} تایید", if (count == s.confluence.size) AurumColors.Green else AurumColors.Gold)
+                    Pill("${s.confidence.toInt()}/۱۰۰ · $count لایهٔ کامل", if (s.isActionable) AurumColors.Green else AurumColors.Gold)
                 },
             ) {
                 if (s.confluence.isEmpty()) {
@@ -168,7 +180,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             }
         }
 
-        // ── ۷. وضعیت پایش پیوسته ۵۰+ نماد در پس‌زمینه (رادار خودکار) ───────
+        // ── ۷. وضعیت پایش واچ‌لیست فعال در پس‌زمینه (رادار خودکار) ───────
         PairRadarSummaryCard(
             scan = scanState,
             onScan = { viewModel.scanPairs() },
@@ -210,8 +222,7 @@ private fun MarketPlaybookCard(decision: PlaybookDecision?, symbol: String) {
             Text("اندازه‌گیری‌های واقعی: ER=${fmt2(decision.efficiencyRatio)} · ATR/میانه=${fmt2(decision.atrRatio)} · اسپرد/ATR=" +
                     (decision.spreadAtrRatio?.let { fmt2(it * 100.0) + "٪" } ?: "—"),
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            Text("پارامترهای مجاز این متد: کف امتیاز ${decision.minScore} · کف اطمینان ${decision.minConfidence.toInt()}٪ · " +
-                    "R:R بین ${fmt2(decision.rrMin)} و ${fmt2(decision.rrMax)} · استاپ بین ${fmt2(decision.stopAtrMin)} و ${fmt2(decision.stopAtrMax)} برابر ATR",
+            Text("خوانش پژوهشی رژیم بازار (نه قفل ورود): کف R:R اولیهٔ واقعی ۱٫۵ است؛ خروج ثابت یا سقف نهایی برای معاملات V1 وجود ندارد.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             Text("کف سود واقعی: ${fmt2(decision.minRewardBps)}bps و حداقل ${fmt2(decision.costRewardMultiple)} برابر هزینهٔ رفت‌وبرگشت · مرجع هزینه: ${decision.venue}",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
@@ -220,7 +231,7 @@ private fun MarketPlaybookCard(decision: PlaybookDecision?, symbol: String) {
                 Text("⛔ $blocker", style = MaterialTheme.typography.labelSmall, color = AurumColors.Red)
             }
             if (decision.allowed) {
-                Text("✅ ورود با این متد مجاز است؛ بقیهٔ گیت‌ها (کراس تأییدشده، MTF، ICT، تازگی قیمت، مارجین و اسپرد) جداگانه بررسی می‌شوند.",
+                Text("این خوانش صرفاً زمینهٔ بازار است؛ امتیاز چهارلایه، تازگی داده و قفل‌های مطلق مرجع ورود هستند.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             }
         }

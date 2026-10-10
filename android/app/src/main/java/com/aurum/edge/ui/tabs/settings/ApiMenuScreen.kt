@@ -41,7 +41,7 @@ fun ApiMenuScreen(viewModel: AurumViewModel, settings: AppSettings, onForexSetti
             }
         }
         SectionCard("خبر · Forex Factory", "تقویم عمومی بی‌کلید؛ FXStreet/BLS مکمل") {
-            Text("ترجمهٔ درون‌اپ روی گوشی انجام می‌شود. AI خبر اگر سرور/کلید و شاهد واقعی داشته باشد فقط تأیید سبز کمکی می‌دهد؛ نبود آن امتیاز ۸ شرط فنی را منفی نمی‌کند.",
+            Text("ترجمهٔ درون‌اپ روی گوشی انجام می‌شود. AI خبر اگر سرور/کلید و شاهد واقعی داشته باشد فقط تأیید سبز کمکی می‌دهد؛ نبود آن امتیاز چهار لایهٔ فنی را منفی نمی‌کند.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
         }
         Text("۲۰ تا ۶۰ درخواست وب در دقیقه در پلن‌های عمومی پشتیبانی نمی‌شود؛ فید WebSocket در صورت دسترسی و بازبودن بازار به‌کار می‌رود؛ اگر کلید/پلن WebSocket ندهد، فید زندهٔ جایگزینِ برچسب‌دار استفاده می‌شود. سهمیه/۴۲۹ یا قطع منبع هرگز قیمت یا مجوز ساختگی تولید نمی‌کند.",
@@ -86,7 +86,7 @@ private fun AiStatusCard(viewModel: AurumViewModel, settings: AppSettings) {
                 color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 4.dp))
         }
         Text(
-            "AI هیچ‌وقت سیگنال نمی‌سازد و هیچ معامله‌ای باز نمی‌کند. ورود و خروج فقط با ۸ شرط فنی ایچیموکو تعیین می‌شود.",
+            "AI هیچ‌وقت سیگنال نمی‌سازد و هیچ معامله‌ای باز نمی‌کند. ورود با موتور چهارلایه تعیین می‌شود؛ AI فقط وتو می‌کند و پارامترها را عوض نمی‌کند.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
             modifier = Modifier.padding(top = 8.dp),
         )

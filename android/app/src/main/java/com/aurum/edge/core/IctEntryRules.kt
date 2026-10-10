@@ -4,7 +4,7 @@ import com.aurum.edge.data.MarketState
 import com.aurum.edge.engine.IctRangeAnalyzer
 import kotlin.math.abs
 
-/** Additional, conservative PAPER-only gate. Never replaces the 8 technical + AI-news checks. */
+/** Additional, conservative PAPER-only gate. Never replaces the seven technical checks; news remains journal context. */
 object IctEntryRules {
     data class Decision(
         val reason: String?,
@@ -16,8 +16,8 @@ object IctEntryRules {
 
     /**
      * Plan an SL beyond the swept wick and TP *before* the opposing range line. This
-     * changes only a PAPER signal plan shown on the chart; the original 9 confluence
-     * items and fresh-price/news requirements are never changed. If a safe plan cannot
+     * changes only a PAPER signal plan shown on the chart; the seven technical conditions and optional news
+     * annotation and fresh-price/news requirements are never changed. If a safe plan cannot
      * keep >=1.5R, the original is retained and [assess] blocks its entry.
      */
     fun withSafePlan(market: MarketState): MarketState {

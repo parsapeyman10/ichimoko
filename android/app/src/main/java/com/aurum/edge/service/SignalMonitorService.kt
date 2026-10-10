@@ -320,7 +320,10 @@ class SignalMonitorService : Service() {
                 // Notify with rich details on EVERY newly opened trade (even if user is in-app)
                 trades.filter { it.isOpen }.forEach { trade ->
                     if (notifiedOpenTrades.add(trade.id)) {
-                        Notifier.notifyTradeOpened(this@SignalMonitorService, trade, currentSettings.alertSoundUri)
+                        if (trade.autoOpened) Notifier.notifyRecordedAutoEntry(
+                            this@SignalMonitorService, trade, currentSettings.alertSoundUri)
+                        else Notifier.notifyTradeOpened(
+                            this@SignalMonitorService, trade, currentSettings.alertSoundUri)
                     }
                 }
                 // Notify on trade closed / settled (TP, SL, manual close)

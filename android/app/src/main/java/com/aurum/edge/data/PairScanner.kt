@@ -1,6 +1,5 @@
 package com.aurum.edge.data
 
-import android.content.Context
 import android.os.SystemClock
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.FeedMode
@@ -21,7 +20,6 @@ import com.aurum.edge.core.SignalAction
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.engine.SignalEngine
-import com.aurum.edge.notify.Notifier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -83,8 +81,8 @@ data class PairScanState(
 )
 
 /**
- * Continuous 50+ instrument scanner and ranking engine:
- * Evaluates at least 50 global instruments (Commodities, Forex, Global Shares/Stocks, Crypto),
+ * Continuous editable-watchlist scanner and ranking view:
+ * Evaluates supported symbols across commodities, FX, shares/indices and crypto,
  * ranks them based on Ichimoku confluence, MTF alignment, and R:R ratio,
  * isolates the Top 3 best setups, and selects the #1 best trade.
  */
@@ -97,23 +95,16 @@ class PairScanner(
     private val opportunities: PaperOpportunityStore,
     private val scope: CoroutineScope,
     private val dukascopyHistory: DukascopyHistoryClient = DukascopyHistoryClient(),
-    private val context: Context? = null,
+    private val decisionLog: DecisionLogStore? = null,
 ) {
     private val mutex = Mutex()
+    private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client)
     /** Trends measured during the running sweep; published as one market-wide read at the end. */
     private val trendSample = mutableListOf<SymbolTrend>()
     private var lastSweepElapsed = 0L
-    private var autoTrader: PaperAutoTrader? = null
     private val _state = MutableStateFlow(PairScanState(
-        statuses = WatchCatalog.scannerSymbols.map { PairScanStatus(it, "pending", "هنوز اسکن نشده") }))
+        statuses = com.aurum.edge.core.V1Universe.defaults.map { PairScanStatus(it, "pending", "هنوز اسکن نشده") }))
     val state: StateFlow<PairScanState> = _state.asStateFlow()
-
-    fun attachAutoTrader(trader: PaperAutoTrader) {
-        autoTrader = trader
-        // «روند کلی بازار» از همین پویشِ پیوسته می‌آید؛ پس آخرین خوانشِ عرض بازار/دلار/جوّ ریسک
-        // در لحظهٔ ورود خودکار هم در دسترس همان گیتِ روند قرار می‌گیرد.
-        trader.attachTrendSource { _state.value.marketTrend }
-    }
 
     fun refreshNow(minIntervalMs: Long = SWEEP_PERIOD_MS) {
         scope.launch { runSweep(minIntervalMs, onCandidate = null) }
@@ -154,7 +145,7 @@ class PairScanner(
 
     private fun rankOpportunities(statuses: List<PairScanStatus>): List<PairScanStatus> {
         return statuses
-            .filter { it.price != null && (it.state == "candidate" || (it.technicalScore ?: 0) >= 5) }
+            .filter { it.price != null && it.state == "candidate" }
             .sortedWith(
                 compareByDescending<PairScanStatus> { it.state == "candidate" }
                     .thenByDescending { it.playbookAllowed == true }
@@ -193,6 +184,10 @@ class PairScanner(
             trendAligned: Boolean? = null,
             trendNote: String? = null,
         ) {
+            decisionLog?.append(symbol, settings.read().interval.label, state, detail,
+                signal = if (conditions.isNotEmpty()) com.aurum.edge.core.Signal(
+                    action ?: SignalAction.NO_TRADE, confidence ?: 0.0, confluence = conditions)
+                    else null, dedupe = false)
             statuses[symbol] = PairScanStatus(
                 symbol = symbol,
                 state = state,
@@ -226,14 +221,18 @@ class PairScanner(
         }
 
         val config = settings.read()
+        _state.value = _state.value.copy(statuses = config.activeWatchlist.map { symbol ->
+            _state.value.statuses.firstOrNull { it.symbol == symbol }
+                ?: PairScanStatus(symbol, "pending", "هنوز اسکن نشده")
+        })
         val interval: Interval = config.interval
         val headlines = news.state.value
         val trades = journal.trades.value
 
-        WatchCatalog.scannerSymbols.forEachIndexed { index, symbol ->
+        config.activeWatchlist.forEachIndexed { index, symbol ->
             if (index > 0) delay(PAIR_SPACING_MS)
             val now = System.currentTimeMillis()
-            if (MarketHours.weekendClosedFor(symbol, now)) {
+            if (MarketHours.closedFor(symbol, now)) {
                 update(symbol, "closed", "بازار تعطیل است؛ اسکن موقتاً متوقف شد")
                 return@forEachIndexed
             }
@@ -260,7 +259,7 @@ class PairScanner(
                 }
             }
 
-            val candles = try {
+            val rawCandles = try {
                 if (config.hasKey) {
                     try {
                         client.fetchCandles(config.apiKey, symbol, interval, outputSize = HistoryPolicy.TARGET_CANDLES)
@@ -277,16 +276,17 @@ class PairScanner(
                 return@forEachIndexed
             }
 
-            if (candles.size < HistoryPolicy.TARGET_CANDLES) {
-                update(symbol, "error", "ناشر فقط ${candles.size} کندل داد؛ حداقل ${HistoryPolicy.TARGET_CANDLES} کندل لازم است")
+            // Provider flags can mark an in-progress bar as closed. Never score, settle or
+            // construct MTF snapshots from it, even when its OHLC parses correctly.
+            val candles = rawCandles.filter { it.closed && it.time + interval.millis <= now }
+            if (candles.size < SignalEngine.minBars(interval)) {
+                update(symbol, "error", "ناشر فقط ${candles.size} کندل بسته داد؛ حداقل ${SignalEngine.minBars(interval)} کندل لازم است")
                 return@forEachIndexed
             }
 
             val price = candles.lastOrNull()?.close
-            val lastClosed = candles.lastOrNull { it.closed }
-            if (price != null && price > 0.0) {
-                journal.settleTick(symbol, price, now)
-            }
+            val lastClosed = candles.lastOrNull { it.closed && it.time + interval.millis <= now }
+            // A REST candle close is not a live tick. Never settle a position as if it were one.
             if (lastClosed != null) {
                 journal.settle(lastClosed, symbol, now)
             }
@@ -305,25 +305,16 @@ class PairScanner(
             val playbook = withContext(Dispatchers.Default) {
                 runCatching { MarketPlaybook.assess(symbol, candles, interval, now) }.getOrNull()
             }
-            val playbookBlocker = if (playbook != null && !playbook.allowed) {
-                playbook.blockers.firstOrNull() ?: playbook.reasonFa
-            } else null
-            if (playbookBlocker != null && playbook != null) {
-                update(
-                    symbol = symbol,
-                    state = "blocked",
-                    detail = "متد بازار: ${playbook.method.label} — ${playbookBlocker.take(120)}",
-                    price = price,
-                    methodLabel = playbook.method.label,
-                    playbookAllowed = false,
-                    playbookReason = playbookBlocker.take(160),
-                    trend = trend,
-                )
-                return@forEachIndexed
-            }
+            // The playbook is context only; V1Scoring has the absolute market locks.
 
+            val frames = timeframeFeed.fetch(symbol, interval, candles, config.apiKey)
             val evaluated = withContext(Dispatchers.Default) {
-                runCatching { SignalEngine.evaluate(candles, interval, config.minConfidence, config.spreadPrice, config.signalProfile, config.activeStrategy) }.getOrNull()
+                runCatching {
+                    SignalEngine.evaluate(candles, interval, config.minConfidence, config.spreadPrice,
+                        config.signalProfile, config.activeStrategy, symbol,
+                        config.categoryStrategies[com.aurum.edge.core.AssetClass.of(symbol)]
+                            ?: com.aurum.edge.core.CategoryStrategy.HYBRID, frames)
+                }.getOrNull()
             }
             if (evaluated == null) {
                 update(symbol, "error", "ارزیابی سیگنال روی کندل‌های دریافتی ممکن نشد", price)
@@ -336,7 +327,7 @@ class PairScanner(
                 update(
                     symbol = symbol,
                     state = "no_signal",
-                    detail = if (score >= 5) "شواهد فنی $score از ۷؛ هنوز به آستانهٔ ورود نرسیده" else "بدون سیگنال؛ شواهد فنی $score از ۷",
+                    detail = if (combined.blockers.isNotEmpty()) "امتیاز ${combined.confidence.toInt()}/۱۰۰ زیر آستانه است · ${combined.blockers.joinToString("، ").take(120)}" else "بدون سیگنال؛ شواهد فنی $score از ۴ · ${combined.blockers.joinToString("، ").take(120)}",
                     price = price,
                     score = score,
                     action = combined.action,
@@ -366,59 +357,7 @@ class PairScanner(
                 }.getOrNull()
             }
             val aligned = alignment == TrendAlignment.WITH
-            if (trendGate != null && !trendGate.allowed) {
-                update(
-                    symbol = symbol,
-                    state = "blocked",
-                    detail = "روند بازار: ${(trendGate.blockerFa ?: "ورود خلاف جهتِ روندِ اندازه‌گیری‌شده").take(120)}",
-                    price = price,
-                    score = score,
-                    action = combined.action,
-                    confidence = combined.confidence,
-                    entry = combined.entry,
-                    sl = combined.stopLoss,
-                    tp = combined.takeProfit,
-                    rr = combined.riskReward,
-                    conditions = combined.confluence,
-                    methodLabel = playbook?.method?.label,
-                    playbookAllowed = playbook?.allowed,
-                    playbookReason = playbook?.reasonFa?.take(160),
-                    trend = trend,
-                    trendAligned = false,
-                    trendNote = trendGate.blockerFa?.take(200),
-                )
-                return@forEachIndexed
-            }
-
-            // The method also raises the confidence bar per market/session (thin weekend crypto,
-            // a range fade, an Asian session …). Below that bar the symbol is not "worthy".
-            val trendConfidenceAdd = trendGate?.minConfidenceAdd ?: 0.0
-            val requiredConfidence = (playbook?.minConfidence ?: config.minConfidence) + trendConfidenceAdd
-            if (playbook != null && combined.confidence < requiredConfidence) {
-                update(
-                    symbol = symbol,
-                    state = "blocked",
-                    detail = "متد ${playbook.method.label}: اطمینان ${combined.confidence.toInt()}٪ از کفِ " +
-                        "${requiredConfidence.toInt()}٪ این بازار/سشن کمتر است" +
-                        (if (trendConfidenceAdd > 0.0) " (لایهٔ روند +${trendConfidenceAdd.toInt()})" else ""),
-                    price = price,
-                    score = score,
-                    action = combined.action,
-                    confidence = combined.confidence,
-                    entry = combined.entry,
-                    sl = combined.stopLoss,
-                    tp = combined.takeProfit,
-                    rr = combined.riskReward,
-                    conditions = combined.confluence,
-                    methodLabel = playbook.method.label,
-                    playbookAllowed = true,
-                    playbookReason = playbook.reasonFa.take(160),
-                    trend = trend,
-                    trendAligned = aligned,
-                    trendNote = trendGate?.noteFa?.take(200),
-                )
-                return@forEachIndexed
-            }
+            // The four-layer user threshold is authoritative, not a second trend/session bar.
 
             val graceMs = interval.millis + 90_000L
             val market = MarketState(
@@ -432,12 +371,12 @@ class PairScanner(
                 runCatching { MtfAnalyzer.analyze(candles, interval) }.getOrNull()
             }
             val blocker = PaperAlertRules.blocker(market, config, headlines, trades, mtf,
-                System.currentTimeMillis(), allowedSymbols = WatchCatalog.scannerSymbols, barAgeGraceMs = graceMs)
+                System.currentTimeMillis(), allowedSymbols = config.activeWatchlist, barAgeGraceMs = graceMs)
             if (blocker != null) {
                 update(
                     symbol = symbol,
                     state = "blocked",
-                    detail = "سیگنال $score/۷ · ${blocker.take(120)}",
+                    detail = "سیگنال $score/۴ · ${blocker.take(120)}",
                     price = price,
                     score = score,
                     action = combined.action,
@@ -460,45 +399,24 @@ class PairScanner(
             val evidence = NewsConfluence.record(headlines, symbol)
             val ict = IctEntryRules.approvedEvidence(market, System.currentTimeMillis(), graceMs)
 
-            if (mtf?.veto == true) {
-                update(symbol = symbol, state = "blocked", detail = "تراز چندتایم‌فریم ورود را وتو کرده است: ${mtf.vetoReason}", price = price, score = score, conditions = combined.confluence, trend = trend, trendAligned = aligned)
-                return@forEachIndexed
-            }
 
             val item = runCatching {
-                val mtfRec = mtf?.let { MtfSnapshotRecord.from(it) } ?: MtfSnapshotRecord(
-                    baseInterval = market.interval.label,
-                    bias = "NEUTRAL",
-                    alignment = 1.0,
-                    buyCount = 0,
-                    sellCount = 0,
-                    neutralCount = 0,
-                    veto = false,
-                    advisory = "تایید",
-                    barTime = combined.barTime,
-                )
+                val mtfRec = MtfSnapshotRecord.from(mtf ?: error("نمایش MTF پایه موجود نیست"))
                 PaperOpportunity.from(combined, symbol, price ?: combined.entry ?: 0.0, mtfRec, evidence, ict)
             }.getOrNull()
 
-            if (item != null) {
-                val recorded = runCatching { opportunities.record(item) }.getOrDefault(false)
-                if (recorded) onCandidate?.invoke(item)
+            if (item == null) {
+                update(symbol = symbol, state = "blocked",
+                    detail = "دادهٔ MTF پایه برای نمایش فرصت موجود نیست",
+                    price = price, score = score, conditions = combined.confluence,
+                    trend = trend, trendAligned = aligned)
+                return@forEachIndexed
             }
+            val recorded = runCatching { opportunities.record(item) }.getOrDefault(false)
+            if (recorded) onCandidate?.invoke(item)
 
-            // Independent category auto-trading: each of the 4 asset categories (Crypto, Forex, Commodity, Stock)
-            // operates independently with 1 dedicated slot without blocking other categories.
-            val targetCategory = com.aurum.edge.core.AssetClass.of(symbol)
-            val currentOpenInClass = journal.trades.value.count { it.isOpen && com.aurum.edge.core.AssetClass.of(it.symbol) == targetCategory }
-            val totalOpen = journal.trades.value.count { it.isOpen }
-
-            if (config.autoPaperTrading && totalOpen < 4 && currentOpenInClass < targetCategory.maxSlots) {
-                runCatching {
-                    val openedTrade = autoTrader?.onMarketUpdate(market)
-                    if (openedTrade != null && context != null) {
-                        Notifier.notifyTradeOpened(context, openedTrade, config.alertSoundUri)
-                    }
-                }
-            }
+            // Radar history may suggest candidates, but cannot auto-open a trade without a
+            // separate fresh, verified quote in the selected live-market path.
             update(
                 symbol = symbol,
                 state = "candidate",

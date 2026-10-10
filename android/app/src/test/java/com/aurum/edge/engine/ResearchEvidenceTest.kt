@@ -47,6 +47,13 @@ class ResearchEvidenceTest {
         autoOpened = true, signalBarTime = barTime, mtf = mtf, newsEvidence = news,
         entryConditions = conditions, priceAction = ict)
 
+    @Test fun `current seven-condition record is recognized without inventing an eighth`() {
+        val current = paper.copy(entryConditions = conditions.take(7))
+        assertTrue(ResearchEvidence.hasRecordedSignalEvidence(current))
+        assertFalse(ResearchEvidence.hasRecordedSignalEvidence(current.copy(
+            entryConditions = current.entryConditions.dropLast(1))))
+    }
+
     @Test fun `manual older unverified and invalid news records never enter recorded signal group`() {
         assertTrue(ResearchEvidence.hasRecordedNineWay(paper))
         val manual = paper.copy(id = "manual", autoOpened = false, signalBarTime = null,

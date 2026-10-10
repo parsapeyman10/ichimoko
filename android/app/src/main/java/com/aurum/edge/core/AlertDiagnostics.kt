@@ -11,7 +11,7 @@ import com.aurum.edge.engine.SignalEngine
 enum class AlertCheckKind(val label: String) {
     KEY("منبع بازار"), MARKET("قیمت واقعی تازه"), HISTORY("کندل بسته"),
     MONITOR("سرویس پایش"), APP_ALERT("هشدار در اپ"), ANDROID_ALERT("اعلان اندروید"),
-    STORAGE("فایل‌های هشدار/ژورنال"), AI_NEWS("خبر نزدیک برای ژورنال"), NINE_WAY("۸/۸ فنی، ICT و MTF"),
+    STORAGE("فایل‌های هشدار/ژورنال"), AI_NEWS("خبر نزدیک برای ژورنال"), NINE_WAY("چهار لایهٔ فنی و هفت بازه"),
     SCAN("اسکن پیوستهٔ نمادها"),
     TREND("روند کلی بازار"),
 }
@@ -34,7 +34,7 @@ object AlertDiagnostics {
             market.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
             FeedLiveness.hasRecentReceipt(market.feed, now)
         val minBars = SignalEngine.minBars(market.interval)
-        // News is now journal-mining context only. It must never erase or block a paper signal.
+        // Missing news is context; a validated opposing AI model can veto a paper signal.
         val calendarFresh = news.calendarCheckedAt?.let { now - it in 0L..1_200_000L } == true
         val selectedVerdict = news.aiBySymbol[market.symbol] ?: news.ai.takeIf { it.symbol == market.symbol }
         val modelFresh = selectedVerdict?.checkedAt?.let { at ->
@@ -43,8 +43,8 @@ object AlertDiagnostics {
         val sourcesOnline = news.sources.isNotEmpty() && news.sources.all { it.state == "online" } &&
             news.sources.any { it.feed == FOREX_CALENDAR_SOURCE_URL }
         val newsConfigured = settings.newsBaseUrl.isNotBlank() || settings.hasClientNewsAi
-        val noNewsVeto = true
         val signal = market.signal
+        val noNewsVeto = signal?.blockers?.none { it.contains("وتوی AI") } != false
         val entryBlocker = if (signal?.isActionable == true)
             PaperAlertRules.blocker(market, settings, news, trades, mtf, now)
         else signal?.blockers?.firstOrNull() ?: "برای این کندل سیگنال فنی تأییدشده موجود نیست"
@@ -64,29 +64,9 @@ object AlertDiagnostics {
                     "${it.dollarBias.label} · جوّ ${it.riskTone.label}"
             } ?: " · روند کلی بازار: هنوز از پویشِ نمادها اندازه گرفته نشد")
         }
-        val trendSide = signal?.takeIf { it.isActionable }?.action
-        val trendCheck = if (trendSide == null) {
-            AlertCheck(AlertCheckKind.TREND, true, "سیگنال قابل‌اقدامی نیست تا با روند سنجیده شود · $trendSummary")
-        } else {
-            val trendMethod = runCatching {
-                MarketPlaybook.assess(market.symbol, market.candles, market.interval, now).method
-            }.getOrNull()
-            val trendGate = runCatching {
-                MarketTrend.entryGate(trendSide, trendMethod, trendSymbol, trendOverall)
-            }.getOrNull()
-            when {
-                trendGate == null -> AlertCheck(AlertCheckKind.TREND, true,
-                    "لایهٔ روند ارزیابی نشد؛ ورود با همان آستانه‌های قبلی سنجیده می‌شود · $trendSummary")
-                !trendGate.allowed -> AlertCheck(AlertCheckKind.TREND, false,
-                    "${MarketTrend.sideLabel(trendSide)} با روندِ اندازه‌گیری‌شده نمی‌خواند: " +
-                        (trendGate.blockerFa ?: "—"))
-                trendGate.minConfidenceAdd > 0.0 -> AlertCheck(AlertCheckKind.TREND, true,
-                    "${MarketTrend.sideLabel(trendSide)} مسدود نشد ولی کف اطمینان " +
-                        "+${trendGate.minConfidenceAdd.toInt()} رفت · $trendSummary")
-                else -> AlertCheck(AlertCheckKind.TREND, true,
-                    "${MarketTrend.sideLabel(trendSide)} هم‌جهت با روندِ اندازه‌گیری‌شده است · $trendSummary")
-            }
-        }
+        // Breadth/trend is context, not a fifth V1 gate or a secret threshold increase.
+        val trendCheck = AlertCheck(AlertCheckKind.TREND, true,
+            "زمینهٔ بازار (نه قفل ورود): $trendSummary")
 
         return listOf(
             AlertCheck(AlertCheckKind.KEY, settings.hasKey || market.closedCount >= HistoryPolicy.TARGET_CANDLES,
@@ -105,7 +85,7 @@ object AlertDiagnostics {
                 }),
             AlertCheck(AlertCheckKind.APP_ALERT, settings.notifyOnSignal,
                 if (settings.notifyOnSignal) "هشدار کاندیدا فعال است؛ ورود خودکار کاغذی برای آن لازم نیست" else
-                    "خاموش است؛ گزینهٔ هشدار کاندیدای ۸/۸ فنی را در تنظیمات فعال کنید"),
+                    "خاموش است؛ گزینهٔ هشدار کاندیدای چهارلایهٔ فنی را در تنظیمات فعال کنید"),
             AlertCheck(AlertCheckKind.ANDROID_ALERT, androidNotificationsReady,
                 if (androidNotificationsReady) "مجوز و کانال باز هستند؛ نمایش/صدا و مزاحم‌نشدن را با اعلان آزمایشی روی گوشی بررسی کنید" else
                     "مجوز اعلان یا کانال هشدار بسته است؛ در تنظیمات اعلان آزمایشی بفرستید"),
@@ -113,6 +93,8 @@ object AlertDiagnostics {
                 opportunityError ?: journalError ?: "خطای فایل محلی گزارش نشده؛ فرصت‌ها باید قبل از اعلان ثبت شوند"),
             AlertCheck(AlertCheckKind.AI_NEWS, noNewsVeto,
                 when {
+                    !noNewsVeto -> signal?.blockers?.lastOrNull { it.contains("وتوی AI") }
+                        ?: "وتوی AI معتبر: ورود کاغذی متوقف شد"
                     news.gate == NewsGate.BLOCKED || market.symbol in news.vetoedSymbols ->
                         "خبر/تقویم پرریسک دیده شده: ${news.reason}؛ معاملهٔ کاغذی را مسدود نمی‌کند و فقط ثبت تحلیلی می‌شود"
                     news.loading -> "خبر در حال بررسی است؛ ورود کاغذی فقط با شروط فنی/آپشن‌ها سنجیده می‌شود"
@@ -120,7 +102,7 @@ object AlertDiagnostics {
                     !newsConfigured -> "مدل خبر تنظیم نشده؛ خبر فقط نمایش/هشدار تقویمی است، نه شرط امتیاز فنی"
                     !sourcesOnline || !calendarFresh -> "خوراک/تقویم کامل یا تازه نیست؛ خبر UNKNOWN است، نه امتیاز منفی فنی"
                     selectedVerdict?.status == "AVAILABLE" && modelFresh ->
-                        "AI خبر برای ${market.symbol}: ${selectedVerdict.direction} با ${selectedVerdict.confidence.toInt()}٪؛ فقط همراه معامله در ژورنال داده‌کاوی می‌شود"
+                        "AI خبر برای ${market.symbol}: ${selectedVerdict.direction} با ${selectedVerdict.confidence.toInt()}٪؛ تعارض معتبر جهت می‌تواند وتو کند"
                     else -> "خبر معیار تأییدی کامل ندارد؛ شرط ورود نیست و فقط زمینهٔ ژورنال/آموزش است"
                 }),
             AlertCheck(AlertCheckKind.SCAN,

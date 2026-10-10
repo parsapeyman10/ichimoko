@@ -78,8 +78,8 @@ object PaperOrderRules {
         }
         require(entry.isFinite() && stop.isFinite() && target.isFinite() &&
             entry > 0.0 && stop > 0.0 && target > 0.0) { "قیمت یا حد ضرر/سود معتبر نیست" }
-        require(balance.isFinite() && balance >= 10.0 && riskPercent.isFinite() && riskPercent in 0.1..5.0) {
-            "موجودی یا درصد ریسک معتبر نیست (حداکثر ۵٪)"
+        require(balance.isFinite() && balance >= 10.0 && riskPercent.isFinite() && riskPercent in 0.1..0.5) {
+            "موجودی یا درصد ریسک معتبر نیست (حداکثر ۰٫۵٪)"
         }
         require((side == SignalAction.BUY && stop < entry && target > entry) ||
             (side == SignalAction.SELL && stop > entry && target < entry)) {
@@ -93,13 +93,20 @@ object PaperOrderRules {
                 String.format(java.util.Locale.US, "%.6f", spec.minStopDistance(entry)) + " است"
         }
         val rr = abs(target - entry) / distance
-        require(rr.isFinite() && rr >= 1.2) { "نسبت سود به زیان باید حداقل ۱٫۲ باشد" }
+        require(rr.isFinite() && rr >= 1.5) { "نسبت سود به زیان باید حداقل ۱٫۵ باشد" }
         val budget = balance * riskPercent / 100.0
-        val isUsdBase = (symbol.startsWith("USD/") || symbol.startsWith("USD")) && USD_CROSS_QUOTES.any { symbol.endsWith(it) }
-        val quantity = floor(
-            (if (!isUsdBase) budget / distance else budget * entry / distance) * 1_000_000.0) / 1_000_000.0
+        // A 0.5% risk includes the complete round-trip cost, not just the stop distance.
+        // USD/JPY spread is JPY per unit and converts at this pair's own entry price;
+        // FX lot commission is already quoted in dollars.
+        val stopUsdPerUnit = quotePnlToUsd(symbol, distance, entry)
+        val costUsdPerUnit = spec.commissionUsd(entry, 1.0) * 2.0 +
+            quotePnlToUsd(symbol, spec.spreadCostUsd(entry, 1.0), entry)
+        require(stopUsdPerUnit.isFinite() && stopUsdPerUnit > 0.0 &&
+            costUsdPerUnit.isFinite() && costUsdPerUnit >= 0.0) { "ریسک و هزینه معتبر نیست" }
+        val quantity = floor(budget / (stopUsdPerUnit + costUsdPerUnit) * 1_000_000.0) / 1_000_000.0
         require(quantity.isFinite() && quantity >= 0.000001) { "حجم با بودجهٔ ریسک فعلی بسیار کوچک است" }
-        val actualRisk = if (!isUsdBase) quantity * distance else quantity * distance / entry
+        val actualRisk = quantity * stopUsdPerUnit
+        val isUsdBase = (symbol.startsWith("USD/") || symbol.startsWith("USD")) && USD_CROSS_QUOTES.any { symbol.endsWith(it) }
         val notional = if (!isUsdBase) quantity * entry else quantity
         require(actualRisk.isFinite() && actualRisk <= budget + 1e-4) {
             "ریسک پوزیشن از بودجه تعیین‌شده فراتر می‌رود"
@@ -114,8 +121,12 @@ object PaperOrderRules {
                 "$ بیشتر است؛ با اهرم واقعی ۱:" + leverage + " این پوزیشن باز نمی‌شود"
         }
         val commission = kotlin.math.round((spec.commissionUsd(entry, quantity) * 2.0) * 10000.0) / 10000.0
-        val spreadCost = kotlin.math.round(spec.spreadCostUsd(entry, quantity) * 10000.0) / 10000.0
+        val spreadCost = kotlin.math.round(quotePnlToUsd(symbol,
+            spec.spreadCostUsd(entry, quantity), entry) * 10000.0) / 10000.0
         val roundTrip = commission + spreadCost
+        require(actualRisk + roundTrip <= budget + 1e-3) {
+            "ریسک توقف به‌اضافهٔ کارمزد/اسپرد از ۰٫۵٪ فراتر می‌رود"
+        }
         val costBps = if (notional > 0.0) kotlin.math.round((roundTrip / notional) * 10_000.0 * 100.0) / 100.0 else 0.0
         // ── کف سودِ واقعیِ هر بازار ────────────────────────────────────────────
         // یک هدفِ کوچک‌تر از «کف bps همان بازار» یا «چند برابر هزینهٔ واقعی رفت‌وبرگشت»، حتی اگر

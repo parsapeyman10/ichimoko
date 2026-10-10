@@ -2,6 +2,7 @@ package com.aurum.edge.engine
 
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.core.TechnicalEvidence
 import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.data.FOREX_CALENDAR_SOURCE_URL
 import kotlin.math.abs
@@ -114,10 +115,10 @@ object ResearchEvidence {
     }
 
     /** Recorded evidence, not a fresh verification of a historical publisher or AI model. */
-    fun hasRecordedNineWay(trade: PaperTrade): Boolean {
+    fun hasRecordedSignalEvidence(trade: PaperTrade): Boolean {
         val bar = trade.signalBarTime ?: return false
         val news = trade.newsEvidence
-        val ict = trade.priceAction ?: return false
+        val ict = trade.priceAction
         val technicalConditions = trade.entryConditions.filterNot { it.name == NewsConfluence.NEWS_LABEL }
         val newsEvidenceOk = news == null || (
             news.model.isNotBlank() && news.model != "deterministic-fallback" &&
@@ -128,19 +129,24 @@ object ResearchEvidence {
                 news.evidence.isNotEmpty() && news.evidence.all { it.id.isNotBlank() &&
                     it.source.isNotBlank() && it.url.startsWith("https://") &&
                     news.checkedAt - it.publishedAt in 0L..10_800_000L })
-        return trade.symbol == "XAU/USD" && trade.unit == "oz" &&
-            trade.action != SignalAction.NO_TRADE && bar > 0L &&
+        val common = trade.action != SignalAction.NO_TRADE && bar > 0L && newsEvidenceOk &&
+            TechnicalEvidence.confirmedRecords(technicalConditions)
+        if (technicalConditions.size == TechnicalEvidence.CURRENT_COUNT)
+            return common && trade.confidence in 60.0..100.0 && trade.initialStopLoss != null
+        // Legacy 7/8-condition records are readable, not used as authorization for V1 entry.
+        return common && trade.symbol == "XAU/USD" && trade.unit == "oz" &&
             trade.mtf?.let { !it.veto && it.barTime == bar } == true &&
-            ict.symbol == trade.symbol && ict.action == trade.action && ict.barTime == bar &&
-            trade.openedAt - ict.checkedAt in 0L..180_000L && newsEvidenceOk &&
-            technicalConditions.size >= 8 &&
-            technicalConditions.take(8).all { it.status == "CONFIRMED" }
+            ict?.let { it.symbol == trade.symbol && it.action == trade.action && it.barTime == bar &&
+                trade.openedAt - it.checkedAt in 0L..180_000L } == true
     }
+
+    /** Compatibility for callers reading eight-condition historical journal records. */
+    fun hasRecordedNineWay(trade: PaperTrade): Boolean = hasRecordedSignalEvidence(trade)
 
     /** A hypothetical deduction from recorded paper P/L, not a broker fill or a journal edit. */
     fun paperCostWhatIf(trades: List<PaperTrade>, spread: Double, commissionPerOz: Double): PaperCostWhatIf? {
         if (!spread.isFinite() || spread < 0.0 || !commissionPerOz.isFinite() || commissionPerOz < 0.0) return null
-        val settled = trades.filter { hasRecordedNineWay(it) && !it.isOpen && it.pnlUsd?.isFinite() == true &&
+        val settled = trades.filter { hasRecordedSignalEvidence(it) && !it.isOpen && it.pnlUsd?.isFinite() == true &&
             it.positionOz.isFinite() && it.positionOz > 0.0 }
         if (settled.isEmpty()) return null
         val gross = settled.sumOf { it.pnlUsd!! }

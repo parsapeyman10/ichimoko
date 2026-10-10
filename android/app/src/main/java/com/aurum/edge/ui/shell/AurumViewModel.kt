@@ -25,6 +25,8 @@ import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PaperOrderRules
+import com.aurum.edge.core.PaperPortfolioPolicy
+import com.aurum.edge.core.TechnicalEvidence
 import com.aurum.edge.core.PaperTicket
 import com.aurum.edge.core.ReplayDecision
 import com.aurum.edge.core.Signal
@@ -81,6 +83,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val forexCalendar = container.forexCalendar.state
     /** All-pairs radar: periodic online candle sweep status of every catalog pair. */
     val pairScan = container.pairScanner.state
+    val decisionLog = container.decisionLog.records
     /** The AI trading companion's latest strictly-validated opinion (analysis, never a signal). */
     val traderOpinion = container.traderAdvisor.state
     /** Reachability of the model, checked before any AI judgement of a trade. */
@@ -146,7 +149,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     /**
      * «چرا معامله/هشدار نداریم؟» — the honest prerequisites (feed, history, monitor, notification
-     * channels, storage, news/AI, the 8/8 technical gate and the CONTINUOUS SYMBOL SCAN itself),
+     * channels, storage, news/AI, the current seven-condition technical gate and the CONTINUOUS SYMBOL SCAN itself),
      * computed from live app state.
      * Green checks are prerequisites, never a forecast.
      */
@@ -518,9 +521,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
      */
     fun selectChartSymbol(symbol: String) {
         if (symbol == settings.value.symbol) return
-        val valid = symbol in WatchCatalog.chartSymbols ||
-            symbol in WatchCatalog.scannerSymbols ||
-            CryptoCatalog.isCrypto(symbol)
+        val valid = com.aurum.edge.core.V1Universe.valid(symbol)
         if (!valid) {
             _toast.value = "نماد $symbol در کاتالوگ نمادها پیدا نشد"
             return
@@ -570,11 +571,23 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     private var marketSaveInFlight = false
 
-    fun saveRiskPercent(value: Double) = container.settingsStore.update { it.copy(riskPercent = value.coerceIn(0.1, 5.0)) }
+    fun setWatchlist(symbols: List<String>) {
+        container.settingsStore.update {
+            it.copy(activeWatchlist = com.aurum.edge.core.V1Universe.watchlist(symbols))
+        }
+        container.pairScanner.refreshNow(minIntervalMs = 0L)
+    }
+
+    fun setCategoryStrategy(category: com.aurum.edge.core.AssetClass,
+                            mode: com.aurum.edge.core.CategoryStrategy) = container.settingsStore.update {
+        it.copy(categoryStrategies = it.categoryStrategies + (category to mode))
+    }
+
+    fun saveRiskPercent(value: Double) = container.settingsStore.update { it.copy(riskPercent = value.coerceIn(0.1, 0.5)) }
 
     fun saveBalance(value: Double) = container.settingsStore.update { it.copy(accountBalance = value.coerceAtLeast(10.0)) }
 
-    fun saveMinConfidence(value: Double) = container.settingsStore.update { it.copy(minConfidence = value.coerceIn(72.0, 95.0)) }
+    fun saveMinConfidence(value: Double) = container.settingsStore.update { it.copy(minConfidence = value.coerceIn(60.0, 95.0)) }
 
     /** Cost assumptions are the user's responsibility; they are echoed in every report. */
     fun saveSpread(value: Double) = container.settingsStore.update { it.copy(spreadPrice = value.coerceIn(0.0, 5.0)) }
@@ -627,7 +640,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun setAutoPaperTrading(enabled: Boolean) {
         container.settingsStore.update { it.copy(autoPaperTrading = enabled) }
         if (enabled) container.news.refreshNow()
-        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ فقط با قواعد کامل موتور، قیمت زنده و ICT/MTF ثبت می‌شود"
+        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ فقط با موتور چهارلایه، هفت بازهٔ واقعی و قفل‌های ریسک/AI ثبت می‌شود"
             else "معاملهٔ خودکار کاغذی خاموش شد"
     }
 
@@ -652,6 +665,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     private fun entryBlocker(current: MarketState): String? {
         freshPaperQuote(current)?.let { return it }
+        if (com.aurum.edge.core.MarketHours.closedFor(current.symbol)) return "بازار بسته است"
+        val candidate = current.signal
+        if (candidate?.isActionable != true || !TechnicalEvidence.confirmed(candidate))
+            return candidate?.blockers?.joinToString("، ") ?: "سیگنال چهارلایهٔ معتبر وجود ندارد"
         if (settings.value.pauseOnNews) {
             val checked = news.value.lastCheckedAt
             if (news.value.gate != NewsGate.CLEAR || checked == null ||
@@ -666,14 +683,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 return "قیمت منابع مستقل با هم تعارض دارد"
             }
         }
-        if (trades.value.count { it.isOpen } >= 3) return "سقف ۳ معاملهٔ همزمان باز پر شده است (${trades.value.count { it.isOpen }}/3)"
-        if (trades.value.any { it.isOpen && it.symbol == current.symbol }) return "برای این نماد یک پوزیشن کاغذی باز است"
+        PaperPortfolioPolicy.blocker(trades.value, current.symbol, settings.value.accountBalance, 0.0)?.let { return it }
         return null
     }
 
     fun previewManualTicket(side: SignalAction, stop: Double?, target: Double?): Result<PaperTicket> = runCatching {
         val current = market.value
         entryBlocker(current)?.let { throw IllegalArgumentException(it) }
+        require(current.signal?.action == side) { "جهت انتخابی باید با سیگنال چهارلایه برابر باشد" }
         PaperOrderRules.preview(side, current.symbol, current.lastPrice!!,
             stop ?: throw IllegalArgumentException("حد ضرر را وارد کنید"),
             target ?: throw IllegalArgumentException("حد سود را وارد کنید"),
@@ -684,9 +701,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun openManualPaperTrade(side: SignalAction, stop: Double, target: Double,
                              expectedPrice: Double, expectedSymbol: String) {
-        val signal = Signal(action = side, confidence = 0.0, stopLoss = stop,
-            takeProfit = target, interval = market.value.interval)
-        submitPaper(signal, manual = true, expectedPrice = expectedPrice, expectedSymbol = expectedSymbol)
+        val verified = market.value.signal
+        if (verified?.isActionable != true || verified.action != side ||
+            !TechnicalEvidence.confirmed(verified)) {
+            _toast.value = "ورود دستی بدون سیگنال چهارلایهٔ هم‌جهت ممنوع است"
+            return
+        }
+        submitPaper(verified.copy(stopLoss = stop, takeProfit = target),
+            manual = true, expectedPrice = expectedPrice, expectedSymbol = expectedSymbol)
     }
 
     private fun submitPaper(signal: Signal, manual: Boolean, expectedPrice: Double? = null,
@@ -700,6 +722,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             entryBlocker(current)?.let { throw IllegalArgumentException(it) }
             val price = current.lastPrice!!
             if (manual) {
+                require(current.signal?.isActionable == true && current.signal?.action == signal.action &&
+                    current.signal?.barTime == signal.barTime && TechnicalEvidence.confirmed(signal)) {
+                    "سیگنال چهارلایه یا وتوی AI تغییر کرده است"
+                }
                 require(expectedSymbol == current.symbol && expectedPrice != null && expectedPrice.isFinite() &&
                     expectedPrice > 0.0 && abs(price / expectedPrice - 1.0) <= 0.001) {
                     "قیمت/نماد نسبت به پیش‌نمایش تغییر کرده است؛ دوباره بررسی کنید"
@@ -707,15 +733,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             } else {
                 require(signal.isActionable && current.signal == signal && signal.interval == current.interval &&
                     signal.entry != null && signal.entry.isFinite() && signal.entry > 0.0 &&
-                    abs(price / signal.entry - 1.0) <= 0.005 && _mtf.value?.veto != true) {
+                    abs(price / signal.entry - 1.0) <= 0.005) {
                     "سیگنال قدیمی، وتوشده یا دور از قیمت تازه است"
                 }
-                val technicalConditions = signal.confluence.filterNot { it.name == NewsConfluence.NEWS_LABEL }
-                require(technicalConditions.take(8).size == 8 &&
-                    technicalConditions.take(8).all { it.ok && it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED }) {
-                    "۸ شرط فنی دیگر معتبر نیست؛ ورود سیگنالی متوقف شد"
+                require(TechnicalEvidence.confirmed(signal)) {
+                    "شروط فنی دیگر معتبر نیست؛ ورود سیگنالی متوقف شد"
                 }
-                IctEntryRules.assess(current).reason?.let { throw IllegalArgumentException(it) }
             }
             PaperOrderRules.preview(signal.action, current.symbol, price,
                 signal.stopLoss ?: throw IllegalArgumentException("حد ضرر لازم است"),
@@ -736,8 +759,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 val (current, price) = verified()
                 val s = container.settingsStore.read()
                 val newsRecord = if (manual) null else NewsConfluence.record(news.value, current.symbol)
-                val ict = if (manual) null else (IctEntryRules.approvedEvidence(current)
-                    ?: error("شواهد رنج/ICT همین کندل پیش از ثبت معتبر نیست"))
+                val ict = if (manual) null else IctEntryRules.approvedEvidence(current) // optional historical detail
                 // «روند کلی بازار» در همان لحظهٔ ورود عکس گرفته و در ژورنال ثبت می‌شود تا برای
                 // هر معامله معلوم باشد با روند بوده یا خلافش. فقط ثبت است؛ گیتِ ورود همان‌جاست
                 // که تصمیم گرفته می‌شود (پویشگر و ورود خودکار)، نه بعد از ذخیره.
@@ -765,7 +787,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     container.journalStore.attachAiReview(trade.id, review)
                 }.getOrNull()
                 reviewedTrade?.let { _stats.value = container.journalStore.stats() }
-                val conditions = trade.entryConditions.take(8).joinToString("، ") {
+                val conditions = trade.entryConditions.joinToString("، ") {
                     it.name.substringAfter('·').trim()
                 }
                 _toast.value = "کاغذی: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} ${trade.symbol} · شروع: $conditions"

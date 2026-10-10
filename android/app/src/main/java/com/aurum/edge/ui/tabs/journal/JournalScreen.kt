@@ -243,7 +243,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                 color = if (trade.action == SignalAction.BUY) AurumColors.Green else AurumColors.Red,
                             )
                             Text(
-                                "ورود ${formatPrice(trade.entry)} · SL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)}",
+                                "ورود ${formatPrice(trade.entry)} · استاپ فعلی ${formatPrice(trade.stopLoss)} · هدف اولیه ${formatPrice(trade.takeProfit)}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.TextMuted,
                             )
@@ -339,8 +339,8 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
         }
 
         if (loadError == null) {
-            val recorded = trades.filter(ResearchEvidence::hasRecordedNineWay)
-            val other = trades.filterNot(ResearchEvidence::hasRecordedNineWay)
+            val recorded = trades.filter(ResearchEvidence::hasRecordedSignalEvidence)
+            val other = trades.filterNot(ResearchEvidence::hasRecordedSignalEvidence)
             PaperEvidencePanel(recorded, other, settings.spreadPrice, settings.commissionPerOz)
             if (recorded.any { !it.isOpen && it.pnlUsd != null }) PerformancePanel(
                 PerformanceMetrics.fromPaper(recorded, settings.accountBalance),
@@ -417,7 +417,7 @@ private fun PaperEvidencePanel(recorded: List<PaperTrade>, other: List<PaperTrad
 
 @Composable
 private fun EntryConditionsLine(conditions: List<PaperConditionRecord>) {
-    val started = conditions.take(8).filter { it.status == "CONFIRMED" }
+    val started = conditions.filter { it.status == "CONFIRMED" }
     if (started.isEmpty()) return
     Text(
         "شروع معامله: " + started.joinToString("، ") { it.name.substringAfter('·').trim() },
@@ -707,7 +707,7 @@ private fun HoldReviewStatus(cycle: HoldReviewCycle, onReview: () -> Unit) {
         cycle.skipped.takeIf { it.isNotBlank() }?.let { reason ->
             Text(reason, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
-        Text("خروج معامله فقط با لمس قیمت واقعی حد ضرر/حد سود انجام می‌شود؛ نظر AI هیچ معامله‌ای را نمی‌بندد و حد ضرر را جابه‌جا نمی‌کند.",
+        Text("پوزیشن‌های جدید V1 در ۱R استاپ را به نقطهٔ ورود و در ۲R به ۱R سود می‌رسانند؛ پس از آن استاپ پویا دنبال‌کننده است و هدف اولیه خروج ثابت نیست. رکوردهای قدیمی طبق قواعد ثبت‌شدهٔ خود تسویه می‌شوند. AI معامله را نمی‌بندد و پارامترها را عوض نمی‌کند.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
     }
 }
