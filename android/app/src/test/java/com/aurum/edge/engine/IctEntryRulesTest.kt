@@ -34,9 +34,11 @@ class IctEntryRulesTest {
         ai = AiNewsVerdict("AVAILABLE", "XAU/USD", "BUY", 91.0, "test-model",
             "fixture", now, listOf("gold-news")),
     )
-    private val signal = Signal(SignalAction.BUY, 87.0, entry = 3000.0,
+    private val signal = Signal(SignalAction.BUY, 100.0, entry = 3000.0,
         stopLoss = 2994.5, takeProfit = 3009.0, interval = Interval.M5, barTime = bar,
-        confluence = (1..8).map { ConfluenceItem("فنی $it", true, "fixture") })
+        confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
+            "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی")
+            .map { ConfluenceItem(it, true, "fixture", scorePercent = 25) })
     private val verified get() = NewsConfluence.apply(signal, "XAU/USD", news, now)!!
     private val market get() = MarketState(symbol = "XAU/USD", interval = Interval.M5,
         candles = IctTestBars.readyAt(bar), lastPrice = 3000.0,
@@ -59,18 +61,21 @@ class IctEntryRulesTest {
         val touched = current.candles.take(32) + current.candles.drop(32).map { c ->
             c.copy(open = 2997.1, high = 2998.1, low = 2996.82, close = 2997.3)
         }
-        listOf(
+        val invalid = listOf(
             current.copy(candles = touched, lastPrice = 2997.3),
             current.copy(candles = current.candles.dropLast(1) + current.candles.last().copy(closed = false)),
             current.copy(candles = current.candles.takeLast(3)),
             current.copy(candles = current.candles.mapIndexed { i, c ->
                 if (i == 31) c.copy(time = c.time + Interval.M5.millis * 2) else c
             }),
-        ).forEachIndexed { i, state ->
-            assertNotNull("block $i", PaperAutoRules.blocker(state, config, news, now))
+        )
+        invalid.forEachIndexed { i, state ->
+            assertFalse("ICT analysis $i", IctEntryRules.assess(state, now).allowed)
         }
+        assertNotNull(PaperAutoRules.blocker(invalid[1], config, news, now))
         val middle = current.copy(lastPrice = (2996.82 + 3009.42) / 2.0)
-        assertTrue(PaperAutoRules.blocker(middle, config, news, now)?.contains("ICT") == true)
+        // ICT is optional V1 research, not an independent entry authorization lock.
+        assertNull(PaperAutoRules.blocker(middle, config, news, now))
     }
 
     @Test fun `real entry stop must be beyond sweep and target before resistance`() {
@@ -78,7 +83,8 @@ class IctEntryRulesTest {
         val unsafeStop = current.copy(signal = verified.copy(stopLoss = 2996.0))
         val overTarget = current.copy(signal = verified.copy(takeProfit = 3010.0))
         listOf(unsafeStop, overTarget).forEach {
-            assertNotNull(PaperAutoRules.blocker(it, config, news, now))
+            assertNull(PaperAutoRules.blocker(it, config, news, now))
+            assertFalse(IctEntryRules.assess(it, now).allowed)
         }
     }
 
@@ -90,7 +96,7 @@ class IctEntryRulesTest {
 
     @Test fun `live closed candle plan moves stop beyond sweep and TP inside range`() {
         val raw = market.copy(signal = verified.copy(stopLoss = 2996.0, takeProfit = 3012.0))
-        assertNotNull(PaperAutoRules.blocker(raw, config, news, now))
+        assertNull(PaperAutoRules.blocker(raw, config, news, now))
         val planned = IctEntryRules.withSafePlan(raw)
         assertTrue(planned.signal!!.stopLoss!! < 2995.0)
         assertTrue(planned.signal!!.takeProfit!! <= 3009.02)

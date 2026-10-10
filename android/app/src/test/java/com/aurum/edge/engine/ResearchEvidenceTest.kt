@@ -64,7 +64,7 @@ class ResearchEvidenceTest {
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = news.copy(calendarSource = null))))
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = news.copy(checkedAt = paper.openedAt + 1))))
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(priceAction = null)))
-        assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(entryConditions = conditions.drop(1))))
+        assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(entryConditions = conditions.drop(3))))
         assertNull(ResearchEvidence.paperCostWhatIf(listOf(manual), 0.30, 0.05))
     }
 

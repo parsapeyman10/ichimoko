@@ -69,10 +69,10 @@ class V1ContractTest {
         assertNotNull(PaperPortfolioPolicy.blocker(open, "USD/JPY", 1000.0, 5.0, now = now))
         assertNotNull(PaperPortfolioPolicy.blocker(open.take(1), "AAPL", 1000.0, 5.01, now = now))
         val losses = (1..3).map { trade("x$it", "AAPL", now - it * 1000L, now - it * 500L, -5.0) }
-        assertTrue(PaperPortfolioPolicy.blocker(losses, "EUR/USD", 985.0, 5.0, now = now)!!.contains("۳ باخت"))
+        assertTrue(PaperPortfolioPolicy.blocker(losses, "EUR/USD", 985.0, 4.9, now = now)!!.contains("۳ باخت"))
         val winning = trade("win", "TSLA", now, now - 1L, 1.0)
         assertNotNull(PaperPortfolioPolicy.blocker(losses + winning + open.take(1),
-            "AAPL", 986.0, 5.0, now = now)) // 15 closed loss + 5 open + 5 new > 2%
+            "AAPL", 986.0, 4.9, now = now)) // 15 closed loss + open risk + 4.9 new > 2%
     }
 
     @Test fun validatedOppositeAiVetoesButUnavailableAiCannotAuthorizeTrades() {

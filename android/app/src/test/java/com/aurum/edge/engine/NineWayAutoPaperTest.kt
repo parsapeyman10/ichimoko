@@ -127,7 +127,8 @@ class NineWayAutoPaperTest {
         val jpyNews = eurNews.copy(aiBySymbol = mapOf("USD/JPY" to AiNewsVerdict("AVAILABLE", "USD/JPY",
             "SELL", 85.0, "test-model", "jpy context", now, listOf("id1"))))
         val jpyBlocked = NewsConfluence.apply(raw, "USD/JPY", jpyNews, now)!!
-        assertEquals(SignalAction.BUY, jpyBlocked.action)
+        assertEquals(SignalAction.NO_TRADE, jpyBlocked.action)
+        assertTrue(jpyBlocked.blockers.any { it.contains("وتوی AI") })
         assertEquals(ConfluenceStatus.CONFLICT, jpyBlocked.confluence[4].status)
         // Server mode (per-pair map empty): a non-gold pair stays honestly UNKNOWN but technical signal remains visible.
         val serverOnly = NewsConfluence.apply(raw, "EUR/USD", news, now)!!
