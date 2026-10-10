@@ -41,7 +41,7 @@ fun ApiMenuScreen(viewModel: AurumViewModel, settings: AppSettings, onForexSetti
             }
         }
         SectionCard("خبر · Forex Factory", "تقویم عمومی بی‌کلید؛ FXStreet/BLS مکمل") {
-            Text("ترجمهٔ درون‌اپ روی گوشی انجام می‌شود. AI خبر اگر سرور/کلید و شاهد واقعی داشته باشد فقط تأیید سبز کمکی می‌دهد؛ نبود آن امتیاز ۸ شرط فنی را منفی نمی‌کند.",
+            Text("ترجمهٔ درون‌اپ روی گوشی انجام می‌شود. AI خبر اگر سرور/کلید و شاهد واقعی داشته باشد فقط تأیید سبز کمکی می‌دهد؛ نبود آن امتیاز چهار لایهٔ فنی را منفی نمی‌کند.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
         }
         Text("۲۰ تا ۶۰ درخواست وب در دقیقه در پلن‌های عمومی پشتیبانی نمی‌شود؛ فید WebSocket در صورت دسترسی و بازبودن بازار به‌کار می‌رود؛ اگر کلید/پلن WebSocket ندهد، فید زندهٔ جایگزینِ برچسب‌دار استفاده می‌شود. سهمیه/۴۲۹ یا قطع منبع هرگز قیمت یا مجوز ساختگی تولید نمی‌کند.",
@@ -86,11 +86,17 @@ private fun AiStatusCard(viewModel: AurumViewModel, settings: AppSettings) {
                 color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 4.dp))
         }
         Text(
-            "AI هیچ‌وقت سیگنال نمی‌سازد و هیچ معامله‌ای باز نمی‌کند. ورود و خروج فقط با ۸ شرط فنی ایچیموکو تعیین می‌شود.",
+            "AI هیچ‌وقت سیگنال نمی‌سازد و هیچ معامله‌ای باز نمی‌کند. ورود با موتور چهارلایه تعیین می‌شود؛ AI فقط وتو می‌کند و پارامترها را عوض نمی‌کند.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
             modifier = Modifier.padding(top = 8.dp),
         )
 
+        Text("اسکن و گزارش دلایلِ موتور چهارلایه بدون مدل و بدون هزینهٔ AI انجام می‌شود. " +
+            "مدل زبانیِ رایگانِ بی‌کلید در APK جاسازی نشده است؛ اگر ارائه‌دهندهٔ شما پلن رایگان " +
+            "و دسترسی شبکه دارد، کلید شخصی و مدلِ مجازش را در تنظیمات وارد و همین‌جا تست کنید. " +
+            "پلن رایگان یا دسترسی از ایران تضمین نمی‌شود؛ کلید را برای ما نفرستید.",
+            style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
+            modifier = Modifier.padding(top = 8.dp))
         Text("چرا ممکن است جواب ندهد",
             style = MaterialTheme.typography.labelMedium, color = AurumColors.TextPrimary,
             modifier = Modifier.padding(top = 12.dp))
@@ -114,8 +120,8 @@ private fun AiStatusCard(viewModel: AurumViewModel, settings: AppSettings) {
 
         if (directProvider) {
             Text(
-                "⚠ $host معمولاً از ایران مسدود است و خطای ۴۰۳ می‌دهد. برای کار کردن، نشانی یک " +
-                    "سرویس واسط سازگار با OpenAI را وارد کنید، نه نشانی مستقیم.",
+                "⚠ دسترسی به $host از شبکهٔ شما تأیید نشده است. HTTP 403 می‌تواند از محدودیت دسترسی، " +
+                    "حساب یا منطقه باشد؛ نتیجهٔ تست اتصال روی همین گوشی ملاک است، نه حدس دربارهٔ شبکه.",
                 style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.Orange,
                 modifier = Modifier.padding(top = 8.dp),
@@ -172,7 +178,8 @@ private fun AiStatusCard(viewModel: AurumViewModel, settings: AppSettings) {
         )
 
         Text(
-            "کلید روی همین گوشی می‌ماند و هرگز در لاگ نوشته نمی‌شود. فقط متن تیتر خبر برای سرویس فرستاده می‌شود.",
+            "کلید روی همین گوشی می‌ماند و در لاگ نوشته نمی‌شود. برای تحلیل خبر، تیتر و شاهد خبر؛ " +
+                "برای نظر تریدر، خلاصهٔ سیگنال/کندل و وضعیت پوزیشن‌های کاغذی به سرویس انتخابی شما فرستاده می‌شود.",
             style = MaterialTheme.typography.labelSmall,
             color = AurumColors.TextMuted,
             modifier = Modifier.padding(top = 10.dp),

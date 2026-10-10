@@ -18,6 +18,7 @@ import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.PaperAlertRules
+import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.data.ResearchAlert
 import com.aurum.edge.data.ResearchAlerts
@@ -320,7 +321,10 @@ class SignalMonitorService : Service() {
                 // Notify with rich details on EVERY newly opened trade (even if user is in-app)
                 trades.filter { it.isOpen }.forEach { trade ->
                     if (notifiedOpenTrades.add(trade.id)) {
-                        Notifier.notifyTradeOpened(this@SignalMonitorService, trade, currentSettings.alertSoundUri)
+                        if (trade.autoOpened) Notifier.notifyRecordedAutoEntry(
+                            this@SignalMonitorService, trade, currentSettings.alertSoundUri)
+                        else Notifier.notifyTradeOpened(
+                            this@SignalMonitorService, trade, currentSettings.alertSoundUri)
                     }
                 }
                 // Notify on trade closed / settled (TP, SL, manual close)
@@ -340,15 +344,17 @@ class SignalMonitorService : Service() {
                     val openTrades = container.journalStore.trades.value.filter { it.isOpen }
                     if (openTrades.isNotEmpty()) {
                         kotlinx.coroutines.coroutineScope {
-                            val deferreds = openTrades.map { t ->
+                            val deferreds = openTrades.map { it.symbol }.distinct()
+                                .filterNot(com.aurum.edge.data.CryptoCatalog::isCrypto).map { symbol ->
                                 async(Dispatchers.IO) {
-                                    val q = runCatching { spot.fetchQuote(t.symbol) }.getOrNull()
-                                    t.symbol to q?.price
+                                    val q = runCatching { spot.fetchQuote(symbol) }.getOrNull()
+                                    symbol to q?.takeIf { TradeQuotePolicy.accepts(it) }
                                 }
                             }
-                            deferreds.awaitAll().forEach { (sym, price) ->
-                                if (price != null && price > 0.0) {
-                                    container.journalStore.settleTick(sym, price)
+                            deferreds.awaitAll().forEach { (sym, quote) ->
+                                if (quote != null && quote.price.isFinite() && quote.price > 0.0 &&
+                                    !MarketHours.closedFor(sym)) {
+                                    container.journalStore.settleTick(sym, quote.price, quote.at)
                                 }
                             }
                         }

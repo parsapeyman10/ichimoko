@@ -83,29 +83,6 @@ fun formatPriceFor(symbol: String, value: Double?): String =
     if (value == null) "—"
     else String.format(Locale.US, "%,.${com.aurum.edge.data.CryptoCatalog.digitsFor(symbol)}f", value)
 
-fun formatQuotePrice(value: Double?): String {
-    if (value == null) return "—"
-    val abs = kotlin.math.abs(value)
-    val digits = when {
-        abs >= 1000.0 -> 2
-        abs >= 100.0 -> 3
-        abs >= 10.0 -> 4
-        else -> 5
-    }
-    return String.format(Locale.US, "%,.${digits}f", value)
-}
-
-fun formatSpread(value: Double?): String {
-    if (value == null) return "—"
-    val abs = kotlin.math.abs(value)
-    val digits = when {
-        abs >= 1.0 -> 2
-        abs >= 0.01 -> 4
-        else -> 5
-    }
-    return String.format(Locale.US, "%,.${digits}f", value)
-}
-
 fun formatSigned(value: Double?, digits: Int = 2): String {
     if (value == null) return "—"
     val sign = if (value >= 0) "+" else "−"
@@ -248,12 +225,13 @@ fun FeedBanner(status: FeedStatus, lastPrice: Double?, lastBarTime: Long?, showi
 fun ConfluenceRow(item: ConfluenceItem) {
     val tone = when (item.status) {
         ConfluenceStatus.CONFIRMED -> AurumColors.Green
-        ConfluenceStatus.UNKNOWN -> AurumColors.Orange
+        ConfluenceStatus.UNKNOWN, ConfluenceStatus.PARTIAL -> AurumColors.Orange
         ConfluenceStatus.CONFLICT -> AurumColors.Red
     }
     val label = when (item.status) {
         ConfluenceStatus.CONFIRMED -> "برقرار"
-        ConfluenceStatus.UNKNOWN -> "احتمالی"
+        ConfluenceStatus.PARTIAL -> "امتیاز جزئی"
+        ConfluenceStatus.UNKNOWN -> "نامعلوم"
         ConfluenceStatus.CONFLICT -> "دور"
     }
     Row(
@@ -271,7 +249,7 @@ fun ConfluenceRow(item: ConfluenceItem) {
             ) {
                 Text(item.name, style = MaterialTheme.typography.bodySmall, color = tone)
                 item.scorePercent?.let { score ->
-                    Text("وزن: $score٪", style = MaterialTheme.typography.labelSmall, color = if (item.ok) tone else AurumColors.TextMuted)
+                    Text("امتیاز: $score/۲۵", style = MaterialTheme.typography.labelSmall, color = if (item.ok) tone else AurumColors.TextMuted)
                 }
             }
             if (item.detail.isNotBlank()) {
@@ -331,7 +309,7 @@ fun AssetClass4SlotsBanner(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "تخصیص متوازن ۴ بازار (حداکثر ۱ پوزیشن در هر دسته)",
+                "۴ پوزیشن کل · حداکثر ۲ در هر دسته",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.Gold,
                 fontWeight = FontWeight.Bold,
@@ -346,8 +324,9 @@ fun AssetClass4SlotsBanner(
             pairs.forEach { rowCategories ->
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     rowCategories.forEach { (assetClass, title) ->
-                        val trade = openTrades.firstOrNull { it.assetClass == assetClass }
-                        val isOpen = trade != null
+                        val categoryTrades = openTrades.filter { it.assetClass == assetClass }
+                        val trade = categoryTrades.firstOrNull()
+                        val isOpen = categoryTrades.isNotEmpty()
                         val defaultLev = com.aurum.edge.core.PaperOrderRules.defaultLeverageFor(
                             when (assetClass) {
                                 com.aurum.edge.core.AssetClass.COMMODITY -> "XAU/USD"
@@ -381,15 +360,16 @@ fun AssetClass4SlotsBanner(
                                     color = if (isOpen) AurumColors.Green else AurumColors.TextPrimary,
                                 )
                                 Pill(
-                                    text = if (isOpen) "● فعال" else "○ غیرفعال",
+                                    text = "${categoryTrades.size}/۲",
                                     color = if (isOpen) AurumColors.Green else AurumColors.Red,
                                 )
                             }
 
-                            if (isOpen && trade != null) {
+                            if (isOpen) categoryTrades.forEach { trade ->
                                 val currentPrice = livePrices[trade.symbol] ?: trade.entry
                                 val pnlPerUnit = if (trade.action == com.aurum.edge.core.SignalAction.BUY) currentPrice - trade.entry else trade.entry - currentPrice
-                                val grossPnl = trade.positionOz * pnlPerUnit
+                                val grossPnl = com.aurum.edge.core.PaperOrderRules.quotePnlToUsd(
+                                    trade.symbol, trade.positionOz * pnlPerUnit, currentPrice)
                                 val netPnl = grossPnl - (trade.effectiveCommissionUsd + trade.effectiveSpreadCostUsd)
 
                                 Text(
@@ -397,6 +377,7 @@ fun AssetClass4SlotsBanner(
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = AurumColors.Gold,
+                                    modifier = Modifier.clickable { onSelectSymbol(trade.symbol) },
                                 )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -421,7 +402,7 @@ fun AssetClass4SlotsBanner(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                 ) {
                                     Text("اهرم: ${defaultLev}x", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                                    Text("پایش ۵۰+ نماد", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                                    Text("واچ‌لیست قابل‌ویرایش", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                                 }
                             }
                         }

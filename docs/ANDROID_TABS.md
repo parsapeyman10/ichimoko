@@ -6,13 +6,13 @@ The Compose UI keeps navigation, tab state, and tab presentation separate so a c
 
 - `ui/shell/AurumRoot.kt`: lifecycle, snackbar, bottom navigation, and dispatch to a selected tab only.
 - `ui/shell/TabNavigation.kt`: tab names, labels, icons, and primary/more grouping.
-- `ui/shell/AppHeader.kt`: shared market header used by Chart and Signal.
+- `ui/shell/AppHeader.kt`: market header used by Signal; the Chart tab is widget-only.
 - `ui/shell/AurumViewModel.kt`: application coordinator only; it does not contain tab UI.
 
 ## Tab entry points
 
 - `ui/tabs/home/HomeScreen.kt`: home dashboard.
-- `ui/tabs/chart/ChartScreen.kt` and `CandleChart.kt`: live chart.
+- `ui/tabs/chart/ChartScreen.kt` and `TradingViewEmbed.kt`: one full-tab TradingView Advanced Chart widget with its own controls; app feed and trade rules are not part of the chart.
 - `ui/tabs/signal/SignalScreen.kt` and `PaperTicketSection.kt`: signal and paper-entry view.
 - `ui/tabs/watch/MarketWatchScreen.kt`: watch list and historical watch observations.
 - `ui/tabs/news/PersianNewsScreen.kt`: news and calendar.

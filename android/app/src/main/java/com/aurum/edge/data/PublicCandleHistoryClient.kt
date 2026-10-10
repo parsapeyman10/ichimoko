@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit
  *
  * This adapter is deliberately narrow and honest: only fixed Yahoo Finance chart symbols for the
  * app's forex/gold workspace are accepted, the response identity/currency is checked, rows with
- * missing OHLC are skipped, and fewer than [HistoryPolicy.TARGET_CANDLES] real bars is reported as
+ * missing OHLC are skipped, and fewer than the caller's required real bars is reported as
  * a provider limitation instead of filling gaps with generated prices.
  */
 class PublicCandleHistoryClient(
@@ -162,29 +162,16 @@ class PublicCandleHistoryClient(
             if (seen.add(time)) out += Candle(time, open, high, low, close, volume, closed = true)
         }
         val sorted = out.sortedBy { it.time }
-        if (sorted.size < HistoryPolicy.TARGET_CANDLES) {
-            // The caller decides whether cache+live bars can complete the window, but a too-small
-            // fresh response is never silently presented as a complete 3000-bar history.
-            return sorted
-        }
-        return if (trimToCache) sorted.takeLast(trimSize.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)) else sorted
+        // No 3000-bar gate in the parser: the caller enforces its own real-bar floor.
+        return if (trimToCache) sorted.takeLast(trimSize.coerceAtLeast(1)) else sorted
     }
 
-    private fun yahooSymbol(symbol: String): String? {
+    internal fun yahooSymbol(symbol: String): String? {
         val key = symbol.trim().uppercase(Locale.ROOT)
         return when (key) {
-            "XAU/USD", "XAUUSD", "GOLD" -> "GC=F"
-            "XAG/USD", "XAGUSD", "SILVER" -> "SI=F"
-            "USOIL", "WTI" -> "CL=F"
-            "UKOIL", "BRENT" -> "BZ=F"
-            "COPPER" -> "HG=F"
-            "NATGAS", "NAT_GAS" -> "NG=F"
-            "NASDAQ" -> "QQQ"
-            "SP500" -> "SPY"
-            "DOW" -> "DIA"
-            "DAX" -> "^GDAXI"
-            "FTSE" -> "^FTSE"
-            "NIKKEI" -> "^N225"
+            // Yahoo commodity futures and ETF/index proxies are NOT XAU/USD spot,
+            // XAG/USD spot, oil spot, or the named cash index. Fail over to an
+            // identity-preserving provider or report missing history; never relabel them.
             "EUR/USD" -> "EURUSD=X"
             "GBP/USD" -> "GBPUSD=X"
             "AUD/USD" -> "AUDUSD=X"
@@ -211,10 +198,11 @@ class PublicCandleHistoryClient(
             "CAD/CHF" -> "CADCHF=X"
             "NZD/CAD" -> "NZDCAD=X"
             else -> {
-                if (key.endsWith("USDT") || key.endsWith("/USDT") || key.endsWith("-USD") || key.endsWith("/USD")) {
-                    val base = key.replace("/USDT", "").replace("USDT", "").replace("-USD", "").replace("/USD", "")
-                    "$base-USD"
-                } else if (key.contains("/")) {
+                if (key.startsWith("XAU/") || key.startsWith("XAG/") ||
+                    key.endsWith("/USDT") || key.endsWith("USDT") ||
+                    key in setOf("XAUUSD", "XAGUSD", "GOLD", "SILVER", "USOIL", "UKOIL", "COPPER", "NATGAS",
+                        "NASDAQ", "SP500", "DOW", "DAX", "FTSE", "NIKKEI")) null
+                else if (key.contains("/")) {
                     val base = key.substringBefore("/")
                     val quote = key.substringAfter("/")
                     "$base$quote=X"

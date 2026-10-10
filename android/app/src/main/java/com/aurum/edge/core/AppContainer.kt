@@ -6,20 +6,16 @@ import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.data.CandleCache
 import com.aurum.edge.data.DataFeedException
 import com.aurum.edge.data.DukascopyHistoryClient
-import com.aurum.edge.data.FreeHistoryDownloader
-import com.aurum.edge.data.FreeHistoryResult
 import com.aurum.edge.data.ForexCalendarRepository
-import com.aurum.edge.data.HistDataCsv
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.MarketRepository
-import com.aurum.edge.data.MetaTraderCsv
 import com.aurum.edge.data.MarketState
-import com.aurum.edge.data.MetaTraderImporter
 import com.aurum.edge.data.NewsRepository
 import com.aurum.edge.data.PublicWebNewsRepository
 import com.aurum.edge.data.PublicNewsCategory
 import com.aurum.edge.data.PublicNewsFeeds
 import com.aurum.edge.data.PaperAutoTrader
+import com.aurum.edge.data.CatalogPaperTrader
 import com.aurum.edge.data.PublicCandleHistoryClient
 import com.aurum.edge.data.PaperOpportunityStore
 import com.aurum.edge.data.PairScanner
@@ -27,11 +23,9 @@ import com.aurum.edge.data.SettingsStore
 import com.aurum.edge.data.TwelveDataClient
 import com.aurum.edge.data.TraderAdvisor
 import com.aurum.edge.data.QuoteHistoryStore
-import com.aurum.edge.data.ReplayJournalStore
 import com.aurum.edge.data.SourceFetcher
 import com.aurum.edge.data.WatchRepository
 import com.aurum.edge.data.WatchSettingsStore
-import com.aurum.edge.engine.Backtester
 import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.notify.Notifier
 import kotlinx.coroutines.CancellationException
@@ -50,16 +44,16 @@ import kotlinx.coroutines.withContext
 
 /**
  * Process-wide wiring. Single source of truth for settings, real market data, journal and engine.
- * Chart/signal workspace is forex/gold; watchlist also includes Iran gold and USD cash-board rows.
+ * TradingView is visual only; every V1 entry reads independent candles for the four asset groups.
  */
 class AppContainer(context: Context) {
 
     val appContext: Context = context.applicationContext
 
     val settingsStore = SettingsStore(appContext)
+    val decisionLog = com.aurum.edge.data.DecisionLogStore(appContext)
     val candleCache = CandleCache(appContext)
     val journalStore = JournalStore(appContext, settingsStore = settingsStore)
-    val replayJournalStore = ReplayJournalStore(appContext)
     val opportunityStore = PaperOpportunityStore(appContext)
     val client = TwelveDataClient()
     val publicHistory = PublicCandleHistoryClient()
@@ -91,20 +85,38 @@ class AppContainer(context: Context) {
         val verified = raw.copy(feed = observedFeed,
             showingCachedData = raw.showingCachedData || delayed,
             signal = if (delayed) null else NewsConfluence.apply(raw.signal, raw.symbol, headlines, now))
-        IctEntryRules.withSafePlan(verified)
+        if (raw.candles.isNotEmpty()) decisionLog.append(raw.symbol, raw.interval.label,
+            when {
+                verified.evaluationError != null -> "error"
+                verified.signal?.isActionable == true -> "candidate"
+                else -> "no_signal"
+            },
+            verified.evaluationError ?: verified.signal?.blockers?.joinToString("، ")?.ifBlank { "چهار لایه و AI بررسی شدند" }
+                ?: "دادهٔ زنده/تایم‌فریم معتبر نیست", verified.signal, now, dedupe = true)
+        verified // four-layer engine owns the price plan; ICT remains optional research context
     }.stateIn(appScope, SharingStarted.Eagerly, market.state.value.copy(signal = null))
-    /** Periodic all-pairs online candle sweep: candidates + radar status for every catalog pair. */
-    val pairScanner = PairScanner(client, publicHistory, settingsStore, news, journalStore, opportunityStore, appScope, dukascopyHistory, appContext)
+    /** Periodic sweep of the editable V1 watchlist; only verified independent bars can become candidates. */
+    val pairScanner = PairScanner(client, publicHistory, settingsStore, news, journalStore, opportunityStore, appScope, dukascopyHistory, decisionLog)
     /** The user's own AI (Claude or OpenAI-compatible) as an educational trading companion. */
     // The advisor also reads the journal so it can review OPEN positions ("continue or not"),
     // which is advisory only: JournalStore.attachHoldReview never closes or re-prices a trade.
     val traderAdvisor = TraderAdvisor(settingsStore, market, pairScanner, news, journalStore, appScope)
     val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore, traderAdvisor)
-    val freeHistory = FreeHistoryDownloader()
-    val metaTraderImporter = MetaTraderImporter(appContext)
+    val catalogPaperTrader = CatalogPaperTrader(settingsStore, autoPaperTrader)
 
     init {
-        pairScanner.attachAutoTrader(autoPaperTrader)
+        pairScanner.attachAutoReview { scanned ->
+            val result = catalogPaperTrader.review(scanned)
+            // The foreground service observes journal changes itself. If it is off and the
+            // app is visible, notify only after the atomic paper journal write succeeded.
+            if (result.trade != null && !com.aurum.edge.service.SignalMonitorService.running.value) {
+                val config = settingsStore.read()
+                if (config.notifyOnSignal) Notifier.notifyRecordedAutoEntry(
+                    appContext, result.trade, config.alertSoundUri)
+            }
+            result
+        }
+        autoPaperTrader.attachTrendSource { pairScanner.state.value.marketTrend }
         market.attach(appScope)
         appScope.launch {
             verifiedMarket.collect { state ->
@@ -113,7 +125,7 @@ class AppContainer(context: Context) {
                     try {
                         val opened = autoPaperTrader.onMarketUpdate(state)
                         if (opened != null) {
-                            Notifier.notifyTradeOpened(appContext, opened, cfg.alertSoundUri)
+                            Notifier.notifyRecordedAutoEntry(appContext, opened, cfg.alertSoundUri)
                         }
                     } catch (cancel: CancellationException) {
                         throw cancel
@@ -123,12 +135,6 @@ class AppContainer(context: Context) {
                 }
             }
         }
-    }
-
-    suspend fun exportFreeHistory(uri: Uri, result: FreeHistoryResult) = withContext(Dispatchers.IO) {
-        val stream = appContext.contentResolver.openOutputStream(uri, "wt")
-            ?: throw IllegalArgumentException("فایل مقصد برای ذخیره باز نشد")
-        stream.bufferedWriter(Charsets.UTF_8).use { it.write(FreeHistoryDownloader.csv(result)) }
     }
 
     /** PDF of REAL, already-saved journal trades only — same [PerformanceMetrics] the on-screen panel uses. */
@@ -146,11 +152,9 @@ class AppContainer(context: Context) {
     )
 
     /**
-     * Download at least 3000 real candles.
-     *
-     * The keyless public history is deliberately tried first. A Twelve Data key is an explicit
-     * last fallback, never a silent primary: provider identity, timestamp and gaps are still
-     * validated by the provider adapter and a failure stops the research run.
+     * Historical provider bars for displaying a previously saved paper trade on its chart.
+     * They never become a current price, an entry or a source for the live engine.
+     * The keyless public history is tried first; Twelve Data is an explicit last fallback.
      */
     private suspend fun downloadCandles(symbol: String, interval: Interval, outputSize: Int): CandleDownload {
         val s = settingsStore.read()
@@ -219,56 +223,6 @@ class AppContainer(context: Context) {
         }
     }
 
-    /** Immutable research input shared by batch backtest and cursor replay. */
-    data class ResearchDataset(
-        val candles: List<Candle>,
-        val source: String,
-        val fetchedAt: Long,
-        val observedGapCount: Int,
-    )
-
-    /** Download and retain the exact verified bars that LearnScreen will replay. */
-    suspend fun fetchResearchDataset(interval: Interval, outputSize: Int): ResearchDataset {
-        val download = downloadCandles(settingsStore.read().symbol, interval, outputSize)
-        require(download.candles.size >= HistoryPolicy.TARGET_CANDLES) {
-            "برای replay/backtest حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی لازم است (${download.candles.size} دریافت شد)"
-        }
-        return ResearchDataset(download.candles, download.source, download.fetchedAt, download.observedGapCount)
-    }
-
-    /** Run batch backtest on a dataset already shown to the replay; no second provider request. */
-    suspend fun runBacktest(
-        dataset: ResearchDataset,
-        interval: Interval,
-        initialBalance: Double,
-        riskPercent: Double,
-        spreadPrice: Double,
-        commissionPerOz: Double,
-        threshold: Double,
-    ): Backtester.Result {
-        val s = settingsStore.read()
-        return withContext(Dispatchers.Default) {
-            Backtester.run(
-                candles = dataset.candles,
-                interval = interval,
-                symbol = s.symbol,
-                dataSource = dataset.source,
-                initialBalance = initialBalance,
-                riskPercent = riskPercent,
-                spreadPrice = spreadPrice,
-                commissionPerOz = commissionPerOz,
-                threshold = threshold,
-                signalProfile = s.signalProfile,
-            )
-        }
-    }
-
-    /** Download real candles from the active online source; never fabricates bars to reach 3000. */
-    suspend fun fetchCandles(interval: Interval, outputSize: Int): List<Candle> {
-        val s = settingsStore.read()
-        return downloadCandles(s.symbol, interval, outputSize).candles
-    }
-
     /** Verified candles already stored on this device for this pair/timeframe; may be empty. */
     suspend fun cachedCandles(symbol: String, interval: Interval): List<Candle> =
         candleCache.load(symbol, interval)
@@ -286,100 +240,5 @@ class AppContainer(context: Context) {
         return merged to download.source
     }
 
-    /** MetaTrader file/link is untrusted research input, not part of the market feed/cache. */
-    suspend fun runImportedBacktest(
-        csv: String, symbol: String, interval: Interval, timezone: String,
-        initialBalance: Double, riskPercent: Double, spreadPrice: Double,
-        commissionPerOz: Double, threshold: Double,
-    ): Backtester.Result = withContext(Dispatchers.Default) {
-        val imported = MetaTraderCsv.parse(csv, interval, timezone)
-        val settings = settingsStore.read()
-        val volumeNote = if (imported.volumeProvided) ")"
-            else "؛ بدون ستون حجم — حجم ۰ فقط برای اندیکاتورهای حجمی ثبت شد)"
-        Backtester.run(
-            candles = imported.candles, interval = interval, symbol = symbol,
-            dataSource = "${imported.formatLabel} کاربر (منشأ تأیید نشده؛ منطقه زمانی ${imported.timezone}؛ " +
-                "${imported.candles.size} از ${imported.totalRows} ردیف$volumeNote",
-            initialBalance = initialBalance, riskPercent = riskPercent,
-            spreadPrice = spreadPrice, commissionPerOz = commissionPerOz, threshold = threshold,
-            signalProfile = settings.signalProfile,
-        )
-    }
 
-    /** HistData monthly CSV is historical BID, never part of Twelve Data live candles or orders. */
-    suspend fun runHistDataBacktest(files: List<Pair<String, String>>, interval: Interval,
-                                    initialBalance: Double, riskPercent: Double, spreadPrice: Double,
-                                    commissionPerOz: Double, threshold: Double): Backtester.Result =
-        withContext(Dispatchers.Default) {
-            val merged = HistDataCsv.parseMerged(files, interval)
-            val settings = settingsStore.read()
-            Backtester.run(candles = merged.candles, interval = merged.interval, symbol = merged.symbol,
-                dataSource = "HistData فایل‌های کاربر (${merged.months} ماه · ${merged.symbol} · " +
-                    "تایم‌فریم ${merged.interval.label} تجمیع‌شده از M1 واقعی) · BID تاریخی · EST ثابت UTC−05:00 · " +
-                    "${merged.candles.size} کندل از ${merged.totalRows} ردیف M1؛ منشأ فایل مستقل تأیید نشده",
-                initialBalance = initialBalance, riskPercent = riskPercent,
-                spreadPrice = spreadPrice, commissionPerOz = commissionPerOz, threshold = threshold,
-                signalProfile = settings.signalProfile)
-        }
-
-    /** Walk-forward on the same downloaded real bars: older half in-sample, newer half unseen. */
-    suspend fun runWalkForward(
-        interval: Interval,
-        outputSize: Int,
-        initialBalance: Double,
-        riskPercent: Double,
-        spreadPrice: Double,
-        commissionPerOz: Double,
-        threshold: Double,
-    ): Backtester.WalkForward {
-        val s = settingsStore.read()
-        val download = downloadCandles(s.symbol, interval, outputSize)
-        val candles = download.candles
-        if (candles.size < HistoryPolicy.TARGET_CANDLES) {
-            throw DataFeedException("برای تست خارج از نمونه حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی لازم است (${candles.size} کندل دریافت شد)")
-        }
-        return withContext(Dispatchers.Default) {
-            Backtester.walkForward(
-                candles = candles,
-                interval = interval,
-                symbol = s.symbol,
-                initialBalance = initialBalance,
-                riskPercent = riskPercent,
-                spreadPrice = spreadPrice,
-                commissionPerOz = commissionPerOz,
-                threshold = threshold,
-                signalProfile = s.signalProfile,
-                dataSource = download.source,
-            )
-        }
-    }
-
-    /** Honest back-test: the strategy runs over the real bars that were just downloaded. */
-    suspend fun runBacktest(
-        interval: Interval,
-        outputSize: Int,
-        initialBalance: Double,
-        riskPercent: Double,
-        spreadPrice: Double,
-        commissionPerOz: Double,
-        threshold: Double,
-    ): Backtester.Result {
-        val s = settingsStore.read()
-        val download = downloadCandles(s.symbol, interval, outputSize)
-        val candles = download.candles
-        return withContext(Dispatchers.Default) {
-            Backtester.run(
-                candles = candles,
-                interval = interval,
-                symbol = s.symbol,
-                dataSource = download.source,
-                initialBalance = initialBalance,
-                riskPercent = riskPercent,
-                spreadPrice = spreadPrice,
-                commissionPerOz = commissionPerOz,
-                threshold = threshold,
-                signalProfile = s.signalProfile,
-            )
-        }
-    }
 }

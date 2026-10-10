@@ -5,6 +5,7 @@ import com.aurum.edge.core.Interval
 import com.aurum.edge.data.DataFeedException
 import com.aurum.edge.data.PublicCandleHistoryClient
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -36,6 +37,26 @@ class PublicCandleHistoryClientTest {
         assertEquals(startMs, bars.first().time)
         assertEquals(startMs + (HistoryPolicy.TARGET_CANDLES + 1L) * Interval.M1.millis, bars.last().time)
         assertTrue(bars.all { it.closed && it.high >= it.open && it.low <= it.close })
+    }
+
+    @Test fun `short real live window is retained without a three thousand bar gate`() {
+        val bars = client.parseYahooChart(
+            yahooJson(rows = HistoryPolicy.LIVE_REQUEST_CANDLES + 10),
+            expectedSymbol = "EUR/USD",
+            expectedYahooSymbol = "EURUSD=X",
+            interval = Interval.M1,
+            now = startMs + 400L * Interval.M1.millis,
+            trimSize = HistoryPolicy.LIVE_REQUEST_CANDLES,
+        )
+        assertEquals(HistoryPolicy.LIVE_REQUEST_CANDLES, bars.size)
+        assertEquals(startMs + 10L * Interval.M1.millis, bars.first().time)
+    }
+
+    @Test fun `commodity futures and index ETFs never masquerade as the requested spot instrument`() {
+        listOf("XAU/USD", "XAG/USD", "USOIL", "UKOIL", "COPPER", "NASDAQ", "SP500", "BTC/USDT")
+            .forEach { assertNull("incorrect substitute for $it", client.yahooSymbol(it)) }
+        assertEquals("AAPL", client.yahooSymbol("AAPL"))
+        assertEquals("EURUSD=X", client.yahooSymbol("EUR/USD"))
     }
 
     @Test fun `wrong public history identity fails closed`() {

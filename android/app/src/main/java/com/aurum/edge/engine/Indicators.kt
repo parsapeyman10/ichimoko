@@ -54,12 +54,18 @@ object Indicators {
         }
         var avgGain = gains / period
         var avgLoss = losses / period
-        out[period] = if (avgLoss == 0.0) 100.0 else 100.0 - 100.0 / (1 + avgGain / avgLoss)
+        fun value(): Double = when {
+            avgGain == 0.0 && avgLoss == 0.0 -> 50.0 // flat tape is neutral, not overbought
+            avgLoss == 0.0 -> 100.0
+            avgGain == 0.0 -> 0.0
+            else -> 100.0 - 100.0 / (1 + avgGain / avgLoss)
+        }
+        out[period] = value()
         for (i in period + 1 until candles.size) {
             val d = candles[i].close - candles[i - 1].close
             avgGain = (avgGain * (period - 1) + max(d, 0.0)) / period
             avgLoss = (avgLoss * (period - 1) + max(-d, 0.0)) / period
-            out[i] = if (avgLoss == 0.0) 100.0 else 100.0 - 100.0 / (1 + avgGain / avgLoss)
+            out[i] = value()
         }
         return out
     }
@@ -209,7 +215,8 @@ object Indicators {
 }
 
 /**
- * Ichimoku 7/22/44 (1m) or 9/26/52 (5m+).
+ * Parameter-free implementation. Live scoring, chart and MTF use the single
+ * 8/24/72 setting with displacement 24 from [SignalEngine.ichimokuSetting].
  * `senkouA/B` are stored at their computation index; the execution-safe cloud for bar i
  * is read from `cloudAt(i)`, which uses the values computed `displacement` bars earlier.
  * Chikou is stored at its display index and is null at the right edge until its source close exists.

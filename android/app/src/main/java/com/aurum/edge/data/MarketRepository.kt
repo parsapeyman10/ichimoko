@@ -8,6 +8,7 @@ import android.os.SystemClock
 import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.HistoryPolicy
+import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.MarketHours
@@ -50,6 +51,8 @@ data class MarketState(
     val feed: FeedStatus = FeedStatus(FeedMode.NO_KEY),
     val signal: Signal? = null,
     val showingCachedData: Boolean = false,
+    /** Distinct from a valid NO_TRADE or insufficient history; never authorizes entry. */
+    val evaluationError: String? = null,
 ) {
     val closedCount: Int get() = candles.count { it.closed }
     val hasRealData: Boolean get() = candles.isNotEmpty()
@@ -84,7 +87,7 @@ class MarketRepository(
      * stopped automatic entries for two days a week on a venue that never shuts.
      */
     private fun marketClosed(now: Long = System.currentTimeMillis()): Boolean =
-        MarketHours.weekendClosedFor(settings.read().symbol, now)
+        MarketHours.closedFor(settings.read().symbol, now)
 
     private val _state = MutableStateFlow(MarketState())
     val state: StateFlow<MarketState> = _state.asStateFlow()
@@ -98,6 +101,10 @@ class MarketRepository(
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var lastNetwork: Network? = null
     private val refreshMutex = Mutex()
+    private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client)
+    private var timeframeJob: Job? = null
+    @Volatile private var timeframeSnapshot: Map<Interval, List<Candle>> = emptyMap()
+    private var lastFrameRefreshAt = 0L
     @Volatile private var started = false
     @Volatile private var generation = 0L
     @Volatile private var streamEpoch = 0L
@@ -119,8 +126,7 @@ class MarketRepository(
             _state.value.interval == current.interval &&
             ((marketClosed() && _state.value.feed.mode == FeedMode.MARKET_CLOSED) ||
                 // Both keyed and keyless modes keep a history-refresh poll plus the live/fallback
-                // tick stream alive; the chart renders its quick 1200-bar window first and grows
-                // the shared cache toward the 3000-bar target in the background.
+                // tick stream alive; the chart uses a bounded real live window.
                 (pollJob?.isActive == true && streamJob?.isActive == true))) return
         stop()
         started = true
@@ -155,6 +161,9 @@ class MarketRepository(
         started = false
         generation++ // delayed HTTP/old socket responses cannot publish after a restart
         streamEpoch++
+        timeframeJob?.cancel(); timeframeJob = null
+        timeframeSnapshot = emptyMap()
+        lastFrameRefreshAt = 0L
         pollJob?.cancel(); pollJob = null
         streamJob?.cancel(); streamJob = null
         bootstrapJob?.cancel(); bootstrapJob = null
@@ -199,35 +208,25 @@ class MarketRepository(
                 cached.forEach { bar -> if (bar.time !in cachedBars) cachedBars[bar.time] = bar }
                 evaluateAndPublish(showingCache = true)
             }
-            // Render a useful, real window first. The larger full-history request runs directly
-            // afterwards and grows the same cache without blocking the first chart frame.
+            // One bounded live window is enough for EMA200/Ichimoku evaluation. Do not
+            // download 3,000/12,000 historical candles every time a chart opens.
             refresh(
-                requestedSize = HistoryPolicy.CHART_BOOTSTRAP_CANDLES,
-                minimumSize = HistoryPolicy.CHART_BOOTSTRAP_MINIMUM,
+                requestedSize = HistoryPolicy.LIVE_FETCH_CANDLES,
+                minimumSize = HistoryPolicy.LIVE_MIN_CANDLES,
                 allowClosedMarketHistory = true,
             )
-            val chartTarget = HistoryPolicy.chartTargetCandles(current.symbol, current.interval)
-            if (started && generation == session &&
-                cachedBars.values.count { it.closed } < chartTarget) {
-                delay(CHART_EXPANSION_DELAY_MS)
-                if (started && generation == session) refresh(
-                    requestedSize = chartTarget,
-                    minimumSize = HistoryPolicy.TARGET_CANDLES,
-                    allowClosedMarketHistory = true,
-                )
-            }
         }
     }
 
     private suspend fun refresh(
-        requestedSize: Int = HistoryPolicy.TARGET_CANDLES,
-        minimumSize: Int = HistoryPolicy.TARGET_CANDLES,
+        requestedSize: Int = HistoryPolicy.LIVE_FETCH_CANDLES,
+        minimumSize: Int = HistoryPolicy.LIVE_MIN_CANDLES,
         allowClosedMarketHistory: Boolean = false,
     ) = refreshMutex.withLock {
         val current = settings.read()
         val session = generation
         if (!started) return@withLock
-        if (MarketHours.weekendClosedFor(current.symbol) && !allowClosedMarketHistory) {
+        if (MarketHours.closedFor(current.symbol) && !allowClosedMarketHistory) {
             publishClosed()
             return@withLock // no recurring REST requests on the scheduled weekend
         }
@@ -239,12 +238,7 @@ class MarketRepository(
                 FeedLiveness.hasRecentReceipt(_state.value.feed))) _state.value = _state.value.copy(
             feed = _state.value.feed.copy(
                 mode = FeedMode.CONNECTING,
-                detail = if (requestedSize < HistoryPolicy.TARGET_CANDLES) {
-                    "دریافت سریع حداقل ${minimumSize} کندل واقعی… سپس تکمیل تاریخچه"
-                } else if (requestedSize > HistoryPolicy.TARGET_CANDLES) {
-                    "تکمیل تاریخچهٔ عمیق با کندل واقعی تا $requestedSize کندل؛ برای طلا Dukascopy هم بررسی می‌شود"
-                } else if (current.hasKey) "دریافت حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی از منبع عمومی؛ Twelve Data فقط fallback آخر…"
-                else "دریافت حداقل ${HistoryPolicy.TARGET_CANDLES} کندل تاریخچهٔ رایگان…",
+                detail = "دریافت پنجرهٔ زندهٔ $requestedSize کندلی؛ حداقل $minimumSize کندل بستهٔ واقعی، بدون نیاز به تاریخچهٔ ۳۰۰۰/۱۲۰۰۰تایی…",
             ))
         try {
             var fetched: List<Candle> = emptyList()
@@ -255,14 +249,26 @@ class MarketRepository(
                 // chart empty and looking broken. Nobitex serves the same instruments and
                 // is reachable from exactly those networks, so it is the fallback rather
                 // than the forex ladder below, which does not carry these pairs at all.
-                // One crypto source, chosen because it is reachable from networks that
-                // Binance geo-blocks with HTTP 451. No second provider to fall back to,
-                // so its error is reported as-is rather than hidden behind a retry.
-                val book = nobitexHistory.fetchCandles(current.symbol, current.interval,
-                    desiredSize = requestedSize, minimumSize = minimumSize)
-                fetched = book.candles
-                historyProvider = book.provider
-                staleDetail = "${book.provider} تاریخچه داد اما آخرین کندل آن باید با قیمت زنده تأیید شود"
+                // Public USDT candles first; a configured Twelve key is a same-pair fallback.
+                // Never treat BTC/USD from Yahoo as if it were BTC/USDT.
+                try {
+                    val book = nobitexHistory.fetchCandles(current.symbol, current.interval,
+                        desiredSize = requestedSize, minimumSize = minimumSize)
+                    fetched = book.candles
+                    historyProvider = book.provider
+                    staleDetail = "${book.provider} تاریخچه داد اما آخرین کندل آن باید با قیمت زنده تأیید شود"
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (nobitexFailure: Exception) {
+                    if (!current.hasKey) throw DataFeedException(
+                        "فید ${current.symbol} از نوبیتکس معتبر نبود: ${(nobitexFailure.message ?: "بدون داده").take(100)}؛ USD جای USDT نیست")
+                    fetched = client.fetchCandles(current.apiKey, current.symbol, current.interval,
+                        outputSize = requestedSize, minimumOutputSize = minimumSize)
+                    if (fetched.size < minimumSize) throw DataFeedException(
+                        "فید جایگزین ${current.symbol} فقط ${fetched.size} کندل واقعی داد")
+                    historyProvider = "Twelve Data · fallback هم‌نماد ${current.symbol}"
+                    staleDetail = "فید جایگزین تاریخچه داد؛ آخرین قیمت همچنان باید جداگانه تأیید شود"
+                }
             } else try {
                 // Public history is the normal path even when a Twelve Data key exists. The key
                 // is only a final fallback; this keeps the chart/replay provider policy honest.
@@ -271,7 +277,7 @@ class MarketRepository(
                 fetched = public.candles
                 historyProvider = public.provider
                 staleDetail = "تاریخچهٔ عمومی پاسخ داد اما آخرین کندل آن قدیمی است؛ تیک زندهٔ جداگانه باید قیمت فعلی را تأیید کند"
-                if (requestedSize > HistoryPolicy.TARGET_CANDLES && fetched.size < requestedSize &&
+                if (requestedSize > HistoryPolicy.LIVE_FETCH_CANDLES && fetched.size < requestedSize &&
                     DukascopyHistoryClient.instrument(current.symbol) != null) {
                     try {
                         val deep = dukascopyHistory.fetchCandles(current.symbol, current.interval,
@@ -430,6 +436,7 @@ class MarketRepository(
                             val active = settings.read()
                             if (!stillCurrent(active) || active.hasKey != current.hasKey ||
                                 (current.hasKey && active.apiKey != current.apiKey)) return@collect
+                            if (!TradeQuotePolicy.accepts(tick)) return@collect
                             emitted = true
                             backoff = 2_000L
                             onTick(tick, provider)
@@ -443,7 +450,7 @@ class MarketRepository(
                     if (current.hasKey) {
                         // Public, keyless live quote is tried first. Twelve Data WebSocket is the
                         // last live fallback, matching the history provider policy.
-                        val publicWorked = try {
+                        val publicWorked = if (CryptoCatalog.isCrypto(current.symbol)) false else try {
                             collectSpotFallback("فید زندهٔ عمومی (Swissquote/Gold-API)", TWELVE_WS_FALLBACK_WINDOW_MS)
                         } catch (_: Exception) {
                             false
@@ -462,6 +469,12 @@ class MarketRepository(
                                 publishStreamUnavailable(e.message ?: "WebSocket آخرین fallback Twelve Data در دسترس نیست")
                             }
                         }
+                    } else if (CryptoCatalog.isCrypto(current.symbol)) {
+                        // Nobitex's UDF endpoint supplies candles, not a timestamped tick.
+                        // Keep polling its real history; do not repeatedly fetch and relabel a
+                        // candle close as a tick or allow it to settle an open position.
+                        publishStreamUnavailable("برای این جفت رمزارز تیک زندهٔ مستقل موجود نیست؛ فقط کندل زمان‌دار نمایش داده می‌شود")
+                        delay(60_000L)
                     } else {
                         collectSpotFallback("فید رایگان خودکار (Swissquote/Gold-API)")
                         if (started && generation == session && streamEpoch == epoch)
@@ -571,6 +584,10 @@ class MarketRepository(
     }
 
     private suspend fun onTick(tick: com.aurum.edge.core.PriceTick, provider: String = "Twelve Data") {
+        // The crypto fallback supplies a historical candle close, not a market tick.
+        // REST history displays it with its original timestamp; never create a LIVE candle
+        // or settle a paper position from a re-timestamped close.
+        if (!TradeQuotePolicy.accepts(tick)) return
         val current = settings.read()
         val now = System.currentTimeMillis()
         val price = tick.price
@@ -703,18 +720,43 @@ class MarketRepository(
         val bars = cachedBars.values.sortedBy { it.time }
         val lastPrice = bars.lastOrNull()?.close ?: _state.value.lastPrice
         if (bars.isEmpty()) {
-            _state.value = _state.value.copy(candles = emptyList(), lastPrice = null, bid = null, ask = null, showingCachedData = false)
+            _state.value = _state.value.copy(candles = emptyList(), lastPrice = null, bid = null, ask = null,
+                showingCachedData = false, signal = null, evaluationError = null)
             return
         }
-        val signal = if (showingCache) null else withContext(Dispatchers.Default) {
-            runCatching {
-                SignalEngine.evaluate(bars, current.interval, current.minConfidence, current.spreadPrice, current.signalProfile, current.activeStrategy)
-            }.getOrNull()
+        // Never stall the live tick/settlement stream behind six REST history downloads.
+        // Until all seven REAL timeframes arrive the engine returns NO_TRADE, not a guess.
+        val frameNow = System.currentTimeMillis()
+        if (!showingCache && bars.count { it.closed } >= HistoryPolicy.LIVE_MIN_CANDLES &&
+            timeframeJob?.isActive != true && frameNow - lastFrameRefreshAt >= 60_000L) {
+            lastFrameRefreshAt = frameNow
+            val session = generation
+            timeframeJob = scope?.launch(Dispatchers.IO) {
+                val fetched = timeframeFeed.fetch(current.symbol, current.interval, bars, current.apiKey)
+                if (started && generation == session && settings.read().symbol == current.symbol &&
+                    settings.read().interval == current.interval) {
+                    timeframeSnapshot = fetched
+                    publishCandles(showingCache = _state.value.showingCachedData)
+                }
+            }
         }
+        val frames = timeframeSnapshot
+        val evaluation = if (showingCache) null else withContext(Dispatchers.Default) {
+            try {
+                Result.success(SignalEngine.evaluateLive(bars, current.interval, current, current.symbol, frames))
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                Result.failure<Signal>(error)
+            }
+        }
+        val evaluationError = if (evaluation?.isFailure == true)
+            "خطای محاسبهٔ موتور فنی؛ ورود متوقف شد" else null
         _state.value = _state.value.copy(
             candles = bars,
             lastPrice = lastPrice,
-            signal = signal,
+            signal = evaluation?.getOrNull(),
+            evaluationError = evaluationError,
             showingCachedData = showingCache,
         )
         if (!showingCache) bars.filter { it.closed }.lastOrNull()?.let { bar ->
@@ -745,6 +787,5 @@ class MarketRepository(
         private const val RECONNECT_WHEN_OFFLINE_MS = 15_000L
         private const val QUIET_RECONNECT_MS = 5 * 60_000L
         private const val TWELVE_WS_FALLBACK_WINDOW_MS = 2 * 60_000L
-        private const val CHART_EXPANSION_DELAY_MS = 250L
     }
 }

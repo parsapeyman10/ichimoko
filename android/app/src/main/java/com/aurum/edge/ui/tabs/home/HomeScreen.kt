@@ -36,7 +36,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
-import com.aurum.edge.core.HomeReadout
+import com.aurum.edge.core.FeedLiveness
+import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
@@ -46,8 +47,6 @@ import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
-import com.aurum.edge.ui.components.formatQuotePrice
-import com.aurum.edge.ui.components.formatSpread
 import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
 import kotlinx.coroutines.delay
@@ -58,18 +57,13 @@ import kotlin.math.abs
  * ۱. در بالای صفحه وضعیت باز یا بسته بودن بازار
  * ۲. ترکینگ زنده و لحظه‌ای تمامی معاملات باز پورتفو با نمایش تراز SL -> قیمت ورود -> TP
  * ۳. پنل معاملهٔ خودکار و آمار کلی پورتفو
- * ۴. آخرین قیمت و اسپرد بازار
  */
 @Composable
 fun HomeScreen(
     viewModel: AurumViewModel,
     market: MarketState,
-    onChart: () -> Unit,
-    onSignal: () -> Unit,
-    onNews: () -> Unit,
-    onLearn: () -> Unit,
+    onChartSymbol: (String) -> Unit,
     onJournal: () -> Unit,
-    onSettings: () -> Unit,
 ) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -79,13 +73,6 @@ fun HomeScreen(
         }
     }
     val session = MarketHours.sessionWindowFor(market.symbol, now)
-    val price = HomeReadout.from(market, now)
-    val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val configuredSpread = settings.spreadPrice.takeIf { it.isFinite() && it > 0.0 && price.value != null }
-    val displayBid = market.bid ?: configuredSpread?.let { spread -> price.value?.minus(spread / 2.0) }
-    val displayAsk = market.ask ?: configuredSpread?.let { spread -> price.value?.plus(spread / 2.0) }
-    val spread = displayBid?.let { bid -> displayAsk?.let { ask -> ask - bid } }
-
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 14.dp)) {
 
         // ── ۱. وضعیت باز یا بسته بودن بازار (بالاترین بخش صفحه) ────────────
@@ -109,16 +96,16 @@ fun HomeScreen(
                 verticalAlignment = Alignment.Top,
             ) {
                 Column {
-                    Text("وضعیت فعالیت بازار", color = AurumColors.Gold, style = MaterialTheme.typography.labelMedium)
+                    Text("ساعت برنامه‌ای ${AssetClass.of(market.symbol).label} · ${market.symbol}", color = AurumColors.Gold, style = MaterialTheme.typography.labelMedium)
                     Text(
-                        if (session.closed) "بازار اکنون بسته است" else "بازار اکنون باز و فعال است",
+                        if (session.closed) "سشن این نماد بسته است" else "طبق برنامه باز؛ فید را بررسی کنید",
                         color = if (session.closed) AurumColors.Red else AurumColors.Green,
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
                     )
                 }
                 Pill(
-                    text = if (session.closed) "CLOSED" else "OPEN 24/7",
+                    text = if (session.closed) "بسته" else if (AssetClass.of(market.symbol) == AssetClass.CRYPTO) "۲۴/۷" else "ساعت مجاز",
                     color = if (session.closed) AurumColors.Red else AurumColors.Green,
                 )
             }
@@ -140,6 +127,15 @@ fun HomeScreen(
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(top = 4.dp),
             )
+            listOf("EUR/USD" to "فارکس", "XAU/USD" to "طلا/کالا",
+                "AAPL" to "سهام آمریکا", "BTC/USDT" to "رمزارز").forEach { (symbol, label) ->
+                val scheduled = MarketHours.sessionWindowFor(symbol, now)
+                val note = if (symbol == "BTC/USDT") "۲۴/۷" else "برای قیمت/تعطیلی خاص، فید همان نماد لازم است"
+                Text("$label: ${if (scheduled.closed) "سشن بسته" else "طبق برنامه باز"} · $note",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (scheduled.closed) AurumColors.Red else AurumColors.TextSecondary,
+                    modifier = Modifier.padding(top = 2.dp))
+            }
         }
 
         // ── ۲. بنر وضعیت ۴ دسته دارایی (رمزارز، فارکس، طلا/کالا، سهام) در ۴ مستطیل بالا ──
@@ -150,10 +146,7 @@ fun HomeScreen(
         com.aurum.edge.ui.components.AssetClass4SlotsBanner(
             openTrades = openTradesList,
             livePrices = livePricesMap,
-            onSelectSymbol = { symbol ->
-                viewModel.selectChartSymbol(symbol)
-                onChart()
-            },
+            onSelectSymbol = onChartSymbol,
         )
 
         // ── ۳. ترکینگ زنده و کامل تمامی معاملات باز پورتفو ──────────────────
@@ -161,52 +154,11 @@ fun HomeScreen(
             viewModel = viewModel,
             currentMarket = market,
             onJournal = onJournal,
-            onSelectTrade = { symbol ->
-                viewModel.selectChartSymbol(symbol)
-                onChart()
-            },
+            onSelectTrade = onChartSymbol,
         )
 
         // ── ۴. پنل معاملهٔ خودکار کاغذی و تخصیص ۴ بازار ────────────────────
         AutoPaperCard(viewModel, onJournal)
-
-        // ── ۵. قیمت لحظه‌ای و اسپرد بازار ──────────────────────────────────
-        SectionCard(
-            title = "قیمت لحظه‌ای بازار · ${market.symbol}",
-            subtitle = "فقط آخرین عدد واقعی دریافت‌شده؛ بدون داده‌های شبیه‌سازی‌شده",
-            trailing = {
-                Pill(
-                    when {
-                        price.current -> "زنده/تازه"
-                        price.value != null -> "قبلی/کش"
-                        else -> "بدون داده"
-                    },
-                    if (price.current) AurumColors.Cyan else AurumColors.Gold,
-                )
-            },
-        ) {
-            Text(
-                formatPrice(price.value),
-                style = MaterialTheme.typography.headlineMedium,
-                color = if (price.current) AurumColors.TextPrimary else AurumColors.TextMuted,
-            )
-            Text(
-                if (price.current) "${price.label} · دریافت ${formatDateTime(price.observedAt)}"
-                else "${price.label} · آخرین مشاهده ${formatDateTime(price.observedAt)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (price.current) AurumColors.Cyan else AurumColors.Gold,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatTile("BID", formatQuotePrice(displayBid), if (price.current) AurumColors.Green else AurumColors.TextMuted, Modifier.weight(1f))
-                StatTile("ASK", formatQuotePrice(displayAsk), if (price.current) AurumColors.Red else AurumColors.TextMuted, Modifier.weight(1f))
-                StatTile("SPREAD", formatSpread(spread), AurumColors.Gold, Modifier.weight(1f))
-            }
-            market.feed.detail.takeIf { it.isNotBlank() }?.let {
-                Text(it, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                    modifier = Modifier.padding(top = 8.dp))
-            }
-        }
     }
 }
 
@@ -295,9 +247,13 @@ private fun LiveTradeGaugeCard(
 ) {
     val isBuy = trade.action == SignalAction.BUY
     val assetClass = AssetClass.of(trade.symbol)
-    val livePrice = livePrices[trade.symbol]
-        ?: (if (currentMarket.symbol == trade.symbol) currentMarket.lastPrice else null)
-        ?: trade.entry
+    val selectedFresh = currentMarket.symbol == trade.symbol &&
+            currentMarket.feed.mode == FeedMode.LIVE &&
+            !currentMarket.showingCachedData && FeedLiveness.hasRecentReceipt(currentMarket.feed) &&
+            currentMarket.lastPrice != null
+    val verifiedLivePrice = livePrices[trade.symbol]
+        ?: currentMarket.lastPrice?.takeIf { selectedFresh }
+    val livePrice = verifiedLivePrice ?: trade.entry
 
     val entry = trade.entry
     val stop = trade.stopLoss
@@ -370,7 +326,8 @@ private fun LiveTradeGaugeCard(
                     color = statusColor,
                 )
                 Text(
-                    text = "سود/زیان خالص (${String.format(java.util.Locale.US, "%.2f", pnlPercent)}%)",
+                    text = (if (verifiedLivePrice == null) "برآورد با قیمت ورود؛ تیک تازه نیست" else "سود/زیان خالص") +
+                        " (${String.format(java.util.Locale.US, "%.2f", pnlPercent)}%)",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                 )
@@ -412,7 +369,8 @@ private fun LiveTradeGaugeCard(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "قیمت لحظه‌ای: ${formatPrice(livePrice)}",
+                text = (if (verifiedLivePrice == null) "قیمت ورود (تیک تازه نیست): " else "قیمت لحظه‌ای: ") +
+                    formatPrice(livePrice),
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextPrimary,
                 fontWeight = FontWeight.Bold,

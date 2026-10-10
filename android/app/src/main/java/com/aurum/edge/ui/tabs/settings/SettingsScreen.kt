@@ -132,17 +132,20 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
-            Text("جفت‌ارز چارت و سیگنال (انتخاب فوری؛ فقط همین ۸ نماد):", style = MaterialTheme.typography.bodySmall,
+            Text("نماد چارت و سیگنال (فهرست فعال قابل ویرایش):", style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 8.dp))
             Row(Modifier.fillMaxWidth().padding(top = 4.dp).horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                WatchCatalog.chartSymbols.forEach { pair ->
+                settings.activeWatchlist.forEach { pair ->
                     FilterChip(selected = symbol == pair, onClick = {
                         symbol = pair
                         viewModel.selectChartSymbol(pair)
                     }, label = { Text(pair) })
                 }
             }
+            OutlinedTextField(value = symbol, onValueChange = { symbol = it.uppercase().trim() },
+                label = { Text("نماد سفارشی چارت (دادهٔ مستقل لازم است)") },
+                singleLine = true, modifier = Modifier.fillMaxWidth())
             Button(
                 onClick = { viewModel.saveMarketCredentials(key, symbol) },
                 enabled = true,
@@ -161,32 +164,45 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 modifier = Modifier.padding(top = 4.dp))
         }
 
-        // موتور تلفیقی: توضیح ثابت. تیک‌های آپشن (و خودتحلیلی تنظیم آپشن) حذف شدند —
-        // محافظ‌های ضد فیک‌کراس همیشه روشن‌اند و توسط کاربر قابل خاموش‌کردن نیستند.
-        SectionCard("موتور تلفیقی ایچیموکو", "توضیح ثابت موتور — بدون آپشن دستی؛ همهٔ محافظ‌ها همیشه روشن") {
+        SectionCard("فهرست و حالت هر بازار · روندگیر / رنج‌گیر / ترکیبی", "۸ نماد پیش‌فرض، ۲ نماد از هر دسته؛ کاتالوگ گسترده فقط با دادهٔ معتبر") {
+            var watchlistText by remember(settings.activeWatchlist) {
+                mutableStateOf(settings.activeWatchlist.joinToString(", "))
+            }
+            OutlinedTextField(value = watchlistText, onValueChange = { watchlistText = it },
+                label = { Text("نمادها، جدا با ویرگول") },
+                modifier = Modifier.fillMaxWidth())
+            Button(onClick = {
+                viewModel.setWatchlist(watchlistText.split(',', '\n', ';'))
+            }) { Text("ذخیرهٔ واچ‌لیست") }
+            Text("افزودن نماد به‌تنهایی قیمت یا سیگنال نمی‌سازد؛ بدون فید واقعی مستقل، ورود بسته می‌ماند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            Text("حالت هر دسته را اینجا انتخاب کنید. «ترکیبی/خودکار» با ADX رژیم را تشخیص می‌دهد؛ " +
+                "این انتخاب برای اسکنر و نماد منتخب یکسان است، اما نبود داده/قیمت تازه را رفع نمی‌کند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
+            com.aurum.edge.core.AssetClass.entries.forEach { category ->
+                Text(category.label, style = MaterialTheme.typography.bodySmall)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    com.aurum.edge.core.CategoryStrategy.entries.forEach { mode ->
+                        FilterChip(selected = settings.categoryStrategies[category] == mode,
+                            onClick = { viewModel.setCategoryStrategy(category, mode) },
+                            label = { Text(mode.label) })
+                    }
+                }
+            }
+        }
+
+        // توضیح موتور واحد چهارلایه؛ گزینه‌های پروفایل قدیمی فقط برای خواندن سوابق می‌مانند.
+        SectionCard("موتور واحد چهارلایهٔ V1", "امتیازدهی فنی و قفل‌های مطلق بازار/ریسک/AI") {
             Text(
-                "موتور واحد: ایچیموکو نهادی ۸/۲۴/۷۲ + تأیید پرایس‌اکشن + حجم/مومنتوم + تراز M15/H1 + قفل ضد ساید.",
+                "موتور واحد V1: EMA/ایچیموکو، RSI/MACD، حمایت/مقاومت و دادهٔ واقعی M1 تا D1. در نبود داده یا جهش/بازار بی‌جان، ورود ممنوع.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold,
             )
-            Text(
-                "ورود فقط وقتی معتبر است که همهٔ این‌ها هم‌زمان تأیید شوند: قیمت بیرون ابر، تنکان/کیجون هم‌جهت، " +
-                    "آزادی چیکو اسپن (۲۴ دوره)، تازگی کراس یا پولبک کیجون، هم‌جهتی M15/H1، سمت درست EMA200 و VWAP و حجم، " +
-                    "نبود رنج/ساید و امتیاز کافی.",
+            Text("در هر بررسی چهار لایه هرکدام تا ۲۵ امتیاز دارند؛ آستانهٔ قابل‌تنظیم ۶۰ تا ۹۵ است. " +
+                "هفت بازهٔ M1، M5، M15، M30، H1، H4 و D1 باید از کندل واقعیِ بسته به دست آیند؛ " +
+                "دادهٔ نامعلوم یا بازار بسته/بی‌جان/پرجهش ورود را مسدود می‌کند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-            Text(
-                "«یک کراس تنها» هرگز جهت نمی‌سازد: همین کراس باید با کندل بستهٔ بعدی، جدایی واقعی تنکان/کیجون (≥ ۰٫۰۸×ATR)، " +
-                    "هم‌سویی شیب کیجون و نبود کراس مخالف تازه (ناحیهٔ رفت‌وبرگشت) تأیید شود؛ در غیر این صورت NO_TRADE.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-            Text(
-                "محافظ‌های همیشه‌فعال (قابل خاموش‌کردن نیستند): ضد فیک‌بریک‌اوت/ری‌تست، اسپرد و نقدشوندگی پویا، " +
-                    "زمان‌های خطرناک، ریسک ساختار/حد ضرر، کول‌داون بعد از کراس مخالف، تأیید تایم‌فریم بالاتر و ضد رنج.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 6.dp),
-            )
+                modifier = Modifier.padding(top = 6.dp))
             Text(
                 "ارزنده‌بودن معامله با AI: اگر کلید مدل در بخش AI تنظیم شده باشد، اول اتصال بررسی و نظر مدل دربارهٔ «ارزنده‌بودن» " +
                     "همین ستاپ گرفته می‌شود؛ اگر مدل بگوید ارزنده نیست، ورود کاغذی ثبت نمی‌شود. اگر مدل در دسترس نباشد یا خطا بدهد، " +
@@ -215,7 +231,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
                 Switch(checked = settings.pauseOnNews, onCheckedChange = viewModel::setPauseOnNews)
             }
-            Text("خبرهای مستقیم فقط برای مطالعه‌اند؛ ورود سیگنالی/خودکار با ۸ شرط فنی سنجیده می‌شود و خبر فقط وقتی وتوی شفاف دارد مانع می‌شود. AI معتبر اگر هم‌جهت و با شاهد باشد سبز می‌شود؛ UNKNOWN زرد است. وتوی دستی جداست؛ سفارش واقعی غیرفعال.",
+            Text("ورود کاغذی فقط با چهار لایهٔ فنی و امتیاز ۶۰ تا ۹۵ انجام می‌شود. AI ناظر است: فقط تعارض معتبر با شواهد تازه وتو می‌کند؛ UNKNOWN اجازهٔ ورود مستقل نمی‌دهد. سفارش واقعی غیرفعال است.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             Text("جایگزین بدون سرور: اگر نشانی بالا خالی باشد و کلید زیر را پر کنید، خودِ گوشی مستقیماً با RSS همین‌جا + کلید شما تحلیل می‌کند. همین کلید، «همراه تریدر AI» صفحهٔ خانه را هم روشن می‌کند (نظر خودکار هر ۱۰ دقیقه + اعلان تغییر جهت).",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold, modifier = Modifier.padding(top = 6.dp))
@@ -237,7 +253,10 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     newsAiBaseUrl = "https://api.openai.com/v1"; newsAiFormat = "OPENAI"
                 }, modifier = Modifier.weight(1f)) { Text("OpenAI رسمی", maxLines = 1) }
             }
-            Text("«نشانی پایه» یعنی آدرسِ سرویسی که کلید شما را صادر کرده — کلید مثل رمز کارت است و نشانی مثل آدرس همان مغازه؛ هر دو را فقط پنل سایت کلید (بخش API / Base URL) می‌دهد. اپ فقط نشانی‌های امن https:// را می‌پذیرد تا کلید در مسیر لو نرود. کلیدهایی که با sk-cs4 شروع می‌شوند مال LLMsRelay هستند و نشانی‌شان با دکمهٔ بالا پر می‌شود.",
+            Text("«نشانی پایه» باید متعلق به همان ارائه‌دهندهٔ کلید شما باشد. برای API سازگار Gemini، " +
+                "نشانی https://generativelanguage.googleapis.com/v1beta/openai با قالب OpenAI قابل آزمون است؛ " +
+                "مدل را از فهرست مجازِ کلید خود انتخاب کنید. رایگان‌بودن یا دسترسی شبکه/منطقه تضمین نیست. " +
+                "اپ فقط HTTPS می‌پذیرد؛ کلید شخصی را در گفتگو یا گزارش خطا ارسال نکنید.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
                 modifier = Modifier.padding(top = 4.dp))
             OutlinedTextField(value = newsAiModel, onValueChange = { newsAiModel = it }, singleLine = true,
@@ -362,7 +381,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 OutlinedTextField(
                     value = risk,
                     onValueChange = { risk = it },
-                    label = { Text("ریسک هر معامله %") },
+                    label = { Text("ریسک هر معامله % (حداکثر ۰٫۵)") },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
@@ -370,7 +389,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             OutlinedTextField(
                 value = minConfidence,
                 onValueChange = { minConfidence = it },
-                label = { Text("حداقل امتیاز ورود (۷۲ تا ۹۵)") },
+                label = { Text("حداقل امتیاز ورود (۶۰ تا ۹۵)") },
                 singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -398,7 +417,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 )
             }
             Text(
-                "این دو عدد از بروکر خودت گرفته می‌شوند و در همه گزارش‌ها (بک‌تست، خارج از نمونه، سیگنال زنده) به‌کار می‌روند.",
+                "این دو عدد از بروکر خودت گرفته می‌شوند و در محاسبهٔ هزینه و ریسک معاملات کاغذی به‌کار می‌روند.",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 6.dp),
@@ -451,8 +470,8 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("هشدار ورود کاغذی / کاندیدای ۸/۸ فنی", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
-                    Text("با ورود خودکار روشن: اعلان فقط پس از ثبت موفق معاملهٔ کاغذی؛ با آن خاموش: اعلان کاندیدای فنی/آموزشی (نه معامله).",
+                    Text("هشدار کاندیدای چهارلایهٔ کاغذی", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
+                    Text("با ورود خودکار روشن: اعلان فقط پس از ثبت موفق معاملهٔ کاغذی؛ با آن خاموش: اعلان کاندیدای فنی (نه معامله).",
                         style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
                 Switch(
@@ -502,9 +521,9 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
-        SectionCard("ورود خودکار کاغذی · فقط آموزشی", "بدون فرم دستی؛ بدون بروکر، بدون سفارش واقعی") {
+        SectionCard("ورود خودکار کاغذی · بدون سفارش واقعی", "بدون فرم دستی؛ بدون بروکر، بدون سفارش واقعی") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("باز کردن خودکار LONG/SHORT کاغذی پس از ۸ شرط فنی، آپشن‌های فعال و تأییدهای ICT/MTF؛ خبر فقط داده‌کاوی ژورنال",
+                Text("ورود خودکار کاغذی برای نماد منتخب و تمام کاتالوگِ دارای تیک هم‌هویت و قابل‌پایش؛ پس از چهار لایه و ریسک/AI",
                     modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
                     color = AurumColors.TextPrimary)
                 Switch(checked = settings.autoPaperTrading, onCheckedChange = { enabled ->
@@ -515,7 +534,11 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             Text(if (settings.autoPaperTrading) autoStatus else "خاموش؛ خطوط روی چارت معامله نیستند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 6.dp))
-            Text("قیمت زنده، ۸ شرط فنی پایهٔ ایچیموکو، آپشن‌های فعال و تأیید ICT/MTF لازم‌اند. پایش پس‌زمینه فقط برای ادامهٔ بررسی بعد از بستن اپ است؛ در زمان باز بودن برنامه هم ورود کاغذی خودکار با همین قواعد بررسی می‌شود. AI/تقویم خبر شرط ورود نیست؛ فقط اگر نزدیک معامله شاهد معتبر داشته باشد در ژورنال برای داده‌کاوی ذخیره می‌شود. نتیجه در ژورنال روی گوشی ذخیره می‌شود؛ خروج با تیک واقعی SL/TP است. مدل و ناشران بازده یا معاملهٔ واقعی را تضمین نمی‌کنند.",
+            Text("رادار هنگام باز بودن اپ خودکار است؛ برای ادامهٔ پس‌زمینه «پایش زنده» و مجوز اعلان گوشی باید روشن باشد. " +
+                "ورود کاتالوگ فعلاً فقط برای جفت‌ارزهای فارکس و XAU/XAG دارای تیک تازهٔ Swissquote/Gold-API و پایش خروج انجام می‌شود؛ " +
+                "سهام، نفت و کریپتو تا زمان داشتن تیک هم‌هویت و مسیر خروج معتبر فقط بررسی می‌شوند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+            Text("قیمت زنده و چهار لایهٔ فنی (EMA/ایچیموکو، RSI/MACD، حمایت/مقاومت، M1 تا D1) لازم‌اند. نبود دادهٔ یک بازه ورود را می‌بندد؛ AI فقط می‌تواند سیگنال را وتو کند و اجازهٔ تغییر SL/TP ندارد. توقف سه باخت، زیان روزانهٔ ۲٪، سقف ۴ پوزیشن و trailing در ۱R و ۲R اعمال می‌شوند. هیچ سفارش واقعی ارسال نمی‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
@@ -561,7 +584,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     if (confirmAuto) {
         AlertDialog(onDismissRequest = { confirmAuto = false },
             title = { Text("ورود خودکار فقط کاغذی") },
-            text = { Text("هیچ سفارشی به بروکر ارسال نمی‌شود. فقط با ۸ شرط فنی، آپشن‌های فعال، قیمت زنده و تأییدهای MTF/ICT، یک رکورد LONG/SHORT کاغذی در ژورنال ایجاد می‌شود. خبر و AI فقط برای داده‌کاوی رکورد هستند و شرط ورود نیستند. اگر سرویس/فید قطع شود ورودی تازه نداریم؛ خروجِ پوزیشن باز نیز به قیمت واقعی نیاز دارد. فعال شود؟") },
+            text = { Text("هیچ سفارشی به بروکر ارسال نمی‌شود. تمام نمادهای پشتیبانی‌شده اسکن می‌شوند؛ ورود کاغذی چندنمادی فقط با تیک مستقل تازه و امکان پایش خروج (فعلاً فارکس و XAU/XAG) انجام می‌شود. دادهٔ هفت بازه، سقف ریسک و وتوی AI پابرجاست. بدون فید، معامله‌ای باز نمی‌شود. فعال شود؟") },
             confirmButton = { TextButton(onClick = {
                 confirmAuto = false
                 viewModel.setAutoPaperTrading(true)

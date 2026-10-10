@@ -52,6 +52,13 @@ class AiTraderTest {
         assertEquals("https://api.openai.com/v1/chat/completions", AiProvider.openAiChatUrl("https://api.openai.com/v1"))
         assertEquals("https://api.llmsrelay.com/v1/chat/completions", AiProvider.openAiChatUrl("https://api.llmsrelay.com"))
         assertEquals("https://openrouter.ai/api/v1/chat/completions", AiProvider.openAiChatUrl("https://openrouter.ai/api/v1"))
+        // Gemini's OpenAI-compatible base ends in /v1beta/openai, NOT /v1.
+        assertEquals("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            AiProvider.openAiChatUrl("https://generativelanguage.googleapis.com/v1beta/openai"))
+        assertEquals("https://generativelanguage.googleapis.com/v1beta/openai/models",
+            AiProvider.modelsUrl("https://generativelanguage.googleapis.com/v1beta/openai"))
+        assertEquals("https://generativelanguage.googleapis.com/v1beta/openai/models",
+            AiProvider.modelsUrl("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"))
         // Models catalogue: same rule
         assertEquals("https://api.llmsrelay.com/v1/models", AiProvider.modelsUrl("https://api.llmsrelay.com"))
         assertEquals("https://api.openai.com/v1/models", AiProvider.modelsUrl("https://api.openai.com/v1"))
@@ -241,56 +248,6 @@ class AiTraderTest {
             holdReviewJson(cautions = """["یک","دو","سه","چهار"]"""), "m", 1L, 1.0, 0.0))
         val missing = Json.parseToJsonElement("""{"verdict":"HOLD"}""").jsonObject
         assertNull(TraderAdvisor.parseHoldReview(missing, "m", 1L, 1.0, 0.0))
-    }
-
-    @Test fun `signal tuning plan toggles engine profile with strict schema`() {
-        val root = Json.parseToJsonElement(
-            """{
-              "summary":"به‌خاطر دادهٔ محدود، فیلترهای احتیاطی فعال و چیکو روشن بماند.",
-              "momentum_volume":true,
-              "flat_span_b":false,
-              "range_chop_filter":true,
-              "higher_timeframe_filter":true,
-              "fake_breakout_filter":true,
-              "dynamic_spread_filter":false,
-              "risky_timing_filter":true,
-              "structure_risk_filter":true,
-              "cooldown_filter":true,
-              "chikou_confirmation":true,
-              "changes":["فیلتر ضد رنج فعال شد","تایم بالاتر برای کاهش ورود فیک روشن شد"]
-            }"""
-        ).jsonObject
-        val plan = TraderAdvisor.parseTuningPlan(root, "m", 7L)!!
-        assertTrue(plan.profile.momentumVolume)
-        assertTrue(plan.profile.rangeChopFilter)
-        assertTrue(plan.profile.higherTimeframeFilter)
-        assertFalse(plan.profile.dynamicSpreadFilter)
-        assertTrue(plan.profile.chikouConfirmation)
-        assertEquals(2, plan.changes.size)
-        assertEquals("m", plan.model)
-        assertEquals(7L, plan.generatedAt)
-    }
-
-    @Test fun `signal tuning plan rejects malformed or unbounded responses`() {
-        val valid = """{
-          "summary":"تحلیل کوتاه اما معتبر برای تنظیم محافظه‌کارانه موتور ایچیموکو.",
-          "momentum_volume":false,"flat_span_b":false,"range_chop_filter":true,
-          "higher_timeframe_filter":true,"fake_breakout_filter":true,"dynamic_spread_filter":false,
-          "risky_timing_filter":true,"structure_risk_filter":true,"cooldown_filter":true,
-          "chikou_confirmation":true,"changes":["کول‌داون فعال شد"]
-        }"""
-        assertNull(TraderAdvisor.parseTuningPlan(
-            Json.parseToJsonElement(valid.replace("\"changes\":[\"کول‌داون فعال شد\"]", "\"changes\":[]")).jsonObject,
-            "m", 1L,
-        ))
-        assertNull(TraderAdvisor.parseTuningPlan(
-            Json.parseToJsonElement(valid.replace("true,\"fake_breakout_filter\"", "\"yes\",\"fake_breakout_filter\"")).jsonObject,
-            "m", 1L,
-        ))
-        assertNull(TraderAdvisor.parseTuningPlan(
-            Json.parseToJsonElement(valid.replace("تحلیل کوتاه اما معتبر برای تنظیم محافظه‌کارانه موتور ایچیموکو.", "کوتاه")).jsonObject,
-            "m", 1L,
-        ))
     }
 
 }

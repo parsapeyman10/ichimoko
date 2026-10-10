@@ -40,9 +40,9 @@ import java.nio.file.Files
 class PaperJournalPersistenceTest {
     private val context get() = RuntimeEnvironment.getApplication()
     private fun journalFile() = File(Files.createTempDirectory("journal-test").toFile(), "paper_journal.json")
-    private val signal = Signal(SignalAction.BUY, 89.0, entry = 3000.0, stopLoss = 2994.5,
-        takeProfit = 3009.0, interval = Interval.M5, barTime = 1_800_000_000_000L,
-        confluence = (1..8).map { ConfluenceItem("فنی $it", true, "fixture") } +
+    private val signal = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2994.5,
+        takeProfit = 3009.0, interval = Interval.M5, barTime = 1_800_000_000_000L - Interval.M5.millis,
+        confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی").map { ConfluenceItem(it, true, "fixture", scorePercent = 25) } +
             ConfluenceItem(NewsConfluence.NEWS_LABEL, true, "خبر مدل با شاهد"))
     private fun mtf(at: Long) = MtfSnapshotRecord("5m", "BUY", 1.0, 1, 0, 0, false, "fixture", at,
         frames = listOf(MtfFrameRecord("5m", "BUY", 80, "fixture", 1.0)))
@@ -72,14 +72,14 @@ class PaperJournalPersistenceTest {
         val parsed = parseWebNews(Json.parseToJsonElement(json) as JsonObject, now)
         val bar = now - Interval.M5.millis
         val technical = signal.copy(barTime = bar, stopLoss = 2994.5, takeProfit = 3009.0,
-            confluence = (1..8).map { ConfluenceItem("فنی $it", true, "fixture") })
+            confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی").map { ConfluenceItem(it, true, "fixture", scorePercent = 25) })
         val verified = NewsConfluence.apply(technical, "XAU/USD", parsed, now)!!
         val current = MarketState(symbol = "XAU/USD", interval = Interval.M5,
             candles = IctTestBars.readyAt(bar),
             lastPrice = 3000.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now), signal = verified)
         val config = AppSettings(backgroundMonitor = true, autoPaperTrading = true)
         assertEquals(SignalAction.BUY, verified.action)
-        assertEquals(9, verified.confluence.size)
+        assertEquals(5, verified.confluence.size)
         assertNull(PaperAutoRules.blocker(current, config, parsed, now))
         val file = journalFile()
         val store = JournalStore(context, file)
@@ -87,9 +87,11 @@ class PaperJournalPersistenceTest {
         val evidence = IctEntryRules.approvedEvidence(current, now)!!
         val opened = store.open(verified, "XAU/USD", 3000.0, 50_000.0, 0.5,
             automatic = true, mtf = mtf(bar),
-            newsEvidence = NewsConfluence.record(parsed), priceAction = evidence)
+            newsEvidence = NewsConfluence.record(parsed), priceAction = evidence, observedAt = now)
         val tick = opened.openedAt + 1000L
         store.settle(Candle(tick, 3010.0, 3011.0, 3010.0, 3011.0), "XAU/USD", tick)
+        assertTrue(store.trades.value.single().isOpen) // target is not a fixed exit in V1
+        store.settleTick("XAU/USD", 3004.0, tick + 1_000L)
         val restored = JournalStore(context, file).also { it.load() }
         assertEquals(1, restored.stats().total)
         assertEquals(opened.id, restored.trades.value.single().id)
@@ -105,16 +107,20 @@ class PaperJournalPersistenceTest {
         // Manual long USD/JPY: entry 150, stop 148, target 153 -> 750 units, 10 USD risk.
         val manual = signal.copy(action = SignalAction.BUY, entry = 150.0,
             stopLoss = 148.0, takeProfit = 153.0, interval = Interval.M5)
-        val opened = store.open(manual, "USD/JPY", 150.0, 1000.0, 1.0, manual = true)
-        assertEquals(750.0, opened.positionOz, 1e-6)
+        val opened = store.open(manual, "USD/JPY", 150.0, 1000.0, 0.5, manual = true,
+            observedAt = 1_800_000_000_000L)
+        assertTrue(opened.positionOz > 0.0)
         assertEquals("USD", opened.unit)
-        assertEquals(10.0, opened.riskUsd, 1e-8)
+        assertTrue(opened.riskUsd + opened.effectiveCommissionUsd + opened.effectiveSpreadCostUsd <= 5.001)
         val tick = opened.openedAt + 1000L
-        // Target hit at 153: P/L = 750 x 3 JPY = 2250 JPY = 2250/153 USD (~14.71).
+        // Reference target does not auto-close; explicit manual exit converts quote P/L to USD.
         store.settle(Candle(tick, 152.9, 153.5, 152.8, 153.2), "USD/JPY", tick)
+        assertTrue(store.trades.value.single().isOpen)
+        store.close(opened.id, 153.0, "test exit")
         val closed = store.trades.value.single()
         assertFalse(closed.isOpen)
-        assertEquals(2250.0 / 153.0, closed.pnlUsd!!, 0.01)
+        assertEquals(opened.positionOz * 3.0 / 153.0 - opened.effectiveCommissionUsd -
+            opened.effectiveSpreadCostUsd, closed.pnlUsd!!, 0.01)
     }
 
     @Test fun autoOpenSettlementAndReloadKeepSameTradeAndEvidence() = runBlocking {
@@ -123,7 +129,8 @@ class PaperJournalPersistenceTest {
         store.load()
         val evidence = ictFor(signal, signal.barTime + Interval.M5.millis)
         val opened = store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5,
-            automatic = true, mtf = mtf(signal.barTime), newsEvidence = news, priceAction = evidence)
+            automatic = true, mtf = mtf(signal.barTime), newsEvidence = news, priceAction = evidence,
+            observedAt = 1_800_000_000_000L)
         assertEquals(1, store.stats().open)
         assertTrue(file.exists())
         val restarted = JournalStore(context, file)
@@ -136,6 +143,9 @@ class PaperJournalPersistenceTest {
         restarted.settle(touchedTarget, "AAPL", after + 1_000)
         assertTrue(restarted.trades.value.single().isOpen)
         restarted.settle(touchedTarget, "XAU/USD", after + 1_000)
+        assertTrue(restarted.trades.value.single().isOpen)
+        val trailed = restarted.trades.value.single().stopLoss
+        restarted.settleTick("XAU/USD", trailed - 0.1, after + 2_000)
         assertEquals(0, restarted.stats().open)
         assertEquals(1, restarted.stats().total)
         val completed = JournalStore(context, file)
@@ -143,7 +153,8 @@ class PaperJournalPersistenceTest {
         val closed = completed.trades.value.single()
         assertEquals(opened.id, closed.id)
         assertFalse(closed.isOpen)
-        assertEquals(opened.positionOz * (signal.takeProfit!! - opened.entry), closed.pnlUsd!!, 0.01)
+        assertEquals(opened.positionOz * (closed.exitPrice!! - opened.entry) -
+            opened.effectiveCommissionUsd - opened.effectiveSpreadCostUsd, closed.pnlUsd!!, 0.01)
         assertEquals(news, closed.newsEvidence)
         assertEquals(evidence, closed.priceAction)
         assertTrue(closed.autoOpened)
@@ -151,21 +162,22 @@ class PaperJournalPersistenceTest {
         // Even after SL/TP and a process restart the same candle cannot auto-open again.
         try {
             completed.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5,
-                automatic = true, mtf = mtf(signal.barTime), newsEvidence = news, priceAction = evidence)
+                automatic = true, mtf = mtf(signal.barTime), newsEvidence = news, priceAction = evidence,
+            observedAt = 1_800_000_000_000L)
             throw AssertionError("double auto entry in one bar")
         } catch (_: IllegalArgumentException) { /* must reject */ }
         assertEquals(1, completed.trades.value.size)
     }
 
-    @Test fun signalBasedEntryWithoutFreshIctEvidenceCannotWriteAndManualIsMarkedUnverified() = runBlocking {
+    @Test fun optionalIctSnapshotCanBeAbsentButFourLayersPersist() = runBlocking {
         val file = journalFile()
         val store = JournalStore(context, file).also { it.load() }
-        assertTrue(runCatching { store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5,
-            automatic = true, mtf = mtf(signal.barTime), newsEvidence = news) }.isFailure)
-        assertTrue(store.trades.value.isEmpty())
-        assertFalse(file.exists())
-        val manual = store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5, manual = true)
-        assertNull(manual.priceAction)
+        val opened = store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5,
+            automatic = true, mtf = mtf(signal.barTime), newsEvidence = news,
+            observedAt = 1_800_000_000_000L)
+        assertTrue(opened.autoOpened)
+        assertNull(opened.priceAction)
+        assertEquals(4, opened.entryConditions.size)
         // A pre-upgrade JSON without the new field must still open, without invented evidence.
         val encoded = file.readText()
         assertTrue(encoded.contains(",\"priceAction\":null"))
@@ -178,7 +190,8 @@ class PaperJournalPersistenceTest {
         val file = journalFile()
         val store = JournalStore(context, file)
         store.load()
-        val opened = store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5, manual = true)
+        val opened = store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5, manual = true,
+            observedAt = 1_800_000_000_000L)
         val closed = store.close(opened.id, 2999.0, "بستن دستی")
         assertEquals(1, store.stats().total)
         assertEquals(opened.id, closed.id)
@@ -195,7 +208,8 @@ class PaperJournalPersistenceTest {
         settingsStore.update { it.copy(accountBalance = 50_000.0) }
         val store = JournalStore(context, file, settingsStore = settingsStore)
         store.load()
-        val opened = store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5, manual = true)
+        val opened = store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5, manual = true,
+            observedAt = 1_800_000_000_000L)
         // Close with a loss
         store.close(opened.id, 2990.0, "بستن دستی با ضرر")
         val currentBal = settingsStore.read().accountBalance
@@ -209,21 +223,26 @@ class PaperJournalPersistenceTest {
 
         // 1. Long position: Entry 3000, SL 2990, TP 3020
         val longSignal = signal.copy(action = SignalAction.BUY, entry = 3000.0, stopLoss = 2990.0, takeProfit = 3020.0)
-        val longTrade = store.open(longSignal, "XAU/USD", 3000.0, 50_000.0, 0.5, manual = true)
+        val longTrade = store.open(longSignal, "XAU/USD", 3000.0, 50_000.0, 0.5,
+            manual = true, observedAt = 1_800_000_000_000L)
         assertTrue(longTrade.isOpen)
 
-        // Price reaches 3021 (TP hit!)
-        val closedList = store.settleTick("XAU/USD", 3021.0, longTrade.openedAt + 1000L)
+        // The 2R reference target raises the trailing stop; it does not close the trade.
+        assertTrue(store.settleTick("XAU/USD", 3021.0, longTrade.openedAt + 1000L).isEmpty())
+        assertEquals(3011.0, store.trades.value.single().stopLoss, 1e-6)
+        val closedList = store.settleTick("XAU/USD", 3010.0, longTrade.openedAt + 2000L)
         assertEquals(1, closedList.size)
         val closedTrade = closedList.single()
         assertFalse(closedTrade.isOpen)
-        assertEquals(3020.0, closedTrade.exitPrice!!, 1e-6)
-        assertTrue(closedTrade.exitReason?.contains("حد سود") == true)
+        assertEquals(3011.0, closedTrade.exitPrice!!, 1e-6)
+        assertTrue(closedTrade.exitReason?.contains("حد ضرر") == true)
         assertTrue(closedTrade.pnlUsd!! > 0.0)
 
         // 2. Short position: Entry 3000, SL 3010, TP 2980
-        val shortSignal = signal.copy(action = SignalAction.SELL, entry = 3000.0, stopLoss = 3010.0, takeProfit = 2980.0)
-        val shortTrade = store.open(shortSignal, "XAU/USD", 3000.0, 50_000.0, 0.5, manual = true)
+        val shortSignal = signal.copy(action = SignalAction.SELL, entry = 3000.0,
+            stopLoss = 3010.0, takeProfit = 2980.0, barTime = signal.barTime + Interval.M5.millis)
+        val shortTrade = store.open(shortSignal, "XAU/USD", 3000.0, 50_000.0, 0.5,
+            manual = true, observedAt = 1_800_000_000_000L + Interval.M5.millis)
         assertTrue(shortTrade.isOpen)
 
         // Price rises to 3011 (SL hit!)

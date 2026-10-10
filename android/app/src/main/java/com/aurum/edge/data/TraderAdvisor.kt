@@ -6,10 +6,10 @@ import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.PaperAiReview
 import com.aurum.edge.core.PaperHoldReview
 import com.aurum.edge.core.PaperOrderRules
+import com.aurum.edge.core.TechnicalEvidence
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
-import com.aurum.edge.core.SignalProfile
 import com.aurum.edge.core.VenueSpecs
 import com.aurum.edge.engine.MtfAnalyzer
 import kotlinx.coroutines.CoroutineScope
@@ -39,14 +39,6 @@ data class TraderOpinion(
     val keyLevels: List<String>,
     val risks: List<String>,
     val invalidation: String,
-    val model: String,
-    val generatedAt: Long,
-)
-
-data class SignalTuningPlan(
-    val profile: SignalProfile,
-    val summary: String,
-    val changes: List<String>,
     val model: String,
     val generatedAt: Long,
 )
@@ -127,7 +119,6 @@ data class TraderOpinionState(
  * Hard boundaries kept identical to the rest of the app:
  * - The opinion is ANALYSIS ONLY: it never creates a signal, never satisfies the ninth
  *   condition, never opens a paper trade and never sends an order.
- * - The self-analysis endpoint may only return a strictly validated SignalProfile toggle set;
  *   the app applies those switches locally and then re-runs the normal Ichimoku engine.
  * - Snapshot data is untrusted input for the model; the returned JSON is strictly validated
  *   (bounded sizes, enums/booleans) and any failure is an explicit error, never a fabricated view.
@@ -195,7 +186,7 @@ class TraderAdvisor(
             lastUnreachableElapsed = SystemClock.elapsedRealtime()
             _connection.value = AiConnectionState(
                 configured = true, reachable = false,
-                detail = (error.message ?: "اتصال برقرار نشد").take(120),
+                detail = AiConnectionDiagnostics.describe(error),
                 checkedAt = System.currentTimeMillis())
             false
         }
@@ -241,54 +232,8 @@ class TraderAdvisor(
         AiProvider.probe(http, baseUrl, apiKey, model, format)
 
     /**
-     * AI self-analysis for the Ichimoku engine options. The model may recommend toggles, but the
-     * app accepts only a strict boolean schema and the ViewModel applies it atomically. No prices,
-     * trades or backtest results are fabricated; missing evidence should produce a conservative
-     * profile with more safeguards enabled.
-     */
-    suspend fun tuneSignalEngine(): SignalTuningPlan {
-        val config = settings.read()
-        if (!config.hasClientNewsAi) throw IllegalStateException("برای خودتحلیلی موتور، کلید/مدل AI را در تنظیمات وارد کنید")
-        val now = System.currentTimeMillis()
-        val marketState = market.state.value
-        val radar = scanner.state.value
-        val headlines = news.state.value
-        val mtf = runCatching { MtfAnalyzer.analyze(marketState.candles, marketState.interval) }.getOrNull()
-        val technicalOk = marketState.signal?.confluence?.take(8)
-            ?.count { it.ok && it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED }
-        val current = config.signalProfile
-        val snapshot = buildString {
-            appendLine("Create a self-analysis tuning plan for the app's Ichimoku signal engine options. Apply no trade, no order, no future claim.")
-            appendLine("current_profile=${current.persistName()}")
-            appendLine("symbol=${marketState.symbol} interval=${marketState.interval.label} feed=${marketState.feed.mode.name} closed_bars=${marketState.closedCount} last_price=${marketState.lastPrice ?: "—"}")
-            appendLine("signal_action=${marketState.signal?.action ?: "NONE"} signal_confidence=${marketState.signal?.confidence ?: "—"} technical_ok=${technicalOk ?: "—"}/8 blockers=${marketState.signal?.blockers?.take(5)?.joinToString(" | ") ?: "—"}")
-            appendLine("mtf_veto=${mtf?.veto ?: "—"} mtf_bias=${mtf?.bias ?: "—"} mtf_alignment=${mtf?.alignment ?: "—"}")
-            appendLine("radar:")
-            radar.statuses.take(12).forEach { row ->
-                appendLine("  ${row.symbol}: state=${row.state} tech=${row.technicalScore ?: "—"}/8 detail=${row.detail.take(100)}")
-            }
-            appendLine("news_gate=${headlines.gate.name} vetoed=${headlines.vetoedSymbols.joinToString(",")}")
-            appendLine("Policy: Chikou confirmation is standard and should normally remain true. Optional filters reduce false entries but may reduce opportunities. Prefer safety when evidence is thin.")
-        }
-        val system = "You are the internal AI self-analysis module for an educational Ichimoku app. " +
-            "Return JSON only. Recommend which engine options should be enabled for the next run, " +
-            "based only on the provided snapshot. Do not invent performance, prices, trades or guarantees. " +
-            "Schema: {\"summary\": Persian string 20..220 chars, " +
-            "\"momentum_volume\": boolean, \"flat_span_b\": boolean, \"range_chop_filter\": boolean, " +
-            "\"higher_timeframe_filter\": boolean, \"fake_breakout_filter\": boolean, " +
-            "\"dynamic_spread_filter\": boolean, \"risky_timing_filter\": boolean, " +
-            "\"structure_risk_filter\": boolean, \"cooldown_filter\": boolean, " +
-            "\"chikou_confirmation\": boolean, \"changes\": array of 1..8 short Persian strings}. " +
-            "Use conservative defaults when data is insufficient."
-        val output = AiProvider.completeJson(http, config.newsAiBaseUrl, config.newsAiApiKey,
-            config.newsAiModel, system, snapshot, maxTokens = 900, format = config.newsAiFormatNormalized)
-        return parseTuningPlan(output, config.newsAiModel, now)
-            ?: throw IllegalStateException("پاسخ خودتحلیلی AI قابل‌راستی‌آزمایی نبود")
-    }
-
-    /**
-     * AI-based dynamic trade planning: determines optimal entry, structural stop loss,
-     * and take profit target for a verified technical signal.
+     * Optional AI worthiness review. Proposed numerical levels are parsed and validated for
+     * audit, but NEVER replace the quote/SL/TP backed by the current ICT evidence.
      */
     suspend fun planTradeWithAi(signal: Signal, marketState: MarketState): AiTradePlan {
         val config = settings.read()
@@ -342,7 +287,7 @@ class TraderAdvisor(
         val rr = if (risk > 0) reward / risk else 1.8
         val validDirection = if (isBuy) sl < entry && tp > entry else sl > entry && tp < entry
 
-        if (!validDirection || risk <= 0 || reward <= 0 || rr < 1.2 || !entry.isFinite() || !sl.isFinite() || !tp.isFinite()) {
+        if (!validDirection || risk <= 0 || reward <= 0 || rr < 1.5 || !entry.isFinite() || !sl.isFinite() || !tp.isFinite()) {
             throw IllegalStateException("سطوح بازگشتی از مدل هوش مصنوعی دارای نسبت ریسک/ریوارد نامعتبر بودند")
         }
 
@@ -371,7 +316,7 @@ class TraderAdvisor(
             throw IllegalStateException("برای اعلام نظر AI، کلید/مدل در تنظیمات AI وارد نشده است")
         }
         val now = System.currentTimeMillis()
-        val technicalOk = trade.entryConditions.take(8).count { it.status == "CONFIRMED" }
+        val technicalOk = trade.entryConditions.count { it.status == "CONFIRMED" }
         val rr = trade.riskReward
         val newsLine = trade.newsEvidence?.let { news ->
             "news_model=${news.model} news_direction=${news.direction} news_confidence=${news.confidence} evidence=" +
@@ -383,7 +328,7 @@ class TraderAdvisor(
             appendLine("A paper trade was just SAVED by the app. Review whether the open conditions were acceptable for an educational paper entry. Do not authorize, block, edit, close, or claim profit.")
             appendLine("trade_id=${trade.id.take(8)} symbol=${trade.symbol} action=${trade.action} interval=${trade.interval.label} auto=${trade.autoOpened}")
             appendLine("entry=${trade.entry} stop=${trade.stopLoss} target=${trade.takeProfit} rr=$rr confidence=${trade.confidence}")
-            appendLine("technical_confirmed=$technicalOk/8")
+            appendLine("technical_confirmed=$technicalOk/${trade.entryConditions.size}")
             trade.entryConditions.take(12).forEachIndexed { index, item ->
                 appendLine("condition_${index + 1}=${item.name}|${item.status}|${item.detail.take(120)}")
             }
@@ -521,7 +466,7 @@ class TraderAdvisor(
         val stopDistance = kotlin.math.abs(price - trade.stopLoss)
         val targetDistance = kotlin.math.abs(trade.takeProfit - price)
         val ageMinutes = ((now - trade.openedAt) / 60_000L).coerceAtLeast(0L)
-        val technicalAtEntry = trade.entryConditions.take(8).count { it.status == "CONFIRMED" }
+        val technicalAtEntry = trade.entryConditions.count { it.status == "CONFIRMED" }
         val currentSignal = state.signal
         val mtf = runCatching { MtfAnalyzer.analyze(state.candles, state.interval) }.getOrNull()
         val roundTripCost = kotlin.math.round(
@@ -535,12 +480,12 @@ class TraderAdvisor(
             appendLine("distance_to_stop=$stopDistance distance_to_target=$targetDistance real_spread=$spreadPrice stop_distance_in_spreads=" +
                 (if (spreadPrice > 0.0) kotlin.math.round(stopDistance / spreadPrice * 10.0) / 10.0 else "—"))
             appendLine("real_round_trip_cost_usd=$roundTripCost venue=${spec.venue}")
-            appendLine("technical_confirmed_at_entry=$technicalAtEntry/8")
-            trade.entryConditions.take(8).forEachIndexed { index, item ->
+            appendLine("technical_confirmed_at_entry=$technicalAtEntry/${trade.entryConditions.size}")
+            trade.entryConditions.forEachIndexed { index, item ->
                 appendLine("entry_condition_${index + 1}=${item.name}|${item.status}")
             }
             appendLine("now_signal_action=${currentSignal?.action ?: "—"} now_technical_ok=" +
-                (currentSignal?.confluence?.take(8)?.count { it.ok }?.let { "$it/8" } ?: "—"))
+                (currentSignal?.let { TechnicalEvidence.items(it) }?.count { it.ok }?.let { "$it/${currentSignal?.let { TechnicalEvidence.items(it).size } ?: 0}" } ?: "—"))
             appendLine("now_mtf_veto=${mtf?.veto ?: "—"} now_mtf_bias=${mtf?.bias ?: "—"} now_mtf_alignment=${mtf?.alignment ?: "—"}")
             trade.aiReview?.let { appendLine("entry_ai_verdict=${it.verdict} entry_ai_confidence=${it.confidence}") }
             trade.newsEvidence?.let { appendLine("news_at_entry=${it.direction}(${it.confidence}%) model=${it.model}") }
@@ -588,8 +533,8 @@ class TraderAdvisor(
         val atr = window.takeLast(15).map { it.high - it.low }.averageOrNull()
         val changePct = if (first != null && first > 0 && lastClose != null)
             (lastClose - first) / first * 100 else null
-        val signalScore = marketState.signal?.confluence
-            ?.take(8)?.count { it.ok && it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED }
+        val signalScore = marketState.signal?.let { TechnicalEvidence.items(it) }
+            ?.count { it.ok && it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED }
         val ict = runCatching { IctEntryRules.assess(marketState, now).reason ?: "تأیید شده" }
             .getOrNull() ?: "بررسی نشد"
         val mtf = runCatching { MtfAnalyzer.analyze(marketState.candles, marketState.interval) }.getOrNull()
@@ -598,12 +543,12 @@ class TraderAdvisor(
             appendLine("App market snapshot (all numbers are REAL observations from this app; untrusted data):")
             appendLine("selected_pair=$symbol interval=${marketState.interval.label} feed=${marketState.feed.mode.name} last_price=${marketState.lastPrice ?: "—"}")
             appendLine("closed_bars=${closed.size} window_high=$high window_low=$low last_close=$lastClose window_change_pct=$changePct avg_bar_range=$atr")
-            appendLine("signal_actionable=${marketState.signal?.isActionable == true} technical_conditions_ok=${signalScore ?: "—"}/8")
+            appendLine("signal_actionable=${marketState.signal?.isActionable == true} technical_conditions_ok=${signalScore ?: "—"}/${TechnicalEvidence.CURRENT_COUNT}")
             appendLine("ict_gate=$ict")
             appendLine("mtf_veto=${mtf?.veto ?: "—"} mtf_bias=${mtf?.bias ?: "—"}")
             appendLine("radar:")
             radar.statuses.forEach { row ->
-                appendLine("  ${row.symbol}: ${row.state} price=${row.price ?: "—"} tech=${row.technicalScore ?: "—"}/8")
+                appendLine("  ${row.symbol}: ${row.state} price=${row.price ?: "—"} tech=${row.technicalScore ?: "—"}/${TechnicalEvidence.CURRENT_COUNT}")
             }
             appendLine("news_gate=${headlines.gate.name} ai_verdicts=" +
                 headlines.aiBySymbol.entries.joinToString(";") { (pair, v) ->
@@ -663,36 +608,6 @@ class TraderAdvisor(
             if (cautions.size > 3 || cautions.any { it.length !in 3..90 }) return null
             return PaperHoldReview(verdict, confidence.toInt(), summary, reasons, cautions,
                 lastPrice, unrealizedUsd, model, now)
-        }
-
-        internal fun parseTuningPlan(root: JsonObject, model: String, now: Long): SignalTuningPlan? {
-            fun str(key: String): String? = (root[key] as? JsonPrimitive)?.contentOrNull?.trim()
-            fun bool(key: String): Boolean? = str(key)?.lowercase(Locale.ROOT)?.let {
-                when (it) { "true" -> true; "false" -> false; else -> null }
-            }
-            fun list(key: String): List<String>? {
-                val array = root[key] as? JsonArray ?: return null
-                val items = array.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim() }
-                if (items.size != array.size) return null
-                return items
-            }
-            val summary = str("summary") ?: return null
-            if (summary.length !in 20..220) return null
-            val changes = list("changes") ?: return null
-            if (changes.isEmpty() || changes.size > 8 || changes.any { it.length !in 3..100 }) return null
-            val profile = SignalProfile(
-                momentumVolume = bool("momentum_volume") ?: return null,
-                flatSpanB = bool("flat_span_b") ?: return null,
-                rangeChopFilter = bool("range_chop_filter") ?: return null,
-                higherTimeframeFilter = bool("higher_timeframe_filter") ?: return null,
-                fakeBreakoutFilter = bool("fake_breakout_filter") ?: return null,
-                dynamicSpreadFilter = bool("dynamic_spread_filter") ?: return null,
-                riskyTimingFilter = bool("risky_timing_filter") ?: return null,
-                structureRiskFilter = bool("structure_risk_filter") ?: return null,
-                cooldownFilter = bool("cooldown_filter") ?: return null,
-                chikouConfirmation = bool("chikou_confirmation") ?: return null,
-            )
-            return SignalTuningPlan(profile, summary, changes, model, now)
         }
 
         /** Strict schema validation: bounded sizes and enums; anything else fails closed. */

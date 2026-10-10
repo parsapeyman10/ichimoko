@@ -31,9 +31,9 @@ class AlertDiagnosticsTest {
         assertTrue(checks.single { it.kind == AlertCheckKind.APP_ALERT }.ready) // opt-in, but not deliverable yet
     }
 
-    @Test fun `recent REST bars allow educational prerequisites but no AI signal or automatic entry`() {
-        val bars = (0 until 210).map { i ->
-            Candle(now - (210L - i) * Interval.M5.millis, 3100.0, 3101.0, 3099.0, 3100.0, closed = true)
+    @Test fun `recent REST bars allow live prerequisites but no AI signal or automatic entry`() {
+        val bars = (0 until 320).map { i ->
+            Candle(now - (320L - i) * Interval.M5.millis, 3100.0, 3101.0, 3099.0, 3100.0, closed = true)
         }
         val market = MarketState(candles = bars, feed = FeedStatus(FeedMode.POLLING, lastSuccessAt = now - 4_000L))
         val settings = AppSettings(apiKey = "synthetic-only", backgroundMonitor = true,

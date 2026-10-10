@@ -24,12 +24,35 @@ class MarketHoursTest {
         val open = MarketHours.sessionWindow(at("2026-09-24T12:00:00Z")) // Thursday EDT
         assertFalse(open.closed)
         assertEquals("بسته‌شدن بازار", open.nextChangeLabel)
-        assertEquals(at("2026-09-25T21:00:00Z"), open.nextChangeAt!!)
+        assertEquals(at("2026-09-24T21:00:00Z"), open.nextChangeAt!!) // daily gold break
 
         val closed = MarketHours.sessionWindow(at("2026-09-26T12:00:00Z")) // Saturday EDT
         assertTrue(closed.closed)
         assertEquals("بازشدن بازار", closed.nextChangeLabel)
         assertEquals(at("2026-09-27T22:00:00Z"), closed.nextChangeAt!!)
+    }
+
+    @Test fun `weekend and weekday schedules differ for FX gold US shares and crypto`() {
+        val sunday1730 = at("2026-09-27T21:30:00Z") // 17:30 EDT
+        assertFalse(MarketHours.closedFor("EUR/USD", sunday1730))
+        assertTrue(MarketHours.closedFor("XAU/USD", sunday1730))
+        assertTrue(MarketHours.closedFor("AAPL", sunday1730))
+        assertFalse(MarketHours.closedFor("BTC/USDT", sunday1730))
+        assertEquals(at("2026-09-27T21:00:00Z"), MarketHours.sessionWindowFor(
+            "EUR/USD", at("2026-09-26T12:00:00Z")).nextChangeAt!!)
+        assertEquals(at("2026-09-27T22:00:00Z"), MarketHours.sessionWindowFor(
+            "XAU/USD", at("2026-09-26T12:00:00Z")).nextChangeAt!!)
+
+        val monday1730 = at("2026-09-28T21:30:00Z")
+        assertTrue(MarketHours.closedFor("XAU/USD", monday1730))
+        assertFalse(MarketHours.closedFor("EUR/USD", monday1730))
+        assertEquals(at("2026-09-28T22:00:00Z"), MarketHours.sessionWindowFor(
+            "XAU/USD", monday1730).nextChangeAt!!)
+        val monday1530 = at("2026-09-28T19:30:00Z")
+        assertFalse(MarketHours.closedFor("AAPL", monday1530))
+        assertTrue(MarketHours.closedFor("AAPL", at("2026-09-28T20:00:00Z")))
+        assertFalse(MarketHours.sessionWindowFor("BTC/USDT", sunday1730).closed)
+        assertEquals(null, MarketHours.sessionWindowFor("BTC/USDT", sunday1730).nextChangeAt)
     }
 
 }

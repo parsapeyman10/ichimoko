@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.Interval
+import com.aurum.edge.core.AssetClass
+import com.aurum.edge.core.CategoryStrategy
+import com.aurum.edge.core.V1Universe
 import com.aurum.edge.core.SignalProfile
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,37 +25,32 @@ class SettingsStore(context: Context) {
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
     fun read(): AppSettings {
-        // The engine options were removed from the UI on purpose: their protective value is
-        // now part of the always-on core. Stored per-option preferences are deliberately
-        // ignored (never read) so an older install can not run a weaker engine than the one
-        // the settings screen describes, and a user can not switch a fake-cross guard off.
-        val profile = SignalProfile(
-            momentumVolume = true,
-            flatSpanB = true,
-            rangeChopFilter = true,
-            higherTimeframeFilter = true,
-            fakeBreakoutFilter = true,
-            dynamicSpreadFilter = true,
-            riskyTimingFilter = true,
-            structureRiskFilter = true,
-            cooldownFilter = true,
-            chikouConfirmation = true,
-        )
+        // Legacy profile preferences remain readable for existing on-device records, but
+        // they are not V1 controls and are not displayed as editable signal filters.
+        // Four scored layers and absolute locks are fixed by the current contract.
+        val profile = SignalProfile.BASE
         val storedApiKey = prefs.getString(KEY_API, null)?.trim()
         val storedNewsAiKey = prefs.getString(KEY_NEWS_AI_KEY, null)?.trim().orEmpty()
         val storedNewsAiUrl = prefs.getString(KEY_NEWS_AI_URL, null)?.trim().orEmpty()
         val storedNewsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, null)?.trim().orEmpty()
-        val storedStrategy = com.aurum.edge.core.StrategyKind.fromId(prefs.getString(KEY_ACTIVE_STRATEGY, "ICHIMOKU"))
+        val storedStrategy = com.aurum.edge.core.StrategyKind.fromId(
+            prefs.getString(KEY_ACTIVE_STRATEGY, "ICHIMOKU"))
+            ?: com.aurum.edge.core.StrategyKind.ICHIMOKU_PRICE_ACTION
+        val activeWatchlist = prefs.getString(KEY_V1_WATCHLIST, null)?.split(',')?.let(V1Universe::watchlist)
+            ?: V1Universe.defaults
+        val categoryStrategies = AssetClass.entries.associateWith { category ->
+            CategoryStrategy.fromStored(prefs.getString("v1_strategy_${category.name}", null))
+        }
         return AppSettings(
         apiKey = storedApiKey?.takeIf { it.isNotBlank() }
             ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY.trim(),
         // Symbol can be any instrument in the 50+ global universe (forex, commodities, stocks, crypto)
         symbol = (prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD")
-            .takeIf { it in WatchCatalog.chartSymbols || it in WatchCatalog.scannerSymbols || CryptoCatalog.isCrypto(it) } ?: "XAU/USD",
+            .takeIf(V1Universe::valid) ?: "XAU/USD",
         interval = Interval.fromLabel(prefs.getString(KEY_INTERVAL, null) ?: "5m"),
-        riskPercent = prefs.getFloat(KEY_RISK, 0.5f).toDouble(),
+        riskPercent = prefs.getFloat(KEY_RISK, 0.5f).toDouble().takeIf { it.isFinite() }?.coerceIn(0.1, 0.5) ?: 0.5,
         accountBalance = prefs.getFloat(KEY_BALANCE, 1000f).toDouble(),
-        minConfidence = prefs.getFloat(KEY_MIN_CONF, 72f).toDouble(),
+        minConfidence = prefs.getFloat(KEY_MIN_CONF, 85f).toDouble().takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
         spreadPrice = prefs.getFloat(KEY_SPREAD, 0.12f).toDouble(),
         commissionPerOz = prefs.getFloat(KEY_COMMISSION, 0.035f).toDouble(),
         backgroundMonitor = prefs.getBoolean(KEY_MONITOR, false),
@@ -61,7 +59,7 @@ class SettingsStore(context: Context) {
         alertSoundName = prefs.getString(KEY_ALERT_SOUND_NAME, "").orEmpty(),
         newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty().trim(),
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
-        autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, true),
+        autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
         autoDownloadUpdates = prefs.getBoolean(KEY_AUTO_DOWNLOAD_UPDATES, false),
         newsAiApiKey = storedNewsAiKey,
         newsAiBaseUrl = storedNewsAiUrl,
@@ -69,6 +67,8 @@ class SettingsStore(context: Context) {
         newsAiFormat = prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" },
         signalProfile = profile,
         activeStrategy = storedStrategy,
+        activeWatchlist = activeWatchlist,
+        categoryStrategies = categoryStrategies,
     )
     }
 
@@ -84,7 +84,7 @@ class SettingsStore(context: Context) {
         val key = keyInput.trim().ifBlank { existing }
         if (key.any { it.isWhitespace() }) return false
         val symbol = symbolInput.trim().uppercase(java.util.Locale.ROOT).ifBlank { "XAU/USD" }
-        val valid = symbol in WatchCatalog.chartSymbols || symbol in WatchCatalog.scannerSymbols || CryptoCatalog.isCrypto(symbol)
+        val valid = V1Universe.valid(symbol)
         if (!valid) return false
         val saved = prefs.edit().putString(KEY_API, key).putString(KEY_SYMBOL, symbol).commit()
         if (saved && prefs.getString(KEY_API, null).orEmpty() == key && prefs.getString(KEY_SYMBOL, null) == symbol) {
@@ -102,7 +102,7 @@ class SettingsStore(context: Context) {
     @Synchronized
     fun saveChartSymbol(symbolInput: String): Boolean {
         val symbol = symbolInput.trim().uppercase(java.util.Locale.ROOT)
-        val valid = symbol in WatchCatalog.chartSymbols || symbol in WatchCatalog.scannerSymbols || CryptoCatalog.isCrypto(symbol)
+        val valid = V1Universe.valid(symbol)
         if (!valid) return false
         val saved = prefs.edit().putString(KEY_SYMBOL, symbol).commit()
         if (saved && prefs.getString(KEY_SYMBOL, null) == symbol) {
@@ -166,9 +166,27 @@ class SettingsStore(context: Context) {
      * Real-time continuous balance adjustment upon settled paper trade (profit or loss).
      * Ensures position sizing and compounding dynamically track actual account equity.
      */
+    /** Stable UTC-day paper equity. Manual balance increases cannot enlarge today's loss cap.
+     * Must be called before every balance mutation and again by the journal's final entry guard.
+     */
+    @Synchronized
+    fun dayOpeningEquity(now: Long = System.currentTimeMillis()): Double {
+        val day = java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneOffset.UTC).toLocalDate().toString()
+        if (prefs.getString("v1_risk_day", null) == day) {
+            return prefs.getFloat("v1_risk_open_equity", 0f).toDouble()
+        }
+        val opening = read().accountBalance
+        check(opening.isFinite() && opening > 0.0 && prefs.edit()
+            .putString("v1_risk_day", day).putFloat("v1_risk_open_equity", opening.toFloat()).commit()) {
+            "موجودی آغاز روز برای قفل ریسک ثبت نشد"
+        }
+        return opening
+    }
+
     @Synchronized
     fun adjustBalance(deltaUsd: Double) {
         if (!deltaUsd.isFinite() || deltaUsd == 0.0) return
+        dayOpeningEquity()
         val current = read()
         val updated = kotlin.math.round((current.accountBalance + deltaUsd) * 100.0) / 100.0
         val finalBalance = maxOf(10.0, updated)
@@ -177,7 +195,13 @@ class SettingsStore(context: Context) {
 
     @Synchronized
     fun update(transform: (AppSettings) -> AppSettings) {
-        val next = transform(_settings.value)
+        val proposed = transform(_settings.value)
+        if (proposed.accountBalance != _settings.value.accountBalance) dayOpeningEquity()
+        val next = proposed.copy(
+            activeWatchlist = V1Universe.watchlist(proposed.activeWatchlist),
+            riskPercent = proposed.riskPercent.takeIf { it.isFinite() }?.coerceIn(0.1, 0.5) ?: 0.5,
+            minConfidence = proposed.minConfidence.takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
+        )
         prefs.edit()
             .putString(KEY_API, next.apiKey.trim())
             .putString(KEY_SYMBOL, next.symbol.trim().ifBlank { "XAU/USD" })
@@ -204,6 +228,13 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_SIGNAL_COOLDOWN, next.signalProfile.cooldownFilter)
             .putBoolean(KEY_SIGNAL_CHIKOU, next.signalProfile.chikouConfirmation)
             .putString(KEY_ACTIVE_STRATEGY, next.activeStrategy.id)
+            .putString(KEY_V1_WATCHLIST, next.activeWatchlist.joinToString(","))
+            .apply {
+                AssetClass.entries.forEach { category ->
+                    putString("v1_strategy_${category.name}",
+                        (next.categoryStrategies[category] ?: CategoryStrategy.HYBRID).name)
+                }
+            }
             .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
             .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
             .putBoolean(KEY_AUTO_DOWNLOAD_UPDATES, next.autoDownloadUpdates)
@@ -219,6 +250,7 @@ class SettingsStore(context: Context) {
         prefs.getLong("last_sync_${symbol}_${interval.label}", 0L).takeIf { it > 0L }
 
     companion object {
+        private const val KEY_V1_WATCHLIST = "v1_watchlist"
         private const val KEY_API = "td_api_key"
         private const val KEY_SYMBOL = "symbol"
         private const val KEY_INTERVAL = "interval"
@@ -233,6 +265,7 @@ class SettingsStore(context: Context) {
         private const val KEY_ALERT_SOUND_NAME = "verified_alert_sound_name"
         private const val KEY_NEWS_URL = "news_base_url"
         private const val KEY_NEWS_PAUSE = "pause_on_news"
+        // Historical preference key must not be renamed: an existing opt-in survives an upgrade.
         private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"
         private const val KEY_AUTO_DOWNLOAD_UPDATES = "auto_download_updates"
         private const val KEY_NEWS_AI_KEY = "news_ai_client_key"

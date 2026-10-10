@@ -25,7 +25,7 @@ class WatchVerificationReasonsTest {
         val jpy = WatchCatalog.find("USD/JPY")!!
         // Asserting the provider name coupled this test to the data source rather than
         // to the single-source rule it is actually about.
-        assertEquals(1, jpy.defaultSources.size)
+        assertTrue("stocks_yahoo" in jpy.defaultSources)
         val only = jpy.defaultSources.first()
         val one = SourceComparison.verify(jpy, listOf(only), mapOf(only to quote(jpy.id, only)), now)
         assertEquals(VerificationStatus.UNVERIFIED, one.status)

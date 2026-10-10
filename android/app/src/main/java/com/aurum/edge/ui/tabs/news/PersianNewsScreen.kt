@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -23,8 +24,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.data.ForexEvent
+import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.NewsClassifier
-import com.aurum.edge.data.NewsDirection
+import com.aurum.edge.data.HeadlineImpact
 import com.aurum.edge.data.NewsImportance
 import com.aurum.edge.data.PublicHeadline
 import com.aurum.edge.ui.components.Pill
@@ -36,9 +38,12 @@ import kotlinx.coroutines.delay
 import kotlin.math.abs
 
 @Composable
-fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
+fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit,
+                      onOpenSignal: () -> Unit) {
     val web by viewModel.publicWebNews.collectAsStateWithLifecycle()
     val calendar by viewModel.forexCalendar.collectAsStateWithLifecycle()
+    val decision by viewModel.news.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
     val uriHandler = LocalUriHandler.current
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
@@ -52,6 +57,24 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
+        SectionCard("وضعیت گیت خبر · ${settings.symbol}",
+            "نتیجهٔ نماد فعلی در کنار گیت عمومی؛ تیتر عمومی به‌تنهایی اجازهٔ ورود نیست") {
+            val symbolVerdict = decision.aiBySymbol[settings.symbol]
+            Text("${when (decision.gate) {
+                NewsGate.CLEAR -> "بدون وتوی خبرِ تأییدشده"
+                NewsGate.BLOCKED -> "ورود جدید مسدود"
+                NewsGate.UNKNOWN -> "وضعیت خبر نامشخص"
+            }} · ${decision.reason}", style = MaterialTheme.typography.bodySmall,
+                color = if (decision.gate == NewsGate.BLOCKED) AurumColors.Red else AurumColors.TextSecondary)
+            Text(symbolVerdict?.let { "مدل این نماد: ${it.status} · ${it.reason}" }
+                ?: "برای این نماد نظر مدل ثبت نشده؛ نتیجهٔ عمومی جای آن را نمی‌گیرد.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            Text("آخرین بررسی گیت: ${relativeTime(decision.lastCheckedAt, now)}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            OutlinedButton(onClick = viewModel::refreshNews, enabled = !decision.loading) {
+                Text("بررسی دوبارهٔ گیت خبر")
+            }
+        }
         SectionCard("خبرهای مهم بازار", "اهمیت، اثر احتمالی و توضیح کوتاه به‌صورت خودکار از تیتر/تقویم واقعی") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = viewModel::refreshPublicWebNews, enabled = !web.loading, modifier = Modifier.weight(1f)) {
@@ -68,6 +91,10 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
                 modifier = Modifier.padding(top = 8.dp),
             )
             calendar.error?.let { Text("تقویم در دسترس نیست: $it", color = AurumColors.Gold, style = MaterialTheme.typography.bodySmall) }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onOpenSignal) { Text("بازگشت به بررسی سیگنال") }
+                OutlinedButton(onClick = onOpenSettings) { Text("تنظیمات خبر") }
+            }
         }
 
         calendar.events
@@ -131,18 +158,21 @@ private fun NewsImpactCard(item: PublicHeadline, classification: com.aurum.edge.
         subtitle = "${item.feed.title} · ${formatDateTime(item.publishedAt)}",
         trailing = { Pill(importanceLabel(classification.importance), tone) },
     ) {
-        Text(
-            directionLine(classification.direction),
-            style = MaterialTheme.typography.bodySmall,
-            color = directionColor(classification.direction),
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            impactExplanation(classification, item),
-            style = MaterialTheme.typography.bodySmall,
-            color = AurumColors.TextSecondary,
-            modifier = Modifier.padding(top = 5.dp),
-        )
+        Text("نماد و جهتِ ذکرشده در همین تیتر:",
+            style = MaterialTheme.typography.labelMedium, color = AurumColors.TextSecondary)
+        HeadlineImpact.explain(item.title).forEach { explanation ->
+            val reported = explanation.substringBefore('؛')
+            Text(explanation, style = MaterialTheme.typography.bodySmall,
+                color = when {
+                    reported.contains('↑') -> AurumColors.Green
+                    reported.contains('↓') -> AurumColors.Red
+                    else -> AurumColors.Gold
+                }, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 6.dp))
+        }
+        Text("↑/↓ فقط گزارش حرکت در متن تیتر است، نه پیش‌بینی واکنش قیمت. خبر بی‌نماد یا مبهم جهت‌دار برچسب نمی‌گیرد.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 4.dp))
         if (item.excerpt.isNotBlank()) Text(item.excerpt,
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
             modifier = Modifier.padding(top = 5.dp))
@@ -156,33 +186,6 @@ private fun importanceLabel(value: NewsImportance): String = when (value) {
     NewsImportance.LOW -> "کم‌اثر"
 }
 
-private fun directionLine(value: NewsDirection): String = when (value) {
-    NewsDirection.BULLISH -> "اثر احتمالی: حمایتی / صعودی برای دارایی مرتبط"
-    NewsDirection.BEARISH -> "اثر احتمالی: فشار فروش / نزولی برای دارایی مرتبط"
-    NewsDirection.NEUTRAL -> "اثر احتمالی: نامشخص یا خنثی"
-}
-
-private fun directionColor(value: NewsDirection) = when (value) {
-    NewsDirection.BULLISH -> AurumColors.Green
-    NewsDirection.BEARISH -> AurumColors.Red
-    NewsDirection.NEUTRAL -> AurumColors.TextSecondary
-}
-
-private fun impactExplanation(classification: com.aurum.edge.data.NewsClassification, item: PublicHeadline): String {
-    val target = when {
-        item.title.contains("gold", ignoreCase = true) || item.excerpt.contains("gold", ignoreCase = true) -> "طلا / XAUUSD"
-        item.title.contains("dollar", ignoreCase = true) || item.excerpt.contains("dollar", ignoreCase = true) ||
-            item.title.contains("fed", ignoreCase = true) -> "دلار آمریکا و جفت‌ارزهای اصلی"
-        else -> "بازار فارکس و طلا"
-    }
-    val behavior = when (classification.direction) {
-        NewsDirection.BULLISH -> "ممکن است تقاضا یا مومنتوم خرید را تقویت کند؛ منتظر تأیید چارت بمان."
-        NewsDirection.BEARISH -> "ممکن است فشار فروش یا نوسان تند ایجاد کند؛ ورود خلاف خبر ریسک بیشتری دارد."
-        NewsDirection.NEUTRAL -> "جهت روشن نیست؛ بیشتر به‌عنوان هشدار نوسان/ریسک زمانی دیده شود."
-    }
-    return "روی $target اثر احتمالی دارد. $behavior"
-}
-
 private fun calendarTimeLabel(at: Long, now: Long): String {
     val diffMinutes = (at - now) / 60_000L
     return when {
@@ -194,10 +197,14 @@ private fun calendarTimeLabel(at: Long, now: Long): String {
 }
 
 private fun calendarExplanation(event: ForexEvent): String {
-    val target = if (event.country == "USD") "طلا و همه جفت‌های دلاری" else "جفت‌ارزهای مرتبط با ${event.country}"
-    return when (event.impact) {
-        "High" -> "این رویداد بسیار مهم است و می‌تواند روی $target نوسان شدید، اسپرد بیشتر و شکست‌های فیک بسازد. تا انتشار/هضم خبر، ورود تازه پرریسک است."
-        "Medium" -> "اثر متوسط دارد؛ ممکن است حرکت کوتاه‌مدت بسازد ولی تصمیم نهایی باید با چارت و امتیاز موتور باشد."
-        else -> "اثر معمولاً محدود است، اما اگر بازار کم‌عمق باشد همچنان می‌تواند نویز ایجاد کند."
+    val target = when (event.country) {
+        "USD" -> "دلار آمریکا (USD)، EUR/USD (USD ارز مظنه)، USD/JPY (USD ارز پایه) و احتمالا طلا (XAU/USD)"
+        "EUR" -> "یورو (EUR) و جفت‌های EUR/USD و EUR/GBP"
+        "JPY" -> "ین ژاپن (JPY) و جفت‌های USD/JPY و EUR/JPY"
+        "GBP" -> "پوند (GBP) و جفت‌های GBP/USD و EUR/GBP"
+        else -> "ارز ${event.country} و جفت‌های مرتبط با آن"
     }
+    val risk = if (event.impact == "High") "ریسک نوسان/اسپرد بالا است" else "اثر ممکن است محدود یا نامشخص باشد"
+    return "نمادهای مرتبط: $target. $risk؛ صعود/نزول هیچ‌کدام فقط از نام رویداد یا برچسب اهمیت معلوم نیست. " +
+        "Actual و Forecast را با تعریف همان شاخص مقایسه کنید؛ واکنش بازار ممکن است خلاف انتظار باشد."
 }

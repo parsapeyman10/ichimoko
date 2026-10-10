@@ -42,7 +42,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.PaperConditionRecord
 import com.aurum.edge.core.IctPriceActionRecord
-import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PaperAiReview
 import com.aurum.edge.core.PaperHoldReview
@@ -50,10 +49,8 @@ import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.TradeReplay
-import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.data.HoldReviewCycle
 import com.aurum.edge.data.MarketState
-import com.aurum.edge.engine.EvidenceGrade
 import com.aurum.edge.engine.PerformanceMetrics
 import com.aurum.edge.engine.ResearchEvidence
 import com.aurum.edge.ui.components.Pill
@@ -69,16 +66,11 @@ import java.util.Locale
 @Composable
 fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
-    val opportunities by viewModel.opportunities.collectAsStateWithLifecycle()
-    val opportunityError by viewModel.opportunityError.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
-    val reports by viewModel.reports.collectAsStateWithLifecycle()
-    val reportError by viewModel.reportError.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val loadError by viewModel.journalError.collectAsStateWithLifecycle()
     val holdReview by viewModel.holdReview.collectAsStateWithLifecycle()
     var confirmClear by remember { mutableStateOf(false) }
-    var confirmOpportunityClear by remember { mutableStateOf(false) }
     var showCombined by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf<AssetClass?>(null) }
     var pendingPdf by remember { mutableStateOf<Pair<String, List<PaperTrade>>?>(null) }
@@ -199,27 +191,6 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             categoryLabel = selectedCategory?.label ?: "همهٔ بازارها",
         )
 
-        val filteredOpportunities = remember(opportunities, selectedCategory) {
-            if (selectedCategory == null) opportunities else opportunities.filter { AssetClass.of(it.symbol) == selectedCategory }
-        }
-
-        if (filteredOpportunities.isNotEmpty() || opportunityError != null) {
-            SectionCard(
-                title = "فرصت‌های آموزشی بررسی‌شده · ${selectedCategory?.label ?: "همهٔ بازارها"}",
-                subtitle = "کاندیداهای اسکن‌شده در دستهٔ انتخاب‌شده (خودِ کاندیدا تا زمان تایید ورود معامله نیست)",
-            ) {
-                opportunityError?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = AurumColors.Red) }
-                filteredOpportunities.take(30).forEach { item ->
-                    OpportunityRow(item, trades.any { it.id == item.paperTradeId })
-                }
-                if (filteredOpportunities.size > 30) Text("۳۰ مورد اخیر از ${filteredOpportunities.size} کاندیدای ذخیره‌شده",
-                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                if (filteredOpportunities.isNotEmpty()) OutlinedButton(onClick = { confirmOpportunityClear = true }) {
-                    Text("پاک کردن تاریخچهٔ کاندیداها (نه معاملات)")
-                }
-            }
-        }
-
         val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
         if (filteredOpen.isNotEmpty()) {
             SectionCard("پوزیشن‌های باز · ${selectedCategory?.label ?: "همهٔ بازارها"}", "ارزش‌گذاری با آخرین قیمت واقعی دریافتی") {
@@ -243,7 +214,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                 color = if (trade.action == SignalAction.BUY) AurumColors.Green else AurumColors.Red,
                             )
                             Text(
-                                "ورود ${formatPrice(trade.entry)} · SL ${formatPrice(trade.stopLoss)} · TP ${formatPrice(trade.takeProfit)}",
+                                "ورود ${formatPrice(trade.entry)} · استاپ فعلی ${formatPrice(trade.stopLoss)} · هدف اولیه ${formatPrice(trade.takeProfit)}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.TextMuted,
                             )
@@ -339,8 +310,8 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
         }
 
         if (loadError == null) {
-            val recorded = trades.filter(ResearchEvidence::hasRecordedNineWay)
-            val other = trades.filterNot(ResearchEvidence::hasRecordedNineWay)
+            val recorded = trades.filter(ResearchEvidence::hasRecordedSignalEvidence)
+            val other = trades.filterNot(ResearchEvidence::hasRecordedSignalEvidence)
             PaperEvidencePanel(recorded, other, settings.spreadPrice, settings.commissionPerOz)
             if (recorded.any { !it.isOpen && it.pnlUsd != null }) PerformancePanel(
                 PerformanceMetrics.fromPaper(recorded, settings.accountBalance),
@@ -357,28 +328,13 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                     "کل ژورنال: دستی + سیگنال فنی مخلوط؛ برای اثبات استراتژی معتبر نیست · حداکثر ۵۰۰ معاملهٔ اخیر")
             }
         }
-        reportError?.let { SectionCard("گزارش پژوهش قابل خواندن نیست") {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
-        } }
-        if (reportError == null) reports.firstOrNull()?.let { report ->
-            StoredReportCard(report)
-            if (ResearchEvidence.stored(report).grade != EvidenceGrade.NO_DATA) {
-                PerformanceMetrics.fromStoredReport(report.outOfSample)?.let { performance ->
-                    PerformancePanel(performance, "فقط تست فنیِ خارج نمونه · ${report.outOfSample.symbol} · ${report.interval}؛ نه گیت خبر")
-                }
-            }
-        }
     }
     if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false },
         title = { Text("حذف قطعی ژورنال کاغذی؟") },
-        text = { Text("تمام معاملات کاغذی باز و بسته‌شدهٔ ثبت‌شده روی گوشی پاک می‌شوند؛ بازگشت‌پذیر نیست. تاریخچهٔ کاندیداها جداگانه نگهداری می‌شود.") },
+        text = { Text("تمام معاملات کاغذی باز و بسته‌شدهٔ ثبت‌شده روی گوشی پاک می‌شوند؛ بازگشت‌پذیر نیست. تاریخچهٔ فرصت‌های اسکن‌شده جداگانه نگهداری می‌شود.") },
         confirmButton = { TextButton(onClick = { viewModel.clearJournal(); confirmClear = false }) { Text("حذف") } },
         dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("انصراف") } })
-    if (confirmOpportunityClear) AlertDialog(onDismissRequest = { confirmOpportunityClear = false },
-        title = { Text("تاریخچهٔ کاندیداهای آموزشی پاک شود؟") },
-        text = { Text("فقط اعلان‌های آموزشی ذخیره‌شده پاک می‌شوند؛ معاملات ژورنال تغییر نمی‌کنند. اگر کندل هنوز تازه باشد ممکن است دوباره هشدار دریافت کنید.") },
-        confirmButton = { TextButton(onClick = { viewModel.clearOpportunityHistory(); confirmOpportunityClear = false }) { Text("حذف کاندیداها") } },
-        dismissButton = { TextButton(onClick = { confirmOpportunityClear = false }) { Text("انصراف") } })
+
 }
 
 @Composable
@@ -386,7 +342,7 @@ private fun PaperEvidencePanel(recorded: List<PaperTrade>, other: List<PaperTrad
                                spread: Double, commission: Double) {
     val closed = recorded.count { !it.isOpen && it.pnlUsd != null }
     val cost = ResearchEvidence.paperCostWhatIf(recorded, spread, commission)
-    SectionCard("تفکیک شواهد عملکرد کاغذی", "سوابق همین نصب؛ بک‌تست فنی در این آمار نیست") {
+    SectionCard("تفکیک شواهد عملکرد کاغذی", "سوابق معاملات ثبت‌شده روی همین نصب، جدا از فرصت‌های اسکن‌شده") {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatTile("بستهٔ سیگنالی با شاهد", "$closed", modifier = Modifier.weight(1f))
             StatTile("دستی/بدون شاهد", "${other.count { !it.isOpen && it.pnlUsd != null }}",
@@ -417,7 +373,7 @@ private fun PaperEvidencePanel(recorded: List<PaperTrade>, other: List<PaperTrad
 
 @Composable
 private fun EntryConditionsLine(conditions: List<PaperConditionRecord>) {
-    val started = conditions.take(8).filter { it.status == "CONFIRMED" }
+    val started = conditions.filter { it.status == "CONFIRMED" }
     if (started.isEmpty()) return
     Text(
         "شروع معامله: " + started.joinToString("، ") { it.name.substringAfter('·').trim() },
@@ -429,13 +385,14 @@ private fun EntryConditionsLine(conditions: List<PaperConditionRecord>) {
 
 private fun conditionTone(status: String) = when (status) {
     "CONFIRMED" -> AurumColors.Green
-    "UNKNOWN" -> AurumColors.Orange
+    "UNKNOWN", "PARTIAL" -> AurumColors.Orange
     else -> AurumColors.Red
 }
 
 private fun conditionLabel(status: String) = when (status) {
     "CONFIRMED" -> "برقرار"
-    "UNKNOWN" -> "احتمالی"
+    "PARTIAL" -> "امتیاز جزئی"
+    "UNKNOWN" -> "نامعلوم"
     else -> "دور"
 }
 
@@ -521,34 +478,6 @@ private fun TradeRow(trade: PaperTrade) {
     }
 }
 
-
-@Composable
-private fun OpportunityRow(item: PaperOpportunity, tradeStillSaved: Boolean) {
-    val uriHandler = LocalUriHandler.current
-    Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
-        Text("${item.symbol} ${item.action} · ${item.interval.label} · ${formatDateTime(item.alertedAt)}",
-            style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
-        Text("قیمت دریافت‌شده ${formatPrice(item.priceAtAlert)}$ · SL ${formatPrice(item.stopLoss)} · TP ${formatPrice(item.takeProfit)}",
-            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-        Text(when {
-            item.paperTradeId == null -> "فقط کاندیدا؛ اعلان به‌تنهایی پوزیشن کاغذی باز نمی‌کند."
-            tradeStillSaved -> "ورود کاغذی جداگانه ثبت شد · شناسهٔ ${item.paperTradeId.take(8)}"
-            else -> "رکورد معاملهٔ مرتبط بعداً از ژورنال پاک شده است."
-        }, style = MaterialTheme.typography.labelSmall,
-            color = if (tradeStillSaved) AurumColors.Green else AurumColors.TextMuted)
-        Text("کندل ${formatDateTime(item.signalBarTime)} · MTF ${item.mtf.bias}" +
-            (item.newsEvidence?.let { " · مدل ${it.model} · تقویم ${formatDateTime(it.calendarCheckedAt)}" }
-                ?: " · خبر نزدیک معتبر برای این کاندیدا ثبت نشد"),
-            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-        ConditionDisclosure(item.key, item.conditions)
-        IctDisclosure(item.key, item.priceAction)
-        item.newsEvidence?.evidence?.forEach { news ->
-            OutlinedButton(onClick = { runCatching { uriHandler.openUri(news.url) } }) {
-                Text("شاهد خبر: ${news.source}", style = MaterialTheme.typography.labelSmall)
-            }
-        }
-    }
-}
 
 /**
  * «همین معامله روی چارت»: the stored entry/SL/TP of one journal row drawn over the REAL candles
@@ -662,7 +591,7 @@ private fun AiReviewDisclosure(review: PaperAiReview?) {
         review.cautions.forEachIndexed { index, caution ->
             Text("احتیاط ${index + 1}: $caution", style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
         }
-        Text("این نظر فقط تحلیل آموزشی بعد از ثبت معاملهٔ کاغذی است؛ معامله را تأیید/رد یا سفارش واقعی ایجاد نمی‌کند.",
+        Text("این نظر فقط تحلیل بعد از ثبت معاملهٔ کاغذی است؛ معامله را تأیید/رد یا سفارش واقعی ایجاد نمی‌کند.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
     }
 }
@@ -707,7 +636,7 @@ private fun HoldReviewStatus(cycle: HoldReviewCycle, onReview: () -> Unit) {
         cycle.skipped.takeIf { it.isNotBlank() }?.let { reason ->
             Text(reason, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
-        Text("خروج معامله فقط با لمس قیمت واقعی حد ضرر/حد سود انجام می‌شود؛ نظر AI هیچ معامله‌ای را نمی‌بندد و حد ضرر را جابه‌جا نمی‌کند.",
+        Text("پوزیشن‌های جدید V1 در ۱R استاپ را به نقطهٔ ورود و در ۲R به ۱R سود می‌رسانند؛ پس از آن استاپ پویا دنبال‌کننده است و هدف اولیه خروج ثابت نیست. رکوردهای قدیمی طبق قواعد ثبت‌شدهٔ خود تسویه می‌شوند. AI معامله را نمی‌بندد و پارامترها را عوض نمی‌کند.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
     }
 }
@@ -744,7 +673,7 @@ private fun HoldReviewDisclosure(review: PaperHoldReview?, showEmptyHint: Boolea
         review.cautions.forEachIndexed { index, caution ->
             Text("احتیاط ${index + 1}: $caution", style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
         }
-        Text("این نظر فقط تحلیل آموزشی است: معامله را نمی‌بندد، حد ضرر/حد سود را تغییر نمی‌دهد و سفارش واقعی نمی‌فرستد.",
+        Text("این نظر فقط تحلیل است: معامله را نمی‌بندد، حد ضرر/حد سود را تغییر نمی‌دهد و سفارش واقعی نمی‌فرستد.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
     }
 }
@@ -783,7 +712,7 @@ private fun IctDisclosure(key: String, record: IctPriceActionRecord?) {
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
         Text("قیمت ${formatPrice(record.quote)} · SL ${formatPrice(record.stop)} (حد بیرون جاروب ${formatPrice(record.stopBoundary)}) · TP ${formatPrice(record.target)} (حد پیش از سطح مقابل ${formatPrice(record.opposingLevel)})",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-        Text("تقریب آموزشی روی کندل بسته؛ سفارش نهادی/سود آینده را تأیید نمی‌کند. مدل قدیمی پس از ثبت دوباره‌نویسی نمی‌شود.",
+        Text("تقریب روی کندل بسته؛ سفارش نهادی/سود آینده را تأیید نمی‌کند. مدل قدیمی پس از ثبت دوباره‌نویسی نمی‌شود.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
     }
 }
@@ -804,35 +733,6 @@ private fun ConditionDisclosure(key: String, conditions: List<PaperConditionReco
             color = tone,
             modifier = Modifier.padding(vertical = 2.dp),
         )
-    }
-}
-
-/**
- * The last walk-forward run kept on this device. It is shown with its own date so the numbers can
- * be re-checked instead of taken on faith.
- */
-@Composable
-private fun StoredReportCard(report: WalkForwardRecord) {
-    val assessment = ResearchEvidence.stored(report)
-    val stress = report.costStressOutOfSample
-    SectionCard(
-        title = "آخرین تست فنیِ خارج نمونه (گزارش گوشی)",
-        subtitle = "${report.interval} · ${report.bars} کندل · ${formatDateTime(report.generatedAt)}",
-    ) {
-        Text(assessment.title, style = MaterialTheme.typography.bodySmall,
-            color = if (assessment.grade == EvidenceGrade.UNFAVORABLE) AurumColors.Red else AurumColors.Gold)
-        Text(assessment.detail, style = MaterialTheme.typography.labelSmall,
-            color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 5.dp))
-        if (assessment.grade != EvidenceGrade.NO_DATA && stress != null) {
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatTile("بستهٔ خارج نمونه", "${report.outOfSample.trades.size}", modifier = Modifier.weight(1f))
-                StatTile("خالص فرضی", "${formatPrice(report.outOfSample.netPnl)}$", modifier = Modifier.weight(1f))
-                StatTile("خالص هزینهٔ ×۲", "${formatPrice(stress.netPnl)}$", modifier = Modifier.weight(1f))
-            }
-            Text("اسپرد ${report.outOfSample.spreadPrice} و کمیسیون ${report.outOfSample.commissionPerOz} دلار/واحد؛ با فرض ×۲: ${stress.spreadPrice} و ${stress.commissionPerOz}. بسته‌شدهٔ ×۲: ${stress.trades.size}. باز در پایان: عادی ${if (report.outOfSample.openAtEnd) 1 else 0}، ×۲ ${if (stress.openAtEnd) 1 else 0}؛ پوزیشن حل‌نشدهٔ گپ: عادی ${report.outOfSample.unresolvedGap}، ×۲ ${stress.unresolvedGap}. فقط پژوهشِ موتور فنی؛ نه معاملات سیگنالی کاغذی.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 8.dp))
-        }
     }
 }
 

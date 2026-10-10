@@ -132,9 +132,9 @@ class CryptoOnDeviceTest {
 
     @Test fun `global gold has a source that serves it`() {
         val row = WatchCatalog.find("XAU/USD")!!
-        // TradingView is reachable where the exchange APIs are not, and it is the same
-        // feed the chart draws, so it leads. gold-api and Yahoo stay as fallback mappings.
-        assertEquals("tradingview_scanner", row.defaultSources.single())
+        // Try two independent keyless sources, without calling a quote confirmed unless
+        // BOTH return fresh publisher timestamps for the same spot instrument.
+        assertEquals(listOf("gold_api_public", "tradingview_scanner"), row.defaultSources)
         assertEquals("OANDA:XAUUSD", row.providerCodes["tradingview_scanner"])
         assertTrue("gold_api_public" in row.providerCodes)
         assertTrue("stocks_yahoo" in row.providerCodes)

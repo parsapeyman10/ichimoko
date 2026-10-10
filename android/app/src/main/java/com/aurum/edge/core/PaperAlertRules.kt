@@ -13,18 +13,11 @@ object PaperAlertRules {
         if (!settings.notifyOnSignal) return "هشدار آموزشی خاموش است"
         PaperAutoRules.opportunityBlocker(market, settings, news, now, allowedSymbols, barAgeGraceMs)?.let { return it }
         val signal = market.signal ?: return "سیگنال در دسترس نیست"
-        if (mtf == null || mtf.frames.isEmpty() || mtf.veto || mtf.barTime != signal.barTime || mtf.baseInterval != signal.interval)
-            return "تراز چندتایم‌فریم برای همین کندل تأیید نشده است"
-        if (trades.count { it.isOpen } >= 3) return "سقف ۳ معاملهٔ همزمان باز پر شده است"
-        if (trades.any { it.isOpen && it.symbol == market.symbol }) return "پوزیشن کاغذی این نماد باز است"
-        if (trades.any { it.symbol == market.symbol && it.signalBarTime == signal.barTime })
-            return "این کندل پیش‌تر در ژورنال معامله شده است"
         val draft = runCatching { PaperOrderRules.preview(signal.action, market.symbol,
             market.lastPrice ?: 0.0, signal.stopLoss ?: 0.0, signal.takeProfit ?: 0.0,
             settings.accountBalance, settings.riskPercent) }.getOrElse { return "ریسک برگهٔ کاغذی معتبر نیست" }
-        val totalRisk = trades.filter { it.isOpen }.sumOf { it.riskUsd }
-        if (totalRisk + draft.actualRiskUsd > settings.accountBalance * 0.05 + 1e-8)
-            return "مجموع ریسک پوزیشن‌های کاغذی از سقف ۵٪ می‌گذرد"
+        PaperPortfolioPolicy.blocker(trades, market.symbol, settings.accountBalance,
+            draft.actualRiskUsd + draft.commissionUsd + draft.spreadCostUsd, signal.barTime)?.let { return it }
         // News never blocks a paper alert/entry; it is attached later as journal-mining evidence.
         return null
     }

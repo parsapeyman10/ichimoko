@@ -1,18 +1,25 @@
 package com.aurum.edge.core
 
-/** Shared candle-history contract for live chart, scanner, replay and research downloads. */
+/** Separate online evaluation windows from optional archived research-history limits. */
 object HistoryPolicy {
-    /** Minimum real candle floor required before the engine/replay treats a feed as complete enough. */
+    /** Each of the seven independent intervals needs 320 real CLOSED bars for direction
+     * and alignment. Fetch a small cushion for an in-progress bar or missing sessions.
+     */
+    const val LIVE_MIN_CANDLES: Int = 320
+    const val LIVE_REQUEST_CANDLES: Int = 320
+    const val LIVE_FETCH_CANDLES: Int = 360
+
+    /** Retained only for archived offline research; not a prerequisite for online checking. */
     const val TARGET_CANDLES: Int = 3000
 
-    /** Extra chart depth for XAU/USD so the user can scroll back beyond the shallow live window. */
+    /** Archived research ceiling; never automatically requested by the live chart/scanner. */
     const val DEEP_CHART_CANDLES: Int = 12000
 
-    /** Open the chart with a useful window first; background refresh expands it to the chart target. */
+    /** Archived research/history bootstrap sizes (no automatic live-chart expansion). */
     const val CHART_BOOTSTRAP_CANDLES: Int = 1200
     const val CHART_BOOTSTRAP_MINIMUM: Int = 1001
 
-    /** Keep a deep chart window plus the currently forming bar when one exists. */
+    /** Legacy on-disk cache ceiling: do not discard saved real bars during an app update. */
     const val MAX_CACHED_CANDLES: Int = DEEP_CHART_CANDLES + 1
 
     /** Twelve Data's time_series endpoint tops out at 5000 rows in one response. */
@@ -22,7 +29,7 @@ object HistoryPolicy {
     const val MAX_PROVIDER_CANDLES: Int = DEEP_CHART_CANDLES
 
     fun chartTargetCandles(symbol: String, interval: Interval): Int =
-        DEEP_CHART_CANDLES
+        LIVE_REQUEST_CANDLES
 
     /** Request size for Twelve Data and other single-call providers that cannot deliver deep history. */
     fun providerRequestSize(requested: Int, minimum: Int = TARGET_CANDLES): Int =

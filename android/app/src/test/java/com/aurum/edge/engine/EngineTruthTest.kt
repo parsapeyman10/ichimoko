@@ -14,8 +14,7 @@ import org.junit.Test
  *
  * The candle fixtures below are *test input* — they are not shipped and never reach the UI. What is
  * being checked is the behaviour of the engine: aggregation must keep real OHLC values and drop
- * incomplete buckets, the walk-forward split must keep each trade inside its own window, and a
- * small account must never be given a position below the broker minimum lot.
+ * incomplete buckets, a missing candle must never be filled by the aggregation.
  */
 class EngineTruthTest {
 
@@ -64,51 +63,6 @@ class EngineTruthTest {
         // a bucket that only holds a single bar is incomplete: it is dropped, never padded
         val single = MtfAnalyzer.resample(minutes.take(1), Interval.M5, Interval.M1)
         assertTrue(single.isEmpty())
-    }
-
-    @Test
-    fun walkForwardKeepsTradesInsideTheirOwnWindow() {
-        val bars = fixture(count = 900, interval = Interval.M5)
-        val report = Backtester.walkForward(
-            candles = bars,
-            interval = Interval.M5,
-            symbol = "XAU/USD",
-            initialBalance = 1000.0,
-            riskPercent = 0.5,
-        )
-
-        assertTrue(report.splitIndex in 1 until bars.size)
-        assertTrue(report.inSample.trades.all { it.entryTime < report.splitTime })
-        assertTrue(report.outOfSample.trades.all { it.entryTime >= report.splitTime })
-        assertTrue(report.verdict.isNotBlank())
-        assertEquals(report.bars, bars.size)
-        assertEquals(report.outOfSample.fromTime, report.costStressOutOfSample.fromTime)
-        assertEquals(report.outOfSample.toTime, report.costStressOutOfSample.toTime)
-        assertEquals(report.outOfSample.spreadPrice * 2,
-            report.costStressOutOfSample.spreadPrice, 1e-9)
-        assertEquals(report.outOfSample.commissionPerOz * 2,
-            report.costStressOutOfSample.commissionPerOz, 1e-9)
-        assertTrue(report.outOfSample.trades.all { it.exitTime >= it.entryTime &&
-            !it.exitReason.contains("آخرین قیمت") })
-        assertTrue(report.costStressOutOfSample.trades.all { it.entryTime >= report.splitTime })
-    }
-
-    @Test
-    fun smallAccountNeverGetsAnImpossiblePosition() {
-        val bars = fixture(count = 900, interval = Interval.M5)
-        val result = Backtester.run(
-            candles = bars,
-            interval = Interval.M5,
-            symbol = "XAU/USD",
-            initialBalance = 100.0,
-            riskPercent = 0.5,
-            minPositionOz = 1.0,
-        )
-
-        assertTrue(result.trades.all { it.positionOz >= result.minPositionOz - 1e-9 })
-        // with a $100 account the engine either skips setups, or reports the ones it could size
-        assertTrue(result.skippedMinLot >= 0)
-        assertTrue(result.finalBalance > 0.0)
     }
 
     @Test
