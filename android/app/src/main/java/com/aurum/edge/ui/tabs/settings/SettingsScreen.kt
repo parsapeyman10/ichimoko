@@ -520,7 +520,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
 
         SectionCard("ورود خودکار کاغذی · بدون سفارش واقعی", "بدون فرم دستی؛ بدون بروکر، بدون سفارش واقعی") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("ورود خودکار کاغذی پس از امتیاز چهارلایه، پشتهٔ ۷ تایم‌فریمی و قفل‌های ریسک/بازار/وتوی AI",
+                Text("ورود خودکار کاغذی برای نماد منتخب و تمام کاتالوگِ دارای تیک هم‌هویت و قابل‌پایش؛ پس از چهار لایه و ریسک/AI",
                     modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
                     color = AurumColors.TextPrimary)
                 Switch(checked = settings.autoPaperTrading, onCheckedChange = { enabled ->
@@ -531,6 +531,10 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             Text(if (settings.autoPaperTrading) autoStatus else "خاموش؛ خطوط روی چارت معامله نیستند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 6.dp))
+            Text("رادار هنگام باز بودن اپ خودکار است؛ برای ادامهٔ پس‌زمینه «پایش زنده» و مجوز اعلان گوشی باید روشن باشد. " +
+                "ورود کاتالوگ فعلاً فقط برای جفت‌ارزهای فارکس و XAU/XAG دارای تیک تازهٔ Swissquote/Gold-API و پایش خروج انجام می‌شود؛ " +
+                "سهام، نفت و کریپتو تا زمان داشتن تیک هم‌هویت و مسیر خروج معتبر فقط بررسی می‌شوند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             Text("قیمت زنده و چهار لایهٔ فنی (EMA/ایچیموکو، RSI/MACD، حمایت/مقاومت، M1 تا D1) لازم‌اند. نبود دادهٔ یک بازه ورود را می‌بندد؛ AI فقط می‌تواند سیگنال را وتو کند و اجازهٔ تغییر SL/TP ندارد. توقف سه باخت، زیان روزانهٔ ۲٪، سقف ۴ پوزیشن و trailing در ۱R و ۲R اعمال می‌شوند. هیچ سفارش واقعی ارسال نمی‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
@@ -577,7 +581,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     if (confirmAuto) {
         AlertDialog(onDismissRequest = { confirmAuto = false },
             title = { Text("ورود خودکار فقط کاغذی") },
-            text = { Text("هیچ سفارشی به بروکر ارسال نمی‌شود. ورود فقط کاغذی با چهار لایهٔ فنی، دادهٔ واقعی هفت بازه، سقف ۰٫۵٪ ریسک و امکان وتوی AI است. اگر فید قطع شود ورود و خروج به قیمت تازه ممکن نیست. فعال شود؟") },
+            text = { Text("هیچ سفارشی به بروکر ارسال نمی‌شود. تمام نمادهای پشتیبانی‌شده اسکن می‌شوند؛ ورود کاغذی چندنمادی فقط با تیک مستقل تازه و امکان پایش خروج (فعلاً فارکس و XAU/XAG) انجام می‌شود. دادهٔ هفت بازه، سقف ریسک و وتوی AI پابرجاست. بدون فید، معامله‌ای باز نمی‌شود. فعال شود؟") },
             confirmButton = { TextButton(onClick = {
                 confirmAuto = false
                 viewModel.setAutoPaperTrading(true)

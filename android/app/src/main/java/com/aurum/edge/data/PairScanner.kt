@@ -35,7 +35,7 @@ import kotlinx.coroutines.withContext
 /** One row of the 50+ universe radar: what the continuous sweep observed for this instrument. */
 data class PairScanStatus(
     val symbol: String,
-    /** pending | closed | error | no_signal | blocked | observed | candidate */
+    /** pending | closed | error | no_signal | blocked | observed | candidate | opened */
     val state: String,
     val detail: String,
     val lastScanAt: Long? = null,
@@ -102,6 +102,13 @@ class PairScanner(
     private val nobitexHistory: NobitexHistoryClient = NobitexHistoryClient(),
 ) {
     private val mutex = Mutex()
+    private var onAutoSignal: (suspend (MarketState) -> CatalogAutoReview)? = null
+
+    /** Wired once by the process container. Scanning never calls this unless paper auto is on. */
+    fun attachAutoReview(callback: suspend (MarketState) -> CatalogAutoReview) {
+        onAutoSignal = callback
+    }
+
     private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client, nobitexHistory)
     /** Trends measured during the running sweep; published as one market-wide read at the end. */
     private val trendSample = mutableListOf<SymbolTrend>()
@@ -417,14 +424,35 @@ class PairScanner(
             val mtf = withContext(Dispatchers.Default) {
                 runCatching { MtfAnalyzer.analyze(candles, interval) }.getOrNull()
             }
-            val blocker = PaperAlertRules.blocker(market, config, headlines, trades, mtf,
+            // This runs for EVERY supported catalog row, not only editable watchlist rows.
+            // The callback MUST obtain a separate same-symbol trade tick and route through
+            // the atomic JournalStore; this historical candle must never act as the fill.
+            val autoReview = if (config.autoPaperTrading && symbol != config.symbol &&
+                symbol in WatchCatalog.scannerSymbols) try {
+                onAutoSignal?.invoke(market)
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                CatalogAutoReview(reason = "بازبینی ورود کاغذی کاتالوگ ناموفق بود")
+            } else null
+            if (autoReview?.trade != null) {
+                update(symbol, "opened", "معاملهٔ کاغذی با قیمت تازهٔ مستقل ثبت شد؛ " +
+                    "کندل اسکن قیمت ورود نبود", price, score, combined.action,
+                    combined.confidence, combined.entry, combined.stopLoss, combined.takeProfit,
+                    combined.riskReward, combined.confluence, playbook?.method?.label,
+                    playbook?.allowed, playbook?.reasonFa?.take(160), trend, aligned,
+                    trendGate?.noteFa?.take(200))
+                return@forEachIndexed
+            }
+            val blocker = PaperAlertRules.blocker(market, config, headlines, journal.trades.value, mtf,
                 System.currentTimeMillis(), allowedSymbols = config.activeWatchlist, barAgeGraceMs = graceMs)
             if (blocker != null) {
                 // A technically actionable closed-bar read is still useful when alerts,
                 // monitor, watchlist, live quote or risk permission are absent. Rank it
                 // read-only; NEVER persist/notify/open it as a paper opportunity.
                 update(symbol = symbol, state = "observed",
-                    detail = "فقط سیگنال فنی؛ ورود/اعلان مجاز نیست: ${blocker.take(160)}",
+                    detail = "فقط سیگنال فنی؛ مجوز ورود/اعلان نیست: ${blocker.take(110)}" +
+                        (autoReview?.reason?.let { " · خودکار: ${it.take(140)}" } ?: ""),
                     price = price, score = score, action = combined.action,
                     confidence = combined.confidence, entry = combined.entry,
                     sl = combined.stopLoss, tp = combined.takeProfit, rr = combined.riskReward,
@@ -469,6 +497,7 @@ class PairScanner(
                 symbol = symbol,
                 state = "candidate",
                 detail = "فرصت معاملاتی تایید شد" +
+                    (autoReview?.reason?.let { " · ورود خودکار انجام نشد: ${it.take(140)}" } ?: "") +
                     (playbook?.let { " · متد ${it.method.label}" } ?: "") +
                     (trend?.let { " · روند ${it.direction.label} ${it.strength}٪" } ?: "") +
                     (overallTrend?.takeIf { it.known }?.let { " · بازار ${it.bias.label}" } ?: "") +

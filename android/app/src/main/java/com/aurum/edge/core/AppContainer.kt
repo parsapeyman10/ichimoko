@@ -15,6 +15,7 @@ import com.aurum.edge.data.PublicWebNewsRepository
 import com.aurum.edge.data.PublicNewsCategory
 import com.aurum.edge.data.PublicNewsFeeds
 import com.aurum.edge.data.PaperAutoTrader
+import com.aurum.edge.data.CatalogPaperTrader
 import com.aurum.edge.data.PublicCandleHistoryClient
 import com.aurum.edge.data.PaperOpportunityStore
 import com.aurum.edge.data.PairScanner
@@ -101,8 +102,20 @@ class AppContainer(context: Context) {
     // which is advisory only: JournalStore.attachHoldReview never closes or re-prices a trade.
     val traderAdvisor = TraderAdvisor(settingsStore, market, pairScanner, news, journalStore, appScope)
     val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore, traderAdvisor)
+    val catalogPaperTrader = CatalogPaperTrader(settingsStore, autoPaperTrader)
 
     init {
+        pairScanner.attachAutoReview { scanned ->
+            val result = catalogPaperTrader.review(scanned)
+            // The foreground service observes journal changes itself. If it is off and the
+            // app is visible, notify only after the atomic paper journal write succeeded.
+            if (result.trade != null && !com.aurum.edge.service.SignalMonitorService.running.value) {
+                val config = settingsStore.read()
+                if (config.notifyOnSignal) Notifier.notifyRecordedAutoEntry(
+                    appContext, result.trade, config.alertSoundUri)
+            }
+            result
+        }
         autoPaperTrader.attachTrendSource { pairScanner.state.value.marketTrend }
         market.attach(appScope)
         appScope.launch {

@@ -149,7 +149,8 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
         // ── ۵. وضعیت معامله خودکار کاغذی ─────────────────────────────────
         SectionCard("معاملهٔ خودکار کاغذی (تخصیص متوازن ۴ بازار)") {
             Text(
-                if (settings.autoPaperTrading) "$autoStatus · ورود خودکار فقط روی فید تازهٔ نماد انتخابی ${market.symbol} اجرا می‌شود؛ رادار سایر نمادها معامله باز نمی‌کند." else "خاموش (از بخش تنظیمات یا صفحه اصلی قابل فعال‌سازی است)",
+                if (settings.autoPaperTrading) "$autoStatus · نماد منتخب و کاتالوگ به‌صورت خودکار بررسی می‌شوند؛ " +
+                    "ورود کاتالوگ فقط با تیک تازهٔ مستقل و پایش خروج (فعلاً فارکس و XAU/XAG). سقف ریسک کل پورتفو مشترک است." else "خاموش (از بخش تنظیمات یا صفحه اصلی قابل فعال‌سازی است)",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (settings.autoPaperTrading) AurumColors.TextSecondary else AurumColors.Gold,
             )
@@ -453,12 +454,12 @@ private fun PerMarketRecommendations(scan: PairScanState, interval: com.aurum.ed
                     if (scan.sweeping) " · اسکن در جریان" else "",
                 style = MaterialTheme.typography.titleSmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 8.dp))
-            Text("فید ناموفق ${rows.count { it.state == "error" }} · بسته ${rows.count { it.state == "closed" }} · " +
+            Text("بازشده ${rows.count { it.state == "opened" }} · فید ناموفق ${rows.count { it.state == "error" }} · بسته ${rows.count { it.state == "closed" }} · " +
                     "بدون سیگنال ${rows.count { it.state == "no_signal" }} · مانع ورود ${rows.count { it.state == "blocked" }} · " +
                     "مشاهده ${rows.count { it.state == "observed" }} · کاندیدا ${rows.count { it.state == "candidate" }}",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             if (ranked.isEmpty()) {
-                val reason = rows.firstOrNull { it.state == "error" || it.state == "blocked" || it.state == "no_signal" }
+                val reason = rows.firstOrNull { it.state == "opened" || it.state == "error" || it.state == "blocked" || it.state == "no_signal" }
                 Text(if (checked == 0) "هنوز بررسی نشده است؛ پایش پس‌زمینه را روشن کنید یا اسکن را بزنید."
                      else "فرصت تازهٔ تأییدشده‌ای نیست. ${reason?.symbol ?: ""}: ${reason?.detail ?: "بازار بسته است یا داده/شواهد کافی نیست"}",
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)

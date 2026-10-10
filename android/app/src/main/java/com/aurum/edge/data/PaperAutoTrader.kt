@@ -7,6 +7,8 @@ import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.PaperTrade
+import com.aurum.edge.core.PriceTick
+import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
 import kotlinx.coroutines.Dispatchers
@@ -39,12 +41,22 @@ class PaperAutoTrader(
     fun stopped(reason: String) { _status.value = reason }
 
     /** Returns only a trade whose atomic journal write has completed; null is never an entry event. */
-    suspend fun onMarketUpdate(state: MarketState): PaperTrade? {
+    suspend fun onMarketUpdate(state: MarketState, catalogQuote: PriceTick? = null): PaperTrade? {
+        // Only the catalog runner may pass an independently fetched trade tick. Selected
+        // symbol keeps its existing live feed/watchlist contract unchanged.
+        val allowed = if (state.symbol in WatchCatalog.scannerSymbols) WatchCatalog.scannerSymbols
+            else settings.read().activeWatchlist
+        if (catalogQuote != null &&
+            (!TradeQuotePolicy.accepts(catalogQuote) || catalogQuote.price != state.lastPrice ||
+                state.symbol !in WatchCatalog.scannerSymbols)) {
+            _status.value = "قیمت مستقل و تازهٔ نماد کاتالوگ تأیید نشد"
+            return null
+        }
         val headlines = news.state.value
         val config = settings.read()
-        val reason = PaperAutoRules.blocker(state, config, headlines)
+        val reason = PaperAutoRules.blocker(state, config, headlines, allowedSymbols = allowed)
         if (reason != null) {
-            _status.value = reason
+            _status.value = if (catalogQuote != null) "${state.symbol}: $reason" else reason
             return null
         }
         com.aurum.edge.core.PaperPortfolioPolicy.blocker(journal.trades.value, state.symbol,
@@ -62,7 +74,7 @@ class PaperAutoTrader(
         val current = state
         val recentNews = news.state.value
         val recentSettings = settings.read()
-        PaperAutoRules.blocker(current, recentSettings, recentNews)?.let {
+        PaperAutoRules.blocker(current, recentSettings, recentNews, allowedSymbols = allowed)?.let {
             _status.value = it
             return null
         }
@@ -136,7 +148,12 @@ class PaperAutoTrader(
         }
 
         return try {
-            PaperAutoRules.blocker(current, settings.read(), news.state.value)?.let {
+            // AI and persistence can take time. The *same provider tick* must still be
+            // within the 45-second trade window when JournalStore atomically opens.
+            if (catalogQuote != null) require(TradeQuotePolicy.accepts(catalogQuote)) {
+                "قیمت مستقل کاتالوگ هنگام ثبت معامله کهنه شد"
+            }
+            PaperAutoRules.blocker(current, settings.read(), news.state.value, allowedSymbols = allowed)?.let {
                 throw IllegalArgumentException("بازبینی پس از پاسخ AI: $it")
             }
             val lastVeto = NewsConfluence.apply(finalSignal, current.symbol, news.state.value)

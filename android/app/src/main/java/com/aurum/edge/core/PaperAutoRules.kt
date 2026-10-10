@@ -7,12 +7,13 @@ import kotlin.math.abs
 /** Side-effect-free guard shared by service and unit tests. NEVER submits a broker order. */
 object PaperAutoRules {
     fun blocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
-                now: Long = System.currentTimeMillis()): String? {
+                now: Long = System.currentTimeMillis(),
+                allowedSymbols: List<String> = settings.activeWatchlist): String? {
         if (!settings.autoPaperTrading) return "معاملهٔ خودکار کاغذی خاموش است"
         if (market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))
             return "فید معتبر در دسترس نیست (وضعیت فید: ${market.feed.mode.label})"
         return opportunityBlocker(market, settings, news, now, requireMonitor = false,
-            allowedSymbols = settings.activeWatchlist,
+            allowedSymbols = allowedSymbols,
             barAgeGraceMs = market.interval.millis + 90_000L)
     }
 
