@@ -91,6 +91,12 @@ private fun AiStatusCard(viewModel: AurumViewModel, settings: AppSettings) {
             modifier = Modifier.padding(top = 8.dp),
         )
 
+        Text("اسکن و گزارش دلایلِ موتور چهارلایه بدون مدل و بدون هزینهٔ AI انجام می‌شود. " +
+            "مدل زبانیِ رایگانِ بی‌کلید در APK جاسازی نشده است؛ اگر ارائه‌دهندهٔ شما پلن رایگان " +
+            "و دسترسی شبکه دارد، کلید شخصی و مدلِ مجازش را در تنظیمات وارد و همین‌جا تست کنید. " +
+            "پلن رایگان یا دسترسی از ایران تضمین نمی‌شود؛ کلید را برای ما نفرستید.",
+            style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
+            modifier = Modifier.padding(top = 8.dp))
         Text("چرا ممکن است جواب ندهد",
             style = MaterialTheme.typography.labelMedium, color = AurumColors.TextPrimary,
             modifier = Modifier.padding(top = 12.dp))
@@ -114,8 +120,8 @@ private fun AiStatusCard(viewModel: AurumViewModel, settings: AppSettings) {
 
         if (directProvider) {
             Text(
-                "⚠ $host معمولاً از ایران مسدود است و خطای ۴۰۳ می‌دهد. برای کار کردن، نشانی یک " +
-                    "سرویس واسط سازگار با OpenAI را وارد کنید، نه نشانی مستقیم.",
+                "⚠ دسترسی به $host از شبکهٔ شما تأیید نشده است. HTTP 403 می‌تواند از محدودیت دسترسی، " +
+                    "حساب یا منطقه باشد؛ نتیجهٔ تست اتصال روی همین گوشی ملاک است، نه حدس دربارهٔ شبکه.",
                 style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.Orange,
                 modifier = Modifier.padding(top = 8.dp),
@@ -172,7 +178,8 @@ private fun AiStatusCard(viewModel: AurumViewModel, settings: AppSettings) {
         )
 
         Text(
-            "کلید روی همین گوشی می‌ماند و هرگز در لاگ نوشته نمی‌شود. فقط متن تیتر خبر برای سرویس فرستاده می‌شود.",
+            "کلید روی همین گوشی می‌ماند و در لاگ نوشته نمی‌شود. برای تحلیل خبر، تیتر و شاهد خبر؛ " +
+                "برای نظر تریدر، خلاصهٔ سیگنال/کندل و وضعیت پوزیشن‌های کاغذی به سرویس انتخابی شما فرستاده می‌شود.",
             style = MaterialTheme.typography.labelSmall,
             color = AurumColors.TextMuted,
             modifier = Modifier.padding(top = 10.dp),

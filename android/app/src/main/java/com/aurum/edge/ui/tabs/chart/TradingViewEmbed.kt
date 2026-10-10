@@ -11,7 +11,4 @@ internal object TradingViewEmbed {
             "&symbol=${encoded(symbol)}&interval=60&theme=dark&style=1" +
             "&hidesidetoolbar=0&symboledit=1&withdateranges=1&saveimage=1"
 
-    /** Fallback is the full provider site, opened by the user's browser (never a made-up chart). */
-    fun browserUrl(symbol: String): String =
-        "https://www.tradingview.com/chart/?symbol=${encoded(symbol)}"
 }

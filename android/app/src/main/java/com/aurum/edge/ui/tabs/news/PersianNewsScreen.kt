@@ -158,12 +158,19 @@ private fun NewsImpactCard(item: PublicHeadline, classification: com.aurum.edge.
         subtitle = "${item.feed.title} · ${formatDateTime(item.publishedAt)}",
         trailing = { Pill(importanceLabel(classification.importance), tone) },
     ) {
+        Text("نماد و جهتِ ذکرشده در همین تیتر:",
+            style = MaterialTheme.typography.labelMedium, color = AurumColors.TextSecondary)
         HeadlineImpact.explain(item.title).forEach { explanation ->
+            val reported = explanation.substringBefore('؛')
             Text(explanation, style = MaterialTheme.typography.bodySmall,
-                color = AurumColors.TextPrimary, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 4.dp))
+                color = when {
+                    reported.contains('↑') -> AurumColors.Green
+                    reported.contains('↓') -> AurumColors.Red
+                    else -> AurumColors.Gold
+                }, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 6.dp))
         }
-        Text("جهتِ تیتر، پیش‌بینیِ قیمت بعدی یا سیگنال معامله نیست؛ نامعلوم را صعودی نمی‌نامیم.",
+        Text("↑/↓ فقط گزارش حرکت در متن تیتر است، نه پیش‌بینی واکنش قیمت. خبر بی‌نماد یا مبهم جهت‌دار برچسب نمی‌گیرد.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
             modifier = Modifier.padding(top = 4.dp))
         if (item.excerpt.isNotBlank()) Text(item.excerpt,

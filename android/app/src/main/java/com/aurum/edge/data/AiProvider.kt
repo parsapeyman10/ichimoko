@@ -51,13 +51,14 @@ internal object AiProvider {
     /** OpenAI-compatible chat endpoint. */
     internal fun openAiChatUrl(base: String): String =
         if (base.endsWith("/chat/completions")) base
-        else if (base.endsWith("/v1")) "$base/chat/completions"
+        else if (base.endsWith("/v1") || base.endsWith("/v1beta/openai")) "$base/chat/completions"
         else "$base/v1/chat/completions"
 
     /** Models catalogue endpoint both protocols expose as {data:[{id:…}]}. */
     internal fun modelsUrl(base: String): String =
-        if (base.endsWith("/models")) base
-        else if (base.endsWith("/v1")) "$base/models"
+        if (base.endsWith("/chat/completions")) base.removeSuffix("/chat/completions") + "/models"
+        else if (base.endsWith("/models")) base
+        else if (base.endsWith("/v1") || base.endsWith("/v1beta/openai")) "$base/models"
         else "$base/v1/models"
 
     /**
@@ -111,10 +112,13 @@ internal object AiProvider {
      * Returns the model's short reply so settings can show proof of life.
      */
     suspend fun probe(httpClient: OkHttpClient, baseUrl: String, apiKey: String, model: String,
-                      format: String = "AUTO"): String =
-        completeText(httpClient, baseUrl, apiKey, model,
+                      format: String = "AUTO"): String {
+        val reply = completeText(httpClient, baseUrl, apiKey, model,
             "You are a connectivity test. Reply with the single word: OK",
-            "ping", 16, format, requireJson = false).take(60)
+            "ping", 16, format, requireJson = false).trim()
+        require(reply.isNotBlank()) { "پاسخ مدل خالی است" }
+        return reply.take(60)
+    }
 
     private suspend fun completeText(httpClient: OkHttpClient, baseUrl: String, apiKey: String, model: String,
                                      system: String, user: String, maxTokens: Int, format: String,
@@ -154,13 +158,14 @@ internal object AiProvider {
             val request = builder.post(bodyText.toRequestBody("application/json".toMediaType())).build()
             httpClient.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) {
-                    val errorDetail = runCatching { resp.peekBody(2000L).string() }.getOrNull().orEmpty()
+                    // Never surface raw provider error bodies: some echo request fields or keys.
                     val friendlyMsg = when (resp.code) {
+                        400 -> "پارامتر درخواست یا مدل با سرویس سازگار نیست (HTTP 400)"
                         401 -> "کلید API نامعتبر است یا منقضی شده (HTTP 401)"
                         403 -> "دسترسی مجاز نیست یا منطقه جغرافیایی محدود شده (HTTP 403)"
                         404 -> "آدرس اندپوینت یا مدل یافت نشد (HTTP 404)"
                         429 -> "محدودیت سهمیه/نرخ فراخوانی (Rate Limit / Quota Exceeded) (HTTP 429)"
-                        else -> "خطای سرویس هوش مصنوعی (HTTP ${resp.code}) ${errorDetail.take(60)}"
+                        else -> "خطای سرویس هوش مصنوعی (HTTP ${resp.code})"
                     }
                     throw IllegalStateException(friendlyMsg)
                 }

@@ -52,6 +52,13 @@ class AiTraderTest {
         assertEquals("https://api.openai.com/v1/chat/completions", AiProvider.openAiChatUrl("https://api.openai.com/v1"))
         assertEquals("https://api.llmsrelay.com/v1/chat/completions", AiProvider.openAiChatUrl("https://api.llmsrelay.com"))
         assertEquals("https://openrouter.ai/api/v1/chat/completions", AiProvider.openAiChatUrl("https://openrouter.ai/api/v1"))
+        // Gemini's OpenAI-compatible base ends in /v1beta/openai, NOT /v1.
+        assertEquals("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            AiProvider.openAiChatUrl("https://generativelanguage.googleapis.com/v1beta/openai"))
+        assertEquals("https://generativelanguage.googleapis.com/v1beta/openai/models",
+            AiProvider.modelsUrl("https://generativelanguage.googleapis.com/v1beta/openai"))
+        assertEquals("https://generativelanguage.googleapis.com/v1beta/openai/models",
+            AiProvider.modelsUrl("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"))
         // Models catalogue: same rule
         assertEquals("https://api.llmsrelay.com/v1/models", AiProvider.modelsUrl("https://api.llmsrelay.com"))
         assertEquals("https://api.openai.com/v1/models", AiProvider.modelsUrl("https://api.openai.com/v1"))

@@ -12,6 +12,15 @@ class HeadlineImpactTest {
         assertFalse(lines.any { it.contains("طلا") && it.contains("↓") })
     }
 
+    @Test fun `oil grades are not swapped and hypothetical moves remain unknown`() {
+        val brent = HeadlineImpact.explain("Brent oil falls while WTI rises")
+        assertTrue(brent.any { it.contains("UKOIL") && it.contains("↓") })
+        assertTrue(brent.any { it.contains("USOIL") && it.contains("↑") })
+        assertFalse(brent.any { it.contains("نوع قرارداد نامشخص") })
+        assertTrue(HeadlineImpact.explain("Gold could rise after CPI").all { !it.contains("↑") })
+        assertTrue(HeadlineImpact.explain("Tesla sales fall").all { !it.contains("TSLA") || !it.contains("↓") })
+    }
+
     @Test fun `CPI and a vague rally never assert which instrument will rise`() {
         assertTrue(HeadlineImpact.explain("US CPI rises above forecasts").all { it.contains("جهت") })
         assertTrue(HeadlineImpact.explain("Markets rally ahead of data").all { it.contains("مشخص") })

@@ -254,15 +254,22 @@ class PairScanner(
         val headlines = news.state.value
         val trades = journal.trades.value
 
-        universe.forEachIndexed { index, symbol ->
-            if (index > 0) delay(PAIR_SPACING_MS)
+        var requestedMarkets = 0
+        universe.forEachIndexed { _, symbol ->
             val now = System.currentTimeMillis()
             if (MarketHours.closedFor(symbol, now)) {
-                update(symbol, "closed", "بازار تعطیل است؛ اسکن موقتاً متوقف شد")
+                // Schedule only: do not fetch candles, evaluate, rank or attempt entry for
+                // this closed market. Other markets (notably 24/7 crypto) remain independent.
+                update(symbol, "closed", "بازار طبق ساعت سشن بسته است؛ تا بازگشایی هیچ درخواست فید یا ارزیابی سیگنال انجام نمی‌شود")
                 return@forEachIndexed
             }
             if (trades.any { it.symbol == symbol && it.isOpen }) {
                 update(symbol, "blocked", "پوزیشن کاغذی این نماد باز است؛ فرصت جدید اسکن نمی‌شود")
+                return@forEachIndexed
+            }
+            if (requestedMarkets++ > 0) delay(PAIR_SPACING_MS)
+            if (MarketHours.closedFor(symbol)) {
+                update(symbol, "closed", "سشن هنگام انتظار بسته شد؛ درخواست فید انجام نشد")
                 return@forEachIndexed
             }
 

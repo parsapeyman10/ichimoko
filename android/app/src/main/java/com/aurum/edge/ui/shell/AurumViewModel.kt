@@ -1038,7 +1038,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             }
             _aiProbe.value = AiProbeState(message = result.fold(
                 onSuccess = { "اتصال تأیید شد؛ پاسخ مدل: «$it»" },
-                onFailure = { "اتصال ناموفق: ${(it.message ?: "خطای نامشخص").take(120)}" }))
+                onFailure = { "اتصال ناموفق: ${com.aurum.edge.data.AiConnectionDiagnostics.describe(it)}" }))
         }
     }
 

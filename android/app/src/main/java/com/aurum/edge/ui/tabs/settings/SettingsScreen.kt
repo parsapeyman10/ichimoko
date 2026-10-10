@@ -253,7 +253,10 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     newsAiBaseUrl = "https://api.openai.com/v1"; newsAiFormat = "OPENAI"
                 }, modifier = Modifier.weight(1f)) { Text("OpenAI رسمی", maxLines = 1) }
             }
-            Text("«نشانی پایه» یعنی آدرسِ سرویسی که کلید شما را صادر کرده — کلید مثل رمز کارت است و نشانی مثل آدرس همان مغازه؛ هر دو را فقط پنل سایت کلید (بخش API / Base URL) می‌دهد. اپ فقط نشانی‌های امن https:// را می‌پذیرد تا کلید در مسیر لو نرود. کلیدهایی که با sk-cs4 شروع می‌شوند مال LLMsRelay هستند و نشانی‌شان با دکمهٔ بالا پر می‌شود.",
+            Text("«نشانی پایه» باید متعلق به همان ارائه‌دهندهٔ کلید شما باشد. برای API سازگار Gemini، " +
+                "نشانی https://generativelanguage.googleapis.com/v1beta/openai با قالب OpenAI قابل آزمون است؛ " +
+                "مدل را از فهرست مجازِ کلید خود انتخاب کنید. رایگان‌بودن یا دسترسی شبکه/منطقه تضمین نیست. " +
+                "اپ فقط HTTPS می‌پذیرد؛ کلید شخصی را در گفتگو یا گزارش خطا ارسال نکنید.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
                 modifier = Modifier.padding(top = 4.dp))
             OutlinedTextField(value = newsAiModel, onValueChange = { newsAiModel = it }, singleLine = true,

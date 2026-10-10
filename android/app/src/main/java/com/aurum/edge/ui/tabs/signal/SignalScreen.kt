@@ -512,8 +512,9 @@ private fun PerMarketRecommendations(scan: PairScanState, interval: com.aurum.ed
         val checked = rows.count { it.state != "pending" }
         val ranked = picks[category].orEmpty()
         SectionCard("برترین‌های ${category.label}",
-            "همین دور اسکن · $checked/${rows.size} بررسی‌شده · ${rows.count { it.state == "error" }} فید ناموفق · " +
-                "${rows.count { it.state == "partial" }} تاریخچهٔ ناقص",
+            "همین دور · $checked/${rows.size} وضعیت ثبت‌شده · " +
+                "${rows.count { it.state == "closed" }} بسته (بدون درخواست/اسکن) · " +
+                "${rows.count { it.state == "error" }} فید ناموفق · ${rows.count { it.state == "partial" }} دادهٔ ناقص",
             trailing = { Pill(if (scan.sweeping) "در حال اسکن" else "آخرین دور", AurumColors.Cyan) }) {
             Box(Modifier.fillMaxWidth().height(6.dp)
                 .background(AurumColors.SurfaceAlt, RoundedCornerShape(8.dp))) {

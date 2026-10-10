@@ -186,7 +186,7 @@ class TraderAdvisor(
             lastUnreachableElapsed = SystemClock.elapsedRealtime()
             _connection.value = AiConnectionState(
                 configured = true, reachable = false,
-                detail = (error.message ?: "اتصال برقرار نشد").take(120),
+                detail = AiConnectionDiagnostics.describe(error),
                 checkedAt = System.currentTimeMillis())
             false
         }

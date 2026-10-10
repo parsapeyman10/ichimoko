@@ -49,6 +49,12 @@ class DecisionLogStore(context: Context) {
             signal?.action?.name ?: status, signal?.confidence, detail.take(500), layers,
             method, methodReason?.take(300))
         val previous = _records.value
+        // A closed market has no feed request or signal evaluation. A minute-by-minute
+        // background sweep must not evict real decisions from the bounded audit trail.
+        if (status == "closed" && previous.any {
+                it.symbol == symbol && it.action == "closed" &&
+                    now - it.checkedAt in 0L..30 * 60_000L
+            }) return
         if (dedupe && previous.take(20).any {
                 it.symbol == symbol && it.barTime == item.barTime && it.action == item.action &&
                     it.reason == item.reason && it.layers == layers && it.method == method &&
