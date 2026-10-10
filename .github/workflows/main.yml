@@ -56,7 +56,7 @@ env:
   APP_MODULE: app
   APPLICATION_ID: com.aurum.edge
   RELEASE_APK_PREFIX: AurumEdge
-  # Public SHA-256 of the v1.3.5 APK signing certificate (not the APK digest or private key).
+  # Public GitHub Release v1.3.5 certificate only. This does NOT prove the signer on a user's phone.
   UPDATER_CERT_SHA256: '137f3f98f6c85fdd8671d1d2099b095ed82f3f91594ac9e7b1ba22c264ed4a04'
   GRADLE_FLAGS: --no-daemon --stacktrace --warning-mode=all
 
@@ -443,10 +443,23 @@ jobs:
 
       - name: Require stable signing for public updater release
         if: steps.guard.outputs.ready == 'true' && ((github.ref == 'refs/heads/main' || github.ref_type == 'tag') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)))
+        env:
+          # A public CERTIFICATE digest, measured from an actually installed supported APK,
+          # must be confirmed by the owner. Do not substitute an Actions/release artifact hash.
+          VERIFIED_INSTALLED_CERT_SHA256: ${{ vars.AURUM_VERIFIED_INSTALLED_CERT_SHA256 }}
+          BUILT_CERT_SHA256: ${{ steps.signing_check.outputs.new_cert_sha256 }}
         run: |
           set -euo pipefail
           if [[ -z "${AURUM_RELEASE_STORE_FILE:-}" || ! -f "${AURUM_RELEASE_STORE_FILE:-}" || -z "${AURUM_RELEASE_STORE_PASSWORD:-}" || -z "${AURUM_RELEASE_KEY_ALIAS:-}" || -z "${AURUM_RELEASE_KEY_PASSWORD:-}" ]]; then
             echo "::error title=Stable signing required::No updater signing key was prepared."
+            exit 1
+          fi
+          if [[ ! "$VERIFIED_INSTALLED_CERT_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]; then
+            echo "::error title=Installed signer not verified::An owner must first confirm the certificate SHA-256 of an actually installed, supported app and set the public GitHub Actions variable AURUM_VERIFIED_INSTALLED_CERT_SHA256. The published Release artifact alone is not proof of what a user installed."
+            exit 1
+          fi
+          if [[ "${VERIFIED_INSTALLED_CERT_SHA256,,}" != "$BUILT_CERT_SHA256" ]]; then
+            echo "::error title=Installed signer differs::The new APK will not update the verified installed app. Restore the SAME signing keystore; never rotate keys silently or tell users to uninstall without a data migration."
             exit 1
           fi
 
