@@ -229,16 +229,8 @@ jobs:
             mkdir -p "$CI_SIGNING_CACHE_DIR"
             STORE_FILE="$CI_SIGNING_CACHE_DIR/aurum-ci-updater.p12"
             if [[ ! -f "$STORE_FILE" ]]; then
-              keytool -genkeypair \
-                -storetype PKCS12 \
-                -keystore "$STORE_FILE" \
-                -storepass android \
-                -keypass android \
-                -alias aurumciupdater \
-                -keyalg RSA \
-                -keysize 4096 \
-                -validity 3650 \
-                -dname "CN=Aurum Edge CI Updater,O=parsapeyman10,C=US"
+              echo "::error title=Signing key unavailable::The updater key was not restored from the CI cache. Do not generate a replacement: previously installed APKs would reject it. Restore the SAME keystore via repository secrets."
+              exit 1
             fi
             echo "AURUM_RELEASE_STORE_FILE=$STORE_FILE" >> "$GITHUB_ENV"
             echo "AURUM_RELEASE_STORE_PASSWORD=android" >> "$GITHUB_ENV"
@@ -321,12 +313,10 @@ jobs:
           echo "Release APK signer SHA-256: $NEW_CERT (mode: ${AURUM_SIGNING_MODE:-unknown})"
           echo "new_cert_sha256=$NEW_CERT" >> "$GITHUB_OUTPUT"
           FILTER='[.[] | select(.draft == false and .prerelease == false) | .assets[] | select((.name | startswith("'"$RELEASE_APK_PREFIX"'-v")) and (.name | endswith(".apk"))) | "\(.url) \(.name)"] | .[0] // empty'
-          PUBLISHED="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=10" --jq "$FILTER" || true)"
+          PUBLISHED="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=10" --jq "$FILTER")"
           if [[ -z "${PUBLISHED// }" ]]; then
-            echo "No published release APK yet — this build establishes the updater signature."
-            echo "published_cert_sha256=" >> "$GITHUB_OUTPUT"
-            echo "continuity=first signed build on this channel" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "::error title=No signing anchor::No published release APK was found. Cannot prove that this APK can update the installed app."
+            exit 1
           fi
           PREV_URL="${PUBLISHED%% *}"
           PREV_NAME="${PUBLISHED##* }"
@@ -338,11 +328,23 @@ jobs:
             echo "::error title=Unreadable published signer::Could not read the certificate of $PREV_NAME, so signing continuity cannot be proven"
             exit 1
           fi
+          echo "::notice title=Updater signing certificate::New: $NEW_CERT; published $PREV_NAME: $PREV_CERT"
           if [[ "$NEW_CERT" != "$PREV_CERT" ]]; then
             echo "::error title=Signing key changed::The new APK is signed with $NEW_CERT but the published $PREV_NAME uses $PREV_CERT. In-app updates need the SAME key, so nothing is published. Restore the AURUM_RELEASE_* repository secrets or the aurum-ci-updater-signing-v1 cache from the default branch."
             exit 1
           fi
-          echo "continuity=verified: identical signer to $PREV_NAME" >> "$GITHUB_OUTPUT"
+          AAPT="$SDK/build-tools/${ANDROID_BUILD_TOOLS}/aapt"
+          apk_code() {
+            "$AAPT" dump badging "$1" | sed -n -E "s/^package: .*versionCode='([0-9]+)'.*/\1/p" | head -1
+          }
+          NEW_CODE="$(apk_code "$NEW_APK")"
+          PREV_CODE="$(apk_code "$RUNNER_TEMP/published-release.apk")"
+          if [[ -z "$NEW_CODE" || -z "$PREV_CODE" || "$NEW_CODE" -le "$PREV_CODE" ]]; then
+            echo "::error title=Non-upgradable version::New versionCode $NEW_CODE must exceed the published $PREV_NAME versionCode $PREV_CODE"
+            exit 1
+          fi
+          echo "::notice title=Updater version continuity::New versionCode $NEW_CODE > published $PREV_NAME versionCode $PREV_CODE"
+          echo "continuity=verified: identical signer to $PREV_NAME; versionCode $NEW_CODE > $PREV_CODE" >> "$GITHUB_OUTPUT"
 
       - name: Collect APKs and updater metadata
         if: steps.guard.outputs.ready == 'true'
@@ -421,7 +423,7 @@ jobs:
             android/app/build/test-results/testDebugUnitTest/**
 
       - name: Require stable signing for public updater release
-        if: steps.guard.outputs.ready == 'true' && ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')) || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))
+        if: steps.guard.outputs.ready == 'true' && ((github.ref == 'refs/heads/main' || github.ref_type == 'tag') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)))
         run: |
           set -euo pipefail
           if [[ -z "${AURUM_RELEASE_STORE_FILE:-}" || ! -f "${AURUM_RELEASE_STORE_FILE:-}" || -z "${AURUM_RELEASE_STORE_PASSWORD:-}" || -z "${AURUM_RELEASE_KEY_ALIAS:-}" || -z "${AURUM_RELEASE_KEY_PASSWORD:-}" ]]; then
@@ -430,7 +432,7 @@ jobs:
           fi
 
       - name: Publish GitHub Release for in-app updater
-        if: steps.guard.outputs.ready == 'true' && ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')) || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))
+        if: steps.guard.outputs.ready == 'true' && ((github.ref == 'refs/heads/main' || github.ref_type == 'tag') && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)))
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.collect.outputs.tag }}
