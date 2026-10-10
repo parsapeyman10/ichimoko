@@ -164,6 +164,34 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 modifier = Modifier.padding(top = 4.dp))
         }
 
+        SectionCard("فهرست و حالت هر بازار · روندگیر / رنج‌گیر / ترکیبی", "۸ نماد پیش‌فرض، ۲ نماد از هر دسته؛ کاتالوگ گسترده فقط با دادهٔ معتبر") {
+            var watchlistText by remember(settings.activeWatchlist) {
+                mutableStateOf(settings.activeWatchlist.joinToString(", "))
+            }
+            OutlinedTextField(value = watchlistText, onValueChange = { watchlistText = it },
+                label = { Text("نمادها، جدا با ویرگول") },
+                modifier = Modifier.fillMaxWidth())
+            Button(onClick = {
+                viewModel.setWatchlist(watchlistText.split(',', '\n', ';'))
+            }) { Text("ذخیرهٔ واچ‌لیست") }
+            Text("افزودن نماد به‌تنهایی قیمت یا سیگنال نمی‌سازد؛ بدون فید واقعی مستقل، ورود بسته می‌ماند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            Text("حالت هر دسته را اینجا انتخاب کنید. «ترکیبی/خودکار» با ADX رژیم را تشخیص می‌دهد؛ " +
+                "این انتخاب برای اسکنر و نماد منتخب یکسان است، اما نبود داده/قیمت تازه را رفع نمی‌کند.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
+            com.aurum.edge.core.AssetClass.entries.forEach { category ->
+                Text(category.label, style = MaterialTheme.typography.bodySmall)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    com.aurum.edge.core.CategoryStrategy.entries.forEach { mode ->
+                        FilterChip(selected = settings.categoryStrategies[category] == mode,
+                            onClick = { viewModel.setCategoryStrategy(category, mode) },
+                            label = { Text(mode.label) })
+                    }
+                }
+            }
+        }
+
         // توضیح موتور واحد چهارلایه؛ گزینه‌های پروفایل قدیمی فقط برای خواندن سوابق می‌مانند.
         SectionCard("موتور واحد چهارلایهٔ V1", "امتیازدهی فنی و قفل‌های مطلق بازار/ریسک/AI") {
             Text(
@@ -333,31 +361,6 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 modifier = Modifier.padding(top = 2.dp))
             Text("⚠️ این کلید روی گوشی ذخیره می‌شود، هرگز به گیت‌هاب نمی‌رود، اما اگر همین APK را با کسی به‌اشتراک بگذارید، کلید همراه آن قابل استخراج است. برای ارائهٔ عمومی از سقف/rate limit سرویس کلید استفاده کنید.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Red)
-        }
-
-        SectionCard("فهرست فعال V1", "۸ نماد پیش‌فرض، ۲ نماد از هر دسته؛ نامحدود در کاتالوگ، فقط با دادهٔ معتبر") {
-            var watchlistText by remember(settings.activeWatchlist) {
-                mutableStateOf(settings.activeWatchlist.joinToString(", "))
-            }
-            OutlinedTextField(value = watchlistText, onValueChange = { watchlistText = it },
-                label = { Text("نمادها، جدا با ویرگول") },
-                modifier = Modifier.fillMaxWidth())
-            Button(onClick = {
-                viewModel.setWatchlist(watchlistText.split(',', '\n', ';'))
-            }) { Text("ذخیرهٔ واچ‌لیست") }
-            Text("افزودن نماد به‌تنهایی قیمت یا سیگنال نمی‌سازد؛ بدون فید واقعی مستقل، ورود بسته می‌ماند.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            com.aurum.edge.core.AssetClass.entries.forEach { category ->
-                Text(category.label, style = MaterialTheme.typography.bodySmall)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    com.aurum.edge.core.CategoryStrategy.entries.forEach { mode ->
-                        FilterChip(selected = settings.categoryStrategies[category] == mode,
-                            onClick = { viewModel.setCategoryStrategy(category, mode) },
-                            label = { Text(mode.label) })
-                    }
-                }
-            }
         }
 
         SectionCard(

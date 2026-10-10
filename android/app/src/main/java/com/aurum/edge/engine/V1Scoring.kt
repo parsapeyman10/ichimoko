@@ -64,9 +64,8 @@ internal object V1Scoring {
 
         val setting = SignalEngine.ichimokuSetting(interval)
         val ichi = Ichimoku.compute(bars, setting.tenkan, setting.kijun, setting.spanB, setting.kijun)
-        val cloud = ichi.cloudAt(bars.lastIndex) ?: return blocked("ابر قابل‌مشاهده هنوز آماده نیست")
-        val tenkan = ichi.tenkan.lastOrNull() ?: return blocked("تنکان آماده نیست")
-        val kijun = ichi.kijun.lastOrNull() ?: return blocked("کیجون آماده نیست")
+        val ichiRead = IchimokuAlignment.read(bars, ichi, atr)
+            ?: return blocked("اجزای هم‌زمان ایچیموکو آماده نیستند")
         val ema = Indicators.ema(bars.map { it.close }, 200).lastOrNull() ?: return blocked("EMA200 آماده نیست")
         val rsi = Indicators.rsi(bars, 7).lastOrNull() ?: return blocked("RSI آماده نیست")
         val macdValues = Indicators.macdHistogram(bars)
@@ -94,14 +93,11 @@ internal object V1Scoring {
 
         fun score(side: SignalAction): Pair<Int, List<ConfluenceItem>> {
             val buy = side == SignalAction.BUY
-            val trend = if (range) {
-                (if ((if (buy) last.close <= ema else last.close >= ema)) 12 else 0) +
-                    (if (last.close in min(cloud.first, cloud.second)..max(cloud.first, cloud.second)) 13 else 0)
-            } else {
-                (if ((if (buy) last.close > ema else last.close < ema)) 12 else 0) +
-                    (if ((if (buy) last.close > max(cloud.first, cloud.second) && tenkan > kijun
-                          else last.close < min(cloud.first, cloud.second) && tenkan < kijun)) 13 else 0)
-            }
+            val ichiOk = if (range) ichiRead.rangeAligned(last.close)
+                         else ichiRead.trendAligned(side, last.close)
+            val trend = (if (if (range) (if (buy) last.close <= ema else last.close >= ema)
+                         else (if (buy) last.close > ema else last.close < ema)) 12 else 0) +
+                (if (ichiOk) 13 else 0)
             val momentum = (if ((if (range) (if (buy) rsi < 42 else rsi > 58)
                                  else (if (buy) rsi in 50.0..75.0 else rsi in 25.0..50.0))) 12 else 0) +
                 (if ((if (range) (if (buy) macd > prevMacd else macd < prevMacd)
@@ -125,7 +121,7 @@ internal object V1Scoring {
                     }, points)
             val items = listOf(
                 item("ساختار روند · EMA + ایچیموکو", trend,
-                    "${mode.label} · EMA200=$ema · ابر=${cloud.first}/${cloud.second} · تنکان=$tenkan کیجون=$kijun · $trend/25"),
+                    "${mode.label} · EMA200=$ema · ${ichiRead.detail(side)} · هم‌راستایی ایچیموکو=${if (ichiOk) "تأیید" else "رد"} · $trend/25"),
                 item("مومنتوم · RSI + MACD", momentum, "RSI=$rsi · MACD=$macd · $momentum/25"),
                 item("پرایس‌اکشن · حمایت/مقاومت", priceAction,
                     "حمایت=$support · مقاومت=$resistance · ATR=$atr · $priceAction/25"),
@@ -141,6 +137,12 @@ internal object V1Scoring {
         val side = chooseSide(long.first, short.first)
         val selected = if (side == SignalAction.SELL) SignalAction.SELL to short else SignalAction.BUY to long
         if (side == SignalAction.NO_TRADE) blockers += "امتیاز خرید و فروش برابر است؛ جهت ورود نامعلوم"
+        // This is the Ichimoku half of the FIRST layer, not a parallel strategy. Never
+        // authorize a trend entry on the EMA half alone while the displaced components
+        // disagree or the lines/price are over-extended relative to real ATR.
+        if (side != SignalAction.NO_TRADE && !range &&
+            !ichiRead.trendAligned(side, last.close))
+            blockers += "اجزای ایچیموکو هم‌جهت/هم‌فاصله نیستند (ابر، تنکان/کیجون، چیکو و ATR)"
         val total = selected.second.first.toDouble()
         if (total < threshold) blockers += "امتیاز $total/۱۰۰ از آستانهٔ $threshold کمتر است"
         val stop = if (side == SignalAction.BUY) min(support, last.close - atr) else max(resistance, last.close + atr)
@@ -187,11 +189,12 @@ internal object V1Scoring {
                 it.high < max(it.open, it.close) || it.low > min(it.open, it.close) }) return null
         val setting = SignalEngine.ichimokuSetting(interval)
         val ichi = Ichimoku.compute(bars, setting.tenkan, setting.kijun, setting.spanB, setting.kijun)
-        val cloud = ichi.cloudAt(bars.lastIndex) ?: return null
+        val atr = Indicators.atr(bars, 14).lastOrNull() ?: return null
+        val read = IchimokuAlignment.read(bars, ichi, atr) ?: return null
         val ema = Indicators.ema(bars.map { it.close }, 200).lastOrNull() ?: return null
         return when {
-            last.close > max(cloud.first, cloud.second) && last.close > ema -> SignalAction.BUY
-            last.close < min(cloud.first, cloud.second) && last.close < ema -> SignalAction.SELL
+            last.close > ema && read.trendAligned(SignalAction.BUY, last.close) -> SignalAction.BUY
+            last.close < ema && read.trendAligned(SignalAction.SELL, last.close) -> SignalAction.SELL
             else -> SignalAction.NO_TRADE
         }
     }

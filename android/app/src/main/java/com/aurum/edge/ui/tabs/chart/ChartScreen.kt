@@ -132,6 +132,12 @@ fun ChartScreen(
             }
         }
 
+        Text("نکته: ایچیموکوِ ویدجت TradingView مستقل از موتور V1 است؛ برای مقایسهٔ بصری " +
+                "پارامترهای آن را در خود ویدجت روی ۸/۲۴/۷۲ و جابه‌جایی ۲۴ بگذارید. " +
+                "سیگنال از کندل‌های تأییدشدهٔ فید اپ محاسبه می‌شود، نه از خطوط TradingView.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+
         OpenTradeWindows(openTrades = openTrades, livePrices = livePrices)
     }
 }

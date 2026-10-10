@@ -35,7 +35,7 @@ import kotlinx.coroutines.withContext
 /** One row of the 50+ universe radar: what the continuous sweep observed for this instrument. */
 data class PairScanStatus(
     val symbol: String,
-    /** pending | closed | error | no_signal | blocked | candidate */
+    /** pending | closed | error | no_signal | blocked | observed | candidate */
     val state: String,
     val detail: String,
     val lastScanAt: Long? = null,
@@ -142,9 +142,9 @@ class PairScanner(
                 lastSweepElapsed = SystemClock.elapsedRealtime()
                 val currentStatuses = _state.value.statuses
                 val ranked = rankOpportunities(currentStatuses)
-                // Nothing measured this sweep ⇒ keep the previous read instead of inventing one.
-                val read = if (trendSample.isEmpty()) _state.value.marketTrend
-                else runCatching { MarketTrend.overall(trendSample) }.getOrNull() ?: _state.value.marketTrend
+                // A failed/empty sweep must not promote the previous market read as current.
+                val read = if (trendSample.isEmpty()) null
+                else runCatching { MarketTrend.overall(trendSample) }.getOrNull()
                 _state.value = _state.value.copy(
                     sweeping = false,
                     lastSweepAt = if (finished) System.currentTimeMillis() else _state.value.lastSweepAt,
@@ -155,21 +155,8 @@ class PairScanner(
             }
         }
 
-    private fun rankOpportunities(statuses: List<PairScanStatus>): List<PairScanStatus> {
-        val now = System.currentTimeMillis()
-        val interval = settings.read().interval
-        return statuses
-            .filter { it.price != null && it.state == "candidate" &&
-                ScanFreshness.current(it.lastScanAt, interval, now) && !MarketHours.closedFor(it.symbol, now) }
-            .sortedWith(
-                compareByDescending<PairScanStatus> { it.state == "candidate" }
-                    .thenByDescending { it.playbookAllowed == true }
-                    .thenByDescending { it.trendAligned == true }
-                    .thenByDescending { it.riskReward ?: 0.0 }
-                    .thenByDescending { it.confidence ?: 0.0 }
-                    .thenByDescending { it.technicalScore ?: 0 }
-            )
-    }
+    private fun rankOpportunities(statuses: List<PairScanStatus>): List<PairScanStatus> =
+        ScanRanking.rank(statuses, settings.read().interval, System.currentTimeMillis())
 
     private suspend fun sweepAll(onCandidate: (suspend (PaperOpportunity) -> Unit)?) {
         trendSample.clear()
@@ -183,12 +170,16 @@ class PairScanner(
         // checked by the same candle -> V1 four-layer -> AI veto -> risk pipeline. An absent
         // feed is reported as an error, never filled with a fabricated candle.
         val universe = WatchCatalog.scanUniverse(config.activeWatchlist)
-        val statuses = _state.value.statuses.associateBy { it.symbol }.toMutableMap()
+        // A result from the previous sweep cannot remain a current recommendation while
+        // the provider is still being checked this time (or after a configuration change).
+        val statuses = mutableMapOf<String, PairScanStatus>()
         _state.value = _state.value.copy(
             checkedCount = 0,
+            topThree = emptyList(),
+            bestPick = null,
             totalCount = universe.size,
             statuses = universe.map { symbol ->
-                statuses[symbol] ?: PairScanStatus(symbol, "pending", "هنوز اسکن نشده")
+                PairScanStatus(symbol, "pending", "در صف بررسی این دور")
             },
         )
         fun update(
@@ -278,7 +269,7 @@ class PairScanner(
                 } catch (cancel: CancellationException) {
                     throw cancel
                 } catch (deepFailure: Exception) {
-                    throw DataFeedException((deepFailure.message ?: publicFailure.message ?: "خطای دریافت کندل").take(140))
+                    throw DataFeedException("عمومی: ${publicFailure.message ?: "ناموفق"}؛ Dukascopy: ${deepFailure.message ?: "ناموفق"}".take(180))
                 }
             }
 
@@ -312,7 +303,7 @@ class PairScanner(
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (error: Exception) {
-                update(symbol, "error", (error.message ?: "خطای دریافت کندل").take(100))
+                update(symbol, "error", (error.message ?: "خطای دریافت کندل").take(180))
                 return@forEachIndexed
             }
 
@@ -429,6 +420,20 @@ class PairScanner(
             val blocker = PaperAlertRules.blocker(market, config, headlines, trades, mtf,
                 System.currentTimeMillis(), allowedSymbols = config.activeWatchlist, barAgeGraceMs = graceMs)
             if (blocker != null) {
+                // Read-only research across the entire catalog, including symbols outside the
+                // editable watchlist. Apply every other freshness/technical gate unchanged;
+                // only the watchlist permission is relaxed for DISPLAY, not for entry/alert.
+                if (symbol !in config.activeWatchlist &&
+                    PaperAlertRules.blocker(market, config, headlines, trades, mtf,
+                        System.currentTimeMillis(), allowedSymbols = universe, barAgeGraceMs = graceMs) == null) {
+                    update(symbol, "observed",
+                        "سیگنال فنی از کندل بسته؛ خارج از واچ‌لیست. قیمت لحظه‌ای مستقل/مجوز ورود تأیید نشده است",
+                        price, score, combined.action, combined.confidence,
+                        combined.entry, combined.stopLoss, combined.takeProfit, combined.riskReward,
+                        combined.confluence, playbook?.method?.label, playbook?.allowed,
+                        playbook?.reasonFa?.take(160), trend, aligned, trendGate?.noteFa?.take(200))
+                    return@forEachIndexed
+                }
                 update(
                     symbol = symbol,
                     state = "blocked",

@@ -42,6 +42,7 @@ import com.aurum.edge.data.AiConnectionState
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.PairScanState
 import com.aurum.edge.data.PairScanStatus
+import com.aurum.edge.data.ScanRanking
 import com.aurum.edge.ui.components.ConfluenceRow
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
@@ -51,6 +52,7 @@ import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.components.formatTime
 import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
+import kotlinx.coroutines.delay
 
 /**
  * صفحه معامله و سیگنال (Signal / Trading Tab):
@@ -77,6 +79,14 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
     val aiConnection by viewModel.aiConnection.collectAsStateWithLifecycle()
     val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
     var showAllDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var scanClock by androidx.compose.runtime.remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000L)
+            scanClock = System.currentTimeMillis() // expire historical recommendations without a new sweep
+        }
+    }
+    val freshCandidates = ScanRanking.rank(scanState.statuses, settings.interval, scanClock)
     val signal = market.signal
 
     val openTrades = trades.filter { it.isOpen }
@@ -99,7 +109,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
 
         // ── ۲. بهترین فرصت معاملاتی (#1 Best Opportunity) با تشریح کامل شروط ──
         BestOpportunityDetailedCard(
-            best = scanState.bestPick,
+            best = freshCandidates.firstOrNull(),
             sweeping = scanState.sweeping,
             onScan = { viewModel.scanPairs() },
             // A scanner candle is not a fresh verified entry; navigate for review only.
@@ -107,13 +117,16 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
         )
 
         // ── ۳. سه کاندیدای برتر بازار (Top 3 Candidates) با تفکیک دسته و شروط ──
-        if (scanState.topThree.isNotEmpty()) {
+        if (freshCandidates.isNotEmpty()) {
             TopCandidatesDetailedSection(
-                candidates = scanState.topThree,
+                candidates = freshCandidates.take(3),
                 currentSymbol = market.symbol,
                 onSelectSymbol = { viewModel.selectChartSymbol(it) },
             )
         }
+
+        // Rankings for all four markets, not only the eight default watchlist rows.
+        PerMarketRecommendations(scanState, settings.interval, scanClock, onChartSymbol)
 
         // ── ۴. خلاصه سیگنال نماد انتخابی و موتور تلفیقی ایچیموکو ─────────
         SignalSummaryCard(
@@ -136,7 +149,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
         // ── ۵. وضعیت معامله خودکار کاغذی ─────────────────────────────────
         SectionCard("معاملهٔ خودکار کاغذی (تخصیص متوازن ۴ بازار)") {
             Text(
-                if (settings.autoPaperTrading) autoStatus else "خاموش (از بخش تنظیمات یا صفحه اصلی قابل فعال‌سازی است)",
+                if (settings.autoPaperTrading) "$autoStatus · ورود خودکار فقط روی فید تازهٔ نماد انتخابی ${market.symbol} اجرا می‌شود؛ رادار سایر نمادها معامله باز نمی‌کند." else "خاموش (از بخش تنظیمات یا صفحه اصلی قابل فعال‌سازی است)",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (settings.autoPaperTrading) AurumColors.TextSecondary else AurumColors.Gold,
             )
@@ -423,6 +436,52 @@ private fun WhyNoTradeCard(checks: List<AlertCheck>, ai: AiConnectionState) {
 private fun fmt2(value: Double?): String =
     if (value == null) "—" else String.format(java.util.Locale.US, "%.2f", value)
 
+/** Four buckets are ALWAYS shown. No eligible candle => show coverage and an actual reason,
+ * not an invented "best". Observations outside the watchlist are never entry permissions.
+ */
+@Composable
+private fun PerMarketRecommendations(scan: PairScanState, interval: com.aurum.edge.core.Interval,
+                                     now: Long, onSelect: (String) -> Unit) {
+    val picks = ScanRanking.byMarket(scan.statuses, interval, now)
+    SectionCard("بهترین هر بازار + ۳ گزینهٔ بعدی",
+        "رتبه‌بندی فقط از کندل‌های بسته و بررسی همین دور؛ مشاهدهٔ خارج از واچ‌لیست معامله/قیمت لحظه‌ای نیست") {
+        com.aurum.edge.core.AssetClass.entries.forEach { category ->
+            val rows = scan.statuses.filter { it.assetClass == category }
+            val checked = rows.count { it.state != "pending" }
+            val ranked = picks[category].orEmpty()
+            Text("${category.label} · بررسی‌شده $checked/${rows.size}" +
+                    if (scan.sweeping) " · اسکن در جریان" else "",
+                style = MaterialTheme.typography.titleSmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 8.dp))
+            Text("فید ناموفق ${rows.count { it.state == "error" }} · بسته ${rows.count { it.state == "closed" }} · " +
+                    "بدون سیگنال ${rows.count { it.state == "no_signal" }} · مانع ورود ${rows.count { it.state == "blocked" }} · " +
+                    "مشاهده ${rows.count { it.state == "observed" }} · کاندیدا ${rows.count { it.state == "candidate" }}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            if (ranked.isEmpty()) {
+                val reason = rows.firstOrNull { it.state == "error" || it.state == "blocked" || it.state == "no_signal" }
+                Text(if (checked == 0) "هنوز بررسی نشده است؛ پایش پس‌زمینه را روشن کنید یا اسکن را بزنید."
+                     else "فرصت تازهٔ تأییدشده‌ای نیست. ${reason?.symbol ?: ""}: ${reason?.detail ?: "بازار بسته است یا داده/شواهد کافی نیست"}",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            } else {
+                ranked.forEachIndexed { index, row ->
+                    Row(Modifier.fillMaxWidth().padding(top = 5.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("${if (index == 0) "بهترین" else "گزینهٔ $index"} · ${row.symbol} · ${row.action?.name ?: "—"} · ${row.confidence?.toInt() ?: 0}/۱۰۰" +
+                                if (row.state == "observed") " · فقط مشاهده" else " · کاندیدای واچ‌لیست",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (row.state == "candidate") AurumColors.Green else AurumColors.Gold,
+                            modifier = Modifier.weight(1f))
+                        Text("بررسی ↗", style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Cyan, modifier = Modifier.clickable { onSelect(row.symbol) })
+                    }
+                }
+                if (ranked.size < 4) Text("${4 - ranked.size} گزینهٔ دیگر با داده/شروط معتبر پیدا نشد؛ موردی ساخته نمی‌شود.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            }
+        }
+    }
+}
+
 /**
  * کارت بهترین فرصت معاملاتی با تشریح کامل شروط تکنیکال و تفکیک نماد/دسته دارایی.
  */
@@ -442,8 +501,8 @@ private fun BestOpportunityDetailedCard(
     }
 
     SectionCard(
-        title = "✨ برترین فرصت معاملاتی (#1 Best Opportunity)",
-        subtitle = if (best != null) "بالاترین امتیاز چهارلایهٔ V1 و نسبت R:R معتبر" else "اسکن هوشمند ۵۰+ سهم و نماد در پس‌زمینه",
+        title = "✨ برترین کاندیدای مجازِ واچ‌لیست",
+        subtitle = if (best != null) "رتبهٔ برتر میان کاندیداهای تازهٔ مجاز؛ ورود فقط با قیمت تازهٔ مستقل" else "اسکن نمادهای کاتالوگ؛ نبود داده به معنی فرصت نیست",
         trailing = {
             if (sweeping) {
                 Pill("در حال اسکن...", AurumColors.Gold)

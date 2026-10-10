@@ -166,21 +166,12 @@ class PublicCandleHistoryClient(
         return if (trimToCache) sorted.takeLast(trimSize.coerceAtLeast(1)) else sorted
     }
 
-    private fun yahooSymbol(symbol: String): String? {
+    internal fun yahooSymbol(symbol: String): String? {
         val key = symbol.trim().uppercase(Locale.ROOT)
         return when (key) {
-            "XAU/USD", "XAUUSD", "GOLD" -> "GC=F"
-            "XAG/USD", "XAGUSD", "SILVER" -> "SI=F"
-            "USOIL", "WTI" -> "CL=F"
-            "UKOIL", "BRENT" -> "BZ=F"
-            "COPPER" -> "HG=F"
-            "NATGAS", "NAT_GAS" -> "NG=F"
-            "NASDAQ" -> "QQQ"
-            "SP500" -> "SPY"
-            "DOW" -> "DIA"
-            "DAX" -> "^GDAXI"
-            "FTSE" -> "^FTSE"
-            "NIKKEI" -> "^N225"
+            // Yahoo commodity futures and ETF/index proxies are NOT XAU/USD spot,
+            // XAG/USD spot, oil spot, or the named cash index. Fail over to an
+            // identity-preserving provider or report missing history; never relabel them.
             "EUR/USD" -> "EURUSD=X"
             "GBP/USD" -> "GBPUSD=X"
             "AUD/USD" -> "AUDUSD=X"
@@ -207,10 +198,11 @@ class PublicCandleHistoryClient(
             "CAD/CHF" -> "CADCHF=X"
             "NZD/CAD" -> "NZDCAD=X"
             else -> {
-                if (key.endsWith("USDT") || key.endsWith("/USDT") || key.endsWith("-USD") || key.endsWith("/USD")) {
-                    val base = key.replace("/USDT", "").replace("USDT", "").replace("-USD", "").replace("/USD", "")
-                    "$base-USD"
-                } else if (key.contains("/")) {
+                if (key.startsWith("XAU/") || key.startsWith("XAG/") ||
+                    key.endsWith("/USDT") || key.endsWith("USDT") ||
+                    key in setOf("XAUUSD", "XAGUSD", "GOLD", "SILVER", "USOIL", "UKOIL", "COPPER", "NATGAS",
+                        "NASDAQ", "SP500", "DOW", "DAX", "FTSE", "NIKKEI")) null
+                else if (key.contains("/")) {
                     val base = key.substringBefore("/")
                     val quote = key.substringAfter("/")
                     "$base$quote=X"
