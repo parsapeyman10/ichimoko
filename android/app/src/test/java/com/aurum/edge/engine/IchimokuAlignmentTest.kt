@@ -29,7 +29,9 @@ class IchimokuAlignmentTest {
         assertTrue(read.chikouVsHigh) // current close against bar 75, NOT a future Chikou element
         assertTrue(read.trendAligned(SignalAction.BUY, 110.0))
         assertFalse(read.trendAligned(SignalAction.SELL, 110.0))
-        assertFalse(read.trendAligned(SignalAction.BUY, 120.0)) // price/line gap > 4 ATR
+        val overextendedBars = candles.dropLast(1) + candles.last().copy(high = 122.0, close = 120.0)
+        assertFalse(IchimokuAlignment.read(overextendedBars, ichi, 2.0)!!
+            .trendAligned(SignalAction.BUY, 120.0)) // price/line gap > 4 ATR
         assertNull(IchimokuAlignment.read(candles.take(24), ichi, 2.0))
         assertNull(IchimokuAlignment.read(candles, ichi, 0.0))
         val cloudAgainst = ichi.copy(senkouA = rawA.toMutableList().also { it[99] = 80.0 })

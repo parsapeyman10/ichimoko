@@ -20,22 +20,27 @@ internal object IchimokuAlignment {
         val chikouVsLow: Boolean,
         val tenkanKijunAtr: Double,
         val priceKijunAtr: Double,
+        val observedClose: Double,
         val linesMovingUp: Boolean,
         val linesMovingDown: Boolean,
     ) {
-        fun trendAligned(side: SignalAction, price: Double): Boolean = when (side) {
-            SignalAction.BUY -> price > max(visibleCloud.first, visibleCloud.second) &&
-                tenkan > kijun && projectedCloud.first > projectedCloud.second && chikouVsHigh &&
-                tenkanKijunAtr <= 3.0 && priceKijunAtr <= 4.0 && linesMovingUp
-            SignalAction.SELL -> price < min(visibleCloud.first, visibleCloud.second) &&
-                tenkan < kijun && projectedCloud.first < projectedCloud.second && chikouVsLow &&
-                tenkanKijunAtr <= 3.0 && priceKijunAtr <= 4.0 && linesMovingDown
-            else -> false
+        fun trendAligned(side: SignalAction, price: Double): Boolean {
+            if (price != observedClose) return false // no mixing with a different quote
+            return when (side) {
+                SignalAction.BUY -> price > max(visibleCloud.first, visibleCloud.second) &&
+                    tenkan > kijun && projectedCloud.first > projectedCloud.second && chikouVsHigh &&
+                    tenkanKijunAtr <= 3.0 && priceKijunAtr <= 4.0 && linesMovingUp
+                SignalAction.SELL -> price < min(visibleCloud.first, visibleCloud.second) &&
+                    tenkan < kijun && projectedCloud.first < projectedCloud.second && chikouVsLow &&
+                    tenkanKijunAtr <= 3.0 && priceKijunAtr <= 4.0 && linesMovingDown
+                else -> false
+            }
         }
 
         /** Range mode measures compression instead of demanding a directional cloud. */
         fun rangeAligned(price: Double): Boolean =
-            price in min(visibleCloud.first, visibleCloud.second)..max(visibleCloud.first, visibleCloud.second) &&
+            price == observedClose &&
+                price in min(visibleCloud.first, visibleCloud.second)..max(visibleCloud.first, visibleCloud.second) &&
                 tenkanKijunAtr <= 2.0
 
         fun detail(side: SignalAction): String =
@@ -71,6 +76,6 @@ internal object IchimokuAlignment {
         val movesDown = current.zip(prior).all { (value, previous) -> value - previous <= 0.25 * atr }
         return Read(visible, projectedA to projectedB, tenkan, kijun,
             close > historical.high, close < historical.low,
-            abs(tenkan - kijun) / atr, abs(close - kijun) / atr, movesUp, movesDown)
+            abs(tenkan - kijun) / atr, abs(close - kijun) / atr, close, movesUp, movesDown)
     }
 }
