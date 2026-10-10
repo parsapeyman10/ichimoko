@@ -14,8 +14,12 @@ object TechnicalEvidence {
 
     fun confirmed(items: List<ConfluenceItem>): Boolean =
         items.size == CURRENT_COUNT && items.map { it.name }.toSet() == REQUIRED_NAMES &&
-            items.all { it.status != ConfluenceStatus.UNKNOWN &&
-                (it.scorePercent?.let { points -> points in 0..25 } == true) } &&
+            items.all { item -> when (item.scorePercent) {
+                25 -> item.ok && item.status == ConfluenceStatus.CONFIRMED
+                in 1..24 -> !item.ok && item.status == ConfluenceStatus.PARTIAL
+                0 -> !item.ok && item.status == ConfluenceStatus.CONFLICT
+                else -> false
+            } } &&
             items.sumOf { it.scorePercent ?: 0 } in 60..100
 
     fun confirmed(signal: Signal): Boolean = confirmed(items(signal)) &&
@@ -24,7 +28,7 @@ object TechnicalEvidence {
 
     fun confirmedRecords(items: List<PaperConditionRecord>): Boolean = when (items.size) {
         CURRENT_COUNT -> items.map { it.name }.toSet() == REQUIRED_NAMES &&
-            items.all { it.status in setOf("CONFIRMED", "CONFLICT") }
+            items.all { it.status in setOf("CONFIRMED", "PARTIAL", "CONFLICT") }
         7, LEGACY_COUNT -> items.map { it.name }.distinct().size == items.size &&
             items.all { it.status == "CONFIRMED" }
         else -> false

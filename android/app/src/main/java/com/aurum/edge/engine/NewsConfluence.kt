@@ -73,7 +73,7 @@ object NewsConfluence {
         val detail = when (result) {
             ConfluenceStatus.CONFIRMED -> "هم‌جهت ${ai.direction} · ${ai.confidence.toInt()}٪ · $label · ${ai.model}"
             ConfluenceStatus.CONFLICT -> "تعارض: مدل ${ai.direction} در برابر ${action.name} · $label"
-            ConfluenceStatus.UNKNOWN -> "تحلیل مدل جهت روشن ندارد؛ ورود تأیید نشده"
+            ConfluenceStatus.UNKNOWN, ConfluenceStatus.PARTIAL -> "تحلیل مدل جهت روشن ندارد؛ ورود تأیید نشده"
         }
         return Alignment(result, detail)
     }
@@ -121,7 +121,7 @@ object NewsConfluence {
             scorePercent = when (match.status) {
                 ConfluenceStatus.CONFIRMED -> 100
                 ConfluenceStatus.CONFLICT -> 0
-                ConfluenceStatus.UNKNOWN -> null
+                ConfluenceStatus.UNKNOWN, ConfluenceStatus.PARTIAL -> null
             },
         )
         val combined = raw.copy(confluence = core + item)
@@ -136,7 +136,7 @@ object NewsConfluence {
         return when (match.status) {
             ConfluenceStatus.CONFIRMED -> combined.copy(
                 reasons = combined.reasons + "خبر/مدل نزدیک معامله ثبت شد؛ فقط داده‌کاوی ژورنال است و شرط ورود نیست")
-            ConfluenceStatus.UNKNOWN -> combined.copy(
+            ConfluenceStatus.UNKNOWN, ConfluenceStatus.PARTIAL -> combined.copy(
                 reasons = combined.reasons + "خبر معیار قطعی ندارد؛ برای داده‌کاوی ژورنال زرد می‌ماند و شرط ورود کاغذی نیست")
             ConfluenceStatus.CONFLICT -> {
                 // Recheck only the model verdict without the calendar's separate event gate.

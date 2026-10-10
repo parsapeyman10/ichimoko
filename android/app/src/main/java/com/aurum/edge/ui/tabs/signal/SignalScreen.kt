@@ -223,7 +223,7 @@ private fun MarketPlaybookCard(decision: PlaybookDecision?, symbol: String) {
     }
     SectionCard(
         title = "متد مناسب این بازار · $symbol",
-        subtitle = "هر بازار یک روش دارد: طلا/فارکس در لندن و نیویورک روند، فارکس در آسیا رنج، رمزارز شکست مومنتوم، سهام درایو بازگشایی",
+        subtitle = "خوانش زمینه‌ای بازار؛ مجوز ورود فقط از موتور چهارلایه و قفل‌های ریسک/بازار صادر می‌شود",
         trailing = { Pill(method?.label ?: "در حال ارزیابی", color) },
     ) {
         if (decision == null) {
@@ -244,7 +244,7 @@ private fun MarketPlaybookCard(decision: PlaybookDecision?, symbol: String) {
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             Text(decision.reasonFa, style = MaterialTheme.typography.labelSmall, color = color)
             decision.blockers.forEach { blocker ->
-                Text("⛔ $blocker", style = MaterialTheme.typography.labelSmall, color = AurumColors.Red)
+                Text("زمینهٔ بازار: $blocker", style = MaterialTheme.typography.labelSmall, color = AurumColors.Red)
             }
             if (decision.allowed) {
                 Text("این خوانش صرفاً زمینهٔ بازار است؛ امتیاز چهارلایه، تازگی داده و قفل‌های مطلق مرجع ورود هستند.",
@@ -414,7 +414,7 @@ private fun WhyNoTradeCard(checks: List<AlertCheck>, ai: AiConnectionState) {
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             }
             if (failed == 0 && checks.isNotEmpty()) {
-                Text("اگر همه‌چیز سبز است و معامله‌ای باز نشد، دلیل لحظه‌ای‌اش در بخش «معاملهٔ خودکار کاغذی» پایین نوشته می‌شود (مثلاً کراس تأییدنشده یا گیت متد بازار).",
+                Text("اگر همه‌چیز سبز است و معامله‌ای باز نشد، دلیل لحظه‌ای را در بخش «معاملهٔ خودکار کاغذی» و گزارش تصمیم ببینید.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             }
         }
@@ -444,7 +444,7 @@ private fun BestOpportunityDetailedCard(
 
     SectionCard(
         title = "✨ برترین فرصت معاملاتی (#1 Best Opportunity)",
-        subtitle = if (best != null) "بالاترین شواهد تاییدشده، آزادی کامل چیکو اسپن و بهترین نسبت R:R" else "اسکن هوشمند ۵۰+ سهم و نماد در پس‌زمینه",
+        subtitle = if (best != null) "بالاترین امتیاز چهارلایهٔ V1 و نسبت R:R معتبر" else "اسکن هوشمند ۵۰+ سهم و نماد در پس‌زمینه",
         trailing = {
             if (sweeping) {
                 Pill("در حال اسکن...", AurumColors.Gold)
@@ -702,7 +702,12 @@ private fun CandidateDetailedItemCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(item.name, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-                        Pill(if (item.ok) "✓ تایید" else "✗ رد", if (item.ok) AurumColors.Green else AurumColors.Red)
+                        Pill(when (item.status) {
+                            com.aurum.edge.core.ConfluenceStatus.CONFIRMED -> "✓ کامل"
+                            com.aurum.edge.core.ConfluenceStatus.PARTIAL -> "◐ ${item.scorePercent}/۲۵"
+                            com.aurum.edge.core.ConfluenceStatus.UNKNOWN -> "؟ نامعلوم"
+                            com.aurum.edge.core.ConfluenceStatus.CONFLICT -> "✗ رد"
+                        }, if (item.ok) AurumColors.Green else AurumColors.Gold)
                     }
                 }
             } else {

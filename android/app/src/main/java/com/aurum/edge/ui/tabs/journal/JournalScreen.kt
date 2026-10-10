@@ -385,13 +385,14 @@ private fun EntryConditionsLine(conditions: List<PaperConditionRecord>) {
 
 private fun conditionTone(status: String) = when (status) {
     "CONFIRMED" -> AurumColors.Green
-    "UNKNOWN" -> AurumColors.Orange
+    "UNKNOWN", "PARTIAL" -> AurumColors.Orange
     else -> AurumColors.Red
 }
 
 private fun conditionLabel(status: String) = when (status) {
     "CONFIRMED" -> "برقرار"
-    "UNKNOWN" -> "احتمالی"
+    "PARTIAL" -> "امتیاز جزئی"
+    "UNKNOWN" -> "نامعلوم"
     else -> "دور"
 }
 

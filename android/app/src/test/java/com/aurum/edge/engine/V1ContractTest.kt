@@ -3,6 +3,11 @@ package com.aurum.edge.engine
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.CategoryStrategy
 import com.aurum.edge.core.ConfluenceItem
+import com.aurum.edge.core.ConfluenceStatus
+import com.aurum.edge.core.TechnicalEvidence
+import com.aurum.edge.core.AssetClass
+import com.aurum.edge.core.SignalProfile
+import com.aurum.edge.core.StrategyKind
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.PaperPortfolioPolicy
@@ -76,6 +81,58 @@ class V1ContractTest {
             symbol = "EUR/USD", timeframes = open)
         assertEquals(SignalAction.NO_TRADE, blocked.action)
         assertTrue(blocked.blockers.any { it.contains("1H(319/320)") })
+    }
+
+    @Test fun equalDirectionalScoresNeverDefaultBuyAndRangeNeedsDirectionalFrames() {
+        assertEquals(SignalAction.NO_TRADE, V1Scoring.chooseSide(75, 75))
+        assertEquals(SignalAction.BUY, V1Scoring.chooseSide(76, 75))
+        assertEquals(SignalAction.SELL, V1Scoring.chooseSide(74, 75))
+        val flat = List(7) { SignalAction.NO_TRADE }
+        assertEquals(0, V1Scoring.directionalAlignment(flat, SignalAction.BUY))
+        assertEquals(0, V1Scoring.directionalAlignment(flat, SignalAction.SELL))
+        assertEquals(0, V1Scoring.directionalAlignment(List(6) { SignalAction.BUY } + null, SignalAction.BUY))
+        assertEquals(25, V1Scoring.directionalAlignment(List(7) { SignalAction.BUY }, SignalAction.BUY))
+        assertEquals(20, V1Scoring.directionalAlignment(List(6) { SignalAction.BUY } + SignalAction.NO_TRADE, SignalAction.BUY))
+    }
+
+    @Test fun partialScoreCannotMasqueradeAsFullConfirmation() {
+        val labels = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
+            "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی")
+        val items = labels.mapIndexed { index, name ->
+            if (index == 0) ConfluenceItem(name, false, "partial", ConfluenceStatus.PARTIAL, 12)
+            else ConfluenceItem(name, true, "full", ConfluenceStatus.CONFIRMED, 25)
+        }
+        assertTrue(TechnicalEvidence.confirmed(items)) // 87 points; partial is not full
+        assertFalse(items.first().ok)
+        assertFalse(TechnicalEvidence.confirmed(items.toMutableList().also {
+            it[0] = it[0].copy(status = ConfluenceStatus.CONFIRMED)
+        }))
+        assertFalse(TechnicalEvidence.confirmed(items.toMutableList().also {
+            it[1] = it[1].copy(ok = false)
+        }))
+    }
+
+    @Test fun slashlessForexIsNotClassifiedAsStockAndLegacyProfilesAreNotV1Modes() {
+        assertEquals(AssetClass.FOREX, AssetClass.of("EURUSD"))
+        assertEquals(AssetClass.FOREX, AssetClass.of("GBPJPY"))
+        assertEquals(AssetClass.STOCK, AssetClass.of("AAPL"))
+        assertEquals(AssetClass.CRYPTO, AssetClass.of("BTCUSDT"))
+        assertEquals(StrategyKind.ICHIMOKU_PRICE_ACTION, StrategyKind.fromId("ICT_SMC"))
+        assertEquals(null, StrategyKind.fromId("unknown-pretend-strategy"))
+        assertFalse(SignalProfile.BASE.fakeBreakoutFilter)
+    }
+
+    @Test fun liveAndDisplayedIchimokuShareTheSamePeriods() {
+        V1Scoring.intervals.forEach { interval ->
+            val setting = SignalEngine.ichimokuSetting(interval)
+            assertEquals(8, setting.tenkan)
+            assertEquals(24, setting.kijun)
+            assertEquals(72, setting.spanB)
+            val sample = bars(interval).takeLast(320)
+            val visible = Ichimoku.compute(sample, setting.tenkan, setting.kijun, setting.spanB,
+                setting.kijun).cloudAt(sample.lastIndex)
+            assertNotNull(visible)
+        }
     }
 
     private fun trade(id: String, symbol: String, opened: Long, closed: Long? = null,

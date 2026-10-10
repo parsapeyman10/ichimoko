@@ -3,8 +3,6 @@ package com.aurum.edge.engine
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.Signal
-import com.aurum.edge.core.SignalProfile
-import com.aurum.edge.core.StrategyKind
 import com.aurum.edge.core.HistoryPolicy
 import kotlin.math.max
 
@@ -71,13 +69,10 @@ object SignalEngine {
 
     const val ENGINE_WINDOW = 400
 
-    /** The only entry decision for live signals. Old profile/strategy
-     * parameters remain for persisted settings compatibility; category mode selects V1 behaviour.
+    /** Only V1 inputs are accepted. Legacy profile/strategy/spread settings do not masquerade
+     * as scoring filters; execution costs are checked separately by PaperOrderRules.
      */
-    @Suppress("UNUSED_PARAMETER")
     fun evaluate(candles: List<Candle>, interval: Interval, threshold: Double = 85.0,
-                 spread: Double? = null, profile: SignalProfile = SignalProfile.BASE,
-                 strategy: StrategyKind = StrategyKind.ICHIMOKU_PRICE_ACTION,
                  symbol: String = "XAU/USD", mode: com.aurum.edge.core.CategoryStrategy =
                      com.aurum.edge.core.CategoryStrategy.HYBRID,
                  timeframes: Map<Interval, List<Candle>> = emptyMap()): Signal =

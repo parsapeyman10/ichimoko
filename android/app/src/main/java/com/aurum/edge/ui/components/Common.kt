@@ -248,12 +248,13 @@ fun FeedBanner(status: FeedStatus, lastPrice: Double?, lastBarTime: Long?, showi
 fun ConfluenceRow(item: ConfluenceItem) {
     val tone = when (item.status) {
         ConfluenceStatus.CONFIRMED -> AurumColors.Green
-        ConfluenceStatus.UNKNOWN -> AurumColors.Orange
+        ConfluenceStatus.UNKNOWN, ConfluenceStatus.PARTIAL -> AurumColors.Orange
         ConfluenceStatus.CONFLICT -> AurumColors.Red
     }
     val label = when (item.status) {
         ConfluenceStatus.CONFIRMED -> "برقرار"
-        ConfluenceStatus.UNKNOWN -> "احتمالی"
+        ConfluenceStatus.PARTIAL -> "امتیاز جزئی"
+        ConfluenceStatus.UNKNOWN -> "نامعلوم"
         ConfluenceStatus.CONFLICT -> "دور"
     }
     Row(

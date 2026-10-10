@@ -51,6 +51,8 @@ data class MarketState(
     val feed: FeedStatus = FeedStatus(FeedMode.NO_KEY),
     val signal: Signal? = null,
     val showingCachedData: Boolean = false,
+    /** Distinct from a valid NO_TRADE or insufficient history; never authorizes entry. */
+    val evaluationError: String? = null,
 ) {
     val closedCount: Int get() = candles.count { it.closed }
     val hasRealData: Boolean get() = candles.isNotEmpty()
@@ -718,7 +720,8 @@ class MarketRepository(
         val bars = cachedBars.values.sortedBy { it.time }
         val lastPrice = bars.lastOrNull()?.close ?: _state.value.lastPrice
         if (bars.isEmpty()) {
-            _state.value = _state.value.copy(candles = emptyList(), lastPrice = null, bid = null, ask = null, showingCachedData = false)
+            _state.value = _state.value.copy(candles = emptyList(), lastPrice = null, bid = null, ask = null,
+                showingCachedData = false, signal = null, evaluationError = null)
             return
         }
         // Never stall the live tick/settlement stream behind six REST history downloads.
@@ -738,18 +741,25 @@ class MarketRepository(
             }
         }
         val frames = timeframeSnapshot
-        val signal = if (showingCache) null else withContext(Dispatchers.Default) {
-            runCatching {
-                SignalEngine.evaluate(bars, current.interval, current.minConfidence, current.spreadPrice,
-                    current.signalProfile, current.activeStrategy, current.symbol,
-                    current.categoryStrategies[com.aurum.edge.core.AssetClass.of(current.symbol)]
-                        ?: com.aurum.edge.core.CategoryStrategy.HYBRID, frames)
-            }.getOrNull()
+        val evaluation = if (showingCache) null else withContext(Dispatchers.Default) {
+            try {
+                Result.success(SignalEngine.evaluate(bars, current.interval, current.minConfidence,
+                    symbol = current.symbol,
+                    mode = current.categoryStrategies[com.aurum.edge.core.AssetClass.of(current.symbol)]
+                        ?: com.aurum.edge.core.CategoryStrategy.HYBRID, timeframes = frames))
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                Result.failure<Signal>(error)
+            }
         }
+        val evaluationError = if (evaluation?.isFailure == true)
+            "خطای محاسبهٔ موتور فنی؛ ورود متوقف شد" else null
         _state.value = _state.value.copy(
             candles = bars,
             lastPrice = lastPrice,
-            signal = signal,
+            signal = evaluation?.getOrNull(),
+            evaluationError = evaluationError,
             showingCachedData = showingCache,
         )
         if (!showingCache) bars.filter { it.closed }.lastOrNull()?.let { bar ->

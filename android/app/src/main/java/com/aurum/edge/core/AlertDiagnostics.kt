@@ -47,7 +47,8 @@ object AlertDiagnostics {
         val noNewsVeto = signal?.blockers?.none { it.contains("وتوی AI") } != false
         val entryBlocker = if (signal?.isActionable == true)
             PaperAlertRules.blocker(market, settings, news, trades, mtf, now)
-        else signal?.blockers?.firstOrNull() ?: "برای این کندل سیگنال فنی تأییدشده موجود نیست"
+        else market.evaluationError ?: signal?.blockers?.firstOrNull()
+            ?: "برای این کندل سیگنال فنی تأییدشده موجود نیست"
 
         // ── «روند کلی بازار» به‌عنوان یک پیش‌نیازِ دیده‌شدنی ──────────────────────────
         // فقط وقتی قرمز می‌شود که واقعاً جلوی ورود را گرفته باشد؛ «اندازه گرفته نشد» قرمز نیست

@@ -17,7 +17,7 @@ object PaperAutoRules {
     }
 
     /**
-     * An educational candidate alert can be enabled while automatic paper entry is OFF.
+     * A technical candidate alert can be enabled while automatic paper entry is OFF.
      * Supports every user-selected symbol with a verified independent feed.
      */
     fun opportunityBlocker(market: MarketState, settings: AppSettings, news: PersianNewsState,

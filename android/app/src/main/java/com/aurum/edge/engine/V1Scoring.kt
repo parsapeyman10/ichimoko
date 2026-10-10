@@ -62,14 +62,17 @@ internal object V1Scoring {
         if (mode == CategoryStrategy.TREND && adx < 20.0) blockers += "استراتژی روندگیر در بازار بدون روند قفل است"
         if (mode == CategoryStrategy.RANGE && adx >= 25.0) blockers += "استراتژی رنج‌گیر در بازار رونددار قفل است"
 
-        val ichi = Ichimoku.compute(bars, 8, 24, 72, 24)
+        val setting = SignalEngine.ichimokuSetting(interval)
+        val ichi = Ichimoku.compute(bars, setting.tenkan, setting.kijun, setting.spanB, setting.kijun)
         val cloud = ichi.cloudAt(bars.lastIndex) ?: return blocked("ابر قابل‌مشاهده هنوز آماده نیست")
         val tenkan = ichi.tenkan.lastOrNull() ?: return blocked("تنکان آماده نیست")
         val kijun = ichi.kijun.lastOrNull() ?: return blocked("کیجون آماده نیست")
         val ema = Indicators.ema(bars.map { it.close }, 200).lastOrNull() ?: return blocked("EMA200 آماده نیست")
         val rsi = Indicators.rsi(bars, 7).lastOrNull() ?: return blocked("RSI آماده نیست")
-        val macd = Indicators.macdHistogram(bars).lastOrNull() ?: return blocked("MACD آماده نیست")
-        val prevMacd = Indicators.macdHistogram(bars).getOrNull(bars.lastIndex - 1) ?: 0.0
+        val macdValues = Indicators.macdHistogram(bars)
+        val macd = macdValues.lastOrNull() ?: return blocked("MACD آماده نیست")
+        val prevMacd = macdValues.getOrNull(bars.lastIndex - 1) ?: return blocked("MACD قبلی آماده نیست")
+        if (!macd.isFinite() || !prevMacd.isFinite()) return blocked("MACD نامعتبر است")
         val support = bars.dropLast(1).takeLast(20).minOf { it.low }
         val resistance = bars.dropLast(1).takeLast(20).maxOf { it.high }
         // On a live higher-timeframe chart, its last CLOSED bar may be hours old while
@@ -110,19 +113,16 @@ internal object V1Scoring {
             val priceAction = if ((if (range) touch else touch || breakout) &&
                 (if (buy) last.close > last.open else last.close < last.open)) 25
                 else if (if (buy) last.close > last.open else last.close < last.open) 12 else 0
-            val expected = if (range) SignalAction.NO_TRADE else side
-            val aligned = stack.count { it.second == expected }
-            val opposite = stack.count { it.second != null && it.second != expected && it.second != SignalAction.NO_TRADE }
-            val tfScore = if (missing.isNotEmpty()) 0 else when {
-                aligned == 7 -> 25
-                aligned == 6 && opposite == 0 -> 20
-                aligned >= 5 && opposite <= 1 -> 15
-                else -> 0
-            }
+            // Sideways frames are neutral context, not confirmation of either entry side.
+            val tfScore = directionalAlignment(stack.map { it.second }, side)
             fun item(label: String, points: Int, detail: String, unknown: Boolean = false) =
                 ConfluenceItem(label, points == 25 && !unknown, detail,
-                    if (unknown) ConfluenceStatus.UNKNOWN else if (points > 0) ConfluenceStatus.CONFIRMED
-                    else ConfluenceStatus.CONFLICT, points)
+                    when {
+                        unknown -> ConfluenceStatus.UNKNOWN
+                        points == 25 -> ConfluenceStatus.CONFIRMED
+                        points > 0 -> ConfluenceStatus.PARTIAL
+                        else -> ConfluenceStatus.CONFLICT
+                    }, points)
             val items = listOf(
                 item("ساختار روند · EMA + ایچیموکو", trend,
                     "${mode.label} · EMA200=$ema · ابر=${cloud.first}/${cloud.second} · تنکان=$tenkan کیجون=$kijun · $trend/25"),
@@ -137,8 +137,10 @@ internal object V1Scoring {
         }
         val long = score(SignalAction.BUY)
         val short = score(SignalAction.SELL)
-        val selected = if (long.first >= short.first) SignalAction.BUY to long else SignalAction.SELL to short
-        val side = selected.first
+        // Equal scores have no directional edge; keep evidence visible but never default BUY.
+        val side = chooseSide(long.first, short.first)
+        val selected = if (side == SignalAction.SELL) SignalAction.SELL to short else SignalAction.BUY to long
+        if (side == SignalAction.NO_TRADE) blockers += "امتیاز خرید و فروش برابر است؛ جهت ورود نامعلوم"
         val total = selected.second.first.toDouble()
         if (total < threshold) blockers += "امتیاز $total/۱۰۰ از آستانهٔ $threshold کمتر است"
         val stop = if (side == SignalAction.BUY) min(support, last.close - atr) else max(resistance, last.close + atr)
@@ -155,6 +157,26 @@ internal object V1Scoring {
             interval = interval, barTime = last.time)
     }
 
+    /** A neutral or unknown frame cannot vote for BUY or SELL. Only seven real frames vote. */
+    internal fun directionalAlignment(frames: List<SignalAction?>, side: SignalAction): Int {
+        if (frames.size != intervals.size || frames.any { it == null } || side == SignalAction.NO_TRADE)
+            return 0
+        val aligned = frames.count { it == side }
+        val opposite = frames.count { it != side && it != SignalAction.NO_TRADE }
+        return when {
+            aligned == 7 -> 25
+            aligned == 6 && opposite == 0 -> 20
+            aligned >= 5 && opposite <= 1 -> 15
+            else -> 0
+        }
+    }
+
+    internal fun chooseSide(buyPoints: Int, sellPoints: Int): SignalAction = when {
+        buyPoints > sellPoints -> SignalAction.BUY
+        sellPoints > buyPoints -> SignalAction.SELL
+        else -> SignalAction.NO_TRADE
+    }
+
     private fun frameBias(input: List<Candle>, interval: Interval, asOf: Long): SignalAction? {
         val bars = input.takeLast(MIN_BARS)
         if (bars.size != MIN_BARS || bars.zipWithNext().any { (a, b) -> b.time <= a.time }) return null
@@ -163,7 +185,8 @@ internal object V1Scoring {
             asOf - (last.time + interval.millis) > interval.millis * 3 ||
             bars.any { !listOf(it.open, it.high, it.low, it.close).all { value -> value.isFinite() && value > 0.0 } ||
                 it.high < max(it.open, it.close) || it.low > min(it.open, it.close) }) return null
-        val ichi = Ichimoku.compute(bars, 8, 24, 72, 24)
+        val setting = SignalEngine.ichimokuSetting(interval)
+        val ichi = Ichimoku.compute(bars, setting.tenkan, setting.kijun, setting.spanB, setting.kijun)
         val cloud = ichi.cloudAt(bars.lastIndex) ?: return null
         val ema = Indicators.ema(bars.map { it.close }, 200).lastOrNull() ?: return null
         return when {

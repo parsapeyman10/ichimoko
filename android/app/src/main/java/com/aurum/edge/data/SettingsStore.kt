@@ -25,26 +25,17 @@ class SettingsStore(context: Context) {
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
     fun read(): AppSettings {
-        // Keep the old profile field for stored reports. The V1 entry engine ignores this
-        // seven-condition-era profile; its four scored layers and absolute locks are fixed.
-        // Stored per-option preferences must not weaken the current entry policy.
-        val profile = SignalProfile(
-            momentumVolume = true,
-            flatSpanB = true,
-            rangeChopFilter = true,
-            higherTimeframeFilter = true,
-            fakeBreakoutFilter = true,
-            dynamicSpreadFilter = true,
-            riskyTimingFilter = true,
-            structureRiskFilter = true,
-            cooldownFilter = true,
-            chikouConfirmation = true,
-        )
+        // Legacy profile preferences remain readable for existing on-device records, but
+        // they are not V1 controls and are not displayed as editable signal filters.
+        // Four scored layers and absolute locks are fixed by the current contract.
+        val profile = SignalProfile.BASE
         val storedApiKey = prefs.getString(KEY_API, null)?.trim()
         val storedNewsAiKey = prefs.getString(KEY_NEWS_AI_KEY, null)?.trim().orEmpty()
         val storedNewsAiUrl = prefs.getString(KEY_NEWS_AI_URL, null)?.trim().orEmpty()
         val storedNewsAiModel = prefs.getString(KEY_NEWS_AI_MODEL, null)?.trim().orEmpty()
-        val storedStrategy = com.aurum.edge.core.StrategyKind.fromId(prefs.getString(KEY_ACTIVE_STRATEGY, "ICHIMOKU"))
+        val storedStrategy = com.aurum.edge.core.StrategyKind.fromId(
+            prefs.getString(KEY_ACTIVE_STRATEGY, "ICHIMOKU"))
+            ?: com.aurum.edge.core.StrategyKind.ICHIMOKU_PRICE_ACTION
         val activeWatchlist = prefs.getString(KEY_V1_WATCHLIST, null)?.split(',')?.let(V1Universe::watchlist)
             ?: V1Universe.defaults
         val categoryStrategies = AssetClass.entries.associateWith { category ->

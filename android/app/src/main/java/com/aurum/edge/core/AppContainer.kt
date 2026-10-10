@@ -85,8 +85,12 @@ class AppContainer(context: Context) {
             showingCachedData = raw.showingCachedData || delayed,
             signal = if (delayed) null else NewsConfluence.apply(raw.signal, raw.symbol, headlines, now))
         if (raw.candles.isNotEmpty()) decisionLog.append(raw.symbol, raw.interval.label,
-            if (verified.signal?.isActionable == true) "candidate" else "no_signal",
-            verified.signal?.blockers?.joinToString("، ")?.ifBlank { "چهار لایه و AI بررسی شدند" }
+            when {
+                verified.evaluationError != null -> "error"
+                verified.signal?.isActionable == true -> "candidate"
+                else -> "no_signal"
+            },
+            verified.evaluationError ?: verified.signal?.blockers?.joinToString("، ")?.ifBlank { "چهار لایه و AI بررسی شدند" }
                 ?: "دادهٔ زنده/تایم‌فریم معتبر نیست", verified.signal, now, dedupe = true)
         verified // four-layer engine owns the price plan; ICT remains optional research context
     }.stateIn(appScope, SharingStarted.Eagerly, market.state.value.copy(signal = null))

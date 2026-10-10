@@ -53,8 +53,16 @@ enum class AssetClass(val code: String, val label: String, val maxSlots: Int) {
     STOCK("STOCK", "سهام و شاخص", 2);
 
     companion object {
+        // Provider-independent identity; do not mistake a slashless EURUSD for a stock.
+        // Known currencies are explicit; arbitrary six-letter strings are not assumed FX.
+        private val fiat = setOf("USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD",
+            "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "TRY", "ZAR", "MXN", "SGD", "HKD")
+        private val equities = setOf("AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "GOOGL", "META",
+            "AMD", "NFLX", "INTC", "NASDAQ", "SP500", "DOW", "DAX", "FTSE", "NIKKEI")
+
         fun of(symbol: String): AssetClass {
-            val s = symbol.trim().uppercase()
+            val s = symbol.trim().uppercase(java.util.Locale.ROOT)
+            val pair = s.replace("/", "")
             return when {
                 s.contains("USDT") || s.startsWith("BTC") || s.startsWith("ETH") || s.startsWith("SOL") ||
                     s.startsWith("BNB") || s.startsWith("XRP") || s.startsWith("DOGE") || s.startsWith("ADA") ||
@@ -66,9 +74,13 @@ enum class AssetClass(val code: String, val label: String, val maxSlots: Int) {
                     s.startsWith("USOIL") || s.startsWith("UKOIL") || s.startsWith("NATGAS") || s.startsWith("COPPER") ||
                     s == "GOLD" || s == "SILVER" -> COMMODITY
 
-                s in setOf("AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "GOOGL", "NASDAQ", "SP500", "DOW", "DAX", "FTSE", "NIKKEI") ||
-                    (!s.contains("/") && !s.contains("USDT") && s.length in 1..6) -> STOCK
+                pair.length == 6 && pair.substring(0, 3) in fiat &&
+                    pair.substring(3) in fiat && pair.substring(0, 3) != pair.substring(3) -> FOREX
 
+                s in equities || (!s.contains("/") && s.length in 1..5) -> STOCK
+
+                // Historical unknown symbols retain their previous risk bucket; a feed must
+                // still validate the actual instrument before a trade can be considered.
                 else -> FOREX
             }
         }
@@ -83,20 +95,20 @@ enum class StrategyKind(val id: String, val label: String, val description: Stri
     );
 
     companion object {
-        val SUPER_PLUS = ICHIMOKU_PRICE_ACTION
-        val ICHIMOKU = ICHIMOKU_PRICE_ACTION
-        val ICT_SMC = ICHIMOKU_PRICE_ACTION
-        val EMA_VWAP = ICHIMOKU_PRICE_ACTION
-        val VOLUME_BREAKOUT = ICHIMOKU_PRICE_ACTION
-        val MEAN_REVERSION = ICHIMOKU_PRICE_ACTION
-
-        fun fromId(raw: String?): StrategyKind = ICHIMOKU_PRICE_ACTION
+        // Older persisted choices are migrated to the only V1 engine; none is offered as
+        // a separate executable strategy. The real selectable modes are CategoryStrategy.
+        fun fromId(raw: String?): StrategyKind? = when (raw?.trim()?.uppercase(java.util.Locale.ROOT)) {
+            null, "", "ICHIMOKU_PRICE_ACTION", "ICHIMOKU", "SUPER_PLUS", "ICT_SMC",
+            "EMA_VWAP", "VOLUME_BREAKOUT", "MEAN_REVERSION" -> ICHIMOKU_PRICE_ACTION
+            else -> null // unknown historical IDs must not be advertised as implemented
+        }
     }
 }
 
 /**
- * The base Ichimoku confluence engine is active by default. These booleans are additive
- * opt-in safeguards/setups; Chikou can be explicitly disabled only for a named profile experiment.
+ * Legacy profile record kept for persisted settings and old journal compatibility.
+ * These options are NOT V1 signal switches; the live engine uses four scored layers,
+ * seven independent frames and the per-category TREND/RANGE/HYBRID mode only.
  */
 data class SignalProfile(
     val momentumVolume: Boolean = false,
@@ -174,7 +186,7 @@ data class SignalProfile(
     }
 }
 
-enum class ConfluenceStatus { CONFIRMED, CONFLICT, UNKNOWN }
+enum class ConfluenceStatus { CONFIRMED, PARTIAL, CONFLICT, UNKNOWN }
 
 data class ConfluenceItem(
     val name: String,
@@ -452,7 +464,7 @@ data class PaperOpportunity(
                 price.isFinite() && price > 0 && signal.stopLoss != null && signal.takeProfit != null &&
                 mtf.frames.isNotEmpty() && mtf.barTime == signal.barTime && mtf.baseInterval == signal.interval.label &&
                 (ict == null || ict.matches(signal, symbol, price))) {
-                "فرصت آموزشی معتبر نیست"
+                "فرصت فنی معتبر نیست"
             }
             return PaperOpportunity(
                 key = "$symbol|${signal.interval.label}|${signal.barTime}|${signal.action}",
@@ -634,7 +646,7 @@ data class AppSettings(
      */
     val newsAiFormat: String = "AUTO",
     val signalProfile: SignalProfile = SignalProfile.BASE,
-    val activeStrategy: StrategyKind = StrategyKind.ICHIMOKU,
+    val activeStrategy: StrategyKind = StrategyKind.ICHIMOKU_PRICE_ACTION,
     val activeWatchlist: List<String> = V1Universe.defaults,
     val categoryStrategies: Map<AssetClass, CategoryStrategy> = AssetClass.entries.associateWith { CategoryStrategy.HYBRID },
 ) {

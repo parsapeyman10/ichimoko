@@ -180,7 +180,7 @@ class PairScanner(
         val overallTrend = _state.value.marketTrend
         val config = settings.read()
         // The watchlist is evaluated first, but every supported catalog instrument is also
-        // checked by the same candle -> playbook -> MTF -> signal -> risk pipeline. An absent
+        // checked by the same candle -> V1 four-layer -> AI veto -> risk pipeline. An absent
         // feed is reported as an error, never filled with a fabricated candle.
         val universe = WatchCatalog.scanUniverse(config.activeWatchlist)
         val statuses = _state.value.statuses.associateBy { it.symbol }.toMutableMap()
@@ -345,11 +345,9 @@ class PairScanner(
             }
             if (trend != null && trend.known) trendSample += trend
 
-            // «متناسب با همان استراتژی پویش کن»: the per-market method router is asked FIRST, from
-            // the real closed candles and the real session clock. A market whose method says
-            // stand aside (weekend, rollover, spike, dead tape, crypto range, closed equities,
-            // spread wider than 25% of ATR) never reaches the engine, so the radar reports the
-            // strategy reason instead of a low-quality signal.
+            // Playbook is market context only (not a fifth V1 gate). The scanner and chart
+            // both send the same selected category mode and independently fetched frames into
+            // the same SignalEngine; absolute locks are enforced there and by paper risk rules.
             val playbook = withContext(Dispatchers.Default) {
                 runCatching { MarketPlaybook.assess(symbol, candles, interval, now) }.getOrNull()
             }
@@ -366,15 +364,18 @@ class PairScanner(
                 return@forEachIndexed
             }
             val evaluated = withContext(Dispatchers.Default) {
-                runCatching {
-                    SignalEngine.evaluate(candles, interval, config.minConfidence, config.spreadPrice,
-                        config.signalProfile, config.activeStrategy, symbol,
-                        config.categoryStrategies[com.aurum.edge.core.AssetClass.of(symbol)]
-                            ?: com.aurum.edge.core.CategoryStrategy.HYBRID, frames)
-                }.getOrNull()
+                try {
+                    SignalEngine.evaluate(candles, interval, config.minConfidence, symbol = symbol,
+                        mode = config.categoryStrategies[com.aurum.edge.core.AssetClass.of(symbol)]
+                            ?: com.aurum.edge.core.CategoryStrategy.HYBRID, timeframes = frames)
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    null
+                }
             }
             if (evaluated == null) {
-                update(symbol, "error", "ارزیابی سیگنال روی کندل‌های دریافتی ممکن نشد", price)
+                update(symbol, "error", "خطای محاسبهٔ موتور فنی؛ ورود متوقف شد", price)
                 return@forEachIndexed
             }
 
@@ -384,7 +385,7 @@ class PairScanner(
                 update(
                     symbol = symbol,
                     state = "no_signal",
-                    detail = if (combined.blockers.isNotEmpty()) "امتیاز ${combined.confidence.toInt()}/۱۰۰ زیر آستانه است · ${combined.blockers.joinToString("، ").take(120)}" else "بدون سیگنال؛ شواهد فنی $score از ۴ · ${combined.blockers.joinToString("، ").take(120)}",
+                    detail = if (combined.blockers.isNotEmpty()) "امتیاز ${combined.confidence.toInt()}/۱۰۰ · ${combined.blockers.joinToString("، ").take(120)}" else "بدون سیگنال؛ شواهد فنی $score از ۴",
                     price = price,
                     score = score,
                     action = combined.action,
