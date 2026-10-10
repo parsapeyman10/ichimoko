@@ -24,6 +24,8 @@ data class DecisionRecord(
     val score: Double?,
     val reason: String,
     val layers: List<DecisionLayer> = emptyList(),
+    val method: String? = null,
+    val methodReason: String? = null,
 )
 
 /** Bounded on-device audit trail. Records blocked/no-data attempts as well as candidates.
@@ -40,15 +42,17 @@ class DecisionLogStore(context: Context) {
     @Synchronized
     fun append(symbol: String, interval: String, status: String, detail: String,
                signal: Signal? = null, now: Long = System.currentTimeMillis(),
-               dedupe: Boolean = false) {
+               dedupe: Boolean = false, method: String? = null, methodReason: String? = null) {
         if (symbol.isBlank()) return
         val layers = signal?.confluence?.take(4)?.map { it.toLayer() }.orEmpty()
         val item = DecisionRecord(symbol, interval, now, signal?.barTime ?: 0L,
-            signal?.action?.name ?: status, signal?.confidence, detail.take(500), layers)
+            signal?.action?.name ?: status, signal?.confidence, detail.take(500), layers,
+            method, methodReason?.take(300))
         val previous = _records.value
         if (dedupe && previous.take(20).any {
                 it.symbol == symbol && it.barTime == item.barTime && it.action == item.action &&
-                    it.reason == item.reason && it.layers == layers && now - it.checkedAt in 0L..60_000L
+                    it.reason == item.reason && it.layers == layers && it.method == method &&
+                    it.methodReason == item.methodReason && now - it.checkedAt in 0L..60_000L
             }) return
         val next = (listOf(item) + previous).take(500)
         if (prefs.edit().putString("records", json.encodeToString(next)).commit()) _records.value = next

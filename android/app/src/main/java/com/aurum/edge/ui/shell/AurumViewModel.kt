@@ -349,13 +349,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     if (settings.value.hasClientNewsAi) {
                         runCatching { container.traderAdvisor.ensureConnection() }.getOrNull()
                     }
-                    // پایش پیوستهٔ نمادها: the 50+ symbol radar keeps sweeping while the app is
-                    // visible, independently of the background-monitor switch (PairScanner enforces
-                    // its own 30s throttle and records honest online/error statuses per symbol).
-                    container.pairScanner.refreshNow()
                     // Advisory review of the open positions while the app is visible (the monitor
                     // service does the same when it runs). Never closes or re-prices a trade.
                     runCatching { container.traderAdvisor.reviewOpenPositions() }.getOrNull()
+                }
+                // Scan each market on its own calendar. A closed selected FX chart must not
+                // suppress crypto (which also trades on weekends) or the other catalog rows.
+                if (visibleOnlineLoopEnabled || SignalMonitorService.running.value) {
+                    container.pairScanner.refreshNow()
                 }
                 turns++
                 delay(60_000L)

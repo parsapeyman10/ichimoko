@@ -66,6 +66,9 @@ data class PairScanStatus(
 data class PairScanState(
     val statuses: List<PairScanStatus> = emptyList(),
     val sweeping: Boolean = false,
+    /** Completed checks in the current sweep; includes closed, blocked and feed-error rows. */
+    val checkedCount: Int = 0,
+    val totalCount: Int = 0,
     val lastSweepAt: Long? = null,
     val lastError: String? = null,
     /** The Top 3 highest-ranking opportunities from the 50+ scan. */
@@ -107,7 +110,9 @@ class PairScanner(
     val state: StateFlow<PairScanState> = _state.asStateFlow()
 
     fun refreshNow(minIntervalMs: Long = SWEEP_PERIOD_MS) {
-        scope.launch { runSweep(minIntervalMs, onCandidate = null) }
+        // A full multi-timeframe universe may take longer than the caller's 60-second tick.
+        // Do not queue redundant sweeps behind the mutex or hammer read-only providers.
+        if (!_state.value.sweeping) scope.launch { runSweep(minIntervalMs, onCandidate = null) }
     }
 
     suspend fun sweepOnce(minIntervalMs: Long = SWEEP_PERIOD_MS,
@@ -122,12 +127,18 @@ class PairScanner(
             if (lastSweepElapsed != 0L && elapsed - lastSweepElapsed < minIntervalMs) return@withLock
             lastSweepElapsed = elapsed
             _state.value = _state.value.copy(sweeping = true, lastError = null)
+            var finished = false
             try {
                 sweepAll(onCandidate)
+                finished = true
+            } catch (cancel: CancellationException) {
+                throw cancel
             } catch (_: Exception) {
                 _state.value = _state.value.copy(
                     lastError = "اسکن دوره‌ای ناموفق بود؛ پاسخ یا اتصال provider معتبر نبود")
             } finally {
+                // Throttle from completion, not from the start of a potentially long sweep.
+                lastSweepElapsed = SystemClock.elapsedRealtime()
                 val currentStatuses = _state.value.statuses
                 val ranked = rankOpportunities(currentStatuses)
                 // Nothing measured this sweep ⇒ keep the previous read instead of inventing one.
@@ -135,7 +146,7 @@ class PairScanner(
                 else runCatching { MarketTrend.overall(trendSample) }.getOrNull() ?: _state.value.marketTrend
                 _state.value = _state.value.copy(
                     sweeping = false,
-                    lastSweepAt = System.currentTimeMillis(),
+                    lastSweepAt = if (finished) System.currentTimeMillis() else _state.value.lastSweepAt,
                     topThree = ranked.take(3),
                     bestPick = ranked.firstOrNull(),
                     marketTrend = read,
@@ -160,10 +171,22 @@ class PairScanner(
         trendSample.clear()
         // The market-wide read of the PREVIOUS sweep: the breadth of the current one is only
         // complete after the last symbol, so entries during this sweep are checked against the
-        // latest published read (≤ ۳۰ ثانیه پیش). On the first sweep it is null, and then only
+        // latest completed read (its age depends on provider latency). On the first sweep it is null, and then only
         // the instrument's own reference-timeframe trend is used — never a guessed market bias.
         val overallTrend = _state.value.marketTrend
+        val config = settings.read()
+        // The watchlist is evaluated first, but every supported catalog instrument is also
+        // checked by the same candle -> playbook -> MTF -> signal -> risk pipeline. An absent
+        // feed is reported as an error, never filled with a fabricated candle.
+        val universe = WatchCatalog.scanUniverse(config.activeWatchlist)
         val statuses = _state.value.statuses.associateBy { it.symbol }.toMutableMap()
+        _state.value = _state.value.copy(
+            checkedCount = 0,
+            totalCount = universe.size,
+            statuses = universe.map { symbol ->
+                statuses[symbol] ?: PairScanStatus(symbol, "pending", "هنوز اسکن نشده")
+            },
+        )
         fun update(
             symbol: String,
             state: String,
@@ -184,10 +207,10 @@ class PairScanner(
             trendAligned: Boolean? = null,
             trendNote: String? = null,
         ) {
-            decisionLog?.append(symbol, settings.read().interval.label, state, detail,
+            decisionLog?.append(symbol, config.interval.label, state, detail,
                 signal = if (conditions.isNotEmpty()) com.aurum.edge.core.Signal(
                     action ?: SignalAction.NO_TRADE, confidence ?: 0.0, confluence = conditions)
-                    else null, dedupe = false)
+                    else null, dedupe = false, method = methodLabel, methodReason = playbookReason)
             statuses[symbol] = PairScanStatus(
                 symbol = symbol,
                 state = state,
@@ -211,25 +234,21 @@ class PairScanner(
                 trendAligned = trendAligned,
                 trendNote = trendNote ?: trend?.detailFa?.take(200),
             )
-            val currentList = WatchCatalog.scannerSymbols.mapNotNull { statuses[it] }
+            val currentList = universe.mapNotNull { statuses[it] }
             val ranked = rankOpportunities(currentList)
             _state.value = _state.value.copy(
                 statuses = currentList,
+                checkedCount = _state.value.checkedCount + 1,
                 topThree = ranked.take(3),
                 bestPick = ranked.firstOrNull(),
             )
         }
 
-        val config = settings.read()
-        _state.value = _state.value.copy(statuses = config.activeWatchlist.map { symbol ->
-            _state.value.statuses.firstOrNull { it.symbol == symbol }
-                ?: PairScanStatus(symbol, "pending", "هنوز اسکن نشده")
-        })
         val interval: Interval = config.interval
         val headlines = news.state.value
         val trades = journal.trades.value
 
-        config.activeWatchlist.forEachIndexed { index, symbol ->
+        universe.forEachIndexed { index, symbol ->
             if (index > 0) delay(PAIR_SPACING_MS)
             val now = System.currentTimeMillis()
             if (MarketHours.closedFor(symbol, now)) {
@@ -271,6 +290,8 @@ class PairScanner(
                 } else {
                     publicOrDukascopy()
                 }
+            } catch (cancel: CancellationException) {
+                throw cancel
             } catch (error: Exception) {
                 update(symbol, "error", (error.message ?: "خطای دریافت کندل").take(100))
                 return@forEachIndexed
@@ -288,7 +309,14 @@ class PairScanner(
             val lastClosed = candles.lastOrNull { it.closed && it.time + interval.millis <= now }
             // A REST candle close is not a live tick. Never settle a position as if it were one.
             if (lastClosed != null) {
-                journal.settle(lastClosed, symbol, now)
+                try {
+                    journal.settle(lastClosed, symbol, now)
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    update(symbol, "error", "تسویهٔ ژورنال این نماد ناموفق بود؛ سیگنال جدید ارزیابی نشد", price)
+                    return@forEachIndexed
+                }
             }
             // «روند کلی بازار چطور به دست می‌آید؟» — لایهٔ اول: از همان کندل‌های بستهٔ واقعیِ
             // همین نماد، هم روی تایم‌فریم پایه و هم روی تایم‌فریم مرجع (تجمیع‌شده، نه ساخته‌شده).
@@ -307,7 +335,16 @@ class PairScanner(
             }
             // The playbook is context only; V1Scoring has the absolute market locks.
 
-            val frames = timeframeFeed.fetch(symbol, interval, candles, config.apiKey)
+            val frames = try {
+                timeframeFeed.fetch(symbol, interval, candles, config.apiKey)
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                update(symbol, "error", "دریافت بازه‌های زمانی ناموفق بود: ${(error.message ?: "خطای فید").take(100)}",
+                    price, methodLabel = playbook?.method?.label,
+                    playbookAllowed = playbook?.allowed, playbookReason = playbook?.reasonFa)
+                return@forEachIndexed
+            }
             val evaluated = withContext(Dispatchers.Default) {
                 runCatching {
                     SignalEngine.evaluate(candles, interval, config.minConfidence, config.spreadPrice,
@@ -413,7 +450,16 @@ class PairScanner(
                 return@forEachIndexed
             }
             val recorded = runCatching { opportunities.record(item) }.getOrDefault(false)
-            if (recorded) onCandidate?.invoke(item)
+            if (recorded) {
+                try {
+                    onCandidate?.invoke(item)
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    // A notification failure must not stop analysis of the remaining symbols.
+                    // The opportunity is already persisted; do not emit a false entry alert.
+                }
+            }
 
             // Radar history may suggest candidates, but cannot auto-open a trade without a
             // separate fresh, verified quote in the selected live-market path.

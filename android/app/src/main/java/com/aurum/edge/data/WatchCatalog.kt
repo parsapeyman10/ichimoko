@@ -69,6 +69,12 @@ object WatchCatalog {
         "AVAX/USDT", "LINK/USDT", "SUI/USDT", "NEAR/USDT", "PEPE/USDT", "TON/USDT", "DOT/USDT", "LTC/USDT"
     )
 
+    /** Scan the user's configured symbols first, then every catalog instrument. Never trade an
+     * out-of-watchlist symbol merely because it appears in this read-only radar universe.
+     */
+    fun scanUniverse(activeWatchlist: List<String>): List<String> =
+        (activeWatchlist + scannerSymbols).filter(com.aurum.edge.core.V1Universe::valid).distinct()
+
     fun find(id: String): WatchSymbol? = symbols.firstOrNull { it.id == id }
 
     /** Symbols selectable for the chart/feed. Iran cash-board rows are watch-only. */

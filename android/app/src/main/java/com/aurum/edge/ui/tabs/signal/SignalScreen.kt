@@ -88,24 +88,6 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             .padding(bottom = 14.dp),
     ) {
 
-        SectionCard("Decision Log · دلیل هر بررسی", "روی همین دستگاه؛ بدون کلید API یا سفارش واقعی") {
-            if (decisionLog.isEmpty()) Text("هنوز بررسی ثبت نشده است")
-            if (decisionLog.size > 20) OutlinedButton(onClick = { showAllDecisions = !showAllDecisions }) {
-                Text(if (showAllDecisions) "نمایش ۲۰ مورد اخیر" else "نمایش تمام ${decisionLog.size} بررسی ذخیره‌شده")
-            }
-            decisionLog.take(if (showAllDecisions) 500 else 20).forEach { record ->
-                Text("${record.symbol} · ${record.interval} · ${formatTime(record.checkedAt)} · " +
-                    "${record.action} · ${record.score?.toInt() ?: "—"}/۱۰۰",
-                    style = MaterialTheme.typography.bodySmall)
-                Text(record.reason, style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.TextSecondary)
-                record.layers.forEach { layer ->
-                    Text("${layer.name}: ${layer.points ?: "—"}/۲۵ · ${layer.status} · ${layer.detail}",
-                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                }
-            }
-        }
-
         // ── ۱. بنر وضعیت ۴ دسته دارایی (رمزارز، فارکس، طلا/کالا، سهام) در ۴ مستطیل بالا ──
         com.aurum.edge.ui.components.AssetClass4SlotsBanner(
             openTrades = openTrades,
@@ -187,6 +169,31 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             onSelectSymbol = { viewModel.selectChartSymbol(it) },
             now = System.currentTimeMillis(),
         )
+
+        // Keep the audit trail after every signal and radar card, at the bottom of Trading.
+        SectionCard("Decision Log · دلیل هر بررسی", "روی همین دستگاه؛ بدون کلید API یا سفارش واقعی") {
+            if (decisionLog.isEmpty()) Text("هنوز بررسی ثبت نشده است")
+            val latestBySymbol = decisionLog.distinctBy { it.symbol }
+            if (decisionLog.size > latestBySymbol.size) OutlinedButton(onClick = { showAllDecisions = !showAllDecisions }) {
+                Text(if (showAllDecisions) "آخرین دلیل هر نماد" else "تاریخچهٔ ${decisionLog.size} بررسی اخیر")
+            }
+            (if (showAllDecisions) decisionLog else latestBySymbol).forEach { record ->
+                Text("${record.symbol} · ${record.interval} · ${formatTime(record.checkedAt)} · " +
+                    "${record.action} · ${record.score?.toInt() ?: "—"}/۱۰۰",
+                    style = MaterialTheme.typography.bodySmall)
+                Text(record.reason, style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary)
+                record.method?.let { method ->
+                    Text("متد: $method · ${record.methodReason.orEmpty()}",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                }
+                record.layers.forEach { layer ->
+                    Text("${layer.name}: ${layer.points ?: "—"}/۲۵ · ${layer.status} · ${layer.detail}",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                }
+            }
+        }
+
     }
 }
 
@@ -786,7 +793,7 @@ internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, onSel
         trailing = {
             Pill(
                 when {
-                    scan.sweeping -> "در حال اسکن ۵۰+ نماد…"
+                    scan.sweeping -> "بررسی ${scan.checkedCount} از ${scan.totalCount} نماد…"
                     scan.lastSweepAt != null -> "آخرین اسکن " + relativeTime(scan.lastSweepAt, now)
                     else -> "اسکن نشده"
                 },
@@ -800,7 +807,9 @@ internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, onSel
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "اسکنر با نرخ هوشمند ۵۰+ سهم و نماد را پایش و معاملات واجد بالاترین R:R را به پورتفو اضافه می‌کند.",
+                "همهٔ نمادهای کاتالوگ و واچ‌لیست، با همان متد و دادهٔ واقعی به‌ترتیب بررسی می‌شوند؛ " +
+                    "نبود فید/بسته‌بودن بازار هم با دلیل ثبت می‌شود. فقط واچ‌لیست فعال مجاز به فرصت معاملاتی است. " +
+                    "پایش پس‌زمینه نیازمند فعال‌بودن سرویس در تنظیمات است.",
                 style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextSecondary,
                 modifier = Modifier.weight(1f),
@@ -813,6 +822,9 @@ internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, onSel
                 Text(if (scan.sweeping) "اسکن..." else "اسکن مجدد")
             }
         }
+        Text("نتیجهٔ دور جاری: ${scan.checkedCount}/${scan.totalCount} نماد · " +
+            "دلیل تک‌تک بررسی‌ها در انتهای همین صفحه ثبت می‌شود.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         scan.lastError?.let { Text(it, color = AurumColors.Red, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp)) }
     }
 }
