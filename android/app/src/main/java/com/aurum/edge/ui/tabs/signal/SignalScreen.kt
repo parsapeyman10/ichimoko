@@ -456,10 +456,10 @@ private fun PerMarketRecommendations(scan: PairScanState, interval: com.aurum.ed
                 modifier = Modifier.padding(top = 8.dp))
             Text("بازشده ${rows.count { it.state == "opened" }} · فید ناموفق ${rows.count { it.state == "error" }} · بسته ${rows.count { it.state == "closed" }} · " +
                     "بدون سیگنال ${rows.count { it.state == "no_signal" }} · مانع ورود ${rows.count { it.state == "blocked" }} · " +
-                    "مشاهده ${rows.count { it.state == "observed" }} · کاندیدا ${rows.count { it.state == "candidate" }}",
+                    "دادهٔ ناقص ${rows.count { it.state == "partial" }} · مشاهده ${rows.count { it.state == "observed" }} · کاندیدا ${rows.count { it.state == "candidate" }}",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             if (ranked.isEmpty()) {
-                val reason = rows.firstOrNull { it.state == "opened" || it.state == "error" || it.state == "blocked" || it.state == "no_signal" }
+                val reason = rows.firstOrNull { it.state == "opened" || it.state == "error" || it.state == "partial" || it.state == "blocked" || it.state == "no_signal" }
                 Text(if (checked == 0) "هنوز بررسی نشده است؛ پایش پس‌زمینه را روشن کنید یا اسکن را بزنید."
                      else "فرصت تازهٔ تأییدشده‌ای نیست. ${reason?.symbol ?: ""}: ${reason?.detail ?: "بازار بسته است یا داده/شواهد کافی نیست"}",
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)

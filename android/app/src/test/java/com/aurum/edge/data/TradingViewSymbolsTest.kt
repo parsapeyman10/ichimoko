@@ -60,7 +60,7 @@ class TradingViewSymbolsTest {
                     TradingViewSymbols.find(row.id),
                     row.providerCodes["tradingview_scanner"],
                 )
-                assertEquals("tradingview_scanner", row.defaultSources.single())
+                assertTrue("TV remains selectable for ${row.id}", "tradingview_scanner" in row.defaultSources)
             }
     }
 }

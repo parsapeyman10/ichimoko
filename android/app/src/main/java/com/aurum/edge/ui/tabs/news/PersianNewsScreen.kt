@@ -26,7 +26,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.data.ForexEvent
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.NewsClassifier
-import com.aurum.edge.data.NewsDirection
+import com.aurum.edge.data.HeadlineImpact
 import com.aurum.edge.data.NewsImportance
 import com.aurum.edge.data.PublicHeadline
 import com.aurum.edge.ui.components.Pill
@@ -158,18 +158,14 @@ private fun NewsImpactCard(item: PublicHeadline, classification: com.aurum.edge.
         subtitle = "${item.feed.title} · ${formatDateTime(item.publishedAt)}",
         trailing = { Pill(importanceLabel(classification.importance), tone) },
     ) {
-        Text(
-            directionLine(classification.direction),
-            style = MaterialTheme.typography.bodySmall,
-            color = directionColor(classification.direction),
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            impactExplanation(classification, item),
-            style = MaterialTheme.typography.bodySmall,
-            color = AurumColors.TextSecondary,
-            modifier = Modifier.padding(top = 5.dp),
-        )
+        HeadlineImpact.explain(item.title).forEach { explanation ->
+            Text(explanation, style = MaterialTheme.typography.bodySmall,
+                color = AurumColors.TextPrimary, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 4.dp))
+        }
+        Text("جهتِ تیتر، پیش‌بینیِ قیمت بعدی یا سیگنال معامله نیست؛ نامعلوم را صعودی نمی‌نامیم.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 4.dp))
         if (item.excerpt.isNotBlank()) Text(item.excerpt,
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
             modifier = Modifier.padding(top = 5.dp))
@@ -183,33 +179,6 @@ private fun importanceLabel(value: NewsImportance): String = when (value) {
     NewsImportance.LOW -> "کم‌اثر"
 }
 
-private fun directionLine(value: NewsDirection): String = when (value) {
-    NewsDirection.BULLISH -> "اثر احتمالی: حمایتی / صعودی برای دارایی مرتبط"
-    NewsDirection.BEARISH -> "اثر احتمالی: فشار فروش / نزولی برای دارایی مرتبط"
-    NewsDirection.NEUTRAL -> "اثر احتمالی: نامشخص یا خنثی"
-}
-
-private fun directionColor(value: NewsDirection) = when (value) {
-    NewsDirection.BULLISH -> AurumColors.Green
-    NewsDirection.BEARISH -> AurumColors.Red
-    NewsDirection.NEUTRAL -> AurumColors.TextSecondary
-}
-
-private fun impactExplanation(classification: com.aurum.edge.data.NewsClassification, item: PublicHeadline): String {
-    val target = when {
-        item.title.contains("gold", ignoreCase = true) || item.excerpt.contains("gold", ignoreCase = true) -> "طلا / XAUUSD"
-        item.title.contains("dollar", ignoreCase = true) || item.excerpt.contains("dollar", ignoreCase = true) ||
-            item.title.contains("fed", ignoreCase = true) -> "دلار آمریکا و جفت‌ارزهای اصلی"
-        else -> "بازار فارکس و طلا"
-    }
-    val behavior = when (classification.direction) {
-        NewsDirection.BULLISH -> "ممکن است تقاضا یا مومنتوم خرید را تقویت کند؛ منتظر تأیید چارت بمان."
-        NewsDirection.BEARISH -> "ممکن است فشار فروش یا نوسان تند ایجاد کند؛ ورود خلاف خبر ریسک بیشتری دارد."
-        NewsDirection.NEUTRAL -> "جهت روشن نیست؛ بیشتر به‌عنوان هشدار نوسان/ریسک زمانی دیده شود."
-    }
-    return "روی $target اثر احتمالی دارد. $behavior"
-}
-
 private fun calendarTimeLabel(at: Long, now: Long): String {
     val diffMinutes = (at - now) / 60_000L
     return when {
@@ -221,10 +190,14 @@ private fun calendarTimeLabel(at: Long, now: Long): String {
 }
 
 private fun calendarExplanation(event: ForexEvent): String {
-    val target = if (event.country == "USD") "طلا و همه جفت‌های دلاری" else "جفت‌ارزهای مرتبط با ${event.country}"
-    return when (event.impact) {
-        "High" -> "این رویداد بسیار مهم است و می‌تواند روی $target نوسان شدید، اسپرد بیشتر و شکست‌های فیک بسازد. تا انتشار/هضم خبر، ورود تازه پرریسک است."
-        "Medium" -> "اثر متوسط دارد؛ ممکن است حرکت کوتاه‌مدت بسازد ولی تصمیم نهایی باید با چارت و امتیاز موتور باشد."
-        else -> "اثر معمولاً محدود است، اما اگر بازار کم‌عمق باشد همچنان می‌تواند نویز ایجاد کند."
+    val target = when (event.country) {
+        "USD" -> "دلار آمریکا (USD)، EUR/USD (USD ارز مظنه)، USD/JPY (USD ارز پایه) و احتمالا طلا (XAU/USD)"
+        "EUR" -> "یورو (EUR) و جفت‌های EUR/USD و EUR/GBP"
+        "JPY" -> "ین ژاپن (JPY) و جفت‌های USD/JPY و EUR/JPY"
+        "GBP" -> "پوند (GBP) و جفت‌های GBP/USD و EUR/GBP"
+        else -> "ارز ${event.country} و جفت‌های مرتبط با آن"
     }
+    val risk = if (event.impact == "High") "ریسک نوسان/اسپرد بالا است" else "اثر ممکن است محدود یا نامشخص باشد"
+    return "نمادهای مرتبط: $target. $risk؛ صعود/نزول هیچ‌کدام فقط از نام رویداد یا برچسب اهمیت معلوم نیست. " +
+        "Actual و Forecast را با تعریف همان شاخص مقایسه کنید؛ واکنش بازار ممکن است خلاف انتظار باشد."
 }

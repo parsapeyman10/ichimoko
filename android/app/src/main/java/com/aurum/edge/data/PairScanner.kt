@@ -35,7 +35,7 @@ import kotlinx.coroutines.withContext
 /** One row of the 50+ universe radar: what the continuous sweep observed for this instrument. */
 data class PairScanStatus(
     val symbol: String,
-    /** pending | closed | error | no_signal | blocked | observed | candidate | opened */
+    /** pending | closed | error | partial | no_signal | blocked | observed | candidate | opened */
     val state: String,
     val detail: String,
     val lastScanAt: Long? = null,
@@ -262,21 +262,25 @@ class PairScanner(
                 return@forEachIndexed
             }
 
-            suspend fun publicOrDukascopy(): List<Candle> = try {
-                publicHistory.fetchCandles(symbol, interval,
-                    minimumSize = HistoryPolicy.LIVE_MIN_CANDLES,
-                    desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES).candles
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (publicFailure: Exception) {
+            suspend fun publicOrDukascopy(): List<Candle> {
+                var partial: List<Candle> = emptyList()
                 try {
+                    val public = publicHistory.fetchCandles(symbol, interval,
+                        minimumSize = 1, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES).candles
+                    if (public.size >= HistoryPolicy.LIVE_MIN_CANDLES) return public
+                    partial = public // read-only observation; NEVER pass an incomplete set to V1.
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) { /* Try an independent, same-instrument source. */ }
+                return try {
                     dukascopyHistory.fetchCandles(symbol, interval,
                         minimumSize = HistoryPolicy.LIVE_MIN_CANDLES,
                         desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES).candles
                 } catch (cancel: CancellationException) {
                     throw cancel
                 } catch (deepFailure: Exception) {
-                    throw DataFeedException("عمومی: ${publicFailure.message ?: "ناموفق"}؛ Dukascopy: ${deepFailure.message ?: "ناموفق"}".take(180))
+                    if (partial.isNotEmpty()) partial else
+                        throw DataFeedException("برای $symbol تاریخچهٔ رایگان هم‌نماد در دسترس نیست: ${deepFailure.message ?: "فید ناموجود"}".take(180))
                 }
             }
 
@@ -319,7 +323,9 @@ class PairScanner(
             val candles = rawCandles.filter { it.closed && it.time + interval.millis <= now }
                 .sortedBy { it.time }.distinctBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
             if (candles.size < HistoryPolicy.LIVE_MIN_CANDLES) {
-                update(symbol, "error", "بازهٔ ${interval.label} فقط ${candles.size} کندل بستهٔ واقعی دارد؛ ${HistoryPolicy.LIVE_MIN_CANDLES} لازم است")
+                update(symbol, "partial", "فقط مشاهدهٔ کندل قبلی ${candles.lastOrNull()?.time ?: "—"}: " +
+                    "${candles.size} کندل بستهٔ واقعی در ${interval.label}؛ برای سیگنال/معامله ${HistoryPolicy.LIVE_MIN_CANDLES} لازم است",
+                    price = candles.lastOrNull()?.close)
                 return@forEachIndexed
             }
 

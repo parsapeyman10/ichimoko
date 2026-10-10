@@ -32,14 +32,14 @@ object WatchCatalog {
         // ── جفت‌ارزهای اصلی و طلا ─────────────────────────────────────────
         WatchSymbol("XAU/USD", "طلای جهانی (هر انس)", "$", linkedMapOf(
             "tradingview_scanner" to "OANDA:XAUUSD", "gold_api_public" to "XAU", "stocks_yahoo" to "XAUUSD=X", "twelve_data_quote" to "XAU/USD",
-        ), listOf("tradingview_scanner"), 10 * 60_000L, 0.5),
-        WatchSymbol("EUR/USD", "یورو / دلار", "$", linkedMapOf("tradingview_scanner" to "OANDA:EURUSD", "stocks_yahoo" to "EURUSD=X", "twelve_data_quote" to "EUR/USD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("GBP/USD", "پوند / دلار", "$", linkedMapOf("tradingview_scanner" to "OANDA:GBPUSD", "stocks_yahoo" to "GBPUSD=X", "twelve_data_quote" to "GBP/USD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("AUD/USD", "دلار استرالیا / دلار", "$", linkedMapOf("tradingview_scanner" to "OANDA:AUDUSD", "stocks_yahoo" to "AUDUSD=X", "twelve_data_quote" to "AUD/USD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("NZD/USD", "دلار نیوزیلند / دلار", "$", linkedMapOf("tradingview_scanner" to "OANDA:NZDUSD", "stocks_yahoo" to "NZDUSD=X", "twelve_data_quote" to "NZD/USD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("USD/JPY", "دلار / ین ژاپن", "JPY", linkedMapOf("tradingview_scanner" to "OANDA:USDJPY", "stocks_yahoo" to "JPY=X", "twelve_data_quote" to "USD/JPY"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("USD/CHF", "دلار / فرانک سوئیس", "CHF", linkedMapOf("tradingview_scanner" to "OANDA:USDCHF", "stocks_yahoo" to "CHF=X", "twelve_data_quote" to "USD/CHF"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("USD/CAD", "دلار / دلار کانادا", "CAD", linkedMapOf("tradingview_scanner" to "OANDA:USDCAD", "stocks_yahoo" to "CAD=X", "twelve_data_quote" to "USD/CAD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
+        ), listOf("gold_api_public", "tradingview_scanner"), 10 * 60_000L, 0.5),
+        WatchSymbol("EUR/USD", "یورو / دلار", "$", linkedMapOf("tradingview_scanner" to "OANDA:EURUSD", "stocks_yahoo" to "EURUSD=X", "twelve_data_quote" to "EUR/USD"), listOf("tradingview_scanner", "stocks_yahoo"), 5 * 60_000L, 0.3),
+        WatchSymbol("GBP/USD", "پوند / دلار", "$", linkedMapOf("tradingview_scanner" to "OANDA:GBPUSD", "stocks_yahoo" to "GBPUSD=X", "twelve_data_quote" to "GBP/USD"), listOf("tradingview_scanner", "stocks_yahoo"), 5 * 60_000L, 0.3),
+        WatchSymbol("AUD/USD", "دلار استرالیا / دلار", "$", linkedMapOf("tradingview_scanner" to "OANDA:AUDUSD", "stocks_yahoo" to "AUDUSD=X", "twelve_data_quote" to "AUD/USD"), listOf("tradingview_scanner", "stocks_yahoo"), 5 * 60_000L, 0.3),
+        WatchSymbol("NZD/USD", "دلار نیوزیلند / دلار", "$", linkedMapOf("tradingview_scanner" to "OANDA:NZDUSD", "stocks_yahoo" to "NZDUSD=X", "twelve_data_quote" to "NZD/USD"), listOf("tradingview_scanner", "stocks_yahoo"), 5 * 60_000L, 0.3),
+        WatchSymbol("USD/JPY", "دلار / ین ژاپن", "JPY", linkedMapOf("tradingview_scanner" to "OANDA:USDJPY", "stocks_yahoo" to "JPY=X", "twelve_data_quote" to "USD/JPY"), listOf("tradingview_scanner", "stocks_yahoo"), 5 * 60_000L, 0.3),
+        WatchSymbol("USD/CHF", "دلار / فرانک سوئیس", "CHF", linkedMapOf("tradingview_scanner" to "OANDA:USDCHF", "stocks_yahoo" to "CHF=X", "twelve_data_quote" to "USD/CHF"), listOf("tradingview_scanner", "stocks_yahoo"), 5 * 60_000L, 0.3),
+        WatchSymbol("USD/CAD", "دلار / دلار کانادا", "CAD", linkedMapOf("tradingview_scanner" to "OANDA:USDCAD", "stocks_yahoo" to "CAD=X", "twelve_data_quote" to "USD/CAD"), listOf("tradingview_scanner", "stocks_yahoo"), 5 * 60_000L, 0.3),
     ) + CryptoCatalog.watchlistSeed.map { coin ->
         WatchSymbol(
             id = coin.id,

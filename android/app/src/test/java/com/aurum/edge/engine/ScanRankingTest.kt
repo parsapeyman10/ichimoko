@@ -21,7 +21,7 @@ class ScanRankingTest {
     @Test fun `every category remains visible and only fresh valid observations are ranked`() {
         val rows = listOf(row("AAPL", "observed", confidence = 95.0),
             row("NVDA", confidence = 75.0), row("EUR/USD"), row("XAU/USD"),
-            row("BTC/USDT"), row("ETH/USDT", "error"),
+            row("BTC/USDT"), row("ETH/USDT", "error"), row("MSFT", "partial"),
             row("SOL/USDT", scannedAt = now - 1_000_000L))
         val ranked = ScanRanking.byMarket(rows, Interval.M5, now)
         assertEquals(AssetClass.entries.toSet(), ranked.keys)

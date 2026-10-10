@@ -96,16 +96,16 @@ fun HomeScreen(
                 verticalAlignment = Alignment.Top,
             ) {
                 Column {
-                    Text("وضعیت فعالیت بازار", color = AurumColors.Gold, style = MaterialTheme.typography.labelMedium)
+                    Text("ساعت برنامه‌ای ${AssetClass.of(market.symbol).label} · ${market.symbol}", color = AurumColors.Gold, style = MaterialTheme.typography.labelMedium)
                     Text(
-                        if (session.closed) "بازار اکنون بسته است" else "بازار اکنون باز و فعال است",
+                        if (session.closed) "سشن این نماد بسته است" else "طبق برنامه باز؛ فید را بررسی کنید",
                         color = if (session.closed) AurumColors.Red else AurumColors.Green,
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold,
                     )
                 }
                 Pill(
-                    text = if (session.closed) "CLOSED" else "OPEN 24/7",
+                    text = if (session.closed) "بسته" else if (AssetClass.of(market.symbol) == AssetClass.CRYPTO) "۲۴/۷" else "ساعت مجاز",
                     color = if (session.closed) AurumColors.Red else AurumColors.Green,
                 )
             }
@@ -127,6 +127,15 @@ fun HomeScreen(
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(top = 4.dp),
             )
+            listOf("EUR/USD" to "فارکس", "XAU/USD" to "طلا/کالا",
+                "AAPL" to "سهام آمریکا", "BTC/USDT" to "رمزارز").forEach { (symbol, label) ->
+                val scheduled = MarketHours.sessionWindowFor(symbol, now)
+                val note = if (symbol == "BTC/USDT") "۲۴/۷" else "برای قیمت/تعطیلی خاص، فید همان نماد لازم است"
+                Text("$label: ${if (scheduled.closed) "سشن بسته" else "طبق برنامه باز"} · $note",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (scheduled.closed) AurumColors.Red else AurumColors.TextSecondary,
+                    modifier = Modifier.padding(top = 2.dp))
+            }
         }
 
         // ── ۲. بنر وضعیت ۴ دسته دارایی (رمزارز، فارکس، طلا/کالا، سهام) در ۴ مستطیل بالا ──
