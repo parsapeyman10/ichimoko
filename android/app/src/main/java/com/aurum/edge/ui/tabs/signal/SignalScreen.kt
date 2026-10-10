@@ -109,6 +109,12 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState,
             onSelectSymbol = { symbol -> viewModel.selectChartSymbol(symbol) },
         )
 
+        com.aurum.edge.core.OilEntrySafety.blocker(market.symbol)?.let { reason ->
+            SectionCard("نفت · توقف حفاظتی ورود تازه", "ژورنال و مدیریت خروج پوزیشن‌های موجود حفظ می‌شود") {
+                Text(reason, style = MaterialTheme.typography.bodyMedium, color = AurumColors.Red)
+            }
+        }
+
         // ── ۲. بهترین فرصت معاملاتی (#1 Best Opportunity) با تشریح کامل شروط ──
         BestOpportunityDetailedCard(
             best = freshCandidates.firstOrNull(),

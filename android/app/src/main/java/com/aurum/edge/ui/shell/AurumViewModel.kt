@@ -138,7 +138,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         val side = state.signal?.action ?: com.aurum.edge.core.SignalAction.NO_TRADE
         if (trend != null && trend.symbol != state.symbol) return@combine null
         runCatching {
-            com.aurum.edge.core.MarketTrend.contextOf(side, trend, overall, decision?.method)
+            com.aurum.edge.core.MarketTrend.contextOf(side, trend,
+                overall?.takeIf { System.currentTimeMillis() - it.computedAt in 0L..10 * 60_000L },
+                decision?.method)
         }.getOrNull()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
@@ -761,7 +763,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     val trend = symbolTrend.value?.takeIf { it.symbol == current.symbol }
                     com.aurum.edge.core.MarketTrendRecord.from(
                         com.aurum.edge.core.MarketTrend.contextOf(
-                            signal.action, trend, marketTrend.value, playbook.value?.method,
+                            signal.action, trend,
+                            marketTrend.value?.takeIf { System.currentTimeMillis() - it.computedAt in 0L..10 * 60_000L },
+                            playbook.value?.method,
                         ),
                     )
                 }.getOrNull()
