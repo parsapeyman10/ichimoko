@@ -42,7 +42,7 @@ class DecisionLogStore(context: Context) {
                signal: Signal? = null, now: Long = System.currentTimeMillis(),
                dedupe: Boolean = false) {
         if (symbol.isBlank()) return
-        val layers = signal?.confluence?.take(4)?.map(ConfluenceItem::toLayer).orEmpty()
+        val layers = signal?.confluence?.take(4)?.map { it.toLayer() }.orEmpty()
         val item = DecisionRecord(symbol, interval, now, signal?.barTime ?: 0L,
             signal?.action?.name ?: status, signal?.confidence, detail.take(500), layers)
         val previous = _records.value
