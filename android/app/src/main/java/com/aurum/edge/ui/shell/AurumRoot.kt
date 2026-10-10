@@ -97,10 +97,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
             Box(Modifier.fillMaxSize()) {
                 when (selectedTab) {
                     AurumTab.Home -> HomeScreen(viewModel, market,
-                        onChart = { open(AurumTab.Chart) }, onChartSymbol = ::openChartFor,
-                        onSignal = { open(AurumTab.Signal) },
-                        onNews = { open(AurumTab.News) },
-                        onJournal = { open(AurumTab.Journal) }, onSettings = { open(AurumTab.Settings) })
+                        onChartSymbol = ::openChartFor, onJournal = { open(AurumTab.Journal) })
                     AurumTab.Chart -> ChartScreen(viewModel, market,
                         onOpenSettings = { open(AurumTab.Settings) }, onOpenJournal = { open(AurumTab.Journal) },
                         onOpenSignal = { open(AurumTab.Signal) })

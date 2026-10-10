@@ -1,6 +1,6 @@
 package com.aurum.edge.core
 
-/** One provenance gate shared by the selected market, the Home ticker and foreground service.
+/** One provenance gate shared by the selected market, catalog paper trading and the foreground service.
  * A historical candle is useful for chart analysis but must never impersonate a trade tick.
  */
 object TradeQuotePolicy {

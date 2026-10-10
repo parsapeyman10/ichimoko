@@ -38,7 +38,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.FeedMode
-import com.aurum.edge.core.HomeReadout
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
@@ -48,8 +47,6 @@ import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
-import com.aurum.edge.ui.components.formatQuotePrice
-import com.aurum.edge.ui.components.formatSpread
 import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
 import kotlinx.coroutines.delay
@@ -60,18 +57,13 @@ import kotlin.math.abs
  * ۱. در بالای صفحه وضعیت باز یا بسته بودن بازار
  * ۲. ترکینگ زنده و لحظه‌ای تمامی معاملات باز پورتفو با نمایش تراز SL -> قیمت ورود -> TP
  * ۳. پنل معاملهٔ خودکار و آمار کلی پورتفو
- * ۴. آخرین قیمت و اسپرد بازار
  */
 @Composable
 fun HomeScreen(
     viewModel: AurumViewModel,
     market: MarketState,
-    onChart: () -> Unit,
     onChartSymbol: (String) -> Unit,
-    onSignal: () -> Unit,
-    onNews: () -> Unit,
     onJournal: () -> Unit,
-    onSettings: () -> Unit,
 ) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -81,13 +73,6 @@ fun HomeScreen(
         }
     }
     val session = MarketHours.sessionWindowFor(market.symbol, now)
-    val price = HomeReadout.from(market, now)
-    val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val configuredSpread = settings.spreadPrice.takeIf { it.isFinite() && it > 0.0 && price.value != null }
-    val displayBid = market.bid ?: configuredSpread?.let { spread -> price.value?.minus(spread / 2.0) }
-    val displayAsk = market.ask ?: configuredSpread?.let { spread -> price.value?.plus(spread / 2.0) }
-    val spread = displayBid?.let { bid -> displayAsk?.let { ask -> ask - bid } }
-
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 14.dp)) {
 
         // ── ۱. وضعیت باز یا بسته بودن بازار (بالاترین بخش صفحه) ────────────
@@ -165,44 +150,6 @@ fun HomeScreen(
 
         // ── ۴. پنل معاملهٔ خودکار کاغذی و تخصیص ۴ بازار ────────────────────
         AutoPaperCard(viewModel, onJournal)
-
-        // ── ۵. قیمت لحظه‌ای و اسپرد بازار ──────────────────────────────────
-        SectionCard(
-            title = "قیمت لحظه‌ای بازار · ${market.symbol}",
-            subtitle = "فقط آخرین عدد واقعی دریافت‌شده؛ بدون داده‌های شبیه‌سازی‌شده",
-            trailing = {
-                Pill(
-                    when {
-                        price.current -> "زنده/تازه"
-                        price.value != null -> "قبلی/کش"
-                        else -> "بدون داده"
-                    },
-                    if (price.current) AurumColors.Cyan else AurumColors.Gold,
-                )
-            },
-        ) {
-            Text(
-                formatPrice(price.value),
-                style = MaterialTheme.typography.headlineMedium,
-                color = if (price.current) AurumColors.TextPrimary else AurumColors.TextMuted,
-            )
-            Text(
-                if (price.current) "${price.label} · دریافت ${formatDateTime(price.observedAt)}"
-                else "${price.label} · آخرین مشاهده ${formatDateTime(price.observedAt)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (price.current) AurumColors.Cyan else AurumColors.Gold,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatTile("BID", formatQuotePrice(displayBid), if (price.current) AurumColors.Green else AurumColors.TextMuted, Modifier.weight(1f))
-                StatTile("ASK", formatQuotePrice(displayAsk), if (price.current) AurumColors.Red else AurumColors.TextMuted, Modifier.weight(1f))
-                StatTile("SPREAD", formatSpread(spread), AurumColors.Gold, Modifier.weight(1f))
-            }
-            market.feed.detail.takeIf { it.isNotBlank() }?.let {
-                Text(it, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                    modifier = Modifier.padding(top = 8.dp))
-            }
-        }
     }
 }
 
