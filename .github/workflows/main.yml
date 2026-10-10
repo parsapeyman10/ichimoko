@@ -451,7 +451,8 @@ jobs:
             (startsWith(github.event.head_commit.message, 'release: publish approved v1.3.14 updater') ||
              startsWith(github.event.head_commit.message, 'release: publish approved v1.3.15 updater') ||
              startsWith(github.event.head_commit.message, 'release: publish approved v1.3.16 updater') ||
-             startsWith(github.event.head_commit.message, 'release: publish approved v1.3.17 updater'))))
+             startsWith(github.event.head_commit.message, 'release: publish approved v1.3.17 updater') ||
+             startsWith(github.event.head_commit.message, 'release: publish approved v1.3.18 updater'))))
         run: |
           set -euo pipefail
           # signing_check already verified the built AND published APK against the fixed #403
@@ -471,7 +472,8 @@ jobs:
             (startsWith(github.event.head_commit.message, 'release: publish approved v1.3.14 updater') ||
              startsWith(github.event.head_commit.message, 'release: publish approved v1.3.15 updater') ||
              startsWith(github.event.head_commit.message, 'release: publish approved v1.3.16 updater') ||
-             startsWith(github.event.head_commit.message, 'release: publish approved v1.3.17 updater'))))
+             startsWith(github.event.head_commit.message, 'release: publish approved v1.3.17 updater') ||
+             startsWith(github.event.head_commit.message, 'release: publish approved v1.3.18 updater'))))
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.collect.outputs.tag }}
