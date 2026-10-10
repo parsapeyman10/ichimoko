@@ -33,7 +33,7 @@ object AlertDiagnostics {
         val priceFresh = !market.showingCachedData &&
             market.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
             FeedLiveness.hasRecentReceipt(market.feed, now)
-        val minBars = SignalEngine.minBars(market.interval)
+        val minBars = HistoryPolicy.LIVE_MIN_CANDLES
         // Missing news is context; a validated opposing AI model can veto a paper signal.
         val calendarFresh = news.calendarCheckedAt?.let { now - it in 0L..1_200_000L } == true
         val selectedVerdict = news.aiBySymbol[market.symbol] ?: news.ai.takeIf { it.symbol == market.symbol }

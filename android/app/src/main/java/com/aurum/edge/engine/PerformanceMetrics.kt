@@ -1,6 +1,5 @@
 package com.aurum.edge.engine
 
-import com.aurum.edge.core.BacktestRecord
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
 import kotlin.math.sqrt
@@ -37,20 +36,6 @@ data class PerformanceReport(
 
 /** Descriptive statistics from settled outcomes only; no future return or synthetic observation. */
 object PerformanceMetrics {
-    fun fromBacktest(result: Backtester.Result): PerformanceReport = from(
-        result.trades.map { ClosedOutcome(it.side, it.entryTime, it.exitTime, it.pnlUsd, it.rMultiple) },
-        result.initialBalance,
-    )
-
-    fun fromStoredReport(record: BacktestRecord): PerformanceReport? {
-        // Older versions stored only the last 80 trades; do not present partial metrics as full.
-        if (record.trades.size != record.wins + record.losses) return null
-        return from(record.trades.map { ClosedOutcome(
-            if (it.side == "BUY") SignalAction.BUY else SignalAction.SELL,
-            it.entryTime, it.exitTime, it.pnlUsd, it.rMultiple,
-        ) }, record.initialBalance)
-    }
-
     fun fromPaper(trades: List<PaperTrade>, startingBalance: Double): PerformanceReport = from(
         trades.filter { !it.isOpen && it.pnlUsd != null && it.closedAt != null }.map {
             ClosedOutcome(it.action, it.openedAt, it.closedAt!!, it.pnlUsd!!, it.rMultiple)

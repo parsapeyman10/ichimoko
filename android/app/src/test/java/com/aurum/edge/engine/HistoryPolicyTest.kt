@@ -19,8 +19,9 @@ class HistoryPolicyTest {
             HistoryPolicy.providerRequestSize(HistoryPolicy.DEEP_CHART_CANDLES))
         assertEquals(HistoryPolicy.DEEP_CHART_CANDLES,
             HistoryPolicy.deepProviderRequestSize(HistoryPolicy.DEEP_CHART_CANDLES))
-        assertEquals(210, HistoryPolicy.LIVE_MIN_CANDLES)
+        assertEquals(320, HistoryPolicy.LIVE_MIN_CANDLES)
         assertEquals(320, HistoryPolicy.LIVE_REQUEST_CANDLES)
+        assertEquals(360, HistoryPolicy.LIVE_FETCH_CANDLES)
         assertEquals(HistoryPolicy.LIVE_REQUEST_CANDLES,
             HistoryPolicy.chartTargetCandles("XAU/USD", com.aurum.edge.core.Interval.M5))
     }

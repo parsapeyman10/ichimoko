@@ -2,11 +2,12 @@ package com.aurum.edge.core
 
 /** Separate online evaluation windows from optional archived research-history limits. */
 object HistoryPolicy {
-    /** The live engine's EMA200 / Ichimoku floor is 210 CLOSED real bars. Request a small
-     * cushion for still-forming bars and gaps; never relax freshness, identity or MTF gates.
+    /** Each of the seven independent intervals needs 320 real CLOSED bars for direction
+     * and alignment. Fetch a small cushion for an in-progress bar or missing sessions.
      */
-    const val LIVE_MIN_CANDLES: Int = 210
+    const val LIVE_MIN_CANDLES: Int = 320
     const val LIVE_REQUEST_CANDLES: Int = 320
+    const val LIVE_FETCH_CANDLES: Int = 360
 
     /** Retained only for archived offline research; not a prerequisite for online checking. */
     const val TARGET_CANDLES: Int = 3000

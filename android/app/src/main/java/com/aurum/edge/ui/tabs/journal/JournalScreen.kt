@@ -42,7 +42,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.PaperConditionRecord
 import com.aurum.edge.core.IctPriceActionRecord
-import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PaperAiReview
 import com.aurum.edge.core.PaperHoldReview
@@ -50,10 +49,8 @@ import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.TradeReplay
-import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.data.HoldReviewCycle
 import com.aurum.edge.data.MarketState
-import com.aurum.edge.engine.EvidenceGrade
 import com.aurum.edge.engine.PerformanceMetrics
 import com.aurum.edge.engine.ResearchEvidence
 import com.aurum.edge.ui.components.Pill
@@ -69,14 +66,11 @@ import java.util.Locale
 @Composable
 fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
-    val opportunities by viewModel.opportunities.collectAsStateWithLifecycle()
-    val opportunityError by viewModel.opportunityError.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val loadError by viewModel.journalError.collectAsStateWithLifecycle()
     val holdReview by viewModel.holdReview.collectAsStateWithLifecycle()
     var confirmClear by remember { mutableStateOf(false) }
-    var confirmOpportunityClear by remember { mutableStateOf(false) }
     var showCombined by remember { mutableStateOf(false) }
     var selectedCategory by remember { mutableStateOf<AssetClass?>(null) }
     var pendingPdf by remember { mutableStateOf<Pair<String, List<PaperTrade>>?>(null) }
@@ -196,27 +190,6 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             closedTrades = filteredClosed,
             categoryLabel = selectedCategory?.label ?: "همهٔ بازارها",
         )
-
-        val filteredOpportunities = remember(opportunities, selectedCategory) {
-            if (selectedCategory == null) opportunities else opportunities.filter { AssetClass.of(it.symbol) == selectedCategory }
-        }
-
-        if (filteredOpportunities.isNotEmpty() || opportunityError != null) {
-            SectionCard(
-                title = "فرصت‌های آموزشی بررسی‌شده · ${selectedCategory?.label ?: "همهٔ بازارها"}",
-                subtitle = "کاندیداهای اسکن‌شده در دستهٔ انتخاب‌شده (خودِ کاندیدا تا زمان تایید ورود معامله نیست)",
-            ) {
-                opportunityError?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = AurumColors.Red) }
-                filteredOpportunities.take(30).forEach { item ->
-                    OpportunityRow(item, trades.any { it.id == item.paperTradeId })
-                }
-                if (filteredOpportunities.size > 30) Text("۳۰ مورد اخیر از ${filteredOpportunities.size} کاندیدای ذخیره‌شده",
-                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                if (filteredOpportunities.isNotEmpty()) OutlinedButton(onClick = { confirmOpportunityClear = true }) {
-                    Text("پاک کردن تاریخچهٔ کاندیداها (نه معاملات)")
-                }
-            }
-        }
 
         val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
         if (filteredOpen.isNotEmpty()) {
@@ -358,14 +331,10 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     }
     if (confirmClear) AlertDialog(onDismissRequest = { confirmClear = false },
         title = { Text("حذف قطعی ژورنال کاغذی؟") },
-        text = { Text("تمام معاملات کاغذی باز و بسته‌شدهٔ ثبت‌شده روی گوشی پاک می‌شوند؛ بازگشت‌پذیر نیست. تاریخچهٔ کاندیداها جداگانه نگهداری می‌شود.") },
+        text = { Text("تمام معاملات کاغذی باز و بسته‌شدهٔ ثبت‌شده روی گوشی پاک می‌شوند؛ بازگشت‌پذیر نیست. تاریخچهٔ فرصت‌های اسکن‌شده جداگانه نگهداری می‌شود.") },
         confirmButton = { TextButton(onClick = { viewModel.clearJournal(); confirmClear = false }) { Text("حذف") } },
         dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("انصراف") } })
-    if (confirmOpportunityClear) AlertDialog(onDismissRequest = { confirmOpportunityClear = false },
-        title = { Text("تاریخچهٔ کاندیداهای آموزشی پاک شود؟") },
-        text = { Text("فقط اعلان‌های آموزشی ذخیره‌شده پاک می‌شوند؛ معاملات ژورنال تغییر نمی‌کنند. اگر کندل هنوز تازه باشد ممکن است دوباره هشدار دریافت کنید.") },
-        confirmButton = { TextButton(onClick = { viewModel.clearOpportunityHistory(); confirmOpportunityClear = false }) { Text("حذف کاندیداها") } },
-        dismissButton = { TextButton(onClick = { confirmOpportunityClear = false }) { Text("انصراف") } })
+
 }
 
 @Composable
@@ -509,34 +478,6 @@ private fun TradeRow(trade: PaperTrade) {
 }
 
 
-@Composable
-private fun OpportunityRow(item: PaperOpportunity, tradeStillSaved: Boolean) {
-    val uriHandler = LocalUriHandler.current
-    Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
-        Text("${item.symbol} ${item.action} · ${item.interval.label} · ${formatDateTime(item.alertedAt)}",
-            style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
-        Text("قیمت دریافت‌شده ${formatPrice(item.priceAtAlert)}$ · SL ${formatPrice(item.stopLoss)} · TP ${formatPrice(item.takeProfit)}",
-            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-        Text(when {
-            item.paperTradeId == null -> "فقط کاندیدا؛ اعلان به‌تنهایی پوزیشن کاغذی باز نمی‌کند."
-            tradeStillSaved -> "ورود کاغذی جداگانه ثبت شد · شناسهٔ ${item.paperTradeId.take(8)}"
-            else -> "رکورد معاملهٔ مرتبط بعداً از ژورنال پاک شده است."
-        }, style = MaterialTheme.typography.labelSmall,
-            color = if (tradeStillSaved) AurumColors.Green else AurumColors.TextMuted)
-        Text("کندل ${formatDateTime(item.signalBarTime)} · MTF ${item.mtf.bias}" +
-            (item.newsEvidence?.let { " · مدل ${it.model} · تقویم ${formatDateTime(it.calendarCheckedAt)}" }
-                ?: " · خبر نزدیک معتبر برای این کاندیدا ثبت نشد"),
-            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-        ConditionDisclosure(item.key, item.conditions)
-        IctDisclosure(item.key, item.priceAction)
-        item.newsEvidence?.evidence?.forEach { news ->
-            OutlinedButton(onClick = { runCatching { uriHandler.openUri(news.url) } }) {
-                Text("شاهد خبر: ${news.source}", style = MaterialTheme.typography.labelSmall)
-            }
-        }
-    }
-}
-
 /**
  * «همین معامله روی چارت»: the stored entry/SL/TP of one journal row drawn over the REAL candles
  * of that period. Bars come from this device's verified cache (or a fresh download with the
@@ -649,7 +590,7 @@ private fun AiReviewDisclosure(review: PaperAiReview?) {
         review.cautions.forEachIndexed { index, caution ->
             Text("احتیاط ${index + 1}: $caution", style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
         }
-        Text("این نظر فقط تحلیل آموزشی بعد از ثبت معاملهٔ کاغذی است؛ معامله را تأیید/رد یا سفارش واقعی ایجاد نمی‌کند.",
+        Text("این نظر فقط تحلیل بعد از ثبت معاملهٔ کاغذی است؛ معامله را تأیید/رد یا سفارش واقعی ایجاد نمی‌کند.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
     }
 }
@@ -731,7 +672,7 @@ private fun HoldReviewDisclosure(review: PaperHoldReview?, showEmptyHint: Boolea
         review.cautions.forEachIndexed { index, caution ->
             Text("احتیاط ${index + 1}: $caution", style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
         }
-        Text("این نظر فقط تحلیل آموزشی است: معامله را نمی‌بندد، حد ضرر/حد سود را تغییر نمی‌دهد و سفارش واقعی نمی‌فرستد.",
+        Text("این نظر فقط تحلیل است: معامله را نمی‌بندد، حد ضرر/حد سود را تغییر نمی‌دهد و سفارش واقعی نمی‌فرستد.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
     }
 }
@@ -770,7 +711,7 @@ private fun IctDisclosure(key: String, record: IctPriceActionRecord?) {
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
         Text("قیمت ${formatPrice(record.quote)} · SL ${formatPrice(record.stop)} (حد بیرون جاروب ${formatPrice(record.stopBoundary)}) · TP ${formatPrice(record.target)} (حد پیش از سطح مقابل ${formatPrice(record.opposingLevel)})",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-        Text("تقریب آموزشی روی کندل بسته؛ سفارش نهادی/سود آینده را تأیید نمی‌کند. مدل قدیمی پس از ثبت دوباره‌نویسی نمی‌شود.",
+        Text("تقریب روی کندل بسته؛ سفارش نهادی/سود آینده را تأیید نمی‌کند. مدل قدیمی پس از ثبت دوباره‌نویسی نمی‌شود.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
     }
 }
@@ -798,319 +739,3 @@ private fun ConditionDisclosure(key: String, conditions: List<PaperConditionReco
  * The last walk-forward run kept on this device. It is shown with its own date so the numbers can
  * be re-checked instead of taken on faith.
  */
-@Composable
-private fun StoredReportCard(report: WalkForwardRecord) {
-    val assessment = ResearchEvidence.stored(report)
-    val stress = report.costStressOutOfSample
-    SectionCard(
-        title = "آخرین تست فنیِ خارج نمونه (گزارش گوشی)",
-        subtitle = "${report.interval} · ${report.bars} کندل · ${formatDateTime(report.generatedAt)}",
-    ) {
-        Text(assessment.title, style = MaterialTheme.typography.bodySmall,
-            color = if (assessment.grade == EvidenceGrade.UNFAVORABLE) AurumColors.Red else AurumColors.Gold)
-        Text(assessment.detail, style = MaterialTheme.typography.labelSmall,
-            color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 5.dp))
-        if (assessment.grade != EvidenceGrade.NO_DATA && stress != null) {
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatTile("بستهٔ خارج نمونه", "${report.outOfSample.trades.size}", modifier = Modifier.weight(1f))
-                StatTile("خالص فرضی", "${formatPrice(report.outOfSample.netPnl)}$", modifier = Modifier.weight(1f))
-                StatTile("خالص هزینهٔ ×۲", "${formatPrice(stress.netPnl)}$", modifier = Modifier.weight(1f))
-            }
-            Text("اسپرد ${report.outOfSample.spreadPrice} و کمیسیون ${report.outOfSample.commissionPerOz} دلار/واحد؛ با فرض ×۲: ${stress.spreadPrice} و ${stress.commissionPerOz}. بسته‌شدهٔ ×۲: ${stress.trades.size}. باز در پایان: عادی ${if (report.outOfSample.openAtEnd) 1 else 0}، ×۲ ${if (stress.openAtEnd) 1 else 0}؛ پوزیشن حل‌نشدهٔ گپ: عادی ${report.outOfSample.unresolvedGap}، ×۲ ${stress.unresolvedGap}. فقط پژوهشِ موتور فنی؛ نه معاملات سیگنالی کاغذی.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 8.dp))
-        }
-    }
-}
-
-/**
- * Daily and monthly PnL / Income calendar for closed trades.
- * Allows month-by-month navigation, visualizing daily profit/loss with green/red badges,
- * and inspecting individual trades per selected day.
- */
-@Composable
-private fun PnlIncomeCalendarSection(
-    closedTrades: List<PaperTrade>,
-    categoryLabel: String,
-) {
-    var calendarMonthOffset by remember { mutableIntStateOf(0) }
-    var selectedDayKey by remember { mutableStateOf<String?>(null) }
-
-    val cal = remember(calendarMonthOffset) {
-        Calendar.getInstance().apply {
-            add(Calendar.MONTH, calendarMonthOffset)
-            set(Calendar.DAY_OF_MONTH, 1)
-            set(Calendar.HOUR_OF_DAY, 0)
-            set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0)
-            set(Calendar.MILLISECOND, 0)
-        }
-    }
-
-    val currentMonth = cal.get(Calendar.MONTH)
-    val currentYear = cal.get(Calendar.YEAR)
-    val maxDaysInMonth = cal.getActualMaximum(Calendar.DAY_OF_MONTH)
-    val firstDayOfWeek = cal.get(Calendar.DAY_OF_WEEK) // 1=Sunday, 7=Saturday
-
-    val monthLabel = remember(cal) {
-        val enFormat = SimpleDateFormat("MMMM yyyy", Locale.US)
-        enFormat.format(cal.time)
-    }
-
-    // Group trades for this month by day of month
-    val monthTrades = remember(closedTrades, currentMonth, currentYear) {
-        closedTrades.filter { t ->
-            val closedTime = t.closedAt
-            if (closedTime == null) {
-                false
-            } else {
-                val tCal = Calendar.getInstance().apply { timeInMillis = closedTime }
-                tCal.get(Calendar.MONTH) == currentMonth && tCal.get(Calendar.YEAR) == currentYear
-            }
-        }
-    }
-
-    val dailyPnlMap = remember(monthTrades) {
-        val map = mutableMapOf<Int, Double>()
-        monthTrades.forEach { t ->
-            val day = Calendar.getInstance().apply { timeInMillis = t.closedAt ?: 0L }.get(Calendar.DAY_OF_MONTH)
-            map[day] = (map[day] ?: 0.0) + (t.pnlUsd ?: 0.0)
-        }
-        map
-    }
-
-    val dailyTradesMap = remember(monthTrades) {
-        val map = mutableMapOf<Int, MutableList<PaperTrade>>()
-        monthTrades.forEach { t ->
-            val day = Calendar.getInstance().apply { timeInMillis = t.closedAt ?: 0L }.get(Calendar.DAY_OF_MONTH)
-            map.getOrPut(day) { mutableListOf() }.add(t)
-        }
-        map
-    }
-
-    val monthNetPnl = monthTrades.sumOf { it.pnlUsd ?: 0.0 }
-    val greenDays = dailyPnlMap.values.count { it > 0.0 }
-    val redDays = dailyPnlMap.values.count { it < 0.0 }
-
-    SectionCard(
-        title = "📅 تقویم درآمد و سود/زیان · $categoryLabel",
-        subtitle = "عملکرد روزانه و ماهانه بر اساس تقویم معاملاتی ($monthLabel)",
-        trailing = {
-            Pill(
-                text = (if (monthNetPnl >= 0) "+$" else "-$") + String.format(Locale.US, "%.2f", kotlin.math.abs(monthNetPnl)),
-                color = if (monthNetPnl >= 0) AurumColors.Green else AurumColors.Red,
-            )
-        },
-    ) {
-        // Month Navigation
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedButton(onClick = { calendarMonthOffset-- }) {
-                Text("◀ ماه قبل", style = MaterialTheme.typography.labelSmall)
-            }
-            Text(
-                text = monthLabel,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = AurumColors.Gold,
-            )
-            OutlinedButton(onClick = { calendarMonthOffset++ }, enabled = calendarMonthOffset < 0) {
-                Text("ماه بعد ▶", style = MaterialTheme.typography.labelSmall)
-            }
-        }
-
-        // Monthly Stats
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            StatTile(
-                "سود/زیان ماه",
-                (if (monthNetPnl >= 0) "+$" else "-$") + String.format(Locale.US, "%.2f", kotlin.math.abs(monthNetPnl)),
-                if (monthNetPnl >= 0) AurumColors.Green else AurumColors.Red,
-                Modifier.weight(1f),
-            )
-            StatTile("معاملات ماه", "${monthTrades.size}", AurumColors.TextPrimary, Modifier.weight(1f))
-            StatTile("روزهای سبز/قرمز", "$greenDays / $redDays", if (greenDays >= redDays) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
-        }
-
-        // Days of week header
-        val dayNames = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            dayNames.forEach { name ->
-                Text(
-                    text = name,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.TextMuted,
-                    modifier = Modifier.weight(1f),
-                    textAlign = TextAlign.Center,
-                )
-            }
-        }
-
-        // 7-column Calendar Grid
-        val leadingBlanks = (firstDayOfWeek - 1).coerceAtLeast(0)
-        val totalCells = leadingBlanks + maxDaysInMonth
-        val rows = (totalCells + 6) / 7
-
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            for (r in 0 until rows) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    for (c in 0 until 7) {
-                        val cellIndex = r * 7 + c
-                        val dayNumber = cellIndex - leadingBlanks + 1
-                        if (dayNumber in 1..maxDaysInMonth) {
-                            val pnlForDay = dailyPnlMap[dayNumber]
-                            val tradesForDay = dailyTradesMap[dayNumber] ?: emptyList<PaperTrade>()
-                            val isPositive = (pnlForDay ?: 0.0) > 0.0
-                            val isNegative = (pnlForDay ?: 0.0) < 0.0
-                            val dayKey = "$currentYear-$currentMonth-$dayNumber"
-                            val isSelected = selectedDayKey == dayKey
-
-                            val cellBg = when {
-                                isSelected -> AurumColors.Gold.copy(alpha = 0.25f)
-                                isPositive -> AurumColors.Green.copy(alpha = 0.18f)
-                                isNegative -> AurumColors.Red.copy(alpha = 0.18f)
-                                else -> AurumColors.SurfaceAlt
-                            }
-                            val borderCol = when {
-                                isSelected -> AurumColors.Gold
-                                isPositive -> AurumColors.Green.copy(alpha = 0.5f)
-                                isNegative -> AurumColors.Red.copy(alpha = 0.5f)
-                                else -> AurumColors.Line
-                            }
-
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(48.dp)
-                                    .background(cellBg, RoundedCornerShape(6.dp))
-                                    .border(1.dp, borderCol, RoundedCornerShape(6.dp))
-                                    .clickable {
-                                        selectedDayKey = if (isSelected) null else dayKey
-                                    }
-                                    .padding(2.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                Text(
-                                    text = "$dayNumber",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = if (tradesForDay.isNotEmpty()) AurumColors.TextPrimary else AurumColors.TextMuted,
-                                    fontWeight = if (tradesForDay.isNotEmpty()) FontWeight.Bold else FontWeight.Normal,
-                                )
-                                if (pnlForDay != null) {
-                                    Text(
-                                        text = (if (pnlForDay >= 0) "+" else "") + String.format(Locale.US, "%.0f$", pnlForDay),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontSize = androidx.compose.ui.unit.TextUnit(9f, androidx.compose.ui.unit.TextUnitType.Sp),
-                                        color = if (pnlForDay >= 0) AurumColors.Green else AurumColors.Red,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                    )
-                                } else {
-                                    Text("—", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted.copy(alpha = 0.3f))
-                                }
-                            }
-                        } else {
-                            Box(modifier = Modifier.weight(1f).height(48.dp))
-                        }
-                    }
-                }
-            }
-        }
-
-        // Selected Day Details
-        if (selectedDayKey != null) {
-            val parts = selectedDayKey!!.split("-")
-            val selDay = parts.getOrNull(2)?.toIntOrNull() ?: 1
-            val dayTrades = dailyTradesMap[selDay] ?: emptyList()
-            val dayPnl = dailyPnlMap[selDay] ?: 0.0
-
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp)
-                    .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
-                    .padding(10.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "جزئیات روز $selDay $monthLabel (${dayTrades.size} معامله)",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = AurumColors.Gold,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Pill(
-                        text = (if (dayPnl >= 0) "+$" else "-$") + String.format(Locale.US, "%.2f", kotlin.math.abs(dayPnl)),
-                        color = if (dayPnl >= 0) AurumColors.Green else AurumColors.Red,
-                    )
-                }
-                if (dayTrades.isEmpty()) {
-                    Text(
-                        "معامله‌ای در این روز ثبت نشده است.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.TextMuted,
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
-                } else {
-                    dayTrades.forEach { t ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "${t.symbol} · ${t.action.name} (ورود: ${formatPrice(t.entry)} | خروج: ${formatPrice(t.exitPrice)})",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = AurumColors.TextSecondary,
-                            )
-                            Text(
-                                text = "${if ((t.pnlUsd ?: 0.0) >= 0) "+" else ""}${formatPrice(t.pnlUsd)}$",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if ((t.pnlUsd ?: 0.0) >= 0) AurumColors.Green else AurumColors.Red,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-
-/** برچسب فارسیِ عکسِ ثبت‌شدهٔ «روند کلی بازار»؛ همان چیزی که در لحظهٔ ورود اندازه گرفته شد. */
-private fun trendDirectionFa(name: String): String = when (name) {
-    "UP" -> "صعودی"
-    "DOWN" -> "نزولی"
-    "SIDEWAYS" -> "خنثی/رنج"
-    else -> "اندازه گرفته نشد"
-}
-
-private fun trendAlignmentFa(name: String): String = when (name) {
-    "WITH" -> "هم‌جهت با روند"
-    "AGAINST" -> "خلاف جهت روند"
-    "NEUTRAL" -> "روند خنثی"
-    else -> "روند اندازه گرفته نشد"
-}
-
-private fun riskToneFa(name: String): String = when (name) {
-    "RISK_ON" -> "ریسک‌پذیر"
-    "RISK_OFF" -> "ریسک‌گریز"
-    "MIXED" -> "مختلط"
-    else -> "اندازه گرفته نشد"
-}

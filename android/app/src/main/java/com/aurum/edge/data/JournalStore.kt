@@ -17,7 +17,6 @@ import com.aurum.edge.core.PaperHoldReview
 import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.Signal
-import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.engine.NewsConfluence
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,20 +44,8 @@ class JournalStore(
     private val settingsStore: SettingsStore? = null,
 ) {
 
-    private val reportsFile = File(context.filesDir, "walk_forward_reports.json")
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val mutex = Mutex()
-
-    /**
-     * Last walk-forward reports run **on this device**. They are persisted on purpose: a report
-     * that cannot be re-checked later would be exactly the kind of unverifiable claim this app
-     * refuses to make.
-     */
-    private val _reports = MutableStateFlow<List<WalkForwardRecord>>(emptyList())
-    val reports: StateFlow<List<WalkForwardRecord>> = _reports.asStateFlow()
-    private val _reportError = MutableStateFlow<String?>(null)
-    val reportError: StateFlow<String?> = _reportError.asStateFlow()
-    private var reportsLoaded = false
 
     private val _trades = MutableStateFlow<List<PaperTrade>>(emptyList())
     val trades: StateFlow<List<PaperTrade>> = _trades.asStateFlow()
@@ -100,42 +87,6 @@ class JournalStore(
             throw error // no toast claiming an entry succeeded if it was not saved
         }
         _trades.value = sorted
-    }
-
-    suspend fun loadReports() = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            val list = try {
-                if (reportsFile.exists() || File(reportsFile.path + ".bak").exists()) {
-                    json.decodeFromString(ListSerializer(WalkForwardRecord.serializer()),
-                        AtomicFile(reportsFile).openRead().bufferedReader().use { it.readText() })
-                } else emptyList()
-            } catch (error: Exception) {
-                reportsLoaded = false
-                _reportError.value = "فایل گزارش پژوهش خوانده نشد؛ گزارش‌ها حذف یا بازنویسی نشدند"
-                throw IllegalStateException(_reportError.value, error)
-            }
-            _reports.value = list.sortedByDescending { it.generatedAt }
-            _reportError.value = null
-            reportsLoaded = true
-        }
-    }
-
-    suspend fun saveReport(report: WalkForwardRecord) = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            check(reportsLoaded && _reportError.value == null) { "گزارش‌های قبلی بارگذاری نشده/آسیب‌دیده‌اند؛ بازنویسی نمی‌شود" }
-            val next = (_reports.value + report).sortedByDescending { it.generatedAt }.take(12)
-            val atomic = AtomicFile(reportsFile)
-            val stream = atomic.startWrite()
-            try {
-                stream.write(json.encodeToString(ListSerializer(WalkForwardRecord.serializer()), next)
-                    .toByteArray(Charsets.UTF_8))
-                atomic.finishWrite(stream)
-            } catch (error: Exception) {
-                atomic.failWrite(stream)
-                throw error
-            }
-            _reports.value = next // only a durable report is called 'stored'
-        }
     }
 
     suspend fun open(

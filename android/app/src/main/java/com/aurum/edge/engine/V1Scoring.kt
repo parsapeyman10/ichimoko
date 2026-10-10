@@ -6,6 +6,7 @@ import com.aurum.edge.core.CategoryStrategy
 import com.aurum.edge.core.ConfluenceItem
 import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.Interval
+import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
@@ -15,18 +16,18 @@ import kotlin.math.min
 
 /** The scoring implementation behind SignalEngine.evaluate; never an alternative entry path.
  * Four independent layers, each worth 25 points. Missing timeframes are UNKNOWN, never
- * synthesized by splitting larger candles; only aggregation of real smaller bars is allowed.
+ * synthesized by splitting or aggregating bars from another interval.
  */
 internal object V1Scoring {
     val intervals = listOf(Interval.M1, Interval.M5, Interval.M15, Interval.M30,
         Interval.H1, Interval.H4, Interval.D1)
-    private const val MIN_BARS = 210 // EMA200 + visible Ichimoku 8/24/72
+    private const val MIN_BARS = HistoryPolicy.LIVE_MIN_CANDLES // 320 genuine closed bars per interval
 
     fun evaluate(input: List<Candle>, interval: Interval, symbol: String, threshold: Double,
                  mode: CategoryStrategy, external: Map<Interval, List<Candle>>): Signal {
         val clock = System.currentTimeMillis()
         val bars = input.filter { it.closed && it.time + interval.millis <= clock }
-            .takeLast(SignalEngine.ENGINE_WINDOW)
+            .takeLast(MIN_BARS)
         val last = bars.lastOrNull()
         val asOf = last?.time?.plus(interval.millis) ?: 0L
         val blockers = mutableListOf<String>()
@@ -71,19 +72,22 @@ internal object V1Scoring {
         val prevMacd = Indicators.macdHistogram(bars).getOrNull(bars.lastIndex - 1) ?: 0.0
         val support = bars.dropLast(1).takeLast(20).minOf { it.low }
         val resistance = bars.dropLast(1).takeLast(20).maxOf { it.high }
+        // On a live higher-timeframe chart, its last CLOSED bar may be hours old while
+        // M1/M5 have moved on. Compare their latest completed bars at the live clock, not
+        // at yesterday's D1 close. Historical evaluation stays bounded by the base close.
+        val frameAsOf = if (clock - asOf in 0L..(interval.millis + 90_000L)) clock else asOf
+        val frameCounts = mutableMapOf<Interval, Int>()
         val stack = intervals.map { target ->
-            val supplied = external[target]
-            val source = when {
-                target == interval -> bars
-                supplied != null -> supplied.filter { it.closed && it.time + target.millis <= asOf }
-                target.millis > interval.millis && target.millis % interval.millis == 0L ->
-                    MtfAnalyzer.resample(bars, target, interval).filter { it.closed }
-                else -> emptyList()
-            }
-            target to frameBias(source, target, asOf)
+            // One independently fetched series for each interval. No higher timeframe is
+            // invented from the selected chart's bars; a missing series is UNKNOWN.
+            val source = if (target == interval) bars else external[target].orEmpty()
+                .filter { it.closed && it.time + target.millis <= frameAsOf }
+                .sortedBy { it.time }.takeLast(MIN_BARS)
+            frameCounts[target] = source.size
+            target to frameBias(source, target, frameAsOf)
         }
-        val missing = stack.filter { it.second == null }.map { it.first.label }
-        if (missing.isNotEmpty()) blockers += "پشتهٔ ۷ تایم‌فریمی کامل نیست: ${missing.joinToString("، ")}؛ کندل ریزتر ساخته نمی‌شود"
+        val missing = stack.filter { it.second == null }.map { "${it.first.label}(${frameCounts[it.first]}/$MIN_BARS)" }
+        if (missing.isNotEmpty()) blockers += "پشتهٔ ۷ تایم‌فریمی کامل نیست: ${missing.joinToString("، ")}؛ هیچ بازه‌ای حدس زده نمی‌شود"
 
         fun score(side: SignalAction): Pair<Int, List<ConfluenceItem>> {
             val buy = side == SignalAction.BUY
@@ -126,7 +130,7 @@ internal object V1Scoring {
                 item("پرایس‌اکشن · حمایت/مقاومت", priceAction,
                     "حمایت=$support · مقاومت=$resistance · ATR=$atr · $priceAction/25"),
                 item("پشتهٔ ۷ تایم‌فریمی", tfScore,
-                    stack.joinToString(" · ") { "${it.first.label}:${it.second?.name ?: "نامعلوم"}" } + " · $tfScore/25",
+                    stack.joinToString(" · ") { "${it.first.label}:${it.second?.name ?: "نامعلوم"} (${frameCounts[it.first]}/$MIN_BARS کندل)" } + " · $tfScore/25",
                     missing.isNotEmpty()),
             )
             return (trend + momentum + priceAction + tfScore) to items
@@ -152,8 +156,8 @@ internal object V1Scoring {
     }
 
     private fun frameBias(input: List<Candle>, interval: Interval, asOf: Long): SignalAction? {
-        val bars = input.takeLast(400)
-        if (bars.size < MIN_BARS || bars.zipWithNext().any { (a, b) -> b.time <= a.time }) return null
+        val bars = input.takeLast(MIN_BARS)
+        if (bars.size != MIN_BARS || bars.zipWithNext().any { (a, b) -> b.time <= a.time }) return null
         val last = bars.last()
         if (!last.closed || last.time + interval.millis > asOf ||
             asOf - (last.time + interval.millis) > interval.millis * 3 ||

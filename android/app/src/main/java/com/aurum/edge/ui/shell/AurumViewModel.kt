@@ -29,14 +29,10 @@ import com.aurum.edge.core.PaperPortfolioPolicy
 import com.aurum.edge.core.TechnicalEvidence
 import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.core.PaperTicket
-import com.aurum.edge.core.ReplayDecision
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.TradeReplay
-import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.data.AppUpdateRepository
-import com.aurum.edge.data.FreeHistoryCatalog
-import com.aurum.edge.data.FreeHistoryState
 import com.aurum.edge.data.JournalStats
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
@@ -46,8 +42,6 @@ import com.aurum.edge.data.WatchSelection
 import com.aurum.edge.data.WatchState
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
-import com.aurum.edge.engine.ReplayEngine
-import com.aurum.edge.engine.ReplayEvaluation
 import com.aurum.edge.notify.AlertSoundPlayer
 import com.aurum.edge.notify.Notifier
 import com.aurum.edge.service.SignalMonitorService
@@ -174,32 +168,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val updateState: StateFlow<AppUpdateRepository.State> = container.updater.state
 
-    /** Walk-forward runs made on this device, kept so the numbers can be re-checked later. */
-    val reports: StateFlow<List<WalkForwardRecord>> = container.journalStore.reports
-    val reportError: StateFlow<String?> = container.journalStore.reportError
-    val replayDecisions: StateFlow<List<ReplayDecision>> = container.replayJournalStore.entries
-
     private val _livePrices = MutableStateFlow<Map<String, Double>>(emptyMap())
     val livePrices: StateFlow<Map<String, Double>> = _livePrices.asStateFlow()
     private var liveTickerLoopStarted = false
 
     private val _stats = MutableStateFlow(container.journalStore.stats())
     val stats: StateFlow<JournalStats> = _stats.asStateFlow()
-
-    private val _learn = MutableStateFlow<LearnState>(LearnState.Idle)
-    val learn: StateFlow<LearnState> = _learn.asStateFlow()
-
-    private val _replay = MutableStateFlow<ReplayState>(ReplayState.Idle)
-    val replay: StateFlow<ReplayState> = _replay.asStateFlow()
-    private var replayJob: kotlinx.coroutines.Job? = null
-    private val replayOutcomeMutex = Mutex()
-    private var replayRevision: Long = 0L
-
-    private val _freeHistory = MutableStateFlow<FreeHistoryState>(FreeHistoryState.Idle)
-    val freeHistory: StateFlow<FreeHistoryState> = _freeHistory.asStateFlow()
-
-    private val _walkForward = MutableStateFlow<WalkForwardState>(WalkForwardState.Idle)
-    val walkForward: StateFlow<WalkForwardState> = _walkForward.asStateFlow()
 
     /** Multi-timeframe confluence, recomputed on the phone whenever a new real bar closes. */
     private val _mtf = MutableStateFlow<MtfAnalyzer.Snapshot?>(null)
@@ -236,12 +210,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             }
             runCatching { container.opportunityStore.load() }.onFailure {
                 _toast.value = "تاریخچهٔ فرصت‌ها خوانده نشد؛ فایل قبلی نگه داشته شد و هشدار تکراری متوقف است"
-            }
-            runCatching { container.journalStore.loadReports() }.onFailure {
-                _toast.value = "گزارش پژوهش خوانده نشد؛ فایل قبلی نگه داشته شد"
-            }
-            runCatching { container.replayJournalStore.load() }.onFailure {
-                _toast.value = "ژورنال تصمیم‌های replay خوانده نشد؛ فایل قبلی دست‌نخورده ماند"
             }
             _stats.value = container.journalStore.stats()
         }
@@ -619,7 +587,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             try {
                 val name = withContext(Dispatchers.IO) { AlertSoundPlayer.select(context, uri) }
                 container.settingsStore.update { it.copy(alertSoundUri = uri.toString(), alertSoundName = name) }
-                _toast.value = "صدای هشدار آموزشی: $name؛ برای بررسی «پخش آزمون» را بزنید"
+                _toast.value = "صدای هشدار: $name؛ برای بررسی «پخش آزمون» را بزنید"
             } catch (error: Exception) {
                 _toast.value = "صدای فایل انتخاب نشد: ${error.message ?: "دسترسی به فایل برقرار نیست"}"
             }
@@ -850,7 +818,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             try {
                 container.opportunityStore.clear()
-                _toast.value = "فقط تاریخچهٔ کاندیداهای آموزشی پاک شد؛ آمار معامله تغییر نکرد"
+                _toast.value = "فقط تاریخچهٔ فرصت‌های اسکن‌شده پاک شد؛ آمار معامله تغییر نکرد"
             } catch (error: Exception) {
                 _toast.value = "حذف کاندیدا انجام نشد؛ فایل قبلی حفظ شد: ${error.message ?: "خطای ذخیره"}"
             }
@@ -862,324 +830,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             container.candleCache.clear()
             _toast.value = "کش دیتای واقعی پاک شد"
             container.market.restart()
-        }
-    }
-
-    fun runLearn(
-        interval: Interval,
-        bars: Int,
-        balance: Double,
-        risk: Double,
-        spread: Double,
-        commission: Double,
-        threshold: Double,
-    ) {
-        replayJob?.cancel()
-        val replayRequest = ++replayRevision
-        viewModelScope.launch {
-            val requestedBars = HistoryPolicy.deepProviderRequestSize(bars)
-            val displayBars = requestedBars.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)
-            _replay.value = ReplayState.Loading
-            _learn.value = LearnState.Loading("دانلود حداقل $displayBars کندل واقعی ${interval.label} از منبع عمومی/Dukascopy؛ Twelve Data فقط fallback آخر…")
-            try {
-                // One verified dataset feeds both the batch report and the interactive cursor.
-                val dataset = container.fetchResearchDataset(interval, requestedBars)
-                if (replayRequest != replayRevision) return@launch
-                val result = container.runBacktest(dataset, interval, balance, risk, spread, commission, threshold)
-                if (replayRequest != replayRevision) return@launch
-                _learn.value = LearnState.Done(result, interval)
-                val profile = settings.value.signalProfile
-                val session = ReplayEngine.create(
-                    candles = dataset.candles,
-                    interval = interval,
-                    symbol = result.symbol,
-                    dataSource = dataset.source,
-                    config = ReplayEngine.Config(
-                        initialBalance = balance,
-                        riskPercent = risk,
-                        spreadPrice = spread,
-                        commissionPerOz = commission,
-                        threshold = threshold,
-                        signalProfile = profile,
-                    ),
-                    providerFetchedAt = dataset.fetchedAt,
-                    observedGapCount = dataset.observedGapCount,
-                )
-                val snapshot = withContext(Dispatchers.Default) { ReplayEngine.snapshot(session) }
-                if (replayRequest == replayRevision) {
-                    _replay.value = ReplayState.Ready(snapshot)
-                    refreshReplayOutcomes(session, replayRequest)
-                }
-            } catch (e: Exception) {
-                if (replayRequest == replayRevision) {
-                    _learn.value = LearnState.Failed(e.message ?: "خطا در دریافت داده واقعی")
-                    _replay.value = ReplayState.Failed(e.message ?: "دادهٔ replay آماده نشد")
-                }
-            }
-        }
-    }
-
-    fun seekReplay(cursor: Int) = updateReplay { ReplayEngine.seek(it, cursor) }
-
-    fun stepReplay(amount: Int = 1) = updateReplay { ReplayEngine.step(it, amount) }
-
-    fun resetReplay() = updateReplay(ReplayEngine::reset)
-
-    fun setReplayStartCursor() {
-        val ready = _replay.value as? ReplayState.Ready ?: return
-        val session = ready.snapshot.session
-        replayJob?.cancel()
-        val revision = ++replayRevision
-        val published = ready.snapshot.copy(
-            session = session.copy(startCursor = session.cursor, playing = false),
-        )
-        _replay.value = ReplayState.Ready(published)
-        viewModelScope.launch { refreshReplayOutcomes(published.session, revision) }
-    }
-
-    fun setReplaySpeed(speed: Float) {
-        val ready = _replay.value as? ReplayState.Ready ?: return
-        _replay.value = ReplayState.Ready(ready.snapshot.copy(
-            session = ReplayEngine.setSpeed(ready.snapshot.session, speed),
-        ))
-    }
-
-    fun setReplayPlaying(playing: Boolean) {
-        val ready = _replay.value as? ReplayState.Ready ?: return
-        if (!playing) {
-            replayJob?.cancel()
-            val revision = ++replayRevision
-            val published = ready.snapshot.copy(
-                session = ready.snapshot.session.copy(playing = false),
-            )
-            _replay.value = ReplayState.Ready(published)
-            viewModelScope.launch { refreshReplayOutcomes(published.session, revision) }
-            return
-        }
-        if (ready.snapshot.isAtEnd) return
-        replayJob?.cancel()
-        val playRevision = ++replayRevision
-        _replay.value = ReplayState.Ready(ready.snapshot.copy(
-            session = ready.snapshot.session.copy(playing = true),
-        ))
-        replayJob = viewModelScope.launch {
-            while (isActive && playRevision == replayRevision) {
-                val current = _replay.value as? ReplayState.Ready ?: break
-                val session = current.snapshot.session
-                if (!session.playing || current.snapshot.isAtEnd) break
-                val delayMs = (1000L / session.speed.coerceIn(0.25f, 8.0f)).toLong().coerceAtLeast(80L)
-                delay(delayMs)
-                val afterDelay = _replay.value as? ReplayState.Ready ?: break
-                if (!afterDelay.snapshot.session.playing) break
-                val next = ReplayEngine.step(afterDelay.snapshot.session)
-                val snapshot = withContext(Dispatchers.Default) { ReplayEngine.snapshot(next) }
-                if (playRevision != replayRevision) break
-                val published = snapshot.copy(
-                    session = if (snapshot.isAtEnd) next.copy(playing = false) else next,
-                )
-                _replay.value = ReplayState.Ready(published)
-                refreshReplayOutcomes(published.session, playRevision)
-                if (snapshot.isAtEnd) break
-            }
-        }
-    }
-
-    private fun updateReplay(transform: (ReplayEngine.Session) -> ReplayEngine.Session) {
-        val ready = _replay.value as? ReplayState.Ready ?: return
-        replayJob?.cancel()
-        val revision = ++replayRevision
-        val next = transform(ready.snapshot.session)
-        viewModelScope.launch {
-            val snapshot = withContext(Dispatchers.Default) { ReplayEngine.snapshot(next) }
-            if (revision == replayRevision) {
-                _replay.value = ReplayState.Ready(snapshot)
-                refreshReplayOutcomes(snapshot.session, revision)
-            }
-        }
-    }
-
-    /** Update only decisions belonging to the current immutable replay dataset and cursor. */
-    private suspend fun refreshReplayOutcomes(session: ReplayEngine.Session, expectedRevision: Long) = replayOutcomeMutex.withLock {
-        if (expectedRevision != replayRevision) return@withLock
-        replayDecisions.value
-            .filter { it.symbol == session.symbol && it.interval == session.interval.label && it.dataSource == session.dataSource }
-            .forEach { decision ->
-                val result = ReplayEvaluation.evaluate(decision, session.allBars, session.interval, session.cursor)
-                if (decision.outcomeStatus != result.status ||
-                    decision.fillBarTime != result.fillBarTime ||
-                    decision.fillPrice != result.fillPrice ||
-                    decision.outcomeBarTime != result.outcomeBarTime ||
-                    decision.outcomePrice != result.outcomePrice ||
-                    decision.outcomeReason != result.reason
-                ) {
-                    runCatching {
-                        container.replayJournalStore.updateOutcome(
-                            id = decision.id,
-                            outcomeStatus = result.status,
-                            fillBarTime = result.fillBarTime,
-                            fillPrice = result.fillPrice,
-                            outcomeBarTime = result.outcomeBarTime,
-                            outcomePrice = result.outcomePrice,
-                            outcomeReason = result.reason,
-                        )
-                    }.onFailure {
-                        _toast.value = "نتیجهٔ تست replay ذخیره نشد؛ فایل قبلی حفظ شد"
-                    }
-                }
-            }
-    }
-
-    /** Store a historical strategy decision separately from live-price paper fills. */
-    fun recordReplayDecision() {
-        val ready = _replay.value as? ReplayState.Ready ?: return
-        val signal = ready.snapshot.signal
-        val session = ready.snapshot.session
-        if (signal == null || !signal.isActionable || signal.entry == null || signal.barTime <= 0L) {
-            _toast.value = "این cursor تصمیم ورود قابل ثبت ندارد؛ NO_TRADE یا warm-up است"
-            return
-        }
-        viewModelScope.launch {
-            try {
-                val decision = ReplayDecision(
-                    id = java.util.UUID.randomUUID().toString(),
-                    symbol = session.symbol,
-                    interval = session.interval.label,
-                    barTime = signal.barTime,
-                    action = signal.action.name,
-                    entry = signal.entry,
-                    stopLoss = signal.stopLoss,
-                    takeProfit = signal.takeProfit,
-                    confidence = signal.confidence,
-                    profile = session.config.signalProfile.persistName(),
-                    dataSource = session.dataSource,
-                    recordedAt = System.currentTimeMillis(),
-                )
-                val result = ReplayEvaluation.evaluate(decision, session.allBars, session.interval, session.cursor)
-                container.replayJournalStore.append(
-                    decision.copy(
-                        outcomeStatus = result.status,
-                        fillBarTime = result.fillBarTime,
-                        fillPrice = result.fillPrice,
-                        outcomeBarTime = result.outcomeBarTime,
-                        outcomePrice = result.outcomePrice,
-                        outcomeReason = result.reason,
-                    ),
-                )
-                _toast.value = "تصمیم ${signal.action.name} روی کندل تاریخی در ژورنال آموزشی ثبت شد؛ نتیجه فقط با جلو رفتن replay آشکار می‌شود"
-            } catch (error: Exception) {
-                _toast.value = "ثبت تصمیم replay انجام نشد؛ فایل قبلی حفظ شد: ${error.message ?: "خطای ذخیره"}"
-            }
-        }
-    }
-
-    /** Automatically fetch fixed-source, read-only history without asking for a CSV URL. */
-    fun downloadFreeHistory(id: String) {
-        val choice = FreeHistoryCatalog.find(id) ?: run {
-            _freeHistory.value = FreeHistoryState.Failed("نمادِ قابل دریافت پیدا نشد")
-            return
-        }
-        if (_freeHistory.value is FreeHistoryState.Loading) return
-        _freeHistory.value = FreeHistoryState.Loading(choice.title)
-        viewModelScope.launch {
-            try {
-                _freeHistory.value = FreeHistoryState.Done(
-                    container.freeHistory.download(id, container.settingsStore.read().apiKey))
-            } catch (e: Exception) {
-                _freeHistory.value = FreeHistoryState.Failed((e.message ?: "دادهٔ منبع دریافت نشد").take(160))
-            }
-        }
-    }
-
-    fun saveFreeHistoryCsv(uri: Uri) {
-        val done = _freeHistory.value as? FreeHistoryState.Done ?: run {
-            _toast.value = "ابتدا دادهٔ واقعی را دریافت کنید"
-            return
-        }
-        viewModelScope.launch {
-            try {
-                container.exportFreeHistory(uri, done.result)
-                _toast.value = "CSV ${done.result.choice.code} از دادهٔ دریافتی در فایل انتخابی ذخیره شد"
-            } catch (e: Exception) {
-                _toast.value = "ذخیرهٔ CSV انجام نشد: ${e.message ?: "فایل مقصد نامعتبر است"}"
-            }
-        }
-    }
-
-    /**
-     * Offline historical HistData M1 archives (monthly CSV/ZIP or the site's yearly ZIP,
-     * one or MANY files), merged and aggregated to the chosen research timeframe (M1..H1).
-     * NEVER a market-feed or order source; gaps stay gaps, nothing is synthesised.
-     */
-    fun importHistData(uris: List<Uri>, interval: Interval, balance: Double, risk: Double,
-                       spread: Double, commission: Double, threshold: Double) {
-        if (uris.isEmpty()) { _learn.value = LearnState.Failed("ابتدا فایل(های) ZIP/CSV ماهانه یا سالانهٔ HistData را انتخاب کنید"); return }
-        viewModelScope.launch {
-            _learn.value = LearnState.Loading("خواندن ${uris.size} فایل HistData و تجمیع به تایم‌فریم ${interval.label}؛ قیمت BID تاریخی با EST ثابت…")
-            try {
-                val files = container.metaTraderImporter.fromHistDataFiles(uris)
-                val result = container.runHistDataBacktest(files, interval, balance,
-                    risk.coerceIn(0.1, 5.0), spread, commission, threshold)
-                _learn.value = LearnState.Done(result, interval)
-            } catch (e: Exception) {
-                _learn.value = LearnState.Failed((e.message ?: "فایل‌های HistData قابل تحلیل نیست").take(160))
-            }
-        }
-    }
-
-    /** Imported MT/educational OHLC history is research-only: never written to the live chart/candle cache. */
-    fun importMetaTrader(
-        uri: Uri?, link: String?, symbol: String, interval: Interval, timezone: String,
-        balance: Double, risk: Double, spread: Double, commission: Double, threshold: Double,
-    ) {
-        if (!symbol.matches(Regex("[A-Za-z0-9/_-]{3,30}"))) {
-            _learn.value = LearnState.Failed("نام نماد وارداتی معتبر نیست")
-            return
-        }
-        viewModelScope.launch {
-            _learn.value = LearnState.Loading("خواندن CSV آموزشی/متاتریدر برای پژوهش؛ منشأ فایل تأیید نشده است…")
-            try {
-                val csv = when {
-                    uri != null -> container.metaTraderImporter.fromFile(uri)
-                    !link.isNullOrBlank() -> container.metaTraderImporter.fromHttps(link)
-                    else -> throw IllegalArgumentException("فایل یا لینک CSV آموزشی/متاتریدر را انتخاب کنید")
-                }
-                val result = container.runImportedBacktest(csv, symbol, interval, timezone,
-                    balance, risk.coerceIn(0.1, 5.0), spread, commission, threshold)
-                _learn.value = LearnState.Done(result, interval)
-            } catch (e: Exception) {
-                _learn.value = LearnState.Failed(e.message ?: "فایل/لینک CSV آموزشی/متاتریدر قابل تحلیل نیست")
-            }
-        }
-    }
-
-    fun runWalkForward(
-        interval: Interval,
-        bars: Int,
-        balance: Double,
-        risk: Double,
-        spread: Double,
-        commission: Double,
-        threshold: Double,
-    ) {
-        viewModelScope.launch {
-            val requestedBars = HistoryPolicy.deepProviderRequestSize(bars)
-            val displayBars = requestedBars.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)
-            _walkForward.value = WalkForwardState.Loading("دانلود حداقل $displayBars کندل واقعی ${interval.label} از منبع عمومی/Dukascopy و تقسیم به داخل/خارج نمونه…")
-            try {
-                val result = container.runWalkForward(interval, requestedBars, balance, risk, spread, commission, threshold)
-                val saved = try {
-                    container.journalStore.saveReport(WalkForwardRecord.from(result))
-                    true
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
-                    _toast.value = "تست انجام شد ولی گزارش در گوشی ذخیره نشد؛ فایل قبلی دست‌نخورده ماند"
-                    false
-                }
-                _walkForward.value = WalkForwardState.Done(result, interval, saved)
-            } catch (e: Exception) {
-                _walkForward.value = WalkForwardState.Failed(e.message ?: "خطا در دریافت داده واقعی")
-            }
         }
     }
 

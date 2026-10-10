@@ -209,7 +209,7 @@ class MarketRepository(
             // One bounded live window is enough for EMA200/Ichimoku evaluation. Do not
             // download 3,000/12,000 historical candles every time a chart opens.
             refresh(
-                requestedSize = HistoryPolicy.LIVE_REQUEST_CANDLES,
+                requestedSize = HistoryPolicy.LIVE_FETCH_CANDLES,
                 minimumSize = HistoryPolicy.LIVE_MIN_CANDLES,
                 allowClosedMarketHistory = true,
             )
@@ -217,7 +217,7 @@ class MarketRepository(
     }
 
     private suspend fun refresh(
-        requestedSize: Int = HistoryPolicy.LIVE_REQUEST_CANDLES,
+        requestedSize: Int = HistoryPolicy.LIVE_FETCH_CANDLES,
         minimumSize: Int = HistoryPolicy.LIVE_MIN_CANDLES,
         allowClosedMarketHistory: Boolean = false,
     ) = refreshMutex.withLock {
@@ -275,7 +275,7 @@ class MarketRepository(
                 fetched = public.candles
                 historyProvider = public.provider
                 staleDetail = "تاریخچهٔ عمومی پاسخ داد اما آخرین کندل آن قدیمی است؛ تیک زندهٔ جداگانه باید قیمت فعلی را تأیید کند"
-                if (requestedSize > HistoryPolicy.LIVE_REQUEST_CANDLES && fetched.size < requestedSize &&
+                if (requestedSize > HistoryPolicy.LIVE_FETCH_CANDLES && fetched.size < requestedSize &&
                     DukascopyHistoryClient.instrument(current.symbol) != null) {
                     try {
                         val deep = dukascopyHistory.fetchCandles(current.symbol, current.interval,
@@ -724,7 +724,7 @@ class MarketRepository(
         // Never stall the live tick/settlement stream behind six REST history downloads.
         // Until all seven REAL timeframes arrive the engine returns NO_TRADE, not a guess.
         val frameNow = System.currentTimeMillis()
-        if (!showingCache && bars.count { it.closed } >= SignalEngine.minBars(current.interval) &&
+        if (!showingCache && bars.count { it.closed } >= HistoryPolicy.LIVE_MIN_CANDLES &&
             timeframeJob?.isActive != true && frameNow - lastFrameRefreshAt >= 60_000L) {
             lastFrameRefreshAt = frameNow
             val session = generation

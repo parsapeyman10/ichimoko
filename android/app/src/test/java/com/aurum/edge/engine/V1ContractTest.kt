@@ -23,8 +23,8 @@ import java.time.Instant
 
 class V1ContractTest {
     private val now = Instant.parse("2026-10-08T12:00:00Z").toEpochMilli()
-    private fun bars(interval: Interval): List<Candle> = (0 until 240).map { i ->
-        val start = now - (240 - i) * interval.millis
+    private fun bars(interval: Interval): List<Candle> = (0 until 340).map { i ->
+        val start = now - (340 - i) * interval.millis
         val price = 100.0 + i * .02 + (i % 5) * .08
         Candle(start, price, price + .25, price - .25, price + .03, 100.0, true)
     }
@@ -57,6 +57,25 @@ class V1ContractTest {
             symbol = "EUR/USD", timeframes = future)
         assertEquals(SignalAction.NO_TRADE, rejected.action)
         assertTrue(rejected.blockers.any { it.contains("پشتهٔ ۷") })
+    }
+
+    @Test fun oneShortOrUnclosedFrameBlocksSevenFrameAlignment() {
+        val complete = V1Scoring.intervals.associateWith(::bars)
+        val short = complete.toMutableMap()
+        short[Interval.M1] = complete.getValue(Interval.M1).takeLast(319)
+        val rejected = SignalEngine.evaluate(complete.getValue(Interval.M5), Interval.M5, 60.0,
+            symbol = "EUR/USD", timeframes = short)
+        assertEquals(SignalAction.NO_TRADE, rejected.action)
+        assertTrue(rejected.blockers.any { it.contains("1m(319/320)") })
+        assertTrue(rejected.confluence.last().detail.contains("319/320 کندل"))
+
+        val open = complete.toMutableMap()
+        open[Interval.H1] = complete.getValue(Interval.H1).takeLast(320)
+            .mapIndexed { index, candle -> if (index == 319) candle.copy(closed = false) else candle }
+        val blocked = SignalEngine.evaluate(complete.getValue(Interval.M5), Interval.M5, 60.0,
+            symbol = "EUR/USD", timeframes = open)
+        assertEquals(SignalAction.NO_TRADE, blocked.action)
+        assertTrue(blocked.blockers.any { it.contains("1h(319/320)") })
     }
 
     private fun trade(id: String, symbol: String, opened: Long, closed: Long? = null,

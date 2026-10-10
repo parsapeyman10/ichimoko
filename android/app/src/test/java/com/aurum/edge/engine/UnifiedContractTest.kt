@@ -60,26 +60,4 @@ class UnifiedContractTest {
         assertTrue(PaperPortfolioPolicy.blocker(listOf(trade("EUR/USD", 5L)),
             "EUR/USD", 1_000.0, 0.0, 5L) != null)
     }
-
-    @Test fun replayCursorUsesTheSameDecisionAsLiveWithoutSeeingFutureBars() {
-        val bars = (0 until 260).map { i ->
-            val price = 100.0 + i * 0.1
-            Candle(1_700_000_000_000L + i * Interval.M5.millis,
-                price, price + 0.6, price - 0.6, price + 0.1, 100.0)
-        }
-        val config = ReplayEngine.Config(1_000.0, 0.5, 0.3, 0.05, 85.0, SignalProfile.BASE)
-        val session = ReplayEngine.create(bars, Interval.M5, "XAU/USD", "fixture", config, 220)
-        val snapshot = ReplayEngine.snapshot(session)
-        val live = SignalEngine.evaluate(bars.take(221), Interval.M5)
-        assertEquals(live.action, snapshot.signal?.action)
-        assertEquals(live.blockers, snapshot.signal?.blockers)
-        assertEquals(live.barTime, snapshot.signal?.barTime)
-        val futureSnapshot = ReplayEngine.snapshot(ReplayEngine.create(
-            bars + bars.last().copy(time = bars.last().time + Interval.M5.millis,
-                high = 10_001.0, close = 10_000.0), Interval.M5,
-            "XAU/USD", "fixture", config, 220))
-        assertEquals(live.action, futureSnapshot.signal?.action)
-        assertEquals(live.blockers, futureSnapshot.signal?.blockers)
-        assertEquals(live.barTime, futureSnapshot.signal?.barTime)
-    }
 }

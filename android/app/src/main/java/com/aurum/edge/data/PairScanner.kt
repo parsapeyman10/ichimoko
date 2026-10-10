@@ -267,14 +267,14 @@ class PairScanner(
             suspend fun publicOrDukascopy(): List<Candle> = try {
                 publicHistory.fetchCandles(symbol, interval,
                     minimumSize = HistoryPolicy.LIVE_MIN_CANDLES,
-                    desiredSize = HistoryPolicy.LIVE_REQUEST_CANDLES).candles
+                    desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES).candles
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (publicFailure: Exception) {
                 try {
                     dukascopyHistory.fetchCandles(symbol, interval,
                         minimumSize = HistoryPolicy.LIVE_MIN_CANDLES,
-                        desiredSize = HistoryPolicy.LIVE_REQUEST_CANDLES).candles
+                        desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES).candles
                 } catch (cancel: CancellationException) {
                     throw cancel
                 } catch (deepFailure: Exception) {
@@ -286,20 +286,20 @@ class PairScanner(
                 if (CryptoCatalog.isCrypto(symbol)) {
                     try {
                         nobitexHistory.fetchCandles(symbol, interval,
-                            HistoryPolicy.LIVE_REQUEST_CANDLES, HistoryPolicy.LIVE_MIN_CANDLES).candles
+                            HistoryPolicy.LIVE_FETCH_CANDLES, HistoryPolicy.LIVE_MIN_CANDLES).candles
                     } catch (cancel: CancellationException) {
                         throw cancel
                     } catch (_: Exception) {
                         // A keyed exchange feed may carry the exact USDT pair. Never silently
                         // substitute a USD quote for it if both sources are unavailable.
                         if (config.hasKey) client.fetchCandles(config.apiKey, symbol, interval,
-                            outputSize = HistoryPolicy.LIVE_REQUEST_CANDLES,
+                            outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
                             minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES)
                         else throw DataFeedException("فید واقعی ${symbol} از نوبیتکس در دسترس نیست؛ دادهٔ USD جایگزین USDT نمی‌شود")
                     }
                 } else if (config.hasKey) {
                     try {
-                        client.fetchCandles(config.apiKey, symbol, interval, outputSize = HistoryPolicy.LIVE_REQUEST_CANDLES,
+                        client.fetchCandles(config.apiKey, symbol, interval, outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
                             minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES)
                     } catch (cancel: CancellationException) {
                         throw cancel
@@ -319,8 +319,9 @@ class PairScanner(
             // Provider flags can mark an in-progress bar as closed. Never score, settle or
             // construct MTF snapshots from it, even when its OHLC parses correctly.
             val candles = rawCandles.filter { it.closed && it.time + interval.millis <= now }
-            if (candles.size < SignalEngine.minBars(interval)) {
-                update(symbol, "error", "ناشر فقط ${candles.size} کندل بسته داد؛ حداقل ${SignalEngine.minBars(interval)} کندل لازم است")
+                .sortedBy { it.time }.distinctBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
+            if (candles.size < HistoryPolicy.LIVE_MIN_CANDLES) {
+                update(symbol, "error", "بازهٔ ${interval.label} فقط ${candles.size} کندل بستهٔ واقعی دارد؛ ${HistoryPolicy.LIVE_MIN_CANDLES} لازم است")
                 return@forEachIndexed
             }
 
