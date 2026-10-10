@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -63,9 +64,8 @@ import kotlinx.coroutines.delay
  * ۵. وضعیت پایش واچ‌لیست فعال در پس‌زمینه
  */
 @Composable
-fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () -> Unit,
-                 onOpenChart: () -> Unit, onChartSymbol: (String) -> Unit,
-                 onOpenJournal: () -> Unit) {
+fun SignalScreen(viewModel: AurumViewModel, market: MarketState,
+                 onChartSymbol: (String) -> Unit) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val autoStatus by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
@@ -79,6 +79,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
     val aiConnection by viewModel.aiConnection.collectAsStateWithLifecycle()
     val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
     var showAllDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var visibleDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(12) }
     var scanClock by androidx.compose.runtime.remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) {
@@ -127,8 +128,9 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
 
         // Rankings for all four markets, not only the eight default watchlist rows.
         PerMarketRecommendations(scanState, settings.interval, scanClock, onChartSymbol)
+        EvidenceTimingCard(market, positionBlocker)
 
-        // ── ۴. خلاصه سیگنال نماد انتخابی و موتور تلفیقی ایچیموکو ─────────
+        // ── ۴. خلاصه سیگنال نماد انتخابی و موتور واحد چهارلایه ─────────
         SignalSummaryCard(
             signal = signal,
             symbol = market.symbol,
@@ -136,15 +138,6 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             entryBlocker = positionBlocker,
             allowManualPaperTrade = true,
         )
-
-        SectionCard("مسیر مشترک این نماد · ${market.symbol}",
-            "چارت، خبر و ژورنال همگی نماد/معاملات همین دستگاه را می‌خوانند") {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onOpenChart) { Text("چارت") }
-                OutlinedButton(onClick = onOpenNews) { Text("خبر و تقویم") }
-                OutlinedButton(onClick = onOpenJournal) { Text("ژورنال") }
-            }
-        }
 
         // ── ۵. وضعیت معامله خودکار کاغذی ─────────────────────────────────
         SectionCard("معاملهٔ خودکار کاغذی (تخصیص متوازن ۴ بازار)") {
@@ -199,7 +192,11 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
             if (decisionLog.size > latestBySymbol.size) OutlinedButton(onClick = { showAllDecisions = !showAllDecisions }) {
                 Text(if (showAllDecisions) "آخرین دلیل هر نماد" else "تاریخچهٔ ${decisionLog.size} بررسی اخیر")
             }
-            (if (showAllDecisions) decisionLog else latestBySymbol).forEach { record ->
+            val records = if (showAllDecisions) decisionLog else latestBySymbol
+            records.take(visibleDecisions).forEach { record ->
+                Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                    .background(AurumColors.SurfaceAlt, RoundedCornerShape(12.dp))
+                    .padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("${record.symbol} · ${record.interval} · ${formatTime(record.checkedAt)} · " +
                     "${record.action} · ${record.score?.toInt() ?: "—"}/۱۰۰",
                     style = MaterialTheme.typography.bodySmall,
@@ -214,9 +211,60 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () 
                     Text("${layer.name}: ${layer.points ?: "—"}/۲۵ · ${layer.status} · ${layer.detail}",
                         style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
+                }
+            }
+            if (records.size > visibleDecisions) OutlinedButton(onClick = { visibleDecisions += 12 }) {
+                Text("نمایش ۱۲ بررسیٔ دیگر · ${records.size - visibleDecisions} باقی‌مانده")
             }
         }
 
+    }
+}
+
+/** Live, read-only timing evidence; no fabricated buy window or forex volume. */
+@Composable
+private fun EvidenceTimingCard(market: MarketState, entryBlocker: String?) {
+    val now = System.currentTimeMillis()
+    val live = market.feed.mode in setOf(com.aurum.edge.core.FeedMode.LIVE,
+        com.aurum.edge.core.FeedMode.POLLING) && !market.showingCachedData &&
+        com.aurum.edge.core.FeedLiveness.hasRecentReceipt(market.feed, now)
+    val bar = market.candles.lastOrNull { it.closed }
+    val freshBar = bar != null && bar.time == market.signal?.barTime &&
+        now - (bar.time + market.interval.millis) in 0L..(market.interval.millis + 90_000L)
+    val buy = live && freshBar && entryBlocker == null && market.signal?.isActionable == true &&
+        market.signal?.action == SignalAction.BUY
+    val hours = if (live) com.aurum.edge.core.VolumeSessionStats.cryptoHours(
+        market.symbol, market.interval, market.candles, now) else emptyList()
+    SectionCard("زمان خرید و ساعات پرحجم · ${market.symbol}",
+        "بر پایهٔ دادهٔ همین نماد؛ توصیف آماری، نه پیش‌بینی سود") {
+        Text(if (buy) "اکنون سیگنال خرید چهارلایهٔ تازه و قابل بررسی وجود دارد · " +
+            "کندل ${market.signal?.barTime?.let { formatTime(it) } ?: "—"}"
+             else "اکنون زمان خرید تأییدشده‌ای نداریم؛ " +
+                 (entryBlocker ?: if (live) "سیگنال خرید چهارلایهٔ معتبر وجود ندارد" else "فید تازه در دسترس نیست"),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (buy) AurumColors.Green else AurumColors.Gold)
+        Text("منبع فعلی: ${market.feed.provider} · آخرین دریافت ${market.feed.lastSuccessAt?.let { formatTime(it) } ?: "—"} · " +
+            "بازه ${market.interval.label} · قیمت/حجم فقط از همان جفتِ منبع، بدون تبدیل دلار به تتر. " +
+            "دسترسی از اینترنت ایران فقط با آزمون روی دستگاه و شبکهٔ همان کاربر قابل تأیید است.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 5.dp))
+        if (hours.isEmpty()) {
+            Text("ساعت اوج حجم قابل محاسبه نیست: فقط رمزارز با فید تازه، کندل H1 بستهٔ واقعی، " +
+                "حجم مثبت و حداقل ۵ نمونه در تک‌تک ۲۴ ساعت UTC طی ۱۴ روز پذیرفته می‌شود. " +
+                "در فارکس/نفت حجم قراردادِ هم‌هویت تأیید نشده؛ عددی حدس نمی‌زنیم.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 8.dp))
+        } else {
+            Text("۳ ساعت با میانگین بیشترین حجم ثبت‌شده در ۱۴ روز گذشته (UTC، نه پیشنهاد خرید):",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 8.dp))
+            hours.forEachIndexed { index, hour ->
+                Text("${index + 1}. ${"%02d".format(java.util.Locale.US, hour.utcHour)}:00–" +
+                    "${"%02d".format(java.util.Locale.US, (hour.utcHour + 1) % 24)}:00 UTC · " +
+                    "میانگین ${"%.2f".format(java.util.Locale.US, hour.meanVolume)} واحد پایه · ${hour.samples} کندل",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.Cyan)
+            }
+        }
     }
 }
 
@@ -281,7 +329,9 @@ private fun MarketTrendCard(
     context: TrendContext?,
     symbol: String,
 ) {
-    val biasColor = when (read?.bias) {
+    val stale = read != null && System.currentTimeMillis() - read.computedAt !in 0L..10 * 60_000L
+    val currentRead = read?.takeUnless { stale }
+    val biasColor = when (currentRead?.bias) {
         TrendDirection.UP -> AurumColors.Green
         TrendDirection.DOWN -> AurumColors.Red
         TrendDirection.SIDEWAYS -> AurumColors.Gold
@@ -290,15 +340,18 @@ private fun MarketTrendCard(
     SectionCard(
         title = "روند کلی بازار · $symbol",
         subtitle = "سه لایهٔ اندازه‌گیری از کندل‌های بستهٔ واقعی: روندِ تایم‌فریم مرجعِ خودِ نماد، " +
-            "عرض بازار در ۵۰+ نماد، و جهت دلار + جوّ ریسک‌پذیری",
+            "عرض نمادهای واقعاً سنجیده‌شده (هر نماد یک رأی)، و جهت دلار + جوّ ریسک‌پذیری",
         trailing = {
             Pill(
-                if (read == null) "هنوز اندازه گرفته نشد" else "${read.bias.label} · ${read.strength}٪",
+                if (currentRead == null) "هنوز اندازه گرفته نشد" else "${currentRead.bias.label} · ${currentRead.strength}٪",
                 biasColor,
             )
         },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("نمونهٔ هر بازار متغیر است؛ این عدد ارزش‌وزن/حجم‌وزن کل بازار نیست. " +
+                "نبود دادهٔ هم‌نماد از ایران به معنی روند خنثی نیست.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             Text("چطور به دست می‌آید؟ (۱) کندل‌های تایم‌فریم پایه به تایم‌فریم مرجع تجمیع می‌شوند " +
                     "(M5→H1، M15→H4، H1→H4، H4→D1) و شش رأی مستقل شمرده می‌شود: قیمت نسبت به EMA50، " +
                     "EMA20 نسبت به EMA50، شیب EMA50 بر حسب ATR، Efficiency Ratio، ساختار سقف/کف " +
@@ -308,20 +361,20 @@ private fun MarketTrendCard(
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatTile("جهت بازار", read?.bias?.label ?: "—", biasColor, Modifier.weight(1f))
-                StatTile("قدرت", read?.let { "${it.strength}٪" } ?: "—", AurumColors.TextPrimary, Modifier.weight(1f))
-                StatTile("عرض بازار", read?.let { "${it.breadthUp}↑/${it.breadthDown}↓" } ?: "—",
+                StatTile("جهت بازار", currentRead?.bias?.label ?: "—", biasColor, Modifier.weight(1f))
+                StatTile("قدرت", currentRead?.let { "${it.strength}٪" } ?: "—", AurumColors.TextPrimary, Modifier.weight(1f))
+                StatTile("عرض بازار", currentRead?.let { "${it.breadthUp}↑/${it.breadthDown}↓" } ?: "—",
                     AurumColors.Cyan, Modifier.weight(1f))
-                StatTile("دلار", read?.dollarBias?.label ?: "—", AurumColors.TextPrimary, Modifier.weight(1f))
+                StatTile("دلار", currentRead?.dollarBias?.label ?: "—", AurumColors.TextPrimary, Modifier.weight(1f))
             }
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatTile("جوّ بازار", read?.riskTone?.label ?: "—",
-                    when (read?.riskTone) {
+                StatTile("جوّ بازار", currentRead?.riskTone?.label ?: "—",
+                    when (currentRead?.riskTone) {
                         RiskTone.RISK_ON -> AurumColors.Green
                         RiskTone.RISK_OFF -> AurumColors.Red
                         else -> AurumColors.Gold
                     }, Modifier.weight(1f))
-                StatTile("نمادِ سنجیده", read?.let { "${it.measured}" } ?: "—",
+                StatTile("نمادِ سنجیده", currentRead?.let { "${it.measured}" } ?: "—",
                     AurumColors.TextPrimary, Modifier.weight(1f))
                 StatTile("روندِ خودِ نماد", symbolTrend?.direction?.label ?: "—",
                     when (symbolTrend?.direction) {
@@ -334,16 +387,19 @@ private fun MarketTrendCard(
                     AurumColors.TextPrimary, Modifier.weight(1f))
             }
 
-            if (read == null) {
+            if (stale) Text("خوانش قبلی مربوط به ${read?.computedAt?.let { formatTime(it) } ?: "—"} است و " +
+                "بیش از ۱۰ دقیقه عمر دارد؛ تا تکمیل پویش جدید، جهت کلی به‌عنوان دادهٔ زنده نمایش/اعمال نمی‌شود.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+            if (currentRead == null) {
                 Text("هنوز هیچ پویشی چیزی اندازه نگرفته است (یا کندل بستهٔ کافی نرسیده). تا وقتی " +
                         "روند کلی بازار مجهول است، معامله‌ها فقط با روندِ خودِ نماد و بقیهٔ گیت‌ها " +
                         "سنجیده می‌شوند و هیچ جهتِ کلیِ حدسی ساخته نمی‌شود.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             } else {
-                read.drivers.forEach { driver ->
+                currentRead.drivers.forEach { driver ->
                     Text("• $driver", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
                 }
-                read.families.forEach { family ->
+                currentRead.families.forEach { family ->
                     Text(family.summaryFa + " · قدرت ${family.strength}٪",
                         style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
@@ -444,43 +500,62 @@ private fun fmt2(value: Double?): String =
 private fun PerMarketRecommendations(scan: PairScanState, interval: com.aurum.edge.core.Interval,
                                      now: Long, onSelect: (String) -> Unit) {
     val picks = ScanRanking.byMarket(scan.statuses, interval, now)
-    SectionCard("بهترین هر بازار + ۳ گزینهٔ بعدی",
-        "رتبه‌بندی فقط از کندل‌های بستهٔ همین دور؛ «فقط مشاهده» فاقد مجوز ورود/اعلان یا قیمت لحظه‌ای تأییدشده است") {
-        com.aurum.edge.core.AssetClass.entries.forEach { category ->
-            val rows = scan.statuses.filter { it.assetClass == category }
-            val checked = rows.count { it.state != "pending" }
-            val ranked = picks[category].orEmpty()
-            Text("${category.label} · بررسی‌شده $checked/${rows.size}" +
-                    if (scan.sweeping) " · اسکن در جریان" else "",
-                style = MaterialTheme.typography.titleSmall, color = AurumColors.Gold,
-                modifier = Modifier.padding(top = 8.dp))
-            Text("بازشده ${rows.count { it.state == "opened" }} · فید ناموفق ${rows.count { it.state == "error" }} · بسته ${rows.count { it.state == "closed" }} · " +
-                    "بدون سیگنال ${rows.count { it.state == "no_signal" }} · مانع ورود ${rows.count { it.state == "blocked" }} · " +
-                    "دادهٔ ناقص ${rows.count { it.state == "partial" }} · مشاهده ${rows.count { it.state == "observed" }} · کاندیدا ${rows.count { it.state == "candidate" }}",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            if (ranked.isEmpty()) {
-                val reason = rows.firstOrNull { it.state == "opened" || it.state == "error" || it.state == "partial" || it.state == "blocked" || it.state == "no_signal" }
-                Text(if (checked == 0) "هنوز بررسی نشده است؛ پایش پس‌زمینه را روشن کنید یا اسکن را بزنید."
-                     else "فرصت تازهٔ تأییدشده‌ای نیست. ${reason?.symbol ?: ""}: ${reason?.detail ?: "بازار بسته است یا داده/شواهد کافی نیست"}",
-                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
-            } else {
-                ranked.forEachIndexed { index, row ->
-                    Row(Modifier.fillMaxWidth().padding(top = 5.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("${if (index == 0) "بهترین" else "گزینهٔ $index"} · ${row.symbol} · ${row.action?.name ?: "—"} · ${row.confidence?.toInt() ?: 0}/۱۰۰" +
-                                if (row.state == "observed") " · فقط مشاهده" else " · کاندیدای واچ‌لیست",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (row.state == "candidate") AurumColors.Green else AurumColors.Gold,
-                            modifier = Modifier.weight(1f))
-                        Text("بررسی ↗", style = MaterialTheme.typography.labelSmall,
-                            color = AurumColors.Cyan, modifier = Modifier.clickable { onSelect(row.symbol) })
-                    }
-                    if (row.state == "observed") Text(row.detail,
-                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                }
-                if (ranked.size < 4) Text("${4 - ranked.size} گزینهٔ دیگر با داده/شروط معتبر پیدا نشد؛ موردی ساخته نمی‌شود.",
-                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+    AssetClass.entries.forEach { category ->
+        val rows = scan.statuses.filter { it.assetClass == category }
+        val checked = rows.count { it.state != "pending" }
+        val ranked = picks[category].orEmpty()
+        SectionCard("برترین‌های ${category.label}",
+            "همین دور اسکن · $checked/${rows.size} بررسی‌شده · ${rows.count { it.state == "error" }} فید ناموفق · " +
+                "${rows.count { it.state == "partial" }} تاریخچهٔ ناقص",
+            trailing = { Pill(if (scan.sweeping) "در حال اسکن" else "آخرین دور", AurumColors.Cyan) }) {
+            Box(Modifier.fillMaxWidth().height(6.dp)
+                .background(AurumColors.SurfaceAlt, RoundedCornerShape(8.dp))) {
+                Box(Modifier.fillMaxWidth(if (rows.isEmpty()) 0f else checked.toFloat() / rows.size)
+                    .height(6.dp).background(AurumColors.Cyan, RoundedCornerShape(8.dp)))
             }
+            Text("رتبه فقط از کندل‌های بستهٔ تازه است؛ «مشاهده» نه مجوز ورود است نه قیمت لحظه‌ای. " +
+                "اگر دادهٔ هفت بازه یا فید معتبر نباشد، رتبه ساخته نمی‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                modifier = Modifier.padding(vertical = 6.dp))
+            if (ranked.isEmpty()) {
+                val reason = rows.firstOrNull { it.state == "error" || it.state == "partial" || it.state == "blocked" }
+                Text(if (checked == 0) "هنوز بررسی نشده؛ اسکن را اجرا کنید."
+                     else "فعلاً گزینهٔ معتبر نیست. ${reason?.symbol.orEmpty()}: ${reason?.detail ?: "شرایط کافی نیست"}",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            } else ranked.forEachIndexed { index, row ->
+                val approved = row.state == "candidate"
+                Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)
+                    .background(AurumColors.SurfaceAlt, RoundedCornerShape(14.dp))
+                    .clickable { onSelect(row.symbol) }.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("#${index + 1}  ${row.symbol}", style = MaterialTheme.typography.titleSmall,
+                            color = AurumColors.TextPrimary, fontWeight = FontWeight.Bold)
+                        Pill(if (approved) "کاندیدای واچ‌لیست" else "فقط مشاهده",
+                            if (approved) AurumColors.Green else AurumColors.Gold)
+                    }
+                    if (category == AssetClass.CRYPTO) Text(
+                        com.aurum.edge.data.CryptoFamilies.label(row.symbol),
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
+                    Text("${row.action?.name ?: "—"} · امتیاز ${row.confidence?.toInt() ?: 0}/۱۰۰ · " +
+                        "متد ${row.methodLabel ?: "نامشخص"} · ${row.trendLabel ?: "روند نامشخص"}",
+                        style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+                    Box(Modifier.fillMaxWidth().height(5.dp)
+                        .background(AurumColors.Bg, RoundedCornerShape(5.dp))) {
+                        Box(Modifier.fillMaxWidth(((row.confidence ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f))
+                            .height(5.dp).background(if (approved) AurumColors.Green else AurumColors.Gold,
+                                RoundedCornerShape(5.dp)))
+                    }
+                    Text("بررسی ${row.lastScanAt?.let { formatTime(it) } ?: "—"} · " +
+                        "قیمت کندل ${formatPrice(row.price)} · لمس کنید برای بررسی نماد",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                    if (!approved) Text(row.detail, style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Gold)
+                }
+            }
+            if (ranked.size in 1..3) Text("گزینهٔ بیشتری با شواهد تازه پیدا نشد؛ رتبهٔ فرضی نمایش داده نمی‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
     }
 }
@@ -646,7 +721,7 @@ private fun BestOpportunityDetailedCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "برای شکار بهترین ستاپ معاملاتی از میان تمامی ۵۰ نماد، دکمهٔ اسکن را بزنید.",
+                    text = "برای بررسی همهٔ نمادهای کاتالوگ با دادهٔ واقعی، اسکن را بزنید؛ نبود فید به‌صورت خطا نمایش داده می‌شود.",
                     style = MaterialTheme.typography.bodySmall,
                     color = AurumColors.TextSecondary,
                     modifier = Modifier.weight(1f),
@@ -660,7 +735,7 @@ private fun BestOpportunityDetailedCard(
                     ),
                     modifier = Modifier.padding(start = 8.dp),
                 ) {
-                    Text(if (sweeping) "در حال اسکن..." else "اسکن ۵۰ نماد")
+                    Text(if (sweeping) "در حال اسکن..." else "اسکن کاتالوگ")
                 }
             }
         }
@@ -829,9 +904,9 @@ internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, now: 
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "همهٔ نمادهای کاتالوگ و واچ‌لیست، با همان متد و دادهٔ واقعی به‌ترتیب بررسی می‌شوند؛ " +
+                "برای همهٔ نمادهای کاتالوگ و واچ‌لیست به‌ترتیب تلاش می‌شود؛ فقط کندل واقعیِ هم‌نماد امتیاز می‌گیرد. " +
                     "نبود فید/بسته‌بودن بازار هم با دلیل ثبت می‌شود. فقط واچ‌لیست فعال مجاز به فرصت معاملاتی است. " +
-                    "پایش پس‌زمینه نیازمند فعال‌بودن سرویس در تنظیمات است.",
+                    "اسکن پیوسته در پس‌زمینه نیازمند سرویس فعال در تنظیمات است؛ هر دور پس از اتمام و فاصلهٔ حداقلی شروع می‌شود.",
                 style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextSecondary,
                 modifier = Modifier.weight(1f),
@@ -845,7 +920,9 @@ internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, now: 
             }
         }
         Text("نتیجهٔ دور جاری: ${scan.checkedCount}/${scan.totalCount} نماد · " +
-            "دلیل تک‌تک بررسی‌ها در انتهای همین صفحه ثبت می‌شود.",
+            "آخرین دور کامل: ${scan.lastSweepAt?.let { formatTime(it) } ?: "هنوز کامل نشده"} · " +
+            "تلاش بعدی پس از اتمام دور، حداقل ۳۰ ثانیه فاصله و در چرخهٔ حدوداً یک‌دقیقه‌ای برنامه. " +
+            "زمان واقعی به شبکه و محدودیت منبع بستگی دارد؛ دلیل هر بررسی در انتهای صفحه است.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         scan.lastError?.let { Text(it, color = AurumColors.Red, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp)) }
     }

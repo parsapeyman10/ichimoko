@@ -108,6 +108,11 @@ class JournalStore(
         marketTrend: MarketTrendRecord? = null,
         observedAt: Long = System.currentTimeMillis(),
     ): PaperTrade {
+        // Authoritative entry guard, independent of UI, scanner and automatic trader. Do not
+        // move this into settlement: already-open oil positions must still be manageable.
+        require(com.aurum.edge.core.OilEntrySafety.blocker(symbol) == null) {
+            com.aurum.edge.core.OilEntrySafety.REASON
+        }
         require(!com.aurum.edge.core.MarketHours.closedFor(symbol, observedAt)) {
             "بازار این نماد بسته است؛ ثبت پوزیشن کاغذی ممنوع"
         }

@@ -171,7 +171,11 @@ class PairScanner(
         // complete after the last symbol, so entries during this sweep are checked against the
         // latest completed read (its age depends on provider latency). On the first sweep it is null, and then only
         // the instrument's own reference-timeframe trend is used — never a guessed market bias.
-        val overallTrend = _state.value.marketTrend
+        // A previous sweep can be hours old when providers fail or the app is paused.
+        // Do not apply its risk-tone adjustment as if it described today's market.
+        val overallTrend = _state.value.marketTrend?.takeIf {
+            System.currentTimeMillis() - it.computedAt in 0L..10 * 60_000L
+        }
         val config = settings.read()
         // The watchlist is evaluated first, but every supported catalog instrument is also
         // checked by the same candle -> V1 four-layer -> AI veto -> risk pipeline. An absent
@@ -331,6 +335,14 @@ class PairScanner(
 
             val price = candles.lastOrNull()?.close
             val lastClosed = candles.lastOrNull { it.closed && it.time + interval.millis <= now }
+            // A newly fetched response can still contain only old bars. Scan timestamp alone
+            // must never make that history look fresh in rankings or the market-wide trend.
+            if (lastClosed == null || now - (lastClosed.time + interval.millis) !in
+                0L..(interval.millis + 90_000L)) {
+                update(symbol, "partial", "آخرین کندل بستهٔ منبع قدیمی است؛ رتبه/روند تازه ساخته نشد",
+                    price = price)
+                return@forEachIndexed
+            }
             // A REST candle close is not a live tick. Never settle a position as if it were one.
             if (lastClosed != null) {
                 try {

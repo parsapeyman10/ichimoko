@@ -9,6 +9,7 @@ object PaperAutoRules {
     fun blocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
                 now: Long = System.currentTimeMillis(),
                 allowedSymbols: List<String> = settings.activeWatchlist): String? {
+        OilEntrySafety.blocker(market.symbol)?.let { return it }
         if (!settings.autoPaperTrading) return "معاملهٔ خودکار کاغذی خاموش است"
         if (market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))
             return "فید معتبر در دسترس نیست (وضعیت فید: ${market.feed.mode.label})"

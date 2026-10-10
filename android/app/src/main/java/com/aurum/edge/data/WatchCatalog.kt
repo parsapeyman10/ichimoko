@@ -67,6 +67,12 @@ object WatchCatalog {
         "SPY", "QQQ", "PLTR", "COIN", "BABA",
         "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "DOGE/USDT", "ADA/USDT",
         "AVAX/USDT", "LINK/USDT", "SUI/USDT", "NEAR/USDT", "PEPE/USDT", "TON/USDT", "DOT/USDT", "LTC/USDT"
+    ) + listOf(
+        // Distinct crypto families; read-only scans fail closed if no same-pair real feed exists.
+        "TRX/USDT", "BCH/USDT", "SHIB/USDT", "UNI/USDT", "ATOM/USDT",
+        "APT/USDT", "ARB/USDT", "OP/USDT", "FIL/USDT", "ICP/USDT",
+        "INJ/USDT", "SEI/USDT", "AAVE/USDT", "WIF/USDT", "FET/USDT",
+        "RENDER/USDT", "TIA/USDT", "GRT/USDT", "SAND/USDT", "MANA/USDT", "POL/USDT"
     )
 
     /** Scan the user's configured symbols first, then every catalog instrument. Never trade an

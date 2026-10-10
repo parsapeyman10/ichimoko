@@ -256,8 +256,15 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         ensureLiveTickerLoop()
     }
 
-    /** Forex is the app's only workspace: start the real feed as soon as the UI is visible. */
+    /** Open on gold on each cold launch; in-session symbol selections remain available. */
     fun startApp(context: Context) {
+        if (container.settingsStore.read().symbol != "XAU/USD") {
+            // Save before starting the market feed, so it cannot start on the previously
+            // viewed symbol. This changes only the chart selection, never open positions.
+            if (!container.settingsStore.saveChartSymbol("XAU/USD")) {
+                _toast.value = "شروع با طلا ذخیره نشد؛ نماد قبلی حفظ شد"
+            }
+        }
         visibleOnlineLoopEnabled = true
         container.market.start()
         container.watch.loadCached()
@@ -650,6 +657,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     private fun entryBlocker(current: MarketState): String? {
+        com.aurum.edge.core.OilEntrySafety.blocker(current.symbol)?.let { return it }
         freshPaperQuote(current)?.let { return it }
         if (com.aurum.edge.core.MarketHours.closedFor(current.symbol)) return "بازار بسته است"
         val candidate = current.signal

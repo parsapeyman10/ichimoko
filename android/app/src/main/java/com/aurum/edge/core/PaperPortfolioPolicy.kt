@@ -18,6 +18,10 @@ object PaperPortfolioPolicy {
     fun blocker(trades: List<PaperTrade>, symbol: String, balance: Double,
                 addedRiskUsd: Double, signalBarTime: Long? = null,
                 now: Long = System.currentTimeMillis(), openingBalance: Double? = null): String? {
+        // Oil entry quarantine: the reported loss series cannot be audited without the device
+        // journal and venue-matched history. No new paper entry (manual or automatic) is safe to
+        // authorize yet. This intentionally does NOT alter or close existing trades.
+        OilEntrySafety.blocker(symbol)?.let { return it }
         val open = trades.filter { it.isOpen }
         if (open.size >= MAX_OPEN) return "سقف ۴ پوزیشن باز پورتفو پر است"
         if (open.any { it.symbol == symbol }) return "برای این نماد پوزیشن کاغذی باز است"

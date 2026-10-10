@@ -59,7 +59,7 @@ fun SignalSummaryCard(
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        if (symbol.isNotBlank()) "موتور تلفیقی ایچیموکو · $symbol" else "موتور تلفیقی ایچیموکو",
+                        if (symbol.isNotBlank()) "موتور واحد چهارلایه · $symbol" else "موتور واحد چهارلایه",
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.Gold,
                         fontWeight = FontWeight.Bold,
