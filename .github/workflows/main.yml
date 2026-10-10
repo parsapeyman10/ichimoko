@@ -421,7 +421,7 @@ jobs:
             android/app/build/test-results/testDebugUnitTest/**
 
       - name: Require stable signing for public updater release
-        if: steps.guard.outputs.ready == 'true' && (github.event_name == 'push' || github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))
+        if: steps.guard.outputs.ready == 'true' && ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')) || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))
         run: |
           set -euo pipefail
           if [[ -z "${AURUM_RELEASE_STORE_FILE:-}" || ! -f "${AURUM_RELEASE_STORE_FILE:-}" || -z "${AURUM_RELEASE_STORE_PASSWORD:-}" || -z "${AURUM_RELEASE_KEY_ALIAS:-}" || -z "${AURUM_RELEASE_KEY_PASSWORD:-}" ]]; then
@@ -430,7 +430,7 @@ jobs:
           fi
 
       - name: Publish GitHub Release for in-app updater
-        if: steps.guard.outputs.ready == 'true' && (github.event_name == 'push' || github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))
+        if: steps.guard.outputs.ready == 'true' && ((github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')) || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.collect.outputs.tag }}
