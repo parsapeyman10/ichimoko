@@ -1,6 +1,9 @@
 package com.aurum.edge.engine
 
 import com.aurum.edge.core.Candle
+import com.aurum.edge.core.AppSettings
+import com.aurum.edge.core.AssetClass
+import com.aurum.edge.core.CategoryStrategy
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.HistoryPolicy
@@ -68,6 +71,14 @@ object SignalEngine {
     }
 
     const val ENGINE_WINDOW = 400
+
+    /** One settings-to-engine adapter for chart, scanner and paper-entry paths.
+     * Category mode and threshold can never diverge between callers.
+     */
+    fun evaluateLive(candles: List<Candle>, interval: Interval, settings: AppSettings,
+                     symbol: String, timeframes: Map<Interval, List<Candle>>): Signal =
+        evaluate(candles, interval, settings.minConfidence, symbol,
+            settings.categoryStrategies[AssetClass.of(symbol)] ?: CategoryStrategy.HYBRID, timeframes)
 
     /** Only V1 inputs are accepted. Legacy profile/strategy/spread settings do not masquerade
      * as scoring filters; execution costs are checked separately by PaperOrderRules.

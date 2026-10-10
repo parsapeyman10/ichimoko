@@ -365,9 +365,7 @@ class PairScanner(
             }
             val evaluated = withContext(Dispatchers.Default) {
                 try {
-                    SignalEngine.evaluate(candles, interval, config.minConfidence, symbol = symbol,
-                        mode = config.categoryStrategies[com.aurum.edge.core.AssetClass.of(symbol)]
-                            ?: com.aurum.edge.core.CategoryStrategy.HYBRID, timeframes = frames)
+                    SignalEngine.evaluateLive(candles, interval, config, symbol, frames)
                 } catch (cancel: CancellationException) {
                     throw cancel
                 } catch (_: Exception) {
@@ -491,7 +489,7 @@ class PairScanner(
                     (playbook?.let { " · متد ${it.method.label}" } ?: "") +
                     (trend?.let { " · روند ${it.direction.label} ${it.strength}٪" } ?: "") +
                     (overallTrend?.takeIf { it.known }?.let { " · بازار ${it.bias.label}" } ?: "") +
-                    " · شانس موفقیت ${(combined.confidence).toInt()}% · R:R 1:${String.format(java.util.Locale.US, "%.1f", combined.riskReward ?: 2.0)}",
+                    " · امتیاز فنی ${combined.confidence.toInt()}/۱۰۰ · R:R 1:${combined.riskReward?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "نامعلوم"}",
                 price = price,
                 score = score,
                 action = combined.action,

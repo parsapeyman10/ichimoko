@@ -7,6 +7,7 @@ import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.TechnicalEvidence
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.SignalProfile
+import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.StrategyKind
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.Interval
@@ -120,6 +121,27 @@ class V1ContractTest {
         assertEquals(StrategyKind.ICHIMOKU_PRICE_ACTION, StrategyKind.fromId("ICT_SMC"))
         assertEquals(null, StrategyKind.fromId("unknown-pretend-strategy"))
         assertFalse(SignalProfile.BASE.fakeBreakoutFilter)
+    }
+
+    @Test fun chartAndScannerUseOneSettingsToEngineAdapter() {
+        val data = V1Scoring.intervals.associateWith(::bars)
+        val base = data.getValue(Interval.M5)
+        listOf(CategoryStrategy.TREND, CategoryStrategy.RANGE, CategoryStrategy.HYBRID).forEach { mode ->
+            val settings = AppSettings(minConfidence = 85.0,
+                categoryStrategies = AssetClass.entries.associateWith { mode })
+            val chart = SignalEngine.evaluateLive(base, Interval.M5, settings, "EUR/USD", data)
+            val scanner = SignalEngine.evaluateLive(base, Interval.M5, settings, "EUR/USD", data)
+            val direct = SignalEngine.evaluate(base, Interval.M5, 85.0,
+                symbol = "EUR/USD", mode = mode, timeframes = data)
+            assertEquals(chart.action, scanner.action)
+            assertEquals(chart.blockers, scanner.blockers)
+            assertEquals(chart.confluence, direct.confluence)
+            assertEquals(chart.action, direct.action)
+        }
+        val incomplete = data - Interval.M1
+        val blocked = SignalEngine.evaluateLive(base, Interval.M5, AppSettings(), "EUR/USD", incomplete)
+        assertFalse(blocked.isActionable)
+        assertTrue(blocked.blockers.any { it.contains("پشتهٔ ۷") })
     }
 
     @Test fun liveAndDisplayedIchimokuShareTheSamePeriods() {

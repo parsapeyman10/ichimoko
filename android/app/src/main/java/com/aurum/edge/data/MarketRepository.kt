@@ -743,10 +743,7 @@ class MarketRepository(
         val frames = timeframeSnapshot
         val evaluation = if (showingCache) null else withContext(Dispatchers.Default) {
             try {
-                Result.success(SignalEngine.evaluate(bars, current.interval, current.minConfidence,
-                    symbol = current.symbol,
-                    mode = current.categoryStrategies[com.aurum.edge.core.AssetClass.of(current.symbol)]
-                        ?: com.aurum.edge.core.CategoryStrategy.HYBRID, timeframes = frames))
+                Result.success(SignalEngine.evaluateLive(bars, current.interval, current, current.symbol, frames))
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (error: Exception) {

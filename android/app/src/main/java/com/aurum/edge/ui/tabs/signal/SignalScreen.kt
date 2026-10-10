@@ -347,19 +347,18 @@ private fun MarketTrendCard(
             if (context != null) {
                 val aligned = context.alignment == TrendAlignment.WITH
                 Text("چطور به معامله اضافه می‌شود: ${context.alignment.label}" +
-                        if (context.gate.allowed) "" else " → ورود مسدود شد",
+                        if (context.gate.allowed) "" else " → در این خوانش زمینه‌ای، خلاف روند",
                     style = MaterialTheme.typography.labelSmall,
                     color = when {
-                        !context.gate.allowed -> AurumColors.Red
+                        !context.gate.allowed -> AurumColors.Gold
                         aligned -> AurumColors.Green
                         context.alignment == TrendAlignment.AGAINST -> AurumColors.Red
                         else -> AurumColors.Gold
                     })
                 Text(context.noteFa, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                Text("قاعدهٔ اجرا: روش روندی (پولبک/شکست/درایو بازگشایی) خلاف جهتِ اندازه‌گیری‌شده مسدود " +
-                        "می‌شود؛ بازگشت به میانگین فقط در بازارِ بی‌روند مجاز است؛ ورودِ دارایی ریسکی " +
-                        "خلافِ جوّ بازار منع نمی‌شود ولی کف امتیاز +۶ و کف اطمینان +۵ می‌گیرد. همین خوانش " +
-                        "در لحظهٔ ورود در ژورنال ثبت و در پنجرهٔ همان معامله روی صفحهٔ چارت نشان داده می‌شود.",
+                Text("این خوانشِ روند، زمینهٔ بازار و رتبه‌بندی است؛ قفل ورود یا آستانهٔ " +
+                        "مخفی اضافه نمی‌کند. مرجع ورود موتور چهارلایهٔ V1، وتوی معتبر AI و " +
+                        "قواعد ریسک/تازگی است؛ عکس خوانش در ژورنال ثبت می‌شود.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             } else {
                 Text("برای دیدن جایگاهِ ورود نسبت به روند، باید سیگنالِ همین نماد و یک پویشِ " +
