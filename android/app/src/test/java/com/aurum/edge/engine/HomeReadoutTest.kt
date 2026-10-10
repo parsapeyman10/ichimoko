@@ -85,7 +85,7 @@ class HomeReadoutTest {
         assertEquals(AurumTab.entries.toSet(), (primaryTabs + moreTabs).toSet())
         assertEquals(AurumTab.Home, primaryTabs.first())
         assertTrue(AurumTab.News in primaryTabs)
-        assertTrue(AurumTab.Learn in moreTabs)
+        assertFalse((primaryTabs + moreTabs).any { it.label == "یادگیری" })
         assertTrue(AurumTab.Update in moreTabs)
         assertTrue(AurumTab.Settings in moreTabs)
         assertTrue(AurumTab.Api in moreTabs)

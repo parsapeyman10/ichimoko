@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit
  *
  * This adapter is deliberately narrow and honest: only fixed Yahoo Finance chart symbols for the
  * app's forex/gold workspace are accepted, the response identity/currency is checked, rows with
- * missing OHLC are skipped, and fewer than [HistoryPolicy.TARGET_CANDLES] real bars is reported as
+ * missing OHLC are skipped, and fewer than the caller's required real bars is reported as
  * a provider limitation instead of filling gaps with generated prices.
  */
 class PublicCandleHistoryClient(
@@ -162,12 +162,8 @@ class PublicCandleHistoryClient(
             if (seen.add(time)) out += Candle(time, open, high, low, close, volume, closed = true)
         }
         val sorted = out.sortedBy { it.time }
-        if (sorted.size < HistoryPolicy.TARGET_CANDLES) {
-            // The caller decides whether cache+live bars can complete the window, but a too-small
-            // fresh response is never silently presented as a complete 3000-bar history.
-            return sorted
-        }
-        return if (trimToCache) sorted.takeLast(trimSize.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)) else sorted
+        // No 3000-bar gate in the parser: the caller enforces its own real-bar floor.
+        return if (trimToCache) sorted.takeLast(trimSize.coerceAtLeast(1)) else sorted
     }
 
     private fun yahooSymbol(symbol: String): String? {

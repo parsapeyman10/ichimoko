@@ -38,6 +38,19 @@ class PublicCandleHistoryClientTest {
         assertTrue(bars.all { it.closed && it.high >= it.open && it.low <= it.close })
     }
 
+    @Test fun `short real live window is retained without a three thousand bar gate`() {
+        val bars = client.parseYahooChart(
+            yahooJson(rows = HistoryPolicy.LIVE_REQUEST_CANDLES + 10),
+            expectedSymbol = "EUR/USD",
+            expectedYahooSymbol = "EURUSD=X",
+            interval = Interval.M1,
+            now = startMs + 400L * Interval.M1.millis,
+            trimSize = HistoryPolicy.LIVE_REQUEST_CANDLES,
+        )
+        assertEquals(HistoryPolicy.LIVE_REQUEST_CANDLES, bars.size)
+        assertEquals(startMs + 10L * Interval.M1.millis, bars.first().time)
+    }
+
     @Test fun `wrong public history identity fails closed`() {
         assertThrows(DataFeedException::class.java) {
             client.parseYahooChart(

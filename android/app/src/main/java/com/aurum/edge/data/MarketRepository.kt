@@ -123,8 +123,7 @@ class MarketRepository(
             _state.value.interval == current.interval &&
             ((marketClosed() && _state.value.feed.mode == FeedMode.MARKET_CLOSED) ||
                 // Both keyed and keyless modes keep a history-refresh poll plus the live/fallback
-                // tick stream alive; the chart renders its quick 1200-bar window first and grows
-                // the shared cache toward the 3000-bar target in the background.
+                // tick stream alive; the chart uses a bounded real live window.
                 (pollJob?.isActive == true && streamJob?.isActive == true))) return
         stop()
         started = true
@@ -206,29 +205,19 @@ class MarketRepository(
                 cached.forEach { bar -> if (bar.time !in cachedBars) cachedBars[bar.time] = bar }
                 evaluateAndPublish(showingCache = true)
             }
-            // Render a useful, real window first. The larger full-history request runs directly
-            // afterwards and grows the same cache without blocking the first chart frame.
+            // One bounded live window is enough for EMA200/Ichimoku evaluation. Do not
+            // download 3,000/12,000 historical candles every time a chart opens.
             refresh(
-                requestedSize = HistoryPolicy.CHART_BOOTSTRAP_CANDLES,
-                minimumSize = HistoryPolicy.CHART_BOOTSTRAP_MINIMUM,
+                requestedSize = HistoryPolicy.LIVE_REQUEST_CANDLES,
+                minimumSize = HistoryPolicy.LIVE_MIN_CANDLES,
                 allowClosedMarketHistory = true,
             )
-            val chartTarget = HistoryPolicy.chartTargetCandles(current.symbol, current.interval)
-            if (started && generation == session &&
-                cachedBars.values.count { it.closed } < chartTarget) {
-                delay(CHART_EXPANSION_DELAY_MS)
-                if (started && generation == session) refresh(
-                    requestedSize = chartTarget,
-                    minimumSize = HistoryPolicy.TARGET_CANDLES,
-                    allowClosedMarketHistory = true,
-                )
-            }
         }
     }
 
     private suspend fun refresh(
-        requestedSize: Int = HistoryPolicy.TARGET_CANDLES,
-        minimumSize: Int = HistoryPolicy.TARGET_CANDLES,
+        requestedSize: Int = HistoryPolicy.LIVE_REQUEST_CANDLES,
+        minimumSize: Int = HistoryPolicy.LIVE_MIN_CANDLES,
         allowClosedMarketHistory: Boolean = false,
     ) = refreshMutex.withLock {
         val current = settings.read()
@@ -246,12 +235,7 @@ class MarketRepository(
                 FeedLiveness.hasRecentReceipt(_state.value.feed))) _state.value = _state.value.copy(
             feed = _state.value.feed.copy(
                 mode = FeedMode.CONNECTING,
-                detail = if (requestedSize < HistoryPolicy.TARGET_CANDLES) {
-                    "دریافت سریع حداقل ${minimumSize} کندل واقعی… سپس تکمیل تاریخچه"
-                } else if (requestedSize > HistoryPolicy.TARGET_CANDLES) {
-                    "تکمیل تاریخچهٔ عمیق با کندل واقعی تا $requestedSize کندل؛ برای طلا Dukascopy هم بررسی می‌شود"
-                } else if (current.hasKey) "دریافت حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی از منبع عمومی؛ Twelve Data فقط fallback آخر…"
-                else "دریافت حداقل ${HistoryPolicy.TARGET_CANDLES} کندل تاریخچهٔ رایگان…",
+                detail = "دریافت پنجرهٔ زندهٔ $requestedSize کندلی؛ حداقل $minimumSize کندل بستهٔ واقعی، بدون نیاز به تاریخچهٔ ۳۰۰۰/۱۲۰۰۰تایی…",
             ))
         try {
             var fetched: List<Candle> = emptyList()
@@ -262,14 +246,26 @@ class MarketRepository(
                 // chart empty and looking broken. Nobitex serves the same instruments and
                 // is reachable from exactly those networks, so it is the fallback rather
                 // than the forex ladder below, which does not carry these pairs at all.
-                // One crypto source, chosen because it is reachable from networks that
-                // Binance geo-blocks with HTTP 451. No second provider to fall back to,
-                // so its error is reported as-is rather than hidden behind a retry.
-                val book = nobitexHistory.fetchCandles(current.symbol, current.interval,
-                    desiredSize = requestedSize, minimumSize = minimumSize)
-                fetched = book.candles
-                historyProvider = book.provider
-                staleDetail = "${book.provider} تاریخچه داد اما آخرین کندل آن باید با قیمت زنده تأیید شود"
+                // Public USDT candles first; a configured Twelve key is a same-pair fallback.
+                // Never treat BTC/USD from Yahoo as if it were BTC/USDT.
+                try {
+                    val book = nobitexHistory.fetchCandles(current.symbol, current.interval,
+                        desiredSize = requestedSize, minimumSize = minimumSize)
+                    fetched = book.candles
+                    historyProvider = book.provider
+                    staleDetail = "${book.provider} تاریخچه داد اما آخرین کندل آن باید با قیمت زنده تأیید شود"
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (nobitexFailure: Exception) {
+                    if (!current.hasKey) throw DataFeedException(
+                        "فید ${current.symbol} از نوبیتکس معتبر نبود: ${(nobitexFailure.message ?: "بدون داده").take(100)}؛ USD جای USDT نیست")
+                    fetched = client.fetchCandles(current.apiKey, current.symbol, current.interval,
+                        outputSize = requestedSize, minimumOutputSize = minimumSize)
+                    if (fetched.size < minimumSize) throw DataFeedException(
+                        "فید جایگزین ${current.symbol} فقط ${fetched.size} کندل واقعی داد")
+                    historyProvider = "Twelve Data · fallback هم‌نماد ${current.symbol}"
+                    staleDetail = "فید جایگزین تاریخچه داد؛ آخرین قیمت همچنان باید جداگانه تأیید شود"
+                }
             } else try {
                 // Public history is the normal path even when a Twelve Data key exists. The key
                 // is only a final fallback; this keeps the chart/replay provider policy honest.
@@ -278,7 +274,7 @@ class MarketRepository(
                 fetched = public.candles
                 historyProvider = public.provider
                 staleDetail = "تاریخچهٔ عمومی پاسخ داد اما آخرین کندل آن قدیمی است؛ تیک زندهٔ جداگانه باید قیمت فعلی را تأیید کند"
-                if (requestedSize > HistoryPolicy.TARGET_CANDLES && fetched.size < requestedSize &&
+                if (requestedSize > HistoryPolicy.LIVE_REQUEST_CANDLES && fetched.size < requestedSize &&
                     DukascopyHistoryClient.instrument(current.symbol) != null) {
                     try {
                         val deep = dukascopyHistory.fetchCandles(current.symbol, current.interval,
@@ -772,6 +768,5 @@ class MarketRepository(
         private const val RECONNECT_WHEN_OFFLINE_MS = 15_000L
         private const val QUIET_RECONNECT_MS = 5 * 60_000L
         private const val TWELVE_WS_FALLBACK_WINDOW_MS = 2 * 60_000L
-        private const val CHART_EXPANSION_DELAY_MS = 250L
     }
 }

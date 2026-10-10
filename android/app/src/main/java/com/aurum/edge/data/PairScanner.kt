@@ -99,9 +99,10 @@ class PairScanner(
     private val scope: CoroutineScope,
     private val dukascopyHistory: DukascopyHistoryClient = DukascopyHistoryClient(),
     private val decisionLog: DecisionLogStore? = null,
+    private val nobitexHistory: NobitexHistoryClient = NobitexHistoryClient(),
 ) {
     private val mutex = Mutex()
-    private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client)
+    private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client, nobitexHistory)
     /** Trends measured during the running sweep; published as one market-wide read at the end. */
     private val trendSample = mutableListOf<SymbolTrend>()
     private var lastSweepElapsed = 0L
@@ -262,15 +263,15 @@ class PairScanner(
 
             suspend fun publicOrDukascopy(): List<Candle> = try {
                 publicHistory.fetchCandles(symbol, interval,
-                    minimumSize = HistoryPolicy.TARGET_CANDLES,
-                    desiredSize = HistoryPolicy.TARGET_CANDLES).candles
+                    minimumSize = HistoryPolicy.LIVE_MIN_CANDLES,
+                    desiredSize = HistoryPolicy.LIVE_REQUEST_CANDLES).candles
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (publicFailure: Exception) {
                 try {
                     dukascopyHistory.fetchCandles(symbol, interval,
-                        minimumSize = HistoryPolicy.TARGET_CANDLES,
-                        desiredSize = HistoryPolicy.TARGET_CANDLES).candles
+                        minimumSize = HistoryPolicy.LIVE_MIN_CANDLES,
+                        desiredSize = HistoryPolicy.LIVE_REQUEST_CANDLES).candles
                 } catch (cancel: CancellationException) {
                     throw cancel
                 } catch (deepFailure: Exception) {
@@ -279,9 +280,24 @@ class PairScanner(
             }
 
             val rawCandles = try {
-                if (config.hasKey) {
+                if (CryptoCatalog.isCrypto(symbol)) {
                     try {
-                        client.fetchCandles(config.apiKey, symbol, interval, outputSize = HistoryPolicy.TARGET_CANDLES)
+                        nobitexHistory.fetchCandles(symbol, interval,
+                            HistoryPolicy.LIVE_REQUEST_CANDLES, HistoryPolicy.LIVE_MIN_CANDLES).candles
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (_: Exception) {
+                        // A keyed exchange feed may carry the exact USDT pair. Never silently
+                        // substitute a USD quote for it if both sources are unavailable.
+                        if (config.hasKey) client.fetchCandles(config.apiKey, symbol, interval,
+                            outputSize = HistoryPolicy.LIVE_REQUEST_CANDLES,
+                            minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES)
+                        else throw DataFeedException("فید واقعی ${symbol} از نوبیتکس در دسترس نیست؛ دادهٔ USD جایگزین USDT نمی‌شود")
+                    }
+                } else if (config.hasKey) {
+                    try {
+                        client.fetchCandles(config.apiKey, symbol, interval, outputSize = HistoryPolicy.LIVE_REQUEST_CANDLES,
+                            minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES)
                     } catch (cancel: CancellationException) {
                         throw cancel
                     } catch (_: Exception) {

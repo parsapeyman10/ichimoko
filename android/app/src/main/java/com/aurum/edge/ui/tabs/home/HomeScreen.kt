@@ -67,7 +67,6 @@ fun HomeScreen(
     onChart: () -> Unit,
     onSignal: () -> Unit,
     onNews: () -> Unit,
-    onLearn: () -> Unit,
     onJournal: () -> Unit,
     onSettings: () -> Unit,
 ) {

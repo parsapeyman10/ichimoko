@@ -69,9 +69,9 @@ object AlertDiagnostics {
             "زمینهٔ بازار (نه قفل ورود): $trendSummary")
 
         return listOf(
-            AlertCheck(AlertCheckKind.KEY, settings.hasKey || market.closedCount >= HistoryPolicy.TARGET_CANDLES,
+            AlertCheck(AlertCheckKind.KEY, settings.hasKey || market.closedCount >= minBars,
                 if (settings.hasKey) "کلید Twelve روی همین نصب موجود است؛ اعتبار آن از اتصال داده مشخص می‌شود" else
-                    "حالت بدون کلید فعال است؛ تاریخچهٔ عمومی/فید رایگان باید حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی بدهد"),
+                    "حالت بدون کلید فعال است؛ تاریخچهٔ عمومی/فید رایگان باید حداقل $minBars کندل بستهٔ واقعی بدهد"),
             AlertCheck(AlertCheckKind.MARKET, priceFresh,
                 if (priceFresh) "${market.feed.mode.label}؛ قیمت در ۹۰ ثانیهٔ اخیر دریافت شده" else
                     "${market.feed.mode.label}؛ ${market.feed.detail.ifBlank { "زمان قیمت/اتصال معتبر نیست" }}"),

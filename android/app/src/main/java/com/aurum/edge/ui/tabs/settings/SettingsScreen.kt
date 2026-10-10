@@ -411,7 +411,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 )
             }
             Text(
-                "این دو عدد از بروکر خودت گرفته می‌شوند و در همه گزارش‌ها (بک‌تست، خارج از نمونه، سیگنال زنده) به‌کار می‌روند.",
+                "این دو عدد از بروکر خودت گرفته می‌شوند و در محاسبهٔ هزینه و ریسک معاملات کاغذی به‌کار می‌روند.",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 6.dp),

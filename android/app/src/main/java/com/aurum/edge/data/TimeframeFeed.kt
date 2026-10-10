@@ -12,6 +12,7 @@ internal class TimeframeFeed(
     private val publicHistory: PublicCandleHistoryClient,
     private val dukascopy: DukascopyHistoryClient,
     private val twelve: TwelveDataClient,
+    private val nobitex: NobitexHistoryClient = NobitexHistoryClient(),
 ) {
     private data class Snapshot(val fetchedAt: Long, val candles: List<Candle>)
     private val cache = mutableMapOf<Pair<String, Interval>, Snapshot>()
@@ -28,7 +29,19 @@ internal class TimeframeFeed(
             }
             val desired = if (interval == Interval.H4) 1050 else 300
             val bars = try {
-                try {
+                if (CryptoCatalog.isCrypto(symbol)) {
+                    // BTC/USDT is not BTC/USD: do not relabel Yahoo USD candles as USDT.
+                    // This is the same identity-preserving crypto feed used for the live chart.
+                    try {
+                        nobitex.fetchCandles(symbol, interval, desiredSize = desired,
+                            minimumSize = 220).candles
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (_: Exception) {
+                        if (apiKey.isBlank()) emptyList() else twelve.fetchCandles(apiKey, symbol,
+                            interval, outputSize = desired, minimumOutputSize = 220)
+                    }
+                } else try {
                     publicHistory.fetchCandles(symbol, interval, minimumSize = 220,
                         desiredSize = desired).candles
                 } catch (cancel: CancellationException) {

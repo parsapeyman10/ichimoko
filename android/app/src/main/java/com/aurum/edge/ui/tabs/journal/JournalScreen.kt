@@ -72,8 +72,6 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     val opportunities by viewModel.opportunities.collectAsStateWithLifecycle()
     val opportunityError by viewModel.opportunityError.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
-    val reports by viewModel.reports.collectAsStateWithLifecycle()
-    val reportError by viewModel.reportError.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val loadError by viewModel.journalError.collectAsStateWithLifecycle()
     val holdReview by viewModel.holdReview.collectAsStateWithLifecycle()
@@ -355,17 +353,6 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                 }
                 if (showCombined) PerformancePanel(PerformanceMetrics.fromPaper(trades, settings.accountBalance),
                     "کل ژورنال: دستی + سیگنال فنی مخلوط؛ برای اثبات استراتژی معتبر نیست · حداکثر ۵۰۰ معاملهٔ اخیر")
-            }
-        }
-        reportError?.let { SectionCard("گزارش پژوهش قابل خواندن نیست") {
-            Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red)
-        } }
-        if (reportError == null) reports.firstOrNull()?.let { report ->
-            StoredReportCard(report)
-            if (ResearchEvidence.stored(report).grade != EvidenceGrade.NO_DATA) {
-                PerformanceMetrics.fromStoredReport(report.outOfSample)?.let { performance ->
-                    PerformancePanel(performance, "فقط تست فنیِ خارج نمونه · ${report.outOfSample.symbol} · ${report.interval}؛ نه گیت خبر")
-                }
             }
         }
     }

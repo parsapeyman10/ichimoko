@@ -77,14 +77,13 @@ fun AurumRoot(viewModel: AurumViewModel) {
                 when (selectedTab) {
                     AurumTab.Home -> HomeScreen(viewModel, market,
                         onChart = { open(AurumTab.Chart) }, onSignal = { open(AurumTab.Signal) },
-                        onNews = { open(AurumTab.News) }, onLearn = { open(AurumTab.Learn) },
+                        onNews = { open(AurumTab.News) },
                         onJournal = { open(AurumTab.Journal) }, onSettings = { open(AurumTab.Settings) })
                     AurumTab.Chart -> ChartScreen(viewModel, market,
                         onOpenSettings = { open(AurumTab.Settings) }, onOpenJournal = { open(AurumTab.Journal) })
                     AurumTab.Signal -> SignalScreen(viewModel, market, onOpenNews = { open(AurumTab.News) })
                     AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) })
                     AurumTab.News -> PersianNewsScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) })
-                    AurumTab.Learn -> LearnScreen(viewModel)
                     AurumTab.Journal -> JournalScreen(viewModel, market)
                     AurumTab.Update -> UpdateScreen(viewModel)
                     AurumTab.Settings -> SettingsScreen(viewModel, settings)

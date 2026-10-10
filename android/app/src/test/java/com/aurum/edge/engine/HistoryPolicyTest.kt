@@ -6,7 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HistoryPolicyTest {
-    @Test fun `chart bootstrap opens fast while gold chart can request deep history`() {
+    @Test fun `live chart uses a bounded history while research limits stay independent`() {
         assertEquals(1200, HistoryPolicy.providerRequestSize(
             HistoryPolicy.CHART_BOOTSTRAP_CANDLES,
             HistoryPolicy.CHART_BOOTSTRAP_CANDLES,
@@ -19,7 +19,9 @@ class HistoryPolicyTest {
             HistoryPolicy.providerRequestSize(HistoryPolicy.DEEP_CHART_CANDLES))
         assertEquals(HistoryPolicy.DEEP_CHART_CANDLES,
             HistoryPolicy.deepProviderRequestSize(HistoryPolicy.DEEP_CHART_CANDLES))
-        assertEquals(HistoryPolicy.DEEP_CHART_CANDLES,
+        assertEquals(210, HistoryPolicy.LIVE_MIN_CANDLES)
+        assertEquals(320, HistoryPolicy.LIVE_REQUEST_CANDLES)
+        assertEquals(HistoryPolicy.LIVE_REQUEST_CANDLES,
             HistoryPolicy.chartTargetCandles("XAU/USD", com.aurum.edge.core.Interval.M5))
     }
 }
