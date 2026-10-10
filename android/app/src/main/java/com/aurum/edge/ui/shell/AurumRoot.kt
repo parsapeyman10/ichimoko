@@ -88,7 +88,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
             AurumBottomBar(selectedTab, onSelect = ::open, onMore = { showMore = true })
         }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            if (selectedTab == AurumTab.Chart || selectedTab == AurumTab.Signal) {
+            if (selectedTab == AurumTab.Signal) {
                 AppHeader(symbol = market.symbol, price = market.lastPrice, interval = market.interval,
                     lastUpdate = market.feed.lastSuccessAt, onRefresh = viewModel::refreshNow)
                 FeedBanner(status = market.feed, lastPrice = market.lastPrice,
@@ -98,9 +98,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
                 when (selectedTab) {
                     AurumTab.Home -> HomeScreen(viewModel, market,
                         onChartSymbol = ::openChartFor, onJournal = { open(AurumTab.Journal) })
-                    AurumTab.Chart -> ChartScreen(viewModel, market,
-                        onOpenSettings = { open(AurumTab.Settings) }, onOpenJournal = { open(AurumTab.Journal) },
-                        onOpenSignal = { open(AurumTab.Signal) })
+                    AurumTab.Chart -> ChartScreen(market.symbol, market.interval)
                     AurumTab.Signal -> SignalScreen(viewModel, market,
                         onOpenNews = { open(AurumTab.News) }, onOpenChart = { open(AurumTab.Chart) },
                         onChartSymbol = ::openChartFor,
