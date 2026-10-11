@@ -15,6 +15,8 @@ class TradingViewEmbedTest {
         assertTrue(html.contains("https://s.tradingview.com/widgetembed/?frameElementId=tradingview_chart"))
         assertTrue(html.contains("https://s3.tradingview.com/tv.js"))
         assertTrue(html.contains("symbol=OANDA%3AXAUUSD"))
+        assertTrue(html.contains("&interval=5&"))
+        assertFalse(html.contains("&interval=60&"))
         assertTrue(html.contains("studies=%5B%22STD%3BIchimoku%25Cloud%22%5D"))
         assertFalse(html.contains("external-embedding/embed-widget-advanced-chart.js"))
     }
@@ -24,5 +26,7 @@ class TradingViewEmbedTest {
         assertNull(TradingViewEmbed.html("</script>"))
         assertTrue(TradingViewEmbed.html("NASDAQ:AAPL")!!.contains("symbol=NASDAQ%3AAAPL"))
         assertFalse(TradingViewEmbed.html("NASDAQ:AAPL")!!.contains("OANDA%3AXAUUSD"))
+        assertTrue(TradingViewEmbed.html("BINANCE:ATOMUSDT")!!.contains("&interval=5&"))
+        assertTrue(TradingViewEmbed.html("NASDAQ:AAPL")!!.contains("&interval=5&"))
     }
 }

@@ -24,6 +24,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -39,6 +40,9 @@ import com.aurum.edge.ui.theme.AurumColors
 fun ChartScreen(initialTicker: String, onSelectTicker: (String) -> Unit) {
     val html = remember(initialTicker) { TradingViewEmbed.html(initialTicker) }
     var showPicker by remember { mutableStateOf(false) }
+    // Re-selecting the same ticker deliberately reloads M5 after an in-widget manual change.
+    // Normal recompositions do not reload the third-party chart.
+    var reloadCount by remember { mutableIntStateOf(0) }
 
     Column(Modifier.fillMaxSize()) {
         // TradingView's mobile iframe may hide its own symbol search even with symboledit=1.
@@ -52,7 +56,7 @@ fun ChartScreen(initialTicker: String, onSelectTicker: (String) -> Unit) {
         } else {
             // Preserve the historical iframe + mobile WebView bootstrap. Recomposition never
             // reloads it; selecting a different instrument replaces the old view exactly once.
-            key(initialTicker) {
+            key(initialTicker, reloadCount) {
                 AndroidView(
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     factory = { context ->
@@ -106,7 +110,8 @@ fun ChartScreen(initialTicker: String, onSelectTicker: (String) -> Unit) {
                     LazyColumn(Modifier.fillMaxWidth().heightIn(max = 370.dp)) {
                         items(ChartSymbolChoices.search(query), key = { it.id }) { choice ->
                             TextButton(onClick = {
-                                onSelectTicker(choice.ticker)
+                                if (choice.ticker == initialTicker) reloadCount++
+                                else onSelectTicker(choice.ticker)
                                 showPicker = false
                             }, modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.fillMaxWidth()) {

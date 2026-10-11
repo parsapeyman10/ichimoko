@@ -13,7 +13,10 @@ internal object TradingViewEmbed {
         if (!ticker.matches(symbol)) return null
         val encoded = URLEncoder.encode(symbol, "UTF-8")
         val iframeUrl = "https://s.tradingview.com/widgetembed/?frameElementId=tradingview_chart" +
-            "&symbol=$encoded&interval=60&hidesidetoolbar=0&symboledit=1" +
+            // A new chart (including a symbol change) always requests M5; the independent
+            // signal/feed interval is NOT changed. The third-party iframe can still let a
+            // person select another timeframe manually while it remains open.
+            "&symbol=$encoded&interval=5&hidesidetoolbar=0&symboledit=1" +
             "&saveimage=0&toolbarbg=0b0e13" +
             "&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1&locale=en" +
             "&studies=%5B%22STD%3BIchimoku%25Cloud%22%5D"
