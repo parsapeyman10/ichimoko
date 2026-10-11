@@ -55,6 +55,9 @@ data class MarketState(
     val evaluationError: String? = null,
     /** Live history provenance; a disk cache has no verified venue. */
     val historyProvider: String? = null,
+    /** Original exchange timestamp/price of the last executed trade; not REST receipt time. */
+    val lastTradeAt: Long? = null,
+    val lastTradePrice: Double? = null,
 ) {
     val closedCount: Int get() = candles.count { it.closed }
     val hasRealData: Boolean get() = candles.isNotEmpty()
@@ -634,6 +637,8 @@ class MarketRepository(
             lastPrice = price,
             bid = displayBid,
             ask = displayAsk,
+            lastTradeAt = at,
+            lastTradePrice = price,
             feed = FeedStatus(FeedMode.LIVE, "", System.currentTimeMillis(), provider = provider),
             showingCachedData = false,
         )

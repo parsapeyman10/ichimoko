@@ -57,6 +57,7 @@ class CatalogPaperTrader(
         CatalogQuotePolicy.rejection(scanned.symbol, tick)?.let { return CatalogAutoReview(reason = it) }
         val verified = scanned.copy(
             lastPrice = tick.price, bid = tick.bid, ask = tick.ask,
+            lastTradeAt = tick.at, lastTradePrice = tick.price,
             // Provider timestamp, NOT scanner download time. This is the same tick contract
             // used for settling all non-crypto open positions in the service/UI.
             feed = FeedStatus(FeedMode.LIVE, "تیک مستقل تأییدشده", tick.at,

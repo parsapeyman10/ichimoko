@@ -12,9 +12,16 @@ object PaperAutoRules {
                 allowedSymbols: List<String> = settings.activeWatchlist): String? {
         OilEntrySafety.blocker(market.symbol)?.let { return it }
         if (!settings.autoPaperTrading) return "معاملهٔ خودکار کاغذی خاموش است"
-        if (AssetClass.of(market.symbol) == AssetClass.CRYPTO &&
-            market.historyProvider != NobitexHistoryClient.PROVIDER)
-            return "تاریخچهٔ هفت بازهٔ هم‌صرافی نوبیتکس برای ورود تأیید نشده است"
+        if (AssetClass.of(market.symbol) == AssetClass.CRYPTO) {
+            if (market.historyProvider != NobitexHistoryClient.PROVIDER)
+                return "تاریخچهٔ هفت بازهٔ هم‌صرافی نوبیتکس برای ورود تأیید نشده است"
+            val tradeAt = market.lastTradeAt
+            val tradePrice = market.lastTradePrice
+            if (market.feed.mode != FeedMode.LIVE || tradeAt == null ||
+                tradeAt !in (now - 45_000L)..(now + 10_000L) ||
+                tradePrice == null || !tradePrice.isFinite() || tradePrice <= 0.0)
+                return "معاملهٔ واقعی تازه و زمان‌دار نوبیتکس برای ورود موجود نیست"
+        }
         if (market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))
             return "فید معتبر در دسترس نیست (وضعیت فید: ${market.feed.mode.label})"
         return opportunityBlocker(market, settings, news, now, requireMonitor = false,

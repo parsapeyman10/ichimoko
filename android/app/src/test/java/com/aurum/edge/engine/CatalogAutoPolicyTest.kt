@@ -45,7 +45,11 @@ class CatalogAutoPolicyTest {
             historyProvider = "Twelve Data")
         assertTrue(PaperAutoRules.blocker(observed, config, PersianNewsState(), now = weekday,
             allowedSymbols = WatchCatalog.scannerSymbols)!!.contains("نوبیتکس"))
-        val matched = observed.copy(historyProvider = com.aurum.edge.data.NobitexHistoryClient.PROVIDER)
+        val matched = observed.copy(historyProvider = com.aurum.edge.data.NobitexHistoryClient.PROVIDER,
+            lastTradeAt = weekday, lastTradePrice = 100.0)
+        assertTrue(PaperAutoRules.blocker(matched.copy(lastTradeAt = weekday - 46_000L), config,
+            PersianNewsState(), now = weekday,
+            allowedSymbols = WatchCatalog.scannerSymbols)!!.contains("معاملهٔ واقعی تازه"))
         assertEquals("سیگنال محاسبه نشده است",
             PaperAutoRules.blocker(matched, config, PersianNewsState(), now = weekday,
                 allowedSymbols = WatchCatalog.scannerSymbols))

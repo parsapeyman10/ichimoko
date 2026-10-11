@@ -165,7 +165,9 @@ class PaperAutoTrader(
                 symbol = current.symbol,
                 // A catalog signal is calculated on closed bars, but the *fill* must be the
                 // separately fetched trade tick. Preview rechecks SL/TP and 0.5% risk at it.
-                price = catalogQuote?.price ?: finalSignal.entry ?: current.lastPrice!!,
+                price = catalogQuote?.price ?: if (com.aurum.edge.core.AssetClass.of(current.symbol) ==
+                    com.aurum.edge.core.AssetClass.CRYPTO) current.lastTradePrice!!
+                    else finalSignal.entry ?: current.lastPrice!!,
                 balance = recentSettings.accountBalance,
                 riskPercent = recentSettings.riskPercent,
                 mtf = mtf?.let { MtfSnapshotRecord.from(it) },
