@@ -34,6 +34,9 @@ class NobitexHistoryClient(
         .followRedirects(false)
         .build(),
 ) {
+    // Cache only inside the same completed M3 bucket; failures and delayed histories retry.
+    private val threeMinuteCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, PublicCandleHistoryClient.Result>>()
+
     companion object {
         const val HOST = "https://apiv2.nobitex.ir"
         const val PROVIDER = "Nobitex عمومی (بدون کلید)"
@@ -41,6 +44,7 @@ class NobitexHistoryClient(
         /** UDF resolutions, in minutes except the daily bucket. */
         fun resolution(interval: Interval): String = when (interval) {
             Interval.M1 -> "1"
+            Interval.M3 -> throw DataFeedException("نوبیتکس بازهٔ مستقیم ۳ دقیقه ندارد")
             Interval.M5 -> "5"
             Interval.M15 -> "15"
             Interval.M30 -> "30"
@@ -122,28 +126,14 @@ class NobitexHistoryClient(
         minimumSize: Int,
         now: Long = System.currentTimeMillis(),
     ): PublicCandleHistoryClient.Result = withContext(Dispatchers.IO) {
+        if (interval == Interval.M3) return@withContext fetchThreeMinuteCandles(symbol, desiredSize, minimumSize, now)
         val code = ticker(symbol) ?: throw DataFeedException("نماد $symbol برای نوبیتکس معتبر نیست")
         val span = interval.millis / 1000L
         val to = now / 1000L
         // Ask for extra room: exchanges skip empty buckets, so a bar count is not a time span.
         val from = to - span * (desiredSize + 50).coerceAtMost(5000)
 
-        val url = "$HOST/market/udf/history?symbol=$code&resolution=${resolution(interval)}" +
-            "&from=$from&to=$to"
-        val request = Request.Builder().url(url).header("Accept", "application/json").build()
-        val body = runCatching {
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    throw DataFeedException("نوبیتکس پاسخ نداد (HTTP ${response.code})")
-                }
-                response.body?.string().orEmpty()
-            }
-        }.getOrElse { error ->
-            if (error is DataFeedException) throw error
-            throw DataFeedException("اتصال به نوبیتکس برقرار نشد: ${error::class.simpleName}")
-        }
-
-        val candles = parseUdf(body)
+        val candles = fetchWindow(code, resolution(interval), from, to)
         if (candles.size < minimumSize) {
             throw DataFeedException(
                 "نوبیتکس فقط ${candles.size} کندل داد؛ حداقل $minimumSize کندل لازم است"
@@ -151,4 +141,46 @@ class NobitexHistoryClient(
         }
         PublicCandleHistoryClient.Result(candles = candles.takeLast(desiredSize), provider = PROVIDER)
     }
+
+    private fun fetchWindow(code: String, resolution: String, from: Long, to: Long): List<Candle> {
+        val url = "$HOST/market/udf/history?symbol=$code&resolution=$resolution&from=$from&to=$to"
+        val request = Request.Builder().url(url).header("Accept", "application/json").build()
+        val body = runCatching {
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) throw DataFeedException("نوبیتکس پاسخ نداد (HTTP ${response.code})")
+                response.body?.string().orEmpty()
+            }
+        }.getOrElse { error ->
+            if (error is DataFeedException) throw error
+            throw DataFeedException("اتصال به نوبیتکس برقرار نشد: ${error::class.simpleName}")
+        }
+        return parseUdf(body)
+    }
+
+    private fun fetchThreeMinuteCandles(symbol: String, desiredSize: Int, minimumSize: Int,
+                                         now: Long): PublicCandleHistoryClient.Result {
+        val code = ticker(symbol) ?: throw DataFeedException("نماد $symbol برای نوبیتکس معتبر نیست")
+        // UDF has no 3-minute resolution. Read bounded, non-overlapping 1m windows so a
+        // provider's per-response bar limit cannot silently truncate the oldest minutes.
+        val end = now / Interval.M3.millis * Interval.M3.millis
+        threeMinuteCache[symbol]?.takeIf { it.first == end &&
+            it.second.candles.size >= minimumSize && it.second.candles.size >= desiredSize
+        }?.let { return it.second }
+        val start = end - (desiredSize + 55L) * Interval.M3.millis
+        val minute = Interval.M1.millis
+        val raw = ArrayList<Candle>()
+        var cursor = start
+        while (cursor < end) {
+            val next = minOf(end, cursor + 350L * minute)
+            raw += fetchWindow(code, "1", cursor / 1000L, (next - 1L) / 1000L)
+            cursor = next
+        }
+        val bars = ThreeMinuteCandles.fromMinutes(raw, now).takeLast(desiredSize)
+        if (bars.size < minimumSize) throw DataFeedException(
+            "نوبیتکس برای ۳ دقیقه فقط ${bars.size} کندل بسته و پیاپی داد؛ حداقل $minimumSize لازم است")
+        val result = PublicCandleHistoryClient.Result(bars, "$PROVIDER / سه کندل واقعی M1")
+        if (bars.lastOrNull()?.time == end - Interval.M3.millis) threeMinuteCache[symbol] = end to result
+        return result
+    }
+
 }

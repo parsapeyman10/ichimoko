@@ -66,7 +66,7 @@ internal object V1Scoring {
         // Explicit RANGE mode never becomes a breakout strategy. HYBRID can leave a range
         // on a validated closed bar even while the lagging ADX still reads below 20.
         val releaseEligible = AssetClass.of(symbol) == AssetClass.CRYPTO &&
-            mode != CategoryStrategy.RANGE && interval in setOf(Interval.M5, Interval.M15)
+            mode != CategoryStrategy.RANGE && interval in setOf(Interval.M3, Interval.M5, Interval.M15)
         val buyRelease = if (releaseEligible) CryptoIchimokuRelease.assess(bars, ichi, atr, SignalAction.BUY) else null
         val sellRelease = if (releaseEligible) CryptoIchimokuRelease.assess(bars, ichi, atr, SignalAction.SELL) else null
         val range = when (mode) {

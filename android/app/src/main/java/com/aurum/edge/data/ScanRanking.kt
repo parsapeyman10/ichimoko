@@ -12,7 +12,7 @@ object ScanRanking {
     fun rank(statuses: List<PairScanStatus>, interval: Interval, now: Long,
              includeObserved: Boolean = false): List<PairScanStatus> = statuses
         .filter { it.price != null && (it.state == "candidate" || (includeObserved && it.state == "observed")) &&
-            ScanFreshness.current(it.lastScanAt, interval, now) && !MarketHours.closedFor(it.symbol, now) }
+            ScanFreshness.current(it.lastScanAt, it.interval ?: interval, now) && !MarketHours.closedFor(it.symbol, now) }
         .sortedWith(compareByDescending<PairScanStatus> { it.state == "candidate" }
             .thenByDescending { it.playbookAllowed == true }
             .thenByDescending { it.trendAligned == true }

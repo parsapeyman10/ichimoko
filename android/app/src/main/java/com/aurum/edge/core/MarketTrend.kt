@@ -211,7 +211,7 @@ object MarketTrend {
 
     /** تایم‌فریم مرجعِ روند برای هر تایم‌فریم پایه؛ فقط با تجمیع، هرگز با شکستن کندل. */
     fun higherFor(interval: Interval): Interval? = when (interval) {
-        Interval.M1 -> Interval.M15
+        Interval.M1, Interval.M3 -> Interval.M15
         Interval.M5 -> Interval.H1
         Interval.M15 -> Interval.H4
         Interval.M30 -> Interval.H4

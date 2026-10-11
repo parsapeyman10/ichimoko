@@ -42,8 +42,8 @@ class CatalogPaperTrader(
 ) {
     suspend fun review(scanned: MarketState): CatalogAutoReview {
         val config = settings.read()
-        if (!config.autoPaperTrading || scanned.symbol == config.symbol ||
-            scanned.symbol !in WatchCatalog.scannerSymbols) return CatalogAutoReview()
+        if (!config.autoPaperTrading || scanned.symbol !in WatchCatalog.scannerSymbols)
+            return CatalogAutoReview()
         if (!CatalogQuotePolicy.tickMonitored(scanned.symbol))
             return CatalogAutoReview(reason = CatalogQuotePolicy.rejection(scanned.symbol, null))
         val tick = try {

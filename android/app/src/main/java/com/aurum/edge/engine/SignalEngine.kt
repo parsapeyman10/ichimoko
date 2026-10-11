@@ -45,6 +45,7 @@ object SignalEngine {
     /** Bars a signal stays valid before it must be re-confirmed. */
     fun barsValid(interval: Interval): Int = when (interval) {
         Interval.M1 -> 8
+        Interval.M3 -> 6
         Interval.M5 -> 6
         else -> 4
     }

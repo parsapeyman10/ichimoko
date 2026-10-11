@@ -218,6 +218,7 @@ class PublicCandleHistoryClient(
 
     private fun requestInterval(interval: Interval): String = when (interval) {
         Interval.M1 -> "1m"
+        Interval.M3 -> throw DataFeedException("کندل ۳دقیقهٔ کریپتو فقط از M1 نوبیتکس ساخته می‌شود")
         Interval.M5 -> "5m"
         Interval.M15 -> "15m"
         Interval.M30 -> "30m"
@@ -227,6 +228,7 @@ class PublicCandleHistoryClient(
 
     private fun range(interval: Interval): String = when (interval) {
         Interval.M1 -> "7d"
+        Interval.M3 -> "7d"
         Interval.M5 -> "1mo"
         Interval.M15 -> "3mo"
         Interval.M30 -> "6mo"

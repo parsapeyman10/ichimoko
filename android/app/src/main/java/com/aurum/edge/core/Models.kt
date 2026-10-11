@@ -25,6 +25,7 @@ data class Candle(
 
 enum class Interval(val api: String, val label: String, val minutes: Int) {
     M1("1min", "1m", 1),
+    M3("3min", "3m", 3),
     M5("5min", "5m", 5),
     M15("15min", "15m", 15),
     M30("30min", "30m", 30),

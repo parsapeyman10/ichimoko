@@ -38,6 +38,7 @@ data class PairScanStatus(
     /** pending | closed | error | partial | no_signal | blocked | observed | candidate | opened */
     val state: String,
     val detail: String,
+    val interval: Interval? = null,
     val lastScanAt: Long? = null,
     val price: Double? = null,
     /** How many of the technical conditions passed on the latest closed bar. */
@@ -184,6 +185,7 @@ class PairScanner(
         // A result from the previous sweep cannot remain a current recommendation while
         // the provider is still being checked this time (or after a configuration change).
         val statuses = mutableMapOf<String, PairScanStatus>()
+        val chosenIntervals = mutableMapOf<String, Interval>()
         _state.value = _state.value.copy(
             checkedCount = 0,
             topThree = emptyList(),
@@ -213,7 +215,7 @@ class PairScanner(
             trendAligned: Boolean? = null,
             trendNote: String? = null,
         ) {
-            decisionLog?.append(symbol, config.interval.label, state, detail,
+            decisionLog?.append(symbol, (chosenIntervals[symbol] ?: config.interval).label, state, detail,
                 signal = if (conditions.isNotEmpty()) com.aurum.edge.core.Signal(
                     action ?: SignalAction.NO_TRADE, confidence ?: 0.0, confluence = conditions)
                     else null, dedupe = false, method = methodLabel, methodReason = playbookReason)
@@ -221,6 +223,7 @@ class PairScanner(
                 symbol = symbol,
                 state = state,
                 detail = detail,
+                interval = chosenIntervals[symbol],
                 lastScanAt = System.currentTimeMillis(),
                 price = price,
                 technicalScore = score,
@@ -250,12 +253,15 @@ class PairScanner(
             )
         }
 
-        val interval: Interval = config.interval
         val headlines = news.state.value
         val trades = journal.trades.value
 
         var requestedMarkets = 0
         universe.forEachIndexed { _, symbol ->
+            val crypto = CryptoCatalog.isCrypto(symbol)
+            // The visual chart and the selected screen's interval are independent of
+            // the crypto entry scan. Compare all three on their own closed bars.
+            var interval = if (crypto || config.interval == Interval.M3) Interval.M5 else config.interval
             val now = System.currentTimeMillis()
             if (MarketHours.closedFor(symbol, now)) {
                 // Schedule only: do not fetch candles, evaluate, rank or attempt entry for
@@ -331,7 +337,7 @@ class PairScanner(
 
             // Provider flags can mark an in-progress bar as closed. Never score, settle or
             // construct MTF snapshots from it, even when its OHLC parses correctly.
-            val candles = rawCandles.filter { it.closed && it.time + interval.millis <= now }
+            var candles = rawCandles.filter { it.closed && it.time + interval.millis <= now }
                 .sortedBy { it.time }.distinctBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
             if (candles.size < HistoryPolicy.LIVE_MIN_CANDLES) {
                 update(symbol, "partial", "فقط مشاهدهٔ کندل قبلی ${candles.lastOrNull()?.time ?: "—"}: " +
@@ -339,6 +345,61 @@ class PairScanner(
                     price = candles.lastOrNull()?.close)
                 return@forEachIndexed
             }
+
+            val frames = try {
+                timeframeFeed.fetch(symbol, interval, candles, config.apiKey,
+                    requireNobitexCrypto = config.autoPaperTrading && CryptoCatalog.isCrypto(symbol))
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                update(symbol, "error", "دریافت بازه‌های زمانی ناموفق بود: ${(error.message ?: "خطای فید").take(100)}",
+                    price = candles.lastOrNull()?.close)
+                return@forEachIndexed
+            }
+            val candidates = if (crypto) listOf(Interval.M3, Interval.M5, Interval.M15) else listOf(interval)
+            val reads = mutableListOf<CryptoIntervalChoice.Read>()
+            val unavailable = mutableListOf<String>()
+            for (candidate in candidates) {
+                val bars = when (candidate) {
+                    Interval.M3 -> try {
+                        nobitexHistory.fetchCandles(symbol, Interval.M3,
+                            HistoryPolicy.LIVE_FETCH_CANDLES, HistoryPolicy.LIVE_MIN_CANDLES).candles
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (error: Exception) {
+                        unavailable += "۳دقیقه: ${(error.message ?: "فید ناقص").take(65)}"
+                        emptyList()
+                    }
+                    interval -> candles
+                    else -> frames[candidate].orEmpty()
+                }.filter { it.closed && it.time + candidate.millis <= System.currentTimeMillis() }
+                    .sortedBy { it.time }.distinctBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
+                if (bars.size < HistoryPolicy.LIVE_MIN_CANDLES) {
+                    unavailable += "${candidate.label}: کمتر از ${HistoryPolicy.LIVE_MIN_CANDLES} کندل بسته"
+                    continue
+                }
+                val evaluated = withContext(Dispatchers.Default) {
+                    try { SignalEngine.evaluateLive(bars, candidate, config, symbol, frames) }
+                    catch (cancel: CancellationException) { throw cancel }
+                    catch (_: Exception) { null }
+                }
+                if (evaluated == null) unavailable += "${candidate.label}: محاسبه ناموفق"
+                else {
+                    val vetted = NewsConfluence.apply(evaluated, symbol, headlines, now)
+                    if (vetted != null) reads += CryptoIntervalChoice.Read(candidate, bars, vetted)
+                    else unavailable += "${candidate.label}: ارزیابی خبر/AI ناموفق"
+                }
+            }
+            val selected = CryptoIntervalChoice.pick(reads) ?: run {
+                update(symbol, "partial", "هیچ‌یک از بازه‌های ${candidates.joinToString { it.label }} قابل ارزیابی نبود: " +
+                    unavailable.joinToString("؛ ").take(130))
+                return@forEachIndexed
+            }
+            interval = selected.interval
+            chosenIntervals[symbol] = interval
+            candles = selected.bars
+            val evaluated = selected.signal
+
 
             val price = candles.lastOrNull()?.close
             val lastClosed = candles.lastOrNull { it.closed && it.time + interval.millis <= now }
@@ -376,38 +437,15 @@ class PairScanner(
             }
             // The playbook is context only; V1Scoring has the absolute market locks.
 
-            val frames = try {
-                timeframeFeed.fetch(symbol, interval, candles, config.apiKey,
-                    requireNobitexCrypto = config.autoPaperTrading && CryptoCatalog.isCrypto(symbol))
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (error: Exception) {
-                update(symbol, "error", "دریافت بازه‌های زمانی ناموفق بود: ${(error.message ?: "خطای فید").take(100)}",
-                    price, methodLabel = playbook?.method?.label,
-                    playbookAllowed = playbook?.allowed, playbookReason = playbook?.reasonFa)
-                return@forEachIndexed
-            }
-            val evaluated = withContext(Dispatchers.Default) {
-                try {
-                    SignalEngine.evaluateLive(candles, interval, config, symbol, frames)
-                } catch (cancel: CancellationException) {
-                    throw cancel
-                } catch (_: Exception) {
-                    null
-                }
-            }
-            if (evaluated == null) {
-                update(symbol, "error", "خطای محاسبهٔ موتور فنی؛ ورود متوقف شد", price)
-                return@forEachIndexed
-            }
-
             val combined = NewsConfluence.apply(evaluated, symbol, headlines, now)!!
             val score = combined.confluence.take(NewsConfluence.TECHNICAL_COUNT).count { it.ok }
             if (!combined.isActionable) {
                 update(
                     symbol = symbol,
                     state = "no_signal",
-                    detail = if (combined.blockers.isNotEmpty()) "امتیاز ${combined.confidence.toInt()}/۱۰۰ · ${combined.blockers.joinToString("، ").take(120)}" else "بدون سیگنال؛ شواهد فنی $score از ۴",
+                    detail = "بازهٔ ${interval.label} از مقایسهٔ ${candidates.joinToString { it.label }} · " +
+                        (if (combined.blockers.isNotEmpty()) "امتیاز ${combined.confidence.toInt()}/۱۰۰ · ${combined.blockers.joinToString("، ").take(95)}" else "بدون سیگنال؛ شواهد فنی $score از ۴") +
+                        (if (unavailable.isNotEmpty()) " · ${unavailable.joinToString("؛ ").take(90)}" else ""),
                     price = price,
                     score = score,
                     action = combined.action,
@@ -455,7 +493,7 @@ class PairScanner(
             // This runs for EVERY supported catalog row, not only editable watchlist rows.
             // The callback MUST obtain a separate same-symbol trade tick and route through
             // the atomic JournalStore; this historical candle must never act as the fill.
-            val autoReview = if (config.autoPaperTrading && symbol != config.symbol &&
+            val autoReview = if (config.autoPaperTrading &&
                 symbol in WatchCatalog.scannerSymbols) try {
                 onAutoSignal?.invoke(market)
             } catch (cancel: CancellationException) {
@@ -464,7 +502,7 @@ class PairScanner(
                 CatalogAutoReview(reason = "بازبینی ورود کاغذی کاتالوگ ناموفق بود")
             } else null
             if (autoReview?.trade != null) {
-                update(symbol, "opened", "معاملهٔ کاغذی با قیمت تازهٔ مستقل ثبت شد؛ " +
+                update(symbol, "opened", "معاملهٔ کاغذی در ${interval.label} با قیمت تازهٔ مستقل ثبت شد؛ " +
                     "کندل اسکن قیمت ورود نبود", price, score, combined.action,
                     combined.confidence, combined.entry, combined.stopLoss, combined.takeProfit,
                     combined.riskReward, combined.confluence, playbook?.method?.label,
@@ -524,7 +562,7 @@ class PairScanner(
             update(
                 symbol = symbol,
                 state = "candidate",
-                detail = "فرصت معاملاتی تایید شد" +
+                detail = "فرصت معاملاتی ${interval.label} از مقایسهٔ ${candidates.joinToString { it.label }} تایید شد" +
                     (autoReview?.reason?.let { " · ورود خودکار انجام نشد: ${it.take(140)}" } ?: "") +
                     (playbook?.let { " · متد ${it.method.label}" } ?: "") +
                     (trend?.let { " · روند ${it.direction.label} ${it.strength}٪" } ?: "") +

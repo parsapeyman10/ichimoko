@@ -55,6 +55,7 @@ object MtfAnalyzer {
     /** Timeframes that can be built from [base] by aggregation only (never by splitting). */
     fun framesFor(base: Interval): List<Interval> = when (base) {
         Interval.M1 -> listOf(Interval.M1, Interval.M5, Interval.M15, Interval.H1)
+        Interval.M3 -> listOf(Interval.M3, Interval.M15, Interval.H1)
         Interval.M5 -> listOf(Interval.M5, Interval.M15, Interval.H1)
         Interval.M15 -> listOf(Interval.M15, Interval.H1)
         Interval.M30 -> listOf(Interval.M30, Interval.H1)
@@ -65,6 +66,7 @@ object MtfAnalyzer {
 
     private fun weightFor(interval: Interval): Double = when (interval) {
         Interval.M1 -> 0.15
+        Interval.M3 -> 0.18
         Interval.M5 -> 0.20
         Interval.M15 -> 0.25
         Interval.M30 -> 0.25
