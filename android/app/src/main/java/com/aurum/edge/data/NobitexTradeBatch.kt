@@ -55,15 +55,17 @@ internal class TradePageCursor {
         require(page.isNotEmpty())
         val old = previous
         previous = page.toList()
+        // Two different prices with the same millisecond have unknown execution order;
+        // identical rows cannot be distinguished without trade IDs.
+        val ambiguous = page.distinct().size != page.size ||
+            page.zipWithNext().any { (a, b) -> a.at == b.at && a.price != b.price }
         if (old == null) {
             // On service restart, the page must reach the moment of entry. Otherwise
             // an unknown stretch of the open position cannot be declared monitored.
-            val gap = page.first().at > openedAt
+            val gap = page.first().at > openedAt || ambiguous
             return Update(if (gap) emptyList() else page.filter { it.at >= openedAt }, gap)
         }
-        // Provider rows can be identical even at the same millisecond. Without IDs an
-        // ambiguous boundary cannot prove continuity; never skip or manufacture ticks.
-        if (old.distinct().size != old.size || page.distinct().size != page.size)
+        if (ambiguous || old.distinct().size != old.size)
             return Update(emptyList(), true)
         val overlap = (minOf(old.size, page.size) downTo 1).firstOrNull { length ->
             old.takeLast(length) == page.take(length)

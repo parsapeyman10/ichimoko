@@ -35,6 +35,9 @@ class NobitexTradeBatchTest {
         val cursor = TradePageCursor()
         cursor.advance(page, now - 10_000)
         assertTrue(cursor.advance(duplicates, now - 10_000).gap)
+        val sameMillisecond = NobitexTradeBatch.parse(body(trade(now - 2000, 101),
+            trade(now - 2000, 95)), now)
+        assertTrue(TradePageCursor().advance(sameMillisecond, now - 2000).gap)
     }
 
     @Test fun `invalid or old executed trades never enter the paper journal`() {

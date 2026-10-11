@@ -93,7 +93,8 @@ jobs:
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.25 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.26 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.27 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.28 updater')))) }}
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.28 updater') ||
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.29 updater')))) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -514,6 +515,9 @@ jobs:
           fi
           if [[ "$VERSION_NAME" == "1.3.28" ]]; then
             NOTES+=$'\n\nChanges: crypto paper-entry scanner now compares independently evaluated closed M3/M5/M15 candidates using the same seven-frame V1 engine, picks the highest-confidence actionable timeframe, and persists the actual timeframe in the trade journal. M3 is assembled only from three complete, contiguous same-pair Nobitex M1 candles per bucket, with 320 consecutive M3 bars required; missing minute data fails closed. A separate fresh Nobitex executed-trade quote remains mandatory for paper entry. The selected crypto symbol participates in the same comparison. The 5-minute TradingView chart display stays unchanged. No new cross-exchange tick feed was connected: Binance aggregate trades are limited/paginated, may be geo-blocked, and must not be silently mixed with Nobitex quotes. Missing data, AI veto and risk guards still block entries; no live trading or profitability claim. Live device/provider coverage has not been verified.'
+          fi
+          if [[ "$VERSION_NAME" == "1.3.29" ]]; then
+            NOTES+=$'\n\nChanges: open crypto PAPER positions now reconcile each executed trade returned in overlapping Nobitex recent-trade pages in time order, instead of settling from only the last snapshot. A missing page overlap, ambiguous duplicate, missing history since entry or prolonged feed failure records a persistent coverage-gap warning in the open trade journal. The endpoint publishes no global trade IDs or guaranteed historical pagination, so missing ticks cannot be recovered or zero-loss coverage promised, especially across mobile offline/OS service stops. FX and commodity feeds remain sampled quotes. Automatic market scanning already runs while the app is visible and via the explicitly enabled Android foreground monitor; it cannot run without permission or past Android time limits. The single 5m TradingView widget requests built-in Ichimoku on each load and passes study override values derived from the V1 engine (8/24/72, shift 24); cross-origin rendering and manual removal cannot be verified or locked without on-device checks. No broker orders or profitability claims.'
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "$TAG" --notes "$NOTES"
