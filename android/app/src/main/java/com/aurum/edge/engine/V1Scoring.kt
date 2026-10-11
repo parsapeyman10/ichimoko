@@ -54,11 +54,6 @@ internal object V1Scoring {
         if (medianAtr <= 0.0 || atr > medianAtr * 2.5) blockers += "قفل مطلق: جهش غیرعادی بازار"
         if (atr < medianAtr * 0.6 || atr / last.close < 0.00001)
             blockers += "قفل مطلق: بازار بی‌جان"
-        val range = when (mode) {
-            CategoryStrategy.RANGE -> true
-            CategoryStrategy.TREND -> false
-            CategoryStrategy.HYBRID -> adx < 20.0
-        }
         if (mode == CategoryStrategy.TREND && adx < 20.0) blockers += "استراتژی روندگیر در بازار بدون روند قفل است"
         if (mode == CategoryStrategy.RANGE && adx >= 25.0) blockers += "استراتژی رنج‌گیر در بازار رونددار قفل است"
 
@@ -66,6 +61,19 @@ internal object V1Scoring {
         val ichi = Ichimoku.compute(bars, setting.tenkan, setting.kijun, setting.spanB, setting.kijun)
         val ichiRead = IchimokuAlignment.read(bars, ichi, atr)
             ?: return blocked("اجزای هم‌زمان ایچیموکو آماده نیستند")
+        // A measured compression/release is a crypto-only way to confirm the EXISTING
+        // Ichimoku/price-action layer, not a parallel strategy or an automatic BUY/SELL.
+        // Explicit RANGE mode never becomes a breakout strategy. HYBRID can leave a range
+        // on a validated closed bar even while the lagging ADX still reads below 20.
+        val releaseEligible = AssetClass.of(symbol) == AssetClass.CRYPTO &&
+            mode != CategoryStrategy.RANGE && interval in setOf(Interval.M5, Interval.M15)
+        val buyRelease = if (releaseEligible) CryptoIchimokuRelease.assess(bars, ichi, atr, SignalAction.BUY) else null
+        val sellRelease = if (releaseEligible) CryptoIchimokuRelease.assess(bars, ichi, atr, SignalAction.SELL) else null
+        val range = when (mode) {
+            CategoryStrategy.RANGE -> true
+            CategoryStrategy.TREND -> false
+            CategoryStrategy.HYBRID -> adx < 20.0 && buyRelease?.ready != true && sellRelease?.ready != true
+        }
         val ema = Indicators.ema(bars.map { it.close }, 200).lastOrNull() ?: return blocked("EMA200 آماده نیست")
         val rsi = Indicators.rsi(bars, 7).lastOrNull() ?: return blocked("RSI آماده نیست")
         val macdValues = Indicators.macdHistogram(bars)
@@ -93,8 +101,9 @@ internal object V1Scoring {
 
         fun score(side: SignalAction): Pair<Int, List<ConfluenceItem>> {
             val buy = side == SignalAction.BUY
+            val release = if (buy) buyRelease else sellRelease
             val ichiOk = if (range) ichiRead.rangeAligned(last.close)
-                         else ichiRead.trendAligned(side, last.close)
+                         else ichiRead.trendAligned(side, last.close) || release?.ready == true
             val trend = (if (if (range) (if (buy) last.close <= ema else last.close >= ema)
                          else (if (buy) last.close > ema else last.close < ema)) 12 else 0) +
                 (if (ichiOk) 13 else 0)
@@ -121,7 +130,9 @@ internal object V1Scoring {
                     }, points)
             val items = listOf(
                 item("ساختار روند · EMA + ایچیموکو", trend,
-                    "${mode.label} · EMA200=$ema · ${ichiRead.detail(side)} · هم‌راستایی ایچیموکو=${if (ichiOk) "تأیید" else "رد"} · $trend/25"),
+                    "${mode.label} · EMA200=$ema · " +
+                        (release?.let { "فشردگی/چیکوی رمزارز: ${it.detail} · " } ?: "") +
+                        "${ichiRead.detail(side)} · هم‌راستایی ایچیموکو=${if (ichiOk) "تأیید" else "رد"} · $trend/25"),
                 item("مومنتوم · RSI + MACD", momentum, "RSI=$rsi · MACD=$macd · $momentum/25"),
                 item("پرایس‌اکشن · حمایت/مقاومت", priceAction,
                     "حمایت=$support · مقاومت=$resistance · ATR=$atr · $priceAction/25"),
@@ -140,8 +151,9 @@ internal object V1Scoring {
         // This is the Ichimoku half of the FIRST layer, not a parallel strategy. Never
         // authorize a trend entry on the EMA half alone while the displaced components
         // disagree or the lines/price are over-extended relative to real ATR.
+        val selectedRelease = if (side == SignalAction.BUY) buyRelease else sellRelease
         if (side != SignalAction.NO_TRADE && !range &&
-            !ichiRead.trendAligned(side, last.close))
+            !ichiRead.trendAligned(side, last.close) && selectedRelease?.ready != true)
             blockers += "اجزای ایچیموکو هم‌جهت/هم‌فاصله نیستند (ابر، تنکان/کیجون، چیکو و ATR)"
         val total = selected.second.first.toDouble()
         if (total < threshold) blockers += "امتیاز $total/۱۰۰ از آستانهٔ $threshold کمتر است"
@@ -154,7 +166,9 @@ internal object V1Scoring {
             stopLoss = if (blockers.isEmpty()) stop else null,
             takeProfit = if (blockers.isEmpty()) target else null,
             riskReward = if (blockers.isEmpty()) 1.5 else null,
-            reasons = listOf("موتور واحد چهارلایه · ${mode.label} · $total/۱۰۰"),
+            reasons = listOf("موتور واحد چهارلایه · ${mode.label} · $total/۱۰۰") +
+                if (selectedRelease?.ready == true) listOf("فشردگی و آزادشدن چیکو با شکست بسته/حجم واقعی تأیید شد؛ سود تضمینی نیست")
+                else emptyList(),
             blockers = blockers, confluence = selected.second.second,
             interval = interval, barTime = last.time)
     }

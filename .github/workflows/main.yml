@@ -90,7 +90,8 @@ jobs:
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.22 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.23 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.24 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.25 updater')))) }}
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.25 updater') ||
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.26 updater')))) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -502,6 +503,9 @@ jobs:
           fi
           if [[ "$VERSION_NAME" == "1.3.25" ]]; then
             NOTES+=$'\n\nChanges: the Trading tab now separates AI connectivity, a fresh same-symbol advisory response, validated news evidence/veto, and the recorded effect of the automatic paper-entry AI review. Each attempted entry review is persisted by symbol, model, bar and outcome in the Decision Log (explicit veto, non-veto, missing verdict, invalid response or unavailable). Only an explicit negative verdict with a valid reason vetoes. The model never creates a signal, overrides technical price/risk levels or proves better returns. No claim of on-device network availability is made.'
+          fi
+          if [[ "$VERSION_NAME" == "1.3.26" ]]; then
+            NOTES+=$'\n\nChanges: within the existing four-layer V1 engine, crypto M5/M15 in hybrid/trend mode can count an independently validated Ichimoku compression-to-release as structural confirmation. Compression of Tenkan/Kijun and the projected cloud over prior closed bars alone is NOT a direction or an entry: Chikou must clear historical price AND the cloud at its own plotted time, while a closed 20-bar breakout, matching line/cloud geometry and real volume confirm the move. Seven independent 320-closed-bar intervals, the current threshold, absolute volatility veto, same-venue fresh trade tick, cost/risk and paper journal rules remain in force. This is a testable entry hypothesis, not a demonstrated improvement in win rate or profit; Binance TradingView charts are not Nobitex execution evidence.'
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "$TAG" --notes "$NOTES"
