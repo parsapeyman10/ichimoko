@@ -382,13 +382,18 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
                     // Parallel multi-processing quote fetching across all open trade symbols
                     val symbolsToFetch = openTradesList.map { it.symbol }.distinct().filter {
-                        it != currentMarket.symbol
+                        it != currentMarket.symbol || com.aurum.edge.data.CryptoCatalog.isCrypto(it)
                     }
                     if (symbolsToFetch.isNotEmpty()) {
                         kotlinx.coroutines.coroutineScope {
                             val deferreds = symbolsToFetch.map { sym ->
                                 async(Dispatchers.IO) {
-                                    val quote = runCatching { spot.fetchQuote(sym) }.getOrNull()
+                                    val openedAt = openTradesList.filter { it.symbol == sym }.minOf { it.openedAt }
+                                    val quote = runCatching {
+                                        if (com.aurum.edge.data.CryptoCatalog.isCrypto(sym))
+                                            container.openTradeTicks.poll(sym, openedAt)
+                                        else spot.fetchQuote(sym)
+                                    }.getOrNull()
                                     sym to quote?.takeIf { TradeQuotePolicy.accepts(it) }
                                 }
                             }
@@ -396,7 +401,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                                 if (quote != null && quote.price.isFinite() && quote.price > 0.0 &&
                                     !MarketHours.closedFor(sym)) {
                                     currentMap[sym] = quote.price
-                                    val closedList = container.journalStore.settleTick(sym, quote.price, quote.at)
+                                    val closedList = if (com.aurum.edge.data.CryptoCatalog.isCrypto(sym))
+                                        emptyList() // openTradeTicks.poll replayed this batch in order
+                                    else container.journalStore.settleTick(sym, quote.price, quote.at)
                                     if (closedList.isNotEmpty()) {
                                         _stats.value = container.journalStore.stats()
                                         closedList.forEach { closed ->

@@ -223,6 +223,12 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.TextMuted,
                             )
+                            trade.tickCoverageGapAt?.let { at ->
+                                Text("⚠ پیوستگی تیک‌ها از ${formatDateTime(at)} قابل تأیید نیست؛ " +
+                                    "در دورهٔ قطع اتصال ممکن است لمس حد ضرر/هدف ثبت نشده باشد.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AurumColors.Red)
+                            }
                             trade.note.takeIf { it.isNotBlank() }?.let { note ->
                                 val isAi = note.contains("هوش مصنوعی") && !note.contains("بدون هوش مصنوعی")
                                 Text(

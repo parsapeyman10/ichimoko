@@ -274,6 +274,16 @@ class JournalStore(
         return@withLock newlyClosed
     }
 
+    /** Persistent audit flag: no trade ID is provided to prove no tick was lost. */
+    suspend fun noteTickCoverageGap(symbol: String, at: Long) = mutex.withLock {
+        if (!loaded || at <= 0L || _trades.value.none {
+                it.isOpen && it.symbol == symbol && it.tickCoverageGapAt == null }) return@withLock
+        persist(_trades.value.map { trade ->
+            if (trade.isOpen && trade.symbol == symbol && trade.tickCoverageGapAt == null)
+                trade.copy(tickCoverageGapAt = at) else trade
+        })
+    }
+
     /**
      * Direct live-tick settlement: whenever a fresh real-time quote arrives for any symbol,
      * immediately checks if Stop Loss or Take Profit has been touched and closes the trade automatically.

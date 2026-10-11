@@ -45,7 +45,7 @@ class SpotFallbackClient(
     // plus a selected pair can be monitored here, and each pair is fetched <= once/10s.
     private object CryptoTradeCache {
         val mutex = Mutex()
-        val quotes = mutableMapOf<String, Pair<Long, PriceTick>>()
+        val responses = mutableMapOf<String, Pair<Long, String>>()
         val lastAttempt = mutableMapOf<String, Long>()
         const val MIN_CRYPTO_FETCH_MS = 10_000L
     }
@@ -129,29 +129,37 @@ class SpotFallbackClient(
         return PriceTick(price, at)
     }
 
+    private suspend fun cryptoTradeResponse(symbol: String): String {
+        val code = NobitexHistoryClient.ticker(symbol)
+            ?: throw DataFeedException("نماد USDT برای نوبیتکس معتبر نیست")
+        return CryptoTradeCache.mutex.withLock {
+            val now = System.currentTimeMillis()
+            CryptoTradeCache.responses[symbol]?.takeIf { (fetchedAt, _) ->
+                now - fetchedAt in 0L..CryptoTradeCache.MIN_CRYPTO_FETCH_MS
+            }?.let { return@withLock it.second }
+            if (now - (CryptoTradeCache.lastAttempt[symbol] ?: 0L) in
+                0L until CryptoTradeCache.MIN_CRYPTO_FETCH_MS)
+                throw DataFeedException("فاصلهٔ مجاز درخواست تیک نوبیتکس؛ پاسخ قبلی معتبر نیست")
+            CryptoTradeCache.lastAttempt[symbol] = now
+            val body = withContext(Dispatchers.IO) { get("${NobitexHistoryClient.HOST}/v2/trades/$code") }
+            CryptoTradeCache.responses[symbol] = now to body
+            body
+        }
+    }
+
+    /** Ordered recent trade page for OPEN crypto positions, sharing the existing 10s
+     * rate-limit with quote snapshots so the service and visible UI do not double-poll.
+     */
+    internal suspend fun fetchCryptoTrades(symbol: String): List<NobitexTradeBatch.Trade> {
+        if (!CryptoCatalog.isCrypto(symbol)) throw DataFeedException("نماد کریپتو معتبر نیست")
+        return NobitexTradeBatch.parse(cryptoTradeResponse(symbol))
+    }
+
     /** One real quote: Swissquote first, gold-api.com only as a gold-only backup. Never fabricated. */
     suspend fun fetchQuote(symbol: String): PriceTick {
         // Crypto has its own real, keyless book. Swissquote and Gold-API do not carry these
         // instruments at all, so trying them would just produce a misleading error.
-        if (CryptoCatalog.isCrypto(symbol)) {
-            val code = NobitexHistoryClient.ticker(symbol)
-                ?: throw DataFeedException("نماد USDT برای نوبیتکس معتبر نیست")
-            return CryptoTradeCache.mutex.withLock {
-                val now = System.currentTimeMillis()
-                CryptoTradeCache.quotes[symbol]?.takeIf { (fetchedAt, tick) ->
-                    now - fetchedAt in 0L..CryptoTradeCache.MIN_CRYPTO_FETCH_MS &&
-                        com.aurum.edge.core.TradeQuotePolicy.accepts(tick, now)
-                }?.let { return@withLock it.second }
-                if (now - (CryptoTradeCache.lastAttempt[symbol] ?: 0L) in
-                    0L until CryptoTradeCache.MIN_CRYPTO_FETCH_MS)
-                    throw DataFeedException("فاصلهٔ مجاز درخواست تیک نوبیتکس؛ تیک قبلی معتبر نیست")
-                CryptoTradeCache.lastAttempt[symbol] = now
-                // A candle close is NOT an executed trade. The public Nobitex trades API
-                // provides both the price and the original exchange timestamp for this pair.
-                val body = withContext(Dispatchers.IO) { get("${NobitexHistoryClient.HOST}/v2/trades/$code") }
-                NobitexTradeQuote.parse(body).also { CryptoTradeCache.quotes[symbol] = now to it }
-            }
-        }
+        if (CryptoCatalog.isCrypto(symbol)) return NobitexTradeQuote.parse(cryptoTradeResponse(symbol))
         return try {
             fetchSwissquote(symbol)
         } catch (cancel: CancellationException) {

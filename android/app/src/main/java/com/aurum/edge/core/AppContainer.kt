@@ -10,6 +10,7 @@ import com.aurum.edge.data.ForexCalendarRepository
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.MarketRepository
 import com.aurum.edge.data.MarketState
+import com.aurum.edge.data.OpenTradeTickMonitor
 import com.aurum.edge.data.NewsRepository
 import com.aurum.edge.data.PublicWebNewsRepository
 import com.aurum.edge.data.PublicNewsCategory
@@ -54,6 +55,7 @@ class AppContainer(context: Context) {
     val decisionLog = com.aurum.edge.data.DecisionLogStore(appContext)
     val candleCache = CandleCache(appContext)
     val journalStore = JournalStore(appContext, settingsStore = settingsStore)
+    val openTradeTicks = OpenTradeTickMonitor(journalStore)
     val opportunityStore = PaperOpportunityStore(appContext)
     val client = TwelveDataClient()
     val publicHistory = PublicCandleHistoryClient()

@@ -346,14 +346,21 @@ class SignalMonitorService : Service() {
                         kotlinx.coroutines.coroutineScope {
                             val deferreds = openTrades.map { it.symbol }.distinct().map { symbol ->
                                 async(Dispatchers.IO) {
-                                    val q = runCatching { spot.fetchQuote(symbol) }.getOrNull()
+                                    val openedAt = openTrades.filter { it.symbol == symbol }.minOf { it.openedAt }
+                                    val q = runCatching {
+                                        if (com.aurum.edge.data.CryptoCatalog.isCrypto(symbol))
+                                            container.openTradeTicks.poll(symbol, openedAt)
+                                        else spot.fetchQuote(symbol)
+                                    }.getOrNull()
                                     symbol to q?.takeIf { TradeQuotePolicy.accepts(it) }
                                 }
                             }
                             deferreds.awaitAll().forEach { (sym, quote) ->
                                 if (quote != null && quote.price.isFinite() && quote.price > 0.0 &&
                                     !MarketHours.closedFor(sym)) {
-                                    container.journalStore.settleTick(sym, quote.price, quote.at)
+                                    if (!com.aurum.edge.data.CryptoCatalog.isCrypto(sym))
+                                        container.journalStore.settleTick(sym, quote.price, quote.at)
+                                    // Crypto ticks were replayed in order by openTradeTicks.poll.
                                 }
                             }
                         }

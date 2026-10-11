@@ -649,9 +649,13 @@ class MarketRepository(
             lastCacheWrite = writeAt
             persistCache()
         }
-        // settle paper trades against real prices as they arrive
-        journal.settleTick(current.symbol, price, at)
-        journal.settle(Candle(time = at, open = price, high = price, low = price, close = price), current.symbol, at)
+        // Crypto's quote-only endpoint exposes only its latest trade. OPEN crypto
+        // positions are settled by OpenTradeTickMonitor replaying each overlapping page;
+        // this single snapshot must not skip earlier stop/target touches.
+        if (!CryptoCatalog.isCrypto(current.symbol)) {
+            journal.settleTick(current.symbol, price, at)
+            journal.settle(Candle(time = at, open = price, high = price, low = price, close = price), current.symbol, at)
+        }
     }
 
     private fun publishStreamUnavailable(detail: String) {
@@ -778,9 +782,12 @@ class MarketRepository(
             evaluationError = evaluationError,
             showingCachedData = showingCache,
         )
-        if (!showingCache) bars.filter { it.closed }.lastOrNull()?.let { bar ->
-            journal.settle(bar, current.symbol, bar.time + current.interval.millis)
-        }
+        // Crypto exits must never be inferred from a single OHLC (unknown intra-bar
+        // order). The open-position executed-trade replay owns crypto settlement.
+        if (!showingCache && !CryptoCatalog.isCrypto(current.symbol))
+            bars.filter { it.closed }.lastOrNull()?.let { bar ->
+                journal.settle(bar, current.symbol, bar.time + current.interval.millis)
+            }
     }
 
     private fun currentPeriodStart(interval: Interval): Long {

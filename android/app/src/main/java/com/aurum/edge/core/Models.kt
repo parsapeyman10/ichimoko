@@ -392,6 +392,8 @@ data class PaperTrade(
     /** Non-null on V1 records; old positions retain their historic fixed-target exit. */
     val initialStopLoss: Double? = null,
     val trailExtreme: Double? = null,
+    /** First observed/unverifiable gap in the executed-trade feed after paper entry. */
+    val tickCoverageGapAt: Long? = null,
 ) {
     val isOpen: Boolean get() = closedAt == null
     val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }

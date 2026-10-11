@@ -18,6 +18,12 @@ class TradingViewEmbedTest {
         assertTrue(html.contains("&interval=5&"))
         assertFalse(html.contains("&interval=60&"))
         assertTrue(html.contains("studies=%5B%22STD%3BIchimoku%25Cloud%22%5D"))
+        val encoded = html.substringAfter("studies_overrides=").substringBefore('"')
+        val overrides = java.net.URLDecoder.decode(encoded, "UTF-8")
+        assertTrue(overrides.contains("\"ichimoku cloud.conversion line periods\":8"))
+        assertTrue(overrides.contains("\"ichimoku cloud.base line periods\":24"))
+        assertTrue(overrides.contains("\"ichimoku cloud.leading span b periods\":72"))
+        assertTrue(overrides.contains("\"ichimoku cloud.lagging span periods\":24"))
         assertFalse(html.contains("external-embedding/embed-widget-advanced-chart.js"))
     }
 
