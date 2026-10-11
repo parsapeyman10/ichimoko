@@ -48,6 +48,7 @@ class ThreeMinuteCandlesTest {
 
     @Test fun `no native Nobitex three minute resolution is ever mislabeled`() {
         assertThrows(DataFeedException::class.java) { NobitexHistoryClient.resolution(Interval.M3) }
+        assertEquals(Interval.M3, Interval.fromLabel("3m")) // saved journal interval survives reload
     }
 
     @Test fun `only actionable timeframe can win over a non actionable higher score`() {

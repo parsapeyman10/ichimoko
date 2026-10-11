@@ -92,4 +92,19 @@ class CryptoIchimokuReleaseTest {
         assertEquals(SignalAction.NO_TRADE, missing.action)
         assertTrue(missing.blockers.any { it.contains("۷ تایم‌فریمی کامل نیست") })
     }
+
+    @Test fun `M3 is an extra crypto entry base and never replaces any of seven independent frames`() {
+        val now = System.currentTimeMillis()
+        val m3 = closedSeries(Interval.M3, now, release = true)
+        val seven = V1Scoring.intervals.associateWith { closedSeries(it, now) }
+        assertEquals(7, seven.size)
+        assertFalse(Interval.M3 in V1Scoring.intervals)
+        val complete = SignalEngine.evaluate(m3, Interval.M3, 60.0, "BTC/USDT",
+            CategoryStrategy.HYBRID, seven)
+        assertEquals(complete.blockers.toString(), SignalAction.BUY, complete.action)
+        val missingM1 = SignalEngine.evaluate(m3, Interval.M3, 60.0, "BTC/USDT",
+            CategoryStrategy.HYBRID, seven - Interval.M1)
+        assertEquals(SignalAction.NO_TRADE, missingM1.action)
+        assertTrue(missingM1.blockers.any { it.contains("۷ تایم‌فریمی کامل نیست") })
+    }
 }
