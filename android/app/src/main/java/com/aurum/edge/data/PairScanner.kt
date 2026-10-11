@@ -558,7 +558,7 @@ class PairScanner(
             }
 
             // Radar history may suggest candidates, but cannot auto-open a trade without a
-            // separate fresh, verified quote in the selected live-market path.
+            // separate fresh same-venue executed trade tick and atomic journal authorization.
             update(
                 symbol = symbol,
                 state = "candidate",
