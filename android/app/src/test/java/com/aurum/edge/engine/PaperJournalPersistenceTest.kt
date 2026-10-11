@@ -54,6 +54,20 @@ class PaperJournalPersistenceTest {
         listOf(PaperNewsEvidence("id", "Publisher", "Gold headline", "https://publisher.example/news", 1_800_000_000_000L)),
         calendarSource = "https://nfs.faireconomy.media/ff_calendar_thisweek.json", calendarCheckedAt = 1_800_000_000_100L)
 
+    @Test fun quoteObservedBeforeEntryCannotSettleNewPosition() = runBlocking {
+        val at = 1_800_000_000_000L
+        val store = JournalStore(context, journalFile()).also { it.load() }
+        val opened = store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5,
+            automatic = true, observedAt = at)
+        // A cached exchange tick seen before the paper fill may still be fresh. It is
+        // not a post-entry price event, even if the polling loop repeats it later.
+        store.settleTick("XAU/USD", 2990.0, at - 1_000L)
+        assertTrue(store.trades.value.single().isOpen)
+        store.settleTick("XAU/USD", 2990.0, at + 1_000L)
+        assertFalse(store.trades.value.single().isOpen)
+        assertEquals(opened.id, store.trades.value.single().id)
+    }
+
     @Test fun backendJsonEightTechnicalChecksNinthAiPaperOpenTickCloseAndReload() = runBlocking {
         val now = 1_800_000_000_000L
         val observed = Instant.ofEpochMilli(now)

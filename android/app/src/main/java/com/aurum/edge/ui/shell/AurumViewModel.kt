@@ -14,7 +14,6 @@ import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.HistoryPolicy
-import com.aurum.edge.data.CryptoCatalog
 import com.aurum.edge.data.SourceComparison
 import com.aurum.edge.data.VerificationStatus
 import com.aurum.edge.data.WatchCatalog
@@ -374,7 +373,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     if (currentMarket.lastPrice != null && currentMarket.lastPrice!! > 0.0 &&
                         !currentMarket.showingCachedData && currentMarket.feed.mode == FeedMode.LIVE &&
                         FeedLiveness.hasRecentReceipt(currentMarket.feed) &&
-                        !CryptoCatalog.isCrypto(currentMarket.symbol) &&
                         !MarketHours.closedFor(currentMarket.symbol)) {
                         currentMap[currentMarket.symbol] = currentMarket.lastPrice!!
                         // MarketRepository already settles the original timestamped tick.
@@ -384,7 +382,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
                     // Parallel multi-processing quote fetching across all open trade symbols
                     val symbolsToFetch = openTradesList.map { it.symbol }.distinct().filter {
-                        it != currentMarket.symbol && !CryptoCatalog.isCrypto(it)
+                        it != currentMarket.symbol
                     }
                     if (symbolsToFetch.isNotEmpty()) {
                         kotlinx.coroutines.coroutineScope {

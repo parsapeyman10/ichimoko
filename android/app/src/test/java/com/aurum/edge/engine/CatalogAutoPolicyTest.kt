@@ -24,7 +24,11 @@ class CatalogAutoPolicyTest {
     @Test fun `catalog entry needs a fresh actual tick and a supported exit monitor`() {
         assertTrue(CatalogQuotePolicy.tickMonitored("EUR/USD"))
         assertTrue(CatalogQuotePolicy.tickMonitored("XAU/USD"))
-        listOf("BTC/USDT", "AAPL", "USOIL", "XAGUSD", "INVALID").forEach {
+        assertTrue(CatalogQuotePolicy.tickMonitored("BTC/USDT"))
+        assertNull(CatalogQuotePolicy.rejection("BTC/USDT", PriceTick(100.0, weekday), weekday))
+        assertNotNull(CatalogQuotePolicy.rejection("BTC/USDT",
+            PriceTick(100.0, weekday, isTradeTick = false), weekday))
+        listOf("AAPL", "USOIL", "XAGUSD", "INVALID").forEach {
             assertFalse(CatalogQuotePolicy.tickMonitored(it))
             assertNotNull(CatalogQuotePolicy.rejection(it, PriceTick(100.0, weekday), weekday))
         }
@@ -32,6 +36,19 @@ class CatalogAutoPolicyTest {
         assertNotNull(CatalogQuotePolicy.rejection("EUR/USD", PriceTick(100.0, weekday, isTradeTick = false), weekday))
         assertNotNull(CatalogQuotePolicy.rejection("EUR/USD", PriceTick(100.0, weekday - 46_000L), weekday))
         assertNull(CatalogQuotePolicy.rejection("EUR/USD", PriceTick(100.0, weekday), weekday))
+    }
+
+    @Test fun `crypto entry never mixes another venue history with Nobitex ticks`() {
+        val config = AppSettings(autoPaperTrading = true)
+        val observed = MarketState(symbol = "BTC/USDT", interval = Interval.M5,
+            lastPrice = 100.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = weekday),
+            historyProvider = "Twelve Data")
+        assertTrue(PaperAutoRules.blocker(observed, config, PersianNewsState(), now = weekday,
+            allowedSymbols = WatchCatalog.scannerSymbols)!!.contains("نوبیتکس"))
+        val matched = observed.copy(historyProvider = com.aurum.edge.data.NobitexHistoryClient.PROVIDER)
+        assertEquals("سیگنال محاسبه نشده است",
+            PaperAutoRules.blocker(matched, config, PersianNewsState(), now = weekday,
+                allowedSymbols = WatchCatalog.scannerSymbols))
     }
 
     @Test fun `catalog permission changes symbol scope but never invents a signal`() {

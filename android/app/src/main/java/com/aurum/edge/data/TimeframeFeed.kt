@@ -16,14 +16,16 @@ internal class TimeframeFeed(
     private val nobitex: NobitexHistoryClient = NobitexHistoryClient(),
 ) {
     private data class Snapshot(val fetchedAt: Long, val candles: List<Candle>)
-    private val cache = mutableMapOf<Pair<String, Interval>, Snapshot>()
+    // Do not reuse a cached Twelve Data frame as Nobitex-only evidence after auto mode is enabled.
+    private val cache = mutableMapOf<Triple<String, Interval, Boolean>, Snapshot>()
 
     suspend fun fetch(symbol: String, base: Interval, baseBars: List<Candle>, apiKey: String,
-                      now: Long = System.currentTimeMillis()): Map<Interval, List<Candle>> {
+                      now: Long = System.currentTimeMillis(),
+                      requireNobitexCrypto: Boolean = false): Map<Interval, List<Candle>> {
         val result = mutableMapOf(base to baseBars.filter { it.closed && it.time + base.millis <= now }
             .sortedBy { it.time }.distinctBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES))
         for (interval in V1Scoring.intervals.filter { it != base }) {
-            val key = symbol to interval
+            val key = Triple(symbol, interval, requireNobitexCrypto)
             val previous = cache[key]
             if (previous != null && now - previous.fetchedAt in 0L..(if (previous.candles.size >= HistoryPolicy.LIVE_MIN_CANDLES) minOf(300_000L, interval.millis) else 60_000L)) {
                 result[interval] = previous.candles
@@ -42,7 +44,7 @@ internal class TimeframeFeed(
                     } catch (cancel: CancellationException) {
                         throw cancel
                     } catch (_: Exception) {
-                        if (apiKey.isBlank()) emptyList() else twelve.fetchCandles(apiKey, symbol,
+                        if (requireNobitexCrypto || apiKey.isBlank()) emptyList() else twelve.fetchCandles(apiKey, symbol,
                             interval, outputSize = desired, minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES)
                     }
                 } else try {

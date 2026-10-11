@@ -11,13 +11,14 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** Only markets for which the existing open-position monitor can also fetch SAME-identity,
- * timestamped trade ticks. No automatic entries on Yahoo snapshots, Nobitex candle closes,
- * unverified Twelve WS subscriptions or futures substituted for spot.
+/** Only markets for which the open-position monitor can also fetch SAME-identity,
+ * timestamped trade ticks. Nobitex executed USDT trades are separate from UDF candle closes.
+ * No automatic entry on Yahoo snapshots, unverified WS or futures substituted for spot.
  */
 object CatalogQuotePolicy {
     fun tickMonitored(symbol: String): Boolean = symbol in WatchCatalog.scannerSymbols &&
-        (AssetClass.of(symbol) == AssetClass.FOREX || symbol in setOf("XAU/USD", "XAG/USD"))
+        (AssetClass.of(symbol) == AssetClass.FOREX || symbol in setOf("XAU/USD", "XAG/USD") ||
+            CryptoCatalog.isCrypto(symbol))
 
     fun rejection(symbol: String, tick: PriceTick?, now: Long = System.currentTimeMillis()): String? = when {
         !tickMonitored(symbol) -> "فید تیک تازهٔ هم‌نماد برای ورود و پایش خروج این بازار تعریف نشده است"
@@ -59,7 +60,8 @@ class CatalogPaperTrader(
             // Provider timestamp, NOT scanner download time. This is the same tick contract
             // used for settling all non-crypto open positions in the service/UI.
             feed = FeedStatus(FeedMode.LIVE, "تیک مستقل تأییدشده", tick.at,
-                provider = "Swissquote / Gold-API"),
+                provider = if (CryptoCatalog.isCrypto(scanned.symbol))
+                    "Nobitex /v2/trades (معاملهٔ زمان‌دار)" else "Swissquote / Gold-API"),
             showingCachedData = false,
         )
         val opened = trader.onMarketUpdate(verified, catalogQuote = tick)

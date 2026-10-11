@@ -53,6 +53,8 @@ data class MarketState(
     val showingCachedData: Boolean = false,
     /** Distinct from a valid NO_TRADE or insufficient history; never authorizes entry. */
     val evaluationError: String? = null,
+    /** Live history provenance; a disk cache has no verified venue. */
+    val historyProvider: String? = null,
 ) {
     val closedCount: Int get() = candles.count { it.closed }
     val hasRealData: Boolean get() = candles.isNotEmpty()
@@ -104,6 +106,7 @@ class MarketRepository(
     private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client)
     private var timeframeJob: Job? = null
     @Volatile private var timeframeSnapshot: Map<Interval, List<Candle>> = emptyMap()
+    private var timeframeAutoMode = false
     private var lastFrameRefreshAt = 0L
     @Volatile private var started = false
     @Volatile private var generation = 0L
@@ -163,6 +166,7 @@ class MarketRepository(
         streamEpoch++
         timeframeJob?.cancel(); timeframeJob = null
         timeframeSnapshot = emptyMap()
+        timeframeAutoMode = false
         lastFrameRefreshAt = 0L
         pollJob?.cancel(); pollJob = null
         streamJob?.cancel(); streamJob = null
@@ -260,8 +264,8 @@ class MarketRepository(
                 } catch (cancel: CancellationException) {
                     throw cancel
                 } catch (nobitexFailure: Exception) {
-                    if (!current.hasKey) throw DataFeedException(
-                        "فید ${current.symbol} از نوبیتکس معتبر نبود: ${(nobitexFailure.message ?: "بدون داده").take(100)}؛ USD جای USDT نیست")
+                    if (!current.hasKey || current.autoPaperTrading) throw DataFeedException(
+                        "فید ${current.symbol} از نوبیتکس معتبر نبود: ${(nobitexFailure.message ?: "بدون داده").take(100)}؛ ورود با تاریخچهٔ صرافی دیگر ممنوع است")
                     fetched = client.fetchCandles(current.apiKey, current.symbol, current.interval,
                         outputSize = requestedSize, minimumOutputSize = minimumSize)
                     if (fetched.size < minimumSize) throw DataFeedException(
@@ -339,6 +343,10 @@ class MarketRepository(
                 FeedLiveness.hasRecentReceipt(_state.value.feed, receivedAt)
             val historyCurrent = hasCurrentRestBar(fetched, current.interval, receivedAt)
             val periodStart = currentPeriodStart(current.interval)
+            // A persisted crypto candle lacks a venue tag. Never blend an older Twelve
+            // series (or a different Nobitex fetch) with the newly verified venue window.
+            if (CryptoCatalog.isCrypto(current.symbol)) cachedBars.clear()
+            _state.value = _state.value.copy(historyProvider = historyProvider)
             fetched.forEach { bar ->
                 // The bar whose period is still open is kept as "forming" and excluded from the engine.
                 // A recent WebSocket/fallback tick can be newer than this REST response; do not overwrite it.
@@ -447,10 +455,14 @@ class MarketRepository(
                     return emitted
                 }
                 try {
-                    if (current.hasKey) {
+                    if (CryptoCatalog.isCrypto(current.symbol)) {
+                        // Same Nobitex USDT venue as the historical bars, with exchange-time
+                        // executed trades. No fallback to another venue for paper entries.
+                        collectSpotFallback("Nobitex /v2/trades (معاملهٔ زمان‌دار)")
+                    } else if (current.hasKey) {
                         // Public, keyless live quote is tried first. Twelve Data WebSocket is the
                         // last live fallback, matching the history provider policy.
-                        val publicWorked = if (CryptoCatalog.isCrypto(current.symbol)) false else try {
+                        val publicWorked = try {
                             collectSpotFallback("فید زندهٔ عمومی (Swissquote/Gold-API)", TWELVE_WS_FALLBACK_WINDOW_MS)
                         } catch (_: Exception) {
                             false
@@ -469,12 +481,6 @@ class MarketRepository(
                                 publishStreamUnavailable(e.message ?: "WebSocket آخرین fallback Twelve Data در دسترس نیست")
                             }
                         }
-                    } else if (CryptoCatalog.isCrypto(current.symbol)) {
-                        // Nobitex's UDF endpoint supplies candles, not a timestamped tick.
-                        // Keep polling its real history; do not repeatedly fetch and relabel a
-                        // candle close as a tick or allow it to settle an open position.
-                        publishStreamUnavailable("برای این جفت رمزارز تیک زندهٔ مستقل موجود نیست؛ فقط کندل زمان‌دار نمایش داده می‌شود")
-                        delay(60_000L)
                     } else {
                         collectSpotFallback("فید رایگان خودکار (Swissquote/Gold-API)")
                         if (started && generation == session && streamEpoch == epoch)
@@ -726,15 +732,23 @@ class MarketRepository(
         }
         // Never stall the live tick/settlement stream behind six REST history downloads.
         // Until all seven REAL timeframes arrive the engine returns NO_TRADE, not a guess.
+        if (CryptoCatalog.isCrypto(current.symbol) && timeframeAutoMode != current.autoPaperTrading) {
+            timeframeJob?.cancel(); timeframeJob = null
+            timeframeSnapshot = emptyMap()
+            lastFrameRefreshAt = 0L
+            timeframeAutoMode = current.autoPaperTrading
+        }
         val frameNow = System.currentTimeMillis()
         if (!showingCache && bars.count { it.closed } >= HistoryPolicy.LIVE_MIN_CANDLES &&
             timeframeJob?.isActive != true && frameNow - lastFrameRefreshAt >= 60_000L) {
             lastFrameRefreshAt = frameNow
             val session = generation
             timeframeJob = scope?.launch(Dispatchers.IO) {
-                val fetched = timeframeFeed.fetch(current.symbol, current.interval, bars, current.apiKey)
+                val fetched = timeframeFeed.fetch(current.symbol, current.interval, bars, current.apiKey,
+                    requireNobitexCrypto = current.autoPaperTrading && CryptoCatalog.isCrypto(current.symbol))
                 if (started && generation == session && settings.read().symbol == current.symbol &&
-                    settings.read().interval == current.interval) {
+                    settings.read().interval == current.interval &&
+                    settings.read().autoPaperTrading == current.autoPaperTrading) {
                     timeframeSnapshot = fetched
                     publishCandles(showingCache = _state.value.showingCachedData)
                 }

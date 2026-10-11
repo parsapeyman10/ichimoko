@@ -305,7 +305,7 @@ class PairScanner(
                     } catch (_: Exception) {
                         // A keyed exchange feed may carry the exact USDT pair. Never silently
                         // substitute a USD quote for it if both sources are unavailable.
-                        if (config.hasKey) client.fetchCandles(config.apiKey, symbol, interval,
+                        if (config.hasKey && !config.autoPaperTrading) client.fetchCandles(config.apiKey, symbol, interval,
                             outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
                             minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES)
                         else throw DataFeedException("فید واقعی ${symbol} از نوبیتکس در دسترس نیست؛ دادهٔ USD جایگزین USDT نمی‌شود")
@@ -377,7 +377,8 @@ class PairScanner(
             // The playbook is context only; V1Scoring has the absolute market locks.
 
             val frames = try {
-                timeframeFeed.fetch(symbol, interval, candles, config.apiKey)
+                timeframeFeed.fetch(symbol, interval, candles, config.apiKey,
+                    requireNobitexCrypto = config.autoPaperTrading && CryptoCatalog.isCrypto(symbol))
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (error: Exception) {
@@ -445,6 +446,8 @@ class PairScanner(
                     if (config.hasKey) "اسکن دوره‌ای Twelve/public/Dukascopy fallback" else "اسکن دوره‌ای تاریخچهٔ عمومی/Dukascopy",
                     System.currentTimeMillis()),
                 signal = combined,
+                historyProvider = if (CryptoCatalog.isCrypto(symbol) && config.autoPaperTrading)
+                    NobitexHistoryClient.PROVIDER else null,
             )
             val mtf = withContext(Dispatchers.Default) {
                 runCatching { MtfAnalyzer.analyze(candles, interval) }.getOrNull()

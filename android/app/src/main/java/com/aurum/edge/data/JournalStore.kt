@@ -289,7 +289,9 @@ class JournalStore(
         val newlyClosed = mutableListOf<PaperTrade>()
         val updated = current.map { t ->
             if (!t.isOpen || t.symbol != symbol) return@map t
-            if (observedAt < t.openedAt - 10_000L) return@map t
+            // A trade fetched just before entry must never close a position opened
+            // afterwards, even if the quote was still within the feed freshness window.
+            if (observedAt < t.openedAt) return@map t
 
             val hitStop = if (t.action == SignalAction.BUY) {
                 price <= t.stopLoss + 1e-9

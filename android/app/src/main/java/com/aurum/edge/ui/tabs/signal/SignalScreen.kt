@@ -150,7 +150,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState,
         SectionCard("معاملهٔ خودکار کاغذی (تخصیص متوازن ۴ بازار)") {
             Text(
                 if (settings.autoPaperTrading) "$autoStatus · نماد منتخب و کاتالوگ به‌صورت خودکار بررسی می‌شوند؛ " +
-                    "ورود کاتالوگ فقط با تیک تازهٔ مستقل و پایش خروج (فعلاً فارکس و XAU/XAG). سقف ریسک کل پورتفو مشترک است." else "خاموش (از بخش تنظیمات یا صفحه اصلی قابل فعال‌سازی است)",
+                    "ورود کاتالوگ فقط با تیک تازهٔ مستقل و پایش خروج (فارکس، XAU/XAG و جفت‌های USDT با معاملات زمان‌دار نوبیتکس). سهام/نفت فاقد مسیر ورود خودکارند؛ سقف ریسک مشترک است." else "خاموش (از بخش تنظیمات یا صفحه اصلی قابل فعال‌سازی است)",
                 style = MaterialTheme.typography.bodySmall,
                 color = if (settings.autoPaperTrading) AurumColors.TextSecondary else AurumColors.Gold,
             )

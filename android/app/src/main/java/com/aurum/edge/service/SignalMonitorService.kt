@@ -344,8 +344,7 @@ class SignalMonitorService : Service() {
                     val openTrades = container.journalStore.trades.value.filter { it.isOpen }
                     if (openTrades.isNotEmpty()) {
                         kotlinx.coroutines.coroutineScope {
-                            val deferreds = openTrades.map { it.symbol }.distinct()
-                                .filterNot(com.aurum.edge.data.CryptoCatalog::isCrypto).map { symbol ->
+                            val deferreds = openTrades.map { it.symbol }.distinct().map { symbol ->
                                 async(Dispatchers.IO) {
                                     val q = runCatching { spot.fetchQuote(symbol) }.getOrNull()
                                     symbol to q?.takeIf { TradeQuotePolicy.accepts(it) }

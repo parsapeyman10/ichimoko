@@ -535,8 +535,8 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 6.dp))
             Text("رادار هنگام باز بودن اپ خودکار است؛ برای ادامهٔ پس‌زمینه «پایش زنده» و مجوز اعلان گوشی باید روشن باشد. " +
-                "ورود کاتالوگ فعلاً فقط برای جفت‌ارزهای فارکس و XAU/XAG دارای تیک تازهٔ Swissquote/Gold-API و پایش خروج انجام می‌شود؛ " +
-                "سهام، نفت و کریپتو تا زمان داشتن تیک هم‌هویت و مسیر خروج معتبر فقط بررسی می‌شوند.",
+                "ورود کاتالوگ برای فارکس و XAU/XAG با فید تأییدشده و برای جفت‌های USDT فقط با تیک واقعیِ زمان‌دار نوبیتکس و هفت تاریخچهٔ همان صرافی بررسی می‌شود؛ " +
+                "سهام و نفت تا وجود تیک هم‌هویت و مسیر خروج معتبر فقط رصد می‌شوند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             Text("قیمت زنده و چهار لایهٔ فنی (EMA/ایچیموکو، RSI/MACD، حمایت/مقاومت، M1 تا D1) لازم‌اند. نبود دادهٔ یک بازه ورود را می‌بندد؛ AI فقط می‌تواند سیگنال را وتو کند و اجازهٔ تغییر SL/TP ندارد. توقف سه باخت، زیان روزانهٔ ۲٪، سقف ۴ پوزیشن و trailing در ۱R و ۲R اعمال می‌شوند. هیچ سفارش واقعی ارسال نمی‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
@@ -584,7 +584,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     if (confirmAuto) {
         AlertDialog(onDismissRequest = { confirmAuto = false },
             title = { Text("ورود خودکار فقط کاغذی") },
-            text = { Text("هیچ سفارشی به بروکر ارسال نمی‌شود. تمام نمادهای پشتیبانی‌شده اسکن می‌شوند؛ ورود کاغذی چندنمادی فقط با تیک مستقل تازه و امکان پایش خروج (فعلاً فارکس و XAU/XAG) انجام می‌شود. دادهٔ هفت بازه، سقف ریسک و وتوی AI پابرجاست. بدون فید، معامله‌ای باز نمی‌شود. فعال شود؟") },
+            text = { Text("هیچ سفارشی به بروکر ارسال نمی‌شود. تمام نمادهای پشتیبانی‌شده اسکن می‌شوند؛ ورود کاغذی چندنمادی فقط با تیک مستقل تازه و پایش خروج (فارکس، XAU/XAG و جفت‌های USDT نوبیتکس با شواهد کامل) انجام می‌شود؛ سایر بازارها بدون فید معتبر فقط رصد می‌شوند. دادهٔ هفت بازه، سقف ریسک و وتوی AI پابرجاست. بدون فید، معامله‌ای باز نمی‌شود. فعال شود؟") },
             confirmButton = { TextButton(onClick = {
                 confirmAuto = false
                 viewModel.setAutoPaperTrading(true)

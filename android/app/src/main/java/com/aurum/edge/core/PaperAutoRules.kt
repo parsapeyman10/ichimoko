@@ -2,6 +2,7 @@ package com.aurum.edge.core
 
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.PersianNewsState
+import com.aurum.edge.data.NobitexHistoryClient
 import kotlin.math.abs
 
 /** Side-effect-free guard shared by service and unit tests. NEVER submits a broker order. */
@@ -11,6 +12,9 @@ object PaperAutoRules {
                 allowedSymbols: List<String> = settings.activeWatchlist): String? {
         OilEntrySafety.blocker(market.symbol)?.let { return it }
         if (!settings.autoPaperTrading) return "معاملهٔ خودکار کاغذی خاموش است"
+        if (AssetClass.of(market.symbol) == AssetClass.CRYPTO &&
+            market.historyProvider != NobitexHistoryClient.PROVIDER)
+            return "تاریخچهٔ هفت بازهٔ هم‌صرافی نوبیتکس برای ورود تأیید نشده است"
         if (market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))
             return "فید معتبر در دسترس نیست (وضعیت فید: ${market.feed.mode.label})"
         return opportunityBlocker(market, settings, news, now, requireMonitor = false,

@@ -163,7 +163,9 @@ class PaperAutoTrader(
             val trade = journal.open(
                 signal = finalSignal,
                 symbol = current.symbol,
-                price = finalSignal.entry ?: current.lastPrice!!,
+                // A catalog signal is calculated on closed bars, but the *fill* must be the
+                // separately fetched trade tick. Preview rechecks SL/TP and 0.5% risk at it.
+                price = catalogQuote?.price ?: finalSignal.entry ?: current.lastPrice!!,
                 balance = recentSettings.accountBalance,
                 riskPercent = recentSettings.riskPercent,
                 mtf = mtf?.let { MtfSnapshotRecord.from(it) },

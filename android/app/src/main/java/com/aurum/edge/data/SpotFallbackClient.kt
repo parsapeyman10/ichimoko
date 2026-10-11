@@ -1,9 +1,12 @@
 package com.aurum.edge.data
 
-import com.aurum.edge.core.Interval
 import com.aurum.edge.core.PriceTick
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
@@ -18,9 +21,9 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
- * Automatic real spot-price source. Mirrors the backend's app/services/spot_feed.py:
- * Swissquote's public BBO quote feed first, then gold-api.com (gold only) as a second real
- * source. MarketRepository tries this public source before its final Twelve Data live fallback,
+ * Automatic real spot-price source: Swissquote's public BBO for FX, gold-api.com for gold,
+ * and the public Nobitex executed-trades endpoint for listed USDT pairs.
+ * MarketRepository tries this public source before its final Twelve Data live fallback,
  * whether or not a key is configured.
  *
  * This is not a mock/synthetic generator: every value returned is parsed from a live provider
@@ -34,9 +37,18 @@ class SpotFallbackClient(
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .build(),
-    private val nobitex: NobitexHistoryClient = NobitexHistoryClient(),
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+
+    // Instances used by the screen, service and scanner share a per-process rate limit.
+    // The public trades endpoint allows 60 requests/minute; at most two crypto positions
+    // plus a selected pair can be monitored here, and each pair is fetched <= once/10s.
+    private object CryptoTradeCache {
+        val mutex = Mutex()
+        val quotes = mutableMapOf<String, Pair<Long, PriceTick>>()
+        val lastAttempt = mutableMapOf<String, Long>()
+        const val MIN_CRYPTO_FETCH_MS = 10_000L
+    }
 
     private fun get(url: String): String {
         val request = Request.Builder().url(url).header("Accept", "application/json").build()
@@ -122,14 +134,23 @@ class SpotFallbackClient(
         // Crypto has its own real, keyless book. Swissquote and Gold-API do not carry these
         // instruments at all, so trying them would just produce a misleading error.
         if (CryptoCatalog.isCrypto(symbol)) {
-            // Last closed candle from the same unblocked source as the history, so the
-            // live price and the chart can never disagree about which venue they mean.
-            val last = nobitex.fetchCandles(symbol, Interval.M1, desiredSize = 2, minimumSize = 1)
-                .candles.lastOrNull()
-                ?: throw DataFeedException("قیمت زندهٔ $symbol دریافت نشد")
-            // This is a candle close, not an exchange tick. Never invent its timestamp or
-            // allow it to trigger SL/TP, trailing stops, or a new paper entry.
-            return PriceTick(price = last.close, at = last.time, isTradeTick = false)
+            val code = NobitexHistoryClient.ticker(symbol)
+                ?: throw DataFeedException("نماد USDT برای نوبیتکس معتبر نیست")
+            return CryptoTradeCache.mutex.withLock {
+                val now = System.currentTimeMillis()
+                CryptoTradeCache.quotes[symbol]?.takeIf { (fetchedAt, tick) ->
+                    now - fetchedAt in 0L..CryptoTradeCache.MIN_CRYPTO_FETCH_MS &&
+                        com.aurum.edge.core.TradeQuotePolicy.accepts(tick, now)
+                }?.let { return@withLock it.second }
+                if (now - (CryptoTradeCache.lastAttempt[symbol] ?: 0L) in
+                    0L until CryptoTradeCache.MIN_CRYPTO_FETCH_MS)
+                    throw DataFeedException("فاصلهٔ مجاز درخواست تیک نوبیتکس؛ تیک قبلی معتبر نیست")
+                CryptoTradeCache.lastAttempt[symbol] = now
+                // A candle close is NOT an executed trade. The public Nobitex trades API
+                // provides both the price and the original exchange timestamp for this pair.
+                val body = withContext(Dispatchers.IO) { get("${NobitexHistoryClient.HOST}/v2/trades/$code") }
+                NobitexTradeQuote.parse(body).also { CryptoTradeCache.quotes[symbol] = now to it }
+            }
         }
         return try {
             fetchSwissquote(symbol)
