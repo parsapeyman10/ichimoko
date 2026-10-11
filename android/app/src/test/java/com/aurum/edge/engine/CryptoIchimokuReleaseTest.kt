@@ -33,6 +33,18 @@ class CryptoIchimokuReleaseTest {
         assertFalse(CryptoIchimokuRelease.assess(bars, ichi, 0.4, SignalAction.NO_TRADE).ready)
     }
 
+    @Test fun `bearish Chikou release is directional and needs a real downside close`() {
+        val down = bars.dropLast(1) + bars.last().copy(
+            open = 100.0, high = 100.1, low = 99.1, close = 99.3)
+        val bearish = ichi.copy(
+            tenkan = tenkan.toMutableList().also { it[99] = 99.6 },
+            kijun = kijun.toMutableList().also { it[99] = 99.85 },
+            senkouA = a.toMutableList().also { it[99] = 99.725 },
+        )
+        assertTrue(CryptoIchimokuRelease.assess(down, bearish, 0.4, SignalAction.SELL).ready)
+        assertFalse(CryptoIchimokuRelease.assess(down, bearish, 0.4, SignalAction.BUY).ready)
+    }
+
     @Test fun `a thin cloud alone never authorizes a crypto breakout`() {
         assertFalse(CryptoIchimokuRelease.assess(bars.dropLast(1) + bars.last().copy(
             close = 100.1, high = 100.2), ichi, 0.4, SignalAction.BUY).ready)
@@ -69,6 +81,12 @@ class CryptoIchimokuReleaseTest {
             CategoryStrategy.HYBRID, frames)
         assertEquals(confirmed.blockers.toString(), SignalAction.BUY, confirmed.action)
         assertTrue(confirmed.confluence.first().detail.contains("فشردگی/چیکوی رمزارز"))
+        val explicitRange = SignalEngine.evaluate(base, Interval.M5, 60.0, "BTC/USDT",
+            CategoryStrategy.RANGE, frames)
+        assertFalse(explicitRange.confluence.first().detail.contains("فشردگی/چیکوی رمزارز"))
+        val fx = SignalEngine.evaluate(base, Interval.M5, 60.0, "EUR/USD",
+            CategoryStrategy.HYBRID, frames)
+        assertFalse(fx.confluence.first().detail.contains("فشردگی/چیکوی رمزارز"))
         val missing = SignalEngine.evaluate(base, Interval.M5, 60.0, "BTC/USDT",
             CategoryStrategy.HYBRID, mapOf(Interval.M5 to base))
         assertEquals(SignalAction.NO_TRADE, missing.action)
