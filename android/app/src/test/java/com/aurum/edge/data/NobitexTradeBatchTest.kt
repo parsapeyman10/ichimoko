@@ -18,8 +18,8 @@ class NobitexTradeBatchTest {
             trade(now - 2000, 99)), now)
         assertEquals(listOf(101.0, 99.0, 103.0), page.map { it.price })
         val cursor = TradePageCursor()
-        assertFalse(cursor.advance(page.take(2), now - 4000).gap)
-        val next = cursor.advance(page.drop(1), now - 4000)
+        assertFalse(cursor.advance(page.take(2), now - 3000).gap)
+        val next = cursor.advance(page.drop(1), now - 3000)
         assertFalse(next.gap)
         assertEquals(listOf(103.0), next.newlySeen.map { it.price })
         assertTrue(cursor.advance(listOf(NobitexTradeBatch.Trade(now, 95.0, 1.0, "sell")),
