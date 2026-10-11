@@ -72,7 +72,8 @@ object NewsConfluence {
         val label = evidence.filterNotNull().joinToString("، ") { it.source }
         val detail = when (result) {
             ConfluenceStatus.CONFIRMED -> "هم‌جهت ${ai.direction} · ${ai.confidence.toInt()}٪ · $label · ${ai.model}"
-            ConfluenceStatus.CONFLICT -> "تعارض: مدل ${ai.direction} در برابر ${action.name} · $label"
+            ConfluenceStatus.CONFLICT -> "تعارض: مدل ${ai.direction} در برابر ${action.name} · $label · " +
+                "${ai.model} · ${java.time.Instant.ofEpochMilli(ai.checkedAt!!)}"
             ConfluenceStatus.UNKNOWN, ConfluenceStatus.PARTIAL -> "تحلیل مدل جهت روشن ندارد؛ ورود تأیید نشده"
         }
         return Alignment(result, detail)

@@ -168,8 +168,12 @@ class NineWayAutoPaperTest {
             assertEquals("opposing validated AI vetoes; calendar-only conflict is context",
                 if (idx == 0) SignalAction.NO_TRADE else SignalAction.BUY, combined.action)
             assertEquals(ConfluenceStatus.CONFLICT, combined.confluence[4].status)
-            if (idx == 0) assertNotNull(PaperAutoRules.blocker(market(combined), settings, input, now))
-            else assertNull(PaperAutoRules.blocker(market(combined), settings, input, now))
+            if (idx == 0) {
+                assertNotNull(PaperAutoRules.blocker(market(combined), settings, input, now))
+                // Preserve model identity and the validated verdict time on the vetoed signal.
+                assertTrue(combined.blockers.last().contains(news.ai.model!!))
+                assertTrue(combined.blockers.last().contains(Instant.ofEpochMilli(news.ai.checkedAt!!).toString()))
+            } else assertNull(PaperAutoRules.blocker(market(combined), settings, input, now))
         }
         assertEquals(ConfluenceStatus.UNKNOWN,
             NewsConfluence.apply(raw, "XAU/USD", news.copy(ai = AiNewsVerdict()), now)!!.confluence[4].status)
