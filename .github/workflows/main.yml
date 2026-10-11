@@ -455,7 +455,8 @@ jobs:
              startsWith(github.event.head_commit.message, 'release: publish approved v1.3.18 updater') ||
              startsWith(github.event.head_commit.message, 'release: publish approved v1.3.19 updater') ||
              startsWith(github.event.head_commit.message, 'release: publish approved v1.3.20 updater') ||
-             startsWith(github.event.head_commit.message, 'release: publish approved v1.3.21 updater'))))
+             startsWith(github.event.head_commit.message, 'release: publish approved v1.3.21 updater') ||
+             startsWith(github.event.head_commit.message, 'release: publish approved v1.3.22 updater'))))
         run: |
           set -euo pipefail
           # signing_check already verified the built AND published APK against the fixed #403
@@ -479,7 +480,8 @@ jobs:
              startsWith(github.event.head_commit.message, 'release: publish approved v1.3.18 updater') ||
              startsWith(github.event.head_commit.message, 'release: publish approved v1.3.19 updater') ||
              startsWith(github.event.head_commit.message, 'release: publish approved v1.3.20 updater') ||
-             startsWith(github.event.head_commit.message, 'release: publish approved v1.3.21 updater'))))
+             startsWith(github.event.head_commit.message, 'release: publish approved v1.3.21 updater') ||
+             startsWith(github.event.head_commit.message, 'release: publish approved v1.3.22 updater'))))
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.collect.outputs.tag }}
@@ -492,6 +494,9 @@ jobs:
           NOTES=$'Aurum Edge Android APK.\n\nVersion: '"$VERSION_NAME"$'\nVersion code: ${{ steps.collect.outputs.version_code }}\nSHA-256: '"$SHA256"$'\nSize bytes: '"$SIZE_BYTES"$'\nSigning: '"${AURUM_SIGNING_MODE:-prepared updater key}"$'\n\nThe in-app updater accepts this public release asset, verifies package name, signing certificate, versionCode, size and SHA-256, then opens Android Installer.'
           if [[ "$VERSION_NAME" == "1.3.14" ]]; then
             NOTES+=$'\n\nChanges: automatic paper-entry evaluation across the supported catalog, not just the selected chart. Only symbols with fresh independently timestamped, same-identity trade ticks AND continuous exit monitoring can open automatically (currently FX pairs and XAU/XAG on the spot fallback). Other catalog markets continue automatic read-only scans with explicit reasons. Requires the existing user opt-in; no broker orders.'
+          fi
+          if [[ "$VERSION_NAME" == "1.3.22" ]]; then
+            NOTES+=$'\n\nChanges: removed the selected-symbol news gate card completely (the engine news gate remains). The chart tab now uses a single TradingView iframe in a WebView based on the chart-loading code from CI run #350 rather than the 1.3.21 async embed script. HTTPS/TLS safeguards remain enabled. CI cannot confirm candles render on a particular phone or network; please test the chart on the device and report its result.'
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "$TAG" --notes "$NOTES"

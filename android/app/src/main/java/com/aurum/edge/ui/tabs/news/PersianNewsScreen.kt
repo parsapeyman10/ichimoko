@@ -25,7 +25,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.data.AiNewsPresentation
 import com.aurum.edge.data.ForexEvent
-import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.NewsClassifier
 import com.aurum.edge.data.HeadlineImpact
 import com.aurum.edge.data.NewsImportance
@@ -102,26 +101,6 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit,
                 val classification = NewsClassifier.classify(item.title, item.excerpt)
                 NewsImpactCard(item, classification, AiNewsPresentation.forHeadline(item, decision, now),
                     onOpen = { runCatching { uriHandler.openUri(item.url) } })
-            }
-        }
-
-        // The selected gold/forex gate is context at the bottom, not the first news item.
-        SectionCard("وضعیت خبرِ نماد انتخابی · ${settings.symbol}",
-            "نتیجهٔ نماد فعلی در کنار گیت عمومی؛ تیتر عمومی به‌تنهایی اجازهٔ ورود نیست") {
-            val symbolVerdict = decision.aiBySymbol[settings.symbol]
-            Text("${when (decision.gate) {
-                NewsGate.CLEAR -> "بدون وتوی خبرِ تأییدشده"
-                NewsGate.BLOCKED -> "ورود جدید مسدود"
-                NewsGate.UNKNOWN -> "وضعیت خبر نامشخص"
-            }} · ${decision.reason}", style = MaterialTheme.typography.bodySmall,
-                color = if (decision.gate == NewsGate.BLOCKED) AurumColors.Red else AurumColors.TextSecondary)
-            Text(symbolVerdict?.let { "مدل این نماد: ${it.status} · ${it.reason}" }
-                ?: "برای این نماد نظر مدل ثبت نشده؛ نتیجهٔ عمومی جای آن را نمی‌گیرد.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            Text("آخرین بررسی گیت: ${relativeTime(decision.lastCheckedAt, now)}",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            OutlinedButton(onClick = viewModel::refreshNews, enabled = !decision.loading) {
-                Text("بررسی دوبارهٔ گیت خبر")
             }
         }
     }
