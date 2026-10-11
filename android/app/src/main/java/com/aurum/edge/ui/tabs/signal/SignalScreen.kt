@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AlertCheck
+import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.MarketTrendRead
@@ -41,6 +42,11 @@ import com.aurum.edge.core.TrendContext
 import com.aurum.edge.core.TrendDirection
 import com.aurum.edge.core.TradeMethod
 import com.aurum.edge.data.AiConnectionState
+import com.aurum.edge.data.AiEntryEffect
+import com.aurum.edge.data.DecisionRecord
+import com.aurum.edge.data.PersianNewsState
+import com.aurum.edge.data.TraderOpinionState
+import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.PairScanState
 import com.aurum.edge.data.PairScanStatus
@@ -51,6 +57,7 @@ import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.SignalSummaryCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatPrice
+import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatTime
 import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
@@ -78,6 +85,8 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState,
     val trendContext by viewModel.trendContext.collectAsStateWithLifecycle()
     val entryDiagnostics by viewModel.entryDiagnostics.collectAsStateWithLifecycle()
     val aiConnection by viewModel.aiConnection.collectAsStateWithLifecycle()
+    val traderOpinion by viewModel.traderOpinion.collectAsStateWithLifecycle()
+    val news by viewModel.news.collectAsStateWithLifecycle()
     val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
     var showAllDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var visibleDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(12) }
@@ -164,6 +173,8 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState,
 
         // ── ۵٫۳ «چرا الان معامله/هشدار نداریم؟» — پیش‌نیازهای صادقانه ─────────
         WhyNoTradeCard(entryDiagnostics, aiConnection)
+        AiProofCard(market, settings.hasClientNewsAi, aiConnection, traderOpinion, news, decisionLog, scanClock,
+            onRefreshOpinion = { viewModel.refreshTraderOpinion(force = true) })
 
         // ── ۶. چک‌لیست کامل شواهد و شروط تکنیکال نماد انتخابی ──────────────
         signal?.let { s ->
@@ -195,17 +206,23 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState,
         // Keep the audit trail after every signal and radar card, at the bottom of Trading.
         SectionCard("Decision Log · دلیل هر بررسی", "روی همین دستگاه؛ بدون کلید API یا سفارش واقعی") {
             if (decisionLog.isEmpty()) Text("هنوز بررسی ثبت نشده است")
-            val latestBySymbol = decisionLog.distinctBy { it.symbol }
+            // An AI entry review is a separate event, not the technical scan's latest score.
+            val latestBySymbol = decisionLog.filter { AiEntryEffect.fromAction(it.action) == null }
+                .distinctBy { it.symbol }
             if (decisionLog.size > latestBySymbol.size) OutlinedButton(onClick = { showAllDecisions = !showAllDecisions }) {
                 Text(if (showAllDecisions) "آخرین دلیل هر نماد" else "تاریخچهٔ ${decisionLog.size} بررسی اخیر")
             }
-            val records = if (showAllDecisions) decisionLog else latestBySymbol
+            val records = if (showAllDecisions) decisionLog else latestBySymbol.ifEmpty { decisionLog.distinctBy { it.symbol } }
             records.take(visibleDecisions).forEach { record ->
                 Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)
                     .background(AurumColors.SurfaceAlt, RoundedCornerShape(12.dp))
                     .padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("${record.symbol} · ${record.interval} · ${formatTime(record.checkedAt)} · " +
-                    "${record.action} · ${record.score?.toInt() ?: "—"}/۱۰۰",
+                val aiEffect = AiEntryEffect.fromAction(record.action)
+                Text(if (aiEffect != null)
+                    "🤖 ${record.symbol} · ${record.interval} · ${formatTime(record.checkedAt)} · ${aiEffect.label}" +
+                        (record.aiModel?.let { " · مدل $it" } ?: " · بدون پاسخ معتبر مدل")
+                    else "${record.symbol} · ${record.interval} · ${formatTime(record.checkedAt)} · " +
+                        "${record.action} · ${record.score?.toInt() ?: "—"}/۱۰۰",
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.clickable { onChartSymbol(record.symbol) })
                 Text(record.reason, style = MaterialTheme.typography.labelSmall,
@@ -446,6 +463,94 @@ private fun MarketTrendCard(
     }
 }
 
+/** Evidence for the selected SIGNAL symbol, never for the chart-only TradingView selection.
+ * The decision log is durable; old responses must not be passed off as this bar's analysis.
+ */
+@Composable
+private fun AiProofCard(
+    market: MarketState,
+    configured: Boolean,
+    connection: AiConnectionState,
+    opinion: TraderOpinionState,
+    news: PersianNewsState,
+    decisions: List<DecisionRecord>,
+    now: Long,
+    onRefreshOpinion: () -> Unit,
+) {
+    val symbol = market.symbol
+    val signal = market.signal
+    val lastEntry = decisions.firstOrNull { it.symbol == symbol && AiEntryEffect.fromAction(it.action) != null }
+    val effect = lastEntry?.let { AiEntryEffect.fromAction(it.action) }
+    val currentBarReview = lastEntry != null && signal != null && lastEntry.barTime > 0L &&
+        lastEntry.barTime == signal.barTime && now - lastEntry.checkedAt in 0L..300_000L
+    val ownOpinion = opinion.opinion?.takeIf { it.symbol == symbol }
+    val aiVeto = signal?.blockers?.firstOrNull { it.startsWith("وتوی AI معتبر:") }
+    val alignment = signal?.let { NewsConfluence.alignment(symbol, it.action, news, now) }
+    val newsVerdict = news.aiBySymbol[symbol] ?: news.ai.takeIf { it.symbol == symbol }
+
+    SectionCard("نقش واقعی AI · $symbol", "نماد فعال تحلیل (مستقل از انتخاب چارت) · اتصال ≠ پاسخ ≠ اثر") {
+        Text(when {
+            !configured -> "اتصال: کلید/مدل تنظیم نشده؛ هیچ پاسخ مدل را از روی اسکن فنی فرض نکنید."
+            connection.reachable == true -> "اتصال: تست موفق در ${connection.checkedAt?.let(::formatTime) ?: "—"}؛ صرفاً دسترسی به سرویس تأیید شده است."
+            connection.reachable == false -> "اتصال: ناموفق در ${connection.checkedAt?.let(::formatTime) ?: "—"}؛ ${connection.detail}"
+            else -> "اتصال: تنظیم شده، اما در این اجرا هنوز تست نشده است."
+        }, style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+
+        Text("ورود خودکار کاغذی: ابتدا سیگنال چهارلایه، فید و ریسک بررسی می‌شوند؛ " +
+            "تنها برای کاندیدای عبورکرده مدل می‌تواند صریحاً وتو کند. بازبینی دستی/نظر تریدر مجوز ورود نیست.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 6.dp))
+        if (lastEntry == null || effect == null) {
+            Text("برای $symbol هنوز هیچ درخواستِ بررسی ارزندگی ورود خودکار در گزارش ثبت نشده است؛ " +
+                "اسکن فنی و تست اتصال، پاسخ مدل برای این نماد نیستند.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 8.dp))
+        } else {
+            Text("آخرین بررسی ورود · ${formatDateTime(lastEntry.checkedAt)} · ${lastEntry.interval}" +
+                (lastEntry.aiModel?.let { " · مدل $it" } ?: " · بدون پاسخ معتبر مدل") +
+                if (currentBarReview) " · همین کندل" else " · تاریخی؛ مربوط به تحلیل فعلی نیست",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 8.dp))
+            Text("قبل از بررسی AI: کاندیدای عبورکرده از شروط اولیهٔ فنی/ورود خودکار. " +
+                "بعد از بررسی AI: ${lastEntry.reason}. " +
+                (if (effect == AiEntryEffect.VETO) "ورود متوقف شد." else "بازبینی نهایی فید، خبر و ریسک ادامه یافت؛ این رکورد اثبات ثبت معامله نیست."),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (effect == AiEntryEffect.VETO) AurumColors.Red else AurumColors.Gold)
+        }
+
+        Text("خبر/مدل: " + when {
+            aiVeto != null -> "$aiVeto (سیگنال این کندل مسدود شد)"
+            alignment?.status == ConfluenceStatus.CONFIRMED && newsVerdict != null ->
+                "پاسخ معتبر ${newsVerdict.model} برای $symbol در ${newsVerdict.checkedAt?.let(::formatDateTime) ?: "—"}؛ " +
+                    "هم‌جهت سیگنال فنی، فقط شاهد خبری/ژورنال؛ مجوز معامله نیست."
+            else -> "برای این سیگنال وتوی معتبر AI ثبت نشده؛ " +
+                "${alignment?.detail ?: "هنوز سیگنال/شاهد خبری معتبر برای تطبیق وجود ندارد"}. " +
+                "نبود شاهد را تأیید AI تلقی نکنید."
+        }, style = MaterialTheme.typography.labelSmall, color = if (aiVeto != null) AurumColors.Red else AurumColors.TextSecondary,
+            modifier = Modifier.padding(top = 8.dp))
+
+        if (ownOpinion != null) {
+            val fresh = now - ownOpinion.generatedAt in 0L..600_000L
+            Text("نظر مشورتی مستقل · ${ownOpinion.model} · ${formatDateTime(ownOpinion.generatedAt)}" +
+                (if (fresh) "" else " · قدیمی") + ": ${ownOpinion.bias} — ${ownOpinion.summary}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 8.dp))
+        } else {
+            Text("نظر مشورتی برای $symbol: هنوز پاسخ معتبر همین نماد دریافت نشده است.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 8.dp))
+        }
+        opinion.error?.let { Text("خطای آخرین درخواست نظر مشورتی: $it",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.Red) }
+        if (configured) OutlinedButton(onClick = onRefreshOpinion, enabled = !opinion.loading) {
+            Text(if (opinion.loading) "در حال دریافت نظر..." else "درخواست نظر مشورتی (مصرف API)")
+        }
+        Text("این کارت نقش اجرایی مدل را نشان می‌دهد، نه بهبود سودآوری. " +
+            "برای اثبات تأثیر بر بازده، مقایسهٔ معاملات واقعیِ با/بی AI لازم است.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+    }
+}
+
 /**
  * «چرا الان معامله/هشدار نداریم؟» — the nine honest prerequisites plus the AI connection truth.
  * Green checks are prerequisites, never a forecast; a red row is the actual reason nothing opened.
@@ -474,7 +579,7 @@ private fun WhyNoTradeCard(checks: List<AlertCheck>, ai: AiConnectionState) {
             Text(
                 when {
                     !ai.configured -> "🤖 اتصال AI: کلید/مدل تنظیم نشده — معاملات کاغذی بدون AI و فقط با شرط‌های فنی انجام می‌شوند."
-                    ai.reachable == true -> "🤖 اتصال AI: برقرار است — ارزنده‌بودن ورود و بازبینی پوزیشن باز از مدل پرسیده می‌شود."
+                    ai.reachable == true -> "🤖 تست اتصال AI موفق بود؛ این به‌تنهایی پاسخ مدل برای این نماد یا اثر آن بر ورود نیست (جزئیات در کارت پایین)."
                     ai.reachable == false -> "🤖 اتصال AI: قطع است (${ai.detail.ifBlank { "اتصال برقرار نشد" }}) — معاملات بدون AI ادامه دارند و این وضعیت اعلان می‌شود."
                     else -> "🤖 اتصال AI: هنوز در این اجرا بررسی نشده است."
                 },

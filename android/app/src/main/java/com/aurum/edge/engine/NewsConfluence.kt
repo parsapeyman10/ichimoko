@@ -14,9 +14,9 @@ import com.aurum.edge.data.PersianHeadline
 import java.net.URI
 
 /** Live-only news journal-mining layer: technical confirmations are scored separately.
- * News can add a green/amber/red context row and a journal evidence snapshot, but it is NOT an
- * entry prerequisite for paper trading. UNKNOWN or CONFLICT news must stay visible and auditable
- * without converting a valid Ichimoku/options signal into NO_TRADE.
+ * News adds a green/amber/red journal evidence row, not a positive entry prerequisite.
+ * UNKNOWN and calendar-only CONFLICT stay visible without vetoing a technical entry; ONLY a
+ * fresh, same-symbol model conflict with independently validated publisher evidence may veto.
  * Historical backtests have no point-in-time news archive and must NEVER claim news confirmation.
  */
 object NewsConfluence {

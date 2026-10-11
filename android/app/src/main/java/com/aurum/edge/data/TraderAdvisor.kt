@@ -54,11 +54,13 @@ data class AiTradePlan(
     val generatedAt: Long,
     /**
      * The model's own verdict on whether this setup is worth taking at all. It is asked for
-     * every plan; a `false` blocks the paper entry instead of only re-pricing it. When the
-     * model is unreachable the caller proceeds on the technical rules alone (never invented).
+     * every plan; only an explicit `false` with a valid reason blocks the paper entry. When the
+     * model is unreachable or the verdict is absent, technical rules decide (never invented).
      */
     val worth: Boolean = true,
     val worthReason: String = "",
+    /** True only if the actual model response contained an explicit boolean worth verdict. */
+    val worthAnswered: Boolean = false,
 )
 
 /**
@@ -277,10 +279,12 @@ class TraderAdvisor(
         val conf = num("confidence") ?: signal.confidence
         val summary = (output["summary"] as? JsonPrimitive)?.contentOrNull?.trim()
             ?: "تنظیم سطوح معاملاتی بر اساس ساختار جریان نقدینگی و مومنتوم"
-        // Worthiness is answered by the model itself. A missing/ambiguous answer stays
-        // "worth=true" so an older model can never silently block every entry.
-        val worth = (output["worth"] as? JsonPrimitive)?.booleanOrNull ?: true
-        val worthReason = (output["worth_reason"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+        // An absent/ambiguous verdict is NOT a positive model recommendation.
+        // It cannot veto either: entry remains governed by the technical/risk rules.
+        val worthAnswer = parseWorthAnswer(output)
+        val worthValue = worthAnswer.worth
+        val worth = worthValue ?: true
+        val worthReason = worthAnswer.reason
 
         val risk = kotlin.math.abs(entry - sl)
         val reward = kotlin.math.abs(tp - entry)
@@ -302,6 +306,7 @@ class TraderAdvisor(
             generatedAt = now,
             worth = worth,
             worthReason = worthReason,
+            worthAnswered = worthValue != null,
         )
     }
 
@@ -577,6 +582,17 @@ class TraderAdvisor(
     }
 
     companion object {
+        internal data class WorthAnswer(val worth: Boolean?, val reason: String)
+
+        /** A probe or malformed answer is not a model veto. A negative verdict needs a reason. */
+        internal fun parseWorthAnswer(root: JsonObject): WorthAnswer {
+            val worth = (root["worth"] as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull
+            val reason = (root["worth_reason"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+            if (worth == false && reason.length !in 10..180)
+                throw IllegalStateException("مدل علت معتبر برای رد این ورود نداد؛ وتوی AI اعمال نشد")
+            return WorthAnswer(worth, reason)
+        }
+
         const val REFRESH_PERIOD_MS = 10 * 60_000L
         const val CONNECTION_TTL_MS = 5 * 60_000L
         /** How often the open positions may be re-reviewed at all. */

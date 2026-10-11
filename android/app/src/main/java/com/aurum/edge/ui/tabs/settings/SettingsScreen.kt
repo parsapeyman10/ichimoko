@@ -322,7 +322,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             val aiConnection by viewModel.aiConnection.collectAsStateWithLifecycle()
             val connectionText = when {
                 !aiConnection.configured -> "اتصال AI: کلید/مدل تنظیم نشده — معاملات کاغذی بدون AI ادامه پیدا می‌کنند"
-                aiConnection.reachable == true -> "اتصال AI: تأییدشده — ارزنده‌بودن هر ورود از مدل پرسیده می‌شود"
+                aiConnection.reachable == true -> "اتصال AI: تست موفق؛ برای اثبات پاسخ و اثر بر یک نماد، کارت «نقش واقعی AI» در تب معامله را ببینید"
                 aiConnection.reachable == false -> "اتصال AI: برقرار نشد — ورودها طبق شرط‌های فنی و بدون AI ثبت می‌شوند"
                 else -> "اتصال AI: هنوز در این اجرا بررسی نشده است"
             }

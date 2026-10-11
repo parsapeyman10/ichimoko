@@ -23,6 +23,7 @@ class PaperAutoTrader(
     private val news: NewsRepository,
     private val journal: JournalStore,
     private val advisor: TraderAdvisor? = null,
+    private val decisionLog: DecisionLogStore? = null,
 ) {
     private val _status = MutableStateFlow("فعال")
     val status: StateFlow<String> = _status.asStateFlow()
@@ -120,31 +121,29 @@ class PaperAutoTrader(
             val aiPlan = runCatching {
                 adv.planTradeWithAi(signal, current)
             }.getOrNull()
-            // The AI is consulted first, exactly as asked: when it answers, it decides whether
-            // this setup is worth taking at all. A "not worth it" verdict blocks the paper
-            // entry instead of only re-pricing it. When the model cannot be reached the call
-            // returns null and the entry continues on the technical rules alone.
-            if (aiPlan != null && !aiPlan.worth) {
-                _status.value = "ارزنده‌بودن معامله از نظر AI تأیید نشد: " +
-                    aiPlan.worthReason.ifBlank { "دلیل ارزنده‌نبودن اعلام نشد" }
+            // Persist the observed review of THIS symbol/bar, not the preceding connection probe.
+            // Only an explicit, validated false verdict may veto. Positive/absent verdicts
+            // cannot authorize a trade or override its technical entry/SL/TP/risk checks.
+            val effect = AiEntryEffect.fromResponse(connected = true, plan = aiPlan)
+            auditAiEntry(current, signal, effect, aiPlan)
+            if (effect == AiEntryEffect.VETO) {
+                _status.value = "وتوی AI برای ${current.symbol}: ${aiPlan!!.worthReason}"
                 return null
             }
-            if (aiPlan != null) {
-                // A model cannot silently move entry/SL/TP away from the quote and ICT evidence.
-                // A negative worth verdict may veto; a positive verdict is advisory only.
+            if (aiPlan != null && effect == AiEntryEffect.NON_VETO) {
                 Pair(signal,
-                    "AI (${aiPlan.model}) طرح را قابل بررسی دانست؛ قیمت و SL/TP همان طرح فنیِ تأییدشدهٔ ICT باقی ماندند")
+                    "AI (${aiPlan.model}) صریحاً وتو نکرد؛ قیمت و SL/TP همان طرح فنی باقی ماندند و ورود همچنان مشروط به کنترل ریسک است")
+            } else if (aiPlan != null) {
+                Pair(signal,
+                    "پاسخ مدل (${aiPlan.model}) فاقد حکم صریح ارزندگی بود؛ ورود فقط با طرح فنی و کنترل ریسک ادامه یافت")
             } else {
-                Pair(
-                    signal,
-                    "اتصال AI برقرار شد اما طرح ورود معتبر برنگشت (پاسخ نامعتبر/خطای میانی)؛ ورود با طرح SL/TP موتور فنی جاری و بدون AI انجام شد."
-                )
+                Pair(signal,
+                    "اتصال AI برقرار شد اما طرح ورود معتبر برنگشت (پاسخ نامعتبر/خطای میانی)؛ ورود با طرح SL/TP موتور فنی جاری و بدون AI انجام شد.")
             }
         } else {
-            Pair(
-                signal,
-                "اتصال AI بررسی شد و مدل در دسترس نبود؛ ورود بدون AI و با طرح SL/TP موتور فنی جاری انجام شد."
-            )
+            auditAiEntry(current, signal, AiEntryEffect.UNAVAILABLE, null)
+            Pair(signal,
+                "اتصال AI بررسی شد و مدل در دسترس نبود؛ ورود بدون AI و با طرح SL/TP موتور فنی جاری انجام شد.")
         }
 
         return try {
@@ -184,5 +183,15 @@ class PaperAutoTrader(
             _status.value = "ورود خودکار کاغذی انجام نشد: ${e.message ?: "ژورنال یا ریسک نامعتبر است"}"
             null
         }
+    }
+
+    private fun auditAiEntry(state: MarketState, signal: com.aurum.edge.core.Signal,
+                             effect: AiEntryEffect, plan: AiTradePlan?) {
+        val reason = if (effect == AiEntryEffect.VETO) {
+            "${effect.label} · علت مدل: ${plan?.worthReason.orEmpty().take(180)}"
+        } else effect.label
+        decisionLog?.append(state.symbol, state.interval.label, effect.action, reason,
+            barTimeOverride = signal.barTime, aiModel = plan?.model,
+            dedupe = true)
     }
 }

@@ -101,7 +101,7 @@ class AppContainer(context: Context) {
     // The advisor also reads the journal so it can review OPEN positions ("continue or not"),
     // which is advisory only: JournalStore.attachHoldReview never closes or re-prices a trade.
     val traderAdvisor = TraderAdvisor(settingsStore, market, pairScanner, news, journalStore, appScope)
-    val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore, traderAdvisor)
+    val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore, traderAdvisor, decisionLog)
     val catalogPaperTrader = CatalogPaperTrader(settingsStore, autoPaperTrader)
 
     init {
