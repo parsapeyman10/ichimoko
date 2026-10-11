@@ -509,25 +509,37 @@ private fun PerMarketRecommendations(scan: PairScanState, interval: com.aurum.ed
     val picks = ScanRanking.byMarket(scan.statuses, interval, now)
     AssetClass.entries.forEach { category ->
         val rows = scan.statuses.filter { it.assetClass == category }
-        val checked = rows.count { it.state != "pending" }
+        val openRows = rows.filterNot { com.aurum.edge.core.MarketHours.closedFor(it.symbol, now) }
+        val checked = openRows.count { it.state != "pending" && it.state != "closed" }
+        val closedCount = rows.size - openRows.size
+        val pending = openRows.any { it.state == "pending" }
         val ranked = picks[category].orEmpty()
         SectionCard("برترین‌های ${category.label}",
-            "همین دور · $checked/${rows.size} وضعیت ثبت‌شده · " +
-                "${rows.count { it.state == "closed" }} بسته (بدون درخواست/اسکن) · " +
+            "بازار باز: $checked/${openRows.size} بررسی‌شده · " +
+                "$closedCount بسته (بدون درخواست/اسکن) · " +
                 "${rows.count { it.state == "error" }} فید ناموفق · ${rows.count { it.state == "partial" }} دادهٔ ناقص",
-            trailing = { Pill(if (scan.sweeping) "در حال اسکن" else "آخرین دور", AurumColors.Cyan) }) {
+            trailing = { Pill(when {
+                openRows.isEmpty() -> "بسته؛ بدون اسکن"
+                scan.sweeping && pending -> "در صف اسکن"
+                scan.sweeping -> "این دسته بررسی شد"
+                else -> "آخرین دور"
+            }, if (openRows.isEmpty()) AurumColors.Gold else AurumColors.Cyan) }) {
             Box(Modifier.fillMaxWidth().height(6.dp)
                 .background(AurumColors.SurfaceAlt, RoundedCornerShape(8.dp))) {
-                Box(Modifier.fillMaxWidth(if (rows.isEmpty()) 0f else checked.toFloat() / rows.size)
+                Box(Modifier.fillMaxWidth(if (openRows.isEmpty()) 0f else checked.toFloat() / openRows.size)
                     .height(6.dp).background(AurumColors.Cyan, RoundedCornerShape(8.dp)))
             }
             Text("رتبه فقط از کندل‌های بستهٔ تازه است؛ «مشاهده» نه مجوز ورود است نه قیمت لحظه‌ای. " +
                 "اگر دادهٔ هفت بازه یا فید معتبر نباشد، رتبه ساخته نمی‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
                 modifier = Modifier.padding(vertical = 6.dp))
-            if (ranked.isEmpty()) {
-                val reason = rows.firstOrNull { it.state == "error" || it.state == "partial" || it.state == "blocked" }
-                Text(if (checked == 0) "هنوز بررسی نشده؛ اسکن را اجرا کنید."
+            if (openRows.isEmpty() && rows.isNotEmpty()) Text(
+                "این دسته طبق ساعت سشن بسته است؛ هیچ قیمت جدید یا سیگنالی برای آن اسکن نمی‌شود. " +
+                    "تاریخچهٔ قبلی، قیمت آنلاین و مجوز ورود نیست.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+            else if (ranked.isEmpty()) {
+                val reason = openRows.firstOrNull { it.state == "error" || it.state == "partial" || it.state == "blocked" }
+                Text(if (checked == 0) "بازار باز است اما هنوز بررسی نشده؛ منتظر نوبت اسکن بمانید."
                      else "فعلاً گزینهٔ معتبر نیست. ${reason?.symbol.orEmpty()}: ${reason?.detail ?: "شرایط کافی نیست"}",
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
             } else ranked.forEachIndexed { index, row ->
@@ -927,7 +939,10 @@ internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, now: 
                 Text(if (scan.sweeping) "اسکن..." else "اسکن مجدد")
             }
         }
-        Text("نتیجهٔ دور جاری: ${scan.checkedCount}/${scan.totalCount} نماد · " +
+        val skipped = scan.statuses.count { com.aurum.edge.core.MarketHours.closedFor(it.symbol, now) }
+        val requested = scan.statuses.count { it.state != "pending" && it.state != "closed" }
+        Text("بازارهای بازِ بررسی‌شده: $requested/${scan.totalCount - skipped} · " +
+            "$skipped نماد بسته بدون درخواست فید · " +
             "آخرین دور کامل: ${scan.lastSweepAt?.let { formatTime(it) } ?: "هنوز کامل نشده"} · " +
             "تلاش بعدی پس از اتمام دور، حداقل ۳۰ ثانیه فاصله و در چرخهٔ حدوداً یک‌دقیقه‌ای برنامه. " +
             "زمان واقعی به شبکه و محدودیت منبع بستگی دارد؛ دلیل هر بررسی در انتهای صفحه است.",

@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.data.AiNewsPresentation
 import com.aurum.edge.data.ForexEvent
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.NewsClassifier
@@ -50,6 +51,7 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit,
     LaunchedEffect(Unit) {
         viewModel.refreshPublicWebNews()
         viewModel.refreshForexCalendar()
+        viewModel.refreshNews() // If configured, obtain a real model verdict for cited headlines.
         while (true) {
             delay(60_000L)
             now = System.currentTimeMillis()
@@ -57,27 +59,14 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit,
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
-        SectionCard("وضعیت گیت خبر · ${settings.symbol}",
-            "نتیجهٔ نماد فعلی در کنار گیت عمومی؛ تیتر عمومی به‌تنهایی اجازهٔ ورود نیست") {
-            val symbolVerdict = decision.aiBySymbol[settings.symbol]
-            Text("${when (decision.gate) {
-                NewsGate.CLEAR -> "بدون وتوی خبرِ تأییدشده"
-                NewsGate.BLOCKED -> "ورود جدید مسدود"
-                NewsGate.UNKNOWN -> "وضعیت خبر نامشخص"
-            }} · ${decision.reason}", style = MaterialTheme.typography.bodySmall,
-                color = if (decision.gate == NewsGate.BLOCKED) AurumColors.Red else AurumColors.TextSecondary)
-            Text(symbolVerdict?.let { "مدل این نماد: ${it.status} · ${it.reason}" }
-                ?: "برای این نماد نظر مدل ثبت نشده؛ نتیجهٔ عمومی جای آن را نمی‌گیرد.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            Text("آخرین بررسی گیت: ${relativeTime(decision.lastCheckedAt, now)}",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            OutlinedButton(onClick = viewModel::refreshNews, enabled = !decision.loading) {
-                Text("بررسی دوبارهٔ گیت خبر")
-            }
-        }
-        SectionCard("خبرهای مهم بازار", "اهمیت، اثر احتمالی و توضیح کوتاه به‌صورت خودکار از تیتر/تقویم واقعی") {
+        SectionCard("خبرهای مهم بازار", "خلاصهٔ AI فقط با پاسخ واقعی مدل و شاهد همین تیتر؛ در غیر این صورت تحلیل موجود نیست") {
+            Text(if (settings.hasClientNewsAi || settings.newsBaseUrl.isNotBlank())
+                "مدل تنظیم شده؛ وضعیت دریافت و شاهد هر تحلیل زیر همان خبر نشان داده می‌شود."
+                else "مدل AI روی این گوشی تنظیم نشده؛ احتمال یا خلاصهٔ ساختگی نمایش داده نمی‌شود.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = viewModel::refreshPublicWebNews, enabled = !web.loading, modifier = Modifier.weight(1f)) {
+                Button(onClick = { viewModel.refreshPublicWebNews(); viewModel.refreshNews() },
+                    enabled = !web.loading, modifier = Modifier.weight(1f)) {
                     Text(if (web.loading) "دریافت خبر…" else "به‌روزرسانی خبر")
                 }
                 Button(onClick = viewModel::refreshForexCalendar, enabled = !calendar.loading, modifier = Modifier.weight(1f)) {
@@ -111,7 +100,28 @@ fun PersianNewsScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit,
         } else {
             headlines.forEach { item ->
                 val classification = NewsClassifier.classify(item.title, item.excerpt)
-                NewsImpactCard(item, classification, onOpen = { runCatching { uriHandler.openUri(item.url) } })
+                NewsImpactCard(item, classification, AiNewsPresentation.forHeadline(item, decision, now),
+                    onOpen = { runCatching { uriHandler.openUri(item.url) } })
+            }
+        }
+
+        // The selected gold/forex gate is context at the bottom, not the first news item.
+        SectionCard("وضعیت خبرِ نماد انتخابی · ${settings.symbol}",
+            "نتیجهٔ نماد فعلی در کنار گیت عمومی؛ تیتر عمومی به‌تنهایی اجازهٔ ورود نیست") {
+            val symbolVerdict = decision.aiBySymbol[settings.symbol]
+            Text("${when (decision.gate) {
+                NewsGate.CLEAR -> "بدون وتوی خبرِ تأییدشده"
+                NewsGate.BLOCKED -> "ورود جدید مسدود"
+                NewsGate.UNKNOWN -> "وضعیت خبر نامشخص"
+            }} · ${decision.reason}", style = MaterialTheme.typography.bodySmall,
+                color = if (decision.gate == NewsGate.BLOCKED) AurumColors.Red else AurumColors.TextSecondary)
+            Text(symbolVerdict?.let { "مدل این نماد: ${it.status} · ${it.reason}" }
+                ?: "برای این نماد نظر مدل ثبت نشده؛ نتیجهٔ عمومی جای آن را نمی‌گیرد.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            Text("آخرین بررسی گیت: ${relativeTime(decision.lastCheckedAt, now)}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+            OutlinedButton(onClick = viewModel::refreshNews, enabled = !decision.loading) {
+                Text("بررسی دوبارهٔ گیت خبر")
             }
         }
     }
@@ -147,7 +157,8 @@ private fun CalendarImpactCard(event: ForexEvent, now: Long) {
 }
 
 @Composable
-private fun NewsImpactCard(item: PublicHeadline, classification: com.aurum.edge.data.NewsClassification, onOpen: () -> Unit) {
+private fun NewsImpactCard(item: PublicHeadline, classification: com.aurum.edge.data.NewsClassification,
+                           aiSummaries: List<AiNewsPresentation.Summary>, onOpen: () -> Unit) {
     val tone = when (classification.importance) {
         NewsImportance.HIGH -> AurumColors.Red
         NewsImportance.MEDIUM -> AurumColors.Gold
@@ -173,6 +184,25 @@ private fun NewsImpactCard(item: PublicHeadline, classification: com.aurum.edge.
         Text("↑/↓ فقط گزارش حرکت در متن تیتر است، نه پیش‌بینی واکنش قیمت. خبر بی‌نماد یا مبهم جهت‌دار برچسب نمی‌گیرد.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
             modifier = Modifier.padding(top = 4.dp))
+        if (aiSummaries.isEmpty()) Text(
+            "خلاصه/برآورد AI معتبر برای این خبر دریافت نشده؛ جهت تیتر بالا نظر مدل نیست.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 7.dp))
+        else aiSummaries.forEach { summary ->
+            val direction = when (summary.direction) {
+                "BUY" -> "تمایل صعودی"
+                "SELL" -> "تمایل نزولی"
+                else -> "جهت نامشخص"
+            }
+            Text("تحلیل مدل · ${summary.symbol} · $direction · اطمینان اعلامی ${summary.confidence.toInt()}/۱۰۰",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Cyan,
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+            Text(summary.reason, style = MaterialTheme.typography.bodySmall,
+                color = AurumColors.TextPrimary, modifier = Modifier.padding(top = 3.dp))
+            Text("${summary.model} · ${formatDateTime(summary.checkedAt)} · مستند به همین خبر. " +
+                "اطمینان مدل احتمال آماریِ کالیبره‌شده یا سیگنال ورود نیست.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        }
         if (item.excerpt.isNotBlank()) Text(item.excerpt,
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
             modifier = Modifier.padding(top = 5.dp))
