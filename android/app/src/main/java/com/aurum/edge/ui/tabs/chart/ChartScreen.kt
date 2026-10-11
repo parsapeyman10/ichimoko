@@ -9,71 +9,117 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.aurum.edge.data.ChartSymbolChoices
 import com.aurum.edge.ui.theme.AurumColors
 
-/** A single TradingView iframe for the selected ticker. No other chart UI or trade windows. */
+/** A visual-only symbol selector and ONE TradingView iframe. It does not change the trade feed. */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun ChartScreen(initialTicker: String) {
+fun ChartScreen(initialTicker: String, onSelectTicker: (String) -> Unit) {
     val html = remember(initialTicker) { TradingViewEmbed.html(initialTicker) }
-    if (html == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    var showPicker by remember { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxSize()) {
+        // TradingView's mobile iframe may hide its own symbol search even with symboledit=1.
+        // This small selector changes the SAME widget, not the app's live market or a second chart.
+        TextButton(onClick = { showPicker = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("تغییر نماد چارت · ${ChartSymbolChoices.display(initialTicker)}")
+        }
+        if (html == null) {
             Text("نماد TradingView معتبر نیست؛ چارت نماد دیگری جایگزین نمی‌شود",
                 modifier = Modifier.padding(20.dp), color = AurumColors.Gold)
+        } else {
+            // Preserve the historical iframe + mobile WebView bootstrap. Recomposition never
+            // reloads it; selecting a different instrument replaces the old view exactly once.
+            key(initialTicker) {
+                AndroidView(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    factory = { context ->
+                        WebView(context).apply {
+                            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                            setBackgroundColor(Color.rgb(11, 14, 19))
+                            isVerticalScrollBarEnabled = false
+                            isHorizontalScrollBarEnabled = false
+                            settings.apply {
+                                javaScriptEnabled = true
+                                domStorageEnabled = true
+                                databaseEnabled = true
+                                loadsImagesAutomatically = true
+                                javaScriptCanOpenWindowsAutomatically = true
+                                loadWithOverviewMode = true
+                                useWideViewPort = true
+                                setSupportZoom(false)
+                                builtInZoomControls = false
+                                displayZoomControls = false
+                                cacheMode = WebSettings.LOAD_DEFAULT
+                                mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                                allowFileAccess = false
+                                allowContentAccess = false
+                                userAgentString = MOBILE_USER_AGENT
+                                textZoom = 100
+                            }
+                            setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                            CookieManager.getInstance().setAcceptCookie(true)
+                            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                            webChromeClient = WebChromeClient()
+                            webViewClient = WebViewClient() // default behavior cancels certificate errors
+                            loadDataWithBaseURL("https://s3.tradingview.com", html, "text/html", "UTF-8", "https://s3.tradingview.com")
+                        }
+                    },
+                    onReset = null,
+                    onRelease = { webView -> webView.stopLoading(); webView.destroy() },
+                )
+            }
         }
-        return
     }
-    // Keep the iframe and mobile WebView bootstrap from the working run #350 implementation.
-    // A new symbol gets one new view, never multiple views or repeated reloads on recomposition.
-    key(initialTicker) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { context ->
-                WebView(context).apply {
-                    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                    setBackgroundColor(Color.rgb(11, 14, 19))
-                    isVerticalScrollBarEnabled = false
-                    isHorizontalScrollBarEnabled = false
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        databaseEnabled = true
-                        loadsImagesAutomatically = true
-                        javaScriptCanOpenWindowsAutomatically = true
-                        loadWithOverviewMode = true
-                        useWideViewPort = true
-                        setSupportZoom(false)
-                        builtInZoomControls = false
-                        displayZoomControls = false
-                        cacheMode = WebSettings.LOAD_DEFAULT
-                        // All resources must remain HTTPS; do not bypass WebView TLS validation.
-                        mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                        allowFileAccess = false
-                        allowContentAccess = false
-                        userAgentString = MOBILE_USER_AGENT
-                        textZoom = 100
+    if (showPicker) {
+        var query by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showPicker = false },
+            title = { Text("نماد TradingView") },
+            text = {
+                Column {
+                    OutlinedTextField(value = query, onValueChange = { query = it },
+                        label = { Text("جستجوی نماد یا نام") }, singleLine = true,
+                        modifier = Modifier.fillMaxWidth())
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 370.dp)) {
+                        items(ChartSymbolChoices.search(query), key = { it.id }) { choice ->
+                            TextButton(onClick = {
+                                onSelectTicker(choice.ticker)
+                                showPicker = false
+                            }, modifier = Modifier.fillMaxWidth()) {
+                                Column(Modifier.fillMaxWidth()) {
+                                    Text("${choice.id} · ${choice.label}", style = MaterialTheme.typography.bodyMedium)
+                                    Text(choice.ticker, style = MaterialTheme.typography.labelSmall,
+                                        color = AurumColors.TextSecondary)
+                                }
+                            }
+                        }
                     }
-                    setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                    CookieManager.getInstance().setAcceptCookie(true)
-                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                    webChromeClient = WebChromeClient()
-                    webViewClient = WebViewClient() // default behavior cancels certificate errors
-                    loadDataWithBaseURL("https://s3.tradingview.com", html, "text/html", "UTF-8", "https://s3.tradingview.com")
                 }
             },
-            onReset = null,
-            onRelease = { webView -> webView.stopLoading(); webView.destroy() },
+            confirmButton = { TextButton(onClick = { showPicker = false }) { Text("بستن") } },
         )
     }
 }

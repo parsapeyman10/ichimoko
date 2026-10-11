@@ -63,11 +63,8 @@ fun AurumRoot(viewModel: AurumViewModel) {
     val selectedTab = AurumTab.entries.firstOrNull { it.name == tab && it in primaryTabs + moreTabs } ?: primaryTabs.first()
     // This only chooses the widget's opening ticker; it does not select an app feed or trade.
     var chartTicker by rememberSaveable { mutableStateOf(TradingViewSymbols.find(settings.symbol) ?: settings.symbol) }
-    // After a cold launch the selected market is reset to gold; keep the TradingView
-    // opening ticker aligned without changing the widget's own in-page controls.
-    LaunchedEffect(settings.symbol) {
-        chartTicker = TradingViewSymbols.find(settings.symbol) ?: settings.symbol
-    }
+    // Do not reset an independently selected chart back to the app's default gold feed
+    // when settings load or the market symbol changes. Chart changes are visual only.
     fun open(destination: AurumTab) {
         if (destination in primaryTabs + moreTabs) tab = destination.name
     }
@@ -91,7 +88,8 @@ fun AurumRoot(viewModel: AurumViewModel) {
                 when (selectedTab) {
                     AurumTab.Home -> HomeScreen(viewModel, market,
                         onChartSymbol = ::openChartFor, onJournal = { open(AurumTab.Journal) })
-                    AurumTab.Chart -> ChartScreen(chartTicker)
+                    AurumTab.Chart -> ChartScreen(initialTicker = chartTicker,
+                        onSelectTicker = { chartTicker = it })
                     AurumTab.Signal -> SignalScreen(viewModel, market, onChartSymbol = ::openChartFor)
                     AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) },
                         onOpenChart = ::openChartFor)
