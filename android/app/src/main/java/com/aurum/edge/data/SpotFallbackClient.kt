@@ -40,16 +40,16 @@ class SpotFallbackClient(
 ) {
     private val json = Json { ignoreUnknownKeys = true }
 
-    // Instances used by the screen, service and scanner share a per-process rate limit.
-    // The public trades endpoint allows 60 requests/minute; at most two crypto positions
-    // plus a selected pair can be monitored here, and each pair is fetched <= once/10s.
+    // Instances used by the screen, service and scanner share a rate budget. Paper
+    // positions get a reserved high-priority lane; low-priority scans cannot exhaust it.
     private object CryptoTradeCache {
-        // A slow BTC request must not lock ETH's response. Each pair retains its own
-        // 10-second gate; the small number of open crypto slots stays below 60 req/min.
+        // A slow BTC request must not lock ETH. Only the short rate budget is global.
         val locks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
         val responses = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, String>>()
         val lastAttempt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+        val budget = NobitexTradeBudget()
         const val MIN_CRYPTO_FETCH_MS = 10_000L
+        const val OPEN_POSITION_FETCH_MS = 3_000L
     }
 
     private fun get(url: String): String {
@@ -131,18 +131,24 @@ class SpotFallbackClient(
         return PriceTick(price, at)
     }
 
-    private suspend fun cryptoTradeResponse(symbol: String): String {
+    private suspend fun cryptoTradeResponse(symbol: String, openPosition: Boolean = false,
+                                            openedAt: Long = 0L): String {
         val code = NobitexHistoryClient.ticker(symbol)
             ?: throw DataFeedException("نماد USDT برای نوبیتکس معتبر نیست")
         val lock = CryptoTradeCache.locks.computeIfAbsent(symbol) { Mutex() }
         return lock.withLock {
             val now = System.currentTimeMillis()
+            val minInterval = if (openPosition) CryptoTradeCache.OPEN_POSITION_FETCH_MS
+                else CryptoTradeCache.MIN_CRYPTO_FETCH_MS
             CryptoTradeCache.responses[symbol]?.takeIf { (fetchedAt, _) ->
-                now - fetchedAt in 0L..CryptoTradeCache.MIN_CRYPTO_FETCH_MS
+                now - fetchedAt in 0L..minInterval && (!openPosition || fetchedAt >= openedAt)
             }?.let { return@withLock it.second }
-            if (now - (CryptoTradeCache.lastAttempt[symbol] ?: 0L) in
-                0L until CryptoTradeCache.MIN_CRYPTO_FETCH_MS)
+            if (now - (CryptoTradeCache.lastAttempt[symbol] ?: 0L) in 0L until minInterval)
                 throw DataFeedException("فاصلهٔ مجاز درخواست تیک نوبیتکس؛ پاسخ قبلی معتبر نیست")
+            // Reserve capacity BEFORE the request so failures and HTTP 429 do not cause
+            // retries that crowd out a currently open position.
+            if (!CryptoTradeCache.budget.tryAcquire(System.nanoTime() / 1_000_000L, openPosition))
+                throw DataFeedException("سهمیهٔ تیک عمومی پر است؛ پوزیشن باز اولویت دارد")
             CryptoTradeCache.lastAttempt[symbol] = now
             val body = withContext(Dispatchers.IO) { get("${NobitexHistoryClient.HOST}/v2/trades/$code") }
             CryptoTradeCache.responses[symbol] = now to body
@@ -150,12 +156,13 @@ class SpotFallbackClient(
         }
     }
 
-    /** Ordered recent trade page for OPEN crypto positions, sharing the existing 10s
-     * rate-limit with quote snapshots so the service and visible UI do not double-poll.
+    /** The only priority lane: an actually OPEN paper position, still capped at 3s/pair.
+     * A display quote and a scanner candidate never acquire this reservation.
      */
-    internal suspend fun fetchCryptoTrades(symbol: String): List<NobitexTradeBatch.Trade> {
-        if (!CryptoCatalog.isCrypto(symbol)) throw DataFeedException("نماد کریپتو معتبر نیست")
-        return NobitexTradeBatch.parse(cryptoTradeResponse(symbol))
+    internal suspend fun fetchCryptoTrades(symbol: String, openedAt: Long): List<NobitexTradeBatch.Trade> {
+        if (!CryptoCatalog.isCrypto(symbol) || openedAt <= 0L)
+            throw DataFeedException("پوزیشن باز معتبر برای فید اولویت‌دار وجود ندارد")
+        return NobitexTradeBatch.parse(cryptoTradeResponse(symbol, openPosition = true, openedAt = openedAt))
     }
 
     /** One real quote: Swissquote first, gold-api.com only as a gold-only backup. Never fabricated. */

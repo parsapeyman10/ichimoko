@@ -254,7 +254,6 @@ class PairScanner(
         }
 
         val headlines = news.state.value
-        val trades = journal.trades.value
 
         var requestedMarkets = 0
         universe.forEachIndexed { _, symbol ->
@@ -269,7 +268,9 @@ class PairScanner(
                 update(symbol, "closed", "بازار طبق ساعت سشن بسته است؛ تا بازگشایی هیچ درخواست فید یا ارزیابی سیگنال انجام نمی‌شود")
                 return@forEachIndexed
             }
-            if (trades.any { it.symbol == symbol && it.isOpen }) {
+            // Re-read after each provider wait: a new open position outranks further
+            // scanner requests even if it was opened during this long universe sweep.
+            if (journal.trades.value.any { it.symbol == symbol && it.isOpen }) {
                 update(symbol, "blocked", "پوزیشن کاغذی این نماد باز است؛ فرصت جدید اسکن نمی‌شود")
                 return@forEachIndexed
             }

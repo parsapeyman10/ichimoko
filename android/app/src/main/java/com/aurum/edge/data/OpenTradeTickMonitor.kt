@@ -26,13 +26,17 @@ class OpenTradeTickMonitor(
         // A blocked request for another pair no longer holds this pair's cursor/settlement.
         return session.mutex.withLock {
             if (sessions[symbol] !== session) return@withLock null
+            if (journal.trades.value.none { it.isOpen && it.symbol == symbol && it.openedAt == openedAt }) {
+                sessions.remove(symbol, session)
+                return@withLock null
+            }
             val now = System.currentTimeMillis()
-            // REST trade endpoint allows 60 requests/minute; one shared body is reused by the
-            // selected market and the foreground service. Avoid a pointless 1s busy loop.
-            if (now - session.lastRequestAt in 0L until 10_000L) return@withLock null
+            // This worker has the reserved public-trades lane. A 3s minimum is not a
+            // promise of every tick: pages must overlap or coverage is marked unknown.
+            if (now - session.lastRequestAt in 0L until 3_000L) return@withLock null
             session.lastRequestAt = now
             val page = try {
-                spot.fetchCryptoTrades(symbol)
+                spot.fetchCryptoTrades(symbol, openedAt)
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (_: Exception) {

@@ -392,7 +392,7 @@ class SignalMonitorService : Service() {
                                         // An unavailable quote is not a tick or an exit. Retry
                                         // independently; the crypto monitor records coverage gaps.
                                     }
-                                    delay(if (crypto) 10_000L else 1_000L)
+                                    delay(if (crypto) 3_000L else 1_000L)
                                 }
                             }
                             workers[symbol] = openedAt to worker
