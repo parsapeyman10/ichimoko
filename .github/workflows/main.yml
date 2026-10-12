@@ -10,11 +10,15 @@ on:
     paths:
       - 'android/**'
       - 'update/**'
+      - 'tools/probe_crypto_venues.py'
+      - 'tools/test_probe_crypto_venues.py'
       - '.github/workflows/main.yml'
   pull_request:
     paths:
       - 'android/**'
       - 'update/**'
+      - 'tools/probe_crypto_venues.py'
+      - 'tools/test_probe_crypto_venues.py'
       - '.github/workflows/main.yml'
   workflow_dispatch:
     inputs:
