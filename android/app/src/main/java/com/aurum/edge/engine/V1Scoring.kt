@@ -178,6 +178,7 @@ internal object V1Scoring {
         if (frames.size != intervals.size || frames.any { it == null } || side == SignalAction.NO_TRADE)
             return 0
         val aligned = frames.count { it == side }
+        val opposite = frames.count { it != side && it != SignalAction.NO_TRADE }
         return when {
             aligned == 3 -> 25
             aligned == 2 && opposite == 0 -> 20

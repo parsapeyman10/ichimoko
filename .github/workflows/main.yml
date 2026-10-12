@@ -635,6 +635,7 @@ jobs:
     timeout-minutes: 12
     permissions:
       contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v4
       - name: Verify probe invariants
@@ -651,6 +652,22 @@ jobs:
               f.write(f"## Read-only market audit\n{supported}/{len(rows)} symbols passed a point-in-time runner probe. "
                       "This does NOT certify Android-device reachability, uninterrupted service, "
                       "or safe execution replay. Download the JSON artifact for per-symbol reasons.\n")
+          PY
+      - name: Expose per-symbol report through the GitHub Checks API
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          report = json.load(open('crypto-venue-coverage.json'))
+          payload = {
+              'name': 'Read-only USDT venue coverage', 'head_sha': os.environ['GITHUB_SHA'],
+              'status': 'completed', 'conclusion': 'neutral',
+              'output': {'title': 'Point-in-time runner audit; not a trading authorization',
+                         'summary': '```json\n' + json.dumps(report, ensure_ascii=False, separators=(',', ':')) + '\n```'}
+          }
+          subprocess.run(['gh', 'api', '-X', 'POST', f"repos/{os.environ['GITHUB_REPOSITORY']}/check-runs", '--input', '-'],
+                         input=json.dumps(payload), text=True, stdout=subprocess.DEVNULL, check=True)
           PY
       - name: Attach audit report (not a venue authorization)
         if: always()
