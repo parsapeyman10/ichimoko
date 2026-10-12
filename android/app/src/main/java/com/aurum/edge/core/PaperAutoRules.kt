@@ -2,7 +2,7 @@ package com.aurum.edge.core
 
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.PersianNewsState
-import com.aurum.edge.data.NobitexHistoryClient
+import com.aurum.edge.data.BinanceSpotClient
 import kotlin.math.abs
 
 /** Side-effect-free guard shared by service and unit tests. NEVER submits a broker order. */
@@ -13,14 +13,15 @@ object PaperAutoRules {
         OilEntrySafety.blocker(market.symbol)?.let { return it }
         if (!settings.autoPaperTrading) return "معاملهٔ خودکار کاغذی خاموش است"
         if (AssetClass.of(market.symbol) == AssetClass.CRYPTO) {
-            if (market.historyProvider != NobitexHistoryClient.PROVIDER)
-                return "تاریخچهٔ هفت بازهٔ هم‌صرافی نوبیتکس برای ورود تأیید نشده است"
+            if (market.historyProvider != BinanceSpotClient.PROVIDER ||
+                market.feed.provider?.startsWith(BinanceSpotClient.PROVIDER) != true)
+                return "تاریخچهٔ هفت بازهٔ هم‌صرافی Binance Spot برای ورود تأیید نشده است"
             val tradeAt = market.lastTradeAt
             val tradePrice = market.lastTradePrice
             if (market.feed.mode != FeedMode.LIVE || tradeAt == null ||
                 tradeAt !in (now - 45_000L)..(now + 10_000L) ||
                 tradePrice == null || !tradePrice.isFinite() || tradePrice <= 0.0)
-                return "معاملهٔ واقعی تازه و زمان‌دار نوبیتکس برای ورود موجود نیست"
+                return "معاملهٔ واقعی تازه و زمان‌دار Binance Spot برای ورود موجود نیست"
         }
         if (market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))
             return "فید معتبر در دسترس نیست (وضعیت فید: ${market.feed.mode.label})"

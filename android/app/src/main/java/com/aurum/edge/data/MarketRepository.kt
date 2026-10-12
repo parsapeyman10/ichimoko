@@ -21,6 +21,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -82,7 +83,6 @@ class MarketRepository(
     private val spotFallback: SpotFallbackClient = SpotFallbackClient(),
     private val publicHistory: PublicCandleHistoryClient = PublicCandleHistoryClient(),
     private val dukascopyHistory: DukascopyHistoryClient = DukascopyHistoryClient(),
-    private val nobitexHistory: NobitexHistoryClient = NobitexHistoryClient(),
 ) {
     /**
      * Weekend gate for the symbol actually being shown.
@@ -252,23 +252,21 @@ class MarketRepository(
             var historyProvider = ""
             var staleDetail = "تاریخچهٔ آنلاین پاسخ داد اما آخرین کندل آن باید با تیک زنده تأیید شود"
             if (CryptoCatalog.isCrypto(current.symbol)) {
-                // Binance geo-blocks some regions with HTTP 451, which leaves the crypto
-                // chart empty and looking broken. Nobitex serves the same instruments and
-                // is reachable from exactly those networks, so it is the fallback rather
-                // than the forex ladder below, which does not carry these pairs at all.
-                // Public USDT candles first; a configured Twelve key is a same-pair fallback.
+                // Only Binance Spot USDT bars may authorize Binance paper entries.
+                // If geo-blocked (HTTP 451), show the provider error rather than
+                // silently replacing the same-pair execution feed with another exchange.
                 // Never treat BTC/USD from Yahoo as if it were BTC/USDT.
                 try {
-                    val book = nobitexHistory.fetchCandles(current.symbol, current.interval,
+                    val book = BinanceSpotClient().fetchCandles(current.symbol, current.interval,
                         desiredSize = requestedSize, minimumSize = minimumSize)
                     fetched = book.candles
                     historyProvider = book.provider
                     staleDetail = "${book.provider} تاریخچه داد اما آخرین کندل آن باید با قیمت زنده تأیید شود"
                 } catch (cancel: CancellationException) {
                     throw cancel
-                } catch (nobitexFailure: Exception) {
+                } catch (binanceFailure: Exception) {
                     if (!current.hasKey || current.autoPaperTrading) throw DataFeedException(
-                        "فید ${current.symbol} از نوبیتکس معتبر نبود: ${(nobitexFailure.message ?: "بدون داده").take(100)}؛ ورود با تاریخچهٔ صرافی دیگر ممنوع است")
+                        "فید ${current.symbol} از Binance Spot معتبر نبود: ${(binanceFailure.message ?: "بدون داده").take(100)}؛ ورود با تاریخچهٔ صرافی دیگر ممنوع است")
                     fetched = client.fetchCandles(current.apiKey, current.symbol, current.interval,
                         outputSize = requestedSize, minimumOutputSize = minimumSize)
                     if (fetched.size < minimumSize) throw DataFeedException(
@@ -347,7 +345,7 @@ class MarketRepository(
             val historyCurrent = hasCurrentRestBar(fetched, current.interval, receivedAt)
             val periodStart = currentPeriodStart(current.interval)
             // A persisted crypto candle lacks a venue tag. Never blend an older Twelve
-            // series (or a different Nobitex fetch) with the newly verified venue window.
+            // or Nobitex series with a newly verified Binance venue window.
             if (CryptoCatalog.isCrypto(current.symbol)) cachedBars.clear()
             _state.value = _state.value.copy(historyProvider = historyProvider)
             fetched.forEach { bar ->
@@ -459,9 +457,35 @@ class MarketRepository(
                 }
                 try {
                     if (CryptoCatalog.isCrypto(current.symbol)) {
-                        // Same Nobitex USDT venue as the historical bars, with exchange-time
-                        // executed trades. No fallback to another venue for paper entries.
-                        collectSpotFallback("Nobitex /v2/trades (معاملهٔ زمان‌دار)")
+                        // Selected-market display also streams Binance executions. An OPEN
+                        // trade has its own higher-priority ordered ID+REST recovery worker.
+                        val events = Channel<BinanceAggregateStream.Event>(2_048)
+                        val socket = BinanceAggregateStream().open(current.symbol) { event ->
+                            if (!events.trySend(event).isSuccess) events.trySend(BinanceAggregateStream.Event.Invalid)
+                        }
+                        try {
+                            withTimeoutOrNull(24L * 60 * 60_000) {
+                                while (isActive && stillCurrent(settings.read())) {
+                                    when (val event = withTimeoutOrNull(30_000L) { events.receive() }) {
+                                        is BinanceAggregateStream.Event.Trade -> {
+                                            if (TradeQuotePolicy.accepts(event.trade.tick)) {
+                                                backoff = 2_000L
+                                                onTick(event.trade.tick, "${BinanceSpotClient.PROVIDER} aggTrade")
+                                            }
+                                        }
+                                        BinanceAggregateStream.Event.Connected -> Unit
+                                        BinanceAggregateStream.Event.Disconnected,
+                                        BinanceAggregateStream.Event.Invalid, null -> break
+                                    }
+                                }
+                            }
+                        } finally {
+                            socket.close()
+                            events.close()
+                        }
+                        // On blocked WebSocket, use same-venue REST with explicit timestamps.
+                        // Not a different exchange and never a synthetic per-second tick.
+                        collectSpotFallback("${BinanceSpotClient.PROVIDER} aggTrade", 10_000L)
                     } else if (current.hasKey) {
                         // Public, keyless live quote is tried first. Twelve Data WebSocket is the
                         // last live fallback, matching the history provider policy.
@@ -754,7 +778,7 @@ class MarketRepository(
             val session = generation
             timeframeJob = scope?.launch(Dispatchers.IO) {
                 val fetched = timeframeFeed.fetch(current.symbol, current.interval, bars, current.apiKey,
-                    requireNobitexCrypto = current.autoPaperTrading && CryptoCatalog.isCrypto(current.symbol))
+                    requireBinanceCrypto = current.autoPaperTrading && CryptoCatalog.isCrypto(current.symbol))
                 if (started && generation == session && settings.read().symbol == current.symbol &&
                     settings.read().interval == current.interval &&
                     settings.read().autoPaperTrading == current.autoPaperTrading) {

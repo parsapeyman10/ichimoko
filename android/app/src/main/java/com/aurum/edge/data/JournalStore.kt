@@ -107,6 +107,7 @@ class JournalStore(
          */
         marketTrend: MarketTrendRecord? = null,
         observedAt: Long = System.currentTimeMillis(),
+        cryptoVenue: String = "NOBITEX",
     ): PaperTrade {
         // Authoritative entry guard, independent of UI, scanner and automatic trader. Do not
         // move this into settlement: already-open oil positions must still be manageable.
@@ -115,6 +116,9 @@ class JournalStore(
         }
         require(!com.aurum.edge.core.MarketHours.closedFor(symbol, observedAt)) {
             "بازار این نماد بسته است؛ ثبت پوزیشن کاغذی ممنوع"
+        }
+        require(!CryptoCatalog.isCrypto(symbol) || cryptoVenue in setOf("NOBITEX", BinanceSpotClient.VENUE)) {
+            "صرافی ورود نامعتبر است"
         }
         val technicalConditions = TechnicalEvidence.items(signal)
         require(signal.isActionable && TechnicalEvidence.confirmed(signal)) {
@@ -166,7 +170,9 @@ class JournalStore(
             marketTrend = marketTrend,
             initialStopLoss = stop,
             trailExtreme = price,
-            usesTickArchive = CryptoCatalog.isCrypto(symbol) && settingsStore?.hasTickArchive() == true,
+            usesTickArchive = CryptoCatalog.isCrypto(symbol) && cryptoVenue == "NOBITEX" &&
+                settingsStore?.hasTickArchive() == true,
+            cryptoVenue = cryptoVenue,
         )
         mutex.withLock {
             // Settings and ledger can change while an AI/preview was running. Fail closed
@@ -228,7 +234,8 @@ class JournalStore(
         val newlyClosed = mutableListOf<PaperTrade>()
         val updated = current.map { t ->
             // A historical candle timestamped before the trade was opened cannot settle this position.
-            if (!t.isOpen || t.symbol != symbol || candle.time < t.openedAt || t.usesTickArchive) return@map t
+            if (!t.isOpen || t.symbol != symbol || candle.time < t.openedAt ||
+                t.usesTickArchive || CryptoCatalog.isCrypto(symbol)) return@map t
 
             val hitStop = if (t.action == SignalAction.BUY) {
                 candle.low <= t.stopLoss + 1e-9
@@ -306,6 +313,7 @@ class JournalStore(
                 (expectedOpenedAt != null && t.openedAt != expectedOpenedAt)) return@map t
             // A trade fetched just before entry must never close a position opened
             // afterwards, even if the quote was still within the feed freshness window.
+            if (t.cryptoVenue == BinanceSpotClient.VENUE) return@map t
             if (t.usesTickArchive != (archiveSeq != null)) return@map t
             if (archiveSeq != null && archiveSeq <= t.tickArchiveSeq) return@map t
             if (observedAt < t.openedAt) {
@@ -360,6 +368,53 @@ class JournalStore(
             }
         }
         return@withLock newlyClosed
+    }
+
+    /** One journal commit per ordered batch (not one disk sync per WebSocket publication).
+     * The sequence cursor, trailing stop and exit/balance are advanced together. A restart
+     * replays from the last committed ID. Never apply a row after an ID gap or a different venue.
+     */
+    suspend fun settleBinanceBatch(symbol: String, openedAt: Long,
+        events: List<BinanceSpotClient.Aggregate>): List<PaperTrade> = mutex.withLock {
+        if (!loaded || events.isEmpty()) return@withLock emptyList()
+        val original = _trades.value.firstOrNull { it.isOpen && it.symbol == symbol &&
+            it.openedAt == openedAt && it.cryptoVenue == BinanceSpotClient.VENUE }
+            ?: return@withLock emptyList()
+        var trade = original
+        var next = trade.binanceAggId + 1L
+        var pnlDelta = 0.0
+        val closed = mutableListOf<PaperTrade>()
+        for (event in events) {
+            if (event.id < next) continue // replay after a process restart
+            if (trade.binanceAggId >= 0 && event.id != next)
+                throw DataFeedException("شناسهٔ معاملهٔ Binance قطع شده؛ تسویه متوقف شد")
+            if (event.tick.at < openedAt || !event.tick.price.isFinite() || event.tick.price <= 0 ||
+                event.tick.at > System.currentTimeMillis() + 10_000L)
+                throw DataFeedException("تیک Binance خارج از زمان پوزیشن یا نامعتبر است")
+            val price = event.tick.price
+            val stopHit = if (trade.action == SignalAction.BUY) price <= trade.stopLoss + 1e-9
+                else price >= trade.stopLoss - 1e-9
+            val targetHit = trade.initialStopLoss == null &&
+                (if (trade.action == SignalAction.BUY) price >= trade.takeProfit - 1e-9
+                    else price <= trade.takeProfit + 1e-9)
+            trade = if (stopHit || targetHit) {
+                val exit = if (stopHit) trade.stopLoss else trade.takeProfit
+                val perUnit = if (trade.action == SignalAction.BUY) exit - trade.entry else trade.entry - exit
+                val pnl = kotlin.math.round((PaperOrderRules.quotePnlToUsd(symbol,
+                    perUnit * trade.positionOz, exit) - trade.effectiveCommissionUsd -
+                    trade.effectiveSpreadCostUsd) * 100.0) / 100.0
+                pnlDelta = pnl
+                trade.copy(closedAt = event.tick.at, exitPrice = exit, binanceAggId = event.id,
+                    exitReason = if (stopHit) "حد ضرر (Binance Spot)" else "حد سود (Binance Spot)", pnlUsd = pnl)
+            } else PaperTrailing.advance(trade, price, price).copy(binanceAggId = event.id)
+            next = event.id + 1L
+            if (!trade.isOpen) { closed.add(trade); break }
+        }
+        if (trade != original) {
+            persist(_trades.value.map { if (it.id == original.id) trade else it })
+            if (pnlDelta != 0.0) settingsStore?.adjustBalance(pnlDelta)
+        }
+        closed
     }
 
     suspend fun close(tradeId: String, price: Double, reason: String): PaperTrade = mutex.withLock {

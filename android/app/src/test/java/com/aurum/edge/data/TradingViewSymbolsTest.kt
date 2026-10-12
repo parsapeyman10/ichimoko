@@ -48,7 +48,7 @@ class TradingViewSymbolsTest {
         assertTrue(SourceCatalog.all.none { it.id == "tradingview_scanner" })
         CryptoCatalog.watchlistSeed.forEach { coin ->
             val watch = WatchCatalog.find(coin.id)!!
-            assertEquals(coin.id, watch.providerCodes["nobitex_public_trades"])
+            assertEquals(coin.id, watch.providerCodes["binance_spot_agg_trades"])
             assertEquals("BINANCE:${coin.binance}", TradingViewSymbols.find(coin.id))
         }
         assertTrue(WatchCatalog.symbols.none { "tradingview_scanner" in it.providerCodes })

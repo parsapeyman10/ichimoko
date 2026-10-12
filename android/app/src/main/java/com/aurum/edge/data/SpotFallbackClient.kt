@@ -22,7 +22,8 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Automatic real spot-price source: Swissquote's public BBO for FX, gold-api.com for gold,
- * and the public Nobitex executed-trades endpoint for listed USDT pairs.
+ * and Binance Spot aggregate executions for NEW USDT entries. Legacy Nobitex
+ * positions retain their dedicated same-venue replay method.
  * MarketRepository tries this public source before its final Twelve Data live fallback,
  * whether or not a key is configured.
  *
@@ -169,7 +170,7 @@ class SpotFallbackClient(
     suspend fun fetchQuote(symbol: String): PriceTick {
         // Crypto has its own real, keyless book. Swissquote and Gold-API do not carry these
         // instruments at all, so trying them would just produce a misleading error.
-        if (CryptoCatalog.isCrypto(symbol)) return NobitexTradeQuote.parse(cryptoTradeResponse(symbol))
+        if (CryptoCatalog.isCrypto(symbol)) return BinanceSpotClient().fetchQuote(symbol)
         return try {
             fetchSwissquote(symbol)
         } catch (cancel: CancellationException) {

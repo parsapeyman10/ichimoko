@@ -385,7 +385,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     if (selectedTick != null && TradeQuotePolicy.accepts(selectedTick) &&
                         !currentMarket.showingCachedData && currentMarket.feed.mode == FeedMode.LIVE &&
                         FeedLiveness.hasRecentReceipt(currentMarket.feed) &&
-                        !MarketHours.closedFor(currentMarket.symbol)) {
+                        !MarketHours.closedFor(currentMarket.symbol) &&
+                        (openTradesList.none { it.symbol == currentMarket.symbol &&
+                            com.aurum.edge.data.CryptoCatalog.isCrypto(it.symbol) &&
+                            it.cryptoVenue != com.aurum.edge.data.BinanceSpotClient.VENUE })) {
                         currentMap[currentMarket.symbol] = selectedTick.price
                         currentTicks[currentMarket.symbol] = selectedTick
                         // MarketRepository already settles the original timestamped tick.
@@ -683,7 +686,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         freshPaperQuote(current)?.let { return it }
         if (!com.aurum.edge.data.CryptoVenuePolicy.compatible(current.symbol,
                 current.historyProvider, current.feed.provider))
-            return "ورود کریپتو مسدود: کندل تحلیل و تیک ورود باید هر دو از بازار نوبیتکس باشند"
+            return "ورود کریپتو مسدود: کندل تحلیل و تیک ورود باید هر دو از بازار Binance Spot باشند"
         if (com.aurum.edge.core.MarketHours.closedFor(current.symbol)) return "بازار بسته است"
         val candidate = current.signal
         if (candidate?.isActionable != true || !TechnicalEvidence.confirmed(candidate))
@@ -799,6 +802,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     manual = manual,
                     newsEvidence = newsRecord, priceAction = ict,
                     marketTrend = trendRecord,
+                    cryptoVenue = if (com.aurum.edge.data.CryptoCatalog.isCrypto(current.symbol))
+                        com.aurum.edge.data.BinanceSpotClient.VENUE else "NOBITEX",
                 )
                 _stats.value = container.journalStore.stats()
                 // Linking is metadata only; a damaged opportunity file must not erase a saved trade.

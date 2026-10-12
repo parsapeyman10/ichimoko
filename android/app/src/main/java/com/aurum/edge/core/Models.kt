@@ -398,6 +398,10 @@ data class PaperTrade(
     val usesTickArchive: Boolean = false,
     /** Durable local archive cursor; never a venue trade ID. */
     val tickArchiveSeq: Long = 0L,
+    /** Legacy records remain Nobitex. Never reinterpret an existing entry on a new venue. */
+    val cryptoVenue: String = "NOBITEX",
+    /** Last Binance Spot aggregate ID atomically settled/checked with trailing and balance. */
+    val binanceAggId: Long = -1L,
 ) {
     val isOpen: Boolean get() = closedAt == null
     val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }

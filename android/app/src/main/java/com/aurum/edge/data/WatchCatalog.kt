@@ -46,10 +46,10 @@ object WatchCatalog {
             label = coin.label,
             unit = "$",
             providerCodes = linkedMapOf(
-                "nobitex_public_trades" to coin.id,
+                "binance_spot_agg_trades" to coin.id,
                 "twelve_data_quote" to coin.id,
             ),
-            defaultSources = listOf("nobitex_public_trades"),
+            defaultSources = listOf("binance_spot_agg_trades"),
             maxAgeMillis = 5 * 60_000L,
             tolerancePct = 0.5,
         )

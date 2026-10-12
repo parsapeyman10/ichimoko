@@ -100,7 +100,7 @@ class PairScanner(
     private val scope: CoroutineScope,
     private val dukascopyHistory: DukascopyHistoryClient = DukascopyHistoryClient(),
     private val decisionLog: DecisionLogStore? = null,
-    private val nobitexHistory: NobitexHistoryClient = NobitexHistoryClient(),
+    private val binanceHistory: BinanceSpotClient = BinanceSpotClient(),
 ) {
     private val mutex = Mutex()
     private var onAutoSignal: (suspend (MarketState) -> CatalogAutoReview)? = null
@@ -110,7 +110,7 @@ class PairScanner(
         onAutoSignal = callback
     }
 
-    private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client, nobitexHistory)
+    private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client, binanceHistory)
     /** Trends measured during the running sweep; published as one market-wide read at the end. */
     private val trendSample = mutableListOf<SymbolTrend>()
     private var lastSweepElapsed = 0L
@@ -305,7 +305,7 @@ class PairScanner(
             val rawCandles = try {
                 if (CryptoCatalog.isCrypto(symbol)) {
                     try {
-                        nobitexHistory.fetchCandles(symbol, interval,
+                        binanceHistory.fetchCandles(symbol, interval,
                             HistoryPolicy.LIVE_FETCH_CANDLES, HistoryPolicy.LIVE_MIN_CANDLES).candles
                     } catch (cancel: CancellationException) {
                         throw cancel
@@ -315,7 +315,7 @@ class PairScanner(
                         if (config.hasKey && !config.autoPaperTrading) client.fetchCandles(config.apiKey, symbol, interval,
                             outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
                             minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES)
-                        else throw DataFeedException("فید واقعی ${symbol} از نوبیتکس در دسترس نیست؛ دادهٔ USD جایگزین USDT نمی‌شود")
+                        else throw DataFeedException("فید واقعی ${symbol} از Binance Spot در دسترس نیست؛ دادهٔ USD جایگزین USDT نمی‌شود")
                     }
                 } else if (config.hasKey) {
                     try {
@@ -349,7 +349,7 @@ class PairScanner(
 
             val frames = try {
                 timeframeFeed.fetch(symbol, interval, candles, config.apiKey,
-                    requireNobitexCrypto = config.autoPaperTrading && CryptoCatalog.isCrypto(symbol))
+                    requireBinanceCrypto = config.autoPaperTrading && CryptoCatalog.isCrypto(symbol))
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (error: Exception) {
@@ -363,7 +363,7 @@ class PairScanner(
             for (candidate in candidates) {
                 val bars = when (candidate) {
                     Interval.M3 -> try {
-                        nobitexHistory.fetchCandles(symbol, Interval.M3,
+                        binanceHistory.fetchCandles(symbol, Interval.M3,
                             HistoryPolicy.LIVE_FETCH_CANDLES, HistoryPolicy.LIVE_MIN_CANDLES).candles
                     } catch (cancel: CancellationException) {
                         throw cancel
@@ -413,7 +413,7 @@ class PairScanner(
                 return@forEachIndexed
             }
             // A REST candle close is not a live tick. Never settle a position as if it were one.
-            if (lastClosed != null) {
+            if (lastClosed != null && !crypto) {
                 try {
                     journal.settle(lastClosed, symbol, now)
                 } catch (cancel: CancellationException) {
@@ -486,7 +486,7 @@ class PairScanner(
                     System.currentTimeMillis()),
                 signal = combined,
                 historyProvider = if (CryptoCatalog.isCrypto(symbol) && config.autoPaperTrading)
-                    NobitexHistoryClient.PROVIDER else null,
+                    BinanceSpotClient.PROVIDER else null,
             )
             val mtf = withContext(Dispatchers.Default) {
                 runCatching { MtfAnalyzer.analyze(candles, interval) }.getOrNull()

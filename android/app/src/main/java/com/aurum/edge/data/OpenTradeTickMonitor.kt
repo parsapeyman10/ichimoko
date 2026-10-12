@@ -27,9 +27,10 @@ class OpenTradeTickMonitor(
     private val journal: JournalStore,
     private val spot: SpotFallbackClient = SpotFallbackClient(),
     private val settings: SettingsStore? = null,
+    private val binance: BinanceSpotClient = BinanceSpotClient(),
 ) {
     private val archive = NobitexTickArchiveClient()
-    enum class Feed { CONNECTING, STREAM, STREAM_RECOVERABLE, ARCHIVE, RECOVERING, REST_FALLBACK }
+    enum class Feed { CONNECTING, STREAM, STREAM_RECOVERABLE, ARCHIVE, RECOVERING, REST_FALLBACK, BINANCE_STREAM }
     private data class Session(
         val openedAt: Long,
         val page: TradePageCursor = TradePageCursor(),
@@ -41,6 +42,7 @@ class OpenTradeTickMonitor(
         var lastReceiptAt: Long = 0L,
         var lastRequestAt: Long = 0L,
         var disconnectedAt: Long = 0L,
+        var binanceBootstrapped: Boolean = false,
     )
     private val sessions = java.util.concurrent.ConcurrentHashMap<String, Session>()
     private val _feeds = MutableStateFlow<Map<String, Feed>>(emptyMap())
@@ -74,9 +76,15 @@ class OpenTradeTickMonitor(
      * While the stream is healthy, the screen sees only its LAST FRESH received trade and
      * never starts a parallel REST replay that could reorder a trailing stop.
      */
-    suspend fun poll(symbol: String, openedAt: Long): PriceTick? =
-        if (archivePosition(symbol, openedAt)) pollArchive(symbol, openedAt).first
-        else pollPage(symbol, openedAt, bootstrap = false)
+    suspend fun poll(symbol: String, openedAt: Long): PriceTick? = when {
+        binancePosition(symbol, openedAt) -> pollBinance(symbol, openedAt)
+        archivePosition(symbol, openedAt) -> pollArchive(symbol, openedAt).first
+        else -> pollPage(symbol, openedAt, bootstrap = false)
+    }
+
+    private fun binancePosition(symbol: String, openedAt: Long): Boolean =
+        journal.trades.value.any { it.isOpen && it.symbol == symbol &&
+            it.openedAt == openedAt && it.cryptoVenue == BinanceSpotClient.VENUE }
 
     private fun archivePosition(symbol: String, openedAt: Long): Boolean =
         journal.trades.value.any { it.isOpen && it.symbol == symbol &&
@@ -193,11 +201,156 @@ class OpenTradeTickMonitor(
         }
     }
 
+    /** Binance aggregate IDs are shared by REST and WebSocket. REST fromId is INCLUSIVE:
+     * restart from the last atomically persisted ID+1, never jump to the latest quote.
+     * Only a complete ordered page can be committed; long backlogs use bounded pages/turn.
+     */
+    private suspend fun pollBinance(symbol: String, openedAt: Long, bootstrap: Boolean = false): PriceTick? {
+        val session = session(symbol, openedAt)
+        return session.mutex.withLock {
+            if (!stillOpen(symbol, session)) { forget(symbol, session); return@withLock null }
+            val now = System.currentTimeMillis()
+            if (session.connected && !bootstrap)
+                return@withLock session.latest?.takeIf { TradeQuotePolicy.accepts(it, now) }
+            if (!bootstrap && now - session.lastRequestAt in 0 until 1_000)
+                return@withLock session.latest?.takeIf { TradeQuotePolicy.accepts(it, now) }
+            session.lastRequestAt = now
+            try {
+                repeat(4) {
+                    val cursor = journal.trades.value.firstOrNull { it.isOpen && it.symbol == symbol &&
+                        it.openedAt == openedAt && it.cryptoVenue == BinanceSpotClient.VENUE }
+                        ?: return@withLock null
+                    val rows = if (cursor.binanceAggId >= 0)
+                        binance.fetchAggregates(symbol, fromId = cursor.binanceAggId + 1L)
+                    else binance.fetchAggregates(symbol, startTime = openedAt)
+                    if (rows.isNotEmpty()) {
+                        val closed = journal.settleBinanceBatch(symbol, openedAt, rows)
+                        session.latest = rows.last().tick
+                        if (closed.isNotEmpty()) { forget(symbol, session); return@withLock null }
+                    }
+                    if (rows.size < 1000) {
+                        session.binanceBootstrapped = true
+                        session.lastReceiptAt = System.currentTimeMillis()
+                        return@withLock session.latest?.takeIf { TradeQuotePolicy.accepts(it) }
+                    }
+                }
+                // Four full pages can still be far behind real time. Do not trust a newer
+                // stream event until the remaining IDs have been replayed in order.
+                setFeed(symbol, session, Feed.RECOVERING)
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                setFeed(symbol, session, Feed.RECOVERING)
+                journal.noteTickCoverageGap(symbol, System.currentTimeMillis(), openedAt)
+            }
+            session.latest?.takeIf { TradeQuotePolicy.accepts(it) }
+        }
+    }
+
+    private suspend fun watchBinance(symbol: String, openedAt: Long) {
+        val session = session(symbol, openedAt)
+        if (!session.watcher.compareAndSet(false, true)) return
+        val events = Channel<BinanceAggregateStream.Event>(4096)
+        val overflow = AtomicBoolean(false)
+        var socket: java.io.Closeable? = null
+        try {
+            setFeed(symbol, session, Feed.CONNECTING)
+            while (currentCoroutineContext().isActive && stillOpen(symbol, session)) {
+                // Finish older pages BEFORE opening a new stream; the first stream ID
+                // forces an additional fromId catch-up for the REST/WS handoff window.
+                pollBinance(symbol, openedAt, bootstrap = true)
+                if (!stillOpen(symbol, session)) break
+                if (!session.binanceBootstrapped) { kotlinx.coroutines.delay(1_000L); continue }
+                try {
+                    socket = BinanceAggregateStream().open(symbol) { event ->
+                        if (!events.trySend(event).isSuccess) overflow.set(true)
+                    }
+                    val batch = ArrayList<BinanceSpotClient.Aggregate>(256)
+                    var connected = false
+                    var lastFlush = System.currentTimeMillis()
+                    while (currentCoroutineContext().isActive && stillOpen(symbol, session)) {
+                        val event = withTimeoutOrNull(250L) { events.receive() }
+                        val now = System.currentTimeMillis()
+                        if (overflow.getAndSet(false)) {
+                            journal.noteTickCoverageGap(symbol, now, openedAt)
+                            setFeed(symbol, session, Feed.RECOVERING)
+                            break // REST fromId will replay what the bounded queue dropped.
+                        }
+                        when (event) {
+                            BinanceAggregateStream.Event.Connected -> {
+                                connected = true
+                                session.connected = true
+                                setFeed(symbol, session, Feed.BINANCE_STREAM)
+                            }
+                            BinanceAggregateStream.Event.Disconnected -> break
+                            BinanceAggregateStream.Event.Invalid -> {
+                                journal.noteTickCoverageGap(symbol, now, openedAt)
+                                break
+                            }
+                            is BinanceAggregateStream.Event.Trade -> {
+                                val row = event.trade
+                                if (row.tick.at < openedAt) continue
+                                val previous = batch.lastOrNull()?.id ?: journal.trades.value.firstOrNull {
+                                    it.isOpen && it.symbol == symbol && it.openedAt == openedAt
+                                }?.binanceAggId ?: break
+                                if (previous < 0 || row.id > previous + 1L) {
+                                    if (batch.isNotEmpty()) {
+                                        journal.settleBinanceBatch(symbol, openedAt, batch)
+                                        batch.clear()
+                                    }
+                                    // Missing IDs must be replayed before this publication.
+                                    // Never let the socket skip a stop while REST is unavailable.
+                                    session.connected = false
+                                    pollBinance(symbol, openedAt, bootstrap = true)
+                                    val caught = journal.trades.value.firstOrNull { it.isOpen &&
+                                        it.symbol == symbol && it.openedAt == openedAt }?.binanceAggId ?: break
+                                    if (row.id > caught + 1L) break
+                                    session.connected = true
+                                    if (row.id <= caught) continue
+                                }
+                                if (row.id <= previous) continue
+                                batch.add(row)
+                                session.latest = row.tick
+                            }
+                            null -> Unit
+                        }
+                        if (batch.isNotEmpty() && (batch.size >= 128 || now - lastFlush >= 250L)) {
+                            journal.settleBinanceBatch(symbol, openedAt, batch)
+                            batch.clear()
+                            lastFlush = now
+                        }
+                        if (!connected && now - session.lastRequestAt > 10_000L) break
+                    }
+                    // A disconnected/overloaded stream's already-received contiguous
+                    // rows are still checked before REST fromId takes over.
+                    if (batch.isNotEmpty() && stillOpen(symbol, session))
+                        journal.settleBinanceBatch(symbol, openedAt, batch)
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    journal.noteTickCoverageGap(symbol, System.currentTimeMillis(), openedAt)
+                } finally {
+                    session.connected = false
+                    setFeed(symbol, session, Feed.REST_FALLBACK)
+                    withContext(NonCancellable + Dispatchers.IO) { runCatching { socket?.close() } }
+                    socket = null
+                    while (events.tryReceive().isSuccess) { /* stale socket callbacks */ }
+                }
+                kotlinx.coroutines.delay(1_000L)
+            }
+        } finally {
+            session.watcher.set(false)
+            if (sessions[symbol] === session) setFeedRemoved(symbol)
+            events.close()
+        }
+    }
+
     /** Own one cancellable stream per open crypto position, separate from scan/AI/news.
      * Centrifugo's SDK reconnects and requests recovery only if the server advertised it.
      * A bounded callback queue makes overload observable rather than silently dropping ticks.
      */
     suspend fun watch(symbol: String, openedAt: Long) {
+        if (binancePosition(symbol, openedAt)) return watchBinance(symbol, openedAt)
         if (archivePosition(symbol, openedAt)) return watchArchive(symbol, openedAt)
         val session = session(symbol, openedAt)
         if (!session.watcher.compareAndSet(false, true)) return

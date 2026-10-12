@@ -97,15 +97,15 @@ object SourceCatalog {
     /** Exchange's documented, timestamped public executions. Display only, shared with
      * the existing Nobitex rate budget; NEVER read TradingView widget/scanner internals.
      */
-    val nobitexTrades = SourceDef(
-        id = "nobitex_public_trades",
-        title = "Nobitex · معاملات عمومی",
-        subtitle = "آخرین معاملهٔ زمان‌دار بازار USDT نوبیتکس، بدون کلید",
-        kind = SourceKind.NOBITEX_TRADE,
-        urlTemplate = "https://apiv2.nobitex.ir/v2/trades/{symbol}",
+    val binanceTrades = SourceDef(
+        id = "binance_spot_agg_trades",
+        title = "Binance Spot · aggTrade",
+        subtitle = "معاملهٔ زمان‌دار بازار USDT بایننس، بدون کلید",
+        kind = SourceKind.CRYPTO_SPOT_TRADE,
+        urlTemplate = "https://data-api.binance.vision/api/v3/aggTrades?symbol={symbol}",
         unit = "$",
     )
 
-    val all = listOf(yahoo, tgju, bamaCars, goldApi, twelveData, nobitexTrades)
+    val all = listOf(yahoo, tgju, bamaCars, goldApi, twelveData, binanceTrades)
     fun find(id: String): SourceDef? = all.firstOrNull { it.id == id }
 }

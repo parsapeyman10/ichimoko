@@ -7,6 +7,6 @@ package com.aurum.edge.data
 object CryptoVenuePolicy {
     fun compatible(symbol: String, historyProvider: String?, tickProvider: String?): Boolean =
         !CryptoCatalog.isCrypto(symbol) ||
-            (historyProvider?.startsWith(NobitexHistoryClient.PROVIDER) == true &&
-                tickProvider?.startsWith("Nobitex ") == true)
+            (historyProvider == BinanceSpotClient.PROVIDER &&
+                tickProvider?.startsWith(BinanceSpotClient.PROVIDER) == true)
 }

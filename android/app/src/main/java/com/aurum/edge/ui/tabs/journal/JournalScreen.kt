@@ -209,7 +209,9 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                 filteredOpen.forEach { trade ->
                     val currentPrice = liveTicks[trade.symbol]
                         ?.takeIf { TradeQuotePolicy.accepts(it, now) }?.price
-                        ?: (if (trade.symbol == market.symbol) livePrice else null)
+                        ?: (if (trade.symbol == market.symbol &&
+                            (!com.aurum.edge.data.CryptoCatalog.isCrypto(trade.symbol) ||
+                                trade.cryptoVenue == com.aurum.edge.data.BinanceSpotClient.VENUE)) livePrice else null)
                     val unrealized = LiveTradeValuation.from(trade, currentPrice)?.netPnlUsd
                     Row(
                         modifier = Modifier
@@ -241,7 +243,8 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                             )
                             if (trade.isOpen && com.aurum.edge.data.CryptoCatalog.isCrypto(trade.symbol)) {
                                 val feed = tickFeeds[trade.symbol]
-                                Text("فید خروج نوبیتکس: " + when (feed) {
+                                Text("فید خروج ${if (trade.cryptoVenue == com.aurum.edge.data.BinanceSpotClient.VENUE) "Binance Spot" else "Nobitex"}: " + when (feed) {
+                                    com.aurum.edge.data.OpenTradeTickMonitor.Feed.BINANCE_STREAM -> "معاملات زندهٔ aggTrade با شناسه؛ بازیابی REST هم‌صرافی"
                                     com.aurum.edge.data.OpenTradeTickMonitor.Feed.STREAM -> "معاملات زنده؛ بازیابی کانال تأیید نشده"
                                     com.aurum.edge.data.OpenTradeTickMonitor.Feed.STREAM_RECOVERABLE -> "معاملات زنده؛ سرور قابلیت بازیابی اعلام کرد"
                                     com.aurum.edge.data.OpenTradeTickMonitor.Feed.ARCHIVE -> "بایگانی تیک هم‌صرافی؛ بازپخش ترتیبی، گسست‌ها ثبت می‌شوند"

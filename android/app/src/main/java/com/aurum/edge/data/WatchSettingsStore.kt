@@ -15,9 +15,11 @@ class WatchSettingsStore(context: Context) {
 
     private fun read(symbol: WatchSymbol): WatchSelection {
         val enabled = prefs.getString("sources_${symbol.id}", null)?.split(',')
+            ?.map { if (it == "nobitex_public_trades") "binance_spot_agg_trades" else it }
             ?.filter { it in symbol.providerCodes }?.distinct()?.takeIf { it.isNotEmpty() }
             ?: symbol.defaultSources
         val preferred = prefs.getString("preferred_${symbol.id}", null)
+            ?.let { if (it == "nobitex_public_trades") "binance_spot_agg_trades" else it }
             ?.takeIf { it in enabled } ?: enabled.firstOrNull().orEmpty()
         return WatchSelection(enabled, preferred)
     }

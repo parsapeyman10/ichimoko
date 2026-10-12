@@ -176,6 +176,8 @@ class PaperAutoTrader(
                 priceAction = ict,
                 customNote = entryNote,
                 marketTrend = trendContext?.let { MarketTrendRecord.from(it) },
+                cryptoVenue = if (com.aurum.edge.data.CryptoCatalog.isCrypto(current.symbol))
+                    BinanceSpotClient.VENUE else "NOBITEX",
             )
             _status.value = "کاغذی ثبت شد: ${trade.symbol} ${trade.action} (${finalSignal.confidence.toInt()}٪)" +
                 (trendContext?.let { " · روند: ${it.alignment.label}" } ?: "") + " · $entryNote"

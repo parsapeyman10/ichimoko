@@ -107,10 +107,10 @@ class CryptoOnDeviceTest {
     }
 
     @Test fun `crypto watch rows use only exchange USDT executions not the TradingView chart venue`() {
-        assertTrue(SourceCatalog.all.any { it.id == "nobitex_public_trades" })
+        assertTrue(SourceCatalog.all.any { it.id == "binance_spot_agg_trades" })
         assertTrue(SourceCatalog.all.none { it.id == "tradingview_scanner" })
         CryptoCatalog.watchlistSeed.forEach { coin ->
-            val code = WatchCatalog.find(coin.id)!!.providerCodes["nobitex_public_trades"]
+            val code = WatchCatalog.find(coin.id)!!.providerCodes["binance_spot_agg_trades"]
             assertEquals(coin.id, code)
             assertEquals("BINANCE:${coin.binance}", TradingViewSymbols.find(coin.id))
         }

@@ -77,9 +77,9 @@ class SourceFetcher(
     }
 
     private suspend fun fetchOne(source: SourceDef, symbol: SymbolDef, apiKey: String): Quote = try {
-        if (source.kind == SourceKind.NOBITEX_TRADE) {
+        if (source.kind == SourceKind.CRYPTO_SPOT_TRADE) {
             val coin = CryptoCatalog.find(symbol.code)
-                ?: throw DataFeedException("جفت USDT نوبیتکس شناسایی نشد")
+                ?: throw DataFeedException("جفت USDT بایننس شناسایی نشد")
             val tick = spot.fetchQuote(coin.id) // shared process-wide 15/40 request budget
             Quote(symbol.code, symbol.label, price = tick.price, providerAt = tick.at,
                 unit = source.unit, sourceId = source.id)

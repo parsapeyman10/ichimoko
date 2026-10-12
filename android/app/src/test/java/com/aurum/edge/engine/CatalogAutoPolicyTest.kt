@@ -44,8 +44,9 @@ class CatalogAutoPolicyTest {
             lastPrice = 100.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = weekday),
             historyProvider = "Twelve Data")
         assertTrue(PaperAutoRules.blocker(observed, config, PersianNewsState(), now = weekday,
-            allowedSymbols = WatchCatalog.scannerSymbols)!!.contains("نوبیتکس"))
-        val matched = observed.copy(historyProvider = com.aurum.edge.data.NobitexHistoryClient.PROVIDER,
+            allowedSymbols = WatchCatalog.scannerSymbols)!!.contains("Binance Spot"))
+        val matched = observed.copy(historyProvider = com.aurum.edge.data.BinanceSpotClient.PROVIDER,
+            feed = observed.feed.copy(provider = "Binance Spot / USDT aggTrade"),
             lastTradeAt = weekday, lastTradePrice = 100.0)
         assertTrue(PaperAutoRules.blocker(matched.copy(lastTradeAt = weekday - 46_000L), config,
             PersianNewsState(), now = weekday,

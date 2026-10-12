@@ -257,6 +257,8 @@ private fun LiveTradeGaugeCard(
     val isBuy = trade.action == SignalAction.BUY
     val assetClass = AssetClass.of(trade.symbol)
     val selectedFresh = currentMarket.symbol == trade.symbol &&
+            (!com.aurum.edge.data.CryptoCatalog.isCrypto(trade.symbol) ||
+                trade.cryptoVenue == com.aurum.edge.data.BinanceSpotClient.VENUE) &&
             currentMarket.feed.mode == FeedMode.LIVE && !currentMarket.showingCachedData &&
             FeedLiveness.hasRecentReceipt(currentMarket.feed, now) &&
             currentMarket.lastPrice?.let { price -> currentMarket.lastTradeAt?.let { at ->

@@ -99,19 +99,19 @@ class WatchRepository(
             lastAttemptAt = System.currentTimeMillis()) // attempt time, not quote freshness
         try {
             val selected = preferences.selections.value
-            // At most six Nobitex watch rows per minute; leave the remaining 9 ordinary
-            // REST slots for selected quote/entry/scanner, while OPEN positions reserve 40.
+            // Watch rows are low-priority snapshots; open-position WebSocket/REST recovery
+            // runs independently even if a watch refresh stalls.
             val cryptoDue = cryptoWatchAttemptAtElapsed == 0L ||
                 elapsed - cryptoWatchAttemptAtElapsed >= 60_000L
             val targets = WatchCatalog.symbols.flatMap { symbol ->
                 selected[symbol.id]?.enabledSources.orEmpty().mapNotNull { sourceId ->
                     val source = SourceCatalog.find(sourceId) ?: return@mapNotNull null
-                    if (source.kind == SourceKind.NOBITEX_TRADE && !cryptoDue) return@mapNotNull null
+                    if (source.kind == SourceKind.CRYPTO_SPOT_TRADE && !cryptoDue) return@mapNotNull null
                     val code = symbol.providerCodes[sourceId] ?: return@mapNotNull null
                     Target(symbol, source, code, if (source.requiresKey) preferences.apiKeyFor(symbol.id, chartSettings.read().apiKey) else "")
                 }
             }
-            if (targets.any { it.source.kind == SourceKind.NOBITEX_TRADE })
+            if (targets.any { it.source.kind == SourceKind.CRYPTO_SPOT_TRADE })
                 cryptoWatchAttemptAtElapsed = elapsed
             // Batch only requests that share both a provider AND a read-only key. A key is
             // never sent to another provider; public Yahoo symbols never receive a Twelve key.

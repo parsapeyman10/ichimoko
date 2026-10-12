@@ -17,9 +17,9 @@ class TradingViewFeedBoundaryTest {
         assertTrue(WatchCatalog.symbols.all { "tradingview_scanner" !in it.providerCodes })
         CryptoCatalog.watchlistSeed.forEach { coin ->
             val watch = WatchCatalog.find(coin.id)!!
-            assertEquals(listOf("nobitex_public_trades"), watch.defaultSources)
-            assertEquals(coin.id, watch.providerCodes["nobitex_public_trades"])
-            assertEquals(SourceKind.NOBITEX_TRADE, SourceCatalog.nobitexTrades.kind)
+            assertEquals(listOf("binance_spot_agg_trades"), watch.defaultSources)
+            assertEquals(coin.id, watch.providerCodes["binance_spot_agg_trades"])
+            assertEquals(SourceKind.CRYPTO_SPOT_TRADE, SourceCatalog.binanceTrades.kind)
         }
         // Chart keeps its TradingView visual mapping, distinct from execution venue.
         assertEquals("BINANCE:BTCUSDT", TradingViewSymbols.find("BTC/USDT"))
@@ -30,7 +30,7 @@ class TradingViewFeedBoundaryTest {
         context.getSharedPreferences("watch_preferences", Context.MODE_PRIVATE).edit()
             .putString("sources_BTC/USDT", "tradingview_scanner").commit()
         val selection = WatchSettingsStore(context).selections.value["BTC/USDT"]!!
-        assertEquals(listOf("nobitex_public_trades"), selection.enabledSources)
-        assertEquals("nobitex_public_trades", selection.preferredSourceId)
+        assertEquals(listOf("binance_spot_agg_trades"), selection.enabledSources)
+        assertEquals("binance_spot_agg_trades", selection.preferredSourceId)
     }
 }

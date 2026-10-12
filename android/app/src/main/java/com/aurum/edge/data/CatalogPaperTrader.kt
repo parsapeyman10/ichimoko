@@ -62,7 +62,7 @@ class CatalogPaperTrader(
             // used for settling all non-crypto open positions in the service/UI.
             feed = FeedStatus(FeedMode.LIVE, "تیک مستقل تأییدشده", tick.at,
                 provider = if (CryptoCatalog.isCrypto(scanned.symbol))
-                    "Nobitex /v2/trades (معاملهٔ زمان‌دار)" else "Swissquote / Gold-API"),
+                    "${BinanceSpotClient.PROVIDER} aggTrade" else "Swissquote / Gold-API"),
             showingCachedData = false,
         )
         val opened = trader.onMarketUpdate(verified, catalogQuote = tick)
