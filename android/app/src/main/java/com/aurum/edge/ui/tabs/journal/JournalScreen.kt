@@ -202,17 +202,14 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             categoryLabel = selectedCategory?.label ?: "همهٔ بازارها",
         )
 
-        val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
-        val livePriceTimes by viewModel.livePriceTimes.collectAsStateWithLifecycle()
+        val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
         if (filteredOpen.isNotEmpty()) {
             SectionCard("پوزیشن‌های باز · ${selectedCategory?.label ?: "همهٔ بازارها"}", "ارزش‌گذاری با آخرین قیمت واقعی دریافتی") {
                 HoldReviewStatus(holdReview) { viewModel.reviewOpenPositionsNow() }
                 filteredOpen.forEach { trade ->
-                    val currentPrice = livePrices[trade.symbol]?.takeIf { price ->
-                        livePriceTimes[trade.symbol]?.let { at ->
-                            TradeQuotePolicy.accepts(PriceTick(price, at), now)
-                        } == true
-                    } ?: (if (trade.symbol == market.symbol) livePrice else null)
+                    val currentPrice = liveTicks[trade.symbol]
+                        ?.takeIf { TradeQuotePolicy.accepts(it, now) }?.price
+                        ?: (if (trade.symbol == market.symbol) livePrice else null)
                     val unrealized = LiveTradeValuation.from(trade, currentPrice)?.netPnlUsd
                     Row(
                         modifier = Modifier

@@ -144,11 +144,9 @@ fun HomeScreen(
         // ── ۲. بنر وضعیت ۴ دسته دارایی (رمزارز، فارکس، طلا/کالا، سهام) در ۴ مستطیل بالا ──
         val tradesState by viewModel.trades.collectAsStateWithLifecycle()
         val openTradesList = remember(tradesState) { tradesState.filter { it.isOpen } }
-        val livePricesMap by viewModel.livePrices.collectAsStateWithLifecycle()
-        val livePriceTimes by viewModel.livePriceTimes.collectAsStateWithLifecycle()
-        val freshPrices = livePricesMap.filter { (symbol, price) ->
-            livePriceTimes[symbol]?.let { at -> TradeQuotePolicy.accepts(PriceTick(price, at), now) } == true
-        }
+        val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
+        val freshPrices = liveTicks.filterValues { TradeQuotePolicy.accepts(it, now) }
+            .mapValues { it.value.price }
 
         com.aurum.edge.ui.components.AssetClass4SlotsBanner(
             openTrades = openTradesList,
@@ -182,8 +180,7 @@ private fun LiveOpenTradesTrackingSection(
     onSelectTrade: (String) -> Unit,
 ) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
-    val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
-    val livePriceTimes by viewModel.livePriceTimes.collectAsStateWithLifecycle()
+    val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
     val openTrades = remember(trades) { trades.filter { it.isOpen } }
 
     SectionCard(
@@ -222,8 +219,7 @@ private fun LiveOpenTradesTrackingSection(
                     LiveTradeGaugeCard(
                         trade = trade,
                         currentMarket = currentMarket,
-                        livePrices = livePrices,
-                        livePriceTimes = livePriceTimes,
+                        liveTicks = liveTicks,
                         now = now,
                         onSelect = { onSelectTrade(trade.symbol) },
                     )
@@ -254,8 +250,7 @@ private fun LiveOpenTradesTrackingSection(
 private fun LiveTradeGaugeCard(
     trade: PaperTrade,
     currentMarket: MarketState,
-    livePrices: Map<String, Double>,
-    livePriceTimes: Map<String, Long>,
+    liveTicks: Map<String, PriceTick>,
     now: Long,
     onSelect: () -> Unit,
 ) {
@@ -267,9 +262,7 @@ private fun LiveTradeGaugeCard(
             currentMarket.lastPrice?.let { price -> currentMarket.lastTradeAt?.let { at ->
                 TradeQuotePolicy.accepts(PriceTick(price, at), now)
             } } == true
-    val polledTick = livePrices[trade.symbol]?.let { price ->
-        livePriceTimes[trade.symbol]?.let { at -> PriceTick(price, at) }
-    }?.takeIf { TradeQuotePolicy.accepts(it, now) }
+    val polledTick = liveTicks[trade.symbol]?.takeIf { TradeQuotePolicy.accepts(it, now) }
     val verifiedLivePrice = polledTick?.price
         ?: currentMarket.lastPrice?.takeIf { selectedFresh }
     val observedAt = polledTick?.at ?: currentMarket.lastTradeAt?.takeIf { selectedFresh }
@@ -516,11 +509,9 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit, now:
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val status by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
-    val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
-    val livePriceTimes by viewModel.livePriceTimes.collectAsStateWithLifecycle()
-    val freshPrices = livePrices.filter { (symbol, price) ->
-        livePriceTimes[symbol]?.let { at -> TradeQuotePolicy.accepts(PriceTick(price, at), now) } == true
-    }
+    val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
+    val freshPrices = liveTicks.filterValues { TradeQuotePolicy.accepts(it, now) }
+        .mapValues { it.value.price }
     val enabled = settings.autoPaperTrading
     val openTrades = remember(trades) { trades.filter { it.isOpen } }
     val lastTrade = trades.maxByOrNull { it.openedAt }

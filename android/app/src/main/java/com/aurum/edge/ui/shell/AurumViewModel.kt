@@ -173,9 +173,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     private val _livePrices = MutableStateFlow<Map<String, Double>>(emptyMap())
     val livePrices: StateFlow<Map<String, Double>> = _livePrices.asStateFlow()
-    /** Original exchange/quote time, not the moment this screen was recomposed. */
-    private val _livePriceTimes = MutableStateFlow<Map<String, Long>>(emptyMap())
-    val livePriceTimes: StateFlow<Map<String, Long>> = _livePriceTimes.asStateFlow()
+    /** One atomic price+original-time snapshot for the open-position UI.
+     * It is never persisted as a new tick and never used to replay an exit.
+     */
+    private val _liveTicks = MutableStateFlow<Map<String, PriceTick>>(emptyMap())
+    val liveTicks: StateFlow<Map<String, PriceTick>> = _liveTicks.asStateFlow()
     private var liveTickerLoopStarted = false
 
     private val _stats = MutableStateFlow(container.journalStore.stats())
@@ -364,8 +366,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             val spot = SpotFallbackClient()
             while (isActive) {
                 if (!visibleOnlineLoopEnabled && !SignalMonitorService.running.value) {
+                    _liveTicks.value = emptyMap()
                     _livePrices.value = emptyMap()
-                    _livePriceTimes.value = emptyMap()
                     delay(1_000L)
                     continue
                 }
@@ -375,7 +377,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     // Rebuild on every pass: a missed provider response must never leave an
                     // indefinitely "live" cached price in Home/Chart/Journal.
                     val currentMap = mutableMapOf<String, Double>()
-                    val currentTimes = mutableMapOf<String, Long>()
+                    val currentTicks = mutableMapOf<String, PriceTick>()
 
                     val selectedTick = currentMarket.lastPrice?.let { price ->
                         currentMarket.lastTradeAt?.let { at -> PriceTick(price, at) }
@@ -385,7 +387,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                         FeedLiveness.hasRecentReceipt(currentMarket.feed) &&
                         !MarketHours.closedFor(currentMarket.symbol)) {
                         currentMap[currentMarket.symbol] = selectedTick.price
-                        currentTimes[currentMarket.symbol] = selectedTick.at
+                        currentTicks[currentMarket.symbol] = selectedTick
                         // MarketRepository already settles the original timestamped tick.
                         // Replaying the same lastPrice on every UI frame could falsely close
                         // a position opened after that quote.
@@ -412,7 +414,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                                 if (quote != null && quote.price.isFinite() && quote.price > 0.0 &&
                                     !MarketHours.closedFor(sym)) {
                                     currentMap[sym] = quote.price
-                                    currentTimes[sym] = quote.at
+                                    currentTicks[sym] = quote
                                     val closedList = if (com.aurum.edge.data.CryptoCatalog.isCrypto(sym))
                                         emptyList() // openTradeTicks.poll replayed this batch in order
                                     else container.journalStore.settleTick(sym, quote.price, quote.at)
@@ -430,7 +432,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     // Scanner prices are closed historical bars. They must never enter the
                     // live PnL map or settle an open position as if they were new ticks.
 
-                    _livePriceTimes.value = currentTimes
+                    _liveTicks.value = currentTicks
                     _livePrices.value = currentMap
                 } catch (_: Exception) {}
                 delay(800L)
@@ -821,16 +823,23 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun closePaperTrade(trade: PaperTrade) {
         val crypto = com.aurum.edge.data.CryptoCatalog.isCrypto(trade.symbol)
-        // A selected-market quote can come from another venue. Manual crypto exit must
-        // use the SAME Nobitex trade monitor as its entry/history and automatic exit.
-        val currentPrice = if (crypto) null else
-            _livePrices.value[trade.symbol] ?: (if (trade.symbol == market.value.symbol) market.value.lastPrice else null)
         viewModelScope.launch {
             try {
-                val exitPrice = if (crypto) container.openTradeTicks.poll(trade.symbol, trade.openedAt)
-                    ?.takeIf { TradeQuotePolicy.accepts(it) }?.price else
-                    currentPrice ?: runCatching { SpotFallbackClient().fetchQuote(trade.symbol).price }.getOrNull()
-                require(exitPrice != null && exitPrice.isFinite() && exitPrice > 0.0) { "قیمت خروج تازه برای ${trade.symbol} در دسترس نیست" }
+                // Read and validate at the moment of manual close, not at the earlier UI
+                // click. An old price left in a StateFlow must never become a fresh fill.
+                // Crypto always uses the same Nobitex position monitor, not chart prices.
+                val exitTick = if (crypto) container.openTradeTicks.poll(trade.symbol, trade.openedAt)
+                else {
+                    _liveTicks.value[trade.symbol]?.takeIf { TradeQuotePolicy.accepts(it) }
+                        ?: market.value.takeIf { it.symbol == trade.symbol &&
+                            it.feed.mode == FeedMode.LIVE && !it.showingCachedData }
+                            ?.let { state -> state.lastPrice?.let { price ->
+                                state.lastTradeAt?.let { at -> PriceTick(price, at) }
+                            } }?.takeIf { TradeQuotePolicy.accepts(it) }
+                        ?: runCatching { SpotFallbackClient().fetchQuote(trade.symbol) }.getOrNull()
+                }
+                val exitPrice = exitTick?.takeIf { TradeQuotePolicy.accepts(it) }?.price
+                require(exitPrice != null) { "قیمت خروج تازه برای ${trade.symbol} در دسترس نیست" }
                 val closed = container.journalStore.close(trade.id, exitPrice, "بستن دستی روی قیمت دریافتی")
                 _stats.value = container.journalStore.stats()
                 _toast.value = "پوزیشن کاغذی ${trade.symbol} با سود/ضرر ${String.format(java.util.Locale.US, "%.2f", closed.pnlUsd ?: 0.0)}$ بسته شد"
