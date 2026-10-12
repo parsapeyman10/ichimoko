@@ -813,9 +813,17 @@ class MarketRepository(
         }
         val evaluationError = if (evaluation?.isFailure == true)
             "خطای محاسبهٔ موتور فنی؛ ورود متوقف شد" else null
-        _state.value = _state.value.copy(
+        // Seven-frame evaluation can finish after a newer WebSocket event. Publishing
+        // historical candles must not roll the selected price back over that event.
+        val latest = _state.value
+        val currentLivePrice = latest.lastPrice?.takeIf { price ->
+            !showingCache && latest.symbol == current.symbol && latest.feed.mode == FeedMode.LIVE &&
+                latest.lastTradeAt?.let { at -> at >= bars.last().time &&
+                    TradeQuotePolicy.accepts(com.aurum.edge.core.PriceTick(price, at)) } == true
+        }
+        _state.value = latest.copy(
             candles = bars,
-            lastPrice = lastPrice,
+            lastPrice = currentLivePrice ?: lastPrice,
             signal = evaluation?.getOrNull(),
             evaluationError = evaluationError,
             showingCachedData = showingCache,
