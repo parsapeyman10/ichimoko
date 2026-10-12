@@ -109,18 +109,17 @@ class OpenTradeTickMonitor(
             for (trade in update.newlySeen) {
                 // REST may contain publications already settled before the socket dropped.
                 // Its rows have no IDs: never replay a past/same-ms page over a newer stop.
-                if (session.watcher.get() && session.latest?.let { trade.at <= it.at } == true) {
+                if (!session.stream.rest(trade.at)) {
                     journal.noteTickCoverageGap(symbol, now, openedAt)
                     continue
                 }
-                session.stream.rest(trade.at)
                 if (journal.settleTick(symbol, trade.price, trade.at, expectedOpenedAt = openedAt).isNotEmpty()) {
                     forget(symbol, session)
                     break
                 }
             }
             val tick = page.last().tick
-            if (session.latest == null || tick.at >= session.latest!!.at) session.latest = tick
+            if (session.latest == null || tick.at > session.latest!!.at) session.latest = tick
             session.latest?.takeIf { TradeQuotePolicy.accepts(it, now) }
         }
     }
@@ -150,7 +149,6 @@ class OpenTradeTickMonitor(
                 // A blocked WebSocket does not disable same-venue REST fallback.
                 null
             }
-            var everSubscribed = false
             var lastSocketAttempt = System.currentTimeMillis()
             while (currentCoroutineContext().isActive && stillOpen(symbol, session)) {
                 val event = withTimeoutOrNull(3_000L) { events.receive() }
@@ -159,9 +157,8 @@ class OpenTradeTickMonitor(
                 when (event) {
                     is NobitexPublicTradeStream.Event.Subscribed -> session.mutex.withLock {
                         if (!stillOpen(symbol, session)) return@withLock
-                        if (session.stream.subscribed(event, !everSubscribed && session.lastReceiptAt > 0))
+                        if (session.stream.subscribed(event))
                             journal.noteTickCoverageGap(symbol, now, openedAt)
-                        everSubscribed = true
                         session.connected = true
                         session.disconnectedAt = 0L
                         setFeed(symbol, session, Feed.STREAM)

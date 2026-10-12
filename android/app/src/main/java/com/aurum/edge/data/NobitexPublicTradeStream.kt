@@ -100,18 +100,22 @@ internal class TradeStreamCursor(private val openedAt: Long) {
     private var lastAt = 0L
     private var lastSourceRest = false
 
-    fun subscribed(event: NobitexPublicTradeStream.Event.Subscribed, hadRestBootstrap: Boolean): Boolean {
+    fun subscribed(event: NobitexPublicTradeStream.Event.Subscribed): Boolean {
         val gap = if (everSubscribed) !event.wasRecovering || !event.recovered
-            else hadRestBootstrap // REST has no ID tying its last row to the first socket publication.
+            else true // No ID ties entry/REST to first socket publication, even if REST failed.
         if (gap || !event.recovered) lastOffset = null
         recoverable = event.recoverable
         everSubscribed = true
         return gap
     }
 
-    fun rest(at: Long) {
-        if (at > lastAt) lastAt = at
+    fun rest(at: Long): Boolean {
+        // A REST page can arrive after socket settlement (including after the service
+        // was cancelled). Never replay an older/same-ms execution over a trailing stop.
+        if (at <= lastAt) return false
+        lastAt = at
         lastSourceRest = true
+        return true
     }
 
     fun publication(at: Long, offset: Long): Verdict {

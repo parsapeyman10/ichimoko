@@ -96,7 +96,8 @@ jobs:
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.28 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.29 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.30 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.31 updater')))) }}
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.31 updater') ||
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.32 updater')))) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -526,6 +527,9 @@ jobs:
           fi
           if [[ "$VERSION_NAME" == "1.3.31" ]]; then
             NOTES+=$'\n\nChanges: OPEN crypto paper positions have first priority for Nobitex public-trade updates. Their per-symbol worker requests the next trade page after a minimum 3-second interval (actual latency can be higher), with up to 40 reserved attempts in a conservative global 55-per-rolling-minute budget; display quotes and new-entry checks cannot consume more than 15. Both lanes retain same-symbol caching/locks and missing overlap still flags a coverage gap in the journal, never inventing ticks. The scanner rechecks current open positions before each symbol to avoid avoidable lower-priority work. The publisher limit, 2-open-crypto-slot policy and Android background restrictions still apply. REST polling cannot guarantee moment-by-moment or gapless delivery, device operation or profits; no broker orders are submitted.'
+          fi
+          if [[ "$VERSION_NAME" == "1.3.32" ]]; then
+            NOTES+=$'\n\nChanges: the documented Nobitex public:trades-{marketSymbol} WebSocket now drives ordered live paper-position exits on the same venue, using the official Centrifugo Android SDK for ping/pong, reconnect and recovery only when the server advertises it and retains the history. REST same-venue pages remain bootstrap and disconnected fallback under the existing reserved rate budget. Unrecoverable reconnection, REST/socket handoff without common IDs, stale/invalid events, missing publication offsets (where supported), or queue overload mark a persistent journal coverage gap; no missed trade or stop touch is invented. Per-position workers remain isolated from scanner, AI and news; manual crypto close rejects cross-venue selected-market prices. The journal shows stream/reconnect/REST status. Android/network interruptions, server retention and mobile background limits still prevent a guarantee of every tick; on-device provider coverage has not been verified. No broker orders or profitability claims.'
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "$TAG" --notes "$NOTES"

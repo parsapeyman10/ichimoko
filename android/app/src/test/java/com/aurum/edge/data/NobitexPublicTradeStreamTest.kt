@@ -34,11 +34,11 @@ class NobitexPublicTradeStreamTest {
 
     @Test fun `recoverable stream preserves order deduplicates and detects missing offset`() {
         val cursor = TradeStreamCursor(now)
-        assertFalse(cursor.subscribed(subscribed(), hadRestBootstrap = false))
+        assertTrue(cursor.subscribed(subscribed()))
         assertEquals(TradeStreamCursor.Verdict.SKIP, cursor.publication(now - 1, 1))
         assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now, 10))
         assertEquals(TradeStreamCursor.Verdict.SKIP, cursor.publication(now, 10))
-        assertTrue(cursor.subscribed(subscribed(recovered = true, wasRecovering = true), false).not())
+        assertFalse(cursor.subscribed(subscribed(recovered = true, wasRecovering = true)))
         assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now + 1, 11))
         assertEquals(TradeStreamCursor.Verdict.GAP_APPLY, cursor.publication(now + 3, 14))
         assertEquals(TradeStreamCursor.Verdict.SKIP, cursor.publication(now + 3, 14))
@@ -46,22 +46,24 @@ class NobitexPublicTradeStreamTest {
 
     @Test fun `unrecoverable reconnect and REST handoff must not masquerade as gapless`() {
         val cursor = TradeStreamCursor(now)
-        cursor.rest(now + 1)
-        assertTrue(cursor.subscribed(subscribed(), hadRestBootstrap = true))
+        assertTrue(cursor.rest(now + 1))
+        assertTrue(cursor.subscribed(subscribed()))
         assertEquals(TradeStreamCursor.Verdict.GAP, cursor.publication(now + 1, 7))
         assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now + 2, 8))
-        assertTrue(cursor.subscribed(subscribed(recovered = false, wasRecovering = true), false))
+        assertTrue(cursor.subscribed(subscribed(recovered = false, wasRecovering = true)))
         assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now + 5, 100))
-        cursor.rest(now + 10)
+        assertTrue(cursor.rest(now + 10))
+        assertFalse(cursor.rest(now + 9))
+        assertFalse(cursor.rest(now + 10))
         assertEquals(TradeStreamCursor.Verdict.GAP, cursor.publication(now + 9, 101))
-        assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now + 11, 102))
+        assertEquals(TradeStreamCursor.Verdict.GAP_APPLY, cursor.publication(now + 11, 102))
     }
 
     @Test fun `nonrecoverable channel does not infer sequence continuity from offsets`() {
         val cursor = TradeStreamCursor(now)
-        assertFalse(cursor.subscribed(subscribed(recoverable = false), false))
+        assertTrue(cursor.subscribed(subscribed(recoverable = false)))
         assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now, 1))
         assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now + 1, 9))
-        assertTrue(cursor.subscribed(subscribed(recoverable = false), false))
+        assertTrue(cursor.subscribed(subscribed(recoverable = false)))
     }
 }
