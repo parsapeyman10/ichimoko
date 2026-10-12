@@ -15,3 +15,7 @@ android/keystores/
 
 # OS / editor noise
 .DS_Store
+# Persistent tick archive data and local environment secrets
+tick-archive/data/
+tick-archive/.env
+tick-archive/.venv/

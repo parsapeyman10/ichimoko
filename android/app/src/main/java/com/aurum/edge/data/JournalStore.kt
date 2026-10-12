@@ -166,6 +166,7 @@ class JournalStore(
             marketTrend = marketTrend,
             initialStopLoss = stop,
             trailExtreme = price,
+            usesTickArchive = CryptoCatalog.isCrypto(symbol) && settingsStore?.hasTickArchive() == true,
         )
         mutex.withLock {
             // Settings and ledger can change while an AI/preview was running. Fail closed
@@ -227,7 +228,7 @@ class JournalStore(
         val newlyClosed = mutableListOf<PaperTrade>()
         val updated = current.map { t ->
             // A historical candle timestamped before the trade was opened cannot settle this position.
-            if (!t.isOpen || t.symbol != symbol || candle.time < t.openedAt) return@map t
+            if (!t.isOpen || t.symbol != symbol || candle.time < t.openedAt || t.usesTickArchive) return@map t
 
             val hitStop = if (t.action == SignalAction.BUY) {
                 candle.low <= t.stopLoss + 1e-9
@@ -291,7 +292,7 @@ class JournalStore(
      * immediately checks if Stop Loss or Take Profit has been touched and closes the trade automatically.
      */
     suspend fun settleTick(symbol: String, price: Double, observedAt: Long = System.currentTimeMillis(),
-                           expectedOpenedAt: Long? = null): List<PaperTrade> = mutex.withLock {
+                           expectedOpenedAt: Long? = null, archiveSeq: Long? = null): List<PaperTrade> = mutex.withLock {
         if (!loaded || !price.isFinite() || price <= 0.0) return@withLock emptyList()
         val current = _trades.value
         val openForSymbol = current.filter { it.isOpen && it.symbol == symbol }
@@ -305,7 +306,14 @@ class JournalStore(
                 (expectedOpenedAt != null && t.openedAt != expectedOpenedAt)) return@map t
             // A trade fetched just before entry must never close a position opened
             // afterwards, even if the quote was still within the feed freshness window.
-            if (observedAt < t.openedAt) return@map t
+            if (t.usesTickArchive != (archiveSeq != null)) return@map t
+            if (archiveSeq != null && archiveSeq <= t.tickArchiveSeq) return@map t
+            if (observedAt < t.openedAt) {
+                if (archiveSeq == null) return@map t
+                changed = true
+                return@map t.copy(tickArchiveSeq = archiveSeq)
+            }
+            if (archiveSeq != null) changed = true // Checkpoint is atomic with settlement/trailing.
 
             val hitStop = if (t.action == SignalAction.BUY) {
                 price <= t.stopLoss + 1e-9
@@ -321,7 +329,7 @@ class JournalStore(
             if (!hitStop && !hitTarget) {
                 val advanced = PaperTrailing.advance(t, price, price)
                 if (advanced != t) changed = true
-                return@map advanced
+                return@map if (archiveSeq != null) advanced.copy(tickArchiveSeq = archiveSeq) else advanced
             }
 
             val exit = if (hitStop) t.stopLoss else t.takeProfit
@@ -340,6 +348,7 @@ class JournalStore(
                 exitPrice = exit,
                 exitReason = if (hitStop) "حد ضرر (قیمت لحظه‌ای)" else "حد سود (قیمت لحظه‌ای)",
                 pnlUsd = pnl,
+                tickArchiveSeq = archiveSeq ?: t.tickArchiveSeq,
             )
             newlyClosed.add(closed)
             closed

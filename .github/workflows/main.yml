@@ -267,6 +267,12 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}
         run: ./gradlew :${APP_MODULE}:dependencies --configuration debugRuntimeClasspath $GRADLE_FLAGS
 
+      - name: Test durable tick archive
+        run: |
+          python3 -m venv tick-archive/.venv
+          tick-archive/.venv/bin/pip install -r tick-archive/requirements.txt
+          (cd tick-archive && .venv/bin/python -m unittest discover -s tests -v)
+
       - name: Lint Android sources
         id: lint
         if: steps.guard.outputs.ready == 'true'

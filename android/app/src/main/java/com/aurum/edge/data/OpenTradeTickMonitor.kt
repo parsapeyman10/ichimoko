@@ -26,8 +26,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 class OpenTradeTickMonitor(
     private val journal: JournalStore,
     private val spot: SpotFallbackClient = SpotFallbackClient(),
+    private val settings: SettingsStore? = null,
 ) {
-    enum class Feed { CONNECTING, STREAM, STREAM_RECOVERABLE, RECOVERING, REST_FALLBACK }
+    private val archive = NobitexTickArchiveClient()
+    enum class Feed { CONNECTING, STREAM, STREAM_RECOVERABLE, ARCHIVE, RECOVERING, REST_FALLBACK }
     private data class Session(
         val openedAt: Long,
         val page: TradePageCursor = TradePageCursor(),
@@ -72,7 +74,72 @@ class OpenTradeTickMonitor(
      * While the stream is healthy, the screen sees only its LAST FRESH received trade and
      * never starts a parallel REST replay that could reorder a trailing stop.
      */
-    suspend fun poll(symbol: String, openedAt: Long): PriceTick? = pollPage(symbol, openedAt, bootstrap = false)
+    suspend fun poll(symbol: String, openedAt: Long): PriceTick? =
+        if (archivePosition(symbol, openedAt)) pollArchive(symbol, openedAt).first
+        else pollPage(symbol, openedAt, bootstrap = false)
+
+    private fun archivePosition(symbol: String, openedAt: Long): Boolean =
+        journal.trades.value.any { it.isOpen && it.symbol == symbol &&
+            it.openedAt == openedAt && it.usesTickArchive }
+
+    private suspend fun pollArchive(symbol: String, openedAt: Long): Pair<PriceTick?, Boolean> {
+        val session = session(symbol, openedAt)
+        return session.mutex.withLock {
+            if (!stillOpen(symbol, session)) {
+                forget(symbol, session)
+                return@withLock null to false
+            }
+            val config = settings?.tickArchiveConfig()
+                ?: throw DataFeedException("نشانی/کلید بایگانی معتبر نیست؛ پوزیشن در فید دیگری تسویه نمی‌شود")
+            val after = journal.trades.value.firstOrNull {
+                it.isOpen && it.symbol == symbol && it.openedAt == openedAt
+            }?.tickArchiveSeq ?: return@withLock null to false
+            val page = archive.fetch(symbol, openedAt, after, config)
+            for (gap in page.gaps) if (gap.at >= openedAt)
+                journal.noteTickCoverageGap(symbol, gap.at, openedAt)
+            for (row in page.rows) {
+                // Older executions are replayed IN ORDER; freshness gate applies only
+                // to a live display quote, not to durable, authenticated history.
+                if (journal.settleTick(symbol, row.price, row.at,
+                        expectedOpenedAt = openedAt, archiveSeq = row.seq).isNotEmpty()) {
+                    forget(symbol, session)
+                    break
+                }
+                if (row.at >= openedAt) {
+                    val latest = session.latest
+                    if (latest == null || row.at >= latest.at) session.latest = PriceTick(row.price, row.at)
+                }
+            }
+            setFeed(symbol, session, Feed.ARCHIVE)
+            session.lastReceiptAt = System.currentTimeMillis()
+            session.latest?.takeIf { TradeQuotePolicy.accepts(it) } to (page.rows.size == 500 || page.next < page.head)
+        }
+    }
+
+    private suspend fun watchArchive(symbol: String, openedAt: Long) {
+        val session = session(symbol, openedAt)
+        if (!session.watcher.compareAndSet(false, true)) return
+        try {
+            setFeed(symbol, session, Feed.CONNECTING)
+            while (currentCoroutineContext().isActive && stillOpen(symbol, session)) {
+                val backlog = try {
+                    pollArchive(symbol, openedAt).second
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    setFeed(symbol, session, Feed.RECOVERING)
+                    val now = System.currentTimeMillis()
+                    if (now - (session.lastReceiptAt.takeIf { it > 0 } ?: openedAt) > 45_000L)
+                        journal.noteTickCoverageGap(symbol, now, openedAt)
+                    false
+                }
+                kotlinx.coroutines.delay(if (backlog) 25L else 650L)
+            }
+        } finally {
+            session.watcher.set(false)
+            if (sessions[symbol] === session) setFeedRemoved(symbol)
+        }
+    }
 
     private suspend fun pollPage(symbol: String, openedAt: Long, bootstrap: Boolean): PriceTick? {
         val session = session(symbol, openedAt)
@@ -129,6 +196,7 @@ class OpenTradeTickMonitor(
      * A bounded callback queue makes overload observable rather than silently dropping ticks.
      */
     suspend fun watch(symbol: String, openedAt: Long) {
+        if (archivePosition(symbol, openedAt)) return watchArchive(symbol, openedAt)
         val session = session(symbol, openedAt)
         if (!session.watcher.compareAndSet(false, true)) return
         val events = Channel<NobitexPublicTradeStream.Event>(2_048)

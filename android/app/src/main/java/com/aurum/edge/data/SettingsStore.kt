@@ -2,6 +2,7 @@ package com.aurum.edge.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.AssetClass
@@ -110,6 +111,36 @@ class SettingsStore(context: Context) {
             return true
         }
         return false
+    }
+
+    /** Market-only archive on the user's own HTTPS host. Never send journal/account data.
+     * The bearer token stays in app-private preferences, not in AppSettings/Compose state.
+     */
+    fun tickArchiveConfig(): Pair<String, String>? {
+        val url = prefs.getString(KEY_TICK_ARCHIVE_URL, null)?.trim().orEmpty()
+        val token = prefs.getString(KEY_TICK_ARCHIVE_TOKEN, null).orEmpty()
+        val parsed = url.toHttpUrlOrNull() ?: return null
+        if (parsed.scheme != "https" || parsed.username.isNotEmpty() || parsed.password.isNotEmpty() ||
+            parsed.query != null || parsed.fragment != null || parsed.encodedPath != "/" || token.length < 32)
+            return null
+        return url.trimEnd('/') to token
+    }
+
+    fun tickArchiveUrl(): String = prefs.getString(KEY_TICK_ARCHIVE_URL, null).orEmpty()
+    fun hasTickArchive(): Boolean = tickArchiveConfig() != null
+
+    @Synchronized
+    fun saveTickArchive(urlInput: String, tokenInput: String): Boolean {
+        val url = urlInput.trim().trimEnd('/')
+        if (url.isBlank()) return prefs.edit().remove(KEY_TICK_ARCHIVE_URL)
+            .remove(KEY_TICK_ARCHIVE_TOKEN).commit()
+        val parsed = url.toHttpUrlOrNull() ?: return false
+        if (parsed.scheme != "https" || parsed.username.isNotEmpty() || parsed.password.isNotEmpty() ||
+            parsed.query != null || parsed.fragment != null || parsed.encodedPath != "/") return false
+        val token = tokenInput.trim().ifEmpty { prefs.getString(KEY_TICK_ARCHIVE_TOKEN, null).orEmpty() }
+        if (token.length < 32 || token.any { it.isWhitespace() }) return false
+        return prefs.edit().putString(KEY_TICK_ARCHIVE_URL, url)
+            .putString(KEY_TICK_ARCHIVE_TOKEN, token).commit()
     }
 
     /** Server configuration must also survive process death before we say it was saved. */
@@ -264,6 +295,8 @@ class SettingsStore(context: Context) {
         private const val KEY_ALERT_SOUND_URI = "verified_alert_sound_uri"
         private const val KEY_ALERT_SOUND_NAME = "verified_alert_sound_name"
         private const val KEY_NEWS_URL = "news_base_url"
+        private const val KEY_TICK_ARCHIVE_URL = "tick_archive_url"
+        private const val KEY_TICK_ARCHIVE_TOKEN = "tick_archive_token"
         private const val KEY_NEWS_PAUSE = "pause_on_news"
         // Historical preference key must not be renamed: an existing opt-in survives an upgrade.
         private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"

@@ -58,6 +58,8 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     var key by remember { mutableStateOf("") }
     var symbol by remember { mutableStateOf(settings.symbol) }
     var newsUrl by remember { mutableStateOf(settings.newsBaseUrl) }
+    var archiveUrl by remember { mutableStateOf(viewModel.tickArchiveUrl()) }
+    var archiveToken by remember { mutableStateOf("") }
     // Never prefill a saved secret in an editable field; blank on entry, like the API key above.
     var newsAiKey by remember { mutableStateOf("") }
     var newsAiBaseUrl by remember { mutableStateOf(settings.newsAiBaseUrl) }
@@ -215,6 +217,23 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 6.dp),
             )
+        }
+
+        SectionCard("بایگانی تیک کریپتو", "سرور مستقل فقط معاملات عمومی نوبیتکس را نگه می‌دارد؛ هیچ پوزیشنی به سرور ارسال نمی‌شود") {
+            Text("اختیاری؛ ابتدا سرویس بایگانی را روی سرور همیشه‌روشن خود با HTTPS راه‌اندازی کنید. " +
+                "روی گوشی خاموش تسویه فوراً در ژورنال دیده نمی‌شود؛ پس از اتصال دوباره به ترتیب تیک‌ها بازپخش می‌شود. " +
+                "گسست ناشر یا نبود آرشیو با پرکردن قیمت ساختگی پوشانده نمی‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+            OutlinedTextField(value = archiveUrl, onValueChange = { archiveUrl = it }, singleLine = true,
+                label = { Text("نشانی HTTPS بایگانی تیک (اختیاری)") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(value = archiveToken, onValueChange = { archiveToken = it }, singleLine = true,
+                label = { Text("کلید خواندن آرشیو؛ خالی = حفظ کلید پیشین") },
+                visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+            Button(onClick = { viewModel.saveTickArchive(archiveUrl.trim(), archiveToken); archiveToken = "" },
+                modifier = Modifier.padding(top = 8.dp)) { Text("ذخیره/حذف بایگانی") }
+            Text("فقط ورودهای کاغذی تازه پس از تنظیم سرور از آرشیو استفاده می‌کنند. " +
+                "برای معاملات قبلی مسیر پایش قبلی عوض نمی‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
         }
 
         SectionCard("ریسک خبر و AI فارکس", "تقویم Forex Factory و خبرهای واقعی وب بی‌نیاز از سرور؛ AI فقط تأیید/هشدار کمکی است، نه امتیاز منفی فنی") {

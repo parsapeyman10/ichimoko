@@ -1057,6 +1057,19 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun tickArchiveUrl(): String = container.settingsStore.tickArchiveUrl()
+
+    fun saveTickArchive(url: String, token: String) {
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                container.settingsStore.saveTickArchive(url, token)
+            }
+            _toast.value = if (!saved) "نشانی HTTPS یا کلید بایگانی نامعتبر است؛ ذخیره نشد"
+                else if (url.isBlank()) "بایگانی برای ورودهای تازه غیرفعال شد؛ وضعیت پوزیشن‌های قبلی تغییر نمی‌کند"
+                else "بایگانی برای ورودهای تازه تنظیم شد؛ دسترسی/اتصال و گسست‌ها را در ژورنال بررسی کنید"
+        }
+    }
+
     fun saveNewsBaseUrl(value: String) {
         val url = value.trim().trimEnd('/')
         if (url.isNotBlank() && NewsRepository.newsUrl(url) == null) {

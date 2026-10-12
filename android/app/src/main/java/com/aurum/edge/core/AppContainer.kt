@@ -55,7 +55,7 @@ class AppContainer(context: Context) {
     val decisionLog = com.aurum.edge.data.DecisionLogStore(appContext)
     val candleCache = CandleCache(appContext)
     val journalStore = JournalStore(appContext, settingsStore = settingsStore)
-    val openTradeTicks = OpenTradeTickMonitor(journalStore)
+    val openTradeTicks = OpenTradeTickMonitor(journalStore, settings = settingsStore)
     val opportunityStore = PaperOpportunityStore(appContext)
     val client = TwelveDataClient()
     val publicHistory = PublicCandleHistoryClient()

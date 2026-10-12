@@ -394,6 +394,10 @@ data class PaperTrade(
     val trailExtreme: Double? = null,
     /** First observed/unverifiable gap in the executed-trade feed after paper entry. */
     val tickCoverageGapAt: Long? = null,
+    /** Opt-in market-only archive is fixed at entry; older positions stay on direct feed. */
+    val usesTickArchive: Boolean = false,
+    /** Durable local archive cursor; never a venue trade ID. */
+    val tickArchiveSeq: Long = 0L,
 ) {
     val isOpen: Boolean get() = closedAt == null
     val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }

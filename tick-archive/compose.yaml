@@ -1,0 +1,20 @@
+services:
+  tick-archive:
+    build: .
+    restart: unless-stopped
+    environment:
+      TICK_ARCHIVE_DB: /data/trades.sqlite3
+      TICK_ARCHIVE_HOST: 0.0.0.0
+      TICK_ARCHIVE_TOKEN: ${TICK_ARCHIVE_TOKEN:?set a long random bearer token in an untracked .env file}
+      TICK_ARCHIVE_SYMBOLS: ${TICK_ARCHIVE_SYMBOLS:-BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,ADAUSDT,DOGEUSDT,AVAXUSDT,LINKUSDT,TRXUSDT,TONUSDT,DOTUSDT,LTCUSDT,BCHUSDT,SHIBUSDT,UNIUSDT,ATOMUSDT,XLMUSDT,NEARUSDT,APTUSDT,ARBUSDT,OPUSDT,FILUSDT,ICPUSDT,ETCUSDT,HBARUSDT,VETUSDT,INJUSDT,SUIUSDT,SEIUSDT,AAVEUSDT,ALGOUSDT,PEPEUSDT,WIFUSDT,FETUSDT,RENDERUSDT,TIAUSDT,LDOUSDT,GRTUSDT,SANDUSDT,MANAUSDT,AXSUSDT,POLUSDT,RUNEUSDT,ENAUSDT}
+    volumes:
+      - tick-archive-data:/data
+    ports:
+      - "127.0.0.1:8787:8787"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health',timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+  tick-archive-data:

@@ -229,6 +229,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                 Text("فید خروج نوبیتکس: " + when (feed) {
                                     com.aurum.edge.data.OpenTradeTickMonitor.Feed.STREAM -> "معاملات زنده؛ بازیابی کانال تأیید نشده"
                                     com.aurum.edge.data.OpenTradeTickMonitor.Feed.STREAM_RECOVERABLE -> "معاملات زنده؛ سرور قابلیت بازیابی اعلام کرد"
+                                    com.aurum.edge.data.OpenTradeTickMonitor.Feed.ARCHIVE -> "بایگانی تیک هم‌صرافی؛ بازپخش ترتیبی، گسست‌ها ثبت می‌شوند"
                                     com.aurum.edge.data.OpenTradeTickMonitor.Feed.RECOVERING -> "اتصال قطع؛ تلاش برای بازیابی"
                                     com.aurum.edge.data.OpenTradeTickMonitor.Feed.REST_FALLBACK -> "REST پشتیبان؛ پوشش کامل نامعلوم"
                                     com.aurum.edge.data.OpenTradeTickMonitor.Feed.CONNECTING -> "در حال اتصال"
