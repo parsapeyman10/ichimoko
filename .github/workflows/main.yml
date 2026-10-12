@@ -98,7 +98,8 @@ jobs:
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.30 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.31 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.32 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.33 updater')))) }}
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.33 updater') ||
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.34 updater')))) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -540,6 +541,9 @@ jobs:
           fi
           if [[ "$VERSION_NAME" == "1.3.33" ]]; then
             NOTES+=$'\n\nChanges: TradingView stays a single DISPLAY-ONLY chart iframe; official widget FAQ offers no raw tick export/data API and the platform prohibits non-display algorithmic/risk use. The undocumented TradingView scanner was removed as an in-app quote source. Crypto watch rows now fetch timestamped Nobitex USDT executions through the existing shared, position-reserved rate budget, capped at one watch refresh/minute; previously selected scanner-only preferences migrate to the same-venue source. Gold/FX watch rows no longer count a TradingView scanner quote as independent confirmation. Nobitex WebSocket position tracking now distinguishes server-advertised recovery in the journal and uses the publisher offset, rather than exchange milliseconds, for ordered recoverable publications. REST/stream handoff or failed recovery still audits unknown coverage; Android/device/network limits remain. The seven-timeframe V1 engine, risk guards, independent workers and single 5m TradingView widget are unchanged. No broker orders, guarantees of every tick, on-device stream validation or profitability claims.'
+          fi
+          if [[ "$VERSION_NAME" == "1.3.34" ]]; then
+            NOTES+=$'\n\nChanges: optional self-hosted Nobitex public-trade archive for NEW crypto paper positions. A deployable single-instance Python/Centrifugo/SQLite service stores same-venue public executions with a durable local sequence, authenticated paged replay and explicit publisher/restart/offset-gap records. The Android app accepts a user-owned HTTPS archive URL and read token; it downloads historical pages after reconnect and atomically checkpoints each paper settlement/trailing update. No positions or trading secrets are sent to the server. TradingView remains display-only and other market venues are not mixed into crypto exits. This APK alone does NOT provide 24/7 coverage: the owner must deploy and monitor the always-on host. With the phone off, server ingestion can continue but journal exits and alerts occur only after device reconnection. Upstream omissions, exchange recovery, disk capacity, server uptime and on-device availability are not guaranteed; no broker orders or profitability claims.'
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "$TAG" --notes "$NOTES"
