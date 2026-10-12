@@ -5,15 +5,15 @@ import java.time.ZoneOffset
 import kotlin.math.min
 
 /** V1 paper-only entry policy. The authoritative call is inside JournalStore's mutex.
- * Closed trades, including those from an earlier installation, are retained for daily-loss and
- * consecutive-loss checks. A missing/invalid ledger or risk value must never authorize entry.
+ * Closed trades, including those from an earlier installation, remain in the UTC-day loss
+ * calculation. A losing streak is a journal statistic, NOT an entry veto in test mode.
+ * A missing/invalid ledger or risk value must never authorize entry.
  */
 object PaperPortfolioPolicy {
     const val MAX_OPEN = 4
     const val MAX_PER_CLASS = 2
     const val MAX_RISK_PER_TRADE = 0.005
     const val MAX_DAILY_LOSS = 0.02
-    const val LOSS_STREAK_LIMIT = 3
 
     fun blocker(trades: List<PaperTrade>, symbol: String, balance: Double,
                 addedRiskUsd: Double, signalBarTime: Long? = null,
@@ -36,12 +36,6 @@ object PaperPortfolioPolicy {
                 !it.effectiveSpreadCostUsd.isFinite() || it.effectiveSpreadCostUsd < 0.0 } ||
             addedRiskUsd > balance * MAX_RISK_PER_TRADE + 1e-4)
             return "ریسک هر معامله نباید از ۰٫۵٪ موجودی بیشتر شود"
-
-        // Emergency halt does not silently reset at midnight: a *winning closed* trade breaks it.
-        val streak = trades.filter { !it.isOpen && it.closedAt != null && it.pnlUsd != null }
-            .sortedWith(compareByDescending<PaperTrade> { it.closedAt }.thenByDescending { it.id })
-            .takeWhile { (it.pnlUsd ?: 0.0) < 0.0 }.size
-        if (streak >= LOSS_STREAK_LIMIT) return "توقف اضطراری: ۳ باخت بستهٔ متوالی"
 
         val day = Instant.ofEpochMilli(now).atZone(ZoneOffset.UTC).toLocalDate()
         val today = trades.filter { !it.isOpen && it.closedAt?.let { at ->

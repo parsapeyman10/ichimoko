@@ -171,15 +171,23 @@ class V1ContractTest {
         100.0, 99.0, 102.0, 85.0, 2.0, opened, closedAt = closed, pnlUsd = pnl,
         positionOz = 5.0, initialStopLoss = 99.0)
 
-    @Test fun riskSlotsDailyHeadroomAndThreeConsecutiveLosses() {
+    @Test fun riskSlotsAndDailyLossRemainButThreeConsecutiveLossesDoNotHaltTesting() {
         val open = listOf(trade("1", "EUR/USD", 1L), trade("2", "GBP/USD", 2L))
         assertNotNull(PaperPortfolioPolicy.blocker(open, "USD/JPY", 1000.0, 5.0, now = now))
         assertNotNull(PaperPortfolioPolicy.blocker(open.take(1), "AAPL", 1000.0, 5.01, now = now))
         val losses = (1..3).map { trade("x$it", "AAPL", now - it * 1000L, now - it * 500L, -5.0) }
-        assertTrue(PaperPortfolioPolicy.blocker(losses, "EUR/USD", 985.0, 4.9, now = now)!!.contains("۳ باخت"))
+        // Three losses alone are no longer an entry veto; today's 2% risk cap still applies.
+        assertEquals(null, PaperPortfolioPolicy.blocker(losses, "EUR/USD", 985.0, 4.9, now = now))
         val winning = trade("win", "TSLA", now, now - 1L, 1.0)
-        assertNotNull(PaperPortfolioPolicy.blocker(losses + winning + open.take(1),
-            "AAPL", 986.0, 4.9, now = now)) // 15 closed loss + open risk + 4.9 new > 2%
+        assertTrue(PaperPortfolioPolicy.blocker(losses + winning + open.take(1),
+            "AAPL", 986.0, 4.9, now = now)!!.contains("سقف ضرر روزانه"))
+        // Even a longer run of losses from a previous UTC day cannot freeze test entries.
+        val olderLosses = (1..5).map { i ->
+            trade("old$i", "AAPL", now - 2 * Interval.D1.millis - i * 1000L,
+                now - 2 * Interval.D1.millis - i * 500L, -5.0)
+        }
+        assertEquals(null, PaperPortfolioPolicy.blocker(olderLosses, "EUR/USD", 975.0, 4.8,
+            now = now, openingBalance = 975.0))
     }
 
     @Test fun validatedOppositeAiVetoesButUnavailableAiCannotAuthorizeTrades() {
