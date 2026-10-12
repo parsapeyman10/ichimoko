@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
+import com.aurum.edge.data.PairScanState
 import com.aurum.edge.core.LiveTradeValuation
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.MarketHours
@@ -95,12 +96,12 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top,
             ) {
-                Column {
+                Column(Modifier.weight(1f)) {
                     Text("ساعت برنامه‌ای ${AssetClass.of(market.symbol).label} · ${market.symbol}", color = AurumColors.Gold, style = MaterialTheme.typography.labelMedium)
                     Text(
                         if (session.closed) "سشن این نماد بسته است" else "طبق برنامه باز؛ فید را بررسی کنید",
                         color = if (session.closed) AurumColors.Red else AurumColors.Green,
-                        style = MaterialTheme.typography.headlineMedium,
+                        style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                     )
                 }
@@ -144,23 +145,92 @@ fun HomeScreen(
         val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
         val freshPrices = com.aurum.edge.data.OpenPositionQuotePolicy.prices(openTradesList, liveTicks, now)
 
-        com.aurum.edge.ui.components.AssetClass4SlotsBanner(
-            openTrades = openTradesList,
-            livePrices = freshPrices,
-            onSelectSymbol = onChartSymbol,
-        )
-
-        // ── ۳. ترکینگ زنده و کامل تمامی معاملات باز پورتفو ──────────────────
-        LiveOpenTradesTrackingSection(
-            viewModel = viewModel,
-            currentMarket = market,
-            now = now,
-            onJournal = onJournal,
-            onSelectTrade = onChartSymbol,
-        )
+        if (openTradesList.isNotEmpty()) {
+            com.aurum.edge.ui.components.AssetClass4SlotsBanner(
+                openTrades = openTradesList,
+                livePrices = freshPrices,
+                onSelectSymbol = onChartSymbol,
+            )
+            LiveOpenTradesTrackingSection(
+                viewModel = viewModel,
+                currentMarket = market,
+                now = now,
+                onJournal = onJournal,
+                onSelectTrade = onChartSymbol,
+            )
+        } else {
+            // Instead of four large empty position cards and a second empty tracking card,
+            // fill the space with the actual per-market scanner progress and provenance.
+            val scan by viewModel.pairScan.collectAsStateWithLifecycle()
+            HomeRadarCard(scan, market.symbol, now, onChartSymbol)
+        }
 
         // ── ۴. پنل معاملهٔ خودکار کاغذی و تخصیص ۴ بازار ────────────────────
         AutoPaperCard(viewModel, onJournal, now)
+    }
+}
+
+/** Closed-bar radar is read-only. It never presents a scanner candle as a live trade price. */
+@Composable
+private fun HomeRadarCard(
+    scan: PairScanState,
+    selectedSymbol: String,
+    now: Long,
+    onChartSymbol: (String) -> Unit,
+) {
+    val selected = scan.statuses.firstOrNull { it.symbol == selectedSymbol }
+    val categories = listOf(
+        AssetClass.COMMODITY to "کالا", AssetClass.FOREX to "فارکس",
+        AssetClass.CRYPTO to "رمزارز", AssetClass.STOCK to "سهام",
+    )
+    SectionCard(
+        title = "رادار بازارها · بدون پوزیشن باز",
+        subtitle = "پیشرفت واقعی اسکن کندل‌های بسته؛ نه قیمت لحظه‌ای یا وعدهٔ ورود",
+        trailing = { Pill("${scan.checkedCount}/${scan.totalCount}",
+            if (scan.sweeping) AurumColors.Cyan else AurumColors.TextSecondary) },
+    ) {
+        categories.chunked(2).forEach { pair ->
+            Row(Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                pair.forEach { (asset, label) ->
+                    val rows = scan.statuses.filter { it.assetClass == asset }
+                    StatTile(label, "${rows.count { it.state != "pending" }}/${rows.size} بررسی",
+                        modifier = Modifier.weight(1f))
+                }
+            }
+        }
+        Text(
+            when {
+                scan.sweeping -> "اسکن در جریان است؛ نتیجهٔ هر نماد بعد از دریافت خودش نمایش داده می‌شود."
+                scan.lastSweepAt != null -> "آخرین دور کامل: ${relativeTime(scan.lastSweepAt)}"
+                else -> "هنوز دور کاملی تمام نشده؛ خطای شبکه یا بسته‌بودن بازار را بررسی کنید."
+            }, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+        )
+        scan.lastError?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = AurumColors.Red) }
+        selected?.let { row ->
+            val label = when (row.state) {
+                "pending" -> "در صف"; "closed" -> "سشن بسته"; "error" -> "خطای فید"
+                "partial" -> "داده ناقص"; "no_signal" -> "بدون سیگنال"
+                "blocked" -> "مسدود"; "observed" -> "فقط مشاهده"
+                "candidate" -> "کاندیدا"; "opened" -> "معامله ثبت شد"
+                else -> "نامعلوم"
+            }
+            Text("${row.symbol} · $label: ${row.detail}",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary,
+                modifier = Modifier.padding(top = 8.dp))
+            Text("کندل پایه: ${row.baseSource ?: "هنوز دریافت نشده"} · بسته‌شدن: " +
+                (row.lastBarAt?.let { formatDateTime(it) } ?: "نامعلوم") +
+                " · بررسی: " + (row.lastScanAt?.let { relativeTime(it) } ?: "هنوز نه"),
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 4.dp))
+        }
+        val best = com.aurum.edge.data.ScanRanking.rank(scan.statuses,
+            com.aurum.edge.core.Interval.M5, now).firstOrNull()
+        if (best != null) {
+            Text("مورد فنیِ این دور: ${best.symbol} · ${best.interval?.label ?: "—"} · مشاهده چارت ↗",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Cyan,
+                modifier = Modifier.padding(top = 8.dp).clickable { onChartSymbol(best.symbol) })
+        }
     }
 }
 
@@ -297,20 +367,20 @@ private fun LiveTradeGaugeCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
                 Text(
                     text = trade.symbol,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = AurumColors.Gold,
                 )
-                Pill(assetClass.label, AurumColors.Surface)
-                Pill(
-                    text = if (isBuy) "خرید LONG" else "فروش SHORT",
-                    color = if (isBuy) AurumColors.Green else AurumColors.Red,
-                )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Pill(assetClass.label, AurumColors.Cyan)
+                    Pill(if (isBuy) "خرید" else "فروش",
+                        if (isBuy) AurumColors.Green else AurumColors.Red)
+                }
             }
-            Column(horizontalAlignment = Alignment.End) {
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
                 Text(
                     text = valuation?.let {
                         "${if (it.netPnlUsd >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.2f", it.netPnlUsd)}$"
@@ -330,14 +400,12 @@ private fun LiveTradeGaugeCard(
         }
 
         // Financial Details: Leverage, Margin, Volume, Commission & Spread
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 8.dp)
                 .background(AurumColors.Surface, RoundedCornerShape(8.dp))
                 .padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 "اهرم: ${trade.effectiveLeverage}x · مارجین: $${formatPrice(trade.effectiveMarginUsd)}",
@@ -348,15 +416,12 @@ private fun LiveTradeGaugeCard(
                 "کارمزد: $${formatPrice(trade.effectiveCommissionUsd)} · اسپرد: $${formatPrice(trade.effectiveSpreadCostUsd)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 3.dp),
             )
         }
 
         // Live status & movement
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
             Text(
                 text = movementLabel,
                 style = MaterialTheme.typography.labelSmall,
@@ -370,6 +435,7 @@ private fun LiveTradeGaugeCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextPrimary,
                 fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 3.dp),
             )
         }
 
@@ -467,24 +533,19 @@ private fun LiveTradeGaugeCard(
             }
 
             // Bottom Info: R:R ratio & quick chart navigate
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     "ریسک به ریوارد: 1:${String.format(java.util.Locale.US, "%.1f", trade.riskReward)} · حجم: ${String.format("%.4f", trade.positionOz)} ${trade.unit}",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                 )
-                Text(
-                    "نمایش روی چارت ↗",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.Cyan,
-                    fontWeight = FontWeight.Bold,
-                )
+                Text("نمایش روی چارت ↗", style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Cyan, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 3.dp))
             }
         }
     }
@@ -512,7 +573,7 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit, now:
 
     SectionCard(
         title = "مدیریت حساب و معاملهٔ خودکار کاغذی",
-        subtitle = "تخصیص متوازن در ۴ دسته: ۱ رمزارز · ۱ فارکس · ۱ کالا · ۱ سهام",
+        subtitle = "سقف ۴ معامله؛ حداکثر ۲ در هر دسته با کنترل ریسک",
         trailing = {
             Pill(
                 if (enabled) "روشن" else "خاموش",
@@ -522,7 +583,7 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit, now:
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                if (enabled) "موتور هوشمند بازار را رصد و تا ۴ موقعیت برتر (هر بازار ۱ معامله) را شکار می‌کند."
+                if (enabled) "اسکن کندل‌های بسته با نظارت مستقلِ پوزیشن‌های باز؛ ورود فقط با تیک واقعی و عبور از ریسک."
                 else "خاموش است؛ هیچ معاملهٔ خودکاری ثبت نمی‌شود.",
                 Modifier.weight(1f),
                 style = MaterialTheme.typography.bodySmall,
@@ -531,42 +592,37 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit, now:
             Switch(checked = enabled, onCheckedChange = viewModel::setAutoPaperTrading)
         }
 
+        val balanceStr = String.format(java.util.Locale.US, "$%.2f", settings.accountBalance)
+        val equityStr = equity?.let { String.format(java.util.Locale.US, "$%.2f", it) } ?: "—"
+        val freeMarginStr = freeMargin?.let { String.format(java.util.Locale.US, "$%.2f", it) } ?: "—"
+        val usedMarginStr = String.format(java.util.Locale.US, "$%.2f", totalMarginUsed)
         Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val balanceStr = String.format(java.util.Locale.US, "$%.2f", settings.accountBalance)
-            val equityStr = equity?.let { String.format(java.util.Locale.US, "$%.2f", it) } ?: "—"
-            val freeMarginStr = freeMargin?.let { String.format(java.util.Locale.US, "$%.2f", it) } ?: "—"
-            StatTile("موجودی کل (Balance)", balanceStr, modifier = Modifier.weight(1f))
-            StatTile("اکوئیتی (Equity)", equityStr,
+            StatTile("موجودی", balanceStr, modifier = Modifier.weight(1f))
+            StatTile("اکوئیتی", equityStr,
                 if (unrealizedTotal == null) AurumColors.TextMuted
                 else if (unrealizedTotal >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
-            StatTile("مارجین آزاد", freeMarginStr, AurumColors.Cyan, Modifier.weight(1f))
         }
         if (unrealizedTotal == null) Text(
-            "اکوئیتی نامعلوم است: حداقل یک پوزیشن تیک تازه ندارد؛ قیمت ورود جای قیمت فعلی استفاده نمی‌شود.",
+            "اکوئیتی نامعلوم: حداقل یک پوزیشن تیک تازه ندارد؛ قیمت ورود جای قیمت فعلی نیست.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
         )
-
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val usedMarginStr = String.format(java.util.Locale.US, "$%.2f", totalMarginUsed)
+            StatTile("مارجین آزاد", freeMarginStr, AurumColors.Cyan, Modifier.weight(1f))
             StatTile("مارجین درگیر", usedMarginStr, AurumColors.Gold, Modifier.weight(1f))
-            StatTile(
-                "سود/ضرر محقق‌شده",
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatTile("سود/زیان محقق‌شده",
                 (if (stats.netPnl >= 0) "+" else "") + String.format(java.util.Locale.US, "%.2f", stats.netPnl) + "$",
-                if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red,
-                Modifier.weight(1f),
-            )
+                if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
             StatTile("پوزیشن‌های باز", "${openTrades.size}/۴", modifier = Modifier.weight(1f))
         }
-
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatTile("کل معاملات", stats.total.toString(), modifier = Modifier.weight(1f))
             StatTile("برد/باخت", "${stats.wins}/${stats.losses}", modifier = Modifier.weight(1f))
-            StatTile(
-                "وین‌ریت",
-                stats.winRate?.let { String.format("%.0f%%", it) } ?: "—",
-                modifier = Modifier.weight(1f),
-            )
         }
+        Text("وین‌ریت ثبت‌شده: ${stats.winRate?.let { String.format(java.util.Locale.US, "%.0f%%", it) } ?: "—"}",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 6.dp))
 
         if (lastTrade != null) {
             val lastClass = AssetClass.of(lastTrade.symbol)

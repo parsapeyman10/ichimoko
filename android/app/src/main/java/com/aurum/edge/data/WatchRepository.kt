@@ -3,12 +3,14 @@ package com.aurum.edge.data
 import android.os.SystemClock
 import com.aurum.edge.core.MarketHours
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -21,6 +23,26 @@ data class WatchState(
     val lastAttemptAt: Long? = null,
     val error: String? = null,
 )
+
+/** A completed source updates only its own rows; a failed fetch retains the old
+ * observation and original timestamp, never a made-up fresh quote. */
+internal data class WatchQuoteUpdate(val symbolId: String, val unit: String, val quote: Quote)
+
+internal fun mergeWatchSource(state: WatchState, sourceId: String,
+                              updates: List<WatchQuoteUpdate>, health: SourceHealth): WatchState {
+    val updated = state.quotes.mapValues { it.value.toMutableMap() }.toMutableMap()
+    for (row in updates) {
+        val normalized = row.quote.copy(unit = row.unit)
+        val quotes = updated.getOrPut(row.symbolId) { mutableMapOf() }
+        if (normalized.price != null && normalized.error == null) {
+            quotes[sourceId] = normalized
+        } else {
+            val old = quotes[sourceId]
+            quotes[sourceId] = old?.copy(stale = true, error = normalized.error) ?: normalized
+        }
+    }
+    return state.copy(quotes = updated, sourceHealth = state.sourceHealth + (sourceId to health))
+}
 
 /** Watch-only snapshots. Never feeds the chart, signal engine, journal settlement or order API. */
 class WatchRepository(
@@ -91,7 +113,7 @@ class WatchRepository(
         ensureLoaded()
         val elapsed = SystemClock.elapsedRealtime()
         if (attemptedAtElapsed != 0L && elapsed - attemptedAtElapsed in 0L until 15_000L) {
-            _state.value = _state.value.copy(error = "برای سهمیهٔ منابع، حداقل سه دقیقه بین دریافت‌های دیده‌بان صبر کنید")
+            _state.value = _state.value.copy(error = "برای سهمیهٔ منابع، حداقل ۱۵ ثانیه بین تلاش‌های دیده‌بان صبر کنید؛ نمادهای رمزارز هر ۶۰ ثانیه بررسی می‌شوند")
             return@withLock
         }
         attemptedAtElapsed = elapsed
@@ -113,63 +135,46 @@ class WatchRepository(
             }
             if (targets.any { it.source.kind == SourceKind.CRYPTO_SPOT_TRADE })
                 cryptoWatchAttemptAtElapsed = elapsed
-            // Batch only requests that share both a provider AND a read-only key. A key is
-            // never sent to another provider; public Yahoo symbols never receive a Twelve key.
-            val results = withContext(Dispatchers.IO) {
-                targets.groupBy { it.source.id to it.key }.values.map { group ->
-                    async {
-                        val source = group.first().source
-                        val snapshot = fetcher.fetchAll(
-                            source,
-                            group.map { SymbolDef(it.providerCode, it.symbol.label) },
-                            group.first().key,
-                        )
-                        GroupResult(source, snapshot, group.zip(snapshot.quotes))
+            // Per-source responses publish as soon as they arrive. A stalled car/FX
+            // publisher cannot hold completed crypto/other watch rows behind awaitAll.
+            // Keep the per-provider batch and the crypto 60s throttle; do not fake ticks.
+            withContext(Dispatchers.IO) {
+                targets.groupBy { it.source.id to it.key }.values.map { group -> async {
+                    val source = group.first().source
+                    val snapshot = try {
+                        fetcher.fetchAll(source,
+                            group.map { SymbolDef(it.providerCode, it.symbol.label) }, group.first().key)
+                    } catch (cancel: CancellationException) { throw cancel }
+                    catch (error: Exception) {
+                        SourceSnapshot(source, group.map { target -> Quote(target.providerCode,
+                            target.symbol.label, error = (error.message ?: "خطای فید").take(100),
+                            sourceId = source.id) }, System.currentTimeMillis(), false,
+                            error = "دریافت منبع انجام نشد")
                     }
-                }.awaitAll()
+                    val result = GroupResult(source, snapshot, group.zip(snapshot.quotes))
+                    val fresh = snapshot.quotes.count { it.price != null && it.error == null && !it.stale }
+                    val health = SourceHealth(source.id, source.title, when {
+                        snapshot.error?.contains("کلید") == true -> "NO_KEY"
+                        fresh == snapshot.quotes.size && fresh > 0 -> "HEALTHY"
+                        fresh > 0 -> "DEGRADED"
+                        else -> "OFFLINE"
+                    }, snapshot.fetchedAt, snapshot.latencyMs, snapshot.quotes.size, fresh, snapshot.error)
+                    // Archive only genuine observations, with the original provider time.
+                    result.pairs.forEach { (target, incoming) ->
+                        if (incoming.price != null && incoming.error == null)
+                            history.append(target.symbol.id, incoming.copy(unit = target.symbol.unit))
+                    }
+                    _state.update { previous ->
+                        mergeWatchSource(previous, source.id,
+                            result.pairs.map { (target, incoming) ->
+                                WatchQuoteUpdate(target.symbol.id, target.symbol.unit, incoming)
+                            }, health)
+                    }
+                } }.awaitAll()
             }
-            val health = results.associate { result ->
-                val snapshot = result.snapshot
-                val fresh = snapshot.quotes.count { it.price != null && it.error == null && !it.stale }
-                val state = when {
-                    snapshot.error?.contains("کلید") == true -> "NO_KEY"
-                    fresh == snapshot.quotes.size && fresh > 0 -> "HEALTHY"
-                    fresh > 0 -> "DEGRADED"
-                    else -> "OFFLINE"
-                }
-                result.source.id to SourceHealth(
-                    sourceId = result.source.id,
-                    provider = result.source.title,
-                    state = state,
-                    fetchedAt = snapshot.fetchedAt,
-                    latencyMs = snapshot.latencyMs,
-                    quoteCount = snapshot.quotes.size,
-                    freshQuoteCount = fresh,
-                    detail = snapshot.error,
-                )
-            }
-            val updated = _state.value.quotes.mapValues { it.value.toMutableMap() }.toMutableMap()
-            for (result in results) for ((target, incoming) in result.pairs) {
-                // providerCodes guarantees the mapped provider code is the same instrument and quote
-                // unit, so the symbol's unit is the true label (Twelve Data quotes USD/JPY in JPY).
-                val normalized = incoming.copy(unit = target.symbol.unit)
-                val quotes = updated.getOrPut(target.symbol.id) { mutableMapOf() }
-                if (normalized.price != null && normalized.error == null) {
-                    quotes[target.source.id] = normalized
-                    history.append(target.symbol.id, normalized)
-                } else {
-                    // Keep old genuine observation and its ORIGINAL timestamp, but explicitly
-                    // mark it cached/failed. Never make yesterday's price look fresh again.
-                    val old = quotes[target.source.id]
-                    quotes[target.source.id] = old?.copy(stale = true, error = normalized.error)
-                        ?: normalized
-                }
-            }
-            _state.value = _state.value.copy(
-                quotes = updated,
-                sourceHealth = _state.value.sourceHealth + health,
-                lastAttemptAt = System.currentTimeMillis(),
-            )
+            _state.value = _state.value.copy(lastAttemptAt = System.currentTimeMillis())
+        } catch (cancel: CancellationException) {
+            throw cancel
         } catch (e: Exception) {
             _state.value = _state.value.copy(error = "به‌روزرسانی دیده‌بان انجام نشد: ${e.message ?: "خطای داده"}")
         } finally {

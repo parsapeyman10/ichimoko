@@ -676,6 +676,10 @@ private fun PerMarketRecommendations(scan: PairScanState, interval: com.aurum.ed
                     Text("بررسی ${row.lastScanAt?.let { formatTime(it) } ?: "—"} · " +
                         "قیمت کندل ${formatPrice(row.price)} · لمس کنید برای بررسی نماد",
                         style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                    Text("منبع کندل پایه: ${row.baseSource ?: "نامعلوم"} · آخرین کندل بسته: " +
+                        (row.lastBarAt?.let { formatTime(it) } ?: "نامعلوم") +
+                        " · بازه‌های M5/M15/H1 مستقل‌اند؛ این قیمت تیک ورود نیست.",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                     if (!approved) Text(row.detail, style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.Gold)
                 }
