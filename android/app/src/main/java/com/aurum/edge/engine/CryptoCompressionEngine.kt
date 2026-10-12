@@ -112,7 +112,7 @@ internal object CryptoCompressionEngine {
             val compression = flat && glued && cloud && quietAtr && quietAdx && quietVolume
             val compressionPoints = (if (flat) 2 else 0) + (if (glued) 2 else 0) +
                 (if (cloud) 1 else 0) + (if (quietAtr) 2 else 0) +
-                (if (quietAdx) 1 else 0) + (if (quietVolume) 1 else 0) + 1 // twenty bars checked
+                (if (quietAdx) 1 else 0) + (if (quietVolume) 1 else 0) + 3 // twenty bars checked; full compression = 12 watch points
             if (!compression) {
                 watch = blocked(interval, bars, "فشردگی ۲۰ کندل کامل نیست: کیجون/ابر/ATR/ADX/حجم", compressionPoints)
                 continue
@@ -187,7 +187,7 @@ internal object CryptoCompressionEngine {
             val session = CryptoCompressionPolicy.londonOrNewYork(asOf)
             val points = compressionPoints + (if (crossing) 2 else 0) + (if (volume) 2 else 0) +
                 (if (adxOk) 2 else 0) + (if (chikou) 1 else 0) + (if (structure) 2 else 0) +
-                (if (range <= 1.8*atr || pullback) 1 else 0) + (if (macro) 6 else 0)
+                (if (range <= 1.8*atr || pullback) 1 else 0) + (if (macro) 4 else 0)
             val setup = IchimokuEntrySetup.assess(bars, ichi, atrs, Interval.M5, bias)
             val ready = crossing && volume && adxOk && chikou && structure && macro && nonChase &&
                 session && setup != null && points >= 16

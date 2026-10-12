@@ -51,6 +51,21 @@ class CryptoCompressionEngineTest {
             Interval.M5, 60.0, "BTC/USDT", timeframes = frames).action)
     }
 
+    @Test fun `twenty genuinely quiet bars are watch only even with full compression score`() {
+        val original = five
+        val quiet = original.mapIndexed { i, bar ->
+            bar.copy(high = 100.0 + if (i < 270) 0.6 else 0.02,
+                low = 100.0 - if (i < 270) 0.6 else 0.02,
+                volume = if (i < 289) 1000.0 else 10.0)
+        }
+        val signal = SignalEngine.evaluate(quiet, Interval.M5, 60.0, "BTC/USDT",
+            timeframes = frames)
+        assertEquals(signal.blockers.toString(), SignalAction.NO_TRADE, signal.action)
+        assertTrue(signal.blockers.toString(), signal.blockers.any { it.contains("واچ‌لیست") })
+        assertTrue(signal.reasons.toString(), signal.reasons.any { it.contains("12/26") })
+        assertNull(signal.cryptoBreakout)
+    }
+
     private val names = listOf("فشردگی · ۲۰ کندل", "انفجار · حجم/ADX/چیکو",
         "فیلتر کلان · ۵۲/۱۰۳ و M15/H1", "ورود · کندل/ریسک/سشن")
     private fun proof(): Signal {
