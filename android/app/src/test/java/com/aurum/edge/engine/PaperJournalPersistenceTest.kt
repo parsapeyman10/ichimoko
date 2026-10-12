@@ -68,6 +68,23 @@ class PaperJournalPersistenceTest {
         assertEquals(opened.id, store.trades.value.single().id)
     }
 
+    @Test fun delayedWorkerCannotSettleOrFlagANewerPositionOnTheSameSymbol() = runBlocking {
+        val at = 1_800_000_000_000L
+        val store = JournalStore(context, journalFile()).also { it.load() }
+        val opened = store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5,
+            manual = true, observedAt = at)
+        assertTrue(store.settleTick("XAU/USD", 2990.0, at + 1_000L,
+            expectedOpenedAt = at - 1_000L).isEmpty())
+        store.noteTickCoverageGap("XAU/USD", at + 2_000L, expectedOpenedAt = at - 1_000L)
+        assertTrue(store.trades.value.single().isOpen)
+        assertNull(store.trades.value.single().tickCoverageGapAt)
+        store.noteTickCoverageGap("XAU/USD", at + 3_000L, expectedOpenedAt = at)
+        assertEquals(at + 3_000L, store.trades.value.single().tickCoverageGapAt)
+        assertEquals(opened.id, store.trades.value.single().id)
+        assertEquals(1, store.settleTick("XAU/USD", 2990.0, at + 4_000L,
+            expectedOpenedAt = at).size)
+    }
+
     @Test fun backendJsonEightTechnicalChecksNinthAiPaperOpenTickCloseAndReload() = runBlocking {
         val now = 1_800_000_000_000L
         val observed = Instant.ofEpochMilli(now)

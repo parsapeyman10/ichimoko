@@ -14,39 +14,44 @@ class OpenTradeTickMonitor(
     private val spot: SpotFallbackClient = SpotFallbackClient(),
 ) {
     private data class Session(val openedAt: Long, val cursor: TradePageCursor = TradePageCursor(),
-                               var lastReceiptAt: Long = 0L, var lastRequestAt: Long = 0L)
-    private val sessions = mutableMapOf<String, Session>()
-    private val mutex = Mutex()
+                               val mutex: Mutex = Mutex(), var lastReceiptAt: Long = 0L,
+                               var lastRequestAt: Long = 0L)
+    private val sessions = java.util.concurrent.ConcurrentHashMap<String, Session>()
 
     /** Null when the current batch is unavailable; never promote a stale quote. */
-    suspend fun poll(symbol: String, openedAt: Long): PriceTick? = mutex.withLock {
-        val now = System.currentTimeMillis()
-        val session = sessions[symbol]?.takeIf { it.openedAt == openedAt }
-            ?: Session(openedAt).also { sessions[symbol] = it }
-        // REST trade endpoint allows 60 requests/minute; one shared body is reused by the
-        // selected market and the foreground service. Avoid a pointless 1s busy loop.
-        if (now - session.lastRequestAt in 0L until 10_000L) return@withLock null
-        session.lastRequestAt = now
-        val page = try {
-            spot.fetchCryptoTrades(symbol)
-        } catch (cancel: CancellationException) {
-            throw cancel
-        } catch (_: Exception) {
-            if (now - (session.lastReceiptAt.takeIf { it > 0 } ?: openedAt) > 45_000L)
-                journal.noteTickCoverageGap(symbol, now)
-            return@withLock null
-        }
-        val update = session.cursor.advance(page, openedAt)
-        session.lastReceiptAt = now
-        if (update.gap) journal.noteTickCoverageGap(symbol, now)
-        // If a page did not overlap the last one, unknown trades are NOT replayed as
-        // if the page were complete. Later overlapping pages resume known-only ticks.
-        for (trade in update.newlySeen) {
-            if (journal.settleTick(symbol, trade.price, trade.at).isNotEmpty()) {
-                sessions.remove(symbol)
-                break
+    suspend fun poll(symbol: String, openedAt: Long): PriceTick? {
+        val session = sessions.compute(symbol) { _, old ->
+            old?.takeIf { it.openedAt == openedAt } ?: Session(openedAt)
+        }!!
+        // A blocked request for another pair no longer holds this pair's cursor/settlement.
+        return session.mutex.withLock {
+            if (sessions[symbol] !== session) return@withLock null
+            val now = System.currentTimeMillis()
+            // REST trade endpoint allows 60 requests/minute; one shared body is reused by the
+            // selected market and the foreground service. Avoid a pointless 1s busy loop.
+            if (now - session.lastRequestAt in 0L until 10_000L) return@withLock null
+            session.lastRequestAt = now
+            val page = try {
+                spot.fetchCryptoTrades(symbol)
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (_: Exception) {
+                if (now - (session.lastReceiptAt.takeIf { it > 0 } ?: openedAt) > 45_000L)
+                    journal.noteTickCoverageGap(symbol, now, openedAt)
+                return@withLock null
             }
+            val update = session.cursor.advance(page, openedAt)
+            session.lastReceiptAt = now
+            if (update.gap) journal.noteTickCoverageGap(symbol, now, openedAt)
+            // If a page did not overlap the last one, unknown trades are NOT replayed as
+            // if the page were complete. Later overlapping pages resume known-only ticks.
+            for (trade in update.newlySeen) {
+                if (journal.settleTick(symbol, trade.price, trade.at, expectedOpenedAt = openedAt).isNotEmpty()) {
+                    sessions.remove(symbol, session)
+                    break
+                }
+            }
+            page.last().tick
         }
-        page.last().tick
     }
 }

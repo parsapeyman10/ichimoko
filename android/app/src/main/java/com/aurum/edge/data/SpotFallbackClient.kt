@@ -44,9 +44,11 @@ class SpotFallbackClient(
     // The public trades endpoint allows 60 requests/minute; at most two crypto positions
     // plus a selected pair can be monitored here, and each pair is fetched <= once/10s.
     private object CryptoTradeCache {
-        val mutex = Mutex()
-        val responses = mutableMapOf<String, Pair<Long, String>>()
-        val lastAttempt = mutableMapOf<String, Long>()
+        // A slow BTC request must not lock ETH's response. Each pair retains its own
+        // 10-second gate; the small number of open crypto slots stays below 60 req/min.
+        val locks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+        val responses = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, String>>()
+        val lastAttempt = java.util.concurrent.ConcurrentHashMap<String, Long>()
         const val MIN_CRYPTO_FETCH_MS = 10_000L
     }
 
@@ -132,7 +134,8 @@ class SpotFallbackClient(
     private suspend fun cryptoTradeResponse(symbol: String): String {
         val code = NobitexHistoryClient.ticker(symbol)
             ?: throw DataFeedException("نماد USDT برای نوبیتکس معتبر نیست")
-        return CryptoTradeCache.mutex.withLock {
+        val lock = CryptoTradeCache.locks.computeIfAbsent(symbol) { Mutex() }
+        return lock.withLock {
             val now = System.currentTimeMillis()
             CryptoTradeCache.responses[symbol]?.takeIf { (fetchedAt, _) ->
                 now - fetchedAt in 0L..CryptoTradeCache.MIN_CRYPTO_FETCH_MS

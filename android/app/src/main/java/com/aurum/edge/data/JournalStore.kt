@@ -275,11 +275,13 @@ class JournalStore(
     }
 
     /** Persistent audit flag: no trade ID is provided to prove no tick was lost. */
-    suspend fun noteTickCoverageGap(symbol: String, at: Long) = mutex.withLock {
+    suspend fun noteTickCoverageGap(symbol: String, at: Long, expectedOpenedAt: Long? = null) = mutex.withLock {
         if (!loaded || at <= 0L || _trades.value.none {
-                it.isOpen && it.symbol == symbol && it.tickCoverageGapAt == null }) return@withLock
+                it.isOpen && it.symbol == symbol && it.tickCoverageGapAt == null &&
+                    (expectedOpenedAt == null || it.openedAt == expectedOpenedAt) }) return@withLock
         persist(_trades.value.map { trade ->
-            if (trade.isOpen && trade.symbol == symbol && trade.tickCoverageGapAt == null)
+            if (trade.isOpen && trade.symbol == symbol && trade.tickCoverageGapAt == null &&
+                (expectedOpenedAt == null || trade.openedAt == expectedOpenedAt))
                 trade.copy(tickCoverageGapAt = at) else trade
         })
     }
@@ -288,7 +290,8 @@ class JournalStore(
      * Direct live-tick settlement: whenever a fresh real-time quote arrives for any symbol,
      * immediately checks if Stop Loss or Take Profit has been touched and closes the trade automatically.
      */
-    suspend fun settleTick(symbol: String, price: Double, observedAt: Long = System.currentTimeMillis()): List<PaperTrade> = mutex.withLock {
+    suspend fun settleTick(symbol: String, price: Double, observedAt: Long = System.currentTimeMillis(),
+                           expectedOpenedAt: Long? = null): List<PaperTrade> = mutex.withLock {
         if (!loaded || !price.isFinite() || price <= 0.0) return@withLock emptyList()
         val current = _trades.value
         val openForSymbol = current.filter { it.isOpen && it.symbol == symbol }
@@ -298,7 +301,8 @@ class JournalStore(
         var settledPnlDelta = 0.0
         val newlyClosed = mutableListOf<PaperTrade>()
         val updated = current.map { t ->
-            if (!t.isOpen || t.symbol != symbol) return@map t
+            if (!t.isOpen || t.symbol != symbol ||
+                (expectedOpenedAt != null && t.openedAt != expectedOpenedAt)) return@map t
             // A trade fetched just before entry must never close a position opened
             // afterwards, even if the quote was still within the feed freshness window.
             if (observedAt < t.openedAt) return@map t

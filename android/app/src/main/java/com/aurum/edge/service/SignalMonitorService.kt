@@ -31,8 +31,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,9 +50,11 @@ class SignalMonitorService : Service() {
     private var stateJob: Job? = null
     private var journalJob: Job? = null
     private var newsJob: Job? = null
+    private var aiJob: Job? = null
     private var researchAlertJob: Job? = null
     private var settingsJob: Job? = null
     private var sweepJob: Job? = null
+    private var positionJobs: Job? = null
     private val notifiedResearch = mutableSetOf<String>()
     private val notifiedTrades = mutableSetOf<String>()
     private val notifiedOpenTrades = mutableSetOf<String>()
@@ -124,8 +124,6 @@ class SignalMonitorService : Service() {
         newsJob?.cancel()
         newsJob = scope.launch {
             var turns = 0
-            /** Last announced AI reachability; null = nothing announced yet. */
-            var lastAiReachable: Boolean? = null
             while (isActive) {
                 if (!notificationsPermitted()) { stopSelf(); break }
                 if (!MarketHours.weekendClosedFor(container.settingsStore.read().symbol)) {
@@ -138,6 +136,19 @@ class SignalMonitorService : Service() {
                             it.autoPaperTrading || it.pauseOnNews || it.notifyOnSignal } &&
                         container.settingsStore.read().let {
                             it.newsBaseUrl.isNotBlank() || it.hasClientNewsAi }) container.news.refreshNow()
+                }
+                delay(60_000L)
+            }
+        }
+
+        // AI reachability and advisory review are independent of news refresh, scanner,
+        // positions and quote receipt; a slow model cannot stall their worker loops.
+        aiJob?.cancel()
+        aiJob = scope.launch {
+            var lastAiReachable: Boolean? = null
+            while (isActive) {
+                if (!notificationsPermitted()) { stopSelf(); break }
+                try {
                     // The AI companion refreshes on its own 10-minute throttle; a bias flip is
                     // surfaced once through the informational research channel — never a trade.
                     container.traderAdvisor.refreshNow()
@@ -185,6 +196,10 @@ class SignalMonitorService : Service() {
                                 "${alert.summary} — این فقط یک نظر است؛ معاملهٔ کاغذی بسته نشده و خروج تنها با لمس قیمت واقعی حد ضرر/حد سود انجام می‌شود.")
                         }
                     }
+                } catch (cancel: kotlinx.coroutines.CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    // Failure of this optional worker never blocks the real-data workers.
                 }
                 delay(60_000L)
             }
@@ -336,38 +351,55 @@ class SignalMonitorService : Service() {
             }
         }
 
-        // Background multi-processing tick monitor for ALL open trades (active both in-app and out-of-app)
-        scope.launch(Dispatchers.IO) {
+        // Each OPEN symbol has its own supervised, cancellable worker. A slow/failed
+        // provider for one pair must not delay the other positions, news or scanner.
+        positionJobs?.cancel()
+        positionJobs = scope.launch {
+            try { container.journalStore.load() } catch (_: Exception) { return@launch }
+            val workers = mutableMapOf<String, Pair<Long, Job>>()
             val spot = SpotFallbackClient()
-            while (isActive) {
-                try {
-                    val openTrades = container.journalStore.trades.value.filter { it.isOpen }
-                    if (openTrades.isNotEmpty()) {
-                        kotlinx.coroutines.coroutineScope {
-                            val deferreds = openTrades.map { it.symbol }.distinct().map { symbol ->
-                                async(Dispatchers.IO) {
-                                    val openedAt = openTrades.filter { it.symbol == symbol }.minOf { it.openedAt }
-                                    val q = runCatching {
-                                        if (com.aurum.edge.data.CryptoCatalog.isCrypto(symbol))
-                                            container.openTradeTicks.poll(symbol, openedAt)
-                                        else spot.fetchQuote(symbol)
-                                    }.getOrNull()
-                                    symbol to q?.takeIf { TradeQuotePolicy.accepts(it) }
-                                }
-                            }
-                            deferreds.awaitAll().forEach { (sym, quote) ->
-                                if (quote != null && quote.price.isFinite() && quote.price > 0.0 &&
-                                    !MarketHours.closedFor(sym)) {
-                                    if (!com.aurum.edge.data.CryptoCatalog.isCrypto(sym))
-                                        container.journalStore.settleTick(sym, quote.price, quote.at)
-                                    // Crypto ticks were replayed in order by openTradeTicks.poll.
-                                }
-                            }
+            try {
+                container.journalStore.trades.collect { trades ->
+                    val open = trades.filter { it.isOpen }.groupBy { it.symbol }
+                        .mapValues { (_, rows) -> rows.minOf { it.openedAt } }
+                    workers.toMap().forEach { (symbol, worker) ->
+                        if (open[symbol] != worker.first) {
+                            worker.second.cancel()
+                            workers.remove(symbol)
                         }
                     }
-                } catch (_: Exception) {}
-                delay(1_000L)
-            }
+                    open.forEach { (symbol, openedAt) ->
+                        if (symbol !in workers) {
+                            val worker = launch(Dispatchers.IO) {
+                                val crypto = com.aurum.edge.data.CryptoCatalog.isCrypto(symbol)
+                                while (isActive) {
+                                    try {
+                                        if (!MarketHours.closedFor(symbol)) {
+                                            if (crypto) {
+                                                // One ordered page per pair; the process-wide monitor
+                                                // guards same-symbol UI/service callers and journal writes.
+                                                container.openTradeTicks.poll(symbol, openedAt)
+                                            } else {
+                                                val quote = spot.fetchQuote(symbol)
+                                                if (TradeQuotePolicy.accepts(quote))
+                                                    container.journalStore.settleTick(symbol, quote.price,
+                                                        quote.at, expectedOpenedAt = openedAt)
+                                            }
+                                        }
+                                    } catch (cancel: kotlinx.coroutines.CancellationException) {
+                                        throw cancel
+                                    } catch (_: Exception) {
+                                        // An unavailable quote is not a tick or an exit. Retry
+                                        // independently; the crypto monitor records coverage gaps.
+                                    }
+                                    delay(if (crypto) 10_000L else 1_000L)
+                                }
+                            }
+                            workers[symbol] = openedAt to worker
+                        }
+                    }
+                }
+            } finally { workers.values.forEach { it.second.cancel() } }
         }
         return START_STICKY
     }
