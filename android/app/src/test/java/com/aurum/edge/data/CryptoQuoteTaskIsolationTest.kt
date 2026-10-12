@@ -19,16 +19,16 @@ class CryptoQuoteTaskIsolationTest {
         val entered = CountDownLatch(1)
         val unblock = CountDownLatch(1)
         val http = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
-            val symbol = chain.request().url.encodedPath.substringAfterLast('/')
+            val symbol = chain.request().url.queryParameter("symbol")
             if (symbol == "VETUSDT") {
                 entered.countDown()
                 check(unblock.await(5, TimeUnit.SECONDS))
             }
-            val json = """{"status":"ok","trades":[{"time":${System.currentTimeMillis()},"price":"101","volume":"1","type":"buy"}]}"""
+            val json = """[{"a":101,"T":${System.currentTimeMillis()},"p":"101","q":"1"}]"""
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
                 .code(200).message("OK").body(json.toResponseBody()).build()
         }).build()
-        val spot = SpotFallbackClient(http)
+        val spot = BinanceSpotClient(http)
         try {
             val slow = async(Dispatchers.IO) { spot.fetchQuote("VET/USDT") }
             check(entered.await(5, TimeUnit.SECONDS))
