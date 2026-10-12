@@ -55,6 +55,24 @@ class PaperJournalPersistenceTest {
         listOf(PaperNewsEvidence("id", "Publisher", "Gold headline", "https://publisher.example/news", 1_800_000_000_000L)),
         calendarSource = "https://nfs.faireconomy.media/ff_calendar_thisweek.json", calendarCheckedAt = 1_800_000_000_100L)
 
+    @Test fun onlyM5MayOpenNewManualOrAutomaticPaperPositions() = runBlocking {
+        val store = JournalStore(context, journalFile()).also { it.load() }
+        for (interval in listOf(Interval.M1, Interval.M3, Interval.M15, Interval.H1)) {
+            // Even a forged matching setup and full four-layer evidence cannot bypass
+            // the authoritative journal constraint. Historical trades are not rewritten.
+            val otherwiseValid = signal.copy(interval = interval,
+                ichimokuEntry = signal.ichimokuEntry!!.copy(interval = interval))
+            for (automatic in listOf(false, true)) {
+                val failure = runCatching { store.open(otherwiseValid, "XAU/USD", 3000.0,
+                    50_000.0, 0.5, manual = !automatic, automatic = automatic,
+                    observedAt = 1_800_000_000_000L) }.exceptionOrNull()
+                assertTrue("$interval: ${failure?.message}", failure is IllegalArgumentException &&
+                    failure.message.orEmpty().contains("۵ دقیقه"))
+            }
+        }
+        assertTrue(store.trades.value.isEmpty())
+    }
+
     @Test fun quoteObservedBeforeEntryCannotSettleNewPosition() = runBlocking {
         val at = 1_800_000_000_000L
         val store = JournalStore(context, journalFile()).also { it.load() }

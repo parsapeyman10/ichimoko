@@ -40,6 +40,9 @@ internal object V1Scoring {
             bars.any { it.time <= 0L || !listOf(it.open, it.high, it.low, it.close).all { v -> v.isFinite() && v > 0.0 } ||
                 it.high < max(it.open, it.close) || it.low > min(it.open, it.close) })
             return blocked("ترتیب یا OHLC کندل‌ها نامعتبر است")
+        // The selected chart may use other intervals for analysis; only a closed 5m
+        // base bar can produce an actionable NEW paper trade, for every asset class.
+        if (interval != Interval.M5) blockers += "ورود کاغذی فقط روی کندل بستهٔ ۵ دقیقه (5m) مجاز است"
         if (MarketHours.closedFor(symbol, asOf) || MarketHours.closedFor(symbol, clock))
             blockers += "بازار بسته است"
         if (clock - asOf !in 0L..(interval.millis + 90_000L))
@@ -68,7 +71,7 @@ internal object V1Scoring {
         // Explicit RANGE mode never becomes a breakout strategy. HYBRID can leave a range
         // on a validated closed bar even while the lagging ADX still reads below 20.
         val releaseEligible = AssetClass.of(symbol) == AssetClass.CRYPTO &&
-            mode != CategoryStrategy.RANGE && interval in setOf(Interval.M3, Interval.M5, Interval.M15)
+            mode != CategoryStrategy.RANGE && interval == Interval.M5
         val buyRelease = if (releaseEligible) CryptoIchimokuRelease.assess(bars, ichi, atr, SignalAction.BUY) else null
         val sellRelease = if (releaseEligible) CryptoIchimokuRelease.assess(bars, ichi, atr, SignalAction.SELL) else null
         val range = when (mode) {

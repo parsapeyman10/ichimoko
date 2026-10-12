@@ -51,6 +51,16 @@ class NineWayAutoPaperTest {
         candles = IctTestBars.readyAt(barTime),
         lastPrice = 3000.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now), signal = s)
 
+    @Test fun automaticReviewRequiresFiveMinuteMarketAndSignal() {
+        for (interval in listOf(Interval.M3, Interval.M15, Interval.H1)) {
+            assertTrue(PaperAutoRules.blocker(market(raw).copy(interval = interval),
+                settings, news, now).orEmpty().contains("۵ دقیقه"))
+            assertTrue(PaperAutoRules.opportunityBlocker(market(raw.copy(interval = interval)),
+                settings, news, now).orEmpty().contains("۵ دقیقه"))
+        }
+        assertNull(PaperAutoRules.blocker(market(raw), settings, news, now))
+    }
+
     @Test fun backendWebNewsJsonToNineWayAndAutoPolicyIsOneContract() {
         val published = Instant.ofEpochMilli(now - 60_000L)
         val received = Instant.ofEpochMilli(now)

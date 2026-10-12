@@ -44,7 +44,7 @@ class PaperAutoTrader(
     /** Returns only a trade whose atomic journal write has completed; null is never an entry event. */
     suspend fun onMarketUpdate(state: MarketState, catalogQuote: PriceTick? = null): PaperTrade? {
         // The catalog runner may pass a second, independently fetched same-venue trade
-        // tick even for the selected crypto symbol's M3/M5/M15 comparison. Persistence and
+        // tick even for the selected crypto symbol's 5m closed-bar scan. Persistence and
         // duplicate/portfolio limits remain atomic in JournalStore.
         val allowed = if (state.symbol in WatchCatalog.scannerSymbols) WatchCatalog.scannerSymbols
             else settings.read().activeWatchlist

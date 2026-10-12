@@ -173,7 +173,7 @@ class PairScanner(
         }
 
     private fun rankOpportunities(statuses: List<PairScanStatus>): List<PairScanStatus> =
-        ScanRanking.rank(statuses, settings.read().interval, System.currentTimeMillis())
+        ScanRanking.rank(statuses, Interval.M5, System.currentTimeMillis())
 
     private suspend fun sweepAll(onCandidate: (suspend (PaperOpportunity) -> Unit)?) {
         trendSample.clear()
@@ -227,7 +227,7 @@ class PairScanner(
             trendAligned: Boolean? = null,
             trendNote: String? = null,
         ) = synchronized(statusLock) {
-            decisionLog?.append(symbol, (chosenIntervals[symbol] ?: config.interval).label, state, detail,
+            decisionLog?.append(symbol, (chosenIntervals[symbol] ?: Interval.M5).label, state, detail,
                 signal = if (conditions.isNotEmpty()) com.aurum.edge.core.Signal(
                     action ?: SignalAction.NO_TRADE, confidence ?: 0.0, confluence = conditions)
                     else null, dedupe = false, method = methodLabel, methodReason = playbookReason)
@@ -283,9 +283,9 @@ class PairScanner(
                 classSlots.getValue(com.aurum.edge.core.AssetClass.of(symbol)).withPermit {
             // Only ACTIVE markets consume a provider slot/start budget.
             val crypto = CryptoCatalog.isCrypto(symbol)
-            // The visual chart and the selected screen's interval are independent of
-            // the crypto entry scan. Compare all three on their own closed bars.
-            var interval = if (crypto || config.interval == Interval.M3) Interval.M5 else config.interval
+            // All NEW entries and radar candidates have a closed 5m base, regardless
+            // of the selected chart. M15/H1 are independent alignment inputs ONLY.
+            var interval = Interval.M5
             var now = System.currentTimeMillis()
             if (MarketHours.closedFor(symbol, now)) {
                 // Schedule only: do not fetch candles, evaluate, rank or attempt entry for
@@ -396,7 +396,7 @@ class PairScanner(
                     price = candles.lastOrNull()?.close)
                 return@withPermit
             }
-            val candidates = if (crypto) listOf(Interval.M5, Interval.M15) else listOf(interval)
+            val candidates = listOf(Interval.M5)
             val reads = mutableListOf<CryptoIntervalChoice.Read>()
             val unavailable = mutableListOf<String>()
             for (candidate in candidates) {

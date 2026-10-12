@@ -51,17 +51,20 @@ class ThreeMinuteCandlesTest {
         assertEquals(Interval.M3, Interval.fromLabel("3m")) // saved journal interval survives reload
     }
 
-    @Test fun `only actionable timeframe can win over a non actionable higher score`() {
+    @Test fun `only five minute base can be selected regardless of other scores`() {
         fun read(frame: Interval, action: SignalAction, confidence: Double) =
             CryptoIntervalChoice.Read(frame, listOf(minute(0)), Signal(action, confidence,
                 interval = frame))
         val m3 = read(Interval.M3, SignalAction.NO_TRADE, 95.0)
         val m5 = read(Interval.M5, SignalAction.BUY, 80.0)
         val m15 = read(Interval.M15, SignalAction.SELL, 90.0)
-        assertEquals(Interval.M15, CryptoIntervalChoice.pick(listOf(m3, m5, m15))?.interval)
+        assertEquals(Interval.M5, CryptoIntervalChoice.pick(listOf(m3, m5, m15))?.interval)
         assertEquals(Interval.M5, CryptoIntervalChoice.pick(listOf(m3, m5))?.interval)
         assertEquals(Interval.M5, CryptoIntervalChoice.pick(listOf(m3, read(Interval.M5,
             SignalAction.NO_TRADE, 75.0)))?.interval)
+        assertFalse(CryptoIntervalChoice.pick(listOf(m3, m15)) != null)
+        assertFalse(CryptoIntervalChoice.pick(listOf(CryptoIntervalChoice.Read(Interval.M5,
+            listOf(minute(0)), m15.signal))) != null) // mismatched evidence is not 5m
         assertFalse(CryptoIntervalChoice.pick(emptyList()) != null)
     }
 }

@@ -98,7 +98,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState,
             scanClock = System.currentTimeMillis() // expire historical recommendations without a new sweep
         }
     }
-    val freshCandidates = ScanRanking.rank(scanState.statuses, settings.interval, scanClock)
+    val freshCandidates = ScanRanking.rank(scanState.statuses, com.aurum.edge.core.Interval.M5, scanClock)
     val signal = market.signal
 
     val openTrades = trades.filter { it.isOpen }
@@ -153,10 +153,15 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState,
         }
 
         // Rankings for all four markets, not only the eight default watchlist rows.
-        PerMarketRecommendations(scanState, settings.interval, scanClock, onChartSymbol)
+        PerMarketRecommendations(scanState, com.aurum.edge.core.Interval.M5, scanClock, onChartSymbol)
         EvidenceTimingCard(market, positionBlocker)
 
         // ── ۴. خلاصه سیگنال نماد انتخابی و موتور واحد چهارلایه ─────────
+        if (market.interval != com.aurum.edge.core.Interval.M5) {
+            Text("ورود فقط در تایم‌فریم ۵ دقیقه (5m)؛ بازهٔ فعلی صرفاً برای مشاهده است.",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+        }
         SignalSummaryCard(
             signal = signal,
             symbol = market.symbol,
