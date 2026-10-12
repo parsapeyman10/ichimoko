@@ -110,8 +110,10 @@ class OpenTradeTickMonitor(
                     if (latest == null || row.at >= latest.at) session.latest = PriceTick(row.price, row.at)
                 }
             }
-            setFeed(symbol, session, Feed.ARCHIVE)
-            session.lastReceiptAt = System.currentTimeMillis()
+            setFeed(symbol, session, if (page.live) Feed.ARCHIVE else Feed.RECOVERING)
+            if (page.live) session.lastReceiptAt = System.currentTimeMillis()
+            else if (System.currentTimeMillis() - (session.lastReceiptAt.takeIf { it > 0 } ?: openedAt) > 45_000L)
+                journal.noteTickCoverageGap(symbol, System.currentTimeMillis(), openedAt)
             session.latest?.takeIf { TradeQuotePolicy.accepts(it) } to (page.rows.size == 500 || page.next < page.head)
         }
     }

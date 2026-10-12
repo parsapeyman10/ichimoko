@@ -147,6 +147,7 @@ class Archive:
             "AND after_seq<=? AND at>=? ORDER BY id",
             (symbol, 0 if requested_after == 0 and from_ms else after, max(head, after), from_ms)).fetchall()
         return {"venue": "nobitex", "symbol": symbol, "head": head,
+                "live": self.healthy and self.connected and symbol in self.live_symbols,
                 "trades": [{"seq": r[0], "time": r[1], "price": r[2],
                             "volume": r[3], "type": r[4], "offset": r[5]} for r in rows],
                 "gaps": [{"at": r[0], "afterSeq": r[1], "reason": r[2]} for r in gaps],
@@ -163,6 +164,8 @@ class Subscriber(SubscriptionEventHandler):
         self.archive.live_symbols.add(self.symbol)
 
     async def on_subscribing(self, ctx):
+        if self.symbol in self.archive.live_symbols:
+            self.archive.gap(self.symbol, "upstream_subscribing")
         self.archive.live_symbols.discard(self.symbol)
         LOG.warning("upstream reconnecting: %s", self.symbol)
 
@@ -195,11 +198,15 @@ class ClientEvents(ClientEventHandler):
         LOG.info("upstream connected")
 
     async def on_connecting(self, ctx):
+        for symbol in self.archive.live_symbols:
+            self.archive.gap(symbol, "upstream_connection_lost")
         self.archive.connected = False
         self.archive.live_symbols.clear()
         LOG.warning("upstream connecting: %s", ctx)
 
     async def on_disconnected(self, ctx):
+        for symbol in self.archive.live_symbols:
+            self.archive.gap(symbol, "upstream_connection_lost")
         self.archive.connected = False
         self.archive.live_symbols.clear()
         LOG.warning("upstream disconnected: %s", ctx)

@@ -23,7 +23,7 @@ internal class NobitexTickArchiveClient(
 ) {
     data class Row(val seq: Long, val at: Long, val price: Double)
     data class Gap(val at: Long, val afterSeq: Long)
-    data class Page(val rows: List<Row>, val gaps: List<Gap>, val head: Long, val next: Long)
+    data class Page(val rows: List<Row>, val gaps: List<Gap>, val head: Long, val next: Long, val live: Boolean)
 
     suspend fun fetch(symbol: String, openedAt: Long, after: Long,
                       configuration: Pair<String, String>): Page = withContext(Dispatchers.IO) {
@@ -48,6 +48,9 @@ internal class NobitexTickArchiveClient(
             fun text(row: JsonObject, key: String): String? = row[key]?.jsonPrimitive?.contentOrNull
             if (text(root, "venue") != "nobitex" || text(root, "symbol") != expectedTicker)
                 throw DataFeedException("بازار آرشیو با پوزیشن هم‌صرافی نیست")
+            val live = text(root, "live")?.let { value ->
+                when (value) { "true" -> true; "false" -> false; else -> null }
+            } ?: throw DataFeedException("وضعیت اتصال آرشیو معلوم نیست")
             val head = text(root, "head")?.toLongOrNull()?.takeIf { it >= 0 }
                 ?: throw DataFeedException("سر آرشیو معتبر نیست")
             val next = text(root, "next")?.toLongOrNull()?.takeIf { it >= after && it <= head }
@@ -74,7 +77,7 @@ internal class NobitexTickArchiveClient(
                 if (at <= 0 || seq < 0 || seq > head) throw DataFeedException("گسست نامعتبر است")
                 Gap(at, seq)
             } ?: throw DataFeedException("وضعیت پیوستگی آرشیو موجود نیست")
-            Page(rows, gaps, head, next)
+            return Page(rows, gaps, head, next, live)
         }
     }
 }

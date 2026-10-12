@@ -20,7 +20,7 @@ import java.nio.file.Files
 @Config(sdk = [33])
 class NobitexTickArchiveTest {
     @Test fun `wrong venue duplicated sequence and missing gaps fail closed`() {
-        val valid = """{"venue":"nobitex","symbol":"BTCUSDT","head":15,"next":15,
+        val valid = """{"venue":"nobitex","symbol":"BTCUSDT","live":true,"head":15,"next":15,
             "trades":[{"seq":14,"time":1800000000000,"price":3000,"volume":1,"type":"buy"},
                       {"seq":15,"time":1799999999999,"price":3001,"volume":1,"type":"sell"}],
             "gaps":[{"at":1800000000000,"afterSeq":14,"reason":"upstream_recovery_failed"}]}"""
