@@ -16,6 +16,7 @@ import math
 import pathlib
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -27,6 +28,8 @@ MIN_CANDLES = 320
 # Binance/Nobitex are intentionally not candidates. No USD/USDC/futures substitutions.
 KRAKEN = "https://api.kraken.com/0/public/"
 OKX = "https://www.okx.com/api/v5/"
+_okx_lock = threading.Lock()
+_okx_last = 0.0
 
 
 def symbols():
@@ -37,17 +40,33 @@ def symbols():
 
 
 def request_json(base, path, params=None, timeout=8):
+    global _okx_last
     if base not in (KRAKEN, OKX):
         raise ValueError("Host not allowlisted")
     url = base + path + ("?" + urllib.parse.urlencode(params) if params else "")
     req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "AurumEdge-market-audit/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as response:
-        if response.status != 200:
-            raise ValueError(f"HTTP {response.status}")
-        data = response.read(10_000_001)
-        if len(data) > 10_000_000:
-            raise ValueError("Oversize response")
-    return json.loads(data)
+    # The limit is per IP; a shared CI runner can already be using some of the quota.
+    # Only the OKX audit lane is paced. A bounded 429 retry cannot promise availability.
+    for attempt in range(2):
+        if base == OKX:
+            with _okx_lock:
+                delay = max(0.0, 0.3 - (time.monotonic() - _okx_last))
+                if delay:
+                    time.sleep(delay)
+                _okx_last = time.monotonic()
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                if response.status != 200:
+                    raise ValueError(f"HTTP {response.status}")
+                data = response.read(10_000_001)
+                if len(data) > 10_000_000:
+                    raise ValueError("Oversize response")
+            return json.loads(data)
+        except urllib.error.HTTPError as error:
+            if error.code != 429 or attempt == 1:
+                raise
+            time.sleep(1.0)
+    raise AssertionError("Unreachable bounded retry")
 
 
 def checked_bars(rows, minutes, now_ms):
@@ -148,7 +167,9 @@ def probe(venue, pair, now_ms):
         except (ValueError, KeyError, IndexError, TypeError, urllib.error.URLError, TimeoutError) as exc:
             result["candles"][label] = f"unavailable: {str(exc)[:85]}"
     try:
-        result["trade_age_ms"] = latest_trade(venue, pair, now_ms)
+        # The probe may spend seconds in a bounded queue. Validate execution time at
+        # receipt, NOT against the start of the entire multi-symbol audit.
+        result["trade_age_ms"] = latest_trade(venue, pair, int(time.time() * 1000))
     except (ValueError, KeyError, IndexError, TypeError, urllib.error.URLError, TimeoutError) as exc:
         result["trade_error"] = str(exc)[:85]
     # 90 seconds is the app's live quote freshness window, not a guarantee of future uptime.
