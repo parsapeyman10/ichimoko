@@ -93,6 +93,20 @@ class GlmRelayTest {
         assertEquals("https://api.llmsrelay.com/v1/models", requests.single().url.toString())
     }
 
+    @Test fun `news client result is invalid after a model or endpoint switch with the same key`() {
+        val old = AppSettings(newsAiApiKey = "same-key", newsAiBaseUrl = "https://api.llmsrelay.com",
+            newsAiModel = "glm-5-3-uncensored", newsAiFormat = "ANTHROPIC")
+        assertTrue(AiCredentialScope.sameNewsClientConfig(old, old))
+        assertFalse(AiCredentialScope.sameNewsClientConfig(old,
+            old.copy(newsAiModel = "glm-5-3-uncensored-1m")))
+        assertFalse(AiCredentialScope.sameNewsClientConfig(old,
+            old.copy(newsAiBaseUrl = "https://api.llmsrelay.com/v1", newsAiFormat = "OPENAI")))
+        assertFalse(AiCredentialScope.sameNewsClientConfig(old,
+            old.copy(newsBaseUrl = "https://example.com")))
+        assertFalse(AiCredentialScope.sameNewsClientConfig(old,
+            old.copy(newsAiApiKey = "new-key")))
+    }
+
     @Test fun `blank edit field cannot send an existing provider or Relay group key to GLM`() {
         val saved = AppSettings(newsAiApiKey = "old-provider-key", newsAiBaseUrl = "https://api.anthropic.com",
             newsAiModel = "claude-sonnet-4.6", newsAiFormat = "ANTHROPIC")

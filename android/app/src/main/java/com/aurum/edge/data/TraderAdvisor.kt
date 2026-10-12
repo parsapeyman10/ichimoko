@@ -154,8 +154,10 @@ class TraderAdvisor(
         lastAttemptElapsed = 0L
         lastReachableElapsed = 0L
         lastUnreachableElapsed = 0L
-        _connection.value = AiConnectionState(configured = settings.read().hasClientNewsAi)
-        _state.value = TraderOpinionState(configured = settings.read().hasClientNewsAi)
+        val configured = settings.read().hasClientNewsAi
+        _connection.value = AiConnectionState(configured = configured)
+        _state.value = TraderOpinionState(configured = configured)
+        _holdReviews.value = HoldReviewCycle() // old model's open-position alerts are invalid
     }
 
     private val _holdReviews = MutableStateFlow(HoldReviewCycle())
@@ -163,6 +165,7 @@ class TraderAdvisor(
     /** tradeId -> wall-clock time of its last successful hold review (per-trade throttle). */
     private val holdReviewedAt = mutableMapOf<String, Long>()
     private var lastHoldCycleElapsed = 0L
+    private var holdReviewGeneration = -1L
 
     /**
      * The connection is checked BEFORE the AI is asked anything, exactly as required: a cached
@@ -389,6 +392,12 @@ class TraderAdvisor(
      *    for that symbol => no review, with the reason recorded instead of a guessed verdict.
      */
     suspend fun reviewOpenPositions(now: Long = System.currentTimeMillis()): HoldReviewCycle = mutex.withLock {
+        val generation = configGeneration
+        if (holdReviewGeneration != generation) {
+            holdReviewGeneration = generation
+            holdReviewedAt.clear()
+            lastHoldCycleElapsed = 0L
+        }
         val open = journal.trades.value.filter { it.isOpen }
         if (open.isEmpty()) {
             holdReviewedAt.clear()
@@ -404,7 +413,10 @@ class TraderAdvisor(
         lastHoldCycleElapsed = elapsed
 
         // 1) ALWAYS check the connection before asking anything.
-        if (!ensureConnection()) {
+        val connected = ensureConnection()
+        if (generation != configGeneration) return@withLock HoldReviewCycle(
+            openCount = open.size, skipped = "تنظیمات AI هنگام بررسی تغییر کرد")
+        if (!connected) {
             val offline = HoldReviewCycle(openCount = open.size,
                 skipped = "AI در دسترس نیست (${_connection.value.detail.ifBlank { "اتصال برقرار نشد" }}) — " +
                     "پوزیشن‌های باز بدون نظر AI و فقط با قوانین قیمتی مدیریت می‌شوند",
@@ -444,7 +456,11 @@ class TraderAdvisor(
         var reviewed = 0
         var failure = ""
         for (trade in due) {
+            if (generation != configGeneration) return@withLock HoldReviewCycle(
+                openCount = open.size, skipped = "تنظیمات AI هنگام بررسی تغییر کرد")
             val review = runCatching { reviewOpenPosition(trade, state, price, now) }.getOrNull()
+            if (generation != configGeneration) return@withLock HoldReviewCycle(
+                openCount = open.size, skipped = "تنظیمات AI هنگام بررسی تغییر کرد")
             if (review == null) {
                 failure = "پاسخ مدل دربارهٔ پوزیشن ${trade.symbol} معتبر/قابل‌راستی‌آزمایی نبود؛ معامله دست‌نخورده ماند"
                 continue

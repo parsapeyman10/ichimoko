@@ -6,6 +6,14 @@ import com.aurum.edge.core.AppSettings
  * Switching to a GLM profile must never forward an existing Claude/OpenAI key to LLMsRelay.
  */
 internal object AiCredentialScope {
+    /** News evidence from one model/key must not be published under another configuration. */
+    fun sameNewsClientConfig(expected: AppSettings, current: AppSettings): Boolean =
+        current.newsBaseUrl.isBlank() &&
+            current.newsAiApiKey == expected.newsAiApiKey &&
+            current.newsAiBaseUrl == expected.newsAiBaseUrl &&
+            current.newsAiModel == expected.newsAiModel &&
+            current.newsAiFormatNormalized == expected.newsAiFormatNormalized
+
     fun format(input: String, saved: AppSettings, usingSavedEndpoint: Boolean): String =
         if (usingSavedEndpoint && input == "AUTO") saved.newsAiFormatNormalized else input
 

@@ -297,7 +297,8 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 }, modifier = Modifier.weight(1f)) { Text("GLM · Chat", maxLines = 1) }
             }
             if (newsAiModel.startsWith("glm-5-3-uncensored")) {
-                Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("glm-5-3-uncensored" to "GLM 5.3", "glm-5-3-uncensored-1m" to "GLM 1M · فقط متن")
                         .forEach { (id, label) ->
                             FilterChip(selected = newsAiModel == id, onClick = {

@@ -206,7 +206,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private val _aiModels = MutableStateFlow(AiModelsState())
     val aiModels: StateFlow<AiModelsState> = _aiModels.asStateFlow()
 
+    // HTTP calls can finish after a user edits the draft or switches provider. An old
+    // response must never be displayed as proof of the new model's connection.
+    private var aiProbeGeneration = 0L
+    private var aiModelsGeneration = 0L
+
     fun resetAiDraftDiagnostics() {
+        aiProbeGeneration++
+        aiModelsGeneration++
         _aiProbe.value = AiProbeState()
         _aiModels.value = AiModelsState()
     }
@@ -1049,8 +1056,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _toast.value = "ذخیرهٔ کلید مستقیم ناموفق بود"
                 return@launch
             }
-            _aiProbe.value = AiProbeState() // An earlier provider's success is not GLM proof.
-            _aiModels.value = AiModelsState()
+            resetAiDraftDiagnostics() // An earlier provider's success is not GLM proof.
             container.traderAdvisor.onAiConfigChanged()
             container.news.resetAndRefresh()
             container.traderAdvisor.refreshNow(force = true)
@@ -1060,9 +1066,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun clearNewsAiConfig() {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { container.settingsStore.clearNewsAiConfig() }
-            _aiProbe.value = AiProbeState()
-            _aiModels.value = AiModelsState()
+            val cleared = withContext(Dispatchers.IO) { container.settingsStore.clearNewsAiConfig() }
+            if (!cleared) {
+                _toast.value = "حذف کلید مستقیم ناموفق بود؛ تنظیمات قبلی حفظ شد"
+                return@launch
+            }
+            resetAiDraftDiagnostics()
             container.traderAdvisor.onAiConfigChanged()
             container.news.resetAndRefresh()
             container.traderAdvisor.refreshNow() // flips the companion card to "not configured"
@@ -1077,6 +1086,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
      */
     /** Fetch the model IDs this key may use, so Settings never guesses a model name. */
     fun loadNewsAiModels(keyInput: String, baseUrl: String, model: String, format: String = "AUTO") {
+        val requestGeneration = ++aiModelsGeneration
         val saved = container.settingsStore.read()
         val usingSavedEndpoint = baseUrl.isBlank()
         val url = baseUrl.trim().trimEnd('/').ifBlank { saved.newsAiBaseUrl }
@@ -1091,6 +1101,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             val result = runCatching {
                 withContext(Dispatchers.IO) { container.traderAdvisor.listModels(key, url, wireFormat) }
             }
+            if (requestGeneration != aiModelsGeneration) return@launch
             _aiModels.value = result.fold(
                 onSuccess = { AiModelsState(models = it) },
                 onFailure = { AiModelsState(error = (it.message ?: "خطای نامشخص").take(120)) })
@@ -1098,6 +1109,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun testNewsAiConnection(keyInput: String, baseUrl: String, model: String, format: String = "AUTO") {
+        val requestGeneration = ++aiProbeGeneration
         val saved = container.settingsStore.read()
         val usingSavedEndpoint = baseUrl.isBlank()
         val url = baseUrl.trim().trimEnd('/').ifBlank { saved.newsAiBaseUrl }
@@ -1115,6 +1127,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     container.traderAdvisor.probe(key, url, modelName, wireFormat)
                 }
             }
+            if (requestGeneration != aiProbeGeneration) return@launch
             _aiProbe.value = AiProbeState(message = result.fold(
                 onSuccess = { "اتصال تأیید شد؛ پاسخ مدل: «$it»" },
                 onFailure = { "اتصال ناموفق: ${com.aurum.edge.data.AiConnectionDiagnostics.describe(it)}" }))

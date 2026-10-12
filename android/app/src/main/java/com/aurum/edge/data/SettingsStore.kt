@@ -158,8 +158,8 @@ class SettingsStore(context: Context) {
      * User's OWN key for a DIRECT-FROM-PHONE AI news call (Anthropic or OpenAI-compatible,
      * see the format parameter), replacing the need
      * for a self-hosted backend for the Forex ninth-condition gate. Explicit, on-device only;
-     * never logged. A blank key keeps the previous secret only for the same URL AND wire format;
-     * use [clearNewsAiConfig] to remove credentials. A different provider requires its own key.
+     * never logged. A blank key keeps the previous secret only for the same URL and wire format
+     * (and on LLMsRelay, the same model group). Use [clearNewsAiConfig] to remove it.
      */
     @Synchronized
     fun saveNewsAiConfig(apiKey: String, baseUrl: String, model: String, format: String = "AUTO"): Boolean {
