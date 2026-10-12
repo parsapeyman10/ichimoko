@@ -57,13 +57,13 @@ class NobitexTickArchiveTest {
         val opened = store.open(signal, "BTC/USDT", 3000.0, 50_000.0, 0.5, manual = true, observedAt = at)
         assertTrue(opened.usesTickArchive)
         // Direct local quotes/candles are not allowed to reorder an archived position.
-        store.settleTick("BTC/USDT", 2980.0, at + 1)
+        store.settleTick("BTC/USDT", 2950.0, at + 1)
         assertTrue(store.trades.value.single().isOpen)
         store.settleTick("BTC/USDT", 3101.0, at + 2, archiveSeq = 4)
         val trailed = store.trades.value.single().stopLoss
         val restored = JournalStore(ctx, file, settingsStore = settings).also { it.load() }
         assertEquals(4L, restored.trades.value.single().tickArchiveSeq)
-        restored.settleTick("BTC/USDT", 2980.0, at + 3, archiveSeq = 4)
+        restored.settleTick("BTC/USDT", 2950.0, at + 3, archiveSeq = 4)
         assertTrue(restored.trades.value.single().isOpen)
         assertEquals(trailed, restored.trades.value.single().stopLoss, 0.001)
         assertEquals(1, restored.settleTick("BTC/USDT", trailed - 0.5,
