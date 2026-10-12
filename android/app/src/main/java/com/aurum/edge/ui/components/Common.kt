@@ -291,6 +291,8 @@ fun AssetClass4SlotsBanner(
     livePrices: Map<String, Double> = emptyMap(),
     onSelectSymbol: (String) -> Unit = {},
     modifier: Modifier = Modifier,
+    /** Home-only UI snapshots; NEVER a live tick, account valuation or settlement price. */
+    lastKnownPrices: Map<String, Double> = emptyMap(),
 ) {
     val categories = listOf(
         com.aurum.edge.core.AssetClass.COMMODITY to "طلا و کالا",
@@ -367,7 +369,10 @@ fun AssetClass4SlotsBanner(
                             }
 
                             if (isOpen) categoryTrades.forEach { trade ->
-                                val valuation = LiveTradeValuation.from(trade, livePrices[trade.symbol])
+                                val frozen = livePrices[trade.symbol] == null &&
+                                    lastKnownPrices[trade.symbol] != null
+                                val valuation = LiveTradeValuation.from(trade,
+                                    livePrices[trade.symbol] ?: lastKnownPrices[trade.symbol])
 
                                 Text(
                                     text = "${trade.symbol} · ${if (trade.action == com.aurum.edge.core.SignalAction.BUY) "BUY ↗" else "SELL ↘"}",
@@ -383,13 +388,15 @@ fun AssetClass4SlotsBanner(
                                     Text("اهرم ${trade.effectiveLeverage}x", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
                                     Text(
                                         valuation?.let { value ->
-                                            (if (value.netPnlUsd >= 0) "+$" else "-$") +
+                                            (if (frozen) "ثابت " else "") +
+                                                (if (value.netPnlUsd >= 0) "+$" else "-$") +
                                                 String.format(Locale.US, "%.2f", kotlin.math.abs(value.netPnlUsd))
                                         } ?: "P/L —",
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = when {
                                             valuation == null -> AurumColors.TextMuted
+                                            frozen -> AurumColors.Gold
                                             valuation.netPnlUsd >= 0 -> AurumColors.Green
                                             else -> AurumColors.Red
                                         },

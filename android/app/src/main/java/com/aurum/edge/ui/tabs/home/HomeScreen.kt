@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.data.PairScanState
+import com.aurum.edge.data.DisplayMark
+import com.aurum.edge.data.OpenPositionDisplay
 import com.aurum.edge.core.LiveTradeValuation
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.MarketHours
@@ -143,17 +145,24 @@ fun HomeScreen(
         val tradesState by viewModel.trades.collectAsStateWithLifecycle()
         val openTradesList = remember(tradesState) { tradesState.filter { it.isOpen } }
         val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
+        val lastMarks by viewModel.lastDisplayMarks.collectAsStateWithLifecycle()
         val freshPrices = com.aurum.edge.data.OpenPositionQuotePolicy.prices(openTradesList, liveTicks, now)
+        // Historical display marks never enter freshPrices, account equity or risk checks.
+        val frozenPrices = openTradesList.mapNotNull { trade ->
+            OpenPositionDisplay.forTrade(trade, lastMarks)?.let { trade.symbol to it.price }
+        }.toMap()
 
         if (openTradesList.isNotEmpty()) {
             com.aurum.edge.ui.components.AssetClass4SlotsBanner(
                 openTrades = openTradesList,
                 livePrices = freshPrices,
+                lastKnownPrices = frozenPrices,
                 onSelectSymbol = onChartSymbol,
             )
             LiveOpenTradesTrackingSection(
                 viewModel = viewModel,
                 currentMarket = market,
+                lastMarks = lastMarks,
                 now = now,
                 onJournal = onJournal,
                 onSelectTrade = onChartSymbol,
@@ -241,6 +250,7 @@ private fun HomeRadarCard(
 private fun LiveOpenTradesTrackingSection(
     viewModel: AurumViewModel,
     currentMarket: MarketState,
+    lastMarks: Map<String, DisplayMark>,
     now: Long,
     onJournal: () -> Unit,
     onSelectTrade: (String) -> Unit,
@@ -286,6 +296,7 @@ private fun LiveOpenTradesTrackingSection(
                         trade = trade,
                         currentMarket = currentMarket,
                         liveTicks = liveTicks,
+                        lastMark = OpenPositionDisplay.forTrade(trade, lastMarks),
                         now = now,
                         onSelect = { onSelectTrade(trade.symbol) },
                     )
@@ -317,6 +328,7 @@ private fun LiveTradeGaugeCard(
     trade: PaperTrade,
     currentMarket: MarketState,
     liveTicks: Map<String, PriceTick>,
+    lastMark: DisplayMark?,
     now: Long,
     onSelect: () -> Unit,
 ) {
@@ -325,10 +337,11 @@ private fun LiveTradeGaugeCard(
     val selectedTick = com.aurum.edge.data.OpenPositionQuotePolicy.selectedFallback(trade, currentMarket, now)
     val polledTick = com.aurum.edge.data.OpenPositionQuotePolicy.monitored(trade, liveTicks[trade.symbol], now)
     val verifiedLivePrice = (polledTick ?: selectedTick)?.price
-    val observedAt = (polledTick ?: selectedTick)?.at
-    // Never draw the moving pointer at entry or calculate P/L from entry when the
-    // actual quote is absent: that was the apparent "rewind" on tab navigation.
-    val valuation = LiveTradeValuation.from(trade, verifiedLivePrice)
+    val frozen = verifiedLivePrice == null && lastMark != null
+    val observedAt = (polledTick ?: selectedTick)?.at ?: lastMark?.tickAt
+    // A frozen mark is only a previously verified display snapshot for this exact trade.
+    // It is never put back into the live tick map or used for settling/risk/equity.
+    val valuation = LiveTradeValuation.from(trade, verifiedLivePrice ?: lastMark?.price)
 
     val entry = trade.entry
     val stop = trade.stopLoss
@@ -341,13 +354,15 @@ private fun LiveTradeGaugeCard(
     }
 
     val statusColor = when {
+        frozen -> AurumColors.Gold
         valuation == null -> AurumColors.TextMuted
         valuation.netPnlUsd > 0.0 -> AurumColors.Green
         valuation.netPnlUsd < 0.0 -> AurumColors.Red
         else -> AurumColors.Gold
     }
     val movementLabel = when {
-        valuation == null -> "منتظر تیک تازه؛ وضعیت قیمت نامعلوم است"
+        frozen -> "آخرین وضعیت ثبت‌شده ثابت مانده؛ تیک تازه نداریم"
+        valuation == null -> "هنوز هیچ تیک تأییدشده‌ای برای این معامله نداریم"
         (if (isBuy) valuation.price - entry else entry - valuation.price) > 0.0 -> "↗ در مسیر حد سود (TP)"
         (if (isBuy) valuation.price - entry else entry - valuation.price) < 0.0 -> "↘ در مسیر حد ضرر (SL)"
         else -> "⚪ قیمت واقعی روی نقطه ورود (Entry)"
@@ -391,8 +406,9 @@ private fun LiveTradeGaugeCard(
                 )
                 Text(
                     text = valuation?.let {
-                        "سود/زیان خالص (${String.format(java.util.Locale.US, "%.2f", it.pnlPercent)}%)"
-                    } ?: "سود/زیان نامعلوم؛ تیک تازه نیست",
+                        (if (frozen) "آخرین سود/زیان ثبت‌شده (ثابت)" else "سود/زیان خالص") +
+                            " (${String.format(java.util.Locale.US, "%.2f", it.pnlPercent)}%)"
+                    } ?: "منتظر اولین تیک معتبر",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                 )
@@ -429,9 +445,12 @@ private fun LiveTradeGaugeCard(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = valuation?.let { "آخرین قیمت تازه: ${formatPrice(it.price)}" +
-                    (observedAt?.let { at -> " · تیک ${formatDateTime(at)}" } ?: "") }
-                    ?: "قیمت فعلی: — (قیمت ورود جای تیک نمی‌نشیند)",
+                text = valuation?.let {
+                    (if (frozen) "آخرین قیمت ثبت‌شده، نه زنده: " else "آخرین قیمت تازه: ") +
+                        formatPrice(it.price) + (observedAt?.let { at ->
+                            " · تیک ${formatDateTime(at)}" + (if (frozen) " (${if (at <= now) relativeTime(at) else "زمان ناشر جلوتر از گوشی"})" else "")
+                        } ?: "")
+                } ?: "اولین تیک واقعی هنوز نرسیده؛ قیمت ورود جای تیک نمی‌نشیند",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextPrimary,
                 fontWeight = FontWeight.Bold,
@@ -512,12 +531,12 @@ private fun LiveTradeGaugeCard(
                     )
                 }
 
-                // A moving pointer exists only with a fresh quote. The gold divider
+                // The last verified pointer stays in place when frozen; the gold divider
                 // above is the saved ENTRY marker, not a substitute current price.
-                valuation?.let { fresh ->
+                valuation?.let { last ->
                     Box(
                         modifier = Modifier
-                            .fillMaxWidth(fresh.progress.coerceIn(0.02f, 0.98f))
+                            .fillMaxWidth(last.progress.coerceIn(0.02f, 0.98f))
                             .height(20.dp),
                         contentAlignment = Alignment.CenterEnd,
                     ) {
@@ -561,6 +580,7 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit, now:
     val status by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
+    val lastMarks by viewModel.lastDisplayMarks.collectAsStateWithLifecycle()
     val enabled = settings.autoPaperTrading
     val openTrades = remember(trades) { trades.filter { it.isOpen } }
     val freshPrices = com.aurum.edge.data.OpenPositionQuotePolicy.prices(openTrades, liveTicks, now)
@@ -568,6 +588,10 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit, now:
 
     val totalMarginUsed = openTrades.sumOf { it.effectiveMarginUsd }
     val unrealizedTotal = LiveTradeValuation.total(openTrades, freshPrices)
+    val savedMarks = openTrades.mapNotNull { OpenPositionDisplay.forTrade(it, lastMarks) }
+    val lastKnownTotal = LiveTradeValuation.total(openTrades, openTrades.mapNotNull { trade ->
+        OpenPositionDisplay.forTrade(trade, lastMarks)?.let { trade.symbol to it.price }
+    }.toMap())
     val equity = unrealizedTotal?.let { settings.accountBalance + it }
     val freeMargin = equity?.let { (it - totalMarginUsed).coerceAtLeast(0.0) }
 
@@ -603,7 +627,12 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit, now:
                 else if (unrealizedTotal >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
         }
         if (unrealizedTotal == null) Text(
-            "اکوئیتی نامعلوم: حداقل یک پوزیشن تیک تازه ندارد؛ قیمت ورود جای قیمت فعلی نیست.",
+            lastKnownTotal?.let { old ->
+                "اکوئیتی زنده فعلاً قابل محاسبه نیست. آخرین برآورد سود/زیان پوزیشن‌ها: " +
+                    String.format(java.util.Locale.US, "%+.2f$", old) +
+                    " (ثابت؛ قدیمی‌ترین تیک ${savedMarks.minOfOrNull { it.tickAt }?.let { relativeTime(it) } ?: "—"}). " +
+                    "این مقدار مبنای ریسک/تسویه نیست."
+            } ?: "هنوز برای همهٔ پوزیشن‌ها تیک معتبر نداریم؛ اکوئیتی زنده قابل محاسبه نیست.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
         )
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

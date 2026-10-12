@@ -38,6 +38,8 @@ import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.SpotFallbackClient
 import com.aurum.edge.data.OpenTickSnapshot
+import com.aurum.edge.data.DisplayMark
+import com.aurum.edge.data.OpenPositionDisplay
 import com.aurum.edge.data.NewsRepository
 import com.aurum.edge.data.WatchSelection
 import com.aurum.edge.data.WatchState
@@ -176,6 +178,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
      */
     private val _liveTicks = MutableStateFlow<Map<String, PriceTick>>(emptyMap())
     val liveTicks: StateFlow<Map<String, PriceTick>> = _liveTicks.asStateFlow()
+    // UI-only memory of the last verified tick for each *trade id*. Stale values never enter liveTicks.
+    private val _lastDisplayMarks = MutableStateFlow<Map<String, DisplayMark>>(emptyMap())
+    val lastDisplayMarks: StateFlow<Map<String, DisplayMark>> = _lastDisplayMarks.asStateFlow()
     private var liveTickerLoopStarted = false
 
     private val _stats = MutableStateFlow(container.journalStore.stats())
@@ -390,6 +395,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     _liveTicks.update { current -> current.filter { (symbol, tick) ->
                         symbol in open && tick.at >= open.getValue(symbol) && TradeQuotePolicy.accepts(tick)
                     } }
+                    _lastDisplayMarks.update { OpenPositionDisplay.onlyOpen(it, trades) }
                     open.forEach { (symbol, openedAt) ->
                         if (symbol !in workers) {
                             val worker = launch(Dispatchers.IO) {
@@ -419,6 +425,13 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                                         if (!isActive) break
                                         val fresh = quote?.takeIf {
                                             it.at >= openedAt && !MarketHours.closedFor(symbol) && TradeQuotePolicy.accepts(it)
+                                        }
+                                        if (fresh != null) {
+                                            container.journalStore.trades.value.firstOrNull { trade ->
+                                                trade.isOpen && trade.symbol == symbol && trade.openedAt == openedAt
+                                            }?.let { trade -> _lastDisplayMarks.update { old ->
+                                                OpenPositionDisplay.record(old, trade, fresh)
+                                            } }
                                         }
                                         _liveTicks.update { previous -> OpenTickSnapshot.updated(previous,
                                             symbol, fresh, container.journalStore.trades.value.filter { it.isOpen }
