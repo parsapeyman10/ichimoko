@@ -28,6 +28,34 @@ class MarketProbeTest(unittest.TestCase):
                      "baseCcy": "BTC", "quoteCcy": "USDT"})
         self.assertEqual("BTC-USDT", audit.okx_listing(data, "BTC/USDT"))
 
+    def test_freshest_verified_spot_venue_wins_without_using_an_unverified_pair(self):
+        candidates = [{"venue": "KRAKEN_SPOT", "ready": True, "trade_age_ms": 48_000},
+                      {"venue": "OKX_SPOT", "ready": True, "trade_age_ms": 1_000}]
+        self.assertEqual("OKX_SPOT", audit.suggested_venue(candidates))
+        candidates[1]["ready"] = False
+        self.assertEqual("KRAKEN_SPOT", audit.suggested_venue(candidates))
+        candidates[0]["ready"] = False
+        self.assertIsNone(audit.suggested_venue(candidates))
+
+    def test_gate_listing_and_candle_column_order_and_execution_time(self):
+        with patch.object(audit, "request_json", return_value={
+            "id": "RUNE_USDT", "base": "RUNE", "quote": "USDT",
+            "trade_status": "tradable", "type": "normal"}):
+            self.assertEqual("RUNE_USDT", audit.gate_listing("RUNE/USDT"))
+            self.assertIsNone(audit.gate_listing("TON/USDT"))
+        interval = 5 * 60_000
+        now = 323 * interval + interval // 2
+        # Gate: timestamp seconds, quote volume, close, high, low, open, base volume, closed.
+        rows = [[str(i * interval // 1000), "123", "2.5", "3", "1", "2", "50", "true"]
+                for i in range(1, 323)]
+        rows += [[str(323 * interval // 1000), "0", "0", "0", "0", "0", "0", "false"]]
+        with patch.object(audit, "request_json", return_value=rows):
+            self.assertEqual("ok", audit.candles("GATE_SPOT", "RUNE_USDT", 5, now))
+        with patch.object(audit, "request_json", return_value=[{
+            "currency_pair": "RUNE_USDT", "create_time_ms": "99000.123000",
+            "price": "2.5", "amount": "5"}]):
+            self.assertEqual(1000, audit.latest_trade("GATE_SPOT", "RUNE_USDT", 100_000))
+
     def test_three_closed_frames_cannot_be_padded_or_stale(self):
         interval = 5 * 60_000
         now = 323 * interval + interval // 2

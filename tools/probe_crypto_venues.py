@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Keyless, read-only spot coverage audit for the app's exact USDT catalog.
 
-Checks Kraken and OKX independently, per symbol: online spot listing, 320 contiguous
+Checks Kraken, OKX and Gate independently, per symbol: online spot listing, 320 contiguous
 closed M5/M15/H1 bars and a timestamped public execution. Never turns a venue's
 availability into a paper-trade authorization; an open position needs a durable,
 same-venue, ordered trade replay implementation as well.
@@ -28,6 +28,7 @@ MIN_CANDLES = 320
 # Binance/Nobitex are intentionally not candidates. No USD/USDC/futures substitutions.
 KRAKEN = "https://api.kraken.com/0/public/"
 OKX = "https://www.okx.com/api/v5/"
+GATE = "https://api.gateio.ws/api/v4/"
 _okx_lock = threading.Lock()
 _okx_last = 0.0
 
@@ -41,7 +42,7 @@ def symbols():
 
 def request_json(base, path, params=None, timeout=8):
     global _okx_last
-    if base not in (KRAKEN, OKX):
+    if base not in (KRAKEN, OKX, GATE):
         raise ValueError("Host not allowlisted")
     url = base + path + ("?" + urllib.parse.urlencode(params) if params else "")
     req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "AurumEdge-market-audit/1.0"})
@@ -103,6 +104,16 @@ def okx_listing(raw, symbol):
                        row.get("quoteCcy") == "USDT" for row in raw) else None
 
 
+def gate_listing(symbol):
+    pair = symbol.replace("/", "_")
+    result = request_json(GATE, "spot/currency_pairs/" + pair)
+    if (result.get("id") == pair and result.get("base") == symbol.split("/")[0] and
+            result.get("quote") == "USDT" and result.get("trade_status") == "tradable" and
+            result.get("type") == "normal"):
+        return pair
+    return None
+
+
 def candles(venue, pair, interval, now_ms):
     if venue == "KRAKEN_SPOT":
         body = request_json(KRAKEN, "OHLC", {"pair": pair, "interval": interval})
@@ -114,7 +125,17 @@ def candles(venue, pair, interval, now_ms):
             raise ValueError("Ambiguous OHLC pair")
         rows = result[keys[0]]
         data = [(int(row[0]) * 1000, *(float(v) for v in row[1:6])) for row in rows]
-    else:
+    elif venue == "GATE_SPOT":
+        bar = f"{interval}m" if interval < 60 else "1h"
+        rows = request_json(GATE, "spot/candlesticks", {"currency_pair": pair,
+                      "interval": bar, "limit": 330})
+        if not isinstance(rows, list):
+            raise ValueError("Gate candles unavailable")
+        # Gate publishes [time, quote volume, close, high, low, open, base volume,
+        # closed]. Column order differs from Kraken and OKX. Never timestamp a close as a tick.
+        data = [(int(row[0]) * 1000, float(row[5]), float(row[3]), float(row[4]),
+                 float(row[2]), float(row[6])) for row in rows if str(row[7]).lower() == "true"]
+    elif venue == "OKX_SPOT":
         bar = f"{interval}m" if interval < 60 else "1H"
         rows = []
         cursor = None
@@ -131,6 +152,8 @@ def candles(venue, pair, interval, now_ms):
             rows.extend(page)
             cursor = page[-1][0]
         data = [(int(row[0]), *(float(v) for v in row[1:6])) for row in rows if row[8] == "1"]
+    else:
+        raise ValueError("Unknown venue")
     return checked_bars(data, interval, now_ms)
 
 
@@ -145,7 +168,14 @@ def latest_trade(venue, pair, now_ms):
         rows = body["result"][keys[0]]
         at = int(float(rows[-1][2]) * 1000)
         price = float(rows[-1][0]); amount = float(rows[-1][1])
-    else:
+    elif venue == "GATE_SPOT":
+        rows = request_json(GATE, "spot/trades", {"currency_pair": pair, "limit": 1})
+        if not isinstance(rows, list) or len(rows) != 1 or rows[0].get("currency_pair") != pair:
+            raise ValueError("Gate execution unavailable or wrong pair")
+        row = rows[0]
+        at = int(float(row["create_time_ms"])); price = float(row["price"])
+        amount = float(row["amount"])
+    elif venue == "OKX_SPOT":
         body = request_json(OKX, "market/trades", {"instId": pair, "limit": 1})
         if body.get("code") != "0" or len(body.get("data", [])) != 1:
             raise ValueError("OKX trades unavailable")
@@ -153,6 +183,8 @@ def latest_trade(venue, pair, now_ms):
         if row.get("instId") != pair:
             raise ValueError("Wrong execution pair")
         at = int(row["ts"]); price = float(row["px"]); amount = float(row["sz"])
+    else:
+        raise ValueError("Unknown venue")
     if not math.isfinite(price) or not math.isfinite(amount) or \
             price <= 0 or amount <= 0 or at <= 0 or at > now_ms + 10_000:
         raise ValueError("Invalid execution")
@@ -176,6 +208,18 @@ def probe(venue, pair, now_ms):
     result["ready"] = all(v == "ok" for v in result["candles"].values()) and \
         result["trade_age_ms"] is not None and result["trade_age_ms"] <= 90_000
     return result
+
+
+def probe_gate(symbol, now_ms):
+    pair = gate_listing(symbol)
+    return probe("GATE_SPOT", pair, now_ms) if pair else None
+
+
+def suggested_venue(candidates):
+    ready = [candidate for candidate in candidates if candidate.get("ready")]
+    # A faster-looking venue is never selected if any frame or trade quote failed.
+    return min(ready, key=lambda candidate: (
+        candidate["trade_age_ms"], candidate["venue"]))["venue"] if ready else None
 
 
 def main():
@@ -208,18 +252,21 @@ def main():
                 market = (kraken_listing(raw, symbol) if venue == "KRAKEN_SPOT"
                           else okx_listing(raw, symbol))
                 if market:
-                    futures[pool.submit(probe, venue, market, now_ms)] = symbol
+                    futures[pool.submit(probe, venue, market, now_ms)] = (symbol, venue)
+            # Gate's single-pair endpoint avoids downloading an entire exchange catalog.
+            futures[pool.submit(probe_gate, symbol, now_ms)] = (symbol, "GATE_SPOT")
         for future in concurrent.futures.as_completed(futures):
-            symbol = futures[future]
+            symbol, venue = futures[future]
             try:
-                rows[symbol]["candidates"].append(future.result())
+                candidate = future.result()
+                if candidate is not None:
+                    rows[symbol]["candidates"].append(candidate)
             except Exception as exc:
-                rows[symbol]["candidates"].append({"ready": False, "error": str(exc)[:90]})
+                rows[symbol]["candidates"].append({"venue": venue, "ready": False, "error": str(exc)[:90]})
     for symbol, row in rows.items():
         row["candidates"].sort(key=lambda candidate: candidate.get("venue", ""))
-        ready = [candidate for candidate in row["candidates"] if candidate.get("ready")]
         # This is only a diagnostic suggestion; never change an existing position's venue.
-        row["suggested"] = ready[0]["venue"] if ready else None
+        row["suggested"] = suggested_venue(row["candidates"])
     print(json.dumps({"observed_at_utc": dt.datetime.fromtimestamp(now_ms / 1000, dt.timezone.utc).isoformat(),
                       "warning": "Runner reachability is not phone reachability. Listing/candles/trade freshness do not certify safe open-position replay or unlimited access.",
                       "source_errors": errors, "symbols": rows}, ensure_ascii=False, indent=2))
