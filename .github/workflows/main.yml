@@ -94,7 +94,8 @@ jobs:
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.26 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.27 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.28 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.29 updater')))) }}
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.29 updater') ||
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.30 updater')))) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -518,6 +519,9 @@ jobs:
           fi
           if [[ "$VERSION_NAME" == "1.3.29" ]]; then
             NOTES+=$'\n\nChanges: open crypto PAPER positions now reconcile each executed trade returned in overlapping Nobitex recent-trade pages in time order, instead of settling from only the last snapshot. A missing page overlap, ambiguous duplicate, missing history since entry or prolonged feed failure records a persistent coverage-gap warning in the open trade journal. The endpoint publishes no global trade IDs or guaranteed historical pagination, so missing ticks cannot be recovered or zero-loss coverage promised, especially across mobile offline/OS service stops. FX and commodity feeds remain sampled quotes. Automatic market scanning already runs while the app is visible and via the explicitly enabled Android foreground monitor; it cannot run without permission or past Android time limits. The single 5m TradingView widget requests built-in Ichimoku on each load and passes study override values derived from the V1 engine (8/24/72, shift 24); cross-origin rendering and manual removal cannot be verified or locked without on-device checks. No broker orders or profitability claims.'
+          fi
+          if [[ "$VERSION_NAME" == "1.3.30" ]]; then
+            NOTES+=$'\n\nChanges: foreground monitoring uses independent coroutine tasks for market scanning, news/calendar, AI, selected-market feed, journal notifications and one supervised task per open-position symbol. A stalled quote for one pair no longer holds another pair under a process-wide quote/tick mutex. Position workers start/stop with the position, keep same-pair 10-second public-feed limits and may only settle/flag the exact paper position they started for. The journal still serializes atomic writes; provider and Android limits still apply. This is bounded task-level concurrency within one Android process, NOT extra independent trading engines or a guarantee of no lost ticks, unlimited scans, device operation or profit.'
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "$TAG" --notes "$NOTES"
