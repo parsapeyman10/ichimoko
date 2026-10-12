@@ -145,10 +145,14 @@ fun HomeScreen(
         val tradesState by viewModel.trades.collectAsStateWithLifecycle()
         val openTradesList = remember(tradesState) { tradesState.filter { it.isOpen } }
         val livePricesMap by viewModel.livePrices.collectAsStateWithLifecycle()
+        val livePriceTimes by viewModel.livePriceTimes.collectAsStateWithLifecycle()
+        val freshPrices = livePricesMap.filter { (symbol, price) ->
+            livePriceTimes[symbol]?.let { at -> TradeQuotePolicy.accepts(PriceTick(price, at), now) } == true
+        }
 
         com.aurum.edge.ui.components.AssetClass4SlotsBanner(
             openTrades = openTradesList,
-            livePrices = livePricesMap,
+            livePrices = freshPrices,
             onSelectSymbol = onChartSymbol,
         )
 
@@ -156,12 +160,13 @@ fun HomeScreen(
         LiveOpenTradesTrackingSection(
             viewModel = viewModel,
             currentMarket = market,
+            now = now,
             onJournal = onJournal,
             onSelectTrade = onChartSymbol,
         )
 
         // ── ۴. پنل معاملهٔ خودکار کاغذی و تخصیص ۴ بازار ────────────────────
-        AutoPaperCard(viewModel, onJournal)
+        AutoPaperCard(viewModel, onJournal, now)
     }
 }
 
@@ -172,11 +177,13 @@ fun HomeScreen(
 private fun LiveOpenTradesTrackingSection(
     viewModel: AurumViewModel,
     currentMarket: MarketState,
+    now: Long,
     onJournal: () -> Unit,
     onSelectTrade: (String) -> Unit,
 ) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
+    val livePriceTimes by viewModel.livePriceTimes.collectAsStateWithLifecycle()
     val openTrades = remember(trades) { trades.filter { it.isOpen } }
 
     SectionCard(
@@ -216,6 +223,8 @@ private fun LiveOpenTradesTrackingSection(
                         trade = trade,
                         currentMarket = currentMarket,
                         livePrices = livePrices,
+                        livePriceTimes = livePriceTimes,
+                        now = now,
                         onSelect = { onSelectTrade(trade.symbol) },
                     )
                 }
@@ -246,18 +255,24 @@ private fun LiveTradeGaugeCard(
     trade: PaperTrade,
     currentMarket: MarketState,
     livePrices: Map<String, Double>,
+    livePriceTimes: Map<String, Long>,
+    now: Long,
     onSelect: () -> Unit,
 ) {
     val isBuy = trade.action == SignalAction.BUY
     val assetClass = AssetClass.of(trade.symbol)
     val selectedFresh = currentMarket.symbol == trade.symbol &&
             currentMarket.feed.mode == FeedMode.LIVE && !currentMarket.showingCachedData &&
-            FeedLiveness.hasRecentReceipt(currentMarket.feed) &&
+            FeedLiveness.hasRecentReceipt(currentMarket.feed, now) &&
             currentMarket.lastPrice?.let { price -> currentMarket.lastTradeAt?.let { at ->
-                TradeQuotePolicy.accepts(PriceTick(price, at))
+                TradeQuotePolicy.accepts(PriceTick(price, at), now)
             } } == true
-    val verifiedLivePrice = livePrices[trade.symbol]
+    val polledTick = livePrices[trade.symbol]?.let { price ->
+        livePriceTimes[trade.symbol]?.let { at -> PriceTick(price, at) }
+    }?.takeIf { TradeQuotePolicy.accepts(it, now) }
+    val verifiedLivePrice = polledTick?.price
         ?: currentMarket.lastPrice?.takeIf { selectedFresh }
+    val observedAt = polledTick?.at ?: currentMarket.lastTradeAt?.takeIf { selectedFresh }
     // Never draw the moving pointer at entry or calculate P/L from entry when the
     // actual quote is absent: that was the apparent "rewind" on tab navigation.
     val valuation = LiveTradeValuation.from(trade, verifiedLivePrice)
@@ -366,7 +381,8 @@ private fun LiveTradeGaugeCard(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = valuation?.let { "آخرین قیمت تازه: ${formatPrice(it.price)}" }
+                text = valuation?.let { "آخرین قیمت تازه: ${formatPrice(it.price)}" +
+                    (observedAt?.let { at -> " · تیک ${formatDateTime(at)}" } ?: "") }
                     ?: "قیمت فعلی: — (قیمت ورود جای تیک نمی‌نشیند)",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextPrimary,
@@ -495,12 +511,16 @@ private fun LiveTradeGaugeCard(
  * پنل معاملهٔ خودکار کاغذی در صفحه اصلی
  */
 @Composable
-private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit) {
+private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit, now: Long) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val status by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
+    val livePriceTimes by viewModel.livePriceTimes.collectAsStateWithLifecycle()
+    val freshPrices = livePrices.filter { (symbol, price) ->
+        livePriceTimes[symbol]?.let { at -> TradeQuotePolicy.accepts(PriceTick(price, at), now) } == true
+    }
     val enabled = settings.autoPaperTrading
     val openTrades = remember(trades) { trades.filter { it.isOpen } }
     val lastTrade = trades.maxByOrNull { it.openedAt }
@@ -508,7 +528,7 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit) {
     val totalMarginUsed = openTrades.sumOf { it.effectiveMarginUsd }
     val freeMargin = (settings.accountBalance - totalMarginUsed).coerceAtLeast(0.0)
 
-    val unrealizedTotal = LiveTradeValuation.total(openTrades, livePrices)
+    val unrealizedTotal = LiveTradeValuation.total(openTrades, freshPrices)
     val equity = unrealizedTotal?.let { settings.accountBalance + it }
 
     SectionCard(

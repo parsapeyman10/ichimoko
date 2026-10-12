@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +46,7 @@ import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.PaperConditionRecord
 import com.aurum.edge.core.IctPriceActionRecord
 import com.aurum.edge.core.PaperTrade
+import com.aurum.edge.core.LiveTradeValuation
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.core.PaperAiReview
@@ -85,7 +87,13 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
         pendingPdf = null
         if (uri != null && request != null) viewModel.exportJournalPdf(uri, request.first, request.second)
     }
-    val now = System.currentTimeMillis()
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(20_000L)
+            now = System.currentTimeMillis()
+        }
+    }
     val livePrice = market.lastPrice?.takeIf { price ->
         !market.showingCachedData && market.feed.mode == FeedMode.LIVE &&
             FeedLiveness.hasRecentReceipt(market.feed, now) &&
@@ -195,15 +203,17 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
         )
 
         val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
+        val livePriceTimes by viewModel.livePriceTimes.collectAsStateWithLifecycle()
         if (filteredOpen.isNotEmpty()) {
             SectionCard("پوزیشن‌های باز · ${selectedCategory?.label ?: "همهٔ بازارها"}", "ارزش‌گذاری با آخرین قیمت واقعی دریافتی") {
                 HoldReviewStatus(holdReview) { viewModel.reviewOpenPositionsNow() }
                 filteredOpen.forEach { trade ->
-                    val currentPrice = livePrices[trade.symbol] ?: (if (trade.symbol == market.symbol) livePrice else null)
-                    val unrealized = currentPrice?.let { price ->
-                        val perOz = if (trade.action == SignalAction.BUY) price - trade.entry else trade.entry - price
-                        perOz * trade.positionOz
-                    }
+                    val currentPrice = livePrices[trade.symbol]?.takeIf { price ->
+                        livePriceTimes[trade.symbol]?.let { at ->
+                            TradeQuotePolicy.accepts(PriceTick(price, at), now)
+                        } == true
+                    } ?: (if (trade.symbol == market.symbol) livePrice else null)
+                    val unrealized = LiveTradeValuation.from(trade, currentPrice)?.netPnlUsd
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -302,6 +312,8 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                     else -> AurumColors.Red
                                 },
                             )
+                            Text(if (unrealized == null) "P/L نامعلوم" else "P/L خالص با تیک تازه",
+                                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                             OutlinedButton(
                                 onClick = { viewModel.closePaperTrade(trade) },
                                 enabled = currentPrice != null,

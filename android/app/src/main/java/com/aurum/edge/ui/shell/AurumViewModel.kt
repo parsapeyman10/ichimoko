@@ -23,6 +23,7 @@ import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
+import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.PaperPortfolioPolicy
 import com.aurum.edge.core.TechnicalEvidence
@@ -172,6 +173,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     private val _livePrices = MutableStateFlow<Map<String, Double>>(emptyMap())
     val livePrices: StateFlow<Map<String, Double>> = _livePrices.asStateFlow()
+    /** Original exchange/quote time, not the moment this screen was recomposed. */
+    private val _livePriceTimes = MutableStateFlow<Map<String, Long>>(emptyMap())
+    val livePriceTimes: StateFlow<Map<String, Long>> = _livePriceTimes.asStateFlow()
     private var liveTickerLoopStarted = false
 
     private val _stats = MutableStateFlow(container.journalStore.stats())
@@ -361,6 +365,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             while (isActive) {
                 if (!visibleOnlineLoopEnabled && !SignalMonitorService.running.value) {
                     _livePrices.value = emptyMap()
+                    _livePriceTimes.value = emptyMap()
                     delay(1_000L)
                     continue
                 }
@@ -370,12 +375,17 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     // Rebuild on every pass: a missed provider response must never leave an
                     // indefinitely "live" cached price in Home/Chart/Journal.
                     val currentMap = mutableMapOf<String, Double>()
+                    val currentTimes = mutableMapOf<String, Long>()
 
-                    if (currentMarket.lastPrice != null && currentMarket.lastPrice!! > 0.0 &&
+                    val selectedTick = currentMarket.lastPrice?.let { price ->
+                        currentMarket.lastTradeAt?.let { at -> PriceTick(price, at) }
+                    }
+                    if (selectedTick != null && TradeQuotePolicy.accepts(selectedTick) &&
                         !currentMarket.showingCachedData && currentMarket.feed.mode == FeedMode.LIVE &&
                         FeedLiveness.hasRecentReceipt(currentMarket.feed) &&
                         !MarketHours.closedFor(currentMarket.symbol)) {
-                        currentMap[currentMarket.symbol] = currentMarket.lastPrice!!
+                        currentMap[currentMarket.symbol] = selectedTick.price
+                        currentTimes[currentMarket.symbol] = selectedTick.at
                         // MarketRepository already settles the original timestamped tick.
                         // Replaying the same lastPrice on every UI frame could falsely close
                         // a position opened after that quote.
@@ -402,6 +412,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                                 if (quote != null && quote.price.isFinite() && quote.price > 0.0 &&
                                     !MarketHours.closedFor(sym)) {
                                     currentMap[sym] = quote.price
+                                    currentTimes[sym] = quote.at
                                     val closedList = if (com.aurum.edge.data.CryptoCatalog.isCrypto(sym))
                                         emptyList() // openTradeTicks.poll replayed this batch in order
                                     else container.journalStore.settleTick(sym, quote.price, quote.at)
@@ -419,6 +430,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     // Scanner prices are closed historical bars. They must never enter the
                     // live PnL map or settle an open position as if they were new ticks.
 
+                    _livePriceTimes.value = currentTimes
                     _livePrices.value = currentMap
                 } catch (_: Exception) {}
                 delay(800L)
