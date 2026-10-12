@@ -59,6 +59,13 @@ class NobitexPublicTradeStreamTest {
         assertEquals(TradeStreamCursor.Verdict.GAP_APPLY, cursor.publication(now + 11, 102))
     }
 
+    @Test fun `recoverable channel missing offset is an audited gap not a forged sequence`() {
+        val cursor = TradeStreamCursor(now)
+        assertTrue(cursor.subscribed(subscribed()))
+        assertEquals(TradeStreamCursor.Verdict.GAP_APPLY, cursor.publication(now, 0))
+        assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now + 1, 8))
+    }
+
     @Test fun `nonrecoverable channel does not infer sequence continuity from offsets`() {
         val cursor = TradeStreamCursor(now)
         assertTrue(cursor.subscribed(subscribed(recoverable = false)))

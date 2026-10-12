@@ -121,7 +121,15 @@ internal class TradeStreamCursor(private val openedAt: Long) {
     fun publication(at: Long, offset: Long): Verdict {
         if (at < openedAt) return Verdict.SKIP
         if (at < lastAt || (lastSourceRest && at == lastAt)) return Verdict.GAP
-        if (recoverable && offset > 0) {
+        if (recoverable && offset <= 0) {
+            // A positioned/recoverable channel must provide a positive publication
+            // offset. Keep the real observed tick, but never claim sequence coverage.
+            lastAt = at
+            lastOffset = null
+            lastSourceRest = false
+            return Verdict.GAP_APPLY
+        }
+        if (recoverable) {
             val previous = lastOffset
             if (previous != null && offset <= previous) return Verdict.SKIP
             if (previous != null && offset > previous + 1) {
