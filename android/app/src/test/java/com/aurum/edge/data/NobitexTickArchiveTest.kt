@@ -48,8 +48,8 @@ class NobitexTickArchiveTest {
         settings.update { it.copy(accountBalance = 50_000.0) }
         val store = JournalStore(ctx, file, settingsStore = settings).also { it.load() }
         val at = 1_800_000_000_000L
-        val signal = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2990.0,
-            takeProfit = 3020.0, interval = Interval.M5, barTime = at - Interval.M5.millis,
+        val signal = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2960.0,
+            takeProfit = 3100.0, interval = Interval.M5, barTime = at - Interval.M5.millis,
             confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
                 "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی").map {
                 ConfluenceItem(it, true, "fixture", scorePercent = 25)
@@ -59,7 +59,7 @@ class NobitexTickArchiveTest {
         // Direct local quotes/candles are not allowed to reorder an archived position.
         store.settleTick("BTC/USDT", 2980.0, at + 1)
         assertTrue(store.trades.value.single().isOpen)
-        store.settleTick("BTC/USDT", 3021.0, at + 2, archiveSeq = 4)
+        store.settleTick("BTC/USDT", 3101.0, at + 2, archiveSeq = 4)
         val trailed = store.trades.value.single().stopLoss
         val restored = JournalStore(ctx, file, settingsStore = settings).also { it.load() }
         assertEquals(4L, restored.trades.value.single().tickArchiveSeq)
