@@ -74,6 +74,7 @@ class TradeReplayTest {
             now = base + 100 * step,
         )
         assertEquals(TradeReplay.Coverage.PARTIAL, window.coverage)
+        assertTrue(window.historyMissing)
         assertEquals(base + 40 * step, window.entryBarTime)
         assertNull(window.exitBarTime)
         assertTrue(window.detail.contains("ناقص"))
@@ -106,6 +107,7 @@ class TradeReplayTest {
         assertEquals(TradeReplay.Coverage.PARTIAL, window.coverage)
         assertNull(window.entryBarTime)
         assertEquals(base + 900 * step, window.exitBarTime)
+        assertFalse(window.historyMissing) // no pointless refetch just to bring entry back into view
         assertTrue(window.detail.contains("پنجرهٔ تازه‌ترین"))
         // A contiguous real slice ends at the exit context, rather than being stuck at entry.
         window.bars.forEachIndexed { index, bar ->
@@ -120,6 +122,7 @@ class TradeReplayTest {
         assertEquals(base + 1_199 * step, first.bars.last().time)
         assertNull(first.entryBarTime) // the entry exists, but is outside the recent viewport
         assertEquals(TradeReplay.Coverage.PARTIAL, first.coverage)
+        assertFalse(first.historyMissing)
         assertTrue(first.detail.contains("پنجرهٔ تازه‌ترین"))
         val returned = TradeReplay.window(opened, series(base, 1_231), now = base + 1_230 * step)
         assertEquals(base + 1_230 * step, returned.bars.last().time)

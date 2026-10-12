@@ -26,6 +26,8 @@ object TradeReplay {
         val requestedFrom: Long = 0L,
         val requestedTo: Long = 0L,
         val detail: String = "",
+        /** Missing provider bars, not merely an entry marker outside the recent viewport. */
+        val historyMissing: Boolean = true,
     ) {
         val hasChart: Boolean get() = bars.size >= 2 && coverage != Coverage.MISSING
     }
@@ -73,6 +75,9 @@ object TradeReplay {
         val shownEntry = trimmed.firstOrNull { it.time == entryBar }?.time
         val shownExit = exitBar?.let { bar -> trimmed.firstOrNull { it.time == bar }?.time }
         val entryOffscreen = shownEntry == null && selected.any { it.time == entryBar }
+        val historyMissing = trimmed.size < 2 ||
+            (shownEntry == null && !entryOffscreen) ||
+            (exitBar != null && shownExit == null)
         val exitSatisfied = exitBar == null || shownExit != null
         val coverage = when {
             trimmed.size < 2 -> Coverage.MISSING
@@ -87,6 +92,7 @@ object TradeReplay {
             requestedFrom = from,
             requestedTo = to,
             detail = detail(trade, trimmed, coverage, shownEntry, exitBar, shownExit, entryOffscreen),
+            historyMissing = historyMissing,
         )
     }
 

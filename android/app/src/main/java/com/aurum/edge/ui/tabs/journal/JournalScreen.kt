@@ -599,7 +599,7 @@ private fun TradeChartDisclosure(viewModel: AurumViewModel, trade: PaperTrade) {
             Text(it, style = MaterialTheme.typography.labelSmall, color = AurumColors.Red,
                 modifier = Modifier.padding(top = 3.dp))
         }
-        if (!state.loading && state.window.coverage != TradeReplay.Coverage.FULL) {
+        if (!state.loading && state.window.historyMissing) {
             OutlinedButton(
                 onClick = { viewModel.downloadTradeChart(trade) },
                 enabled = !state.downloading,

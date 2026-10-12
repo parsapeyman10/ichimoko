@@ -526,10 +526,9 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit, now:
     val lastTrade = trades.maxByOrNull { it.openedAt }
 
     val totalMarginUsed = openTrades.sumOf { it.effectiveMarginUsd }
-    val freeMargin = (settings.accountBalance - totalMarginUsed).coerceAtLeast(0.0)
-
     val unrealizedTotal = LiveTradeValuation.total(openTrades, freshPrices)
     val equity = unrealizedTotal?.let { settings.accountBalance + it }
+    val freeMargin = equity?.let { (it - totalMarginUsed).coerceAtLeast(0.0) }
 
     SectionCard(
         title = "مدیریت حساب و معاملهٔ خودکار کاغذی",
@@ -555,7 +554,7 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit, now:
         Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val balanceStr = String.format(java.util.Locale.US, "$%.2f", settings.accountBalance)
             val equityStr = equity?.let { String.format(java.util.Locale.US, "$%.2f", it) } ?: "—"
-            val freeMarginStr = String.format(java.util.Locale.US, "$%.2f", freeMargin)
+            val freeMarginStr = freeMargin?.let { String.format(java.util.Locale.US, "$%.2f", it) } ?: "—"
             StatTile("موجودی کل (Balance)", balanceStr, modifier = Modifier.weight(1f))
             StatTile("اکوئیتی (Equity)", equityStr,
                 if (unrealizedTotal == null) AurumColors.TextMuted
