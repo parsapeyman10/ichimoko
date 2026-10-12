@@ -1,5 +1,7 @@
 # مرز دادهٔ TradingView و پایش معامله — ارزیابی صنعتی
 
+> **به‌روزرسانی 1.3.36:** جدول‌های پایین تصمیم قدیمی برای پوزیشن‌های Nobitex هستند و تنها برای همان رکوردهای تاریخی معتبرند. ورودهای جدید کریپتو روی Binance Spot با کندل، ورود و خروجِ هم‌صرافی انجام می‌شود. قرارداد و محدودیت‌های مسیر جدید در [طرح Binance Spot](BINANCE_SPOT_TICK_DESIGN_FA.md) آمده است. برای یک پوزیشن قدیمی صرافی خروج عوض نمی‌شود.
+
 ## سؤال: آیا می‌شود از خود TradingView استریم گرفت؟
 
 **برای نمایش بله؛ برای تیک خروج معامله در اپ فعلی نه.** [FAQ رسمی ویجت‌ها](https://www.tradingview.com/widget-docs/faq/data/) می‌گوید ویجت Forex/crypto را می‌تواند برخط *نمایش* دهد، اما API خروج داده یا مقادیر اندیکاتور ندارد و امکان تزریق دادهٔ خودمان به ویجت نیست. تنها ویجت iframe اپ (`TradingViewEmbed.kt`) به همین خانواده تعلق دارد. [Datafeed API در Advanced Charts](https://www.tradingview.com/charting-library-docs/latest/connecting_data/) جهت معکوس دارد: خودِ برنامه باید تاریخچه و WebSocket بازار را برای چارت فراهم کند؛ [subscribeBars](https://www.tradingview.com/charting-library-docs/latest/connecting_data/datafeed-api/datafeed-subscriptions/) خروجی OHLCV از datafeed ما به چارت است، نه جریان خام تیک TradingView به موتور. جایگزین‌کردن iframe موجود با Charting Library هم مجوز/دسترسی جداگانه و تغییر خواستهٔ «یک ویجت TradingView» را لازم دارد و به‌خودی‌خود فید نمی‌آورد.

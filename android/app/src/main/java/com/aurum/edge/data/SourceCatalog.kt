@@ -94,8 +94,8 @@ object SourceCatalog {
         symbols = listOf(SymbolDef("XAU", "طلای جهانی (هر انس)"), SymbolDef("XAG", "نقره (هر انس)")),
     )
 
-    /** Exchange's documented, timestamped public executions. Display only, shared with
-     * the existing Nobitex rate budget; NEVER read TradingView widget/scanner internals.
+    /** Documented, timestamped Binance Spot aggregate executions. Watch display only;
+     * open-position settlement has a separate higher-priority ID-ordered stream.
      */
     val binanceTrades = SourceDef(
         id = "binance_spot_agg_trades",

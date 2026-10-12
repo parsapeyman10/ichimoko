@@ -219,7 +219,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             )
         }
 
-        SectionCard("بایگانی تیک کریپتو", "سرور مستقل فقط معاملات عمومی نوبیتکس را نگه می‌دارد؛ هیچ پوزیشنی به سرور ارسال نمی‌شود") {
+        SectionCard("بایگانی پوزیشن‌های قدیمی نوبیتکس", "برای پوزیشن‌های Binance Spot جدید کاربرد ندارد؛ دادهٔ صرافی‌ها مخلوط نمی‌شود") {
             Text("اختیاری؛ ابتدا سرویس بایگانی را روی سرور همیشه‌روشن خود با HTTPS راه‌اندازی کنید. " +
                 "روی گوشی خاموش تسویه فوراً در ژورنال دیده نمی‌شود؛ پس از اتصال دوباره به ترتیب تیک‌ها بازپخش می‌شود. " +
                 "گسست ناشر یا نبود آرشیو با پرکردن قیمت ساختگی پوشانده نمی‌شود.",
@@ -231,8 +231,8 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
             Button(onClick = { viewModel.saveTickArchive(archiveUrl.trim(), archiveToken); archiveToken = "" },
                 modifier = Modifier.padding(top = 8.dp)) { Text("ذخیره/حذف بایگانی") }
-            Text("فقط ورودهای کاغذی تازه پس از تنظیم سرور از آرشیو استفاده می‌کنند. " +
-                "برای معاملات قبلی مسیر پایش قبلی عوض نمی‌شود.",
+            Text("فقط پوزیشن‌هایی که هنگام ورود در نسخه‌های قبلی مسیر آرشیو نوبیتکس را ثبت کرده‌اند از این نشانی استفاده می‌کنند. " +
+                "پوزیشن‌های جدید Binance Spot از WebSocket و بازیابی REST هم‌صرافی استفاده می‌کنند؛ سرور قبلی روی آن‌ها اثری ندارد.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
         }
 
@@ -554,7 +554,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 6.dp))
             Text("رادار هنگام باز بودن اپ خودکار است؛ برای ادامهٔ پس‌زمینه «پایش زنده» و مجوز اعلان گوشی باید روشن باشد. " +
-                "ورود کاتالوگ برای فارکس و XAU/XAG با فید تأییدشده و برای جفت‌های USDT فقط با تیک واقعیِ زمان‌دار نوبیتکس و هفت تاریخچهٔ همان صرافی بررسی می‌شود؛ " +
+                "ورود کاتالوگ برای فارکس و XAU/XAG با فید تأییدشده و برای جفت‌های USDT فقط با تیک واقعیِ زمان‌دار Binance Spot و هفت تاریخچهٔ همان صرافی بررسی می‌شود؛ " +
                 "سهام و نفت تا وجود تیک هم‌هویت و مسیر خروج معتبر فقط رصد می‌شوند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             Text("قیمت زنده و چهار لایهٔ فنی (EMA/ایچیموکو، RSI/MACD، حمایت/مقاومت، M1 تا D1) لازم‌اند. نبود دادهٔ یک بازه ورود را می‌بندد؛ AI فقط می‌تواند سیگنال را وتو کند و اجازهٔ تغییر SL/TP ندارد. توقف سه باخت، زیان روزانهٔ ۲٪، سقف ۴ پوزیشن و trailing در ۱R و ۲R اعمال می‌شوند. هیچ سفارش واقعی ارسال نمی‌شود.",
@@ -603,7 +603,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     if (confirmAuto) {
         AlertDialog(onDismissRequest = { confirmAuto = false },
             title = { Text("ورود خودکار فقط کاغذی") },
-            text = { Text("هیچ سفارشی به بروکر ارسال نمی‌شود. تمام نمادهای پشتیبانی‌شده اسکن می‌شوند؛ ورود کاغذی چندنمادی فقط با تیک مستقل تازه و پایش خروج (فارکس، XAU/XAG و جفت‌های USDT نوبیتکس با شواهد کامل) انجام می‌شود؛ سایر بازارها بدون فید معتبر فقط رصد می‌شوند. دادهٔ هفت بازه، سقف ریسک و وتوی AI پابرجاست. بدون فید، معامله‌ای باز نمی‌شود. فعال شود؟") },
+            text = { Text("هیچ سفارشی به بروکر ارسال نمی‌شود. تمام نمادهای پشتیبانی‌شده اسکن می‌شوند؛ ورود کاغذی چندنمادی فقط با تیک مستقل تازه و پایش خروج (فارکس، XAU/XAG و جفت‌های USDT Binance Spot با شواهد کامل) انجام می‌شود؛ سایر بازارها بدون فید معتبر فقط رصد می‌شوند. دادهٔ هفت بازه، سقف ریسک و وتوی AI پابرجاست. بدون فید، معامله‌ای باز نمی‌شود. فعال شود؟") },
             confirmButton = { TextButton(onClick = {
                 confirmAuto = false
                 viewModel.setAutoPaperTrading(true)
