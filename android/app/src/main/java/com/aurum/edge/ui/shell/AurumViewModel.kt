@@ -667,6 +667,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private fun entryBlocker(current: MarketState): String? {
         com.aurum.edge.core.OilEntrySafety.blocker(current.symbol)?.let { return it }
         freshPaperQuote(current)?.let { return it }
+        if (!com.aurum.edge.data.CryptoVenuePolicy.compatible(current.symbol,
+                current.historyProvider, current.feed.provider))
+            return "ورود کریپتو مسدود: کندل تحلیل و تیک ورود باید هر دو از بازار نوبیتکس باشند"
         if (com.aurum.edge.core.MarketHours.closedFor(current.symbol)) return "بازار بسته است"
         val candidate = current.signal
         if (candidate?.isActionable != true || !TechnicalEvidence.confirmed(candidate))
