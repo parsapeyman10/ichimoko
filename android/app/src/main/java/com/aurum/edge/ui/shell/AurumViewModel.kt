@@ -37,6 +37,7 @@ import com.aurum.edge.data.JournalStats
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.SpotFallbackClient
+import com.aurum.edge.data.OpenTickSnapshot
 import com.aurum.edge.data.NewsRepository
 import com.aurum.edge.data.WatchSelection
 import com.aurum.edge.data.WatchState
@@ -47,15 +48,13 @@ import com.aurum.edge.notify.Notifier
 import com.aurum.edge.service.SignalMonitorService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -321,7 +320,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     private var visibleOnlineLoopStarted = false
-    private var visibleOnlineLoopEnabled = false
+    @Volatile private var visibleOnlineLoopEnabled = false
     private var updateCheckStarted = false
 
     /**
@@ -331,6 +330,15 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private fun ensureVisibleOnlineLoop() {
         if (visibleOnlineLoopStarted) return
         visibleOnlineLoopStarted = true
+        // Radar has its own clock: a stalled news or AI request must never delay the next
+        // symbol sweep. The scanner itself rejects closed markets and respects provider pacing.
+        viewModelScope.launch {
+            while (isActive) {
+                if (visibleOnlineLoopEnabled || SignalMonitorService.running.value)
+                    container.pairScanner.refreshNow()
+                delay(60_000L)
+            }
+        }
         viewModelScope.launch {
             var turns = 0
             while (isActive) {
@@ -353,97 +361,93 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     // service does the same when it runs). Never closes or re-prices a trade.
                     runCatching { container.traderAdvisor.reviewOpenPositions() }.getOrNull()
                 }
-                // Scan each market on its own calendar. A closed selected FX chart must not
-                // suppress crypto (which also trades on weekends) or the other catalog rows.
-                if (visibleOnlineLoopEnabled || SignalMonitorService.running.value) {
-                    container.pairScanner.refreshNow()
-                }
                 turns++
                 delay(60_000L)
             }
         }
     }
 
-    /**
-     * Continuous multi-symbol parallel price ticker:
-     * Fetches real-time market prices concurrently for ALL open trades and active symbols,
-     * updates live PnL and gauge animations on Home Screen, and automatically
-     * settles Take Profit (TP) and Stop Loss (SL) in real-time as prices move.
+    /** Each OPEN symbol has an independent UI worker, so one slow quote cannot hold
+     * another position's display behind awaitAll. The service keeps its own same-venue
+     * ordered exit monitor; this map is only timestamped, verified on-screen valuation.
      */
     private fun ensureLiveTickerLoop() {
         if (liveTickerLoopStarted) return
         liveTickerLoopStarted = true
         viewModelScope.launch(Dispatchers.IO) {
             val spot = SpotFallbackClient()
-            while (isActive) {
-                if (!visibleOnlineLoopEnabled && !SignalMonitorService.running.value) {
-                    _liveTicks.value = emptyMap()
-                    delay(1_000L)
-                    continue
-                }
-                try {
-                    val currentMarket = container.verifiedMarket.value
-                    val openTradesList = container.journalStore.trades.value.filter { it.isOpen }
-                    // Rebuild on every pass: a missed provider response must never leave an
-                    // indefinitely "live" cached price in Home/Chart/Journal.
-                    val currentTicks = mutableMapOf<String, PriceTick>()
-
-                    // Never value an open crypto position from the selected chart's latest
-                    // quote: only its own ordered same-venue monitor proves replay coverage.
-                    val selectedTick = openTradesList.firstOrNull { it.symbol == currentMarket.symbol }
-                        ?.let { com.aurum.edge.data.OpenPositionQuotePolicy.selectedFallback(it, currentMarket) }
-                    if (selectedTick != null) {
-                        currentTicks[currentMarket.symbol] = selectedTick
-                        // MarketRepository already settles the original timestamped tick.
-                        // Replaying the same lastPrice on every UI frame could falsely close
-                        // a position opened after that quote.
-                    }
-
-                    // Parallel multi-processing quote fetching across all open trade symbols
-                    val symbolsToFetch = openTradesList.map { it.symbol }.distinct().filter {
-                        it != currentMarket.symbol || com.aurum.edge.data.CryptoCatalog.isCrypto(it)
-                    }
-                    if (symbolsToFetch.isNotEmpty()) {
-                        kotlinx.coroutines.coroutineScope {
-                            val deferreds = symbolsToFetch.map { sym ->
-                                async(Dispatchers.IO) {
-                                    val openedAt = openTradesList.filter { it.symbol == sym }.minOf { it.openedAt }
-                                    val quote = runCatching {
-                                        if (com.aurum.edge.data.CryptoCatalog.isCrypto(sym))
-                                            container.openTradeTicks.poll(sym, openedAt)
-                                        else spot.fetchQuote(sym)
-                                    }.getOrNull()
-                                    sym to quote?.takeIf { TradeQuotePolicy.accepts(it) }
-                                }
-                            }
-                            deferreds.awaitAll().forEach { (sym, quote) ->
-                                if (quote != null && quote.price.isFinite() && quote.price > 0.0 &&
-                                    !MarketHours.closedFor(sym)) {
-                                    currentTicks[sym] = quote
-                                    val closedList = if (com.aurum.edge.data.CryptoCatalog.isCrypto(sym))
-                                        emptyList() // openTradeTicks.poll replayed this batch in order
-                                    else container.journalStore.settleTick(sym, quote.price, quote.at)
-                                    if (closedList.isNotEmpty()) {
-                                        _stats.value = container.journalStore.stats()
-                                        closedList.forEach { closed ->
-                                            _toast.value = "معاملهٔ ${closed.symbol} (${closed.exitReason}) بسته و تسویه شد: ${closed.pnlUsd}$"
-                                        }
-                                    }
-                                }
-                            }
+            val workers = mutableMapOf<String, Pair<Long, kotlinx.coroutines.Job>>()
+            try {
+                container.journalStore.trades.collect { trades ->
+                    val open = trades.filter { it.isOpen }.groupBy { it.symbol }
+                        .mapValues { (_, positions) -> positions.minOf { it.openedAt } }
+                    workers.toMap().forEach { (symbol, worker) ->
+                        if (open[symbol] != worker.first) {
+                            worker.second.cancel()
+                            workers.remove(symbol)
                         }
                     }
-
-                    // Scanner prices are closed historical bars. They must never enter the
-                    // live PnL map or settle an open position as if they were new ticks.
-                    _liveTicks.value = currentTicks
-                } catch (cancel: CancellationException) {
-                    throw cancel
-                } catch (_: Exception) {
-                    // A failed monitor pass cannot keep the previous pass's quote/PnL alive.
-                    _liveTicks.value = emptyMap()
+                    _liveTicks.update { current -> current.filter { (symbol, tick) ->
+                        symbol in open && tick.at >= open.getValue(symbol) && TradeQuotePolicy.accepts(tick)
+                    } }
+                    open.forEach { (symbol, openedAt) ->
+                        if (symbol !in workers) {
+                            val worker = launch(Dispatchers.IO) {
+                                val crypto = com.aurum.edge.data.CryptoCatalog.isCrypto(symbol)
+                                while (isActive) {
+                                    if (!visibleOnlineLoopEnabled && !SignalMonitorService.running.value) {
+                                        _liveTicks.update { it - symbol }
+                                        delay(1_000L)
+                                        continue
+                                    }
+                                    if (MarketHours.closedFor(symbol)) {
+                                        _liveTicks.update { it - symbol }
+                                        delay(10_000L)
+                                        continue
+                                    }
+                                    try {
+                                        val selected = if (!crypto)
+                                            container.verifiedMarket.value.let { market ->
+                                                container.journalStore.trades.value
+                                                    .firstOrNull { it.symbol == symbol && it.isOpen && it.openedAt == openedAt }
+                                                    ?.let { com.aurum.edge.data.OpenPositionQuotePolicy.selectedFallback(it, market) }
+                                            } else null
+                                        val isSelected = !crypto && container.verifiedMarket.value.symbol == symbol
+                                        // Never use the selected chart as a crypto trade source.
+                                        val quote = if (isSelected) selected else if (crypto)
+                                            container.openTradeTicks.poll(symbol, openedAt) else spot.fetchQuote(symbol)
+                                        if (!isActive) break
+                                        val fresh = quote?.takeIf {
+                                            it.at >= openedAt && !MarketHours.closedFor(symbol) && TradeQuotePolicy.accepts(it)
+                                        }
+                                        _liveTicks.update { previous -> OpenTickSnapshot.updated(previous,
+                                            symbol, fresh, container.journalStore.trades.value.filter { it.isOpen }
+                                                .map { it.symbol }.toSet()) }
+                                        if (fresh != null && !crypto && !isSelected) {
+                                            val closed = container.journalStore.settleTick(symbol, fresh.price,
+                                                fresh.at, expectedOpenedAt = openedAt)
+                                            if (closed.isNotEmpty()) {
+                                                _stats.value = container.journalStore.stats()
+                                                closed.forEach { trade -> _toast.value =
+                                                    "معاملهٔ ${trade.symbol} (${trade.exitReason}) بسته و تسویه شد: ${trade.pnlUsd}$" }
+                                            }
+                                        }
+                                    } catch (cancel: CancellationException) {
+                                        throw cancel
+                                    } catch (_: Exception) {
+                                        // Only this symbol becomes unknown. Keep other real ticks.
+                                        _liveTicks.update { it - symbol }
+                                    }
+                                    delay(if (crypto) 3_000L else 1_000L)
+                                }
+                            }
+                            workers[symbol] = openedAt to worker
+                        }
+                    }
                 }
-                delay(800L)
+            } finally {
+                workers.values.forEach { it.second.cancel() }
+                _liveTicks.value = emptyMap()
             }
         }
     }
