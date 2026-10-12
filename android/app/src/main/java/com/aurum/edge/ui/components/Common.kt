@@ -22,6 +22,7 @@ import com.aurum.edge.core.ConfluenceItem
 import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
+import com.aurum.edge.core.LiveTradeValuation
 import com.aurum.edge.data.NewsClassification
 import com.aurum.edge.data.NewsDirection
 import com.aurum.edge.data.NewsImportance
@@ -366,11 +367,7 @@ fun AssetClass4SlotsBanner(
                             }
 
                             if (isOpen) categoryTrades.forEach { trade ->
-                                val currentPrice = livePrices[trade.symbol] ?: trade.entry
-                                val pnlPerUnit = if (trade.action == com.aurum.edge.core.SignalAction.BUY) currentPrice - trade.entry else trade.entry - currentPrice
-                                val grossPnl = com.aurum.edge.core.PaperOrderRules.quotePnlToUsd(
-                                    trade.symbol, trade.positionOz * pnlPerUnit, currentPrice)
-                                val netPnl = grossPnl - (trade.effectiveCommissionUsd + trade.effectiveSpreadCostUsd)
+                                val valuation = LiveTradeValuation.from(trade, livePrices[trade.symbol])
 
                                 Text(
                                     text = "${trade.symbol} · ${if (trade.action == com.aurum.edge.core.SignalAction.BUY) "BUY ↗" else "SELL ↘"}",
@@ -385,10 +382,17 @@ fun AssetClass4SlotsBanner(
                                 ) {
                                     Text("اهرم ${trade.effectiveLeverage}x", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
                                     Text(
-                                        (if (netPnl >= 0) "+$" else "-$") + String.format(Locale.US, "%.2f", kotlin.math.abs(netPnl)),
+                                        valuation?.let { value ->
+                                            (if (value.netPnlUsd >= 0) "+$" else "-$") +
+                                                String.format(Locale.US, "%.2f", kotlin.math.abs(value.netPnlUsd))
+                                        } ?: "P/L —",
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (netPnl >= 0) AurumColors.Green else AurumColors.Red,
+                                        color = when {
+                                            valuation == null -> AurumColors.TextMuted
+                                            valuation.netPnlUsd >= 0 -> AurumColors.Green
+                                            else -> AurumColors.Red
+                                        },
                                     )
                                 }
                             } else {

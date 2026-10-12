@@ -38,6 +38,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.FeedMode
+import com.aurum.edge.core.LiveTradeValuation
+import com.aurum.edge.core.PriceTick
+import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
@@ -248,47 +251,38 @@ private fun LiveTradeGaugeCard(
     val isBuy = trade.action == SignalAction.BUY
     val assetClass = AssetClass.of(trade.symbol)
     val selectedFresh = currentMarket.symbol == trade.symbol &&
-            currentMarket.feed.mode == FeedMode.LIVE &&
-            !currentMarket.showingCachedData && FeedLiveness.hasRecentReceipt(currentMarket.feed) &&
-            currentMarket.lastPrice != null
+            currentMarket.feed.mode == FeedMode.LIVE && !currentMarket.showingCachedData &&
+            FeedLiveness.hasRecentReceipt(currentMarket.feed) &&
+            currentMarket.lastPrice?.let { price -> currentMarket.lastTradeAt?.let { at ->
+                TradeQuotePolicy.accepts(PriceTick(price, at))
+            } } == true
     val verifiedLivePrice = livePrices[trade.symbol]
         ?: currentMarket.lastPrice?.takeIf { selectedFresh }
-    val livePrice = verifiedLivePrice ?: trade.entry
+    // Never draw the moving pointer at entry or calculate P/L from entry when the
+    // actual quote is absent: that was the apparent "rewind" on tab navigation.
+    val valuation = LiveTradeValuation.from(trade, verifiedLivePrice)
 
     val entry = trade.entry
     val stop = trade.stopLoss
     val target = trade.takeProfit
-
-    val pnlPerUnit = if (isBuy) livePrice - entry else entry - livePrice
-    val grossPnl = pnlPerUnit * trade.positionOz
-    val netPnl = grossPnl - (trade.effectiveCommissionUsd + trade.effectiveSpreadCostUsd)
-    val pnlPercent = if (entry > 0) (pnlPerUnit / entry) * 100.0 else 0.0
-
-    // Calculate progression on scale from SL (0%) to TP (100%)
     val totalRange = abs(target - stop).coerceAtLeast(0.000001)
-    val progress = if (isBuy) {
-        ((livePrice - stop) / totalRange).toFloat().coerceIn(0f, 1f)
-    } else {
-        ((stop - livePrice) / totalRange).toFloat().coerceIn(0f, 1f)
-    }
-
     val entryFraction = if (isBuy) {
         ((entry - stop) / totalRange).toFloat().coerceIn(0.05f, 0.95f)
     } else {
         ((stop - entry) / totalRange).toFloat().coerceIn(0.05f, 0.95f)
     }
 
-    val isProfitable = netPnl >= 0.0
     val statusColor = when {
-        netPnl > 0.0 -> AurumColors.Green
-        netPnl < 0.0 -> AurumColors.Red
+        valuation == null -> AurumColors.TextMuted
+        valuation.netPnlUsd > 0.0 -> AurumColors.Green
+        valuation.netPnlUsd < 0.0 -> AurumColors.Red
         else -> AurumColors.Gold
     }
-
     val movementLabel = when {
-        grossPnl > 0.0 -> "↗ در مسیر حد سود (TP)"
-        grossPnl < 0.0 -> "↘ در مسیر حد ضرر (SL)"
-        else -> "⚪ در نقطه ورود (Entry)"
+        valuation == null -> "منتظر تیک تازه؛ وضعیت قیمت نامعلوم است"
+        (if (isBuy) valuation.price - entry else entry - valuation.price) > 0.0 -> "↗ در مسیر حد سود (TP)"
+        (if (isBuy) valuation.price - entry else entry - valuation.price) < 0.0 -> "↘ در مسیر حد ضرر (SL)"
+        else -> "⚪ قیمت واقعی روی نقطه ورود (Entry)"
     }
 
     Column(
@@ -320,14 +314,17 @@ private fun LiveTradeGaugeCard(
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = "${if (netPnl >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.2f", netPnl)}$",
+                    text = valuation?.let {
+                        "${if (it.netPnlUsd >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.2f", it.netPnlUsd)}$"
+                    } ?: "—",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = statusColor,
                 )
                 Text(
-                    text = (if (verifiedLivePrice == null) "برآورد با قیمت ورود؛ تیک تازه نیست" else "سود/زیان خالص") +
-                        " (${String.format(java.util.Locale.US, "%.2f", pnlPercent)}%)",
+                    text = valuation?.let {
+                        "سود/زیان خالص (${String.format(java.util.Locale.US, "%.2f", it.pnlPercent)}%)"
+                    } ?: "سود/زیان نامعلوم؛ تیک تازه نیست",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                 )
@@ -369,8 +366,8 @@ private fun LiveTradeGaugeCard(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = (if (verifiedLivePrice == null) "قیمت ورود (تیک تازه نیست): " else "قیمت لحظه‌ای: ") +
-                    formatPrice(livePrice),
+                text = valuation?.let { "آخرین قیمت تازه: ${formatPrice(it.price)}" }
+                    ?: "قیمت فعلی: — (قیمت ورود جای تیک نمی‌نشیند)",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextPrimary,
                 fontWeight = FontWeight.Bold,
@@ -450,20 +447,23 @@ private fun LiveTradeGaugeCard(
                     )
                 }
 
-                // Live Active Moving Pointer
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(progress.coerceIn(0.02f, 0.98f))
-                        .height(20.dp),
-                    contentAlignment = Alignment.CenterEnd,
-                ) {
+                // A moving pointer exists only with a fresh quote. The gold divider
+                // above is the saved ENTRY marker, not a substitute current price.
+                valuation?.let { fresh ->
                     Box(
                         modifier = Modifier
-                            .size(16.dp)
-                            .clip(CircleShape)
-                            .background(statusColor)
-                            .border(2.dp, AurumColors.TextPrimary, CircleShape),
-                    )
+                            .fillMaxWidth(fresh.progress.coerceIn(0.02f, 0.98f))
+                            .height(20.dp),
+                        contentAlignment = Alignment.CenterEnd,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clip(CircleShape)
+                                .background(statusColor)
+                                .border(2.dp, AurumColors.TextPrimary, CircleShape),
+                        )
+                    }
                 }
             }
 
@@ -508,13 +508,8 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit) {
     val totalMarginUsed = openTrades.sumOf { it.effectiveMarginUsd }
     val freeMargin = (settings.accountBalance - totalMarginUsed).coerceAtLeast(0.0)
 
-    val unrealizedTotal = openTrades.sumOf { t ->
-        val price = livePrices[t.symbol] ?: t.entry
-        val pnlPerUnit = if (t.action == SignalAction.BUY) price - t.entry else t.entry - price
-        val gross = pnlPerUnit * t.positionOz
-        gross - (t.effectiveCommissionUsd + t.effectiveSpreadCostUsd)
-    }
-    val equity = settings.accountBalance + unrealizedTotal
+    val unrealizedTotal = LiveTradeValuation.total(openTrades, livePrices)
+    val equity = unrealizedTotal?.let { settings.accountBalance + it }
 
     SectionCard(
         title = "مدیریت حساب و معاملهٔ خودکار کاغذی",
@@ -539,12 +534,18 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit) {
 
         Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val balanceStr = String.format(java.util.Locale.US, "$%.2f", settings.accountBalance)
-            val equityStr = String.format(java.util.Locale.US, "$%.2f", equity)
+            val equityStr = equity?.let { String.format(java.util.Locale.US, "$%.2f", it) } ?: "—"
             val freeMarginStr = String.format(java.util.Locale.US, "$%.2f", freeMargin)
             StatTile("موجودی کل (Balance)", balanceStr, modifier = Modifier.weight(1f))
-            StatTile("اکوئیتی (Equity)", equityStr, if (unrealizedTotal >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
+            StatTile("اکوئیتی (Equity)", equityStr,
+                if (unrealizedTotal == null) AurumColors.TextMuted
+                else if (unrealizedTotal >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
             StatTile("مارجین آزاد", freeMarginStr, AurumColors.Cyan, Modifier.weight(1f))
         }
+        if (unrealizedTotal == null) Text(
+            "اکوئیتی نامعلوم است: حداقل یک پوزیشن تیک تازه ندارد؛ قیمت ورود جای قیمت فعلی استفاده نمی‌شود.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+        )
 
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val usedMarginStr = String.format(java.util.Locale.US, "$%.2f", totalMarginUsed)

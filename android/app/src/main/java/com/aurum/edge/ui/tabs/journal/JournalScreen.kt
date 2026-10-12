@@ -45,6 +45,8 @@ import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.PaperConditionRecord
 import com.aurum.edge.core.IctPriceActionRecord
 import com.aurum.edge.core.PaperTrade
+import com.aurum.edge.core.PriceTick
+import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.core.PaperAiReview
 import com.aurum.edge.core.PaperHoldReview
 import com.aurum.edge.core.FeedLiveness
@@ -84,13 +86,10 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
         if (uri != null && request != null) viewModel.exportJournalPdf(uri, request.first, request.second)
     }
     val now = System.currentTimeMillis()
-    val livePrice = market.lastPrice?.takeIf {
-        it.isFinite() && it > 0 && !market.showingCachedData &&
-            market.feed.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) &&
+    val livePrice = market.lastPrice?.takeIf { price ->
+        !market.showingCachedData && market.feed.mode == FeedMode.LIVE &&
             FeedLiveness.hasRecentReceipt(market.feed, now) &&
-            market.candles.lastOrNull()?.time?.let { at ->
-                now - at in 0L..minOf(180_000L, market.interval.millis * 2)
-            } == true
+            market.lastTradeAt?.let { at -> TradeQuotePolicy.accepts(PriceTick(price, at), now) } == true
     }
 
     val filteredTrades = remember(trades, selectedCategory) {
@@ -242,7 +241,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                     com.aurum.edge.data.OpenTradeTickMonitor.Feed.RECOVERING -> "اتصال قطع؛ تلاش برای بازیابی"
                                     com.aurum.edge.data.OpenTradeTickMonitor.Feed.REST_FALLBACK -> "REST پشتیبان؛ پوشش کامل نامعلوم"
                                     com.aurum.edge.data.OpenTradeTickMonitor.Feed.CONNECTING -> "در حال اتصال"
-                                    null -> "پایش REST فقط هنگام بازبودن صفحه؛ سرویس پس‌زمینه را فعال کنید"
+                                    null -> "پایش تیک تا وقتی اپ فعال است ادامه دارد؛ برای پس‌زمینه سرویس را فعال کنید"
                                 }, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                             }
                             trade.tickCoverageGapAt?.let { at ->
