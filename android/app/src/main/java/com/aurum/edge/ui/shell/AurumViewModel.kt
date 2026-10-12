@@ -833,7 +833,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 // Read and validate at the moment of manual close, not at the earlier UI
                 // click. An old price left in a StateFlow must never become a fresh fill.
                 // Crypto always uses the same Nobitex position monitor, not chart prices.
-                val exitTick = if (crypto) container.openTradeTicks.poll(trade.symbol, trade.openedAt)
+                val exitTick = if (crypto) container.openTradeTicks.quoteForManualClose(trade.symbol, trade.openedAt)
                 else {
                     _liveTicks.value[trade.symbol]?.takeIf { TradeQuotePolicy.accepts(it) }
                         ?: market.value.takeIf { it.symbol == trade.symbol &&

@@ -39,10 +39,12 @@ class OpenTradeTickMonitor(
         val watcher: AtomicBoolean = AtomicBoolean(false),
         @Volatile var connected: Boolean = false,
         @Volatile var latest: PriceTick? = null,
+        @Volatile var latestBinanceId: Long = -1L,
         var lastReceiptAt: Long = 0L,
         var lastRequestAt: Long = 0L,
         var disconnectedAt: Long = 0L,
         var binanceBootstrapped: Boolean = false,
+        @Volatile var lastBinanceReplayOk: Boolean = false,
     )
     private val sessions = java.util.concurrent.ConcurrentHashMap<String, Session>()
     private val _feeds = MutableStateFlow<Map<String, Feed>>(emptyMap())
@@ -85,6 +87,20 @@ class OpenTradeTickMonitor(
     private fun binancePosition(symbol: String, openedAt: Long): Boolean =
         journal.trades.value.any { it.isOpen && it.symbol == symbol &&
             it.openedAt == openedAt && it.cryptoVenue == BinanceSpotClient.VENUE }
+
+    /** Manual exit must first replay every received Binance execution (including a
+     * WebSocket row still buffered for the 250-ms journal batch). If REST cannot catch
+     * that known ID, refuse the exit instead of overtaking an unprocessed stop.
+     */
+    suspend fun quoteForManualClose(symbol: String, openedAt: Long): PriceTick? {
+        if (!binancePosition(symbol, openedAt)) return poll(symbol, openedAt)
+        val quote = pollBinance(symbol, openedAt, bootstrap = true)
+        val cursor = journal.trades.value.firstOrNull { it.isOpen && it.symbol == symbol &&
+            it.openedAt == openedAt }?.binanceAggId ?: return null
+        val active = sessions[symbol]?.takeIf { it.openedAt == openedAt } ?: return null
+        return quote?.takeIf { active.binanceBootstrapped && active.lastBinanceReplayOk &&
+            active.latestBinanceId <= cursor }
+    }
 
     private fun archivePosition(symbol: String, openedAt: Long): Boolean =
         journal.trades.value.any { it.isOpen && it.symbol == symbol &&
@@ -215,6 +231,7 @@ class OpenTradeTickMonitor(
             if (!bootstrap && now - session.lastRequestAt in 0 until 1_000)
                 return@withLock session.latest?.takeIf { TradeQuotePolicy.accepts(it, now) }
             session.lastRequestAt = now
+            session.lastBinanceReplayOk = false
             try {
                 repeat(4) {
                     val cursor = journal.trades.value.firstOrNull { it.isOpen && it.symbol == symbol &&
@@ -225,11 +242,15 @@ class OpenTradeTickMonitor(
                     else binance.fetchAggregates(symbol, startTime = openedAt)
                     if (rows.isNotEmpty()) {
                         val closed = journal.settleBinanceBatch(symbol, openedAt, rows)
-                        session.latest = rows.last().tick
+                        if (rows.last().id >= session.latestBinanceId) {
+                            session.latest = rows.last().tick
+                            session.latestBinanceId = rows.last().id
+                        }
                         if (closed.isNotEmpty()) { forget(symbol, session); return@withLock null }
                     }
                     if (rows.size < 1000) {
                         session.binanceBootstrapped = true
+                        session.lastBinanceReplayOk = true
                         session.lastReceiptAt = System.currentTimeMillis()
                         return@withLock session.latest?.takeIf { TradeQuotePolicy.accepts(it) }
                     }
@@ -240,8 +261,10 @@ class OpenTradeTickMonitor(
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (_: Exception) {
-                setFeed(symbol, session, Feed.RECOVERING)
-                journal.noteTickCoverageGap(symbol, System.currentTimeMillis(), openedAt)
+                if (!session.connected) {
+                    setFeed(symbol, session, Feed.RECOVERING)
+                    journal.noteTickCoverageGap(symbol, System.currentTimeMillis(), openedAt)
+                } // A manual REST failure while the stream is healthy is not a feed gap.
             }
             session.latest?.takeIf { TradeQuotePolicy.accepts(it) }
         }
@@ -314,6 +337,7 @@ class OpenTradeTickMonitor(
                                 if (row.id <= previous) continue
                                 batch.add(row)
                                 session.latest = row.tick
+                                session.latestBinanceId = maxOf(session.latestBinanceId, row.id)
                             }
                             null -> Unit
                         }
