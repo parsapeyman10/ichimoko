@@ -365,6 +365,9 @@ class OpenTradeTickMonitor(
                     journal.noteTickCoverageGap(symbol, System.currentTimeMillis(), openedAt)
                 } finally {
                     session.connected = false
+                    // A socket may have ended with an uncommitted batch or dropped rows.
+                    // Require a fresh fromId replay before displaying its last seen price.
+                    session.lastBinanceReplayOk = false
                     setFeed(symbol, session, Feed.REST_FALLBACK)
                     withContext(NonCancellable + Dispatchers.IO) { runCatching { socket?.close() } }
                     socket = null
