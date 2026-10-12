@@ -107,7 +107,8 @@ jobs:
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.35 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.36 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.42 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.43 updater')))) }}
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.43 updater') ||
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.44 updater')))) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -515,8 +516,8 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$GITHUB_REF" == "refs/heads/arena/20dbf868-ichimoko" &&
-                ( "$VERSION_NAME" != "1.3.43" || "$TAG" != "v1.3.43" || "${{ steps.collect.outputs.version_code }}" != "659" ) ]]; then
-            echo "::error title=Wrong release version::Explicit 1.3.43 authorization cannot publish another version."
+                ( "$VERSION_NAME" != "1.3.44" || "$TAG" != "v1.3.44" || "${{ steps.collect.outputs.version_code }}" != "660" ) ]]; then
+            echo "::error title=Wrong release version::Explicit 1.3.44 authorization cannot publish another version."
             exit 1
           fi
           NOTES=$'Aurum Edge Android APK.\n\nVersion: '"$VERSION_NAME"$'\nVersion code: ${{ steps.collect.outputs.version_code }}\nSHA-256: '"$SHA256"$'\nSize bytes: '"$SIZE_BYTES"$'\nSigning: '"${AURUM_SIGNING_MODE:-prepared updater key}"$'\n\nThe in-app updater accepts this public release asset, verifies package name, signing certificate, versionCode, size and SHA-256, then opens Android Installer.'
@@ -564,6 +565,9 @@ jobs:
           fi
           if [[ "$VERSION_NAME" == "1.3.35" ]]; then
             NOTES+=$'\n\nChanges: open paper-trade tracking no longer substitutes entry price when the latest independently timestamped quote is missing or older than 45 seconds. The home card, market banners, equity/free margin and journal show unknown values until a valid tick arrives, using an atomic price/timestamp snapshot. The journal chart starts with the latest 320 real candles; an offscreen entry marker is distinguished from missing history, and tab state is preserved on navigation. Manual paper exits also revalidate quote age at closing time and reject stale fills. This is a UI/valuation correction and stale-price safeguard, not evidence that every real tick is captured. The embedded TradingView widget can reload when its tab is recreated; chart appearance and position settlement are separate. Device behavior and uninterrupted provider coverage have not been verified.'
+          fi
+          if [[ "$VERSION_NAME" == "1.3.44" ]]; then
+            NOTES+=$'\n\nChanges: every NEW manual or automatic paper position now requires a verified closed 5-minute (5m) entry signal. The catalog scanner evaluates only a 5m base for all asset classes, including crypto; a higher-scored 15m setup can no longer replace a 5m entry. M15 and H1 remain independent trend-alignment inputs, not trade entry timeframes. The signal engine and auto-entry policy reject non-5m bases, and the authoritative journal rejects even a forged non-5m signal. Other chart intervals remain view-only for entries; existing trades keep their recorded timeframe and exits remain manageable. Independent same-venue ticks, setup, news and risk checks are unchanged. No guarantee of trading frequency or provider availability.'
           fi
           if [[ "$VERSION_NAME" == "1.3.43" ]]; then
             NOTES+=$'\n\nChanges: all NEW paper positions now require a directional Tenkan/Kijun cross on one of the latest two independently closed base bars, with at least three of five preceding bars compressed and a thin visible cloud at cross and evaluation time. The journal rejects signals without matching entry evidence; existing session, same-venue trade-tick, timeframe, news and risk rules still apply. The Home/Trading position display retains each trade\x27s last verified price, P/L and movement silently through a missing tick (at least 10 seconds and until another verified tick), showing the original absolute publisher time; these display snapshots never authorize risk, fills or settlement. Category cards now distinguish no open position from a closed session, unsupported monitored quote, waiting scan and missing setup. No guarantee of profit, provider uptime or phone-off operation; device behavior is unverified.'
