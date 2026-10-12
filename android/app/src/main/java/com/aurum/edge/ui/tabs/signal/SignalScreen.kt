@@ -88,6 +88,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState,
     val traderOpinion by viewModel.traderOpinion.collectAsStateWithLifecycle()
     val news by viewModel.news.collectAsStateWithLifecycle()
     val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
+    val lastMarks by viewModel.lastDisplayMarks.collectAsStateWithLifecycle()
     var showAllDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var visibleDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(12) }
     var scanClock by androidx.compose.runtime.remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis()) }
@@ -116,6 +117,10 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState,
         com.aurum.edge.ui.components.AssetClass4SlotsBanner(
             openTrades = openTrades,
             livePrices = livePrices,
+            lastKnownPrices = openTrades.mapNotNull { trade ->
+                com.aurum.edge.data.OpenPositionDisplay.forTrade(trade, lastMarks)
+                    ?.let { trade.symbol to it.price }
+            }.toMap(),
             onSelectSymbol = { symbol -> viewModel.selectChartSymbol(symbol) },
             entryReasons = AssetClass.entries.associateWith { asset ->
                 com.aurum.edge.data.MarketEntryReason.forClass(asset, scanState,

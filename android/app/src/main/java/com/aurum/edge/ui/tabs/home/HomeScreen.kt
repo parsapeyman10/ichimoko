@@ -265,8 +265,8 @@ private fun LiveOpenTradesTrackingSection(
     val openTrades = remember(trades) { trades.filter { it.isOpen } }
 
     SectionCard(
-        title = "⚡ ترکینگ لحظه‌ای معاملات باز",
-        subtitle = "رهگیری زنده حرکت قیمت میان حد ضرر (SL)، نقطه ورود و حد سود (TP)",
+        title = "⚡ ترکینگ معاملات باز",
+        subtitle = "آخرین قیمت تأییدشده میان حد ضرر (SL)، ورود و حد سود (TP)",
         trailing = {
             Pill(
                 text = "${openTrades.size} از ۴ فعال",
@@ -367,7 +367,7 @@ private fun LiveTradeGaugeCard(
         valuation == null -> "در انتظار اولین قیمت"
         (if (isBuy) valuation.price - entry else entry - valuation.price) > 0.0 -> "↗ در مسیر حد سود (TP)"
         (if (isBuy) valuation.price - entry else entry - valuation.price) < 0.0 -> "↘ در مسیر حد ضرر (SL)"
-        else -> "⚪ قیمت واقعی روی نقطه ورود (Entry)"
+        else -> "⚪ آخرین قیمت روی نقطه ورود (Entry)"
     }
 
     Column(

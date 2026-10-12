@@ -23,7 +23,13 @@ class OpenPositionDisplayTest {
         val tick = PriceTick(1.105, now - 10_000L)
         val snapshot = OpenPositionDisplay.record(emptyMap(), position, tick, now)
         assertEquals(tick.at, OpenPositionDisplay.forTrade(position, snapshot)?.tickAt)
-        // The live valuation stays unknown. Only the explicitly labelled frozen card uses this mark.
+        // More than ten seconds of silence must not erase the original trade-specific mark.
+        val afterSilence = OpenTickSnapshot.updated(emptyMap(), position.symbol, null,
+            setOf(position.symbol), now + 11_000L)
+        assertTrue(afterSilence.isEmpty()) // no old price is put back into executable ticks
+        assertEquals(tick, PriceTick(OpenPositionDisplay.forTrade(position, snapshot)!!.price,
+            OpenPositionDisplay.forTrade(position, snapshot)!!.tickAt))
+        // Live valuation stays unknown. The card alone keeps the last real mark without a feed alert.
         assertNull(LiveTradeValuation.total(listOf(position), emptyMap()))
         assertTrue(LiveTradeValuation.from(position, snapshot.getValue(position.id).price) != null)
         assertEquals(snapshot, OpenPositionDisplay.record(snapshot, position,
