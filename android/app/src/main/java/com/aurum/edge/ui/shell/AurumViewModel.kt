@@ -171,8 +171,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val updateState: StateFlow<AppUpdateRepository.State> = container.updater.state
 
-    private val _livePrices = MutableStateFlow<Map<String, Double>>(emptyMap())
-    val livePrices: StateFlow<Map<String, Double>> = _livePrices.asStateFlow()
     /** One atomic price+original-time snapshot for the open-position UI.
      * It is never persisted as a new tick and never used to replay an exit.
      */
@@ -379,7 +377,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             while (isActive) {
                 if (!visibleOnlineLoopEnabled && !SignalMonitorService.running.value) {
                     _liveTicks.value = emptyMap()
-                    _livePrices.value = emptyMap()
                     delay(1_000L)
                     continue
                 }
@@ -388,7 +385,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     val openTradesList = container.journalStore.trades.value.filter { it.isOpen }
                     // Rebuild on every pass: a missed provider response must never leave an
                     // indefinitely "live" cached price in Home/Chart/Journal.
-                    val currentMap = mutableMapOf<String, Double>()
                     val currentTicks = mutableMapOf<String, PriceTick>()
 
                     // Never value an open crypto position from the selected chart's latest
@@ -396,7 +392,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     val selectedTick = openTradesList.firstOrNull { it.symbol == currentMarket.symbol }
                         ?.let { com.aurum.edge.data.OpenPositionQuotePolicy.selectedFallback(it, currentMarket) }
                     if (selectedTick != null) {
-                        currentMap[currentMarket.symbol] = selectedTick.price
                         currentTicks[currentMarket.symbol] = selectedTick
                         // MarketRepository already settles the original timestamped tick.
                         // Replaying the same lastPrice on every UI frame could falsely close
@@ -423,7 +418,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                             deferreds.awaitAll().forEach { (sym, quote) ->
                                 if (quote != null && quote.price.isFinite() && quote.price > 0.0 &&
                                     !MarketHours.closedFor(sym)) {
-                                    currentMap[sym] = quote.price
                                     currentTicks[sym] = quote
                                     val closedList = if (com.aurum.edge.data.CryptoCatalog.isCrypto(sym))
                                         emptyList() // openTradeTicks.poll replayed this batch in order
@@ -441,15 +435,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
                     // Scanner prices are closed historical bars. They must never enter the
                     // live PnL map or settle an open position as if they were new ticks.
-
                     _liveTicks.value = currentTicks
-                    _livePrices.value = currentMap
                 } catch (cancel: CancellationException) {
                     throw cancel
                 } catch (_: Exception) {
                     // A failed monitor pass cannot keep the previous pass's quote/PnL alive.
                     _liveTicks.value = emptyMap()
-                    _livePrices.value = emptyMap()
                 }
                 delay(800L)
             }
@@ -845,18 +836,17 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             try {
                 // Read and validate at the moment of manual close, not at the earlier UI
                 // click. An old price left in a StateFlow must never become a fresh fill.
-                // Crypto always uses the same Nobitex position monitor, not chart prices.
+                // Crypto always uses its own same-venue replay monitor, never chart prices.
+                // Even a fresh quote observed BEFORE this paper entry is not an exit fill.
                 val exitTick = if (crypto) container.openTradeTicks.quoteForManualClose(trade.symbol, trade.openedAt)
                 else {
-                    _liveTicks.value[trade.symbol]?.takeIf { TradeQuotePolicy.accepts(it) }
-                        ?: market.value.takeIf { it.symbol == trade.symbol &&
-                            it.feed.mode == FeedMode.LIVE && !it.showingCachedData }
-                            ?.let { state -> state.lastPrice?.let { price ->
-                                state.lastTradeAt?.let { at -> PriceTick(price, at) }
-                            } }?.takeIf { TradeQuotePolicy.accepts(it) }
+                    com.aurum.edge.data.OpenPositionQuotePolicy.monitored(trade, _liveTicks.value[trade.symbol])
+                        ?: com.aurum.edge.data.OpenPositionQuotePolicy.selectedFallback(trade, market.value)
                         ?: runCatching { SpotFallbackClient().fetchQuote(trade.symbol) }.getOrNull()
                 }
-                val exitPrice = exitTick?.takeIf { TradeQuotePolicy.accepts(it) }?.price
+                val exitPrice = exitTick?.takeIf {
+                    it.at >= trade.openedAt && TradeQuotePolicy.accepts(it)
+                }?.price
                 require(exitPrice != null) { "قیمت خروج تازه برای ${trade.symbol} در دسترس نیست" }
                 val closed = container.journalStore.close(trade.id, exitPrice, "بستن دستی روی قیمت دریافتی")
                 _stats.value = container.journalStore.stats()

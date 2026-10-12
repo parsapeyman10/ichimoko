@@ -4,6 +4,7 @@ import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.PaperTrade
+import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.SignalAction
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -28,6 +29,17 @@ class OpenPositionQuotePolicyTest {
             market("BTC/USDT", "${BinanceSpotClient.PROVIDER} aggTrade"), now))
         assertNull(OpenPositionQuotePolicy.selectedFallback(trade("BTC/USDT"),
             market("BTC/USDT", "Nobitex"), now))
+    }
+
+    @Test fun `a pre-entry tick cannot value a newly opened trade even when still fresh`() {
+        val newer = trade("EUR/USD").copy(openedAt = now - 500L)
+        val beforeEntry = PriceTick(105.0, now - 1_000L)
+        assertNull(OpenPositionQuotePolicy.monitored(newer, beforeEntry, now))
+        assertNull(OpenPositionQuotePolicy.selectedFallback(newer, market("EUR/USD"), now))
+        assertEquals(emptyMap<String, Double>(), OpenPositionQuotePolicy.prices(
+            listOf(newer), mapOf(newer.symbol to beforeEntry), now))
+        assertEquals(105.0, OpenPositionQuotePolicy.monitored(newer,
+            PriceTick(105.0, now - 100L), now)!!.price, 0.0)
     }
 
     @Test fun `fresh same-symbol FX tick remains available but stale and cached ticks are not`() {

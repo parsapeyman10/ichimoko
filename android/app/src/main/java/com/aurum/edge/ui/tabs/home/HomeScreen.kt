@@ -38,7 +38,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.LiveTradeValuation
 import com.aurum.edge.core.PriceTick
-import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
@@ -143,8 +142,7 @@ fun HomeScreen(
         val tradesState by viewModel.trades.collectAsStateWithLifecycle()
         val openTradesList = remember(tradesState) { tradesState.filter { it.isOpen } }
         val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
-        val freshPrices = liveTicks.filterValues { TradeQuotePolicy.accepts(it, now) }
-            .mapValues { it.value.price }
+        val freshPrices = com.aurum.edge.data.OpenPositionQuotePolicy.prices(openTradesList, liveTicks, now)
 
         com.aurum.edge.ui.components.AssetClass4SlotsBanner(
             openTrades = openTradesList,
@@ -255,7 +253,7 @@ private fun LiveTradeGaugeCard(
     val isBuy = trade.action == SignalAction.BUY
     val assetClass = AssetClass.of(trade.symbol)
     val selectedTick = com.aurum.edge.data.OpenPositionQuotePolicy.selectedFallback(trade, currentMarket, now)
-    val polledTick = liveTicks[trade.symbol]?.takeIf { TradeQuotePolicy.accepts(it, now) }
+    val polledTick = com.aurum.edge.data.OpenPositionQuotePolicy.monitored(trade, liveTicks[trade.symbol], now)
     val verifiedLivePrice = (polledTick ?: selectedTick)?.price
     val observedAt = (polledTick ?: selectedTick)?.at
     // Never draw the moving pointer at entry or calculate P/L from entry when the
@@ -502,10 +500,9 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit, now:
     val status by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
-    val freshPrices = liveTicks.filterValues { TradeQuotePolicy.accepts(it, now) }
-        .mapValues { it.value.price }
     val enabled = settings.autoPaperTrading
     val openTrades = remember(trades) { trades.filter { it.isOpen } }
+    val freshPrices = com.aurum.edge.data.OpenPositionQuotePolicy.prices(openTrades, liveTicks, now)
     val lastTrade = trades.maxByOrNull { it.openedAt }
 
     val totalMarginUsed = openTrades.sumOf { it.effectiveMarginUsd }

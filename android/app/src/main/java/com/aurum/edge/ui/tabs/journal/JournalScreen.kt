@@ -47,7 +47,6 @@ import com.aurum.edge.core.PaperConditionRecord
 import com.aurum.edge.core.IctPriceActionRecord
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.LiveTradeValuation
-import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.core.PaperAiReview
 import com.aurum.edge.core.PaperHoldReview
 import com.aurum.edge.core.SignalAction
@@ -198,8 +197,8 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             SectionCard("پوزیشن‌های باز · ${selectedCategory?.label ?: "همهٔ بازارها"}", "ارزش‌گذاری با آخرین قیمت واقعی دریافتی") {
                 HoldReviewStatus(holdReview) { viewModel.reviewOpenPositionsNow() }
                 filteredOpen.forEach { trade ->
-                    val currentPrice = (liveTicks[trade.symbol]
-                        ?.takeIf { TradeQuotePolicy.accepts(it, now) }
+                    val currentPrice = (com.aurum.edge.data.OpenPositionQuotePolicy.monitored(
+                        trade, liveTicks[trade.symbol], now)
                         ?: com.aurum.edge.data.OpenPositionQuotePolicy.selectedFallback(trade, market, now))?.price
                     val unrealized = LiveTradeValuation.from(trade, currentPrice)?.netPnlUsd
                     Row(

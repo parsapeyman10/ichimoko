@@ -87,7 +87,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState,
     val aiConnection by viewModel.aiConnection.collectAsStateWithLifecycle()
     val traderOpinion by viewModel.traderOpinion.collectAsStateWithLifecycle()
     val news by viewModel.news.collectAsStateWithLifecycle()
-    val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
+    val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
     var showAllDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var visibleDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(12) }
     var scanClock by androidx.compose.runtime.remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis()) }
@@ -101,6 +101,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState,
     val signal = market.signal
 
     val openTrades = trades.filter { it.isOpen }
+    val livePrices = com.aurum.edge.data.OpenPositionQuotePolicy.prices(openTrades, liveTicks)
     val positionBlocker = com.aurum.edge.core.PaperPortfolioPolicy.blocker(
         trades, market.symbol, settings.accountBalance, 0.0, signal?.barTime)
 
