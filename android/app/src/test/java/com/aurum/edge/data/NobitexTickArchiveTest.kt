@@ -71,5 +71,6 @@ class NobitexTickArchiveTest {
         assertEquals(5L, JournalStore(ctx, file, settingsStore = settings).also { it.load() }
             .trades.value.single().tickArchiveSeq)
         settings.saveTickArchive("", "")
+        Unit
     }
 }
