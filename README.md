@@ -23,4 +23,4 @@ cd android
 ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
 ```
 
-ورک‌فلوی `.github/workflows/main.yml` آزمون، lint، ساخت و کنترل `applicationId`، SHA-256، گواهی امضا و افزایش `versionCode` را انجام می‌دهد؛ سپس در انتشار تأییدشده APK و متادیتا را در GitHub Release عمومی قرار می‌دهد تا بخش بروزرسانی اپ آن را پیدا کند. تطابق گواهی با Release عمومی، امضای APK نصب‌شدهٔ خاص یک گوشی را اثبات نمی‌کند. کلید امضا در مخزن نگهداری نمی‌شود. [راهنمای ساخت/امضا](docs/BUILD_SIGNING_FA.md) · [راهنمای اندروید](android/README.md).
+ورک‌فلوی `.github/workflows/main.yml` آزمون، lint، ساخت و کنترل `applicationId`، SHA-256، گواهی امضا و افزایش `versionCode` را انجام می‌دهد؛ سپس در انتشار تأییدشده APK و متادیتا را در GitHub Release عمومی قرار می‌دهد تا بخش بروزرسانی اپ آن را پیدا کند. تطابق گواهی با Release عمومی، امضای APK نصب‌شدهٔ خاص یک گوشی را اثبات نمی‌کند؛ در نسخهٔ ۱.۳.۳۹ تب بروزرسانی اثر انگشت نصب را نشان می‌دهد. حذف نصب پیش از بررسی و حفظ دادهٔ خصوصی خطرناک است. کلید امضا در مخزن نگهداری نمی‌شود. [راهنمای ساخت/امضا](docs/BUILD_SIGNING_FA.md) · [راهنمای اندروید](android/README.md).

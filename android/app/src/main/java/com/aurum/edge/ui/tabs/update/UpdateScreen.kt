@@ -46,6 +46,8 @@ fun UpdateScreen(viewModel: AurumViewModel) {
             }
             Text("شناسه نصب: ${BuildConfig.APPLICATION_ID}", style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted, modifier = Modifier.padding(top = 8.dp))
+            Text(viewModel.updateSigningDiagnostic, style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.Gold, modifier = Modifier.padding(top = 8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -115,7 +117,7 @@ fun UpdateScreen(viewModel: AurumViewModel) {
             Text("• Android اجازهٔ نصب بی‌صدا نمی‌دهد؛ اپ فایل را از داخل خودش می‌گیرد، اما نصب نهایی باید با صفحهٔ Package Installer تأیید شود.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
                 modifier = Modifier.padding(top = 5.dp))
-            Text("• برای اینکه بروزرسانی روی نصب قبلی بنشیند، امضای APK باید همان امضای نسخهٔ نصب‌شده باشد. بیلدهای CI اگر با کلید موقت متفاوت باشند، Android ممکن است نصب را رد کند.",
+            Text("• برای اینکه بروزرسانی روی نصب قبلی بنشیند، امضای APK باید همان امضای نسخهٔ نصب‌شده باشد. اثر انگشت نصب همین گوشی و کانال عمومی بالای همین صفحه دیده می‌شود؛ CI امضای گوشی شما را از راه دور نمی‌بیند. حذف نصب ممکن است ژورنال و تنظیمات خصوصی را از بین ببرد.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 5.dp))
             Text("• کد برنامه در Android به‌صورت امن با APK بروزرسانی می‌شود؛ فقط تنظیمات/داده‌های قابل پیکربندی می‌توانند بدون نصب APK تغییر کنند. قیمت، حجم یا سیگنال ساختگی برای بروزرسانی ساخته نمی‌شود.",

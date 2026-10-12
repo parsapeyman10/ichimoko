@@ -170,6 +170,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val updateState: StateFlow<AppUpdateRepository.State> = container.updater.state
+    val updateSigningDiagnostic: String by lazy { container.updater.installedSigningDiagnostic() }
 
     /** One atomic price+original-time snapshot for the open-position UI.
      * It is never persisted as a new tick and never used to replay an exit.

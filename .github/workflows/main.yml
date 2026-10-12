@@ -105,7 +105,8 @@ jobs:
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.33 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.34 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.35 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.36 updater')))) }}
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.36 updater') ||
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.39 updater')))) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -340,6 +341,10 @@ jobs:
             "$APKSIGNER" verify --print-certs "$1" \
               | awk -F': ' '/certificate SHA-256 digest/ { print tolower($2); exit }'
           }
+          [[ "$(tr -d '\n\r ' < update/updater-signer.sha256)" == "$UPDATER_CERT_SHA256" ]] || {
+            echo "::error title=Updater signer pin mismatch::On-device fingerprint differs from CI release pin."
+            exit 1
+          }
           NEW_CERT="$(cert_of "$NEW_APK")"
           if [[ -z "$NEW_CERT" ]]; then
             echo "::error title=Unreadable signer::apksigner could not print the certificate of the built release APK"
@@ -508,6 +513,11 @@ jobs:
           SIZE_BYTES: ${{ steps.collect.outputs.size_bytes }}
         run: |
           set -euo pipefail
+          if [[ "$GITHUB_REF" == "refs/heads/arena/20dbf868-ichimoko" &&
+                ( "$VERSION_NAME" != "1.3.39" || "$TAG" != "v1.3.39" || "${{ steps.collect.outputs.version_code }}" != "655" ) ]]; then
+            echo "::error title=Wrong release version::Explicit 1.3.39 authorization cannot publish another version."
+            exit 1
+          fi
           NOTES=$'Aurum Edge Android APK.\n\nVersion: '"$VERSION_NAME"$'\nVersion code: ${{ steps.collect.outputs.version_code }}\nSHA-256: '"$SHA256"$'\nSize bytes: '"$SIZE_BYTES"$'\nSigning: '"${AURUM_SIGNING_MODE:-prepared updater key}"$'\n\nThe in-app updater accepts this public release asset, verifies package name, signing certificate, versionCode, size and SHA-256, then opens Android Installer.'
           if [[ "$VERSION_NAME" == "1.3.14" ]]; then
             NOTES+=$'\n\nChanges: automatic paper-entry evaluation across the supported catalog, not just the selected chart. Only symbols with fresh independently timestamped, same-identity trade ticks AND continuous exit monitoring can open automatically (currently FX pairs and XAU/XAG on the spot fallback). Other catalog markets continue automatic read-only scans with explicit reasons. Requires the existing user opt-in; no broker orders.'
@@ -554,15 +564,23 @@ jobs:
           if [[ "$VERSION_NAME" == "1.3.35" ]]; then
             NOTES+=$'\n\nChanges: open paper-trade tracking no longer substitutes entry price when the latest independently timestamped quote is missing or older than 45 seconds. The home card, market banners, equity/free margin and journal show unknown values until a valid tick arrives, using an atomic price/timestamp snapshot. The journal chart starts with the latest 320 real candles; an offscreen entry marker is distinguished from missing history, and tab state is preserved on navigation. Manual paper exits also revalidate quote age at closing time and reject stale fills. This is a UI/valuation correction and stale-price safeguard, not evidence that every real tick is captured. The embedded TradingView widget can reload when its tab is recreated; chart appearance and position settlement are separate. Device behavior and uninterrupted provider coverage have not been verified.'
           fi
+          if [[ "$VERSION_NAME" == "1.3.39" ]]; then
+            NOTES+=$'\n\nChanges: restores in-app updates by publishing a real public release (not a private Actions artifact); displays the on-device certificate fingerprint next to the pinned release-channel certificate. The updater refuses mismatched signatures; never uninstall before preserving private local data. Paper testing no longer pauses entry solely after three consecutive losses; other risk limits remain. Phone-specific signature/install behavior needs device verification.'
+          fi
           if [[ "$VERSION_NAME" == "1.3.36" ]]; then
             NOTES+=$'\n\nChanges: NEW crypto paper positions now use the same Binance Spot USDT venue for seven independent 320-closed-bar history windows, fresh independently timestamped aggregate-trade entry, and ID-ordered open-position WebSocket monitoring. Public market-data-only REST fromId replays gaps/reconnects and checkpoints the last processed aggregate ID with trailing/exit in the journal. BTC selected-chart heavy analysis is throttled to once per second while open-position ticks keep an independent higher-priority worker. Old Nobitex positions remain on their original venue and are never silently repriced with Binance. The watchlist uses Binance market-only quotes; old preferences migrate. aggTrade aggregates fills per taker order/price: it is NOT a raw record of every individual fill. WebSocket is event-driven, not a guarantee that the market prints a trade each second. If Binance Vision is blocked/returns 451, no Binance paper entry occurs; no cross-venue fallback is used. Android offline/background/network/rate limits mean no guaranteed tick coverage or phone-off execution. TradingView remains display-only. On-device stream reachability must still be checked.'
           fi
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "$TAG" --notes "$NOTES"
-          else
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "$NOTES"
+          # Fail closed on a pre-existing tag: editing or clobbering a published release can
+          # silently replace an APK already downloaded by users, without versionCode changing.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1 ||
+             gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error title=Existing release tag::Refusing to overwrite $TAG; bump version and code."
+            exit 1
           fi
-          gh release upload "$TAG" "out/${APK_NAME}" "out/${APK_NAME}.json" "out/checksums.sha256" --clobber
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "$NOTES" --draft
+          gh release upload "$TAG" "out/${APK_NAME}" "out/${APK_NAME}.json" "out/checksums.sha256"
+          # A draft is invisible to the updater; publish only once all assets are uploaded.
+          gh release edit "$TAG" --draft=false
 
       - name: Verify public updater release is discoverable
         if: steps.guard.outputs.ready == 'true' && steps.collect.outputs.tag != '' && (steps.publish.outcome == 'success')

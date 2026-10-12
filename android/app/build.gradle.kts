@@ -17,8 +17,8 @@ if (System.getenv("GITHUB_ACTIONS") == "true") {
 
 // Never bake provider credentials into an APK (even a GitHub Actions secret is extractable).
 // Read-only market keys are entered on the device; trading keys must stay server-side.
-// The CI artifact is a DEBUG-SIGNED preview. A repository owner can explicitly supply a
-// stable, privately held signing key for sideloaded updates; signing is NOT Play certification
+// Locally built releases without a stable keystore fall back to a debug signature. CI requires
+// the pinned updater key before publishing; signing is NOT Play certification
 // and does not guarantee that Google Play Protect will stop warning on first sideload.
 val ownerStorePath = System.getenv("AURUM_RELEASE_STORE_FILE")?.takeIf { it.isNotBlank() }
 val ownerStorePassword = System.getenv("AURUM_RELEASE_STORE_PASSWORD")?.takeIf { it.isNotBlank() }
@@ -34,6 +34,11 @@ fun gitOutput(vararg args: String): String = runCatching {
     out.toString().trim().ifBlank { "unknown" }
 }.getOrDefault("unknown")
 val gitSha = gitOutput("rev-parse", "--short=12", "HEAD")
+// Public certificate fingerprint only (NEVER the private key). Kept in Git for diagnostic display.
+val updaterSigner = file("../../update/updater-signer.sha256").readText().trim()
+if (!Regex("[0-9a-f]{64}").matches(updaterSigner)) {
+    throw org.gradle.api.GradleException("Invalid updater certificate fingerprint")
+}
 if (!ownerSigningReady && (requireOwnerSigning || signingValues.any { it != null })) {
     throw org.gradle.api.GradleException(
         "Owner-signed release requires all four AURUM_RELEASE_* environment variables; refusing an incomplete signing setup."
@@ -56,11 +61,12 @@ android {
         applicationId = "com.aurum.edge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 654
-        versionName = "1.3.38"
+        versionCode = 655
+        versionName = "1.3.39"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
+        buildConfigField("String", "UPDATER_CERT_SHA256", "\"$updaterSigner\"")
         buildConfigField("String", "UPDATE_REPO", "\"parsapeyman10/ichimoko\"")
         // The updater must read the published manifest, not a short-lived Arena/PR branch.
         // Public releases are still checked separately, so a manifest without apkUrl cannot

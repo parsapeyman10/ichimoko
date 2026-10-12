@@ -90,6 +90,25 @@ class AppUpdateRepository(
         val error: String? = null,
     )
 
+    /** Read the actual package signature on THIS device, not the APK/build number in CI. */
+    fun installedSigningDiagnostic(): String {
+        val expected = BuildConfig.UPDATER_CERT_SHA256
+        val installed = runCatching {
+            @Suppress("DEPRECATION")
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
+                PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
+            signingCertificateDigests(context.packageManager.getPackageInfo(context.packageName, flags))
+        }.getOrElse { emptySet() }
+        val value = installed.sorted().joinToString("، ").ifEmpty { "قابل خواندن نیست" }
+        val verdict = when {
+            context.packageName != "com.aurum.edge" -> "این نصب debug است و بستهٔ انتشار عمومی را جایگزین نمی‌کند."
+            installed.isEmpty() -> "گواهی نصب خوانده نشد؛ سازگاری نامعلوم است."
+            sameCurrentSigners(installed, setOf(expected)) -> "امضای نصب با کانال انتشار یکسان است؛ نصب نهایی با Android است."
+            else -> "امضای نصب با کانال انتشار فرق دارد؛ بروزرسانی روی همین بسته ممکن نیست. برنامه را بدون پشتیبان‌گیری مطمئن حذف نکنید."
+        }
+        return "SHA-256 گواهی نصب فعلی: $value\nSHA-256 کانال Release: $expected\n$verdict"
+    }
+
     private val json = Json { ignoreUnknownKeys = true }
     private val operationMutex = Mutex()
     private val _state = MutableStateFlow(State())
@@ -126,7 +145,7 @@ class AppUpdateRepository(
                 }
                 update == null -> {
                     _state.value = State(
-                        message = "نسخهٔ نصب‌شده فعلاً آخرین نسخهٔ عمومی قابل دریافت است. نسخه ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · ${BuildConfig.GIT_SHA.take(7)}. برای دانلود باید APK در manifest یا یک GitHub Release عمومی منتشر شده باشد.",
+                        message = "نسخهٔ جدیدتری در Release عمومی یا manifest پیدا نشد. نسخهٔ نصب‌شده ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · ${BuildConfig.GIT_SHA.take(7)}؛ artifact خصوصی Actions از داخل اپ قابل دریافت نیست. اگر APK را از artifact گرفته‌اید، باید نسخهٔ بالاتر در Release عمومی منتشر شود.",
                     )
                 }
                 !update.canDownload -> {
@@ -188,12 +207,20 @@ class AppUpdateRepository(
             val installedInfo = context.packageManager.getPackageInfo(context.packageName, archiveFlags)
             val installedSigners = signingCertificateDigests(installedInfo)
             val downloadedSigners = signingCertificateDigests(packageInfo)
-            if (installedSigners.isEmpty() || downloadedSigners.isEmpty() ||
-                installedSigners.intersect(downloadedSigners).isEmpty()
-            ) {
+            if (installedSigners.isEmpty() || downloadedSigners.isEmpty()) {
+                throw DataFeedException("گواهی نصب فعلی یا APK دریافتی خوانده نشد؛ سازگاری امضا نامعلوم است. نصب ادامه نمی‌یابد.")
+            }
+            // A single overlapping signer is insufficient for a multi-signer package: Android
+            // may reject it. This updater does not support key rotation; fail closed instead.
+            if (!sameCurrentSigners(installedSigners, downloadedSigners)) {
                 throw DataFeedException(
-                    "امضای نسخهٔ نصب‌شده با کانال Release یکی نیست. این نصب از artifact/کلید قدیمی آمده و Android اجازهٔ بروزرسانی مستقیم نمی‌دهد. راه درست: یک‌بار نسخهٔ فعلی را حذف کن و APK رسمی GitHub Release را نصب کن؛ از نصب بعدی، بروزرسانی داخل اپ با همین کلید ثابت انجام می‌شود.",
+                    "امضای APK با نصب فعلی یکسان نیست (نصب: ${installedSigners.sorted().joinToString()}؛ دانلود: ${downloadedSigners.sorted().joinToString()}). Android بروزرسانی را رد می‌کند. بدون پشتیبان‌گیریِ مطمئن برنامه را حذف نکنید؛ حذف نصب داده‌های محلی را از بین می‌برد.",
                 )
+            }
+            if (context.packageName == "com.aurum.edge" &&
+                !sameCurrentSigners(downloadedSigners, setOf(BuildConfig.UPDATER_CERT_SHA256))
+            ) {
+                throw DataFeedException("APK منتشرشده با گواهی pin‌شدهٔ کانال انتشار مطابقت ندارد؛ نصب متوقف شد.")
             }
             val versionCode = PackageInfoCompat.getLongVersionCode(packageInfo)
             if (info.versionCode != null && versionCode < info.versionCode) {
@@ -482,8 +509,8 @@ class AppUpdateRepository(
     /**
      * Check the signing certificate before opening Package Installer. Android performs the final
      * check too, but doing it here gives a useful error and prevents presenting a known-incompatible
-     * debug/release APK to the user. Key rotation is intentionally conservative: at least one
-     * current content signer must match.
+     * debug/release APK to the user. This updater deliberately does not support key rotation;
+     * every current content signer must match.
      */
     @Suppress("DEPRECATION")
     private fun signingCertificateDigests(info: PackageInfo): Set<String> {
