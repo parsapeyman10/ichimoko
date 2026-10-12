@@ -27,10 +27,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalUriHandler
@@ -62,6 +64,7 @@ import com.aurum.edge.ui.theme.AurumColors
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 @Composable
 fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
@@ -73,7 +76,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     val holdReview by viewModel.holdReview.collectAsStateWithLifecycle()
     var confirmClear by remember { mutableStateOf(false) }
     var showCombined by remember { mutableStateOf(false) }
-    var selectedCategory by remember { mutableStateOf<AssetClass?>(null) }
+    var selectedCategory by rememberSaveable { mutableStateOf<AssetClass?>(null) }
     var pendingPdf by remember { mutableStateOf<Pair<String, List<PaperTrade>>?>(null) }
     val savePdf = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
         val request = pendingPdf
@@ -218,6 +221,12 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                 "ورود ${formatPrice(trade.entry)} · استاپ فعلی ${formatPrice(trade.stopLoss)} · هدف اولیه ${formatPrice(trade.takeProfit)}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.TextMuted,
+                            )
+                            Text(
+                                currentPrice?.let { "آخرین قیمت تازهٔ دریافتی ${formatPrice(it)}" }
+                                    ?: "قیمت تازهٔ این نماد فعلاً در دسترس نیست؛ ورود، قیمت فعلی نیست",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (currentPrice != null) AurumColors.Cyan else AurumColors.Gold,
                             )
                             Text(
                                 "${formatDateTime(trade.openedAt)} · ${if (trade.autoOpened) "خودکار کاغذی" else if (trade.note.startsWith("ورود دستی")) "دستی" else "کاغذی"} · ${trade.id.take(8)}",
@@ -507,6 +516,17 @@ private fun TradeRow(trade: PaperTrade) {
 private fun TradeChartDisclosure(viewModel: AurumViewModel, trade: PaperTrade) {
     val state by viewModel.tradeChart.collectAsStateWithLifecycle()
     val expanded = state.tradeId == trade.id
+    // The tab is disposed on navigation. On return, refresh its picture from the
+    // verified cache without restarting the live position tracker or replaying ticks.
+    LaunchedEffect(expanded, trade.id, trade.closedAt) {
+        if (expanded) {
+            while (true) {
+                viewModel.refreshVisibleTradeChart(trade)
+                if (!trade.isOpen) break
+                delay(15_000L)
+            }
+        }
+    }
     OutlinedButton(
         onClick = { viewModel.showTradeChart(trade) },
         modifier = Modifier.padding(top = 4.dp),
@@ -534,6 +554,11 @@ private fun TradeChartDisclosure(viewModel: AurumViewModel, trade: PaperTrade) {
                         " → ${if (trade.isOpen) "هنوز باز" else "خروج ${formatDateTime(trade.closedAt)}"}",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
                     modifier = Modifier.padding(top = 5.dp),
+                )
+                Text(
+                    "آخرین کندل واقعیِ این تصویر: ${formatDateTime(state.window.bars.last().time)}" +
+                        (if (trade.isOpen) " · نمودار کندلی تیک زندهٔ خروج نیست" else ""),
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan,
                 )
                 Text(
                     "خط ENTRY/SL/TP/EXIT از همین رکورد ژورنال خوانده شده؛ IN-L/IN-S کندل ورود و OUT کندل خروج ثبت‌شده است." +

@@ -946,6 +946,29 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** Refresh the expanded journal picture on return to its tab and while it is visible.
+     * Only verified cached candles are read; this NEVER restarts a tick stream, rewinds the
+     * position cursor, modifies a trade, or turns a historical candle into an exit quote.
+     */
+    suspend fun refreshVisibleTradeChart(trade: PaperTrade) {
+        val before = _tradeChart.value
+        if (before.tradeId != trade.id || before.loading || before.downloading) return
+        val bars = container.cachedCandles(trade.symbol, trade.interval)
+        if (_tradeChart.value.tradeId != trade.id || _tradeChart.value.loading ||
+            _tradeChart.value.downloading || bars.isEmpty()) return
+        val window = withContext(Dispatchers.Default) { TradeReplay.window(trade, bars) }
+        val current = _tradeChart.value
+        if (current.tradeId != trade.id || current.loading || current.downloading) return
+        // A provider download can finish during the disk read. Never replace a newer
+        // downloaded chart with an older cache (including when its entry is off-screen).
+        if ((window.bars.lastOrNull()?.time ?: 0L) <
+            (current.window.bars.lastOrNull()?.time ?: 0L)) return
+        if (current.window != window) {
+            _tradeChart.value = current.copy(window = window,
+                source = "کش کندل‌های تأییدشدهٔ همین گوشی")
+        }
+    }
+
     /**
      * The local cache does not reach back far enough: ask the provider for the real bars of this
      * pair/timeframe with the user's own read-only key. Display only — no order, no signal.

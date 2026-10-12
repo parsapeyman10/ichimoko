@@ -14,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -36,6 +37,9 @@ fun AurumRoot(viewModel: AurumViewModel) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val toast by viewModel.toast.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    // The selected tab is removed from composition on every navigation. Keep its
+    // saveable scroll/filter state so returning to Journal does not jump to entry/top.
+    val tabStates = rememberSaveableStateHolder()
 
     // After process recreation Compose may restore a visible screen, but the new app
     // container has no running feed. Start it as soon as the UI is visible again.
@@ -85,20 +89,22 @@ fun AurumRoot(viewModel: AurumViewModel) {
                     lastBarTime = market.candles.lastOrNull()?.time, showingCache = market.showingCachedData)
             }
             Box(Modifier.fillMaxSize()) {
-                when (selectedTab) {
-                    AurumTab.Home -> HomeScreen(viewModel, market,
-                        onChartSymbol = ::openChartFor, onJournal = { open(AurumTab.Journal) })
-                    AurumTab.Chart -> ChartScreen(initialTicker = chartTicker,
-                        onSelectTicker = { chartTicker = it })
-                    AurumTab.Signal -> SignalScreen(viewModel, market, onChartSymbol = ::openChartFor)
-                    AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) },
-                        onOpenChart = ::openChartFor)
-                    AurumTab.News -> PersianNewsScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) },
-                        onOpenSignal = { open(AurumTab.Signal) })
-                    AurumTab.Journal -> JournalScreen(viewModel, market)
-                    AurumTab.Update -> UpdateScreen(viewModel)
-                    AurumTab.Settings -> SettingsScreen(viewModel, settings)
-                    AurumTab.Api -> ApiMenuScreen(viewModel, settings, onForexSettings = { open(AurumTab.Settings) })
+                tabStates.SaveableStateProvider(selectedTab.name) {
+                    when (selectedTab) {
+                        AurumTab.Home -> HomeScreen(viewModel, market,
+                            onChartSymbol = ::openChartFor, onJournal = { open(AurumTab.Journal) })
+                        AurumTab.Chart -> ChartScreen(initialTicker = chartTicker,
+                            onSelectTicker = { chartTicker = it })
+                        AurumTab.Signal -> SignalScreen(viewModel, market, onChartSymbol = ::openChartFor)
+                        AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) },
+                            onOpenChart = ::openChartFor)
+                        AurumTab.News -> PersianNewsScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) },
+                            onOpenSignal = { open(AurumTab.Signal) })
+                        AurumTab.Journal -> JournalScreen(viewModel, market)
+                        AurumTab.Update -> UpdateScreen(viewModel)
+                        AurumTab.Settings -> SettingsScreen(viewModel, settings)
+                        AurumTab.Api -> ApiMenuScreen(viewModel, settings, onForexSettings = { open(AurumTab.Settings) })
+                    }
                 }
             }
         }

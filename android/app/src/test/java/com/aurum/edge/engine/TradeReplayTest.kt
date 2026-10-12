@@ -104,11 +104,27 @@ class TradeReplayTest {
         )
         assertEquals(TradeReplay.MAX_BARS, window.bars.size)
         assertEquals(TradeReplay.Coverage.PARTIAL, window.coverage)
-        assertNull(window.exitBarTime)
-        // still a contiguous slice of the real series — no resampling, no averaged bars
+        assertNull(window.entryBarTime)
+        assertEquals(base + 900 * step, window.exitBarTime)
+        assertTrue(window.detail.contains("پنجرهٔ تازه‌ترین"))
+        // A contiguous real slice ends at the exit context, rather than being stuck at entry.
         window.bars.forEachIndexed { index, bar ->
-            assertEquals(base + (20 - TradeReplay.PADDING_BARS + index) * step, bar.time)
+            assertEquals(base + (900 + TradeReplay.PADDING_BARS - TradeReplay.MAX_BARS + 1 + index) * step, bar.time)
         }
+    }
+
+    @Test fun `returning to a long-running open trade follows the newest real bars instead of entry`() {
+        val opened = trade(base + 20 * step, null)
+        val first = TradeReplay.window(opened, series(base, 1_200), now = base + 1_199 * step)
+        assertEquals(TradeReplay.MAX_BARS, first.bars.size)
+        assertEquals(base + 1_199 * step, first.bars.last().time)
+        assertNull(first.entryBarTime) // the entry exists, but is outside the recent viewport
+        assertEquals(TradeReplay.Coverage.PARTIAL, first.coverage)
+        assertTrue(first.detail.contains("پنجرهٔ تازه‌ترین"))
+        val returned = TradeReplay.window(opened, series(base, 1_231), now = base + 1_230 * step)
+        assertEquals(base + 1_230 * step, returned.bars.last().time)
+        assertEquals(base + (1_231 - TradeReplay.MAX_BARS) * step, returned.bars.first().time)
+        assertTrue(returned.bars.all { it in series(base, 1_231) })
     }
 
     @Test fun `an open position is drawn up to the newest bar and says so`() {
