@@ -20,7 +20,8 @@ import java.time.Instant
 
 /** Synthetic policy fixtures, NOT proof of profitable performance or available venue quotes. */
 class CryptoCompressionEngineTest {
-    private val now = Instant.parse("2026-10-13T12:00:00Z").toEpochMilli()
+    private val now = System.currentTimeMillis()
+    private val london = Instant.parse("2026-10-13T12:00:00Z").toEpochMilli()
     private fun bars(frame: Interval, volume: Double = 100.0): List<Candle> {
         val end = now / frame.millis * frame.millis - frame.millis
         return (0 until 320).map { j ->
@@ -53,7 +54,7 @@ class CryptoCompressionEngineTest {
     private val names = listOf("فشردگی · ۲۰ کندل", "انفجار · حجم/ADX/چیکو",
         "فیلتر کلان · ۵۲/۱۰۳ و M15/H1", "ورود · کندل/ریسک/سشن")
     private fun proof(): Signal {
-        val bar = now - Interval.M5.millis
+        val bar = london - Interval.M5.millis
         return Signal(SignalAction.BUY, 100.0, entry = 100.0, stopLoss = 99.0,
             takeProfit = 103.0, interval = Interval.M5, barTime = bar,
             cryptoBreakout = CryptoBreakoutEvidence(SignalAction.BUY, bar, bar,
@@ -74,14 +75,14 @@ class CryptoCompressionEngineTest {
     @Test fun `spread must be measured from independent top of book and under tenth ATR`() {
         val signal = proof()
         assertNull(CryptoCompressionPolicy.quoteBlocker(signal,
-            PriceTick(100.0, now, bid = 99.98, ask = 100.02), now))
-        assertNotNull(CryptoCompressionPolicy.quoteBlocker(signal, PriceTick(100.0, now), now))
+            PriceTick(100.0, london, bid = 99.98, ask = 100.02), london))
+        assertNotNull(CryptoCompressionPolicy.quoteBlocker(signal, PriceTick(100.0, london), london))
         assertNotNull(CryptoCompressionPolicy.quoteBlocker(signal,
-            PriceTick(100.0, now, bid = 99.94, ask = 100.06), now))
+            PriceTick(100.0, london, bid = 99.94, ask = 100.06), london))
         assertNotNull(CryptoCompressionPolicy.quoteBlocker(signal,
-            PriceTick(100.0, now - 46_000L, bid = 99.98, ask = 100.02), now))
+            PriceTick(100.0, london - 46_000L, bid = 99.98, ask = 100.02), london))
         assertNotNull(CryptoCompressionPolicy.quoteBlocker(signal,
-            PriceTick(101.0, now, bid = 100.98, ask = 101.02), now))
+            PriceTick(101.0, london, bid = 100.98, ask = 101.02), london))
         assertFalse(CryptoCompressionPolicy.londonOrNewYork(
             Instant.parse("2026-10-13T23:00:00Z").toEpochMilli()))
     }
@@ -90,9 +91,9 @@ class CryptoCompressionEngineTest {
         val signal = proof()
         val earlier = (0 until 5).map { id -> PaperTrade(id.toString(), "BTC/USDT", Interval.M5,
             SignalAction.BUY, 100.0, 99.0, 103.0, 100.0, 3.0,
-            now - 2*60*60*1000L - id*60_000L, closedAt = now - 1_000L, pnlUsd = 1.0) }
+            london - 2*60*60*1000L - id*60_000L, closedAt = london - 1_000L, pnlUsd = 1.0) }
         assertTrue(PaperPortfolioPolicy.blocker(earlier, "ETH/USDT", 100_000.0, 0.5,
-            now = now).orEmpty().contains("۵ ورود"))
+            now = london).orEmpty().contains("۵ ورود"))
         assertEquals(AssetClass.CRYPTO, AssetClass.of("ETH/USDT"))
         assertTrue(signal.cryptoBreakout!!.matches(signal))
     }

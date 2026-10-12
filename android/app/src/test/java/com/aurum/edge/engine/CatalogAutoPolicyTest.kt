@@ -38,20 +38,22 @@ class CatalogAutoPolicyTest {
         assertNull(CatalogQuotePolicy.rejection("EUR/USD", PriceTick(100.0, weekday), weekday))
     }
 
-    @Test fun `crypto entry never mixes another venue history with Nobitex ticks`() {
+    @Test fun `crypto entry requires the new breakout proof before any venue or quote`() {
         val config = AppSettings(autoPaperTrading = true)
         val observed = MarketState(symbol = "BTC/USDT", interval = Interval.M5,
             lastPrice = 100.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = weekday),
             historyProvider = "Twelve Data")
+        assertFalse(com.aurum.edge.data.CryptoVenuePolicy.compatible("BTC/USDT",
+            observed.historyProvider, observed.feed.provider))
         assertTrue(PaperAutoRules.blocker(observed, config, PersianNewsState(), now = weekday,
-            allowedSymbols = WatchCatalog.scannerSymbols)!!.contains("Binance Spot"))
+            allowedSymbols = WatchCatalog.scannerSymbols)!!.contains("فشردگی"))
         val matched = observed.copy(historyProvider = com.aurum.edge.data.BinanceSpotClient.PROVIDER,
             feed = observed.feed.copy(provider = "Binance Spot / USDT aggTrade"),
             lastTradeAt = weekday, lastTradePrice = 100.0)
         assertTrue(PaperAutoRules.blocker(matched.copy(lastTradeAt = weekday - 46_000L), config,
             PersianNewsState(), now = weekday,
-            allowedSymbols = WatchCatalog.scannerSymbols)!!.contains("معاملهٔ واقعی تازه"))
-        assertEquals("سیگنال محاسبه نشده است",
+            allowedSymbols = WatchCatalog.scannerSymbols)!!.contains("فشردگی"))
+        assertEquals("سیگنال فشردگی/انفجار موجود نیست",
             PaperAutoRules.blocker(matched, config, PersianNewsState(), now = weekday,
                 allowedSymbols = WatchCatalog.scannerSymbols))
     }
