@@ -40,6 +40,7 @@ class SpotFallbackClient(
         .build(),
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+    private val binance = BinanceSpotClient()
 
     // Instances used by the screen, service and scanner share a rate budget. Paper
     // positions get a reserved high-priority lane; low-priority scans cannot exhaust it.
@@ -170,7 +171,7 @@ class SpotFallbackClient(
     suspend fun fetchQuote(symbol: String): PriceTick {
         // Crypto has its own real, keyless book. Swissquote and Gold-API do not carry these
         // instruments at all, so trying them would just produce a misleading error.
-        if (CryptoCatalog.isCrypto(symbol)) return BinanceSpotClient().fetchQuote(symbol)
+        if (CryptoCatalog.isCrypto(symbol)) return binance.fetchQuote(symbol)
         return try {
             fetchSwissquote(symbol)
         } catch (cancel: CancellationException) {

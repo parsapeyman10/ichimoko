@@ -33,4 +33,15 @@ class TradingViewFeedBoundaryTest {
         assertEquals(listOf("binance_spot_agg_trades"), selection.enabledSources)
         assertEquals("binance_spot_agg_trades", selection.preferredSourceId)
     }
+    @Test fun `old Nobitex watch preference is migrated to Binance without relabeling its cached price`() {
+        val context = RuntimeEnvironment.getApplication()
+        context.getSharedPreferences("watch_preferences", Context.MODE_PRIVATE).edit()
+            .putString("sources_ETH/USDT", "nobitex_public_trades")
+            .putString("preferred_ETH/USDT", "nobitex_public_trades").commit()
+        val selection = WatchSettingsStore(context).selections.value["ETH/USDT"]!!
+        assertEquals(listOf("binance_spot_agg_trades"), selection.enabledSources)
+        assertEquals("binance_spot_agg_trades", selection.preferredSourceId)
+        assertFalse(SourceCatalog.all.any { it.id == "nobitex_public_trades" })
+    }
+
 }

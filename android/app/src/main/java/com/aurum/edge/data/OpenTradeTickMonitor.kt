@@ -304,7 +304,10 @@ class OpenTradeTickMonitor(
                                     pollBinance(symbol, openedAt, bootstrap = true)
                                     val caught = journal.trades.value.firstOrNull { it.isOpen &&
                                         it.symbol == symbol && it.openedAt == openedAt }?.binanceAggId ?: break
-                                    if (row.id > caught + 1L) break
+                                    if (row.id > caught + 1L) {
+                                        journal.noteTickCoverageGap(symbol, now, openedAt)
+                                        break
+                                    }
                                     session.connected = true
                                     if (row.id <= caught) continue
                                 }

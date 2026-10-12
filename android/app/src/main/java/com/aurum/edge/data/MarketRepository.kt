@@ -106,7 +106,8 @@ class MarketRepository(
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private var lastNetwork: Network? = null
     private val refreshMutex = Mutex()
-    private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client)
+    private val binanceHistory = BinanceSpotClient()
+    private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client, binanceHistory)
     private var timeframeJob: Job? = null
     @Volatile private var timeframeSnapshot: Map<Interval, List<Candle>> = emptyMap()
     private var timeframeAutoMode = false
@@ -118,6 +119,8 @@ class MarketRepository(
     private var lastQuietReconnect = 0L
     private var cachedBars: MutableMap<Long, Candle> = mutableMapOf()
     private var lastCacheWrite = 0L
+    private var lastCryptoEvaluationAt = 0L
+    private var lastCryptoEvaluationPeriod = -1L
 
     fun attach(scope: CoroutineScope) {
         this.scope = scope
@@ -257,7 +260,7 @@ class MarketRepository(
                 // silently replacing the same-pair execution feed with another exchange.
                 // Never treat BTC/USD from Yahoo as if it were BTC/USDT.
                 try {
-                    val book = BinanceSpotClient().fetchCandles(current.symbol, current.interval,
+                    val book = binanceHistory.fetchCandles(current.symbol, current.interval,
                         desiredSize = requestedSize, minimumSize = minimumSize)
                     fetched = book.candles
                     historyProvider = book.provider
@@ -625,6 +628,9 @@ class MarketRepository(
         val now = System.currentTimeMillis()
         val price = tick.price
         val at = tick.at
+        // A late REST response or reconnect callback cannot rewind the selected quote.
+        if (_state.value.symbol == current.symbol &&
+            at < (_state.value.lastTradeAt ?: 0L)) return
         if (marketClosed(now)) { publishClosed(); return }
         if (!isCurrentIntervalTick(at, current.interval, now)) return
         val wallPeriodStart = now - now % current.interval.millis
@@ -666,7 +672,15 @@ class MarketRepository(
             feed = FeedStatus(FeedMode.LIVE, "", System.currentTimeMillis(), provider = provider),
             showingCachedData = false,
         )
-        publishCandles()
+        // BTC can publish hundreds of aggregates a second. Keep every exchange event
+        // in the independent position monitor; this selected display updates the latest
+        // quote immediately, but does not re-run the seven-frame engine on every fill.
+        if (!CryptoCatalog.isCrypto(current.symbol) ||
+            now - lastCryptoEvaluationAt >= 1_000L || periodStart != lastCryptoEvaluationPeriod) {
+            lastCryptoEvaluationAt = now
+            lastCryptoEvaluationPeriod = periodStart
+            publishCandles()
+        }
 
         val writeAt = System.currentTimeMillis()
         if (writeAt - lastCacheWrite > 60_000L) {

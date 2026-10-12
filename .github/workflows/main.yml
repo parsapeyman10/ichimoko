@@ -100,7 +100,8 @@ jobs:
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.32 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.33 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.34 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.35 updater')))) }}
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.35 updater') ||
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.36 updater')))) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -548,6 +549,9 @@ jobs:
           fi
           if [[ "$VERSION_NAME" == "1.3.35" ]]; then
             NOTES+=$'\n\nChanges: open paper-trade tracking no longer substitutes entry price when the latest independently timestamped quote is missing or older than 45 seconds. The home card, market banners, equity/free margin and journal show unknown values until a valid tick arrives, using an atomic price/timestamp snapshot. The journal chart starts with the latest 320 real candles; an offscreen entry marker is distinguished from missing history, and tab state is preserved on navigation. Manual paper exits also revalidate quote age at closing time and reject stale fills. This is a UI/valuation correction and stale-price safeguard, not evidence that every real tick is captured. The embedded TradingView widget can reload when its tab is recreated; chart appearance and position settlement are separate. Device behavior and uninterrupted provider coverage have not been verified.'
+          fi
+          if [[ "$VERSION_NAME" == "1.3.36" ]]; then
+            NOTES+=$'\n\nChanges: NEW crypto paper positions now use the same Binance Spot USDT venue for seven independent 320-closed-bar history windows, fresh independently timestamped aggregate-trade entry, and ID-ordered open-position WebSocket monitoring. Public market-data-only REST fromId replays gaps/reconnects and checkpoints the last processed aggregate ID with trailing/exit in the journal. BTC selected-chart heavy analysis is throttled to once per second while open-position ticks keep an independent higher-priority worker. Old Nobitex positions remain on their original venue and are never silently repriced with Binance. The watchlist uses Binance market-only quotes; old preferences migrate. aggTrade aggregates fills per taker order/price: it is NOT a raw record of every individual fill. WebSocket is event-driven, not a guarantee that the market prints a trade each second. If Binance Vision is blocked/returns 451, no Binance paper entry occurs; no cross-venue fallback is used. Android offline/background/network/rate limits mean no guaranteed tick coverage or phone-off execution. TradingView remains display-only. On-device stream reachability must still be checked.'
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "$TAG" --notes "$NOTES"

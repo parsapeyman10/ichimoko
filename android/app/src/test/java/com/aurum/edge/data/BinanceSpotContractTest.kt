@@ -3,6 +3,12 @@ package com.aurum.edge.data
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.TradeQuotePolicy
 import org.junit.Assert.*
+import kotlinx.coroutines.runBlocking
+import okhttp3.OkHttpClient
+import okhttp3.Interceptor
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Test
 
 /** Ten independent assertions for venue, clock, stream, pagination and closed bars. */
@@ -62,4 +68,26 @@ class BinanceSpotContractTest {
             Interval.M5, now).size)
         fails { BinanceSpotClient.parseCandles("[${bar(now-3*step)},${bar(now-step)}]", Interval.M5, now) }
     }
+    @Test fun `11 REST resumes at inclusive persisted ID and checks returned first ID`() = runBlocking {
+        var requested: String? = null
+        val http = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+            requested = chain.request().url.queryParameter("fromId")
+            val body = "[${row(102, System.currentTimeMillis())}]"
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                .code(200).message("OK").body(body.toResponseBody()).build()
+        }).build()
+        val client = BinanceSpotClient(http)
+        assertEquals(102L, client.fetchAggregates("BTC/USDT", fromId = 102L).single().id)
+        assertEquals("102", requested)
+        assertTrue(runCatching { client.fetchAggregates("BTC/USDT", fromId = 101L) }.isFailure)
+    }
+
+    @Test fun `12 region blocked response does not turn into a live trade`() = runBlocking {
+        val http = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                .code(451).message("Unavailable").body("blocked".toResponseBody()).build()
+        }).build()
+        assertTrue(runCatching { BinanceSpotClient(http).fetchQuote("BTC/USDT") }.isFailure)
+    }
+
 }
