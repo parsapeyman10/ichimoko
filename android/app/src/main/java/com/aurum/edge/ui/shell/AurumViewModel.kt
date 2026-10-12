@@ -391,16 +391,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     val currentMap = mutableMapOf<String, Double>()
                     val currentTicks = mutableMapOf<String, PriceTick>()
 
-                    val selectedTick = currentMarket.lastPrice?.let { price ->
-                        currentMarket.lastTradeAt?.let { at -> PriceTick(price, at) }
-                    }
-                    if (selectedTick != null && TradeQuotePolicy.accepts(selectedTick) &&
-                        !currentMarket.showingCachedData && currentMarket.feed.mode == FeedMode.LIVE &&
-                        FeedLiveness.hasRecentReceipt(currentMarket.feed) &&
-                        !MarketHours.closedFor(currentMarket.symbol) &&
-                        (openTradesList.none { it.symbol == currentMarket.symbol &&
-                            com.aurum.edge.data.CryptoCatalog.isCrypto(it.symbol) &&
-                            it.cryptoVenue != com.aurum.edge.data.BinanceSpotClient.VENUE })) {
+                    // Never value an open crypto position from the selected chart's latest
+                    // quote: only its own ordered same-venue monitor proves replay coverage.
+                    val selectedTick = openTradesList.firstOrNull { it.symbol == currentMarket.symbol }
+                        ?.let { com.aurum.edge.data.OpenPositionQuotePolicy.selectedFallback(it, currentMarket) }
+                    if (selectedTick != null) {
                         currentMap[currentMarket.symbol] = selectedTick.price
                         currentTicks[currentMarket.symbol] = selectedTick
                         // MarketRepository already settles the original timestamped tick.
@@ -449,7 +444,13 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
                     _liveTicks.value = currentTicks
                     _livePrices.value = currentMap
-                } catch (_: Exception) {}
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    // A failed monitor pass cannot keep the previous pass's quote/PnL alive.
+                    _liveTicks.value = emptyMap()
+                    _livePrices.value = emptyMap()
+                }
                 delay(800L)
             }
         }

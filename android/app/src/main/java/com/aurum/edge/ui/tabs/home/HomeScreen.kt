@@ -36,8 +36,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
-import com.aurum.edge.core.FeedLiveness
-import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.LiveTradeValuation
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.TradeQuotePolicy
@@ -256,18 +254,10 @@ private fun LiveTradeGaugeCard(
 ) {
     val isBuy = trade.action == SignalAction.BUY
     val assetClass = AssetClass.of(trade.symbol)
-    val selectedFresh = currentMarket.symbol == trade.symbol &&
-            (!com.aurum.edge.data.CryptoCatalog.isCrypto(trade.symbol) ||
-                trade.cryptoVenue == com.aurum.edge.data.BinanceSpotClient.VENUE) &&
-            currentMarket.feed.mode == FeedMode.LIVE && !currentMarket.showingCachedData &&
-            FeedLiveness.hasRecentReceipt(currentMarket.feed, now) &&
-            currentMarket.lastPrice?.let { price -> currentMarket.lastTradeAt?.let { at ->
-                TradeQuotePolicy.accepts(PriceTick(price, at), now)
-            } } == true
+    val selectedTick = com.aurum.edge.data.OpenPositionQuotePolicy.selectedFallback(trade, currentMarket, now)
     val polledTick = liveTicks[trade.symbol]?.takeIf { TradeQuotePolicy.accepts(it, now) }
-    val verifiedLivePrice = polledTick?.price
-        ?: currentMarket.lastPrice?.takeIf { selectedFresh }
-    val observedAt = polledTick?.at ?: currentMarket.lastTradeAt?.takeIf { selectedFresh }
+    val verifiedLivePrice = (polledTick ?: selectedTick)?.price
+    val observedAt = (polledTick ?: selectedTick)?.at
     // Never draw the moving pointer at entry or calculate P/L from entry when the
     // actual quote is absent: that was the apparent "rewind" on tab navigation.
     val valuation = LiveTradeValuation.from(trade, verifiedLivePrice)

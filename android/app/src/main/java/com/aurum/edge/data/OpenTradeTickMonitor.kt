@@ -229,7 +229,9 @@ class OpenTradeTickMonitor(
             if (session.connected && !bootstrap)
                 return@withLock session.latest?.takeIf { TradeQuotePolicy.accepts(it, now) }
             if (!bootstrap && now - session.lastRequestAt in 0 until 1_000)
-                return@withLock session.latest?.takeIf { TradeQuotePolicy.accepts(it, now) }
+                return@withLock session.latest?.takeIf {
+                    session.lastBinanceReplayOk && TradeQuotePolicy.accepts(it, now)
+                }
             session.lastRequestAt = now
             session.lastBinanceReplayOk = false
             try {
@@ -266,7 +268,9 @@ class OpenTradeTickMonitor(
                     journal.noteTickCoverageGap(symbol, System.currentTimeMillis(), openedAt)
                 } // A manual REST failure while the stream is healthy is not a feed gap.
             }
-            session.latest?.takeIf { TradeQuotePolicy.accepts(it) }
+            // A fresh last-seen socket quote does not prove that an interrupted REST
+            // fromId replay checked all intervening stops and targets.
+            session.latest?.takeIf { session.lastBinanceReplayOk && TradeQuotePolicy.accepts(it) }
         }
     }
 
@@ -283,7 +287,10 @@ class OpenTradeTickMonitor(
                 // forces an additional fromId catch-up for the REST/WS handoff window.
                 pollBinance(symbol, openedAt, bootstrap = true)
                 if (!stillOpen(symbol, session)) break
-                if (!session.binanceBootstrapped) { kotlinx.coroutines.delay(1_000L); continue }
+                if (!session.binanceBootstrapped || !session.lastBinanceReplayOk) {
+                    kotlinx.coroutines.delay(1_000L)
+                    continue // never open a new stream while REST is still behind or failed
+                }
                 try {
                     socket = BinanceAggregateStream().open(symbol) { event ->
                         if (!events.trySend(event).isSuccess) overflow.set(true)

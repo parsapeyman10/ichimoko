@@ -6,6 +6,10 @@ import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
 import kotlinx.coroutines.runBlocking
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -38,6 +42,30 @@ class BinancePositionReplayTest {
         assertTrue(store.settleBinanceBatch("BTC/USDT", at, listOf(row(100, 80.0))).isEmpty())
         assertTrue(store.trades.value.single().isOpen)
         assertEquals(1, store.settleTick("BTC/USDT", 80.0, at + 100L, expectedOpenedAt = at).size)
+    }
+
+    @Test fun `failed Binance replay hides last quote instead of valuing an unverified open position`() = runBlocking {
+        val store = JournalStore(context, file()).also { it.load() }
+        store.open(signal, "BTC/USDT", 100.0, 50_000.0, 0.5,
+            manual = true, observedAt = at, cryptoVenue = BinanceSpotClient.VENUE)
+        var calls = 0
+        val http = OkHttpClient.Builder().addInterceptor { chain ->
+            calls++
+            val responseBody = if (calls == 1)
+                """[{"a":100,"p":"100","q":"1","T":${System.currentTimeMillis() - 1_000L}}]"""
+            else "blocked"
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                .code(if (calls == 1) 200 else 451).message("mock")
+                .body(responseBody.toResponseBody()).build()
+        }.build()
+        val monitor = OpenTradeTickMonitor(store, binance = BinanceSpotClient(http))
+        assertNotNull(monitor.poll("BTC/USDT", at))
+        assertNull(monitor.quoteForManualClose("BTC/USDT", at))
+        // The 1s REST throttle must not re-expose the earlier quote after replay failed.
+        assertNull(monitor.poll("BTC/USDT", at))
+        assertEquals(2, calls)
+        assertTrue(store.trades.value.single().isOpen)
+        assertNotNull(store.trades.value.single().tickCoverageGapAt)
     }
 
     @Test fun `new venue rejects legacy REST and candles then persists ID in one atomic batch`() = runBlocking {

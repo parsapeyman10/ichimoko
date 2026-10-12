@@ -47,12 +47,9 @@ import com.aurum.edge.core.PaperConditionRecord
 import com.aurum.edge.core.IctPriceActionRecord
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.LiveTradeValuation
-import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.core.PaperAiReview
 import com.aurum.edge.core.PaperHoldReview
-import com.aurum.edge.core.FeedLiveness
-import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.TradeReplay
 import com.aurum.edge.data.HoldReviewCycle
@@ -94,12 +91,6 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             now = System.currentTimeMillis()
         }
     }
-    val livePrice = market.lastPrice?.takeIf { price ->
-        !market.showingCachedData && market.feed.mode == FeedMode.LIVE &&
-            FeedLiveness.hasRecentReceipt(market.feed, now) &&
-            market.lastTradeAt?.let { at -> TradeQuotePolicy.accepts(PriceTick(price, at), now) } == true
-    }
-
     val filteredTrades = remember(trades, selectedCategory) {
         if (selectedCategory == null) trades else trades.filter { it.assetClass == selectedCategory }
     }
@@ -207,11 +198,9 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
             SectionCard("پوزیشن‌های باز · ${selectedCategory?.label ?: "همهٔ بازارها"}", "ارزش‌گذاری با آخرین قیمت واقعی دریافتی") {
                 HoldReviewStatus(holdReview) { viewModel.reviewOpenPositionsNow() }
                 filteredOpen.forEach { trade ->
-                    val currentPrice = liveTicks[trade.symbol]
-                        ?.takeIf { TradeQuotePolicy.accepts(it, now) }?.price
-                        ?: (if (trade.symbol == market.symbol &&
-                            (!com.aurum.edge.data.CryptoCatalog.isCrypto(trade.symbol) ||
-                                trade.cryptoVenue == com.aurum.edge.data.BinanceSpotClient.VENUE)) livePrice else null)
+                    val currentPrice = (liveTicks[trade.symbol]
+                        ?.takeIf { TradeQuotePolicy.accepts(it, now) }
+                        ?: com.aurum.edge.data.OpenPositionQuotePolicy.selectedFallback(trade, market, now))?.price
                     val unrealized = LiveTradeValuation.from(trade, currentPrice)?.netPnlUsd
                     Row(
                         modifier = Modifier
