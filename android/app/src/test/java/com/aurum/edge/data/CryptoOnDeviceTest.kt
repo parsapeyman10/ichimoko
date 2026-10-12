@@ -106,16 +106,15 @@ class CryptoOnDeviceTest {
         }
     }
 
-    @Test fun `crypto watch rows use the chart's own exchange ticker`() {
-        // Same EXCHANGE:TICKER string the TradingView chart draws, so a quote and the
-        // chart can never refer to different venues.
-        assertTrue(SourceCatalog.all.any { it.id == "tradingview_scanner" })
+    @Test fun `crypto watch rows use only exchange USDT executions not the TradingView chart venue`() {
+        assertTrue(SourceCatalog.all.any { it.id == "nobitex_public_trades" })
+        assertTrue(SourceCatalog.all.none { it.id == "tradingview_scanner" })
         CryptoCatalog.watchlistSeed.forEach { coin ->
-            val code = WatchCatalog.find(coin.id)!!.providerCodes["tradingview_scanner"]
-            assertEquals("BINANCE:${coin.binance}", code)
+            val code = WatchCatalog.find(coin.id)!!.providerCodes["nobitex_public_trades"]
+            assertEquals(coin.id, code)
+            assertEquals("BINANCE:${coin.binance}", TradingViewSymbols.find(coin.id))
         }
     }
-
 
     // ---------- the fixes requested after field use ----------
 
@@ -134,8 +133,8 @@ class CryptoOnDeviceTest {
         val row = WatchCatalog.find("XAU/USD")!!
         // Try two independent keyless sources, without calling a quote confirmed unless
         // BOTH return fresh publisher timestamps for the same spot instrument.
-        assertEquals(listOf("gold_api_public", "tradingview_scanner"), row.defaultSources)
-        assertEquals("OANDA:XAUUSD", row.providerCodes["tradingview_scanner"])
+        assertEquals(listOf("gold_api_public", "stocks_yahoo"), row.defaultSources)
+        assertEquals("OANDA:XAUUSD", TradingViewSymbols.find(row.id))
         assertTrue("gold_api_public" in row.providerCodes)
         assertTrue("stocks_yahoo" in row.providerCodes)
     }

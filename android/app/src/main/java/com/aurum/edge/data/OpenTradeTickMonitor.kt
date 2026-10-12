@@ -27,7 +27,7 @@ class OpenTradeTickMonitor(
     private val journal: JournalStore,
     private val spot: SpotFallbackClient = SpotFallbackClient(),
 ) {
-    enum class Feed { CONNECTING, STREAM, RECOVERING, REST_FALLBACK }
+    enum class Feed { CONNECTING, STREAM, STREAM_RECOVERABLE, RECOVERING, REST_FALLBACK }
     private data class Session(
         val openedAt: Long,
         val page: TradePageCursor = TradePageCursor(),
@@ -161,7 +161,7 @@ class OpenTradeTickMonitor(
                             journal.noteTickCoverageGap(symbol, now, openedAt)
                         session.connected = true
                         session.disconnectedAt = 0L
-                        setFeed(symbol, session, Feed.STREAM)
+                        setFeed(symbol, session, if (event.recoverable) Feed.STREAM_RECOVERABLE else Feed.STREAM)
                     }
                     NobitexPublicTradeStream.Event.Subscribing,
                     NobitexPublicTradeStream.Event.Unsubscribed -> {

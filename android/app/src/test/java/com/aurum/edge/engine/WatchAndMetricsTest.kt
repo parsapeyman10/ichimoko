@@ -19,10 +19,10 @@ class WatchAndMetricsTest {
     )
 
     @Test fun oneDefaultSourceIsAllowedButNotTwoSourceConfirmed() {
-        // Even though two keyless sources are requested by default, one actual fresh
-        // publisher response cannot be called a confirmed quote.
+        // With the unsupported TradingView scanner removed, a single default source
+        // must never be mislabelled as two-source confirmation.
         val ids = eur.defaultSources
-        assertEquals(2, ids.size)
+        assertEquals(1, ids.size)
         val result = SourceComparison.verify(eur, ids, mapOf(
             ids[0] to quote(ids[0], 100.0),
         ), now)

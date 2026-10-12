@@ -66,11 +66,6 @@ object TradingViewSymbols {
         if (key.isBlank()) return null
         FIXED_SYMBOLS[key]?.let { return it }
         CryptoCatalog.find(key)?.let { return "BINANCE:${it.binance}" }
-        val watch = WatchCatalog.find(key)
-        if (watch != null) {
-            val tv = watch.providerCodes["tradingview_scanner"]
-            if (tv != null) return tv
-        }
         return null
     }
 

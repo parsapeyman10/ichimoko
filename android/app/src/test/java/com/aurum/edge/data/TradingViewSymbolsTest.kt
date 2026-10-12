@@ -44,23 +44,13 @@ class TradingViewSymbolsTest {
         // answer, and the UI must say "this symbol has no TradingView mapping".
     }
 
-    @Test fun `the watchlist quote and the chart use the same ticker`() {
+    @Test fun `TradingView stays visual only and exchange watch prices stay with their venue`() {
+        assertTrue(SourceCatalog.all.none { it.id == "tradingview_scanner" })
         CryptoCatalog.watchlistSeed.forEach { coin ->
-            val watchCode = WatchCatalog.find(coin.id)!!.providerCodes["tradingview_scanner"]
-            assertEquals(TradingViewSymbols.find(coin.id), watchCode)
+            val watch = WatchCatalog.find(coin.id)!!
+            assertEquals(coin.id, watch.providerCodes["nobitex_public_trades"])
+            assertEquals("BINANCE:${coin.binance}", TradingViewSymbols.find(coin.id))
         }
-    }
-
-    @Test fun `every forex watch row quotes from the same ticker the chart draws`() {
-        WatchCatalog.symbols
-            .filter { "tradingview_scanner" in it.providerCodes }
-            .forEach { row ->
-                assertEquals(
-                    "watch and chart disagree for ${row.id}",
-                    TradingViewSymbols.find(row.id),
-                    row.providerCodes["tradingview_scanner"],
-                )
-                assertTrue("TV remains selectable for ${row.id}", "tradingview_scanner" in row.defaultSources)
-            }
+        assertTrue(WatchCatalog.symbols.none { "tradingview_scanner" in it.providerCodes })
     }
 }

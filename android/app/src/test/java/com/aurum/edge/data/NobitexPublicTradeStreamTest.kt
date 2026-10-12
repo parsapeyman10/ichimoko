@@ -42,6 +42,8 @@ class NobitexPublicTradeStreamTest {
         assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now + 1, 11))
         assertEquals(TradeStreamCursor.Verdict.GAP_APPLY, cursor.publication(now + 3, 14))
         assertEquals(TradeStreamCursor.Verdict.SKIP, cursor.publication(now + 3, 14))
+        // A later publisher offset, not a millisecond clock, defines stream order.
+        assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now + 2, 15))
     }
 
     @Test fun `unrecoverable reconnect and REST handoff must not masquerade as gapless`() {

@@ -15,7 +15,8 @@ class WatchSettingsStore(context: Context) {
 
     private fun read(symbol: WatchSymbol): WatchSelection {
         val enabled = prefs.getString("sources_${symbol.id}", null)?.split(',')
-            ?.filter { it in symbol.providerCodes }?.distinct() ?: symbol.defaultSources
+            ?.filter { it in symbol.providerCodes }?.distinct()?.takeIf { it.isNotEmpty() }
+            ?: symbol.defaultSources
         val preferred = prefs.getString("preferred_${symbol.id}", null)
             ?.takeIf { it in enabled } ?: enabled.firstOrNull().orEmpty()
         return WatchSelection(enabled, preferred)

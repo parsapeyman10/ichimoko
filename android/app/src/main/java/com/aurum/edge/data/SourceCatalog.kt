@@ -94,31 +94,18 @@ object SourceCatalog {
         symbols = listOf(SymbolDef("XAU", "طلای جهانی (هر انس)"), SymbolDef("XAG", "نقره (هر انس)")),
     )
 
-    /**
-     * TradingView's public symbol scanner.
-     *
-     * One source for gold, FX and crypto alike, and reachable from networks that
-     * geo-block the exchanges directly — which is why the previous crypto rows returned
-     * nothing at all. The symbol code is the same "EXCHANGE:TICKER" the chart already
-     * uses, so the watchlist and the chart can never disagree about which venue a price
-     * came from.
-     *
-     * Quote data only; it cannot place an order.
+    /** Exchange's documented, timestamped public executions. Display only, shared with
+     * the existing Nobitex rate budget; NEVER read TradingView widget/scanner internals.
      */
-    val tradingView = SourceDef(
-        id = "tradingview_scanner",
-        title = "TradingView · عمومی",
-        subtitle = "قیمت و تغییر روزانه برای طلا، جفت‌ارز و ارز دیجیتال، بدون کلید",
-        kind = SourceKind.JSON_REST,
-        urlTemplate = "https://scanner.tradingview.com/symbol?symbol={symbol}" +
-            "&fields=close,change,high,low,volume&no_404=true",
-        pricePath = "close",
-        changePath = "change",
-        changeMode = ChangeMode.PERCENT,
-        volumePath = "volume",
+    val nobitexTrades = SourceDef(
+        id = "nobitex_public_trades",
+        title = "Nobitex · معاملات عمومی",
+        subtitle = "آخرین معاملهٔ زمان‌دار بازار USDT نوبیتکس، بدون کلید",
+        kind = SourceKind.NOBITEX_TRADE,
+        urlTemplate = "https://apiv2.nobitex.ir/v2/trades/{symbol}",
         unit = "$",
     )
 
-    val all = listOf(yahoo, tgju, bamaCars, goldApi, twelveData, tradingView)
+    val all = listOf(yahoo, tgju, bamaCars, goldApi, twelveData, nobitexTrades)
     fun find(id: String): SourceDef? = all.firstOrNull { it.id == id }
 }

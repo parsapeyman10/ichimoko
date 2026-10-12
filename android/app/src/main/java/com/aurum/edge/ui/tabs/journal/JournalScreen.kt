@@ -227,7 +227,8 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                             if (trade.isOpen && com.aurum.edge.data.CryptoCatalog.isCrypto(trade.symbol)) {
                                 val feed = tickFeeds[trade.symbol]
                                 Text("فید خروج نوبیتکس: " + when (feed) {
-                                    com.aurum.edge.data.OpenTradeTickMonitor.Feed.STREAM -> "معاملات زنده (WebSocket)"
+                                    com.aurum.edge.data.OpenTradeTickMonitor.Feed.STREAM -> "معاملات زنده؛ بازیابی کانال تأیید نشده"
+                                    com.aurum.edge.data.OpenTradeTickMonitor.Feed.STREAM_RECOVERABLE -> "معاملات زنده؛ سرور قابلیت بازیابی اعلام کرد"
                                     com.aurum.edge.data.OpenTradeTickMonitor.Feed.RECOVERING -> "اتصال قطع؛ تلاش برای بازیابی"
                                     com.aurum.edge.data.OpenTradeTickMonitor.Feed.REST_FALLBACK -> "REST پشتیبان؛ پوشش کامل نامعلوم"
                                     com.aurum.edge.data.OpenTradeTickMonitor.Feed.CONNECTING -> "در حال اتصال"

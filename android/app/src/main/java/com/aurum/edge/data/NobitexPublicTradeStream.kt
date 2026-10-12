@@ -120,26 +120,30 @@ internal class TradeStreamCursor(private val openedAt: Long) {
 
     fun publication(at: Long, offset: Long): Verdict {
         if (at < openedAt) return Verdict.SKIP
-        if (at < lastAt || (lastSourceRest && at == lastAt)) return Verdict.GAP
-        if (recoverable && offset <= 0) {
-            // A positioned/recoverable channel must provide a positive publication
-            // offset. Keep the real observed tick, but never claim sequence coverage.
-            lastAt = at
-            lastOffset = null
-            lastSourceRest = false
-            return Verdict.GAP_APPLY
-        }
+        // REST has no shared sequence identity. A same/older-millisecond socket row
+        // could already have been settled by REST: audit the uncertainty, don't replay.
+        if (lastSourceRest && at <= lastAt) return Verdict.GAP
         if (recoverable) {
-            val previous = lastOffset
-            if (previous != null && offset <= previous) return Verdict.SKIP
-            if (previous != null && offset > previous + 1) {
-                lastOffset = offset
-                lastAt = at
+            if (offset <= 0) {
+                lastAt = maxOf(lastAt, at)
+                lastOffset = null
                 lastSourceRest = false
                 return Verdict.GAP_APPLY
             }
+            val previous = lastOffset
+            if (previous != null && offset <= previous) return Verdict.SKIP
+            val skipped = previous != null && offset > previous + 1
             lastOffset = offset
+            // Provider execution milliseconds are NOT the transport sequence. A trade
+            // can arrive with an earlier millisecond but a newer ordered stream offset.
+            // Keep the highest time for REST handoff, process in publisher offset order.
+            lastAt = maxOf(lastAt, at)
+            lastSourceRest = false
+            return if (skipped) Verdict.GAP_APPLY else Verdict.APPLY
         }
+        // A non-recoverable channel exposes no trustworthy sequence. Do not replay
+        // older timestamped executions on top of a newer trailing stop.
+        if (at < lastAt) return Verdict.GAP
         lastAt = at
         lastSourceRest = false
         return Verdict.APPLY
