@@ -19,3 +19,5 @@ android/keystores/
 tick-archive/data/
 tick-archive/.env
 tick-archive/.venv/
+__pycache__/
+*.py[cod]
