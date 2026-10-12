@@ -376,9 +376,10 @@ class SignalMonitorService : Service() {
                                     try {
                                         if (!MarketHours.closedFor(symbol)) {
                                             if (crypto) {
-                                                // One ordered page per pair; the process-wide monitor
-                                                // guards same-symbol UI/service callers and journal writes.
-                                                container.openTradeTicks.poll(symbol, openedAt)
+                                                // Official same-venue trade stream; SDK reconnects and
+                                                // attempts recovery if the server advertises it. REST
+                                                // bootstrap/fallback remains inside the process-wide gate.
+                                                container.openTradeTicks.watch(symbol, openedAt)
                                             } else {
                                                 val quote = spot.fetchQuote(symbol)
                                                 if (TradeQuotePolicy.accepts(quote))

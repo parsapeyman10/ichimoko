@@ -69,6 +69,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     val stats by viewModel.stats.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val loadError by viewModel.journalError.collectAsStateWithLifecycle()
+    val tickFeeds by viewModel.tickFeeds.collectAsStateWithLifecycle()
     val holdReview by viewModel.holdReview.collectAsStateWithLifecycle()
     var confirmClear by remember { mutableStateOf(false) }
     var showCombined by remember { mutableStateOf(false) }
@@ -223,6 +224,16 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.TextMuted,
                             )
+                            if (trade.isOpen && com.aurum.edge.data.CryptoCatalog.isCrypto(trade.symbol)) {
+                                val feed = tickFeeds[trade.symbol]
+                                Text("فید خروج نوبیتکس: " + when (feed) {
+                                    com.aurum.edge.data.OpenTradeTickMonitor.Feed.STREAM -> "معاملات زنده (WebSocket)"
+                                    com.aurum.edge.data.OpenTradeTickMonitor.Feed.RECOVERING -> "اتصال قطع؛ تلاش برای بازیابی"
+                                    com.aurum.edge.data.OpenTradeTickMonitor.Feed.REST_FALLBACK -> "REST پشتیبان؛ پوشش کامل نامعلوم"
+                                    com.aurum.edge.data.OpenTradeTickMonitor.Feed.CONNECTING -> "در حال اتصال"
+                                    null -> "پایش REST فقط هنگام بازبودن صفحه؛ سرویس پس‌زمینه را فعال کنید"
+                                }, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                            }
                             trade.tickCoverageGapAt?.let { at ->
                                 Text("⚠ پیوستگی تیک‌ها از ${formatDateTime(at)} قابل تأیید نیست؛ " +
                                     "در دورهٔ قطع اتصال ممکن است لمس حد ضرر/هدف ثبت نشده باشد.",

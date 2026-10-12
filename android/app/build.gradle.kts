@@ -151,6 +151,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Nobitex documents Centrifugo public trade subscriptions; use its official Android SDK
+    // for application ping/pong, reconnect and server-supported stream recovery.
+    implementation("io.github.centrifugal:centrifuge-java:0.7.0")
     implementation("org.tukaani:xz:1.10")
     implementation("org.jsoup:jsoup:1.18.3")
 

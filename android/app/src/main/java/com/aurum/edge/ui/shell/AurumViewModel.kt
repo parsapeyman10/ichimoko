@@ -90,6 +90,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val opportunities: StateFlow<List<PaperOpportunity>> = container.opportunityStore.items
     val opportunityError: StateFlow<String?> = container.opportunityStore.loadError
     val journalError: StateFlow<String?> = container.journalStore.loadError
+    val tickFeeds = container.openTradeTicks.feeds
     val autoPaperStatus: StateFlow<String> = container.autoPaperTrader.status
 
     /**
@@ -804,10 +805,16 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun closePaperTrade(trade: PaperTrade) {
-        val currentPrice = _livePrices.value[trade.symbol] ?: (if (trade.symbol == market.value.symbol) market.value.lastPrice else null)
+        val crypto = com.aurum.edge.data.CryptoCatalog.isCrypto(trade.symbol)
+        // A selected-market quote can come from another venue. Manual crypto exit must
+        // use the SAME Nobitex trade monitor as its entry/history and automatic exit.
+        val currentPrice = if (crypto) null else
+            _livePrices.value[trade.symbol] ?: (if (trade.symbol == market.value.symbol) market.value.lastPrice else null)
         viewModelScope.launch {
             try {
-                val exitPrice = currentPrice ?: runCatching { SpotFallbackClient().fetchQuote(trade.symbol).price }.getOrNull()
+                val exitPrice = if (crypto) container.openTradeTicks.poll(trade.symbol, trade.openedAt)
+                    ?.takeIf { TradeQuotePolicy.accepts(it) }?.price else
+                    currentPrice ?: runCatching { SpotFallbackClient().fetchQuote(trade.symbol).price }.getOrNull()
                 require(exitPrice != null && exitPrice.isFinite() && exitPrice > 0.0) { "قیمت خروج تازه برای ${trade.symbol} در دسترس نیست" }
                 val closed = container.journalStore.close(trade.id, exitPrice, "بستن دستی روی قیمت دریافتی")
                 _stats.value = container.journalStore.stats()

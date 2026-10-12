@@ -1,0 +1,67 @@
+package com.aurum.edge.data
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class NobitexPublicTradeStreamTest {
+    private val now = 1_780_000_000_000L
+    private fun subscribed(recovered: Boolean = false, wasRecovering: Boolean = false,
+                           recoverable: Boolean = true) =
+        NobitexPublicTradeStream.Event.Subscribed(wasRecovering, recovered, recoverable)
+
+    @Test fun `public trade message uses same venue time price and validated freshness`() {
+        val data = """{"price":"84251.20","time":${now - 50},"type":"sell","volume":"0.003"}"""
+        val trade = NobitexStreamTrade.parse(data, now)
+        assertEquals(now - 50, trade.at)
+        assertEquals(84251.20, trade.price, 0.00001)
+        assertEquals("sell", trade.side)
+        assertThrows(DataFeedException::class.java) {
+            NobitexStreamTrade.parse(data.replace("${now - 50}", "${now - 46_000}"), now)
+        }
+        assertThrows(DataFeedException::class.java) {
+            NobitexStreamTrade.parse(data.replace("0.003", "-1"), now)
+        }
+        assertThrows(DataFeedException::class.java) {
+            NobitexStreamTrade.parse(data.replace("sell", "unknown"), now)
+        }
+        assertThrows(DataFeedException::class.java) {
+            NobitexStreamTrade.parse(data.replace("84251.20", "NaN"), now)
+        }
+    }
+
+    @Test fun `recoverable stream preserves order deduplicates and detects missing offset`() {
+        val cursor = TradeStreamCursor(now)
+        assertFalse(cursor.subscribed(subscribed(), hadRestBootstrap = false))
+        assertEquals(TradeStreamCursor.Verdict.SKIP, cursor.publication(now - 1, 1))
+        assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now, 10))
+        assertEquals(TradeStreamCursor.Verdict.SKIP, cursor.publication(now, 10))
+        assertTrue(cursor.subscribed(subscribed(recovered = true, wasRecovering = true), false).not())
+        assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now + 1, 11))
+        assertEquals(TradeStreamCursor.Verdict.GAP_APPLY, cursor.publication(now + 3, 14))
+        assertEquals(TradeStreamCursor.Verdict.SKIP, cursor.publication(now + 3, 14))
+    }
+
+    @Test fun `unrecoverable reconnect and REST handoff must not masquerade as gapless`() {
+        val cursor = TradeStreamCursor(now)
+        cursor.rest(now + 1)
+        assertTrue(cursor.subscribed(subscribed(), hadRestBootstrap = true))
+        assertEquals(TradeStreamCursor.Verdict.GAP, cursor.publication(now + 1, 7))
+        assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now + 2, 8))
+        assertTrue(cursor.subscribed(subscribed(recovered = false, wasRecovering = true), false))
+        assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now + 5, 100))
+        cursor.rest(now + 10)
+        assertEquals(TradeStreamCursor.Verdict.GAP, cursor.publication(now + 9, 101))
+        assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now + 11, 102))
+    }
+
+    @Test fun `nonrecoverable channel does not infer sequence continuity from offsets`() {
+        val cursor = TradeStreamCursor(now)
+        assertFalse(cursor.subscribed(subscribed(recoverable = false), false))
+        assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now, 1))
+        assertEquals(TradeStreamCursor.Verdict.APPLY, cursor.publication(now + 1, 9))
+        assertTrue(cursor.subscribed(subscribed(recoverable = false), false))
+    }
+}
