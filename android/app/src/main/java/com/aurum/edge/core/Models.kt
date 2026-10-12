@@ -645,7 +645,7 @@ data class AppSettings(
      * own backend server, the phone calls this endpoint DIRECTLY with your own key - either the
      * Anthropic (Claude) Messages API or any OpenAI-compatible service (see [newsAiFormat]). Used only if [newsBaseUrl] is blank. The SAME publisher-rights/consent responsibility
      * applies to whoever holds this key; headline/excerpt text goes straight to this host from
-     * the phone, so if you later share this APK, this key travels with it and is extractable.
+     * the phone. The key stays in app-private preferences, not in the distributable APK.
      */
     val newsAiApiKey: String = "",
     val newsAiBaseUrl: String = "",

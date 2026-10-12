@@ -18,15 +18,28 @@ import java.net.URI
 
 /**
  * Direct, on-device AI calls with the user's OWN key. Two request formats are supported and
- * chosen by the configured base URL:
- *  - Anthropic (Claude): host `api.anthropic.com` -> POST /v1/messages with `x-api-key` and
- *    `anthropic-version` headers, `system` parameter and a `content[]` response.
- *  - Anything else (OpenAI-compatible proxies, DeepSeek, OpenRouter, Groq, Gemini): POST {base}/chat/completions
+ * chosen by the explicitly configured wire format (AUTO falls back to host detection):
+ *  - Anthropic Messages: POST /v1/messages with `x-api-key` and `anthropic-version`,
+ *    `system` parameter and a `content[]` response.
+ *  - OpenAI-compatible Chat: POST /v1/chat/completions (without doubling an existing /v1)
  *    with a Bearer token and a `choices[0].message.content` response.
  */
 internal object AiProvider {
-    private const val ANTHROPIC_HOST = "api.anthropic.com"
     private const val ANTHROPIC_VERSION = "2023-06-01"
+
+    /** Exact host match: a user-controlled lookalike must never receive relay credentials. */
+    internal fun isLlmRelay(baseUrl: String): Boolean = runCatching { URI(baseUrl.trim()) }
+        .getOrNull()?.let { it.scheme == "https" && it.host.equals("api.llmsrelay.com", true) } == true
+
+    private fun providerError(code: Int): String = when (code) {
+        400 -> "پارامتر درخواست یا مدل با سرویس سازگار نیست (HTTP 400)"
+        401 -> "کلید API نامعتبر است یا منقضی شده (HTTP 401)"
+        402 -> "اعتبار کافی نیست؛ برای GLM هم موجودی نقدی GLM و هم سهمیهٔ خود کلید را بررسی کنید (HTTP 402)"
+        403 -> "کلید برای این مدل مجاز نیست یا دسترسی سرویس/منطقه محدود شده (HTTP 403)"
+        404 -> "آدرس اندپوینت یا مدل یافت نشد (HTTP 404)"
+        429 -> "محدودیت سهمیه/نرخ فراخوانی؛ بعداً دوباره امتحان کنید (HTTP 429)"
+        else -> "خطای سرویس هوش مصنوعی (HTTP $code)"
+    }
 
     fun isAnthropic(baseUrl: String): Boolean =
         runCatching { URI(baseUrl.trim()) }.getOrNull()
@@ -69,8 +82,8 @@ internal object AiProvider {
                            format: String = "AUTO"): List<String> {
         val base = baseUrl.trim().trimEnd('/')
         val uri = runCatching { URI(base) }.getOrNull()
-        require(uri != null && (uri.scheme == "https" || uri.scheme == "http") && !uri.host.isNullOrBlank()) {
-            "نشانی سرویس هوش مصنوعی معتبر نیست (باید با https:// یا http:// آغاز شود)"
+        require(uri != null && uri.scheme == "https" && !uri.host.isNullOrBlank()) {
+            "نشانی سرویس هوش مصنوعی باید HTTPS معتبر باشد"
         }
         val anthropic = usesAnthropic(base, format)
         val response = withContext(Dispatchers.IO) {
@@ -78,10 +91,12 @@ internal object AiProvider {
                 .header("Accept", "application/json")
                 .header("HTTP-Referer", "https://aurum.edge")
                 .header("X-Title", "Aurum Edge")
-            if (anthropic) builder.header("x-api-key", apiKey).header("anthropic-version", ANTHROPIC_VERSION)
-            else builder.header("Authorization", "Bearer $apiKey")
+            // LLMsRelay documents GET /v1/models with Bearer even when subsequent
+            // completions use Messages (x-api-key). Do not send both credentials.
+            if (isLlmRelay(base) || !anthropic) builder.header("Authorization", "Bearer $apiKey")
+            else builder.header("x-api-key", apiKey).header("anthropic-version", ANTHROPIC_VERSION)
             httpClient.newCall(builder.get().build()).execute().use { resp ->
-                if (!resp.isSuccessful) throw IllegalStateException("سرویس مدل خطا داد (HTTP ${resp.code})؛ کلید یا نشانی را بررسی کنید")
+                if (!resp.isSuccessful) throw IllegalStateException(providerError(resp.code))
                 resp.peekBody(512_000L).string()
             }
         }
@@ -115,7 +130,8 @@ internal object AiProvider {
                       format: String = "AUTO"): String {
         val reply = completeText(httpClient, baseUrl, apiKey, model,
             "You are a connectivity test. Reply with the single word: OK",
-            "ping", 16, format, requireJson = false).trim()
+            "ping", if (isLlmRelay(baseUrl) && model.startsWith("glm-5-3-uncensored")) 128 else 16,
+            format, requireJson = false).trim()
         require(reply.isNotBlank()) { "پاسخ مدل خالی است" }
         return reply.take(60)
     }
@@ -125,23 +141,28 @@ internal object AiProvider {
                                      requireJson: Boolean): String {
         val base = baseUrl.trim().trimEnd('/')
         val uri = runCatching { URI(base) }.getOrNull()
-        require(uri != null && (uri.scheme == "https" || uri.scheme == "http") && !uri.host.isNullOrBlank()) {
-            "نشانی سرویس هوش مصنوعی معتبر نیست (باید با https:// یا http:// آغاز شود)"
+        require(uri != null && uri.scheme == "https" && !uri.host.isNullOrBlank()) {
+            "نشانی سرویس هوش مصنوعی باید HTTPS معتبر باشد"
         }
         val anthropic = usesAnthropic(base, format)
+        val glm = isLlmRelay(base) && model in setOf("glm-5-3-uncensored", "glm-5-3-uncensored-1m")
         val url = if (anthropic) anthropicMessagesUrl(base) else openAiChatUrl(base)
         fun requestBody(useJsonMode: Boolean) = if (anthropic) buildJsonObject {
             put("model", model)
             put("max_tokens", maxTokens)
-            put("temperature", 0)
+            if (!glm) put("temperature", 0)
             put("system", system)
             put("messages", buildJsonArray {
                 add(buildJsonObject { put("role", "user"); put("content", user) })
             })
         } else buildJsonObject {
             put("model", model)
-            put("temperature", 0)
-            if (useJsonMode) put("response_format", buildJsonObject { put("type", "json_object") })
+            put("max_tokens", maxTokens)
+            if (!glm) put("temperature", 0)
+            // The documented GLM structured mode is json_schema, not json_object.
+            // App-specific schemas are validated after plain text; do not send an
+            // undocumented mode or pay for a guaranteed 400+retry on every call.
+            if (useJsonMode && !glm) put("response_format", buildJsonObject { put("type", "json_object") })
             put("messages", buildJsonArray {
                 add(buildJsonObject { put("role", "system"); put("content", system) })
                 add(buildJsonObject { put("role", "user"); put("content", user) })
@@ -159,22 +180,14 @@ internal object AiProvider {
             httpClient.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) {
                     // Never surface raw provider error bodies: some echo request fields or keys.
-                    val friendlyMsg = when (resp.code) {
-                        400 -> "پارامتر درخواست یا مدل با سرویس سازگار نیست (HTTP 400)"
-                        401 -> "کلید API نامعتبر است یا منقضی شده (HTTP 401)"
-                        403 -> "دسترسی مجاز نیست یا منطقه جغرافیایی محدود شده (HTTP 403)"
-                        404 -> "آدرس اندپوینت یا مدل یافت نشد (HTTP 404)"
-                        429 -> "محدودیت سهمیه/نرخ فراخوانی (Rate Limit / Quota Exceeded) (HTTP 429)"
-                        else -> "خطای سرویس هوش مصنوعی (HTTP ${resp.code})"
-                    }
-                    throw IllegalStateException(friendlyMsg)
+                    throw IllegalStateException(providerError(resp.code))
                 }
                 val text = resp.peekBody(64_000L).string()
                 if (text.isBlank()) throw IllegalStateException("پاسخ دریافتی از هوش مصنوعی خالی بود")
                 text
             }
         }
-        val response = if (!anthropic && requireJson) {
+        val response = if (!anthropic && requireJson && !glm) {
             try {
                 post(requestBody(useJsonMode = true).toString())
             } catch (ex: IllegalStateException) {

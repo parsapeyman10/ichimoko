@@ -206,6 +206,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private val _aiModels = MutableStateFlow(AiModelsState())
     val aiModels: StateFlow<AiModelsState> = _aiModels.asStateFlow()
 
+    fun resetAiDraftDiagnostics() {
+        _aiProbe.value = AiProbeState()
+        _aiModels.value = AiModelsState()
+    }
+
     init {
         // The market and background service can settle trades without going through a UI
         // button. Keep Home/Journal statistics attached to the same persisted ledger.
@@ -1032,8 +1037,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun saveNewsAiConfig(apiKey: String, baseUrl: String, model: String, format: String = "AUTO") {
         val url = baseUrl.trim().trimEnd('/')
-        if (apiKey.isNotBlank() && (!url.startsWith("https://") || model.isBlank())) {
-            _toast.value = "برای کلید مستقیم، نشانی HTTPS و نام مدل هم لازم است"
+        val savedConfig = container.settingsStore.read()
+        if (!url.startsWith("https://") || model.isBlank() ||
+            com.aurum.edge.data.AiCredentialScope.key(apiKey, savedConfig, url, format, model).isBlank()) {
+            _toast.value = "کلید جداگانهٔ این سرویس، نشانی HTTPS و نام مدل لازم است؛ کلید سرویس قبلی منتقل نمی‌شود"
             return
         }
         viewModelScope.launch {
@@ -1042,17 +1049,21 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _toast.value = "ذخیرهٔ کلید مستقیم ناموفق بود"
                 return@launch
             }
+            _aiProbe.value = AiProbeState() // An earlier provider's success is not GLM proof.
+            _aiModels.value = AiModelsState()
+            container.traderAdvisor.onAiConfigChanged()
             container.news.resetAndRefresh()
-            // The companion card reacts immediately to a newly saved/cleared key.
-            container.traderAdvisor.refreshNow(force = apiKey.isNotBlank())
-            _toast.value = if (apiKey.isBlank()) "کلید مستقیم حذف شد"
-                else "کلید مستقیم ذخیره شد؛ همراه تریدر AI هم فعال شد — نظر اول چند لحظهٔ دیگر می‌آید"
+            container.traderAdvisor.refreshNow(force = true)
+            _toast.value = "تنظیمات AI ذخیره شد؛ وضعیت اتصال/تأثیر فقط پس از پاسخ واقعی مدل مشخص می‌شود"
         }
     }
 
     fun clearNewsAiConfig() {
         viewModelScope.launch {
             withContext(Dispatchers.IO) { container.settingsStore.clearNewsAiConfig() }
+            _aiProbe.value = AiProbeState()
+            _aiModels.value = AiModelsState()
+            container.traderAdvisor.onAiConfigChanged()
             container.news.resetAndRefresh()
             container.traderAdvisor.refreshNow() // flips the companion card to "not configured"
             _toast.value = "کلید مستقیم حذف شد"
@@ -1065,10 +1076,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
      * checks what the app would actually use. The key itself is never echoed.
      */
     /** Fetch the model IDs this key may use, so Settings never guesses a model name. */
-    fun loadNewsAiModels(keyInput: String, baseUrl: String, format: String = "AUTO") {
+    fun loadNewsAiModels(keyInput: String, baseUrl: String, model: String, format: String = "AUTO") {
         val saved = container.settingsStore.read()
-        val key = keyInput.trim().ifBlank { saved.newsAiApiKey }
+        val usingSavedEndpoint = baseUrl.isBlank()
         val url = baseUrl.trim().trimEnd('/').ifBlank { saved.newsAiBaseUrl }
+        val wireFormat = com.aurum.edge.data.AiCredentialScope.format(format, saved, usingSavedEndpoint)
+        val key = com.aurum.edge.data.AiCredentialScope.key(keyInput, saved, url, wireFormat, model)
         if (key.isBlank() || !url.startsWith("https://")) {
             _aiModels.value = AiModelsState(error = "کلید و نشانی HTTPS هر دو لازم است")
             return
@@ -1076,7 +1089,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         _aiModels.value = AiModelsState(loading = true)
         viewModelScope.launch {
             val result = runCatching {
-                withContext(Dispatchers.IO) { container.traderAdvisor.listModels(key, url, format) }
+                withContext(Dispatchers.IO) { container.traderAdvisor.listModels(key, url, wireFormat) }
             }
             _aiModels.value = result.fold(
                 onSuccess = { AiModelsState(models = it) },
@@ -1086,9 +1099,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun testNewsAiConnection(keyInput: String, baseUrl: String, model: String, format: String = "AUTO") {
         val saved = container.settingsStore.read()
-        val key = keyInput.trim().ifBlank { saved.newsAiApiKey }
+        val usingSavedEndpoint = baseUrl.isBlank()
         val url = baseUrl.trim().trimEnd('/').ifBlank { saved.newsAiBaseUrl }
+        val wireFormat = com.aurum.edge.data.AiCredentialScope.format(format, saved, usingSavedEndpoint)
         val modelName = model.trim().ifBlank { saved.newsAiModel }
+        val key = com.aurum.edge.data.AiCredentialScope.key(keyInput, saved, url, wireFormat, modelName)
         if (key.isBlank() || !url.startsWith("https://") || modelName.isBlank()) {
             _aiProbe.value = AiProbeState(message = "کلید، نشانی HTTPS و نام مدل هر سه لازم است")
             return
@@ -1097,7 +1112,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
-                    container.traderAdvisor.probe(key, url, modelName, format)
+                    container.traderAdvisor.probe(key, url, modelName, wireFormat)
                 }
             }
             _aiProbe.value = AiProbeState(message = result.fold(

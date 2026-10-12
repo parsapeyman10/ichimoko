@@ -254,23 +254,60 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             Text("جایگزین بدون سرور: اگر نشانی بالا خالی باشد و کلید زیر را پر کنید، خودِ گوشی مستقیماً با RSS همین‌جا + کلید شما تحلیل می‌کند. همین کلید، «همراه تریدر AI» صفحهٔ خانه را هم روشن می‌کند (نظر خودکار هر ۱۰ دقیقه + اعلان تغییر جهت).",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold, modifier = Modifier.padding(top = 6.dp))
-            OutlinedTextField(value = newsAiKey, onValueChange = { newsAiKey = it }, singleLine = true,
+            OutlinedTextField(value = newsAiKey, onValueChange = {
+                newsAiKey = it; viewModel.resetAiDraftDiagnostics()
+            }, singleLine = true,
                 label = { Text("کلید هوش مصنوعی تریدر — Claude یا سازگار با OpenAI (فقط روی همین گوشی)") },
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-            OutlinedTextField(value = newsAiBaseUrl, onValueChange = { newsAiBaseUrl = it }, singleLine = true,
+            OutlinedTextField(value = newsAiBaseUrl, onValueChange = {
+                newsAiBaseUrl = it; viewModel.resetAiDraftDiagnostics()
+            }, singleLine = true,
                 label = { Text("نشانی پایهٔ HTTPS سرویس مدل") },
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
             Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedButton(onClick = {
                     newsAiBaseUrl = "https://api.llmsrelay.com"; newsAiFormat = "ANTHROPIC"
-                }, modifier = Modifier.weight(1f)) { Text("LLMsRelay (sk-cs4)", maxLines = 1) }
+                    viewModel.resetAiDraftDiagnostics()
+                }, modifier = Modifier.weight(1f)) { Text("Relay · Claude", maxLines = 1) }
                 OutlinedButton(onClick = {
                     newsAiBaseUrl = "https://api.anthropic.com"; newsAiFormat = "ANTHROPIC"
+                    viewModel.resetAiDraftDiagnostics()
                 }, modifier = Modifier.weight(1f)) { Text("Claude رسمی", maxLines = 1) }
                 OutlinedButton(onClick = {
                     newsAiBaseUrl = "https://api.openai.com/v1"; newsAiFormat = "OPENAI"
+                    viewModel.resetAiDraftDiagnostics()
                 }, modifier = Modifier.weight(1f)) { Text("OpenAI رسمی", maxLines = 1) }
+            }
+            Text("GLM 5.3 در LLMsRelay: کلید مخصوص GLM 5.3 و کیف پول نقدی جداگانهٔ GLM لازم است؛ " +
+                "موجودی بستهٔ استاندارد، کلید Claude یا GPT برای GLM کافی نیست. " +
+                "انتخاب زیر فقط فرم را آماده می‌کند؛ کلید ذخیره‌شده تا ثبتِ کلید جدید جابه‌جا نمی‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 8.dp))
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(onClick = {
+                    newsAiBaseUrl = "https://api.llmsrelay.com"; newsAiFormat = "ANTHROPIC"
+                    newsAiModel = "glm-5-3-uncensored"; newsAiKey = ""
+                    viewModel.resetAiDraftDiagnostics()
+                }, modifier = Modifier.weight(1f)) { Text("GLM · Messages", maxLines = 1) }
+                OutlinedButton(onClick = {
+                    newsAiBaseUrl = "https://api.llmsrelay.com/v1"; newsAiFormat = "OPENAI"
+                    newsAiModel = "glm-5-3-uncensored"; newsAiKey = ""
+                    viewModel.resetAiDraftDiagnostics()
+                }, modifier = Modifier.weight(1f)) { Text("GLM · Chat", maxLines = 1) }
+            }
+            if (newsAiModel.startsWith("glm-5-3-uncensored")) {
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("glm-5-3-uncensored" to "GLM 5.3", "glm-5-3-uncensored-1m" to "GLM 1M · فقط متن")
+                        .forEach { (id, label) ->
+                            FilterChip(selected = newsAiModel == id, onClick = {
+                                newsAiModel = id; viewModel.resetAiDraftDiagnostics()
+                            }, label = { Text(label) })
+                        }
+                }
+                Text("مدل 1M ورودی تصویر ندارد. خودِ اپ فقط متن بازار/خبر می‌فرستد؛ فعال‌بودن مدل را با تست اتصال واقعی بررسی کنید. " +
+                    "HTTP 402 یعنی هم موجودی نقدی GLM و هم سهمیهٔ کلید باید بررسی شود؛ درخواست‌ها ممکن است هزینه داشته باشند.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
             }
             Text("«نشانی پایه» باید متعلق به همان ارائه‌دهندهٔ کلید شما باشد. برای API سازگار Gemini، " +
                 "نشانی https://generativelanguage.googleapis.com/v1beta/openai با قالب OpenAI قابل آزمون است؛ " +
@@ -278,11 +315,13 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 "اپ فقط HTTPS می‌پذیرد؛ کلید شخصی را در گفتگو یا گزارش خطا ارسال نکنید.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
                 modifier = Modifier.padding(top = 4.dp))
-            OutlinedTextField(value = newsAiModel, onValueChange = { newsAiModel = it }, singleLine = true,
+            OutlinedTextField(value = newsAiModel, onValueChange = {
+                newsAiModel = it; viewModel.resetAiDraftDiagnostics()
+            }, singleLine = true,
                 label = { Text("نام مدل (مثلاً claude-sonnet-4.6 یا gpt-4o-mini)") },
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
             val models = viewModel.aiModels.collectAsStateWithLifecycle().value
-            OutlinedButton(onClick = { viewModel.loadNewsAiModels(newsAiKey, newsAiBaseUrl, newsAiFormat) },
+            OutlinedButton(onClick = { viewModel.loadNewsAiModels(newsAiKey, newsAiBaseUrl, newsAiModel, newsAiFormat) },
                 enabled = !models.loading && (newsAiKey.isNotBlank() || settings.hasClientNewsAi) &&
                     (newsAiBaseUrl.isNotBlank() || settings.newsAiBaseUrl.isNotBlank()),
                 modifier = Modifier.padding(top = 6.dp)) {
@@ -296,8 +335,8 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     models.models.forEach { id ->
-                        if (id == newsAiModel) Button(onClick = { newsAiModel = id }) { Text(id, maxLines = 1) }
-                        else OutlinedButton(onClick = { newsAiModel = id }) { Text(id, maxLines = 1) }
+                        if (id == newsAiModel) Button(onClick = { newsAiModel = id; viewModel.resetAiDraftDiagnostics() }) { Text(id, maxLines = 1) }
+                        else OutlinedButton(onClick = { newsAiModel = id; viewModel.resetAiDraftDiagnostics() }) { Text(id, maxLines = 1) }
                     }
                 }
             }
@@ -311,9 +350,9 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     "OPENAI" to "سازگار با OpenAI",
                 ).forEach { (value, label) ->
                     val selected = newsAiFormat == value
-                    if (selected) Button(onClick = { newsAiFormat = value },
+                    if (selected) Button(onClick = { newsAiFormat = value; viewModel.resetAiDraftDiagnostics() },
                         modifier = Modifier.weight(1f)) { Text(label, maxLines = 1) }
-                    else OutlinedButton(onClick = { newsAiFormat = value },
+                    else OutlinedButton(onClick = { newsAiFormat = value; viewModel.resetAiDraftDiagnostics() },
                         modifier = Modifier.weight(1f)) { Text(label, maxLines = 1) }
                 }
             }
@@ -381,7 +420,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             Text("نظر AI دربارهٔ ادامهٔ معامله فقط یک یادداشت/اعلان است: پوزیشن را نمی‌بندد، حد ضرر را جابه‌جا نمی‌کند و خروج همچنان فقط با لمس قیمت واقعی SL/TP انجام می‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 2.dp))
-            Text("⚠️ این کلید روی گوشی ذخیره می‌شود، هرگز به گیت‌هاب نمی‌رود، اما اگر همین APK را با کسی به‌اشتراک بگذارید، کلید همراه آن قابل استخراج است. برای ارائهٔ عمومی از سقف/rate limit سرویس کلید استفاده کنید.",
+            Text("⚠️ کلید واردشده در دادهٔ خصوصی همین نصب روی گوشی ذخیره می‌شود، نه داخل APK یا گیت‌هاب؛ اشتراک‌گذاری خود APK کلید شما را منتقل نمی‌کند. از گوشی، نسخهٔ پشتیبانِ داده و سقف مصرف کلید محافظت کنید.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Red)
         }
 

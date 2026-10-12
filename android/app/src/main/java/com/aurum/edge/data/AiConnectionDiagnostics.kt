@@ -14,6 +14,7 @@ object AiConnectionDiagnostics {
         is ConnectException -> "برقراری اتصال به سرویس ممکن نشد؛ شبکه یا نشانی را بررسی کنید"
         else -> when {
             error.message?.contains("HTTP 401") == true -> "HTTP 401: کلید این سرویس معتبر نیست؛ کلید را فقط روی گوشی بررسی کنید"
+            error.message?.contains("HTTP 402") == true -> "HTTP 402: اعتبار کافی نیست؛ کیف پول نقدی GLM و سهمیهٔ کلید را جداگانه بررسی کنید"
             error.message?.contains("HTTP 403") == true -> "HTTP 403: دسترسی سرویس/منطقه مجاز نیست؛ از همین شبکه با ارائه‌دهنده بررسی کنید"
             error.message?.contains("HTTP 404") == true -> "HTTP 404: مسیر API یا نام مدل پیدا نشد؛ قالب و شناسهٔ مدل را بررسی کنید"
             error.message?.contains("HTTP 429") == true -> "HTTP 429: سهمیه یا محدودیت نرخ سرویس؛ بدون ادعای پلن رایگان، وضعیت حساب را بررسی کنید"

@@ -136,6 +136,7 @@ class TraderAdvisor(
 ) {
     private val mutex = Mutex()
     private var lastAttemptElapsed = 0L
+    @Volatile private var configGeneration = 0L
     private val http = OkHttpClient.Builder().callTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
         .followRedirects(false).build()
     private val _state = MutableStateFlow(TraderOpinionState())
@@ -146,6 +147,16 @@ class TraderAdvisor(
     private var lastUnreachableElapsed = 0L
     private val _connection = MutableStateFlow(AiConnectionState())
     val connection: StateFlow<AiConnectionState> = _connection.asStateFlow()
+
+    /** An old Claude probe cannot authorize GLM (or vice versa) for the TTL window. */
+    fun onAiConfigChanged() {
+        configGeneration++
+        lastAttemptElapsed = 0L
+        lastReachableElapsed = 0L
+        lastUnreachableElapsed = 0L
+        _connection.value = AiConnectionState(configured = settings.read().hasClientNewsAi)
+        _state.value = TraderOpinionState(configured = settings.read().hasClientNewsAi)
+    }
 
     private val _holdReviews = MutableStateFlow(HoldReviewCycle())
     val holdReviews: StateFlow<HoldReviewCycle> = _holdReviews.asStateFlow()
@@ -160,6 +171,7 @@ class TraderAdvisor(
      * caller keeps trading on the technical rules alone.
      */
     suspend fun ensureConnection(): Boolean {
+        val generation = configGeneration
         val config = settings.read()
         if (!config.hasClientNewsAi) {
             _connection.value = AiConnectionState(
@@ -177,6 +189,7 @@ class TraderAdvisor(
                 AiProvider.probe(http, config.newsAiBaseUrl, config.newsAiApiKey,
                     config.newsAiModel, config.newsAiFormat)
             }
+            if (generation != configGeneration) return false
             lastReachableElapsed = SystemClock.elapsedRealtime()
             lastUnreachableElapsed = 0L
             _connection.value = AiConnectionState(
@@ -184,6 +197,7 @@ class TraderAdvisor(
                 detail = reply.trim().take(80), checkedAt = System.currentTimeMillis())
             true
         } catch (error: Exception) {
+            if (generation != configGeneration) return false
             lastReachableElapsed = 0L
             lastUnreachableElapsed = SystemClock.elapsedRealtime()
             _connection.value = AiConnectionState(
@@ -198,6 +212,7 @@ class TraderAdvisor(
 
     internal suspend fun refresh(force: Boolean = false,
                                  minIntervalMs: Long = REFRESH_PERIOD_MS) = mutex.withLock {
+        val generation = configGeneration
         val config = settings.read()
         if (!config.hasClientNewsAi) {
             _state.value = TraderOpinionState(configured = false)
@@ -209,6 +224,7 @@ class TraderAdvisor(
         _state.value = _state.value.copy(loading = true, configured = true, error = null)
         try {
             val opinion = withContext(Dispatchers.Default) { analyze(config) }
+            if (generation != configGeneration) return@withLock
             val previous = _state.value.opinion
             val flipped = previous != null && previous.bias != opinion.bias &&
                 previous.bias != "NEUTRAL" && opinion.bias != "NEUTRAL"
@@ -216,6 +232,7 @@ class TraderAdvisor(
                 opinion = opinion, loading = false, previousBias = previous?.bias,
                 biasFlipped = flipped, lastAttemptAt = System.currentTimeMillis())
         } catch (error: Exception) {
+            if (generation != configGeneration) return@withLock
             _state.value = _state.value.copy(loading = false,
                 error = (error.message ?: "خطای تحلیل").take(140),
                 lastAttemptAt = System.currentTimeMillis())

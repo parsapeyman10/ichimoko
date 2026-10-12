@@ -158,17 +158,17 @@ class SettingsStore(context: Context) {
      * User's OWN key for a DIRECT-FROM-PHONE AI news call (Anthropic or OpenAI-compatible,
      * see the format parameter), replacing the need
      * for a self-hosted backend for the Forex ninth-condition gate. Explicit, on-device only;
-     * never logged. An empty [apiKey] or [baseUrl] or [model] clears client mode entirely (falls
-     * back to [newsBaseUrl] server mode, or UNKNOWN if neither is configured).
+     * never logged. A blank key keeps the previous secret only for the same URL AND wire format;
+     * use [clearNewsAiConfig] to remove credentials. A different provider requires its own key.
      */
     @Synchronized
     fun saveNewsAiConfig(apiKey: String, baseUrl: String, model: String, format: String = "AUTO"): Boolean {
-        val key = apiKey.trim()
-        val url = baseUrl.trim()
+        val url = baseUrl.trim().trimEnd('/')
         val modelName = model.trim()
         val wireFormat = format.trim().uppercase(java.util.Locale.ROOT).let {
             if (it in setOf("ANTHROPIC", "OPENAI")) it else "AUTO" }
-        if (key.isNotBlank() && (url.isBlank() || !url.startsWith("https://") || modelName.isBlank())) return false
+        val key = AiCredentialScope.key(apiKey, read(), url, wireFormat, modelName)
+        if (key.isBlank() || !url.startsWith("https://") || modelName.isBlank()) return false
         val saved = prefs.edit()
             .putString(KEY_NEWS_AI_KEY, key)
             .putString(KEY_NEWS_AI_URL, url)

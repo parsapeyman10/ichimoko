@@ -18,6 +18,10 @@ class AiConnectionDiagnosticsTest {
     @Test fun `http errors identify likely cause without response body`() {
         assertTrue(AiConnectionDiagnostics.describe(IllegalStateException("HTTP 404 sk-secret"))
             .contains("مدل"))
+        assertTrue(AiConnectionDiagnostics.describe(IllegalStateException("HTTP 402 sk-secret"))
+            .contains("GLM"))
+        assertFalse(AiConnectionDiagnostics.describe(IllegalStateException("HTTP 402 sk-secret"))
+            .contains("sk-secret"))
         assertTrue(AiConnectionDiagnostics.describe(IllegalStateException("HTTP 429 quota"))
             .contains("سهمیه"))
         assertFalse(AiConnectionDiagnostics.describe(IllegalStateException("HTTP 500 sk-secret"))
