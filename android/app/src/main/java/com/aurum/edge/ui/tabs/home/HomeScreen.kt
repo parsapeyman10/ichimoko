@@ -224,7 +224,7 @@ private fun HomeRadarCard(
         selected?.let { row ->
             val label = when (row.state) {
                 "pending" -> "در صف"; "closed" -> "سشن بسته"; "error" -> "خطای فید"
-                "partial" -> "داده ناقص"; "no_signal" -> "بدون سیگنال"
+                "partial" -> "داده ناقص"; "no_signal" -> "بدون سیگنال"; "watch" -> "فشردگی · واچ‌لیست"
                 "blocked" -> "مسدود"; "observed" -> "فقط مشاهده"
                 "candidate" -> "کاندیدا"; "opened" -> "معامله ثبت شد"
                 else -> "نامعلوم"

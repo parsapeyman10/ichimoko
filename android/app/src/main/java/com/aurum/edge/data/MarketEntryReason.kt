@@ -18,6 +18,7 @@ object MarketEntryReason {
         if (current.isEmpty()) return "در انتظار ارزیابی تازه"
         if (current.any { it.state == "candidate" || it.state == "opened" })
             return "کاندیدا؛ تأیید تیک و ریسک ورود لازم است"
+        if (current.any { it.state == "watch" }) return "فشردگی رصد شد؛ هنوز شکست تأیید نشده"
         if (current.any { it.state == "no_signal" }) return "کراس، فشردگی یا سایر شروط ورود کامل نیست"
         if (current.any { it.state == "blocked" }) return "گیت ورود/ریسک: ${current.first { it.state == "blocked" }.detail.take(72)}"
         if (current.any { it.state == "partial" || it.state == "error" })

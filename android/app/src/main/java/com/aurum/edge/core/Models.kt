@@ -212,6 +212,33 @@ data class IchimokuEntryEvidence(
         crossTime > 0L
 }
 
+/** Measured closed-bar proof of the crypto-only compression/breakout engine.
+ * It is ephemeral signal evidence, NOT a fill or a claim about future prices.
+ */
+data class CryptoBreakoutEvidence(
+    val side: SignalAction,
+    val barTime: Long,
+    val breakoutTime: Long,
+    val compressionStart: Long,
+    val atr: Double,
+    val points: Int,
+    val pattern: String,
+) {
+    fun matches(signal: Signal): Boolean = signal.action == side &&
+        signal.interval == Interval.M5 && barTime == signal.barTime && barTime > 0L &&
+        breakoutTime in (barTime - Interval.M5.millis)..barTime &&
+        breakoutTime - compressionStart == 20L * Interval.M5.millis &&
+        atr.isFinite() && atr > 0.0 && points in 16..26 &&
+        pattern in setOf("FLAG", "BASE", "WEDGE") &&
+        signal.entry?.isFinite() == true && signal.entry > 0 &&
+        signal.stopLoss?.isFinite() == true && signal.takeProfit?.isFinite() == true &&
+        signal.stopLoss > 0 && signal.takeProfit > 0 &&
+        (if (side == SignalAction.BUY) signal.stopLoss < signal.entry &&
+            signal.takeProfit >= signal.entry + 3 * (signal.entry - signal.stopLoss)
+         else side == SignalAction.SELL && signal.stopLoss > signal.entry &&
+            signal.takeProfit <= signal.entry - 3 * (signal.stopLoss - signal.entry))
+}
+
 data class Signal(
     val action: SignalAction,
     val confidence: Double,
@@ -226,6 +253,7 @@ data class Signal(
     val barTime: Long = 0L,
     val evaluatedAt: Long = System.currentTimeMillis(),
     val ichimokuEntry: IchimokuEntryEvidence? = null,
+    val cryptoBreakout: CryptoBreakoutEvidence? = null,
 ) {
     val isActionable: Boolean get() = action != SignalAction.NO_TRADE
 }

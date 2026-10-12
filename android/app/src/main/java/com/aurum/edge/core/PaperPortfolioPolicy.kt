@@ -26,6 +26,13 @@ object PaperPortfolioPolicy {
         if (open.size >= MAX_OPEN) return "سقف ۴ پوزیشن باز پورتفو پر است"
         if (open.any { it.symbol == symbol }) return "برای این نماد پوزیشن کاغذی باز است"
         val group = AssetClass.of(symbol)
+        // Atomic at JournalStore.open's mutex; count ALL openings, not only closed losses.
+        if (group == AssetClass.CRYPTO) {
+            val day = Instant.ofEpochMilli(now).atZone(ZoneOffset.UTC).toLocalDate()
+            if (trades.count { it.assetClass == AssetClass.CRYPTO && it.openedAt <= now &&
+                    Instant.ofEpochMilli(it.openedAt).atZone(ZoneOffset.UTC).toLocalDate() == day } >= 5)
+                return "سقف ۵ ورود رمزارز در روز پر است"
+        }
         if (open.count { AssetClass.of(it.symbol) == group } >= MAX_PER_CLASS)
             return "سقف ۲ پوزیشن دستهٔ «${group.label}» پر است"
         if (signalBarTime != null && trades.any { it.symbol == symbol && it.signalBarTime == signalBarTime })

@@ -175,6 +175,8 @@ class PaperAutoTrader(
                 newsEvidence = newsRecord,
                 priceAction = ict,
                 customNote = entryNote,
+                cryptoEntryQuote = catalogQuote,
+                cryptoNews = recentNews,
                 marketTrend = trendContext?.let { MarketTrendRecord.from(it) },
                 cryptoVenue = if (com.aurum.edge.data.CryptoCatalog.isCrypto(current.symbol))
                     BinanceSpotClient.VENUE else "NOBITEX",

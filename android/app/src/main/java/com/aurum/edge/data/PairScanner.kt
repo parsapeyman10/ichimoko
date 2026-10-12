@@ -40,7 +40,7 @@ import kotlinx.coroutines.withContext
 /** One row of the 50+ universe radar: what the continuous sweep observed for this instrument. */
 data class PairScanStatus(
     val symbol: String,
-    /** pending | closed | error | partial | no_signal | blocked | observed | candidate | opened */
+    /** pending | closed | error | partial | no_signal | watch | blocked | observed | candidate | opened */
     val state: String,
     val detail: String,
     val interval: Interval? = null,
@@ -474,7 +474,7 @@ class PairScanner(
             if (!combined.isActionable) {
                 update(
                     symbol = symbol,
-                    state = "no_signal",
+                    state = if (crypto && combined.blockers.any { it.startsWith("واچ‌لیست") }) "watch" else "no_signal",
                     detail = "بازهٔ ${interval.label} از مقایسهٔ ${candidates.joinToString { it.label }} · " +
                         (if (combined.blockers.isNotEmpty()) "امتیاز ${combined.confidence.toInt()}/۱۰۰ · ${combined.blockers.joinToString("، ").take(95)}" else "بدون سیگنال؛ شواهد فنی $score از ۴") +
                         (if (unavailable.isNotEmpty()) " · ${unavailable.joinToString("؛ ").take(90)}" else ""),
@@ -594,7 +594,7 @@ class PairScanner(
             update(
                 symbol = symbol,
                 state = "candidate",
-                detail = "فرصت معاملاتی ${interval.label} از مقایسهٔ ${candidates.joinToString { it.label }} تایید شد" +
+                detail = "فرصت معاملاتی ${interval.label} از کندل بستهٔ همان نماد تایید شد" +
                     (autoReview?.reason?.let { " · ورود خودکار انجام نشد: ${it.take(140)}" } ?: "") +
                     (playbook?.let { " · متد ${it.method.label}" } ?: "") +
                     (trend?.let { " · روند ${it.direction.label} ${it.strength}٪" } ?: "") +

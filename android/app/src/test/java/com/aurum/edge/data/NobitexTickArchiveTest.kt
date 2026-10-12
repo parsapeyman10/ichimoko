@@ -46,16 +46,19 @@ class NobitexTickArchiveTest {
         assertTrue(settings.saveTickArchive(url, "x".repeat(40)))
         val file = File(Files.createTempDirectory("tick-archive-test").toFile(), "journal.json")
         settings.update { it.copy(accountBalance = 50_000.0) }
-        val store = JournalStore(ctx, file, settingsStore = settings).also { it.load() }
+        val store = JournalStore(ctx, file, settingsStore = settings)
         val at = 1_800_000_000_000L
-        val signal = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2960.0,
-            takeProfit = 3100.0, interval = Interval.M5, barTime = at - Interval.M5.millis,
-            ichimokuEntry = com.aurum.edge.core.IchimokuEntryEvidence(SignalAction.BUY, at - Interval.M5.millis, at - Interval.M5.millis, Interval.M5, 3),
-            confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
-                "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map {
-                ConfluenceItem(it, true, "fixture", scorePercent = 25)
-            })
-        val opened = store.open(signal, "BTC/USDT", 3000.0, 50_000.0, 0.5, manual = true, observedAt = at)
+        // Historical journal fixture: NEW crypto entries no longer use the old strategy,
+        // but their previously recorded same-venue archive cursors still settle safely.
+        val legacy = com.aurum.edge.core.PaperTrade("legacy-archive", "BTC/USDT",
+            Interval.M5, SignalAction.BUY, 3000.0, 2960.0, 3100.0, 100.0, 2.5, at,
+            initialStopLoss = 2960.0, trailExtreme = 3000.0, usesTickArchive = true,
+            cryptoVenue = "NOBITEX")
+        file.writeText(kotlinx.serialization.json.Json.encodeToString(
+            kotlinx.serialization.builtins.ListSerializer(com.aurum.edge.core.PaperTrade.serializer()),
+            listOf(legacy)))
+        store.load()
+        val opened = store.trades.value.single()
         assertTrue(opened.usesTickArchive)
         // Direct local quotes/candles are not allowed to reorder an archived position.
         store.settleTick("BTC/USDT", 2950.0, at + 1)

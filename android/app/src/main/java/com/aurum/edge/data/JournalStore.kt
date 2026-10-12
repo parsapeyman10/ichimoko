@@ -108,11 +108,17 @@ class JournalStore(
         marketTrend: MarketTrendRecord? = null,
         observedAt: Long = System.currentTimeMillis(),
         cryptoVenue: String = "NOBITEX",
+        /** Independent same-venue trade print and observed top-of-book, never a candle close. */
+        cryptoEntryQuote: com.aurum.edge.core.PriceTick? = null,
+        cryptoNews: PersianNewsState? = null,
     ): PaperTrade {
         // Authoritative entry guard, independent of UI, scanner and automatic trader. Do not
         // move this into settlement: already-open oil positions must still be manageable.
         require(signal.interval == com.aurum.edge.core.Interval.M5) {
             "ثبت پوزیشن تازه فقط از سیگنال کندل بستهٔ ۵ دقیقه (5m) مجاز است"
+        }
+        if (CryptoCatalog.isCrypto(symbol)) require(signal.cryptoBreakout?.matches(signal) == true) {
+            "فقط استراتژی فشردگی ← انفجار برای ورود تازهٔ رمزارز مجاز است"
         }
         require(signal.ichimokuEntry?.matches(signal) == true) {
             "کراس بستهٔ تنکان/کیجون، ابر نازک و فشردگی پیش از ورود تأیید نشده‌اند"
@@ -126,6 +132,18 @@ class JournalStore(
         require(!CryptoCatalog.isCrypto(symbol) || cryptoVenue in setOf("NOBITEX", BinanceSpotClient.VENUE)) {
             "صرافی ورود نامعتبر است"
         }
+        if (CryptoCatalog.isCrypto(symbol)) {
+            require(riskPercent in 0.3..0.5) { "ریسک رمزارز باید ۰٫۳ تا ۰٫۵ درصد باشد" }
+            require(com.aurum.edge.core.CryptoCompressionPolicy.quoteBlocker(
+                signal, cryptoEntryQuote, observedAt) == null && cryptoEntryQuote?.price == price) {
+                "اسپرد و قیمت واقعی مستقل هم‌صرافی رمزارز تأیید نشده است"
+            }
+            require(cryptoNews?.gate == NewsGate.CLEAR && cryptoNews.cached == false &&
+                cryptoNews.lastCheckedAt?.let { observedAt - it in 0L..180_000L } == true &&
+                cryptoNews.calendarCheckedAt?.let { observedAt - it in 0L..1_200_000L } == true) {
+                "خبر/تقویم پراثر یا تازگی آن برای ورود رمزارز تأیید نشده است"
+            }
+        }
         val technicalConditions = TechnicalEvidence.items(signal)
         require(signal.isActionable && TechnicalEvidence.confirmed(signal)) {
             "شروط فنی کامل و تأیید شده نیستند"
@@ -138,6 +156,8 @@ class JournalStore(
         require(priceAction == null || priceAction.matches(signal, symbol, price)) {
             "شواهد اختیاری ICT با همان کندل مطابقت ندارد"
         }
+        if (CryptoCatalog.isCrypto(symbol)) require(kotlin.math.abs(target - price) >=
+            3.0 * kotlin.math.abs(price - stop) - 1e-9) { "نسبت واقعی ریسک به ریوارد رمزارز باید حداقل ۱:۳ باشد" }
         val draft = PaperOrderRules.preview(signal.action, symbol, price, stop, target, balance, riskPercent)
         val startConditions = technicalConditions
             .filter { it.status == ConfluenceStatus.CONFIRMED }

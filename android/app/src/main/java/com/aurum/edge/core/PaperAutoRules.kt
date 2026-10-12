@@ -15,6 +15,18 @@ object PaperAutoRules {
         OilEntrySafety.blocker(market.symbol)?.let { return it }
         if (!settings.autoPaperTrading) return "معاملهٔ خودکار کاغذی خاموش است"
         if (AssetClass.of(market.symbol) == AssetClass.CRYPTO) {
+            val signal = market.signal ?: return "سیگنال فشردگی/انفجار موجود نیست"
+            if (signal.cryptoBreakout?.matches(signal) != true ||
+                signal.ichimokuEntry?.matches(signal) != true)
+                return "فقط استراتژی فشردگی ← انفجار با شواهد بسته مجاز است"
+            if (news.gate != com.aurum.edge.data.NewsGate.CLEAR || news.cached ||
+                news.lastCheckedAt?.let { now - it in 0L..180_000L } != true ||
+                news.calendarCheckedAt?.let { now - it in 0L..1_200_000L } != true)
+                return "خبر/تقویم پراثر یا تازه‌بودن آن قابل تأیید نیست؛ ورود رمزارز متوقف است"
+            val tick = market.lastTradeAt?.let { time -> market.lastTradePrice?.let { price ->
+                PriceTick(price, time, market.bid, market.ask)
+            } }
+            CryptoCompressionPolicy.quoteBlocker(signal, tick, now)?.let { return it }
             if (market.historyProvider != BinanceSpotClient.PROVIDER ||
                 market.feed.provider?.startsWith(BinanceSpotClient.PROVIDER) != true)
                 return "تاریخچهٔ هفت بازهٔ هم‌صرافی Binance Spot برای ورود تأیید نشده است"

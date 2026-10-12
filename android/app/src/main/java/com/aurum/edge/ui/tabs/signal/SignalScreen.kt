@@ -672,7 +672,7 @@ private fun PerMarketRecommendations(scan: PairScanState, interval: com.aurum.ed
                         verticalAlignment = Alignment.CenterVertically) {
                         Text("#${index + 1}  ${row.symbol}", style = MaterialTheme.typography.titleSmall,
                             color = AurumColors.TextPrimary, fontWeight = FontWeight.Bold)
-                        Pill(if (approved) "کاندیدای واچ‌لیست" else "فقط مشاهده",
+                        Pill(if (approved) "کاندیدای ورود" else if (row.state == "watch") "فشردگی · آماده‌باش" else "فقط مشاهده",
                             if (approved) AurumColors.Green else AurumColors.Gold)
                     }
                     if (category == AssetClass.CRYPTO) Text(

@@ -178,12 +178,14 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             }) { Text("ذخیرهٔ واچ‌لیست") }
             Text("افزودن نماد به‌تنهایی قیمت یا سیگنال نمی‌سازد؛ بدون فید واقعی مستقل، ورود بسته می‌ماند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            Text("حالت هر دسته را اینجا انتخاب کنید. «ترکیبی/خودکار» با ADX رژیم را تشخیص می‌دهد؛ " +
-                "این انتخاب برای اسکنر و نماد منتخب یکسان است، اما نبود داده/قیمت تازه را رفع نمی‌کند.",
+            Text("حالت‌های روند/رنج فقط برای بازارهای غیررمزارز هستند؛ کریپتو تنها فشردگی ← انفجار 5m دارد.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
             com.aurum.edge.core.AssetClass.entries.forEach { category ->
                 Text(category.label, style = MaterialTheme.typography.bodySmall)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                if (category == com.aurum.edge.core.AssetClass.CRYPTO)
+                    Text("فشردگی ← انفجار · 5m · 9/26/52 + 103 (ثابت)",
+                        style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+                else Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     com.aurum.edge.core.CategoryStrategy.entries.forEach { mode ->
                         FilterChip(selected = settings.categoryStrategies[category] == mode,
@@ -195,7 +197,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
         }
 
         // توضیح موتور واحد چهارلایه؛ گزینه‌های پروفایل قدیمی فقط برای خواندن سوابق می‌مانند.
-        SectionCard("موتور واحد چهارلایهٔ V1", "امتیازدهی فنی و قفل‌های مطلق بازار/ریسک/AI") {
+        SectionCard("موتور V1 بازارهای غیررمزارز", "رمزارز فقط از موتور فشردگی ← انفجار استفاده می‌کند") {
             Text(
                 "موتور واحد V1: EMA/ایچیموکو، RSI/MACD، حمایت/مقاومت و دادهٔ واقعی M1 تا D1. در نبود داده یا جهش/بازار بی‌جان، ورود ممنوع.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold,

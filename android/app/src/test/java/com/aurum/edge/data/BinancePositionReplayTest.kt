@@ -26,19 +26,40 @@ class BinancePositionReplayTest {
     private val at = System.currentTimeMillis() - 10_000L
     private val context get() = RuntimeEnvironment.getApplication()
     private fun file() = File(Files.createTempDirectory("binance-ledger").toFile(), "journal.json")
-    private val signal = Signal(SignalAction.BUY, 100.0, entry = 100.0, stopLoss = 90.0,
-        takeProfit = 125.0, interval = Interval.M5, barTime = at - Interval.M5.millis,
-        ichimokuEntry = com.aurum.edge.core.IchimokuEntryEvidence(SignalAction.BUY, at - Interval.M5.millis, at - Interval.M5.millis, Interval.M5, 3),
-        confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
-            "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map {
-            ConfluenceItem(it, true, "fixture", scorePercent = 25)
-        })
+    /** These are already-open LEGACY fixtures loaded from disk, not new entries.
+     * Retiring the old crypto strategy must not disable old same-venue exits.
+     */
+    private suspend fun legacy(venue: String, path: File = file()): JournalStore {
+        val trade = com.aurum.edge.core.PaperTrade("legacy", "BTC/USDT", Interval.M5,
+            SignalAction.BUY, 100.0, 90.0, 125.0, 100.0, 2.5, at,
+            positionOz = 1.0, initialStopLoss = 90.0, trailExtreme = 100.0, cryptoVenue = venue)
+        path.writeText(kotlinx.serialization.json.Json.encodeToString(
+            kotlinx.serialization.builtins.ListSerializer(com.aurum.edge.core.PaperTrade.serializer()),
+            listOf(trade)))
+        return JournalStore(context, path).also { it.load() }
+    }
     private fun row(id: Long, price: Double, delay: Long = id) =
         BinanceSpotClient.Aggregate(id, PriceTick(price, at + delay))
 
+    @Test fun `retired crypto entry signal is rejected but old positions remain loadable`() = runBlocking {
+        val fresh = JournalStore(context, file()).also { it.load() }
+        val legacySignal = Signal(SignalAction.BUY, 100.0, entry = 100.0,
+            stopLoss = 90.0, takeProfit = 130.0, interval = Interval.M5,
+            barTime = at - Interval.M5.millis,
+            ichimokuEntry = com.aurum.edge.core.IchimokuEntryEvidence(
+                SignalAction.BUY, at - Interval.M5.millis, at - Interval.M5.millis, Interval.M5, 5),
+            confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
+                "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map {
+                ConfluenceItem(it, true, "old fixture", scorePercent = 25)
+            })
+        assertTrue(runCatching { fresh.open(legacySignal, "BTC/USDT", 100.0,
+            50_000.0, 0.5, observedAt = at) }.exceptionOrNull()?.message
+            .orEmpty().contains("فشردگی ← انفجار"))
+        assertTrue(fresh.trades.value.isEmpty())
+    }
+
     @Test fun `old position keeps Nobitex settlement even after app changes default venue`() = runBlocking {
-        val store = JournalStore(context, file()).also { it.load() }
-        store.open(signal, "BTC/USDT", 100.0, 50_000.0, 0.5, manual = true, observedAt = at)
+        val store = legacy("NOBITEX")
         assertEquals("NOBITEX", store.trades.value.single().cryptoVenue)
         assertTrue(store.settleBinanceBatch("BTC/USDT", at, listOf(row(100, 80.0))).isEmpty())
         assertTrue(store.trades.value.single().isOpen)
@@ -46,9 +67,7 @@ class BinancePositionReplayTest {
     }
 
     @Test fun `failed Binance replay hides last quote instead of valuing an unverified open position`() = runBlocking {
-        val store = JournalStore(context, file()).also { it.load() }
-        store.open(signal, "BTC/USDT", 100.0, 50_000.0, 0.5,
-            manual = true, observedAt = at, cryptoVenue = BinanceSpotClient.VENUE)
+        val store = legacy(BinanceSpotClient.VENUE)
         var calls = 0
         val http = OkHttpClient.Builder().addInterceptor { chain ->
             calls++
@@ -71,9 +90,8 @@ class BinancePositionReplayTest {
 
     @Test fun `new venue rejects legacy REST and candles then persists ID in one atomic batch`() = runBlocking {
         val file = file()
-        val store = JournalStore(context, file).also { it.load() }
-        val opened = store.open(signal, "BTC/USDT", 100.0, 50_000.0, 0.5,
-            manual = true, observedAt = at, cryptoVenue = BinanceSpotClient.VENUE)
+        val store = legacy(BinanceSpotClient.VENUE, file)
+        val opened = store.trades.value.single()
         assertFalse(opened.usesTickArchive)
         assertTrue(store.settleTick("BTC/USDT", 80.0, at + 1L).isEmpty())
         assertTrue(store.trades.value.single().isOpen)

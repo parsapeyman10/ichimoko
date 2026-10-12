@@ -88,5 +88,7 @@ object SignalEngine {
                  symbol: String = "XAU/USD", mode: com.aurum.edge.core.CategoryStrategy =
                      com.aurum.edge.core.CategoryStrategy.HYBRID,
                  timeframes: Map<Interval, List<Candle>> = emptyMap()): Signal =
-        V1Scoring.evaluate(candles, interval, symbol, threshold, mode, timeframes)
+        if (AssetClass.of(symbol) == AssetClass.CRYPTO)
+            CryptoCompressionEngine.evaluate(candles, interval, symbol, timeframes)
+        else V1Scoring.evaluate(candles, interval, symbol, threshold, mode, timeframes)
 }

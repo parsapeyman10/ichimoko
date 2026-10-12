@@ -619,8 +619,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun setCategoryStrategy(category: com.aurum.edge.core.AssetClass,
-                            mode: com.aurum.edge.core.CategoryStrategy) = container.settingsStore.update {
-        it.copy(categoryStrategies = it.categoryStrategies + (category to mode))
+                            mode: com.aurum.edge.core.CategoryStrategy) {
+        if (category == com.aurum.edge.core.AssetClass.CRYPTO) return // retired legacy crypto modes
+        container.settingsStore.update {
+            it.copy(categoryStrategies = it.categoryStrategies + (category to mode))
+        }
     }
 
     fun saveRiskPercent(value: Double) = container.settingsStore.update { it.copy(riskPercent = value.coerceIn(0.1, 0.5)) }
@@ -711,6 +714,17 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             return "ورود کریپتو مسدود: کندل تحلیل و تیک ورود باید هر دو از بازار Binance Spot باشند"
         if (com.aurum.edge.core.MarketHours.closedFor(current.symbol)) return "بازار بسته است"
         val candidate = current.signal
+        if (com.aurum.edge.core.AssetClass.of(current.symbol) == com.aurum.edge.core.AssetClass.CRYPTO) {
+            if (news.value.gate != com.aurum.edge.data.NewsGate.CLEAR || news.value.cached ||
+                news.value.lastCheckedAt?.let { System.currentTimeMillis() - it in 0L..180_000L } != true ||
+                news.value.calendarCheckedAt?.let { System.currentTimeMillis() - it in 0L..1_200_000L } != true)
+                return "خبر و تقویم تازهٔ بدون رویداد پراثر لازم است"
+            val quote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { price ->
+                PriceTick(price, at, current.bid, current.ask)
+            } }
+            com.aurum.edge.core.CryptoCompressionPolicy.quoteBlocker(
+                candidate ?: return "سیگنال رمزارز موجود نیست", quote)?.let { return it }
+        }
         if (candidate?.isActionable != true || !TechnicalEvidence.confirmed(candidate))
             return candidate?.blockers?.joinToString("، ") ?: "سیگنال چهارلایهٔ معتبر وجود ندارد"
         if (settings.value.pauseOnNews) {
@@ -824,6 +838,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     manual = manual,
                     newsEvidence = newsRecord, priceAction = ict,
                     marketTrend = trendRecord,
+                    cryptoNews = news.value,
+                    cryptoEntryQuote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { quote ->
+                        com.aurum.edge.core.PriceTick(quote, at, current.bid, current.ask)
+                    } },
                     cryptoVenue = if (com.aurum.edge.data.CryptoCatalog.isCrypto(current.symbol))
                         com.aurum.edge.data.BinanceSpotClient.VENUE else "NOBITEX",
                 )

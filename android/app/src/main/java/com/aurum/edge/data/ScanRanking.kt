@@ -23,8 +23,11 @@ object ScanRanking {
 
     fun byMarket(statuses: List<PairScanStatus>, interval: Interval, now: Long): Map<AssetClass, List<PairScanStatus>> {
         val ranked = rank(statuses, interval, now, includeObserved = true)
+        // The 20-bar crypto setup is watch-only. It NEVER enters bestPick/alerts/auto entry.
+        val watch = statuses.filter { it.state == "watch" && it.assetClass == AssetClass.CRYPTO &&
+            ScanFreshness.current(it.lastScanAt, it.interval ?: Interval.M5, now) }
         return AssetClass.entries.associateWith { category ->
-            ranked.filter { it.assetClass == category }.take(4)
+            (ranked.filter { it.assetClass == category } + watch.filter { it.assetClass == category }).take(4)
         }
     }
 }
