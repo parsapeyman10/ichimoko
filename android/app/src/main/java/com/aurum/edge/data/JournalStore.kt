@@ -196,6 +196,7 @@ class JournalStore(
             marketTrend = marketTrend,
             initialStopLoss = stop,
             trailExtreme = price,
+            cryptoEntryAtr = if (CryptoCatalog.isCrypto(symbol)) signal.cryptoBreakout?.atr else null,
             usesTickArchive = CryptoCatalog.isCrypto(symbol) && cryptoVenue == "NOBITEX" &&
                 settingsStore?.hasTickArchive() == true,
             cryptoVenue = cryptoVenue,
@@ -217,6 +218,31 @@ class JournalStore(
             persist(_trades.value + trade)
         }
         return trade
+    }
+
+    /** Same-venue CLOSED candles only; never a fill. The intent and ATR trail are
+     * durable, but settlement waits for a later ordered executed trade on the original venue.
+     */
+    suspend fun applyCryptoClosedBars(symbol: String, openedAt: Long,
+        venue: String, m5: List<Candle>, m15: List<Candle>,
+        now: Long = System.currentTimeMillis()): Boolean = mutex.withLock {
+        if (!loaded || venue != BinanceSpotClient.VENUE) return@withLock false
+        val trade = _trades.value.singleOrNull { it.isOpen && it.symbol == symbol &&
+            it.openedAt == openedAt && it.cryptoVenue == venue && it.cryptoEntryAtr != null }
+            ?: return@withLock false
+        val decision = com.aurum.edge.engine.CryptoCompressionExit.assess(trade, m5, m15, now)
+            ?: return@withLock false
+        val suggested = decision.stop?.let { if (trade.action == SignalAction.BUY)
+            maxOf(trade.stopLoss, it) else minOf(trade.stopLoss, it) } ?: trade.stopLoss
+        val next = trade.copy(
+            stopLoss = suggested,
+            cryptoLastClosedBarAt = decision.barClosedAt,
+            cryptoExitPendingAt = if (decision.exitReason != null)
+                decision.barClosedAt else trade.cryptoExitPendingAt,
+            cryptoExitReason = decision.exitReason ?: trade.cryptoExitReason,
+        )
+        persist(_trades.value.map { if (it.id == trade.id) next else it })
+        true
     }
 
     suspend fun attachAiReview(tradeId: String, review: PaperAiReview): PaperTrade = mutex.withLock {
@@ -420,18 +446,28 @@ class JournalStore(
             val price = event.tick.price
             val stopHit = if (trade.action == SignalAction.BUY) price <= trade.stopLoss + 1e-9
                 else price >= trade.stopLoss - 1e-9
-            val targetHit = trade.initialStopLoss == null &&
+            val targetHit = (trade.initialStopLoss == null || trade.cryptoEntryAtr != null) &&
                 (if (trade.action == SignalAction.BUY) price >= trade.takeProfit - 1e-9
                     else price <= trade.takeProfit + 1e-9)
-            trade = if (stopHit || targetHit) {
-                val exit = if (stopHit) trade.stopLoss else trade.takeProfit
+            val structureExit = trade.cryptoEntryAtr != null &&
+                trade.cryptoExitPendingAt?.let { event.tick.at >= it } == true
+            trade = if (stopHit || targetHit || structureExit) {
+                // For the new strategy, a stop/target/structural intent is executed at
+                // the OBSERVED same-venue price, not at an unobserved threshold. This
+                // models gap/slippage honestly; old saved positions retain their policy.
+                val exit = if (trade.cryptoEntryAtr != null) price
+                    else if (stopHit) trade.stopLoss else trade.takeProfit
                 val perUnit = if (trade.action == SignalAction.BUY) exit - trade.entry else trade.entry - exit
                 val pnl = kotlin.math.round((PaperOrderRules.quotePnlToUsd(symbol,
                     perUnit * trade.positionOz, exit) - trade.effectiveCommissionUsd -
                     trade.effectiveSpreadCostUsd) * 100.0) / 100.0
                 pnlDelta = pnl
                 trade.copy(closedAt = event.tick.at, exitPrice = exit, binanceAggId = event.id,
-                    exitReason = if (stopHit) "حد ضرر (Binance Spot)" else "حد سود (Binance Spot)", pnlUsd = pnl)
+                    exitReason = when {
+                        stopHit -> "حد ضرر (Binance Spot)"
+                        structureExit -> trade.cryptoExitReason ?: "خروج ساختاری (Binance Spot)"
+                        else -> "حد سود (Binance Spot)"
+                    }, pnlUsd = pnl)
             } else PaperTrailing.advance(trade, price, price).copy(binanceAggId = event.id)
             next = event.id + 1L
             if (!trade.isOpen) { closed.add(trade); break }

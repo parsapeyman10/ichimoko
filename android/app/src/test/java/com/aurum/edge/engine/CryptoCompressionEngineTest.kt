@@ -72,6 +72,20 @@ class CryptoCompressionEngineTest {
             it.copy(name = "ساختار روند · EMA + ایچیموکو") })))
     }
 
+    @Test fun `new crypto trail uses entry ATR not old R multiple or unverified lines`() {
+        val trade = PaperTrade("new", "BTC/USDT", Interval.M5, SignalAction.BUY,
+            100.0, 98.8, 103.6, 100.0, 3.0, london,
+            initialStopLoss = 98.8, trailExtreme = 100.0, cryptoEntryAtr = 1.0)
+        assertEquals(98.8, com.aurum.edge.core.PaperTrailing.advance(trade,
+            100.9, 100.9).stopLoss, 1e-6)
+        assertEquals(100.0, com.aurum.edge.core.PaperTrailing.advance(trade,
+            101.0, 101.0).stopLoss, 1e-6)
+        assertEquals(100.0, com.aurum.edge.core.PaperTrailing.advance(trade,
+            103.0, 103.0).stopLoss, 1e-6)
+        assertEquals(101.8, com.aurum.edge.core.PaperTrailing.advance(
+            trade.copy(cryptoEntryAtr = null), 103.0, 103.0).stopLoss, 1e-6)
+    }
+
     @Test fun `spread must be measured from independent top of book and under tenth ATR`() {
         val signal = proof()
         assertNull(CryptoCompressionPolicy.quoteBlocker(signal,

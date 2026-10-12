@@ -18,6 +18,16 @@ object PaperTrailing {
         val extreme = if (buy) max(trade.trailExtreme ?: trade.entry, observedHigh)
                       else min(trade.trailExtreme ?: trade.entry, observedLow)
         val favourable = if (buy) extreme - trade.entry else trade.entry - extreme
+        // New crypto strategy trails in ATR units. Without a VERIFIED closed M5 line,
+        // never invent the Tenkan/Kijun level at +2/+3 ATR. The closed-bar monitor
+        // may tighten further, but this tick-only lane can always move to break even.
+        val cryptoAtr = trade.cryptoEntryAtr
+        if (cryptoAtr != null && cryptoAtr.isFinite() && cryptoAtr > 0.0) {
+            val proposed = if (favourable >= cryptoAtr) trade.entry else trade.stopLoss
+            val next = if (buy) max(trade.stopLoss, proposed) else min(trade.stopLoss, proposed)
+            return if (next == trade.stopLoss && extreme == trade.trailExtreme) trade
+                else trade.copy(stopLoss = next, trailExtreme = extreme)
+        }
         val proposed = when {
             favourable >= 2.0 * initialRisk -> if (buy) extreme - initialRisk else extreme + initialRisk
             favourable >= initialRisk -> trade.entry

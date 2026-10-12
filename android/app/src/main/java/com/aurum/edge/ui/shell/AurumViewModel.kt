@@ -400,6 +400,19 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                         if (symbol !in workers) {
                             val worker = launch(Dispatchers.IO) {
                                 val crypto = com.aurum.edge.data.CryptoCatalog.isCrypto(symbol)
+                                // Separate closed-candle lane: never slow the ordered tick stream.
+                                if (crypto) launch {
+                                    while (isActive) {
+                                        try {
+                                            container.openTradeTicks.syncCryptoClosedBars(symbol, openedAt)
+                                        } catch (cancel: kotlinx.coroutines.CancellationException) {
+                                            throw cancel
+                                        } catch (_: Exception) {
+                                            // Keep the prior real stop/valuation when history is unavailable.
+                                        }
+                                        delay(60_000L)
+                                    }
+                                }
                                 while (isActive) {
                                     if (!visibleOnlineLoopEnabled && !SignalMonitorService.running.value) {
                                         _liveTicks.update { it - symbol }

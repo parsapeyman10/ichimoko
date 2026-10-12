@@ -1,5 +1,6 @@
 package com.aurum.edge.data
 
+import com.aurum.edge.core.Interval
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.TradeQuotePolicy
 import kotlinx.coroutines.CancellationException
@@ -37,6 +38,8 @@ class OpenTradeTickMonitor(
         val stream: TradeStreamCursor = TradeStreamCursor(openedAt),
         val mutex: Mutex = Mutex(),
         val watcher: AtomicBoolean = AtomicBoolean(false),
+        val strategyMutex: Mutex = Mutex(),
+        var lastStrategyCheckAt: Long = 0L,
         @Volatile var connected: Boolean = false,
         @Volatile var latest: PriceTick? = null,
         @Volatile var latestBinanceId: Long = -1L,
@@ -87,6 +90,37 @@ class OpenTradeTickMonitor(
     private fun binancePosition(symbol: String, openedAt: Long): Boolean =
         journal.trades.value.any { it.isOpen && it.symbol == symbol &&
             it.openedAt == openedAt && it.cryptoVenue == BinanceSpotClient.VENUE }
+
+    /** Only NEW compression positions. This is independent of the tick stream and
+     * serialised per symbol across foreground UI and background service. A failed
+     * candle request does not make a tick, an exit, or a new stop.
+     */
+    suspend fun syncCryptoClosedBars(symbol: String, openedAt: Long) {
+        if (!binancePosition(symbol, openedAt)) return
+        val session = session(symbol, openedAt)
+        session.strategyMutex.withLock {
+            val trade = journal.trades.value.singleOrNull { it.isOpen && it.symbol == symbol &&
+                it.openedAt == openedAt && it.cryptoVenue == BinanceSpotClient.VENUE &&
+                it.cryptoEntryAtr != null } ?: return@withLock
+            val now = System.currentTimeMillis()
+            if (now - session.lastStrategyCheckAt in 0 until 60_000L) return@withLock
+            session.lastStrategyCheckAt = now
+            val m5 = binance.fetchCandles(symbol, Interval.M5, 321, 320)
+            if (m5.provider != BinanceSpotClient.PROVIDER) return@withLock
+            if (m5.candles.lastOrNull()?.time?.let { it + Interval.M5.millis <=
+                    (trade.cryptoLastClosedBarAt ?: 0L) } != false) return@withLock
+            // M15 is a separate structural exit confirmation, never an entry timeframe.
+            // If it is unavailable, independent M5 protection still works.
+            val m15 = try {
+                binance.fetchCandles(symbol, Interval.M15, 321, 320)
+                    .takeIf { it.provider == BinanceSpotClient.PROVIDER }?.candles.orEmpty()
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (_: Exception) { emptyList() }
+            if (stillOpen(symbol, session))
+                journal.applyCryptoClosedBars(symbol, openedAt, BinanceSpotClient.VENUE,
+                    m5.candles, m15, System.currentTimeMillis())
+        }
+    }
 
     /** Manual exit must first replay every received Binance execution (including a
      * WebSocket row still buffered for the 250-ms journal batch). If REST cannot catch

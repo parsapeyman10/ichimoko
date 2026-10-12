@@ -41,6 +41,36 @@ class BinancePositionReplayTest {
     private fun row(id: Long, price: Double, delay: Long = id) =
         BinanceSpotClient.Aggregate(id, PriceTick(price, at + delay))
 
+    @Test fun `new compression position exits on next ordered real print after M5 close`() = runBlocking {
+        val path = file()
+        val trade = com.aurum.edge.core.PaperTrade("compression", "BTC/USDT", Interval.M5,
+            SignalAction.BUY, 100.0, 99.0, 103.0, 100.0, 3.0,
+            at - 2*Interval.M5.millis, positionOz = 1.0,
+            initialStopLoss = 99.0, trailExtreme = 100.0,
+            cryptoVenue = BinanceSpotClient.VENUE, cryptoEntryAtr = 1.0)
+        path.writeText(kotlinx.serialization.json.Json.encodeToString(
+            kotlinx.serialization.builtins.ListSerializer(com.aurum.edge.core.PaperTrade.serializer()),
+            listOf(trade)))
+        val journal = JournalStore(context, path).also { it.load() }
+        val end = at / Interval.M5.millis * Interval.M5.millis
+        val bars = (0 until 320).map { index ->
+            com.aurum.edge.core.Candle(end - (320-index)*Interval.M5.millis,
+                100.0, 100.3, if (index == 319) 98.7 else 99.7,
+                if (index == 319) 99.0 else 100.0, 100.0)
+        }
+        assertFalse(journal.applyCryptoClosedBars("BTC/USDT", trade.openedAt,
+            "OTHER_VENUE", bars, emptyList(), at))
+        assertTrue(journal.applyCryptoClosedBars("BTC/USDT", trade.openedAt,
+            BinanceSpotClient.VENUE, bars, emptyList(), at))
+        assertTrue(journal.trades.value.single().isOpen) // candle close is NOT a fill
+        assertEquals(end, journal.trades.value.single().cryptoExitPendingAt)
+        val closed = journal.settleBinanceBatch("BTC/USDT", trade.openedAt,
+            listOf(BinanceSpotClient.Aggregate(1, PriceTick(99.5, at + 1))))
+        assertEquals(99.5, closed.single().exitPrice!!, 0.00001)
+        assertTrue(closed.single().exitReason.orEmpty().contains("کیجون"))
+        assertFalse(journal.trades.value.single().isOpen)
+    }
+
     @Test fun `retired crypto entry signal is rejected but old positions remain loadable`() = runBlocking {
         val fresh = JournalStore(context, file()).also { it.load() }
         val legacySignal = Signal(SignalAction.BUY, 100.0, entry = 100.0,

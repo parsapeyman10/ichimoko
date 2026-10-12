@@ -445,6 +445,11 @@ data class PaperTrade(
     val cryptoVenue: String = "NOBITEX",
     /** Last Binance Spot aggregate ID atomically settled/checked with trailing and balance. */
     val binanceAggId: Long = -1L,
+    /** Only NEW crypto compression positions have this ATR; legacy trails stay unchanged. */
+    val cryptoEntryAtr: Double? = null,
+    val cryptoLastClosedBarAt: Long? = null,
+    val cryptoExitPendingAt: Long? = null,
+    val cryptoExitReason: String? = null,
 ) {
     val isOpen: Boolean get() = closedAt == null
     val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }
