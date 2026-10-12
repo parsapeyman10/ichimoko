@@ -13,7 +13,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.aurum.edge.AurumApplication
-import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.IctEntryRules
@@ -145,7 +144,6 @@ class SignalMonitorService : Service() {
         // positions and quote receipt; a slow model cannot stall their worker loops.
         aiJob?.cancel()
         aiJob = scope.launch {
-            var lastAiReachable: Boolean? = null
             while (isActive) {
                 if (!notificationsPermitted()) { stopSelf(); break }
                 try {
@@ -161,27 +159,10 @@ class SignalMonitorService : Service() {
                                 "جهت از $from به ${flip.bias} تغییر کرد — ${flip.summary}")
                         }
                     }
-                    // ── وضعیت اتصال AI ────────────────────────────────────────
-                    // The connection is checked FIRST and a drop is ANNOUNCED, exactly as asked:
-                    // when the model stops answering the user is told, and paper trading simply
-                    // continues on the technical rules (never on an invented AI opinion).
+                    // Connection is checked for safety but changes are not user-facing alerts.
                     val aiConfig = container.settingsStore.read()
                     if (aiConfig.hasClientNewsAi && (aiConfig.autoPaperTrading || aiConfig.notifyOnSignal)) {
                         runCatching { container.traderAdvisor.ensureConnection() }
-                        val conn = container.traderAdvisor.connection.value
-                        if (notificationsPermitted() && conn.reachable != null &&
-                            conn.reachable != lastAiReachable) {
-                            lastAiReachable = conn.reachable
-                            Notifier.notifyResearch(this@SignalMonitorService,
-                                "ai-connection|" + conn.reachable + "|" + (conn.checkedAt ?: 0L),
-                                if (conn.reachable == true) "همراه تریدر AI · اتصال برقرار شد"
-                                else "همراه تریدر AI · اتصال قطع است",
-                                if (conn.reachable == true)
-                                    "مدل پاسخ داد؛ ارزنده‌بودن ورودها و بازبینی پوزیشن‌های باز دوباره از AI پرسیده می‌شود."
-                                else
-                                    "مدل در دسترس نیست (${conn.detail.ifBlank { "اتصال برقرار نشد" }}) — " +
-                                        "معاملات کاغذی بدون AI و فقط با شرط‌های فنی ادامه پیدا می‌کنند.")
-                        }
                     }
                     // «ادامه بده یا نه»: the companion AI reviews the OPEN paper positions on its own
                     // throttle. Advisory ONLY — a DO_NOT_CONTINUE verdict raises one research
@@ -247,15 +228,9 @@ class SignalMonitorService : Service() {
                     stopSelf()
                     return@collect
                 }
-                val text = when (state.feed.mode) {
-                    FeedMode.LIVE -> "زنده · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
-                    FeedMode.POLLING -> "آخرین کندل/تاریخچه آنلاین (نه تیک زنده) · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
-                    FeedMode.MARKET_CLOSED -> "بازار طبق برنامهٔ معمول بسته است؛ قیمت/ورود بررسی نمی‌شود"
-                    FeedMode.DELAYED -> "دادهٔ دیررس؛ اتصال در حال بررسی (معامله مسدود)"
-                    FeedMode.CONNECTING -> "در حال اتصال…"
-                    FeedMode.OFFLINE -> "آفلاین — آخرین دیتای واقعی: ${state.candles.lastOrNull()?.time ?: "—"}"
-                    FeedMode.NO_KEY -> "کلید API لازم است"
-                }
+                // Android requires an ongoing foreground notification. Keep it neutral;
+                // feed failures still block entries/settlement, but never trigger an alert.
+                val text = "پایش معاملات کاغذی"
                 runCatching {
                     NotificationManagerCompat.from(this@SignalMonitorService).notify(
                         Notifier.MONITOR_NOTIFICATION_ID,

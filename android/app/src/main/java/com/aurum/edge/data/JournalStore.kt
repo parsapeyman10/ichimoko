@@ -111,6 +111,9 @@ class JournalStore(
     ): PaperTrade {
         // Authoritative entry guard, independent of UI, scanner and automatic trader. Do not
         // move this into settlement: already-open oil positions must still be manageable.
+        require(signal.ichimokuEntry?.matches(signal) == true) {
+            "کراس بستهٔ تنکان/کیجون، ابر نازک و فشردگی پیش از ورود تأیید نشده‌اند"
+        }
         require(com.aurum.edge.core.OilEntrySafety.blocker(symbol) == null) {
             com.aurum.edge.core.OilEntrySafety.REASON
         }

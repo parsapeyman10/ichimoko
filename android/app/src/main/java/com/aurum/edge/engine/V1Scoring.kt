@@ -59,6 +59,8 @@ internal object V1Scoring {
 
         val setting = SignalEngine.ichimokuSetting(interval)
         val ichi = Ichimoku.compute(bars, setting.tenkan, setting.kijun, setting.spanB, setting.kijun)
+        val buySetup = IchimokuEntrySetup.assess(bars, ichi, atrSeries, interval, SignalAction.BUY)
+        val sellSetup = IchimokuEntrySetup.assess(bars, ichi, atrSeries, interval, SignalAction.SELL)
         val ichiRead = IchimokuAlignment.read(bars, ichi, atr)
             ?: return blocked("اجزای هم‌زمان ایچیموکو آماده نیستند")
         // A measured compression/release is a crypto-only way to confirm the EXISTING
@@ -152,6 +154,8 @@ internal object V1Scoring {
         // authorize a trend entry on the EMA half alone while the displaced components
         // disagree or the lines/price are over-extended relative to real ATR.
         val selectedRelease = if (side == SignalAction.BUY) buyRelease else sellRelease
+        val selectedSetup = if (side == SignalAction.BUY) buySetup else sellSetup
+        if (selectedSetup == null) blockers += "ورود فقط پس از کراس تنکان/کیجون در جهت معامله، ابر نازک و فشردگی ۳ از ۵ کندل بسته مجاز است"
         if (side != SignalAction.NO_TRADE && !range &&
             !ichiRead.trendAligned(side, last.close) && selectedRelease?.ready != true)
             blockers += "اجزای ایچیموکو هم‌جهت/هم‌فاصله نیستند (ابر، تنکان/کیجون، چیکو و ATR)"
@@ -170,7 +174,7 @@ internal object V1Scoring {
                 if (selectedRelease?.ready == true) listOf("فشردگی و آزادشدن چیکو با شکست بسته/حجم واقعی تأیید شد؛ سود تضمینی نیست")
                 else emptyList(),
             blockers = blockers, confluence = selected.second.second,
-            interval = interval, barTime = last.time)
+            interval = interval, barTime = last.time, ichimokuEntry = if (blockers.isEmpty()) selectedSetup else null)
     }
 
     /** A neutral or unknown frame cannot vote for BUY or SELL. Only three real frames vote. */

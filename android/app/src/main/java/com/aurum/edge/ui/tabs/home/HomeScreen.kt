@@ -152,13 +152,19 @@ fun HomeScreen(
             OpenPositionDisplay.forTrade(trade, lastMarks)?.let { trade.symbol to it.price }
         }.toMap()
 
-        if (openTradesList.isNotEmpty()) {
-            com.aurum.edge.ui.components.AssetClass4SlotsBanner(
+        val scan by viewModel.pairScan.collectAsStateWithLifecycle()
+        val homeSettings by viewModel.settings.collectAsStateWithLifecycle()
+        com.aurum.edge.ui.components.AssetClass4SlotsBanner(
                 openTrades = openTradesList,
                 livePrices = freshPrices,
                 lastKnownPrices = frozenPrices,
                 onSelectSymbol = onChartSymbol,
+                entryReasons = AssetClass.entries.associateWith { asset ->
+                    com.aurum.edge.data.MarketEntryReason.forClass(asset, scan,
+                        homeSettings.autoPaperTrading, now)
+                },
             )
+        if (openTradesList.isNotEmpty()) {
             LiveOpenTradesTrackingSection(
                 viewModel = viewModel,
                 currentMarket = market,
@@ -170,7 +176,6 @@ fun HomeScreen(
         } else {
             // Instead of four large empty position cards and a second empty tracking card,
             // fill the space with the actual per-market scanner progress and provenance.
-            val scan by viewModel.pairScan.collectAsStateWithLifecycle()
             HomeRadarCard(scan, market.symbol, now, onChartSymbol)
         }
 
@@ -337,7 +342,6 @@ private fun LiveTradeGaugeCard(
     val selectedTick = com.aurum.edge.data.OpenPositionQuotePolicy.selectedFallback(trade, currentMarket, now)
     val polledTick = com.aurum.edge.data.OpenPositionQuotePolicy.monitored(trade, liveTicks[trade.symbol], now)
     val verifiedLivePrice = (polledTick ?: selectedTick)?.price
-    val frozen = verifiedLivePrice == null && lastMark != null
     val observedAt = (polledTick ?: selectedTick)?.at ?: lastMark?.tickAt
     // A frozen mark is only a previously verified display snapshot for this exact trade.
     // It is never put back into the live tick map or used for settling/risk/equity.
@@ -354,15 +358,13 @@ private fun LiveTradeGaugeCard(
     }
 
     val statusColor = when {
-        frozen -> AurumColors.Gold
         valuation == null -> AurumColors.TextMuted
         valuation.netPnlUsd > 0.0 -> AurumColors.Green
         valuation.netPnlUsd < 0.0 -> AurumColors.Red
         else -> AurumColors.Gold
     }
     val movementLabel = when {
-        frozen -> "آخرین وضعیت ثبت‌شده ثابت مانده؛ تیک تازه نداریم"
-        valuation == null -> "هنوز هیچ تیک تأییدشده‌ای برای این معامله نداریم"
+        valuation == null -> "در انتظار اولین قیمت"
         (if (isBuy) valuation.price - entry else entry - valuation.price) > 0.0 -> "↗ در مسیر حد سود (TP)"
         (if (isBuy) valuation.price - entry else entry - valuation.price) < 0.0 -> "↘ در مسیر حد ضرر (SL)"
         else -> "⚪ قیمت واقعی روی نقطه ورود (Entry)"
@@ -406,9 +408,9 @@ private fun LiveTradeGaugeCard(
                 )
                 Text(
                     text = valuation?.let {
-                        (if (frozen) "آخرین سود/زیان ثبت‌شده (ثابت)" else "سود/زیان خالص") +
+                        "سود/زیان آخرین قیمت" +
                             " (${String.format(java.util.Locale.US, "%.2f", it.pnlPercent)}%)"
-                    } ?: "منتظر اولین تیک معتبر",
+                    } ?: "—",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                 )
@@ -446,11 +448,9 @@ private fun LiveTradeGaugeCard(
             )
             Text(
                 text = valuation?.let {
-                    (if (frozen) "آخرین قیمت ثبت‌شده، نه زنده: " else "آخرین قیمت تازه: ") +
-                        formatPrice(it.price) + (observedAt?.let { at ->
-                            " · تیک ${formatDateTime(at)}" + (if (frozen) " (${if (at <= now) relativeTime(at) else "زمان ناشر جلوتر از گوشی"})" else "")
-                        } ?: "")
-                } ?: "اولین تیک واقعی هنوز نرسیده؛ قیمت ورود جای تیک نمی‌نشیند",
+                    "آخرین قیمت: " + formatPrice(it.price) +
+                        (observedAt?.let { at -> " · ${formatDateTime(at)}" } ?: "")
+                } ?: "—",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextPrimary,
                 fontWeight = FontWeight.Bold,
@@ -577,7 +577,6 @@ private fun LiveTradeGaugeCard(
 private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit, now: Long) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
-    val status by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
     val lastMarks by viewModel.lastDisplayMarks.collectAsStateWithLifecycle()
@@ -587,12 +586,12 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit, now:
     val lastTrade = trades.maxByOrNull { it.openedAt }
 
     val totalMarginUsed = openTrades.sumOf { it.effectiveMarginUsd }
-    val unrealizedTotal = LiveTradeValuation.total(openTrades, freshPrices)
-    val savedMarks = openTrades.mapNotNull { OpenPositionDisplay.forTrade(it, lastMarks) }
-    val lastKnownTotal = LiveTradeValuation.total(openTrades, openTrades.mapNotNull { trade ->
+    // Screen-only valuation. Never reuse these remembered prices for risk, fills or settlement.
+    val displayPrices = openTrades.mapNotNull { trade ->
         OpenPositionDisplay.forTrade(trade, lastMarks)?.let { trade.symbol to it.price }
-    }.toMap())
-    val equity = unrealizedTotal?.let { settings.accountBalance + it }
+    }.toMap() + freshPrices
+    val displayPnl = LiveTradeValuation.total(openTrades, displayPrices)
+    val equity = displayPnl?.let { settings.accountBalance + it }
     val freeMargin = equity?.let { (it - totalMarginUsed).coerceAtLeast(0.0) }
 
     SectionCard(
@@ -622,21 +621,12 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit, now:
         val usedMarginStr = String.format(java.util.Locale.US, "$%.2f", totalMarginUsed)
         Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatTile("موجودی", balanceStr, modifier = Modifier.weight(1f))
-            StatTile("اکوئیتی", equityStr,
-                if (unrealizedTotal == null) AurumColors.TextMuted
-                else if (unrealizedTotal >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
+            StatTile("برآورد اکوئیتی", equityStr,
+                if (displayPnl == null) AurumColors.TextMuted
+                else if (displayPnl >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
         }
-        if (unrealizedTotal == null) Text(
-            lastKnownTotal?.let { old ->
-                "اکوئیتی زنده فعلاً قابل محاسبه نیست. آخرین برآورد سود/زیان پوزیشن‌ها: " +
-                    String.format(java.util.Locale.US, "%+.2f$", old) +
-                    " (ثابت؛ قدیمی‌ترین تیک ${savedMarks.minOfOrNull { it.tickAt }?.let { relativeTime(it) } ?: "—"}). " +
-                    "این مقدار مبنای ریسک/تسویه نیست."
-            } ?: "هنوز برای همهٔ پوزیشن‌ها تیک معتبر نداریم؛ اکوئیتی زنده قابل محاسبه نیست.",
-            style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
-        )
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatTile("مارجین آزاد", freeMarginStr, AurumColors.Cyan, Modifier.weight(1f))
+            StatTile("برآورد مارجین آزاد", freeMarginStr, AurumColors.Cyan, Modifier.weight(1f))
             StatTile("مارجین درگیر", usedMarginStr, AurumColors.Gold, Modifier.weight(1f))
         }
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -660,15 +650,6 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit, now:
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 10.dp),
-            )
-        }
-
-        if (enabled) {
-            Text(
-                "وضعیت موتور: $status",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.Gold,
-                modifier = Modifier.padding(top = 6.dp),
             )
         }
 

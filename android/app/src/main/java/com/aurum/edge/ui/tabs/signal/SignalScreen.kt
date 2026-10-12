@@ -117,6 +117,10 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState,
             openTrades = openTrades,
             livePrices = livePrices,
             onSelectSymbol = { symbol -> viewModel.selectChartSymbol(symbol) },
+            entryReasons = AssetClass.entries.associateWith { asset ->
+                com.aurum.edge.data.MarketEntryReason.forClass(asset, scanState,
+                    settings.autoPaperTrading, scanClock)
+            },
         )
 
         com.aurum.edge.core.OilEntrySafety.blocker(market.symbol)?.let { reason ->

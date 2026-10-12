@@ -198,6 +198,20 @@ data class ConfluenceItem(
     val scorePercent: Int? = null,
 )
 
+/** Closed-bar entry evidence carried through news review to the final journal guard. */
+data class IchimokuEntryEvidence(
+    val side: SignalAction,
+    val barTime: Long,
+    val crossTime: Long,
+    val interval: Interval,
+    val compressedBars: Int,
+) {
+    fun matches(signal: Signal): Boolean = signal.action == side && signal.barTime == barTime &&
+        signal.interval == interval && compressedBars in 3..5 &&
+        crossTime <= barTime && barTime - crossTime in 0L..interval.millis &&
+        crossTime > 0L
+}
+
 data class Signal(
     val action: SignalAction,
     val confidence: Double,
@@ -211,6 +225,7 @@ data class Signal(
     val interval: Interval = Interval.M5,
     val barTime: Long = 0L,
     val evaluatedAt: Long = System.currentTimeMillis(),
+    val ichimokuEntry: IchimokuEntryEvidence? = null,
 ) {
     val isActionable: Boolean get() = action != SignalAction.NO_TRADE
 }

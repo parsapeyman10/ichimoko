@@ -53,6 +53,7 @@ class PaperOpportunityTest {
     )
     private val raw = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2994.5,
         takeProfit = 3009.0, interval = Interval.M5, barTime = bar,
+        ichimokuEntry = com.aurum.edge.core.IchimokuEntryEvidence(SignalAction.BUY, bar, bar, Interval.M5, 3),
         confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "fixture", scorePercent = 25) })
     private val signal get() = NewsConfluence.apply(raw, "XAU/USD", news, now)!!
     private val snapshot = MtfAnalyzer.Snapshot(Interval.M5,

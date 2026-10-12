@@ -28,6 +28,7 @@ class BinancePositionReplayTest {
     private fun file() = File(Files.createTempDirectory("binance-ledger").toFile(), "journal.json")
     private val signal = Signal(SignalAction.BUY, 100.0, entry = 100.0, stopLoss = 90.0,
         takeProfit = 125.0, interval = Interval.M5, barTime = at - Interval.M5.millis,
+        ichimokuEntry = com.aurum.edge.core.IchimokuEntryEvidence(SignalAction.BUY, at - Interval.M5.millis, at - Interval.M5.millis, Interval.M5, 3),
         confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
             "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map {
             ConfluenceItem(it, true, "fixture", scorePercent = 25)

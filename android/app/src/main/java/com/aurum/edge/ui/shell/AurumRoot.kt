@@ -85,8 +85,11 @@ fun AurumRoot(viewModel: AurumViewModel) {
             if (selectedTab == AurumTab.Signal) {
                 AppHeader(symbol = market.symbol, price = market.lastPrice, interval = market.interval,
                     lastUpdate = market.feed.lastSuccessAt, onRefresh = viewModel::refreshNow)
-                FeedBanner(status = market.feed, lastPrice = market.lastPrice,
-                    lastBarTime = market.candles.lastOrNull()?.time, showingCache = market.showingCachedData)
+                if (market.feed.mode in setOf(com.aurum.edge.core.FeedMode.LIVE,
+                        com.aurum.edge.core.FeedMode.POLLING, com.aurum.edge.core.FeedMode.MARKET_CLOSED)) {
+                    FeedBanner(status = market.feed, lastPrice = market.lastPrice,
+                        lastBarTime = market.candles.lastOrNull()?.time, showingCache = market.showingCachedData)
+                }
             }
             Box(Modifier.fillMaxSize()) {
                 tabStates.SaveableStateProvider(selectedTab.name) {

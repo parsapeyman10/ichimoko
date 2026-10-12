@@ -42,6 +42,7 @@ class PaperJournalPersistenceTest {
     private fun journalFile() = File(Files.createTempDirectory("journal-test").toFile(), "paper_journal.json")
     private val signal = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2994.5,
         takeProfit = 3009.0, interval = Interval.M5, barTime = 1_800_000_000_000L - Interval.M5.millis,
+        ichimokuEntry = com.aurum.edge.core.IchimokuEntryEvidence(SignalAction.BUY, 1_800_000_000_000L - Interval.M5.millis, 1_800_000_000_000L - Interval.M5.millis, Interval.M5, 3),
         confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "fixture", scorePercent = 25) } +
             ConfluenceItem(NewsConfluence.NEWS_LABEL, true, "خبر مدل با شاهد"))
     private fun mtf(at: Long) = MtfSnapshotRecord("5m", "BUY", 1.0, 1, 0, 0, false, "fixture", at,
@@ -102,7 +103,8 @@ class PaperJournalPersistenceTest {
                 "evidence_ids":["verified"]}}"""
         val parsed = parseWebNews(Json.parseToJsonElement(json) as JsonObject, now)
         val bar = now - Interval.M5.millis
-        val technical = signal.copy(barTime = bar, stopLoss = 2994.5, takeProfit = 3009.0,
+        val technical = signal.copy(barTime = bar,
+            ichimokuEntry = signal.ichimokuEntry!!.copy(barTime = bar, crossTime = bar), stopLoss = 2994.5, takeProfit = 3009.0,
             confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "fixture", scorePercent = 25) })
         val verified = NewsConfluence.apply(technical, "XAU/USD", parsed, now)!!
         val current = MarketState(symbol = "XAU/USD", interval = Interval.M5,
@@ -271,7 +273,9 @@ class PaperJournalPersistenceTest {
 
         // 2. Short position: Entry 3000, SL 3010, TP 2980
         val shortSignal = signal.copy(action = SignalAction.SELL, entry = 3000.0,
-            stopLoss = 3010.0, takeProfit = 2980.0, barTime = signal.barTime + Interval.M5.millis)
+            stopLoss = 3010.0, takeProfit = 2980.0, barTime = signal.barTime + Interval.M5.millis,
+            ichimokuEntry = signal.ichimokuEntry!!.copy(side = SignalAction.SELL,
+                barTime = signal.barTime + Interval.M5.millis, crossTime = signal.barTime + Interval.M5.millis))
         val shortTrade = store.open(shortSignal, "XAU/USD", 3000.0, 50_000.0, 0.5,
             manual = true, observedAt = 1_800_000_000_000L + Interval.M5.millis)
         assertTrue(shortTrade.isOpen)

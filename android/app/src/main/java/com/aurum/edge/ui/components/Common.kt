@@ -293,6 +293,7 @@ fun AssetClass4SlotsBanner(
     modifier: Modifier = Modifier,
     /** Home-only UI snapshots; NEVER a live tick, account valuation or settlement price. */
     lastKnownPrices: Map<String, Double> = emptyMap(),
+    entryReasons: Map<com.aurum.edge.core.AssetClass, String> = emptyMap(),
 ) {
     val categories = listOf(
         com.aurum.edge.core.AssetClass.COMMODITY to "طلا و کالا",
@@ -330,17 +331,8 @@ fun AssetClass4SlotsBanner(
                         val categoryTrades = openTrades.filter { it.assetClass == assetClass }
                         val trade = categoryTrades.firstOrNull()
                         val isOpen = categoryTrades.isNotEmpty()
-                        val defaultLev = com.aurum.edge.core.PaperOrderRules.defaultLeverageFor(
-                            when (assetClass) {
-                                com.aurum.edge.core.AssetClass.COMMODITY -> "XAU/USD"
-                                com.aurum.edge.core.AssetClass.FOREX -> "EUR/USD"
-                                com.aurum.edge.core.AssetClass.CRYPTO -> "BTCUSDT"
-                                com.aurum.edge.core.AssetClass.STOCK -> "AAPL"
-                            }
-                        )
-
-                        val borderColor = if (isOpen) AurumColors.Green else AurumColors.Red.copy(alpha = 0.5f)
-                        val bgColor = if (isOpen) AurumColors.Green.copy(alpha = 0.12f) else AurumColors.Red.copy(alpha = 0.06f)
+                        val borderColor = if (isOpen) AurumColors.Green else AurumColors.TextMuted.copy(alpha = 0.5f)
+                        val bgColor = if (isOpen) AurumColors.Green.copy(alpha = 0.12f) else AurumColors.SurfaceAlt
 
                         Column(
                             modifier = Modifier
@@ -364,13 +356,11 @@ fun AssetClass4SlotsBanner(
                                 )
                                 Pill(
                                     text = "${categoryTrades.size}/۲",
-                                    color = if (isOpen) AurumColors.Green else AurumColors.Red,
+                                    color = if (isOpen) AurumColors.Green else AurumColors.TextMuted,
                                 )
                             }
 
                             if (isOpen) categoryTrades.forEach { trade ->
-                                val frozen = livePrices[trade.symbol] == null &&
-                                    lastKnownPrices[trade.symbol] != null
                                 val valuation = LiveTradeValuation.from(trade,
                                     livePrices[trade.symbol] ?: lastKnownPrices[trade.symbol])
 
@@ -388,15 +378,13 @@ fun AssetClass4SlotsBanner(
                                     Text("اهرم ${trade.effectiveLeverage}x", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
                                     Text(
                                         valuation?.let { value ->
-                                            (if (frozen) "ثابت " else "") +
-                                                (if (value.netPnlUsd >= 0) "+$" else "-$") +
+                                            (if (value.netPnlUsd >= 0) "+$" else "-$") +
                                                 String.format(Locale.US, "%.2f", kotlin.math.abs(value.netPnlUsd))
                                         } ?: "P/L —",
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = when {
                                             valuation == null -> AurumColors.TextMuted
-                                            frozen -> AurumColors.Gold
                                             valuation.netPnlUsd >= 0 -> AurumColors.Green
                                             else -> AurumColors.Red
                                         },
@@ -404,17 +392,13 @@ fun AssetClass4SlotsBanner(
                                 }
                             } else {
                                 Text(
-                                    text = "آماده ورود خودکار",
+                                    text = "پوزیشن باز ندارد",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = AurumColors.TextMuted,
                                 )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                ) {
-                                    Text("اهرم: ${defaultLev}x", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                                    Text("واچ‌لیست قابل‌ویرایش", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                                }
+                                Text(entryReasons[assetClass] ?: "هنوز ارزیابی نشده",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AurumColors.TextSecondary)
                             }
                         }
                     }

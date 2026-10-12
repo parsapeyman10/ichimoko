@@ -50,6 +50,7 @@ class NobitexTickArchiveTest {
         val at = 1_800_000_000_000L
         val signal = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2960.0,
             takeProfit = 3100.0, interval = Interval.M5, barTime = at - Interval.M5.millis,
+            ichimokuEntry = com.aurum.edge.core.IchimokuEntryEvidence(SignalAction.BUY, at - Interval.M5.millis, at - Interval.M5.millis, Interval.M5, 3),
             confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
                 "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map {
                 ConfluenceItem(it, true, "fixture", scorePercent = 25)
