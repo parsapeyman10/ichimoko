@@ -99,7 +99,8 @@ jobs:
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.31 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.32 updater') ||
           startsWith(github.event.head_commit.message, 'release: publish approved v1.3.33 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.34 updater')))) }}
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.34 updater') ||
+          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.35 updater')))) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -544,6 +545,9 @@ jobs:
           fi
           if [[ "$VERSION_NAME" == "1.3.34" ]]; then
             NOTES+=$'\n\nChanges: optional self-hosted Nobitex public-trade archive for NEW crypto paper positions. A deployable single-instance Python/Centrifugo/SQLite service stores same-venue public executions with a durable local sequence, authenticated paged replay and explicit publisher/restart/offset-gap records. The Android app accepts a user-owned HTTPS archive URL and read token; it downloads historical pages after reconnect and atomically checkpoints each paper settlement/trailing update. No positions or trading secrets are sent to the server. TradingView remains display-only and other market venues are not mixed into crypto exits. This APK alone does NOT provide 24/7 coverage: the owner must deploy and monitor the always-on host. With the phone off, server ingestion can continue but journal exits and alerts occur only after device reconnection. Upstream omissions, exchange recovery, disk capacity, server uptime and on-device availability are not guaranteed; no broker orders or profitability claims.'
+          fi
+          if [[ "$VERSION_NAME" == "1.3.35" ]]; then
+            NOTES+=$'\n\nChanges: open paper-trade tracking no longer substitutes entry price when the latest independently timestamped quote is missing or older than 45 seconds. The home card, market banners, equity/free margin and journal show unknown values until a valid tick arrives, using an atomic price/timestamp snapshot. The journal chart starts with the latest 320 real candles; an offscreen entry marker is distinguished from missing history, and tab state is preserved on navigation. Manual paper exits also revalidate quote age at closing time and reject stale fills. This is a UI/valuation correction and stale-price safeguard, not evidence that every real tick is captured. The embedded TradingView widget can reload when its tab is recreated; chart appearance and position settlement are separate. Device behavior and uninterrupted provider coverage have not been verified.'
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --title "$TAG" --notes "$NOTES"
