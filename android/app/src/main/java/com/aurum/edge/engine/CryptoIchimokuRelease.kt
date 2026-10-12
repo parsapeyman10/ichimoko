@@ -10,7 +10,7 @@ import kotlin.math.min
  * A thin cloud / close Tenkan-Kijun is compression, not a forecast. The entry side is only
  * considered after a same-venue price-action breakout, Chikou clearance (price AND the cloud
  * at the Chikou's own historical position), and actual reported volume. No future candle is read.
- * The ordinary volatility, seven-frame, risk, quote and journal gates remain authoritative.
+ * The ordinary volatility, three-frame, risk, quote and journal gates remain authoritative.
  */
 internal object CryptoIchimokuRelease {
     data class Evidence(

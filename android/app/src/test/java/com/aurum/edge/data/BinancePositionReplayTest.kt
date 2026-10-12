@@ -29,7 +29,7 @@ class BinancePositionReplayTest {
     private val signal = Signal(SignalAction.BUY, 100.0, entry = 100.0, stopLoss = 90.0,
         takeProfit = 125.0, interval = Interval.M5, barTime = at - Interval.M5.millis,
         confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
-            "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی").map {
+            "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map {
             ConfluenceItem(it, true, "fixture", scorePercent = 25)
         })
     private fun row(id: Long, price: Double, delay: Long = id) =

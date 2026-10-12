@@ -42,7 +42,7 @@ class PaperJournalPersistenceTest {
     private fun journalFile() = File(Files.createTempDirectory("journal-test").toFile(), "paper_journal.json")
     private val signal = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2994.5,
         takeProfit = 3009.0, interval = Interval.M5, barTime = 1_800_000_000_000L - Interval.M5.millis,
-        confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی").map { ConfluenceItem(it, true, "fixture", scorePercent = 25) } +
+        confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "fixture", scorePercent = 25) } +
             ConfluenceItem(NewsConfluence.NEWS_LABEL, true, "خبر مدل با شاهد"))
     private fun mtf(at: Long) = MtfSnapshotRecord("5m", "BUY", 1.0, 1, 0, 0, false, "fixture", at,
         frames = listOf(MtfFrameRecord("5m", "BUY", 80, "fixture", 1.0)))
@@ -103,7 +103,7 @@ class PaperJournalPersistenceTest {
         val parsed = parseWebNews(Json.parseToJsonElement(json) as JsonObject, now)
         val bar = now - Interval.M5.millis
         val technical = signal.copy(barTime = bar, stopLoss = 2994.5, takeProfit = 3009.0,
-            confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی").map { ConfluenceItem(it, true, "fixture", scorePercent = 25) })
+            confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "fixture", scorePercent = 25) })
         val verified = NewsConfluence.apply(technical, "XAU/USD", parsed, now)!!
         val current = MarketState(symbol = "XAU/USD", interval = Interval.M5,
             candles = IctTestBars.readyAt(bar),

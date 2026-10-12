@@ -7,7 +7,7 @@ object TechnicalEvidence {
     const val CURRENT_COUNT = 4
     const val LEGACY_COUNT = 8
     private val REQUIRED_NAMES = setOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
-        "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی")
+        "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی")
     private const val NEWS_LABEL = "خبر/تقویم · داده‌کاوی ژورنال"
 
     fun items(signal: Signal): List<ConfluenceItem> = signal.confluence.filterNot { it.name == NEWS_LABEL }
@@ -27,7 +27,8 @@ object TechnicalEvidence {
         kotlin.math.abs(items(signal).sumOf { it.scorePercent ?: 0 }.toDouble() - signal.confidence) < 1e-6
 
     fun confirmedRecords(items: List<PaperConditionRecord>): Boolean = when (items.size) {
-        CURRENT_COUNT -> items.map { it.name }.toSet() == REQUIRED_NAMES &&
+        CURRENT_COUNT -> (items.map { it.name }.toSet() == REQUIRED_NAMES ||
+                items.map { it.name }.toSet() == REQUIRED_NAMES - "پشتهٔ ۳ تایم‌فریمی" + "پشتهٔ ۷ تایم‌فریمی") &&
             items.all { it.status in setOf("CONFIRMED", "PARTIAL", "CONFLICT") }
         7, LEGACY_COUNT -> items.map { it.name }.distinct().size == items.size &&
             items.all { it.status == "CONFIRMED" }

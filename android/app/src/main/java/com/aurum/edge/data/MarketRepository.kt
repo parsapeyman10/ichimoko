@@ -674,7 +674,7 @@ class MarketRepository(
         )
         // BTC can publish hundreds of aggregates a second. Keep every exchange event
         // in the independent position monitor; this selected display updates the latest
-        // quote immediately, but does not re-run the seven-frame engine on every fill.
+        // quote immediately, but does not re-run the three-frame engine on every fill.
         if (!CryptoCatalog.isCrypto(current.symbol) ||
             now - lastCryptoEvaluationAt >= 1_000L || periodStart != lastCryptoEvaluationPeriod) {
             lastCryptoEvaluationAt = now
@@ -777,8 +777,8 @@ class MarketRepository(
                 showingCachedData = false, signal = null, evaluationError = null)
             return
         }
-        // Never stall the live tick/settlement stream behind six REST history downloads.
-        // Until all seven REAL timeframes arrive the engine returns NO_TRADE, not a guess.
+        // Never stall the live tick/settlement stream behind M15/H1 history downloads.
+        // Until all three REAL alignment timeframes arrive the engine returns NO_TRADE.
         if (CryptoCatalog.isCrypto(current.symbol) && timeframeAutoMode != current.autoPaperTrading) {
             timeframeJob?.cancel(); timeframeJob = null
             timeframeSnapshot = emptyMap()
@@ -813,7 +813,7 @@ class MarketRepository(
         }
         val evaluationError = if (evaluation?.isFailure == true)
             "خطای محاسبهٔ موتور فنی؛ ورود متوقف شد" else null
-        // Seven-frame evaluation can finish after a newer WebSocket event. Publishing
+        // Three-frame evaluation can finish after a newer WebSocket event. Publishing
         // historical candles must not roll the selected price back over that event.
         val latest = _state.value
         val currentLivePrice = latest.lastPrice?.takeIf { price ->

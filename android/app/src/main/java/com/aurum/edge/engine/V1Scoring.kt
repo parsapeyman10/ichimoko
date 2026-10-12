@@ -15,12 +15,12 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** The scoring implementation behind SignalEngine.evaluate; never an alternative entry path.
- * Four independent layers, each worth 25 points. Missing timeframes are UNKNOWN, never
+ * Four independent layers, each worth 25 points. Only M5/M15/H1 vote on alignment.
+ * Missing timeframes are UNKNOWN, never
  * synthesized by splitting or aggregating bars from another interval.
  */
 internal object V1Scoring {
-    val intervals = listOf(Interval.M1, Interval.M5, Interval.M15, Interval.M30,
-        Interval.H1, Interval.H4, Interval.D1)
+    val intervals = listOf(Interval.M5, Interval.M15, Interval.H1)
     private const val MIN_BARS = HistoryPolicy.LIVE_MIN_CANDLES // 320 genuine closed bars per interval
 
     fun evaluate(input: List<Candle>, interval: Interval, symbol: String, threshold: Double,
@@ -97,7 +97,7 @@ internal object V1Scoring {
             target to frameBias(source, target, frameAsOf)
         }
         val missing = stack.filter { it.second == null }.map { "${it.first.label}(${frameCounts[it.first]}/$MIN_BARS)" }
-        if (missing.isNotEmpty()) blockers += "پشتهٔ ۷ تایم‌فریمی کامل نیست: ${missing.joinToString("، ")}؛ هیچ بازه‌ای حدس زده نمی‌شود"
+        if (missing.isNotEmpty()) blockers += "پشتهٔ ۳ تایم‌فریمی کامل نیست: ${missing.joinToString("، ")}؛ هیچ بازه‌ای حدس زده نمی‌شود"
 
         fun score(side: SignalAction): Pair<Int, List<ConfluenceItem>> {
             val buy = side == SignalAction.BUY
@@ -136,7 +136,7 @@ internal object V1Scoring {
                 item("مومنتوم · RSI + MACD", momentum, "RSI=$rsi · MACD=$macd · $momentum/25"),
                 item("پرایس‌اکشن · حمایت/مقاومت", priceAction,
                     "حمایت=$support · مقاومت=$resistance · ATR=$atr · $priceAction/25"),
-                item("پشتهٔ ۷ تایم‌فریمی", tfScore,
+                item("پشتهٔ ۳ تایم‌فریمی", tfScore,
                     stack.joinToString(" · ") { "${it.first.label}:${it.second?.name ?: "نامعلوم"} (${frameCounts[it.first]}/$MIN_BARS کندل)" } + " · $tfScore/25",
                     missing.isNotEmpty()),
             )
@@ -173,16 +173,14 @@ internal object V1Scoring {
             interval = interval, barTime = last.time)
     }
 
-    /** A neutral or unknown frame cannot vote for BUY or SELL. Only seven real frames vote. */
+    /** A neutral or unknown frame cannot vote for BUY or SELL. Only three real frames vote. */
     internal fun directionalAlignment(frames: List<SignalAction?>, side: SignalAction): Int {
         if (frames.size != intervals.size || frames.any { it == null } || side == SignalAction.NO_TRADE)
             return 0
         val aligned = frames.count { it == side }
-        val opposite = frames.count { it != side && it != SignalAction.NO_TRADE }
         return when {
-            aligned == 7 -> 25
-            aligned == 6 && opposite == 0 -> 20
-            aligned >= 5 && opposite <= 1 -> 15
+            aligned == 3 -> 25
+            aligned == 2 && opposite == 0 -> 20
             else -> 0
         }
     }

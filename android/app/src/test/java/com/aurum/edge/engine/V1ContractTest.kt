@@ -41,38 +41,38 @@ class V1ContractTest {
             symbol = "EUR/USD", mode = CategoryStrategy.HYBRID)
         assertEquals(SignalAction.NO_TRADE, signal.action)
         assertEquals(4, signal.confluence.size)
-        assertTrue(signal.blockers.any { it.contains("پشتهٔ ۷") })
-        assertTrue(signal.confluence.last().detail.contains("1m:نامعلوم") ||
-            signal.confluence.last().detail.contains("1M:نامعلوم"))
+        assertTrue(signal.blockers.any { it.contains("پشتهٔ ۳") })
+        assertTrue(signal.confluence.last().detail.contains("15m:نامعلوم") ||
+            signal.confluence.last().detail.contains("15M:نامعلوم"))
         assertFalse(signal.isActionable)
     }
 
-    @Test fun fullRealSevenFrameStackIsScoredAndOldFutureBarsCannotParticipate() {
+    @Test fun threeRealFrameStackIsScoredAndOldFutureBarsCannotParticipate() {
         val data = V1Scoring.intervals.associateWith(::bars)
         val signal = SignalEngine.evaluate(data.getValue(Interval.M5), Interval.M5, 85.0,
             symbol = "EUR/USD", timeframes = data)
         assertEquals(4, signal.confluence.size)
-        assertEquals(7, V1Scoring.intervals.size)
-        assertTrue(signal.confluence.last().detail.contains("1D:"))
-        assertFalse(signal.blockers.any { it.contains("پشتهٔ ۷") })
+        assertEquals(listOf(Interval.M5, Interval.M15, Interval.H1), V1Scoring.intervals)
+        assertTrue(signal.confluence.last().detail.contains("1H:"))
+        assertFalse(signal.blockers.any { it.contains("پشتهٔ ۳") })
         val future = data.toMutableMap()
-        future[Interval.M1] = data.getValue(Interval.M1).map {
+        future[Interval.M15] = data.getValue(Interval.M15).map {
             it.copy(time = it.time + 2L * Interval.D1.millis)
         }
         val rejected = SignalEngine.evaluate(data.getValue(Interval.M5), Interval.M5, 60.0,
             symbol = "EUR/USD", timeframes = future)
         assertEquals(SignalAction.NO_TRADE, rejected.action)
-        assertTrue(rejected.blockers.any { it.contains("پشتهٔ ۷") })
+        assertTrue(rejected.blockers.any { it.contains("پشتهٔ ۳") })
     }
 
-    @Test fun oneShortOrUnclosedFrameBlocksSevenFrameAlignment() {
+    @Test fun oneShortOrUnclosedFrameBlocksThreeFrameAlignment() {
         val complete = V1Scoring.intervals.associateWith(::bars)
         val short = complete.toMutableMap()
-        short[Interval.M1] = complete.getValue(Interval.M1).takeLast(319)
+        short[Interval.M15] = complete.getValue(Interval.M15).takeLast(319)
         val rejected = SignalEngine.evaluate(complete.getValue(Interval.M5), Interval.M5, 60.0,
             symbol = "EUR/USD", timeframes = short)
         assertEquals(SignalAction.NO_TRADE, rejected.action)
-        assertTrue(rejected.blockers.any { it.contains("1m(319/320)") })
+        assertTrue(rejected.blockers.any { it.contains("15m(319/320)") })
         assertTrue(rejected.confluence.last().detail.contains("319/320 کندل"))
 
         val open = complete.toMutableMap()
@@ -88,17 +88,17 @@ class V1ContractTest {
         assertEquals(SignalAction.NO_TRADE, V1Scoring.chooseSide(75, 75))
         assertEquals(SignalAction.BUY, V1Scoring.chooseSide(76, 75))
         assertEquals(SignalAction.SELL, V1Scoring.chooseSide(74, 75))
-        val flat = List(7) { SignalAction.NO_TRADE }
+        val flat = List(3) { SignalAction.NO_TRADE }
         assertEquals(0, V1Scoring.directionalAlignment(flat, SignalAction.BUY))
         assertEquals(0, V1Scoring.directionalAlignment(flat, SignalAction.SELL))
-        assertEquals(0, V1Scoring.directionalAlignment(List(6) { SignalAction.BUY } + null, SignalAction.BUY))
-        assertEquals(25, V1Scoring.directionalAlignment(List(7) { SignalAction.BUY }, SignalAction.BUY))
-        assertEquals(20, V1Scoring.directionalAlignment(List(6) { SignalAction.BUY } + SignalAction.NO_TRADE, SignalAction.BUY))
+        assertEquals(0, V1Scoring.directionalAlignment(List(2) { SignalAction.BUY } + null, SignalAction.BUY))
+        assertEquals(25, V1Scoring.directionalAlignment(List(3) { SignalAction.BUY }, SignalAction.BUY))
+        assertEquals(20, V1Scoring.directionalAlignment(List(2) { SignalAction.BUY } + SignalAction.NO_TRADE, SignalAction.BUY))
     }
 
     @Test fun partialScoreCannotMasqueradeAsFullConfirmation() {
         val labels = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
-            "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی")
+            "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی")
         val items = labels.mapIndexed { index, name ->
             if (index == 0) ConfluenceItem(name, false, "partial", ConfluenceStatus.PARTIAL, 12)
             else ConfluenceItem(name, true, "full", ConfluenceStatus.CONFIRMED, 25)
@@ -110,6 +110,15 @@ class V1ContractTest {
         }))
         assertFalse(TechnicalEvidence.confirmed(items.toMutableList().also {
             it[1] = it[1].copy(ok = false)
+        }))
+        // Existing journal records retain their original seven-frame label for display;
+        // accepting the persisted record does NOT let an old seven-frame signal authorize
+        // a new three-frame paper entry.
+        val old = items.map { com.aurum.edge.core.PaperConditionRecord.from(it) }.toMutableList()
+        old[3] = old[3].copy(name = "پشتهٔ ۷ تایم‌فریمی")
+        assertTrue(TechnicalEvidence.confirmedRecords(old))
+        assertFalse(TechnicalEvidence.confirmed(items.toMutableList().also {
+            it[3] = it[3].copy(name = "پشتهٔ ۷ تایم‌فریمی")
         }))
     }
 
@@ -138,10 +147,10 @@ class V1ContractTest {
             assertEquals(chart.confluence, direct.confluence)
             assertEquals(chart.action, direct.action)
         }
-        val incomplete = data - Interval.M1
+        val incomplete = data - Interval.M15
         val blocked = SignalEngine.evaluateLive(base, Interval.M5, AppSettings(), "EUR/USD", incomplete)
         assertFalse(blocked.isActionable)
-        assertTrue(blocked.blockers.any { it.contains("پشتهٔ ۷") })
+        assertTrue(blocked.blockers.any { it.contains("پشتهٔ ۳") })
     }
 
     @Test fun liveAndDisplayedIchimokuShareTheSamePeriods() {
@@ -175,7 +184,7 @@ class V1ContractTest {
 
     @Test fun validatedOppositeAiVetoesButUnavailableAiCannotAuthorizeTrades() {
         val labels = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
-            "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی")
+            "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی")
         val raw = Signal(SignalAction.BUY, 100.0, entry = 100.0,
             stopLoss = 99.0, takeProfit = 101.5, interval = Interval.M5,
             barTime = now - Interval.M5.millis,

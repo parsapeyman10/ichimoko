@@ -19,7 +19,7 @@ import org.junit.Test
 
 class UnifiedContractTest {
     private val conditions = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
-        "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی").map {
+        "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map {
         ConfluenceItem(it, true, "fixture", scorePercent = 25)
     }
     private val candidate = Signal(SignalAction.BUY, 100.0, entry = 100.0,

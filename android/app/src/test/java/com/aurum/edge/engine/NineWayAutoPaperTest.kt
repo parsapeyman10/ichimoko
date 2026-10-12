@@ -31,7 +31,7 @@ import org.junit.Test
 class NineWayAutoPaperTest {
     private val now = 1_800_000_000_000L
     private val barTime = now - Interval.M5.millis
-    private val four = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی").map { ConfluenceItem(it, true, "دادهٔ آزمون", scorePercent = 25) }
+    private val four = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "دادهٔ آزمون", scorePercent = 25) }
     private val settings = AppSettings(symbol = "XAU/USD", interval = Interval.M5,
         backgroundMonitor = true, autoPaperTrading = true)
     private val headline = PersianHeadline("id1", "Gold reacts to dollar weakness", "headline fixture",

@@ -627,3 +627,35 @@ jobs:
             echo ""
             echo "No market or AI API keys are embedded in the APK. Users enter optional keys only on their own device."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  crypto-coverage:
+    name: Audit exact USDT pairs (read-only)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/arena/20dbf868-ichimoko'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify probe invariants
+        run: PYTHONPATH=tools python3 -m unittest discover -s tools -p 'test_probe_crypto_venues.py'
+      - name: Audit Kraken and OKX public feeds, per symbol
+        run: |
+          timeout 9m python3 tools/probe_crypto_venues.py > crypto-venue-coverage.json
+          python3 - <<'PY'
+          import json, os
+          data = json.load(open('crypto-venue-coverage.json'))
+          rows = data['symbols']
+          supported = sum(row['suggested'] is not None for row in rows.values())
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write(f"## Read-only market audit\n{supported}/{len(rows)} symbols passed a point-in-time runner probe. "
+                      "This does NOT certify Android-device reachability, uninterrupted service, "
+                      "or safe execution replay. Download the JSON artifact for per-symbol reasons.\n")
+          PY
+      - name: Attach audit report (not a venue authorization)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crypto-venue-coverage
+          path: crypto-venue-coverage.json
+          if-no-files-found: warn

@@ -51,7 +51,7 @@ class NobitexTickArchiveTest {
         val signal = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2960.0,
             takeProfit = 3100.0, interval = Interval.M5, barTime = at - Interval.M5.millis,
             confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
-                "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی").map {
+                "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map {
                 ConfluenceItem(it, true, "fixture", scorePercent = 25)
             })
         val opened = store.open(signal, "BTC/USDT", 3000.0, 50_000.0, 0.5, manual = true, observedAt = at)

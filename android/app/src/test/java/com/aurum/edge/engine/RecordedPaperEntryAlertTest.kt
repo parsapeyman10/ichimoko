@@ -36,7 +36,7 @@ class RecordedPaperEntryAlertTest {
     private val context get() = RuntimeEnvironment.getApplication()
     private val signal = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2994.5,
         takeProfit = 3009.0, interval = Interval.M5, barTime = 1_800_000_000_000L,
-        confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی").map { ConfluenceItem(it, true, "تأییدشده", scorePercent = 25) } +
+        confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "تأییدشده", scorePercent = 25) } +
             ConfluenceItem(NewsConfluence.NEWS_LABEL, true, "خبر مدل با شاهد"))
     private val news = PaperNewsRecord("test-model", "BUY", 91.0, signal.barTime,
         listOf(PaperNewsEvidence("news-1", "Publisher", "Gold news",

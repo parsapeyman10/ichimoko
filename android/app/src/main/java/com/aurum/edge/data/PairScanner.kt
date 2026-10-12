@@ -357,20 +357,11 @@ class PairScanner(
                     price = candles.lastOrNull()?.close)
                 return@forEachIndexed
             }
-            val candidates = if (crypto) listOf(Interval.M3, Interval.M5, Interval.M15) else listOf(interval)
+            val candidates = if (crypto) listOf(Interval.M5, Interval.M15) else listOf(interval)
             val reads = mutableListOf<CryptoIntervalChoice.Read>()
             val unavailable = mutableListOf<String>()
             for (candidate in candidates) {
                 val bars = when (candidate) {
-                    Interval.M3 -> try {
-                        binanceHistory.fetchCandles(symbol, Interval.M3,
-                            HistoryPolicy.LIVE_FETCH_CANDLES, HistoryPolicy.LIVE_MIN_CANDLES).candles
-                    } catch (cancel: CancellationException) {
-                        throw cancel
-                    } catch (error: Exception) {
-                        unavailable += "۳دقیقه: ${(error.message ?: "فید ناقص").take(65)}"
-                        emptyList()
-                    }
                     interval -> candles
                     else -> frames[candidate].orEmpty()
                 }.filter { it.closed && it.time + candidate.millis <= System.currentTimeMillis() }

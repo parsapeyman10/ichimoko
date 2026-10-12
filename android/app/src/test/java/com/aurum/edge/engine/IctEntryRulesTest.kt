@@ -37,7 +37,7 @@ class IctEntryRulesTest {
     private val signal = Signal(SignalAction.BUY, 100.0, entry = 3000.0,
         stopLoss = 2994.5, takeProfit = 3009.0, interval = Interval.M5, barTime = bar,
         confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
-            "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۷ تایم‌فریمی")
+            "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی")
             .map { ConfluenceItem(it, true, "fixture", scorePercent = 25) })
     private val verified get() = NewsConfluence.apply(signal, "XAU/USD", news, now)!!
     private val market get() = MarketState(symbol = "XAU/USD", interval = Interval.M5,
