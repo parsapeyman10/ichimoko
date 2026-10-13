@@ -364,6 +364,11 @@ class MarketRepository(
                 settings.read().symbol != current.symbol || settings.read().interval != current.interval ||
                 (current.hasKey && settings.read().apiKey != current.apiKey) ||
                 settings.read().hasKey != current.hasKey || _state.value.symbol != current.symbol) return@withLock
+            if (_state.value.historyProvider != historyProvider) {
+                timeframeJob?.cancel(); timeframeJob = null
+                timeframeSnapshot = emptyMap()
+                lastFrameRefreshAt = 0L
+            }
             pinnedCrypto?.let { snapshot ->
                 timeframeJob?.cancel(); timeframeJob = null
                 timeframeSnapshot = snapshot.frames
@@ -825,16 +830,24 @@ class MarketRepository(
             timeframeAutoMode = current.autoPaperTrading
         }
         val frameNow = System.currentTimeMillis()
+        val baseProvider = _state.value.historyProvider
+        val pinnedSource = SourceRouting.fromProvider(baseProvider)
+        val sameVenueCrypto = CryptoCatalog.isCrypto(current.symbol) &&
+            baseProvider == BinanceSpotClient.PROVIDER
+        // Gate/OKX/Kraken read-only bundles are refreshed with their BASE candles.
+        // Fetching Binance reference frames for a Gate base silently mixed venues.
         if (!showingCache && bars.count { it.closed } >= HistoryPolicy.LIVE_MIN_CANDLES &&
+            (pinnedSource != null || sameVenueCrypto) &&
             timeframeJob?.isActive != true && frameNow - lastFrameRefreshAt >= 60_000L) {
             lastFrameRefreshAt = frameNow
             val session = generation
             timeframeJob = scope?.launch(Dispatchers.IO) {
                 val fetched = timeframeFeed.fetch(current.symbol, current.interval, bars, current.apiKey,
-                    requireBinanceCrypto = current.autoPaperTrading && CryptoCatalog.isCrypto(current.symbol))
+                    requireBinanceCrypto = sameVenueCrypto, pinnedSource = pinnedSource)
                 if (started && generation == session && settings.read().symbol == current.symbol &&
                     settings.read().interval == current.interval &&
-                    settings.read().autoPaperTrading == current.autoPaperTrading) {
+                    settings.read().autoPaperTrading == current.autoPaperTrading &&
+                    _state.value.historyProvider == baseProvider) {
                     timeframeSnapshot = fetched
                     publishCandles(showingCache = _state.value.showingCachedData)
                 }

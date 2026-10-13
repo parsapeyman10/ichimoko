@@ -122,7 +122,17 @@ class PairScanner(
         onAutoSignal = callback
     }
 
-    private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client, binanceHistory)
+    private val nonCryptoBundle = NonCryptoRadarBundle { symbol, frame, source, apiKey -> when (source) {
+        SourceRouting.HistorySource.YAHOO -> publicHistory.fetchCandles(symbol, frame,
+            minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
+        SourceRouting.HistorySource.DUKASCOPY -> dukascopyHistory.fetchCandles(symbol, frame,
+            minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
+            .let { PublicCandleHistoryClient.Result(it.candles, it.provider, it.fetchedAt) }
+        SourceRouting.HistorySource.TWELVE_DATA -> PublicCandleHistoryClient.Result(
+            client.fetchCandles(apiKey, symbol, frame,
+                outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
+                minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES), "Twelve Data · fallback")
+    } }
     private val cryptoReadOnly = CryptoRadarCandleClient()
     private val cryptoBundle = CryptoRadarBundle { symbol, interval, source ->
         when (source) {
@@ -295,6 +305,17 @@ class PairScanner(
         }
         coroutineScope {
             universe.map { symbol -> async {
+                // A closed market or already-open position does not need a network slot.
+                // Publish these statuses immediately, without waiting behind HTTP requests.
+                val preflightNow = System.currentTimeMillis()
+                if (MarketHours.closedFor(symbol, preflightNow)) {
+                    update(symbol, "closed", "بازار طبق ساعت سشن بسته است؛ درخواست فید انجام نمی‌شود")
+                    return@async
+                }
+                if (journal.trades.value.any { it.symbol == symbol && it.isOpen }) {
+                    update(symbol, "blocked", "پوزیشن کاغذی این نماد باز است؛ فرصت جدید اسکن نمی‌شود")
+                    return@async
+                }
                 classSlots.getValue(com.aurum.edge.core.AssetClass.of(symbol)).withPermit {
             // Only ACTIVE markets consume a provider slot.
             val crypto = CryptoCatalog.isCrypto(symbol)
@@ -313,36 +334,6 @@ class PairScanner(
             if (journal.trades.value.any { it.symbol == symbol && it.isOpen }) {
                 update(symbol, "blocked", "پوزیشن کاغذی این نماد باز است؛ فرصت جدید اسکن نمی‌شود")
                 return@withPermit
-            }
-
-            suspend fun publicOrDukascopy(): Pair<List<Candle>, String> {
-                val failures = mutableListOf<String>()
-                try {
-                    val public = publicHistory.fetchCandles(symbol, interval,
-                        minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
-                    if (CandleSourceHealth.ready(public.candles, interval, now))
-                        return public.candles to public.provider
-                    failures += "Yahoo: کندل قدیمی/ناقص"
-                } catch (cancel: CancellationException) { throw cancel }
-                catch (_: Exception) { failures += "Yahoo: ناموجود" }
-                try {
-                    val deep = dukascopyHistory.fetchCandles(symbol, interval,
-                        minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
-                    if (CandleSourceHealth.ready(deep.candles, interval, now))
-                        return deep.candles to deep.provider
-                    failures += "Dukascopy: کندل قدیمی/ناقص"
-                } catch (cancel: CancellationException) { throw cancel }
-                catch (_: Exception) { failures += "Dukascopy: ناموجود" }
-                if (config.hasKey) try {
-                    val keyed = client.fetchCandles(config.apiKey, symbol, interval,
-                        outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
-                        minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES)
-                    if (CandleSourceHealth.ready(keyed, interval, now))
-                        return keyed to "Twelve Data (fallback)"
-                    failures += "Twelve Data: کندل قدیمی/ناقص"
-                } catch (cancel: CancellationException) { throw cancel }
-                catch (_: Exception) { failures += "Twelve Data: ناموجود" }
-                throw DataFeedException("$symbol: ${failures.joinToString("؛ ")}؛ سیگنال مسدود است")
             }
 
             val cryptoSnapshot = if (crypto) try {
@@ -367,14 +358,15 @@ class PairScanner(
                 } else update(symbol, "error", (failure.message ?: "منبع هم‌نماد موجود نیست").take(230))
                 return@withPermit
             } else null
-            val (rawCandles, baseSource) = try {
-                if (cryptoSnapshot != null) cryptoSnapshot.m5 to cryptoSnapshot.provider
-                else publicOrDukascopy()
+            val nonCryptoSnapshot = if (!crypto) try {
+                nonCryptoBundle.fetch(symbol, config.apiKey, now)
             } catch (cancel: CancellationException) { throw cancel }
-            catch (error: Exception) {
-                update(symbol, "error", (error.message ?: "خطای دریافت کندل").take(180))
+            catch (failure: Exception) {
+                update(symbol, "error", (failure.message ?: "منبع هم‌نماد موجود نیست").take(230))
                 return@withPermit
-            }
+            } else null
+            val rawCandles = cryptoSnapshot?.m5 ?: nonCryptoSnapshot!!.m5
+            val baseSource = cryptoSnapshot?.provider ?: nonCryptoSnapshot!!.provider
 
             baseSources[symbol] = baseSource
             // Provider flags can mark an in-progress bar as closed. Never score, settle or
@@ -389,15 +381,8 @@ class PairScanner(
                 return@withPermit
             }
 
-            val frames = try {
-                cryptoSnapshot?.frames ?: timeframeFeed.fetch(symbol, interval, candles, config.apiKey)
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (error: Exception) {
-                update(symbol, "error", "دریافت بازه‌های زمانی ناموفق بود: ${(error.message ?: "خطای فید").take(100)}",
-                    price = candles.lastOrNull()?.close)
-                return@withPermit
-            }
+            // The complete decision uses ONE publisher for all three independent frames.
+            val frames = cryptoSnapshot?.frames ?: nonCryptoSnapshot!!.frames
             val candidates = listOf(Interval.M5)
             val reads = mutableListOf<CryptoIntervalChoice.Read>()
             val unavailable = mutableListOf<String>()

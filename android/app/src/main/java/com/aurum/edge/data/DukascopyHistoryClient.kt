@@ -190,6 +190,7 @@ class DukascopyHistoryClient(
 
         internal fun instrument(symbol: String): String? = when (symbol.trim().uppercase(Locale.ROOT)) {
             "XAU/USD" -> "XAUUSD"
+            "XAG/USD" -> "XAGUSD"
             "EUR/USD" -> "EURUSD"
             "GBP/USD" -> "GBPUSD"
             "AUD/USD" -> "AUDUSD"
@@ -221,7 +222,7 @@ class DukascopyHistoryClient(
         }
 
         internal fun pointScale(instrument: String): Double = when {
-            instrument == "XAUUSD" -> 1_000.0
+            instrument == "XAUUSD" || instrument == "XAGUSD" -> 1_000.0
             instrument.endsWith("JPY") -> 1_000.0
             else -> 100_000.0
         }

@@ -22,22 +22,26 @@ internal class TimeframeFeed(
 ) {
     private data class Snapshot(val fetchedAt: Long, val candles: List<Candle>)
     // Do not reuse a cached Twelve Data frame as Binance-only evidence after auto mode is enabled.
-    private val cache = ConcurrentHashMap<Triple<String, Interval, Boolean>, Snapshot>()
+    private data class Key(val symbol: String, val interval: Interval, val requireBinanceCrypto: Boolean,
+                           val source: SourceRouting.HistorySource?)
+    private val cache = ConcurrentHashMap<Key, Snapshot>()
 
     suspend fun fetch(symbol: String, base: Interval, baseBars: List<Candle>, apiKey: String,
                       now: Long = System.currentTimeMillis(),
-                      requireBinanceCrypto: Boolean = false): Map<Interval, List<Candle>> = coroutineScope {
+                      requireBinanceCrypto: Boolean = false,
+                      pinnedSource: SourceRouting.HistorySource? = null): Map<Interval, List<Candle>> = coroutineScope {
         val result = mutableMapOf(base to baseBars.filter { it.closed && it.time + base.millis <= now }
             .sortedBy { it.time }.distinctBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES))
         V1Scoring.intervals.filter { it != base }.map { interval ->
-            async { interval to fetchFrame(symbol, interval, apiKey, now, requireBinanceCrypto) }
+            async { interval to fetchFrame(symbol, interval, apiKey, now, requireBinanceCrypto, pinnedSource) }
         }.awaitAll().forEach { (interval, bars) -> result[interval] = bars }
         result
     }
 
     private suspend fun fetchFrame(symbol: String, interval: Interval, apiKey: String,
-                                   now: Long, requireBinanceCrypto: Boolean): List<Candle> {
-        val key = Triple(symbol, interval, requireBinanceCrypto)
+                                   now: Long, requireBinanceCrypto: Boolean,
+                                   pinnedSource: SourceRouting.HistorySource?): List<Candle> {
+        val key = Key(symbol, interval, requireBinanceCrypto, pinnedSource)
         val previous = cache[key]
         if (previous != null && now - previous.fetchedAt in 0L..minOf(300_000L, interval.millis) &&
             CandleSourceHealth.ready(previous.candles, interval, now,
@@ -56,7 +60,17 @@ internal class TimeframeFeed(
                         throw DataFeedException("${interval.label}: تاریخچه ناقص/قدیمی است")
                     return bars
                 }
-                try { healthy(publicHistory.fetchCandles(symbol, interval,
+                // A live chart must NOT silently combine another publisher's reference
+                // frames with its already chosen base. Unknown publisher => no frames.
+                if (pinnedSource != null) when (pinnedSource) {
+                    SourceRouting.HistorySource.YAHOO -> healthy(publicHistory.fetchCandles(symbol, interval,
+                        minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = desired).candles)
+                    SourceRouting.HistorySource.DUKASCOPY -> healthy(dukascopy.fetchCandles(symbol, interval,
+                        minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = desired).candles)
+                    SourceRouting.HistorySource.TWELVE_DATA -> if (apiKey.isBlank()) emptyList()
+                        else healthy(twelve.fetchCandles(apiKey, symbol, interval,
+                            outputSize = desired, minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES))
+                } else try { healthy(publicHistory.fetchCandles(symbol, interval,
                     minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = desired).candles) }
                 catch (cancel: CancellationException) { throw cancel }
                 catch (_: Exception) {

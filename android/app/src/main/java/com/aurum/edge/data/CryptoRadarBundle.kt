@@ -4,6 +4,9 @@ import com.aurum.edge.core.Candle
 import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 /** One spot venue for all three independent frames; source changes apply to the WHOLE
  * evaluation, never only one timeframe. No Binance/Nobitex source is selected here;
@@ -29,8 +32,18 @@ internal class CryptoRadarBundle(
             try {
                 val series = linkedMapOf<Interval,List<Candle>>()
                 var provider: String? = null
-                for (interval in frames) {
-                    val result = read(symbol, interval, source)
+                // M5 validates/list-caches the spot pair first. Then M15/H1 are requested
+                // concurrently from that SAME venue rather than waiting behind each other.
+                val primary = read(symbol, Interval.M5, source)
+                val other = coroutineScope {
+                    frames.drop(1).map { interval -> async {
+                        try { Result.success(interval to read(symbol, interval, source)) }
+                        catch (cancel: CancellationException) { throw cancel }
+                        catch (failure: Exception) { Result.failure(failure) }
+                    } }.awaitAll()
+                }
+                val results = listOf(Interval.M5 to primary) + other.map { it.getOrThrow() }
+                for ((interval, result) in results) {
                     if (provider != null && result.provider != provider)
                         throw DataFeedException("ناشر بازه‌های زمانی متفاوت است")
                     provider = result.provider

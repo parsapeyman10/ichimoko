@@ -20,6 +20,10 @@ class SourceRoutingTest {
         assertTrue(SourceRouting.historyPlan("AAPL", false).contains("جایگزین مستقل ندارد"))
         assertTrue(SourceRouting.historyPlan("USOIL", false).contains("تعریف نشده"))
         assertTrue(SourceRouting.historyPlan("XAU/USD", true).contains("Twelve Data"))
+        assertTrue(SourceRouting.historyPlan("XAG/USD", false).contains("Dukascopy"))
+        assertFalse(SourceRouting.historyPlan("XAG/USD", false).contains("Yahoo"))
+        assertEquals(listOf(SourceRouting.HistorySource.YAHOO), SourceRouting.historySources("AAPL", false))
+        assertTrue(SourceRouting.historySources("USOIL", false).isEmpty())
         assertNull(PublicCandleHistoryClient().yahooSymbol("BTC/USDT"))
     }
 }
