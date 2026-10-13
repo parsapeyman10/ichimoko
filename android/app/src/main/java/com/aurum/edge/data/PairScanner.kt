@@ -361,7 +361,22 @@ class PairScanner(
                 cryptoBundle.fetch(symbol, now)
             } catch (cancel: CancellationException) { throw cancel }
             catch (failure: Exception) {
-                update(symbol, "error", (failure.message ?: "منبع هم‌نماد موجود نیست").take(230))
+                // A venue may supply a FRESH, exact-pair trade even when it cannot
+                // supply 320 contiguous closed candles. Show that price as a
+                // READ-ONLY partial observation, never as a candle, signal or fill.
+                val quote = listOf(CryptoRadarCandleClient.Venue.GATE,
+                    CryptoRadarCandleClient.Venue.OKX, CryptoRadarCandleClient.Venue.KRAKEN)
+                    .firstNotNullOfOrNull { venue ->
+                        try { venue to cryptoReadOnly.fetchWatchTrade(symbol, venue) }
+                        catch (cancel: CancellationException) { throw cancel }
+                        catch (_: Exception) { null }
+                    }
+                if (quote != null) {
+                    update(symbol, "partial",
+                        "${quote.first.provider}: معاملهٔ زمان‌دار ${quote.second.at}؛ " +
+                            "۳۲۰ کندل بستهٔ M5/M15/H1 تأیید نشد؛ فقط قیمت مشاهده‌ای، بدون سیگنال/ورود",
+                        price = quote.second.price)
+                } else update(symbol, "error", (failure.message ?: "منبع هم‌نماد موجود نیست").take(230))
                 return@withPermit
             } else null
             val (rawCandles, baseSource) = try {
