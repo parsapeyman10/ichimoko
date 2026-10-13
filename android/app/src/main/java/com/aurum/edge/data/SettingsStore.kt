@@ -164,7 +164,8 @@ class SettingsStore(context: Context) {
     @Synchronized
     fun saveNewsAiConfig(apiKey: String, baseUrl: String, model: String, format: String = "AUTO"): Boolean {
         val url = baseUrl.trim().trimEnd('/')
-        val modelName = model.trim()
+        val modelName = if (format.trim().uppercase(java.util.Locale.ROOT) == "ANTHROPIC") model.trim()
+            else GeminiAiStudio.openAiModelId(url, model)
         val wireFormat = format.trim().uppercase(java.util.Locale.ROOT).let {
             if (it in setOf("ANTHROPIC", "OPENAI")) it else "AUTO" }
         val key = AiCredentialScope.key(apiKey, read(), url, wireFormat, modelName)

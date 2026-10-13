@@ -347,8 +347,16 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             OutlinedTextField(value = newsAiModel, onValueChange = {
                 newsAiModel = it; viewModel.resetAiDraftDiagnostics()
             }, singleLine = true,
-                label = { Text("نام مدل (مثلاً claude-sonnet-4.6 یا gpt-4o-mini)") },
+                label = { Text(if (GeminiAiStudio.isOfficialOpenAiEndpoint(newsAiBaseUrl))
+                    "مدل Gemini بدون models/ (مثلاً gemini-3.8-flash)"
+                    else "نام مدل (مثلاً claude-sonnet-4.6 یا gpt-4o-mini)") },
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+            if (GeminiAiStudio.isOfficialOpenAiEndpoint(newsAiBaseUrl)) {
+                Text("در قالب سازگار با OpenAI، شناسهٔ مدل را بدون models/ بنویسید. " +
+                    "دسترسی به gemini-2.5-pro ممکن است برای پروژه‌های تازه محدود باشد؛ " +
+                    "مدلی را از فهرست همین کلید برگزینید. خطای ۴۰۴ لزوماً به معنی خرابی کلید نیست.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+            }
             val models = viewModel.aiModels.collectAsStateWithLifecycle().value
             OutlinedButton(onClick = { viewModel.loadNewsAiModels(newsAiKey, newsAiBaseUrl, newsAiModel, newsAiFormat) },
                 enabled = !models.loading && (newsAiKey.isNotBlank() || settings.hasClientNewsAi) &&

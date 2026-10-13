@@ -102,7 +102,8 @@ internal object AiProvider {
         }
         val root = runCatching { Json.parseToJsonElement(response) as? JsonObject }.getOrNull()
             ?: throw IllegalStateException("پاسخ فهرست مدل‌ها ساختار JSON ندارد")
-        return parseModelIds(root).ifEmpty { throw IllegalStateException("فهرست مدل‌های این کلید خالی بود") }
+        return parseModelIds(root).map { GeminiAiStudio.openAiModelId(base, it) }.distinct()
+            .ifEmpty { throw IllegalStateException("فهرست مدل‌های این کلید خالی بود") }
     }
 
     /** Extract distinct, non-blank data[].id values in the service's own order. */
@@ -156,7 +157,7 @@ internal object AiProvider {
                 add(buildJsonObject { put("role", "user"); put("content", user) })
             })
         } else buildJsonObject {
-            put("model", model)
+            put("model", GeminiAiStudio.openAiModelId(base, model))
             put("max_tokens", maxTokens)
             if (!glm) put("temperature", 0)
             // The documented GLM structured mode is json_schema, not json_object.
