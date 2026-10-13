@@ -122,6 +122,13 @@ class AppContainer(context: Context) {
         autoPaperTrader.attachTrendSource { pairScanner.state.value.marketTrend }
         market.attach(appScope)
         appScope.launch {
+            com.aurum.edge.data.AppNetwork.route.collect { route ->
+                if (route.ready) market.refreshNow()
+                // Marks the scanner waiting when Tor is down, retries promptly when restored.
+                pairScanner.refreshNow(minIntervalMs = 0)
+            }
+        }
+        appScope.launch {
             verifiedMarket.collect { state ->
                 val cfg = settingsStore.read()
                 if (cfg.autoPaperTrading) {

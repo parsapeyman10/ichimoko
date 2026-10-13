@@ -17,6 +17,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import android.os.SystemClock
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -45,6 +47,7 @@ class EmbeddedProxy(context: Context, settings: SettingsStore) {
     private var bound = false
     private var failed = false
     private var enabled = settings.read().proxyEnabled
+    private val restart = MutableStateFlow(0L)
 
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
@@ -81,7 +84,10 @@ class EmbeddedProxy(context: Context, settings: SettingsStore) {
             addAction(TorService.ACTION_STATUS)
         })
         scope.launch {
-            settings.settings.map { it.proxyEnabled }.distinctUntilChanged().collectLatest { requested ->
+            combine(settings.settings.map { it.proxyEnabled }.distinctUntilChanged(), restart) { requested, retry ->
+                requested to retry
+            }.collectLatest { (requested, _) ->
+                unbind()
                 enabled = requested
                 AppNetwork.configure(requested)
                 if (!requested) {
@@ -90,6 +96,7 @@ class EmbeddedProxy(context: Context, settings: SettingsStore) {
                     return@collectLatest
                 }
                 var backoff = 5_000L
+                var bootstrapStarted = SystemClock.elapsedRealtime()
                 mutableStatus.value = Status.STARTING
                 while (true) {
                     if (!hasInternet()) {
@@ -122,6 +129,7 @@ class EmbeddedProxy(context: Context, settings: SettingsStore) {
                             failed = true
                             continue
                         }
+                        bootstrapStarted = SystemClock.elapsedRealtime()
                         mutableStatus.value = Status.STARTING
                     }
                     val daemon = service
@@ -134,6 +142,10 @@ class EmbeddedProxy(context: Context, settings: SettingsStore) {
                     if (port > 0) {
                         mutableStatus.value = Status.ONLINE
                         backoff = 5_000L
+                        bootstrapStarted = SystemClock.elapsedRealtime()
+                    } else if (SystemClock.elapsedRealtime() - bootstrapStarted > 120_000L) {
+                        failed = true
+                        mutableStatus.value = Status.RETRYING
                     } else if (mutableStatus.value != Status.RETRYING) mutableStatus.value = Status.STARTING
                     delay(5_000)
                 }
@@ -146,6 +158,15 @@ class EmbeddedProxy(context: Context, settings: SettingsStore) {
         this.enabled = enabled
         AppNetwork.configure(enabled)
         mutableStatus.value = if (enabled) Status.STARTING else Status.OFF
+    }
+
+    fun reconnect() {
+        if (enabled) {
+            AppNetwork.configure(true)
+            mutableStatus.value = Status.STARTING
+            restart.value++
+        }
+        WebProxyRouting.retry()
     }
 
     private fun hasInternet(): Boolean {

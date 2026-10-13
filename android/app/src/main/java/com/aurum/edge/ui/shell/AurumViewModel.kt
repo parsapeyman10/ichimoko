@@ -684,6 +684,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun reconnectProxy() { container.proxy.reconnect() }
+
     fun setProxyEnabled(enabled: Boolean) {
         if (!container.settingsStore.saveProxyEnabled(enabled)) {
             _toast.value = "تنظیم پروکسی ذخیره نشد؛ دوباره تلاش کنید"

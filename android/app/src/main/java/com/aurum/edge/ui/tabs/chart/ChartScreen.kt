@@ -41,9 +41,12 @@ import com.aurum.edge.ui.theme.AurumColors
 /** A visual-only symbol selector and ONE TradingView iframe. It does not change the trade feed. */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun ChartScreen(initialTicker: String, onSelectTicker: (String) -> Unit) {
+fun ChartScreen(initialTicker: String, onSelectTicker: (String) -> Unit,
+                onReconnect: () -> Unit, onDisableProxy: () -> Unit) {
     val route by AppNetwork.route.collectAsStateWithLifecycle()
     val appliedRevision by WebProxyRouting.appliedRevision.collectAsStateWithLifecycle()
+    val webStatus by WebProxyRouting.status.collectAsStateWithLifecycle()
+    var confirmDirect by remember { mutableStateOf(false) }
     val networkReady = route.ready && appliedRevision == route.revision
     val html = remember(initialTicker) { TradingViewEmbed.html(initialTicker) }
     var showPicker by remember { mutableStateOf(false) }
@@ -62,8 +65,14 @@ fun ChartScreen(initialTicker: String, onSelectTicker: (String) -> Unit) {
             TextButton(onClick = { reloadCount++ }) { Text("ایچیموکو ↻") }
         }
         if (!networkReady) {
-            Text("چارت منتظر تنظیم مسیر اتصال است. در حالت پروکسی، WebView باید از Proxy Override پشتیبانی کند؛ در صورت نیاز Android System WebView را به‌روز کنید.",
+            Text(if (!route.ready) WebProxyRouting.Status.WAITING_TOR.message else webStatus.message,
                 modifier = Modifier.padding(20.dp), color = AurumColors.Gold)
+            Row {
+                TextButton(onClick = { if (!route.ready) onReconnect() else WebProxyRouting.retry() }) {
+                    Text("تلاش مجدد اتصال")
+                }
+                if (route.enabled) TextButton(onClick = { confirmDirect = true }) { Text("خاموش‌کردن پروکسی…") }
+            }
         } else if (html == null) {
             Text("نماد TradingView معتبر نیست؛ چارت نماد دیگری جایگزین نمی‌شود",
                 modifier = Modifier.padding(20.dp), color = AurumColors.Gold)
@@ -112,6 +121,13 @@ fun ChartScreen(initialTicker: String, onSelectTicker: (String) -> Unit) {
             }
         }
     }
+    if (confirmDirect) AlertDialog(
+        onDismissRequest = { confirmDirect = false },
+        title = { Text("اتصال مستقیم؟") },
+        text = { Text("با خاموش‌کردن پروکسی، همهٔ درخواست‌های برنامه مستقیم ارسال می‌شوند. این انتخاب در تنظیمات ذخیره می‌شود؛ دسترسی منابع تضمین‌شده نیست.") },
+        confirmButton = { TextButton(onClick = { confirmDirect = false; onDisableProxy() }) { Text("خاموش کن") } },
+        dismissButton = { TextButton(onClick = { confirmDirect = false }) { Text("انصراف") } },
+    )
     if (showPicker) {
         var query by remember { mutableStateOf("") }
         AlertDialog(

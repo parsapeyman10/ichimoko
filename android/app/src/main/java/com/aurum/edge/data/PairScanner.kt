@@ -170,6 +170,15 @@ class PairScanner(
 
     private suspend fun runSweep(minIntervalMs: Long, onCandidate: (suspend (PaperOpportunity) -> Unit)?) =
         mutex.withLock {
+            if (!AppNetwork.route.value.ready) {
+                _state.value = _state.value.copy(sweeping = false, checkedCount = 0,
+                    topThree = emptyList(), bestPick = null, marketTrend = null,
+                    lastError = "اتصال Tor آماده نیست؛ اسکن تا آماده‌شدن مسیر متوقف است، نه محدودیت صرافی",
+                    statuses = settings.read().activeSymbols.map {
+                        PairScanStatus(it, "waiting_connection", "انتظار اتصال؛ هنوز درخواستی به منبع ارسال نشده")
+                    })
+                return@withLock
+            }
             val elapsed = SystemClock.elapsedRealtime()
             if (_state.value.sweeping) return@withLock
             if (lastSweepElapsed != 0L && elapsed - lastSweepElapsed < minIntervalMs) return@withLock
@@ -339,6 +348,10 @@ class PairScanner(
                     cryptoBundle.fetch(symbol, now)
                 } catch (cancel: CancellationException) { throw cancel }
                 catch (failure: Exception) {
+                    if (!AppNetwork.route.value.ready) {
+                        update(symbol, "waiting_connection", "اتصال Tor آماده نیست؛ تحلیل و ورود انجام نشد")
+                        return@async
+                    }
                     // A venue may supply a FRESH, exact-pair trade even when it cannot
                     // supply 320 contiguous closed candles. Show that price as a
                     // READ-ONLY partial observation, never as a candle, signal or fill.

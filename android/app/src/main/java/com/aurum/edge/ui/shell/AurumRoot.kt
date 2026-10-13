@@ -87,7 +87,9 @@ fun AurumRoot(viewModel: AurumViewModel) {
                         AurumTab.Home -> HomeScreen(viewModel, market,
                             onChartSymbol = ::openChartFor, onJournal = { open(AurumTab.Journal) })
                         AurumTab.Chart -> ChartScreen(initialTicker = chartTicker,
-                            onSelectTicker = { chartTicker = it })
+                            onSelectTicker = { chartTicker = it },
+                            onReconnect = viewModel::reconnectProxy,
+                            onDisableProxy = { viewModel.setProxyEnabled(false) })
                         AurumTab.Signal -> SignalScreen(viewModel, onChartSymbol = ::openChartFor)
                         AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { open(AurumTab.Api) },
                             onOpenChart = ::openChartFor)

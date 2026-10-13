@@ -14,6 +14,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -23,8 +25,8 @@ import java.util.concurrent.TimeUnit
  */
 class CryptoRadarCandleClient(
     private val http: OkHttpClient = AppNetwork.builder()
-        .connectTimeout(7, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS)
-        .callTimeout(15, TimeUnit.SECONDS).followRedirects(false).build(),
+        .connectTimeout(20, TimeUnit.SECONDS).readTimeout(25, TimeUnit.SECONDS)
+        .callTimeout(40, TimeUnit.SECONDS).followRedirects(false).build(),
 ) {
     enum class Venue(val provider: String, val host: String) {
         GATE("Gate Spot / USDT (radar only)", "https://api.gateio.ws"),
@@ -34,30 +36,24 @@ class CryptoRadarCandleClient(
     private val json = Json { ignoreUnknownKeys = true }
     private val listing = ConcurrentHashMap<String, Long>()
     private val krakenPairs = ConcurrentHashMap<String, String>()
-    private val cooldown = ConcurrentHashMap<Venue, Long>()
+    private val listingLocks = ConcurrentHashMap<String, Mutex>()
+    private val frameLocks = ConcurrentHashMap<String, Mutex>()
+    private data class Cached(val result: PublicCandleHistoryClient.Result, val revision: Long)
+    private val frameCache = java.util.Collections.synchronizedMap(
+        object : LinkedHashMap<String, Cached>(650, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Cached>?): Boolean = size > 650
+        })
 
-    private suspend fun get(venue: Venue, path: String): String = withContext(Dispatchers.IO) {
-        val until = cooldown[venue] ?: 0L
-        if (System.currentTimeMillis() < until) throw DataFeedException("${venue.provider}: سهمیه/دسترسی موقتاً محدود است")
-        val request = Request.Builder().url(venue.host + path)
-            .header("Accept", "application/json").header("User-Agent", "AurumEdge-radar/1")
-            .build()
-        try {
+    private suspend fun get(venue: Venue, path: String): String = VenueRequestPolicy.shared.read(venue) {
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder().url(venue.host + path)
+                .header("Accept", "application/json").header("User-Agent", "AurumEdge-radar/1").build()
             http.newCall(request).execute().use { response ->
-                if (response.code == 429 || response.code == 418 || response.code >= 500)
-                    cooldown[venue] = System.currentTimeMillis() + 60_000L
-                if (!response.isSuccessful) throw DataFeedException("${venue.provider} HTTP ${response.code}")
+                if (!response.isSuccessful) throw VenueHttpFailure(response.code, response.header("Retry-After"))
                 val body = response.peekBody(2_000_001L).bytes()
                 if (body.size > 2_000_000) throw DataFeedException("پاسخ ${venue.provider} بیش از حد بزرگ است")
                 body.toString(Charsets.UTF_8)
             }
-        } catch (cancel: CancellationException) { throw cancel }
-        catch (error: DataFeedException) { throw error }
-        catch (_: Exception) {
-            // A blocked/unreachable host must not cost a full socket timeout for EACH
-            // of the 36 pairs in the same sweep. Other venues still get their turn.
-            cooldown[venue] = System.currentTimeMillis() + 60_000L
-            throw DataFeedException("${venue.provider} پاسخ نداد")
         }
     }
 
@@ -71,10 +67,11 @@ class CryptoRadarCandleClient(
         }
     }
 
-    private suspend fun checkListing(symbol: String, venue: Venue, pair: String): String {
+    private suspend fun checkListing(symbol: String, venue: Venue, pair: String): String =
+        listingLocks.getOrPut("${venue.name}:$symbol") { Mutex() }.withLock {
         val key = "${venue.name}:$symbol"
         if (System.currentTimeMillis() - (listing[key] ?: 0L) in 0L..3_600_000L)
-            return krakenPairs[key] ?: pair
+            return@withLock krakenPairs[key] ?: pair
         val base = symbol.substringBefore('/')
         val body = when (venue) {
             Venue.GATE -> get(venue, "/api/v4/spot/currency_pairs/$pair")
@@ -109,10 +106,24 @@ class CryptoRadarCandleClient(
         }
         if (!valid) throw DataFeedException("${venue.provider}: جفت دقیق $symbol فعال/تأییدشده نیست")
         listing[key] = System.currentTimeMillis()
-        return krakenPairs[key] ?: pair
+        return@withLock krakenPairs[key] ?: pair
     }
 
     suspend fun fetch(symbol: String, interval: Interval, venue: Venue): PublicCandleHistoryClient.Result {
+        val key = "${venue.name}:$symbol:${interval.name}"
+        return frameLocks.getOrPut(key) { Mutex() }.withLock {
+            val route = AppNetwork.route.value
+            if (!route.ready) throw DataFeedException("اتصال Tor هنوز آماده نیست؛ تحلیل تازه انجام نشد")
+            frameCache[key]?.takeIf { it.revision == route.revision &&
+                reusable(it.result.candles, interval, System.currentTimeMillis()) }?.let { return@withLock it.result }
+            val result = fetchUncached(symbol, interval, venue)
+            if (route != AppNetwork.route.value) throw DataFeedException("مسیر اتصال تغییر کرد")
+            frameCache[key] = Cached(result, route.revision)
+            result
+        }
+    }
+
+    private suspend fun fetchUncached(symbol: String, interval: Interval, venue: Venue): PublicCandleHistoryClient.Result {
         val requestedPair = pair(symbol, venue)
         if (interval !in listOf(Interval.M5, Interval.M15, Interval.H1))
             throw DataFeedException("رادار صرافی فقط M5/M15/H1 را پشتیبانی می‌کند")
@@ -149,6 +160,10 @@ class CryptoRadarCandleClient(
             throw DataFeedException("${venue.provider}: ۳۲۰ کندل بستهٔ پیوسته/تازهٔ $bar موجود نیست")
         return PublicCandleHistoryClient.Result(tail, venue.provider)
     }
+
+    internal fun reusable(rows: List<Candle>, interval: Interval, now: Long): Boolean =
+        rows.lastOrNull()?.time?.plus(interval.millis) == now / interval.millis * interval.millis &&
+            CandleSourceHealth.ready(rows, interval, now, requireContiguous = true, requireVolume = false)
 
     /** Last PUBLIC execution is a watch quote only. No stable replay cursor or
      * bid/ask is asserted here; never pass it into an entry/exit journal.
