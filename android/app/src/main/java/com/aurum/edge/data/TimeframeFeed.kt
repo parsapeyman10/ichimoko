@@ -70,18 +70,7 @@ internal class TimeframeFeed(
                     SourceRouting.HistorySource.TWELVE_DATA -> if (apiKey.isBlank()) emptyList()
                         else healthy(twelve.fetchCandles(apiKey, symbol, interval,
                             outputSize = desired, minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES))
-                } else try { healthy(publicHistory.fetchCandles(symbol, interval,
-                    minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = desired).candles) }
-                catch (cancel: CancellationException) { throw cancel }
-                catch (_: Exception) {
-                    try { healthy(dukascopy.fetchCandles(symbol, interval,
-                        minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = desired).candles) }
-                    catch (cancel: CancellationException) { throw cancel }
-                    catch (_: Exception) {
-                        if (apiKey.isBlank()) emptyList() else healthy(twelve.fetchCandles(apiKey, symbol,
-                            interval, outputSize = desired, minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES))
-                    }
-                }
+                } else emptyList() // unknown publisher is not permission to mix reference frames
             }
         } catch (cancel: CancellationException) { throw cancel }
         catch (_: Exception) { emptyList() }
