@@ -51,6 +51,25 @@ class CryptoCompressionEngineTest {
             Interval.M5, 60.0, "BTC/USDT", timeframes = frames).action)
     }
 
+    @Test fun `a zero volume recent bar blocks entry but an old zero bar is valid history`() {
+        val recent = CryptoCompressionEngine.evaluate(
+            five.mapIndexed { i, bar -> if (i == 305) bar.copy(volume = 0.0) else bar },
+            Interval.M5, "BTC/USDT", frames, now)
+        assertEquals(SignalAction.NO_TRADE, recent.action)
+        assertTrue(recent.blockers.toString(), recent.blockers.any { it.contains("۴۰ کندل") })
+        val old = CryptoCompressionEngine.evaluate(
+            five.mapIndexed { i, bar -> if (i == 1) bar.copy(volume = 0.0) else bar },
+            Interval.M5, "BTC/USDT", frames, now)
+        assertEquals(SignalAction.NO_TRADE, old.action)
+        assertFalse(old.blockers.toString(), old.blockers.any { it.contains("۳۲۰ کندل") })
+        val noMacroVolume = CryptoCompressionEngine.evaluate(five, Interval.M5,
+            "BTC/USDT", frames.mapValues { (frame, bars) ->
+                if (frame == Interval.H1) bars.dropLast(1) + bars.last().copy(volume = 0.0) else bars
+            }, now)
+        assertEquals(SignalAction.NO_TRADE, noMacroVolume.action)
+        assertTrue(noMacroVolume.blockers.toString(), noMacroVolume.blockers.any { it.contains("M15/H1") })
+    }
+
     @Test fun `twenty genuinely quiet bars are watch only even with full compression score`() {
         val original = five
         val quiet = original.mapIndexed { i, bar ->

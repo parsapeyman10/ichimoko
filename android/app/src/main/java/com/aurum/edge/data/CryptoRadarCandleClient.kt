@@ -112,8 +112,7 @@ class CryptoRadarCandleClient(
         return krakenPairs[key] ?: pair
     }
 
-    suspend fun fetch(symbol: String, interval: Interval, venue: Venue,
-                      now: Long = System.currentTimeMillis()): PublicCandleHistoryClient.Result {
+    suspend fun fetch(symbol: String, interval: Interval, venue: Venue): PublicCandleHistoryClient.Result {
         val requestedPair = pair(symbol, venue)
         if (interval !in listOf(Interval.M5, Interval.M15, Interval.H1))
             throw DataFeedException("رادار صرافی فقط M5/M15/H1 را پشتیبانی می‌کند")
@@ -123,15 +122,16 @@ class CryptoRadarCandleClient(
             else -> if (venue == Venue.GATE) "1h" else "1H"
         }
         val rows = when (venue) {
-            Venue.GATE -> parseGate(get(venue, "/api/v4/spot/candlesticks?currency_pair=$pair&interval=$bar&limit=330"), interval, now)
+            Venue.GATE -> parseGate(get(venue, "/api/v4/spot/candlesticks?currency_pair=$pair&interval=$bar&limit=330"),
+                interval, System.currentTimeMillis())
             Venue.KRAKEN -> parseKraken(get(venue,
-                "/0/public/OHLC?pair=$pair&interval=${interval.minutes}"), interval, now)
+                "/0/public/OHLC?pair=$pair&interval=${interval.minutes}"), interval, System.currentTimeMillis())
             Venue.OKX -> {
                 val all = mutableListOf<Candle>()
                 var after: Long? = null
                 repeat(2) { // OKX 300/page; 320 CLOSED candles need two pages
                     val page = parseOkx(get(venue, "/api/v5/market/history-candles?instId=$pair&bar=$bar&limit=300" +
-                        (after?.let { "&after=$it" } ?: "")), interval, now)
+                        (after?.let { "&after=$it" } ?: "")), interval, System.currentTimeMillis())
                     if (page.isNotEmpty()) {
                         val oldest = page.minOf { it.time }
                         if (after != null && oldest >= after!!) throw DataFeedException("صفحه‌های OKX پیش نمی‌روند")
@@ -142,9 +142,10 @@ class CryptoRadarCandleClient(
                 all
             }
         }
-        val tail = rows.filter { it.closed && it.time + interval.millis <= now }
+        val receivedAt = System.currentTimeMillis()
+        val tail = rows.filter { it.closed && it.time + interval.millis <= receivedAt }
             .distinctBy { it.time }.sortedBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
-        if (!CandleSourceHealth.ready(tail, interval, now, requireContiguous = true, requireVolume = true))
+        if (!CandleSourceHealth.ready(tail, interval, receivedAt, requireContiguous = true, requireVolume = false))
             throw DataFeedException("${venue.provider}: ۳۲۰ کندل بستهٔ پیوسته/تازهٔ $bar موجود نیست")
         return PublicCandleHistoryClient.Result(tail, venue.provider)
     }
@@ -152,8 +153,7 @@ class CryptoRadarCandleClient(
     /** Last PUBLIC execution is a watch quote only. No stable replay cursor or
      * bid/ask is asserted here; never pass it into an entry/exit journal.
      */
-    suspend fun fetchWatchTrade(symbol: String, venue: Venue,
-                                now: Long = System.currentTimeMillis()): PriceTick {
+    suspend fun fetchWatchTrade(symbol: String, venue: Venue): PriceTick {
         val id = checkListing(symbol, venue, pair(symbol, venue))
         val body = when (venue) {
             Venue.GATE -> get(venue, "/api/v4/spot/trades?currency_pair=$id&limit=1")
@@ -165,7 +165,8 @@ class CryptoRadarCandleClient(
             Venue.OKX -> parseOkxTrade(body, id)
             Venue.KRAKEN -> parseKrakenTrade(body)
         }
-        if (tick.at !in (now - 90_000L)..(now + 10_000L))
+        val receivedAt = System.currentTimeMillis()
+        if (tick.at !in (receivedAt - 90_000L)..(receivedAt + 10_000L))
             throw DataFeedException("${venue.provider}: آخرین معامله تازه نیست")
         return tick
     }
@@ -236,7 +237,8 @@ class CryptoRadarCandleClient(
         return rows.mapNotNull { item ->
             val row = item as? JsonArray ?: throw DataFeedException("ساختار کندل Gate نامعتبر است")
             if (row.size < 8) throw DataFeedException("ستون‌های کندل Gate ناقص‌اند")
-            if (row[7].string().lowercase() != "true") return@mapNotNull null
+            if (row[7].string().lowercase() != "true" ||
+                (row[0].string().toLongOrNull()?.times(1000L) ?: 0L) + interval.millis > now) return@mapNotNull null
             checkedCandle(row[0].string().toLongOrNull()?.times(1000L), row[5].string(),
                 row[3].string(), row[4].string(), row[2].string(), row[6].string(), interval, now)
         }
@@ -248,7 +250,8 @@ class CryptoRadarCandleClient(
         return root.array("data")?.mapNotNull { item ->
             val row = item as? JsonArray ?: throw DataFeedException("ساختار کندل OKX نامعتبر است")
             if (row.size < 9) throw DataFeedException("ستون‌های کندل OKX ناقص‌اند")
-            if (row[8].string() != "1") return@mapNotNull null
+            if (row[8].string() != "1" ||
+                (row[0].string().toLongOrNull() ?: 0L) + interval.millis > now) return@mapNotNull null
             checkedCandle(row[0].string().toLongOrNull(), row[1].string(),
                 row[2].string(), row[3].string(), row[4].string(), row[5].string(), interval, now)
         } ?: throw DataFeedException("دادهٔ کندل OKX موجود نیست")
@@ -260,7 +263,7 @@ class CryptoRadarCandleClient(
         val (open, high, low, close, volume) = prices
         if (t == null || t <= 0 || t % interval.millis != 0L || t + interval.millis > now ||
             prices.any { !it.isFinite() } || minOf(open,high,low,close) <= 0 ||
-            high < maxOf(open,close) || low > minOf(open,close) || volume <= 0)
+            high < maxOf(open,close) || low > minOf(open,close) || volume < 0)
             throw DataFeedException("کندل بستهٔ صرافی دارای زمان، قیمت یا حجم نامعتبر است")
         return Candle(t,open,high,low,close,volume,closed = true)
     }

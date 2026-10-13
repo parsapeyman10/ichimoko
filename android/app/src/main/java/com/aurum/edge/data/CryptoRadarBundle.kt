@@ -47,10 +47,11 @@ internal class CryptoRadarBundle(
                     if (provider != null && result.provider != provider)
                         throw DataFeedException("ناشر بازه‌های زمانی متفاوت است")
                     provider = result.provider
-                    val bars = result.candles.filter { it.closed && it.time + interval.millis <= now }
+                    val receivedAt = System.currentTimeMillis()
+                    val bars = result.candles.filter { it.closed && it.time + interval.millis <= receivedAt }
                         .sortedBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
-                    if (!CandleSourceHealth.ready(bars, interval, now,
-                            requireContiguous = true, requireVolume = true))
+                    if (!CandleSourceHealth.ready(bars, interval, receivedAt,
+                            requireContiguous = true, requireVolume = false))
                         throw DataFeedException("۳۲۰ کندل بستهٔ پیوسته و تازهٔ ${interval.label} ناقص است")
                     series[interval] = bars
                 }

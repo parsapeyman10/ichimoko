@@ -42,11 +42,24 @@ class CryptoRadarBundleTest {
     @Test fun `all failed venues never yield a radar signal`() = runBlocking {
         val feed = CryptoRadarBundle { _, interval, venue ->
             PublicCandleHistoryClient.Result(bars(interval).map {
-                if (venue == CryptoRadarBundle.Source.KRAKEN) it.copy(volume = 0.0) else it.copy(closed = false)
+                if (venue == CryptoRadarBundle.Source.KRAKEN) it.copy(volume = -1.0) else it.copy(closed = false)
             }, venue.label)
         }
         assertTrue(runCatching { feed.fetch("BTC/USDT", now) }.exceptionOrNull()?.message
             .orEmpty().contains("هیچ منبع"))
+    }
+
+    @Test fun `historical zero execution bars remain real OHLC in the same venue bundle`() = runBlocking {
+        val feed = CryptoRadarBundle { _, interval, source ->
+            PublicCandleHistoryClient.Result(bars(interval).mapIndexed { index, bar ->
+                if (index == 2) bar.copy(volume = 0.0) else bar
+            }, source.label)
+        }
+        val snapshot = feed.fetch("BTC/USDT", now)
+        assertEquals(CryptoRadarBundle.Source.GATE, snapshot.venue)
+        assertEquals(0.0, snapshot.frames.getValue(Interval.M5)[2].volume, 0.0)
+        assertFalse(CandleSourceHealth.ready(
+            snapshot.m5.map { it.copy(volume = -1.0) }, Interval.M5, now, true))
     }
 
     @Test fun `venue parsers reject partial candle and wrong pair execution`() {
@@ -55,9 +68,20 @@ class CryptoRadarBundleTest {
         val gate = """[["${t/1000}","10","100","101","99","100","4",true]]"""
         assertEquals(t, client.parseGate(gate, Interval.M5, now).single().time)
         assertTrue(client.parseGate(gate.replace("true", "false"), Interval.M5, now).isEmpty())
+        assertEquals(0.0, client.parseGate(gate.replace("\"4\",true", "\"0\",true"),
+            Interval.M5, now).single().volume, 0.0)
+        assertThrows(DataFeedException::class.java) {
+            client.parseGate(gate.replace("\"4\",true", "\"-1\",true"), Interval.M5, now)
+        }
+
         val okx = """{"code":"0","data":[["$t","100","101","99","100","4","10","20","1"]]}"""
         assertEquals(4.0, client.parseOkx(okx, Interval.M5, now).single().volume, 0.00001)
         assertTrue(client.parseOkx(okx.replace("\"1\"]", "\"0\"]"), Interval.M5, now).isEmpty())
+        assertEquals(0.0, client.parseOkx(okx.replace("\"4\",\"10\"", "\"0\",\"10\""),
+            Interval.M5, now).single().volume, 0.0)
+        // A venue can mark the forming candle closed before the local clock sees the close.
+        assertTrue(client.parseGate(gate.replace("${t/1000}", "${now/1000}"), Interval.M5, now).isEmpty())
+        assertTrue(client.parseOkx(okx.replace("$t", "$now"), Interval.M5, now).isEmpty())
         val kraken = """{"error":[],"result":{"XBTUSDT":[[${t/1000},"100","101","99","100","100.1","4","12"]],"last":123}}"""
         assertEquals(4.0, client.parseKraken(kraken, Interval.M5, now).single().volume, 0.00001)
         assertTrue(client.parseKraken(kraken.replace("${t/1000}", "${now/1000}"),

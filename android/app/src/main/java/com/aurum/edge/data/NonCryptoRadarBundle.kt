@@ -36,19 +36,20 @@ internal class NonCryptoRadarBundle(
                     } }.awaitAll()
                 }
                 val results = fetched.map { it.getOrThrow() }
+                val receivedAt = System.currentTimeMillis()
                 val provider = results.first().second.provider
                 val frames = results.associate { (interval, result) ->
                     if (SourceRouting.fromProvider(result.provider) != source ||
-                        !CandleSourceHealth.ready(result.candles, interval, now))
+                        !CandleSourceHealth.ready(result.candles, interval, receivedAt))
                         throw DataFeedException("${interval.label}: منبع متفاوت یا کندل بستهٔ تازه/کامل ندارد")
                     interval to result.candles
                 }
                 return Snapshot(provider, source, frames, errors)
             } catch (cancel: CancellationException) { throw cancel }
             catch (failure: Exception) {
-                errors += "${source.name}: ${(failure.message ?: "ناموجود").take(60)}"
+                errors += "${source.name}: ${(failure.message ?: "ناموجود").take(105)}"
             }
         }
-        throw DataFeedException("$symbol: هیچ بستهٔ هم‌ناشر M5/M15/H1 معتبر نیست؛ ${errors.joinToString("؛ ").take(170)}")
+        throw DataFeedException("$symbol: هیچ بستهٔ هم‌ناشر M5/M15/H1 معتبر نیست؛ ${errors.joinToString("؛ ").take(355)}")
     }
 }

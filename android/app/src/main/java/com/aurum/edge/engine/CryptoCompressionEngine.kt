@@ -38,6 +38,10 @@ internal object CryptoCompressionEngine {
             bars.zipWithNext().any { (a,b) -> b.time - a.time != interval.millis } ||
             now - (bars.last().time + interval.millis) !in 0L..(interval.millis + 90_000L))
             return blocked(interval, bars, "۳۲۰ کندل 5m بستهٔ پیوسته و تازه با حجم واقعی لازم است")
+        // A venue may publish real zero-execution bars. They belong in price history,
+        // but a quiet recent window is not evidence for a volume-confirmed entry.
+        if (bars.takeLast(40).any { it.volume <= 0.0 })
+            return blocked(interval, bars, "حجم معاملات واقعی در ۴۰ کندل اخیر 5m کامل نیست")
         val last = bars.lastIndex
         val asOf = bars[last].time + interval.millis
         val ichi = Ichimoku.compute(bars, 9, 26, 52, 26)
@@ -54,6 +58,9 @@ internal object CryptoCompressionEngine {
         }
         if (readyFrames.values.any { it == null })
             return blocked(interval, bars, "تأیید مستقل کندل‌های بستهٔ M15 و H1 کامل/تازه نیست")
+
+        if (readyFrames.values.any { it!!.last().volume <= 0.0 })
+            return blocked(interval, bars, "حجم معاملات واقعی کندل بستهٔ M15/H1 موجود نیست")
 
         // Evaluate a just-closed breakout, or the immediately following closed pullback
         // after an overlarge breakout. No older breakout may be chased from a later candle.
@@ -233,7 +240,7 @@ internal object CryptoCompressionEngine {
 
     private fun valid(bar: Candle): Boolean = bar.time > 0 && bar.closed &&
         listOf(bar.open,bar.high,bar.low,bar.close,bar.volume).all { it.isFinite() } &&
-        min(bar.open,bar.close) > 0 && bar.volume > 0 &&
+        min(bar.open,bar.close) > 0 && bar.volume >= 0 &&
         bar.high >= max(bar.open,bar.close) && bar.low <= min(bar.open,bar.close) && bar.low > 0
 
     private fun compressionType(bars: List<Candle>, at: Int, atr: Double): String {

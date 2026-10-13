@@ -61,6 +61,7 @@ class PublicCandleHistoryClient(
             "?interval=$requestInterval&range=${range(interval)}&includePrePost=false&events=history"
         // Same Yahoo publisher, TWO bounded hosts for availability only. These are
         // not independent market confirmations; never count both as separate evidence.
+        val hostErrors = mutableListOf<String>()
         val body = listOf("query1.finance.yahoo.com", "query2.finance.yahoo.com")
             .firstNotNullOfOrNull { host ->
                 try {
@@ -75,7 +76,7 @@ class PublicCandleHistoryClient(
                     }
                 } catch (cancel: CancellationException) { throw cancel }
                 catch (_: Exception) { null }
-            } ?: throw DataFeedException("دو مسیر Yahoo برای این نماد تاریخچه ندادند")
+            } ?: throw DataFeedException("Yahoo هر دو میزبان ناموفق: ${hostErrors.joinToString("؛ ").take(210)}")
         val baseInterval = if (interval == Interval.H4) Interval.H1 else interval
         val parsed = parseYahooChart(body, symbol, yahoo, baseInterval,
             trimToCache = interval != Interval.H4, trimSize = keepSize)

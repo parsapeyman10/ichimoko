@@ -361,16 +361,19 @@ class PairScanner(
                             "${quote.first.provider}: معاملهٔ زمان‌دار ${quote.second.at}؛ " +
                                 "۳۲۰ کندل بستهٔ M5/M15/H1 تأیید نشد؛ فقط قیمت مشاهده‌ای، بدون سیگنال/ورود",
                             price = quote.second.price)
-                    } else update(symbol, "error", (failure.message ?: "منبع هم‌نماد موجود نیست").take(230))
+                    } else update(symbol, "error", (failure.message ?: "منبع هم‌نماد موجود نیست").take(420))
                     return@async
                 } else null
                 val nonCryptoSnapshot = if (!crypto) try {
                     nonCryptoBundle.fetch(symbol, config.apiKey, now)
                 } catch (cancel: CancellationException) { throw cancel }
                 catch (failure: Exception) {
-                    update(symbol, "error", (failure.message ?: "منبع هم‌نماد موجود نیست").take(230))
+                    update(symbol, "error", (failure.message ?: "منبع هم‌نماد موجود نیست").take(420))
                     return@async
                 } else null
+                // Network permits and fallback can outlast a bar boundary. Use receipt time,
+                // not the clock captured before the publisher wait.
+                now = System.currentTimeMillis()
                 val rawCandles = cryptoSnapshot?.m5 ?: nonCryptoSnapshot!!.m5
                 val baseSource = cryptoSnapshot?.provider ?: nonCryptoSnapshot!!.provider
 
