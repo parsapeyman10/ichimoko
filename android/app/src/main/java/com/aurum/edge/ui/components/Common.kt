@@ -114,7 +114,7 @@ fun relativeTime(millis: Long?, now: Long = System.currentTimeMillis()): String 
 @Composable
 fun SectionCard(
     title: String,
-    subtitle: String? = null,
+    @Suppress("UNUSED_PARAMETER") subtitle: String? = null,
     trailing: @Composable (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
@@ -134,9 +134,6 @@ fun SectionCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleSmall, color = AurumColors.TextPrimary)
-                if (subtitle != null) {
-                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
-                }
             }
             trailing?.invoke()
         }

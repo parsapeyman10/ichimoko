@@ -56,20 +56,16 @@ fun MarketWatchScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit,
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
-        SectionCard("دیده‌بان بازار", "طلای ایران و دلار ایران بالای لیست؛ بعد طلا و جفت‌ارزهای فارکس · بدون API Key اجباری") {
+        SectionCard("دیده‌بان بازار") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = viewModel::refreshWatch, enabled = !state.refreshing, modifier = Modifier.weight(1f)) {
                     Text(if (state.refreshing) "در حال دریافت…" else "به‌روزرسانی")
                 }
-                OutlinedButton(onClick = onOpenSettings) { Text("تنظیمات منبع") }
+                OutlinedButton(onClick = onOpenSettings) { Text("API") }
             }
             if (state.refreshing) CircularProgressIndicator(modifier = Modifier.padding(top = 8.dp), strokeWidth = 2.dp)
-            Text(
-                "آخرین تلاش: ${relativeTime(state.lastAttemptAt, now)} · منابع عمومی: TGJU برای ایران و Yahoo Finance برای فارکس/طلا.",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 8.dp),
-            )
+            Text("آخرین تلاش: ${relativeTime(state.lastAttemptAt, now)}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             state.error?.let { Text(it, color = AurumColors.Red, style = MaterialTheme.typography.bodySmall) }
         }
 
@@ -82,11 +78,15 @@ fun MarketWatchScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit,
             val sourceTitle = SourceCatalog.find(display.sourceId)?.title ?: "منبع عمومی"
             val assessment = SourceComparison.assess(symbol, display.sourceId, quote, now)
             val tone = when {
-                assessment.readable -> AurumColors.Green
                 verification.status == VerificationStatus.CONFLICT -> AurumColors.Red
+                assessment.readable -> AurumColors.Green
                 else -> AurumColors.TextMuted
             }
-            val badge = if (assessment.readable) "یک منبع معتبر" else verification.badge
+            val badge = when (verification.status) {
+                VerificationStatus.CONFIRMED -> "${verification.freshSources} منبع همخوان"
+                VerificationStatus.CONFLICT -> "اختلاف منابع"
+                else -> if (assessment.readable) "یک منبع تازه" else verification.badge
+            }
             SectionCard(
                 title = "${symbol.label} · ${symbol.id}",
                 subtitle = "منبع: $sourceTitle${if (display.fallback) " · جایگزین" else ""}",

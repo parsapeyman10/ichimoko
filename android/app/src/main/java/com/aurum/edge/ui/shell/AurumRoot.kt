@@ -22,7 +22,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.aurum.edge.ui.components.FeedBanner
 import com.aurum.edge.data.TradingViewSymbols
 import com.aurum.edge.ui.theme.AurumColors
 
@@ -82,15 +81,6 @@ fun AurumRoot(viewModel: AurumViewModel) {
             AurumBottomBar(selectedTab, onSelect = ::open, onMore = { showMore = true })
         }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            if (selectedTab == AurumTab.Signal) {
-                AppHeader(symbol = market.symbol, price = market.lastPrice, interval = market.interval,
-                    lastUpdate = market.feed.lastSuccessAt, onRefresh = viewModel::refreshNow)
-                if (market.feed.mode in setOf(com.aurum.edge.core.FeedMode.LIVE,
-                        com.aurum.edge.core.FeedMode.POLLING, com.aurum.edge.core.FeedMode.MARKET_CLOSED)) {
-                    FeedBanner(status = market.feed, lastPrice = market.lastPrice,
-                        lastBarTime = market.candles.lastOrNull()?.time, showingCache = market.showingCachedData)
-                }
-            }
             Box(Modifier.fillMaxSize()) {
                 tabStates.SaveableStateProvider(selectedTab.name) {
                     when (selectedTab) {
@@ -98,8 +88,8 @@ fun AurumRoot(viewModel: AurumViewModel) {
                             onChartSymbol = ::openChartFor, onJournal = { open(AurumTab.Journal) })
                         AurumTab.Chart -> ChartScreen(initialTicker = chartTicker,
                             onSelectTicker = { chartTicker = it })
-                        AurumTab.Signal -> SignalScreen(viewModel, market, onChartSymbol = ::openChartFor)
-                        AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) },
+                        AurumTab.Signal -> SignalScreen(viewModel, onChartSymbol = ::openChartFor)
+                        AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { open(AurumTab.Api) },
                             onOpenChart = ::openChartFor)
                         AurumTab.News -> PersianNewsScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) },
                             onOpenSignal = { open(AurumTab.Signal) })

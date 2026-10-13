@@ -9,6 +9,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -47,8 +48,12 @@ fun ChartScreen(initialTicker: String, onSelectTicker: (String) -> Unit) {
     Column(Modifier.fillMaxSize()) {
         // TradingView's mobile iframe may hide its own symbol search even with symboledit=1.
         // This small selector changes the SAME widget, not the app's live market or a second chart.
-        TextButton(onClick = { showPicker = true }, modifier = Modifier.fillMaxWidth()) {
-            Text("تغییر نماد چارت · ${ChartSymbolChoices.display(initialTicker)}")
+        Row(Modifier.fillMaxWidth()) {
+            TextButton(onClick = { showPicker = true }, modifier = Modifier.weight(1f)) {
+                Text("نماد · ${ChartSymbolChoices.display(initialTicker)}")
+            }
+            // Recreate the widget with its Ichimoku study if it was removed inside TradingView.
+            TextButton(onClick = { reloadCount++ }) { Text("ایچیموکو ↻") }
         }
         if (html == null) {
             Text("نماد TradingView معتبر نیست؛ چارت نماد دیگری جایگزین نمی‌شود",

@@ -72,23 +72,9 @@ import kotlinx.coroutines.delay
  * ۵. وضعیت پایش واچ‌لیست فعال در پس‌زمینه
  */
 @Composable
-fun SignalScreen(viewModel: AurumViewModel, market: MarketState,
-                 onChartSymbol: (String) -> Unit) {
-    val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val trades by viewModel.trades.collectAsStateWithLifecycle()
-    val autoStatus by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
+fun SignalScreen(viewModel: AurumViewModel, onChartSymbol: (String) -> Unit) {
     val scanState by viewModel.pairScan.collectAsStateWithLifecycle()
     val decisionLog by viewModel.decisionLog.collectAsStateWithLifecycle()
-    val playbook by viewModel.playbook.collectAsStateWithLifecycle()
-    val marketTrend by viewModel.marketTrend.collectAsStateWithLifecycle()
-    val symbolTrend by viewModel.symbolTrend.collectAsStateWithLifecycle()
-    val trendContext by viewModel.trendContext.collectAsStateWithLifecycle()
-    val entryDiagnostics by viewModel.entryDiagnostics.collectAsStateWithLifecycle()
-    val aiConnection by viewModel.aiConnection.collectAsStateWithLifecycle()
-    val traderOpinion by viewModel.traderOpinion.collectAsStateWithLifecycle()
-    val news by viewModel.news.collectAsStateWithLifecycle()
-    val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
-    val lastMarks by viewModel.lastDisplayMarks.collectAsStateWithLifecycle()
     var showAllDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var visibleDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(12) }
     var scanClock by androidx.compose.runtime.remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis()) }
@@ -99,127 +85,16 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState,
         }
     }
     val freshCandidates = ScanRanking.rank(scanState.statuses, com.aurum.edge.core.Interval.M5, scanClock)
-    val signal = market.signal
-
-    val openTrades = trades.filter { it.isOpen }
-    val livePrices = com.aurum.edge.data.OpenPositionQuotePolicy.prices(openTrades, liveTicks)
-    val positionBlocker = com.aurum.edge.core.PaperPortfolioPolicy.blocker(
-        trades, market.symbol, settings.accountBalance, 0.0, signal?.barTime)
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(bottom = 14.dp),
-    ) {
-
-        // ── ۱. بنر وضعیت ۴ دسته دارایی (رمزارز، فارکس، طلا/کالا، سهام) در ۴ مستطیل بالا ──
-        com.aurum.edge.ui.components.AssetClass4SlotsBanner(
-            openTrades = openTrades,
-            livePrices = livePrices,
-            lastKnownPrices = openTrades.mapNotNull { trade ->
-                com.aurum.edge.data.OpenPositionDisplay.forTrade(trade, lastMarks)
-                    ?.let { trade.symbol to it.price }
-            }.toMap(),
-            onSelectSymbol = { symbol -> viewModel.selectChartSymbol(symbol) },
-            entryReasons = AssetClass.entries.associateWith { asset ->
-                com.aurum.edge.data.MarketEntryReason.forClass(asset, scanState,
-                    settings.autoPaperTrading, scanClock)
-            },
-        )
-
-        com.aurum.edge.core.OilEntrySafety.blocker(market.symbol)?.let { reason ->
-            SectionCard("نفت · توقف حفاظتی ورود تازه", "ژورنال و مدیریت خروج پوزیشن‌های موجود حفظ می‌شود") {
-                Text(reason, style = MaterialTheme.typography.bodyMedium, color = AurumColors.Red)
-            }
-        }
-
-        // ── ۲. بهترین فرصت معاملاتی (#1 Best Opportunity) با تشریح کامل شروط ──
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 14.dp)) {
+        // The background scanner publishes each finished symbol immediately. Never require
+        // the user to press Scan or wait for the entire sweep to display a fresh best pick.
         BestOpportunityDetailedCard(
             best = freshCandidates.firstOrNull(),
             sweeping = scanState.sweeping,
-            onScan = { viewModel.scanPairs() },
-            // A scanner candle is not a fresh verified entry; navigate for review only.
             onTrade = onChartSymbol,
         )
 
-        // ── ۳. سه کاندیدای برتر بازار (Top 3 Candidates) با تفکیک دسته و شروط ──
-        if (freshCandidates.isNotEmpty()) {
-            TopCandidatesDetailedSection(
-                candidates = freshCandidates.take(3),
-                currentSymbol = market.symbol,
-                onSelectSymbol = { viewModel.selectChartSymbol(it) },
-            )
-        }
-
-        // Rankings for all four markets, not only the eight default watchlist rows.
-        PerMarketRecommendations(scanState, com.aurum.edge.core.Interval.M5, scanClock, onChartSymbol)
-        EvidenceTimingCard(market, positionBlocker)
-
-        // ── ۴. خلاصه سیگنال نماد انتخابی و موتور واحد چهارلایه ─────────
-        if (market.interval != com.aurum.edge.core.Interval.M5) {
-            Text("ورود فقط در تایم‌فریم ۵ دقیقه (5m)؛ بازهٔ فعلی صرفاً برای مشاهده است.",
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
-        }
-        SignalSummaryCard(
-            signal = signal,
-            symbol = market.symbol,
-            onOpenPaperTrade = { signal?.let { viewModel.openPaperTrade(it) } },
-            entryBlocker = positionBlocker,
-            allowManualPaperTrade = true,
-        )
-
-        // ── ۵. وضعیت معامله خودکار کاغذی ─────────────────────────────────
-        SectionCard("معاملهٔ خودکار کاغذی (تخصیص متوازن ۴ بازار)") {
-            Text(
-                if (settings.autoPaperTrading) "$autoStatus · نماد منتخب و کاتالوگ به‌صورت خودکار بررسی می‌شوند؛ " +
-                    "ورود کاتالوگ فقط با تیک تازهٔ مستقل و پایش خروج (فارکس، XAU/XAG و جفت‌های USDT با معاملات زمان‌دار نوبیتکس). سهام/نفت فاقد مسیر ورود خودکارند؛ سقف ریسک مشترک است." else "خاموش (از بخش تنظیمات یا صفحه اصلی قابل فعال‌سازی است)",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (settings.autoPaperTrading) AurumColors.TextSecondary else AurumColors.Gold,
-            )
-        }
-
-        // ── ۵٫۱ «کدام روش برای کدام بازار» — روتر متد بازار ──────────────────
-        MarketPlaybookCard(playbook, market.symbol)
-
-        // ── ۵٫۲ «روند کلی بازار» — چطور به دست می‌آید و چطور به معامله اضافه می‌شود ──
-        MarketTrendCard(marketTrend, symbolTrend, trendContext, market.symbol)
-
-        // ── ۵٫۳ «چرا الان معامله/هشدار نداریم؟» — پیش‌نیازهای صادقانه ─────────
-        WhyNoTradeCard(entryDiagnostics, aiConnection)
-        AiProofCard(market, settings.hasClientNewsAi, aiConnection, traderOpinion, news, decisionLog, scanClock,
-            onRefreshOpinion = { viewModel.refreshTraderOpinion(force = true) })
-
-        // ── ۶. چک‌لیست کامل شواهد و شروط تکنیکال نماد انتخابی ──────────────
-        signal?.let { s ->
-            SectionCard(
-                title = "چهار لایهٔ امتیاز فنی · ${market.symbol}",
-                subtitle = "EMA/ایچیموکو · RSI/MACD · حمایت/مقاومت · هفت بازهٔ M1 تا D1",
-                trailing = {
-                    val count = s.confluence.count { it.ok }
-                    Pill("${s.confidence.toInt()}/۱۰۰ · $count لایهٔ کامل", if (s.isActionable) AurumColors.Green else AurumColors.Gold)
-                },
-            ) {
-                if (s.confluence.isEmpty()) {
-                    Text("در حال پردازش شروط تکنیکال...", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        s.confluence.forEach { ConfluenceRow(it) }
-                    }
-                }
-            }
-        }
-
-        // ── ۷. وضعیت پایش واچ‌لیست فعال در پس‌زمینه (رادار خودکار) ───────
-        PairRadarSummaryCard(
-            scan = scanState,
-            onScan = { viewModel.scanPairs() },
-            now = System.currentTimeMillis(),
-        )
-
-        // Keep the audit trail after every signal and radar card, at the bottom of Trading.
-        SectionCard("Decision Log · دلیل هر بررسی", "روی همین دستگاه؛ بدون کلید API یا سفارش واقعی") {
+        SectionCard("دلیل بررسی") {
             if (decisionLog.isEmpty()) Text("هنوز بررسی ثبت نشده است")
             // An AI entry review is a separate event, not the technical scan's latest score.
             val latestBySymbol = decisionLog.filter { AiEntryEffect.fromAction(it.action) == null }
@@ -711,7 +586,6 @@ private fun PerMarketRecommendations(scan: PairScanState, interval: com.aurum.ed
 private fun BestOpportunityDetailedCard(
     best: PairScanStatus?,
     sweeping: Boolean,
-    onScan: () -> Unit,
     onTrade: (String) -> Unit,
 ) {
     val assetClass = best?.let { AssetClass.of(it.symbol) } ?: AssetClass.FOREX
@@ -723,8 +597,7 @@ private fun BestOpportunityDetailedCard(
     }
 
     SectionCard(
-        title = "✨ برترین کاندیدای مجازِ واچ‌لیست",
-        subtitle = if (best != null) "رتبهٔ برتر میان کاندیداهای تازهٔ مجاز؛ ورود فقط با قیمت تازهٔ مستقل" else "اسکن نمادهای کاتالوگ؛ نبود داده به معنی فرصت نیست",
+        title = "برترین کاندید مجاز",
         trailing = {
             if (sweeping) {
                 Pill("در حال اسکن...", AurumColors.Gold)
@@ -859,29 +732,8 @@ private fun BestOpportunityDetailedCard(
                 }
             }
         } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "برای بررسی همهٔ نمادهای کاتالوگ با دادهٔ واقعی، اسکن را بزنید؛ نبود فید به‌صورت خطا نمایش داده می‌شود.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = AurumColors.TextSecondary,
-                    modifier = Modifier.weight(1f),
-                )
-                Button(
-                    onClick = onScan,
-                    enabled = !sweeping,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AurumColors.Gold,
-                        contentColor = androidx.compose.ui.graphics.Color.Black,
-                    ),
-                    modifier = Modifier.padding(start = 8.dp),
-                ) {
-                    Text(if (sweeping) "در حال اسکن..." else "اسکن کاتالوگ")
-                }
-            }
+            Text(if (sweeping) "در حال بررسی بازارها" else "کاندیدای مجازِ تازه‌ای موجود نیست",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
         }
     }
 }

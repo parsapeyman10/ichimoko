@@ -36,7 +36,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
-import com.aurum.edge.data.PairScanState
 import com.aurum.edge.data.DisplayMark
 import com.aurum.edge.data.OpenPositionDisplay
 import com.aurum.edge.core.LiveTradeValuation
@@ -173,81 +172,10 @@ fun HomeScreen(
                 onJournal = onJournal,
                 onSelectTrade = onChartSymbol,
             )
-        } else {
-            // Instead of four large empty position cards and a second empty tracking card,
-            // fill the space with the actual per-market scanner progress and provenance.
-            HomeRadarCard(scan, market.symbol, now, onChartSymbol)
         }
 
         // ── ۴. پنل معاملهٔ خودکار کاغذی و تخصیص ۴ بازار ────────────────────
         AutoPaperCard(viewModel, onJournal, now)
-    }
-}
-
-/** Closed-bar radar is read-only. It never presents a scanner candle as a live trade price. */
-@Composable
-private fun HomeRadarCard(
-    scan: PairScanState,
-    selectedSymbol: String,
-    now: Long,
-    onChartSymbol: (String) -> Unit,
-) {
-    val selected = scan.statuses.firstOrNull { it.symbol == selectedSymbol }
-    val categories = listOf(
-        AssetClass.COMMODITY to "کالا", AssetClass.FOREX to "فارکس",
-        AssetClass.CRYPTO to "رمزارز", AssetClass.STOCK to "سهام",
-    )
-    SectionCard(
-        title = "رادار بازارها · بدون پوزیشن باز",
-        subtitle = "پیشرفت واقعی اسکن کندل‌های بسته؛ نه قیمت لحظه‌ای یا وعدهٔ ورود",
-        trailing = { Pill("${scan.checkedCount}/${scan.totalCount}",
-            if (scan.sweeping) AurumColors.Cyan else AurumColors.TextSecondary) },
-    ) {
-        categories.chunked(2).forEach { pair ->
-            Row(Modifier.fillMaxWidth().padding(bottom = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                pair.forEach { (asset, label) ->
-                    val rows = scan.statuses.filter { it.assetClass == asset }
-                    StatTile(label, "${rows.count { it.state != "pending" }}/${rows.size} بررسی",
-                        modifier = Modifier.weight(1f))
-                }
-            }
-        }
-        Text(
-            when {
-                scan.sweeping -> "اسکن در جریان است؛ نتیجهٔ هر نماد بعد از دریافت خودش نمایش داده می‌شود."
-                scan.lastSweepAt != null -> "آخرین دور کامل: ${relativeTime(scan.lastSweepAt)}"
-                else -> "هنوز دور کاملی تمام نشده؛ خطای شبکه یا بسته‌بودن بازار را بررسی کنید."
-            }, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
-        )
-        scan.lastError?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = AurumColors.Red) }
-        selected?.let { row ->
-            val label = when (row.state) {
-                "pending" -> "در صف"; "closed" -> "سشن بسته"; "error" -> "خطای فید"
-                "partial" -> "داده ناقص"; "no_signal" -> "بدون سیگنال"; "watch" -> "فشردگی · واچ‌لیست"
-                "blocked" -> "مسدود"; "observed" -> "فقط مشاهده"
-                "candidate" -> "کاندیدا"; "opened" -> "معامله ثبت شد"
-                else -> "نامعلوم"
-            }
-            Text("${row.symbol} · $label: ${row.detail}",
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary,
-                modifier = Modifier.padding(top = 8.dp))
-            row.sourcePlan?.let { plan -> Text("منابع این نماد: $plan",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 4.dp)) }
-            Text("کندل پایه: ${row.baseSource ?: "هنوز دریافت نشده"} · بسته‌شدن: " +
-                (row.lastBarAt?.let { formatDateTime(it) } ?: "نامعلوم") +
-                " · بررسی: " + (row.lastScanAt?.let { relativeTime(it) } ?: "هنوز نه"),
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 4.dp))
-        }
-        val best = com.aurum.edge.data.ScanRanking.rank(scan.statuses,
-            com.aurum.edge.core.Interval.M5, now).firstOrNull()
-        if (best != null) {
-            Text("مورد فنیِ این دور: ${best.symbol} · ${best.interval?.label ?: "—"} · مشاهده چارت ↗",
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.Cyan,
-                modifier = Modifier.padding(top = 8.dp).clickable { onChartSymbol(best.symbol) })
-        }
     }
 }
 
