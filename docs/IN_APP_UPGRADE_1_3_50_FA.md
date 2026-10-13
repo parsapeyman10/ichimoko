@@ -37,8 +37,10 @@ Workflow علاوه بر تست‌های اندروید و بررسی امضای
 
 ## تحویل عمومی به آپدیتر قدیمی
 
-این شاخه فقط با اجرای دستی workflow و `publish_release=true`، برای همین نسخهٔ ۱.۳.۵۰/۶۶۶
-مجاز به انتشار است؛ push معمولی و PR صرفاً اعتبارسنجی هستند:
+این شاخه فقط برای نسخهٔ ۱.۳.۵۰/۶۶۶ مجاز به انتشار است: اجرای دستی workflow با
+`publish_release=true` یا push با پیشوند پیام `release: publish v1.3.50 updater`.
+این مسیر push محدود، مشابه مسیر انتشار قبلی مخزن است و زمانی استفاده می‌شود که اتصال
+GitHub اجازهٔ API dispatch ندارد. push معمولی و PR صرفاً اعتبارسنجی هستند:
 
 ```bash
 gh workflow run main.yml --ref arena/3d998929-ichimoko -f publish_release=true

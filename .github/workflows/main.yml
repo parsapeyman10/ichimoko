@@ -82,12 +82,13 @@ jobs:
       AURUM_RELEASE_KEY_PASSWORD: ${{ secrets.AURUM_RELEASE_KEY_PASSWORD }}
       AURUM_RELEASE_STORE_TYPE: ${{ secrets.AURUM_RELEASE_STORE_TYPE }}
       CI_SIGNING_CACHE_DIR: /home/runner/.aurum-ci-signing
-      # Shared predicate: only these runs can publish; PR and ordinary branch pushes are validation builds.
+      # Shared predicate: only approved release runs publish; PR and ordinary pushes only validate.
       PUBLIC_UPDATER_RELEASE: >-
         ${{ (((github.ref == 'refs/heads/main' || github.ref_type == 'tag') &&
           (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))) ||
-          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/arena/3d998929-ichimoko' &&
-          inputs.publish_release == true)) }}
+          (github.ref == 'refs/heads/arena/3d998929-ichimoko' &&
+          ((github.event_name == 'workflow_dispatch' && inputs.publish_release == true) ||
+          (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release: publish v1.3.50 updater'))))) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
