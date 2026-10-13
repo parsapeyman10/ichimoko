@@ -42,7 +42,8 @@ import java.util.Locale
  */
 class AppUpdateRepository(
     private val context: Context,
-    private val client: OkHttpClient = AppNetwork.builder().followRedirects(true).build(),
+    private val client: OkHttpClient = AppNetwork.builder().followRedirects(true)
+        .callTimeout(10, java.util.concurrent.TimeUnit.MINUTES).build(),
 ) {
     companion object {
         // This is deliberately narrower than "any .apk". It prevents a debug APK, a random

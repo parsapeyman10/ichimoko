@@ -14,12 +14,12 @@ class SourceRoutingTest {
         assertFalse(canRefreshSamePublisherFrames("XAG/USD", "نامعلوم"))
     }
 
-    @Test fun `all 81 scanner rows show honest exact-pair plans without claiming universal coverage`() {
+    @Test fun `all 230 scanner rows show honest exact-pair plans without claiming universal coverage`() {
         val universe = WatchCatalog.scannerSymbols
-        assertEquals(81, universe.distinct().size)
-        assertEquals(36, universe.count { AssetClass.of(it) == AssetClass.CRYPTO })
+        assertEquals(230, universe.distinct().size)
+        assertEquals(200, universe.count { AssetClass.of(it) == AssetClass.CRYPTO })
         assertEquals(25, universe.count { AssetClass.of(it) == AssetClass.FOREX })
-        assertEquals(15, universe.count { AssetClass.of(it) == AssetClass.STOCK })
+        assertEquals(0, universe.count { AssetClass.of(it) == AssetClass.STOCK })
         assertEquals(5, universe.count { AssetClass.of(it) == AssetClass.COMMODITY })
         assertTrue(universe.filter { AssetClass.of(it) == AssetClass.CRYPTO }.all {
             SourceRouting.historyPlan(it, false).contains("Gate Spot ← OKX Spot ← Kraken Spot")
