@@ -640,7 +640,7 @@ private fun PerMarketRecommendations(scan: PairScanState, interval: com.aurum.ed
                 "${rows.count { it.state == "error" }} فید ناموفق · ${rows.count { it.state == "partial" }} دادهٔ ناقص",
             trailing = { Pill(when {
                 openRows.isEmpty() -> "بسته؛ بدون اسکن"
-                scan.sweeping && pending -> "در صف اسکن"
+                scan.sweeping && pending -> "در انتظار پاسخ منبع"
                 scan.sweeping -> "این دسته بررسی شد"
                 else -> "آخرین دور"
             }, if (openRows.isEmpty()) AurumColors.Gold else AurumColors.Cyan) }) {
