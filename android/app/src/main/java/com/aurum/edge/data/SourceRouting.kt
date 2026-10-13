@@ -5,11 +5,12 @@ package com.aurum.edge.data
  * No futures/ETF/USD proxy is substituted for an oil, silver or USDT instrument.
  */
 internal object SourceRouting {
+    private val yahoo = PublicCandleHistoryClient()
     fun historyPlan(symbol: String, keyed: Boolean): String {
         if (CryptoCatalog.isCrypto(symbol))
             return "Gate Spot ← OKX Spot ← Kraken Spot (فقط رادار؛ ورود صرافی دیگر ممنوع)"
         val paths = mutableListOf<String>()
-        if (PublicCandleHistoryClient.yahooSymbol(symbol) != null)
+        if (yahoo.yahooSymbol(symbol) != null)
             paths += "Yahoo (دو میزبان، یک ناشر)"
         if (DukascopyHistoryClient.instrument(symbol) != null)
             paths += "Dukascopy"
