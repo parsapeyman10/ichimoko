@@ -61,8 +61,8 @@ android {
         applicationId = "com.aurum.edge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 663
-        versionName = "1.3.47"
+        versionCode = 664
+        versionName = "1.3.48"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
