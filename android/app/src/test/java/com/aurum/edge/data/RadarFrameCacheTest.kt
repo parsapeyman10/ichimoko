@@ -47,7 +47,7 @@ class RadarFrameCacheTest {
             Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
                 .code(200).message("test").body(body.toResponseBody("application/json".toMediaType())).build()
         }.build()
-        val client = CryptoRadarCandleClient(http)
+        val client = CryptoRadarCandleClient(http, clock = { boundary + 10_000L })
         val rows = (1..3).map { async { client.fetch("BTC/USDT", interval, CryptoRadarCandleClient.Venue.GATE) } }.awaitAll()
         assertEquals(320, rows.first().candles.size)
         assertEquals(2, calls.get()) // one listing, one history, no duplicate page/refresh calls

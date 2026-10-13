@@ -27,6 +27,7 @@ class CryptoRadarCandleClient(
     private val http: OkHttpClient = AppNetwork.builder()
         .connectTimeout(20, TimeUnit.SECONDS).readTimeout(25, TimeUnit.SECONDS)
         .callTimeout(40, TimeUnit.SECONDS).followRedirects(false).build(),
+    private val clock: () -> Long = System::currentTimeMillis,
 ) {
     enum class Venue(val provider: String, val host: String) {
         GATE("Gate Spot / USDT (radar only)", "https://api.gateio.ws"),
@@ -70,7 +71,7 @@ class CryptoRadarCandleClient(
     private suspend fun checkListing(symbol: String, venue: Venue, pair: String): String =
         listingLocks.getOrPut("${venue.name}:$symbol") { Mutex() }.withLock {
         val key = "${venue.name}:$symbol"
-        if (System.currentTimeMillis() - (listing[key] ?: 0L) in 0L..3_600_000L)
+        if (clock() - (listing[key] ?: 0L) in 0L..3_600_000L)
             return@withLock krakenPairs[key] ?: pair
         val base = symbol.substringBefore('/')
         val body = when (venue) {
@@ -105,7 +106,7 @@ class CryptoRadarCandleClient(
                 } == true
         }
         if (!valid) throw DataFeedException("${venue.provider}: جفت دقیق $symbol فعال/تأییدشده نیست")
-        listing[key] = System.currentTimeMillis()
+        listing[key] = clock()
         return@withLock krakenPairs[key] ?: pair
     }
 
@@ -115,7 +116,7 @@ class CryptoRadarCandleClient(
             val route = AppNetwork.route.value
             if (!route.ready) throw DataFeedException("اتصال Tor هنوز آماده نیست؛ تحلیل تازه انجام نشد")
             frameCache[key]?.takeIf { it.revision == route.revision &&
-                reusable(it.result.candles, interval, System.currentTimeMillis()) }?.let { return@withLock it.result }
+                reusable(it.result.candles, interval, clock()) }?.let { return@withLock it.result }
             val result = fetchUncached(symbol, interval, venue)
             if (route != AppNetwork.route.value) throw DataFeedException("مسیر اتصال تغییر کرد")
             frameCache[key] = Cached(result, route.revision)
@@ -134,15 +135,15 @@ class CryptoRadarCandleClient(
         }
         val rows = when (venue) {
             Venue.GATE -> parseGate(get(venue, "/api/v4/spot/candlesticks?currency_pair=$pair&interval=$bar&limit=330"),
-                interval, System.currentTimeMillis())
+                interval, clock())
             Venue.KRAKEN -> parseKraken(get(venue,
-                "/0/public/OHLC?pair=$pair&interval=${interval.minutes}"), interval, System.currentTimeMillis())
+                "/0/public/OHLC?pair=$pair&interval=${interval.minutes}"), interval, clock())
             Venue.OKX -> {
                 val all = mutableListOf<Candle>()
                 var after: Long? = null
                 repeat(2) { // OKX 300/page; 320 CLOSED candles need two pages
                     val page = parseOkx(get(venue, "/api/v5/market/history-candles?instId=$pair&bar=$bar&limit=300" +
-                        (after?.let { "&after=$it" } ?: "")), interval, System.currentTimeMillis())
+                        (after?.let { "&after=$it" } ?: "")), interval, clock())
                     if (page.isNotEmpty()) {
                         val oldest = page.minOf { it.time }
                         if (after != null && oldest >= after!!) throw DataFeedException("صفحه‌های OKX پیش نمی‌روند")
@@ -153,7 +154,7 @@ class CryptoRadarCandleClient(
                 all
             }
         }
-        val receivedAt = System.currentTimeMillis()
+        val receivedAt = clock()
         val tail = rows.filter { it.closed && it.time + interval.millis <= receivedAt }
             .distinctBy { it.time }.sortedBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
         if (!CandleSourceHealth.ready(tail, interval, receivedAt, requireContiguous = true, requireVolume = false))
@@ -180,7 +181,7 @@ class CryptoRadarCandleClient(
             Venue.OKX -> parseOkxTrade(body, id)
             Venue.KRAKEN -> parseKrakenTrade(body)
         }
-        val receivedAt = System.currentTimeMillis()
+        val receivedAt = clock()
         if (tick.at !in (receivedAt - 90_000L)..(receivedAt + 10_000L))
             throw DataFeedException("${venue.provider}: آخرین معامله تازه نیست")
         return tick

@@ -92,10 +92,12 @@ class AppContainer(context: Context) {
             when {
                 verified.evaluationError != null -> "error"
                 verified.signal?.isActionable == true -> "candidate"
+                verified.signal == null -> "waiting_data"
                 else -> "no_signal"
             },
             verified.evaluationError ?: verified.signal?.blockers?.joinToString("، ")?.ifBlank { "چهار لایه و AI بررسی شدند" }
-                ?: "دادهٔ زنده/تایم‌فریم معتبر نیست", verified.signal, now, dedupe = true)
+                ?: "در انتظار دادهٔ معتبر؛ ${observedFeed.provider}: ${observedFeed.detail.take(240)}؛ تحلیل/ورود انجام نشد",
+            verified.signal, now, dedupe = true)
         verified // four-layer engine owns the price plan; ICT remains optional research context
     }.stateIn(appScope, SharingStarted.Eagerly, market.state.value.copy(signal = null))
     /** Periodic sweep of the editable V1 watchlist; only verified independent bars can become candidates. */
