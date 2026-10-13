@@ -71,7 +71,8 @@ env:
 
 jobs:
   apk:
-    if: github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'verify: public v1.3.51')
+    if: >-
+      github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'verify: public v1.3.51')
     name: Build, test, package APK
     runs-on: ubuntu-latest
     timeout-minutes: 55
@@ -661,7 +662,8 @@ jobs:
 
   public-updater-audit:
     name: Independently verify published updater
-    if: github.event_name == 'push' && github.ref == 'refs/heads/arena/3d998929-ichimoko' && startsWith(github.event.head_commit.message, 'verify: public v1.3.51')
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/arena/3d998929-ichimoko' && startsWith(github.event.head_commit.message, 'verify: public v1.3.51')
     runs-on: ubuntu-latest
     timeout-minutes: 12
     permissions:
