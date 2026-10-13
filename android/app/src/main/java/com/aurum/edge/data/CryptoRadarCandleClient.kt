@@ -53,7 +53,12 @@ class CryptoRadarCandleClient(
             }
         } catch (cancel: CancellationException) { throw cancel }
         catch (error: DataFeedException) { throw error }
-        catch (_: Exception) { throw DataFeedException("${venue.provider} پاسخ نداد") }
+        catch (_: Exception) {
+            // A blocked/unreachable host must not cost a full socket timeout for EACH
+            // of the 36 pairs in the same sweep. Other venues still get their turn.
+            cooldown[venue] = System.currentTimeMillis() + 60_000L
+            throw DataFeedException("${venue.provider} پاسخ نداد")
+        }
     }
 
     private fun pair(symbol: String, venue: Venue): String {
