@@ -4,6 +4,7 @@ import com.aurum.edge.core.Candle
 import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
 import com.aurum.edge.engine.MtfAnalyzer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -56,26 +57,25 @@ class PublicCandleHistoryClient(
             ?: throw DataFeedException("برای این نماد تاریخچهٔ رایگانِ بدون کلید تعریف نشده است")
         val keepSize = HistoryPolicy.deepProviderRequestSize(desiredSize, minimumSize)
         val requestInterval = requestInterval(interval)
-        val url = "https://query1.finance.yahoo.com/v8/finance/chart/" +
-            encodeYahooPath(yahoo) +
+        val path = encodeYahooPath(yahoo) +
             "?interval=$requestInterval&range=${range(interval)}&includePrePost=false&events=history"
-        val body = try {
-            client.newCall(Request.Builder()
-                .url(url)
-                .header("Accept", "application/json")
-                .header("User-Agent", "AurumEdge/1 Android")
-                .build()).execute().use { response ->
-                    if (!response.isSuccessful) throw DataFeedException("تاریخچهٔ رایگان HTTP ${response.code}")
-                    val bytes = response.peekBody(4_000_001L).bytes()
-                    if (bytes.size > 4_000_000) throw DataFeedException("پاسخ تاریخچهٔ رایگان بیش از حد بزرگ است")
-                    bytes.toString(Charsets.UTF_8).takeIf { it.isNotBlank() }
-                        ?: throw DataFeedException("پاسخ تاریخچهٔ رایگان خالی است")
-                }
-        } catch (e: DataFeedException) {
-            throw e
-        } catch (_: Exception) {
-            throw DataFeedException("اتصال به تاریخچهٔ رایگان Yahoo Finance برقرار نشد")
-        }
+        // Same Yahoo publisher, TWO bounded hosts for availability only. These are
+        // not independent market confirmations; never count both as separate evidence.
+        val body = listOf("query1.finance.yahoo.com", "query2.finance.yahoo.com")
+            .firstNotNullOfOrNull { host ->
+                try {
+                    val url = "https://$host/v8/finance/chart/$path"
+                    client.newCall(Request.Builder().url(url).header("Accept", "application/json")
+                        .header("User-Agent", "AurumEdge/1 Android").build()).execute().use { response ->
+                        if (!response.isSuccessful) throw DataFeedException("Yahoo HTTP ${response.code}")
+                        val bytes = response.peekBody(4_000_001L).bytes()
+                        if (bytes.size > 4_000_000) throw DataFeedException("پاسخ Yahoo بیش از حد بزرگ است")
+                        bytes.toString(Charsets.UTF_8).takeIf { it.isNotBlank() }
+                            ?: throw DataFeedException("پاسخ Yahoo خالی است")
+                    }
+                } catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) { null }
+            } ?: throw DataFeedException("دو مسیر Yahoo برای این نماد تاریخچه ندادند")
         val baseInterval = if (interval == Interval.H4) Interval.H1 else interval
         val parsed = parseYahooChart(body, symbol, yahoo, baseInterval,
             trimToCache = interval != Interval.H4, trimSize = keepSize)
