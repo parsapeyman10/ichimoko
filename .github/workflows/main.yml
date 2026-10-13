@@ -83,35 +83,7 @@ jobs:
         ${{ (((github.ref == 'refs/heads/main' || github.ref_type == 'tag') &&
           (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))) ||
           (github.event_name == 'push' && github.ref == 'refs/heads/arena/20dbf868-ichimoko' &&
-          (startsWith(github.event.head_commit.message, 'release: publish approved v1.3.14 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.15 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.16 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.17 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.18 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.19 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.20 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.21 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.22 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.23 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.24 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.25 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.26 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.27 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.28 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.29 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.30 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.31 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.32 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.33 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.34 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.35 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.36 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.42 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.43 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.44 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.45 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.46 updater') ||
-          startsWith(github.event.head_commit.message, 'release: publish approved v1.3.47 updater')))) }}
+          (startsWith(github.event.head_commit.message, 'release: publish approved v1.3.47 updater')))) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
