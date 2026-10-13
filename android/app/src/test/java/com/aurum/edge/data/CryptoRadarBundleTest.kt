@@ -61,8 +61,7 @@ class CryptoRadarBundleTest {
         val krakenTrade = """{"error":[],"result":{"XBTUSDT":[["100","2","${now/1000.0}","b","l",""]],"last":"99"}}"""
         assertEquals(100.0, client.parseKrakenTrade(krakenTrade).price, 0.00001)
         assertThrows(DataFeedException::class.java) {
-            client.parseKrakenTrade(krakenTrade.replace("XBTUSDT", "XBTUSDT2").replace(
-                ""last":"99"", ""second":[],"last":"99""))
+            client.parseKrakenTrade("""{"error":[],"result":{"A":[],"B":[],"last":"99"}}""")
         }
         assertThrows(DataFeedException::class.java) {
             client.parseGateTrade("""[{"currency_pair":"ETH_USDT","price":"100","amount":"1","create_time_ms":"$now"}]""", "BTC_USDT")
