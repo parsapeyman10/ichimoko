@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit
  * interpolation or GC futures proxy is used: XAU/USD history remains spot-gold history.
  */
 class DukascopyHistoryClient(
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = AppNetwork.builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
         .callTimeout(45, TimeUnit.SECONDS)

@@ -16,6 +16,7 @@ class TradingViewEmbedTest {
         assertTrue(html.contains("https://s3.tradingview.com/tv.js"))
         assertTrue(html.contains("symbol=OANDA%3AXAUUSD"))
         assertTrue(html.contains("&interval=5&"))
+        assertTrue(html.contains("&symboledit=0"))
         assertFalse(html.contains("&interval=60&"))
         assertTrue(html.contains("studies=%5B%22STD%3BIchimoku%25Cloud%22%5D"))
         val encoded = html.substringAfter("studies_overrides=").substringBefore('"')
@@ -30,9 +31,10 @@ class TradingViewEmbedTest {
     @Test fun `invalid or injection ticker is rejected instead of substituting gold`() {
         assertNull(TradingViewEmbed.html("BAD&symbol=OTHER"))
         assertNull(TradingViewEmbed.html("</script>"))
-        assertTrue(TradingViewEmbed.html("NASDAQ:AAPL")!!.contains("symbol=NASDAQ%3AAAPL"))
-        assertFalse(TradingViewEmbed.html("NASDAQ:AAPL")!!.contains("OANDA%3AXAUUSD"))
+        assertNull(TradingViewEmbed.html("NASDAQ:AAPL"))
+        assertTrue(TradingViewEmbed.html("BINANCE:ETHUSDT")!!.contains("symbol=BINANCE%3AETHUSDT"))
+        assertFalse(TradingViewEmbed.html("BINANCE:ETHUSDT")!!.contains("OANDA%3AXAUUSD"))
         assertTrue(TradingViewEmbed.html("BINANCE:ATOMUSDT")!!.contains("&interval=5&"))
-        assertTrue(TradingViewEmbed.html("NASDAQ:AAPL")!!.contains("&interval=5&"))
+        assertTrue(TradingViewEmbed.html("BINANCE:ETHUSDT")!!.contains("&interval=5&"))
     }
 }

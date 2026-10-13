@@ -42,7 +42,7 @@ import java.util.Locale
  */
 class AppUpdateRepository(
     private val context: Context,
-    private val client: OkHttpClient = OkHttpClient.Builder().followRedirects(true).build(),
+    private val client: OkHttpClient = AppNetwork.builder().followRedirects(true).build(),
 ) {
     companion object {
         // This is deliberately narrower than "any .apk". It prevents a debug APK, a random

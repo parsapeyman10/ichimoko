@@ -271,7 +271,7 @@ private fun MarketTrendCard(
                     "EMA20 نسبت به EMA50، شیب EMA50 بر حسب ATR، Efficiency Ratio، ساختار سقف/کف " +
                     "(HH/HL یا LH/LL) و جابه‌جایی خالص بر حسب ATR. مجموع ≥+۲ صعودی و ≤−۲ نزولی است. " +
                     "(۲) همان اندازه‌گیری برای همهٔ نمادهای پویش‌شده تکرار می‌شود و «عرض بازار» را می‌سازد. " +
-                    "(۳) جهت دلار از شش جفت اصلی و جوّ ریسک از رمزارز/سهام در برابر طلا خوانده می‌شود.",
+                    "(۳) جهت دلار از شش جفت اصلی و جوّ ریسک از رمزارز در برابر طلا خوانده می‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -502,7 +502,7 @@ private fun fmt2(value: Double?): String =
 private fun PerMarketRecommendations(scan: PairScanState, interval: com.aurum.edge.core.Interval,
                                      now: Long, onSelect: (String) -> Unit) {
     val picks = ScanRanking.byMarket(scan.statuses, interval, now)
-    AssetClass.entries.forEach { category ->
+    AssetClass.entries.filter { it != AssetClass.STOCK }.forEach { category ->
         val rows = scan.statuses.filter { it.assetClass == category }
         val openRows = rows.filterNot { com.aurum.edge.core.MarketHours.closedFor(it.symbol, now) }
         val checked = openRows.count { it.state != "pending" && it.state != "closed" }
@@ -749,7 +749,7 @@ private fun TopCandidatesDetailedSection(
 ) {
     SectionCard(
         title = "🏆 ۳ کاندیدای برتر بازار (Top 3 Candidates)",
-        subtitle = "فرصت‌های ممتاز استخراج‌شده از میان ۵۰+ نماد با تفکیک دقیق دسته دارایی و امتیاز شروط",
+        subtitle = "فرصت‌های ممتاز استخراج‌شده از میان ۲۰۰ کریپتو و نمادهای فارکس/کالا با تفکیک دقیق دسته دارایی و امتیاز شروط",
         trailing = {
             Pill("${candidates.size} کاندیدا", AurumColors.Gold)
         },
@@ -881,8 +881,8 @@ private fun CandidateDetailedItemCard(
 internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, now: Long) {
     LaunchedEffect(scan.lastSweepAt) { if (scan.lastSweepAt == null) onScan() }
     SectionCard(
-        title = "پایش پیوستهٔ ۵۰+ نماد در پس‌زمینه",
-        subtitle = "دیتاگیری و کشف خودکار فرصت‌ها از بازار کریپتو، طلا، نفت، فارکس و سهام",
+        title = "پایش پیوستهٔ ۲۰۰ کریپتو و نمادهای فارکس/کالا در پس‌زمینه",
+        subtitle = "دیتاگیری و کشف خودکار فرصت‌ها از بازار کریپتو، طلا، نفت و فارکس",
         trailing = {
             Pill(
                 when {

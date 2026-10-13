@@ -296,7 +296,6 @@ fun AssetClass4SlotsBanner(
         com.aurum.edge.core.AssetClass.COMMODITY to "طلا و کالا",
         com.aurum.edge.core.AssetClass.FOREX to "جفت‌ارزها",
         com.aurum.edge.core.AssetClass.CRYPTO to "رمزارزها",
-        com.aurum.edge.core.AssetClass.STOCK to "سهام جهانی",
     )
 
     Column(

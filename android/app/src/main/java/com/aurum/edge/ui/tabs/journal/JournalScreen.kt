@@ -134,8 +134,9 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
                 AssetClass.COMMODITY to "طلا و کالا",
                 AssetClass.FOREX to "فارکس",
                 AssetClass.CRYPTO to "رمزارزها",
-                AssetClass.STOCK to "سهام بین‌المللی",
-            ).forEach { (cls, label) ->
+                AssetClass.STOCK to "سهام · فقط سوابق",
+            ).filter { (cls, _) -> cls != AssetClass.STOCK || trades.any { it.assetClass == cls } }
+                .forEach { (cls, label) ->
                 val countInClass = trades.count { it.assetClass == cls }
                 FilterChip(
                     selected = selectedCategory == cls,

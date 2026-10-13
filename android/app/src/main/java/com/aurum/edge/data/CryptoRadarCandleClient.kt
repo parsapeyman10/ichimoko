@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit
  * A failure/429 falls through to another venue; bar histories are NEVER stitched together.
  */
 class CryptoRadarCandleClient(
-    private val http: OkHttpClient = OkHttpClient.Builder()
+    private val http: OkHttpClient = AppNetwork.builder()
         .connectTimeout(7, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS)
         .callTimeout(15, TimeUnit.SECONDS).followRedirects(false).build(),
 ) {

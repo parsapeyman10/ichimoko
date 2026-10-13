@@ -112,6 +112,9 @@ class JournalStore(
         cryptoEntryQuote: com.aurum.edge.core.PriceTick? = null,
         cryptoNews: PersianNewsState? = null,
     ): PaperTrade {
+        require(com.aurum.edge.core.V1Universe.valid(symbol)) {
+            "نماد از بازارهای فعال حذف شده است؛ فقط مدیریت سوابق قبلی مجاز است"
+        }
         // Authoritative entry guard, independent of UI, scanner and automatic trader. Do not
         // move this into settlement: already-open oil positions must still be manageable.
         require(signal.interval == com.aurum.edge.core.Interval.M5) {

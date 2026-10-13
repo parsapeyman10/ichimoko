@@ -12,7 +12,7 @@ object ChartSymbolChoices {
         ChartSymbolChoice(id, ticker, label)
     }
 
-    fun search(query: String, limit: Int = 60): List<ChartSymbolChoice> {
+    fun search(query: String, limit: Int = 250): List<ChartSymbolChoice> {
         val term = query.trim().uppercase(Locale.ROOT)
         return all.filter { choice ->
             term.isEmpty() || choice.id.uppercase(Locale.ROOT).contains(term) ||

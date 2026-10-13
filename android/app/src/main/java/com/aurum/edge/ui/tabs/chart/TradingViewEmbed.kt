@@ -12,7 +12,7 @@ internal object TradingViewEmbed {
     private val ticker = Regex("^[A-Za-z0-9:./_-]{1,64}$")
 
     fun html(symbol: String): String? {
-        if (!ticker.matches(symbol)) return null
+        if (!ticker.matches(symbol) || com.aurum.edge.data.ChartSymbolChoices.all.none { it.ticker == symbol }) return null
         val encoded = URLEncoder.encode(symbol, "UTF-8")
         val ichi = SignalEngine.ichimokuSetting(Interval.M5)
         // Public widgetembed accepts a studies_overrides JSON query in examples. Request
@@ -30,7 +30,7 @@ internal object TradingViewEmbed {
             // A new chart (including a symbol change) always requests M5; the independent
             // signal/feed interval is NOT changed. The third-party iframe can still let a
             // person select another timeframe manually while it remains open.
-            "&symbol=$encoded&interval=5&hidesidetoolbar=0&symboledit=1" +
+            "&symbol=$encoded&interval=5&hidesidetoolbar=0&symboledit=0" +
             "&saveimage=0&toolbarbg=0b0e13" +
             "&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1&locale=en" +
             "&studies=%5B%22STD%3BIchimoku%25Cloud%22%5D" +

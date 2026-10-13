@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit
  * a provider limitation instead of filling gaps with generated prices.
  */
 class PublicCandleHistoryClient(
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = AppNetwork.builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .callTimeout(35, TimeUnit.SECONDS)

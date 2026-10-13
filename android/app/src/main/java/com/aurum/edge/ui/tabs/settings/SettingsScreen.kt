@@ -54,6 +54,7 @@ import com.aurum.edge.ui.theme.AurumColors
 @Composable
 fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     val context = LocalContext.current
+    val proxyStatus by viewModel.proxyStatus.collectAsStateWithLifecycle()
     val monitorRunning by SignalMonitorService.running.collectAsStateWithLifecycle()
     // Never prefill a saved secret in an editable Compose field. Blank means keep the stored key.
     var newsUrl by remember { mutableStateOf(settings.newsBaseUrl) }
@@ -112,7 +113,24 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             .verticalScroll(rememberScrollState())
             .padding(bottom = 12.dp),
     ) {
-        SectionCard("فهرست و حالت هر بازار · روندگیر / رنج‌گیر / ترکیبی", "۸ نماد پیش‌فرض، ۲ نماد از هر دسته؛ کاتالوگ گسترده فقط با دادهٔ معتبر") {
+        SectionCard("اتصال مستقل · پروکسی داخلی Tor", "بدون حساب، آدرس سرور، رمز یا کلید") {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("پروکسی روشن / خاموش", Modifier.weight(1f))
+                Switch(checked = settings.proxyEnabled, onCheckedChange = viewModel::setProxyEnabled)
+            }
+            Text(proxyStatus.label, color = AurumColors.Gold,
+                style = MaterialTheme.typography.bodySmall)
+            Text("بازسازی اتصال خودکار است. در حالت روشن، قطع پروکسی باعث اتصال مستقیم پنهانی نمی‌شود. " +
+                "اینترنت قطع، مسدودبودن Tor یا محدودیت باتری اندروید ممکن است اتصال را متوقف کند. " +
+                "برای پایش در پس‌زمینه، گزینهٔ پایش پس‌زمینه را هم فعال کنید.",
+                style = MaterialTheme.typography.bodySmall)
+            Text("قیمت‌های عمومی بدون کلید دریافت می‌شوند. این قابلیت اطلاعات شخصی یا ژورنال شما را جمع‌آوری نمی‌کند؛ " +
+                "سرویس‌های مقصد درخواست بازار را می‌بینند و Tor یک شبکهٔ شخص ثالث است. " +
+                "AI و سرورهای اختیاری فقط با تنظیم خودتان فعال می‌شوند.",
+                style = MaterialTheme.typography.bodySmall)
+        }
+
+        SectionCard("فهرست و حالت هر بازار · روندگیر / رنج‌گیر / ترکیبی", "۲۰۰ نماد کریپتو + فارکس و کالا؛ سهام آمریکا حذف شده است") {
             var watchlistText by remember(settings.activeWatchlist) {
                 mutableStateOf(settings.activeWatchlist.joinToString(", "))
             }
@@ -130,7 +148,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                         onClick = { viewModel.selectChartSymbol(pair) }, label = { Text(pair) })
                 }
             }
-            com.aurum.edge.core.AssetClass.entries.forEach { category ->
+            com.aurum.edge.core.AssetClass.entries.filter { it != com.aurum.edge.core.AssetClass.STOCK }.forEach { category ->
                 Text(category.label, style = MaterialTheme.typography.bodySmall)
                 if (category == com.aurum.edge.core.AssetClass.CRYPTO)
                     Text("فشردگی ← انفجار · 5m · 9/26/52 + 103 (ثابت)",

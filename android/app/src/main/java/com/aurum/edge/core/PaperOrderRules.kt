@@ -37,7 +37,7 @@ object PaperOrderRules {
     fun paperable(symbol: String): Boolean {
         val s = symbol.trim().uppercase(java.util.Locale.ROOT)
         if (s.isBlank() || s.contains("IRT") || s.contains("IRR")) return false
-        return s.matches(Regex("[A-Z0-9]{2,12}(/[A-Z0-9]{2,12})?"))
+        return s.matches(Regex("[A-Z0-9]{1,12}(/[A-Z0-9]{2,12})?"))
     }
 
     fun unitFor(symbol: String): String {

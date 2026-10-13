@@ -22,6 +22,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.data.AppNetwork
+import com.aurum.edge.data.WebProxyRouting
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -39,6 +42,9 @@ import com.aurum.edge.ui.theme.AurumColors
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun ChartScreen(initialTicker: String, onSelectTicker: (String) -> Unit) {
+    val route by AppNetwork.route.collectAsStateWithLifecycle()
+    val appliedRevision by WebProxyRouting.appliedRevision.collectAsStateWithLifecycle()
+    val networkReady = route.ready && appliedRevision == route.revision
     val html = remember(initialTicker) { TradingViewEmbed.html(initialTicker) }
     var showPicker by remember { mutableStateOf(false) }
     // Re-selecting the same ticker deliberately reloads M5 after an in-widget manual change.
@@ -55,13 +61,16 @@ fun ChartScreen(initialTicker: String, onSelectTicker: (String) -> Unit) {
             // Recreate the widget with its Ichimoku study if it was removed inside TradingView.
             TextButton(onClick = { reloadCount++ }) { Text("ایچیموکو ↻") }
         }
-        if (html == null) {
+        if (!networkReady) {
+            Text("چارت منتظر تنظیم مسیر اتصال است. در حالت پروکسی، WebView باید از Proxy Override پشتیبانی کند؛ در صورت نیاز Android System WebView را به‌روز کنید.",
+                modifier = Modifier.padding(20.dp), color = AurumColors.Gold)
+        } else if (html == null) {
             Text("نماد TradingView معتبر نیست؛ چارت نماد دیگری جایگزین نمی‌شود",
                 modifier = Modifier.padding(20.dp), color = AurumColors.Gold)
         } else {
             // Preserve the historical iframe + mobile WebView bootstrap. Recomposition never
             // reloads it; selecting a different instrument replaces the old view exactly once.
-            key(initialTicker, reloadCount) {
+            key(initialTicker, reloadCount, route.revision) {
                 AndroidView(
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     factory = { context ->
@@ -93,11 +102,12 @@ fun ChartScreen(initialTicker: String, onSelectTicker: (String) -> Unit) {
                             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                             webChromeClient = WebChromeClient()
                             webViewClient = WebViewClient() // default behavior cancels certificate errors
+                            WebProxyRouting.track(this)
                             loadDataWithBaseURL("https://s3.tradingview.com", html, "text/html", "UTF-8", "https://s3.tradingview.com")
                         }
                     },
                     onReset = null,
-                    onRelease = { webView -> webView.stopLoading(); webView.destroy() },
+                    onRelease = { webView -> WebProxyRouting.release(webView) },
                 )
             }
         }

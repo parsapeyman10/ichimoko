@@ -45,7 +45,7 @@ class SettingsStore(context: Context) {
         return AppSettings(
         apiKey = storedApiKey?.takeIf { it.isNotBlank() }
             ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY.trim(),
-        // Symbol can be any instrument in the 50+ global universe (forex, commodities, stocks, crypto)
+        // Symbol can be any instrument in the catalog (forex, commodities, crypto)
         symbol = (prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD")
             .takeIf(V1Universe::valid) ?: "XAU/USD",
         interval = Interval.fromLabel(prefs.getString(KEY_INTERVAL, null) ?: "5m"),
@@ -54,6 +54,7 @@ class SettingsStore(context: Context) {
         minConfidence = prefs.getFloat(KEY_MIN_CONF, 85f).toDouble().takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
         spreadPrice = prefs.getFloat(KEY_SPREAD, 0.12f).toDouble(),
         commissionPerOz = prefs.getFloat(KEY_COMMISSION, 0.035f).toDouble(),
+        proxyEnabled = prefs.getBoolean(KEY_PROXY, false),
         backgroundMonitor = prefs.getBoolean(KEY_MONITOR, false),
         notifyOnSignal = prefs.getBoolean(KEY_NOTIFY, true),
         alertSoundUri = prefs.getString(KEY_ALERT_SOUND_URI, "").orEmpty(),
@@ -71,6 +72,14 @@ class SettingsStore(context: Context) {
         activeWatchlist = activeWatchlist,
         categoryStrategies = categoryStrategies,
     )
+    }
+
+    /** A proxy toggle is acknowledged only after a durable local write. */
+    @Synchronized
+    fun saveProxyEnabled(enabled: Boolean): Boolean {
+        if (!prefs.edit().putBoolean(KEY_PROXY, enabled).commit()) return false
+        _settings.value = read()
+        return true
     }
 
     /**
@@ -98,7 +107,7 @@ class SettingsStore(context: Context) {
 
     /**
      * Switch ONLY the chart/signal symbol, without touching the stored key.
-     * Allowed set is the 50+ instrument universe (gold, commodities, forex, crypto, stocks).
+     * Allowed set is the instrument universe (gold, commodities, forex, crypto).
      */
     @Synchronized
     fun saveChartSymbol(symbolInput: String): Boolean {
@@ -230,6 +239,7 @@ class SettingsStore(context: Context) {
         val proposed = transform(_settings.value)
         if (proposed.accountBalance != _settings.value.accountBalance) dayOpeningEquity()
         val next = proposed.copy(
+            symbol = V1Universe.normalize(proposed.symbol).takeIf(V1Universe::valid) ?: "XAU/USD",
             activeWatchlist = V1Universe.watchlist(proposed.activeWatchlist),
             riskPercent = proposed.riskPercent.takeIf { it.isFinite() }?.coerceIn(0.1, 0.5) ?: 0.5,
             minConfidence = proposed.minConfidence.takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
@@ -243,6 +253,7 @@ class SettingsStore(context: Context) {
             .putFloat(KEY_MIN_CONF, next.minConfidence.toFloat())
             .putFloat(KEY_SPREAD, next.spreadPrice.toFloat())
             .putFloat(KEY_COMMISSION, next.commissionPerOz.toFloat())
+            .putBoolean(KEY_PROXY, next.proxyEnabled)
             .putBoolean(KEY_MONITOR, next.backgroundMonitor)
             .putBoolean(KEY_NOTIFY, next.notifyOnSignal)
             .putString(KEY_ALERT_SOUND_URI, next.alertSoundUri)
@@ -291,6 +302,7 @@ class SettingsStore(context: Context) {
         private const val KEY_MIN_CONF = "min_confidence"
         private const val KEY_SPREAD = "spread_price"
         private const val KEY_COMMISSION = "commission_per_oz"
+        private const val KEY_PROXY = "embedded_tor_enabled"
         private const val KEY_MONITOR = "background_monitor"
         private const val KEY_NOTIFY = "notify_signal"
         private const val KEY_ALERT_SOUND_URI = "verified_alert_sound_uri"

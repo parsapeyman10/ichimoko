@@ -40,6 +40,8 @@
                 android:resource="@xml/update_file_paths" />
         </provider>
 
+        <service android:name="org.torproject.jni.TorService" android:exported="false" />
+
         <service
             android:name=".service.SignalMonitorService"
             android:exported="false"

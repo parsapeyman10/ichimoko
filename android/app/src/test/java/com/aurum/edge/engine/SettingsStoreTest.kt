@@ -43,7 +43,7 @@ class SettingsStoreTest {
         val store = SettingsStore(context)
         // Symbols outside the 50+ catalog are rejected, key untouched.
         assertFalse(store.saveChartSymbol("TOTALLY_INVALID_XYZ"))
-        assertTrue(store.saveChartSymbol("AAPL"))
+        assertFalse(store.saveChartSymbol("AAPL"))
         assertTrue(store.saveChartSymbol("XAG/USD"))
         assertTrue(store.saveChartSymbol(" eur/usd "))
         assertEquals("EUR/USD", store.read().symbol)
@@ -70,4 +70,34 @@ class SettingsStoreTest {
         assertTrue(store.saveNewsBaseUrl(""))
         assertEquals("", SettingsStore(context).read().newsBaseUrl)
     }
+    @Test fun `legacy stocks migrate without deleting journal or optional credentials`() {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE)
+        prefs.edit().clear().putString("symbol", "NVDA")
+            .putString("v1_watchlist", "AAPL,BTC/USDT,EUR/USD,SPY")
+            .putString("td_api_key", "synthetic-key").commit()
+        val store = SettingsStore(context)
+        assertEquals("XAU/USD", store.read().symbol)
+        assertEquals(listOf("BTC/USDT", "EUR/USD"), store.read().activeWatchlist)
+        assertEquals("synthetic-key", store.read().apiKey)
+        assertFalse(store.saveMarketCredentials("", "AAPL"))
+        store.update { it.copy(symbol = "MSFT") }
+        assertEquals("XAU/USD", SettingsStore(context).read().symbol)
+    }
+
+    @Test fun `proxy choice needs no credentials and survives restart and other settings writes`() {
+        val context = RuntimeEnvironment.getApplication()
+        context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit().clear().commit()
+        val store = SettingsStore(context)
+        assertFalse(store.read().proxyEnabled)
+        assertTrue(store.saveProxyEnabled(true))
+        assertTrue(SettingsStore(context).read().proxyEnabled)
+        assertFalse(store.read().hasKey)
+        assertFalse(store.read().hasClientNewsAi)
+        store.update { it.copy(notifyOnSignal = false) }
+        assertTrue(SettingsStore(context).read().proxyEnabled)
+        assertTrue(store.saveProxyEnabled(false))
+        assertFalse(SettingsStore(context).read().proxyEnabled)
+    }
+
 }

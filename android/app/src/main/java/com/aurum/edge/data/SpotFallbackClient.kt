@@ -34,7 +34,7 @@ import java.util.concurrent.TimeUnit
  * aggregator is needed here.
  */
 class SpotFallbackClient(
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = AppNetwork.builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .build(),

@@ -70,7 +70,7 @@ class ForexCalendarRepository(private val scope: CoroutineScope) {
     // The calendar host redirects to its CDN, which a no-redirect client reports as a
     // failure, and the weekly feed is comfortably larger than the old 512 KB peek cap.
     // Both made the tab look permanently broken.
-    private val client = OkHttpClient.Builder()
+    private val client = AppNetwork.builder()
         .callTimeout(25, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)

@@ -43,22 +43,6 @@ object TradingViewSymbols {
         "CAD/CHF" to "OANDA:CADCHF",
         "NZD/CAD" to "OANDA:NZDCAD",
 
-        // Top Global Stocks & ETFs
-        "AAPL" to "NASDAQ:AAPL",
-        "TSLA" to "NASDAQ:TSLA",
-        "NVDA" to "NASDAQ:NVDA",
-        "MSFT" to "NASDAQ:MSFT",
-        "AMZN" to "NASDAQ:AMZN",
-        "GOOGL" to "NASDAQ:GOOGL",
-        "META" to "NASDAQ:META",
-        "AMD" to "NASDAQ:AMD",
-        "NFLX" to "NASDAQ:NFLX",
-        "INTC" to "NASDAQ:INTC",
-        "SPY" to "AMEX:SPY",
-        "QQQ" to "NASDAQ:QQQ",
-        "PLTR" to "NYSE:PLTR",
-        "COIN" to "NASDAQ:COIN",
-        "BABA" to "NYSE:BABA",
     )
 
     fun find(symbol: String): String? {

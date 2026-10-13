@@ -52,6 +52,7 @@ class AppContainer(context: Context) {
     val appContext: Context = context.applicationContext
 
     val settingsStore = SettingsStore(appContext)
+    val proxy = com.aurum.edge.data.EmbeddedProxy(appContext, settingsStore)
     val decisionLog = com.aurum.edge.data.DecisionLogStore(appContext)
     val candleCache = CandleCache(appContext)
     val journalStore = JournalStore(appContext, settingsStore = settingsStore)

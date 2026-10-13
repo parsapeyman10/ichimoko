@@ -11,7 +11,7 @@ class ChartSymbolChoicesTest {
         assertEquals("OANDA:EURUSD", eur.ticker)
         assertEquals("OANDA:EURUSD", TradingViewSymbols.find(eur.id))
         assertTrue(TradingViewSymbols.find("ETH/USDT") in ChartSymbolChoices.search("eth").map { it.ticker })
-        assertTrue(ChartSymbolChoices.search("NASDAQ:AAPL").any { it.id == "AAPL" })
+        assertTrue(ChartSymbolChoices.search("NASDAQ:AAPL").isEmpty())
         assertTrue(ChartSymbolChoices.search("NOT-A-REAL-SYMBOL").isEmpty())
         assertFalse(ChartSymbolChoices.search("EUR/USD").any { it.ticker == "OANDA:XAUUSD" })
     }

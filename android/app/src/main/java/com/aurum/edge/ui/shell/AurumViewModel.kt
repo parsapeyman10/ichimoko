@@ -70,6 +70,7 @@ import kotlin.math.min
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
+    val proxyStatus = container.proxy.status
 
 
     val watchSettings: StateFlow<Map<String, WatchSelection>> = container.watchSettings.selections
@@ -533,11 +534,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     /** Manual all-pairs sweep across 50+ instruments. */
     fun scanPairs() {
         if (container.pairScanner.state.value.sweeping) {
-            _toast.value = "اسکن همگانی ۵۰+ نماد در حال اجراست"
+            _toast.value = "اسکن ۲۰۰ کریپتو و فارکس/کالا در حال اجراست"
             return
         }
         viewModelScope.launch {
-            _toast.value = "اسکن ۵۰+ سهم و نماد آغاز شد؛ بهترین فرصت‌ها شناسایی می‌شوند"
+            _toast.value = "اسکن ۲۰۰ کریپتو و فارکس/کالا آغاز شد؛ بهترین فرصت‌ها شناسایی می‌شوند"
             try {
                 container.pairScanner.sweepOnce(minIntervalMs = 1 * 60_000L) { }
             } catch (_: Exception) {
@@ -633,7 +634,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setCategoryStrategy(category: com.aurum.edge.core.AssetClass,
                             mode: com.aurum.edge.core.CategoryStrategy) {
-        if (category == com.aurum.edge.core.AssetClass.CRYPTO) return // retired legacy crypto modes
+        if (category in setOf(com.aurum.edge.core.AssetClass.CRYPTO, com.aurum.edge.core.AssetClass.STOCK)) return // retired legacy crypto modes
         container.settingsStore.update {
             it.copy(categoryStrategies = it.categoryStrategies + (category to mode))
         }
@@ -686,6 +687,17 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             _toast.value = if (queued) "آزمون پخش فایل تا ۱۰ ثانیه؛ بلندی صدا/مزاحم‌نشدن دستگاه را بررسی کنید"
                 else "فایل صوتی دیگر قابل خواندن نیست؛ دوباره انتخاب کنید"
         }
+    }
+
+    fun setProxyEnabled(enabled: Boolean) {
+        if (!container.settingsStore.saveProxyEnabled(enabled)) {
+            _toast.value = "تنظیم پروکسی ذخیره نشد؛ دوباره تلاش کنید"
+            return
+        }
+        container.proxy.applyPreference(enabled)
+        _toast.value = if (enabled) "پروکسی داخلی روشن شد؛ آماده‌شدن Tor ممکن است چند دقیقه طول بکشد"
+            else "پروکسی خاموش شد؛ درخواست‌های بعدی مستقیم هستند"
+        container.market.refreshNow()
     }
 
     fun setMonitorFlag(enabled: Boolean) {

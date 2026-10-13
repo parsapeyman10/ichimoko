@@ -157,6 +157,12 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("androidx.webkit:webkit:1.12.1")
+    // The AAR contains Java/JNI only; do not upgrade the app's Kotlin runtime via its POM.
+    implementation("info.guardianproject:tor-android:0.4.8.22") {
+        exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
+    }
+    implementation("info.guardianproject:jtorctl:0.4.5.7")
     // Nobitex documents Centrifugo public trade subscriptions; use its official Android SDK
     // for application ping/pong, reconnect and server-supported stream recovery.
     implementation("io.github.centrifugal:centrifuge-java:0.7.0")
@@ -166,6 +172,7 @@ dependencies {
     // JVM unit tests for the pure engine code and read-only data validation.
     // They never run inside the APK; release assembly requires them to pass below.
     testImplementation("junit:junit:4.13.2")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.robolectric:robolectric:4.14.1")
 }
 

@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
  * aggTrade is one aggregate per taker order/price, not every constituent fill. No API key.
  */
 class BinanceSpotClient(
-    private val http: OkHttpClient = OkHttpClient.Builder()
+    private val http: OkHttpClient = AppNetwork.builder()
         .connectTimeout(8, TimeUnit.SECONDS).readTimeout(12, TimeUnit.SECONDS)
         .callTimeout(18, TimeUnit.SECONDS).followRedirects(false).build(),
     private val host: String = "https://data-api.binance.vision",
