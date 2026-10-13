@@ -12,6 +12,8 @@ on:
       - 'update/**'
       - 'tools/probe_crypto_venues.py'
       - 'tools/test_probe_crypto_venues.py'
+      - 'tools/verify_apk_upgrade.py'
+      - 'tools/test_verify_apk_upgrade.py'
       - '.github/workflows/main.yml'
   pull_request:
     paths:
@@ -19,6 +21,8 @@ on:
       - 'update/**'
       - 'tools/probe_crypto_venues.py'
       - 'tools/test_probe_crypto_venues.py'
+      - 'tools/verify_apk_upgrade.py'
+      - 'tools/test_verify_apk_upgrade.py'
       - '.github/workflows/main.yml'
   workflow_dispatch:
     inputs:
@@ -33,7 +37,7 @@ on:
         default: ''
         type: string
       publish_release:
-        description: 'Publish/refresh GitHub Release assets for the in-app updater. Requires stable signing secrets.'
+        description: 'Publish a NEW public updater release on an approved ref. Requires the existing pinned signing key.'
         required: false
         default: false
         type: boolean
@@ -82,8 +86,8 @@ jobs:
       PUBLIC_UPDATER_RELEASE: >-
         ${{ (((github.ref == 'refs/heads/main' || github.ref_type == 'tag') &&
           (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))) ||
-          (github.event_name == 'push' && github.ref == 'refs/heads/arena/20dbf868-ichimoko' &&
-          (startsWith(github.event.head_commit.message, 'release: publish v1.3.49 updater')))) }}
+          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/arena/3d998929-ichimoko' &&
+          inputs.publish_release == true)) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -252,6 +256,9 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}
         run: ./gradlew :${APP_MODULE}:dependencies --configuration debugRuntimeClasspath $GRADLE_FLAGS
 
+      - name: Test release compatibility and public-data tooling
+        run: python3 -m unittest discover -s tools -p 'test_*.py' -v
+
       - name: Test durable tick archive
         run: |
           python3 -m venv tick-archive/.venv
@@ -300,7 +307,7 @@ jobs:
       - name: Build debug and release APKs
         if: steps.guard.outputs.ready == 'true'
         working-directory: ${{ env.PROJECT_DIR }}
-        run: ./gradlew :${APP_MODULE}:assembleDebug :${APP_MODULE}:assembleRelease $GRADLE_FLAGS
+        run: ./gradlew :${APP_MODULE}:assembleDebug :${APP_MODULE}:assembleRelease -PaurumRequireReleaseSigning=true $GRADLE_FLAGS
 
       # The in-app updater refuses an APK whose signing certificate differs from the installed one,
       # so a rotated/lost keystore must fail HERE — never publish an APK nobody can install over.
@@ -391,6 +398,23 @@ jobs:
             echo "continuity=verified: identical signer to $PREV_NAME; versionCode $NEW_CODE > $PREV_CODE" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Verify built APK installation compatibility
+        if: steps.guard.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          NEWER=()
+          if [[ "$PUBLIC_UPDATER_RELEASE" == "true" ]]; then NEWER+=(--require-newer); fi
+          python3 tools/verify_apk_upgrade.py \
+            --previous "$RUNNER_TEMP/published-release.apk" \
+            --candidate "$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk" \
+            --aapt "$SDK/build-tools/${ANDROID_BUILD_TOOLS}/aapt" \
+            --apksigner "$SDK/build-tools/${ANDROID_BUILD_TOOLS}/apksigner" \
+            --certificate "$UPDATER_CERT_SHA256" \
+            --version-name '${{ steps.version.outputs.name }}' \
+            --version-code '${{ steps.version.outputs.code }}' \
+            --output out/upgrade-compatibility.json "${NEWER[@]}"
+
       - name: Collect APKs and updater metadata
         if: steps.guard.outputs.ready == 'true'
         id: collect
@@ -435,11 +459,26 @@ jobs:
             "sizeBytes": ${SIZE_BYTES}
           }
           JSON
+          # Extra compatibility fields are optional to older updater parsers.
+          python3 - "out/${APK_NAME}.json" <<'PYMETA'
+          import json, sys
+          from pathlib import Path
+          path = Path(sys.argv[1])
+          metadata = json.loads(path.read_text())
+          audit = json.loads(Path('out/upgrade-compatibility.json').read_text())['candidate']
+          assert metadata['sha256'] == audit['sha256']
+          assert metadata['sizeBytes'] == audit['sizeBytes']
+          assert metadata['versionCode'] == audit['versionCode']
+          assert metadata['versionName'] == audit['versionName']
+          metadata.update(signerSha256=audit['signersSha256'][0], minSdk=audit['minSdk'],
+                          targetSdk=audit['targetSdk'], supportedAbis=audit['abis'])
+          path.write_text(json.dumps(metadata, indent=2) + '\n')
+          PYMETA
           cp "out/${APK_NAME}.json" out/aurum-edge.json
           {
             sha256sum "$RELEASE_APK"
-            sha256sum "$DEBUG_APK"
             sha256sum "out/${APK_NAME}.json"
+            sha256sum out/upgrade-compatibility.json
           } > out/checksums.sha256
           ls -la out
 
@@ -490,14 +529,14 @@ jobs:
           SIZE_BYTES: ${{ steps.collect.outputs.size_bytes }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_REF" == "refs/heads/arena/20dbf868-ichimoko" &&
-                ( "$VERSION_NAME" != "1.3.49" || "$TAG" != "v1.3.49" || "${{ steps.collect.outputs.version_code }}" != "665" ) ]]; then
-            echo "::error title=Wrong release version::This branch can publish only the guarded v1.3.49 version."
+          if [[ "$GITHUB_REF" == "refs/heads/arena/3d998929-ichimoko" &&
+                ( "$VERSION_NAME" != "1.3.50" || "$TAG" != "v1.3.50" || "${{ steps.collect.outputs.version_code }}" != "666" ) ]]; then
+            echo "::error title=Wrong release version::This branch can publish only the approved v1.3.50 (666) upgrade."
             exit 1
           fi
           NOTES=$'Aurum Edge Android APK.\n\nVersion: '"$VERSION_NAME"$'\nVersion code: ${{ steps.collect.outputs.version_code }}\nSHA-256: '"$SHA256"$'\nSize bytes: '"$SIZE_BYTES"$'\nSigning: '"${AURUM_SIGNING_MODE:-prepared updater key}"$'\n\nThe in-app updater accepts this public release asset, verifies package name, signing certificate, versionCode, size and SHA-256, then opens Android Installer.'
-          if [[ "$VERSION_NAME" == "1.3.49" ]]; then
-            NOTES+=$'\n\nChanges: Focused mobile UI: the Home radar card is removed, the Trading tab shows the automatically refreshed best valid candidate and the per-symbol decision reasons, without a manual scan button or the extra explanation cards. The chart requests Ichimoku on every open and has a reset control. The fixed Watch list displays multiple active-source confirmations without adding symbols. Settings hide the legacy Nobitex archive and verbose V1/local-data/policy cards, retain operational risk and alert controls, and offer only LLMsRelay or Gemini model presets. The read-only Twelve Data key moves to the API screen. Existing on-device trade records and open-position recovery are NOT deleted by this UI change.'
+          if [[ "$VERSION_NAME" == "1.3.50" ]]; then
+            NOTES+=$'\n\nChanges: 200 crypto pairs with US stocks removed from the active catalog; optional embedded Tor proxy with an on/off setting; native Gemini API with model discovery and safe response validation; category settings and scanner alerts cover the entire 230-symbol catalog without a manual watchlist filter. Existing journal records and application identity are preserved.\n\nUpgrade from 1.3.49 (665): same pinned signing certificate, higher versionCode 666, Android 8.0+ (API 26), ARM64/ARMv7. See upgrade-compatibility.json for verified APK metadata. Open the installed app update screen, check for updates, and approve the Android installer. Do not uninstall or clear application data. Real-device installation still requires Android confirmation.'
           fi
           # Fail closed on a pre-existing tag: editing or clobbering a published release can
           # silently replace an APK already downloaded by users, without versionCode changing.
@@ -507,9 +546,9 @@ jobs:
             exit 1
           fi
           gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "$NOTES" --draft
-          gh release upload "$TAG" "out/${APK_NAME}" "out/${APK_NAME}.json" "out/checksums.sha256"
+          gh release upload "$TAG" "out/${APK_NAME}" "out/${APK_NAME}.json" "out/checksums.sha256" "out/upgrade-compatibility.json"
           # A draft is invisible to the updater; publish only once all assets are uploaded.
-          gh release edit "$TAG" --draft=false
+          gh release edit "$TAG" --draft=false --latest
 
       - name: Verify public updater release is discoverable
         if: steps.guard.outputs.ready == 'true' && steps.collect.outputs.tag != '' && (steps.publish.outcome == 'success')
@@ -536,6 +575,20 @@ jobs:
             --argjson code "$VERSION_CODE" --arg version "$VERSION_NAME" '
               .applicationId == "com.aurum.edge" and .artifactName == $name and
               .versionCode == $code and .sha256 == $sha and .versionName == $version' >/dev/null
+          # The installed APK has no GitHub token: prove anonymous API visibility AND
+          # real asset downloads, not just access with the workflow's credentials.
+          curl --fail --silent --show-error --location --retry 3 \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases?per_page=10" > "$RUNNER_TEMP/public-releases.json"
+          jq -e --arg tag "$TAG" 'any(.[]; .tag_name == $tag and .draft == false and .prerelease == false)' \
+            "$RUNNER_TEMP/public-releases.json" >/dev/null
+          PUBLIC_URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$APK_NAME"
+          curl --fail --silent --show-error --location --retry 3 "$PUBLIC_URL.json" > "$RUNNER_TEMP/public-sidecar.json"
+          jq -e --arg sha "$SHA256" --arg cert "$UPDATER_CERT_SHA256" --argjson code "$VERSION_CODE" \
+            '.applicationId == "com.aurum.edge" and .sha256 == $sha and .signerSha256 == $cert and .versionCode == $code' \
+            "$RUNNER_TEMP/public-sidecar.json" >/dev/null
+          curl --fail --silent --show-error --location --retry 3 "$PUBLIC_URL" > "$RUNNER_TEMP/public-candidate.apk"
+          [[ "$(sha256sum "$RUNNER_TEMP/public-candidate.apk" | cut -d' ' -f1)" == "$SHA256" ]]
+          [[ "$(stat -c%s "$RUNNER_TEMP/public-candidate.apk")" == "$SIZE_BYTES" ]]
           echo "::notice title=Public updater ready::$TAG code=$VERSION_CODE APK=$APK_NAME SHA-256=$SHA256 is listed in the public Release API with valid sidecar metadata."
 
       - name: Job summary
@@ -571,9 +624,9 @@ jobs:
             echo "### Signing continuity (in-app updates need the SAME key)"
             echo "| Check | Value |"
             echo "|---|---|"
-            echo "| Signing key cache hit | `${{ steps.signing_cache.outputs.cache-hit }}` |"
-            echo "| New release APK signer SHA-256 | `${{ steps.signing_check.outputs.new_cert_sha256 }}` |"
-            echo "| Published release APK signer SHA-256 | `${{ steps.signing_check.outputs.published_cert_sha256 }}` |"
+            echo "| Signing key cache hit | \`${{ steps.signing_cache.outputs.cache-hit }}\` |"
+            echo "| New release APK signer SHA-256 | \`${{ steps.signing_check.outputs.new_cert_sha256 }}\` |"
+            echo "| Published release APK signer SHA-256 | \`${{ steps.signing_check.outputs.published_cert_sha256 }}\` |"
             echo "| Verdict | ${{ steps.signing_check.outputs.continuity }} |"
             echo ""
             echo "No market or AI API keys are embedded in the APK. Users enter optional keys only on their own device."
