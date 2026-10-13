@@ -29,8 +29,12 @@ class CryptoRadarBundleTest {
         assertEquals("OKX Spot", result.provider)
         assertEquals(3, result.frames.size)
         assertTrue(result.priorFailures.single().contains("Gate"))
-        assertEquals(listOf(Interval.M5, Interval.M15, Interval.M5, Interval.M15, Interval.H1),
-            requested.map { it.second })
+        listOf(CryptoRadarBundle.Source.GATE, CryptoRadarBundle.Source.OKX).forEach { source ->
+            val venueFrames = requested.filter { it.first == source }.map { it.second }
+            assertEquals(Interval.M5, venueFrames.first())
+            assertEquals(setOf(Interval.M5, Interval.M15, Interval.H1), venueFrames.toSet())
+            assertEquals(3, venueFrames.size)
+        }
         assertFalse(CandleSourceHealth.ready(bars(Interval.M5).drop(1), Interval.M5, now, true, true))
         assertFalse(CandleSourceHealth.ready(bars(Interval.M5).dropLast(1), Interval.M5, now, true, true))
     }
