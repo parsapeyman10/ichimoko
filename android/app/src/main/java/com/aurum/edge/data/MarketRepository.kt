@@ -32,6 +32,11 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
+/** Reference frames must come from the publisher of the BASE, including manual crypto mode. */
+internal fun canRefreshSamePublisherFrames(symbol: String, provider: String?): Boolean =
+    if (CryptoCatalog.isCrypto(symbol)) provider == BinanceSpotClient.PROVIDER
+    else SourceRouting.fromProvider(provider) != null
+
 /** A successful REST download is not proof that the market has a current bar. */
 internal fun hasCurrentRestBar(bars: List<Candle>, interval: Interval, now: Long): Boolean {
     val last = bars.maxByOrNull { it.time } ?: return false
@@ -831,13 +836,14 @@ class MarketRepository(
         }
         val frameNow = System.currentTimeMillis()
         val baseProvider = _state.value.historyProvider
-        val pinnedSource = SourceRouting.fromProvider(baseProvider)
         val sameVenueCrypto = CryptoCatalog.isCrypto(current.symbol) &&
             baseProvider == BinanceSpotClient.PROVIDER
+        val pinnedSource = if (CryptoCatalog.isCrypto(current.symbol)) null
+            else SourceRouting.fromProvider(baseProvider)
         // Gate/OKX/Kraken read-only bundles are refreshed with their BASE candles.
         // Fetching Binance reference frames for a Gate base silently mixed venues.
         if (!showingCache && bars.count { it.closed } >= HistoryPolicy.LIVE_MIN_CANDLES &&
-            (pinnedSource != null || sameVenueCrypto) &&
+            canRefreshSamePublisherFrames(current.symbol, baseProvider) &&
             timeframeJob?.isActive != true && frameNow - lastFrameRefreshAt >= 60_000L) {
             lastFrameRefreshAt = frameNow
             val session = generation

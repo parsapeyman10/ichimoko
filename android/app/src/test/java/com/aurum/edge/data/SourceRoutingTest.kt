@@ -5,6 +5,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class SourceRoutingTest {
+    @Test fun `reference frames never fetch Binance for a read-only or keyed crypto base`() {
+        assertFalse(canRefreshSamePublisherFrames("BTC/USDT", "Gate Spot / USDT (radar only)"))
+        assertFalse(canRefreshSamePublisherFrames("BTC/USDT", "Twelve Data · fallback هم‌نماد BTC/USDT"))
+        assertTrue(canRefreshSamePublisherFrames("BTC/USDT", BinanceSpotClient.PROVIDER))
+        assertTrue(canRefreshSamePublisherFrames("EUR/USD", "Yahoo Finance عمومی"))
+        assertTrue(canRefreshSamePublisherFrames("XAG/USD", "Dukascopy عمومی"))
+        assertFalse(canRefreshSamePublisherFrames("XAG/USD", "نامعلوم"))
+    }
+
     @Test fun `all 81 scanner rows show honest exact-pair plans without claiming universal coverage`() {
         val universe = WatchCatalog.scannerSymbols
         assertEquals(81, universe.distinct().size)
