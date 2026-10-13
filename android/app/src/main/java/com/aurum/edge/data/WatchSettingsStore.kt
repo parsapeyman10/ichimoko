@@ -15,10 +15,13 @@ class WatchSettingsStore(context: Context) {
 
     private fun read(symbol: WatchSymbol): WatchSelection {
         val saved = prefs.getString("sources_${symbol.id}", null)
-        // Migrate the original single-provider crypto default, but respect an explicit
-        // custom choice (and an intentionally empty selection).
-        val normalized = if (symbol.id.endsWith("/USDT") &&
-            saved in listOf("binance_spot_agg_trades", "nobitex_public_trades")) null else saved
+        // Migrate old single-source defaults to a verified multi-source watch.
+        // Other explicit source combinations remain the user's own choice.
+        val obsoleteDefault = (symbol.id.endsWith("/USDT") &&
+            saved in listOf("binance_spot_agg_trades", "nobitex_public_trades")) ||
+            (symbol.id == "XAU/USD" && saved == "gold_api_public,stocks_yahoo") ||
+            (symbol.providerCodes.containsKey("swissquote_bbo") && saved == "stocks_yahoo")
+        val normalized = if (obsoleteDefault) null else saved
         val enabled = normalized?.split(',')
             ?.map { if (it == "nobitex_public_trades") "binance_spot_agg_trades" else it }
             ?.filter { it in symbol.providerCodes }?.distinct()?.takeIf { it.isNotEmpty() }

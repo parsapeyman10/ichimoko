@@ -232,6 +232,9 @@ private fun HomeRadarCard(
             Text("${row.symbol} · $label: ${row.detail}",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary,
                 modifier = Modifier.padding(top = 8.dp))
+            row.sourcePlan?.let { plan -> Text("منابع این نماد: $plan",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 4.dp)) }
             Text("کندل پایه: ${row.baseSource ?: "هنوز دریافت نشده"} · بسته‌شدن: " +
                 (row.lastBarAt?.let { formatDateTime(it) } ?: "نامعلوم") +
                 " · بررسی: " + (row.lastScanAt?.let { relativeTime(it) } ?: "هنوز نه"),

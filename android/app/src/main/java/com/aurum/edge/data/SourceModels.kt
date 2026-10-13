@@ -3,7 +3,7 @@ package com.aurum.edge.data
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class SourceKind { JSON_REST, HTML_PAGE, CRYPTO_SPOT_TRADE }
+enum class SourceKind { JSON_REST, HTML_PAGE, CRYPTO_SPOT_TRADE, SPOT_BBO_QUOTE }
 
 @Serializable
 enum class ChangeMode { PERCENT, ABSOLUTE, PREV_CLOSE, NONE }

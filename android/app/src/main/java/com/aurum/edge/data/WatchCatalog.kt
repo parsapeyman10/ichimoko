@@ -31,15 +31,15 @@ object WatchCatalog {
 
         // ── جفت‌ارزهای اصلی و طلا ─────────────────────────────────────────
         WatchSymbol("XAU/USD", "طلای جهانی (هر انس)", "$", linkedMapOf(
-            "gold_api_public" to "XAU", "stocks_yahoo" to "XAUUSD=X", "twelve_data_quote" to "XAU/USD",
-        ), listOf("gold_api_public", "stocks_yahoo"), 10 * 60_000L, 0.5),
-        WatchSymbol("EUR/USD", "یورو / دلار", "$", linkedMapOf("stocks_yahoo" to "EURUSD=X", "twelve_data_quote" to "EUR/USD"), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
-        WatchSymbol("GBP/USD", "پوند / دلار", "$", linkedMapOf("stocks_yahoo" to "GBPUSD=X", "twelve_data_quote" to "GBP/USD"), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
-        WatchSymbol("AUD/USD", "دلار استرالیا / دلار", "$", linkedMapOf("stocks_yahoo" to "AUDUSD=X", "twelve_data_quote" to "AUD/USD"), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
-        WatchSymbol("NZD/USD", "دلار نیوزیلند / دلار", "$", linkedMapOf("stocks_yahoo" to "NZDUSD=X", "twelve_data_quote" to "NZD/USD"), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
-        WatchSymbol("USD/JPY", "دلار / ین ژاپن", "JPY", linkedMapOf("stocks_yahoo" to "JPY=X", "twelve_data_quote" to "USD/JPY"), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
-        WatchSymbol("USD/CHF", "دلار / فرانک سوئیس", "CHF", linkedMapOf("stocks_yahoo" to "CHF=X", "twelve_data_quote" to "USD/CHF"), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
-        WatchSymbol("USD/CAD", "دلار / دلار کانادا", "CAD", linkedMapOf("stocks_yahoo" to "CAD=X", "twelve_data_quote" to "USD/CAD"), listOf("stocks_yahoo"), 5 * 60_000L, 0.3),
+            "gold_api_public" to "XAU", "swissquote_bbo" to "XAU/USD", "twelve_data_quote" to "XAU/USD",
+        ), listOf("gold_api_public", "swissquote_bbo"), 10 * 60_000L, 0.5),
+        WatchSymbol("EUR/USD", "یورو / دلار", "$", linkedMapOf("stocks_yahoo" to "EURUSD=X", "swissquote_bbo" to "EUR/USD", "twelve_data_quote" to "EUR/USD"), listOf("stocks_yahoo", "swissquote_bbo"), 5 * 60_000L, 0.3),
+        WatchSymbol("GBP/USD", "پوند / دلار", "$", linkedMapOf("stocks_yahoo" to "GBPUSD=X", "swissquote_bbo" to "GBP/USD", "twelve_data_quote" to "GBP/USD"), listOf("stocks_yahoo", "swissquote_bbo"), 5 * 60_000L, 0.3),
+        WatchSymbol("AUD/USD", "دلار استرالیا / دلار", "$", linkedMapOf("stocks_yahoo" to "AUDUSD=X", "swissquote_bbo" to "AUD/USD", "twelve_data_quote" to "AUD/USD"), listOf("stocks_yahoo", "swissquote_bbo"), 5 * 60_000L, 0.3),
+        WatchSymbol("NZD/USD", "دلار نیوزیلند / دلار", "$", linkedMapOf("stocks_yahoo" to "NZDUSD=X", "swissquote_bbo" to "NZD/USD", "twelve_data_quote" to "NZD/USD"), listOf("stocks_yahoo", "swissquote_bbo"), 5 * 60_000L, 0.3),
+        WatchSymbol("USD/JPY", "دلار / ین ژاپن", "JPY", linkedMapOf("stocks_yahoo" to "JPY=X", "swissquote_bbo" to "USD/JPY", "twelve_data_quote" to "USD/JPY"), listOf("stocks_yahoo", "swissquote_bbo"), 5 * 60_000L, 0.3),
+        WatchSymbol("USD/CHF", "دلار / فرانک سوئیس", "CHF", linkedMapOf("stocks_yahoo" to "CHF=X", "swissquote_bbo" to "USD/CHF", "twelve_data_quote" to "USD/CHF"), listOf("stocks_yahoo", "swissquote_bbo"), 5 * 60_000L, 0.3),
+        WatchSymbol("USD/CAD", "دلار / دلار کانادا", "CAD", linkedMapOf("stocks_yahoo" to "CAD=X", "swissquote_bbo" to "USD/CAD", "twelve_data_quote" to "USD/CAD"), listOf("stocks_yahoo", "swissquote_bbo"), 5 * 60_000L, 0.3),
     ) + CryptoCatalog.watchlistSeed.map { coin ->
         WatchSymbol(
             id = coin.id,
@@ -48,9 +48,10 @@ object WatchCatalog {
             providerCodes = linkedMapOf(
                 "gate_spot_trades" to coin.id,
                 "okx_spot_trades" to coin.id,
-                "binance_spot_agg_trades" to coin.id,
+                "kraken_spot_trades" to coin.id,
+                "binance_spot_agg_trades" to coin.id, // optional legacy display, never a radar fallback
             ),
-            defaultSources = listOf("gate_spot_trades", "okx_spot_trades", "binance_spot_agg_trades"),
+            defaultSources = listOf("gate_spot_trades", "okx_spot_trades", "kraken_spot_trades"),
             maxAgeMillis = 5 * 60_000L,
             tolerancePct = 0.5,
         )

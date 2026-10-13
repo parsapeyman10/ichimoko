@@ -22,8 +22,8 @@ class WatchAndMetricsTest {
         // With the unsupported TradingView scanner removed, a single default source
         // must never be mislabelled as two-source confirmation.
         val ids = eur.defaultSources
-        assertEquals(1, ids.size)
-        val result = SourceComparison.verify(eur, ids, mapOf(
+        assertEquals(listOf("stocks_yahoo", "swissquote_bbo"), ids)
+        val result = SourceComparison.verify(eur, listOf(ids[0]), mapOf(
             ids[0] to quote(ids[0], 100.0),
         ), now)
         assertEquals(VerificationStatus.UNVERIFIED, result.status)

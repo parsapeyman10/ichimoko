@@ -78,12 +78,17 @@ class SourceFetcher(
     }
 
     private suspend fun fetchOne(source: SourceDef, symbol: SymbolDef, apiKey: String): Quote = try {
-        if (source.kind == SourceKind.CRYPTO_SPOT_TRADE) {
+        if (source.kind == SourceKind.SPOT_BBO_QUOTE) {
+            val tick = spot.fetchSwissquoteOnly(symbol.code)
+            Quote(symbol.code, symbol.label, price = tick.price, providerAt = tick.at,
+                unit = source.unit, sourceId = source.id)
+        } else if (source.kind == SourceKind.CRYPTO_SPOT_TRADE) {
             val coin = CryptoCatalog.find(symbol.code)
                 ?: throw DataFeedException("جفت USDT بایننس شناسایی نشد")
             val tick = when (source.id) {
                 SourceCatalog.gateTrades.id -> cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.GATE)
                 SourceCatalog.okxTrades.id -> cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.OKX)
+                SourceCatalog.krakenTrades.id -> cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.KRAKEN)
                 SourceCatalog.binanceTrades.id -> spot.fetchQuote(coin.id) // original venue budget
                 else -> throw DataFeedException("منبع معاملات رمزارز ناشناخته است")
             }

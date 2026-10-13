@@ -6,13 +6,13 @@ import com.aurum.edge.core.Interval
 import kotlinx.coroutines.CancellationException
 
 /** One spot venue for all three independent frames; source changes apply to the WHOLE
- * evaluation, never only one timeframe. Binance is a third READ-ONLY fallback here;
- * an OKX/Gate observation cannot authorize a Binance/Nobitex paper position.
+ * evaluation, never only one timeframe. No Binance/Nobitex source is selected here;
+ * no read-only observation can authorize a new paper position.
  */
 internal class CryptoRadarBundle(
     private val read: suspend (String, Interval, Source) -> PublicCandleHistoryClient.Result,
 ) {
-    enum class Source(val label: String) { GATE("Gate Spot"), OKX("OKX Spot"), BINANCE("Binance Spot") }
+    enum class Source(val label: String) { GATE("Gate Spot"), OKX("OKX Spot"), KRAKEN("Kraken Spot") }
     data class Snapshot(val provider: String, val venue: Source,
                         val frames: Map<Interval, List<Candle>>, val priorFailures: List<String>) {
         val m5: List<Candle> get() = frames.getValue(Interval.M5)
@@ -21,9 +21,9 @@ internal class CryptoRadarBundle(
     private val frames = listOf(Interval.M5, Interval.M15, Interval.H1)
 
     suspend fun fetch(symbol: String, now: Long = System.currentTimeMillis()): Snapshot {
-        val last = lastGood[symbol]?.takeIf { it.first != Source.BINANCE &&
+        val last = lastGood[symbol]?.takeIf {
             now - it.second in 0L..600_000L }?.first
-        val choices = (listOfNotNull(last) + listOf(Source.GATE, Source.OKX, Source.BINANCE)).distinct()
+        val choices = (listOfNotNull(last) + listOf(Source.GATE, Source.OKX, Source.KRAKEN)).distinct()
         val errors = mutableListOf<String>()
         for (source in choices) {
             try {

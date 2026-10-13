@@ -104,6 +104,11 @@ class SpotFallbackClient(
         return PriceTick((bid + ask) / 2.0, at, bid = bid, ask = ask)
     }
 
+    /** Watch-only, exact Swissquote bid/ask; does NOT silently relabel Gold-API. */
+    suspend fun fetchSwissquoteOnly(symbol: String): PriceTick = withContext(Dispatchers.IO) {
+        fetchSwissquote(symbol)
+    }
+
     /** gold-api.com: a second, independent, keyless source — gold (XAU/USD) only. */
     private fun fetchGoldApi(symbol: String): PriceTick {
         if (!symbol.trim().equals("XAU/USD", ignoreCase = true)) {

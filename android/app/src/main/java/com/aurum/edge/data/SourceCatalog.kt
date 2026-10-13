@@ -35,6 +35,14 @@ object SourceCatalog {
         requiresKey = true,
     )
 
+    val swissquoteBbo = SourceDef(
+        id = "swissquote_bbo", title = "Swissquote · bid/ask عمومی",
+        subtitle = "مظنهٔ هم‌نماد و زمان‌دار FX/طلا؛ فقط دیده‌بان",
+        kind = SourceKind.SPOT_BBO_QUOTE,
+        urlTemplate = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/{symbol}",
+        unit = "$",
+    )
+
     val bamaCars = SourceDef(
         id = "bama_car_price",
         title = "Bama · قیمت خودرو",
@@ -119,7 +127,14 @@ object SourceCatalog {
         urlTemplate = "https://www.okx.com/api/v5/market/trades?instId={symbol}", unit = "$",
     )
 
-    val all = listOf(yahoo, tgju, bamaCars, goldApi, twelveData,
-        gateTrades, okxTrades, binanceTrades)
+    val krakenTrades = SourceDef(
+        id = "kraken_spot_trades", title = "Kraken Spot · معاملات USDT",
+        subtitle = "فقط جفت USDT فعال و زمان‌دار؛ دیده‌بان، نه ورود/خروج",
+        kind = SourceKind.CRYPTO_SPOT_TRADE,
+        urlTemplate = "https://api.kraken.com/0/public/Trades?pair={symbol}", unit = "$",
+    )
+
+    val all = listOf(yahoo, tgju, bamaCars, goldApi, twelveData, swissquoteBbo,
+        gateTrades, okxTrades, krakenTrades, binanceTrades)
     fun find(id: String): SourceDef? = all.firstOrNull { it.id == id }
 }

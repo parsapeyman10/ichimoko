@@ -45,6 +45,8 @@ data class PairScanStatus(
     val detail: String,
     val interval: Interval? = null,
     val lastScanAt: Long? = null,
+    /** Intended exact-pair fallback order; not proof of a reachable source. */
+    val sourcePlan: String? = null,
     /** Primary historical candle publisher; not proof of a same-venue entry/exit tick. */
     val baseSource: String? = null,
     val lastBarAt: Long? = null,
@@ -125,8 +127,7 @@ class PairScanner(
         when (source) {
             CryptoRadarBundle.Source.GATE -> cryptoReadOnly.fetch(symbol, interval, CryptoRadarCandleClient.Venue.GATE)
             CryptoRadarBundle.Source.OKX -> cryptoReadOnly.fetch(symbol, interval, CryptoRadarCandleClient.Venue.OKX)
-            CryptoRadarBundle.Source.BINANCE -> binanceHistory.fetchCandles(symbol, interval,
-                HistoryPolicy.LIVE_FETCH_CANDLES, HistoryPolicy.LIVE_MIN_CANDLES)
+            CryptoRadarBundle.Source.KRAKEN -> cryptoReadOnly.fetch(symbol, interval, CryptoRadarCandleClient.Venue.KRAKEN)
         }
     }
     /** Trends measured during the running sweep; published as one market-wide read at the end. */
@@ -213,7 +214,8 @@ class PairScanner(
             bestPick = null,
             totalCount = universe.size,
             statuses = universe.map { symbol ->
-                PairScanStatus(symbol, "pending", "در صف بررسی این دور")
+                PairScanStatus(symbol, "pending", "در صف بررسی این دور",
+                    sourcePlan = SourceRouting.historyPlan(symbol, config.hasKey))
             },
         )
         fun update(
@@ -246,6 +248,7 @@ class PairScanner(
                 detail = detail,
                 interval = chosenIntervals[symbol],
                 lastScanAt = System.currentTimeMillis(),
+                sourcePlan = SourceRouting.historyPlan(symbol, config.hasKey),
                 baseSource = baseSources[symbol],
                 lastBarAt = barTimes[symbol],
                 price = price,
@@ -363,17 +366,7 @@ class PairScanner(
             } else null
             val (rawCandles, baseSource) = try {
                 if (cryptoSnapshot != null) cryptoSnapshot.m5 to cryptoSnapshot.provider
-                else if (config.hasKey) {
-                    try {
-                        val keyed = client.fetchCandles(config.apiKey, symbol, interval,
-                            outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
-                            minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES)
-                        if (!CandleSourceHealth.ready(keyed, interval, now))
-                            throw DataFeedException("Twelve Data کندل تازه/کامل ندارد")
-                        keyed to "Twelve Data"
-                    } catch (cancel: CancellationException) { throw cancel }
-                    catch (_: Exception) { publicOrDukascopy() }
-                } else publicOrDukascopy()
+                else publicOrDukascopy()
             } catch (cancel: CancellationException) { throw cancel }
             catch (error: Exception) {
                 update(symbol, "error", (error.message ?: "خطای دریافت کندل").take(180))

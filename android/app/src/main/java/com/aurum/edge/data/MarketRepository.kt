@@ -111,8 +111,7 @@ class MarketRepository(
     private val cryptoBundle = CryptoRadarBundle { symbol, frame, source -> when (source) {
         CryptoRadarBundle.Source.GATE -> cryptoReadOnly.fetch(symbol, frame, CryptoRadarCandleClient.Venue.GATE)
         CryptoRadarBundle.Source.OKX -> cryptoReadOnly.fetch(symbol, frame, CryptoRadarCandleClient.Venue.OKX)
-        CryptoRadarBundle.Source.BINANCE -> binanceHistory.fetchCandles(symbol, frame,
-            HistoryPolicy.LIVE_FETCH_CANDLES, HistoryPolicy.LIVE_MIN_CANDLES)
+        CryptoRadarBundle.Source.KRAKEN -> cryptoReadOnly.fetch(symbol, frame, CryptoRadarCandleClient.Venue.KRAKEN)
     } }
     private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client, binanceHistory)
     private var timeframeJob: Job? = null

@@ -67,7 +67,7 @@ class FeedNavigationTest {
         assertEquals("tgju_public", WatchCatalog.find("IR_GOLD18")!!.defaultSources.single())
         assertEquals("تومان", WatchCatalog.find("USD/IRR")!!.unit)
         assertEquals("bama_car_price", WatchCatalog.find("QUICK_GXRL")!!.defaultSources.single())
-        assertEquals("XAUUSD=X", WatchCatalog.find("XAU/USD")!!.providerCodes["stocks_yahoo"])
+        assertEquals("XAU/USD", WatchCatalog.find("XAU/USD")!!.providerCodes["swissquote_bbo"])
         assertEquals("JPY", WatchCatalog.find("USD/JPY")!!.unit)
     }
 }

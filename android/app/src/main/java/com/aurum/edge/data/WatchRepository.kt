@@ -55,6 +55,7 @@ class WatchRepository(
     private val mutex = Mutex()
     private var attemptedAtElapsed = 0L
     private var cryptoWatchAttemptAtElapsed = 0L
+    private var bboWatchAttemptAtElapsed = 0L
     private var loaded = false
     private val _state = MutableStateFlow(WatchState())
     val state: StateFlow<WatchState> = _state.asStateFlow()
@@ -125,16 +126,21 @@ class WatchRepository(
             // runs independently even if a watch refresh stalls.
             val cryptoDue = cryptoWatchAttemptAtElapsed == 0L ||
                 elapsed - cryptoWatchAttemptAtElapsed >= 60_000L
+            val bboDue = bboWatchAttemptAtElapsed == 0L ||
+                elapsed - bboWatchAttemptAtElapsed >= 60_000L
             val targets = WatchCatalog.symbols.flatMap { symbol ->
                 selected[symbol.id]?.enabledSources.orEmpty().mapNotNull { sourceId ->
                     val source = SourceCatalog.find(sourceId) ?: return@mapNotNull null
                     if (source.kind == SourceKind.CRYPTO_SPOT_TRADE && !cryptoDue) return@mapNotNull null
+                    if (source.kind == SourceKind.SPOT_BBO_QUOTE && !bboDue) return@mapNotNull null
                     val code = symbol.providerCodes[sourceId] ?: return@mapNotNull null
                     Target(symbol, source, code, if (source.requiresKey) preferences.apiKeyFor(symbol.id, chartSettings.read().apiKey) else "")
                 }
             }
             if (targets.any { it.source.kind == SourceKind.CRYPTO_SPOT_TRADE })
                 cryptoWatchAttemptAtElapsed = elapsed
+            if (targets.any { it.source.kind == SourceKind.SPOT_BBO_QUOTE })
+                bboWatchAttemptAtElapsed = elapsed
             // Per-source responses publish as soon as they arrive. A stalled car/FX
             // publisher cannot hold completed crypto/other watch rows behind awaitAll.
             // Keep the per-provider batch and the crypto 60s throttle; do not fake ticks.

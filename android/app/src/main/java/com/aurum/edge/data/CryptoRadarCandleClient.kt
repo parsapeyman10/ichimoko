@@ -29,9 +29,11 @@ class CryptoRadarCandleClient(
     enum class Venue(val provider: String, val host: String) {
         GATE("Gate Spot / USDT (radar only)", "https://api.gateio.ws"),
         OKX("OKX Spot / USDT (radar only)", "https://www.okx.com"),
+        KRAKEN("Kraken Spot / USDT (radar only)", "https://api.kraken.com"),
     }
     private val json = Json { ignoreUnknownKeys = true }
     private val listing = ConcurrentHashMap<String, Long>()
+    private val krakenPairs = ConcurrentHashMap<String, String>()
     private val cooldown = ConcurrentHashMap<Venue, Long>()
 
     private suspend fun get(venue: Venue, path: String): String = withContext(Dispatchers.IO) {
@@ -57,16 +59,22 @@ class CryptoRadarCandleClient(
     private fun pair(symbol: String, venue: Venue): String {
         if (CryptoCatalog.find(symbol) == null || !symbol.matches(Regex("[A-Z0-9]+/USDT")))
             throw DataFeedException("جفت دقیق USDT برای رادار تعریف نشده است")
-        return if (venue == Venue.GATE) symbol.replace('/', '_') else symbol.replace('/', '-')
+        return when (venue) {
+            Venue.GATE -> symbol.replace('/', '_')
+            Venue.OKX -> symbol.replace('/', '-')
+            Venue.KRAKEN -> symbol.replace("BTC/", "XBT/").replace("DOGE/", "XDG/").replace("/", "")
+        }
     }
 
-    private suspend fun checkListing(symbol: String, venue: Venue, pair: String) {
+    private suspend fun checkListing(symbol: String, venue: Venue, pair: String): String {
         val key = "${venue.name}:$symbol"
-        if (System.currentTimeMillis() - (listing[key] ?: 0L) in 0L..3_600_000L) return
+        if (System.currentTimeMillis() - (listing[key] ?: 0L) in 0L..3_600_000L)
+            return krakenPairs[key] ?: pair
         val base = symbol.substringBefore('/')
         val body = when (venue) {
             Venue.GATE -> get(venue, "/api/v4/spot/currency_pairs/$pair")
             Venue.OKX -> get(venue, "/api/v5/public/instruments?instType=SPOT&instId=$pair")
+            Venue.KRAKEN -> get(venue, "/0/public/AssetPairs?pair=$pair")
         }
         val root = json.parseToJsonElement(body)
         val valid = when (venue) {
@@ -74,6 +82,19 @@ class CryptoRadarCandleClient(
                 it.text("id") == pair && it.text("base") == base && it.text("quote") == "USDT" &&
                     it.text("type") == "normal" && it.text("trade_status") == "tradable"
             } == true
+            Venue.KRAKEN -> {
+                val obj = root as? JsonObject
+                val results = obj?.obj("result")
+                val alias = symbol.replace("BTC/", "XBT/").replace("DOGE/", "XDG/")
+                val matched = results?.entries?.singleOrNull { (_, entry) ->
+                    val data = entry as? JsonObject
+                    data != null && data.text("wsname") == alias && data.text("status") == "online"
+                }
+                if (obj?.array("error")?.isEmpty() == true && matched != null) {
+                    krakenPairs[key] = matched.key
+                    true
+                } else false
+            }
             Venue.OKX -> (root as? JsonObject)?.takeIf { it.text("code") == "0" }
                 ?.array("data")?.singleOrNull()?.let { it as? JsonObject }?.let {
                     it.text("instId") == pair && it.text("instType") == "SPOT" &&
@@ -83,20 +104,23 @@ class CryptoRadarCandleClient(
         }
         if (!valid) throw DataFeedException("${venue.provider}: جفت دقیق $symbol فعال/تأییدشده نیست")
         listing[key] = System.currentTimeMillis()
+        return krakenPairs[key] ?: pair
     }
 
     suspend fun fetch(symbol: String, interval: Interval, venue: Venue,
                       now: Long = System.currentTimeMillis()): PublicCandleHistoryClient.Result {
-        val pair = pair(symbol, venue)
+        val requestedPair = pair(symbol, venue)
         if (interval !in listOf(Interval.M5, Interval.M15, Interval.H1))
             throw DataFeedException("رادار صرافی فقط M5/M15/H1 را پشتیبانی می‌کند")
-        checkListing(symbol, venue, pair)
+        val pair = checkListing(symbol, venue, requestedPair)
         val bar = when (interval) {
             Interval.M5 -> "5m"; Interval.M15 -> "15m"
             else -> if (venue == Venue.GATE) "1h" else "1H"
         }
         val rows = when (venue) {
             Venue.GATE -> parseGate(get(venue, "/api/v4/spot/candlesticks?currency_pair=$pair&interval=$bar&limit=330"), interval, now)
+            Venue.KRAKEN -> parseKraken(get(venue,
+                "/0/public/OHLC?pair=$pair&interval=${interval.minutes}"), interval, now)
             Venue.OKX -> {
                 val all = mutableListOf<Candle>()
                 var after: Long? = null
@@ -125,19 +149,53 @@ class CryptoRadarCandleClient(
      */
     suspend fun fetchWatchTrade(symbol: String, venue: Venue,
                                 now: Long = System.currentTimeMillis()): PriceTick {
-        val id = pair(symbol, venue)
-        checkListing(symbol, venue, id)
+        val id = checkListing(symbol, venue, pair(symbol, venue))
         val body = when (venue) {
             Venue.GATE -> get(venue, "/api/v4/spot/trades?currency_pair=$id&limit=1")
             Venue.OKX -> get(venue, "/api/v5/market/trades?instId=$id&limit=1")
+            Venue.KRAKEN -> get(venue, "/0/public/Trades?pair=$id&count=1")
         }
         val tick = when (venue) {
             Venue.GATE -> parseGateTrade(body, id)
             Venue.OKX -> parseOkxTrade(body, id)
+            Venue.KRAKEN -> parseKrakenTrade(body)
         }
         if (tick.at !in (now - 90_000L)..(now + 10_000L))
             throw DataFeedException("${venue.provider}: آخرین معامله تازه نیست")
         return tick
+    }
+
+    internal fun parseKrakenTrade(body: String): PriceTick {
+        val root = json.parseToJsonElement(body) as? JsonObject
+            ?: throw DataFeedException("معاملهٔ Kraken نامعتبر است")
+        if (root.array("error")?.isEmpty() != true) throw DataFeedException("Kraken معامله را رد کرد")
+        val result = root.obj("result") ?: throw DataFeedException("Kraken معامله ندارد")
+        val rows = result.entries.singleOrNull { it.key != "last" }?.value as? JsonArray
+            ?: throw DataFeedException("هویت جفت معاملات Kraken مبهم است")
+        val row = rows.lastOrNull() as? JsonArray
+            ?: throw DataFeedException("معاملهٔ Kraken موجود نیست")
+        if (row.size < 3) throw DataFeedException("ستون معاملهٔ Kraken ناقص است")
+        val t = row[2].string().toDoubleOrNull()?.takeIf { it.isFinite() && it > 0 }
+            ?.times(1000.0)?.toLong()
+        return checkedTrade(row[0].string(), row[1].string(), t?.toString())
+    }
+
+    internal fun parseKraken(body: String, interval: Interval, now: Long): List<Candle> {
+        val root = json.parseToJsonElement(body) as? JsonObject
+            ?: throw DataFeedException("کندل Kraken نامعتبر است")
+        if (root.array("error")?.isEmpty() != true) throw DataFeedException("Kraken کندل را رد کرد")
+        val result = root.obj("result") ?: throw DataFeedException("Kraken کندل ندارد")
+        val rows = result.entries.singleOrNull { it.key != "last" }?.value as? JsonArray
+            ?: throw DataFeedException("هویت جفت کندل Kraken مبهم است")
+        return rows.mapNotNull { item ->
+            val row = item as? JsonArray ?: throw DataFeedException("ساختار کندل Kraken نامعتبر است")
+            if (row.size < 7) throw DataFeedException("ستون کندل Kraken ناقص است")
+            val time = row[0].string().toLongOrNull()?.times(1000L)
+                ?: throw DataFeedException("زمان کندل Kraken نامعتبر است")
+            if (time + interval.millis > now) return@mapNotNull null // current forming bar
+            checkedCandle(time, row[1].string(), row[2].string(), row[3].string(),
+                row[4].string(), row[6].string(), interval, now)
+        }
     }
 
     internal fun parseGateTrade(body: String, id: String): PriceTick {
@@ -204,6 +262,7 @@ class CryptoRadarCandleClient(
 
     private fun JsonObject.text(key: String) = (this[key] as? JsonPrimitive)?.contentOrNull
     private fun JsonObject.array(key: String) = this[key] as? JsonArray
+    private fun JsonObject.obj(key: String) = this[key] as? JsonObject
     private fun kotlinx.serialization.json.JsonElement.string(): String =
         (this as? JsonPrimitive)?.contentOrNull ?: throw DataFeedException("فیلد کندل نامعتبر است")
 }

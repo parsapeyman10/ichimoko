@@ -133,9 +133,9 @@ class CryptoOnDeviceTest {
         val row = WatchCatalog.find("XAU/USD")!!
         // Try two independent keyless sources, without calling a quote confirmed unless
         // BOTH return fresh publisher timestamps for the same spot instrument.
-        assertEquals(listOf("gold_api_public", "stocks_yahoo"), row.defaultSources)
+        assertEquals(listOf("gold_api_public", "swissquote_bbo"), row.defaultSources)
         assertEquals("OANDA:XAUUSD", TradingViewSymbols.find(row.id))
         assertTrue("gold_api_public" in row.providerCodes)
-        assertTrue("stocks_yahoo" in row.providerCodes)
+        assertTrue("swissquote_bbo" in row.providerCodes)
     }
 }

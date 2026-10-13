@@ -38,7 +38,7 @@ class CryptoRadarBundleTest {
     @Test fun `all failed venues never yield a radar signal`() = runBlocking {
         val feed = CryptoRadarBundle { _, interval, venue ->
             PublicCandleHistoryClient.Result(bars(interval).map {
-                if (venue == CryptoRadarBundle.Source.BINANCE) it.copy(volume = 0.0) else it.copy(closed = false)
+                if (venue == CryptoRadarBundle.Source.KRAKEN) it.copy(volume = 0.0) else it.copy(closed = false)
             }, venue.label)
         }
         assertTrue(runCatching { feed.fetch("BTC/USDT", now) }.exceptionOrNull()?.message
@@ -54,6 +54,16 @@ class CryptoRadarBundleTest {
         val okx = """{"code":"0","data":[["$t","100","101","99","100","4","10","20","1"]]}"""
         assertEquals(4.0, client.parseOkx(okx, Interval.M5, now).single().volume, 0.00001)
         assertTrue(client.parseOkx(okx.replace("\"1\"]", "\"0\"]"), Interval.M5, now).isEmpty())
+        val kraken = """{"error":[],"result":{"XBTUSDT":[[${t/1000},"100","101","99","100","100.1","4","12"]],"last":123}}"""
+        assertEquals(4.0, client.parseKraken(kraken, Interval.M5, now).single().volume, 0.00001)
+        assertTrue(client.parseKraken(kraken.replace("${t/1000}", "${now/1000}"),
+            Interval.M5, now).isEmpty()) // Kraken's trailing forming bar
+        val krakenTrade = """{"error":[],"result":{"XBTUSDT":[["100","2","${now/1000.0}","b","l",""]],"last":"99"}}"""
+        assertEquals(100.0, client.parseKrakenTrade(krakenTrade).price, 0.00001)
+        assertThrows(DataFeedException::class.java) {
+            client.parseKrakenTrade(krakenTrade.replace("XBTUSDT", "XBTUSDT2").replace(
+                ""last":"99"", ""second":[],"last":"99""))
+        }
         assertThrows(DataFeedException::class.java) {
             client.parseGateTrade("""[{"currency_pair":"ETH_USDT","price":"100","amount":"1","create_time_ms":"$now"}]""", "BTC_USDT")
         }
