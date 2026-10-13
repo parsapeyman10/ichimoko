@@ -39,50 +39,48 @@ internal class TimeframeFeed(
                                    now: Long, requireBinanceCrypto: Boolean): List<Candle> {
         val key = Triple(symbol, interval, requireBinanceCrypto)
         val previous = cache[key]
-        if (previous != null && now - previous.fetchedAt in 0L..(if (previous.candles.size >= HistoryPolicy.LIVE_MIN_CANDLES) minOf(300_000L, interval.millis) else 60_000L))
-            return previous.candles
+        if (previous != null && now - previous.fetchedAt in 0L..minOf(300_000L, interval.millis) &&
+            CandleSourceHealth.ready(previous.candles, interval, now,
+                requireContiguous = CryptoCatalog.isCrypto(symbol),
+                requireVolume = CryptoCatalog.isCrypto(symbol))) return previous.candles
         val desired = HistoryPolicy.LIVE_FETCH_CANDLES
         val bars = try {
             if (CryptoCatalog.isCrypto(symbol)) {
-                // BTC/USDT is not BTC/USD. Twelve Data cannot authorize a Binance entry.
-                try {
-                    binance.fetchCandles(symbol, interval, desiredSize = desired,
-                        minimumSize = HistoryPolicy.LIVE_MIN_CANDLES).candles
-                } catch (cancel: CancellationException) {
-                    throw cancel
-                } catch (_: Exception) {
-                    if (requireBinanceCrypto || apiKey.isBlank()) emptyList() else twelve.fetchCandles(apiKey, symbol,
-                        interval, outputSize = desired, minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES)
+                // Selected crypto chart's independent frames must use the original
+                // Binance venue, never a Twelve Data/USD or another-venue mix.
+                binance.fetchCandles(symbol, interval, desiredSize = desired,
+                    minimumSize = HistoryPolicy.LIVE_MIN_CANDLES).candles
+            } else {
+                suspend fun healthy(bars: List<Candle>): List<Candle> {
+                    if (!CandleSourceHealth.ready(bars, interval, now))
+                        throw DataFeedException("${interval.label}: تاریخچه ناقص/قدیمی است")
+                    return bars
                 }
-            } else try {
-                publicHistory.fetchCandles(symbol, interval, minimumSize = HistoryPolicy.LIVE_MIN_CANDLES,
-                    desiredSize = desired).candles
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (_: Exception) {
-                try {
-                    dukascopy.fetchCandles(symbol, interval, minimumSize = HistoryPolicy.LIVE_MIN_CANDLES,
-                        desiredSize = desired).candles
-                } catch (cancel: CancellationException) {
-                    throw cancel
-                } catch (_: Exception) {
-                    if (apiKey.isBlank()) emptyList() else twelve.fetchCandles(apiKey, symbol,
-                        interval, outputSize = desired, minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES)
+                try { healthy(publicHistory.fetchCandles(symbol, interval,
+                    minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = desired).candles) }
+                catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) {
+                    try { healthy(dukascopy.fetchCandles(symbol, interval,
+                        minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = desired).candles) }
+                    catch (cancel: CancellationException) { throw cancel }
+                    catch (_: Exception) {
+                        if (apiKey.isBlank()) emptyList() else healthy(twelve.fetchCandles(apiKey, symbol,
+                            interval, outputSize = desired, minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES))
+                    }
                 }
             }
-        } catch (cancel: CancellationException) {
-            throw cancel
-        } catch (_: Exception) {
-            emptyList()
-        }
-        val closed = bars.filter { it.time > 0L && it.time + interval.millis <= now }
-            .sortedBy { it.time }.distinctBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
-            .map { it.copy(closed = true) }
-        return if (closed.size == HistoryPolicy.LIVE_REQUEST_CANDLES) {
+        } catch (cancel: CancellationException) { throw cancel }
+        catch (_: Exception) { emptyList() }
+        val closed = bars.filter { it.closed && it.time > 0L && it.time + interval.millis <= now }
+            .sortedBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
+        val valid = CandleSourceHealth.ready(closed, interval, now,
+            requireContiguous = CryptoCatalog.isCrypto(symbol),
+            requireVolume = CryptoCatalog.isCrypto(symbol))
+        return if (valid) {
             cache[key] = Snapshot(now, closed)
             closed
         } else {
-            cache[key] = Snapshot(now, emptyList()) // retry later; never reuse stale frames
+            cache[key] = Snapshot(now, emptyList()) // never reuse stale/partial frames
             emptyList()
         }
     }

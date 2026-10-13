@@ -197,6 +197,26 @@ class DukascopyHistoryClient(
             "USD/JPY" -> "USDJPY"
             "USD/CHF" -> "USDCHF"
             "USD/CAD" -> "USDCAD"
+            // Same-pair FX crosses, not an index/ETF or converted proxy. Missing
+            // instruments still fail at the actual publisher; never create bars.
+            "EUR/GBP" -> "EURGBP"
+            "EUR/JPY" -> "EURJPY"
+            "GBP/JPY" -> "GBPJPY"
+            "AUD/JPY" -> "AUDJPY"
+            "CAD/JPY" -> "CADJPY"
+            "CHF/JPY" -> "CHFJPY"
+            "NZD/JPY" -> "NZDJPY"
+            "EUR/AUD" -> "EURAUD"
+            "EUR/CAD" -> "EURCAD"
+            "EUR/CHF" -> "EURCHF"
+            "GBP/AUD" -> "GBPAUD"
+            "GBP/CAD" -> "GBPCAD"
+            "GBP/CHF" -> "GBPCHF"
+            "AUD/CAD" -> "AUDCAD"
+            "AUD/CHF" -> "AUDCHF"
+            "AUD/NZD" -> "AUDNZD"
+            "CAD/CHF" -> "CADCHF"
+            "NZD/CAD" -> "NZDCAD"
             else -> null
         }
 

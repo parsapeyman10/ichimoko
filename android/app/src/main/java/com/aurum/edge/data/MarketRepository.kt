@@ -107,6 +107,13 @@ class MarketRepository(
     private var lastNetwork: Network? = null
     private val refreshMutex = Mutex()
     private val binanceHistory = BinanceSpotClient()
+    private val cryptoReadOnly = CryptoRadarCandleClient()
+    private val cryptoBundle = CryptoRadarBundle { symbol, frame, source -> when (source) {
+        CryptoRadarBundle.Source.GATE -> cryptoReadOnly.fetch(symbol, frame, CryptoRadarCandleClient.Venue.GATE)
+        CryptoRadarBundle.Source.OKX -> cryptoReadOnly.fetch(symbol, frame, CryptoRadarCandleClient.Venue.OKX)
+        CryptoRadarBundle.Source.BINANCE -> binanceHistory.fetchCandles(symbol, frame,
+            HistoryPolicy.LIVE_FETCH_CANDLES, HistoryPolicy.LIVE_MIN_CANDLES)
+    } }
     private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client, binanceHistory)
     private var timeframeJob: Job? = null
     @Volatile private var timeframeSnapshot: Map<Interval, List<Candle>> = emptyMap()
@@ -252,9 +259,19 @@ class MarketRepository(
             ))
         try {
             var fetched: List<Candle> = emptyList()
+            var pinnedCrypto: CryptoRadarBundle.Snapshot? = null
             var historyProvider = ""
             var staleDetail = "تاریخچهٔ آنلاین پاسخ داد اما آخرین کندل آن باید با تیک زنده تأیید شود"
-            if (CryptoCatalog.isCrypto(current.symbol)) {
+            if (CryptoCatalog.isCrypto(current.symbol) && current.interval == Interval.M5 &&
+                requestedSize <= HistoryPolicy.LIVE_FETCH_CANDLES) {
+                // One publisher across M5/M15/H1. Gate/OKX are strictly read-only;
+                // never mix their candles with Binance executions or MTF frames.
+                val book = cryptoBundle.fetch(current.symbol)
+                pinnedCrypto = book
+                fetched = book.m5
+                historyProvider = book.provider
+                staleDetail = "${book.provider}: کندل بسته دریافت شد؛ ورود فقط با تیک همان صرافی مجاز است"
+            } else if (CryptoCatalog.isCrypto(current.symbol)) {
                 // Only Binance Spot USDT bars may authorize Binance paper entries.
                 // If geo-blocked (HTTP 451), show the provider error rather than
                 // silently replacing the same-pair execution feed with another exchange.
@@ -282,6 +299,9 @@ class MarketRepository(
                 // is only a final fallback; this keeps the chart/replay provider policy honest.
                 val public = publicHistory.fetchCandles(current.symbol, current.interval,
                     minimumSize = minimumSize, desiredSize = requestedSize)
+                if (requestedSize <= HistoryPolicy.LIVE_FETCH_CANDLES &&
+                    !CandleSourceHealth.ready(public.candles, current.interval, System.currentTimeMillis()))
+                    throw DataFeedException("Yahoo کندل بستهٔ تازه/کامل ندارد؛ منبع بعدی بررسی می‌شود")
                 fetched = public.candles
                 historyProvider = public.provider
                 staleDetail = "تاریخچهٔ عمومی پاسخ داد اما آخرین کندل آن قدیمی است؛ تیک زندهٔ جداگانه باید قیمت فعلی را تأیید کند"
@@ -307,6 +327,9 @@ class MarketRepository(
                 val dukascopyFailure = try {
                     val deep = dukascopyHistory.fetchCandles(current.symbol, current.interval,
                         minimumSize = minimumSize, desiredSize = requestedSize)
+                    if (requestedSize <= HistoryPolicy.LIVE_FETCH_CANDLES &&
+                        !CandleSourceHealth.ready(deep.candles, current.interval, System.currentTimeMillis()))
+                        throw DataFeedException("Dukascopy کندل تازه/کامل ندارد")
                     fetched = deep.candles
                     historyProvider = deep.provider
                     staleDetail = "Dukascopy تاریخچهٔ واقعی داد اما آخرین کندل آن باید با تیک زنده تأیید شود"
@@ -342,8 +365,16 @@ class MarketRepository(
                 settings.read().symbol != current.symbol || settings.read().interval != current.interval ||
                 (current.hasKey && settings.read().apiKey != current.apiKey) ||
                 settings.read().hasKey != current.hasKey || _state.value.symbol != current.symbol) return@withLock
+            pinnedCrypto?.let { snapshot ->
+                timeframeJob?.cancel(); timeframeJob = null
+                timeframeSnapshot = snapshot.frames
+                timeframeAutoMode = current.autoPaperTrading
+                lastFrameRefreshAt = System.currentTimeMillis()
+            }
             val receivedAt = System.currentTimeMillis()
-            val streamRecent = _state.value.feed.mode == FeedMode.LIVE &&
+            val streamRecent = (!CryptoCatalog.isCrypto(current.symbol) ||
+                historyProvider == BinanceSpotClient.PROVIDER) &&
+                _state.value.feed.mode == FeedMode.LIVE &&
                 FeedLiveness.hasRecentReceipt(_state.value.feed, receivedAt)
             val historyCurrent = hasCurrentRestBar(fetched, current.interval, receivedAt)
             val periodStart = currentPeriodStart(current.interval)
@@ -432,6 +463,11 @@ class MarketRepository(
             while (isActive && started && generation == session && streamEpoch == epoch) {
                 val current = settings.read()
                 if (marketClosed()) { publishClosed(); delay(60_000L); continue }
+                if (CryptoCatalog.isCrypto(current.symbol) && _state.value.historyProvider != null &&
+                    _state.value.historyProvider != BinanceSpotClient.PROVIDER) {
+                    delay(10_000L) // read-only alternate candle source; Binance is not its tick stream
+                    continue
+                }
                 if (!hasInternet()) {
                     publishDelayed(if (current.hasKey)
                         "شبکه موقتاً در دسترس نیست؛ WebSocket بعد از بازگشت شبکه دوباره وصل می‌شود"
@@ -625,6 +661,10 @@ class MarketRepository(
         // or settle a paper position from a re-timestamped close.
         if (!TradeQuotePolicy.accepts(tick)) return
         val current = settings.read()
+        // A Binance trade cannot mutate Gate/OKX historical bars or become a
+        // same-venue quote for their read-only radar. Open-position replay is separate.
+        if (CryptoCatalog.isCrypto(current.symbol) &&
+            _state.value.historyProvider != BinanceSpotClient.PROVIDER) return
         val now = System.currentTimeMillis()
         val price = tick.price
         val at = tick.at

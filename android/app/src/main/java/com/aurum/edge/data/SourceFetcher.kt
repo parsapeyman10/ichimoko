@@ -31,6 +31,7 @@ class SourceFetcher(
 ) {
     private val json = Json { ignoreUnknownKeys = true }
     private val spot = SpotFallbackClient()
+    private val cryptoRadar = CryptoRadarCandleClient()
 
     suspend fun fetchAll(
         source: SourceDef,
@@ -80,7 +81,12 @@ class SourceFetcher(
         if (source.kind == SourceKind.CRYPTO_SPOT_TRADE) {
             val coin = CryptoCatalog.find(symbol.code)
                 ?: throw DataFeedException("جفت USDT بایننس شناسایی نشد")
-            val tick = spot.fetchQuote(coin.id) // shared process-wide 15/40 request budget
+            val tick = when (source.id) {
+                SourceCatalog.gateTrades.id -> cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.GATE)
+                SourceCatalog.okxTrades.id -> cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.OKX)
+                SourceCatalog.binanceTrades.id -> spot.fetchQuote(coin.id) // original venue budget
+                else -> throw DataFeedException("منبع معاملات رمزارز ناشناخته است")
+            }
             Quote(symbol.code, symbol.label, price = tick.price, providerAt = tick.at,
                 unit = source.unit, sourceId = source.id)
         } else {

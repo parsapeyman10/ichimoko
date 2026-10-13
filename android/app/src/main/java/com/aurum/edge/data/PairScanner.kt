@@ -120,6 +120,15 @@ class PairScanner(
     }
 
     private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client, binanceHistory)
+    private val cryptoReadOnly = CryptoRadarCandleClient()
+    private val cryptoBundle = CryptoRadarBundle { symbol, interval, source ->
+        when (source) {
+            CryptoRadarBundle.Source.GATE -> cryptoReadOnly.fetch(symbol, interval, CryptoRadarCandleClient.Venue.GATE)
+            CryptoRadarBundle.Source.OKX -> cryptoReadOnly.fetch(symbol, interval, CryptoRadarCandleClient.Venue.OKX)
+            CryptoRadarBundle.Source.BINANCE -> binanceHistory.fetchCandles(symbol, interval,
+                HistoryPolicy.LIVE_FETCH_CANDLES, HistoryPolicy.LIVE_MIN_CANDLES)
+        }
+    }
     /** Trends measured during the running sweep; published as one market-wide read at the end. */
     private val trendSample = mutableListOf<SymbolTrend>()
     private var lastSweepElapsed = 0L
@@ -316,59 +325,57 @@ class PairScanner(
             }
 
             suspend fun publicOrDukascopy(): Pair<List<Candle>, String> {
-                var partial: Pair<List<Candle>, String>? = null
+                val failures = mutableListOf<String>()
                 try {
                     val public = publicHistory.fetchCandles(symbol, interval,
-                        minimumSize = 1, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
-                    if (public.candles.size >= HistoryPolicy.LIVE_MIN_CANDLES)
+                        minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
+                    if (CandleSourceHealth.ready(public.candles, interval, now))
                         return public.candles to public.provider
-                    partial = public.candles to public.provider // read-only; never authorize entry.
-                } catch (cancel: CancellationException) {
-                    throw cancel
-                } catch (_: Exception) { /* Try an independent, same-instrument source. */ }
-                return try {
-                    dukascopyHistory.fetchCandles(symbol, interval,
-                        minimumSize = HistoryPolicy.LIVE_MIN_CANDLES,
-                        desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES).let { it.candles to it.provider }
-                } catch (cancel: CancellationException) {
-                    throw cancel
-                } catch (deepFailure: Exception) {
-                    partial?.takeIf { it.first.isNotEmpty() }
-                        ?: throw DataFeedException("برای $symbol تاریخچهٔ رایگان هم‌نماد در دسترس نیست: ${deepFailure.message ?: "فید ناموجود"}".take(180))
-                }
+                    failures += "Yahoo: کندل قدیمی/ناقص"
+                } catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) { failures += "Yahoo: ناموجود" }
+                try {
+                    val deep = dukascopyHistory.fetchCandles(symbol, interval,
+                        minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
+                    if (CandleSourceHealth.ready(deep.candles, interval, now))
+                        return deep.candles to deep.provider
+                    failures += "Dukascopy: کندل قدیمی/ناقص"
+                } catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) { failures += "Dukascopy: ناموجود" }
+                if (config.hasKey) try {
+                    val keyed = client.fetchCandles(config.apiKey, symbol, interval,
+                        outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
+                        minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES)
+                    if (CandleSourceHealth.ready(keyed, interval, now))
+                        return keyed to "Twelve Data (fallback)"
+                    failures += "Twelve Data: کندل قدیمی/ناقص"
+                } catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) { failures += "Twelve Data: ناموجود" }
+                throw DataFeedException("$symbol: ${failures.joinToString("؛ ")}؛ سیگنال مسدود است")
             }
 
+            val cryptoSnapshot = if (crypto) try {
+                cryptoBundle.fetch(symbol, now)
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (failure: Exception) {
+                update(symbol, "error", (failure.message ?: "منبع هم‌نماد موجود نیست").take(230))
+                return@withPermit
+            } else null
             val (rawCandles, baseSource) = try {
-                if (CryptoCatalog.isCrypto(symbol)) {
+                if (cryptoSnapshot != null) cryptoSnapshot.m5 to cryptoSnapshot.provider
+                else if (config.hasKey) {
                     try {
-                        binanceHistory.fetchCandles(symbol, interval,
-                            HistoryPolicy.LIVE_FETCH_CANDLES, HistoryPolicy.LIVE_MIN_CANDLES)
-                            .let { it.candles to it.provider }
-                    } catch (cancel: CancellationException) {
-                        throw cancel
-                    } catch (_: Exception) {
-                        // A keyed exchange feed may carry the exact USDT pair. Never silently
-                        // substitute a USD quote for it if both sources are unavailable.
-                        if (config.hasKey && !config.autoPaperTrading) client.fetchCandles(config.apiKey, symbol, interval,
+                        val keyed = client.fetchCandles(config.apiKey, symbol, interval,
                             outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
-                            minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES) to "Twelve Data (فقط رادار، نه ورود)"
-                        else throw DataFeedException("فید واقعی ${symbol} از Binance Spot در دسترس نیست؛ دادهٔ USD جایگزین USDT نمی‌شود")
-                    }
-                } else if (config.hasKey) {
-                    try {
-                        client.fetchCandles(config.apiKey, symbol, interval, outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
-                            minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES) to "Twelve Data"
-                    } catch (cancel: CancellationException) {
-                        throw cancel
-                    } catch (_: Exception) {
-                        publicOrDukascopy()
-                    }
-                } else {
-                    publicOrDukascopy()
-                }
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (error: Exception) {
+                            minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES)
+                        if (!CandleSourceHealth.ready(keyed, interval, now))
+                            throw DataFeedException("Twelve Data کندل تازه/کامل ندارد")
+                        keyed to "Twelve Data"
+                    } catch (cancel: CancellationException) { throw cancel }
+                    catch (_: Exception) { publicOrDukascopy() }
+                } else publicOrDukascopy()
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (error: Exception) {
                 update(symbol, "error", (error.message ?: "خطای دریافت کندل").take(180))
                 return@withPermit
             }
@@ -387,8 +394,7 @@ class PairScanner(
             }
 
             val frames = try {
-                timeframeFeed.fetch(symbol, interval, candles, config.apiKey,
-                    requireBinanceCrypto = config.autoPaperTrading && CryptoCatalog.isCrypto(symbol))
+                cryptoSnapshot?.frames ?: timeframeFeed.fetch(symbol, interval, candles, config.apiKey)
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (error: Exception) {
@@ -513,11 +519,13 @@ class PairScanner(
             val market = MarketState(
                 symbol = symbol, interval = interval, candles = candles, lastPrice = price,
                 feed = FeedStatus(FeedMode.POLLING,
-                    if (config.hasKey) "اسکن دوره‌ای Twelve/public/Dukascopy fallback" else "اسکن دوره‌ای تاریخچهٔ عمومی/Dukascopy",
-                    System.currentTimeMillis()),
+                    "تاریخچهٔ بستهٔ $baseSource؛ تیک اجرا و اسپرد جداگانه لازم است",
+                    System.currentTimeMillis(), provider = baseSource),
                 signal = combined,
-                historyProvider = if (CryptoCatalog.isCrypto(symbol) && config.autoPaperTrading)
-                    BinanceSpotClient.PROVIDER else null,
+                // Only the ACTUAL publisher can authorize a same-venue entry. Radar fallback
+                // candles from Gate/OKX are never relabelled as Binance history.
+                historyProvider = baseSource,
+
             )
             val mtf = withContext(Dispatchers.Default) {
                 runCatching { MtfAnalyzer.analyze(candles, interval) }.getOrNull()

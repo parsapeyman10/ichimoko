@@ -46,10 +46,11 @@ object WatchCatalog {
             label = coin.label,
             unit = "$",
             providerCodes = linkedMapOf(
+                "gate_spot_trades" to coin.id,
+                "okx_spot_trades" to coin.id,
                 "binance_spot_agg_trades" to coin.id,
-                "twelve_data_quote" to coin.id,
             ),
-            defaultSources = listOf("binance_spot_agg_trades"),
+            defaultSources = listOf("gate_spot_trades", "okx_spot_trades", "binance_spot_agg_trades"),
             maxAgeMillis = 5 * 60_000L,
             tolerancePct = 0.5,
         )

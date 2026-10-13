@@ -106,6 +106,20 @@ object SourceCatalog {
         unit = "$",
     )
 
-    val all = listOf(yahoo, tgju, bamaCars, goldApi, twelveData, binanceTrades)
+    val gateTrades = SourceDef(
+        id = "gate_spot_trades", title = "Gate Spot · معاملات USDT",
+        subtitle = "معاملهٔ عمومی زمان‌دار، فقط برای دیده‌بان؛ بدون ورود/خروج",
+        kind = SourceKind.CRYPTO_SPOT_TRADE,
+        urlTemplate = "https://api.gateio.ws/api/v4/spot/trades?currency_pair={symbol}", unit = "$",
+    )
+    val okxTrades = SourceDef(
+        id = "okx_spot_trades", title = "OKX Spot · معاملات USDT",
+        subtitle = "معاملهٔ عمومی زمان‌دار، فقط برای دیده‌بان؛ بدون ورود/خروج",
+        kind = SourceKind.CRYPTO_SPOT_TRADE,
+        urlTemplate = "https://www.okx.com/api/v5/market/trades?instId={symbol}", unit = "$",
+    )
+
+    val all = listOf(yahoo, tgju, bamaCars, goldApi, twelveData,
+        gateTrades, okxTrades, binanceTrades)
     fun find(id: String): SourceDef? = all.firstOrNull { it.id == id }
 }

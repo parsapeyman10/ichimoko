@@ -14,11 +14,17 @@ class WatchSettingsStore(context: Context) {
     val selections: StateFlow<Map<String, WatchSelection>> = _selections.asStateFlow()
 
     private fun read(symbol: WatchSymbol): WatchSelection {
-        val enabled = prefs.getString("sources_${symbol.id}", null)?.split(',')
+        val saved = prefs.getString("sources_${symbol.id}", null)
+        // Migrate the original single-provider crypto default, but respect an explicit
+        // custom choice (and an intentionally empty selection).
+        val normalized = if (symbol.id.endsWith("/USDT") &&
+            saved in listOf("binance_spot_agg_trades", "nobitex_public_trades")) null else saved
+        val enabled = normalized?.split(',')
             ?.map { if (it == "nobitex_public_trades") "binance_spot_agg_trades" else it }
             ?.filter { it in symbol.providerCodes }?.distinct()?.takeIf { it.isNotEmpty() }
             ?: symbol.defaultSources
-        val preferred = prefs.getString("preferred_${symbol.id}", null)
+        val preferred = (if (normalized == null && saved != null) null
+            else prefs.getString("preferred_${symbol.id}", null))
             ?.let { if (it == "nobitex_public_trades") "binance_spot_agg_trades" else it }
             ?.takeIf { it in enabled } ?: enabled.firstOrNull().orEmpty()
         return WatchSelection(enabled, preferred)
