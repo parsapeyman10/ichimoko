@@ -8,6 +8,7 @@ import javax.net.ssl.SSLException
 /** Safe, actionable diagnostics. Never echo endpoint, response body or the user's secret. */
 object AiConnectionDiagnostics {
     fun describe(error: Throwable): String = when (error) {
+        is GeminiNativeClient.GeminiResponseException -> error.reason.message
         is UnknownHostException -> "نام دامنهٔ سرویس پیدا نشد (DNS)؛ نشانی HTTPS و دسترسی شبکه را بررسی کنید"
         is SocketTimeoutException -> "مهلت پاسخ سرویس تمام شد؛ اتصال/دسترسی از همین شبکه را بررسی کنید"
         is SSLException -> "گواهی HTTPS یا ارتباط امن تأیید نشد؛ نشانی و ساعت دستگاه را بررسی کنید"

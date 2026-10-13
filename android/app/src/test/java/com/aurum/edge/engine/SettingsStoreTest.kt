@@ -78,7 +78,7 @@ class SettingsStoreTest {
             .putString("td_api_key", "synthetic-key").commit()
         val store = SettingsStore(context)
         assertEquals("XAU/USD", store.read().symbol)
-        assertEquals(listOf("BTC/USDT", "EUR/USD"), store.read().activeWatchlist)
+        assertEquals(com.aurum.edge.data.WatchCatalog.scannerSymbols, store.read().activeSymbols)
         assertEquals("synthetic-key", store.read().apiKey)
         assertFalse(store.saveMarketCredentials("", "AAPL"))
         store.update { it.copy(symbol = "MSFT") }
@@ -98,6 +98,25 @@ class SettingsStoreTest {
         assertTrue(SettingsStore(context).read().proxyEnabled)
         assertTrue(store.saveProxyEnabled(false))
         assertFalse(SettingsStore(context).read().proxyEnabled)
+    }
+
+    @Test fun `old empty or narrow watchlist cannot restrict category strategies or active symbols`() {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE)
+        for (legacy in listOf("", "EUR/USD", "AAPL")) {
+            prefs.edit().clear().putString("v1_watchlist", legacy).commit()
+            val store = SettingsStore(context)
+            for (mode in com.aurum.edge.core.CategoryStrategy.entries) {
+                store.update { it.copy(categoryStrategies = com.aurum.edge.core.AssetClass.entries.associateWith { mode }) }
+                val config = SettingsStore(context).read()
+                assertEquals(230, config.activeSymbols.size)
+                assertEquals(200, config.activeSymbols.count(com.aurum.edge.data.CryptoCatalog::isCrypto))
+                config.activeSymbols.forEach { symbol -> assertEquals(mode, config.strategyFor(symbol)) }
+                assertFalse(config.autoPaperTrading) // expanding coverage is not trading consent
+                assertEquals(0.5, config.riskPercent, 0.0)
+            }
+            assertEquals(legacy, prefs.getString("v1_watchlist", null)) // ignored, not destructive
+        }
     }
 
 }

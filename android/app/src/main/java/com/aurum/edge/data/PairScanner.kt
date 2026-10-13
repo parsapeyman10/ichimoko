@@ -219,10 +219,9 @@ class PairScanner(
             System.currentTimeMillis() - it.computedAt in 0L..10 * 60_000L
         }
         val config = settings.read()
-        // The watchlist is evaluated first, but every supported catalog instrument is also
-        // checked by the same candle -> V1 four-layer -> AI veto -> risk pipeline. An absent
-        // feed is reported as an error, never filled with a fabricated candle.
-        val universe = WatchCatalog.scanUniverse(config.activeWatchlist)
+        // Every catalog instrument uses its category settings. Retired manual watchlists
+        // cannot narrow scanning or alert authorization. Missing feeds remain explicit errors.
+        val universe = config.activeSymbols
         // A result from the previous sweep cannot remain a current recommendation while
         // the provider is still being checked this time (or after a configuration change).
         val statuses = mutableMapOf<String, PairScanStatus>()
@@ -541,10 +540,10 @@ class PairScanner(
                     return@async
                 }
                 val blocker = PaperAlertRules.blocker(market, config, headlines, journal.trades.value, mtf,
-                    System.currentTimeMillis(), allowedSymbols = config.activeWatchlist, barAgeGraceMs = graceMs)
+                    System.currentTimeMillis(), allowedSymbols = config.activeSymbols, barAgeGraceMs = graceMs)
                 if (blocker != null) {
                     // A technically actionable closed-bar read is still useful when alerts,
-                    // monitor, watchlist, live quote or risk permission are absent. Rank it
+                    // monitor, live quote or risk permission are absent. Rank it
                     // read-only; NEVER persist/notify/open it as a paper opportunity.
                     update(symbol = symbol, state = "observed",
                         detail = "فقط سیگنال فنی؛ مجوز ورود/اعلان نیست: ${blocker.take(110)}" +

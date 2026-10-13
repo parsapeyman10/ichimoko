@@ -46,8 +46,7 @@ class PaperAutoTrader(
         // The catalog runner may pass a second, independently fetched same-venue trade
         // tick even for the selected crypto symbol's 5m closed-bar scan. Persistence and
         // duplicate/portfolio limits remain atomic in JournalStore.
-        val allowed = if (state.symbol in WatchCatalog.scannerSymbols) WatchCatalog.scannerSymbols
-            else settings.read().activeWatchlist
+        val allowed = settings.read().activeSymbols
         if (catalogQuote != null &&
             (!TradeQuotePolicy.accepts(catalogQuote) || catalogQuote.price != state.lastPrice ||
                 state.symbol !in WatchCatalog.scannerSymbols)) {

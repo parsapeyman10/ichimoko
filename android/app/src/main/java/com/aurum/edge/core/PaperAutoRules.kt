@@ -9,7 +9,7 @@ import kotlin.math.abs
 object PaperAutoRules {
     fun blocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
                 now: Long = System.currentTimeMillis(),
-                allowedSymbols: List<String> = settings.activeWatchlist): String? {
+                allowedSymbols: List<String> = settings.activeSymbols): String? {
         if (market.interval != Interval.M5 || market.signal?.interval?.let { it != Interval.M5 } == true)
             return "ورود کاغذی فقط روی کندل بستهٔ ۵ دقیقه (5m) مجاز است"
         OilEntrySafety.blocker(market.symbol)?.let { return it }

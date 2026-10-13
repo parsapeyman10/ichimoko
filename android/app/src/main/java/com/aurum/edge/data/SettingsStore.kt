@@ -37,8 +37,12 @@ class SettingsStore(context: Context) {
         val storedStrategy = com.aurum.edge.core.StrategyKind.fromId(
             prefs.getString(KEY_ACTIVE_STRATEGY, "ICHIMOKU"))
             ?: com.aurum.edge.core.StrategyKind.ICHIMOKU_PRICE_ACTION
-        val activeWatchlist = prefs.getString(KEY_V1_WATCHLIST, null)?.split(',')?.let(V1Universe::watchlist)
-            ?: V1Universe.defaults
+        // Retired v1_watchlist is intentionally ignored. It cannot narrow the app catalog.
+        val (aiUrl, aiFormat) = GeminiAiStudio.migratePreset(storedNewsAiUrl,
+            prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" })
+        val aiModel = if (aiFormat == GeminiAiStudio.WIRE_FORMAT)
+            runCatching { GeminiAiStudio.modelId(storedNewsAiModel) }.getOrDefault(storedNewsAiModel)
+            else storedNewsAiModel
         val categoryStrategies = AssetClass.entries.associateWith { category ->
             CategoryStrategy.fromStored(prefs.getString("v1_strategy_${category.name}", null))
         }
@@ -64,12 +68,11 @@ class SettingsStore(context: Context) {
         autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
         autoDownloadUpdates = prefs.getBoolean(KEY_AUTO_DOWNLOAD_UPDATES, false),
         newsAiApiKey = storedNewsAiKey,
-        newsAiBaseUrl = storedNewsAiUrl,
-        newsAiModel = storedNewsAiModel,
-        newsAiFormat = prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" },
+        newsAiBaseUrl = aiUrl,
+        newsAiModel = aiModel,
+        newsAiFormat = aiFormat,
         signalProfile = profile,
         activeStrategy = storedStrategy,
-        activeWatchlist = activeWatchlist,
         categoryStrategies = categoryStrategies,
     )
     }
@@ -164,7 +167,7 @@ class SettingsStore(context: Context) {
     }
 
     /**
-     * User's OWN key for a DIRECT-FROM-PHONE AI news call (Anthropic or OpenAI-compatible,
+     * User's OWN key for a DIRECT-FROM-PHONE AI news call (native Gemini, Anthropic or OpenAI-compatible,
      * see the format parameter), replacing the need
      * for a self-hosted backend for the Forex ninth-condition gate. Explicit, on-device only;
      * never logged. A blank key keeps the previous secret only for the same URL and wire format
@@ -172,11 +175,14 @@ class SettingsStore(context: Context) {
      */
     @Synchronized
     fun saveNewsAiConfig(apiKey: String, baseUrl: String, model: String, format: String = "AUTO"): Boolean {
-        val url = baseUrl.trim().trimEnd('/')
-        val modelName = if (format.trim().uppercase(java.util.Locale.ROOT) == "ANTHROPIC") model.trim()
-            else GeminiAiStudio.openAiModelId(url, model)
-        val wireFormat = format.trim().uppercase(java.util.Locale.ROOT).let {
-            if (it in setOf("ANTHROPIC", "OPENAI")) it else "AUTO" }
+        val requestedFormat = format.trim().uppercase(java.util.Locale.ROOT).let {
+            if (it in setOf("ANTHROPIC", "OPENAI", "GEMINI")) it else "AUTO"
+        }
+        val (url, wireFormat) = GeminiAiStudio.migratePreset(baseUrl.trim().trimEnd('/'), requestedFormat)
+        val modelName = if (wireFormat == GeminiAiStudio.WIRE_FORMAT) {
+            if (!GeminiAiStudio.isOfficialNativeEndpoint(url)) return false
+            runCatching { GeminiAiStudio.modelId(model) }.getOrNull() ?: return false
+        } else if (wireFormat == "ANTHROPIC") model.trim() else GeminiAiStudio.openAiModelId(url, model)
         val key = AiCredentialScope.key(apiKey, read(), url, wireFormat, modelName)
         if (key.isBlank() || !url.startsWith("https://") || modelName.isBlank()) return false
         val saved = prefs.edit()
@@ -240,7 +246,6 @@ class SettingsStore(context: Context) {
         if (proposed.accountBalance != _settings.value.accountBalance) dayOpeningEquity()
         val next = proposed.copy(
             symbol = V1Universe.normalize(proposed.symbol).takeIf(V1Universe::valid) ?: "XAU/USD",
-            activeWatchlist = V1Universe.watchlist(proposed.activeWatchlist),
             riskPercent = proposed.riskPercent.takeIf { it.isFinite() }?.coerceIn(0.1, 0.5) ?: 0.5,
             minConfidence = proposed.minConfidence.takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
         )
@@ -271,7 +276,6 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_SIGNAL_COOLDOWN, next.signalProfile.cooldownFilter)
             .putBoolean(KEY_SIGNAL_CHIKOU, next.signalProfile.chikouConfirmation)
             .putString(KEY_ACTIVE_STRATEGY, next.activeStrategy.id)
-            .putString(KEY_V1_WATCHLIST, next.activeWatchlist.joinToString(","))
             .apply {
                 AssetClass.entries.forEach { category ->
                     putString("v1_strategy_${category.name}",
@@ -293,7 +297,6 @@ class SettingsStore(context: Context) {
         prefs.getLong("last_sync_${symbol}_${interval.label}", 0L).takeIf { it > 0L }
 
     companion object {
-        private const val KEY_V1_WATCHLIST = "v1_watchlist"
         private const val KEY_API = "td_api_key"
         private const val KEY_SYMBOL = "symbol"
         private const val KEY_INTERVAL = "interval"

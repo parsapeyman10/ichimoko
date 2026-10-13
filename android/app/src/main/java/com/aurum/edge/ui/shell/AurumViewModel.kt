@@ -625,19 +625,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     private var marketSaveInFlight = false
 
-    fun setWatchlist(symbols: List<String>) {
-        container.settingsStore.update {
-            it.copy(activeWatchlist = com.aurum.edge.core.V1Universe.watchlist(symbols))
-        }
-        container.pairScanner.refreshNow(minIntervalMs = 0L)
-    }
-
     fun setCategoryStrategy(category: com.aurum.edge.core.AssetClass,
                             mode: com.aurum.edge.core.CategoryStrategy) {
         if (category in setOf(com.aurum.edge.core.AssetClass.CRYPTO, com.aurum.edge.core.AssetClass.STOCK)) return // retired legacy crypto modes
         container.settingsStore.update {
             it.copy(categoryStrategies = it.categoryStrategies + (category to mode))
         }
+        container.market.refreshNow()
+        container.pairScanner.refreshNow(minIntervalMs = 0L)
     }
 
     fun saveRiskPercent(value: Double) = container.settingsStore.update { it.copy(riskPercent = value.coerceIn(0.1, 0.5)) }
@@ -1156,7 +1151,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             if (requestGeneration != aiModelsGeneration) return@launch
             _aiModels.value = result.fold(
                 onSuccess = { AiModelsState(models = it) },
-                onFailure = { AiModelsState(error = (it.message ?: "خطای نامشخص").take(120)) })
+                onFailure = { AiModelsState(error = com.aurum.edge.data.AiConnectionDiagnostics.describe(it)) })
         }
     }
 

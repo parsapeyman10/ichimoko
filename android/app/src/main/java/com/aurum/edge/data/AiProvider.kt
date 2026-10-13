@@ -17,8 +17,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URI
 
 /**
- * Direct, on-device AI calls with the user's OWN key. Two request formats are supported and
+ * Direct, on-device AI calls with the user's OWN key. Three request formats are supported and
  * chosen by the explicitly configured wire format (AUTO falls back to host detection):
+ *  - Gemini native generateContent with x-goog-api-key, contents and systemInstruction.
  *  - Anthropic Messages: POST /v1/messages with `x-api-key` and `anthropic-version`,
  *    `system` parameter and a `content[]` response.
  *  - OpenAI-compatible Chat: POST /v1/chat/completions (without doubling an existing /v1)
@@ -31,7 +32,7 @@ internal object AiProvider {
     internal fun isLlmRelay(baseUrl: String): Boolean = runCatching { URI(baseUrl.trim()) }
         .getOrNull()?.let { it.scheme == "https" && it.host.equals("api.llmsrelay.com", true) } == true
 
-    private fun providerError(code: Int): String = when (code) {
+    internal fun providerError(code: Int): String = when (code) {
         400 -> "پارامتر درخواست یا مدل با سرویس سازگار نیست (HTTP 400)"
         401 -> "کلید API نامعتبر است یا منقضی شده (HTTP 401)"
         402 -> "اعتبار کافی نیست؛ برای GLM هم موجودی نقدی GLM و هم سهمیهٔ خود کلید را بررسی کنید (HTTP 402)"
@@ -51,7 +52,7 @@ internal object AiProvider {
      */
     internal fun usesAnthropic(baseUrl: String, format: String): Boolean = when (format.trim().uppercase()) {
         "ANTHROPIC" -> true
-        "OPENAI" -> false
+        "OPENAI", "GEMINI" -> false
         else -> isAnthropic(baseUrl)
     }
 
@@ -80,6 +81,8 @@ internal object AiProvider {
      */
     suspend fun listModels(httpClient: OkHttpClient, baseUrl: String, apiKey: String,
                            format: String = "AUTO"): List<String> {
+        if (GeminiAiStudio.usesNative(baseUrl, format))
+            return GeminiNativeClient.listModels(httpClient, baseUrl, apiKey)
         val base = baseUrl.trim().trimEnd('/')
         val uri = runCatching { URI(base) }.getOrNull()
         require(uri != null && uri.scheme == "https" && !uri.host.isNullOrBlank()) {
@@ -120,7 +123,9 @@ internal object AiProvider {
                               format: String = "AUTO"): JsonObject {
         val content = completeText(httpClient, baseUrl, apiKey, model, system, user, maxTokens, format,
             requireJson = true)
-        return parseJsonObjectLoose(content) ?: throw IllegalStateException("خروجی مدل JSON معتبر نیست")
+        return (if (GeminiAiStudio.usesNative(baseUrl, format))
+            runCatching { Json.parseToJsonElement(content) as? JsonObject }.getOrNull()
+            else parseJsonObjectLoose(content)) ?: throw IllegalStateException("خروجی مدل JSON معتبر نیست")
     }
 
     /**
@@ -140,6 +145,8 @@ internal object AiProvider {
     private suspend fun completeText(httpClient: OkHttpClient, baseUrl: String, apiKey: String, model: String,
                                      system: String, user: String, maxTokens: Int, format: String,
                                      requireJson: Boolean): String {
+        if (GeminiAiStudio.usesNative(baseUrl, format))
+            return GeminiNativeClient.generate(httpClient, baseUrl, apiKey, model, system, user, maxTokens, requireJson)
         val base = baseUrl.trim().trimEnd('/')
         val uri = runCatching { URI(base) }.getOrNull()
         require(uri != null && uri.scheme == "https" && !uri.host.isNullOrBlank()) {
