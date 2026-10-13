@@ -26,7 +26,6 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -81,6 +80,8 @@ data class PairScanState(
     val checkedCount: Int = 0,
     val totalCount: Int = 0,
     val lastSweepAt: Long? = null,
+    /** Measured elapsed time of the last completed network sweep; never an SLA. */
+    val lastSweepDurationMs: Long? = null,
     val lastError: String? = null,
     /** The Top 3 highest-ranking opportunities from the 50+ scan. */
     val topThree: List<PairScanStatus> = emptyList(),
@@ -175,6 +176,8 @@ class PairScanner(
                 _state.value = _state.value.copy(
                     sweeping = false,
                     lastSweepAt = if (finished) System.currentTimeMillis() else _state.value.lastSweepAt,
+                    lastSweepDurationMs = if (finished) SystemClock.elapsedRealtime() - elapsed
+                        else _state.value.lastSweepDurationMs,
                     topThree = ranked.take(3),
                     bestPick = ranked.firstOrNull(),
                     marketTrend = read,
@@ -282,18 +285,18 @@ class PairScanner(
         val headlines = news.state.value
 
         // Separate bounded lanes: a slow FX/history source cannot starve crypto, stocks or
-        // commodities. Crypto gets two slots; each other class gets one. Global starts are
-        // still paced to avoid an uncontrolled public API request burst.
+        // commodities. Crypto gets two slots; each other class gets one. Symbols launch
+        // concurrently, without the old unconditional 1-second delay per start. The bounded
+        // provider slots still wait when busy: unlimited concurrent public HTTP calls would
+        // trigger throttling, not make 81 fresh histories arrive within one second.
         // This is NOT a faster tick feed: signals still use real closed M5/M15/H1 bars.
         val classSlots = com.aurum.edge.core.AssetClass.entries.associateWith { asset ->
             Semaphore(if (asset == com.aurum.edge.core.AssetClass.CRYPTO) 2 else 1)
         }
-        val startGate = Mutex()
-        var lastRequestStart = 0L
         coroutineScope {
             universe.map { symbol -> async {
                 classSlots.getValue(com.aurum.edge.core.AssetClass.of(symbol)).withPermit {
-            // Only ACTIVE markets consume a provider slot/start budget.
+            // Only ACTIVE markets consume a provider slot.
             val crypto = CryptoCatalog.isCrypto(symbol)
             // All NEW entries and radar candidates have a closed 5m base, regardless
             // of the selected chart. M15/H1 are independent alignment inputs ONLY.
@@ -305,25 +308,10 @@ class PairScanner(
                 update(symbol, "closed", "بازار طبق ساعت سشن بسته است؛ تا بازگشایی هیچ درخواست فید یا ارزیابی سیگنال انجام نمی‌شود")
                 return@withPermit
             }
-            // Re-read after each provider wait: a new open position outranks further
-            // scanner requests even if it was opened during this long universe sweep.
+            // Re-read after the class slot becomes available: an open position outranks
+            // scanner requests even if it was opened during this universe sweep.
             if (journal.trades.value.any { it.symbol == symbol && it.isOpen }) {
                 update(symbol, "blocked", "پوزیشن کاغذی این نماد باز است؛ فرصت جدید اسکن نمی‌شود")
-                return@withPermit
-            }
-            startGate.withLock {
-                val elapsed = SystemClock.elapsedRealtime()
-                val waitMs = PAIR_SPACING_MS - (elapsed - lastRequestStart)
-                if (lastRequestStart != 0L && waitMs > 0L) delay(waitMs)
-                lastRequestStart = SystemClock.elapsedRealtime()
-            }
-            now = System.currentTimeMillis()
-            if (MarketHours.closedFor(symbol, now)) {
-                update(symbol, "closed", "سشن هنگام انتظار بسته شد؛ درخواست فید انجام نشد")
-                return@withPermit
-            }
-            if (journal.trades.value.any { it.symbol == symbol && it.isOpen }) {
-                update(symbol, "blocked", "در زمان انتظار پوزیشن این نماد باز شد؛ درخواست اسکن لغو شد")
                 return@withPermit
             }
 
@@ -639,6 +627,5 @@ class PairScanner(
 
     companion object {
         const val SWEEP_PERIOD_MS = 30_000L
-        const val PAIR_SPACING_MS = 1_000L
     }
 }

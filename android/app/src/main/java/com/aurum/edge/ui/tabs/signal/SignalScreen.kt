@@ -1067,7 +1067,8 @@ internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, now: 
         val requested = scan.statuses.count { it.state != "pending" && it.state != "closed" }
         Text("بازارهای بازِ بررسی‌شده: $requested/${scan.totalCount - skipped} · " +
             "$skipped نماد بسته بدون درخواست فید · " +
-            "آخرین دور کامل: ${scan.lastSweepAt?.let { formatTime(it) } ?: "هنوز کامل نشده"} · " +
+            "آخرین دور کامل: ${scan.lastSweepAt?.let { formatTime(it) } ?: "هنوز کامل نشده"}" +
+            (scan.lastSweepDurationMs?.let { " · زمان واقعی دور: ${it / 1000.0} ثانیه" } ?: "") + " · " +
             "تلاش بعدی پس از اتمام دور، حداقل ۳۰ ثانیه فاصله و در چرخهٔ حدوداً یک‌دقیقه‌ای برنامه. " +
             "زمان واقعی به شبکه و محدودیت منبع بستگی دارد؛ دلیل هر بررسی در انتهای صفحه است.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)

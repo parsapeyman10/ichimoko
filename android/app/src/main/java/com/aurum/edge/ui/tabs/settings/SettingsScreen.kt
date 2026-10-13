@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
 import com.aurum.edge.BuildConfig
 import com.aurum.edge.core.AppSettings
+import com.aurum.edge.data.GeminiAiStudio
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.service.SignalMonitorService
 import com.aurum.edge.notify.Notifier
@@ -312,10 +313,35 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     "HTTP 402 یعنی هم موجودی نقدی GLM و هم سهمیهٔ کلید باید بررسی شود؛ درخواست‌ها ممکن است هزینه داشته باشند.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
             }
-            Text("«نشانی پایه» باید متعلق به همان ارائه‌دهندهٔ کلید شما باشد. برای API سازگار Gemini، " +
-                "نشانی https://generativelanguage.googleapis.com/v1beta/openai با قالب OpenAI قابل آزمون است؛ " +
-                "مدل را از فهرست مجازِ کلید خود انتخاب کنید. رایگان‌بودن یا دسترسی شبکه/منطقه تضمین نیست. " +
-                "اپ فقط HTTPS می‌پذیرد؛ کلید شخصی را در گفتگو یا گزارش خطا ارسال نکنید.",
+            Text("Google AI Studio / Gemini: ۱) با حساب Google وارد صفحهٔ API Keys شوید و شرایط سرویس را بپذیرید. " +
+                "۲) پروژهٔ پیش‌فرض را انتخاب کنید؛ اگر پروژهٔ Cloud از قبل دارید، از Dashboard ← Projects آن را Import کنید. " +
+                "۳) Create API key را بزنید و کلید مخصوص Gemini API همان پروژه را کپی کنید. " +
+                "اگر دکمه غیرفعال است، مدیر پروژه باید مجوزهای IAM ساخت کلید و فعال‌کردن سرویس را بدهد. " +
+                "۴) کلید را فقط در فیلد بالا وارد کنید، مدل مجاز را انتخاب و اتصال را تست کنید؛ کلید را در چت/کد/گزارش نفرستید.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 8.dp))
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(onClick = {
+                    // A draft from another provider must NEVER be sent to Google's endpoint.
+                    newsAiKey = ""; newsAiModel = ""
+                    newsAiBaseUrl = GeminiAiStudio.OPENAI_BASE_URL
+                    newsAiFormat = GeminiAiStudio.WIRE_FORMAT
+                    viewModel.resetAiDraftDiagnostics()
+                }, modifier = Modifier.weight(1f)) { Text("آماده‌سازی Gemini") }
+                OutlinedButton(onClick = {
+                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GeminiAiStudio.KEYS_URL))) }
+                }, modifier = Modifier.weight(1f)) { Text("صفحهٔ ساخت کلید") }
+            }
+            Text("Gemini فقط برای تحلیل اختیاری خبر/نظر AI است؛ قیمت، کندل یا تسریع اسکن ۸۱ نماد نمی‌دهد. " +
+                "سهمیه، منطقه، مدل و هزینه به پروژه بستگی دارد؛ کلید بدون سقف/هزینهٔ تضمینی نیست. " +
+                "این اپ کلید واردشده را در حافظهٔ خصوصی همین گوشی ذخیره و مستقیم به Google می‌فرستد؛ " +
+                "کلید موبایل در برابر استخراج تضمین امنیت ندارد. برای استفادهٔ تولیدی با کلید محرمانه، پروکسی سرور خودتان لازم است. " +
+                "برای محدودیت کلید و هشدار هزینه به Google Cloud رجوع کنید؛ فقط پاسخ تست اتصال روی گوشی ملاک است.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 4.dp))
+            Text("«نشانی پایه» باید متعلق به ارائه‌دهندهٔ همان کلید باشد؛ Gemini از قالب OpenAI-compatible استفاده می‌کند. " +
+                "مدل را از فهرست مجاز همین کلید بگیرید. انتخاب preset فقط فرم را آماده می‌کند و " +
+                "کلید قبلی تا ذخیرهٔ تنظیمات جدید به سرویس دیگر ارسال نمی‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
                 modifier = Modifier.padding(top = 4.dp))
             OutlinedTextField(value = newsAiModel, onValueChange = {

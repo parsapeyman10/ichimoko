@@ -1,5 +1,8 @@
 package com.aurum.edge.ui
 
+import android.content.Intent
+import android.net.Uri
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,8 +17,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.aurum.edge.core.AppSettings
+import com.aurum.edge.data.GeminiAiStudio
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.theme.AurumColors
@@ -25,8 +30,23 @@ import com.aurum.edge.ui.theme.AurumColors
  */
 @Composable
 fun ApiMenuScreen(viewModel: AurumViewModel, settings: AppSettings, onForexSettings: () -> Unit) {
+    val context = LocalContext.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         AiStatusCard(viewModel, settings)
+        SectionCard("Google AI Studio · Gemini API", "کلید تحلیل AI؛ نه کلید قیمت یا معامله") {
+            Text("برای دریافت کلید: با حساب Google و پذیرش شرایط سرویس وارد API Keys شوید، " +
+                "پروژهٔ پیش‌فرض را انتخاب یا پروژهٔ Cloud موجود را از بخش Projects وارد کنید و Create API key را بزنید. " +
+                "اگر دسترسی ساخت ندارید، مجوز IAM پروژه را از مدیر بخواهید. سهمیه، منطقه و هزینه را بررسی کنید.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            OutlinedButton(onClick = {
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GeminiAiStudio.KEYS_URL))) }
+            }, modifier = Modifier.fillMaxWidth()) { Text("بازکردن صفحهٔ رسمی API Keys") }
+            OutlinedButton(onClick = onForexSettings, modifier = Modifier.fillMaxWidth()) {
+                Text("تنظیم کلید Gemini در AI")
+            }
+            Text("Gemini فید کندل/قیمت نیست و مدت اسکن نمادها را کاهش نمی‌دهد. کلید را در چت یا برنامهٔ عمومی منتشر نکنید.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+        }
         SectionCard("منابع و APIهای فارکس", "فقط منابع تعریف‌شده، نه «همهٔ سایت‌ها»") {
             Text("کلید API اختصاصیِ دستیار وجود ندارد. کلید خواندنی خود را فقط در تنظیمات وارد کنید؛ کلید معاملاتی یا کلید افشاشده را وارد نکنید.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
