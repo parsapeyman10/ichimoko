@@ -22,6 +22,10 @@ class SettingsStore(context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE)
 
+    // Retired in 1.3.55: an old enabled flag must not strand an upgraded install
+    // waiting for a daemon which is no longer bundled. No other preferences are cleared.
+    init { prefs.edit().remove("embedded_tor_enabled").apply() }
+
     private val _settings = MutableStateFlow(read())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
@@ -37,15 +41,19 @@ class SettingsStore(context: Context) {
         val storedStrategy = com.aurum.edge.core.StrategyKind.fromId(
             prefs.getString(KEY_ACTIVE_STRATEGY, "ICHIMOKU"))
             ?: com.aurum.edge.core.StrategyKind.ICHIMOKU_PRICE_ACTION
-        val activeWatchlist = prefs.getString(KEY_V1_WATCHLIST, null)?.split(',')?.let(V1Universe::watchlist)
-            ?: V1Universe.defaults
+        // Retired v1_watchlist is intentionally ignored. It cannot narrow the app catalog.
+        val (aiUrl, aiFormat) = GeminiAiStudio.migratePreset(storedNewsAiUrl,
+            prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" })
+        val aiModel = if (aiFormat == GeminiAiStudio.WIRE_FORMAT)
+            runCatching { GeminiAiStudio.modelId(storedNewsAiModel) }.getOrDefault(storedNewsAiModel)
+            else storedNewsAiModel
         val categoryStrategies = AssetClass.entries.associateWith { category ->
             CategoryStrategy.fromStored(prefs.getString("v1_strategy_${category.name}", null))
         }
         return AppSettings(
         apiKey = storedApiKey?.takeIf { it.isNotBlank() }
             ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY.trim(),
-        // Symbol can be any instrument in the 50+ global universe (forex, commodities, stocks, crypto)
+        // Symbol can be any instrument in the catalog (forex, commodities, crypto)
         symbol = (prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD")
             .takeIf(V1Universe::valid) ?: "XAU/USD",
         interval = Interval.fromLabel(prefs.getString(KEY_INTERVAL, null) ?: "5m"),
@@ -63,12 +71,11 @@ class SettingsStore(context: Context) {
         autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
         autoDownloadUpdates = prefs.getBoolean(KEY_AUTO_DOWNLOAD_UPDATES, false),
         newsAiApiKey = storedNewsAiKey,
-        newsAiBaseUrl = storedNewsAiUrl,
-        newsAiModel = storedNewsAiModel,
-        newsAiFormat = prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" },
+        newsAiBaseUrl = aiUrl,
+        newsAiModel = aiModel,
+        newsAiFormat = aiFormat,
         signalProfile = profile,
         activeStrategy = storedStrategy,
-        activeWatchlist = activeWatchlist,
         categoryStrategies = categoryStrategies,
     )
     }
@@ -98,7 +105,7 @@ class SettingsStore(context: Context) {
 
     /**
      * Switch ONLY the chart/signal symbol, without touching the stored key.
-     * Allowed set is the 50+ instrument universe (gold, commodities, forex, crypto, stocks).
+     * Allowed set is the instrument universe (gold, commodities, forex, crypto).
      */
     @Synchronized
     fun saveChartSymbol(symbolInput: String): Boolean {
@@ -155,7 +162,7 @@ class SettingsStore(context: Context) {
     }
 
     /**
-     * User's OWN key for a DIRECT-FROM-PHONE AI news call (Anthropic or OpenAI-compatible,
+     * User's OWN key for a DIRECT-FROM-PHONE AI news call (native Gemini, Anthropic or OpenAI-compatible,
      * see the format parameter), replacing the need
      * for a self-hosted backend for the Forex ninth-condition gate. Explicit, on-device only;
      * never logged. A blank key keeps the previous secret only for the same URL and wire format
@@ -163,11 +170,14 @@ class SettingsStore(context: Context) {
      */
     @Synchronized
     fun saveNewsAiConfig(apiKey: String, baseUrl: String, model: String, format: String = "AUTO"): Boolean {
-        val url = baseUrl.trim().trimEnd('/')
-        val modelName = if (format.trim().uppercase(java.util.Locale.ROOT) == "ANTHROPIC") model.trim()
-            else GeminiAiStudio.openAiModelId(url, model)
-        val wireFormat = format.trim().uppercase(java.util.Locale.ROOT).let {
-            if (it in setOf("ANTHROPIC", "OPENAI")) it else "AUTO" }
+        val requestedFormat = format.trim().uppercase(java.util.Locale.ROOT).let {
+            if (it in setOf("ANTHROPIC", "OPENAI", "GEMINI")) it else "AUTO"
+        }
+        val (url, wireFormat) = GeminiAiStudio.migratePreset(baseUrl.trim().trimEnd('/'), requestedFormat)
+        val modelName = if (wireFormat == GeminiAiStudio.WIRE_FORMAT) {
+            if (!GeminiAiStudio.isOfficialNativeEndpoint(url)) return false
+            runCatching { GeminiAiStudio.modelId(model) }.getOrNull() ?: return false
+        } else if (wireFormat == "ANTHROPIC") model.trim() else GeminiAiStudio.openAiModelId(url, model)
         val key = AiCredentialScope.key(apiKey, read(), url, wireFormat, modelName)
         if (key.isBlank() || !url.startsWith("https://") || modelName.isBlank()) return false
         val saved = prefs.edit()
@@ -230,7 +240,7 @@ class SettingsStore(context: Context) {
         val proposed = transform(_settings.value)
         if (proposed.accountBalance != _settings.value.accountBalance) dayOpeningEquity()
         val next = proposed.copy(
-            activeWatchlist = V1Universe.watchlist(proposed.activeWatchlist),
+            symbol = V1Universe.normalize(proposed.symbol).takeIf(V1Universe::valid) ?: "XAU/USD",
             riskPercent = proposed.riskPercent.takeIf { it.isFinite() }?.coerceIn(0.1, 0.5) ?: 0.5,
             minConfidence = proposed.minConfidence.takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
         )
@@ -260,7 +270,6 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_SIGNAL_COOLDOWN, next.signalProfile.cooldownFilter)
             .putBoolean(KEY_SIGNAL_CHIKOU, next.signalProfile.chikouConfirmation)
             .putString(KEY_ACTIVE_STRATEGY, next.activeStrategy.id)
-            .putString(KEY_V1_WATCHLIST, next.activeWatchlist.joinToString(","))
             .apply {
                 AssetClass.entries.forEach { category ->
                     putString("v1_strategy_${category.name}",
@@ -282,7 +291,6 @@ class SettingsStore(context: Context) {
         prefs.getLong("last_sync_${symbol}_${interval.label}", 0L).takeIf { it > 0L }
 
     companion object {
-        private const val KEY_V1_WATCHLIST = "v1_watchlist"
         private const val KEY_API = "td_api_key"
         private const val KEY_SYMBOL = "symbol"
         private const val KEY_INTERVAL = "interval"

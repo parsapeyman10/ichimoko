@@ -532,12 +532,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Manual all-pairs sweep across 50+ instruments. */
     fun scanPairs() {
-        if (container.pairScanner.state.value.sweeping) {
-            _toast.value = "اسکن همگانی ۵۰+ نماد در حال اجراست"
-            return
-        }
         viewModelScope.launch {
-            _toast.value = "اسکن ۵۰+ سهم و نماد آغاز شد؛ بهترین فرصت‌ها شناسایی می‌شوند"
+            _toast.value = "اسکن ۲۰۰ کریپتو و فارکس/کالا آغاز شد؛ بهترین فرصت‌ها شناسایی می‌شوند"
             try {
                 container.pairScanner.sweepOnce(minIntervalMs = 1 * 60_000L) { }
             } catch (_: Exception) {
@@ -624,19 +620,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     private var marketSaveInFlight = false
 
-    fun setWatchlist(symbols: List<String>) {
-        container.settingsStore.update {
-            it.copy(activeWatchlist = com.aurum.edge.core.V1Universe.watchlist(symbols))
-        }
-        container.pairScanner.refreshNow(minIntervalMs = 0L)
-    }
-
     fun setCategoryStrategy(category: com.aurum.edge.core.AssetClass,
                             mode: com.aurum.edge.core.CategoryStrategy) {
-        if (category == com.aurum.edge.core.AssetClass.CRYPTO) return // retired legacy crypto modes
+        if (category in setOf(com.aurum.edge.core.AssetClass.CRYPTO, com.aurum.edge.core.AssetClass.STOCK)) return // retired legacy crypto modes
         container.settingsStore.update {
             it.copy(categoryStrategies = it.categoryStrategies + (category to mode))
         }
+        container.market.refreshNow()
+        container.pairScanner.refreshNow(minIntervalMs = 0L)
     }
 
     fun saveRiskPercent(value: Double) = container.settingsStore.update { it.copy(riskPercent = value.coerceIn(0.1, 0.5)) }
@@ -852,6 +843,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     newsEvidence = newsRecord, priceAction = ict,
                     marketTrend = trendRecord,
                     cryptoNews = news.value,
+                    sourceIntegrityRevision = current.sourceIntegrityRevision,
                     cryptoEntryQuote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { quote ->
                         com.aurum.edge.core.PriceTick(quote, at, current.bid, current.ask)
                     } },
@@ -1144,7 +1136,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             if (requestGeneration != aiModelsGeneration) return@launch
             _aiModels.value = result.fold(
                 onSuccess = { AiModelsState(models = it) },
-                onFailure = { AiModelsState(error = (it.message ?: "خطای نامشخص").take(120)) })
+                onFailure = { AiModelsState(error = com.aurum.edge.data.AiConnectionDiagnostics.describe(it)) })
         }
     }
 

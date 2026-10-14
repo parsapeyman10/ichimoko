@@ -197,7 +197,7 @@ class SignalMonitorService : Service() {
                         container.pairScanner.refreshNow() // records honest online/error/alert-off statuses
                     } else {
                         try {
-                            container.pairScanner.sweepOnce { candidate ->
+                            container.pairScanner.refreshNow { candidate ->
                                 if (Notifier.canNotifyVerified(this@SignalMonitorService, config.alertSoundUri)) {
                                     Notifier.notifyVerifiedOpportunity(this@SignalMonitorService, candidate,
                                         config.alertSoundUri)

@@ -60,9 +60,9 @@ class CatalogPaperTrader(
             lastTradeAt = tick.at, lastTradePrice = tick.price,
             // Provider timestamp, NOT scanner download time. This is the same tick contract
             // used for settling all non-crypto open positions in the service/UI.
-            feed = FeedStatus(FeedMode.LIVE, "تیک مستقل تأییدشده", tick.at,
+            feed = FeedStatus(FeedMode.LIVE, tick.sourceNote ?: "تیک مستقل تأییدشده", tick.at,
                 provider = if (CryptoCatalog.isCrypto(scanned.symbol))
-                    "${BinanceSpotClient.PROVIDER} aggTrade" else "Swissquote / Gold-API"),
+                    "${BinanceSpotClient.PROVIDER} aggTrade" else tick.provider ?: "منبع تیک نامعلوم"),
             showingCachedData = false,
         )
         val opened = trader.onMarketUpdate(verified, catalogQuote = tick)

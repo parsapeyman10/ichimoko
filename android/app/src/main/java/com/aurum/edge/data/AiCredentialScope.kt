@@ -21,14 +21,15 @@ internal object AiCredentialScope {
             model: String = saved.newsAiModel): String {
         val typed = input.trim()
         if (typed.isNotBlank()) return typed
+        val requested = GeminiAiStudio.migratePreset(url.trim().trimEnd('/'), format.trim().uppercase(java.util.Locale.ROOT))
+        val previous = GeminiAiStudio.migratePreset(saved.newsAiBaseUrl.trim().trimEnd('/'), saved.newsAiFormatNormalized)
         val sameRelayGroup = !AiProvider.isLlmRelay(url) ||
             model.trim() == saved.newsAiModel ||
             (model.trim() in setOf("glm-5-3-uncensored", "glm-5-3-uncensored-1m") &&
                 saved.newsAiModel in setOf("glm-5-3-uncensored", "glm-5-3-uncensored-1m"))
         return saved.newsAiApiKey.takeIf {
             it.isNotBlank() && sameRelayGroup &&
-                url.trim().trimEnd('/') == saved.newsAiBaseUrl.trim().trimEnd('/') &&
-                format.trim().uppercase(java.util.Locale.ROOT) == saved.newsAiFormatNormalized
+                requested == previous
         }.orEmpty()
     }
 }

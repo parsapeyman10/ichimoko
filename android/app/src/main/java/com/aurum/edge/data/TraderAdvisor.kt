@@ -137,7 +137,7 @@ class TraderAdvisor(
     private val mutex = Mutex()
     private var lastAttemptElapsed = 0L
     @Volatile private var configGeneration = 0L
-    private val http = OkHttpClient.Builder().callTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+    private val http = AppNetwork.builder().callTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
         .followRedirects(false).build()
     private val _state = MutableStateFlow(TraderOpinionState())
     val state: StateFlow<TraderOpinionState> = _state.asStateFlow()

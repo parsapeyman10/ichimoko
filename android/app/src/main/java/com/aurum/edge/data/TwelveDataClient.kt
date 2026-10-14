@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit
 import java.net.URLEncoder
 
 /** Raised for provider errors; the message is already user-facing (Persian). */
-class DataFeedException(message: String) : Exception(message)
+open class DataFeedException(message: String) : Exception(message)
 
 /**
  * Thin, honest client for Twelve Data.
@@ -33,7 +33,7 @@ class DataFeedException(message: String) : Exception(message)
  * [DataFeedException] / a closed flow so the UI can show an offline state.
  */
 class TwelveDataClient(
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = AppNetwork.builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .pingInterval(20, TimeUnit.SECONDS)

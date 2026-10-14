@@ -105,7 +105,7 @@ class NewsRepository(
     private val forexHeadlines: PublicWebNewsRepository? = null,
     private val forexCalendar: ForexCalendarRepository? = null,
 ) {
-    private val client = OkHttpClient.Builder()
+    private val client = AppNetwork.builder()
         .callTimeout(25, TimeUnit.SECONDS).followRedirects(false).build()
     private val json = Json { ignoreUnknownKeys = true }
     private val mutex = Mutex()

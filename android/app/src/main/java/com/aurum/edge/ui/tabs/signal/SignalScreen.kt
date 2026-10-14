@@ -271,7 +271,7 @@ private fun MarketTrendCard(
                     "EMA20 نسبت به EMA50، شیب EMA50 بر حسب ATR، Efficiency Ratio، ساختار سقف/کف " +
                     "(HH/HL یا LH/LL) و جابه‌جایی خالص بر حسب ATR. مجموع ≥+۲ صعودی و ≤−۲ نزولی است. " +
                     "(۲) همان اندازه‌گیری برای همهٔ نمادهای پویش‌شده تکرار می‌شود و «عرض بازار» را می‌سازد. " +
-                    "(۳) جهت دلار از شش جفت اصلی و جوّ ریسک از رمزارز/سهام در برابر طلا خوانده می‌شود.",
+                    "(۳) جهت دلار از شش جفت اصلی و جوّ ریسک از رمزارز در برابر طلا خوانده می‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -502,7 +502,7 @@ private fun fmt2(value: Double?): String =
 private fun PerMarketRecommendations(scan: PairScanState, interval: com.aurum.edge.core.Interval,
                                      now: Long, onSelect: (String) -> Unit) {
     val picks = ScanRanking.byMarket(scan.statuses, interval, now)
-    AssetClass.entries.forEach { category ->
+    AssetClass.entries.filter { it != AssetClass.STOCK }.forEach { category ->
         val rows = scan.statuses.filter { it.assetClass == category }
         val openRows = rows.filterNot { com.aurum.edge.core.MarketHours.closedFor(it.symbol, now) }
         val checked = openRows.count { it.state != "pending" && it.state != "closed" }
@@ -749,7 +749,7 @@ private fun TopCandidatesDetailedSection(
 ) {
     SectionCard(
         title = "🏆 ۳ کاندیدای برتر بازار (Top 3 Candidates)",
-        subtitle = "فرصت‌های ممتاز استخراج‌شده از میان ۵۰+ نماد با تفکیک دقیق دسته دارایی و امتیاز شروط",
+        subtitle = "فرصت‌های ممتاز استخراج‌شده از میان ۲۰۰ کریپتو و نمادهای فارکس/کالا با تفکیک دقیق دسته دارایی و امتیاز شروط",
         trailing = {
             Pill("${candidates.size} کاندیدا", AurumColors.Gold)
         },
@@ -881,8 +881,8 @@ private fun CandidateDetailedItemCard(
 internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, now: Long) {
     LaunchedEffect(scan.lastSweepAt) { if (scan.lastSweepAt == null) onScan() }
     SectionCard(
-        title = "پایش پیوستهٔ ۵۰+ نماد در پس‌زمینه",
-        subtitle = "دیتاگیری و کشف خودکار فرصت‌ها از بازار کریپتو، طلا، نفت، فارکس و سهام",
+        title = "پایش پیوستهٔ ۲۰۰ کریپتو و نمادهای فارکس/کالا در پس‌زمینه",
+        subtitle = "دیتاگیری و کشف خودکار فرصت‌ها از بازار کریپتو، طلا، نفت و فارکس",
         trailing = {
             Pill(
                 when {
@@ -900,28 +900,28 @@ internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, now: 
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "برای همهٔ نمادهای کاتالوگ و واچ‌لیست به‌ترتیب تلاش می‌شود؛ فقط کندل واقعیِ هم‌نماد امتیاز می‌گیرد. " +
-                    "نبود فید/بسته‌بودن بازار هم با دلیل ثبت می‌شود. فقط واچ‌لیست فعال مجاز به فرصت معاملاتی است. " +
-                    "اسکن پیوسته در پس‌زمینه نیازمند سرویس فعال در تنظیمات است؛ هر دور پس از اتمام و فاصلهٔ حداقلی شروع می‌شود.",
+                "هر یک از ۲۳۰ نماد موتور مستقل دارد؛ نماد کند، بقیه را پشت یک دور سراسری نگه نمی‌دارد. " +
+                    "فقط دادهٔ واقعی هم‌نماد معتبر است؛ منبع پرظرفیت صف نمی‌سازد و موتور همان نماد دوباره تلاش می‌کند. " +
+                    "محدودیت ناشر حذف نشده و دریافت آنی همهٔ نمادها تضمین نیست. پایش پس‌زمینه نیازمند سرویس فعال است.",
                 style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextSecondary,
                 modifier = Modifier.weight(1f),
             )
             OutlinedButton(
                 onClick = onScan,
-                enabled = !scan.sweeping,
+                enabled = true,
                 modifier = Modifier.padding(start = 8.dp),
             ) {
-                Text(if (scan.sweeping) "اسکن..." else "اسکن مجدد")
+                Text("بازبینی مستقل")
             }
         }
         val skipped = scan.statuses.count { com.aurum.edge.core.MarketHours.closedFor(it.symbol, now) }
         val requested = scan.statuses.count { it.state != "pending" && it.state != "closed" }
         Text("بازارهای بازِ بررسی‌شده: $requested/${scan.totalCount - skipped} · " +
             "$skipped نماد بسته بدون درخواست فید · " +
-            "آخرین دور کامل: ${scan.lastSweepAt?.let { formatTime(it) } ?: "هنوز کامل نشده"}" +
-            (scan.lastSweepDurationMs?.let { " · زمان واقعی دور: ${it / 1000.0} ثانیه" } ?: "") + " · " +
-            "تلاش بعدی پس از اتمام دور، حداقل ۳۰ ثانیه فاصله و در چرخهٔ حدوداً یک‌دقیقه‌ای برنامه. " +
+            "آخرین موتور تکمیل‌شده: ${scan.lastSweepAt?.let { formatTime(it) } ?: "هنوز تکمیل نشده"}" +
+            (scan.lastSweepDurationMs?.let { " · مدت همان نماد: ${it / 1000.0} ثانیه" } ?: "") + " · " +
+            "هر موتور پس از بررسی خودش حداقل ۳۰ ثانیه فاصله دارد؛ انتظار ظرفیت با تلاش مجدد کوتاه همان موتور است. " +
             "زمان واقعی به شبکه و محدودیت منبع بستگی دارد؛ دلیل هر بررسی در انتهای صفحه است.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         scan.lastError?.let { Text(it, color = AurumColors.Red, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp)) }

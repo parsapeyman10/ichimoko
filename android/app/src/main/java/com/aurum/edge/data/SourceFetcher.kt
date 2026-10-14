@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit
 
 /** Read-only provider fetcher. No custom URLs or trading credentials are accepted by the app. */
 class SourceFetcher(
-    private val http: OkHttpClient = OkHttpClient.Builder()
+    private val http: OkHttpClient = AppNetwork.builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .callTimeout(25, TimeUnit.SECONDS)

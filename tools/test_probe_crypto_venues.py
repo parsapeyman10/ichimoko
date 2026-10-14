@@ -5,7 +5,7 @@ import probe_crypto_venues as audit
 
 class MarketProbeTest(unittest.TestCase):
     def test_catalog_has_unique_usdt_pairs(self):
-        self.assertEqual(45, len(audit.symbols()))
+        self.assertEqual(200, len(audit.symbols()))
         self.assertEqual(len(audit.symbols()), len(set(audit.symbols())))
 
     def test_kraken_rest_alias_and_exact_quote(self):

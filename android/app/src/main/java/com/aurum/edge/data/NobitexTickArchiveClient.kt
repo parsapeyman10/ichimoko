@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
  * 45-second LIVE quote gate, but only for the archive's authenticated, ordered page.
  */
 internal class NobitexTickArchiveClient(
-    private val http: OkHttpClient = OkHttpClient.Builder()
+    private val http: OkHttpClient = AppNetwork.builder()
         .connectTimeout(5, TimeUnit.SECONDS).readTimeout(8, TimeUnit.SECONDS)
         .callTimeout(12, TimeUnit.SECONDS).followRedirects(false).build(),
 ) {

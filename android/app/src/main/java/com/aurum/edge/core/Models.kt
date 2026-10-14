@@ -41,7 +41,7 @@ enum class Interval(val api: String, val label: String, val minutes: Int) {
 }
 
 data class PriceTick(val price: Double, val at: Long, val bid: Double? = null, val ask: Double? = null,
-                     val isTradeTick: Boolean = true) {
+                     val isTradeTick: Boolean = true, val provider: String? = null, val sourceNote: String? = null, val sourceConfirmations: Int = 0) {
     val spread: Double? get() = if (bid != null && ask != null && ask >= bid) ask - bid else null
 }
 
@@ -691,7 +691,7 @@ data class AppSettings(
     /**
      * OPTIONAL alternative to [newsBaseUrl] for the Forex ninth-condition AI gate: instead of your
      * own backend server, the phone calls this endpoint DIRECTLY with your own key - either the
-     * Anthropic (Claude) Messages API or any OpenAI-compatible service (see [newsAiFormat]). Used only if [newsBaseUrl] is blank. The SAME publisher-rights/consent responsibility
+     * native Gemini, Anthropic (Claude) Messages API or an OpenAI-compatible service (see [newsAiFormat]). Used only if [newsBaseUrl] is blank. The SAME publisher-rights/consent responsibility
      * applies to whoever holds this key; headline/excerpt text goes straight to this host from
      * the phone. The key stays in app-private preferences, not in the distributable APK.
      */
@@ -699,17 +699,20 @@ data class AppSettings(
     val newsAiBaseUrl: String = "",
     val newsAiModel: String = "",
     /**
-     * Wire format of the AI endpoint: AUTO (detect Anthropic by host, else OpenAI-compatible),
+     * Wire format: GEMINI (native Google REST), AUTO (exact native Google endpoint,
+     * Anthropic host, otherwise OpenAI-compatible),
      * ANTHROPIC (Messages API on ANY host, e.g. a relay) or OPENAI (chat/completions on any
      * host). Explicit beats guessing for proxy keys with non-standard prefixes.
      */
     val newsAiFormat: String = "AUTO",
     val signalProfile: SignalProfile = SignalProfile.BASE,
     val activeStrategy: StrategyKind = StrategyKind.ICHIMOKU_PRICE_ACTION,
-    val activeWatchlist: List<String> = V1Universe.defaults,
     val categoryStrategies: Map<AssetClass, CategoryStrategy> = AssetClass.entries.associateWith { CategoryStrategy.HYBRID },
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
     val hasClientNewsAi: Boolean get() = newsAiApiKey.isNotBlank() && newsAiBaseUrl.isNotBlank() && newsAiModel.isNotBlank()
-    val newsAiFormatNormalized: String get() = if (newsAiFormat in setOf("ANTHROPIC", "OPENAI")) newsAiFormat else "AUTO"
+    /** Full app catalog, never a hidden user-entered subset. Legacy preferences are ignored. */
+    val activeSymbols: List<String> get() = com.aurum.edge.data.WatchCatalog.scannerSymbols
+    fun strategyFor(symbol: String): CategoryStrategy = categoryStrategies[AssetClass.of(symbol)] ?: CategoryStrategy.HYBRID
+    val newsAiFormatNormalized: String get() = if (newsAiFormat in setOf("ANTHROPIC", "OPENAI", "GEMINI")) newsAiFormat else "AUTO"
 }

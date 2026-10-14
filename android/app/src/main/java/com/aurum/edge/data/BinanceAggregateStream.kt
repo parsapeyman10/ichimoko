@@ -13,7 +13,7 @@ import java.util.concurrent.TimeUnit
  * OkHttp responds to WebSocket control pings and closes on failed connection.
  */
 internal class BinanceAggregateStream(
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = AppNetwork.builder()
         .pingInterval(25, TimeUnit.SECONDS).build(),
 ) {
     sealed interface Event {

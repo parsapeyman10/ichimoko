@@ -56,6 +56,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
     }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.pauseInvisibleForexFeed() }
     LifecycleEventEffect(Lifecycle.Event.ON_START) {
+        com.aurum.edge.data.AppNetwork.refreshSystemNetwork()
         if (started) {
             viewModel.resumeVisibleForexFeed()
             // Returning from Android's "install unknown apps" settings should continue a

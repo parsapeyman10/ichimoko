@@ -25,13 +25,13 @@ internal object SourceRouting {
 
     fun historyPlan(symbol: String, keyed: Boolean): String {
         if (CryptoCatalog.isCrypto(symbol))
-            return "Gate Spot ← OKX Spot ← Kraken Spot (فقط رادار؛ ورود صرافی دیگر ممنوع)"
+            return "مقایسهٔ Gate / OKX / Kraken / MEXC؛ انتخاب بستهٔ سالم همخوان (فقط رادار، نه قیمت اجرای صرافی دیگر)"
         val paths = historySources(symbol, keyed).map { when (it) {
             HistorySource.YAHOO -> "Yahoo (دو میزبان، یک ناشر)"
             HistorySource.DUKASCOPY -> "Dukascopy"
             HistorySource.TWELVE_DATA -> "Twelve Data (کلیددار)"
         } }
         return if (paths.isEmpty()) "منبع تاریخچهٔ دقیق M5/M15/H1 تعریف نشده؛ بررسی فقط خطا نشان می‌دهد"
-            else paths.joinToString(" ← ") + if (paths.size == 1) " · جایگزین مستقل ندارد" else ""
+            else "مقایسهٔ " + paths.joinToString(" / ") + if (paths.size == 1) " · جایگزین مستقل ندارد" else ""
     }
 }

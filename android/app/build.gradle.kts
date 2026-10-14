@@ -61,8 +61,8 @@ android {
         applicationId = "com.aurum.edge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 665
-        versionName = "1.3.49"
+        versionCode = 671
+        versionName = "1.3.55"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
@@ -119,8 +119,8 @@ android {
 
     // Ship only the CPU architectures real phones use. Without this every native library
     // is bundled four times (arm64, armeabi-v7a, x86, x86_64) and three of them are dead
-    // weight on any given device. Code is NOT obfuscated or shrunk: isMinifyEnabled stays
-    // false, so nothing can break at runtime that the JVM tests would not catch.
+    // weight on any given device. Keep existing ARM support for any remaining native
+    // dependency. Shrinking remains disabled; device testing is still necessary.
     defaultConfig {
         ndk {
             abiFilters += setOf("arm64-v8a", "armeabi-v7a")
@@ -166,6 +166,7 @@ dependencies {
     // JVM unit tests for the pure engine code and read-only data validation.
     // They never run inside the APK; release assembly requires them to pass below.
     testImplementation("junit:junit:4.13.2")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.robolectric:robolectric:4.14.1")
 }
 

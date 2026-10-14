@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit
  * Market data only: no key, no account, nothing that can place an order.
  */
 class NobitexHistoryClient(
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = AppNetwork.builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
         .callTimeout(40, TimeUnit.SECONDS)

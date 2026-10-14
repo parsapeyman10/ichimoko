@@ -35,7 +35,8 @@ internal class NobitexPublicTradeStream {
         val ticker = NobitexHistoryClient.ticker(symbol)
             ?.takeIf { CryptoCatalog.isCrypto(symbol) }
             ?: throw DataFeedException("کانال معاملات این نماد موجود نیست")
-        val client = Client("wss://ws.nobitex.ir/connection/websocket", Options(), object : EventListener() {})
+        val options = Options().apply { setOkHttpClient(AppNetwork.builder().build()) }
+        val client = Client("wss://ws.nobitex.ir/connection/websocket", options, object : EventListener() {})
         try {
             val subscription = client.newSubscription("public:trades-$ticker", SubscriptionOptions(),
                 object : SubscriptionEventListener() {

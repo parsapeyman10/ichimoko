@@ -73,6 +73,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     LaunchedEffect(settings.newsBaseUrl) { newsUrl = settings.newsBaseUrl }
     LaunchedEffect(settings.newsAiApiKey) { newsAiKey = "" }
     LaunchedEffect(settings.newsAiBaseUrl) { newsAiBaseUrl = settings.newsAiBaseUrl }
+    LaunchedEffect(settings.newsAiFormat) { newsAiFormat = settings.newsAiFormatNormalized }
     LaunchedEffect(settings.newsAiModel) { newsAiModel = settings.newsAiModel }
 
     val soundPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -112,25 +113,27 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             .verticalScroll(rememberScrollState())
             .padding(bottom = 12.dp),
     ) {
-        SectionCard("فهرست و حالت هر بازار · روندگیر / رنج‌گیر / ترکیبی", "۸ نماد پیش‌فرض، ۲ نماد از هر دسته؛ کاتالوگ گسترده فقط با دادهٔ معتبر") {
-            var watchlistText by remember(settings.activeWatchlist) {
-                mutableStateOf(settings.activeWatchlist.joinToString(", "))
+        SectionCard("اتصال اینترنت / VPN گوشی", "بدون پروکسی داخلی و کتابخانهٔ حجیم") {
+            TextButton(onClick = { com.aurum.edge.data.AppNetwork.refreshSystemNetwork(force = true) }) {
+                Text("بازبینی اتصال پس از تغییر VPN")
             }
-            OutlinedTextField(value = watchlistText, onValueChange = { watchlistText = it },
-                label = { Text("نمادها، جدا با ویرگول") },
-                modifier = Modifier.fillMaxWidth())
-            Button(onClick = {
-                viewModel.setWatchlist(watchlistText.split(',', '\n', ';'))
-            }) { Text("ذخیرهٔ واچ‌لیست") }
-            Text("نماد سیگنال", style = MaterialTheme.typography.bodySmall)
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                settings.activeWatchlist.forEach { pair ->
-                    FilterChip(selected = settings.symbol == pair,
-                        onClick = { viewModel.selectChartSymbol(pair) }, label = { Text(pair) })
-                }
-            }
-            com.aurum.edge.core.AssetClass.entries.forEach { category ->
+            Text("Tor و Snowflake از برنامه حذف شده‌اند. درخواست‌ها از مسیر شبکهٔ انتخاب‌شدهٔ اندروید ارسال می‌شوند.",
+                style = MaterialTheme.typography.bodySmall)
+            Text("برای استفاده از Windscribe، برنامهٔ رسمی آن را جداگانه روی گوشی وصل کنید. " +
+                "در Split Tunneling مطمئن شوید Aurum Edge از VPN مستثنا نشده است. " +
+                "هیچ حساب، رمز یا کلید Windscribe در این برنامه دریافت نمی‌شود.",
+                style = MaterialTheme.typography.bodySmall)
+            Text("با قطع VPN ممکن است اندروید از اینترنت مستقیم استفاده کند؛ اگر این را نمی‌خواهید، " +
+                "در صورت پشتیبانی، Always-on VPN و مسدودکردن اتصال بدون VPN را در تنظیمات اندروید فعال کنید. " +
+                "اتصال VPN تضمین مجوز Google، سهمیهٔ Gemini یا دسترسی همهٔ منابع نیست.",
+                style = MaterialTheme.typography.bodySmall)
+        }
+
+        SectionCard("حالت هر بازار · روندگیر / رنج‌گیر / ترکیبی", "اعمال روی تمام ${settings.activeSymbols.size} نماد برنامه") {
+            Text("تنظیم هر دسته روی همهٔ نمادهای همان دسته اعمال می‌شود؛ اسکن و اعلان به فهرست دستی محدود نیستند. " +
+                "فعال‌بودن نماد مجوز معامله نیست؛ دادهٔ تازه، خبر و قفل‌های ریسک لازم‌اند.",
+                style = MaterialTheme.typography.bodySmall)
+            com.aurum.edge.core.AssetClass.entries.filter { it != com.aurum.edge.core.AssetClass.STOCK }.forEach { category ->
                 Text(category.label, style = MaterialTheme.typography.bodySmall)
                 if (category == com.aurum.edge.core.AssetClass.CRYPTO)
                     Text("فشردگی ← انفجار · 5m · 9/26/52 + 103 (ثابت)",
@@ -147,6 +150,9 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
         }
 
         SectionCard("خبر و AI · LLMsRelay / Gemini") {
+            if (settings.newsBaseUrl.isNotBlank()) Text(
+                "سرور خبر تنظیم شده و در بخش خبر بر AI مستقیم اولویت دارد؛ برای خبر مستقیم Gemini نشانی سرور را خالی و ذخیره کنید.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
             OutlinedTextField(
                 value = newsUrl, onValueChange = { newsUrl = it }, singleLine = true,
                 label = { Text("نشانی HTTPS سرور خبر فارکس (اختیاری)") },
@@ -174,19 +180,25 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 }, modifier = Modifier.weight(1f)) { Text("LLMsRelay") }
                 OutlinedButton(onClick = {
                     newsAiKey = ""; newsAiModel = ""
-                    newsAiBaseUrl = GeminiAiStudio.OPENAI_BASE_URL
+                    newsAiBaseUrl = GeminiAiStudio.BASE_URL
                     newsAiFormat = GeminiAiStudio.WIRE_FORMAT
                     viewModel.resetAiDraftDiagnostics()
                 }, modifier = Modifier.weight(1f)) { Text("Gemini") }
             }
             Text("سرویس: " + when (newsAiBaseUrl) {
                 "https://api.llmsrelay.com", "https://api.llmsrelay.com/v1" -> "LLMsRelay"
-                GeminiAiStudio.OPENAI_BASE_URL -> "Gemini"
+                GeminiAiStudio.BASE_URL -> "Gemini · API رسمی generateContent"
                 else -> "انتخاب نشده"
             }, color = AurumColors.TextSecondary, style = MaterialTheme.typography.labelSmall)
             OutlinedButton(onClick = {
                 runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GeminiAiStudio.KEYS_URL))) }
             }) { Text("ساخت کلید Gemini") }
+            if (newsAiFormat == GeminiAiStudio.WIRE_FORMAT) {
+                Text("کلید Gemini در سربرگ امن x-goog-api-key ارسال می‌شود. مدل را از فهرست دریافت کنید؛ " +
+                    "وجود مدل در فهرست تضمین سهمیه یا دسترسی تولید پاسخ نیست. کلید فقط روی گوشی ذخیره می‌شود؛ " +
+                    "درخواست تحلیل/تست به Google ارسال می‌شود و ممکن است هزینه داشته باشد.",
+                    style = MaterialTheme.typography.bodySmall)
+            }
             OutlinedTextField(value = newsAiModel, onValueChange = {
                 newsAiModel = it; viewModel.resetAiDraftDiagnostics()
             }, singleLine = true,
@@ -195,9 +207,9 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             val models = viewModel.aiModels.collectAsStateWithLifecycle().value
             OutlinedButton(onClick = { viewModel.loadNewsAiModels(newsAiKey, newsAiBaseUrl, newsAiModel, newsAiFormat) },
                 enabled = !models.loading && (newsAiKey.isNotBlank() || settings.hasClientNewsAi) &&
-                    newsAiBaseUrl in setOf("https://api.llmsrelay.com", "https://api.llmsrelay.com/v1", GeminiAiStudio.OPENAI_BASE_URL),
+                    newsAiBaseUrl in setOf("https://api.llmsrelay.com", "https://api.llmsrelay.com/v1", GeminiAiStudio.BASE_URL),
                 modifier = Modifier.padding(top = 6.dp)) {
-                Text(if (models.loading) "در حال دریافت…" else "فهرست مدل‌های مجازِ همین کلید")
+                Text(if (models.loading) "در حال دریافت…" else "دریافت مدل‌های سرویس")
             }
             models.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red) }
             if (models.models.isNotEmpty()) {
@@ -211,7 +223,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { viewModel.saveNewsAiConfig(newsAiKey, newsAiBaseUrl, newsAiModel, newsAiFormat) },
-                    enabled = newsAiBaseUrl in setOf("https://api.llmsrelay.com", "https://api.llmsrelay.com/v1", GeminiAiStudio.OPENAI_BASE_URL),
+                    enabled = newsAiBaseUrl in setOf("https://api.llmsrelay.com", "https://api.llmsrelay.com/v1", GeminiAiStudio.BASE_URL),
                     modifier = Modifier.weight(1f)) { Text("ذخیرهٔ کلید مستقیم") }
                 OutlinedButton(onClick = {
                     newsAiKey = ""; newsAiBaseUrl = ""; newsAiModel = ""
@@ -222,7 +234,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             OutlinedButton(onClick = {
                 viewModel.testNewsAiConnection(newsAiKey, newsAiBaseUrl, newsAiModel, newsAiFormat)
             }, enabled = !probe.running && (newsAiKey.isNotBlank() || settings.hasClientNewsAi) &&
-                newsAiBaseUrl in setOf("https://api.llmsrelay.com", "https://api.llmsrelay.com/v1", GeminiAiStudio.OPENAI_BASE_URL),
+                newsAiBaseUrl in setOf("https://api.llmsrelay.com", "https://api.llmsrelay.com/v1", GeminiAiStudio.BASE_URL),
                 modifier = Modifier.padding(top = 8.dp)) {
                 Text(if (probe.running) "در حال آزمون…" else "تست اتصال به مدل")
             }

@@ -22,9 +22,10 @@ import org.robolectric.RuntimeEnvironment
 
 @RunWith(RobolectricTestRunner::class)
 class GeminiAiStudioTest {
-    @Test fun `Gemini preset uses Google's OpenAI compatible routes`() {
-        assertEquals("https://aistudio.google.com/api-keys", GeminiAiStudio.KEYS_URL)
-        assertEquals("OPENAI", GeminiAiStudio.WIRE_FORMAT)
+    @Test fun `Gemini native preset keeps legacy compatible routes available`() {
+        assertEquals("https://aistudio.google.com/apikey", GeminiAiStudio.KEYS_URL)
+        assertEquals("GEMINI", GeminiAiStudio.WIRE_FORMAT)
+        assertTrue(GeminiAiStudio.isOfficialNativeEndpoint(GeminiAiStudio.BASE_URL))
         assertEquals("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
             AiProvider.openAiChatUrl(GeminiAiStudio.OPENAI_BASE_URL))
         assertEquals("https://generativelanguage.googleapis.com/v1beta/openai/models",
@@ -82,8 +83,9 @@ class GeminiAiStudioTest {
         // Earlier app versions may have persisted the native-prefixed name already.
         context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit()
             .putString("news_ai_client_model", "models/gemini-2.5-pro").commit()
-        assertEquals("gemini-2.5-pro", GeminiAiStudio.openAiModelId(store.read().newsAiBaseUrl,
-            store.read().newsAiModel))
+        assertEquals("gemini-2.5-pro", store.read().newsAiModel)
+        assertEquals(GeminiAiStudio.BASE_URL, store.read().newsAiBaseUrl)
+        assertEquals("GEMINI", store.read().newsAiFormatNormalized)
     }
 
     @Test fun `switching to Gemini cannot silently reuse an earlier provider key`() {
@@ -93,13 +95,32 @@ class GeminiAiStudioTest {
         assertTrue(store.saveNewsAiConfig("old-provider-secret", "https://api.openai.com/v1",
             "previous-model", "OPENAI"))
         val saved = store.read()
-        assertEquals("", AiCredentialScope.key("", saved, GeminiAiStudio.OPENAI_BASE_URL,
+        assertEquals("", AiCredentialScope.key("", saved, GeminiAiStudio.BASE_URL,
             GeminiAiStudio.WIRE_FORMAT, "gemini-model"))
-        assertFalse(store.saveNewsAiConfig("", GeminiAiStudio.OPENAI_BASE_URL,
+        assertFalse(store.saveNewsAiConfig("", GeminiAiStudio.BASE_URL,
             "gemini-model", GeminiAiStudio.WIRE_FORMAT))
         assertEquals("old-provider-secret", store.read().newsAiApiKey)
-        assertTrue(store.saveNewsAiConfig("separate-gemini-secret", GeminiAiStudio.OPENAI_BASE_URL,
+        assertTrue(store.saveNewsAiConfig("separate-gemini-secret", GeminiAiStudio.BASE_URL,
             "gemini-model", GeminiAiStudio.WIRE_FORMAT))
         assertEquals("separate-gemini-secret", store.read().newsAiApiKey)
     }
+    @Test fun `native migration keeps only the same Google credential scope`() {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE)
+        prefs.edit().clear().putString("news_ai_client_key", "synthetic-google-key")
+            .putString("news_ai_client_base_url", GeminiAiStudio.OPENAI_BASE_URL)
+            .putString("news_ai_client_model", "models/gemini-test")
+            .putString("news_ai_format", "OPENAI").commit()
+        val store = SettingsStore(context)
+        assertEquals("GEMINI", store.read().newsAiFormatNormalized)
+        assertEquals(GeminiAiStudio.BASE_URL, store.read().newsAiBaseUrl)
+        assertEquals("gemini-test", store.read().newsAiModel)
+        assertEquals("synthetic-google-key", store.read().newsAiApiKey)
+        assertTrue(store.saveNewsAiConfig("", GeminiAiStudio.BASE_URL, "models/gemini-other", "GEMINI"))
+        assertEquals("synthetic-google-key", SettingsStore(context).read().newsAiApiKey)
+        assertFalse(store.saveNewsAiConfig("", "https://api.llmsrelay.com", "other", "ANTHROPIC"))
+        assertFalse(store.saveNewsAiConfig("typed", "https://generativelanguage.googleapis.com.evil.example/v1beta", "gemini-test", "GEMINI"))
+        assertEquals("synthetic-google-key", SettingsStore(context).read().newsAiApiKey)
+    }
+
 }

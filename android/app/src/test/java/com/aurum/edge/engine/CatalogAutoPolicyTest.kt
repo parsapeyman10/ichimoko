@@ -58,12 +58,14 @@ class CatalogAutoPolicyTest {
                 allowedSymbols = WatchCatalog.scannerSymbols))
     }
 
-    @Test fun `catalog permission changes symbol scope but never invents a signal`() {
+    @Test fun `full catalog is active by default but never invents a signal`() {
         val config = AppSettings(autoPaperTrading = true)
         val state = MarketState(symbol = "USD/JPY", interval = Interval.M5,
             lastPrice = 150.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = weekday))
         val news = PersianNewsState()
-        assertTrue(PaperAutoRules.blocker(state, config, news, now = weekday)!!.contains("لیست"))
+        assertEquals("سیگنال محاسبه نشده است", PaperAutoRules.blocker(state, config, news, now = weekday))
+        assertTrue(PaperAutoRules.blocker(state, config, news, now = weekday,
+            allowedSymbols = listOf("EUR/USD"))!!.contains("لیست"))
         assertEquals("سیگنال محاسبه نشده است",
             PaperAutoRules.blocker(state, config, news, now = weekday,
                 allowedSymbols = WatchCatalog.scannerSymbols))

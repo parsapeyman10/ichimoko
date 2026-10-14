@@ -57,24 +57,14 @@ object WatchCatalog {
         )
     }
 
-    /** 50+ Extended Universe for continuous scanner & multi-asset analysis */
+    /** 200 crypto pairs plus forex/commodities; no US equities or ETFs. */
     val scannerSymbols: List<String> = listOf(
         "XAU/USD", "XAG/USD", "USOIL", "UKOIL", "COPPER",
         "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD", "USD/JPY", "USD/CHF", "USD/CAD",
         "EUR/GBP", "EUR/JPY", "GBP/JPY", "AUD/JPY", "CAD/JPY", "CHF/JPY", "NZD/JPY",
         "EUR/AUD", "EUR/CAD", "EUR/CHF", "GBP/AUD", "GBP/CAD", "GBP/CHF",
         "AUD/CAD", "AUD/CHF", "AUD/NZD", "CAD/CHF", "NZD/CAD",
-        "AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META", "AMD", "NFLX", "INTC",
-        "SPY", "QQQ", "PLTR", "COIN", "BABA",
-        "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "DOGE/USDT", "ADA/USDT",
-        "AVAX/USDT", "LINK/USDT", "SUI/USDT", "NEAR/USDT", "PEPE/USDT", "TON/USDT", "DOT/USDT", "LTC/USDT"
-    ) + listOf(
-        // Distinct crypto families; read-only scans fail closed if no same-pair real feed exists.
-        "TRX/USDT", "BCH/USDT", "SHIB/USDT", "UNI/USDT", "ATOM/USDT",
-        "APT/USDT", "ARB/USDT", "OP/USDT", "FIL/USDT", "ICP/USDT",
-        "INJ/USDT", "SEI/USDT", "AAVE/USDT", "WIF/USDT", "FET/USDT",
-        "RENDER/USDT", "TIA/USDT", "GRT/USDT", "SAND/USDT", "MANA/USDT", "POL/USDT"
-    )
+    ) + CryptoCatalog.ids
 
     /** Scan the user's configured symbols first, then every catalog instrument. Never trade an
      * out-of-watchlist symbol merely because it appears in this read-only radar universe.

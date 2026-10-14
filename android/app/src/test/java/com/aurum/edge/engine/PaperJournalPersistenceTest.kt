@@ -55,6 +55,34 @@ class PaperJournalPersistenceTest {
         listOf(PaperNewsEvidence("id", "Publisher", "Gold headline", "https://publisher.example/news", 1_800_000_000_000L)),
         calendarSource = "https://nfs.faireconomy.media/ff_calendar_thisweek.json", calendarCheckedAt = 1_800_000_000_100L)
 
+    @Test fun sourceDisagreementBlocksNewEntriesButNeverBlocksManagementOfOpenPositions() = runBlocking {
+        val gate = com.aurum.edge.data.SourceIntegrity.shared
+        val channel = com.aurum.edge.data.SourceIntegrity.Channel.HISTORY
+        gate.resetForTests()
+        try {
+            val at = 1_800_000_000_000L
+            val store = JournalStore(context, journalFile()).also { it.load() }
+            store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5, automatic = true, observedAt = at)
+            gate.reject("XAU/USD", channel, "conflicting sources")
+            for (manual in listOf(false, true)) {
+                val failure = runCatching { store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5,
+                    manual = manual, automatic = !manual, observedAt = at) }.exceptionOrNull()
+                assertEquals("conflicting sources", failure?.message)
+            }
+            store.settleTick("XAU/USD", 2990.0, at + 1_000)
+            assertFalse(store.trades.value.single().isOpen)
+            val recovered = gate.accept("XAU/USD", channel, gate.begin("XAU/USD", channel), 2)!!
+            val fresh = JournalStore(context, journalFile()).also { it.load() }
+            val oldPreview = runCatching { fresh.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5,
+                automatic = true, observedAt = at, sourceIntegrityRevision = 0) }.exceptionOrNull()
+            assertTrue(oldPreview?.message.orEmpty().contains("دوباره"))
+            assertTrue(fresh.trades.value.isEmpty())
+            fresh.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5, automatic = true,
+                observedAt = at, sourceIntegrityRevision = recovered)
+            assertEquals(1, fresh.trades.value.size)
+        } finally { gate.resetForTests() }
+    }
+
     @Test fun onlyM5MayOpenNewManualOrAutomaticPaperPositions() = runBlocking {
         val store = JournalStore(context, journalFile()).also { it.load() }
         for (interval in listOf(Interval.M1, Interval.M3, Interval.M15, Interval.H1)) {

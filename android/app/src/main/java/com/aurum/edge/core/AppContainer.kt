@@ -52,6 +52,7 @@ class AppContainer(context: Context) {
     val appContext: Context = context.applicationContext
 
     val settingsStore = SettingsStore(appContext)
+    init { com.aurum.edge.data.AppNetwork.start(appContext) }
     val decisionLog = com.aurum.edge.data.DecisionLogStore(appContext)
     val candleCache = CandleCache(appContext)
     val journalStore = JournalStore(appContext, settingsStore = settingsStore)
@@ -77,24 +78,28 @@ class AppContainer(context: Context) {
     val news = NewsRepository(settingsStore, appScope, publicWebNews, forexCalendar)
     /** Shared by chart, signal tab, notifications and automatic *paper* entries. Expires on time. */
     val verifiedMarket: StateFlow<MarketState> = combine(
-        market.state, news.state, flow { while (true) { emit(System.currentTimeMillis()); delay(20_000L) } },
-    ) { raw, headlines, _ ->
+        market.state, news.state, com.aurum.edge.data.SourceIntegrity.shared.state, flow { while (true) { emit(System.currentTimeMillis()); delay(20_000L) } },
+    ) { raw, headlines, _, _ ->
         // The periodic clock only forces recomposition; a one-second market tick must always be
         // judged against the real current clock, not the last 20-second timer emission.
         val now = System.currentTimeMillis()
         val observedFeed = FeedLiveness.display(raw.feed, now)
         val delayed = observedFeed.mode == FeedMode.DELAYED
+        val integrityBlocker = com.aurum.edge.data.SourceIntegrity.shared.blocker(raw.symbol, raw.sourceIntegrityRevision)
         val verified = raw.copy(feed = observedFeed,
+            evaluationError = integrityBlocker ?: raw.evaluationError,
             showingCachedData = raw.showingCachedData || delayed,
-            signal = if (delayed) null else NewsConfluence.apply(raw.signal, raw.symbol, headlines, now))
+            signal = if (delayed || integrityBlocker != null) null else NewsConfluence.apply(raw.signal, raw.symbol, headlines, now))
         if (raw.candles.isNotEmpty()) decisionLog.append(raw.symbol, raw.interval.label,
             when {
                 verified.evaluationError != null -> "error"
                 verified.signal?.isActionable == true -> "candidate"
+                verified.signal == null -> "waiting_data"
                 else -> "no_signal"
             },
             verified.evaluationError ?: verified.signal?.blockers?.joinToString("، ")?.ifBlank { "چهار لایه و AI بررسی شدند" }
-                ?: "دادهٔ زنده/تایم‌فریم معتبر نیست", verified.signal, now, dedupe = true)
+                ?: "در انتظار دادهٔ معتبر؛ ${observedFeed.provider}: ${observedFeed.detail.take(240)}؛ تحلیل/ورود انجام نشد",
+            verified.signal, now, dedupe = true)
         verified // four-layer engine owns the price plan; ICT remains optional research context
     }.stateIn(appScope, SharingStarted.Eagerly, market.state.value.copy(signal = null))
     /** Periodic sweep of the editable V1 watchlist; only verified independent bars can become candidates. */
@@ -120,6 +125,13 @@ class AppContainer(context: Context) {
         }
         autoPaperTrader.attachTrendSource { pairScanner.state.value.marketTrend }
         market.attach(appScope)
+        appScope.launch {
+            com.aurum.edge.data.AppNetwork.route.collect { route ->
+                if (route.ready) market.refreshNow()
+                // System network / VPN changes invalidate routing caches and trigger a fresh check.
+                pairScanner.refreshNow(minIntervalMs = 0)
+            }
+        }
         appScope.launch {
             verifiedMarket.collect { state ->
                 val cfg = settingsStore.read()

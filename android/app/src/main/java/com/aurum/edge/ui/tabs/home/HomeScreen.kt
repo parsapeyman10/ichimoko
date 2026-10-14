@@ -74,9 +74,20 @@ fun HomeScreen(
             now = System.currentTimeMillis()
         }
     }
+    val sourceAudits by com.aurum.edge.data.HistorySourceAudits.state.collectAsStateWithLifecycle()
+    val sourceAudit = sourceAudits[market.symbol]
     val session = MarketHours.sessionWindowFor(market.symbol, now)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 14.dp)) {
 
+        sourceAudit?.let { audit ->
+            SectionCard("منبع دادهٔ ${market.symbol}", "انتخاب کیفیت‌محور؛ نه تضمین صحت یا مجوز ورود") {
+                Text("انتخاب مقایسه: ${audit.selected ?: "منبع قابل انتخاب نیست"} · تاریخچهٔ فعلی: ${market.historyProvider ?: "ناموجود"}", color = AurumColors.Gold)
+                Text(audit.note, style = MaterialTheme.typography.bodySmall)
+                Text(market.feed.detail, style = MaterialTheme.typography.bodySmall)
+                Text("آخرین مقایسه: ${relativeTime(audit.checkedAt)} · قیمت زنده: ${market.feed.provider}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+            }
+        }
         // ── ۱. وضعیت باز یا بسته بودن بازار (بالاترین بخش صفحه) ────────────
         Column(
             Modifier.fillMaxWidth()
@@ -130,7 +141,7 @@ fun HomeScreen(
                 modifier = Modifier.padding(top = 4.dp),
             )
             listOf("EUR/USD" to "فارکس", "XAU/USD" to "طلا/کالا",
-                "AAPL" to "سهام آمریکا", "BTC/USDT" to "رمزارز").forEach { (symbol, label) ->
+                "BTC/USDT" to "رمزارز").forEach { (symbol, label) ->
                 val scheduled = MarketHours.sessionWindowFor(symbol, now)
                 val note = if (symbol == "BTC/USDT") "۲۴/۷" else "برای قیمت/تعطیلی خاص، فید همان نماد لازم است"
                 Text("$label: ${if (scheduled.closed) "سشن بسته" else "طبق برنامه باز"} · $note",
@@ -218,7 +229,7 @@ private fun LiveOpenTradesTrackingSection(
                     color = AurumColors.TextSecondary,
                 )
                 Text(
-                    text = "سیستم به شکل پیوسته بیش از ۵۰ نماد را در ۴ دسته دارایی (رمزارز، فارکس، کالا و سهام) پایش می‌کند تا معاملات دارای بیشترین نسبت R:R را شکار کند.",
+                    text = "رادار ۲۰۰ نماد کریپتو به‌همراه فارکس و کالا را بررسی می‌کند؛ سرعت و پوشش به دسترسی منبع بستگی دارد و دادهٔ ناقص مجوز ورود نیست.",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                     textAlign = TextAlign.Center,

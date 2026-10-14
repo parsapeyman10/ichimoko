@@ -79,7 +79,7 @@ object SignalEngine {
     fun evaluateLive(candles: List<Candle>, interval: Interval, settings: AppSettings,
                      symbol: String, timeframes: Map<Interval, List<Candle>>): Signal =
         evaluate(candles, interval, settings.minConfidence, symbol,
-            settings.categoryStrategies[AssetClass.of(symbol)] ?: CategoryStrategy.HYBRID, timeframes)
+            settings.strategyFor(symbol), timeframes)
 
     /** Only V1 inputs are accepted. Legacy profile/strategy/spread settings do not masquerade
      * as scoring filters; execution costs are checked separately by PaperOrderRules.
