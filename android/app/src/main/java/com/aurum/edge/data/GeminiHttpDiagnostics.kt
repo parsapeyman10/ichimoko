@@ -18,9 +18,10 @@ internal object GeminiHttpDiagnostics {
     }
     class ModelUnavailable : IllegalStateException("کلید به فهرست مدل‌ها دسترسی دارد، اما مدل انتخابی قابلیت generateContent ندارد یا در فهرست همین کلید نیست؛ مدل را از فهرست انتخاب کنید")
 
-    class Failure(val code: Int, val reason: Cause) : IllegalStateException("HTTP $code: ${reason.advice}")
+    enum class Stage(val label: String) { MODELS("دریافت فهرست مدل‌ها"), GENERATION("تولید پاسخ") }
+    class Failure(val code: Int, val reason: Cause, val stage: Stage? = null) : IllegalStateException("HTTP $code: ${reason.advice}")
 
-    fun failure(code: Int, body: String): Failure {
+    fun failure(code: Int, body: String, stage: Stage? = null): Failure {
         val error = runCatching { Json.parseToJsonElement(body).jsonObject["error"]?.jsonObject }.getOrNull()
         val reasons = (error?.get("details") as? JsonArray).orEmpty().mapNotNull {
             ((it as? JsonObject)?.get("reason") as? JsonPrimitive)?.contentOrNull
@@ -38,6 +39,6 @@ internal object GeminiHttpDiagnostics {
             code == 400 -> Cause.REQUEST
             else -> Cause.OTHER
         }
-        return Failure(code, cause)
+        return Failure(code, cause, stage)
     }
 }

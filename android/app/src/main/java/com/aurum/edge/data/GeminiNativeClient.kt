@@ -30,11 +30,11 @@ internal object GeminiNativeClient {
             .header("Accept", "application/json")
     }
 
-    private suspend fun execute(client: OkHttpClient, request: Request): JsonObject = withContext(Dispatchers.IO) {
+    private suspend fun execute(client: OkHttpClient, request: Request, stage: GeminiHttpDiagnostics.Stage): JsonObject = withContext(Dispatchers.IO) {
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
                 val errorBody = response.peekBody(65_536L).string()
-                throw GeminiHttpDiagnostics.failure(response.code, errorBody)
+                throw GeminiHttpDiagnostics.failure(response.code, errorBody, stage)
             }
             val body = response.peekBody(MAX_RESPONSE_BYTES + 1).bytes()
             check(body.size <= MAX_RESPONSE_BYTES) { "پاسخ JSON مدل بیش از اندازه بزرگ است" }
@@ -52,7 +52,7 @@ internal object GeminiNativeClient {
         repeat(MAX_MODEL_PAGES) {
             val url = "$base/models".toHttpUrl().newBuilder().addQueryParameter("pageSize", "100")
                 .apply { pageToken?.let { addQueryParameter("pageToken", it) } }.build()
-            val root = execute(http, request(url.toString(), apiKey).get().build())
+            val root = execute(http, request(url.toString(), apiKey).get().build(), GeminiHttpDiagnostics.Stage.MODELS)
             val rows = root["models"] as? JsonArray
                 ?: throw IllegalStateException("فهرست مدل‌های Gemini ساختار JSON معتبر ندارد")
             rows.forEach { row ->
@@ -98,7 +98,7 @@ internal object GeminiNativeClient {
         val request = request("$base/models/$id:generateContent", apiKey)
             .post(payload.toString().toRequestBody("application/json".toMediaType())).build()
         // No paid retry that silently drops JSON mode after an HTTP 400.
-        return extractText(execute(transport(client), request))
+        return extractText(execute(transport(client), request, GeminiHttpDiagnostics.Stage.GENERATION))
     }
 
     internal fun extractText(root: JsonObject): String {

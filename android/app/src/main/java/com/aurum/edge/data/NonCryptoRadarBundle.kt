@@ -15,12 +15,17 @@ import kotlinx.coroutines.coroutineScope
 internal class NonCryptoRadarBundle(
     private val read: suspend (String, Interval, SourceRouting.HistorySource, String) -> PublicCandleHistoryClient.Result,
 ) {
+    companion object {
+        private val admission = PublisherBudget(SourceRouting.HistorySource.entries.associateWith {
+            if (it == SourceRouting.HistorySource.YAHOO) 6 else 2
+        })
+    }
     data class Snapshot(val provider: String, val source: SourceRouting.HistorySource,
                         val frames: Map<Interval, List<Candle>>, val priorFailures: List<String>, val integrityRevision: Long = 0) {
         val m5: List<Candle> get() = frames.getValue(Interval.M5)
     }
 
-    private data class Preferred(val source: SourceRouting.HistorySource, val at: Long, val revision: Long, val integrityRevision: Long)
+    private data class Preferred(val source: SourceRouting.HistorySource, val at: Long, val revision: Long, val integrityRevision: Long, val auditTtl: Long)
     private val preferred = java.util.concurrent.ConcurrentHashMap<String, Preferred>()
 
     suspend fun fetch(symbol: String, apiKey: String, now: Long = System.currentTimeMillis()): Snapshot {
@@ -30,7 +35,7 @@ internal class NonCryptoRadarBundle(
         val token = gate.begin(symbol, SourceIntegrity.Channel.HISTORY)
         val startRevision = gate.revision(symbol)
         val revision = AppNetwork.route.value.revision
-        val previous = preferred[symbol]?.takeIf { it.source in choices && it.revision == revision && it.integrityRevision == startRevision && now - it.at in 0 until 600_000L }
+        val previous = preferred[symbol]?.takeIf { it.source in choices && it.revision == revision && it.integrityRevision == startRevision && now - it.at in 0 until it.auditTtl }
         if (previous != null && !gate.channelBlocked(symbol, SourceIntegrity.Channel.HISTORY)) {
             try {
                 val snapshot = readSource(symbol, apiKey, previous.source)
@@ -42,11 +47,13 @@ internal class NonCryptoRadarBundle(
         }
         val errors = mutableListOf<String>()
         val healthy = mutableListOf<Snapshot>()
+        var occupied = false
         for (source in choices) {
             try { healthy += readSource(symbol, apiKey, source) }
             catch (cancel: CancellationException) { throw cancel }
-            catch (failure: Exception) { errors += "${source.name}: ${(failure.message ?: "ناموجود").take(105)}" }
+            catch (failure: Exception) { occupied = occupied || failure is PublisherOccupied; errors += "${source.name}: ${(failure.message ?: "ناموجود").take(105)}" }
         }
+        if (healthy.isEmpty() && occupied) throw PublisherOccupied()
         val receivedAt = System.currentTimeMillis()
         val choice = try {
             HistorySourceSelection.choose(symbol, healthy.map {
@@ -61,14 +68,14 @@ internal class NonCryptoRadarBundle(
         val verifiedRevision = gate.accept(symbol, SourceIntegrity.Channel.HISTORY, token, choice.confirmations)
             ?: throw DataFeedException("اختلاف منابع هنوز رفع نشده؛ مقایسهٔ مستقل تازه لازم است")
         val winner = choice.selected.value
-        preferred[symbol] = Preferred(winner.source, receivedAt, revision, verifiedRevision)
+        preferred[symbol] = Preferred(winner.source, receivedAt, revision, verifiedRevision, if (choice.confirmations >= 2) 600_000L else 30_000L)
         HistorySourceAudits.record(symbol, winner.provider,
             choice.note + " · بررسی: " + choices.joinToString { it.name } +
                 (if (errors.isNotEmpty()) " · نامعتبر/قطع: ${errors.joinToString("؛ ")}" else ""), receivedAt)
         return winner.copy(priorFailures = errors, integrityRevision = verifiedRevision)
     }
 
-    private suspend fun readSource(symbol: String, apiKey: String, source: SourceRouting.HistorySource): Snapshot {
+    private suspend fun readSource(symbol: String, apiKey: String, source: SourceRouting.HistorySource): Snapshot = admission.tryRead(source) {
         // Network requests for the frames start together; only a verified complete
         // bundle can be returned. No attempt is made to merge publishers.
         val fetched = coroutineScope {
@@ -87,6 +94,6 @@ internal class NonCryptoRadarBundle(
                 throw DataFeedException("${interval.label}: منبع متفاوت یا کندل بستهٔ تازه/کامل ندارد")
             interval to result.candles
         }
-        return Snapshot(provider, source, frames, emptyList())
+        Snapshot(provider, source, frames, emptyList())
     }
 }

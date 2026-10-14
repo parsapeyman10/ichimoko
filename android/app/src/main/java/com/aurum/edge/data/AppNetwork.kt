@@ -23,6 +23,8 @@ import java.util.concurrent.TimeUnit
  * telemetry or trust-all TLS. SOCKS destinations are resolved by Tor, not the local resolver.
  * Enabling Tor is fail-closed: unavailable Tor never silently falls back to a direct route.
  */
+internal class ProxyNotReady : IOException("پروکسی هنوز آماده نیست؛ مسیر مستقیم استفاده نمی‌شود")
+
 object AppNetwork {
     data class Route(val enabled: Boolean = false, val socksPort: Int = 0, val revision: Long = 0) {
         val ready: Boolean get() = !enabled || socksPort in 1..65535
@@ -88,7 +90,7 @@ object AppNetwork {
                 calls.add(chain.call())
                 route.value
             }
-            if (!before.ready) throw IOException("پروکسی در حال اتصال است؛ مسیر مستقیم استفاده نمی‌شود")
+            if (!before.ready) throw ProxyNotReady()
             val response = chain.proceed(chain.request())
             if (before.revision != route.value.revision) {
                 response.close()

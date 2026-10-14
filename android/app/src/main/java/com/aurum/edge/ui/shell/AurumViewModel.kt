@@ -71,6 +71,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
     val proxyStatus = container.proxy.status
+    val proxyDetail = container.proxy.detail
 
 
     val watchSettings: StateFlow<Map<String, WatchSelection>> = container.watchSettings.selections
@@ -533,10 +534,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Manual all-pairs sweep across 50+ instruments. */
     fun scanPairs() {
-        if (container.pairScanner.state.value.sweeping) {
-            _toast.value = "اسکن ۲۰۰ کریپتو و فارکس/کالا در حال اجراست"
-            return
-        }
         viewModelScope.launch {
             _toast.value = "اسکن ۲۰۰ کریپتو و فارکس/کالا آغاز شد؛ بهترین فرصت‌ها شناسایی می‌شوند"
             try {

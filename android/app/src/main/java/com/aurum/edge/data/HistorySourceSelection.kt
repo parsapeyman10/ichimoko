@@ -48,7 +48,7 @@ internal object HistorySourceSelection {
         val tolerance = WatchCatalog.find(symbol)?.tolerancePct ?: if (symbol.contains("/USD") && symbol.startsWith("XA")) 0.5 else 0.3
         fun price(c: Candidate<T>) = c.frames.getValue(Interval.M5).first { it.time == shared }.close
         fun agree(a: Candidate<T>, b: Candidate<T>): Boolean = abs(price(a) - price(b)) / ((price(a) + price(b)) / 2) * 100 <= tolerance
-        // At most three currently supported independent publishers per exact history route.
+        // At most four currently supported independent publishers per exact history route.
         // Enumerate pairwise-consistent groups; a chain A~B~C is not an A~C agreement.
         val groups = (1 until (1 shl valid.size)).map { mask -> valid.filterIndexed { i, _ -> mask and (1 shl i) != 0 } }
             .filter { group -> group.all { a -> group.all { b -> agree(a, b) } } }

@@ -9,6 +9,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PublisherBudgetTest {
+    @Test fun `saturated publisher rejects admission without creating a wait queue`() = runBlocking {
+        val budget = PublisherBudget(mapOf("A" to 1, "B" to 1))
+        val started = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        val first = async { budget.tryRead("A") { started.complete(Unit); release.await() } }
+        started.await()
+        assertTrue(runCatching { budget.tryRead("A") { error("must not run") } }.exceptionOrNull() is PublisherOccupied)
+        assertEquals(7, budget.tryRead("B") { 7 })
+        release.complete(Unit); first.await()
+        assertEquals(8, budget.tryRead("A") { 8 })
+    }
+
     @Test fun `saturated publisher does not queue another publisher or a market class`() = runBlocking {
         val budget = PublisherBudget(mapOf("Yahoo" to 1, "Dukascopy" to 1))
         val firstEntered = CompletableDeferred<Unit>()

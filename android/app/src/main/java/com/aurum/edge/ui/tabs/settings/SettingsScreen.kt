@@ -55,6 +55,7 @@ import com.aurum.edge.ui.theme.AurumColors
 fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     val context = LocalContext.current
     val proxyStatus by viewModel.proxyStatus.collectAsStateWithLifecycle()
+    val proxyDetail by viewModel.proxyDetail.collectAsStateWithLifecycle()
     val monitorRunning by SignalMonitorService.running.collectAsStateWithLifecycle()
     // Never prefill a saved secret in an editable Compose field. Blank means keep the stored key.
     var newsUrl by remember { mutableStateOf(settings.newsBaseUrl) }
@@ -121,7 +122,10 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             }
             Text(proxyStatus.label, color = AurumColors.Gold,
                 style = MaterialTheme.typography.bodySmall)
-            Text("بازسازی اتصال خودکار است. در حالت روشن، قطع پروکسی باعث اتصال مستقیم پنهانی نمی‌شود. " +
+            if (settings.proxyEnabled) Text(proxyDetail, style = MaterialTheme.typography.bodySmall)
+            Text("مسیر داخلی از Snowflake و مسیر جایگزین AMP استفاده می‌کند؛ راه‌اندازی ممکن است چند دقیقه طول بکشد. " +
+                "این اتصال تضمین دسترسی در تمام اپراتورها یا مجوز استفاده از Gemini نیست. " +
+                "بازسازی اتصال خودکار است. در حالت روشن، قطع پروکسی باعث اتصال مستقیم پنهانی نمی‌شود. " +
                 "اینترنت قطع، مسدودبودن Tor یا محدودیت باتری اندروید ممکن است اتصال را متوقف کند. " +
                 "برای پایش در پس‌زمینه، گزینهٔ پایش پس‌زمینه را هم فعال کنید.",
                 style = MaterialTheme.typography.bodySmall)

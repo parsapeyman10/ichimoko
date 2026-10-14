@@ -61,8 +61,8 @@ android {
         applicationId = "com.aurum.edge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 669
-        versionName = "1.3.53"
+        versionCode = 670
+        versionName = "1.3.54"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
@@ -163,6 +163,7 @@ dependencies {
         exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
     }
     implementation("info.guardianproject:jtorctl:0.4.5.7")
+    implementation("com.netzarchitekten:IPtProxy:5.7.0")
     // Nobitex documents Centrifugo public trade subscriptions; use its official Android SDK
     // for application ping/pong, reconnect and server-supported stream recovery.
     implementation("io.github.centrifugal:centrifuge-java:0.7.0")

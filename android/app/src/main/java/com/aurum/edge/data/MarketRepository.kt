@@ -119,6 +119,7 @@ class MarketRepository(
         CryptoRadarBundle.Source.GATE -> cryptoReadOnly.fetch(symbol, frame, CryptoRadarCandleClient.Venue.GATE)
         CryptoRadarBundle.Source.OKX -> cryptoReadOnly.fetch(symbol, frame, CryptoRadarCandleClient.Venue.OKX)
         CryptoRadarBundle.Source.KRAKEN -> cryptoReadOnly.fetch(symbol, frame, CryptoRadarCandleClient.Venue.KRAKEN)
+        CryptoRadarBundle.Source.MEXC -> cryptoReadOnly.fetch(symbol, frame, CryptoRadarCandleClient.Venue.MEXC)
     } }
     private val nonCryptoBundle = NonCryptoRadarBundle { symbol, frame, source, apiKey ->
         when (source) {

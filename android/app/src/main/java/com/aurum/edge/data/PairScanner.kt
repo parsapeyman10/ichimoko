@@ -29,7 +29,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -74,11 +77,11 @@ data class PairScanStatus(
 data class PairScanState(
     val statuses: List<PairScanStatus> = emptyList(),
     val sweeping: Boolean = false,
-    /** Completed checks in the current sweep; includes closed, blocked and feed-error rows. */
+    /** Rows with an independently completed check, including closed/error rows. */
     val checkedCount: Int = 0,
     val totalCount: Int = 0,
     val lastSweepAt: Long? = null,
-    /** Measured elapsed time of the last completed network sweep; never an SLA. */
+    /** Elapsed time of the most recently completed symbol engine; never a universe-wide SLA. */
     val lastSweepDurationMs: Long? = null,
     val lastError: String? = null,
     /** The Top 3 highest-ranking opportunities from the 50+ scan. */
@@ -111,7 +114,8 @@ class PairScanner(
     private val decisionLog: DecisionLogStore? = null,
     private val binanceHistory: BinanceSpotClient = BinanceSpotClient(),
 ) {
-    private val mutex = Mutex()
+    private val workers = SymbolWorkers(scope) { SystemClock.elapsedRealtime() }
+    private val activeWorkers = java.util.concurrent.atomic.AtomicInteger()
     private val autoReviewMutex = Mutex() // serialize the non-atomic AI/entry review across scanner workers
     private var onAutoSignal: (suspend (MarketState) -> CatalogAutoReview)? = null
 
@@ -120,18 +124,8 @@ class PairScanner(
         onAutoSignal = callback
     }
 
-    private val historyBudget = PublisherBudget(SourceRouting.HistorySource.entries.associateWith { source ->
-        when (source) {
-            SourceRouting.HistorySource.YAHOO -> 6
-            SourceRouting.HistorySource.DUKASCOPY -> 2 // multi-file .bi5 downloads
-            SourceRouting.HistorySource.TWELVE_DATA -> 2 // user's plan can have a smaller quota
-        }
-    })
-    private val cryptoBudget = PublisherBudget(CryptoRadarBundle.Source.entries.associateWith { venue ->
-        if (venue == CryptoRadarBundle.Source.KRAKEN) 2 else 4
-    })
     private val nonCryptoBundle = NonCryptoRadarBundle { symbol, frame, source, apiKey ->
-        historyBudget.read(source) { when (source) {
+        when (source) {
         SourceRouting.HistorySource.YAHOO -> publicHistory.fetchCandles(symbol, frame,
             minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
         SourceRouting.HistorySource.DUKASCOPY -> dukascopyHistory.fetchCandles(symbol, frame,
@@ -141,96 +135,104 @@ class PairScanner(
             withContext(Dispatchers.IO) { client.fetchCandles(apiKey, symbol, frame,
                 outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
                 minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES) }, "Twelve Data · fallback")
-    } } }
+    } }
     private val cryptoReadOnly = CryptoRadarCandleClient()
     private val cryptoBundle = CryptoRadarBundle { symbol, interval, source ->
-        cryptoBudget.read(source) { when (source) {
+        when (source) {
             CryptoRadarBundle.Source.GATE -> cryptoReadOnly.fetch(symbol, interval, CryptoRadarCandleClient.Venue.GATE)
             CryptoRadarBundle.Source.OKX -> cryptoReadOnly.fetch(symbol, interval, CryptoRadarCandleClient.Venue.OKX)
             CryptoRadarBundle.Source.KRAKEN -> cryptoReadOnly.fetch(symbol, interval, CryptoRadarCandleClient.Venue.KRAKEN)
-        } }
+            CryptoRadarBundle.Source.MEXC -> cryptoReadOnly.fetch(symbol, interval, CryptoRadarCandleClient.Venue.MEXC)
+        }
     }
-    /** Trends measured during the running sweep; published as one market-wide read at the end. */
-    private val trendSample = mutableListOf<SymbolTrend>()
-    private var lastSweepElapsed = 0L
+    /** One latest real trend sample per symbol, independently expired. */
+    private val trendSample = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, SymbolTrend>>()
     private val _state = MutableStateFlow(PairScanState(
         statuses = com.aurum.edge.core.V1Universe.defaults.map { PairScanStatus(it, "pending", "هنوز اسکن نشده") }))
     val state: StateFlow<PairScanState> = _state.asStateFlow()
 
-    fun refreshNow(minIntervalMs: Long = SWEEP_PERIOD_MS) {
-        // A full multi-timeframe universe may take longer than the caller's 60-second tick.
-        // Do not queue redundant sweeps behind the mutex or hammer read-only providers.
-        if (!_state.value.sweeping) scope.launch { runSweep(minIntervalMs, onCandidate = null) }
+    fun refreshNow(minIntervalMs: Long = SWEEP_PERIOD_MS,
+                   onCandidate: (suspend (PaperOpportunity) -> Unit)? = null) {
+        schedule(minIntervalMs, onCandidate)
     }
 
     suspend fun sweepOnce(minIntervalMs: Long = SWEEP_PERIOD_MS,
                           onCandidate: (suspend (PaperOpportunity) -> Unit)? = null) {
-        runSweep(minIntervalMs, onCandidate)
+        schedule(minIntervalMs, onCandidate).joinAll()
     }
 
-    private suspend fun runSweep(minIntervalMs: Long, onCandidate: (suspend (PaperOpportunity) -> Unit)?) =
-        mutex.withLock {
-            if (!AppNetwork.route.value.ready) {
-                _state.value = _state.value.copy(sweeping = false, checkedCount = 0,
-                    topThree = emptyList(), bestPick = null, marketTrend = null,
-                    lastError = "اتصال Tor آماده نیست؛ اسکن تا آماده‌شدن مسیر متوقف است، نه محدودیت صرافی",
-                    statuses = settings.read().activeSymbols.map {
-                        PairScanStatus(it, "waiting_connection", "انتظار اتصال؛ هنوز درخواستی به منبع ارسال نشده")
-                    })
-                return@withLock
-            }
-            val elapsed = SystemClock.elapsedRealtime()
-            if (_state.value.sweeping) return@withLock
-            if (lastSweepElapsed != 0L && elapsed - lastSweepElapsed < minIntervalMs) return@withLock
-            lastSweepElapsed = elapsed
-            _state.value = _state.value.copy(sweeping = true, lastError = null)
-            var finished = false
+    private fun schedule(minIntervalMs: Long, onCandidate: (suspend (PaperOpportunity) -> Unit)?): List<Job> {
+        val config = settings.read()
+        val universe = config.activeSymbols
+        _state.update { old -> old.copy(totalCount = universe.size,
+            statuses = universe.map { symbol -> old.statuses.find { it.symbol == symbol }
+                ?: PairScanStatus(symbol, "pending", "موتور مستقل این نماد هنوز داده ندارد",
+                    sourcePlan = SourceRouting.historyPlan(symbol, config.hasKey)) }) }
+        // Randomize admission order, so scarce publisher slots do not always favor the
+        // first catalog rows. No symbol waits for the last symbol of a previous pass.
+        return universe.shuffled().mapNotNull { symbol -> workers.submit(symbol, minIntervalMs) {
+            val started = SystemClock.elapsedRealtime()
+            activeWorkers.incrementAndGet()
+            _state.update { it.copy(sweeping = true) }
             try {
-                sweepAll(onCandidate)
-                finished = true
+                if (!AppNetwork.route.value.ready) {
+                    publishFailure(symbol, "waiting_connection", "Tor آماده نیست؛ درخواست به منبع ارسال نشد")
+                } else if (withTimeoutOrNull(180_000L) {
+                    do {
+                        sweepAll(onCandidate, listOf(symbol))
+                        val occupied = state.value.statuses.find { it.symbol == symbol }?.state == "capacity"
+                        if (occupied) kotlinx.coroutines.delay(kotlin.random.Random.nextLong(1_000L, 4_000L))
+                    } while (occupied && AppNetwork.route.value.ready)
+                    true
+                } != true) {
+                    publishFailure(symbol, "error", "مهلت موتور این نماد تمام شد؛ نمادهای دیگر مستقل ادامه دارند")
+                }
             } catch (cancel: CancellationException) {
+                publishFailure(symbol, "pending", "بررسی این نماد لغو شد؛ سیگنال قبلی مجوز ورود نیست")
                 throw cancel
             } catch (_: Exception) {
-                _state.value = _state.value.copy(
-                    lastError = "اسکن دوره‌ای ناموفق بود؛ پاسخ یا اتصال provider معتبر نبود")
+                publishFailure(symbol, "error", "موتور این نماد پاسخ معتبر نگرفت؛ تلاش بعدی مستقل است")
             } finally {
-                // Throttle from completion, not from the start of a potentially long sweep.
-                lastSweepElapsed = SystemClock.elapsedRealtime()
-                val currentStatuses = _state.value.statuses
-                val ranked = rankOpportunities(currentStatuses)
-                // A failed/empty sweep must not promote the previous market read as current.
-                val read = if (trendSample.isEmpty()) null
-                else runCatching { MarketTrend.overall(trendSample) }.getOrNull()
-                _state.value = _state.value.copy(
-                    sweeping = false,
-                    lastSweepAt = if (finished) System.currentTimeMillis() else _state.value.lastSweepAt,
-                    lastSweepDurationMs = if (finished) SystemClock.elapsedRealtime() - elapsed
-                        else _state.value.lastSweepDurationMs,
-                    topThree = ranked.take(3),
-                    bestPick = ranked.firstOrNull(),
-                    marketTrend = read,
-                )
+                activeWorkers.decrementAndGet()
+                _state.update { it.copy(sweeping = activeWorkers.get() > 0,
+                    lastSweepAt = System.currentTimeMillis(),
+                    lastSweepDurationMs = SystemClock.elapsedRealtime() - started) }
             }
+        } }
+    }
+
+    private fun publishFailure(symbol: String, state: String, detail: String) {
+        trendSample.remove(symbol)
+        _state.update { old ->
+            val rows = old.statuses.map { if (it.symbol == symbol) PairScanStatus(symbol, state, detail,
+                lastScanAt = System.currentTimeMillis(), sourcePlan = SourceRouting.historyPlan(symbol, settings.read().hasKey)) else it }
+            val ranked = rankOpportunities(rows)
+            old.copy(statuses = rows, checkedCount = rows.count { it.lastScanAt != null },
+                topThree = ranked.take(3), bestPick = ranked.firstOrNull(), marketTrend = freshTrend())
         }
+    }
+
+    private fun freshTrend(): MarketTrendRead? {
+        val now = System.currentTimeMillis()
+        val fresh = trendSample.values.filter { now - it.first in 0L..600_000L }
+        return if (fresh.isEmpty()) null else runCatching {
+            MarketTrend.overall(fresh.map { it.second }).copy(computedAt = fresh.minOf { it.first })
+        }.getOrNull()
+    }
 
     private fun rankOpportunities(statuses: List<PairScanStatus>): List<PairScanStatus> =
         ScanRanking.rank(statuses, Interval.M5, System.currentTimeMillis())
 
-    private suspend fun sweepAll(onCandidate: (suspend (PaperOpportunity) -> Unit)?) {
-        trendSample.clear()
-        // The market-wide read of the PREVIOUS sweep: the breadth of the current one is only
-        // complete after the last symbol, so entries during this sweep are checked against the
-        // latest completed read (its age depends on provider latency). On the first sweep it is null, and then only
-        // the instrument's own reference-timeframe trend is used — never a guessed market bias.
-        // A previous sweep can be hours old when providers fail or the app is paused.
-        // Do not apply its risk-tone adjustment as if it described today's market.
+    private suspend fun sweepAll(onCandidate: (suspend (PaperOpportunity) -> Unit)?, universe: List<String>) {
+        universe.forEach { trendSample.remove(it) }
+        // Rolling view of independently completed engines. Expiration is anchored to
+        // the oldest included sample, never refreshed merely by an unrelated tick.
         val overallTrend = _state.value.marketTrend?.takeIf {
             System.currentTimeMillis() - it.computedAt in 0L..10 * 60_000L
         }
         val config = settings.read()
         // Every catalog instrument uses its category settings. Retired manual watchlists
         // cannot narrow scanning or alert authorization. Missing feeds remain explicit errors.
-        val universe = config.activeSymbols
         // A result from the previous sweep cannot remain a current recommendation while
         // the provider is still being checked this time (or after a configuration change).
         val statuses = mutableMapOf<String, PairScanStatus>()
@@ -238,16 +240,13 @@ class PairScanner(
         val baseSources = java.util.concurrent.ConcurrentHashMap<String, String>()
         val barTimes = java.util.concurrent.ConcurrentHashMap<String, Long>()
         val statusLock = Any()
-        _state.value = _state.value.copy(
-            checkedCount = 0,
-            topThree = emptyList(),
-            bestPick = null,
-            totalCount = universe.size,
-            statuses = universe.map { symbol ->
-                PairScanStatus(symbol, "pending", "در انتظار پاسخ منبع این دور",
-                    sourcePlan = SourceRouting.historyPlan(symbol, config.hasKey))
-            },
-        )
+        _state.update { old ->
+            val rows = old.statuses.map { row -> if (row.symbol in universe)
+                PairScanStatus(row.symbol, "pending", "موتور مستقل در حال دریافت و مقایسهٔ منابع",
+                    sourcePlan = SourceRouting.historyPlan(row.symbol, config.hasKey)) else row }
+            val ranked = rankOpportunities(rows)
+            old.copy(statuses = rows, topThree = ranked.take(3), bestPick = ranked.firstOrNull())
+        }
         fun update(
             symbol: String,
             state: String,
@@ -268,7 +267,7 @@ class PairScanner(
             trendAligned: Boolean? = null,
             trendNote: String? = null,
         ) = synchronized(statusLock) {
-            decisionLog?.append(symbol, (chosenIntervals[symbol] ?: Interval.M5).label, state, detail,
+            if (state != "capacity") decisionLog?.append(symbol, (chosenIntervals[symbol] ?: Interval.M5).label, state, detail,
                 signal = if (conditions.isNotEmpty()) com.aurum.edge.core.Signal(
                     action ?: SignalAction.NO_TRADE, confidence ?: 0.0, confluence = conditions)
                     else null, dedupe = false, method = methodLabel, methodReason = playbookReason)
@@ -299,14 +298,13 @@ class PairScanner(
                 trendAligned = trendAligned,
                 trendNote = trendNote ?: trend?.detailFa?.take(200),
             )
-            val currentList = universe.mapNotNull { statuses[it] }
-            val ranked = rankOpportunities(currentList)
-            _state.value = _state.value.copy(
-                statuses = currentList,
-                checkedCount = _state.value.checkedCount + 1,
-                topThree = ranked.take(3),
-                bestPick = ranked.firstOrNull(),
-            )
+            _state.update { old ->
+                val currentList = old.statuses.map { statuses[it.symbol] ?: it }
+                val ranked = rankOpportunities(currentList)
+                old.copy(statuses = currentList,
+                    checkedCount = currentList.count { it.lastScanAt != null },
+                    topThree = ranked.take(3), bestPick = ranked.firstOrNull(), marketTrend = freshTrend())
+            }
         }
 
         val headlines = news.state.value
@@ -355,16 +353,15 @@ class PairScanner(
                     // A venue may supply a FRESH, exact-pair trade even when it cannot
                     // supply 320 contiguous closed candles. Show that price as a
                     // READ-ONLY partial observation, never as a candle, signal or fill.
+                    if (failure is PublisherOccupied) {
+                        update(symbol, "capacity", failure.message.orEmpty())
+                        return@async
+                    }
                     val quote = listOf(CryptoRadarCandleClient.Venue.GATE,
-                        CryptoRadarCandleClient.Venue.OKX, CryptoRadarCandleClient.Venue.KRAKEN)
+                        CryptoRadarCandleClient.Venue.OKX, CryptoRadarCandleClient.Venue.KRAKEN, CryptoRadarCandleClient.Venue.MEXC)
                         .firstNotNullOfOrNull { venue ->
                             try {
-                                val source = when (venue) {
-                                    CryptoRadarCandleClient.Venue.GATE -> CryptoRadarBundle.Source.GATE
-                                    CryptoRadarCandleClient.Venue.OKX -> CryptoRadarBundle.Source.OKX
-                                    CryptoRadarCandleClient.Venue.KRAKEN -> CryptoRadarBundle.Source.KRAKEN
-                                }
-                                venue to cryptoBudget.read(source) { cryptoReadOnly.fetchWatchTrade(symbol, venue) }
+                                venue to cryptoReadOnly.fetchWatchTrade(symbol, venue)
                             } catch (cancel: CancellationException) { throw cancel }
                             catch (_: Exception) { null }
                         }
@@ -380,7 +377,8 @@ class PairScanner(
                     nonCryptoBundle.fetch(symbol, config.apiKey, now)
                 } catch (cancel: CancellationException) { throw cancel }
                 catch (failure: Exception) {
-                    update(symbol, "error", (failure.message ?: "منبع هم‌نماد موجود نیست").take(420))
+                    update(symbol, if (failure is PublisherOccupied) "capacity" else "error",
+                        (failure.message ?: "منبع هم‌نماد موجود نیست").take(420))
                     return@async
                 } else null
                 // Network permits and fallback can outlast a bar boundary. Use receipt time,
@@ -472,7 +470,7 @@ class PairScanner(
                 val trend = withContext(Dispatchers.Default) {
                     runCatching { MarketTrend.symbolTrend(symbol, candles, interval) }.getOrNull()
                 }
-                if (trend != null && trend.known) synchronized(trendSample) { trendSample += trend }
+                if (trend != null && trend.known) trendSample[symbol] = System.currentTimeMillis() to trend
 
                 // Playbook is market context only (not a fifth V1 gate). The scanner and chart
                 // both send the same selected category mode and independently fetched frames into

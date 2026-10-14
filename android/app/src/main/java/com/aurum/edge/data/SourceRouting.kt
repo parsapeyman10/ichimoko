@@ -25,7 +25,7 @@ internal object SourceRouting {
 
     fun historyPlan(symbol: String, keyed: Boolean): String {
         if (CryptoCatalog.isCrypto(symbol))
-            return "مقایسهٔ Gate / OKX / Kraken؛ انتخاب بستهٔ سالم همخوان (فقط رادار، نه قیمت اجرای صرافی دیگر)"
+            return "مقایسهٔ Gate / OKX / Kraken / MEXC؛ انتخاب بستهٔ سالم همخوان (فقط رادار، نه قیمت اجرای صرافی دیگر)"
         val paths = historySources(symbol, keyed).map { when (it) {
             HistorySource.YAHOO -> "Yahoo (دو میزبان، یک ناشر)"
             HistorySource.DUKASCOPY -> "Dukascopy"

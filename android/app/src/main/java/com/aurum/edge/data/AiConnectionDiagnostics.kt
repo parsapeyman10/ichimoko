@@ -9,7 +9,9 @@ import javax.net.ssl.SSLException
 object AiConnectionDiagnostics {
     fun describe(error: Throwable): String = when (error) {
         is GeminiHttpDiagnostics.ModelUnavailable -> error.message.orEmpty()
-        is GeminiHttpDiagnostics.Failure -> "HTTP ${error.code}: ${error.reason.advice}"
+        is ProxyNotReady -> "اتصال پروکسی آماده نیست؛ هنوز پاسخی از سرویس AI برای معتبر یا نامعتبر بودن کلید نداریم. وضعیت و درصد اتصال Snowflake را بررسی کنید"
+        is GeminiHttpDiagnostics.Failure -> (error.stage?.let { "مرحلهٔ ${it.label} · " } ?: "") +
+            "HTTP ${error.code}: ${error.reason.advice}"
         is GeminiNativeClient.GeminiResponseException -> error.reason.message
         is UnknownHostException -> "نام دامنهٔ سرویس پیدا نشد (DNS)؛ نشانی HTTPS و دسترسی شبکه را بررسی کنید"
         is SocketTimeoutException -> "مهلت پاسخ سرویس تمام شد؛ اتصال/دسترسی از همین شبکه را بررسی کنید"

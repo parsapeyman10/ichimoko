@@ -3,7 +3,6 @@ package com.aurum.edge.data
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import java.io.IOException
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
@@ -24,7 +23,8 @@ internal class VenueRequestPolicy(
     suspend fun <T> read(venue: CryptoRadarCandleClient.Venue, request: suspend () -> T): T {
         if (!route().ready) throw DataFeedException("اتصال Tor هنوز آماده نیست؛ درخواستی به صرافی ارسال نشد")
         val slot = slots.getValue(venue)
-        return slot.mutex.withLock {
+        if (!slot.mutex.tryLock()) throw PublisherOccupied()
+        try {
             val current = route()
             if (!current.ready) throw DataFeedException("اتصال Tor هنوز آماده نیست؛ درخواستی ارسال نشد")
             if (slot.revision != current.revision) {
@@ -36,7 +36,7 @@ internal class VenueRequestPolicy(
             if (wait > 0) pause(wait)
             if (route() != current) throw DataFeedException("مسیر اتصال تغییر کرد؛ دریافت دوباره لازم است")
             slot.next = clock() + if (venue == CryptoRadarCandleClient.Venue.KRAKEN) 1100L else 350L
-            try { request() }
+            return try { request() }
             catch (cancel: CancellationException) { throw cancel }
             catch (failure: Exception) {
                 if (route() != current) throw DataFeedException("مسیر اتصال تغییر کرد؛ دریافت دوباره لازم است")
@@ -54,7 +54,7 @@ internal class VenueRequestPolicy(
                 throw DataFeedException("${venue.name}: $reason" +
                     if (backoff > 0) "؛ تلاش بعدی ${(backoff + 999) / 1000} ثانیه" else "")
             }
-        }
+        } finally { slot.mutex.unlock() }
     }
 
     companion object {

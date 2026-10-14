@@ -900,28 +900,28 @@ internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, now: 
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "برای همهٔ نمادهای کاتالوگ و واچ‌لیست به‌ترتیب تلاش می‌شود؛ فقط کندل واقعیِ هم‌نماد امتیاز می‌گیرد. " +
-                    "نبود فید/بسته‌بودن بازار هم با دلیل ثبت می‌شود. فقط واچ‌لیست فعال مجاز به فرصت معاملاتی است. " +
-                    "اسکن پیوسته در پس‌زمینه نیازمند سرویس فعال در تنظیمات است؛ هر دور پس از اتمام و فاصلهٔ حداقلی شروع می‌شود.",
+                "هر یک از ۲۳۰ نماد موتور مستقل دارد؛ نماد کند، بقیه را پشت یک دور سراسری نگه نمی‌دارد. " +
+                    "فقط دادهٔ واقعی هم‌نماد معتبر است؛ منبع پرظرفیت صف نمی‌سازد و موتور همان نماد دوباره تلاش می‌کند. " +
+                    "محدودیت ناشر حذف نشده و دریافت آنی همهٔ نمادها تضمین نیست. پایش پس‌زمینه نیازمند سرویس فعال است.",
                 style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextSecondary,
                 modifier = Modifier.weight(1f),
             )
             OutlinedButton(
                 onClick = onScan,
-                enabled = !scan.sweeping,
+                enabled = true,
                 modifier = Modifier.padding(start = 8.dp),
             ) {
-                Text(if (scan.sweeping) "اسکن..." else "اسکن مجدد")
+                Text("بازبینی مستقل")
             }
         }
         val skipped = scan.statuses.count { com.aurum.edge.core.MarketHours.closedFor(it.symbol, now) }
         val requested = scan.statuses.count { it.state != "pending" && it.state != "closed" }
         Text("بازارهای بازِ بررسی‌شده: $requested/${scan.totalCount - skipped} · " +
             "$skipped نماد بسته بدون درخواست فید · " +
-            "آخرین دور کامل: ${scan.lastSweepAt?.let { formatTime(it) } ?: "هنوز کامل نشده"}" +
-            (scan.lastSweepDurationMs?.let { " · زمان واقعی دور: ${it / 1000.0} ثانیه" } ?: "") + " · " +
-            "تلاش بعدی پس از اتمام دور، حداقل ۳۰ ثانیه فاصله و در چرخهٔ حدوداً یک‌دقیقه‌ای برنامه. " +
+            "آخرین موتور تکمیل‌شده: ${scan.lastSweepAt?.let { formatTime(it) } ?: "هنوز تکمیل نشده"}" +
+            (scan.lastSweepDurationMs?.let { " · مدت همان نماد: ${it / 1000.0} ثانیه" } ?: "") + " · " +
+            "هر موتور پس از بررسی خودش حداقل ۳۰ ثانیه فاصله دارد؛ انتظار ظرفیت با تلاش مجدد کوتاه همان موتور است. " +
             "زمان واقعی به شبکه و محدودیت منبع بستگی دارد؛ دلیل هر بررسی در انتهای صفحه است.",
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         scan.lastError?.let { Text(it, color = AurumColors.Red, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp)) }

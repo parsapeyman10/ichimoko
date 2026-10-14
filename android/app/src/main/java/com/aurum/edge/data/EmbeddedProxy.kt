@@ -43,6 +43,9 @@ class EmbeddedProxy(context: Context, settings: SettingsStore) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val mutableStatus = MutableStateFlow(Status.OFF)
     val status = mutableStatus.asStateFlow()
+    private val bridge = SnowflakeBridge(app)
+    private val mutableDetail = MutableStateFlow("پروکسی خاموش است")
+    val detail = mutableDetail.asStateFlow()
     private var service: TorService? = null
     private var bound = false
     private var failed = false
@@ -93,8 +96,10 @@ class EmbeddedProxy(context: Context, settings: SettingsStore) {
                 if (!requested) {
                     unbind()
                     mutableStatus.value = Status.OFF
+                    mutableDetail.value = "پروکسی خاموش است؛ مسیر مستقیم یا VPN سیستم"
                     return@collectLatest
                 }
+                var attempt = 0
                 var backoff = 5_000L
                 var bootstrapStarted = SystemClock.elapsedRealtime()
                 mutableStatus.value = Status.STARTING
@@ -106,6 +111,7 @@ class EmbeddedProxy(context: Context, settings: SettingsStore) {
                         continue
                     }
                     if (failed) {
+                        attempt++
                         unbind()
                         AppNetwork.configure(true)
                         mutableStatus.value = Status.RETRYING
@@ -114,11 +120,12 @@ class EmbeddedProxy(context: Context, settings: SettingsStore) {
                     }
                     if (!bound) {
                         failed = false
+                        mutableDetail.value = if (attempt % 2 == 0) "Snowflake · اتصال ضدانسداد در حال شروع" else "Snowflake AMP · تلاش با مسیر جایگزین"
                         // Loopback only. No relay/exit service, DNS port or LAN listener.
                         val configured = withContext(Dispatchers.IO) {
                             runCatching {
                                 TorService.getTorrc(app).apply { parentFile?.mkdirs() }.writeText(
-                                    "SocksPort 127.0.0.1:auto\nHTTPTunnelPort 0\nClientOnly 1\nSafeLogging 1\n"
+                                    bridge.start(amp = attempt % 2 != 0)
                                 )
                             }.isSuccess
                         }
@@ -138,12 +145,17 @@ class EmbeddedProxy(context: Context, settings: SettingsStore) {
                         if (runCatching { daemon.getInfo("status/circuit-established") == "1" }.getOrDefault(false))
                             daemon.getSocksPort().takeIf { it in 1..65535 } ?: 0 else 0
                     } else 0
+                    val percent = if (daemon?.torControlConnection != null) withContext(Dispatchers.IO) {
+                        SnowflakeConfig.bootstrapPercent(runCatching { daemon.getInfo("status/bootstrap-phase") }.getOrNull())
+                    } else null
+                    mutableDetail.value = "Snowflake${if (attempt % 2 != 0) " AMP" else ""} · " +
+                        if (port > 0) "مدار Tor آماده؛ دسترسی Google جدا بررسی می‌شود" else "پیشرفت Tor: ${percent ?: 0}٪؛ آماده نیست"
                     AppNetwork.configure(true, port)
                     if (port > 0) {
                         mutableStatus.value = Status.ONLINE
                         backoff = 5_000L
                         bootstrapStarted = SystemClock.elapsedRealtime()
-                    } else if (SystemClock.elapsedRealtime() - bootstrapStarted > 120_000L) {
+                    } else if (SystemClock.elapsedRealtime() - bootstrapStarted > 300_000L) {
                         failed = true
                         mutableStatus.value = Status.RETRYING
                     } else if (mutableStatus.value != Status.RETRYING) mutableStatus.value = Status.STARTING
@@ -180,5 +192,6 @@ class EmbeddedProxy(context: Context, settings: SettingsStore) {
         bound = false
         service = null
         failed = false
+        bridge.stop()
     }
 }

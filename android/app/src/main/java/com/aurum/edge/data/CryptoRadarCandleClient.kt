@@ -33,6 +33,7 @@ class CryptoRadarCandleClient(
         GATE("Gate Spot / USDT (radar only)", "https://api.gateio.ws"),
         OKX("OKX Spot / USDT (radar only)", "https://www.okx.com"),
         KRAKEN("Kraken Spot / USDT (radar only)", "https://api.kraken.com"),
+        MEXC("MEXC Spot / USDT (radar only)", "https://api.mexc.com"),
     }
     private val json = Json { ignoreUnknownKeys = true }
     private val listing = ConcurrentHashMap<String, Long>()
@@ -64,6 +65,7 @@ class CryptoRadarCandleClient(
         return when (venue) {
             Venue.GATE -> symbol.replace('/', '_')
             Venue.OKX -> symbol.replace('/', '-')
+            Venue.MEXC -> symbol.replace("/", "")
             Venue.KRAKEN -> symbol.replace("BTC/", "XBT/").replace("DOGE/", "XDG/").replace("/", "")
         }
     }
@@ -78,9 +80,11 @@ class CryptoRadarCandleClient(
             Venue.GATE -> get(venue, "/api/v4/spot/currency_pairs/$pair")
             Venue.OKX -> get(venue, "/api/v5/public/instruments?instType=SPOT&instId=$pair")
             Venue.KRAKEN -> get(venue, "/0/public/AssetPairs?pair=$pair")
+            Venue.MEXC -> get(venue, "/api/v3/exchangeInfo?symbol=$pair")
         }
         val root = json.parseToJsonElement(body)
         val valid = when (venue) {
+            Venue.MEXC -> validMexcListing(root as? JsonObject, pair, base)
             Venue.GATE -> (root as? JsonObject)?.let {
                 it.text("id") == pair && it.text("base") == base && it.text("quote") == "USDT" &&
                     it.text("type") == "normal" && it.text("trade_status") == "tradable"
@@ -134,6 +138,8 @@ class CryptoRadarCandleClient(
             else -> if (venue == Venue.GATE) "1h" else "1H"
         }
         val rows = when (venue) {
+            Venue.MEXC -> parseMexc(get(venue,
+                "/api/v3/klines?symbol=$pair&interval=${if (interval == Interval.H1) "60m" else bar}&limit=330"), interval, clock())
             Venue.GATE -> parseGate(get(venue, "/api/v4/spot/candlesticks?currency_pair=$pair&interval=$bar&limit=330"),
                 interval, clock())
             Venue.KRAKEN -> parseKraken(get(venue,
@@ -175,16 +181,44 @@ class CryptoRadarCandleClient(
             Venue.GATE -> get(venue, "/api/v4/spot/trades?currency_pair=$id&limit=1")
             Venue.OKX -> get(venue, "/api/v5/market/trades?instId=$id&limit=1")
             Venue.KRAKEN -> get(venue, "/0/public/Trades?pair=$id&count=1")
+            Venue.MEXC -> get(venue, "/api/v3/trades?symbol=$id&limit=1")
         }
         val tick = when (venue) {
             Venue.GATE -> parseGateTrade(body, id)
             Venue.OKX -> parseOkxTrade(body, id)
             Venue.KRAKEN -> parseKrakenTrade(body)
+            Venue.MEXC -> parseMexcTrade(body)
         }
         val receivedAt = clock()
         if (tick.at !in (receivedAt - 90_000L)..(receivedAt + 10_000L))
             throw DataFeedException("${venue.provider}: آخرین معامله تازه نیست")
         return tick
+    }
+
+    internal fun validMexcListing(root: JsonObject?, pair: String, base: String): Boolean =
+        root?.array("symbols")?.singleOrNull()?.let { it as? JsonObject }?.let {
+            it.text("symbol") == pair && it.text("baseAsset") == base && it.text("quoteAsset") == "USDT" &&
+                it.text("status") == "1" && it.text("isSpotTradingAllowed") == "true"
+        } == true
+
+    internal fun parseMexc(body: String, interval: Interval, now: Long): List<Candle> {
+        val rows = json.parseToJsonElement(body) as? JsonArray ?: throw DataFeedException("کندل MEXC نامعتبر است")
+        return rows.mapNotNull { item ->
+            val row = item as? JsonArray ?: throw DataFeedException("ساختار کندل MEXC نامعتبر است")
+            if (row.size < 7) throw DataFeedException("ستون‌های کندل MEXC ناقص‌اند")
+            val t = row[0].string().toLongOrNull() ?: throw DataFeedException("زمان کندل MEXC نامعتبر است")
+            if (t + interval.millis > now) return@mapNotNull null
+            val end = row[6].string().toLongOrNull()
+            if (end == null || end !in (t + interval.millis - 1)..(t + interval.millis))
+                throw DataFeedException("بازهٔ زمانی کندل MEXC مطابق درخواست نیست")
+            checkedCandle(t, row[1].string(), row[2].string(), row[3].string(), row[4].string(), row[5].string(), interval, now)
+        }
+    }
+
+    internal fun parseMexcTrade(body: String): PriceTick {
+        val row = (json.parseToJsonElement(body) as? JsonArray)?.singleOrNull() as? JsonObject
+            ?: throw DataFeedException("معاملهٔ زمان‌دار MEXC موجود نیست")
+        return checkedTrade(row.text("price"), row.text("qty"), row.text("time"))
     }
 
     internal fun parseKrakenTrade(body: String): PriceTick {

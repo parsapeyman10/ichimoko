@@ -2,6 +2,8 @@ package com.aurum.edge.data
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.async
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.*
 import org.junit.Test
 import java.io.IOException
@@ -10,6 +12,16 @@ import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 class VenueRequestPolicyTest {
+    @Test fun `slow response does not form a FIFO of other symbol requests`() = runBlocking {
+        val policy = VenueRequestPolicy()
+        val started = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        val slow = async { policy.read(gate) { started.complete(Unit); release.await() } }
+        started.await()
+        assertTrue(runCatching { policy.read(gate) { error("must not send") } }.exceptionOrNull() is PublisherOccupied)
+        assertEquals("available", policy.read(okx) { "available" })
+        release.complete(Unit); slow.await()
+    }
+
     private val gate = CryptoRadarCandleClient.Venue.GATE
     private val okx = CryptoRadarCandleClient.Venue.OKX
 
