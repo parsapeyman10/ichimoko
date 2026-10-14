@@ -675,8 +675,6 @@ data class AppSettings(
     // IC Markets Raw Spread (EU): XAU/USD ≈ $0.12/oz spread + $3.50 per 100 oz lot/side = $0.035/oz.
     val spreadPrice: Double = 0.12,
     val commissionPerOz: Double = 0.035,
-    /** Embedded keyless Tor. No endpoint, login or account is required. */
-    val proxyEnabled: Boolean = false,
     val backgroundMonitor: Boolean = false,
     val notifyOnSignal: Boolean = true,
     /** Persistable SAF content Uri; blank uses the device's system notification tone. */

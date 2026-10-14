@@ -52,7 +52,7 @@ class AppContainer(context: Context) {
     val appContext: Context = context.applicationContext
 
     val settingsStore = SettingsStore(appContext)
-    val proxy = com.aurum.edge.data.EmbeddedProxy(appContext, settingsStore)
+    init { com.aurum.edge.data.AppNetwork.start(appContext) }
     val decisionLog = com.aurum.edge.data.DecisionLogStore(appContext)
     val candleCache = CandleCache(appContext)
     val journalStore = JournalStore(appContext, settingsStore = settingsStore)
@@ -128,7 +128,7 @@ class AppContainer(context: Context) {
         appScope.launch {
             com.aurum.edge.data.AppNetwork.route.collect { route ->
                 if (route.ready) market.refreshNow()
-                // Marks the scanner waiting when Tor is down, retries promptly when restored.
+                // System network / VPN changes invalidate routing caches and trigger a fresh check.
                 pairScanner.refreshNow(minIntervalMs = 0)
             }
         }

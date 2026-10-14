@@ -22,6 +22,10 @@ class SettingsStore(context: Context) {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE)
 
+    // Retired in 1.3.55: an old enabled flag must not strand an upgraded install
+    // waiting for a daemon which is no longer bundled. No other preferences are cleared.
+    init { prefs.edit().remove("embedded_tor_enabled").apply() }
+
     private val _settings = MutableStateFlow(read())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
@@ -58,7 +62,6 @@ class SettingsStore(context: Context) {
         minConfidence = prefs.getFloat(KEY_MIN_CONF, 85f).toDouble().takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
         spreadPrice = prefs.getFloat(KEY_SPREAD, 0.12f).toDouble(),
         commissionPerOz = prefs.getFloat(KEY_COMMISSION, 0.035f).toDouble(),
-        proxyEnabled = prefs.getBoolean(KEY_PROXY, false),
         backgroundMonitor = prefs.getBoolean(KEY_MONITOR, false),
         notifyOnSignal = prefs.getBoolean(KEY_NOTIFY, true),
         alertSoundUri = prefs.getString(KEY_ALERT_SOUND_URI, "").orEmpty(),
@@ -75,14 +78,6 @@ class SettingsStore(context: Context) {
         activeStrategy = storedStrategy,
         categoryStrategies = categoryStrategies,
     )
-    }
-
-    /** A proxy toggle is acknowledged only after a durable local write. */
-    @Synchronized
-    fun saveProxyEnabled(enabled: Boolean): Boolean {
-        if (!prefs.edit().putBoolean(KEY_PROXY, enabled).commit()) return false
-        _settings.value = read()
-        return true
     }
 
     /**
@@ -258,7 +253,6 @@ class SettingsStore(context: Context) {
             .putFloat(KEY_MIN_CONF, next.minConfidence.toFloat())
             .putFloat(KEY_SPREAD, next.spreadPrice.toFloat())
             .putFloat(KEY_COMMISSION, next.commissionPerOz.toFloat())
-            .putBoolean(KEY_PROXY, next.proxyEnabled)
             .putBoolean(KEY_MONITOR, next.backgroundMonitor)
             .putBoolean(KEY_NOTIFY, next.notifyOnSignal)
             .putString(KEY_ALERT_SOUND_URI, next.alertSoundUri)
@@ -305,7 +299,6 @@ class SettingsStore(context: Context) {
         private const val KEY_MIN_CONF = "min_confidence"
         private const val KEY_SPREAD = "spread_price"
         private const val KEY_COMMISSION = "commission_per_oz"
-        private const val KEY_PROXY = "embedded_tor_enabled"
         private const val KEY_MONITOR = "background_monitor"
         private const val KEY_NOTIFY = "notify_signal"
         private const val KEY_ALERT_SOUND_URI = "verified_alert_sound_uri"

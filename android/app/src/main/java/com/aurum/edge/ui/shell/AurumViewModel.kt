@@ -70,8 +70,6 @@ import kotlin.math.min
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
-    val proxyStatus = container.proxy.status
-    val proxyDetail = container.proxy.detail
 
 
     val watchSettings: StateFlow<Map<String, WatchSelection>> = container.watchSettings.selections
@@ -679,19 +677,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             _toast.value = if (queued) "آزمون پخش فایل تا ۱۰ ثانیه؛ بلندی صدا/مزاحم‌نشدن دستگاه را بررسی کنید"
                 else "فایل صوتی دیگر قابل خواندن نیست؛ دوباره انتخاب کنید"
         }
-    }
-
-    fun reconnectProxy() { container.proxy.reconnect() }
-
-    fun setProxyEnabled(enabled: Boolean) {
-        if (!container.settingsStore.saveProxyEnabled(enabled)) {
-            _toast.value = "تنظیم پروکسی ذخیره نشد؛ دوباره تلاش کنید"
-            return
-        }
-        container.proxy.applyPreference(enabled)
-        _toast.value = if (enabled) "پروکسی داخلی روشن شد؛ آماده‌شدن Tor ممکن است چند دقیقه طول بکشد"
-            else "پروکسی خاموش شد؛ درخواست‌های بعدی مستقیم هستند"
-        container.market.refreshNow()
     }
 
     fun setMonitorFlag(enabled: Boolean) {

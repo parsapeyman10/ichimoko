@@ -34,8 +34,6 @@ fun AurumRoot(viewModel: AurumViewModel) {
     val context = LocalContext.current
     val market by viewModel.market.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val proxyStatus by viewModel.proxyStatus.collectAsStateWithLifecycle()
-    val proxyRoute by com.aurum.edge.data.AppNetwork.route.collectAsStateWithLifecycle()
     val toast by viewModel.toast.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     // The selected tab is removed from composition on every navigation. Keep its
@@ -58,6 +56,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
     }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { viewModel.pauseInvisibleForexFeed() }
     LifecycleEventEffect(Lifecycle.Event.ON_START) {
+        com.aurum.edge.data.AppNetwork.refreshSystemNetwork()
         if (started) {
             viewModel.resumeVisibleForexFeed()
             // Returning from Android's "install unknown apps" settings should continue a
@@ -79,10 +78,6 @@ fun AurumRoot(viewModel: AurumViewModel) {
     }
 
     Scaffold(containerColor = AurumColors.Bg, snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            ProxyStatusLamp(settings.proxyEnabled, proxyStatus, proxyRoute,
-                onClick = { open(AurumTab.Settings) })
-        },
         bottomBar = {
             AurumBottomBar(selectedTab, onSelect = ::open, onMore = { showMore = true })
         }) { padding ->
@@ -93,9 +88,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
                         AurumTab.Home -> HomeScreen(viewModel, market,
                             onChartSymbol = ::openChartFor, onJournal = { open(AurumTab.Journal) })
                         AurumTab.Chart -> ChartScreen(initialTicker = chartTicker,
-                            onSelectTicker = { chartTicker = it },
-                            onReconnect = viewModel::reconnectProxy,
-                            onDisableProxy = { viewModel.setProxyEnabled(false) })
+                            onSelectTicker = { chartTicker = it })
                         AurumTab.Signal -> SignalScreen(viewModel, onChartSymbol = ::openChartFor)
                         AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { open(AurumTab.Api) },
                             onOpenChart = ::openChartFor)

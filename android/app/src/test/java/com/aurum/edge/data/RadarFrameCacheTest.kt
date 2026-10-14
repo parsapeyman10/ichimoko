@@ -32,7 +32,7 @@ class RadarFrameCacheTest {
     }
 
     @Test fun `concurrent same frame reads coalesce and a second sweep reuses valid bars`() = runBlocking {
-        AppNetwork.configure(false)
+        AppNetwork.observeNetwork("test", true, force = true)
         val interval = Interval.M5
         val boundary = System.currentTimeMillis() / interval.millis * interval.millis
         val calls = AtomicInteger()
@@ -55,10 +55,4 @@ class RadarFrameCacheTest {
         assertEquals(2, calls.get())
     }
 
-    @Test fun `Chromium proxy uses documented SOCKS scheme with no direct fallback`() {
-        assertEquals("socks://127.0.0.1:19050", WebProxyRouting.proxyRule(19050))
-        assertThrows(IllegalArgumentException::class.java) { WebProxyRouting.proxyRule(0) }
-        assertThrows(IllegalArgumentException::class.java) { WebProxyRouting.proxyRule(65536) }
-        assertNotEquals(WebProxyRouting.Status.WAITING_TOR.message, WebProxyRouting.Status.UNSUPPORTED.message)
-    }
 }

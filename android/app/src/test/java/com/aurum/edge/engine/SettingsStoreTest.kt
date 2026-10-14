@@ -85,19 +85,18 @@ class SettingsStoreTest {
         assertEquals("XAU/USD", SettingsStore(context).read().symbol)
     }
 
-    @Test fun `proxy choice needs no credentials and survives restart and other settings writes`() {
+    @Test fun `upgrade retires enabled proxy flag without clearing market credentials or account settings`() {
         val context = RuntimeEnvironment.getApplication()
-        context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit().clear().commit()
+        val prefs = context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE)
+        prefs.edit().clear().putBoolean("embedded_tor_enabled", true)
+            .putString("td_api_key", "synthetic-key").putFloat("balance", 775f).commit()
         val store = SettingsStore(context)
-        assertFalse(store.read().proxyEnabled)
-        assertTrue(store.saveProxyEnabled(true))
-        assertTrue(SettingsStore(context).read().proxyEnabled)
-        assertFalse(store.read().hasKey)
-        assertFalse(store.read().hasClientNewsAi)
+        assertFalse(prefs.contains("embedded_tor_enabled"))
+        assertEquals("synthetic-key", store.read().apiKey)
+        assertEquals(775.0, store.read().accountBalance, 0.0)
         store.update { it.copy(notifyOnSignal = false) }
-        assertTrue(SettingsStore(context).read().proxyEnabled)
-        assertTrue(store.saveProxyEnabled(false))
-        assertFalse(SettingsStore(context).read().proxyEnabled)
+        assertEquals(775.0, SettingsStore(context).read().accountBalance, 0.0)
+        assertFalse(prefs.contains("embedded_tor_enabled"))
     }
 
     @Test fun `old empty or narrow watchlist cannot restrict category strategies or active symbols`() {

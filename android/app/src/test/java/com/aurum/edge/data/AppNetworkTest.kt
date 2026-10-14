@@ -14,56 +14,55 @@ import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.URI
+import java.net.ProxySelector
+import java.net.SocketAddress
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class AppNetworkTest {
-    @Before fun reset() { AppNetwork.configure(false) }
-    @After fun cleanup() { AppNetwork.configure(false) }
+    @Before fun reset() { AppNetwork.observeNetwork("direct", true, force = true) }
+    @After fun cleanup() { AppNetwork.observeNetwork("direct", true, force = true) }
 
-    @Test fun `proxy startup and failure never offer a direct fallback`() {
-        AppNetwork.configure(true)
-        assertFalse(AppNetwork.route.value.ready)
-        val routes = AppNetwork.selector.select(URI("https://example.org"))
-        assertEquals(1, routes.size)
-        assertEquals(Proxy.Type.SOCKS, routes.single().type())
-        assertEquals(1, (routes.single().address() as InetSocketAddress).port)
-        AppNetwork.selector.connectFailed(URI("https://example.org"), routes.single().address(), IOException())
-        assertEquals(routes, AppNetwork.selector.select(URI("https://example.org")))
+    @Test fun `system proxy selector is honored without a private socks listener`() {
+        val previous = ProxySelector.getDefault()
+        val systemProxy = Proxy(Proxy.Type.HTTP, InetSocketAddress("192.0.2.1", 8080))
+        try {
+            ProxySelector.setDefault(object : ProxySelector() {
+                override fun select(uri: URI) = listOf(systemProxy)
+                override fun connectFailed(uri: URI, sa: SocketAddress, ioe: IOException) = Unit
+            })
+            assertEquals(listOf(systemProxy), AppNetwork.selector.select(URI("https://example.org")))
+            ProxySelector.setDefault(null)
+            assertEquals(listOf(Proxy.NO_PROXY), AppNetwork.selector.select(URI("https://example.org")))
+        } finally { ProxySelector.setDefault(previous) }
+    }
+
+    @Test fun `network identity change invalidates caches but repeated capability events do not`() {
+        AppNetwork.observeNetwork("wifi", true)
+        val first = AppNetwork.route.value.revision
+        AppNetwork.observeNetwork("wifi", true)
+        assertEquals(first, AppNetwork.route.value.revision)
+        AppNetwork.observeNetwork("vpn", true)
+        assertTrue(AppNetwork.route.value.ready)
+        assertTrue(AppNetwork.route.value.revision > first)
+        AppNetwork.observeNetwork(null, false)
         val error = runCatching {
             AppNetwork.builder().build().newCall(Request.Builder().url("https://example.org").build()).execute()
         }.exceptionOrNull()
-        assertTrue(error is IOException)
-        assertTrue(error!!.message!!.contains("پروکسی"))
+        assertTrue(error is NetworkUnavailable)
     }
 
-    @Test fun `a ready route uses loopback socks and off explicitly restores direct mode`() {
-        AppNetwork.configure(true, 19050)
-        assertTrue(AppNetwork.route.value.ready)
-        val revision = AppNetwork.route.value.revision
-        val proxy = AppNetwork.selector.select(URI("wss://example.org/stream")).single()
-        assertEquals(Proxy.Type.SOCKS, proxy.type())
-        val address = proxy.address() as InetSocketAddress
-        assertEquals("127.0.0.1", address.address.hostAddress)
-        assertEquals(19050, address.port)
-        AppNetwork.configure(true, 19050)
-        assertEquals(revision, AppNetwork.route.value.revision)
-        AppNetwork.configure(false)
-        assertEquals(listOf(Proxy.NO_PROXY), AppNetwork.selector.select(URI("https://example.org")))
-        assertTrue(AppNetwork.route.value.revision > revision)
-    }
-
-    @Test fun `all previously built clients honor a later toggle`() {
+    @Test fun `previously built clients recover when the system network returns`() {
         MockWebServer().use { server ->
             server.start()
             val client = AppNetwork.builder().build()
             server.enqueue(MockResponse().setBody("public price"))
             val request = Request.Builder().url(server.url("/price")).build()
             client.newCall(request).execute().use { assertEquals("public price", it.body!!.string()) }
-            AppNetwork.configure(true)
+            AppNetwork.observeNetwork(null, false)
             assertTrue(runCatching { client.newCall(request).execute() }.exceptionOrNull() is IOException)
             assertEquals(1, server.requestCount)
-            AppNetwork.configure(false)
+            AppNetwork.observeNetwork("direct", true, force = true)
             server.enqueue(MockResponse().setBody("fresh price"))
             client.newCall(request).execute().use { assertEquals("fresh price", it.body!!.string()) }
             assertEquals(2, server.requestCount)
@@ -83,7 +82,7 @@ class AppNetworkTest {
                 })
             try {
                 assertTrue(opened.await(5, TimeUnit.SECONDS))
-                AppNetwork.configure(true)
+                AppNetwork.observeNetwork(null, false)
                 assertTrue(disconnected.await(5, TimeUnit.SECONDS))
             } finally { socket.cancel() }
         }

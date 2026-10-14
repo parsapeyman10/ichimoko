@@ -21,12 +21,12 @@ internal class VenueRequestPolicy(
     private val slots = CryptoRadarCandleClient.Venue.entries.associateWith { Slot() }
 
     suspend fun <T> read(venue: CryptoRadarCandleClient.Venue, request: suspend () -> T): T {
-        if (!route().ready) throw DataFeedException("اتصال Tor هنوز آماده نیست؛ درخواستی به صرافی ارسال نشد")
+        if (!route().ready) throw DataFeedException("شبکهٔ گوشی هنوز آماده نیست؛ درخواستی به صرافی ارسال نشد")
         val slot = slots.getValue(venue)
         if (!slot.mutex.tryLock()) throw PublisherOccupied()
         try {
             val current = route()
-            if (!current.ready) throw DataFeedException("اتصال Tor هنوز آماده نیست؛ درخواستی ارسال نشد")
+            if (!current.ready) throw DataFeedException("شبکهٔ گوشی هنوز آماده نیست؛ درخواستی ارسال نشد")
             if (slot.revision != current.revision) {
                 slot.revision = current.revision; slot.next = 0; slot.until = 0; slot.reason = ""
             }

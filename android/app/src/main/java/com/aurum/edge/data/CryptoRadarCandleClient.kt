@@ -118,7 +118,7 @@ class CryptoRadarCandleClient(
         val key = "${venue.name}:$symbol:${interval.name}"
         return frameLocks.getOrPut(key) { Mutex() }.withLock {
             val route = AppNetwork.route.value
-            if (!route.ready) throw DataFeedException("اتصال Tor هنوز آماده نیست؛ تحلیل تازه انجام نشد")
+            if (!route.ready) throw DataFeedException("شبکهٔ گوشی هنوز آماده نیست؛ تحلیل تازه انجام نشد")
             frameCache[key]?.takeIf { it.revision == route.revision &&
                 reusable(it.result.candles, interval, clock()) }?.let { return@withLock it.result }
             val result = fetchUncached(symbol, interval, venue)

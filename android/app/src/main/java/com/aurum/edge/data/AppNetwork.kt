@@ -1,5 +1,6 @@
 package com.aurum.edge.data
 
+import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.Call
@@ -9,7 +10,6 @@ import okhttp3.Dispatcher
 import okhttp3.EventListener
 import okhttp3.OkHttpClient
 import java.io.IOException
-import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.ProxySelector
 import java.net.Socket
@@ -19,21 +19,22 @@ import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.TimeUnit
 
-/** One routing policy for REST, downloads and WebSockets. No remote proxy list, credentials,
- * telemetry or trust-all TLS. SOCKS destinations are resolved by Tor, not the local resolver.
- * Enabling Tor is fail-closed: unavailable Tor never silently falls back to a direct route.
- */
-internal class ProxyNotReady : IOException("پروکسی هنوز آماده نیست؛ مسیر مستقیم استفاده نمی‌شود")
+/** Normal Android networking for REST, downloads and sockets, including an external VPN
+ * when Android routes this app through it. No embedded proxy, custom DNS or TLS bypass. */
+internal class NetworkUnavailable : IOException("شبکهٔ گوشی آماده نیست")
 
 object AppNetwork {
-    data class Route(val enabled: Boolean = false, val socksPort: Int = 0, val revision: Long = 0) {
-        val ready: Boolean get() = !enabled || socksPort in 1..65535
-        fun proxy(): Proxy = if (!enabled) Proxy.NO_PROXY else
-            Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", socksPort.takeIf { it in 1..65535 } ?: 1))
+    /** Ready means Android advertises a default Internet network, not API permission. */
+    data class Route(val ready: Boolean = true, val revision: Long = 0)
+
+    private var observer: SystemNetworkObserver? = null
+    private var networkKey: Any? = null
+    @Synchronized fun start(context: Context) {
+        if (observer == null) observer = SystemNetworkObserver(context).also { it.start() }
     }
 
-    /** Installed by the main-thread WebView adapter; invoked before changing routes. */
-    internal var beforeRouteChange: () -> Unit = {}
+    fun refreshSystemNetwork(force: Boolean = false) { observer?.refresh(force) }
+
     private val lock = Any()
     private val mutableRoute = MutableStateFlow(Route())
     val route = mutableRoute.asStateFlow()
@@ -42,12 +43,12 @@ object AppNetwork {
     private val calls = Collections.newSetFromMap(WeakHashMap<Call, Boolean>())
     private val sockets = Collections.newSetFromMap(WeakHashMap<Socket, Boolean>())
 
-    fun configure(enabled: Boolean, socksPort: Int = 0) = synchronized(lock) {
-        val port = if (enabled) socksPort.takeIf { it in 1..65535 } ?: 0 else 0
+    /** A network/VPN transition invalidates same-route histories and existing sockets. */
+    internal fun observeNetwork(key: Any?, ready: Boolean, force: Boolean = false) = synchronized(lock) {
         val before = mutableRoute.value
-        if (before.enabled == enabled && before.socksPort == port) return@synchronized
-        beforeRouteChange()
-        mutableRoute.value = Route(enabled, port, before.revision + 1)
+        if (!force && key == networkKey && before.ready == ready) return@synchronized
+        networkKey = key
+        mutableRoute.value = Route(ready, before.revision + 1)
         // Close upgraded WebSockets too: they are no longer in the idle HTTP pool.
         dispatcher.cancelAll()
         calls.forEach { it.cancel() }
@@ -58,8 +59,11 @@ object AppNetwork {
     }
 
     internal val selector = object : ProxySelector() {
-        override fun select(uri: URI): List<Proxy> = listOf(route.value.proxy())
-        override fun connectFailed(uri: URI, sa: SocketAddress, ioe: IOException) = Unit
+        override fun select(uri: URI): List<Proxy> =
+            ProxySelector.getDefault()?.takeUnless { it === this }?.select(uri) ?: listOf(Proxy.NO_PROXY)
+        override fun connectFailed(uri: URI, sa: SocketAddress, ioe: IOException) {
+            ProxySelector.getDefault()?.takeUnless { it === this }?.connectFailed(uri, sa, ioe)
+        }
     }
 
     fun builder(): OkHttpClient.Builder = OkHttpClient.Builder()
@@ -90,7 +94,7 @@ object AppNetwork {
                 calls.add(chain.call())
                 route.value
             }
-            if (!before.ready) throw ProxyNotReady()
+            if (!before.ready) throw NetworkUnavailable()
             val response = chain.proceed(chain.request())
             if (before.revision != route.value.revision) {
                 response.close()

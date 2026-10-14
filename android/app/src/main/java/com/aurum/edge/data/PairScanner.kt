@@ -176,7 +176,7 @@ class PairScanner(
             _state.update { it.copy(sweeping = true) }
             try {
                 if (!AppNetwork.route.value.ready) {
-                    publishFailure(symbol, "waiting_connection", "Tor آماده نیست؛ درخواست به منبع ارسال نشد")
+                    publishFailure(symbol, "waiting_connection", "شبکهٔ گوشی آماده نیست؛ درخواست به منبع ارسال نشد")
                 } else if (withTimeoutOrNull(180_000L) {
                     do {
                         sweepAll(onCandidate, listOf(symbol))
@@ -347,7 +347,7 @@ class PairScanner(
                 } catch (cancel: CancellationException) { throw cancel }
                 catch (failure: Exception) {
                     if (!AppNetwork.route.value.ready) {
-                        update(symbol, "waiting_connection", "اتصال Tor آماده نیست؛ تحلیل و ورود انجام نشد")
+                        update(symbol, "waiting_connection", "شبکهٔ گوشی آماده نیست؛ تحلیل و ورود انجام نشد")
                         return@async
                     }
                     // A venue may supply a FRESH, exact-pair trade even when it cannot

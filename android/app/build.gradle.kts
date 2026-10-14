@@ -61,8 +61,8 @@ android {
         applicationId = "com.aurum.edge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 670
-        versionName = "1.3.54"
+        versionCode = 671
+        versionName = "1.3.55"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
@@ -119,8 +119,8 @@ android {
 
     // Ship only the CPU architectures real phones use. Without this every native library
     // is bundled four times (arm64, armeabi-v7a, x86, x86_64) and three of them are dead
-    // weight on any given device. Code is NOT obfuscated or shrunk: isMinifyEnabled stays
-    // false, so nothing can break at runtime that the JVM tests would not catch.
+    // weight on any given device. Keep existing ARM support for any remaining native
+    // dependency. Shrinking remains disabled; device testing is still necessary.
     defaultConfig {
         ndk {
             abiFilters += setOf("arm64-v8a", "armeabi-v7a")
@@ -157,13 +157,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("androidx.webkit:webkit:1.12.1")
-    // The AAR contains Java/JNI only; do not upgrade the app's Kotlin runtime via its POM.
-    implementation("info.guardianproject:tor-android:0.4.8.22") {
-        exclude(group = "org.jetbrains.kotlin", module = "kotlin-stdlib")
-    }
-    implementation("info.guardianproject:jtorctl:0.4.5.7")
-    implementation("com.netzarchitekten:IPtProxy:5.7.0")
     // Nobitex documents Centrifugo public trade subscriptions; use its official Android SDK
     // for application ping/pong, reconnect and server-supported stream recovery.
     implementation("io.github.centrifugal:centrifuge-java:0.7.0")

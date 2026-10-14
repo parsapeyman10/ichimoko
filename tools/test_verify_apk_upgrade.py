@@ -51,6 +51,18 @@ class UpgradeCompatibilityTest(unittest.TestCase):
                     self.check()
         self.candidate = original
 
+    def test_proxy_free_upgrade_can_be_architecture_independent_but_must_contain_no_proxy(self):
+        candidate = dict(self.candidate, versionCode=671, versionName="1.3.55", abis=[],
+                         torAbis=[], embeddedProxyEntries=[], embeddedProxyDex=False)
+        def check(item):
+            return verify(self.previous, item, certificate=CERT, version_code=671,
+                          version_name="1.3.55", require_newer=True)
+        self.assertEqual("verified-upgrade", check(candidate)["status"])
+        for patch in ({"embeddedProxyDex": True}, {"embeddedProxyEntries": ["lib/arm64-v8a/libgojni.so"]},
+                      {"torAbis": ["arm64-v8a"]}, {"abis": ["arm64-v8a"]}):
+            with self.assertRaises(ValueError):
+                check(dict(candidate, **patch))
+
     def test_previous_apk_must_match_installed_channel_too(self):
         self.previous["signersSha256"] = ["b" * 64]
         with self.assertRaises(ValueError):

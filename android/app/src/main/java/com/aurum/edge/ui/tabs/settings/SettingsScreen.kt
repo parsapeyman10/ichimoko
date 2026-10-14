@@ -54,8 +54,6 @@ import com.aurum.edge.ui.theme.AurumColors
 @Composable
 fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     val context = LocalContext.current
-    val proxyStatus by viewModel.proxyStatus.collectAsStateWithLifecycle()
-    val proxyDetail by viewModel.proxyDetail.collectAsStateWithLifecycle()
     val monitorRunning by SignalMonitorService.running.collectAsStateWithLifecycle()
     // Never prefill a saved secret in an editable Compose field. Blank means keep the stored key.
     var newsUrl by remember { mutableStateOf(settings.newsBaseUrl) }
@@ -115,23 +113,19 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             .verticalScroll(rememberScrollState())
             .padding(bottom = 12.dp),
     ) {
-        SectionCard("اتصال مستقل · پروکسی داخلی Tor", "بدون حساب، آدرس سرور، رمز یا کلید") {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("پروکسی روشن / خاموش", Modifier.weight(1f))
-                Switch(checked = settings.proxyEnabled, onCheckedChange = viewModel::setProxyEnabled)
+        SectionCard("اتصال اینترنت / VPN گوشی", "بدون پروکسی داخلی و کتابخانهٔ حجیم") {
+            TextButton(onClick = { com.aurum.edge.data.AppNetwork.refreshSystemNetwork(force = true) }) {
+                Text("بازبینی اتصال پس از تغییر VPN")
             }
-            Text(proxyStatus.label, color = AurumColors.Gold,
+            Text("Tor و Snowflake از برنامه حذف شده‌اند. درخواست‌ها از مسیر شبکهٔ انتخاب‌شدهٔ اندروید ارسال می‌شوند.",
                 style = MaterialTheme.typography.bodySmall)
-            if (settings.proxyEnabled) Text(proxyDetail, style = MaterialTheme.typography.bodySmall)
-            Text("مسیر داخلی از Snowflake و مسیر جایگزین AMP استفاده می‌کند؛ راه‌اندازی ممکن است چند دقیقه طول بکشد. " +
-                "این اتصال تضمین دسترسی در تمام اپراتورها یا مجوز استفاده از Gemini نیست. " +
-                "بازسازی اتصال خودکار است. در حالت روشن، قطع پروکسی باعث اتصال مستقیم پنهانی نمی‌شود. " +
-                "اینترنت قطع، مسدودبودن Tor یا محدودیت باتری اندروید ممکن است اتصال را متوقف کند. " +
-                "برای پایش در پس‌زمینه، گزینهٔ پایش پس‌زمینه را هم فعال کنید.",
+            Text("برای استفاده از Windscribe، برنامهٔ رسمی آن را جداگانه روی گوشی وصل کنید. " +
+                "در Split Tunneling مطمئن شوید Aurum Edge از VPN مستثنا نشده است. " +
+                "هیچ حساب، رمز یا کلید Windscribe در این برنامه دریافت نمی‌شود.",
                 style = MaterialTheme.typography.bodySmall)
-            Text("قیمت‌های عمومی بدون کلید دریافت می‌شوند. این قابلیت اطلاعات شخصی یا ژورنال شما را جمع‌آوری نمی‌کند؛ " +
-                "سرویس‌های مقصد درخواست بازار را می‌بینند و Tor یک شبکهٔ شخص ثالث است. " +
-                "AI و سرورهای اختیاری فقط با تنظیم خودتان فعال می‌شوند.",
+            Text("با قطع VPN ممکن است اندروید از اینترنت مستقیم استفاده کند؛ اگر این را نمی‌خواهید، " +
+                "در صورت پشتیبانی، Always-on VPN و مسدودکردن اتصال بدون VPN را در تنظیمات اندروید فعال کنید. " +
+                "اتصال VPN تضمین مجوز Google، سهمیهٔ Gemini یا دسترسی همهٔ منابع نیست.",
                 style = MaterialTheme.typography.bodySmall)
         }
 

@@ -61,6 +61,15 @@ def inspect(apk, aapt, apksigner):
             raise ValueError("APK ZIP integrity check failed")
         result["torAbis"] = sorted({n.split('/')[1] for n in archive.namelist()
                                      if re.fullmatch(r"lib/[^/]+/libtor\.so", n)})
+        names = archive.namelist()
+        native_abis = sorted({n.split('/')[1] for n in names if re.fullmatch(r"lib/[^/]+/[^/]+\.so", n)})
+        if native_abis != result["abis"]:
+            raise ValueError("APK native entries disagree with manifest badging")
+        result["embeddedProxyEntries"] = sorted(n for n in names if
+            Path(n).name.lower() in {"libtor.so", "libtorjni.so", "libgojni.so", "libobfs4.so", "liblyrebird.so", "libsnowflake.so", "snowflake-bridges.txt"})
+        result["embeddedProxyDex"] = any(
+            any(marker in archive.read(n) for marker in (b"Lorg/torproject/jni/", b"LIPtProxy/", b"Lnet/freehaven/tor/control/"))
+            for n in names if re.fullmatch(r"classes[0-9]*\.dex", n))
     digest = hashlib.sha256()
     with apk.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
@@ -85,9 +94,14 @@ def verify(previous, candidate, *, certificate, version_code, version_name, requ
         raise ValueError("Minimum Android version increased: existing devices could be excluded")
     if candidate["targetSdk"] < previous["targetSdk"] or candidate["targetSdk"] != 35:
         raise ValueError("Unexpected targetSdk change")
-    if not (set(previous["abis"]) | REQUIRED_ABIS).issubset(candidate["abis"]):
+    # An APK with no native libraries is architecture-independent. If JNI remains,
+    # it must retain the old ARM coverage. inspect() cross-checks actual ZIP entries.
+    if candidate["abis"] and not (set(previous["abis"]) | REQUIRED_ABIS).issubset(candidate["abis"]):
         raise ValueError("New APK drops supported phone CPU architectures")
-    if not REQUIRED_ABIS.issubset(candidate["torAbis"]):
+    if version_code >= 671:
+        if candidate["torAbis"] or candidate.get("embeddedProxyEntries") != [] or candidate.get("embeddedProxyDex") is not False:
+            raise ValueError("Embedded proxy code/assets must be absent from the lightweight release")
+    elif not REQUIRED_ABIS.issubset(candidate["torAbis"]):
         raise ValueError("Embedded Tor native library missing for a supported phone ABI")
     if not candidate["canRequestInstalls"]:
         raise ValueError("New APK cannot request the next in-app update")

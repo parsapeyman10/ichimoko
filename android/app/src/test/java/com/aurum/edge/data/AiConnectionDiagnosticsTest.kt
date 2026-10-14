@@ -7,8 +7,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AiConnectionDiagnosticsTest {
-    @Test fun `unready proxy is not reported as rejected API key and HTTP phase is visible`() {
-        val unavailable = AiConnectionDiagnostics.describe(ProxyNotReady())
+    @Test fun `unavailable system network is not reported as rejected API key and HTTP phase is visible`() {
+        val unavailable = AiConnectionDiagnostics.describe(NetworkUnavailable())
         assertTrue(unavailable.contains("هنوز پاسخی"))
         val failure = GeminiHttpDiagnostics.failure(403, "secret response", GeminiHttpDiagnostics.Stage.MODELS)
         val description = AiConnectionDiagnostics.describe(failure)

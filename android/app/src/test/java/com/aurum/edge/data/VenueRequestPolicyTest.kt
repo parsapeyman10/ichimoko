@@ -26,12 +26,12 @@ class VenueRequestPolicyTest {
     private val okx = CryptoRadarCandleClient.Venue.OKX
 
     @Test fun `startup does not mark every publisher rate limited and ready route can probe immediately`() = runBlocking {
-        var route = AppNetwork.Route(true)
+        var route = AppNetwork.Route(ready = false)
         var calls = 0
         val policy = VenueRequestPolicy(route = { route })
         val error = runCatching { policy.read(gate) { calls++ } }.exceptionOrNull()
-        assertTrue(error!!.message!!.contains("Tor")); assertEquals(0, calls)
-        route = AppNetwork.Route(true, 19050, 1)
+        assertTrue(error!!.message!!.contains("شبکه")); assertEquals(0, calls)
+        route = AppNetwork.Route(ready = true, revision = 1)
         policy.read(gate) { calls++ }
         assertEquals(1, calls)
     }
@@ -44,7 +44,7 @@ class VenueRequestPolicyTest {
         assertTrue(error!!.message!!.contains("429"))
         assertTrue(runCatching { policy.read(gate) { throw AssertionError("must not send") } }.exceptionOrNull()!!.message!!.contains("120"))
         assertEquals("ok", policy.read(okx) { "ok" })
-        route = AppNetwork.Route(true, 19050, 1)
+        route = AppNetwork.Route(ready = true, revision = 1)
         assertEquals("recovered", policy.read(gate) { "recovered" })
         runCatching { policy.read(gate) { throw VenueHttpFailure(429, "120") } }
         now += 120_000L

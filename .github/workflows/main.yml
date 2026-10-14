@@ -72,7 +72,7 @@ env:
 jobs:
   apk:
     if: >-
-      github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'verify: public v1.3.54')
+      github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'verify: public v1.3.55')
     name: Build, test, package APK
     runs-on: ubuntu-latest
     timeout-minutes: 55
@@ -90,7 +90,7 @@ jobs:
           (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))) ||
           (github.ref == 'refs/heads/arena/3d998929-ichimoko' &&
           ((github.event_name == 'workflow_dispatch' && inputs.publish_release == true) ||
-          (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release: publish v1.3.54 updater'))))) }}
+          (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release: publish v1.3.55 updater'))))) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -533,13 +533,13 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$GITHUB_REF" == "refs/heads/arena/3d998929-ichimoko" &&
-                ( "$VERSION_NAME" != "1.3.54" || "$TAG" != "v1.3.54" || "${{ steps.collect.outputs.version_code }}" != "670" ) ]]; then
-            echo "::error title=Wrong release version::This branch can publish only the approved v1.3.54 (670) upgrade."
+                ( "$VERSION_NAME" != "1.3.55" || "$TAG" != "v1.3.55" || "${{ steps.collect.outputs.version_code }}" != "671" ) ]]; then
+            echo "::error title=Wrong release version::This branch can publish only the approved v1.3.55 (671) upgrade."
             exit 1
           fi
           NOTES=$'Aurum Edge Android APK.\n\nVersion: '"$VERSION_NAME"$'\nVersion code: ${{ steps.collect.outputs.version_code }}\nSHA-256: '"$SHA256"$'\nSize bytes: '"$SIZE_BYTES"$'\nSigning: '"${AURUM_SIGNING_MODE:-prepared updater key}"$'\n\nThe in-app updater accepts this public release asset, verifies package name, signing certificate, versionCode, size and SHA-256, then opens Android Installer.'
-          if [[ "$VERSION_NAME" == "1.3.54" ]]; then
-            NOTES+=$'\n\n230 catalog symbols: 200 crypto, 25 FX, 5 commodities. Each symbol now refreshes independently without waiting for a complete universe sweep. Saturated publishers reject local admission instead of queuing other symbols; engines retry independently. Real publisher rate limits and risk/source-integrity gates remain. MEXC joins exact-spot/USDT radar candidates, never cross-venue fills. A full candidate inventory is in docs/source-candidates-230.csv; USOIL/UKOIL/COPPER still have no exact keyless history adapter.\n\nInternal proxy now uses a Snowflake client with alternate AMP rendezvous, automatic retries and numeric Tor bootstrap diagnostics. No relay service, manual bridge, account, personal-data collection or transport log files. Gemini errors distinguish unready proxy from Google HTTP rejection and identify model-list versus generation stage. No live Google key test, Iran-network availability guarantee, phone-install test or claim that a provider account restriction was removed.\n\nUpgrade from 1.3.53 (669) to 1.3.54 (670), same pinned signer/package. Install over the existing app, never uninstall or clear data. No fabricated prices or guaranteed profits.'
+          if [[ "$VERSION_NAME" == "1.3.55" ]]; then
+            NOTES+=$'\n\nLightweight release requested by the user: removed embedded Tor, Snowflake/IPtProxy, jtorctl, bridge assets, daemon service, WebView proxy override and internal proxy controls/indicator. No replacement VPN SDK, AI model or Windscribe account integration is bundled. The final APK is checked for absence of embedded-proxy native libraries and DEX classes.\n\nNormal Android networking now handles REST, downloads, sockets and WebView. Connect Windscribe separately on the phone and include Aurum Edge in VPN routing/Split Tunneling. Never enter Windscribe credentials in this app. Network changes invalidate previous connections and same-route caches. Without an external VPN kill switch, Android may use direct Internet after VPN disconnects. No live Windscribe, Iranian-ISP, Google-key or physical-device test is claimed.\n\nThe old enabled-proxy preference is retired without clearing keys, account settings or journal. 230-symbol independent engines, source-integrity and paper-trade risk gates remain unchanged. Upgrade from 1.3.54 (670) to 1.3.55 (671), same pinned signer/package; install over the current app without uninstalling or clearing data.'
           fi
           # Fail closed on a pre-existing tag: editing or clobbering a published release can
           # silently replace an APK already downloaded by users, without versionCode changing.
@@ -663,7 +663,7 @@ jobs:
   public-updater-audit:
     name: Independently verify published updater
     if: >-
-      github.event_name == 'push' && github.ref == 'refs/heads/arena/3d998929-ichimoko' && startsWith(github.event.head_commit.message, 'verify: public v1.3.54')
+      github.event_name == 'push' && github.ref == 'refs/heads/arena/3d998929-ichimoko' && startsWith(github.event.head_commit.message, 'verify: public v1.3.55')
     runs-on: ubuntu-latest
     timeout-minutes: 12
     permissions:
@@ -684,7 +684,7 @@ jobs:
           set -euo pipefail
           SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
           python3 tools/verify_public_updater.py --repo "$GITHUB_REPOSITORY" \
-            --version 1.3.54 --code 670 --certificate "$UPDATER_CERT_SHA256" \
+            --version 1.3.55 --code 671 --certificate "$UPDATER_CERT_SHA256" \
             --sdk "$SDK/build-tools/$ANDROID_BUILD_TOOLS" --output "$RUNNER_TEMP/public-updater"
       - uses: actions/upload-artifact@v4
         with:
