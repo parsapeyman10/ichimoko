@@ -10,7 +10,7 @@ import org.junit.Test
 class SourceRoutingTest {
     @Test fun `each of the 15 symbols maps to a unique dedicated source with no duplicates`() {
         val dedicated = V1Universe.allSymbols.map { symbol ->
-            val src = SourceRouting.dedicatedSource(symbol)
+            val src = SourceRouting.dedicatedFor(symbol)
             assertNotNull("missing dedicated source for $symbol", src)
             src!!
         }
@@ -20,26 +20,26 @@ class SourceRoutingTest {
 
     @Test fun `non-crypto symbols each map to their own dedicated HistorySource`() {
         assertEquals(listOf(SourceRouting.HistorySource.DUKASCOPY_XAU),
-            SourceRouting.historySources("XAU/USD", hasTwelveKey = false))
+            SourceRouting.historySources("XAU/USD"))
         assertEquals(listOf(SourceRouting.HistorySource.DUKASCOPY_XAG),
-            SourceRouting.historySources("XAG/USD", hasTwelveKey = false))
+            SourceRouting.historySources("XAG/USD"))
         assertEquals(listOf(SourceRouting.HistorySource.YAHOO_DOW),
-            SourceRouting.historySources("DOW", hasTwelveKey = false))
+            SourceRouting.historySources("DOW"))
         assertEquals(listOf(SourceRouting.HistorySource.YAHOO_EURUSD),
-            SourceRouting.historySources("EUR/USD", hasTwelveKey = false))
+            SourceRouting.historySources("EUR/USD"))
         assertEquals(listOf(SourceRouting.HistorySource.DUKASCOPY_GBPUSD),
-            SourceRouting.historySources("GBP/USD", hasTwelveKey = false))
+            SourceRouting.historySources("GBP/USD"))
         assertEquals(listOf(SourceRouting.HistorySource.YAHOO_USDJPY),
-            SourceRouting.historySources("USD/JPY", hasTwelveKey = false))
+            SourceRouting.historySources("USD/JPY"))
         assertEquals(listOf(SourceRouting.HistorySource.DUKASCOPY_EURJPY),
-            SourceRouting.historySources("EUR/JPY", hasTwelveKey = false))
+            SourceRouting.historySources("EUR/JPY"))
         assertEquals(listOf(SourceRouting.HistorySource.YAHOO_GBPJPY),
-            SourceRouting.historySources("GBP/JPY", hasTwelveKey = false))
+            SourceRouting.historySources("GBP/JPY"))
         assertEquals(listOf(SourceRouting.HistorySource.DUKASCOPY_AUDUSD),
-            SourceRouting.historySources("AUD/USD", hasTwelveKey = false))
+            SourceRouting.historySources("AUD/USD"))
         assertEquals(listOf(SourceRouting.HistorySource.YAHOO_USDCHF),
-            SourceRouting.historySources("USD/CHF", hasTwelveKey = false))
-        assertTrue(SourceRouting.historySources("BTC/USDT", hasTwelveKey = true).isEmpty())
+            SourceRouting.historySources("USD/CHF"))
+        assertTrue(SourceRouting.historySources("BTC/USDT").isEmpty())
     }
 
     @Test fun `crypto symbols each map to their own distinct exchange venue`() {

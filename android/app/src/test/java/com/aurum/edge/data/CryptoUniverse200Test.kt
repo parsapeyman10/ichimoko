@@ -26,7 +26,7 @@ class CryptoUniverse200Test {
         // 1-to-1 unique source mapping per symbol:
         val watchSources = WatchCatalog.symbols.map { it.defaultSources.single() }
         assertEquals(15, watchSources.distinct().size)
-        val historySources = WatchCatalog.scannerSymbols.map { SourceRouting.dedicatedSource(it)!! }
+        val historySources = WatchCatalog.scannerSymbols.map { SourceRouting.dedicatedFor(it)!! }
         assertEquals(15, historySources.distinct().size)
     }
 
