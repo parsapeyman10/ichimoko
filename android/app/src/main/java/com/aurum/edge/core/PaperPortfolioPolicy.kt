@@ -17,7 +17,10 @@ object PaperPortfolioPolicy {
 
     fun blocker(trades: List<PaperTrade>, symbol: String, balance: Double,
                 addedRiskUsd: Double, signalBarTime: Long? = null,
-                now: Long = System.currentTimeMillis(), openingBalance: Double? = null): String? {
+                now: Long = System.currentTimeMillis(), openingBalance: Double? = null,
+                maxRiskPerTradePct: Double = MAX_RISK_PER_TRADE,
+                maxDailyLossPct: Double = MAX_DAILY_LOSS,
+                als5SetupKey: String? = null): String? {
         // Oil entry quarantine: the reported loss series cannot be audited without the device
         // journal and venue-matched history. No new paper entry (manual or automatic) is safe to
         // authorize yet. This intentionally does NOT alter or close existing trades.
@@ -37,12 +40,17 @@ object PaperPortfolioPolicy {
             return "سقف ۲ پوزیشن دستهٔ «${group.label}» پر است"
         if (signalBarTime != null && trades.any { it.symbol == symbol && it.signalBarTime == signalBarTime })
             return "این نماد و کندل پیش‌تر معامله شده‌اند"
-        if (!balance.isFinite() || balance <= 0.0 || !addedRiskUsd.isFinite() || addedRiskUsd < 0.0 ||
+        if (!als5SetupKey.isNullOrBlank() && trades.any {
+                it.symbol == symbol && it.als5SetupKey == als5SetupKey
+            }) return "این ستاپ ساختاری ALS-5 پیش‌تر معامله شده است"
+        if (!maxRiskPerTradePct.isFinite() || maxRiskPerTradePct !in 0.0001..MAX_RISK_PER_TRADE ||
+            !maxDailyLossPct.isFinite() || maxDailyLossPct !in 0.0001..MAX_DAILY_LOSS ||
+            !balance.isFinite() || balance <= 0.0 || !addedRiskUsd.isFinite() || addedRiskUsd < 0.0 ||
             open.any { !it.riskUsd.isFinite() || it.riskUsd < 0.0 ||
                 !it.effectiveCommissionUsd.isFinite() || it.effectiveCommissionUsd < 0.0 ||
                 !it.effectiveSpreadCostUsd.isFinite() || it.effectiveSpreadCostUsd < 0.0 } ||
-            addedRiskUsd > balance * MAX_RISK_PER_TRADE + 1e-4)
-            return "ریسک هر معامله نباید از ۰٫۵٪ موجودی بیشتر شود"
+            addedRiskUsd > balance * maxRiskPerTradePct + 1e-4)
+            return "ریسک هر معامله از سقف ${"%.2f".format(maxRiskPerTradePct * 100.0)}٪ موجودی بیشتر است"
 
         val day = Instant.ofEpochMilli(now).atZone(ZoneOffset.UTC).toLocalDate()
         val today = trades.filter { !it.isOpen && it.closedAt?.let { at ->
@@ -55,8 +63,8 @@ object PaperPortfolioPolicy {
         val openingEquity = openingBalance ?: (balance - today.sumOf { it.pnlUsd ?: 0.0 })
         if (!openingEquity.isFinite() || openingEquity <= 0.0 ||
             realizedLoss + open.sumOf { it.riskUsd + it.effectiveCommissionUsd + it.effectiveSpreadCostUsd } + addedRiskUsd >
-                openingEquity * MAX_DAILY_LOSS + 1e-4)
-            return "سقف ضرر روزانهٔ ۲٪ با احتساب ریسک پوزیشن‌های باز و ورود جدید پر است"
+                openingEquity * maxDailyLossPct + 1e-4)
+            return "سقف ضرر روزانهٔ ${"%.2f".format(maxDailyLossPct * 100.0)}٪ با احتساب ریسک باز و ورود جدید پر است"
         return null
     }
 }

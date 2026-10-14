@@ -180,6 +180,7 @@ class PublicCandleHistoryClient(
             "USD/JPY" -> "JPY=X"
             "USD/CHF" -> "CHF=X"
             "USD/CAD" -> "CAD=X"
+            "DOW", "US30", "DJI", "^DJI" -> "^DJI"
             "EUR/GBP" -> "EURGBP=X"
             "EUR/JPY" -> "EURJPY=X"
             "GBP/JPY" -> "GBPJPY=X"
@@ -230,9 +231,9 @@ class PublicCandleHistoryClient(
     private fun range(interval: Interval): String = when (interval) {
         Interval.M1 -> "7d"
         Interval.M3 -> "7d"
-        Interval.M5 -> "1mo"
-        Interval.M15 -> "3mo"
-        Interval.M30 -> "6mo"
+        Interval.M5 -> "60d"
+        Interval.M15 -> "60d"
+        Interval.M30 -> "60d"
         Interval.H1, Interval.H4 -> "2y"
         Interval.D1 -> "15y"
     }

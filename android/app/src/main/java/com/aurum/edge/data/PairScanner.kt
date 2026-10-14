@@ -72,6 +72,8 @@ data class PairScanStatus(
     /** Was the latest actionable side WITH the measured trend? null = never got a side. */
     val trendAligned: Boolean? = null,
     val trendNote: String? = null,
+    /** ALS-5 pre-confirmation monitor record; present for XAU/USD, including WAIT/NO_TRADE. */
+    val als5Opportunity: com.aurum.edge.core.Als5OpportunityRecord? = null,
 )
 
 data class PairScanState(
@@ -125,25 +127,21 @@ class PairScanner(
     }
 
     private val nonCryptoBundle = NonCryptoRadarBundle { symbol, frame, source, apiKey ->
-        when (source) {
-        SourceRouting.HistorySource.YAHOO -> publicHistory.fetchCandles(symbol, frame,
-            minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
-        SourceRouting.HistorySource.DUKASCOPY -> dukascopyHistory.fetchCandles(symbol, frame,
-            minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
-            .let { PublicCandleHistoryClient.Result(it.candles, it.provider, it.fetchedAt) }
-        SourceRouting.HistorySource.TWELVE_DATA -> PublicCandleHistoryClient.Result(
-            withContext(Dispatchers.IO) { client.fetchCandles(apiKey, symbol, frame,
-                outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
-                minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES) }, "Twelve Data · fallback")
-    } }
+        when {
+            source.usesYahoo -> publicHistory.fetchCandles(symbol, frame,
+                minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
+            source.usesDukascopy -> dukascopyHistory.fetchCandles(symbol, frame,
+                minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
+                .let { PublicCandleHistoryClient.Result(it.candles, it.provider, it.fetchedAt) }
+            else -> PublicCandleHistoryClient.Result(
+                withContext(Dispatchers.IO) { client.fetchCandles(apiKey, symbol, frame,
+                    outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
+                    minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES) }, "Twelve Data · fallback")
+        }
+    }
     private val cryptoReadOnly = CryptoRadarCandleClient()
     private val cryptoBundle = CryptoRadarBundle { symbol, interval, source ->
-        when (source) {
-            CryptoRadarBundle.Source.GATE -> cryptoReadOnly.fetch(symbol, interval, CryptoRadarCandleClient.Venue.GATE)
-            CryptoRadarBundle.Source.OKX -> cryptoReadOnly.fetch(symbol, interval, CryptoRadarCandleClient.Venue.OKX)
-            CryptoRadarBundle.Source.KRAKEN -> cryptoReadOnly.fetch(symbol, interval, CryptoRadarCandleClient.Venue.KRAKEN)
-            CryptoRadarBundle.Source.MEXC -> cryptoReadOnly.fetch(symbol, interval, CryptoRadarCandleClient.Venue.MEXC)
-        }
+        cryptoReadOnly.fetch(symbol, interval, source.venue)
     }
     /** One latest real trend sample per symbol, independently expired. */
     private val trendSample = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, SymbolTrend>>()
@@ -266,6 +264,7 @@ class PairScanner(
             trend: SymbolTrend? = null,
             trendAligned: Boolean? = null,
             trendNote: String? = null,
+            als5Opportunity: com.aurum.edge.core.Als5OpportunityRecord? = null,
         ) = synchronized(statusLock) {
             if (state != "capacity") decisionLog?.append(symbol, (chosenIntervals[symbol] ?: Interval.M5).label, state, detail,
                 signal = if (conditions.isNotEmpty()) com.aurum.edge.core.Signal(
@@ -297,6 +296,7 @@ class PairScanner(
                 trendStrength = trend?.strength,
                 trendAligned = trendAligned,
                 trendNote = trendNote ?: trend?.detailFa?.take(200),
+                als5Opportunity = als5Opportunity,
             )
             _state.update { old ->
                 val currentList = old.statuses.map { statuses[it.symbol] ?: it }
@@ -502,6 +502,7 @@ class PairScanner(
                         playbookAllowed = playbook?.allowed,
                         playbookReason = playbook?.reasonFa?.take(160),
                         trend = trend,
+                        als5Opportunity = combined.als5Opportunity,
                     )
                     return@async
                 }
@@ -553,7 +554,7 @@ class PairScanner(
                         combined.confidence, combined.entry, combined.stopLoss, combined.takeProfit,
                         combined.riskReward, combined.confluence, playbook?.method?.label,
                         playbook?.allowed, playbook?.reasonFa?.take(160), trend, aligned,
-                        trendGate?.noteFa?.take(200))
+                        trendGate?.noteFa?.take(200), combined.als5Opportunity)
                     return@async
                 }
                 val blocker = PaperAlertRules.blocker(market, config, headlines, journal.trades.value, mtf,
@@ -571,7 +572,8 @@ class PairScanner(
                         conditions = combined.confluence, methodLabel = playbook?.method?.label,
                         playbookAllowed = playbook?.allowed,
                         playbookReason = playbook?.reasonFa?.take(160), trend = trend,
-                        trendAligned = aligned, trendNote = trendGate?.noteFa?.take(200))
+                        trendAligned = aligned, trendNote = trendGate?.noteFa?.take(200),
+                        als5Opportunity = combined.als5Opportunity)
                     return@async
                 }
 
@@ -629,6 +631,7 @@ class PairScanner(
                     trend = trend,
                     trendAligned = aligned,
                     trendNote = trendGate?.noteFa?.take(200),
+                    als5Opportunity = combined.als5Opportunity,
                 )
             } }.awaitAll()
         } // independent symbol evaluations; publisher-limited requests

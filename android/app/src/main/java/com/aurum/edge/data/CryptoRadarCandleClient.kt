@@ -34,6 +34,7 @@ class CryptoRadarCandleClient(
         OKX("OKX Spot / USDT (radar only)", "https://www.okx.com"),
         KRAKEN("Kraken Spot / USDT (radar only)", "https://api.kraken.com"),
         MEXC("MEXC Spot / USDT (radar only)", "https://api.mexc.com"),
+        BINANCE("Binance Spot / USDT", "https://data-api.binance.vision"),
     }
     private val json = Json { ignoreUnknownKeys = true }
     private val listing = ConcurrentHashMap<String, Long>()
@@ -65,7 +66,7 @@ class CryptoRadarCandleClient(
         return when (venue) {
             Venue.GATE -> symbol.replace('/', '_')
             Venue.OKX -> symbol.replace('/', '-')
-            Venue.MEXC -> symbol.replace("/", "")
+            Venue.MEXC, Venue.BINANCE -> symbol.replace("/", "")
             Venue.KRAKEN -> symbol.replace("BTC/", "XBT/").replace("DOGE/", "XDG/").replace("/", "")
         }
     }
@@ -73,6 +74,10 @@ class CryptoRadarCandleClient(
     private suspend fun checkListing(symbol: String, venue: Venue, pair: String): String =
         listingLocks.getOrPut("${venue.name}:$symbol") { Mutex() }.withLock {
         val key = "${venue.name}:$symbol"
+        if (venue == Venue.BINANCE) {
+            listing[key] = clock()
+            return@withLock pair
+        }
         if (clock() - (listing[key] ?: 0L) in 0L..3_600_000L)
             return@withLock krakenPairs[key] ?: pair
         val base = symbol.substringBefore('/')
@@ -80,11 +85,11 @@ class CryptoRadarCandleClient(
             Venue.GATE -> get(venue, "/api/v4/spot/currency_pairs/$pair")
             Venue.OKX -> get(venue, "/api/v5/public/instruments?instType=SPOT&instId=$pair")
             Venue.KRAKEN -> get(venue, "/0/public/AssetPairs?pair=$pair")
-            Venue.MEXC -> get(venue, "/api/v3/exchangeInfo?symbol=$pair")
+            Venue.MEXC, Venue.BINANCE -> get(venue, "/api/v3/exchangeInfo?symbol=$pair")
         }
         val root = json.parseToJsonElement(body)
         val valid = when (venue) {
-            Venue.MEXC -> validMexcListing(root as? JsonObject, pair, base)
+            Venue.MEXC, Venue.BINANCE -> validMexcListing(root as? JsonObject, pair, base)
             Venue.GATE -> (root as? JsonObject)?.let {
                 it.text("id") == pair && it.text("base") == base && it.text("quote") == "USDT" &&
                     it.text("type") == "normal" && it.text("trade_status") == "tradable"
@@ -138,16 +143,49 @@ class CryptoRadarCandleClient(
             else -> if (venue == Venue.GATE) "1h" else "1H"
         }
         val rows = when (venue) {
-            Venue.MEXC -> parseMexc(get(venue,
-                "/api/v3/klines?symbol=$pair&interval=${if (interval == Interval.H1) "60m" else bar}&limit=330"), interval, clock())
-            Venue.GATE -> parseGate(get(venue, "/api/v4/spot/candlesticks?currency_pair=$pair&interval=$bar&limit=330"),
-                interval, clock())
+            Venue.BINANCE -> {
+                val bInterval = if (interval == Interval.H1) "1h" else bar
+                val page1 = parseMexc(get(venue,
+                    "/api/v3/klines?symbol=$pair&interval=$bInterval&limit=1000"), interval, clock())
+                if (page1.size >= HistoryPolicy.LIVE_REQUEST_CANDLES || page1.isEmpty()) page1
+                else {
+                    val oldest = page1.minOf { it.time }
+                    val page2 = parseMexc(get(venue,
+                        "/api/v3/klines?symbol=$pair&interval=$bInterval&endTime=${oldest - 1}&limit=600"), interval, clock())
+                    page2 + page1
+                }
+            }
+            Venue.MEXC -> {
+                val mInterval = if (interval == Interval.H1) "60m" else bar
+                val page1 = parseMexc(get(venue,
+                    "/api/v3/klines?symbol=$pair&interval=$mInterval&limit=1000"), interval, clock())
+                if (page1.size >= HistoryPolicy.LIVE_REQUEST_CANDLES || page1.isEmpty()) page1
+                else {
+                    val oldest = page1.minOf { it.time }
+                    val page2 = parseMexc(get(venue,
+                        "/api/v3/klines?symbol=$pair&interval=$mInterval&endTime=${oldest - 1}&limit=600"), interval, clock())
+                    page2 + page1
+                }
+            }
+            Venue.GATE -> {
+                val page1 = parseGate(get(venue,
+                    "/api/v4/spot/candlesticks?currency_pair=$pair&interval=$bar&limit=1000"), interval, clock())
+                if (page1.size >= HistoryPolicy.LIVE_REQUEST_CANDLES || page1.isEmpty()) page1
+                else {
+                    val oldestSec = page1.minOf { it.time } / 1000 - interval.minutes * 60
+                    val page2 = parseGate(get(venue,
+                        "/api/v4/spot/candlesticks?currency_pair=$pair&interval=$bar&to=$oldestSec&limit=600"), interval, clock())
+                    page2 + page1
+                }
+            }
             Venue.KRAKEN -> parseKraken(get(venue,
                 "/0/public/OHLC?pair=$pair&interval=${interval.minutes}"), interval, clock())
             Venue.OKX -> {
                 val all = mutableListOf<Candle>()
                 var after: Long? = null
-                repeat(2) { // OKX 300/page; 320 CLOSED candles need two pages
+                val maxPages = (HistoryPolicy.LIVE_REQUEST_CANDLES + 299) / 300
+                repeat(maxPages) {
+                    if (all.size >= HistoryPolicy.LIVE_REQUEST_CANDLES) return@repeat
                     val page = parseOkx(get(venue, "/api/v5/market/history-candles?instId=$pair&bar=$bar&limit=300" +
                         (after?.let { "&after=$it" } ?: "")), interval, clock())
                     if (page.isNotEmpty()) {
@@ -164,7 +202,7 @@ class CryptoRadarCandleClient(
         val tail = rows.filter { it.closed && it.time + interval.millis <= receivedAt }
             .distinctBy { it.time }.sortedBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
         if (!CandleSourceHealth.ready(tail, interval, receivedAt, requireContiguous = true, requireVolume = false))
-            throw DataFeedException("${venue.provider}: ۳۲۰ کندل بستهٔ پیوسته/تازهٔ $bar موجود نیست")
+            throw DataFeedException("${venue.provider}: ${HistoryPolicy.LIVE_REQUEST_CANDLES} کندل بستهٔ پیوسته/تازهٔ $bar موجود نیست")
         return PublicCandleHistoryClient.Result(tail, venue.provider)
     }
 
@@ -181,13 +219,13 @@ class CryptoRadarCandleClient(
             Venue.GATE -> get(venue, "/api/v4/spot/trades?currency_pair=$id&limit=1")
             Venue.OKX -> get(venue, "/api/v5/market/trades?instId=$id&limit=1")
             Venue.KRAKEN -> get(venue, "/0/public/Trades?pair=$id&count=1")
-            Venue.MEXC -> get(venue, "/api/v3/trades?symbol=$id&limit=1")
+            Venue.MEXC, Venue.BINANCE -> get(venue, "/api/v3/trades?symbol=$id&limit=1")
         }
         val tick = when (venue) {
             Venue.GATE -> parseGateTrade(body, id)
             Venue.OKX -> parseOkxTrade(body, id)
             Venue.KRAKEN -> parseKrakenTrade(body)
-            Venue.MEXC -> parseMexcTrade(body)
+            Venue.MEXC, Venue.BINANCE -> parseMexcTrade(body)
         }
         val receivedAt = clock()
         if (tick.at !in (receivedAt - 90_000L)..(receivedAt + 10_000L))

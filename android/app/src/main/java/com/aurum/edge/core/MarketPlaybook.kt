@@ -142,7 +142,7 @@ object MarketPlaybook {
             AssetClass.of(symbol) == AssetClass.CRYPTO -> MarketFamily.CRYPTO
             AssetClass.of(symbol) == AssetClass.STOCK ->
                 if (s.contains("SPX") || s.contains("US500") || s.contains("NAS") ||
-                    s.contains("US30") || s.contains("DJI") || s.contains("IXIC") ||
+                    s.contains("US30") || s.contains("DJI") || s.contains("DOW") || s.contains("IXIC") ||
                     s.contains("SPY") || s.contains("QQQ") || s.endsWith("INDEX")
                 ) MarketFamily.INDEX else MarketFamily.US_STOCK
             AssetClass.of(symbol) == AssetClass.FOREX ->

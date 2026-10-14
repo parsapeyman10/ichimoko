@@ -1,41 +1,38 @@
 package com.aurum.edge.core
 
-/** Separate online evaluation windows from optional archived research-history limits. */
+/**
+ * Unified 5-minute (M5) candle history policy:
+ * Always fetch and retain the latest 1500 closed M5 candles so that:
+ * - Higher-timeframe Ichimoku lines (513 and 1024) are computed directly on M5
+ * - M15 Ichimoku is computed from 500 resampled candles (every 3 M5 candles = 1 M15 candle)
+ * - H1 Ichimoku is computed from 125 resampled candles (every 12 M5 candles = 1 H1 candle)
+ */
 object HistoryPolicy {
-    /** Each of the seven independent intervals needs 320 real CLOSED bars for direction
-     * and alignment. Fetch a small cushion for an in-progress bar or missing sessions.
-     */
-    const val LIVE_MIN_CANDLES: Int = 320
-    const val LIVE_REQUEST_CANDLES: Int = 320
-    const val LIVE_FETCH_CANDLES: Int = 360
+    const val LIVE_MIN_CANDLES: Int = 1500
+    const val LIVE_REQUEST_CANDLES: Int = 1500
+    const val LIVE_FETCH_CANDLES: Int = 1500
 
-    /** Retained only for archived offline research; not a prerequisite for online checking. */
-    const val TARGET_CANDLES: Int = 3000
+    const val TARGET_CANDLES: Int = 1500
+    const val DEEP_CHART_CANDLES: Int = 1500
 
-    /** Archived research ceiling; never automatically requested by the live chart/scanner. */
-    const val DEEP_CHART_CANDLES: Int = 12000
+    const val CHART_BOOTSTRAP_CANDLES: Int = 1500
+    const val CHART_BOOTSTRAP_MINIMUM: Int = 1500
 
-    /** Archived research/history bootstrap sizes (no automatic live-chart expansion). */
-    const val CHART_BOOTSTRAP_CANDLES: Int = 1200
-    const val CHART_BOOTSTRAP_MINIMUM: Int = 1001
+    const val MAX_CACHED_CANDLES: Int = 1500
+    const val MAX_TWELVE_CANDLES: Int = 1500
+    const val MAX_PROVIDER_CANDLES: Int = 1500
 
-    /** Legacy on-disk cache ceiling: do not discard saved real bars during an app update. */
-    const val MAX_CACHED_CANDLES: Int = DEEP_CHART_CANDLES + 1
-
-    /** Twelve Data's time_series endpoint tops out at 5000 rows in one response. */
-    const val MAX_TWELVE_CANDLES: Int = 5000
-
-    /** Public deep-history adapters (Yahoo/Dukascopy) may retain more than the engine floor. */
-    const val MAX_PROVIDER_CANDLES: Int = DEEP_CHART_CANDLES
+    const val ICHIMOKU_HTF_513: Int = 513
+    const val ICHIMOKU_HTF_1024: Int = 1024
+    const val RESAMPLED_M15_CANDLES: Int = LIVE_REQUEST_CANDLES / 3
+    const val RESAMPLED_H1_CANDLES: Int = LIVE_REQUEST_CANDLES / 12
 
     fun chartTargetCandles(symbol: String, interval: Interval): Int =
         LIVE_REQUEST_CANDLES
 
-    /** Request size for Twelve Data and other single-call providers that cannot deliver deep history. */
     fun providerRequestSize(requested: Int, minimum: Int = TARGET_CANDLES): Int =
         requested.coerceAtLeast(minimum).coerceAtMost(MAX_TWELVE_CANDLES)
 
-    /** Request size for public deep-history providers. */
     fun deepProviderRequestSize(requested: Int, minimum: Int = TARGET_CANDLES): Int =
         requested.coerceAtLeast(minimum).coerceAtMost(MAX_PROVIDER_CANDLES)
 

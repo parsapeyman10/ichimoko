@@ -22,14 +22,18 @@ import java.time.Instant
 class CryptoCompressionEngineTest {
     private val now = System.currentTimeMillis()
     private val london = Instant.parse("2026-10-13T12:00:00Z").toEpochMilli()
+    private val totalBars = com.aurum.edge.core.HistoryPolicy.LIVE_MIN_CANDLES
     private fun bars(frame: Interval, volume: Double = 100.0): List<Candle> {
         val end = now / frame.millis * frame.millis - frame.millis
-        return (0 until 320).map { j ->
-            Candle(end - (319 - j)*frame.millis, 100.0, 100.3, 99.7, 100.0, volume)
+        return (0 until totalBars).map { j ->
+            Candle(end - (totalBars - 1 - j)*frame.millis, 100.0, 100.3, 99.7, 100.0, volume)
         }
     }
     private val five get() = bars(Interval.M5)
-    private val frames get() = mapOf(Interval.M15 to bars(Interval.M15), Interval.H1 to bars(Interval.H1))
+    private val frames get() = mapOf(
+        Interval.M15 to MtfAnalyzer.convertFromM5(five, Interval.M15),
+        Interval.H1 to MtfAnalyzer.convertFromM5(five, Interval.H1),
+    )
 
     @Test fun `crypto does not fall through to EMA RSI range or old breakout when setup is absent`() {
         val trend = SignalEngine.evaluate(five, Interval.M5, 60.0, "BTC/USDT",
@@ -53,7 +57,7 @@ class CryptoCompressionEngineTest {
 
     @Test fun `a zero volume recent bar blocks entry but an old zero bar is valid history`() {
         val recent = CryptoCompressionEngine.evaluate(
-            five.mapIndexed { i, bar -> if (i == 305) bar.copy(volume = 0.0) else bar },
+            five.mapIndexed { i, bar -> if (i == totalBars - 15) bar.copy(volume = 0.0) else bar },
             Interval.M5, "BTC/USDT", frames, now)
         assertEquals(SignalAction.NO_TRADE, recent.action)
         assertTrue(recent.blockers.toString(), recent.blockers.any { it.contains("۴۰ کندل") })
@@ -61,7 +65,7 @@ class CryptoCompressionEngineTest {
             five.mapIndexed { i, bar -> if (i == 1) bar.copy(volume = 0.0) else bar },
             Interval.M5, "BTC/USDT", frames, now)
         assertEquals(SignalAction.NO_TRADE, old.action)
-        assertFalse(old.blockers.toString(), old.blockers.any { it.contains("۳۲۰ کندل") })
+        assertFalse(old.blockers.toString(), old.blockers.any { it.contains("۱۵۰۰ کندل") })
         val noMacroVolume = CryptoCompressionEngine.evaluate(five, Interval.M5,
             "BTC/USDT", frames.mapValues { (frame, bars) ->
                 if (frame == Interval.H1) bars.dropLast(1) + bars.last().copy(volume = 0.0) else bars
@@ -73,9 +77,9 @@ class CryptoCompressionEngineTest {
     @Test fun `twenty genuinely quiet bars are watch only even with full compression score`() {
         val original = five
         val quiet = original.mapIndexed { i, bar ->
-            bar.copy(high = 100.0 + if (i < 270) 0.6 else 0.02,
-                low = 100.0 - if (i < 270) 0.6 else 0.02,
-                volume = if (i < 289) 1000.0 else 10.0)
+            bar.copy(high = 100.0 + if (i < totalBars - 50) 0.6 else 0.02,
+                low = 100.0 - if (i < totalBars - 50) 0.6 else 0.02,
+                volume = if (i < totalBars - 31) 1000.0 else 10.0)
         }
         val signal = SignalEngine.evaluate(quiet, Interval.M5, 60.0, "BTC/USDT",
             timeframes = frames)

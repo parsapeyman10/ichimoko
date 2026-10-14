@@ -19,7 +19,7 @@ class WatchKeyStoreTest {
     @Test fun `per-symbol read-only key is disk-committed and never overwrites the chart key`() {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("watch_preferences", Context.MODE_PRIVATE).edit().clear().commit()
-        val id = WatchCatalog.symbols.first { SourceCatalog.twelveData.id in it.providerCodes }.id
+        val id = WatchCatalog.symbols.first().id
         val store = WatchSettingsStore(context)
         assertTrue(store.setKeyOverride(id, " synthetic-watch-only "))
         assertEquals("synthetic-watch-only", WatchSettingsStore(context).keyOverride(id))

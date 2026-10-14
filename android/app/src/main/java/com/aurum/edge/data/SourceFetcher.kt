@@ -86,10 +86,16 @@ class SourceFetcher(
             val coin = CryptoCatalog.find(symbol.code)
                 ?: throw DataFeedException("جفت USDT بایننس شناسایی نشد")
             val tick = when (source.id) {
-                SourceCatalog.gateTrades.id -> cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.GATE)
-                SourceCatalog.okxTrades.id -> cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.OKX)
-                SourceCatalog.krakenTrades.id -> cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.KRAKEN)
-                SourceCatalog.binanceTrades.id -> spot.fetchQuote(coin.id) // original venue budget
+                SourceCatalog.gateSolSpot.id, "gate_spot_trades" ->
+                    cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.GATE)
+                SourceCatalog.okxEthSpot.id, "okx_spot_trades" ->
+                    cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.OKX)
+                SourceCatalog.krakenXrpSpot.id, "kraken_spot_trades" ->
+                    cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.KRAKEN)
+                SourceCatalog.mexcBnbSpot.id, "mexc_spot_trades" ->
+                    cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.MEXC)
+                SourceCatalog.binanceBtcSpot.id, "binance_spot_agg_trades" ->
+                    spot.fetchQuote(coin.id)
                 else -> throw DataFeedException("منبع معاملات رمزارز ناشناخته است")
             }
             Quote(symbol.code, symbol.label, price = tick.price, providerAt = tick.at,

@@ -37,7 +37,7 @@ internal object CryptoCompressionEngine {
         if (bars.size != WINDOW || bars.any { !valid(it) } ||
             bars.zipWithNext().any { (a,b) -> b.time - a.time != interval.millis } ||
             now - (bars.last().time + interval.millis) !in 0L..(interval.millis + 90_000L))
-            return blocked(interval, bars, "۳۲۰ کندل 5m بستهٔ پیوسته و تازه با حجم واقعی لازم است")
+            return blocked(interval, bars, "${WINDOW} کندل 5m بستهٔ پیوسته و تازه با حجم واقعی لازم است")
         // A venue may publish real zero-execution bars. They belong in price history,
         // but a quiet recent window is not evidence for a volume-confirmed entry.
         if (bars.takeLast(40).any { it.volume <= 0.0 })
@@ -48,10 +48,21 @@ internal object CryptoCompressionEngine {
         val longLine = Indicators.donchianMid(bars, 103)
         val atrs = Indicators.atr(bars, 14)
         val adxs = Indicators.adx(bars, 14)
+        val resolvedFrames = if (frames.isEmpty()) {
+            mapOf(
+                Interval.M15 to MtfAnalyzer.convertFromM5(bars, Interval.M15),
+                Interval.H1 to MtfAnalyzer.convertFromM5(bars, Interval.H1),
+            )
+        } else frames
         val readyFrames = listOf(Interval.M15, Interval.H1).associateWith { frame ->
-            frames[frame].orEmpty().filter { it.closed && it.time + frame.millis <= asOf }
+            val minFrameSize = when (frame) {
+                Interval.M15 -> HistoryPolicy.RESAMPLED_M15_CANDLES
+                Interval.H1 -> HistoryPolicy.RESAMPLED_H1_CANDLES
+                else -> WINDOW
+            }
+            resolvedFrames[frame].orEmpty().filter { it.closed && it.time + frame.millis <= asOf }
                 .takeLast(WINDOW).takeIf { series ->
-                    series.size == WINDOW && series.all(::valid) &&
+                    series.size >= minFrameSize && series.all(::valid) &&
                         series.zipWithNext().all { (a,b) -> b.time - a.time == frame.millis } &&
                         asOf - (series.last().time + frame.millis) in 0L..(2 * frame.millis)
                 }

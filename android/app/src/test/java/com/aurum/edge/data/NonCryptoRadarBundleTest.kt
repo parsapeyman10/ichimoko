@@ -1,82 +1,56 @@
 package com.aurum.edge.data
 
 import com.aurum.edge.core.Candle
+import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
 
 class NonCryptoRadarBundleTest {
-    private val now = System.currentTimeMillis()
-    private fun bars(interval: Interval, stale: Boolean = false): List<Candle> {
-        val last = now / interval.millis * interval.millis - interval.millis -
-            if (stale) 4 * interval.millis else 0L
-        return (0 until 320).map { i ->
-            Candle(last - (319-i) * interval.millis, 100.0, 101.0, 99.0, 100.0, 10.0)
+    private val now = 1_800_000_000_000L
+
+    private fun closedM5Series(price: Double = 2400.0): List<Candle> {
+        val step = Interval.M5.millis
+        val end = now / step * step
+        return (0 until HistoryPolicy.LIVE_REQUEST_CANDLES).map { i ->
+            Candle(end - (HistoryPolicy.LIVE_REQUEST_CANDLES - i) * step,
+                price, price + 1.0, price - 1.0, price, 10.0, closed = true)
         }
     }
 
-    @Test fun `stale Yahoo M15 rejects entire publisher and retries complete Dukascopy bundle`() = runBlocking {
-        val requests = mutableListOf<Pair<SourceRouting.HistorySource, Interval>>()
-        val bundle = NonCryptoRadarBundle { _, frame, source, _ ->
-            requests += source to frame
-            PublicCandleHistoryClient.Result(bars(frame,
-                stale = source == SourceRouting.HistorySource.YAHOO && frame == Interval.M15),
-                when (source) {
-                    SourceRouting.HistorySource.YAHOO -> "Yahoo Finance عمومی · $frame"
-                    SourceRouting.HistorySource.DUKASCOPY -> "Dukascopy عمومی · $frame فایل"
-                    SourceRouting.HistorySource.TWELVE_DATA -> "Twelve Data · fallback"
-                })
+    @Test fun `each non-crypto symbol fetches only 1500 M5 candles from its dedicated source and converts M15 and H1`() = runBlocking {
+        val calls = mutableListOf<Triple<String, Interval, SourceRouting.HistorySource>>()
+        val bundle = NonCryptoRadarBundle { symbol, frame, source, _ ->
+            calls += Triple(symbol, frame, source)
+            PublicCandleHistoryClient.Result(closedM5Series(), source.providerLabel)
         }
-        val result = bundle.fetch("EUR/USD", "", now)
-        assertEquals(SourceRouting.HistorySource.DUKASCOPY, result.source)
-        assertEquals(setOf(Interval.M5, Interval.M15, Interval.H1), result.frames.keys)
-        assertTrue(result.priorFailures.single().contains("YAHOO"))
-        assertEquals(3, requests.count { it.first == SourceRouting.HistorySource.YAHOO })
-        assertEquals(3, requests.count { it.first == SourceRouting.HistorySource.DUKASCOPY })
-        result.frames.forEach { (frame, rows) ->
-            assertEquals(bars(frame).last().time, rows.last().time)
-        }
+
+        val gold = bundle.fetch("XAU/USD", "", now)
+        assertEquals(SourceRouting.HistorySource.DUKASCOPY_XAU, gold.source)
+        assertEquals(1500, gold.frames.getValue(Interval.M5).size)
+        assertEquals(500, gold.frames.getValue(Interval.M15).size)
+        assertEquals(125, gold.frames.getValue(Interval.H1).size)
+
+        val silver = bundle.fetch("XAG/USD", "", now)
+        assertEquals(SourceRouting.HistorySource.DUKASCOPY_XAG, silver.source)
+
+        val dow = bundle.fetch("DOW", "", now)
+        assertEquals(SourceRouting.HistorySource.YAHOO_DOW, dow.source)
+
+        val eur = bundle.fetch("EUR/USD", "", now)
+        assertEquals(SourceRouting.HistorySource.YAHOO_EURUSD, eur.source)
+
+        // Only M5 is fetched over the network; M15 and H1 are converted from M5
+        assertEquals(4, calls.size)
+        assertTrue(calls.all { it.second == Interval.M5 })
+        assertEquals(4, calls.map { it.third }.distinct().size)
     }
 
-    @Test fun `silver uses exact Dukascopy instrument then keyed provider if needed`() = runBlocking {
-        assertEquals("XAGUSD", DukascopyHistoryClient.instrument("XAG/USD"))
-        assertEquals(1_000.0, DukascopyHistoryClient.pointScale("XAGUSD"), 0.0)
-        assertEquals(listOf(SourceRouting.HistorySource.DUKASCOPY),
-            SourceRouting.historySources("XAG/USD", false))
-        assertEquals(listOf(SourceRouting.HistorySource.DUKASCOPY, SourceRouting.HistorySource.TWELVE_DATA),
-            SourceRouting.historySources("XAG/USD", true))
-        val bundle = NonCryptoRadarBundle { _, frame, source, _ ->
-            PublicCandleHistoryClient.Result(bars(frame,
-                stale = source == SourceRouting.HistorySource.DUKASCOPY),
-                if (source == SourceRouting.HistorySource.DUKASCOPY) "Dukascopy عمومی" else "Twelve Data")
+    @Test fun `incomplete M5 history is rejected`() = runBlocking {
+        val bundle = NonCryptoRadarBundle { _, _, source, _ ->
+            PublicCandleHistoryClient.Result(closedM5Series().drop(1), source.providerLabel)
         }
-        assertEquals(SourceRouting.HistorySource.TWELVE_DATA,
-            bundle.fetch("XAG/USD", "dummy-key", now).source)
-    }
-
-    @Test fun `frames launch concurrently and wrong publisher never approves a signal`() = runBlocking {
-        val started = mutableListOf<Interval>()
-        val release = CompletableDeferred<Unit>()
-        val bundle = NonCryptoRadarBundle { _, frame, _, _ ->
-            started += frame
-            release.await()
-            PublicCandleHistoryClient.Result(bars(frame), "Yahoo Finance عمومی")
-        }
-        val job = async { bundle.fetch("AAPL", "", now) }
-        // Each async read runs until it suspends on the same deferred (no wall-clock benchmark).
-        kotlinx.coroutines.withTimeout(1_000) {
-            while (started.size < 3) kotlinx.coroutines.yield()
-        }
-        assertEquals(setOf(Interval.M5, Interval.M15, Interval.H1), started.toSet())
-        release.complete(Unit)
-        assertEquals(SourceRouting.HistorySource.YAHOO, job.await().source)
-        val broken = NonCryptoRadarBundle { _, frame, _, _ ->
-            PublicCandleHistoryClient.Result(bars(frame),
-                if (frame == Interval.H1) "Dukascopy عمومی" else "Yahoo Finance عمومی")
-        }
-        assertTrue(runCatching { broken.fetch("AAPL", "", now) }.exceptionOrNull() is DataFeedException)
+        assertTrue(runCatching { bundle.fetch("XAU/USD", "", now) }.isFailure)
     }
 }

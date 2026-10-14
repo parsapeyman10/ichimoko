@@ -53,10 +53,10 @@ class SettingsStore(context: Context) {
         return AppSettings(
         apiKey = storedApiKey?.takeIf { it.isNotBlank() }
             ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY.trim(),
-        // Symbol can be any instrument in the catalog (forex, commodities, crypto)
-        symbol = (prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD")
+        // Symbol can be any instrument in the 15-symbol catalog (metals, Dow Jones, Ichimoku forex, top-5 crypto)
+        symbol = V1Universe.normalize(prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD")
             .takeIf(V1Universe::valid) ?: "XAU/USD",
-        interval = Interval.fromLabel(prefs.getString(KEY_INTERVAL, null) ?: "5m"),
+        interval = Interval.M5,
         riskPercent = prefs.getFloat(KEY_RISK, 0.5f).toDouble().takeIf { it.isFinite() }?.coerceIn(0.1, 0.5) ?: 0.5,
         accountBalance = prefs.getFloat(KEY_BALANCE, 1000f).toDouble(),
         minConfidence = prefs.getFloat(KEY_MIN_CONF, 85f).toDouble().takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
@@ -91,7 +91,7 @@ class SettingsStore(context: Context) {
         val existing = read().apiKey.trim()
         val key = keyInput.trim().ifBlank { existing }
         if (key.any { it.isWhitespace() }) return false
-        val symbol = symbolInput.trim().uppercase(java.util.Locale.ROOT).ifBlank { "XAU/USD" }
+        val symbol = V1Universe.normalize(symbolInput).ifBlank { "XAU/USD" }
         val valid = V1Universe.valid(symbol)
         if (!valid) return false
         val saved = prefs.edit().putString(KEY_API, key).putString(KEY_SYMBOL, symbol).commit()
@@ -109,7 +109,7 @@ class SettingsStore(context: Context) {
      */
     @Synchronized
     fun saveChartSymbol(symbolInput: String): Boolean {
-        val symbol = symbolInput.trim().uppercase(java.util.Locale.ROOT)
+        val symbol = V1Universe.normalize(symbolInput)
         val valid = V1Universe.valid(symbol)
         if (!valid) return false
         val saved = prefs.edit().putString(KEY_SYMBOL, symbol).commit()
@@ -241,6 +241,7 @@ class SettingsStore(context: Context) {
         if (proposed.accountBalance != _settings.value.accountBalance) dayOpeningEquity()
         val next = proposed.copy(
             symbol = V1Universe.normalize(proposed.symbol).takeIf(V1Universe::valid) ?: "XAU/USD",
+            interval = Interval.M5,
             riskPercent = proposed.riskPercent.takeIf { it.isFinite() }?.coerceIn(0.1, 0.5) ?: 0.5,
             minConfidence = proposed.minConfidence.takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
         )

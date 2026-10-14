@@ -132,9 +132,28 @@ class BinanceSpotClient(
     suspend fun fetchCandles(symbol: String, interval: Interval,
                              desiredSize: Int = HistoryPolicy.LIVE_FETCH_CANDLES,
                              minimumSize: Int = HistoryPolicy.LIVE_MIN_CANDLES): PublicCandleHistoryClient.Result {
-        val count = desiredSize.coerceAtLeast(minimumSize).coerceAtMost(1000)
-        val rows = parseCandles(get("api/v3/klines", mapOf("symbol" to ticker(symbol),
-            "interval" to resolution(interval), "limit" to (count + 1).coerceAtMost(1000).toString())), interval)
+        val count = desiredSize.coerceAtLeast(minimumSize).coerceAtMost(HistoryPolicy.MAX_CACHED_CANDLES)
+        val firstLimit = (count + 1).coerceAtMost(1000)
+        val firstPage = parseCandles(get("api/v3/klines", mapOf(
+            "symbol" to ticker(symbol),
+            "interval" to resolution(interval),
+            "limit" to firstLimit.toString(),
+        )), interval)
+        val rows = if (firstPage.size >= minimumSize || firstPage.isEmpty() || count <= 1000) {
+            firstPage
+        } else {
+            val needMore = (count - firstPage.size + 5).coerceIn(1, 1000)
+            val olderPage = parseCandles(get("api/v3/klines", mapOf(
+                "symbol" to ticker(symbol),
+                "interval" to resolution(interval),
+                "endTime" to (firstPage.first().time - 1L).toString(),
+                "limit" to needMore.toString(),
+            )), interval)
+            (olderPage + firstPage).distinctBy { it.time }.sortedBy { it.time }.also { combined ->
+                if (combined.zipWithNext().any { (a, b) -> b.time != a.time + interval.millis })
+                    throw DataFeedException("تاریخچهٔ Binance کندل گمشده دارد")
+            }
+        }
         if (rows.size < minimumSize) throw DataFeedException("Binance فقط ${rows.size} کندل بستهٔ واقعی داد؛ حداقل $minimumSize لازم است")
         return PublicCandleHistoryClient.Result(rows.takeLast(count), PROVIDER)
     }

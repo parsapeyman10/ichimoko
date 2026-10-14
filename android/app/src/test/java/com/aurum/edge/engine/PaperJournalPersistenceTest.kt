@@ -45,6 +45,7 @@ class PaperJournalPersistenceTest {
         ichimokuEntry = com.aurum.edge.core.IchimokuEntryEvidence(SignalAction.BUY, 1_800_000_000_000L - Interval.M5.millis, 1_800_000_000_000L - Interval.M5.millis, Interval.M5, 3),
         confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "fixture", scorePercent = 25) } +
             ConfluenceItem(NewsConfluence.NEWS_LABEL, true, "خبر مدل با شاهد"))
+    private val alsSignal by lazy { asConfirmedAls5TestSignal(signal) }
     private fun mtf(at: Long) = MtfSnapshotRecord("5m", "BUY", 1.0, 1, 0, 0, false, "fixture", at,
         frames = listOf(MtfFrameRecord("5m", "BUY", 80, "fixture", 1.0)))
     private fun ictFor(s: Signal, now: Long) = IctEntryRules.approvedEvidence(
@@ -62,10 +63,10 @@ class PaperJournalPersistenceTest {
         try {
             val at = 1_800_000_000_000L
             val store = JournalStore(context, journalFile()).also { it.load() }
-            store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5, automatic = true, observedAt = at)
+            store.open(alsSignal, "XAU/USD", 3000.0, 50_000.0, 0.5, automatic = true, observedAt = at)
             gate.reject("XAU/USD", channel, "conflicting sources")
             for (manual in listOf(false, true)) {
-                val failure = runCatching { store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5,
+                val failure = runCatching { store.open(if (manual) signal else alsSignal, "XAU/USD", 3000.0, 50_000.0, 0.5,
                     manual = manual, automatic = !manual, observedAt = at) }.exceptionOrNull()
                 assertEquals("conflicting sources", failure?.message)
             }
@@ -73,11 +74,11 @@ class PaperJournalPersistenceTest {
             assertFalse(store.trades.value.single().isOpen)
             val recovered = gate.accept("XAU/USD", channel, gate.begin("XAU/USD", channel), 2)!!
             val fresh = JournalStore(context, journalFile()).also { it.load() }
-            val oldPreview = runCatching { fresh.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5,
+            val oldPreview = runCatching { fresh.open(alsSignal, "XAU/USD", 3000.0, 50_000.0, 0.5,
                 automatic = true, observedAt = at, sourceIntegrityRevision = 0) }.exceptionOrNull()
             assertTrue(oldPreview?.message.orEmpty().contains("دوباره"))
             assertTrue(fresh.trades.value.isEmpty())
-            fresh.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5, automatic = true,
+            fresh.open(alsSignal, "XAU/USD", 3000.0, 50_000.0, 0.5, automatic = true,
                 observedAt = at, sourceIntegrityRevision = recovered)
             assertEquals(1, fresh.trades.value.size)
         } finally { gate.resetForTests() }
@@ -104,7 +105,7 @@ class PaperJournalPersistenceTest {
     @Test fun quoteObservedBeforeEntryCannotSettleNewPosition() = runBlocking {
         val at = 1_800_000_000_000L
         val store = JournalStore(context, journalFile()).also { it.load() }
-        val opened = store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5,
+        val opened = store.open(alsSignal, "XAU/USD", 3000.0, 50_000.0, 0.5,
             automatic = true, observedAt = at)
         // A cached exchange tick seen before the paper fill may still be fresh. It is
         // not a post-entry price event, even if the polling loop repeats it later.
@@ -149,9 +150,9 @@ class PaperJournalPersistenceTest {
                 "evidence_ids":["verified"]}}"""
         val parsed = parseWebNews(Json.parseToJsonElement(json) as JsonObject, now)
         val bar = now - Interval.M5.millis
-        val technical = signal.copy(barTime = bar,
+        val technical = asConfirmedAls5TestSignal(signal.copy(barTime = bar,
             ichimokuEntry = signal.ichimokuEntry!!.copy(barTime = bar, crossTime = bar), stopLoss = 2994.5, takeProfit = 3009.0,
-            confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "fixture", scorePercent = 25) })
+            confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "fixture", scorePercent = 25) }))
         val verified = NewsConfluence.apply(technical, "XAU/USD", parsed, now)!!
         val current = MarketState(symbol = "XAU/USD", interval = Interval.M5,
             candles = IctTestBars.readyAt(bar),
@@ -207,7 +208,7 @@ class PaperJournalPersistenceTest {
         val store = JournalStore(context, file)
         store.load()
         val evidence = ictFor(signal, signal.barTime + Interval.M5.millis)
-        val opened = store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5,
+        val opened = store.open(alsSignal, "XAU/USD", 3000.0, 50_000.0, 0.5,
             automatic = true, mtf = mtf(signal.barTime), newsEvidence = news, priceAction = evidence,
             observedAt = 1_800_000_000_000L)
         assertEquals(1, store.stats().open)
@@ -240,7 +241,7 @@ class PaperJournalPersistenceTest {
         assertEquals(signal.barTime, closed.signalBarTime)
         // Even after SL/TP and a process restart the same candle cannot auto-open again.
         try {
-            completed.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5,
+            completed.open(alsSignal, "XAU/USD", 3000.0, 50_000.0, 0.5,
                 automatic = true, mtf = mtf(signal.barTime), newsEvidence = news, priceAction = evidence,
             observedAt = 1_800_000_000_000L)
             throw AssertionError("double auto entry in one bar")
@@ -251,7 +252,7 @@ class PaperJournalPersistenceTest {
     @Test fun optionalIctSnapshotCanBeAbsentButFourLayersPersist() = runBlocking {
         val file = journalFile()
         val store = JournalStore(context, file).also { it.load() }
-        val opened = store.open(signal, "XAU/USD", 3000.0, 50_000.0, 0.5,
+        val opened = store.open(alsSignal, "XAU/USD", 3000.0, 50_000.0, 0.5,
             automatic = true, mtf = mtf(signal.barTime), newsEvidence = news,
             observedAt = 1_800_000_000_000L)
         assertTrue(opened.autoOpened)

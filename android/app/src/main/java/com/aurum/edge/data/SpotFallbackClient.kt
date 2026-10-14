@@ -214,27 +214,50 @@ class SpotFallbackClient(
         }
     }
 
-    /** One real quote: Swissquote first, gold-api.com only as a gold-only backup. Never fabricated. */
+    /** Single dedicated source per symbol (1-to-1). Never fabricated. */
     suspend fun fetchQuote(symbol: String): PriceTick {
-        // Crypto has its own real, keyless book. Swissquote and Gold-API do not carry these
-        // instruments at all, so trying them would just produce a misleading error.
-        if (CryptoCatalog.isCrypto(symbol)) return binance.fetchQuote(symbol)
-        if (symbol == "XAU/USD") return compareGold()
-        return try {
-            fetchSwissquote(symbol)
-        } catch (cancel: CancellationException) {
-            throw cancel
-        } catch (primary: Exception) {
-            try {
-                fetchGoldApi(symbol)
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (secondary: Exception) {
-                throw DataFeedException(
-                    "منابع رایگان قیمت لحظه‌ای (Swissquote/Gold-API) در دسترس نیستند"
-                )
+        val canonical = com.aurum.edge.core.V1Universe.normalize(symbol)
+        if (CryptoCatalog.isCrypto(canonical)) {
+            val venue = SourceRouting.cryptoVenueFor(canonical)
+                ?: throw DataFeedException("منبع اختصاصی رمزارز تعریف نشده: $canonical")
+            return if (venue == CryptoRadarCandleClient.Venue.BINANCE) {
+                binance.fetchQuote(canonical)
+            } else {
+                CryptoRadarCandleClient(client).fetchWatchTrade(canonical, venue)
             }
         }
+        return when (canonical) {
+            "XAU/USD", "XAG/USD" -> withContext(Dispatchers.IO) { fetchGoldApi(canonical) }
+            "DOW" -> withContext(Dispatchers.IO) { fetchYahooIndexQuote("^DJI") }
+            "EUR/USD" -> withContext(Dispatchers.IO) { fetchYahooIndexQuote("EURUSD=X") }
+            "USD/JPY" -> withContext(Dispatchers.IO) { fetchYahooIndexQuote("JPY=X") }
+            "GBP/JPY" -> withContext(Dispatchers.IO) { fetchYahooIndexQuote("GBPJPY=X") }
+            else -> withContext(Dispatchers.IO) { fetchSwissquote(canonical) }
+        }
+    }
+
+    private fun fetchYahooIndexQuote(yahooSymbol: String): PriceTick {
+        val encoded = java.net.URLEncoder.encode(yahooSymbol, "UTF-8").replace("%3D", "=")
+        val url = "https://query1.finance.yahoo.com/v8/finance/chart/$encoded?interval=5m&range=1d&includePrePost=false"
+        val body = get(url)
+        val root = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
+            ?: throw DataFeedException("پاسخ Yahoo معتبر نیست")
+        val meta = ((root["chart"] as? JsonObject)?.get("result") as? JsonArray)
+            ?.firstOrNull() as? JsonObject
+        val metaObj = meta?.get("meta") as? JsonObject
+            ?: throw DataFeedException("متای قیمت Yahoo موجود نیست")
+        val price = metaObj["regularMarketPrice"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it > 0.0 }
+            ?: throw DataFeedException("قیمت لحظه‌ای Yahoo معتبر نیست")
+        val tsSec = metaObj["regularMarketTime"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+            ?: throw DataFeedException("زمان قیمت Yahoo موجود نیست")
+        val at = tsSec * 1000L
+        return PriceTick(
+            price = price,
+            at = at,
+            provider = "Yahoo Dedicated ($yahooSymbol)",
+            sourceConfirmations = 1,
+        )
     }
 
     /** Infinite real-tick stream, polled every [POLL_INTERVAL_MS]. A failure closes the flow. */

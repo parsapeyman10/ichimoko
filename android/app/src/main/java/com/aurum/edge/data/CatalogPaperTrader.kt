@@ -17,7 +17,7 @@ import kotlinx.coroutines.withContext
  */
 object CatalogQuotePolicy {
     fun tickMonitored(symbol: String): Boolean = symbol in WatchCatalog.scannerSymbols &&
-        (AssetClass.of(symbol) == AssetClass.FOREX || symbol in setOf("XAU/USD", "XAG/USD") ||
+        (AssetClass.of(symbol) == AssetClass.FOREX || symbol in setOf("XAU/USD", "XAG/USD", "DOW") ||
             CryptoCatalog.isCrypto(symbol))
 
     fun rejection(symbol: String, tick: PriceTick?, now: Long = System.currentTimeMillis()): String? = when {

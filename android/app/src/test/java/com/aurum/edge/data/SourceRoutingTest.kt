@@ -1,38 +1,60 @@
 package com.aurum.edge.data
 
-import com.aurum.edge.core.AssetClass
-import org.junit.Assert.*
+import com.aurum.edge.core.V1Universe
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SourceRoutingTest {
-    @Test fun `reference frames never fetch Binance for a read-only or keyed crypto base`() {
-        assertFalse(canRefreshSamePublisherFrames("BTC/USDT", "Gate Spot / USDT (radar only)"))
-        assertFalse(canRefreshSamePublisherFrames("BTC/USDT", "Twelve Data · fallback هم‌نماد BTC/USDT"))
-        assertTrue(canRefreshSamePublisherFrames("BTC/USDT", BinanceSpotClient.PROVIDER))
-        assertTrue(canRefreshSamePublisherFrames("EUR/USD", "Yahoo Finance عمومی"))
-        assertTrue(canRefreshSamePublisherFrames("XAG/USD", "Dukascopy عمومی"))
-        assertFalse(canRefreshSamePublisherFrames("XAG/USD", "نامعلوم"))
+    @Test fun `each of the 15 symbols maps to a unique dedicated source with no duplicates`() {
+        val dedicated = V1Universe.allSymbols.map { symbol ->
+            val src = SourceRouting.dedicatedSource(symbol)
+            assertNotNull("missing dedicated source for $symbol", src)
+            src!!
+        }
+        assertEquals(15, dedicated.size)
+        assertEquals("no two symbols may share a source", 15, dedicated.distinct().size)
     }
 
-    @Test fun `all 230 scanner rows show honest exact-pair plans without claiming universal coverage`() {
-        val universe = WatchCatalog.scannerSymbols
-        assertEquals(230, universe.distinct().size)
-        assertEquals(200, universe.count { AssetClass.of(it) == AssetClass.CRYPTO })
-        assertEquals(25, universe.count { AssetClass.of(it) == AssetClass.FOREX })
-        assertEquals(0, universe.count { AssetClass.of(it) == AssetClass.STOCK })
-        assertEquals(5, universe.count { AssetClass.of(it) == AssetClass.COMMODITY })
-        assertTrue(universe.filter { AssetClass.of(it) == AssetClass.CRYPTO }.all {
-            SourceRouting.historyPlan(it, false).contains("Gate / OKX / Kraken")
-        })
-        assertTrue(SourceRouting.historyPlan("EUR/JPY", false).contains("Dukascopy"))
-        assertFalse(SourceRouting.historyPlan("AAPL", false).contains("Dukascopy"))
-        assertTrue(SourceRouting.historyPlan("AAPL", false).contains("جایگزین مستقل ندارد"))
-        assertTrue(SourceRouting.historyPlan("USOIL", false).contains("تعریف نشده"))
-        assertTrue(SourceRouting.historyPlan("XAU/USD", true).contains("Twelve Data"))
-        assertTrue(SourceRouting.historyPlan("XAG/USD", false).contains("Dukascopy"))
-        assertFalse(SourceRouting.historyPlan("XAG/USD", false).contains("Yahoo"))
-        assertEquals(listOf(SourceRouting.HistorySource.YAHOO), SourceRouting.historySources("AAPL", false))
-        assertTrue(SourceRouting.historySources("USOIL", false).isEmpty())
-        assertNull(PublicCandleHistoryClient().yahooSymbol("BTC/USDT"))
+    @Test fun `non-crypto symbols each map to their own dedicated HistorySource`() {
+        assertEquals(listOf(SourceRouting.HistorySource.DUKASCOPY_XAU),
+            SourceRouting.historySources("XAU/USD", hasTwelveKey = false))
+        assertEquals(listOf(SourceRouting.HistorySource.DUKASCOPY_XAG),
+            SourceRouting.historySources("XAG/USD", hasTwelveKey = false))
+        assertEquals(listOf(SourceRouting.HistorySource.YAHOO_DOW),
+            SourceRouting.historySources("DOW", hasTwelveKey = false))
+        assertEquals(listOf(SourceRouting.HistorySource.YAHOO_EURUSD),
+            SourceRouting.historySources("EUR/USD", hasTwelveKey = false))
+        assertEquals(listOf(SourceRouting.HistorySource.DUKASCOPY_GBPUSD),
+            SourceRouting.historySources("GBP/USD", hasTwelveKey = false))
+        assertEquals(listOf(SourceRouting.HistorySource.YAHOO_USDJPY),
+            SourceRouting.historySources("USD/JPY", hasTwelveKey = false))
+        assertEquals(listOf(SourceRouting.HistorySource.DUKASCOPY_EURJPY),
+            SourceRouting.historySources("EUR/JPY", hasTwelveKey = false))
+        assertEquals(listOf(SourceRouting.HistorySource.YAHOO_GBPJPY),
+            SourceRouting.historySources("GBP/JPY", hasTwelveKey = false))
+        assertEquals(listOf(SourceRouting.HistorySource.DUKASCOPY_AUDUSD),
+            SourceRouting.historySources("AUD/USD", hasTwelveKey = false))
+        assertEquals(listOf(SourceRouting.HistorySource.YAHOO_USDCHF),
+            SourceRouting.historySources("USD/CHF", hasTwelveKey = false))
+        assertTrue(SourceRouting.historySources("BTC/USDT", hasTwelveKey = true).isEmpty())
+    }
+
+    @Test fun `crypto symbols each map to their own distinct exchange venue`() {
+        assertEquals(CryptoRadarCandleClient.Venue.BINANCE, SourceRouting.cryptoVenueFor("BTC/USDT"))
+        assertEquals(CryptoRadarCandleClient.Venue.OKX, SourceRouting.cryptoVenueFor("ETH/USDT"))
+        assertEquals(CryptoRadarCandleClient.Venue.GATE, SourceRouting.cryptoVenueFor("SOL/USDT"))
+        assertEquals(CryptoRadarCandleClient.Venue.MEXC, SourceRouting.cryptoVenueFor("BNB/USDT"))
+        assertEquals(CryptoRadarCandleClient.Venue.KRAKEN, SourceRouting.cryptoVenueFor("XRP/USDT"))
+    }
+
+    @Test fun `live stream policy matches dedicated source`() {
+        assertTrue(SourceRouting.preferSpotLive("XAU/USD"))
+        assertTrue(SourceRouting.preferSpotLive("EUR/USD"))
+        assertTrue(SourceRouting.preferSpotLive("DOW"))
+        assertFalse(SourceRouting.preferSpotLive("BTC/USDT"))
+        assertFalse(SourceRouting.preferSpotLive("AAPL"))
     }
 }

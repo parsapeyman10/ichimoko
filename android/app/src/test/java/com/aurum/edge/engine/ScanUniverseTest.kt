@@ -2,31 +2,30 @@ package com.aurum.edge.engine
 
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.data.CryptoCatalog
-import com.aurum.edge.data.CryptoFamilies
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ScanUniverseTest {
-    @Test fun cryptoFamiliesExpandReadOnlyRadarWithoutUnknownPairIds() {
+    @Test fun `background radar covers the 15 symbols in the curated universe`() {
         val symbols = WatchCatalog.scannerSymbols
-        assertTrue(symbols.size > 60)
-        assertEquals(symbols.size, symbols.distinct().size)
+        assertEquals(15, symbols.size)
+        assertTrue(listOf("XAU/USD", "XAG/USD", "DOW", "EUR/USD", "GBP/USD", "USD/JPY",
+            "EUR/JPY", "GBP/JPY", "AUD/USD", "USD/CHF",
+            "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT").all { it in symbols })
         assertTrue(CryptoCatalog.ids.containsAll(symbols.filter { it.endsWith("/USDT") }))
-        listOf("SHIB/USDT", "ARB/USDT", "UNI/USDT", "RENDER/USDT", "SAND/USDT")
-            .forEach { assertTrue(it, it in symbols) }
-        assertEquals("میم‌کوین", CryptoFamilies.label("SHIB/USDT"))
-        assertEquals("مقیاس‌پذیری / لایهٔ دو", CryptoFamilies.label("ARB/USDT"))
+        assertFalse("IR_GOLD18" in symbols)
+        assertFalse("USD/IRR" in symbols)
+        assertFalse("USOIL" in symbols)
     }
 
-    @Test fun checksEveryCatalogSymbolAndCustomWatchlistExactlyOnce() {
-        val active = listOf("BTC/USDT", "XAU/USD", "EUR/USD", "CUSTOM/USD", "IRR/USD")
+    @Test fun `user watchlist is scanned first and invalid symbols are dropped`() {
+        val active = listOf("XAU/USD", "EUR/USD", "AAPL")
         val universe = WatchCatalog.scanUniverse(active)
-        assertEquals(active.take(4), universe.take(4))
+        assertEquals(listOf("XAU/USD", "EUR/USD"), universe.take(2))
         assertTrue(universe.containsAll(WatchCatalog.scannerSymbols))
-        assertEquals(universe.size, universe.distinct().size)
-        assertFalse(universe.contains("IRR/USD"))
-        assertEquals(WatchCatalog.scannerSymbols.size + 1, universe.size)
+        assertFalse("AAPL" in universe)
+        assertEquals(WatchCatalog.scannerSymbols.size, universe.size)
     }
 }

@@ -12,48 +12,47 @@ import org.robolectric.RuntimeEnvironment
 /** The iframe is a display, not a market data entitlement or a trade-price transport. */
 @RunWith(RobolectricTestRunner::class)
 class TradingViewFeedBoundaryTest {
-    @Test fun `unsupported scanner never becomes an automated quote source`() {
+    @Test fun `unsupported scanner never becomes an automated quote source and every symbol has 1-to-1 source`() {
         assertFalse(SourceCatalog.all.any { it.id == "tradingview_scanner" })
         assertTrue(WatchCatalog.symbols.all { "tradingview_scanner" !in it.providerCodes })
-        CryptoCatalog.watchlistSeed.forEach { coin ->
-            val watch = WatchCatalog.find(coin.id)!!
-            assertEquals(listOf("gate_spot_trades", "okx_spot_trades", "kraken_spot_trades"), watch.defaultSources)
-            assertEquals(coin.id, watch.providerCodes["binance_spot_agg_trades"])
-            assertEquals(SourceKind.CRYPTO_SPOT_TRADE, SourceCatalog.binanceTrades.kind)
-            assertEquals(coin.id, watch.providerCodes["gate_spot_trades"])
-            assertEquals(coin.id, watch.providerCodes["okx_spot_trades"])
-            assertEquals(coin.id, watch.providerCodes["kraken_spot_trades"])
-        }
-        // Chart keeps its TradingView visual mapping, distinct from execution venue.
+        assertEquals(listOf("binance_btc_spot"), WatchCatalog.find("BTC/USDT")!!.defaultSources)
+        assertEquals(listOf("okx_eth_spot"), WatchCatalog.find("ETH/USDT")!!.defaultSources)
+        assertEquals(listOf("gate_sol_spot"), WatchCatalog.find("SOL/USDT")!!.defaultSources)
+        assertEquals(listOf("mexc_bnb_spot"), WatchCatalog.find("BNB/USDT")!!.defaultSources)
+        assertEquals(listOf("kraken_xrp_spot"), WatchCatalog.find("XRP/USDT")!!.defaultSources)
         assertEquals("BINANCE:BTCUSDT", TradingViewSymbols.find("BTC/USDT"))
     }
 
-    @Test fun `forex and gold watch use distinct public publishers rather than two Yahoo mirrors`() {
-        assertEquals(listOf("stocks_yahoo", "swissquote_bbo"),
-            WatchCatalog.find("EUR/USD")!!.defaultSources)
-        assertEquals(listOf("gold_api_public", "swissquote_bbo"),
-            WatchCatalog.find("XAU/USD")!!.defaultSources)
-        assertEquals(SourceKind.SPOT_BBO_QUOTE, SourceCatalog.swissquoteBbo.kind)
-        assertEquals("USD/JPY", WatchCatalog.find("USD/JPY")!!.providerCodes["swissquote_bbo"])
+    @Test fun `metals index and forex each use a distinct dedicated source`() {
+        assertEquals(listOf("gold_api_xau"), WatchCatalog.find("XAU/USD")!!.defaultSources)
+        assertEquals(listOf("gold_api_xag"), WatchCatalog.find("XAG/USD")!!.defaultSources)
+        assertEquals(listOf("yahoo_dow"), WatchCatalog.find("DOW")!!.defaultSources)
+        assertEquals(listOf("yahoo_eurusd"), WatchCatalog.find("EUR/USD")!!.defaultSources)
+        assertEquals(listOf("swissquote_gbpusd"), WatchCatalog.find("GBP/USD")!!.defaultSources)
+        assertEquals(listOf("yahoo_usdjpy"), WatchCatalog.find("USD/JPY")!!.defaultSources)
+        assertEquals(listOf("swissquote_eurjpy"), WatchCatalog.find("EUR/JPY")!!.defaultSources)
+        assertEquals(listOf("yahoo_gbpjpy"), WatchCatalog.find("GBP/JPY")!!.defaultSources)
+        assertEquals(listOf("swissquote_audusd"), WatchCatalog.find("AUD/USD")!!.defaultSources)
+        assertEquals(listOf("swissquote_usdchf"), WatchCatalog.find("USD/CHF")!!.defaultSources)
     }
 
-    @Test fun `legacy TradingView-only preference migrates to documented exchange feed`() {
+    @Test fun `legacy preference migrates to the symbol's single dedicated source`() {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("watch_preferences", Context.MODE_PRIVATE).edit()
             .putString("sources_BTC/USDT", "tradingview_scanner").commit()
         val selection = WatchSettingsStore(context).selections.value["BTC/USDT"]!!
-        assertEquals(listOf("gate_spot_trades", "okx_spot_trades", "kraken_spot_trades"), selection.enabledSources)
-        assertEquals("gate_spot_trades", selection.preferredSourceId)
+        assertEquals(listOf("binance_btc_spot"), selection.enabledSources)
+        assertEquals("binance_btc_spot", selection.preferredSourceId)
     }
-    @Test fun `old Nobitex watch preference gains read-only alternatives without relabeling cached price`() {
+
+    @Test fun `old Nobitex watch preference migrates to dedicated exchange source`() {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("watch_preferences", Context.MODE_PRIVATE).edit()
             .putString("sources_ETH/USDT", "nobitex_public_trades")
             .putString("preferred_ETH/USDT", "nobitex_public_trades").commit()
         val selection = WatchSettingsStore(context).selections.value["ETH/USDT"]!!
-        assertEquals(listOf("gate_spot_trades", "okx_spot_trades", "kraken_spot_trades"), selection.enabledSources)
-        assertEquals("gate_spot_trades", selection.preferredSourceId)
+        assertEquals(listOf("okx_eth_spot"), selection.enabledSources)
+        assertEquals("okx_eth_spot", selection.preferredSourceId)
         assertFalse(SourceCatalog.all.any { it.id == "nobitex_public_trades" })
     }
-
 }
