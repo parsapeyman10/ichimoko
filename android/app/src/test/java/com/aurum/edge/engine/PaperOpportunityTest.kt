@@ -95,7 +95,7 @@ class PaperOpportunityTest {
         val journalFile = File(root, "journal.json")
         val ict = IctEntryRules.approvedEvidence(market, now)!!
         val opportunity = PaperOpportunity.from(signal, "EUR/USD", 3000.0,
-            MtfSnapshotRecord.from(snapshot), NewsConfluence.record(news)!!, ict, now)
+            MtfSnapshotRecord.from(snapshot), NewsConfluence.record(news, "EUR/USD")!!, ict, now)
         val store = PaperOpportunityStore(context, file)
         store.load()
         assertTrue(store.record(opportunity))

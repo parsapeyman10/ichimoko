@@ -63,7 +63,10 @@ class V1ContractTest {
         val rejected = SignalEngine.evaluate(data.getValue(Interval.M5), Interval.M5, 60.0,
             symbol = "EUR/USD", timeframes = future)
         assertEquals(SignalAction.NO_TRADE, rejected.action)
-        assertTrue(rejected.blockers.any { it.contains("پشتهٔ ۳") })
+        // A future-dated M15 frame must become UNKNOWN rather than contributing a vote.
+        val stackEvidence = rejected.confluence.single { it.name == "پشتهٔ ۳ تایم‌فریمی" }
+        assertEquals(ConfluenceStatus.UNKNOWN, stackEvidence.status)
+        assertTrue(stackEvidence.detail.contains("15m:نامعلوم"))
     }
 
     @Test fun oneShortOrUnclosedFrameBlocksThreeFrameAlignment() {
