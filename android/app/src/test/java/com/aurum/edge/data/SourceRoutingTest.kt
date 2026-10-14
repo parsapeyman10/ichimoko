@@ -2,8 +2,8 @@ package com.aurum.edge.data
 
 import com.aurum.edge.core.V1Universe
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -50,11 +50,9 @@ class SourceRoutingTest {
         assertEquals(CryptoRadarCandleClient.Venue.KRAKEN, SourceRouting.cryptoVenueFor("XRP/USDT"))
     }
 
-    @Test fun `live stream policy matches dedicated source`() {
-        assertTrue(SourceRouting.preferSpotLive("XAU/USD"))
-        assertTrue(SourceRouting.preferSpotLive("EUR/USD"))
-        assertTrue(SourceRouting.preferSpotLive("DOW"))
-        assertFalse(SourceRouting.preferSpotLive("BTC/USDT"))
-        assertFalse(SourceRouting.preferSpotLive("AAPL"))
+    @Test fun `unknown symbols have no dedicated source or history fallback`() {
+        assertNull(SourceRouting.dedicatedFor("AAPL"))
+        assertNull(SourceRouting.cryptoVenueFor("AAPL"))
+        assertTrue(SourceRouting.historySources("AAPL").isEmpty())
     }
 }
