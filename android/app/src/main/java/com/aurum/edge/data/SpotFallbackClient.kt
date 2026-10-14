@@ -185,8 +185,10 @@ class SpotFallbackClient(
     private suspend fun compareGold(): PriceTick = GoldBudget.mutex.withLock {
         val route = AppNetwork.route.value
         if (!route.ready) throw DataFeedException("پروکسی آماده نیست؛ قیمت زنده تأیید نشد")
+        val gate = SourceIntegrity.shared
+        val token = gate.begin("XAU/USD", SourceIntegrity.Channel.GOLD_QUOTE)
         val now = System.currentTimeMillis()
-        GoldBudget.cached?.takeIf { GoldBudget.revision == route.revision &&
+        GoldBudget.cached?.takeIf { !gate.channelBlocked("XAU/USD", SourceIntegrity.Channel.GOLD_QUOTE) && GoldBudget.revision == route.revision &&
             now - GoldBudget.receivedAt in 0L..5_000L && now - it.at in -10_000L..45_000L
         }?.let { return@withLock it }
         val quotes = coroutineScope {
@@ -200,7 +202,14 @@ class SpotFallbackClient(
         }
         if (route != AppNetwork.route.value) throw DataFeedException("مسیر قیمت طلا تغییر کرد؛ دریافت دوباره لازم است")
         GoldBudget.cached = null // a new conflict must not reuse a previous agreement
-        SpotPriceSelection.gold(quotes, System.currentTimeMillis()).also {
+        val selected = try { SpotPriceSelection.gold(quotes, System.currentTimeMillis()) }
+        catch (failure: SourceDisagreement) {
+            gate.reject("XAU/USD", SourceIntegrity.Channel.GOLD_QUOTE, failure.message.orEmpty())
+            throw failure
+        }
+        if (gate.accept("XAU/USD", SourceIntegrity.Channel.GOLD_QUOTE, token, selected.sourceConfirmations) == null)
+            throw DataFeedException("اختلاف قیمت طلا هنوز رفع نشده؛ دو منبع همخوان لازم است")
+        selected.also {
             GoldBudget.cached = it; GoldBudget.receivedAt = System.currentTimeMillis(); GoldBudget.revision = route.revision
         }
     }

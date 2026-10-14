@@ -24,7 +24,7 @@ import java.util.concurrent.TimeUnit
 import java.net.URLEncoder
 
 /** Raised for provider errors; the message is already user-facing (Persian). */
-class DataFeedException(message: String) : Exception(message)
+open class DataFeedException(message: String) : Exception(message)
 
 /**
  * Thin, honest client for Twelve Data.

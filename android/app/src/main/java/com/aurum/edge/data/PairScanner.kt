@@ -386,6 +386,11 @@ class PairScanner(
                 // Network permits and fallback can outlast a bar boundary. Use receipt time,
                 // not the clock captured before the publisher wait.
                 now = System.currentTimeMillis()
+                val integrityRevision = cryptoSnapshot?.integrityRevision ?: nonCryptoSnapshot!!.integrityRevision
+                SourceIntegrity.shared.blocker(symbol, integrityRevision)?.let { reason ->
+                    update(symbol, "blocked", reason)
+                    return@async
+                }
                 val rawCandles = cryptoSnapshot?.m5 ?: nonCryptoSnapshot!!.m5
                 val baseSource = cryptoSnapshot?.provider ?: nonCryptoSnapshot!!.provider
 
@@ -520,6 +525,7 @@ class PairScanner(
                 val graceMs = interval.millis + 90_000L
                 val market = MarketState(
                     symbol = symbol, interval = interval, candles = candles, lastPrice = price,
+                    sourceIntegrityRevision = integrityRevision,
                     feed = FeedStatus(FeedMode.POLLING,
                         "تاریخچهٔ بستهٔ $baseSource؛ تیک اجرا و اسپرد جداگانه لازم است",
                         System.currentTimeMillis(), provider = baseSource),

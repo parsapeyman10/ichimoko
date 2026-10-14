@@ -16,20 +16,27 @@ internal class NonCryptoRadarBundle(
     private val read: suspend (String, Interval, SourceRouting.HistorySource, String) -> PublicCandleHistoryClient.Result,
 ) {
     data class Snapshot(val provider: String, val source: SourceRouting.HistorySource,
-                        val frames: Map<Interval, List<Candle>>, val priorFailures: List<String>) {
+                        val frames: Map<Interval, List<Candle>>, val priorFailures: List<String>, val integrityRevision: Long = 0) {
         val m5: List<Candle> get() = frames.getValue(Interval.M5)
     }
 
-    private data class Preferred(val source: SourceRouting.HistorySource, val at: Long, val revision: Long)
+    private data class Preferred(val source: SourceRouting.HistorySource, val at: Long, val revision: Long, val integrityRevision: Long)
     private val preferred = java.util.concurrent.ConcurrentHashMap<String, Preferred>()
 
     suspend fun fetch(symbol: String, apiKey: String, now: Long = System.currentTimeMillis()): Snapshot {
         val choices = SourceRouting.historySources(symbol, apiKey.isNotBlank())
         if (choices.isEmpty()) throw DataFeedException("$symbol: منبع دقیق تاریخچه تعریف نشده است")
+        val gate = SourceIntegrity.shared
+        val token = gate.begin(symbol, SourceIntegrity.Channel.HISTORY)
+        val startRevision = gate.revision(symbol)
         val revision = AppNetwork.route.value.revision
-        val previous = preferred[symbol]?.takeIf { it.source in choices && it.revision == revision && now - it.at in 0 until 600_000L }
-        if (previous != null) {
-            try { return readSource(symbol, apiKey, previous.source) }
+        val previous = preferred[symbol]?.takeIf { it.source in choices && it.revision == revision && it.integrityRevision == startRevision && now - it.at in 0 until 600_000L }
+        if (previous != null && !gate.channelBlocked(symbol, SourceIntegrity.Channel.HISTORY)) {
+            try {
+                val snapshot = readSource(symbol, apiKey, previous.source)
+                if (gate.revision(symbol) != startRevision) throw DataFeedException("اعتبار منابع هنگام دریافت تغییر کرد")
+                return snapshot.copy(integrityRevision = startRevision)
+            }
             catch (cancel: CancellationException) { throw cancel }
             catch (_: Exception) { preferred.remove(symbol) }
         }
@@ -46,16 +53,19 @@ internal class NonCryptoRadarBundle(
                 HistorySourceSelection.Candidate(it, it.source.name, it.frames)
             }, receivedAt)
         } catch (failure: DataFeedException) {
+            if (failure is SourceDisagreement) gate.reject(symbol, SourceIntegrity.Channel.HISTORY, failure.message.orEmpty())
             val note = "${failure.message}؛ ${errors.joinToString("؛ ").take(355)}"
             HistorySourceAudits.record(symbol, null, note, receivedAt)
             throw DataFeedException(note)
         }
+        val verifiedRevision = gate.accept(symbol, SourceIntegrity.Channel.HISTORY, token, choice.confirmations)
+            ?: throw DataFeedException("اختلاف منابع هنوز رفع نشده؛ مقایسهٔ مستقل تازه لازم است")
         val winner = choice.selected.value
-        preferred[symbol] = Preferred(winner.source, receivedAt, revision)
+        preferred[symbol] = Preferred(winner.source, receivedAt, revision, verifiedRevision)
         HistorySourceAudits.record(symbol, winner.provider,
             choice.note + " · بررسی: " + choices.joinToString { it.name } +
                 (if (errors.isNotEmpty()) " · نامعتبر/قطع: ${errors.joinToString("؛ ")}" else ""), receivedAt)
-        return winner.copy(priorFailures = errors)
+        return winner.copy(priorFailures = errors, integrityRevision = verifiedRevision)
     }
 
     private suspend fun readSource(symbol: String, apiKey: String, source: SourceRouting.HistorySource): Snapshot {

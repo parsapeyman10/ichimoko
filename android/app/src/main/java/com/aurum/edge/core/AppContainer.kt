@@ -78,16 +78,18 @@ class AppContainer(context: Context) {
     val news = NewsRepository(settingsStore, appScope, publicWebNews, forexCalendar)
     /** Shared by chart, signal tab, notifications and automatic *paper* entries. Expires on time. */
     val verifiedMarket: StateFlow<MarketState> = combine(
-        market.state, news.state, flow { while (true) { emit(System.currentTimeMillis()); delay(20_000L) } },
-    ) { raw, headlines, _ ->
+        market.state, news.state, com.aurum.edge.data.SourceIntegrity.shared.state, flow { while (true) { emit(System.currentTimeMillis()); delay(20_000L) } },
+    ) { raw, headlines, _, _ ->
         // The periodic clock only forces recomposition; a one-second market tick must always be
         // judged against the real current clock, not the last 20-second timer emission.
         val now = System.currentTimeMillis()
         val observedFeed = FeedLiveness.display(raw.feed, now)
         val delayed = observedFeed.mode == FeedMode.DELAYED
+        val integrityBlocker = com.aurum.edge.data.SourceIntegrity.shared.blocker(raw.symbol, raw.sourceIntegrityRevision)
         val verified = raw.copy(feed = observedFeed,
+            evaluationError = integrityBlocker ?: raw.evaluationError,
             showingCachedData = raw.showingCachedData || delayed,
-            signal = if (delayed) null else NewsConfluence.apply(raw.signal, raw.symbol, headlines, now))
+            signal = if (delayed || integrityBlocker != null) null else NewsConfluence.apply(raw.signal, raw.symbol, headlines, now))
         if (raw.candles.isNotEmpty()) decisionLog.append(raw.symbol, raw.interval.label,
             when {
                 verified.evaluationError != null -> "error"

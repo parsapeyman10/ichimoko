@@ -111,7 +111,9 @@ class JournalStore(
         /** Independent same-venue trade print and observed top-of-book, never a candle close. */
         cryptoEntryQuote: com.aurum.edge.core.PriceTick? = null,
         cryptoNews: PersianNewsState? = null,
+        sourceIntegrityRevision: Long = 0L,
     ): PaperTrade {
+        SourceIntegrity.shared.blocker(symbol, sourceIntegrityRevision)?.let { throw IllegalArgumentException(it) }
         require(com.aurum.edge.core.V1Universe.valid(symbol)) {
             "نماد از بازارهای فعال حذف شده است؛ فقط مدیریت سوابق قبلی مجاز است"
         }
@@ -218,6 +220,9 @@ class JournalStore(
                 signal.barTime, now = observedAt,
                 openingBalance = settingsStore?.dayOpeningEquity(observedAt))
             require(blocker == null) { blocker ?: "ظرفیت پورتفو پر است" }
+            // Recheck after scheduling, sizing and any journal-lock wait. Fresh ticks or an
+            // AI response cannot authorize a preview calculated before a source conflict.
+            SourceIntegrity.shared.blocker(symbol, sourceIntegrityRevision)?.let { throw IllegalArgumentException(it) }
             persist(_trades.value + trade)
         }
         return trade

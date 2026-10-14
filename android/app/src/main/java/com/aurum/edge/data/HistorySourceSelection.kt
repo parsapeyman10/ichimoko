@@ -19,7 +19,7 @@ object HistorySourceAudits {
 
 internal object HistorySourceSelection {
     data class Candidate<T>(val value: T, val publisher: String, val frames: Map<Interval, List<Candle>>)
-    data class Choice<T>(val selected: Candidate<T>, val note: String)
+    data class Choice<T>(val selected: Candidate<T>, val note: String, val confirmations: Int = 1)
 
     /** Compare only the SAME closed M5 timestamp. Never average prices or stitch frames.
      * With two disagreeing publishers we cannot know which is right: fail closed. With
@@ -44,7 +44,7 @@ internal object HistorySourceSelection {
         val shared = valid.map { it.frames.getValue(Interval.M5).map(Candle::time).toSet() }
             .reduce { a, b -> a intersect b }.maxOrNull()
         if (shared == null || now - (shared + Interval.M5.millis) !in 0..(Interval.M5.millis + 90_000L))
-            throw DataFeedException("زمان مشترک تازه برای مقایسهٔ منابع موجود نیست؛ قیمت‌های ناهم‌زمان مقایسه نشدند")
+            throw SourceDisagreement("زمان مشترک تازه برای مقایسهٔ منابع موجود نیست؛ قیمت‌های ناهم‌زمان مقایسه نشدند")
         val tolerance = WatchCatalog.find(symbol)?.tolerancePct ?: if (symbol.contains("/USD") && symbol.startsWith("XA")) 0.5 else 0.3
         fun price(c: Candidate<T>) = c.frames.getValue(Interval.M5).first { it.time == shared }.close
         fun agree(a: Candidate<T>, b: Candidate<T>): Boolean = abs(price(a) - price(b)) / ((price(a) + price(b)) / 2) * 100 <= tolerance
@@ -55,11 +55,11 @@ internal object HistorySourceSelection {
         val maxSize = groups.maxOf { it.size }
         val largest = groups.filter { it.size == maxSize }
         if (maxSize < 2 || maxSize * 2 <= valid.size || largest.size != 1)
-            throw DataFeedException("اختلاف منابع هم‌زمان بیش از $tolerance٪ است؛ منبع صحیح قابل تشخیص نیست، تحلیل/ورود متوقف شد")
+            throw SourceDisagreement("اختلاف منابع هم‌زمان بیش از $tolerance٪ است؛ منبع صحیح قابل تشخیص نیست، تحلیل/ورود متوقف شد")
         val cluster = largest.single()
         val winner = cluster.maxWith(freshest)
         return Choice(winner, "${cluster.size} از ${valid.size} ناشر سالم در کندل هم‌زمان همخوان‌اند؛ " +
             "انتخاب تازه‌ترین بستهٔ کامل، بدون میانگین/ادغام" +
-            if (cluster.size < valid.size) "؛ منبع پرت کنار گذاشته شد" else "")
+            (if (cluster.size < valid.size) "؛ منبع پرت کنار گذاشته شد" else ""), cluster.size)
     }
 }

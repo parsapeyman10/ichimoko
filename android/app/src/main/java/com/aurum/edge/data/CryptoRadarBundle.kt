@@ -19,10 +19,11 @@ internal class CryptoRadarBundle(
 ) {
     enum class Source(val label: String) { GATE("Gate Spot"), OKX("OKX Spot"), KRAKEN("Kraken Spot") }
     data class Snapshot(val provider: String, val venue: Source,
-                        val frames: Map<Interval, List<Candle>>, val priorFailures: List<String>) {
+                        val frames: Map<Interval, List<Candle>>, val priorFailures: List<String>, val integrityRevision: Long = 0) {
         val m5: List<Candle> get() = frames.getValue(Interval.M5)
     }
-    private val lastGood = java.util.concurrent.ConcurrentHashMap<String, Triple<Source, Long, Long>>()
+    private data class Preferred(val source: Source, val at: Long, val route: Long, val integrityRevision: Long)
+    private val lastGood = java.util.concurrent.ConcurrentHashMap<String, Preferred>()
     private val frames = listOf(Interval.M5, Interval.M15, Interval.H1)
 
     // Bound whole bundles: 200 M5 requests must not queue ahead of every M15/H1 request.
@@ -32,8 +33,11 @@ internal class CryptoRadarBundle(
         activeBundles.withPermit { fetchBundle(symbol, now) }
 
     private suspend fun fetchBundle(symbol: String, now: Long): Snapshot {
+        val gate = SourceIntegrity.shared
+        val token = gate.begin(symbol, SourceIntegrity.Channel.HISTORY)
+        val startRevision = gate.revision(symbol)
         val last = lastGood[symbol]?.takeIf {
-            now - it.second in 0L..600_000L && it.third == AppNetwork.route.value.revision }?.first
+            !gate.channelBlocked(symbol, SourceIntegrity.Channel.HISTORY) && now - it.at in 0L..600_000L && it.route == AppNetwork.route.value.revision && it.integrityRevision == startRevision }?.source
         val choices = (listOfNotNull(last) + listOf(Source.GATE, Source.OKX, Source.KRAKEN)).distinct()
         val errors = mutableListOf<String>()
         val healthy = mutableListOf<Snapshot>()
@@ -65,7 +69,10 @@ internal class CryptoRadarBundle(
                     series[interval] = bars
                 }
                 val snapshot = Snapshot(provider ?: throw DataFeedException("منبع نامعلوم است"), source, series, errors.toList())
-                if (source == last) return snapshot // still fully revalidate all three frames
+                if (source == last && gate.revision(symbol) == startRevision)
+                    return snapshot.copy(integrityRevision = startRevision) // revalidate all frames
+                // A concurrent conflict requires a new complete audit, not this old response.
+                if (gate.revision(symbol) != startRevision) throw DataFeedException("اعتبار منابع هنگام دریافت تغییر کرد")
                 healthy += snapshot
             } catch (cancel: CancellationException) { throw cancel }
             catch (failure: Exception) {
@@ -78,15 +85,18 @@ internal class CryptoRadarBundle(
                 HistorySourceSelection.Candidate(it, it.venue.name, it.frames)
             }, receivedAt)
         } catch (failure: DataFeedException) {
+            if (failure is SourceDisagreement) gate.reject(symbol, SourceIntegrity.Channel.HISTORY, failure.message.orEmpty())
             val note = "$symbol: هیچ منبع هم‌نماد M5/M15/H1 معتبر نیست؛ ${failure.message}؛ ${errors.joinToString("؛ ").take(210)}"
             HistorySourceAudits.record(symbol, null, note, receivedAt)
             throw DataFeedException(note)
         }
+        val verifiedRevision = gate.accept(symbol, SourceIntegrity.Channel.HISTORY, token, choice.confirmations)
+            ?: throw DataFeedException("اختلاف منابع هنوز رفع نشده؛ مقایسهٔ مستقل تازه لازم است")
         val winner = choice.selected.value
-        lastGood[symbol] = Triple(winner.venue, receivedAt, AppNetwork.route.value.revision)
+        lastGood[symbol] = Preferred(winner.venue, receivedAt, AppNetwork.route.value.revision, verifiedRevision)
         HistorySourceAudits.record(symbol, winner.provider,
             choice.note + " · بررسی: Gate / OKX / Kraken" +
                 (if (errors.isNotEmpty()) " · نامعتبر/قطع: ${errors.joinToString("؛ ")}" else ""), receivedAt)
-        return winner.copy(priorFailures = errors)
+        return winner.copy(priorFailures = errors, integrityRevision = verifiedRevision)
     }
 }

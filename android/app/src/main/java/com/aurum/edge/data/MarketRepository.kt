@@ -59,6 +59,8 @@ data class MarketState(
     val showingCachedData: Boolean = false,
     /** Distinct from a valid NO_TRADE or insufficient history; never authorizes entry. */
     val evaluationError: String? = null,
+    /** Source comparison generation used for this evaluation, not the latest tick receipt. */
+    val sourceIntegrityRevision: Long = 0L,
     /** Live history provenance; a disk cache has no verified venue. */
     val historyProvider: String? = null,
     /** Original exchange timestamp/price of the last executed trade; not REST receipt time. */
@@ -135,6 +137,7 @@ class MarketRepository(
     @Volatile private var timeframeSnapshot: Map<Interval, List<Candle>> = emptyMap()
     private var timeframeAutoMode = false
     private var lastFrameRefreshAt = 0L
+    private var historyIntegrityRevision = 0L
     @Volatile private var started = false
     @Volatile private var generation = 0L
     @Volatile private var streamEpoch = 0L
@@ -258,6 +261,7 @@ class MarketRepository(
     ) = refreshMutex.withLock {
         val current = settings.read()
         val session = generation
+        val integrityAtStart = SourceIntegrity.shared.revision(current.symbol)
         if (!started) return@withLock
         if (MarketHours.closedFor(current.symbol) && !allowClosedMarketHistory) {
             publishClosed()
@@ -389,6 +393,12 @@ class MarketRepository(
                 settings.read().symbol != current.symbol || settings.read().interval != current.interval ||
                 (current.hasKey && settings.read().apiKey != current.apiKey) ||
                 settings.read().hasKey != current.hasKey || _state.value.symbol != current.symbol) return@withLock
+            val acceptedRevision = pinnedCrypto?.integrityRevision ?: pinnedNonCrypto?.integrityRevision ?: integrityAtStart
+            SourceIntegrity.shared.blocker(current.symbol, acceptedRevision)?.let { reason ->
+                _state.value = _state.value.copy(signal = null, evaluationError = reason)
+                return@withLock
+            }
+            historyIntegrityRevision = acceptedRevision
             if (_state.value.historyProvider != historyProvider) {
                 timeframeJob?.cancel(); timeframeJob = null
                 timeframeSnapshot = emptyMap()
@@ -839,6 +849,8 @@ class MarketRepository(
 
     private suspend fun publishCandles(showingCache: Boolean = _state.value.showingCachedData) {
         val current = settings.read()
+        val evaluatedRevision = historyIntegrityRevision
+        val integrityBlocker = SourceIntegrity.shared.blocker(current.symbol, evaluatedRevision)
         val bars = cachedBars.values.sortedBy { it.time }
         val lastPrice = bars.lastOrNull()?.close ?: _state.value.lastPrice
         if (bars.isEmpty()) {
@@ -862,7 +874,7 @@ class MarketRepository(
             else SourceRouting.fromProvider(baseProvider)
         // Gate/OKX/Kraken read-only bundles are refreshed with their BASE candles.
         // Fetching Binance reference frames for a Gate base silently mixed venues.
-        if (!showingCache && bars.count { it.closed } >= HistoryPolicy.LIVE_MIN_CANDLES &&
+        if (integrityBlocker == null && !showingCache && bars.count { it.closed } >= HistoryPolicy.LIVE_MIN_CANDLES &&
             canRefreshSamePublisherFrames(current.symbol, baseProvider) &&
             timeframeJob?.isActive != true && frameNow - lastFrameRefreshAt >= 60_000L) {
             lastFrameRefreshAt = frameNow
@@ -880,7 +892,7 @@ class MarketRepository(
             }
         }
         val frames = timeframeSnapshot
-        val evaluation = if (showingCache) null else withContext(Dispatchers.Default) {
+        val evaluation = if (showingCache || integrityBlocker != null) null else withContext(Dispatchers.Default) {
             try {
                 Result.success(SignalEngine.evaluateLive(bars, current.interval, current, current.symbol, frames))
             } catch (cancel: CancellationException) {
@@ -902,8 +914,9 @@ class MarketRepository(
         _state.value = latest.copy(
             candles = bars,
             lastPrice = currentLivePrice ?: lastPrice,
-            signal = evaluation?.getOrNull(),
-            evaluationError = evaluationError,
+            signal = evaluation?.getOrNull()?.takeIf { SourceIntegrity.shared.blocker(current.symbol, evaluatedRevision) == null },
+            evaluationError = SourceIntegrity.shared.blocker(current.symbol, evaluatedRevision) ?: evaluationError,
+            sourceIntegrityRevision = evaluatedRevision,
             showingCachedData = showingCache,
         )
         // Crypto exits must never be inferred from a single OHLC (unknown intra-bar

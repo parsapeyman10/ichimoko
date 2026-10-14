@@ -861,6 +861,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     newsEvidence = newsRecord, priceAction = ict,
                     marketTrend = trendRecord,
                     cryptoNews = news.value,
+                    sourceIntegrityRevision = current.sourceIntegrityRevision,
                     cryptoEntryQuote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { quote ->
                         com.aurum.edge.core.PriceTick(quote, at, current.bid, current.ask)
                     } },
