@@ -86,10 +86,11 @@ internal object V1Scoring {
         if (!macd.isFinite() || !prevMacd.isFinite()) return blocked("MACD نامعتبر است")
         val support = bars.dropLast(1).takeLast(20).minOf { it.low }
         val resistance = bars.dropLast(1).takeLast(20).maxOf { it.high }
-        // On a live higher-timeframe chart, its last CLOSED bar may be hours old while
-        // M1/M5 have moved on. Compare their latest completed bars at the live clock, not
-        // at yesterday's D1 close. Historical evaluation stays bounded by the base close.
-        val frameAsOf = if (clock - asOf in 0L..(interval.millis + 90_000L)) clock else asOf
+        // The M5 entry path must never read an M15/H1 bar that closed after its own base
+        // candle, even if the wall clock has advanced. For non-M5 analysis views only,
+        // allow the most recent closed frame at the live clock when the base bar is fresh.
+        val frameAsOf = if (interval != Interval.M5 &&
+            clock - asOf in 0L..(interval.millis + 90_000L)) clock else asOf
         val resolvedExternal = if (external.isEmpty() && interval == Interval.M5) {
             mapOf(
                 Interval.M15 to MtfAnalyzer.convertFromM5(bars, Interval.M15),
