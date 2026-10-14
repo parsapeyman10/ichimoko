@@ -2,6 +2,9 @@ package com.aurum.edge.data
 
 import com.aurum.edge.core.PriceTick
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -101,7 +104,7 @@ class SpotFallbackClient(
         val at = tsRaw.toLong()
         val age = System.currentTimeMillis() - at
         if (age !in -10_000L..MAX_QUOTE_AGE_MS) throw DataFeedException("قیمت Swissquote قدیمی یا با زمان نامعتبر است")
-        return PriceTick((bid + ask) / 2.0, at, bid = bid, ask = ask)
+        return PriceTick((bid + ask) / 2.0, at, bid = bid, ask = ask, provider = "Swissquote")
     }
 
     /** Watch-only, exact Swissquote bid/ask; does NOT silently relabel Gold-API. */
@@ -135,7 +138,7 @@ class SpotFallbackClient(
         if (!price.isFinite() || price <= 0.0) throw DataFeedException("قیمت Gold-API نامعتبر است")
         val age = System.currentTimeMillis() - at
         if (age !in -10_000L..MAX_QUOTE_AGE_MS) throw DataFeedException("قیمت Gold-API قدیمی است")
-        return PriceTick(price, at)
+        return PriceTick(price, at, provider = "Gold-API")
     }
 
     private suspend fun cryptoTradeResponse(symbol: String, openPosition: Boolean = false,
@@ -172,11 +175,42 @@ class SpotFallbackClient(
         return NobitexTradeBatch.parse(cryptoTradeResponse(symbol, openPosition = true, openedAt = openedAt))
     }
 
+    private object GoldBudget {
+        val mutex = Mutex()
+        var cached: PriceTick? = null
+        var receivedAt = 0L
+        var revision = -1L
+    }
+
+    private suspend fun compareGold(): PriceTick = GoldBudget.mutex.withLock {
+        val route = AppNetwork.route.value
+        if (!route.ready) throw DataFeedException("پروکسی آماده نیست؛ قیمت زنده تأیید نشد")
+        val now = System.currentTimeMillis()
+        GoldBudget.cached?.takeIf { GoldBudget.revision == route.revision &&
+            now - GoldBudget.receivedAt in 0L..5_000L && now - it.at in -10_000L..45_000L
+        }?.let { return@withLock it }
+        val quotes = coroutineScope {
+            listOf<suspend () -> PriceTick>(
+                { withContext(Dispatchers.IO) { fetchSwissquote("XAU/USD") } },
+                { withContext(Dispatchers.IO) { fetchGoldApi("XAU/USD") } },
+            ).map { read -> async {
+                try { read() } catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) { null }
+            } }.awaitAll().filterNotNull()
+        }
+        if (route != AppNetwork.route.value) throw DataFeedException("مسیر قیمت طلا تغییر کرد؛ دریافت دوباره لازم است")
+        GoldBudget.cached = null // a new conflict must not reuse a previous agreement
+        SpotPriceSelection.gold(quotes, System.currentTimeMillis()).also {
+            GoldBudget.cached = it; GoldBudget.receivedAt = System.currentTimeMillis(); GoldBudget.revision = route.revision
+        }
+    }
+
     /** One real quote: Swissquote first, gold-api.com only as a gold-only backup. Never fabricated. */
     suspend fun fetchQuote(symbol: String): PriceTick {
         // Crypto has its own real, keyless book. Swissquote and Gold-API do not carry these
         // instruments at all, so trying them would just produce a misleading error.
         if (CryptoCatalog.isCrypto(symbol)) return binance.fetchQuote(symbol)
+        if (symbol == "XAU/USD") return compareGold()
         return try {
             fetchSwissquote(symbol)
         } catch (cancel: CancellationException) {

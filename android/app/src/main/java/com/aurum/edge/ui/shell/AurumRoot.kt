@@ -34,6 +34,8 @@ fun AurumRoot(viewModel: AurumViewModel) {
     val context = LocalContext.current
     val market by viewModel.market.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val proxyStatus by viewModel.proxyStatus.collectAsStateWithLifecycle()
+    val proxyRoute by com.aurum.edge.data.AppNetwork.route.collectAsStateWithLifecycle()
     val toast by viewModel.toast.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     // The selected tab is removed from composition on every navigation. Keep its
@@ -77,6 +79,10 @@ fun AurumRoot(viewModel: AurumViewModel) {
     }
 
     Scaffold(containerColor = AurumColors.Bg, snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            ProxyStatusLamp(settings.proxyEnabled, proxyStatus, proxyRoute,
+                onClick = { open(AurumTab.Settings) })
+        },
         bottomBar = {
             AurumBottomBar(selectedTab, onSelect = ::open, onMore = { showMore = true })
         }) { padding ->

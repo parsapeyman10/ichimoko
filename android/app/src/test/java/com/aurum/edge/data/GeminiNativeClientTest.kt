@@ -53,11 +53,23 @@ class GeminiNativeClientTest {
         val response = """{"candidates":[{"finishReason":"STOP","content":{"parts":[
             {"thought":true,"text":"private thought"},{"text":"O"},{"text":"K"}]}}]}"""
         val http = client {
+            if (it.method == "GET") return@client 200 to """{"models":[{"name":"models/gemini-test","supportedGenerationMethods":["generateContent"]}]}"""
             val body = root(Buffer().apply { it.body!!.writeTo(this) }.readUtf8())
             assertFalse(body["generationConfig"]!!.jsonObject.containsKey("responseMimeType"))
             200 to response
         }
         assertEquals("OK", AiProvider.probe(http, "$base/models/", fakeKey, "gemini-test", "AUTO"))
+    }
+
+    @Test fun `native probe stops before generation if model is not in this key catalog`() = runBlocking {
+        val calls = mutableListOf<String>()
+        val http = client {
+            calls += it.method
+            200 to """{"models":[{"name":"models/other-model","supportedGenerationMethods":["generateContent"]}]}"""
+        }
+        val error = runCatching { AiProvider.probe(http, base, fakeKey, "unlisted-model", "GEMINI") }.exceptionOrNull()
+        assertTrue(error is GeminiHttpDiagnostics.ModelUnavailable)
+        assertEquals(listOf("GET"), calls)
     }
 
     @Test fun `catalog follows nextPageToken and filters generation support without hardcoded model IDs`() = runBlocking {

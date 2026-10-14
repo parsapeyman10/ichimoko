@@ -22,7 +22,7 @@ internal class CryptoRadarBundle(
                         val frames: Map<Interval, List<Candle>>, val priorFailures: List<String>) {
         val m5: List<Candle> get() = frames.getValue(Interval.M5)
     }
-    private val lastGood = java.util.concurrent.ConcurrentHashMap<String, Pair<Source, Long>>()
+    private val lastGood = java.util.concurrent.ConcurrentHashMap<String, Triple<Source, Long, Long>>()
     private val frames = listOf(Interval.M5, Interval.M15, Interval.H1)
 
     // Bound whole bundles: 200 M5 requests must not queue ahead of every M15/H1 request.
@@ -33,9 +33,10 @@ internal class CryptoRadarBundle(
 
     private suspend fun fetchBundle(symbol: String, now: Long): Snapshot {
         val last = lastGood[symbol]?.takeIf {
-            now - it.second in 0L..600_000L }?.first
+            now - it.second in 0L..600_000L && it.third == AppNetwork.route.value.revision }?.first
         val choices = (listOfNotNull(last) + listOf(Source.GATE, Source.OKX, Source.KRAKEN)).distinct()
         val errors = mutableListOf<String>()
+        val healthy = mutableListOf<Snapshot>()
         for (source in choices) {
             try {
                 val series = linkedMapOf<Interval,List<Candle>>()
@@ -63,13 +64,29 @@ internal class CryptoRadarBundle(
                         throw DataFeedException("۳۲۰ کندل بستهٔ پیوسته و تازهٔ ${interval.label} ناقص است")
                     series[interval] = bars
                 }
-                lastGood[symbol] = source to now
-                return Snapshot(provider ?: throw DataFeedException("منبع نامعلوم است"), source, series, errors)
+                val snapshot = Snapshot(provider ?: throw DataFeedException("منبع نامعلوم است"), source, series, errors.toList())
+                if (source == last) return snapshot // still fully revalidate all three frames
+                healthy += snapshot
             } catch (cancel: CancellationException) { throw cancel }
             catch (failure: Exception) {
                 errors += "${source.label}: ${(failure.message ?: "ناموجود").take(55)}"
             }
         }
-        throw DataFeedException("$symbol: هیچ منبع هم‌نماد M5/M15/H1 معتبر نیست؛ ${errors.joinToString("؛ ").take(210)}")
+        val receivedAt = System.currentTimeMillis()
+        val choice = try {
+            HistorySourceSelection.choose(symbol, healthy.map {
+                HistorySourceSelection.Candidate(it, it.venue.name, it.frames)
+            }, receivedAt)
+        } catch (failure: DataFeedException) {
+            val note = "$symbol: هیچ منبع هم‌نماد M5/M15/H1 معتبر نیست؛ ${failure.message}؛ ${errors.joinToString("؛ ").take(210)}"
+            HistorySourceAudits.record(symbol, null, note, receivedAt)
+            throw DataFeedException(note)
+        }
+        val winner = choice.selected.value
+        lastGood[symbol] = Triple(winner.venue, receivedAt, AppNetwork.route.value.revision)
+        HistorySourceAudits.record(symbol, winner.provider,
+            choice.note + " · بررسی: Gate / OKX / Kraken" +
+                (if (errors.isNotEmpty()) " · نامعتبر/قطع: ${errors.joinToString("؛ ")}" else ""), receivedAt)
+        return winner.copy(priorFailures = errors)
     }
 }

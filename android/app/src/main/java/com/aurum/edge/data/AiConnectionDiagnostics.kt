@@ -8,6 +8,8 @@ import javax.net.ssl.SSLException
 /** Safe, actionable diagnostics. Never echo endpoint, response body or the user's secret. */
 object AiConnectionDiagnostics {
     fun describe(error: Throwable): String = when (error) {
+        is GeminiHttpDiagnostics.ModelUnavailable -> error.message.orEmpty()
+        is GeminiHttpDiagnostics.Failure -> "HTTP ${error.code}: ${error.reason.advice}"
         is GeminiNativeClient.GeminiResponseException -> error.reason.message
         is UnknownHostException -> "نام دامنهٔ سرویس پیدا نشد (DNS)؛ نشانی HTTPS و دسترسی شبکه را بررسی کنید"
         is SocketTimeoutException -> "مهلت پاسخ سرویس تمام شد؛ اتصال/دسترسی از همین شبکه را بررسی کنید"
@@ -16,7 +18,7 @@ object AiConnectionDiagnostics {
         else -> when {
             error.message?.contains("HTTP 401") == true -> "HTTP 401: کلید این سرویس معتبر نیست؛ کلید را فقط روی گوشی بررسی کنید"
             error.message?.contains("HTTP 402") == true -> "HTTP 402: اعتبار کافی نیست؛ کیف پول نقدی GLM و سهمیهٔ کلید را جداگانه بررسی کنید"
-            error.message?.contains("HTTP 403") == true -> "HTTP 403: دسترسی سرویس/منطقه مجاز نیست؛ از همین شبکه با ارائه‌دهنده بررسی کنید"
+            error.message?.contains("HTTP 403") == true -> "HTTP 403: درخواست مجاز نیست؛ کلید، پروژه، محدودیت کلید و دسترسی سرویس را بررسی کنید؛ علت منطقه‌ای قطعی نیست"
             error.message?.contains("HTTP 404") == true -> "HTTP 404: مسیر API یا نام مدل پیدا نشد؛ قالب و شناسهٔ مدل را بررسی کنید"
             error.message?.contains("HTTP 429") == true -> "HTTP 429: سهمیه یا محدودیت نرخ سرویس؛ بدون ادعای پلن رایگان، وضعیت حساب را بررسی کنید"
             error.message?.contains("HTTP 400") == true -> "HTTP 400: قالب درخواست، نام مدل یا پارامترهای سرویس سازگار نیست"

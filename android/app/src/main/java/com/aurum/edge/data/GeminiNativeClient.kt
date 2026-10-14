@@ -32,7 +32,10 @@ internal object GeminiNativeClient {
 
     private suspend fun execute(client: OkHttpClient, request: Request): JsonObject = withContext(Dispatchers.IO) {
         client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw IllegalStateException(AiProvider.providerError(response.code))
+            if (!response.isSuccessful) {
+                val errorBody = response.peekBody(65_536L).string()
+                throw GeminiHttpDiagnostics.failure(response.code, errorBody)
+            }
             val body = response.peekBody(MAX_RESPONSE_BYTES + 1).bytes()
             check(body.size <= MAX_RESPONSE_BYTES) { "پاسخ JSON مدل بیش از اندازه بزرگ است" }
             runCatching { Json.parseToJsonElement(body.toString(Charsets.UTF_8)) as? JsonObject }.getOrNull()

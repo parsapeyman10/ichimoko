@@ -74,9 +74,20 @@ fun HomeScreen(
             now = System.currentTimeMillis()
         }
     }
+    val sourceAudits by com.aurum.edge.data.HistorySourceAudits.state.collectAsStateWithLifecycle()
+    val sourceAudit = sourceAudits[market.symbol]
     val session = MarketHours.sessionWindowFor(market.symbol, now)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 14.dp)) {
 
+        sourceAudit?.let { audit ->
+            SectionCard("منبع دادهٔ ${market.symbol}", "انتخاب کیفیت‌محور؛ نه تضمین صحت یا مجوز ورود") {
+                Text("انتخاب مقایسه: ${audit.selected ?: "منبع قابل انتخاب نیست"} · تاریخچهٔ فعلی: ${market.historyProvider ?: "ناموجود"}", color = AurumColors.Gold)
+                Text(audit.note, style = MaterialTheme.typography.bodySmall)
+                Text(market.feed.detail, style = MaterialTheme.typography.bodySmall)
+                Text("آخرین مقایسه: ${relativeTime(audit.checkedAt)} · قیمت زنده: ${market.feed.provider}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+            }
+        }
         // ── ۱. وضعیت باز یا بسته بودن بازار (بالاترین بخش صفحه) ────────────
         Column(
             Modifier.fillMaxWidth()

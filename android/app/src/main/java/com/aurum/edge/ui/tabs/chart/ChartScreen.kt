@@ -62,7 +62,7 @@ fun ChartScreen(initialTicker: String, onSelectTicker: (String) -> Unit,
                 Text("نماد · ${ChartSymbolChoices.display(initialTicker)}")
             }
             // Recreate the widget with its Ichimoku study if it was removed inside TradingView.
-            TextButton(onClick = { reloadCount++ }) { Text("ایچیموکو ↻") }
+            TextButton(onClick = { reloadCount++ }) { Text("بازخوانی چارت ↻") }
         }
         if (!networkReady) {
             Text(if (!route.ready) WebProxyRouting.Status.WAITING_TOR.message else webStatus.message,

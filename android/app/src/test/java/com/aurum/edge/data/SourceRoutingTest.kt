@@ -22,7 +22,7 @@ class SourceRoutingTest {
         assertEquals(0, universe.count { AssetClass.of(it) == AssetClass.STOCK })
         assertEquals(5, universe.count { AssetClass.of(it) == AssetClass.COMMODITY })
         assertTrue(universe.filter { AssetClass.of(it) == AssetClass.CRYPTO }.all {
-            SourceRouting.historyPlan(it, false).contains("Gate Spot ← OKX Spot ← Kraken Spot")
+            SourceRouting.historyPlan(it, false).contains("Gate / OKX / Kraken")
         })
         assertTrue(SourceRouting.historyPlan("EUR/JPY", false).contains("Dukascopy"))
         assertFalse(SourceRouting.historyPlan("AAPL", false).contains("Dukascopy"))

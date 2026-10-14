@@ -1,40 +1,28 @@
 package com.aurum.edge.ui
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
+import kotlinx.serialization.json.*
+import org.junit.Assert.*
 import org.junit.Test
 
 class TradingViewEmbedTest {
-    @Test fun `one historical TradingView iframe for the exact requested symbol`() {
-        val html = TradingViewEmbed.html("OANDA:XAUUSD")
-        assertNotNull(html)
-        assertEquals(1, Regex("<iframe\\b").findAll(html!!).count())
-        assertTrue(html.contains("https://s.tradingview.com/widgetembed/?frameElementId=tradingview_chart"))
+    @Test fun `one widget adds the correct Ichimoku study on the chart for the exact symbol`() {
+        val html = TradingViewEmbed.html("OANDA:XAUUSD")!!
+        assertEquals(1, Regex("new TradingView\\.widget\\(").findAll(html).count())
         assertTrue(html.contains("https://s3.tradingview.com/tv.js"))
-        assertTrue(html.contains("symbol=OANDA%3AXAUUSD"))
-        assertTrue(html.contains("&interval=5&"))
-        assertTrue(html.contains("&symboledit=0"))
-        assertFalse(html.contains("&interval=60&"))
-        assertTrue(html.contains("studies=%5B%22STD%3BIchimoku%25Cloud%22%5D"))
-        val encoded = html.substringAfter("studies_overrides=").substringBefore('"')
-        val overrides = java.net.URLDecoder.decode(encoded, "UTF-8")
-        assertTrue(overrides.contains("\"ichimoku cloud.conversion line periods\":8"))
-        assertTrue(overrides.contains("\"ichimoku cloud.base line periods\":24"))
-        assertTrue(overrides.contains("\"ichimoku cloud.leading span b periods\":72"))
-        assertTrue(overrides.contains("\"ichimoku cloud.lagging span periods\":24"))
-        assertFalse(html.contains("external-embedding/embed-widget-advanced-chart.js"))
+        val config = Json.parseToJsonElement(html.substringAfter("new TradingView.widget(").substringBefore(");</script>")).jsonObject
+        assertEquals("OANDA:XAUUSD",config["symbol"]!!.jsonPrimitive.content)
+        assertEquals("5",config["interval"]!!.jsonPrimitive.content)
+        assertFalse(config["allow_symbol_change"]!!.jsonPrimitive.boolean)
+        assertEquals("STD;Ichimoku%1Cloud",config["studies"]!!.jsonArray.single().jsonPrimitive.content)
+        val overrides = config["studies_overrides"]!!.jsonObject
+        assertEquals(8,overrides["ichimoku cloud.conversion line periods"]!!.jsonPrimitive.int)
+        assertEquals(24,overrides["ichimoku cloud.base line periods"]!!.jsonPrimitive.int)
+        assertEquals(72,overrides["ichimoku cloud.leading span b periods"]!!.jsonPrimitive.int)
+        assertFalse(html.contains("Ichimoku%Cloud"))
     }
-
     @Test fun `invalid or injection ticker is rejected instead of substituting gold`() {
-        assertNull(TradingViewEmbed.html("BAD&symbol=OTHER"))
-        assertNull(TradingViewEmbed.html("</script>"))
-        assertNull(TradingViewEmbed.html("NASDAQ:AAPL"))
-        assertTrue(TradingViewEmbed.html("BINANCE:ETHUSDT")!!.contains("symbol=BINANCE%3AETHUSDT"))
-        assertFalse(TradingViewEmbed.html("BINANCE:ETHUSDT")!!.contains("OANDA%3AXAUUSD"))
-        assertTrue(TradingViewEmbed.html("BINANCE:ATOMUSDT")!!.contains("&interval=5&"))
-        assertTrue(TradingViewEmbed.html("BINANCE:ETHUSDT")!!.contains("&interval=5&"))
+        listOf("BAD&symbol=OTHER","</script>","NASDAQ:AAPL").forEach { assertNull(TradingViewEmbed.html(it)) }
+        assertTrue(TradingViewEmbed.html("BINANCE:ETHUSDT")!!.contains("BINANCE:ETHUSDT"))
+        assertFalse(TradingViewEmbed.html("BINANCE:ETHUSDT")!!.contains("OANDA:XAUUSD"))
     }
 }

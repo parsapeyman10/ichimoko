@@ -134,6 +134,11 @@ internal object AiProvider {
      */
     suspend fun probe(httpClient: OkHttpClient, baseUrl: String, apiKey: String, model: String,
                       format: String = "AUTO"): String {
+        if (GeminiAiStudio.usesNative(baseUrl, format)) {
+            val id = GeminiAiStudio.modelId(model)
+            val available = GeminiNativeClient.listModels(httpClient, baseUrl, apiKey)
+            if (id !in available) throw GeminiHttpDiagnostics.ModelUnavailable()
+        }
         val reply = completeText(httpClient, baseUrl, apiKey, model,
             "You are a connectivity test. Reply with the single word: OK",
             "ping", if (isLlmRelay(baseUrl) && model.startsWith("glm-5-3-uncensored")) 128 else 16,

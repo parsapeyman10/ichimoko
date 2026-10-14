@@ -118,6 +118,18 @@ class MarketRepository(
         CryptoRadarBundle.Source.OKX -> cryptoReadOnly.fetch(symbol, frame, CryptoRadarCandleClient.Venue.OKX)
         CryptoRadarBundle.Source.KRAKEN -> cryptoReadOnly.fetch(symbol, frame, CryptoRadarCandleClient.Venue.KRAKEN)
     } }
+    private val nonCryptoBundle = NonCryptoRadarBundle { symbol, frame, source, apiKey ->
+        when (source) {
+            SourceRouting.HistorySource.YAHOO -> publicHistory.fetchCandles(symbol, frame,
+                minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
+            SourceRouting.HistorySource.DUKASCOPY -> dukascopyHistory.fetchCandles(symbol, frame,
+                minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
+                .let { PublicCandleHistoryClient.Result(it.candles, it.provider, it.fetchedAt) }
+            SourceRouting.HistorySource.TWELVE_DATA -> PublicCandleHistoryClient.Result(
+                client.fetchCandles(apiKey, symbol, frame, outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
+                    minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES), "Twelve Data")
+        }
+    }
     private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client, binanceHistory)
     private var timeframeJob: Job? = null
     @Volatile private var timeframeSnapshot: Map<Interval, List<Candle>> = emptyMap()
@@ -264,6 +276,7 @@ class MarketRepository(
         try {
             var fetched: List<Candle> = emptyList()
             var pinnedCrypto: CryptoRadarBundle.Snapshot? = null
+            var pinnedNonCrypto: NonCryptoRadarBundle.Snapshot? = null
             var historyProvider = ""
             var staleDetail = "تاریخچهٔ آنلاین پاسخ داد اما آخرین کندل آن باید با تیک زنده تأیید شود"
             if (CryptoCatalog.isCrypto(current.symbol) && current.interval == Interval.M5 &&
@@ -298,6 +311,13 @@ class MarketRepository(
                     historyProvider = "Twelve Data · fallback هم‌نماد ${current.symbol}"
                     staleDetail = "فید جایگزین تاریخچه داد؛ آخرین قیمت همچنان باید جداگانه تأیید شود"
                 }
+            } else if (current.interval == Interval.M5 && requestedSize <= HistoryPolicy.LIVE_FETCH_CANDLES &&
+                !MarketHours.closedFor(current.symbol)) {
+                val book = nonCryptoBundle.fetch(current.symbol, current.apiKey)
+                pinnedNonCrypto = book
+                fetched = book.m5
+                historyProvider = book.provider
+                staleDetail = "${book.provider}: بستهٔ سه‌بازه‌ای با انتخاب کیفیت‌محور؛ قیمت زنده مستقل لازم است"
             } else try {
                 // Public history is the normal path even when a Twelve Data key exists. The key
                 // is only a final fallback; this keeps the chart/replay provider policy honest.
@@ -374,9 +394,9 @@ class MarketRepository(
                 timeframeSnapshot = emptyMap()
                 lastFrameRefreshAt = 0L
             }
-            pinnedCrypto?.let { snapshot ->
+            (pinnedCrypto?.frames ?: pinnedNonCrypto?.frames)?.let { frames ->
                 timeframeJob?.cancel(); timeframeJob = null
-                timeframeSnapshot = snapshot.frames
+                timeframeSnapshot = frames
                 timeframeAutoMode = current.autoPaperTrading
                 lastFrameRefreshAt = System.currentTimeMillis()
             }
@@ -389,7 +409,7 @@ class MarketRepository(
             val periodStart = currentPeriodStart(current.interval)
             // A persisted crypto candle lacks a venue tag. Never blend an older Twelve
             // or Nobitex series with a newly verified Binance venue window.
-            if (CryptoCatalog.isCrypto(current.symbol)) cachedBars.clear()
+            if (CryptoCatalog.isCrypto(current.symbol) || _state.value.historyProvider != historyProvider) cachedBars.clear()
             _state.value = _state.value.copy(historyProvider = historyProvider)
             fetched.forEach { bar ->
                 // The bar whose period is still open is kept as "forming" and excluded from the engine.
@@ -496,7 +516,7 @@ class MarketRepository(
                             if (!TradeQuotePolicy.accepts(tick)) return@collect
                             emitted = true
                             backoff = 2_000L
-                            onTick(tick, provider)
+                            onTick(tick, tick.provider ?: provider)
                         }
                     }
                     if (maxMillis == null) collectBlock()
@@ -718,7 +738,7 @@ class MarketRepository(
             ask = displayAsk,
             lastTradeAt = at,
             lastTradePrice = price,
-            feed = FeedStatus(FeedMode.LIVE, "", System.currentTimeMillis(), provider = provider),
+            feed = FeedStatus(FeedMode.LIVE, tick.sourceNote.orEmpty(), System.currentTimeMillis(), provider = provider),
             showingCachedData = false,
         )
         // BTC can publish hundreds of aggregates a second. Keep every exchange event
