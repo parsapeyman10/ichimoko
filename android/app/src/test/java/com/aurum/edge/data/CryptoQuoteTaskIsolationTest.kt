@@ -20,7 +20,7 @@ class CryptoQuoteTaskIsolationTest {
         val unblock = CountDownLatch(1)
         val http = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
             val symbol = chain.request().url.queryParameter("symbol")
-            if (symbol == "VETUSDT") {
+            if (symbol == "BTCUSDT") {
                 entered.countDown()
                 check(unblock.await(5, TimeUnit.SECONDS))
             }
@@ -30,9 +30,9 @@ class CryptoQuoteTaskIsolationTest {
         }).build()
         val spot = BinanceSpotClient(http)
         try {
-            val slow = async(Dispatchers.IO) { spot.fetchQuote("VET/USDT") }
+            val slow = async(Dispatchers.IO) { spot.fetchQuote("BTC/USDT") }
             check(entered.await(5, TimeUnit.SECONDS))
-            val fast = async(Dispatchers.IO) { spot.fetchQuote("SAND/USDT") }
+            val fast = async(Dispatchers.IO) { spot.fetchQuote("ETH/USDT") }
             assertEquals(101.0, withTimeout(2_500L) { fast.await() }.price, 0.0)
             unblock.countDown()
             assertEquals(101.0, slow.await().price, 0.0)

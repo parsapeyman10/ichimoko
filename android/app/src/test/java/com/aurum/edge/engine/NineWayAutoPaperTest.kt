@@ -84,7 +84,7 @@ class NineWayAutoPaperTest {
         val combined = NewsConfluence.apply(raw, "EUR/USD", parsed, now)!!
         assertEquals(SignalAction.BUY, combined.action)
         assertNull(PaperAutoRules.blocker(market(combined), settings, parsed, now))
-        assertEquals("id1", NewsConfluence.record(parsed)!!.evidence.single().id)
+        assertEquals("id1", NewsConfluence.record(parsed, "EUR/USD")!!.evidence.single().id)
         val missingAi = parseWebNews(Json.parseToJsonElement(payload.replace("ai_confluence", "not_ai")) as JsonObject, now)
         assertEquals("UNKNOWN news is yellow/advisory, not a technical veto", SignalAction.BUY,
             NewsConfluence.apply(raw, "EUR/USD", missingAi, now)!!.action)
@@ -108,7 +108,7 @@ class NineWayAutoPaperTest {
         assertEquals(5, result.confluence.size)
         assertEquals(NewsConfluence.NEWS_LABEL, result.confluence[4].name)
         assertEquals(ConfluenceStatus.CONFIRMED, result.confluence[4].status)
-        assertNotNull(NewsConfluence.record(news))
+        assertNotNull(NewsConfluence.record(news, "EUR/USD"))
         assertNull(PaperAutoRules.blocker(market(result), settings, news, now))
         for (failed in four.indices) {
             val input = raw.copy(confluence = four.mapIndexed { i, item -> if (i == failed) item.copy(ok = false, status = ConfluenceStatus.CONFLICT, scorePercent = 0) else item })
@@ -141,7 +141,8 @@ class NineWayAutoPaperTest {
         assertTrue(jpyBlocked.blockers.any { it.contains("وتوی AI") })
         assertEquals(ConfluenceStatus.CONFLICT, jpyBlocked.confluence[4].status)
         // Server mode (per-pair map empty): a non-gold pair stays honestly UNKNOWN but technical signal remains visible.
-        val serverOnly = NewsConfluence.apply(raw, "EUR/USD", news, now)!!
+        val serverOnlyNews = news.copy(ai = AiNewsVerdict(), aiBySymbol = emptyMap())
+        val serverOnly = NewsConfluence.apply(raw, "EUR/USD", serverOnlyNews, now)!!
         assertEquals(SignalAction.BUY, serverOnly.action)
         assertEquals(ConfluenceStatus.UNKNOWN, serverOnly.confluence[4].status)
     }

@@ -152,8 +152,11 @@ class PublicCandleHistoryClient(
             val seconds = timestamps[i].num()?.toLong() ?: continue
             if (seconds <= 0 || seconds > Long.MAX_VALUE / 1000L) continue
             val rawTime = seconds * 1000L
-            if (rawTime > now + 60_000L) continue
+            if (rawTime > now) continue
             val time = rawTime - (rawTime % interval.millis)
+            // Historical responses may include the currently forming candle. Do not label it
+            // closed; this adapter returns only bars whose full interval has elapsed.
+            if (time + interval.millis > now) continue
             val open = opens[i].num()?.takeIf { it.isFinite() && it > 0.0 } ?: continue
             val high = highs[i].num()?.takeIf { it.isFinite() && it > 0.0 } ?: continue
             val low = lows[i].num()?.takeIf { it.isFinite() && it > 0.0 } ?: continue

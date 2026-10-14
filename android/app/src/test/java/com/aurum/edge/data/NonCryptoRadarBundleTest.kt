@@ -8,7 +8,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class NonCryptoRadarBundleTest {
-    private val now = 1_800_000_000_000L
+    private val now = System.currentTimeMillis()
 
     private fun closedM5Series(price: Double = 2400.0): List<Candle> {
         val step = Interval.M5.millis

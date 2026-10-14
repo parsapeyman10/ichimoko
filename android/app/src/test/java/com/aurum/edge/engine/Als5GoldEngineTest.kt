@@ -134,7 +134,8 @@ class Als5GoldEngineTest {
         assertTrue(overDailyCap.orEmpty().contains("ضرر روزانه"))
 
         val prior = PaperTrade("als5", "XAU/USD", Interval.M5, SignalAction.BUY,
-            2_400.0, 2_398.0, 2_404.0, 100.0, 2.0, now,
+            2_400.0, 2_398.0, 2_404.0, 100.0, 2.0, now - 60_000L,
+            closedAt = now - 1_000L, pnlUsd = 0.0,
             positionOz = 1.0, als5SetupKey = "A|BUY|confirmed-pivot")
         val duplicate = PaperPortfolioPolicy.blocker(
             trades = listOf(prior), symbol = "XAU/USD", balance = 10_000.0,
