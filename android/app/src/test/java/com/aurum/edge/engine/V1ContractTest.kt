@@ -57,7 +57,9 @@ class V1ContractTest {
         assertTrue(signal.confluence.last().detail.contains("1H:"))
         assertFalse(signal.blockers.any { it.contains("پشتهٔ ۳") })
         val future = data.toMutableMap()
-        future[Interval.M15] = data.getValue(Interval.M15).map {
+        // Supply only a short block of M15 bars shifted after the M5 base close. Older
+        // history must not leave enough bars to accidentally satisfy the 500-bar gate.
+        future[Interval.M15] = data.getValue(Interval.M15).takeLast(100).map {
             it.copy(time = it.time + 2L * Interval.D1.millis)
         }
         val rejected = SignalEngine.evaluate(data.getValue(Interval.M5), Interval.M5, 60.0,
