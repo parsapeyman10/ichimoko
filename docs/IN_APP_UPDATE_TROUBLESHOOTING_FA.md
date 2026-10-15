@@ -22,15 +22,29 @@
 - **گیت CI:** مرحلهٔ «Verify default-branch manifest points at the newest release» اگر manifest از جدیدترین Release عقب بماند، اجرا را می‌شکند.
 - **فایل manifest:** `update/aurum-edge.json` به مقادیر `v2.0.0 (672)` به‌روز شد (هش/حجم/گواهی همان Release).
 
-## انتشار یک بروزرسانی واقعی (نیازمندی باقی‌مانده)
+## نتیجهٔ انتشار (انجام شد)
 
-APK بزرگ‌تر از کد نصب‌شده باید در Release عمومی منتشر شود. مسیر دستی:
+Release **`v2.0.1` / کد ۶۷۳** در ۲۰۲۶-۱۰-۱۵ ۲۰:۰۲ UTC منتشر شد؛ پنج asset شامل `AurumEdge-v2.0.1.apk`، `AurumEdge-v2.0.1.apk.json`، **`aurum-edge.json`**، `checksums.sha256` و `upgrade-compatibility.json`. مرحلهٔ «Verify public updater release is discoverable» همان APK را بدون توکن دانلود و با `apksigner/aapt` تأیید کرد. گزارش `tools/diagnose_in_app_update.py`:
+
+| نصب کنونی | نتیجه |
+|---|---|
+| `1.3.55` (۶۷۱) | `UPDATE_AVAILABLE` → `v2.0.1` |
+| `2.0.0` (۶۷۲) | `UPDATE_AVAILABLE` → `v2.0.1` (پیش از این «چیزی پیدا نشد» بود) |
+| `2.0.1` (۶۷۳) | `NO_UPDATE_FOUND` (رفتار درست) |
+
+هش APK منتشرشده: `f5ac0a470a54b1777d88706a75ee98eb28cd39ee7ed26562d7d2d9a8e8d7d206` — امضا همان گواهی پین‌شده.
+
+## انتشار نسخه‌های بعدی
+
+هر انتشار باید `versionCode` بزرگ‌تر از نسخهٔ عمومی فعلی داشته باشد و در Release همین assetها (به‌ویژه `aurum-edge.json`) قرار بگیرند:
 
 ```bash
-gh workflow run main.yml --ref <branch> -f publish_release=true -f version_name=2.0.1 -f version_code=673
+git tag -a v2.0.2 -m "Aurum Edge 2.0.2 (674)" && git push origin v2.0.2
+# یا در صورت داشتن توکن با دسترسی actions:
+gh workflow run main.yml --ref <branch> -f publish_release=true -f version_name=2.0.2 -f version_code=674
 ```
 
-گیت‌های CI پیش از انتشار: `applicationId`, SHA-256, حجم، گواهی امضا، افزایش `versionCode` و سلامت ZIP. تگ موجود بازنویسی نمی‌شود.
+گیت‌های CI پیش از انتشار: `applicationId`, SHA-256, حجم، گواهی امضا، افزایش `versionCode` و سلامت ZIP. تگ موجود بازنویسی نمی‌شود. پس از انتشار، `update/aurum-edge.json` را از متادیتای همان Release به‌روز کن؛ در غیر این صورت مرحلهٔ «Verify default-branch manifest points at the newest release» اجرا را متوقف می‌کند.
 
 ## گیت‌های آپدیتر روی گوشی (بدون تغییر، همه باید رد شوند)
 
