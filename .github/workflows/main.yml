@@ -367,6 +367,44 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}
         run: ./gradlew :${APP_MODULE}:testDebugUnitTest $GRADLE_FLAGS
 
+      # A silently-not-running regression suite looks exactly like a passing suite. This step
+      # fails the build if the updater tests vanish, and publishes their counts as annotations
+      # so the result is readable without downloading the (often unreachable) test artifacts.
+      - name: Verify updater regression tests ran
+        if: always() && steps.guard.outputs.ready == 'true'
+        run: |
+          set -uo pipefail
+          python3 "$PROJECT_DIR/app/build/test-results/testDebugUnitTest" <<'PY'
+          import glob, os, sys, xml.etree.ElementTree as ET
+
+          directory = sys.argv[1]
+          if not os.path.isdir(directory):
+              print(f'::error title=No test results::The unit-test results directory {directory} does not exist; '
+                    'the updater regression suite cannot be shown to have run.')
+              raise SystemExit(1)
+
+          total = failures = 0
+          updater = {}
+          for report in sorted(glob.glob(os.path.join(directory, 'TEST-*.xml'))):
+              root = ET.parse(report).getroot()
+              cases = list(root.iter('testcase'))
+              total += len(cases)
+              failures += sum(1 for case in cases if case.find('failure') is not None or case.find('error') is not None)
+              name = root.get('name', '')
+              if 'Updater' in name:
+                  updater[name] = len(cases)
+
+          if not updater:
+              print('::error title=Updater tests missing::No Updater* test class produced results. '
+                    'The update-channel regression suite did not run.')
+              raise SystemExit(1)
+          for name, count in sorted(updater.items()):
+              print(f'::notice title=Updater regression test:: {name}: {count} test(s)')
+          print(f'::notice title=Unit test totals:: {total} test(s), {failures} failure(s); '
+                f'updater classes: {len(updater)}')
+          raise SystemExit(1 if failures else 0)
+          PY
+
       # A failed test should expose its assertion and source line in GitHub's annotations;
       # raw Actions logs/artifact downloads are not always accessible to contributors.
       - name: Annotate failing unit tests
