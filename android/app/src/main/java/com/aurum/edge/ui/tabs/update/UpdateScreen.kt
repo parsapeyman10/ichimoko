@@ -55,7 +55,7 @@ fun UpdateScreen(viewModel: AurumViewModel) {
                 Column(Modifier.weight(1f)) {
                     Text("دانلود خودکار نسخهٔ جدید", style = MaterialTheme.typography.bodySmall,
                         color = AurumColors.TextPrimary)
-                    Text("هنگام باز شدن برنامه نسخه را بررسی می‌کند و APK عمومی را می‌گیرد؛ نصب نهایی به تأیید Android نیاز دارد.",
+                    Text("روشن است: هنگام باز شدن برنامه نسخه بررسی و APK عمومی دانلود می‌شود؛ نصب نهایی یک تأیید Android لازم دارد. اگر نمی‌خواهید، همین کلید را خاموش کنید.",
                         style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
                 Switch(

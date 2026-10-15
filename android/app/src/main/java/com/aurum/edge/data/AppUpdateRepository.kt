@@ -298,7 +298,12 @@ class AppUpdateRepository(
         }
     }
 
-    fun installDownloaded() {
+    /**
+     * Hands the verified APK to Android's installer. [openPermissionSettings] is false on the
+     * automatic path (app start) so a launch never hijacks the screen: the update screen shows the
+     * button instead and the user decides when to grant the install permission.
+     */
+    fun installDownloaded(openPermissionSettings: Boolean = true) {
         val apk = _state.value.downloadedApkPath?.let(::File)
         if (apk == null || !apk.isFile) {
             _state.value = _state.value.copy(error = "فایل APK آماده نیست؛ دوباره دانلود کنید")
@@ -307,9 +312,9 @@ class AppUpdateRepository(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !canInstallUnknownSources()) {
             _state.value = _state.value.copy(
                 needsInstallPermission = true,
-                message = "برای نصب خودکار باید اجازهٔ نصب از این برنامه را در Android بدهید؛ بعد از بازگشت نصب دوباره ادامه پیدا می‌کند.",
+                message = "بروزرسانی دانلود شد. برای نصب باید اجازهٔ «نصب از این برنامه» را در Android بدهید؛ بعد از بازگشت نصب ادامه پیدا می‌کند.",
             )
-            openInstallPermissionSettings()
+            if (openPermissionSettings) openInstallPermissionSettings()
             return
         }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.updateprovider", apk)

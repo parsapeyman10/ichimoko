@@ -61,9 +61,9 @@ android {
         applicationId = "com.aurum.edge"
         minSdk = 26
         targetSdk = 35
-        // Keep the published update channel upgradeable: 2.0.1 is code 673 after v2.0.0 (672).
-        versionCode = 673
-        versionName = "2.0.1"
+        // Keep the published update channel upgradeable: 2.0.2 is code 674 after v2.0.1 (673).
+        versionCode = 674
+        versionName = "2.0.2"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

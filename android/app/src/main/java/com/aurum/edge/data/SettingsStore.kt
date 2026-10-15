@@ -24,7 +24,23 @@ class SettingsStore(context: Context) {
 
     // Retired in 1.3.55: an old enabled flag must not strand an upgraded install
     // waiting for a daemon which is no longer bundled. No other preferences are cleared.
-    init { prefs.edit().remove("embedded_tor_enabled").apply() }
+    init {
+        prefs.edit().remove("embedded_tor_enabled").apply()
+        migrateAutoDownload() // owner-requested: in-app updating is on unless switched off
+    }
+
+    /**
+     * In-app updating became default-on in 2.0.2. A stored `false` from an older build cannot be
+     * told apart from "never chosen", so the preference is enabled once, recorded as migrated, and
+     * left alone afterwards. Turning the switch off after this migration sticks.
+     */
+    private fun migrateAutoDownload() {
+        if (prefs.getBoolean(KEY_AUTO_DOWNLOAD_MIGRATED, false)) return
+        prefs.edit()
+            .putBoolean(KEY_AUTO_DOWNLOAD_MIGRATED, true)
+            .putBoolean(KEY_AUTO_DOWNLOAD_UPDATES, true)
+            .apply()
+    }
 
     private val _settings = MutableStateFlow(read())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
@@ -69,7 +85,7 @@ class SettingsStore(context: Context) {
         newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty().trim(),
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
         autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
-        autoDownloadUpdates = prefs.getBoolean(KEY_AUTO_DOWNLOAD_UPDATES, false),
+        autoDownloadUpdates = prefs.getBoolean(KEY_AUTO_DOWNLOAD_UPDATES, true),
         newsAiApiKey = storedNewsAiKey,
         newsAiBaseUrl = aiUrl,
         newsAiModel = aiModel,
@@ -311,6 +327,7 @@ class SettingsStore(context: Context) {
         // Historical preference key must not be renamed: an existing opt-in survives an upgrade.
         private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"
         private const val KEY_AUTO_DOWNLOAD_UPDATES = "auto_download_updates"
+        private const val KEY_AUTO_DOWNLOAD_MIGRATED = "auto_download_updates_migrated_2_0_2"
         private const val KEY_NEWS_AI_KEY = "news_ai_client_key"
         private const val KEY_NEWS_AI_URL = "news_ai_client_base_url"
         private const val KEY_NEWS_AI_MODEL = "news_ai_client_model"

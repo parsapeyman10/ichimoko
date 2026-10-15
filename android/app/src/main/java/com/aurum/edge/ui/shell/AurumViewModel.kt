@@ -486,7 +486,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             container.updater.checkForUpdate(autoDownload, force)
             if (autoDownload && container.updater.state.value.downloadedApkPath != null) {
-                container.updater.installDownloaded()
+                // Automatic path: prepare the install without jumping to Android settings; the
+                // update screen offers the permission button when it is actually needed.
+                container.updater.installDownloaded(openPermissionSettings = false)
             }
         }
     }
