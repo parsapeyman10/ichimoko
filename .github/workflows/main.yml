@@ -374,7 +374,7 @@ jobs:
         if: always() && steps.guard.outputs.ready == 'true'
         run: |
           set -uo pipefail
-          python3 "$PROJECT_DIR/app/build/test-results/testDebugUnitTest" <<'PY'
+          python3 - "$PROJECT_DIR/app/build/test-results/testDebugUnitTest" <<'PY'
           import glob, os, sys, xml.etree.ElementTree as ET
 
           directory = sys.argv[1]
