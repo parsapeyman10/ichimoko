@@ -27,8 +27,9 @@ class AutoUpdatePreferenceTest {
 
     private fun context(): Context = RuntimeEnvironment.getApplication()
 
-    private fun clear(): Unit = context().getSharedPreferences(settingsName, Context.MODE_PRIVATE)
-        .edit().clear().commit()
+    private fun clear() {
+        context().getSharedPreferences(settingsName, Context.MODE_PRIVATE).edit().clear().commit()
+    }
 
     private fun store(): SettingsStore = SettingsStore(context())
 
