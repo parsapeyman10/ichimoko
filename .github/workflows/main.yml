@@ -90,7 +90,9 @@ jobs:
           (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))) ||
           (github.ref == 'refs/heads/arena/3d998929-ichimoko' &&
           ((github.event_name == 'workflow_dispatch' && inputs.publish_release == true) ||
-          (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release: publish v1.3.55 updater'))))) }}
+          (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release: publish v1.3.55 updater'))) ||
+          ((startsWith(github.ref, 'refs/heads/arena/') || github.ref == 'refs/heads/main') &&
+          github.event_name == 'workflow_dispatch' && inputs.publish_release == true))) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -258,6 +260,92 @@ jobs:
         if: steps.guard.outputs.ready == 'true'
         working-directory: ${{ env.PROJECT_DIR }}
         run: ./gradlew :${APP_MODULE}:dependencies --configuration debugRuntimeClasspath $GRADLE_FLAGS
+
+      # A phone reading update/aurum-edge.json on the default branch must not be pointed at an
+      # older APK than the newest published release: that is exactly the state in which the in-app
+      # updater reports "no newer version" while a newer APK already exists. Composition instead of
+      # trust: the newest release with an APK is taken from the anonymous Releases API and compared
+      # with the repository file by tag, SHA-256 and size.
+      - name: Verify default-branch manifest points at the newest release
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          MANIFEST="update/aurum-edge.json"
+          if [[ ! -f "$MANIFEST" ]]; then
+            echo "::notice title=Manifest missing::No $MANIFEST to compare; the app falls back to the release-embedded manifest."
+            exit 0
+          fi
+          python3 - "$MANIFEST" <<'PY'
+          import json, os, re, sys, urllib.error, urllib.request
+          from pathlib import Path
+
+          APK_NAME = re.compile(r'^AurumEdge-v\d+(?:\.\d+)*\.apk$')
+          manifest_path = Path(sys.argv[1])
+          manifest = json.loads(manifest_path.read_text())
+          repo = os.environ.get('GITHUB_REPOSITORY', 'parsapeyman10/ichimoko')
+
+          def get(url, timeout=30):
+              headers = {'User-Agent': 'aurum-manifest-gate', 'Accept': 'application/vnd.github+json'}
+              token = os.environ.get('GH_TOKEN')
+              if token:
+                  headers['Authorization'] = 'Bearer ' + token
+              with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as response:
+                  return json.loads(response.read(1_048_577))
+
+          try:
+              releases = [r for r in get(f'https://api.github.com/repos/{repo}/releases?per_page=20')
+                          if not r.get('draft') and not r.get('prerelease')]
+          except (urllib.error.URLError, urllib.error.HTTPError, ValueError) as error:
+              print(f'::warning title=Manifest gate skipped::The public release list was not readable ({error}); '
+                    'update/aurum-edge.json was NOT compared with the newest release.')
+              raise SystemExit(0)
+
+          newest = None
+          for release in releases:
+              for asset in release.get('assets', []):
+                  if APK_NAME.match(asset.get('name', '')):
+                      newest = (release, asset)
+                      break
+              if newest:
+                  break
+          if newest is None:
+              print('::warning title=No published APK found::No public release carries an APK yet; nothing to compare.')
+              raise SystemExit(0)
+
+          release, asset = newest
+          tag = release.get('tag_name', '')
+          digest = (asset.get('digest') or '').removeprefix('sha256:').lower()
+          size = asset.get('size')
+          manifest_tag = (manifest.get('tagName') or '').strip()
+          manifest_sha = (manifest.get('sha256') or '').strip().lower()
+          manifest_size = manifest.get('sizeBytes')
+
+          problems = []
+          if manifest_tag != tag:
+              problems.append(f'points at {manifest_tag or "no tag"} while the newest published APK is {tag}')
+          if digest and manifest_sha and digest != manifest_sha:
+              problems.append(f'declares sha256 {manifest_sha[:16]}… while {tag} publishes {digest[:16]}…')
+          if isinstance(size, int) and isinstance(manifest_size, int) and size != manifest_size:
+              problems.append(f'declares size {manifest_size} while {tag} publishes {size}')
+
+          try:
+              sidecar = get(f'https://github.com/{repo}/releases/download/{tag}/AurumEdge-{tag}.apk.json')
+              sidecar_code = sidecar.get('versionCode')
+              if isinstance(sidecar_code, int) and isinstance(manifest.get('versionCode'), int) \
+                      and manifest['versionCode'] < sidecar_code:
+                  problems.append(f'declares versionCode {manifest["versionCode"]} but {tag} publishes {sidecar_code}')
+          except Exception as error:  # noqa: BLE001 - the API digest/tag comparison already stands
+              print(f'::notice::Sidecar of {tag} was not readable ({error}); tag/hash/size comparison still applied.')
+
+          if problems:
+              print('::error title=Stale default-branch manifest::update/aurum-edge.json ' + '; '.join(problems)
+                    + f'. A phone reading this manifest is told it is up to date. Refresh {manifest_path} from the '
+                    + f'{tag} sidecar (or delete it and rely on the release-embedded manifest).')
+              raise SystemExit(1)
+          print(f'::notice title=Manifest gate::update/aurum-edge.json is consistent with newest published APK {tag}.')
+          PY
 
       - name: Test release compatibility and public-data tooling
         run: python3 -m unittest discover -s tools -p 'test_*.py' -v
@@ -496,6 +584,7 @@ jobs:
             out/*.apk
             out/*.json
             out/checksums.sha256
+            out/upgrade-compatibility.json
 
       - name: Upload test and lint reports
         if: always() && steps.guard.outputs.ready == 'true'
@@ -560,7 +649,11 @@ jobs:
             exit 1
           fi
           gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "$NOTES" --draft
-          gh release upload "$TAG" "out/${APK_NAME}" "out/${APK_NAME}.json" "out/checksums.sha256" "out/upgrade-compatibility.json"
+          # aurum-edge.json is uploaded on purpose: the in-app updater reads it from
+          # releases/latest/download/aurum-edge.json first, because that copy cannot be older
+          # than the release it sits in. Without this asset the primary channel 404s.
+          gh release upload "$TAG" "out/${APK_NAME}" "out/${APK_NAME}.json" "out/checksums.sha256" \
+            "out/upgrade-compatibility.json" "out/aurum-edge.json"
           # A draft is invisible to the updater; publish only once all assets are uploaded.
           gh release edit "$TAG" --draft=false --latest
 
