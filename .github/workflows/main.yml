@@ -765,18 +765,20 @@ jobs:
       - uses: actions/checkout@v4
       - name: Verify probe invariants
         run: PYTHONPATH=tools python3 -m unittest discover -s tools -p 'test_probe_crypto_venues.py'
-      - name: Audit Kraken and OKX public feeds, per symbol
+      - name: Audit exact USDT spot listings
         run: |
           timeout 9m python3 tools/probe_crypto_venues.py > crypto-venue-coverage.json
           python3 - <<'PY'
           import json, os
           data = json.load(open('crypto-venue-coverage.json'))
-          rows = data['symbols']
-          supported = sum(row['suggested'] is not None for row in rows.values())
+          count = data['catalog_count']
+          supported = data['covered_by_non_binance_venue']
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
-              f.write(f"## Read-only market audit\n{supported}/{len(rows)} symbols passed a point-in-time runner probe. "
-                      "This does NOT certify Android-device reachability, uninterrupted service, "
-                      "or safe execution replay. Download the JSON artifact for per-symbol reasons.\n")
+              f.write(f"## Read-only spot listing audit\n{supported}/{count} exact catalog symbols appear in "
+                      "at least one non-Binance public spot listing at probe time. "
+                      f"Listing request errors: {len(data['errors'])}. "
+                      "Listing is NOT proof of 1500 contiguous bars, a fresh trade, phone reachability, "
+                      "or safe execution replay. Download the JSON for per-venue reasons.\n")
           PY
       - name: Expose per-symbol report through the GitHub Checks API
         env:
