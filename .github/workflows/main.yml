@@ -84,15 +84,14 @@ jobs:
       AURUM_RELEASE_KEY_PASSWORD: ${{ secrets.AURUM_RELEASE_KEY_PASSWORD }}
       AURUM_RELEASE_STORE_TYPE: ${{ secrets.AURUM_RELEASE_STORE_TYPE }}
       CI_SIGNING_CACHE_DIR: /home/runner/.aurum-ci-signing
-      # Shared predicate: only approved release runs publish; PR and ordinary pushes only validate.
+      # A merge into main is a validation build, not permission to republish the same
+      # versionCode. Only an explicit release commit, tag, or approved dispatch publishes.
       PUBLIC_UPDATER_RELEASE: >-
-        ${{ (((github.ref == 'refs/heads/main' || github.ref_type == 'tag') &&
-          (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))) ||
-          (github.ref == 'refs/heads/arena/3d998929-ichimoko' &&
-          ((github.event_name == 'workflow_dispatch' && inputs.publish_release == true) ||
-          (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release: publish v1.3.55 updater'))) ||
-          ((startsWith(github.ref, 'refs/heads/arena/') || github.ref == 'refs/heads/main') &&
-          github.event_name == 'workflow_dispatch' && inputs.publish_release == true))) }}
+        ${{ (github.event_name == 'push' && github.ref_type == 'tag') ||
+          (github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+           startsWith(github.event.head_commit.message, 'release: publish ')) ||
+          (github.event_name == 'workflow_dispatch' && inputs.publish_release == true &&
+           (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/arena/'))) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
