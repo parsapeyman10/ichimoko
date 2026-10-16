@@ -1,34 +1,38 @@
 package com.aurum.edge.core
 
-/** Shared candle-history contract for live chart, scanner, replay and research downloads. */
+/**
+ * Unified 5-minute (M5) candle history policy:
+ * Always fetch and retain the latest 1500 closed M5 candles so that:
+ * - Higher-timeframe Ichimoku lines (513 and 1024) are computed directly on M5
+ * - M15 Ichimoku is computed from 500 resampled candles (every 3 M5 candles = 1 M15 candle)
+ * - H1 Ichimoku is computed from 125 resampled candles (every 12 M5 candles = 1 H1 candle)
+ */
 object HistoryPolicy {
-    /** Minimum real candle floor required before the engine/replay treats a feed as complete enough. */
-    const val TARGET_CANDLES: Int = 3000
+    const val LIVE_MIN_CANDLES: Int = 1500
+    const val LIVE_REQUEST_CANDLES: Int = 1500
+    const val LIVE_FETCH_CANDLES: Int = 1500
 
-    /** Extra chart depth for XAU/USD so the user can scroll back beyond the shallow live window. */
-    const val DEEP_CHART_CANDLES: Int = 12000
+    const val TARGET_CANDLES: Int = 1500
+    const val DEEP_CHART_CANDLES: Int = 1500
 
-    /** Open the chart with a useful window first; background refresh expands it to the chart target. */
-    const val CHART_BOOTSTRAP_CANDLES: Int = 1200
-    const val CHART_BOOTSTRAP_MINIMUM: Int = 1001
+    const val CHART_BOOTSTRAP_CANDLES: Int = 1500
+    const val CHART_BOOTSTRAP_MINIMUM: Int = 1500
 
-    /** Keep a deep chart window plus the currently forming bar when one exists. */
-    const val MAX_CACHED_CANDLES: Int = DEEP_CHART_CANDLES + 1
+    const val MAX_CACHED_CANDLES: Int = 1500
+    const val MAX_TWELVE_CANDLES: Int = 1500
+    const val MAX_PROVIDER_CANDLES: Int = 1500
 
-    /** Twelve Data's time_series endpoint tops out at 5000 rows in one response. */
-    const val MAX_TWELVE_CANDLES: Int = 5000
-
-    /** Public deep-history adapters (Yahoo/Dukascopy) may retain more than the engine floor. */
-    const val MAX_PROVIDER_CANDLES: Int = DEEP_CHART_CANDLES
+    const val ICHIMOKU_HTF_513: Int = 513
+    const val ICHIMOKU_HTF_1024: Int = 1024
+    const val RESAMPLED_M15_CANDLES: Int = LIVE_REQUEST_CANDLES / 3
+    const val RESAMPLED_H1_CANDLES: Int = LIVE_REQUEST_CANDLES / 12
 
     fun chartTargetCandles(symbol: String, interval: Interval): Int =
-        DEEP_CHART_CANDLES
+        LIVE_REQUEST_CANDLES
 
-    /** Request size for Twelve Data and other single-call providers that cannot deliver deep history. */
     fun providerRequestSize(requested: Int, minimum: Int = TARGET_CANDLES): Int =
         requested.coerceAtLeast(minimum).coerceAtMost(MAX_TWELVE_CANDLES)
 
-    /** Request size for public deep-history providers. */
     fun deepProviderRequestSize(requested: Int, minimum: Int = TARGET_CANDLES): Int =
         requested.coerceAtLeast(minimum).coerceAtMost(MAX_PROVIDER_CANDLES)
 

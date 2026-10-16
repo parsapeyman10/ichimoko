@@ -1,0 +1,364 @@
+package com.aurum.edge.data
+
+import com.aurum.edge.core.Candle
+import com.aurum.edge.core.HistoryPolicy
+import com.aurum.edge.core.Interval
+import com.aurum.edge.core.PriceTick
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+
+/** Keyless SPOT OHLC for read-only radar. Never used for entry, fills or old positions.
+ * Exact USDT pair is checked against the venue's live SPOT listing, not a guessed ticker.
+ * A failure/429 falls through to another venue; bar histories are NEVER stitched together.
+ */
+class CryptoRadarCandleClient(
+    private val http: OkHttpClient = AppNetwork.builder()
+        .connectTimeout(20, TimeUnit.SECONDS).readTimeout(25, TimeUnit.SECONDS)
+        .callTimeout(40, TimeUnit.SECONDS).followRedirects(false).build(),
+    private val clock: () -> Long = System::currentTimeMillis,
+) {
+    enum class Venue(val provider: String, val host: String) {
+        GATE("Gate Spot / USDT (radar only)", "https://api.gateio.ws"),
+        OKX("OKX Spot / USDT (radar only)", "https://www.okx.com"),
+        KRAKEN("Kraken Spot / USDT (radar only)", "https://api.kraken.com"),
+        MEXC("MEXC Spot / USDT (radar only)", "https://api.mexc.com"),
+        BINANCE("Binance Spot / USDT", "https://data-api.binance.vision"),
+    }
+    private val json = Json { ignoreUnknownKeys = true }
+    private val listing = ConcurrentHashMap<String, Long>()
+    private val krakenPairs = ConcurrentHashMap<String, String>()
+    private val listingLocks = ConcurrentHashMap<String, Mutex>()
+    private val frameLocks = ConcurrentHashMap<String, Mutex>()
+    private data class Cached(val result: PublicCandleHistoryClient.Result, val revision: Long)
+    private val frameCache = java.util.Collections.synchronizedMap(
+        object : LinkedHashMap<String, Cached>(650, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Cached>?): Boolean = size > 650
+        })
+
+    private suspend fun get(venue: Venue, path: String): String = VenueRequestPolicy.shared.read(venue) {
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder().url(venue.host + path)
+                .header("Accept", "application/json").header("User-Agent", "AurumEdge-radar/1").build()
+            http.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) throw VenueHttpFailure(response.code, response.header("Retry-After"))
+                val body = response.peekBody(2_000_001L).bytes()
+                if (body.size > 2_000_000) throw DataFeedException("پاسخ ${venue.provider} بیش از حد بزرگ است")
+                body.toString(Charsets.UTF_8)
+            }
+        }
+    }
+
+    private fun pair(symbol: String, venue: Venue): String {
+        if (CryptoCatalog.find(symbol) == null || !symbol.matches(Regex("[A-Z0-9]+/USDT")))
+            throw DataFeedException("جفت دقیق USDT برای رادار تعریف نشده است")
+        return when (venue) {
+            Venue.GATE -> symbol.replace('/', '_')
+            Venue.OKX -> symbol.replace('/', '-')
+            Venue.MEXC, Venue.BINANCE -> symbol.replace("/", "")
+            Venue.KRAKEN -> symbol.replace("BTC/", "XBT/").replace("DOGE/", "XDG/").replace("/", "")
+        }
+    }
+
+    private suspend fun checkListing(symbol: String, venue: Venue, pair: String): String =
+        listingLocks.getOrPut("${venue.name}:$symbol") { Mutex() }.withLock {
+        val key = "${venue.name}:$symbol"
+        if (venue == Venue.BINANCE) {
+            listing[key] = clock()
+            return@withLock pair
+        }
+        if (clock() - (listing[key] ?: 0L) in 0L..3_600_000L)
+            return@withLock krakenPairs[key] ?: pair
+        val base = symbol.substringBefore('/')
+        val body = when (venue) {
+            Venue.GATE -> get(venue, "/api/v4/spot/currency_pairs/$pair")
+            Venue.OKX -> get(venue, "/api/v5/public/instruments?instType=SPOT&instId=$pair")
+            Venue.KRAKEN -> get(venue, "/0/public/AssetPairs?pair=$pair")
+            Venue.MEXC, Venue.BINANCE -> get(venue, "/api/v3/exchangeInfo?symbol=$pair")
+        }
+        val root = json.parseToJsonElement(body)
+        val valid = when (venue) {
+            Venue.MEXC, Venue.BINANCE -> validMexcListing(root as? JsonObject, pair, base)
+            Venue.GATE -> (root as? JsonObject)?.let {
+                it.text("id") == pair && it.text("base") == base && it.text("quote") == "USDT" &&
+                    it.text("type") == "normal" && it.text("trade_status") == "tradable"
+            } == true
+            Venue.KRAKEN -> {
+                val obj = root as? JsonObject
+                val results = obj?.obj("result")
+                val alias = symbol.replace("BTC/", "XBT/").replace("DOGE/", "XDG/")
+                val matched = results?.entries?.singleOrNull { (_, entry) ->
+                    val data = entry as? JsonObject
+                    data != null && data.text("wsname") == alias && data.text("status") == "online"
+                }
+                if (obj?.array("error")?.isEmpty() == true && matched != null) {
+                    krakenPairs[key] = matched.key
+                    true
+                } else false
+            }
+            Venue.OKX -> (root as? JsonObject)?.takeIf { it.text("code") == "0" }
+                ?.array("data")?.singleOrNull()?.let { it as? JsonObject }?.let {
+                    it.text("instId") == pair && it.text("instType") == "SPOT" &&
+                        it.text("baseCcy") == base && it.text("quoteCcy") == "USDT" &&
+                        it.text("state") == "live"
+                } == true
+        }
+        if (!valid) throw DataFeedException("${venue.provider}: جفت دقیق $symbol فعال/تأییدشده نیست")
+        listing[key] = clock()
+        return@withLock krakenPairs[key] ?: pair
+    }
+
+    suspend fun fetch(symbol: String, interval: Interval, venue: Venue): PublicCandleHistoryClient.Result {
+        val key = "${venue.name}:$symbol:${interval.name}"
+        return frameLocks.getOrPut(key) { Mutex() }.withLock {
+            val route = AppNetwork.route.value
+            if (!route.ready) throw DataFeedException("شبکهٔ گوشی هنوز آماده نیست؛ تحلیل تازه انجام نشد")
+            frameCache[key]?.takeIf { it.revision == route.revision &&
+                reusable(it.result.candles, interval, clock()) }?.let { return@withLock it.result }
+            val result = fetchUncached(symbol, interval, venue)
+            if (route != AppNetwork.route.value) throw DataFeedException("مسیر اتصال تغییر کرد")
+            frameCache[key] = Cached(result, route.revision)
+            result
+        }
+    }
+
+    private suspend fun fetchUncached(symbol: String, interval: Interval, venue: Venue): PublicCandleHistoryClient.Result {
+        val requestedPair = pair(symbol, venue)
+        if (interval !in listOf(Interval.M5, Interval.M15, Interval.H1))
+            throw DataFeedException("رادار صرافی فقط M5/M15/H1 را پشتیبانی می‌کند")
+        val pair = checkListing(symbol, venue, requestedPair)
+        val bar = when (interval) {
+            Interval.M5 -> "5m"; Interval.M15 -> "15m"
+            else -> if (venue == Venue.GATE) "1h" else "1H"
+        }
+        val rows = when (venue) {
+            Venue.BINANCE -> {
+                val bInterval = if (interval == Interval.H1) "1h" else bar
+                val page1 = parseMexc(get(venue,
+                    "/api/v3/klines?symbol=$pair&interval=$bInterval&limit=1000"), interval, clock())
+                if (page1.size >= HistoryPolicy.LIVE_REQUEST_CANDLES || page1.isEmpty()) page1
+                else {
+                    val oldest = page1.minOf { it.time }
+                    val page2 = parseMexc(get(venue,
+                        "/api/v3/klines?symbol=$pair&interval=$bInterval&endTime=${oldest - 1}&limit=600"), interval, clock())
+                    page2 + page1
+                }
+            }
+            Venue.MEXC -> {
+                val mInterval = if (interval == Interval.H1) "60m" else bar
+                val page1 = parseMexc(get(venue,
+                    "/api/v3/klines?symbol=$pair&interval=$mInterval&limit=1000"), interval, clock())
+                if (page1.size >= HistoryPolicy.LIVE_REQUEST_CANDLES || page1.isEmpty()) page1
+                else {
+                    val oldest = page1.minOf { it.time }
+                    val page2 = parseMexc(get(venue,
+                        "/api/v3/klines?symbol=$pair&interval=$mInterval&endTime=${oldest - 1}&limit=600"), interval, clock())
+                    page2 + page1
+                }
+            }
+            Venue.GATE -> {
+                val page1 = parseGate(get(venue,
+                    "/api/v4/spot/candlesticks?currency_pair=$pair&interval=$bar&limit=1000"), interval, clock())
+                if (page1.size >= HistoryPolicy.LIVE_REQUEST_CANDLES || page1.isEmpty()) page1
+                else {
+                    val oldestSec = page1.minOf { it.time } / 1000 - interval.minutes * 60
+                    val page2 = parseGate(get(venue,
+                        "/api/v4/spot/candlesticks?currency_pair=$pair&interval=$bar&to=$oldestSec&limit=600"), interval, clock())
+                    page2 + page1
+                }
+            }
+            Venue.KRAKEN -> parseKraken(get(venue,
+                "/0/public/OHLC?pair=$pair&interval=${interval.minutes}"), interval, clock())
+            Venue.OKX -> {
+                val all = mutableListOf<Candle>()
+                var after: Long? = null
+                val maxPages = (HistoryPolicy.LIVE_REQUEST_CANDLES + 299) / 300
+                repeat(maxPages) {
+                    if (all.size >= HistoryPolicy.LIVE_REQUEST_CANDLES) return@repeat
+                    val page = parseOkx(get(venue, "/api/v5/market/history-candles?instId=$pair&bar=$bar&limit=300" +
+                        (after?.let { "&after=$it" } ?: "")), interval, clock())
+                    if (page.isNotEmpty()) {
+                        val oldest = page.minOf { it.time }
+                        if (after != null && oldest >= after!!) throw DataFeedException("صفحه‌های OKX پیش نمی‌روند")
+                        after = oldest
+                        all += page
+                    }
+                }
+                all
+            }
+        }
+        val receivedAt = clock()
+        val tail = rows.filter { it.closed && it.time + interval.millis <= receivedAt }
+            .distinctBy { it.time }.sortedBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
+        if (!CandleSourceHealth.ready(tail, interval, receivedAt, requireContiguous = true, requireVolume = false))
+            throw DataFeedException("${venue.provider}: ${HistoryPolicy.LIVE_REQUEST_CANDLES} کندل بستهٔ پیوسته/تازهٔ $bar موجود نیست")
+        return PublicCandleHistoryClient.Result(tail, venue.provider)
+    }
+
+    internal fun reusable(rows: List<Candle>, interval: Interval, now: Long): Boolean =
+        rows.lastOrNull()?.time?.plus(interval.millis) == now / interval.millis * interval.millis &&
+            CandleSourceHealth.ready(rows, interval, now, requireContiguous = true, requireVolume = false)
+
+    /** Last PUBLIC execution is a watch quote only. No stable replay cursor or
+     * bid/ask is asserted here; never pass it into an entry/exit journal.
+     */
+    suspend fun fetchWatchTrade(symbol: String, venue: Venue): PriceTick {
+        val id = checkListing(symbol, venue, pair(symbol, venue))
+        val body = when (venue) {
+            Venue.GATE -> get(venue, "/api/v4/spot/trades?currency_pair=$id&limit=1")
+            Venue.OKX -> get(venue, "/api/v5/market/trades?instId=$id&limit=1")
+            Venue.KRAKEN -> get(venue, "/0/public/Trades?pair=$id&count=1")
+            Venue.MEXC, Venue.BINANCE -> get(venue, "/api/v3/trades?symbol=$id&limit=1")
+        }
+        val tick = when (venue) {
+            Venue.GATE -> parseGateTrade(body, id)
+            Venue.OKX -> parseOkxTrade(body, id)
+            Venue.KRAKEN -> parseKrakenTrade(body)
+            Venue.MEXC, Venue.BINANCE -> parseMexcTrade(body)
+        }
+        val receivedAt = clock()
+        if (tick.at !in (receivedAt - 90_000L)..(receivedAt + 10_000L))
+            throw DataFeedException("${venue.provider}: آخرین معامله تازه نیست")
+        return tick
+    }
+
+    internal fun validMexcListing(root: JsonObject?, pair: String, base: String): Boolean =
+        root?.array("symbols")?.singleOrNull()?.let { it as? JsonObject }?.let {
+            it.text("symbol") == pair && it.text("baseAsset") == base && it.text("quoteAsset") == "USDT" &&
+                it.text("status") == "1" && it.text("isSpotTradingAllowed") == "true"
+        } == true
+
+    internal fun parseMexc(body: String, interval: Interval, now: Long): List<Candle> {
+        val rows = json.parseToJsonElement(body) as? JsonArray ?: throw DataFeedException("کندل MEXC نامعتبر است")
+        return rows.mapNotNull { item ->
+            val row = item as? JsonArray ?: throw DataFeedException("ساختار کندل MEXC نامعتبر است")
+            if (row.size < 7) throw DataFeedException("ستون‌های کندل MEXC ناقص‌اند")
+            val t = row[0].string().toLongOrNull() ?: throw DataFeedException("زمان کندل MEXC نامعتبر است")
+            if (t + interval.millis > now) return@mapNotNull null
+            val end = row[6].string().toLongOrNull()
+            if (end == null || end !in (t + interval.millis - 1)..(t + interval.millis))
+                throw DataFeedException("بازهٔ زمانی کندل MEXC مطابق درخواست نیست")
+            checkedCandle(t, row[1].string(), row[2].string(), row[3].string(), row[4].string(), row[5].string(), interval, now)
+        }
+    }
+
+    internal fun parseMexcTrade(body: String): PriceTick {
+        val row = (json.parseToJsonElement(body) as? JsonArray)?.singleOrNull() as? JsonObject
+            ?: throw DataFeedException("معاملهٔ زمان‌دار MEXC موجود نیست")
+        return checkedTrade(row.text("price"), row.text("qty"), row.text("time"))
+    }
+
+    internal fun parseKrakenTrade(body: String): PriceTick {
+        val root = json.parseToJsonElement(body) as? JsonObject
+            ?: throw DataFeedException("معاملهٔ Kraken نامعتبر است")
+        if (root.array("error")?.isEmpty() != true) throw DataFeedException("Kraken معامله را رد کرد")
+        val result = root.obj("result") ?: throw DataFeedException("Kraken معامله ندارد")
+        val rows = result.entries.singleOrNull { it.key != "last" }?.value as? JsonArray
+            ?: throw DataFeedException("هویت جفت معاملات Kraken مبهم است")
+        val row = rows.lastOrNull() as? JsonArray
+            ?: throw DataFeedException("معاملهٔ Kraken موجود نیست")
+        if (row.size < 3) throw DataFeedException("ستون معاملهٔ Kraken ناقص است")
+        val t = row[2].string().toDoubleOrNull()?.takeIf { it.isFinite() && it > 0 }
+            ?.times(1000.0)?.toLong()
+        return checkedTrade(row[0].string(), row[1].string(), t?.toString())
+    }
+
+    internal fun parseKraken(body: String, interval: Interval, now: Long): List<Candle> {
+        val root = json.parseToJsonElement(body) as? JsonObject
+            ?: throw DataFeedException("کندل Kraken نامعتبر است")
+        if (root.array("error")?.isEmpty() != true) throw DataFeedException("Kraken کندل را رد کرد")
+        val result = root.obj("result") ?: throw DataFeedException("Kraken کندل ندارد")
+        val rows = result.entries.singleOrNull { it.key != "last" }?.value as? JsonArray
+            ?: throw DataFeedException("هویت جفت کندل Kraken مبهم است")
+        return rows.mapNotNull { item ->
+            val row = item as? JsonArray ?: throw DataFeedException("ساختار کندل Kraken نامعتبر است")
+            if (row.size < 7) throw DataFeedException("ستون کندل Kraken ناقص است")
+            val time = row[0].string().toLongOrNull()?.times(1000L)
+                ?: throw DataFeedException("زمان کندل Kraken نامعتبر است")
+            if (time + interval.millis > now) return@mapNotNull null // current forming bar
+            checkedCandle(time, row[1].string(), row[2].string(), row[3].string(),
+                row[4].string(), row[6].string(), interval, now)
+        }
+    }
+
+    internal fun parseGateTrade(body: String, id: String): PriceTick {
+        val rows = json.parseToJsonElement(body) as? JsonArray
+            ?: throw DataFeedException("معاملات Gate نامعتبرند")
+        val row = rows.singleOrNull() as? JsonObject
+            ?: throw DataFeedException("معاملهٔ Gate موجود نیست")
+        if (row.text("currency_pair") != id) throw DataFeedException("معاملهٔ Gate با جفت درخواستی یکی نیست")
+        return checkedTrade(row.text("price"), row.text("amount"), row.text("create_time_ms"))
+    }
+
+    internal fun parseOkxTrade(body: String, id: String): PriceTick {
+        val root = json.parseToJsonElement(body) as? JsonObject
+            ?: throw DataFeedException("معاملات OKX نامعتبرند")
+        if (root.text("code") != "0") throw DataFeedException("معاملات OKX رد شد")
+        val row = root.array("data")?.singleOrNull() as? JsonObject
+            ?: throw DataFeedException("معاملهٔ OKX موجود نیست")
+        if (row.text("instId") != id) throw DataFeedException("معاملهٔ OKX با جفت درخواستی یکی نیست")
+        return checkedTrade(row.text("px"), row.text("sz"), row.text("ts"))
+    }
+
+    private fun checkedTrade(price: String?, size: String?, at: String?): PriceTick {
+        val p = price?.toDoubleOrNull(); val amount = size?.toDoubleOrNull()
+        val t = at?.toLongOrNull()
+        if (p == null || !p.isFinite() || p <= 0 || amount == null ||
+            !amount.isFinite() || amount <= 0 || t == null || t <= 0)
+            throw DataFeedException("قیمت/حجم/زمان معامله معتبر نیست")
+        return PriceTick(p, t)
+    }
+
+    internal fun parseGate(body: String, interval: Interval, now: Long): List<Candle> {
+        val rows = json.parseToJsonElement(body) as? JsonArray ?: throw DataFeedException("کندل Gate نامعتبر است")
+        return rows.mapNotNull { item ->
+            val row = item as? JsonArray ?: throw DataFeedException("ساختار کندل Gate نامعتبر است")
+            if (row.size < 8) throw DataFeedException("ستون‌های کندل Gate ناقص‌اند")
+            if (row[7].string().lowercase() != "true" ||
+                (row[0].string().toLongOrNull()?.times(1000L) ?: 0L) + interval.millis > now) return@mapNotNull null
+            checkedCandle(row[0].string().toLongOrNull()?.times(1000L), row[5].string(),
+                row[3].string(), row[4].string(), row[2].string(), row[6].string(), interval, now)
+        }
+    }
+
+    internal fun parseOkx(body: String, interval: Interval, now: Long): List<Candle> {
+        val root = json.parseToJsonElement(body) as? JsonObject ?: throw DataFeedException("کندل OKX نامعتبر است")
+        if (root.text("code") != "0") throw DataFeedException("OKX دریافت کندل را رد کرد")
+        return root.array("data")?.mapNotNull { item ->
+            val row = item as? JsonArray ?: throw DataFeedException("ساختار کندل OKX نامعتبر است")
+            if (row.size < 9) throw DataFeedException("ستون‌های کندل OKX ناقص‌اند")
+            if (row[8].string() != "1" ||
+                (row[0].string().toLongOrNull() ?: 0L) + interval.millis > now) return@mapNotNull null
+            checkedCandle(row[0].string().toLongOrNull(), row[1].string(),
+                row[2].string(), row[3].string(), row[4].string(), row[5].string(), interval, now)
+        } ?: throw DataFeedException("دادهٔ کندل OKX موجود نیست")
+    }
+
+    private fun checkedCandle(t: Long?, o: String, h: String, l: String, c: String, v: String,
+                              interval: Interval, now: Long): Candle {
+        val prices = listOf(o,h,l,c,v).map { it.toDoubleOrNull() ?: throw DataFeedException("عدد کندل معتبر نیست") }
+        val (open, high, low, close, volume) = prices
+        if (t == null || t <= 0 || t % interval.millis != 0L || t + interval.millis > now ||
+            prices.any { !it.isFinite() } || minOf(open,high,low,close) <= 0 ||
+            high < maxOf(open,close) || low > minOf(open,close) || volume < 0)
+            throw DataFeedException("کندل بستهٔ صرافی دارای زمان، قیمت یا حجم نامعتبر است")
+        return Candle(t,open,high,low,close,volume,closed = true)
+    }
+
+    private fun JsonObject.text(key: String) = (this[key] as? JsonPrimitive)?.contentOrNull
+    private fun JsonObject.array(key: String) = this[key] as? JsonArray
+    private fun JsonObject.obj(key: String) = this[key] as? JsonObject
+    private fun kotlinx.serialization.json.JsonElement.string(): String =
+        (this as? JsonPrimitive)?.contentOrNull ?: throw DataFeedException("فیلد کندل نامعتبر است")
+}

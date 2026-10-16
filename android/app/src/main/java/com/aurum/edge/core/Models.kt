@@ -25,6 +25,7 @@ data class Candle(
 
 enum class Interval(val api: String, val label: String, val minutes: Int) {
     M1("1min", "1m", 1),
+    M3("3min", "3m", 3),
     M5("5min", "5m", 5),
     M15("15min", "15m", 15),
     M30("30min", "30m", 30),
@@ -39,21 +40,30 @@ enum class Interval(val api: String, val label: String, val minutes: Int) {
     }
 }
 
-data class PriceTick(val price: Double, val at: Long, val bid: Double? = null, val ask: Double? = null) {
+data class PriceTick(val price: Double, val at: Long, val bid: Double? = null, val ask: Double? = null,
+                     val isTradeTick: Boolean = true, val provider: String? = null, val sourceNote: String? = null, val sourceConfirmations: Int = 0) {
     val spread: Double? get() = if (bid != null && ask != null && ask >= bid) ask - bid else null
 }
 
 enum class SignalAction { BUY, SELL, NO_TRADE }
 
 enum class AssetClass(val code: String, val label: String, val maxSlots: Int) {
-    CRYPTO("CRYPTO", "رمزارز", 1),
-    FOREX("FOREX", "جفت‌ارز فارکس", 1),
-    COMMODITY("COMMODITY", "کالا و انرژی", 1),
-    STOCK("STOCK", "سهام و شاخص", 1);
+    CRYPTO("CRYPTO", "رمزارز", 2),
+    FOREX("FOREX", "جفت‌ارز فارکس", 2),
+    COMMODITY("COMMODITY", "کالا و انرژی", 2),
+    STOCK("STOCK", "سهام و شاخص", 2);
 
     companion object {
+        // Provider-independent identity; do not mistake a slashless EURUSD for a stock.
+        // Known currencies are explicit; arbitrary six-letter strings are not assumed FX.
+        private val fiat = setOf("USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD",
+            "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "TRY", "ZAR", "MXN", "SGD", "HKD")
+        private val equities = setOf("AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "GOOGL", "META",
+            "AMD", "NFLX", "INTC", "NASDAQ", "SP500", "DOW", "US30", "DJI", "^DJI", "DJIA", "DAX", "FTSE", "NIKKEI")
+
         fun of(symbol: String): AssetClass {
-            val s = symbol.trim().uppercase()
+            val s = symbol.trim().uppercase(java.util.Locale.ROOT)
+            val pair = s.replace("/", "")
             return when {
                 s.contains("USDT") || s.startsWith("BTC") || s.startsWith("ETH") || s.startsWith("SOL") ||
                     s.startsWith("BNB") || s.startsWith("XRP") || s.startsWith("DOGE") || s.startsWith("ADA") ||
@@ -65,9 +75,13 @@ enum class AssetClass(val code: String, val label: String, val maxSlots: Int) {
                     s.startsWith("USOIL") || s.startsWith("UKOIL") || s.startsWith("NATGAS") || s.startsWith("COPPER") ||
                     s == "GOLD" || s == "SILVER" -> COMMODITY
 
-                s in setOf("AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "GOOGL", "NASDAQ", "SP500", "DOW", "DAX", "FTSE", "NIKKEI") ||
-                    (!s.contains("/") && !s.contains("USDT") && s.length in 1..6) -> STOCK
+                pair.length == 6 && pair.substring(0, 3) in fiat &&
+                    pair.substring(3) in fiat && pair.substring(0, 3) != pair.substring(3) -> FOREX
 
+                s in equities || (!s.contains("/") && s.length in 1..5) -> STOCK
+
+                // Historical unknown symbols retain their previous risk bucket; a feed must
+                // still validate the actual instrument before a trade can be considered.
                 else -> FOREX
             }
         }
@@ -78,24 +92,24 @@ enum class StrategyKind(val id: String, val label: String, val description: Stri
     ICHIMOKU_PRICE_ACTION(
         "ICHIMOKU_PRICE_ACTION",
         "ایچیموکو + پرایس اکشن",
-        "موتور واحد: ایچیموکو نهادی ۸/۲۴/۷۲ + تاییدیه پرایس‌اکشن + حجم و مومنتوم + تراز روند ۳ تایم‌فریم + فیلتر قفل ضد ساید",
+        "موتور واحد V1: EMA/ایچیموکو + RSI/MACD + واکنش حمایت/مقاومت + هفت تایم‌فریم M1 تا D1",
     );
 
     companion object {
-        val SUPER_PLUS = ICHIMOKU_PRICE_ACTION
-        val ICHIMOKU = ICHIMOKU_PRICE_ACTION
-        val ICT_SMC = ICHIMOKU_PRICE_ACTION
-        val EMA_VWAP = ICHIMOKU_PRICE_ACTION
-        val VOLUME_BREAKOUT = ICHIMOKU_PRICE_ACTION
-        val MEAN_REVERSION = ICHIMOKU_PRICE_ACTION
-
-        fun fromId(raw: String?): StrategyKind = ICHIMOKU_PRICE_ACTION
+        // Older persisted choices are migrated to the only V1 engine; none is offered as
+        // a separate executable strategy. The real selectable modes are CategoryStrategy.
+        fun fromId(raw: String?): StrategyKind? = when (raw?.trim()?.uppercase(java.util.Locale.ROOT)) {
+            null, "", "ICHIMOKU_PRICE_ACTION", "ICHIMOKU", "SUPER_PLUS", "ICT_SMC",
+            "EMA_VWAP", "VOLUME_BREAKOUT", "MEAN_REVERSION" -> ICHIMOKU_PRICE_ACTION
+            else -> null // unknown historical IDs must not be advertised as implemented
+        }
     }
 }
 
 /**
- * The base Ichimoku confluence engine is active by default. These booleans are additive
- * opt-in safeguards/setups; Chikou can be explicitly disabled only for a named profile experiment.
+ * Legacy profile record kept for persisted settings and old journal compatibility.
+ * These options are NOT V1 signal switches; the live engine uses four scored layers,
+ * seven independent frames and the per-category TREND/RANGE/HYBRID mode only.
  */
 data class SignalProfile(
     val momentumVolume: Boolean = false,
@@ -173,7 +187,7 @@ data class SignalProfile(
     }
 }
 
-enum class ConfluenceStatus { CONFIRMED, CONFLICT, UNKNOWN }
+enum class ConfluenceStatus { CONFIRMED, PARTIAL, CONFLICT, UNKNOWN }
 
 data class ConfluenceItem(
     val name: String,
@@ -183,6 +197,109 @@ data class ConfluenceItem(
     /** Optional per-condition contribution/health shown in the UI as a percent out of 100. */
     val scorePercent: Int? = null,
 )
+
+/** Closed-bar entry evidence carried through news review to the final journal guard. */
+data class IchimokuEntryEvidence(
+    val side: SignalAction,
+    val barTime: Long,
+    val crossTime: Long,
+    val interval: Interval,
+    val compressedBars: Int,
+) {
+    fun matches(signal: Signal): Boolean = signal.action == side && signal.barTime == barTime &&
+        signal.interval == interval && compressedBars in 3..5 &&
+        crossTime <= barTime && barTime - crossTime in 0L..interval.millis &&
+        crossTime > 0L
+}
+
+/** Measured closed-bar proof of the crypto-only compression/breakout engine.
+ * It is ephemeral signal evidence, NOT a fill or a claim about future prices.
+ */
+data class CryptoBreakoutEvidence(
+    val side: SignalAction,
+    val barTime: Long,
+    val breakoutTime: Long,
+    val compressionStart: Long,
+    val atr: Double,
+    val points: Int,
+    val pattern: String,
+) {
+    fun matches(signal: Signal): Boolean = signal.action == side &&
+        signal.interval == Interval.M5 && barTime == signal.barTime && barTime > 0L &&
+        breakoutTime in (barTime - Interval.M5.millis)..barTime &&
+        breakoutTime - compressionStart == 20L * Interval.M5.millis &&
+        atr.isFinite() && atr > 0.0 && points in 16..26 &&
+        pattern in setOf("FLAG", "BASE", "WEDGE") &&
+        signal.entry?.isFinite() == true && signal.entry > 0 &&
+        signal.stopLoss?.isFinite() == true && signal.takeProfit?.isFinite() == true &&
+        signal.stopLoss > 0 && signal.takeProfit > 0 &&
+        (if (side == SignalAction.BUY) signal.stopLoss < signal.entry &&
+            signal.takeProfit >= signal.entry + 3 * (signal.entry - signal.stopLoss)
+         else side == SignalAction.SELL && signal.stopLoss > signal.entry &&
+            signal.takeProfit <= signal.entry - 3 * (signal.stopLoss - signal.entry))
+}
+
+/**
+ * ALS-5 — Adaptive Liquidity & Structure Trading System opportunity & state-machine record for XAU/USD.
+ * Captures both incomplete candidate setups (WAIT) and fully confirmed entries (BUY / SELL).
+ */
+@Serializable
+data class Als5OpportunityRecord(
+    val strategyName: String = "ALS-5",
+    val state: String, // BUY | SELL | WAIT | NO_TRADE
+    val setupType: String, // ENGINE_A_TREND | ENGINE_B_SWEEP | ENGINE_C_RANGE | NONE
+    val direction: SignalAction,
+    val structuralLevel: Double?,
+    val regime: String, // BULLISH_TREND | BEARISH_TREND | RANGE | UNCERTAIN_HIGH_VOL
+    val satisfiedConditions: List<String>,
+    val missingConditions: List<String>,
+    val invalidationLevel: Double?,
+    val candidateEntry: Double?,
+    val estimatedStopLoss: Double?,
+    val estimatedTakeProfit: Double?,
+    val rewardToRisk: Double?,
+    val candidateSinceBarTime: Long? = null,
+    val expirationBarsRemaining: Int,
+    val scoreOutOf10: Int,
+    val structureScore: Int, // 0..2
+    val setupLevelScore: Int, // 0..2
+    val confirmationScore: Int, // 0..2
+    val rrScore: Int, // 0..2
+    val executionScore: Int, // 0..2
+    val positionLots: Double = 0.0,
+    val positionOz: Double = 0.0,
+    val exitModel: String = "FIXED_RR",
+    val setupKey: String = "",
+    val barTime: Long = 0L,
+) {
+    fun matches(signal: Signal): Boolean {
+        val entry = candidateEntry ?: return false
+        val stop = estimatedStopLoss ?: return false
+        val target = estimatedTakeProfit ?: return false
+        val rr = rewardToRisk ?: return false
+        return strategyName == "ALS-5" &&
+            state == direction.name && state in setOf("BUY", "SELL") &&
+            setupType in setOf("ENGINE_A_TREND", "ENGINE_B_SWEEP", "ENGINE_C_RANGE") &&
+            regime in setOf("BULLISH_TREND", "BEARISH_TREND", "RANGE") &&
+            signal.action == direction && signal.interval == Interval.M5 &&
+            barTime == signal.barTime && barTime > 0L &&
+            scoreOutOf10 in 8..10 &&
+            listOf(structureScore, setupLevelScore, confirmationScore, rrScore, executionScore)
+                .all { it in 0..2 } &&
+            structureScore + setupLevelScore + confirmationScore + rrScore + executionScore == scoreOutOf10 &&
+            rr.isFinite() && rr >= 1.5 &&
+            entry.isFinite() && entry > 0.0 &&
+            stop.isFinite() && stop > 0.0 &&
+            target.isFinite() && target > 0.0 &&
+            signal.entry?.let { kotlin.math.abs(it - entry) < 1e-8 } == true &&
+            signal.stopLoss?.let { kotlin.math.abs(it - stop) < 1e-8 } == true &&
+            signal.takeProfit?.let { kotlin.math.abs(it - target) < 1e-8 } == true &&
+            signal.riskReward?.let { kotlin.math.abs(it - rr) < 1e-8 } == true &&
+            positionLots.isFinite() && positionLots > 0.0 &&
+            positionOz.isFinite() && positionOz > 0.0 &&
+            !setupKey.isBlank()
+    }
+}
 
 data class Signal(
     val action: SignalAction,
@@ -197,6 +314,9 @@ data class Signal(
     val interval: Interval = Interval.M5,
     val barTime: Long = 0L,
     val evaluatedAt: Long = System.currentTimeMillis(),
+    val ichimokuEntry: IchimokuEntryEvidence? = null,
+    val cryptoBreakout: CryptoBreakoutEvidence? = null,
+    val als5Opportunity: Als5OpportunityRecord? = null,
 ) {
     val isActionable: Boolean get() = action != SignalAction.NO_TRADE
 }
@@ -356,6 +476,8 @@ data class PaperTrade(
     /** Defaults keep older journal JSON readable. Auto is always PAPER, never a broker fill. */
     val autoOpened: Boolean = false,
     val signalBarTime: Long? = null,
+    /** Stable ALS-5 structure key prevents a repeat entry from the same setup after a close. */
+    val als5SetupKey: String? = null,
     val newsEvidence: PaperNewsRecord? = null,
     /** Companion AI's post-open educational review; never a gate and never financial advice. */
     val aiReview: PaperAiReview? = null,
@@ -375,12 +497,30 @@ data class PaperTrade(
      * بعد از ورود دوباره محاسبه نمی‌شود. برای رکوردهای قدیمی‌تر null است.
      */
     val marketTrend: MarketTrendRecord? = null,
+    /** Non-null on V1 records; old positions retain their historic fixed-target exit. */
+    val initialStopLoss: Double? = null,
+    val trailExtreme: Double? = null,
+    /** First observed/unverifiable gap in the executed-trade feed after paper entry. */
+    val tickCoverageGapAt: Long? = null,
+    /** Opt-in market-only archive is fixed at entry; older positions stay on direct feed. */
+    val usesTickArchive: Boolean = false,
+    /** Durable local archive cursor; never a venue trade ID. */
+    val tickArchiveSeq: Long = 0L,
+    /** Legacy records remain Nobitex. Never reinterpret an existing entry on a new venue. */
+    val cryptoVenue: String = "NOBITEX",
+    /** Last Binance Spot aggregate ID atomically settled/checked with trailing and balance. */
+    val binanceAggId: Long = -1L,
+    /** Only NEW crypto compression positions have this ATR; legacy trails stay unchanged. */
+    val cryptoEntryAtr: Double? = null,
+    val cryptoLastClosedBarAt: Long? = null,
+    val cryptoExitPendingAt: Long? = null,
+    val cryptoExitReason: String? = null,
 ) {
     val isOpen: Boolean get() = closedAt == null
     val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }
     val assetClass: AssetClass get() = AssetClass.of(symbol)
 
-    val riskPerOz: Double get() = kotlin.math.abs(entry - stopLoss)
+    val riskPerOz: Double get() = kotlin.math.abs(entry - (initialStopLoss ?: stopLoss))
 
     /** Risk in QUOTE currency per unit; convert to USD before comparing with the budget. */
     val riskUsd: Double
@@ -442,13 +582,13 @@ data class PaperOpportunity(
         fun from(signal: Signal, symbol: String, price: Double, mtf: MtfSnapshotRecord,
                  news: PaperNewsRecord?, ict: IctPriceActionRecord? = null,
                  now: Long = System.currentTimeMillis()): PaperOpportunity {
-            val technicalConditions = signal.confluence.filterNot {
-                it.name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL
-            }
+            val technicalConditions = TechnicalEvidence.items(signal)
             require(PaperOrderRules.paperable(symbol) && signal.isActionable && signal.barTime > 0 &&
+                TechnicalEvidence.confirmed(signal) &&
                 price.isFinite() && price > 0 && signal.stopLoss != null && signal.takeProfit != null &&
-                !mtf.veto) {
-                "فرصت آموزشی معتبر نیست"
+                mtf.frames.isNotEmpty() && mtf.barTime == signal.barTime && mtf.baseInterval == signal.interval.label &&
+                (ict == null || ict.matches(signal, symbol, price))) {
+                "فرصت فنی معتبر نیست"
             }
             return PaperOpportunity(
                 key = "$symbol|${signal.interval.label}|${signal.barTime}|${signal.action}",
@@ -588,131 +728,13 @@ data class MtfSnapshotRecord(
     }
 }
 
-@Serializable
-data class BacktestTradeRecord(
-    val side: String,
-    val entryTime: Long,
-    val exitTime: Long,
-    val entry: Double,
-    val exit: Double,
-    val positionOz: Double,
-    val pnlUsd: Double,
-    val rMultiple: Double,
-    val exitReason: String,
-)
-
-@Serializable
-data class BacktestRecord(
-    val interval: String,
-    val symbol: String = "XAU/USD",
-    val dataSource: String = "Twelve Data (دیتای واقعی)",
-    val fromTime: Long,
-    val toTime: Long,
-    val bars: Int,
-    val initialBalance: Double,
-    val finalBalance: Double,
-    val netPnl: Double,
-    val wins: Int,
-    val losses: Int,
-    val winRate: Double? = null,
-    val profitFactor: Double? = null,
-    val expectancyR: Double? = null,
-    val maxDrawdownPct: Double,
-    val feesUsd: Double,
-    val skippedMinLot: Int,
-    val skippedMargin: Int,
-    val spreadPrice: Double,
-    val commissionPerOz: Double,
-    val note: String,
-    val trades: List<BacktestTradeRecord> = emptyList(),
-    /** Old JSON had same-close entry and forced last-bar settlement; do not treat it as V2. */
-    val executionModel: String = "LEGACY_CLOSE_FILL",
-    val skippedGap: Int = 0,
-    val skippedFill: Int = 0,
-    val unresolvedGap: Int = 0,
-    val openAtEnd: Boolean = false,
-) {
-    companion object {
-        fun from(result: com.aurum.edge.engine.Backtester.Result): BacktestRecord = BacktestRecord(
-            interval = result.interval.label,
-            symbol = result.symbol,
-            dataSource = result.dataSource,
-            fromTime = result.fromTime,
-            toTime = result.toTime,
-            bars = result.bars,
-            initialBalance = result.initialBalance,
-            finalBalance = result.finalBalance,
-            netPnl = result.netPnl,
-            wins = result.wins,
-            losses = result.losses,
-            winRate = result.winRate,
-            profitFactor = result.profitFactor,
-            expectancyR = result.expectancyR,
-            maxDrawdownPct = result.maxDrawdownPct,
-            feesUsd = result.feesUsd,
-            skippedMinLot = result.skippedMinLot,
-            skippedMargin = result.skippedMargin,
-            spreadPrice = result.spreadPrice,
-            commissionPerOz = result.commissionPerOz,
-            note = result.note,
-            executionModel = com.aurum.edge.engine.Backtester.EXECUTION_MODEL,
-            skippedGap = result.skippedGap,
-            skippedFill = result.skippedFill,
-            unresolvedGap = result.unresolvedGap,
-            openAtEnd = result.openAtEnd,
-            trades = result.trades.map {
-                BacktestTradeRecord(
-                    side = it.side.name,
-                    entryTime = it.entryTime,
-                    exitTime = it.exitTime,
-                    entry = it.entry,
-                    exit = it.exit,
-                    positionOz = it.positionOz,
-                    pnlUsd = it.pnlUsd,
-                    rMultiple = it.rMultiple,
-                    exitReason = it.exitReason,
-                )
-            },
-        )
-    }
-}
-
-@Serializable
-data class WalkForwardRecord(
-    val interval: String,
-    val bars: Int,
-    val splitTime: Long,
-    val splitIndex: Int,
-    val verdict: String,
-    val generatedAt: Long,
-    val inSample: BacktestRecord,
-    val outOfSample: BacktestRecord,
-    /** Null for older stored reports; never manufacture a cost scenario on read. */
-    val costStressOutOfSample: BacktestRecord? = null,
-) {
-    companion object {
-        fun from(result: com.aurum.edge.engine.Backtester.WalkForward, generatedAt: Long = System.currentTimeMillis()): WalkForwardRecord =
-            WalkForwardRecord(
-                interval = result.outOfSample.interval.label,
-                bars = result.bars,
-                splitTime = result.splitTime,
-                splitIndex = result.splitIndex,
-                verdict = result.verdict,
-                generatedAt = generatedAt,
-                inSample = BacktestRecord.from(result.inSample),
-                outOfSample = BacktestRecord.from(result.outOfSample),
-                costStressOutOfSample = BacktestRecord.from(result.costStressOutOfSample),
-            )
-    }
-}
-
 data class AppSettings(
     val apiKey: String = "",
     val symbol: String = "XAU/USD",
     val interval: Interval = Interval.M5,
     val riskPercent: Double = 0.5,
     val accountBalance: Double = 1000.0,
-    val minConfidence: Double = 72.0,
+    val minConfidence: Double = 85.0,
     /** Cost assumptions in USD. They must match your broker; every report states them. */
     // Defaults are the REAL reference costs of the most liquid gold venue pair we quote:
     // IC Markets Raw Spread (EU): XAU/USD ≈ $0.12/oz spread + $3.50 per 100 oz lot/side = $0.035/oz.
@@ -728,29 +750,34 @@ data class AppSettings(
     /** Applies to NEW paper entries; real orders remain disabled independently. */
     val pauseOnNews: Boolean = false,
     /** Automatic orders here are local paper records, never broker orders. */
-    val autoPaperTrading: Boolean = true,
+    val autoPaperTrading: Boolean = false,
     /** Check for a public APK when the app starts and download it when one is available. */
-    val autoDownloadUpdates: Boolean = false,
+    val autoDownloadUpdates: Boolean = true,
     /**
      * OPTIONAL alternative to [newsBaseUrl] for the Forex ninth-condition AI gate: instead of your
      * own backend server, the phone calls this endpoint DIRECTLY with your own key - either the
-     * Anthropic (Claude) Messages API or any OpenAI-compatible service (see [newsAiFormat]). Used only if [newsBaseUrl] is blank. The SAME publisher-rights/consent responsibility
+     * native Gemini, Anthropic (Claude) Messages API or an OpenAI-compatible service (see [newsAiFormat]). Used only if [newsBaseUrl] is blank. The SAME publisher-rights/consent responsibility
      * applies to whoever holds this key; headline/excerpt text goes straight to this host from
-     * the phone, so if you later share this APK, this key travels with it and is extractable.
+     * the phone. The key stays in app-private preferences, not in the distributable APK.
      */
     val newsAiApiKey: String = "",
     val newsAiBaseUrl: String = "",
     val newsAiModel: String = "",
     /**
-     * Wire format of the AI endpoint: AUTO (detect Anthropic by host, else OpenAI-compatible),
+     * Wire format: GEMINI (native Google REST), AUTO (exact native Google endpoint,
+     * Anthropic host, otherwise OpenAI-compatible),
      * ANTHROPIC (Messages API on ANY host, e.g. a relay) or OPENAI (chat/completions on any
      * host). Explicit beats guessing for proxy keys with non-standard prefixes.
      */
     val newsAiFormat: String = "AUTO",
     val signalProfile: SignalProfile = SignalProfile.BASE,
-    val activeStrategy: StrategyKind = StrategyKind.ICHIMOKU,
+    val activeStrategy: StrategyKind = StrategyKind.ICHIMOKU_PRICE_ACTION,
+    val categoryStrategies: Map<AssetClass, CategoryStrategy> = AssetClass.entries.associateWith { CategoryStrategy.HYBRID },
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank()
     val hasClientNewsAi: Boolean get() = newsAiApiKey.isNotBlank() && newsAiBaseUrl.isNotBlank() && newsAiModel.isNotBlank()
-    val newsAiFormatNormalized: String get() = if (newsAiFormat in setOf("ANTHROPIC", "OPENAI")) newsAiFormat else "AUTO"
+    /** Full app catalog, never a hidden user-entered subset. Legacy preferences are ignored. */
+    val activeSymbols: List<String> get() = com.aurum.edge.data.WatchCatalog.scannerSymbols
+    fun strategyFor(symbol: String): CategoryStrategy = categoryStrategies[AssetClass.of(symbol)] ?: CategoryStrategy.HYBRID
+    val newsAiFormatNormalized: String get() = if (newsAiFormat in setOf("ANTHROPIC", "OPENAI", "GEMINI")) newsAiFormat else "AUTO"
 }

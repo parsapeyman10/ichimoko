@@ -17,8 +17,8 @@ if (System.getenv("GITHUB_ACTIONS") == "true") {
 
 // Never bake provider credentials into an APK (even a GitHub Actions secret is extractable).
 // Read-only market keys are entered on the device; trading keys must stay server-side.
-// The CI artifact is a DEBUG-SIGNED preview. A repository owner can explicitly supply a
-// stable, privately held signing key for sideloaded updates; signing is NOT Play certification
+// Locally built releases without a stable keystore fall back to a debug signature. CI requires
+// the pinned updater key before publishing; signing is NOT Play certification
 // and does not guarantee that Google Play Protect will stop warning on first sideload.
 val ownerStorePath = System.getenv("AURUM_RELEASE_STORE_FILE")?.takeIf { it.isNotBlank() }
 val ownerStorePassword = System.getenv("AURUM_RELEASE_STORE_PASSWORD")?.takeIf { it.isNotBlank() }
@@ -34,6 +34,11 @@ fun gitOutput(vararg args: String): String = runCatching {
     out.toString().trim().ifBlank { "unknown" }
 }.getOrDefault("unknown")
 val gitSha = gitOutput("rev-parse", "--short=12", "HEAD")
+// Public certificate fingerprint only (NEVER the private key). Kept in Git for diagnostic display.
+val updaterSigner = file("../../update/updater-signer.sha256").readText().trim()
+if (!Regex("[0-9a-f]{64}").matches(updaterSigner)) {
+    throw org.gradle.api.GradleException("Invalid updater certificate fingerprint")
+}
 if (!ownerSigningReady && (requireOwnerSigning || signingValues.any { it != null })) {
     throw org.gradle.api.GradleException(
         "Owner-signed release requires all four AURUM_RELEASE_* environment variables; refusing an incomplete signing setup."
@@ -56,11 +61,13 @@ android {
         applicationId = "com.aurum.edge"
         minSdk = 26
         targetSdk = 35
-        versionCode = 14
-        versionName = "1.3.5"
+        // Keep the published update channel upgradeable: 2.0.2 is code 674 after v2.0.1 (673).
+        versionCode = 674
+        versionName = "2.0.2"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
+        buildConfigField("String", "UPDATER_CERT_SHA256", "\"$updaterSigner\"")
         buildConfigField("String", "UPDATE_REPO", "\"parsapeyman10/ichimoko\"")
         // The updater must read the published manifest, not a short-lived Arena/PR branch.
         // Public releases are still checked separately, so a manifest without apkUrl cannot
@@ -113,8 +120,8 @@ android {
 
     // Ship only the CPU architectures real phones use. Without this every native library
     // is bundled four times (arm64, armeabi-v7a, x86, x86_64) and three of them are dead
-    // weight on any given device. Code is NOT obfuscated or shrunk: isMinifyEnabled stays
-    // false, so nothing can break at runtime that the JVM tests would not catch.
+    // weight on any given device. Keep existing ARM support for any remaining native
+    // dependency. Shrinking remains disabled; device testing is still necessary.
     defaultConfig {
         ndk {
             abiFilters += setOf("arm64-v8a", "armeabi-v7a")
@@ -151,12 +158,16 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Nobitex documents Centrifugo public trade subscriptions; use its official Android SDK
+    // for application ping/pong, reconnect and server-supported stream recovery.
+    implementation("io.github.centrifugal:centrifuge-java:0.7.0")
     implementation("org.tukaani:xz:1.10")
     implementation("org.jsoup:jsoup:1.18.3")
 
     // JVM unit tests for the pure engine code and read-only data validation.
     // They never run inside the APK; release assembly requires them to pass below.
     testImplementation("junit:junit:4.13.2")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.robolectric:robolectric:4.14.1")
 }
 

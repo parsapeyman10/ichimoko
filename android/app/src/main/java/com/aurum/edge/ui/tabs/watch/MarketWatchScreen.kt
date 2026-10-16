@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -39,7 +40,8 @@ import com.aurum.edge.ui.theme.AurumColors
 import kotlinx.coroutines.delay
 
 @Composable
-fun MarketWatchScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
+fun MarketWatchScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit,
+                      onOpenChart: (String) -> Unit) {
     val state by viewModel.watch.collectAsStateWithLifecycle()
     val selections by viewModel.watchSettings.collectAsStateWithLifecycle()
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -54,19 +56,16 @@ fun MarketWatchScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
-        SectionCard("دیده‌بان بازار", "طلای ایران و دلار ایران بالای لیست؛ بعد طلا و جفت‌ارزهای فارکس · بدون API Key اجباری") {
+        SectionCard("دیده‌بان بازار") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = viewModel::refreshWatch, enabled = !state.refreshing, modifier = Modifier.weight(1f)) {
                     Text(if (state.refreshing) "در حال دریافت…" else "به‌روزرسانی")
                 }
+                OutlinedButton(onClick = onOpenSettings) { Text("API") }
             }
             if (state.refreshing) CircularProgressIndicator(modifier = Modifier.padding(top = 8.dp), strokeWidth = 2.dp)
-            Text(
-                "آخرین تلاش: ${relativeTime(state.lastAttemptAt, now)} · منابع عمومی: TGJU برای ایران و Yahoo Finance برای فارکس/طلا.",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 8.dp),
-            )
+            Text("آخرین تلاش: ${relativeTime(state.lastAttemptAt, now)}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             state.error?.let { Text(it, color = AurumColors.Red, style = MaterialTheme.typography.bodySmall) }
         }
 
@@ -79,17 +78,26 @@ fun MarketWatchScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit) {
             val sourceTitle = SourceCatalog.find(display.sourceId)?.title ?: "منبع عمومی"
             val assessment = SourceComparison.assess(symbol, display.sourceId, quote, now)
             val tone = when {
-                assessment.readable -> AurumColors.Green
                 verification.status == VerificationStatus.CONFLICT -> AurumColors.Red
+                assessment.readable -> AurumColors.Green
                 else -> AurumColors.TextMuted
             }
-            val badge = if (assessment.readable) "یک منبع معتبر" else verification.badge
+            val badge = when (verification.status) {
+                VerificationStatus.CONFIRMED -> "${verification.freshSources} منبع همخوان"
+                VerificationStatus.CONFLICT -> "اختلاف منابع"
+                else -> if (assessment.readable) "یک منبع تازه" else verification.badge
+            }
             SectionCard(
                 title = "${symbol.label} · ${symbol.id}",
                 subtitle = "منبع: $sourceTitle${if (display.fallback) " · جایگزین" else ""}",
                 trailing = { Pill(badge, tone) },
             ) {
                 QuoteMainLine(quote, symbol.unit, tone)
+                if (symbol.id in WatchCatalog.chartSymbols) {
+                    OutlinedButton(onClick = { onOpenChart(symbol.id) }) {
+                        Text("چارت و سیگنال ${symbol.id}")
+                    }
+                }
                 Text(
                     quote?.changePct?.let { change -> "تغییر: ${String.format(java.util.Locale.US, "%.2f", change)}٪" }
                         ?: "تغییر روزانه از منبع دریافت نشد",

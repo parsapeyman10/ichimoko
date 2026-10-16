@@ -7,6 +7,8 @@ import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.PaperTrade
+import com.aurum.edge.core.PriceTick
+import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +23,7 @@ class PaperAutoTrader(
     private val news: NewsRepository,
     private val journal: JournalStore,
     private val advisor: TraderAdvisor? = null,
+    private val decisionLog: DecisionLogStore? = null,
 ) {
     private val _status = MutableStateFlow("فعال")
     val status: StateFlow<String> = _status.asStateFlow()
@@ -39,47 +42,40 @@ class PaperAutoTrader(
     fun stopped(reason: String) { _status.value = reason }
 
     /** Returns only a trade whose atomic journal write has completed; null is never an entry event. */
-    suspend fun onMarketUpdate(state: MarketState): PaperTrade? {
+    suspend fun onMarketUpdate(state: MarketState, catalogQuote: PriceTick? = null): PaperTrade? {
+        // The catalog runner may pass a second, independently fetched same-venue trade
+        // tick even for the selected crypto symbol's 5m closed-bar scan. Persistence and
+        // duplicate/portfolio limits remain atomic in JournalStore.
+        val allowed = settings.read().activeSymbols
+        if (catalogQuote != null &&
+            (!TradeQuotePolicy.accepts(catalogQuote) || catalogQuote.price != state.lastPrice ||
+                state.symbol !in WatchCatalog.scannerSymbols)) {
+            _status.value = "قیمت مستقل و تازهٔ نماد کاتالوگ تأیید نشد"
+            return null
+        }
         val headlines = news.state.value
         val config = settings.read()
-        val reason = PaperAutoRules.blocker(state, config, headlines)
+        val reason = PaperAutoRules.blocker(state, config, headlines, allowedSymbols = allowed)
         if (reason != null) {
-            _status.value = reason
+            _status.value = if (catalogQuote != null) "${state.symbol}: $reason" else reason
             return null
         }
-        if (journal.trades.value.any { it.symbol == state.symbol && it.signalBarTime == state.signal?.barTime }) {
-            _status.value = "سیگنال این کندل قبلاً در ژورنال ثبت شده است؛ ورود تکراری نداریم"
-            return null
-        }
-        val openTrades = journal.trades.value.filter { it.isOpen }
-        if (openTrades.size >= 4) {
-            _status.value = "سقف ۴ معاملهٔ همزمان پورتفو پر شده است (${openTrades.size}/4)"
-            return null
-        }
-        if (openTrades.any { it.symbol == state.symbol }) {
-            _status.value = "برای نماد ${state.symbol} از قبل پوزیشن کاغذی باز است"
-            return null
-        }
-        val targetClass = com.aurum.edge.core.AssetClass.of(state.symbol)
-        val openInClass = openTrades.count { com.aurum.edge.core.AssetClass.of(it.symbol) == targetClass }
-        if (openInClass >= targetClass.maxSlots) {
-            _status.value = "ظرفیت پوزیشن باز برای دستهٔ «${targetClass.label}» تکمیل است (۱/۱)"
+        com.aurum.edge.core.PaperPortfolioPolicy.blocker(journal.trades.value, state.symbol,
+            config.accountBalance, 0.0, state.signal?.barTime)?.let {
+            _status.value = it
             return null
         }
         // Computing higher-timeframe bars is read-only.
         val mtf = withContext(Dispatchers.Default) {
             runCatching { MtfAnalyzer.analyze(state.candles, state.interval) }.getOrNull()
         }
-        if (mtf?.veto == true) {
-            _status.value = "تراز چندتایم‌فریم ورود را وتو کرده است: ${mtf.vetoReason}"
-            return null
-        }
+
         // Re-verify against the SAME emission plus freshly read settings/news snapshot. News is
         // not an entry gate; the snapshot is only used for journal evidence.
         val current = state
         val recentNews = news.state.value
         val recentSettings = settings.read()
-        PaperAutoRules.blocker(current, recentSettings, recentNews)?.let {
+        PaperAutoRules.blocker(current, recentSettings, recentNews, allowedSymbols = allowed)?.let {
             _status.value = it
             return null
         }
@@ -96,27 +92,8 @@ class PaperAutoTrader(
                     current.symbol, current.candles, current.interval, System.currentTimeMillis())
             }.getOrNull()
         }
-        if (playbook != null) {
-            if (!playbook.allowed) {
-                _status.value = "بازار ${current.symbol} · ${playbook.family.label} · ${playbook.session.label} · " +
-                    "${playbook.regime.label} → ${playbook.method.label}: " +
-                    (playbook.blockers.firstOrNull() ?: "ورود مجاز نیست")
-                return null
-            }
-            if (signal.confidence < playbook.minConfidence) {
-                _status.value = "اطمینان سیگنال (${signal.confidence.toInt()}٪) از کفِ این بازار/سشن " +
-                    "(${playbook.minConfidence.toInt()}٪ برای ${playbook.method.label}) کمتر است"
-                return null
-            }
-            val rewardBps = signal.entry?.takeIf { it > 0.0 }?.let { entryPrice ->
-                signal.takeProfit?.let { target -> kotlin.math.abs(target - entryPrice) / entryPrice * 10_000.0 }
-            }
-            if (rewardBps != null && rewardBps < playbook.minRewardBps) {
-                _status.value = "هدف سیگنال ${String.format(java.util.Locale.US, "%.1f", rewardBps)}bps است؛ " +
-                    "کفِ سودِ واقعیِ ${playbook.family.label} ${String.format(java.util.Locale.US, "%.1f", playbook.minRewardBps)}bps"
-                return null
-            }
-        }
+        // Playbook remains a market-context annotation; category mode and four-layer score
+        // were already applied by SignalEngine. No second dynamic confidence threshold.
 
         // ── «روند کلی بازار» → چطور به همین معامله اضافه می‌شود ─────────────────
         // لایهٔ اول از کندل‌های بستهٔ خودِ نماد (پایه + تایم‌فریم مرجعِ تجمیع‌شده) و لایهٔ
@@ -132,30 +109,8 @@ class PaperAutoTrader(
                 MarketTrend.contextOf(signal.action, symbolTrend, marketTrend, playbook?.method)
             }.getOrNull()
         }
-        if (trendContext != null && !trendContext.gate.allowed) {
-            _status.value = "روند بازار: " +
-                (trendContext.gate.blockerFa ?: "این ورود خلاف جهتِ روندِ اندازه‌گیری‌شده است")
-            return null
-        }
-        val trendConfidenceFloor = (playbook?.minConfidence ?: config.minConfidence) +
-            (trendContext?.gate?.minConfidenceAdd ?: 0.0)
-        if ((trendContext?.gate?.minConfidenceAdd ?: 0.0) > 0.0 && signal.confidence < trendConfidenceFloor) {
-            _status.value = "لایهٔ روند بازار کف اطمینان را به " +
-                "${trendConfidenceFloor.toInt()}٪ برد و سیگنال ${signal.confidence.toInt()}٪ است · " +
-                (trendContext?.gate?.noteFa ?: "—")
-            return null
-        }
-
         val newsRecord = NewsConfluence.record(recentNews, current.symbol)
-        val isLegacyEight = signal.confluence.filterNot { it.name == NewsConfluence.NEWS_LABEL }.size == 8
-        val ict = if (isLegacyEight) {
-            IctEntryRules.approvedEvidence(current) ?: run {
-                _status.value = "شواهد رنج/ICT همین کندل برای ژورنال تأیید نشد"
-                return null
-            }
-        } else {
-            IctEntryRules.approvedEvidence(current)
-        }
+        val ict = IctEntryRules.approvedEvidence(current) // optional legacy research snapshot
 
         // ── برنامه ریزی توسط AI یا استفاده از مقادیر فنی پایه ──
         // The connection is probed FIRST. If the model answers, its worthiness verdict gates the
@@ -166,44 +121,52 @@ class PaperAutoTrader(
             val aiPlan = runCatching {
                 adv.planTradeWithAi(signal, current)
             }.getOrNull()
-            // The AI is consulted first, exactly as asked: when it answers, it decides whether
-            // this setup is worth taking at all. A "not worth it" verdict blocks the paper
-            // entry instead of only re-pricing it. When the model cannot be reached the call
-            // returns null and the entry continues on the technical rules alone.
-            if (aiPlan != null && !aiPlan.worth) {
-                _status.value = "ارزنده‌بودن معامله از نظر AI تأیید نشد: " +
-                    aiPlan.worthReason.ifBlank { "دلیل ارزنده‌نبودن اعلام نشد" }
+            // Persist the observed review of THIS symbol/bar, not the preceding connection probe.
+            // Only an explicit, validated false verdict may veto. Positive/absent verdicts
+            // cannot authorize a trade or override its technical entry/SL/TP/risk checks.
+            val effect = AiEntryEffect.fromResponse(connected = true, plan = aiPlan)
+            auditAiEntry(current, signal, effect, aiPlan)
+            if (effect == AiEntryEffect.VETO) {
+                _status.value = "وتوی AI برای ${current.symbol}: ${aiPlan!!.worthReason}"
                 return null
             }
-            if (aiPlan != null) {
-                Pair(
-                    signal.copy(
-                        entry = aiPlan.entry,
-                        stopLoss = aiPlan.stopLoss,
-                        takeProfit = aiPlan.takeProfit,
-                        riskReward = aiPlan.riskReward,
-                        confidence = aiPlan.confidence,
-                    ),
-                    "طرح ورود توسط هوش مصنوعی (${aiPlan.model}) · نسبت ریسک به ریوارد ۱:${String.format(java.util.Locale.US, "%.1f", aiPlan.riskReward)} · ${aiPlan.summary}"
-                )
+            if (aiPlan != null && effect == AiEntryEffect.NON_VETO) {
+                Pair(signal,
+                    "AI (${aiPlan.model}) صریحاً وتو نکرد؛ قیمت و SL/TP همان طرح فنی باقی ماندند و ورود همچنان مشروط به کنترل ریسک است")
+            } else if (aiPlan != null) {
+                Pair(signal,
+                    "پاسخ مدل (${aiPlan.model}) فاقد حکم صریح ارزندگی بود؛ ورود فقط با طرح فنی و کنترل ریسک ادامه یافت")
             } else {
-                Pair(
-                    signal,
-                    "اتصال AI برقرار شد اما طرح ورود معتبر برنگشت (پاسخ نامعتبر/خطای میانی)؛ ورود با محاسبات فنی ایچیموکو و بدون AI انجام شد (SL کیجون ± ۰٫۵×ATR و TP ۱:۱٫۸)."
-                )
+                Pair(signal,
+                    "اتصال AI برقرار شد اما طرح ورود معتبر برنگشت (پاسخ نامعتبر/خطای میانی)؛ ورود با طرح SL/TP موتور فنی جاری و بدون AI انجام شد.")
             }
         } else {
-            Pair(
-                signal,
-                "اتصال AI بررسی شد و مدل در دسترس نبود؛ ورود بدون AI و طبق محاسبات فنی ایچیموکو انجام شد (SL کیجون ± ۰٫۵×ATR و TP ۱:۱٫۸)."
-            )
+            auditAiEntry(current, signal, AiEntryEffect.UNAVAILABLE, null)
+            Pair(signal,
+                "اتصال AI بررسی شد و مدل در دسترس نبود؛ ورود بدون AI و با طرح SL/TP موتور فنی جاری انجام شد.")
         }
 
         return try {
+            // AI and persistence can take time. The *same provider tick* must still be
+            // within the 45-second trade window when JournalStore atomically opens.
+            if (catalogQuote != null) require(TradeQuotePolicy.accepts(catalogQuote)) {
+                "قیمت مستقل کاتالوگ هنگام ثبت معامله کهنه شد"
+            }
+            PaperAutoRules.blocker(current, settings.read(), news.state.value, allowedSymbols = allowed)?.let {
+                throw IllegalArgumentException("بازبینی پس از پاسخ AI: $it")
+            }
+            val lastVeto = NewsConfluence.apply(finalSignal, current.symbol, news.state.value)
+            require(lastVeto?.isActionable == true) {
+                lastVeto?.blockers?.lastOrNull() ?: "وتوی AI یا شواهد چهارلایه نامعتبر شدند"
+            }
             val trade = journal.open(
                 signal = finalSignal,
                 symbol = current.symbol,
-                price = finalSignal.entry ?: current.lastPrice!!,
+                // A catalog signal is calculated on closed bars, but the *fill* must be the
+                // separately fetched trade tick. Preview rechecks SL/TP and 0.5% risk at it.
+                price = catalogQuote?.price ?: if (com.aurum.edge.core.AssetClass.of(current.symbol) ==
+                    com.aurum.edge.core.AssetClass.CRYPTO) current.lastTradePrice!!
+                    else finalSignal.entry ?: current.lastPrice!!,
                 balance = recentSettings.accountBalance,
                 riskPercent = recentSettings.riskPercent,
                 mtf = mtf?.let { MtfSnapshotRecord.from(it) },
@@ -211,11 +174,13 @@ class PaperAutoTrader(
                 newsEvidence = newsRecord,
                 priceAction = ict,
                 customNote = entryNote,
+                cryptoEntryQuote = catalogQuote,
+                cryptoNews = recentNews,
+                sourceIntegrityRevision = current.sourceIntegrityRevision,
                 marketTrend = trendContext?.let { MarketTrendRecord.from(it) },
+                cryptoVenue = if (com.aurum.edge.data.CryptoCatalog.isCrypto(current.symbol))
+                    BinanceSpotClient.VENUE else "NOBITEX",
             )
-            val conditions = trade.entryConditions.take(8).joinToString("، ") {
-                it.name.substringAfter('·').trim()
-            }
             _status.value = "کاغذی ثبت شد: ${trade.symbol} ${trade.action} (${finalSignal.confidence.toInt()}٪)" +
                 (trendContext?.let { " · روند: ${it.alignment.label}" } ?: "") + " · $entryNote"
             trade
@@ -223,5 +188,15 @@ class PaperAutoTrader(
             _status.value = "ورود خودکار کاغذی انجام نشد: ${e.message ?: "ژورنال یا ریسک نامعتبر است"}"
             null
         }
+    }
+
+    private fun auditAiEntry(state: MarketState, signal: com.aurum.edge.core.Signal,
+                             effect: AiEntryEffect, plan: AiTradePlan?) {
+        val reason = if (effect == AiEntryEffect.VETO) {
+            "${effect.label} · علت مدل: ${plan?.worthReason.orEmpty().take(180)}"
+        } else effect.label
+        decisionLog?.append(state.symbol, state.interval.label, effect.action, reason,
+            barTimeOverride = signal.barTime, aiModel = plan?.model,
+            dedupe = true)
     }
 }

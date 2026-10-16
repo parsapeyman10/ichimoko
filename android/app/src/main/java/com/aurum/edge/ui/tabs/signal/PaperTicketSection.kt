@@ -44,9 +44,9 @@ fun PaperTicketSection(viewModel: AurumViewModel, market: MarketState) {
 
     SectionCard(
         title = "برگهٔ معاملهٔ دوطرفه · فقط کاغذی",
-        subtitle = "ورود دستی بدون سیگنال؛ لانگ/شورت با قیمت دریافتی همین نماد، بدون ارسال سفارش",
+        subtitle = "ورود دستی فقط هم‌جهت سیگنال چهارلایهٔ تأییدشده و دادهٔ تازه؛ قفل‌های AI و ریسک برقرارند",
     ) {
-        Text("${market.symbol} · ورود تقریبی ${formatPrice(market.lastPrice)} · فقط جفت‌ارزهای /USD یا /USDT",
+        Text("${market.symbol} · ورود تقریبی ${formatPrice(market.lastPrice)} · فقط نمادهای دارای قیمت مستقل معتبر",
             style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             FilterChip(selected = side == SignalAction.BUY, onClick = { side = SignalAction.BUY; pending = null },
@@ -58,7 +58,7 @@ fun PaperTicketSection(viewModel: AurumViewModel, market: MarketState) {
             OutlinedTextField(value = stopText, onValueChange = { stopText = it; pending = null },
                 label = { Text("حد ضرر SL") }, singleLine = true, modifier = Modifier.weight(1f))
             OutlinedTextField(value = targetText, onValueChange = { targetText = it; pending = null },
-                label = { Text("حد سود TP") }, singleLine = true, modifier = Modifier.weight(1f))
+                label = { Text("هدف اولیه (بدون خروج ثابت)") }, singleLine = true, modifier = Modifier.weight(1f))
         }
         if (preview == null) {
             Text("ورود متوقف: ${result.exceptionOrNull()?.message ?: "قیمت و حدود را وارد کنید"}",
@@ -68,7 +68,7 @@ fun PaperTicketSection(viewModel: AurumViewModel, market: MarketState) {
             Text("حجم فرضی ${String.format("%.6f", preview.quantity)} ${preview.unit} · ارزش ${formatPrice(preview.notionalUsd)}$ · نسبت سود/ضرر ۱:${String.format("%.2f", preview.rewardRisk)}",
                 modifier = Modifier.padding(top = 7.dp), style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextPrimary)
-            Text("ریسک تا استاپ ${formatPrice(preview.actualRiskUsd)}$ از سقف ${formatPrice(preview.riskBudgetUsd)}$؛ مجموع ریسک پوزیشن‌ها حداکثر ۵٪ موجودی است.",
+            Text("ریسک تا استاپ ${formatPrice(preview.actualRiskUsd)}$ از سقف ${formatPrice(preview.riskBudgetUsd)}$؛ هر معامله حداکثر ۰٫۵٪، زیان روزانه حداکثر ۲٪ و هم‌زمان ۴ پوزیشن (۲ در دسته) است.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
             Text("مرجع اعداد: ${preview.venue}",
                 modifier = Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelSmall,
@@ -102,7 +102,7 @@ fun PaperTicketSection(viewModel: AurumViewModel, market: MarketState) {
             onDismissRequest = { pending = null },
             title = { Text("تأیید ${if (request.side == SignalAction.BUY) "لانگ" else "شورت"} کاغذی") },
             text = { Text("${request.symbol} · قیمت تقریبی ${formatPrice(request.price)}$ · ${String.format("%.6f", request.preview.quantity)} ${request.preview.unit}\n" +
-                "SL ${formatPrice(request.stop)} · TP ${formatPrice(request.target)} · ریسک ${formatPrice(request.preview.actualRiskUsd)}$.\n" +
+                "SL ${formatPrice(request.stop)} · هدف اولیه ${formatPrice(request.target)} (خروج با trailing) · ریسک ${formatPrice(request.preview.actualRiskUsd)}$.\n" +
                 "اگر نماد تغییر کند یا قیمت بیش از ۰٫۱٪ جابه‌جا شود، ثبت لغو می‌شود. این سفارش واقعی نیست.") },
             confirmButton = {
                 TextButton(onClick = {

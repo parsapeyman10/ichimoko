@@ -5,6 +5,8 @@ import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
 import com.aurum.edge.engine.MtfAnalyzer
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -27,7 +29,7 @@ import java.util.concurrent.TimeUnit
  * interpolation or GC futures proxy is used: XAU/USD history remains spot-gold history.
  */
 class DukascopyHistoryClient(
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = AppNetwork.builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
         .callTimeout(45, TimeUnit.SECONDS)
@@ -75,7 +77,7 @@ class DukascopyHistoryClient(
         )
     }
 
-    private fun fetchDailyMinuteCandles(
+    private suspend fun fetchDailyMinuteCandles(
         instrument: String,
         pointScale: Double,
         targetInterval: Interval,
@@ -89,6 +91,7 @@ class DukascopyHistoryClient(
         val today = LocalDate.now(ZoneOffset.UTC)
         var offset = 0
         while (offset < days) {
+            currentCoroutineContext().ensureActive()
             val day = today.minusDays(offset.toLong())
             val url = "https://datafeed.dukascopy.com/datafeed/$instrument/${day.year}/${zeroMonth(day.monthValue)}/${two(day.dayOfMonth)}/BID_candles_min_1.bi5"
             val bytes = fetchBytesOrNull(url)
@@ -106,7 +109,7 @@ class DukascopyHistoryClient(
         return out.sortedBy { it.time }.takeLast(keepSize * targetInterval.minutes.coerceAtLeast(1) * 2) to files
     }
 
-    private fun fetchMonthlyHourCandles(
+    private suspend fun fetchMonthlyHourCandles(
         instrument: String,
         pointScale: Double,
         targetInterval: Interval,
@@ -121,6 +124,7 @@ class DukascopyHistoryClient(
         var offset = 0
         val rawNeed = keepSize * if (targetInterval == Interval.H4) 5 else 2
         while (offset < months) {
+            currentCoroutineContext().ensureActive()
             val url = "https://datafeed.dukascopy.com/datafeed/$instrument/${month.year}/${zeroMonth(month.monthValue)}/BID_candles_hour_1.bi5"
             val bytes = fetchBytesOrNull(url)
             if (bytes != null) {
@@ -137,7 +141,7 @@ class DukascopyHistoryClient(
         return out.sortedBy { it.time }.takeLast(rawNeed) to files
     }
 
-    private fun fetchYearlyDayCandles(
+    private suspend fun fetchYearlyDayCandles(
         instrument: String,
         pointScale: Double,
         keepSize: Int,
@@ -149,6 +153,7 @@ class DukascopyHistoryClient(
         var year = Year.now(ZoneOffset.UTC).value
         var offset = 0
         while (offset < years) {
+            currentCoroutineContext().ensureActive()
             val url = "https://datafeed.dukascopy.com/datafeed/$instrument/$year/BID_candles_day_1.bi5"
             val bytes = fetchBytesOrNull(url)
             if (bytes != null) {
@@ -190,6 +195,8 @@ class DukascopyHistoryClient(
 
         internal fun instrument(symbol: String): String? = when (symbol.trim().uppercase(Locale.ROOT)) {
             "XAU/USD" -> "XAUUSD"
+            "XAG/USD" -> "XAGUSD"
+            "DOW", "US30", "DJI" -> "USA30IDXUSD"
             "EUR/USD" -> "EURUSD"
             "GBP/USD" -> "GBPUSD"
             "AUD/USD" -> "AUDUSD"
@@ -197,11 +204,31 @@ class DukascopyHistoryClient(
             "USD/JPY" -> "USDJPY"
             "USD/CHF" -> "USDCHF"
             "USD/CAD" -> "USDCAD"
+            // Same-pair FX crosses, not an index/ETF or converted proxy. Missing
+            // instruments still fail at the actual publisher; never create bars.
+            "EUR/GBP" -> "EURGBP"
+            "EUR/JPY" -> "EURJPY"
+            "GBP/JPY" -> "GBPJPY"
+            "AUD/JPY" -> "AUDJPY"
+            "CAD/JPY" -> "CADJPY"
+            "CHF/JPY" -> "CHFJPY"
+            "NZD/JPY" -> "NZDJPY"
+            "EUR/AUD" -> "EURAUD"
+            "EUR/CAD" -> "EURCAD"
+            "EUR/CHF" -> "EURCHF"
+            "GBP/AUD" -> "GBPAUD"
+            "GBP/CAD" -> "GBPCAD"
+            "GBP/CHF" -> "GBPCHF"
+            "AUD/CAD" -> "AUDCAD"
+            "AUD/CHF" -> "AUDCHF"
+            "AUD/NZD" -> "AUDNZD"
+            "CAD/CHF" -> "CADCHF"
+            "NZD/CAD" -> "NZDCAD"
             else -> null
         }
 
         internal fun pointScale(instrument: String): Double = when {
-            instrument == "XAUUSD" -> 1_000.0
+            instrument == "XAUUSD" || instrument == "XAGUSD" || instrument == "USA30IDXUSD" -> 1_000.0
             instrument.endsWith("JPY") -> 1_000.0
             else -> 100_000.0
         }

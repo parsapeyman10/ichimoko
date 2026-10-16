@@ -26,6 +26,8 @@ object TradeReplay {
         val requestedFrom: Long = 0L,
         val requestedTo: Long = 0L,
         val detail: String = "",
+        /** Missing provider bars, not merely an entry marker outside the recent viewport. */
+        val historyMissing: Boolean = true,
     ) {
         val hasChart: Boolean get() = bars.size >= 2 && coverage != Coverage.MISSING
     }
@@ -67,10 +69,15 @@ object TradeReplay {
             .distinctBy { it.time }
             .sortedBy { it.time }
             .toList()
-        // Never thin out or average bars to fit: cut the tail and say the exit is off screen.
-        val trimmed = if (selected.size > MAX_BARS) selected.take(MAX_BARS) else selected
+        // Show the latest real bars, not the FIRST 320 bars after entry forever.
+        // Keep a contiguous slice: never thin, interpolate or label old history as live.
+        val trimmed = if (selected.size > MAX_BARS) selected.takeLast(MAX_BARS) else selected
         val shownEntry = trimmed.firstOrNull { it.time == entryBar }?.time
         val shownExit = exitBar?.let { bar -> trimmed.firstOrNull { it.time == bar }?.time }
+        val entryOffscreen = shownEntry == null && selected.any { it.time == entryBar }
+        val historyMissing = trimmed.size < 2 ||
+            (shownEntry == null && !entryOffscreen) ||
+            (exitBar != null && shownExit == null)
         val exitSatisfied = exitBar == null || shownExit != null
         val coverage = when {
             trimmed.size < 2 -> Coverage.MISSING
@@ -84,7 +91,8 @@ object TradeReplay {
             exitBarTime = shownExit,
             requestedFrom = from,
             requestedTo = to,
-            detail = detail(trade, trimmed, coverage, shownEntry, exitBar, shownExit, selected.size),
+            detail = detail(trade, trimmed, coverage, shownEntry, exitBar, shownExit, entryOffscreen),
+            historyMissing = historyMissing,
         )
     }
 
@@ -95,7 +103,7 @@ object TradeReplay {
         shownEntry: Long?,
         exitBar: Long?,
         shownExit: Long?,
-        selectedSize: Int,
+        entryOffscreen: Boolean,
     ): String = when (coverage) {
         Coverage.MISSING ->
             "کندل واقعی این بازه روی گوشی نیست (${trade.symbol} · ${trade.interval.label}). " +
@@ -103,13 +111,15 @@ object TradeReplay {
         Coverage.PARTIAL -> buildString {
             append("${bars.size} کندل واقعی از این بازه موجود است؛ پوشش ناقص: ")
             val gaps = mutableListOf<String>()
-            if (shownEntry == null) gaps += "کندل لحظهٔ ورود در تاریخچهٔ محلی نیست"
+            if (shownEntry == null) gaps += if (entryOffscreen)
+                "کندل ورود موجود است ولی از پنجرهٔ تازه‌ترین $MAX_BARS کندل بیرون مانده"
+                else "کندل ورود در تاریخچهٔ محلی نیست"
             if (exitBar != null && shownExit == null) {
-                gaps += if (selectedSize > bars.size) "بازه طولانی‌تر از سقف نمایش است و کندل خروج بیرون از تصویر ماند"
-                else "کندل لحظهٔ خروج در تاریخچهٔ محلی نیست"
+                gaps += "کندل لحظهٔ خروج در تاریخچهٔ محلی نیست"
             }
             append(gaps.joinToString(" · "))
-            append(". خطوط ورود/SL/TP از رکورد ژورنال‌اند، نه از این کندل‌ها.")
+            append(". جدیدترین کندل واقعی موجود در سمت راست نمایش داده شده است؛ " +
+                "خطوط ورود/SL/TP از رکورد ژورنال‌اند، نه از این کندل‌ها.")
         }
         Coverage.FULL ->
             "${bars.size} کندل واقعی ${trade.interval.label} حول همین معامله؛ " +

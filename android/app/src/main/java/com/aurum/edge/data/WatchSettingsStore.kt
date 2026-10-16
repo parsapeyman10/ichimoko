@@ -14,9 +14,21 @@ class WatchSettingsStore(context: Context) {
     val selections: StateFlow<Map<String, WatchSelection>> = _selections.asStateFlow()
 
     private fun read(symbol: WatchSymbol): WatchSelection {
-        val enabled = prefs.getString("sources_${symbol.id}", null)?.split(',')
-            ?.filter { it in symbol.providerCodes }?.distinct() ?: symbol.defaultSources
-        val preferred = prefs.getString("preferred_${symbol.id}", null)
+        val saved = prefs.getString("sources_${symbol.id}", null)
+        // Migrate old single-source defaults to a verified multi-source watch.
+        // Other explicit source combinations remain the user's own choice.
+        val obsoleteDefault = (symbol.id.endsWith("/USDT") &&
+            saved in listOf("binance_spot_agg_trades", "nobitex_public_trades")) ||
+            (symbol.id == "XAU/USD" && saved == "gold_api_public,stocks_yahoo") ||
+            (symbol.providerCodes.containsKey("swissquote_bbo") && saved == "stocks_yahoo")
+        val normalized = if (obsoleteDefault) null else saved
+        val enabled = normalized?.split(',')
+            ?.map { if (it == "nobitex_public_trades") "binance_spot_agg_trades" else it }
+            ?.filter { it in symbol.providerCodes }?.distinct()?.takeIf { it.isNotEmpty() }
+            ?: symbol.defaultSources
+        val preferred = (if (normalized == null && saved != null) null
+            else prefs.getString("preferred_${symbol.id}", null))
+            ?.let { if (it == "nobitex_public_trades") "binance_spot_agg_trades" else it }
             ?.takeIf { it in enabled } ?: enabled.firstOrNull().orEmpty()
         return WatchSelection(enabled, preferred)
     }
@@ -51,7 +63,7 @@ class WatchSettingsStore(context: Context) {
     /** Explicit blank removes this per-symbol override; the chart key remains untouched. */
     @Synchronized
     fun setKeyOverride(symbolId: String, key: String): Boolean {
-        if (WatchCatalog.find(symbolId)?.providerCodes?.containsKey(SourceCatalog.twelveData.id) != true) return false
+        if (WatchCatalog.find(symbolId) == null) return false
         val normalized = key.trim()
         if (normalized.any { it.isWhitespace() }) return false
         val saved = prefs.edit().putString("key_$symbolId", normalized).commit()

@@ -43,7 +43,7 @@ class SettingsStoreTest {
         val store = SettingsStore(context)
         // Symbols outside the 50+ catalog are rejected, key untouched.
         assertFalse(store.saveChartSymbol("TOTALLY_INVALID_XYZ"))
-        assertTrue(store.saveChartSymbol("AAPL"))
+        assertFalse(store.saveChartSymbol("AAPL"))
         assertTrue(store.saveChartSymbol("XAG/USD"))
         assertTrue(store.saveChartSymbol(" eur/usd "))
         assertEquals("EUR/USD", store.read().symbol)
@@ -70,4 +70,52 @@ class SettingsStoreTest {
         assertTrue(store.saveNewsBaseUrl(""))
         assertEquals("", SettingsStore(context).read().newsBaseUrl)
     }
+    @Test fun `legacy stocks migrate without deleting journal or optional credentials`() {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE)
+        prefs.edit().clear().putString("symbol", "NVDA")
+            .putString("v1_watchlist", "AAPL,BTC/USDT,EUR/USD,SPY")
+            .putString("td_api_key", "synthetic-key").commit()
+        val store = SettingsStore(context)
+        assertEquals("XAU/USD", store.read().symbol)
+        assertEquals(com.aurum.edge.data.WatchCatalog.scannerSymbols, store.read().activeSymbols)
+        assertEquals("synthetic-key", store.read().apiKey)
+        assertFalse(store.saveMarketCredentials("", "AAPL"))
+        store.update { it.copy(symbol = "MSFT") }
+        assertEquals("XAU/USD", SettingsStore(context).read().symbol)
+    }
+
+    @Test fun `upgrade retires enabled proxy flag without clearing market credentials or account settings`() {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE)
+        prefs.edit().clear().putBoolean("embedded_tor_enabled", true)
+            .putString("td_api_key", "synthetic-key").putFloat("balance", 775f).commit()
+        val store = SettingsStore(context)
+        assertFalse(prefs.contains("embedded_tor_enabled"))
+        assertEquals("synthetic-key", store.read().apiKey)
+        assertEquals(775.0, store.read().accountBalance, 0.0)
+        store.update { it.copy(notifyOnSignal = false) }
+        assertEquals(775.0, SettingsStore(context).read().accountBalance, 0.0)
+        assertFalse(prefs.contains("embedded_tor_enabled"))
+    }
+
+    @Test fun `old empty or narrow watchlist cannot restrict category strategies or active symbols`() {
+        val context = RuntimeEnvironment.getApplication()
+        val prefs = context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE)
+        for (legacy in listOf("", "EUR/USD", "AAPL")) {
+            prefs.edit().clear().putString("v1_watchlist", legacy).commit()
+            val store = SettingsStore(context)
+            for (mode in com.aurum.edge.core.CategoryStrategy.entries) {
+                store.update { it.copy(categoryStrategies = com.aurum.edge.core.AssetClass.entries.associateWith { mode }) }
+                val config = SettingsStore(context).read()
+                assertEquals(15, config.activeSymbols.size)
+                assertEquals(5, config.activeSymbols.count(com.aurum.edge.data.CryptoCatalog::isCrypto))
+                config.activeSymbols.forEach { symbol -> assertEquals(mode, config.strategyFor(symbol)) }
+                assertFalse(config.autoPaperTrading) // expanding coverage is not trading consent
+                assertEquals(0.5, config.riskPercent, 0.0)
+            }
+            assertEquals(legacy, prefs.getString("v1_watchlist", null)) // ignored, not destructive
+        }
+    }
+
 }

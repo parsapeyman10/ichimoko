@@ -135,7 +135,7 @@ private fun parseFeedDate(raw: String): Long? =
 /** Independent from NewsRepository.state: headlines here cannot approve AI/news confluence. */
 class PublicWebNewsRepository(
     private val scope: CoroutineScope,
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = AppNetwork.builder()
         .connectTimeout(10, TimeUnit.SECONDS).readTimeout(12, TimeUnit.SECONDS)
         .callTimeout(18, TimeUnit.SECONDS).followRedirects(false).build(),
     private val feeds: List<PublicFeed> = PublicNewsFeeds.all,

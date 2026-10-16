@@ -14,6 +14,7 @@ import com.aurum.edge.R
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
+import com.aurum.edge.core.TechnicalEvidence
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.components.formatPriceFor
@@ -156,7 +157,7 @@ object Notifier {
             appendLine("🎯 حد سود (TP): ${formatPriceFor(item.symbol, item.takeProfit)}$")
             val rr = item.priceAction?.rewardRisk ?: 2.2
             appendLine("📐 نسبت ریسک به ریوارد: 1:${String.format(Locale.US, "%.1f", rr)}")
-            appendLine("🔍 شواهد: ایچیموکو، آزادی ۲۴ دوره‌ای چیکواسپن و تراز MTF")
+            appendLine("🔍 شواهد: چهار لایهٔ فنی V1 و هفت بازهٔ واقعی")
             appendLine("⏱ زمان: ${formatDateTime(item.signalBarTime)}")
         }.trimEnd()
 
@@ -176,23 +177,23 @@ object Notifier {
         val assetLabel = trade.assetClass.label
 
         val title = "معاملهٔ آموزشی $sideFa ثبت شد · ${trade.symbol} ($assetLabel)"
-        val text = "${trade.symbol} ${trade.interval.label} · ورود ${formatPriceFor(trade.symbol, trade.entry)}$ · شناسه ${trade.id.take(8)} · SL: ${formatPriceFor(trade.symbol, trade.stopLoss)}$ · TP: ${formatPriceFor(trade.symbol, trade.takeProfit)}$"
+        val text = "${trade.symbol} ${trade.interval.label} · ورود ${formatPriceFor(trade.symbol, trade.entry)}$ · شناسه ${trade.id.take(8)} · SL: ${formatPriceFor(trade.symbol, trade.stopLoss)}$ · هدف اولیه: ${formatPriceFor(trade.symbol, trade.takeProfit)}$ (خروج trailing)"
 
         val expanded = buildString {
             appendLine("📊 نماد معاملاتی: $symbol ($assetLabel)")
             appendLine("🎯 نوع پوزیشن: ${if (isBuy) "خرید (LONG)" else "فروش (SHORT)"}")
             appendLine("💰 قیمت ورود: ${formatPriceFor(trade.symbol, trade.entry)}$")
             appendLine("🛑 حد ضرر (SL): ${formatPriceFor(trade.symbol, trade.stopLoss)}$")
-            appendLine("🎯 حد سود (TP): ${formatPriceFor(trade.symbol, trade.takeProfit)}$")
+            appendLine("🎯 هدف اولیه ۱٫۵R (نه خروج ثابت): ${formatPriceFor(trade.symbol, trade.takeProfit)}$")
             appendLine("⚡ اهرم معاملاتی: ${trade.effectiveLeverage}x | مارجین: $${formatPrice(trade.effectiveMarginUsd)}")
             appendLine("📐 نسبت ریسک به ریوارد (R:R): 1:${String.format(Locale.US, "%.1f", trade.riskReward ?: 2.2)}")
             appendLine("📦 حجم پوزیشن: ${String.format(Locale.US, "%.4f", trade.positionOz)} واحد")
-            appendLine("🔍 استراتژی: ابر ایچیموکو (کومو ۸/۲۴/۷۲)، تقاطع TK، آزادی ۲۴ دوره‌ای چیکواسپن و تراز MTF")
+            appendLine("🔍 موتور V1: EMA/ایچیموکو + RSI/MACD + حمایت/مقاومت + هفت بازه")
             if (trade.entryConditions.isNotEmpty()) {
                 val conditionsSummary = trade.entryConditions.take(6).joinToString("، ") {
                     it.name.substringAfter('·').trim()
                 }
-                appendLine("📋 شروط تاییدشده: $conditionsSummary")
+                appendLine("📋 لایه‌های امتیازدهی: $conditionsSummary")
             }
             if (trade.note.isNotBlank()) {
                 appendLine("📝 توضیحات: ${trade.note}")
@@ -248,19 +249,13 @@ object Notifier {
 
     /** Caller must pass ONLY the new result of JournalStore.open, after its atomic write succeeds. */
     fun notifyRecordedAutoEntry(context: Context, trade: PaperTrade, customSoundUri: String): Boolean {
-        if (!trade.autoOpened || !trade.isOpen ||
-            trade.action == SignalAction.NO_TRADE || (trade.signalBarTime ?: 0L) <= 0L ||
-            trade.mtf?.veto != false) return false
-        val isLegacyEight = trade.symbol == "XAU/USD" && (trade.priceAction != null || trade.entryConditions.size == 8)
-        if (isLegacyEight) {
-            if (trade.priceAction == null || trade.entryConditions.size < 8 ||
-                trade.entryConditions.take(8).any { it.status != "CONFIRMED" } ||
-                trade.priceAction.barTime != trade.signalBarTime ||
-                trade.priceAction.action != trade.action ||
-                trade.priceAction.quote != trade.entry) return false
-        } else {
-            if (trade.entryConditions.size < 7 || trade.entryConditions.any { it.status == "CONFLICT" }) return false
-        }
+        // Notify only after JournalStore.open persisted the V1 paper entry. Optional legacy
+        // research snapshots (ICT/MTF) never become a second authorization gate.
+        if (!trade.autoOpened || !trade.isOpen || trade.action == SignalAction.NO_TRADE ||
+            (trade.signalBarTime ?: 0L) <= 0L || trade.initialStopLoss == null ||
+            trade.confidence !in 60.0..100.0 ||
+            trade.entryConditions.size != TechnicalEvidence.CURRENT_COUNT ||
+            !TechnicalEvidence.confirmedRecords(trade.entryConditions)) return false
         return notifyTradeOpened(context, trade, customSoundUri)
     }
 

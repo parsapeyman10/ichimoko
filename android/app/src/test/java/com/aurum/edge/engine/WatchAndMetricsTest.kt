@@ -5,6 +5,7 @@ import com.aurum.edge.data.Quote
 import com.aurum.edge.data.SourceComparison
 import com.aurum.edge.data.VerificationStatus
 import com.aurum.edge.data.WatchCatalog
+import com.aurum.edge.data.WatchSymbol
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -13,26 +14,33 @@ import org.junit.Test
 class WatchAndMetricsTest {
     private val now = 1_700_000_000_000L
     private val eur = WatchCatalog.find("EUR/USD")!!
+    private val dualFixture = WatchSymbol(
+        id = "EUR/USD",
+        label = "یورو / دلار",
+        unit = "$",
+        providerCodes = linkedMapOf("yahoo_eurusd" to "EURUSD=X", "swissquote_gbpusd" to "EUR/USD"),
+        defaultSources = listOf("yahoo_eurusd", "swissquote_gbpusd"),
+        maxAgeMillis = 5 * 60_000L,
+        tolerancePct = 0.5,
+    )
     private fun quote(source: String, price: Double, at: Long? = now, cached: Boolean = false): Quote = Quote(
         code = "EUR", label = "یورو", price = price, unit = "$", sourceId = source,
         ts = now, providerAt = at, stale = cached,
     )
 
-    @Test fun oneDefaultSourceIsAllowedButNotTwoSourceConfirmed() {
+    @Test fun singleDedicatedCatalogSourceConfirmsWhenFreshAndDated() {
         val ids = eur.defaultSources
-        // What matters here is that ONE default source stays unverified, not which
-        // provider it happens to be; naming it made this fail on a routine source swap.
-        assertEquals(1, ids.size)
+        assertEquals(listOf("yahoo_eurusd"), ids)
         val result = SourceComparison.verify(eur, ids, mapOf(
             ids[0] to quote(ids[0], 100.0),
         ), now)
-        assertEquals(VerificationStatus.UNVERIFIED, result.status)
+        assertEquals(VerificationStatus.CONFIRMED, result.status)
         assertEquals(1, result.freshSources)
     }
 
-    @Test fun twoIndependentFreshSourcesAgreeWhenOptionalSecondSourceEnabled() {
-        val ids = eur.providerCodes.keys.toList()
-        val result = SourceComparison.verify(eur, ids, mapOf(
+    @Test fun twoIndependentFreshSourcesAgreeWhenDualFixtureEnabled() {
+        val ids = dualFixture.providerCodes.keys.toList()
+        val result = SourceComparison.verify(dualFixture, ids, mapOf(
             ids[0] to quote(ids[0], 100.0), ids[1] to quote(ids[1], 100.3),
         ), now)
         assertEquals(VerificationStatus.CONFIRMED, result.status)
@@ -40,21 +48,21 @@ class WatchAndMetricsTest {
     }
 
     @Test fun conflictCannotBeConfirmedByOldCacheOrMissingTimestamps() {
-        val ids = eur.providerCodes.keys.toList()
-        assertEquals(VerificationStatus.CONFLICT, SourceComparison.verify(eur, ids, mapOf(
+        val ids = dualFixture.providerCodes.keys.toList()
+        assertEquals(VerificationStatus.CONFLICT, SourceComparison.verify(dualFixture, ids, mapOf(
             ids[0] to quote(ids[0], 100.0), ids[1] to quote(ids[1], 107.0),
         ), now).status)
-        assertEquals(VerificationStatus.UNVERIFIED, SourceComparison.verify(eur, ids, mapOf(
+        assertEquals(VerificationStatus.UNVERIFIED, SourceComparison.verify(dualFixture, ids, mapOf(
             ids[0] to quote(ids[0], 100.0), ids[1] to quote(ids[1], 100.1, cached = true),
         ), now).status)
-        assertEquals(VerificationStatus.UNVERIFIED, SourceComparison.verify(eur, ids, mapOf(
+        assertEquals(VerificationStatus.UNVERIFIED, SourceComparison.verify(dualFixture, ids, mapOf(
             ids[0] to quote(ids[0], 100.0), ids[1] to quote(ids[1], 100.1, at = null),
         ), now).status)
-        assertEquals(VerificationStatus.UNVERIFIED, SourceComparison.verify(eur, ids, mapOf(
-            ids[0] to quote(ids[0], 100.0), ids[1] to quote(ids[1], 100.1, at = now - eur.maxAgeMillis - 1),
+        assertEquals(VerificationStatus.UNVERIFIED, SourceComparison.verify(dualFixture, ids, mapOf(
+            ids[0] to quote(ids[0], 100.0), ids[1] to quote(ids[1], 100.1, at = now - dualFixture.maxAgeMillis - 1),
         ), now).status)
-        assertEquals(VerificationStatus.NO_DATA, SourceComparison.verify(eur, ids, emptyMap(), now).status)
-        assertTrue(!SourceComparison.isFresh(eur, quote(ids[0], Double.POSITIVE_INFINITY), now))
+        assertEquals(VerificationStatus.NO_DATA, SourceComparison.verify(dualFixture, ids, emptyMap(), now).status)
+        assertTrue(!SourceComparison.isFresh(eur, quote(eur.defaultSources[0], Double.POSITIVE_INFINITY), now))
     }
 
     @Test fun eighteenMetricsComeOnlyFromSettledOutcomes() {

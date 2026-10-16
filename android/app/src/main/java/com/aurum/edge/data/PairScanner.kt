@@ -1,6 +1,5 @@
 package com.aurum.edge.data
 
-import android.content.Context
 import android.os.SystemClock
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.FeedMode
@@ -21,15 +20,19 @@ import com.aurum.edge.core.SignalAction
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.engine.SignalEngine
-import com.aurum.edge.notify.Notifier
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -37,10 +40,16 @@ import kotlinx.coroutines.withContext
 /** One row of the 50+ universe radar: what the continuous sweep observed for this instrument. */
 data class PairScanStatus(
     val symbol: String,
-    /** pending | closed | error | no_signal | blocked | candidate */
+    /** pending | closed | error | partial | no_signal | watch | blocked | observed | candidate | opened */
     val state: String,
     val detail: String,
+    val interval: Interval? = null,
     val lastScanAt: Long? = null,
+    /** Intended exact-pair fallback order; not proof of a reachable source. */
+    val sourcePlan: String? = null,
+    /** Primary historical candle publisher; not proof of a same-venue entry/exit tick. */
+    val baseSource: String? = null,
+    val lastBarAt: Long? = null,
     val price: Double? = null,
     /** How many of the technical conditions passed on the latest closed bar. */
     val technicalScore: Int? = null,
@@ -63,12 +72,19 @@ data class PairScanStatus(
     /** Was the latest actionable side WITH the measured trend? null = never got a side. */
     val trendAligned: Boolean? = null,
     val trendNote: String? = null,
+    /** ALS-5 pre-confirmation monitor record; present for XAU/USD, including WAIT/NO_TRADE. */
+    val als5Opportunity: com.aurum.edge.core.Als5OpportunityRecord? = null,
 )
 
 data class PairScanState(
     val statuses: List<PairScanStatus> = emptyList(),
     val sweeping: Boolean = false,
+    /** Rows with an independently completed check, including closed/error rows. */
+    val checkedCount: Int = 0,
+    val totalCount: Int = 0,
     val lastSweepAt: Long? = null,
+    /** Elapsed time of the most recently completed symbol engine; never a universe-wide SLA. */
+    val lastSweepDurationMs: Long? = null,
     val lastError: String? = null,
     /** The Top 3 highest-ranking opportunities from the 50+ scan. */
     val topThree: List<PairScanStatus> = emptyList(),
@@ -83,8 +99,8 @@ data class PairScanState(
 )
 
 /**
- * Continuous 50+ instrument scanner and ranking engine:
- * Evaluates at least 50 global instruments (Commodities, Forex, Global Shares/Stocks, Crypto),
+ * Continuous editable-watchlist scanner and ranking view:
+ * Evaluates supported symbols across commodities, FX, shares/indices and crypto,
  * ranks them based on Ichimoku confluence, MTF alignment, and R:R ratio,
  * isolates the Top 3 best setups, and selects the #1 best trade.
  */
@@ -97,82 +113,138 @@ class PairScanner(
     private val opportunities: PaperOpportunityStore,
     private val scope: CoroutineScope,
     private val dukascopyHistory: DukascopyHistoryClient = DukascopyHistoryClient(),
-    private val context: Context? = null,
+    private val decisionLog: DecisionLogStore? = null,
+    private val binanceHistory: BinanceSpotClient = BinanceSpotClient(),
 ) {
-    private val mutex = Mutex()
-    /** Trends measured during the running sweep; published as one market-wide read at the end. */
-    private val trendSample = mutableListOf<SymbolTrend>()
-    private var lastSweepElapsed = 0L
-    private var autoTrader: PaperAutoTrader? = null
-    private val _state = MutableStateFlow(PairScanState(
-        statuses = WatchCatalog.scannerSymbols.map { PairScanStatus(it, "pending", "هنوز اسکن نشده") }))
-    val state: StateFlow<PairScanState> = _state.asStateFlow()
+    private val workers = SymbolWorkers(scope) { SystemClock.elapsedRealtime() }
+    private val activeWorkers = java.util.concurrent.atomic.AtomicInteger()
+    private val autoReviewMutex = Mutex() // serialize the non-atomic AI/entry review across scanner workers
+    private var onAutoSignal: (suspend (MarketState) -> CatalogAutoReview)? = null
 
-    fun attachAutoTrader(trader: PaperAutoTrader) {
-        autoTrader = trader
-        // «روند کلی بازار» از همین پویشِ پیوسته می‌آید؛ پس آخرین خوانشِ عرض بازار/دلار/جوّ ریسک
-        // در لحظهٔ ورود خودکار هم در دسترس همان گیتِ روند قرار می‌گیرد.
-        trader.attachTrendSource { _state.value.marketTrend }
+    /** Wired once by the process container. Scanning never calls this unless paper auto is on. */
+    fun attachAutoReview(callback: suspend (MarketState) -> CatalogAutoReview) {
+        onAutoSignal = callback
     }
 
-    fun refreshNow(minIntervalMs: Long = SWEEP_PERIOD_MS) {
-        scope.launch { runSweep(minIntervalMs, onCandidate = null) }
+    private val nonCryptoBundle = NonCryptoRadarBundle { symbol, frame, source, apiKey ->
+        when {
+            source.usesYahoo -> publicHistory.fetchCandles(symbol, frame,
+                minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
+            source.usesDukascopy -> dukascopyHistory.fetchCandles(symbol, frame,
+                minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
+                .let { PublicCandleHistoryClient.Result(it.candles, it.provider, it.fetchedAt) }
+            else -> PublicCandleHistoryClient.Result(
+                withContext(Dispatchers.IO) { client.fetchCandles(apiKey, symbol, frame,
+                    outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
+                    minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES) }, "Twelve Data · fallback")
+        }
+    }
+    private val cryptoReadOnly = CryptoRadarCandleClient()
+    private val cryptoBundle = CryptoRadarBundle { symbol, interval, source ->
+        cryptoReadOnly.fetch(symbol, interval, source.venue)
+    }
+    /** One latest real trend sample per symbol, independently expired. */
+    private val trendSample = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, SymbolTrend>>()
+    private val _state = MutableStateFlow(PairScanState(
+        statuses = com.aurum.edge.core.V1Universe.defaults.map { PairScanStatus(it, "pending", "هنوز اسکن نشده") }))
+    val state: StateFlow<PairScanState> = _state.asStateFlow()
+
+    fun refreshNow(minIntervalMs: Long = SWEEP_PERIOD_MS,
+                   onCandidate: (suspend (PaperOpportunity) -> Unit)? = null) {
+        schedule(minIntervalMs, onCandidate)
     }
 
     suspend fun sweepOnce(minIntervalMs: Long = SWEEP_PERIOD_MS,
                           onCandidate: (suspend (PaperOpportunity) -> Unit)? = null) {
-        runSweep(minIntervalMs, onCandidate)
+        schedule(minIntervalMs, onCandidate).joinAll()
     }
 
-    private suspend fun runSweep(minIntervalMs: Long, onCandidate: (suspend (PaperOpportunity) -> Unit)?) =
-        mutex.withLock {
-            val elapsed = SystemClock.elapsedRealtime()
-            if (_state.value.sweeping) return@withLock
-            if (lastSweepElapsed != 0L && elapsed - lastSweepElapsed < minIntervalMs) return@withLock
-            lastSweepElapsed = elapsed
-            _state.value = _state.value.copy(sweeping = true, lastError = null)
+    private fun schedule(minIntervalMs: Long, onCandidate: (suspend (PaperOpportunity) -> Unit)?): List<Job> {
+        val config = settings.read()
+        val universe = config.activeSymbols
+        _state.update { old -> old.copy(totalCount = universe.size,
+            statuses = universe.map { symbol -> old.statuses.find { it.symbol == symbol }
+                ?: PairScanStatus(symbol, "pending", "موتور مستقل این نماد هنوز داده ندارد",
+                    sourcePlan = SourceRouting.historyPlan(symbol, config.hasKey)) }) }
+        // Randomize admission order, so scarce publisher slots do not always favor the
+        // first catalog rows. No symbol waits for the last symbol of a previous pass.
+        return universe.shuffled().mapNotNull { symbol -> workers.submit(symbol, minIntervalMs) {
+            val started = SystemClock.elapsedRealtime()
+            activeWorkers.incrementAndGet()
+            _state.update { it.copy(sweeping = true) }
             try {
-                sweepAll(onCandidate)
+                if (!AppNetwork.route.value.ready) {
+                    publishFailure(symbol, "waiting_connection", "شبکهٔ گوشی آماده نیست؛ درخواست به منبع ارسال نشد")
+                } else if (withTimeoutOrNull(180_000L) {
+                    do {
+                        sweepAll(onCandidate, listOf(symbol))
+                        val occupied = state.value.statuses.find { it.symbol == symbol }?.state == "capacity"
+                        if (occupied) kotlinx.coroutines.delay(kotlin.random.Random.nextLong(1_000L, 4_000L))
+                    } while (occupied && AppNetwork.route.value.ready)
+                    true
+                } != true) {
+                    publishFailure(symbol, "error", "مهلت موتور این نماد تمام شد؛ نمادهای دیگر مستقل ادامه دارند")
+                }
+            } catch (cancel: CancellationException) {
+                publishFailure(symbol, "pending", "بررسی این نماد لغو شد؛ سیگنال قبلی مجوز ورود نیست")
+                throw cancel
             } catch (_: Exception) {
-                _state.value = _state.value.copy(
-                    lastError = "اسکن دوره‌ای ناموفق بود؛ پاسخ یا اتصال provider معتبر نبود")
+                publishFailure(symbol, "error", "موتور این نماد پاسخ معتبر نگرفت؛ تلاش بعدی مستقل است")
             } finally {
-                val currentStatuses = _state.value.statuses
-                val ranked = rankOpportunities(currentStatuses)
-                // Nothing measured this sweep ⇒ keep the previous read instead of inventing one.
-                val read = if (trendSample.isEmpty()) _state.value.marketTrend
-                else runCatching { MarketTrend.overall(trendSample) }.getOrNull() ?: _state.value.marketTrend
-                _state.value = _state.value.copy(
-                    sweeping = false,
+                activeWorkers.decrementAndGet()
+                _state.update { it.copy(sweeping = activeWorkers.get() > 0,
                     lastSweepAt = System.currentTimeMillis(),
-                    topThree = ranked.take(3),
-                    bestPick = ranked.firstOrNull(),
-                    marketTrend = read,
-                )
+                    lastSweepDurationMs = SystemClock.elapsedRealtime() - started) }
             }
-        }
-
-    private fun rankOpportunities(statuses: List<PairScanStatus>): List<PairScanStatus> {
-        return statuses
-            .filter { it.price != null && (it.state == "candidate" || (it.technicalScore ?: 0) >= 5) }
-            .sortedWith(
-                compareByDescending<PairScanStatus> { it.state == "candidate" }
-                    .thenByDescending { it.playbookAllowed == true }
-                    .thenByDescending { it.trendAligned == true }
-                    .thenByDescending { it.riskReward ?: 0.0 }
-                    .thenByDescending { it.confidence ?: 0.0 }
-                    .thenByDescending { it.technicalScore ?: 0 }
-            )
+        } }
     }
 
-    private suspend fun sweepAll(onCandidate: (suspend (PaperOpportunity) -> Unit)?) {
-        trendSample.clear()
-        // The market-wide read of the PREVIOUS sweep: the breadth of the current one is only
-        // complete after the last symbol, so entries during this sweep are checked against the
-        // latest published read (≤ ۳۰ ثانیه پیش). On the first sweep it is null, and then only
-        // the instrument's own reference-timeframe trend is used — never a guessed market bias.
-        val overallTrend = _state.value.marketTrend
-        val statuses = _state.value.statuses.associateBy { it.symbol }.toMutableMap()
+    private fun publishFailure(symbol: String, state: String, detail: String) {
+        trendSample.remove(symbol)
+        _state.update { old ->
+            val rows = old.statuses.map { if (it.symbol == symbol) PairScanStatus(symbol, state, detail,
+                lastScanAt = System.currentTimeMillis(), sourcePlan = SourceRouting.historyPlan(symbol, settings.read().hasKey)) else it }
+            val ranked = rankOpportunities(rows)
+            old.copy(statuses = rows, checkedCount = rows.count { it.lastScanAt != null },
+                topThree = ranked.take(3), bestPick = ranked.firstOrNull(), marketTrend = freshTrend())
+        }
+    }
+
+    private fun freshTrend(): MarketTrendRead? {
+        val now = System.currentTimeMillis()
+        val fresh = trendSample.values.filter { now - it.first in 0L..600_000L }
+        return if (fresh.isEmpty()) null else runCatching {
+            MarketTrend.overall(fresh.map { it.second }).copy(computedAt = fresh.minOf { it.first })
+        }.getOrNull()
+    }
+
+    private fun rankOpportunities(statuses: List<PairScanStatus>): List<PairScanStatus> =
+        ScanRanking.rank(statuses, Interval.M5, System.currentTimeMillis())
+
+    private suspend fun sweepAll(onCandidate: (suspend (PaperOpportunity) -> Unit)?, universe: List<String>) {
+        universe.forEach { trendSample.remove(it) }
+        // Rolling view of independently completed engines. Expiration is anchored to
+        // the oldest included sample, never refreshed merely by an unrelated tick.
+        val overallTrend = _state.value.marketTrend?.takeIf {
+            System.currentTimeMillis() - it.computedAt in 0L..10 * 60_000L
+        }
+        val config = settings.read()
+        // Every catalog instrument uses its category settings. Retired manual watchlists
+        // cannot narrow scanning or alert authorization. Missing feeds remain explicit errors.
+        // A result from the previous sweep cannot remain a current recommendation while
+        // the provider is still being checked this time (or after a configuration change).
+        val statuses = mutableMapOf<String, PairScanStatus>()
+        val chosenIntervals = java.util.concurrent.ConcurrentHashMap<String, Interval>()
+        val baseSources = java.util.concurrent.ConcurrentHashMap<String, String>()
+        val barTimes = java.util.concurrent.ConcurrentHashMap<String, Long>()
+        val statusLock = Any()
+        _state.update { old ->
+            val rows = old.statuses.map { row -> if (row.symbol in universe)
+                PairScanStatus(row.symbol, "pending", "موتور مستقل در حال دریافت و مقایسهٔ منابع",
+                    sourcePlan = SourceRouting.historyPlan(row.symbol, config.hasKey)) else row }
+            val ranked = rankOpportunities(rows)
+            old.copy(statuses = rows, topThree = ranked.take(3), bestPick = ranked.firstOrNull())
+        }
         fun update(
             symbol: String,
             state: String,
@@ -192,12 +264,21 @@ class PairScanner(
             trend: SymbolTrend? = null,
             trendAligned: Boolean? = null,
             trendNote: String? = null,
-        ) {
+            als5Opportunity: com.aurum.edge.core.Als5OpportunityRecord? = null,
+        ) = synchronized(statusLock) {
+            if (state != "capacity") decisionLog?.append(symbol, (chosenIntervals[symbol] ?: Interval.M5).label, state, detail,
+                signal = if (conditions.isNotEmpty()) com.aurum.edge.core.Signal(
+                    action ?: SignalAction.NO_TRADE, confidence ?: 0.0, confluence = conditions)
+                    else null, dedupe = false, method = methodLabel, methodReason = playbookReason)
             statuses[symbol] = PairScanStatus(
                 symbol = symbol,
                 state = state,
                 detail = detail,
+                interval = chosenIntervals[symbol],
                 lastScanAt = System.currentTimeMillis(),
+                sourcePlan = SourceRouting.historyPlan(symbol, config.hasKey),
+                baseSource = baseSources[symbol],
+                lastBarAt = barTimes[symbol],
                 price = price,
                 technicalScore = score,
                 action = action,
@@ -215,319 +296,348 @@ class PairScanner(
                 trendStrength = trend?.strength,
                 trendAligned = trendAligned,
                 trendNote = trendNote ?: trend?.detailFa?.take(200),
+                als5Opportunity = als5Opportunity,
             )
-            val currentList = WatchCatalog.scannerSymbols.mapNotNull { statuses[it] }
-            val ranked = rankOpportunities(currentList)
-            _state.value = _state.value.copy(
-                statuses = currentList,
-                topThree = ranked.take(3),
-                bestPick = ranked.firstOrNull(),
-            )
+            _state.update { old ->
+                val currentList = old.statuses.map { statuses[it.symbol] ?: it }
+                val ranked = rankOpportunities(currentList)
+                old.copy(statuses = currentList,
+                    checkedCount = currentList.count { it.lastScanAt != null },
+                    topThree = ranked.take(3), bestPick = ranked.firstOrNull(), marketTrend = freshTrend())
+            }
         }
 
-        val config = settings.read()
-        val interval: Interval = config.interval
         val headlines = news.state.value
-        val trades = journal.trades.value
 
-        WatchCatalog.scannerSymbols.forEachIndexed { index, symbol ->
-            if (index > 0) delay(PAIR_SPACING_MS)
-            val now = System.currentTimeMillis()
-            if (MarketHours.weekendClosedFor(symbol, now)) {
-                update(symbol, "closed", "بازار تعطیل است؛ اسکن موقتاً متوقف شد")
-                return@forEachIndexed
-            }
-            if (trades.any { it.symbol == symbol && it.isOpen }) {
-                update(symbol, "blocked", "پوزیشن کاغذی این نماد باز است؛ فرصت جدید اسکن نمی‌شود")
-                return@forEachIndexed
-            }
-
-            suspend fun publicOrDukascopy(): List<Candle> = try {
-                publicHistory.fetchCandles(symbol, interval,
-                    minimumSize = HistoryPolicy.TARGET_CANDLES,
-                    desiredSize = HistoryPolicy.TARGET_CANDLES).candles
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (publicFailure: Exception) {
-                try {
-                    dukascopyHistory.fetchCandles(symbol, interval,
-                        minimumSize = HistoryPolicy.TARGET_CANDLES,
-                        desiredSize = HistoryPolicy.TARGET_CANDLES).candles
-                } catch (cancel: CancellationException) {
-                    throw cancel
-                } catch (deepFailure: Exception) {
-                    throw DataFeedException((deepFailure.message ?: publicFailure.message ?: "خطای دریافت کندل").take(140))
+        // All symbols start without waiting for an asset-class slot. Only each external
+        // publisher's own HTTP capacity is bounded; position monitoring is independent.
+        // This is NOT a sub-second multi-source network guarantee.
+        coroutineScope {
+            universe.map { symbol -> async {
+                // A closed market or already-open position does not need a network slot.
+                // Publish these statuses immediately, without waiting behind HTTP requests.
+                val preflightNow = System.currentTimeMillis()
+                if (MarketHours.closedFor(symbol, preflightNow)) {
+                    update(symbol, "closed", "بازار طبق ساعت سشن بسته است؛ درخواست فید انجام نمی‌شود")
+                    return@async
                 }
-            }
+                if (journal.trades.value.any { it.symbol == symbol && it.isOpen }) {
+                    update(symbol, "blocked", "پوزیشن کاغذی این نماد باز است؛ فرصت جدید اسکن نمی‌شود")
+                    return@async
+                }
+                val crypto = CryptoCatalog.isCrypto(symbol)
+                // All NEW entries and radar candidates have a closed 5m base, regardless
+                // of the selected chart. M15/H1 are independent alignment inputs ONLY.
+                var interval = Interval.M5
+                var now = System.currentTimeMillis()
+                if (MarketHours.closedFor(symbol, now)) {
+                    // Schedule only: do not fetch candles, evaluate, rank or attempt entry for
+                    // this closed market. Other markets (notably 24/7 crypto) remain independent.
+                    update(symbol, "closed", "بازار طبق ساعت سشن بسته است؛ تا بازگشایی هیچ درخواست فید یا ارزیابی سیگنال انجام نمی‌شود")
+                    return@async
+                }
+                // Re-read before any publisher request: a new open position outranks scanning.
+                if (journal.trades.value.any { it.symbol == symbol && it.isOpen }) {
+                    update(symbol, "blocked", "پوزیشن کاغذی این نماد باز است؛ فرصت جدید اسکن نمی‌شود")
+                    return@async
+                }
 
-            val candles = try {
-                if (config.hasKey) {
+                val cryptoSnapshot = if (crypto) try {
+                    cryptoBundle.fetch(symbol, now)
+                } catch (cancel: CancellationException) { throw cancel }
+                catch (failure: Exception) {
+                    if (!AppNetwork.route.value.ready) {
+                        update(symbol, "waiting_connection", "شبکهٔ گوشی آماده نیست؛ تحلیل و ورود انجام نشد")
+                        return@async
+                    }
+                    // A venue may supply a FRESH, exact-pair trade even when it cannot
+                    // supply 320 contiguous closed candles. Show that price as a
+                    // READ-ONLY partial observation, never as a candle, signal or fill.
+                    if (failure is PublisherOccupied) {
+                        update(symbol, "capacity", failure.message.orEmpty())
+                        return@async
+                    }
+                    val quote = listOf(CryptoRadarCandleClient.Venue.GATE,
+                        CryptoRadarCandleClient.Venue.OKX, CryptoRadarCandleClient.Venue.KRAKEN, CryptoRadarCandleClient.Venue.MEXC)
+                        .firstNotNullOfOrNull { venue ->
+                            try {
+                                venue to cryptoReadOnly.fetchWatchTrade(symbol, venue)
+                            } catch (cancel: CancellationException) { throw cancel }
+                            catch (_: Exception) { null }
+                        }
+                    if (quote != null) {
+                        update(symbol, "partial",
+                            "${quote.first.provider}: معاملهٔ زمان‌دار ${quote.second.at}؛ " +
+                                "۳۲۰ کندل بستهٔ M5/M15/H1 تأیید نشد؛ فقط قیمت مشاهده‌ای، بدون سیگنال/ورود",
+                            price = quote.second.price)
+                    } else update(symbol, "error", (failure.message ?: "منبع هم‌نماد موجود نیست").take(420))
+                    return@async
+                } else null
+                val nonCryptoSnapshot = if (!crypto) try {
+                    nonCryptoBundle.fetch(symbol, config.apiKey, now)
+                } catch (cancel: CancellationException) { throw cancel }
+                catch (failure: Exception) {
+                    update(symbol, if (failure is PublisherOccupied) "capacity" else "error",
+                        (failure.message ?: "منبع هم‌نماد موجود نیست").take(420))
+                    return@async
+                } else null
+                // Network permits and fallback can outlast a bar boundary. Use receipt time,
+                // not the clock captured before the publisher wait.
+                now = System.currentTimeMillis()
+                val integrityRevision = cryptoSnapshot?.integrityRevision ?: nonCryptoSnapshot!!.integrityRevision
+                SourceIntegrity.shared.blocker(symbol, integrityRevision)?.let { reason ->
+                    update(symbol, "blocked", reason)
+                    return@async
+                }
+                val rawCandles = cryptoSnapshot?.m5 ?: nonCryptoSnapshot!!.m5
+                val baseSource = cryptoSnapshot?.provider ?: nonCryptoSnapshot!!.provider
+
+                baseSources[symbol] = baseSource
+                // Provider flags can mark an in-progress bar as closed. Never score, settle or
+                // construct MTF snapshots from it, even when its OHLC parses correctly.
+                var candles = rawCandles.filter { it.closed && it.time + interval.millis <= now }
+                    .sortedBy { it.time }.distinctBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
+                candles.lastOrNull()?.let { barTimes[symbol] = it.time + interval.millis }
+                if (candles.size < HistoryPolicy.LIVE_MIN_CANDLES) {
+                    update(symbol, "partial", "فقط مشاهدهٔ کندل قبلی ${candles.lastOrNull()?.time ?: "—"}: " +
+                        "${candles.size} کندل بستهٔ واقعی در ${interval.label}؛ برای سیگنال/معامله ${HistoryPolicy.LIVE_MIN_CANDLES} لازم است",
+                        price = candles.lastOrNull()?.close)
+                    return@async
+                }
+
+                // The complete decision uses ONE publisher for all three independent frames.
+                val frames = cryptoSnapshot?.frames ?: nonCryptoSnapshot!!.frames
+                val candidates = listOf(Interval.M5)
+                val reads = mutableListOf<CryptoIntervalChoice.Read>()
+                val unavailable = mutableListOf<String>()
+                for (candidate in candidates) {
+                    val bars = when (candidate) {
+                        interval -> candles
+                        else -> frames[candidate].orEmpty()
+                    }.filter { it.closed && it.time + candidate.millis <= System.currentTimeMillis() }
+                        .sortedBy { it.time }.distinctBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
+                    if (bars.size < HistoryPolicy.LIVE_MIN_CANDLES) {
+                        unavailable += "${candidate.label}: کمتر از ${HistoryPolicy.LIVE_MIN_CANDLES} کندل بسته"
+                        continue
+                    }
+                    val evaluated = withContext(Dispatchers.Default) {
+                        try { SignalEngine.evaluateLive(bars, candidate, config, symbol, frames) }
+                        catch (cancel: CancellationException) { throw cancel }
+                        catch (_: Exception) { null }
+                    }
+                    if (evaluated == null) unavailable += "${candidate.label}: محاسبه ناموفق"
+                    else {
+                        val vetted = NewsConfluence.apply(evaluated, symbol, headlines, now)
+                        if (vetted != null) reads += CryptoIntervalChoice.Read(candidate, bars, vetted)
+                        else unavailable += "${candidate.label}: ارزیابی خبر/AI ناموفق"
+                    }
+                }
+                val selected = CryptoIntervalChoice.pick(reads) ?: run {
+                    update(symbol, "partial", "هیچ‌یک از بازه‌های ${candidates.joinToString { it.label }} قابل ارزیابی نبود: " +
+                        unavailable.joinToString("؛ ").take(130))
+                    return@async
+                }
+                interval = selected.interval
+                chosenIntervals[symbol] = interval
+                candles = selected.bars
+                val evaluated = selected.signal
+
+
+                val price = candles.lastOrNull()?.close
+                barTimes[symbol] = candles.last().time + interval.millis
+                val lastClosed = candles.lastOrNull { it.closed && it.time + interval.millis <= now }
+                // A newly fetched response can still contain only old bars. Scan timestamp alone
+                // must never make that history look fresh in rankings or the market-wide trend.
+                if (lastClosed == null || now - (lastClosed.time + interval.millis) !in
+                    0L..(interval.millis + 90_000L)) {
+                    update(symbol, "partial", "آخرین کندل بستهٔ منبع قدیمی است؛ رتبه/روند تازه ساخته نشد",
+                        price = price)
+                    return@async
+                }
+                // A REST candle close is not a live tick. Never settle a position as if it were one.
+                if (lastClosed != null && !crypto) {
                     try {
-                        client.fetchCandles(config.apiKey, symbol, interval, outputSize = HistoryPolicy.TARGET_CANDLES)
+                        journal.settle(lastClosed, symbol, now)
                     } catch (cancel: CancellationException) {
                         throw cancel
                     } catch (_: Exception) {
-                        publicOrDukascopy()
+                        update(symbol, "error", "تسویهٔ ژورنال این نماد ناموفق بود؛ سیگنال جدید ارزیابی نشد", price)
+                        return@async
                     }
-                } else {
-                    publicOrDukascopy()
                 }
-            } catch (error: Exception) {
-                update(symbol, "error", (error.message ?: "خطای دریافت کندل").take(100))
-                return@forEachIndexed
-            }
+                // «روند کلی بازار چطور به دست می‌آید؟» — لایهٔ اول: از همان کندل‌های بستهٔ واقعیِ
+                // همین نماد، هم روی تایم‌فریم پایه و هم روی تایم‌فریم مرجع (تجمیع‌شده، نه ساخته‌شده).
+                val trend = withContext(Dispatchers.Default) {
+                    runCatching { MarketTrend.symbolTrend(symbol, candles, interval) }.getOrNull()
+                }
+                if (trend != null && trend.known) trendSample[symbol] = System.currentTimeMillis() to trend
 
-            if (candles.size < HistoryPolicy.TARGET_CANDLES) {
-                update(symbol, "error", "ناشر فقط ${candles.size} کندل داد؛ حداقل ${HistoryPolicy.TARGET_CANDLES} کندل لازم است")
-                return@forEachIndexed
-            }
+                // Playbook is market context only (not a fifth V1 gate). The scanner and chart
+                // both send the same selected category mode and independently fetched frames into
+                // the same SignalEngine; absolute locks are enforced there and by paper risk rules.
+                val playbook = withContext(Dispatchers.Default) {
+                    runCatching { MarketPlaybook.assess(symbol, candles, interval, now) }.getOrNull()
+                }
+                // The playbook is context only; V1Scoring has the absolute market locks.
 
-            val price = candles.lastOrNull()?.close
-            val lastClosed = candles.lastOrNull { it.closed }
-            if (price != null && price > 0.0) {
-                journal.settleTick(symbol, price, now)
-            }
-            if (lastClosed != null) {
-                journal.settle(lastClosed, symbol, now)
-            }
-            // «روند کلی بازار چطور به دست می‌آید؟» — لایهٔ اول: از همان کندل‌های بستهٔ واقعیِ
-            // همین نماد، هم روی تایم‌فریم پایه و هم روی تایم‌فریم مرجع (تجمیع‌شده، نه ساخته‌شده).
-            val trend = withContext(Dispatchers.Default) {
-                runCatching { MarketTrend.symbolTrend(symbol, candles, interval) }.getOrNull()
-            }
-            if (trend != null && trend.known) trendSample += trend
+                val combined = NewsConfluence.apply(evaluated, symbol, headlines, now)!!
+                val score = combined.confluence.take(NewsConfluence.TECHNICAL_COUNT).count { it.ok }
+                if (!combined.isActionable) {
+                    update(
+                        symbol = symbol,
+                        state = if (crypto && combined.blockers.any { it.startsWith("واچ‌لیست") }) "watch" else "no_signal",
+                        detail = "بازهٔ ${interval.label} از مقایسهٔ ${candidates.joinToString { it.label }} · " +
+                            (if (combined.blockers.isNotEmpty()) "امتیاز ${combined.confidence.toInt()}/۱۰۰ · ${combined.blockers.joinToString("، ").take(95)}" else "بدون سیگنال؛ شواهد فنی $score از ۴") +
+                            (if (unavailable.isNotEmpty()) " · ${unavailable.joinToString("؛ ").take(90)}" else ""),
+                        price = price,
+                        score = score,
+                        action = combined.action,
+                        confidence = combined.confidence,
+                        entry = combined.entry,
+                        sl = combined.stopLoss,
+                        tp = combined.takeProfit,
+                        rr = combined.riskReward,
+                        conditions = combined.confluence,
+                        methodLabel = playbook?.method?.label,
+                        playbookAllowed = playbook?.allowed,
+                        playbookReason = playbook?.reasonFa?.take(160),
+                        trend = trend,
+                        als5Opportunity = combined.als5Opportunity,
+                    )
+                    return@async
+                }
 
-            // «متناسب با همان استراتژی پویش کن»: the per-market method router is asked FIRST, from
-            // the real closed candles and the real session clock. A market whose method says
-            // stand aside (weekend, rollover, spike, dead tape, crypto range, closed equities,
-            // spread wider than 25% of ATR) never reaches the engine, so the radar reports the
-            // strategy reason instead of a low-quality signal.
-            val playbook = withContext(Dispatchers.Default) {
-                runCatching { MarketPlaybook.assess(symbol, candles, interval, now) }.getOrNull()
-            }
-            val playbookBlocker = if (playbook != null && !playbook.allowed) {
-                playbook.blockers.firstOrNull() ?: playbook.reasonFa
-            } else null
-            if (playbookBlocker != null && playbook != null) {
-                update(
-                    symbol = symbol,
-                    state = "blocked",
-                    detail = "متد بازار: ${playbook.method.label} — ${playbookBlocker.take(120)}",
-                    price = price,
-                    methodLabel = playbook.method.label,
-                    playbookAllowed = false,
-                    playbookReason = playbookBlocker.take(160),
-                    trend = trend,
+                // ── لایهٔ دوم و سوم: عرض بازار + جهت دلار + جوّ ریسک، و اثرشان روی همین ورود ──
+                // روش‌های روندی خلاف جهتِ اندازه‌گیری‌شده مسدود می‌شوند؛ بازگشت به میانگین فقط در
+                // بازارِ بدون روند؛ و ورودِ دارایی ریسکی خلافِ جوّ بازار با کف اطمینانِ سخت‌تر.
+                val alignment = withContext(Dispatchers.Default) {
+                    runCatching { MarketTrend.alignmentOf(combined.action, trend) }.getOrNull()
+                }
+                val trendGate = withContext(Dispatchers.Default) {
+                    runCatching {
+                        MarketTrend.entryGate(combined.action, playbook?.method, trend, overallTrend)
+                    }.getOrNull()
+                }
+                val aligned = alignment == TrendAlignment.WITH
+                // The four-layer user threshold is authoritative, not a second trend/session bar.
+
+                val graceMs = interval.millis + 90_000L
+                val market = MarketState(
+                    symbol = symbol, interval = interval, candles = candles, lastPrice = price,
+                    sourceIntegrityRevision = integrityRevision,
+                    feed = FeedStatus(FeedMode.POLLING,
+                        "تاریخچهٔ بستهٔ $baseSource؛ تیک اجرا و اسپرد جداگانه لازم است",
+                        System.currentTimeMillis(), provider = baseSource),
+                    signal = combined,
+                    // Only the ACTUAL publisher can authorize a same-venue entry. Radar fallback
+                    // candles from Gate/OKX are never relabelled as Binance history.
+                    historyProvider = baseSource,
+
                 )
-                return@forEachIndexed
-            }
+                val mtf = withContext(Dispatchers.Default) {
+                    runCatching { MtfAnalyzer.analyze(candles, interval) }.getOrNull()
+                }
+                // This runs for EVERY supported catalog row, not only editable watchlist rows.
+                // The callback MUST obtain a separate same-symbol trade tick and route through
+                // the atomic JournalStore; this historical candle must never act as the fill.
+                val autoReview = if (config.autoPaperTrading &&
+                    symbol in WatchCatalog.scannerSymbols) try {
+                    autoReviewMutex.withLock { onAutoSignal?.invoke(market) }
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    CatalogAutoReview(reason = "بازبینی ورود کاغذی کاتالوگ ناموفق بود")
+                } else null
+                if (autoReview?.trade != null) {
+                    update(symbol, "opened", "معاملهٔ کاغذی در ${interval.label} با قیمت تازهٔ مستقل ثبت شد؛ " +
+                        "کندل اسکن قیمت ورود نبود", price, score, combined.action,
+                        combined.confidence, combined.entry, combined.stopLoss, combined.takeProfit,
+                        combined.riskReward, combined.confluence, playbook?.method?.label,
+                        playbook?.allowed, playbook?.reasonFa?.take(160), trend, aligned,
+                        trendGate?.noteFa?.take(200), combined.als5Opportunity)
+                    return@async
+                }
+                val blocker = PaperAlertRules.blocker(market, config, headlines, journal.trades.value, mtf,
+                    System.currentTimeMillis(), allowedSymbols = config.activeSymbols, barAgeGraceMs = graceMs)
+                if (blocker != null) {
+                    // A technically actionable closed-bar read is still useful when alerts,
+                    // monitor, live quote or risk permission are absent. Rank it
+                    // read-only; NEVER persist/notify/open it as a paper opportunity.
+                    update(symbol = symbol, state = "observed",
+                        detail = "فقط سیگنال فنی؛ مجوز ورود/اعلان نیست: ${blocker.take(110)}" +
+                            (autoReview?.reason?.let { " · خودکار: ${it.take(140)}" } ?: ""),
+                        price = price, score = score, action = combined.action,
+                        confidence = combined.confidence, entry = combined.entry,
+                        sl = combined.stopLoss, tp = combined.takeProfit, rr = combined.riskReward,
+                        conditions = combined.confluence, methodLabel = playbook?.method?.label,
+                        playbookAllowed = playbook?.allowed,
+                        playbookReason = playbook?.reasonFa?.take(160), trend = trend,
+                        trendAligned = aligned, trendNote = trendGate?.noteFa?.take(200),
+                        als5Opportunity = combined.als5Opportunity)
+                    return@async
+                }
 
-            val evaluated = withContext(Dispatchers.Default) {
-                runCatching { SignalEngine.evaluate(candles, interval, config.minConfidence, config.spreadPrice, config.signalProfile, config.activeStrategy) }.getOrNull()
-            }
-            if (evaluated == null) {
-                update(symbol, "error", "ارزیابی سیگنال روی کندل‌های دریافتی ممکن نشد", price)
-                return@forEachIndexed
-            }
+                val evidence = NewsConfluence.record(headlines, symbol)
+                val ict = IctEntryRules.approvedEvidence(market, System.currentTimeMillis(), graceMs)
 
-            val combined = NewsConfluence.apply(evaluated, symbol, headlines, now)!!
-            val score = combined.confluence.take(NewsConfluence.TECHNICAL_COUNT).count { it.ok }
-            if (!combined.isActionable) {
-                update(
-                    symbol = symbol,
-                    state = "no_signal",
-                    detail = if (score >= 5) "شواهد فنی $score از ۷؛ هنوز به آستانهٔ ورود نرسیده" else "بدون سیگنال؛ شواهد فنی $score از ۷",
-                    price = price,
-                    score = score,
-                    action = combined.action,
-                    confidence = combined.confidence,
-                    entry = combined.entry,
-                    sl = combined.stopLoss,
-                    tp = combined.takeProfit,
-                    rr = combined.riskReward,
-                    conditions = combined.confluence,
-                    methodLabel = playbook?.method?.label,
-                    playbookAllowed = playbook?.allowed,
-                    playbookReason = playbook?.reasonFa?.take(160),
-                    trend = trend,
-                )
-                return@forEachIndexed
-            }
 
-            // ── لایهٔ دوم و سوم: عرض بازار + جهت دلار + جوّ ریسک، و اثرشان روی همین ورود ──
-            // روش‌های روندی خلاف جهتِ اندازه‌گیری‌شده مسدود می‌شوند؛ بازگشت به میانگین فقط در
-            // بازارِ بدون روند؛ و ورودِ دارایی ریسکی خلافِ جوّ بازار با کف اطمینانِ سخت‌تر.
-            val alignment = withContext(Dispatchers.Default) {
-                runCatching { MarketTrend.alignmentOf(combined.action, trend) }.getOrNull()
-            }
-            val trendGate = withContext(Dispatchers.Default) {
-                runCatching {
-                    MarketTrend.entryGate(combined.action, playbook?.method, trend, overallTrend)
+                val item = runCatching {
+                    val mtfRec = MtfSnapshotRecord.from(mtf ?: error("نمایش MTF پایه موجود نیست"))
+                    PaperOpportunity.from(combined, symbol, price ?: combined.entry ?: 0.0, mtfRec, evidence, ict)
                 }.getOrNull()
-            }
-            val aligned = alignment == TrendAlignment.WITH
-            if (trendGate != null && !trendGate.allowed) {
-                update(
-                    symbol = symbol,
-                    state = "blocked",
-                    detail = "روند بازار: ${(trendGate.blockerFa ?: "ورود خلاف جهتِ روندِ اندازه‌گیری‌شده").take(120)}",
-                    price = price,
-                    score = score,
-                    action = combined.action,
-                    confidence = combined.confidence,
-                    entry = combined.entry,
-                    sl = combined.stopLoss,
-                    tp = combined.takeProfit,
-                    rr = combined.riskReward,
-                    conditions = combined.confluence,
-                    methodLabel = playbook?.method?.label,
-                    playbookAllowed = playbook?.allowed,
-                    playbookReason = playbook?.reasonFa?.take(160),
-                    trend = trend,
-                    trendAligned = false,
-                    trendNote = trendGate.blockerFa?.take(200),
-                )
-                return@forEachIndexed
-            }
 
-            // The method also raises the confidence bar per market/session (thin weekend crypto,
-            // a range fade, an Asian session …). Below that bar the symbol is not "worthy".
-            val trendConfidenceAdd = trendGate?.minConfidenceAdd ?: 0.0
-            val requiredConfidence = (playbook?.minConfidence ?: config.minConfidence) + trendConfidenceAdd
-            if (playbook != null && combined.confidence < requiredConfidence) {
-                update(
-                    symbol = symbol,
-                    state = "blocked",
-                    detail = "متد ${playbook.method.label}: اطمینان ${combined.confidence.toInt()}٪ از کفِ " +
-                        "${requiredConfidence.toInt()}٪ این بازار/سشن کمتر است" +
-                        (if (trendConfidenceAdd > 0.0) " (لایهٔ روند +${trendConfidenceAdd.toInt()})" else ""),
-                    price = price,
-                    score = score,
-                    action = combined.action,
-                    confidence = combined.confidence,
-                    entry = combined.entry,
-                    sl = combined.stopLoss,
-                    tp = combined.takeProfit,
-                    rr = combined.riskReward,
-                    conditions = combined.confluence,
-                    methodLabel = playbook.method.label,
-                    playbookAllowed = true,
-                    playbookReason = playbook.reasonFa.take(160),
-                    trend = trend,
-                    trendAligned = aligned,
-                    trendNote = trendGate?.noteFa?.take(200),
-                )
-                return@forEachIndexed
-            }
-
-            val graceMs = interval.millis + 90_000L
-            val market = MarketState(
-                symbol = symbol, interval = interval, candles = candles, lastPrice = price,
-                feed = FeedStatus(FeedMode.POLLING,
-                    if (config.hasKey) "اسکن دوره‌ای Twelve/public/Dukascopy fallback" else "اسکن دوره‌ای تاریخچهٔ عمومی/Dukascopy",
-                    System.currentTimeMillis()),
-                signal = combined,
-            )
-            val mtf = withContext(Dispatchers.Default) {
-                runCatching { MtfAnalyzer.analyze(candles, interval) }.getOrNull()
-            }
-            val blocker = PaperAlertRules.blocker(market, config, headlines, trades, mtf,
-                System.currentTimeMillis(), allowedSymbols = WatchCatalog.scannerSymbols, barAgeGraceMs = graceMs)
-            if (blocker != null) {
-                update(
-                    symbol = symbol,
-                    state = "blocked",
-                    detail = "سیگنال $score/۷ · ${blocker.take(120)}",
-                    price = price,
-                    score = score,
-                    action = combined.action,
-                    confidence = combined.confidence,
-                    entry = combined.entry,
-                    sl = combined.stopLoss,
-                    tp = combined.takeProfit,
-                    rr = combined.riskReward,
-                    conditions = combined.confluence,
-                    methodLabel = playbook?.method?.label,
-                    playbookAllowed = playbook?.allowed,
-                    playbookReason = playbook?.reasonFa?.take(160),
-                    trend = trend,
-                    trendAligned = aligned,
-                    trendNote = trendGate?.noteFa?.take(200),
-                )
-                return@forEachIndexed
-            }
-
-            val evidence = NewsConfluence.record(headlines, symbol)
-            val ict = IctEntryRules.approvedEvidence(market, System.currentTimeMillis(), graceMs)
-
-            if (mtf?.veto == true) {
-                update(symbol = symbol, state = "blocked", detail = "تراز چندتایم‌فریم ورود را وتو کرده است: ${mtf.vetoReason}", price = price, score = score, conditions = combined.confluence, trend = trend, trendAligned = aligned)
-                return@forEachIndexed
-            }
-
-            val item = runCatching {
-                val mtfRec = mtf?.let { MtfSnapshotRecord.from(it) } ?: MtfSnapshotRecord(
-                    baseInterval = market.interval.label,
-                    bias = "NEUTRAL",
-                    alignment = 1.0,
-                    buyCount = 0,
-                    sellCount = 0,
-                    neutralCount = 0,
-                    veto = false,
-                    advisory = "تایید",
-                    barTime = combined.barTime,
-                )
-                PaperOpportunity.from(combined, symbol, price ?: combined.entry ?: 0.0, mtfRec, evidence, ict)
-            }.getOrNull()
-
-            if (item != null) {
+                if (item == null) {
+                    update(symbol = symbol, state = "blocked",
+                        detail = "دادهٔ MTF پایه برای نمایش فرصت موجود نیست",
+                        price = price, score = score, conditions = combined.confluence,
+                        trend = trend, trendAligned = aligned)
+                    return@async
+                }
                 val recorded = runCatching { opportunities.record(item) }.getOrDefault(false)
-                if (recorded) onCandidate?.invoke(item)
-            }
-
-            // Independent category auto-trading: each of the 4 asset categories (Crypto, Forex, Commodity, Stock)
-            // operates independently with 1 dedicated slot without blocking other categories.
-            val targetCategory = com.aurum.edge.core.AssetClass.of(symbol)
-            val currentOpenInClass = journal.trades.value.count { it.isOpen && com.aurum.edge.core.AssetClass.of(it.symbol) == targetCategory }
-            val totalOpen = journal.trades.value.count { it.isOpen }
-
-            if (config.autoPaperTrading && totalOpen < 4 && currentOpenInClass < targetCategory.maxSlots) {
-                runCatching {
-                    val openedTrade = autoTrader?.onMarketUpdate(market)
-                    if (openedTrade != null && context != null) {
-                        Notifier.notifyTradeOpened(context, openedTrade, config.alertSoundUri)
+                if (recorded) {
+                    try {
+                        onCandidate?.invoke(item)
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (_: Exception) {
+                        // A notification failure must not stop analysis of the remaining symbols.
+                        // The opportunity is already persisted; do not emit a false entry alert.
                     }
                 }
-            }
-            update(
-                symbol = symbol,
-                state = "candidate",
-                detail = "فرصت معاملاتی تایید شد" +
-                    (playbook?.let { " · متد ${it.method.label}" } ?: "") +
-                    (trend?.let { " · روند ${it.direction.label} ${it.strength}٪" } ?: "") +
-                    (overallTrend?.takeIf { it.known }?.let { " · بازار ${it.bias.label}" } ?: "") +
-                    " · شانس موفقیت ${(combined.confidence).toInt()}% · R:R 1:${String.format(java.util.Locale.US, "%.1f", combined.riskReward ?: 2.0)}",
-                price = price,
-                score = score,
-                action = combined.action,
-                confidence = combined.confidence,
-                entry = combined.entry,
-                sl = combined.stopLoss,
-                tp = combined.takeProfit,
-                rr = combined.riskReward,
-                conditions = combined.confluence,
-                methodLabel = playbook?.method?.label,
-                playbookAllowed = playbook?.allowed,
-                playbookReason = playbook?.reasonFa?.take(160),
-                trend = trend,
-                trendAligned = aligned,
-                trendNote = trendGate?.noteFa?.take(200),
-            )
-        }
+
+                // Radar history may suggest candidates, but cannot auto-open a trade without a
+                // separate fresh same-venue executed trade tick and atomic journal authorization.
+                update(
+                    symbol = symbol,
+                    state = "candidate",
+                    detail = "فرصت معاملاتی ${interval.label} از کندل بستهٔ همان نماد تایید شد" +
+                        (autoReview?.reason?.let { " · ورود خودکار انجام نشد: ${it.take(140)}" } ?: "") +
+                        (playbook?.let { " · متد ${it.method.label}" } ?: "") +
+                        (trend?.let { " · روند ${it.direction.label} ${it.strength}٪" } ?: "") +
+                        (overallTrend?.takeIf { it.known }?.let { " · بازار ${it.bias.label}" } ?: "") +
+                        " · امتیاز فنی ${combined.confidence.toInt()}/۱۰۰ · R:R 1:${combined.riskReward?.let { String.format(java.util.Locale.US, "%.1f", it) } ?: "نامعلوم"}",
+                    price = price,
+                    score = score,
+                    action = combined.action,
+                    confidence = combined.confidence,
+                    entry = combined.entry,
+                    sl = combined.stopLoss,
+                    tp = combined.takeProfit,
+                    rr = combined.riskReward,
+                    conditions = combined.confluence,
+                    methodLabel = playbook?.method?.label,
+                    playbookAllowed = playbook?.allowed,
+                    playbookReason = playbook?.reasonFa?.take(160),
+                    trend = trend,
+                    trendAligned = aligned,
+                    trendNote = trendGate?.noteFa?.take(200),
+                    als5Opportunity = combined.als5Opportunity,
+                )
+            } }.awaitAll()
+        } // independent symbol evaluations; publisher-limited requests
     }
 
     companion object {
         const val SWEEP_PERIOD_MS = 30_000L
-        const val PAIR_SPACING_MS = 1_000L
     }
 }

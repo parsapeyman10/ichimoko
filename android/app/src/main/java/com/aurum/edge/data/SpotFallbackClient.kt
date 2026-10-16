@@ -1,9 +1,15 @@
 package com.aurum.edge.data
 
-import com.aurum.edge.core.Interval
 import com.aurum.edge.core.PriceTick
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.json.Json
@@ -18,9 +24,10 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
- * Automatic real spot-price source. Mirrors the backend's app/services/spot_feed.py:
- * Swissquote's public BBO quote feed first, then gold-api.com (gold only) as a second real
- * source. MarketRepository tries this public source before its final Twelve Data live fallback,
+ * Automatic real spot-price source: Swissquote's public BBO for FX, gold-api.com for gold,
+ * and Binance Spot aggregate executions for NEW USDT entries. Legacy Nobitex
+ * positions retain their dedicated same-venue replay method.
+ * MarketRepository tries this public source before its final Twelve Data live fallback,
  * whether or not a key is configured.
  *
  * This is not a mock/synthetic generator: every value returned is parsed from a live provider
@@ -30,13 +37,25 @@ import java.util.concurrent.TimeUnit
  * aggregator is needed here.
  */
 class SpotFallbackClient(
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = AppNetwork.builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .build(),
-    private val nobitex: NobitexHistoryClient = NobitexHistoryClient(),
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+    private val binance = BinanceSpotClient()
+
+    // Instances used by the screen, service and scanner share a rate budget. Paper
+    // positions get a reserved high-priority lane; low-priority scans cannot exhaust it.
+    private object CryptoTradeCache {
+        // A slow BTC request must not lock ETH. Only the short rate budget is global.
+        val locks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+        val responses = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, String>>()
+        val lastAttempt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+        val budget = NobitexTradeBudget()
+        const val MIN_CRYPTO_FETCH_MS = 10_000L
+        const val OPEN_POSITION_FETCH_MS = 3_000L
+    }
 
     private fun get(url: String): String {
         val request = Request.Builder().url(url).header("Accept", "application/json").build()
@@ -85,7 +104,12 @@ class SpotFallbackClient(
         val at = tsRaw.toLong()
         val age = System.currentTimeMillis() - at
         if (age !in -10_000L..MAX_QUOTE_AGE_MS) throw DataFeedException("قیمت Swissquote قدیمی یا با زمان نامعتبر است")
-        return PriceTick((bid + ask) / 2.0, at, bid = bid, ask = ask)
+        return PriceTick((bid + ask) / 2.0, at, bid = bid, ask = ask, provider = "Swissquote")
+    }
+
+    /** Watch-only, exact Swissquote bid/ask; does NOT silently relabel Gold-API. */
+    suspend fun fetchSwissquoteOnly(symbol: String): PriceTick = withContext(Dispatchers.IO) {
+        fetchSwissquote(symbol)
     }
 
     /** gold-api.com: a second, independent, keyless source — gold (XAU/USD) only. */
@@ -114,36 +138,126 @@ class SpotFallbackClient(
         if (!price.isFinite() || price <= 0.0) throw DataFeedException("قیمت Gold-API نامعتبر است")
         val age = System.currentTimeMillis() - at
         if (age !in -10_000L..MAX_QUOTE_AGE_MS) throw DataFeedException("قیمت Gold-API قدیمی است")
-        return PriceTick(price, at)
+        return PriceTick(price, at, provider = "Gold-API")
     }
 
-    /** One real quote: Swissquote first, gold-api.com only as a gold-only backup. Never fabricated. */
-    suspend fun fetchQuote(symbol: String): PriceTick {
-        // Crypto has its own real, keyless book. Swissquote and Gold-API do not carry these
-        // instruments at all, so trying them would just produce a misleading error.
-        if (CryptoCatalog.isCrypto(symbol)) {
-            // Last closed candle from the same unblocked source as the history, so the
-            // live price and the chart can never disagree about which venue they mean.
-            val last = nobitex.fetchCandles(symbol, Interval.M1, desiredSize = 2, minimumSize = 1)
-                .candles.lastOrNull()
-                ?: throw DataFeedException("قیمت زندهٔ $symbol دریافت نشد")
-            return PriceTick(price = last.close, at = System.currentTimeMillis())
+    private suspend fun cryptoTradeResponse(symbol: String, openPosition: Boolean = false,
+                                            openedAt: Long = 0L): String {
+        val code = NobitexHistoryClient.ticker(symbol)
+            ?: throw DataFeedException("نماد USDT برای نوبیتکس معتبر نیست")
+        val lock = CryptoTradeCache.locks.computeIfAbsent(symbol) { Mutex() }
+        return lock.withLock {
+            val now = System.currentTimeMillis()
+            val minInterval = if (openPosition) CryptoTradeCache.OPEN_POSITION_FETCH_MS
+                else CryptoTradeCache.MIN_CRYPTO_FETCH_MS
+            CryptoTradeCache.responses[symbol]?.takeIf { (fetchedAt, _) ->
+                now - fetchedAt in 0L..minInterval && (!openPosition || fetchedAt >= openedAt)
+            }?.let { return@withLock it.second }
+            if (now - (CryptoTradeCache.lastAttempt[symbol] ?: 0L) in 0L until minInterval)
+                throw DataFeedException("فاصلهٔ مجاز درخواست تیک نوبیتکس؛ پاسخ قبلی معتبر نیست")
+            // Reserve capacity BEFORE the request so failures and HTTP 429 do not cause
+            // retries that crowd out a currently open position.
+            if (!CryptoTradeCache.budget.tryAcquire(System.nanoTime() / 1_000_000L, openPosition))
+                throw DataFeedException("سهمیهٔ تیک عمومی پر است؛ پوزیشن باز اولویت دارد")
+            CryptoTradeCache.lastAttempt[symbol] = now
+            val body = withContext(Dispatchers.IO) { get("${NobitexHistoryClient.HOST}/v2/trades/$code") }
+            CryptoTradeCache.responses[symbol] = now to body
+            body
         }
-        return try {
-            fetchSwissquote(symbol)
-        } catch (cancel: CancellationException) {
-            throw cancel
-        } catch (primary: Exception) {
-            try {
-                fetchGoldApi(symbol)
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (secondary: Exception) {
-                throw DataFeedException(
-                    "منابع رایگان قیمت لحظه‌ای (Swissquote/Gold-API) در دسترس نیستند"
-                )
+    }
+
+    /** The only priority lane: an actually OPEN paper position, still capped at 3s/pair.
+     * A display quote and a scanner candidate never acquire this reservation.
+     */
+    internal suspend fun fetchCryptoTrades(symbol: String, openedAt: Long): List<NobitexTradeBatch.Trade> {
+        if (!CryptoCatalog.isCrypto(symbol) || openedAt <= 0L)
+            throw DataFeedException("پوزیشن باز معتبر برای فید اولویت‌دار وجود ندارد")
+        return NobitexTradeBatch.parse(cryptoTradeResponse(symbol, openPosition = true, openedAt = openedAt))
+    }
+
+    private object GoldBudget {
+        val mutex = Mutex()
+        var cached: PriceTick? = null
+        var receivedAt = 0L
+        var revision = -1L
+    }
+
+    private suspend fun compareGold(): PriceTick = GoldBudget.mutex.withLock {
+        val route = AppNetwork.route.value
+        if (!route.ready) throw DataFeedException("پروکسی آماده نیست؛ قیمت زنده تأیید نشد")
+        val gate = SourceIntegrity.shared
+        val token = gate.begin("XAU/USD", SourceIntegrity.Channel.GOLD_QUOTE)
+        val now = System.currentTimeMillis()
+        GoldBudget.cached?.takeIf { !gate.channelBlocked("XAU/USD", SourceIntegrity.Channel.GOLD_QUOTE) && GoldBudget.revision == route.revision &&
+            now - GoldBudget.receivedAt in 0L..5_000L && now - it.at in -10_000L..45_000L
+        }?.let { return@withLock it }
+        val quotes = coroutineScope {
+            listOf<suspend () -> PriceTick>(
+                { withContext(Dispatchers.IO) { fetchSwissquote("XAU/USD") } },
+                { withContext(Dispatchers.IO) { fetchGoldApi("XAU/USD") } },
+            ).map { read -> async {
+                try { read() } catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) { null }
+            } }.awaitAll().filterNotNull()
+        }
+        if (route != AppNetwork.route.value) throw DataFeedException("مسیر قیمت طلا تغییر کرد؛ دریافت دوباره لازم است")
+        GoldBudget.cached = null // a new conflict must not reuse a previous agreement
+        val selected = try { SpotPriceSelection.gold(quotes, System.currentTimeMillis()) }
+        catch (failure: SourceDisagreement) {
+            gate.reject("XAU/USD", SourceIntegrity.Channel.GOLD_QUOTE, failure.message.orEmpty())
+            throw failure
+        }
+        if (gate.accept("XAU/USD", SourceIntegrity.Channel.GOLD_QUOTE, token, selected.sourceConfirmations) == null)
+            throw DataFeedException("اختلاف قیمت طلا هنوز رفع نشده؛ دو منبع همخوان لازم است")
+        selected.also {
+            GoldBudget.cached = it; GoldBudget.receivedAt = System.currentTimeMillis(); GoldBudget.revision = route.revision
+        }
+    }
+
+    /** Single dedicated source per symbol (1-to-1). Never fabricated. */
+    suspend fun fetchQuote(symbol: String): PriceTick {
+        val canonical = com.aurum.edge.core.V1Universe.normalize(symbol)
+        if (CryptoCatalog.isCrypto(canonical)) {
+            val venue = SourceRouting.cryptoVenueFor(canonical)
+                ?: throw DataFeedException("منبع اختصاصی رمزارز تعریف نشده: $canonical")
+            return if (venue == CryptoRadarCandleClient.Venue.BINANCE) {
+                binance.fetchQuote(canonical)
+            } else {
+                CryptoRadarCandleClient(client).fetchWatchTrade(canonical, venue)
             }
         }
+        return when (canonical) {
+            "XAU/USD", "XAG/USD" -> withContext(Dispatchers.IO) { fetchGoldApi(canonical) }
+            "DOW" -> withContext(Dispatchers.IO) { fetchYahooIndexQuote("^DJI") }
+            "EUR/USD" -> withContext(Dispatchers.IO) { fetchYahooIndexQuote("EURUSD=X") }
+            "USD/JPY" -> withContext(Dispatchers.IO) { fetchYahooIndexQuote("JPY=X") }
+            "GBP/JPY" -> withContext(Dispatchers.IO) { fetchYahooIndexQuote("GBPJPY=X") }
+            else -> withContext(Dispatchers.IO) { fetchSwissquote(canonical) }
+        }
+    }
+
+    private fun fetchYahooIndexQuote(yahooSymbol: String): PriceTick {
+        val encoded = java.net.URLEncoder.encode(yahooSymbol, "UTF-8").replace("%3D", "=")
+        val url = "https://query1.finance.yahoo.com/v8/finance/chart/$encoded?interval=5m&range=1d&includePrePost=false"
+        val body = get(url)
+        val root = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
+            ?: throw DataFeedException("پاسخ Yahoo معتبر نیست")
+        val meta = ((root["chart"] as? JsonObject)?.get("result") as? JsonArray)
+            ?.firstOrNull() as? JsonObject
+        val metaObj = meta?.get("meta") as? JsonObject
+            ?: throw DataFeedException("متای قیمت Yahoo موجود نیست")
+        val price = metaObj["regularMarketPrice"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() && it > 0.0 }
+            ?: throw DataFeedException("قیمت لحظه‌ای Yahoo معتبر نیست")
+        val tsSec = metaObj["regularMarketTime"]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+            ?: throw DataFeedException("زمان قیمت Yahoo موجود نیست")
+        val at = tsSec * 1000L
+        return PriceTick(
+            price = price,
+            at = at,
+            provider = "Yahoo Dedicated ($yahooSymbol)",
+            sourceConfirmations = 1,
+        )
     }
 
     /** Infinite real-tick stream, polled every [POLL_INTERVAL_MS]. A failure closes the flow. */

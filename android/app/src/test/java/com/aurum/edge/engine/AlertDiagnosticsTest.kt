@@ -6,6 +6,7 @@ import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
+import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
@@ -31,9 +32,10 @@ class AlertDiagnosticsTest {
         assertTrue(checks.single { it.kind == AlertCheckKind.APP_ALERT }.ready) // opt-in, but not deliverable yet
     }
 
-    @Test fun `recent REST bars allow educational prerequisites but no AI signal or automatic entry`() {
-        val bars = (0 until 210).map { i ->
-            Candle(now - (210L - i) * Interval.M5.millis, 3100.0, 3101.0, 3099.0, 3100.0, closed = true)
+    @Test fun `recent REST bars allow live prerequisites but no AI signal or automatic entry`() {
+        val count = HistoryPolicy.LIVE_MIN_CANDLES
+        val bars = (0 until count).map { i ->
+            Candle(now - (count - i) * Interval.M5.millis, 3100.0, 3101.0, 3099.0, 3100.0, closed = true)
         }
         val market = MarketState(candles = bars, feed = FeedStatus(FeedMode.POLLING, lastSuccessAt = now - 4_000L))
         val settings = AppSettings(apiKey = "synthetic-only", backgroundMonitor = true,

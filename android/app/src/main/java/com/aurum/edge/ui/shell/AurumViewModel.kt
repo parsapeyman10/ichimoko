@@ -14,7 +14,6 @@ import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.HistoryPolicy
-import com.aurum.edge.data.CryptoCatalog
 import com.aurum.edge.data.SourceComparison
 import com.aurum.edge.data.VerificationStatus
 import com.aurum.edge.data.WatchCatalog
@@ -24,41 +23,40 @@ import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
+import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.PaperOrderRules
+import com.aurum.edge.core.PaperPortfolioPolicy
+import com.aurum.edge.core.TechnicalEvidence
+import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.core.PaperTicket
-import com.aurum.edge.core.ReplayDecision
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.TradeReplay
-import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.data.AppUpdateRepository
-import com.aurum.edge.data.FreeHistoryCatalog
-import com.aurum.edge.data.FreeHistoryState
 import com.aurum.edge.data.JournalStats
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.SpotFallbackClient
+import com.aurum.edge.data.OpenTickSnapshot
+import com.aurum.edge.data.DisplayMark
+import com.aurum.edge.data.OpenPositionDisplay
 import com.aurum.edge.data.NewsRepository
 import com.aurum.edge.data.WatchSelection
 import com.aurum.edge.data.WatchState
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.NewsConfluence
-import com.aurum.edge.engine.ReplayEngine
-import com.aurum.edge.engine.ReplayEvaluation
 import com.aurum.edge.notify.AlertSoundPlayer
 import com.aurum.edge.notify.Notifier
 import com.aurum.edge.service.SignalMonitorService
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -81,6 +79,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val forexCalendar = container.forexCalendar.state
     /** All-pairs radar: periodic online candle sweep status of every catalog pair. */
     val pairScan = container.pairScanner.state
+    val decisionLog = container.decisionLog.records
     /** The AI trading companion's latest strictly-validated opinion (analysis, never a signal). */
     val traderOpinion = container.traderAdvisor.state
     /** Reachability of the model, checked before any AI judgement of a trade. */
@@ -93,6 +92,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val opportunities: StateFlow<List<PaperOpportunity>> = container.opportunityStore.items
     val opportunityError: StateFlow<String?> = container.opportunityStore.loadError
     val journalError: StateFlow<String?> = container.journalStore.loadError
+    val tickFeeds = container.openTradeTicks.feeds
     val autoPaperStatus: StateFlow<String> = container.autoPaperTrader.status
 
     /**
@@ -140,13 +140,15 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         val side = state.signal?.action ?: com.aurum.edge.core.SignalAction.NO_TRADE
         if (trend != null && trend.symbol != state.symbol) return@combine null
         runCatching {
-            com.aurum.edge.core.MarketTrend.contextOf(side, trend, overall, decision?.method)
+            com.aurum.edge.core.MarketTrend.contextOf(side, trend,
+                overall?.takeIf { System.currentTimeMillis() - it.computedAt in 0L..10 * 60_000L },
+                decision?.method)
         }.getOrNull()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
      * «چرا معامله/هشدار نداریم؟» — the honest prerequisites (feed, history, monitor, notification
-     * channels, storage, news/AI, the 8/8 technical gate and the CONTINUOUS SYMBOL SCAN itself),
+     * channels, storage, news/AI, the current seven-condition technical gate and the CONTINUOUS SYMBOL SCAN itself),
      * computed from live app state.
      * Green checks are prerequisites, never a forecast.
      */
@@ -169,33 +171,20 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val updateState: StateFlow<AppUpdateRepository.State> = container.updater.state
+    val updateSigningDiagnostic: String by lazy { container.updater.installedSigningDiagnostic() }
 
-    /** Walk-forward runs made on this device, kept so the numbers can be re-checked later. */
-    val reports: StateFlow<List<WalkForwardRecord>> = container.journalStore.reports
-    val reportError: StateFlow<String?> = container.journalStore.reportError
-    val replayDecisions: StateFlow<List<ReplayDecision>> = container.replayJournalStore.entries
-
-    private val _livePrices = MutableStateFlow<Map<String, Double>>(emptyMap())
-    val livePrices: StateFlow<Map<String, Double>> = _livePrices.asStateFlow()
+    /** One atomic price+original-time snapshot for the open-position UI.
+     * It is never persisted as a new tick and never used to replay an exit.
+     */
+    private val _liveTicks = MutableStateFlow<Map<String, PriceTick>>(emptyMap())
+    val liveTicks: StateFlow<Map<String, PriceTick>> = _liveTicks.asStateFlow()
+    // UI-only memory of the last verified tick for each *trade id*. Stale values never enter liveTicks.
+    private val _lastDisplayMarks = MutableStateFlow<Map<String, DisplayMark>>(emptyMap())
+    val lastDisplayMarks: StateFlow<Map<String, DisplayMark>> = _lastDisplayMarks.asStateFlow()
     private var liveTickerLoopStarted = false
 
     private val _stats = MutableStateFlow(container.journalStore.stats())
     val stats: StateFlow<JournalStats> = _stats.asStateFlow()
-
-    private val _learn = MutableStateFlow<LearnState>(LearnState.Idle)
-    val learn: StateFlow<LearnState> = _learn.asStateFlow()
-
-    private val _replay = MutableStateFlow<ReplayState>(ReplayState.Idle)
-    val replay: StateFlow<ReplayState> = _replay.asStateFlow()
-    private var replayJob: kotlinx.coroutines.Job? = null
-    private val replayOutcomeMutex = Mutex()
-    private var replayRevision: Long = 0L
-
-    private val _freeHistory = MutableStateFlow<FreeHistoryState>(FreeHistoryState.Idle)
-    val freeHistory: StateFlow<FreeHistoryState> = _freeHistory.asStateFlow()
-
-    private val _walkForward = MutableStateFlow<WalkForwardState>(WalkForwardState.Idle)
-    val walkForward: StateFlow<WalkForwardState> = _walkForward.asStateFlow()
 
     /** Multi-timeframe confluence, recomputed on the phone whenever a new real bar closes. */
     private val _mtf = MutableStateFlow<MtfAnalyzer.Snapshot?>(null)
@@ -220,19 +209,30 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private val _aiModels = MutableStateFlow(AiModelsState())
     val aiModels: StateFlow<AiModelsState> = _aiModels.asStateFlow()
 
+    // HTTP calls can finish after a user edits the draft or switches provider. An old
+    // response must never be displayed as proof of the new model's connection.
+    private var aiProbeGeneration = 0L
+    private var aiModelsGeneration = 0L
+
+    fun resetAiDraftDiagnostics() {
+        aiProbeGeneration++
+        aiModelsGeneration++
+        _aiProbe.value = AiProbeState()
+        _aiModels.value = AiModelsState()
+    }
+
     init {
+        // The market and background service can settle trades without going through a UI
+        // button. Keep Home/Journal statistics attached to the same persisted ledger.
+        viewModelScope.launch {
+            container.journalStore.trades.collect { _stats.value = container.journalStore.stats() }
+        }
         viewModelScope.launch {
             runCatching { container.journalStore.load() }.onFailure {
                 _toast.value = "ژورنال خوانده نشد؛ فایل قبلی برای بازیابی نگه داشته شد"
             }
             runCatching { container.opportunityStore.load() }.onFailure {
                 _toast.value = "تاریخچهٔ فرصت‌ها خوانده نشد؛ فایل قبلی نگه داشته شد و هشدار تکراری متوقف است"
-            }
-            runCatching { container.journalStore.loadReports() }.onFailure {
-                _toast.value = "گزارش پژوهش خوانده نشد؛ فایل قبلی نگه داشته شد"
-            }
-            runCatching { container.replayJournalStore.load() }.onFailure {
-                _toast.value = "ژورنال تصمیم‌های replay خوانده نشد؛ فایل قبلی دست‌نخورده ماند"
             }
             _stats.value = container.journalStore.stats()
         }
@@ -279,8 +279,15 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         ensureLiveTickerLoop()
     }
 
-    /** Forex is the app's only workspace: start the real feed as soon as the UI is visible. */
+    /** Open on gold on each cold launch; in-session symbol selections remain available. */
     fun startApp(context: Context) {
+        if (container.settingsStore.read().symbol != "XAU/USD") {
+            // Save before starting the market feed, so it cannot start on the previously
+            // viewed symbol. This changes only the chart selection, never open positions.
+            if (!container.settingsStore.saveChartSymbol("XAU/USD")) {
+                _toast.value = "شروع با طلا ذخیره نشد؛ نماد قبلی حفظ شد"
+            }
+        }
         visibleOnlineLoopEnabled = true
         container.market.start()
         container.watch.loadCached()
@@ -299,9 +306,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
         // Do this once per process, not on every tab change. If the user enabled automatic
         // download, a verified public APK is downloaded and Android's installer is opened.
+        // Automatic checks keep a gap (see AppUpdateRepository): the anonymous GitHub API quota
+        // is shared per public IP, so re-checking on every launch hid real updates behind 403s.
         if (!updateCheckStarted) {
             updateCheckStarted = true
-            checkForAppUpdate(settings.value.autoDownloadUpdates)
+            checkForAppUpdate(settings.value.autoDownloadUpdates, force = false)
         }
     }
 
@@ -318,7 +327,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     private var visibleOnlineLoopStarted = false
-    private var visibleOnlineLoopEnabled = false
+    @Volatile private var visibleOnlineLoopEnabled = false
     private var updateCheckStarted = false
 
     /**
@@ -328,6 +337,15 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private fun ensureVisibleOnlineLoop() {
         if (visibleOnlineLoopStarted) return
         visibleOnlineLoopStarted = true
+        // Radar has its own clock: a stalled news or AI request must never delay the next
+        // symbol sweep. The scanner itself rejects closed markets and respects provider pacing.
+        viewModelScope.launch {
+            while (isActive) {
+                if (visibleOnlineLoopEnabled || SignalMonitorService.running.value)
+                    container.pairScanner.refreshNow()
+                delay(60_000L)
+            }
+        }
         viewModelScope.launch {
             var turns = 0
             while (isActive) {
@@ -346,10 +364,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     if (settings.value.hasClientNewsAi) {
                         runCatching { container.traderAdvisor.ensureConnection() }.getOrNull()
                     }
-                    // پایش پیوستهٔ نمادها: the 50+ symbol radar keeps sweeping while the app is
-                    // visible, independently of the background-monitor switch (PairScanner enforces
-                    // its own 30s throttle and records honest online/error statuses per symbol).
-                    container.pairScanner.refreshNow()
                     // Advisory review of the open positions while the app is visible (the monitor
                     // service does the same when it runs). Never closes or re-prices a trade.
                     runCatching { container.traderAdvisor.reviewOpenPositions() }.getOrNull()
@@ -360,81 +374,121 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    /**
-     * Continuous multi-symbol parallel price ticker:
-     * Fetches real-time market prices concurrently for ALL open trades and active symbols,
-     * updates live PnL and gauge animations on Home Screen, and automatically
-     * settles Take Profit (TP) and Stop Loss (SL) in real-time as prices move.
+    /** Each OPEN symbol has an independent UI worker, so one slow quote cannot hold
+     * another position's display behind awaitAll. The service keeps its own same-venue
+     * ordered exit monitor; this map is only timestamped, verified on-screen valuation.
      */
     private fun ensureLiveTickerLoop() {
         if (liveTickerLoopStarted) return
         liveTickerLoopStarted = true
         viewModelScope.launch(Dispatchers.IO) {
             val spot = SpotFallbackClient()
-            while (isActive) {
-                try {
-                    val currentMarket = container.verifiedMarket.value
-                    val openTradesList = container.journalStore.trades.value.filter { it.isOpen }
-                    val currentMap = _livePrices.value.toMutableMap()
-
-                    if (currentMarket.lastPrice != null && currentMarket.lastPrice!! > 0.0) {
-                        currentMap[currentMarket.symbol] = currentMarket.lastPrice!!
-                        val closedList = container.journalStore.settleTick(currentMarket.symbol, currentMarket.lastPrice!!)
-                        if (closedList.isNotEmpty()) {
-                            _stats.value = container.journalStore.stats()
-                            closedList.forEach { closed ->
-                                _toast.value = "معاملهٔ ${closed.symbol} (${closed.exitReason}) بسته و تسویه شد: ${closed.pnlUsd}$"
-                            }
+            val workers = mutableMapOf<String, Pair<Long, kotlinx.coroutines.Job>>()
+            try {
+                container.journalStore.trades.collect { trades ->
+                    val open = trades.filter { it.isOpen }.groupBy { it.symbol }
+                        .mapValues { (_, positions) -> positions.minOf { it.openedAt } }
+                    workers.toMap().forEach { (symbol, worker) ->
+                        if (open[symbol] != worker.first) {
+                            worker.second.cancel()
+                            workers.remove(symbol)
                         }
                     }
-
-                    // Parallel multi-processing quote fetching across all open trade symbols
-                    val symbolsToFetch = openTradesList.map { it.symbol }.distinct().filter { it != currentMarket.symbol }
-                    if (symbolsToFetch.isNotEmpty()) {
-                        kotlinx.coroutines.coroutineScope {
-                            val deferreds = symbolsToFetch.map { sym ->
-                                async(Dispatchers.IO) {
-                                    val quote = runCatching { spot.fetchQuote(sym) }.getOrNull()
-                                    sym to quote?.price
-                                }
-                            }
-                            deferreds.awaitAll().forEach { (sym, price) ->
-                                if (price != null && price.isFinite() && price > 0.0) {
-                                    currentMap[sym] = price
-                                    val closedList = container.journalStore.settleTick(sym, price)
-                                    if (closedList.isNotEmpty()) {
-                                        _stats.value = container.journalStore.stats()
-                                        closedList.forEach { closed ->
-                                            _toast.value = "معاملهٔ ${closed.symbol} (${closed.exitReason}) بسته و تسویه شد: ${closed.pnlUsd}$"
+                    _liveTicks.update { current -> current.filter { (symbol, tick) ->
+                        symbol in open && tick.at >= open.getValue(symbol) && TradeQuotePolicy.accepts(tick)
+                    } }
+                    _lastDisplayMarks.update { OpenPositionDisplay.onlyOpen(it, trades) }
+                    open.forEach { (symbol, openedAt) ->
+                        if (symbol !in workers) {
+                            val worker = launch(Dispatchers.IO) {
+                                val crypto = com.aurum.edge.data.CryptoCatalog.isCrypto(symbol)
+                                // Separate closed-candle lane: never slow the ordered tick stream.
+                                if (crypto) launch {
+                                    while (isActive) {
+                                        try {
+                                            container.openTradeTicks.syncCryptoClosedBars(symbol, openedAt)
+                                        } catch (cancel: kotlinx.coroutines.CancellationException) {
+                                            throw cancel
+                                        } catch (_: Exception) {
+                                            // Keep the prior real stop/valuation when history is unavailable.
                                         }
+                                        delay(60_000L)
                                     }
                                 }
+                                while (isActive) {
+                                    if (!visibleOnlineLoopEnabled && !SignalMonitorService.running.value) {
+                                        _liveTicks.update { it - symbol }
+                                        delay(1_000L)
+                                        continue
+                                    }
+                                    if (MarketHours.closedFor(symbol)) {
+                                        _liveTicks.update { it - symbol }
+                                        delay(10_000L)
+                                        continue
+                                    }
+                                    try {
+                                        val selected = if (!crypto)
+                                            container.verifiedMarket.value.let { market ->
+                                                container.journalStore.trades.value
+                                                    .firstOrNull { it.symbol == symbol && it.isOpen && it.openedAt == openedAt }
+                                                    ?.let { com.aurum.edge.data.OpenPositionQuotePolicy.selectedFallback(it, market) }
+                                            } else null
+                                        val isSelected = !crypto && container.verifiedMarket.value.symbol == symbol
+                                        // Never use the selected chart as a crypto trade source.
+                                        val quote = if (isSelected) selected else if (crypto)
+                                            container.openTradeTicks.poll(symbol, openedAt) else spot.fetchQuote(symbol)
+                                        if (!isActive) break
+                                        val fresh = quote?.takeIf {
+                                            it.at >= openedAt && !MarketHours.closedFor(symbol) && TradeQuotePolicy.accepts(it)
+                                        }
+                                        if (fresh != null) {
+                                            container.journalStore.trades.value.firstOrNull { trade ->
+                                                trade.isOpen && trade.symbol == symbol && trade.openedAt == openedAt
+                                            }?.let { trade -> _lastDisplayMarks.update { old ->
+                                                OpenPositionDisplay.record(old, trade, fresh)
+                                            } }
+                                        }
+                                        _liveTicks.update { previous -> OpenTickSnapshot.updated(previous,
+                                            symbol, fresh, container.journalStore.trades.value.filter { it.isOpen }
+                                                .map { it.symbol }.toSet()) }
+                                        if (fresh != null && !crypto && !isSelected) {
+                                            val closed = container.journalStore.settleTick(symbol, fresh.price,
+                                                fresh.at, expectedOpenedAt = openedAt)
+                                            if (closed.isNotEmpty()) {
+                                                _stats.value = container.journalStore.stats()
+                                                closed.forEach { trade -> _toast.value =
+                                                    "معاملهٔ ${trade.symbol} (${trade.exitReason}) بسته و تسویه شد: ${trade.pnlUsd}$" }
+                                            }
+                                        }
+                                    } catch (cancel: CancellationException) {
+                                        throw cancel
+                                    } catch (_: Exception) {
+                                        // Only this symbol becomes unknown. Keep other real ticks.
+                                        _liveTicks.update { it - symbol }
+                                    }
+                                    delay(if (crypto) 3_000L else 1_000L)
+                                }
                             }
+                            workers[symbol] = openedAt to worker
                         }
                     }
-
-                    // Also pull prices from scanner if available
-                    container.pairScanner.state.value.statuses.forEach { st ->
-                        if (st.price != null && st.price > 0.0) {
-                            currentMap.putIfAbsent(st.symbol, st.price)
-                            container.journalStore.settleTick(st.symbol, st.price)
-                        }
-                    }
-
-                    _livePrices.value = currentMap
-                } catch (_: Exception) {}
-                delay(800L)
+                }
+            } finally {
+                workers.values.forEach { it.second.cancel() }
+                _liveTicks.value = emptyMap()
             }
         }
     }
 
     fun refreshNow() = container.market.refreshNow()
 
-    fun checkForAppUpdate(autoDownload: Boolean = settings.value.autoDownloadUpdates) {
+    fun checkForAppUpdate(autoDownload: Boolean = settings.value.autoDownloadUpdates, force: Boolean = true) {
         viewModelScope.launch {
-            container.updater.checkForUpdate(autoDownload)
+            container.updater.checkForUpdate(autoDownload, force)
             if (autoDownload && container.updater.state.value.downloadedApkPath != null) {
-                container.updater.installDownloaded()
+                // Automatic path: prepare the install without jumping to Android settings; the
+                // update screen offers the permission button when it is actually needed.
+                container.updater.installDownloaded(openPermissionSettings = false)
             }
         }
     }
@@ -448,7 +502,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setAutoDownloadUpdates(enabled: Boolean) {
         container.settingsStore.update { it.copy(autoDownloadUpdates = enabled) }
-        if (enabled) checkForAppUpdate(autoDownload = true)
+        if (enabled) checkForAppUpdate(autoDownload = true, force = false)
         _toast.value = if (enabled)
             "بررسی و دانلود خودکار فعال شد؛ نصب نهایی با تأیید Android انجام می‌شود"
         else "دانلود خودکار بروزرسانی خاموش شد"
@@ -482,12 +536,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     /** Manual all-pairs sweep across 50+ instruments. */
     fun scanPairs() {
-        if (container.pairScanner.state.value.sweeping) {
-            _toast.value = "اسکن همگانی ۵۰+ نماد در حال اجراست"
-            return
-        }
         viewModelScope.launch {
-            _toast.value = "اسکن ۵۰+ سهم و نماد آغاز شد؛ بهترین فرصت‌ها شناسایی می‌شوند"
+            _toast.value = "اسکن ۲۰۰ کریپتو و فارکس/کالا آغاز شد؛ بهترین فرصت‌ها شناسایی می‌شوند"
             try {
                 container.pairScanner.sweepOnce(minIntervalMs = 1 * 60_000L) { }
             } catch (_: Exception) {
@@ -516,26 +566,30 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
      * the keyless Swissquote feed serves ticks for every pair; REST history still needs a key.
      * One verified write, one feed restart.
      */
+    private val symbolSelectionMutex = Mutex()
+
     fun selectChartSymbol(symbol: String) {
         if (symbol == settings.value.symbol) return
-        val valid = symbol in WatchCatalog.chartSymbols ||
-            symbol in WatchCatalog.scannerSymbols ||
-            CryptoCatalog.isCrypto(symbol)
+        val valid = com.aurum.edge.core.V1Universe.valid(symbol)
         if (!valid) {
             _toast.value = "نماد $symbol در کاتالوگ نمادها پیدا نشد"
             return
         }
         viewModelScope.launch {
-            try {
-                val saved = withContext(Dispatchers.IO) { container.settingsStore.saveChartSymbol(symbol) }
-                if (!saved) {
-                    _toast.value = "ذخیرهٔ نماد روی دستگاه تأیید نشد؛ دوباره تلاش کنید"
-                    return@launch
+            symbolSelectionMutex.withLock {
+                try {
+                    val saved = withContext(Dispatchers.IO) { container.settingsStore.saveChartSymbol(symbol) }
+                    if (!saved) {
+                        _toast.value = "ذخیرهٔ نماد روی دستگاه تأیید نشد؛ دوباره تلاش کنید"
+                        return@withLock
+                    }
+                    container.market.restart()
+                    _toast.value = "نماد چارت و سیگنال: $symbol"
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    _toast.value = "تغییر نماد ناموفق بود؛ دوباره تلاش کنید"
                 }
-                container.market.restart()
-                _toast.value = "نماد چارت و سیگنال: $symbol"
-            } catch (_: Exception) {
-                _toast.value = "تغییر نماد ناموفق بود؛ دوباره تلاش کنید"
             }
         }
     }
@@ -570,11 +624,21 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     private var marketSaveInFlight = false
 
-    fun saveRiskPercent(value: Double) = container.settingsStore.update { it.copy(riskPercent = value.coerceIn(0.1, 5.0)) }
+    fun setCategoryStrategy(category: com.aurum.edge.core.AssetClass,
+                            mode: com.aurum.edge.core.CategoryStrategy) {
+        if (category in setOf(com.aurum.edge.core.AssetClass.CRYPTO, com.aurum.edge.core.AssetClass.STOCK)) return // retired legacy crypto modes
+        container.settingsStore.update {
+            it.copy(categoryStrategies = it.categoryStrategies + (category to mode))
+        }
+        container.market.refreshNow()
+        container.pairScanner.refreshNow(minIntervalMs = 0L)
+    }
+
+    fun saveRiskPercent(value: Double) = container.settingsStore.update { it.copy(riskPercent = value.coerceIn(0.1, 0.5)) }
 
     fun saveBalance(value: Double) = container.settingsStore.update { it.copy(accountBalance = value.coerceAtLeast(10.0)) }
 
-    fun saveMinConfidence(value: Double) = container.settingsStore.update { it.copy(minConfidence = value.coerceIn(72.0, 95.0)) }
+    fun saveMinConfidence(value: Double) = container.settingsStore.update { it.copy(minConfidence = value.coerceIn(60.0, 95.0)) }
 
     /** Cost assumptions are the user's responsibility; they are echoed in every report. */
     fun saveSpread(value: Double) = container.settingsStore.update { it.copy(spreadPrice = value.coerceIn(0.0, 5.0)) }
@@ -588,7 +652,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             try {
                 val name = withContext(Dispatchers.IO) { AlertSoundPlayer.select(context, uri) }
                 container.settingsStore.update { it.copy(alertSoundUri = uri.toString(), alertSoundName = name) }
-                _toast.value = "صدای هشدار آموزشی: $name؛ برای بررسی «پخش آزمون» را بزنید"
+                _toast.value = "صدای هشدار: $name؛ برای بررسی «پخش آزمون» را بزنید"
             } catch (error: Exception) {
                 _toast.value = "صدای فایل انتخاب نشد: ${error.message ?: "دسترسی به فایل برقرار نیست"}"
             }
@@ -627,7 +691,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun setAutoPaperTrading(enabled: Boolean) {
         container.settingsStore.update { it.copy(autoPaperTrading = enabled) }
         if (enabled) container.news.refreshNow()
-        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ فقط با قواعد کامل موتور، قیمت زنده و ICT/MTF ثبت می‌شود"
+        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ فقط با موتور چهارلایه، هفت بازهٔ واقعی و قفل‌های ریسک/AI ثبت می‌شود"
             else "معاملهٔ خودکار کاغذی خاموش شد"
     }
 
@@ -651,7 +715,26 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     private fun entryBlocker(current: MarketState): String? {
+        com.aurum.edge.core.OilEntrySafety.blocker(current.symbol)?.let { return it }
         freshPaperQuote(current)?.let { return it }
+        if (!com.aurum.edge.data.CryptoVenuePolicy.compatible(current.symbol,
+                current.historyProvider, current.feed.provider))
+            return "ورود کریپتو مسدود: کندل تحلیل و تیک ورود باید هر دو از بازار Binance Spot باشند"
+        if (com.aurum.edge.core.MarketHours.closedFor(current.symbol)) return "بازار بسته است"
+        val candidate = current.signal
+        if (com.aurum.edge.core.AssetClass.of(current.symbol) == com.aurum.edge.core.AssetClass.CRYPTO) {
+            if (news.value.gate != com.aurum.edge.data.NewsGate.CLEAR || news.value.cached ||
+                news.value.lastCheckedAt?.let { System.currentTimeMillis() - it in 0L..180_000L } != true ||
+                news.value.calendarCheckedAt?.let { System.currentTimeMillis() - it in 0L..1_200_000L } != true)
+                return "خبر و تقویم تازهٔ بدون رویداد پراثر لازم است"
+            val quote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { price ->
+                PriceTick(price, at, current.bid, current.ask)
+            } }
+            com.aurum.edge.core.CryptoCompressionPolicy.quoteBlocker(
+                candidate ?: return "سیگنال رمزارز موجود نیست", quote)?.let { return it }
+        }
+        if (candidate?.isActionable != true || !TechnicalEvidence.confirmed(candidate))
+            return candidate?.blockers?.joinToString("، ") ?: "سیگنال چهارلایهٔ معتبر وجود ندارد"
         if (settings.value.pauseOnNews) {
             val checked = news.value.lastCheckedAt
             if (news.value.gate != NewsGate.CLEAR || checked == null ||
@@ -666,14 +749,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 return "قیمت منابع مستقل با هم تعارض دارد"
             }
         }
-        if (trades.value.count { it.isOpen } >= 3) return "سقف ۳ معاملهٔ همزمان باز پر شده است (${trades.value.count { it.isOpen }}/3)"
-        if (trades.value.any { it.isOpen && it.symbol == current.symbol }) return "برای این نماد یک پوزیشن کاغذی باز است"
+        PaperPortfolioPolicy.blocker(trades.value, current.symbol, settings.value.accountBalance, 0.0)?.let { return it }
         return null
     }
 
     fun previewManualTicket(side: SignalAction, stop: Double?, target: Double?): Result<PaperTicket> = runCatching {
         val current = market.value
         entryBlocker(current)?.let { throw IllegalArgumentException(it) }
+        require(current.signal?.action == side) { "جهت انتخابی باید با سیگنال چهارلایه برابر باشد" }
         PaperOrderRules.preview(side, current.symbol, current.lastPrice!!,
             stop ?: throw IllegalArgumentException("حد ضرر را وارد کنید"),
             target ?: throw IllegalArgumentException("حد سود را وارد کنید"),
@@ -684,9 +767,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun openManualPaperTrade(side: SignalAction, stop: Double, target: Double,
                              expectedPrice: Double, expectedSymbol: String) {
-        val signal = Signal(action = side, confidence = 0.0, stopLoss = stop,
-            takeProfit = target, interval = market.value.interval)
-        submitPaper(signal, manual = true, expectedPrice = expectedPrice, expectedSymbol = expectedSymbol)
+        val verified = market.value.signal
+        if (verified?.isActionable != true || verified.action != side ||
+            !TechnicalEvidence.confirmed(verified)) {
+            _toast.value = "ورود دستی بدون سیگنال چهارلایهٔ هم‌جهت ممنوع است"
+            return
+        }
+        submitPaper(verified.copy(stopLoss = stop, takeProfit = target),
+            manual = true, expectedPrice = expectedPrice, expectedSymbol = expectedSymbol)
     }
 
     private fun submitPaper(signal: Signal, manual: Boolean, expectedPrice: Double? = null,
@@ -700,6 +788,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             entryBlocker(current)?.let { throw IllegalArgumentException(it) }
             val price = current.lastPrice!!
             if (manual) {
+                require(current.signal?.isActionable == true && current.signal?.action == signal.action &&
+                    current.signal?.barTime == signal.barTime && TechnicalEvidence.confirmed(signal)) {
+                    "سیگنال چهارلایه یا وتوی AI تغییر کرده است"
+                }
                 require(expectedSymbol == current.symbol && expectedPrice != null && expectedPrice.isFinite() &&
                     expectedPrice > 0.0 && abs(price / expectedPrice - 1.0) <= 0.001) {
                     "قیمت/نماد نسبت به پیش‌نمایش تغییر کرده است؛ دوباره بررسی کنید"
@@ -707,15 +799,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             } else {
                 require(signal.isActionable && current.signal == signal && signal.interval == current.interval &&
                     signal.entry != null && signal.entry.isFinite() && signal.entry > 0.0 &&
-                    abs(price / signal.entry - 1.0) <= 0.005 && _mtf.value?.veto != true) {
+                    abs(price / signal.entry - 1.0) <= 0.005) {
                     "سیگنال قدیمی، وتوشده یا دور از قیمت تازه است"
                 }
-                val technicalConditions = signal.confluence.filterNot { it.name == NewsConfluence.NEWS_LABEL }
-                require(technicalConditions.take(8).size == 8 &&
-                    technicalConditions.take(8).all { it.ok && it.status == com.aurum.edge.core.ConfluenceStatus.CONFIRMED }) {
-                    "۸ شرط فنی دیگر معتبر نیست؛ ورود سیگنالی متوقف شد"
+                require(TechnicalEvidence.confirmed(signal)) {
+                    "شروط فنی دیگر معتبر نیست؛ ورود سیگنالی متوقف شد"
                 }
-                IctEntryRules.assess(current).reason?.let { throw IllegalArgumentException(it) }
             }
             PaperOrderRules.preview(signal.action, current.symbol, price,
                 signal.stopLoss ?: throw IllegalArgumentException("حد ضرر لازم است"),
@@ -736,8 +825,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 val (current, price) = verified()
                 val s = container.settingsStore.read()
                 val newsRecord = if (manual) null else NewsConfluence.record(news.value, current.symbol)
-                val ict = if (manual) null else (IctEntryRules.approvedEvidence(current)
-                    ?: error("شواهد رنج/ICT همین کندل پیش از ثبت معتبر نیست"))
+                val ict = if (manual) null else IctEntryRules.approvedEvidence(current) // optional historical detail
                 // «روند کلی بازار» در همان لحظهٔ ورود عکس گرفته و در ژورنال ثبت می‌شود تا برای
                 // هر معامله معلوم باشد با روند بوده یا خلافش. فقط ثبت است؛ گیتِ ورود همان‌جاست
                 // که تصمیم گرفته می‌شود (پویشگر و ورود خودکار)، نه بعد از ذخیره.
@@ -745,7 +833,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     val trend = symbolTrend.value?.takeIf { it.symbol == current.symbol }
                     com.aurum.edge.core.MarketTrendRecord.from(
                         com.aurum.edge.core.MarketTrend.contextOf(
-                            signal.action, trend, marketTrend.value, playbook.value?.method,
+                            signal.action, trend,
+                            marketTrend.value?.takeIf { System.currentTimeMillis() - it.computedAt in 0L..10 * 60_000L },
+                            playbook.value?.method,
                         ),
                     )
                 }.getOrNull()
@@ -756,6 +846,13 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     manual = manual,
                     newsEvidence = newsRecord, priceAction = ict,
                     marketTrend = trendRecord,
+                    cryptoNews = news.value,
+                    sourceIntegrityRevision = current.sourceIntegrityRevision,
+                    cryptoEntryQuote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { quote ->
+                        com.aurum.edge.core.PriceTick(quote, at, current.bid, current.ask)
+                    } },
+                    cryptoVenue = if (com.aurum.edge.data.CryptoCatalog.isCrypto(current.symbol))
+                        com.aurum.edge.data.BinanceSpotClient.VENUE else "NOBITEX",
                 )
                 _stats.value = container.journalStore.stats()
                 // Linking is metadata only; a damaged opportunity file must not erase a saved trade.
@@ -765,7 +862,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     container.journalStore.attachAiReview(trade.id, review)
                 }.getOrNull()
                 reviewedTrade?.let { _stats.value = container.journalStore.stats() }
-                val conditions = trade.entryConditions.take(8).joinToString("، ") {
+                val conditions = trade.entryConditions.joinToString("، ") {
                     it.name.substringAfter('·').trim()
                 }
                 _toast.value = "کاغذی: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} ${trade.symbol} · شروع: $conditions"
@@ -779,11 +876,23 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun closePaperTrade(trade: PaperTrade) {
-        val currentPrice = _livePrices.value[trade.symbol] ?: (if (trade.symbol == market.value.symbol) market.value.lastPrice else null)
+        val crypto = com.aurum.edge.data.CryptoCatalog.isCrypto(trade.symbol)
         viewModelScope.launch {
             try {
-                val exitPrice = currentPrice ?: runCatching { SpotFallbackClient().fetchQuote(trade.symbol).price }.getOrNull()
-                require(exitPrice != null && exitPrice.isFinite() && exitPrice > 0.0) { "قیمت خروج تازه برای ${trade.symbol} در دسترس نیست" }
+                // Read and validate at the moment of manual close, not at the earlier UI
+                // click. An old price left in a StateFlow must never become a fresh fill.
+                // Crypto always uses its own same-venue replay monitor, never chart prices.
+                // Even a fresh quote observed BEFORE this paper entry is not an exit fill.
+                val exitTick = if (crypto) container.openTradeTicks.quoteForManualClose(trade.symbol, trade.openedAt)
+                else {
+                    com.aurum.edge.data.OpenPositionQuotePolicy.monitored(trade, _liveTicks.value[trade.symbol])
+                        ?: com.aurum.edge.data.OpenPositionQuotePolicy.selectedFallback(trade, market.value)
+                        ?: runCatching { SpotFallbackClient().fetchQuote(trade.symbol) }.getOrNull()
+                }
+                val exitPrice = exitTick?.takeIf {
+                    it.at >= trade.openedAt && TradeQuotePolicy.accepts(it)
+                }?.price
+                require(exitPrice != null) { "قیمت خروج تازه برای ${trade.symbol} در دسترس نیست" }
                 val closed = container.journalStore.close(trade.id, exitPrice, "بستن دستی روی قیمت دریافتی")
                 _stats.value = container.journalStore.stats()
                 _toast.value = "پوزیشن کاغذی ${trade.symbol} با سود/ضرر ${String.format(java.util.Locale.US, "%.2f", closed.pnlUsd ?: 0.0)}$ بسته شد"
@@ -810,7 +919,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             try {
                 container.opportunityStore.clear()
-                _toast.value = "فقط تاریخچهٔ کاندیداهای آموزشی پاک شد؛ آمار معامله تغییر نکرد"
+                _toast.value = "فقط تاریخچهٔ فرصت‌های اسکن‌شده پاک شد؛ آمار معامله تغییر نکرد"
             } catch (error: Exception) {
                 _toast.value = "حذف کاندیدا انجام نشد؛ فایل قبلی حفظ شد: ${error.message ?: "خطای ذخیره"}"
             }
@@ -822,324 +931,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             container.candleCache.clear()
             _toast.value = "کش دیتای واقعی پاک شد"
             container.market.restart()
-        }
-    }
-
-    fun runLearn(
-        interval: Interval,
-        bars: Int,
-        balance: Double,
-        risk: Double,
-        spread: Double,
-        commission: Double,
-        threshold: Double,
-    ) {
-        replayJob?.cancel()
-        val replayRequest = ++replayRevision
-        viewModelScope.launch {
-            val requestedBars = HistoryPolicy.deepProviderRequestSize(bars)
-            val displayBars = requestedBars.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)
-            _replay.value = ReplayState.Loading
-            _learn.value = LearnState.Loading("دانلود حداقل $displayBars کندل واقعی ${interval.label} از منبع عمومی/Dukascopy؛ Twelve Data فقط fallback آخر…")
-            try {
-                // One verified dataset feeds both the batch report and the interactive cursor.
-                val dataset = container.fetchResearchDataset(interval, requestedBars)
-                if (replayRequest != replayRevision) return@launch
-                val result = container.runBacktest(dataset, interval, balance, risk, spread, commission, threshold)
-                if (replayRequest != replayRevision) return@launch
-                _learn.value = LearnState.Done(result, interval)
-                val profile = settings.value.signalProfile
-                val session = ReplayEngine.create(
-                    candles = dataset.candles,
-                    interval = interval,
-                    symbol = result.symbol,
-                    dataSource = dataset.source,
-                    config = ReplayEngine.Config(
-                        initialBalance = balance,
-                        riskPercent = risk,
-                        spreadPrice = spread,
-                        commissionPerOz = commission,
-                        threshold = threshold,
-                        signalProfile = profile,
-                    ),
-                    providerFetchedAt = dataset.fetchedAt,
-                    observedGapCount = dataset.observedGapCount,
-                )
-                val snapshot = withContext(Dispatchers.Default) { ReplayEngine.snapshot(session) }
-                if (replayRequest == replayRevision) {
-                    _replay.value = ReplayState.Ready(snapshot)
-                    refreshReplayOutcomes(session, replayRequest)
-                }
-            } catch (e: Exception) {
-                if (replayRequest == replayRevision) {
-                    _learn.value = LearnState.Failed(e.message ?: "خطا در دریافت داده واقعی")
-                    _replay.value = ReplayState.Failed(e.message ?: "دادهٔ replay آماده نشد")
-                }
-            }
-        }
-    }
-
-    fun seekReplay(cursor: Int) = updateReplay { ReplayEngine.seek(it, cursor) }
-
-    fun stepReplay(amount: Int = 1) = updateReplay { ReplayEngine.step(it, amount) }
-
-    fun resetReplay() = updateReplay(ReplayEngine::reset)
-
-    fun setReplayStartCursor() {
-        val ready = _replay.value as? ReplayState.Ready ?: return
-        val session = ready.snapshot.session
-        replayJob?.cancel()
-        val revision = ++replayRevision
-        val published = ready.snapshot.copy(
-            session = session.copy(startCursor = session.cursor, playing = false),
-        )
-        _replay.value = ReplayState.Ready(published)
-        viewModelScope.launch { refreshReplayOutcomes(published.session, revision) }
-    }
-
-    fun setReplaySpeed(speed: Float) {
-        val ready = _replay.value as? ReplayState.Ready ?: return
-        _replay.value = ReplayState.Ready(ready.snapshot.copy(
-            session = ReplayEngine.setSpeed(ready.snapshot.session, speed),
-        ))
-    }
-
-    fun setReplayPlaying(playing: Boolean) {
-        val ready = _replay.value as? ReplayState.Ready ?: return
-        if (!playing) {
-            replayJob?.cancel()
-            val revision = ++replayRevision
-            val published = ready.snapshot.copy(
-                session = ready.snapshot.session.copy(playing = false),
-            )
-            _replay.value = ReplayState.Ready(published)
-            viewModelScope.launch { refreshReplayOutcomes(published.session, revision) }
-            return
-        }
-        if (ready.snapshot.isAtEnd) return
-        replayJob?.cancel()
-        val playRevision = ++replayRevision
-        _replay.value = ReplayState.Ready(ready.snapshot.copy(
-            session = ready.snapshot.session.copy(playing = true),
-        ))
-        replayJob = viewModelScope.launch {
-            while (isActive && playRevision == replayRevision) {
-                val current = _replay.value as? ReplayState.Ready ?: break
-                val session = current.snapshot.session
-                if (!session.playing || current.snapshot.isAtEnd) break
-                val delayMs = (1000L / session.speed.coerceIn(0.25f, 8.0f)).toLong().coerceAtLeast(80L)
-                delay(delayMs)
-                val afterDelay = _replay.value as? ReplayState.Ready ?: break
-                if (!afterDelay.snapshot.session.playing) break
-                val next = ReplayEngine.step(afterDelay.snapshot.session)
-                val snapshot = withContext(Dispatchers.Default) { ReplayEngine.snapshot(next) }
-                if (playRevision != replayRevision) break
-                val published = snapshot.copy(
-                    session = if (snapshot.isAtEnd) next.copy(playing = false) else next,
-                )
-                _replay.value = ReplayState.Ready(published)
-                refreshReplayOutcomes(published.session, playRevision)
-                if (snapshot.isAtEnd) break
-            }
-        }
-    }
-
-    private fun updateReplay(transform: (ReplayEngine.Session) -> ReplayEngine.Session) {
-        val ready = _replay.value as? ReplayState.Ready ?: return
-        replayJob?.cancel()
-        val revision = ++replayRevision
-        val next = transform(ready.snapshot.session)
-        viewModelScope.launch {
-            val snapshot = withContext(Dispatchers.Default) { ReplayEngine.snapshot(next) }
-            if (revision == replayRevision) {
-                _replay.value = ReplayState.Ready(snapshot)
-                refreshReplayOutcomes(snapshot.session, revision)
-            }
-        }
-    }
-
-    /** Update only decisions belonging to the current immutable replay dataset and cursor. */
-    private suspend fun refreshReplayOutcomes(session: ReplayEngine.Session, expectedRevision: Long) = replayOutcomeMutex.withLock {
-        if (expectedRevision != replayRevision) return@withLock
-        replayDecisions.value
-            .filter { it.symbol == session.symbol && it.interval == session.interval.label && it.dataSource == session.dataSource }
-            .forEach { decision ->
-                val result = ReplayEvaluation.evaluate(decision, session.allBars, session.interval, session.cursor)
-                if (decision.outcomeStatus != result.status ||
-                    decision.fillBarTime != result.fillBarTime ||
-                    decision.fillPrice != result.fillPrice ||
-                    decision.outcomeBarTime != result.outcomeBarTime ||
-                    decision.outcomePrice != result.outcomePrice ||
-                    decision.outcomeReason != result.reason
-                ) {
-                    runCatching {
-                        container.replayJournalStore.updateOutcome(
-                            id = decision.id,
-                            outcomeStatus = result.status,
-                            fillBarTime = result.fillBarTime,
-                            fillPrice = result.fillPrice,
-                            outcomeBarTime = result.outcomeBarTime,
-                            outcomePrice = result.outcomePrice,
-                            outcomeReason = result.reason,
-                        )
-                    }.onFailure {
-                        _toast.value = "نتیجهٔ تست replay ذخیره نشد؛ فایل قبلی حفظ شد"
-                    }
-                }
-            }
-    }
-
-    /** Store a historical strategy decision separately from live-price paper fills. */
-    fun recordReplayDecision() {
-        val ready = _replay.value as? ReplayState.Ready ?: return
-        val signal = ready.snapshot.signal
-        val session = ready.snapshot.session
-        if (signal == null || !signal.isActionable || signal.entry == null || signal.barTime <= 0L) {
-            _toast.value = "این cursor تصمیم ورود قابل ثبت ندارد؛ NO_TRADE یا warm-up است"
-            return
-        }
-        viewModelScope.launch {
-            try {
-                val decision = ReplayDecision(
-                    id = java.util.UUID.randomUUID().toString(),
-                    symbol = session.symbol,
-                    interval = session.interval.label,
-                    barTime = signal.barTime,
-                    action = signal.action.name,
-                    entry = signal.entry,
-                    stopLoss = signal.stopLoss,
-                    takeProfit = signal.takeProfit,
-                    confidence = signal.confidence,
-                    profile = session.config.signalProfile.persistName(),
-                    dataSource = session.dataSource,
-                    recordedAt = System.currentTimeMillis(),
-                )
-                val result = ReplayEvaluation.evaluate(decision, session.allBars, session.interval, session.cursor)
-                container.replayJournalStore.append(
-                    decision.copy(
-                        outcomeStatus = result.status,
-                        fillBarTime = result.fillBarTime,
-                        fillPrice = result.fillPrice,
-                        outcomeBarTime = result.outcomeBarTime,
-                        outcomePrice = result.outcomePrice,
-                        outcomeReason = result.reason,
-                    ),
-                )
-                _toast.value = "تصمیم ${signal.action.name} روی کندل تاریخی در ژورنال آموزشی ثبت شد؛ نتیجه فقط با جلو رفتن replay آشکار می‌شود"
-            } catch (error: Exception) {
-                _toast.value = "ثبت تصمیم replay انجام نشد؛ فایل قبلی حفظ شد: ${error.message ?: "خطای ذخیره"}"
-            }
-        }
-    }
-
-    /** Automatically fetch fixed-source, read-only history without asking for a CSV URL. */
-    fun downloadFreeHistory(id: String) {
-        val choice = FreeHistoryCatalog.find(id) ?: run {
-            _freeHistory.value = FreeHistoryState.Failed("نمادِ قابل دریافت پیدا نشد")
-            return
-        }
-        if (_freeHistory.value is FreeHistoryState.Loading) return
-        _freeHistory.value = FreeHistoryState.Loading(choice.title)
-        viewModelScope.launch {
-            try {
-                _freeHistory.value = FreeHistoryState.Done(
-                    container.freeHistory.download(id, container.settingsStore.read().apiKey))
-            } catch (e: Exception) {
-                _freeHistory.value = FreeHistoryState.Failed((e.message ?: "دادهٔ منبع دریافت نشد").take(160))
-            }
-        }
-    }
-
-    fun saveFreeHistoryCsv(uri: Uri) {
-        val done = _freeHistory.value as? FreeHistoryState.Done ?: run {
-            _toast.value = "ابتدا دادهٔ واقعی را دریافت کنید"
-            return
-        }
-        viewModelScope.launch {
-            try {
-                container.exportFreeHistory(uri, done.result)
-                _toast.value = "CSV ${done.result.choice.code} از دادهٔ دریافتی در فایل انتخابی ذخیره شد"
-            } catch (e: Exception) {
-                _toast.value = "ذخیرهٔ CSV انجام نشد: ${e.message ?: "فایل مقصد نامعتبر است"}"
-            }
-        }
-    }
-
-    /**
-     * Offline historical HistData M1 archives (monthly CSV/ZIP or the site's yearly ZIP,
-     * one or MANY files), merged and aggregated to the chosen research timeframe (M1..H1).
-     * NEVER a market-feed or order source; gaps stay gaps, nothing is synthesised.
-     */
-    fun importHistData(uris: List<Uri>, interval: Interval, balance: Double, risk: Double,
-                       spread: Double, commission: Double, threshold: Double) {
-        if (uris.isEmpty()) { _learn.value = LearnState.Failed("ابتدا فایل(های) ZIP/CSV ماهانه یا سالانهٔ HistData را انتخاب کنید"); return }
-        viewModelScope.launch {
-            _learn.value = LearnState.Loading("خواندن ${uris.size} فایل HistData و تجمیع به تایم‌فریم ${interval.label}؛ قیمت BID تاریخی با EST ثابت…")
-            try {
-                val files = container.metaTraderImporter.fromHistDataFiles(uris)
-                val result = container.runHistDataBacktest(files, interval, balance,
-                    risk.coerceIn(0.1, 5.0), spread, commission, threshold)
-                _learn.value = LearnState.Done(result, interval)
-            } catch (e: Exception) {
-                _learn.value = LearnState.Failed((e.message ?: "فایل‌های HistData قابل تحلیل نیست").take(160))
-            }
-        }
-    }
-
-    /** Imported MT/educational OHLC history is research-only: never written to the live chart/candle cache. */
-    fun importMetaTrader(
-        uri: Uri?, link: String?, symbol: String, interval: Interval, timezone: String,
-        balance: Double, risk: Double, spread: Double, commission: Double, threshold: Double,
-    ) {
-        if (!symbol.matches(Regex("[A-Za-z0-9/_-]{3,30}"))) {
-            _learn.value = LearnState.Failed("نام نماد وارداتی معتبر نیست")
-            return
-        }
-        viewModelScope.launch {
-            _learn.value = LearnState.Loading("خواندن CSV آموزشی/متاتریدر برای پژوهش؛ منشأ فایل تأیید نشده است…")
-            try {
-                val csv = when {
-                    uri != null -> container.metaTraderImporter.fromFile(uri)
-                    !link.isNullOrBlank() -> container.metaTraderImporter.fromHttps(link)
-                    else -> throw IllegalArgumentException("فایل یا لینک CSV آموزشی/متاتریدر را انتخاب کنید")
-                }
-                val result = container.runImportedBacktest(csv, symbol, interval, timezone,
-                    balance, risk.coerceIn(0.1, 5.0), spread, commission, threshold)
-                _learn.value = LearnState.Done(result, interval)
-            } catch (e: Exception) {
-                _learn.value = LearnState.Failed(e.message ?: "فایل/لینک CSV آموزشی/متاتریدر قابل تحلیل نیست")
-            }
-        }
-    }
-
-    fun runWalkForward(
-        interval: Interval,
-        bars: Int,
-        balance: Double,
-        risk: Double,
-        spread: Double,
-        commission: Double,
-        threshold: Double,
-    ) {
-        viewModelScope.launch {
-            val requestedBars = HistoryPolicy.deepProviderRequestSize(bars)
-            val displayBars = requestedBars.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)
-            _walkForward.value = WalkForwardState.Loading("دانلود حداقل $displayBars کندل واقعی ${interval.label} از منبع عمومی/Dukascopy و تقسیم به داخل/خارج نمونه…")
-            try {
-                val result = container.runWalkForward(interval, requestedBars, balance, risk, spread, commission, threshold)
-                val saved = try {
-                    container.journalStore.saveReport(WalkForwardRecord.from(result))
-                    true
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: Exception) {
-                    _toast.value = "تست انجام شد ولی گزارش در گوشی ذخیره نشد؛ فایل قبلی دست‌نخورده ماند"
-                    false
-                }
-                _walkForward.value = WalkForwardState.Done(result, interval, saved)
-            } catch (e: Exception) {
-                _walkForward.value = WalkForwardState.Failed(e.message ?: "خطا در دریافت داده واقعی")
-            }
         }
     }
 
@@ -1229,6 +1020,29 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** Refresh the expanded journal picture on return to its tab and while it is visible.
+     * Only verified cached candles are read; this NEVER restarts a tick stream, rewinds the
+     * position cursor, modifies a trade, or turns a historical candle into an exit quote.
+     */
+    suspend fun refreshVisibleTradeChart(trade: PaperTrade) {
+        val before = _tradeChart.value
+        if (before.tradeId != trade.id || before.loading || before.downloading) return
+        val bars = container.cachedCandles(trade.symbol, trade.interval)
+        if (_tradeChart.value.tradeId != trade.id || _tradeChart.value.loading ||
+            _tradeChart.value.downloading || bars.isEmpty()) return
+        val window = withContext(Dispatchers.Default) { TradeReplay.window(trade, bars) }
+        val current = _tradeChart.value
+        if (current.tradeId != trade.id || current.loading || current.downloading) return
+        // A provider download can finish during the disk read. Never replace a newer
+        // downloaded chart with an older cache (including when its entry is off-screen).
+        if ((window.bars.lastOrNull()?.time ?: 0L) <
+            (current.window.bars.lastOrNull()?.time ?: 0L)) return
+        if (current.window != window) {
+            _tradeChart.value = current.copy(window = window,
+                source = "کش کندل‌های تأییدشدهٔ همین گوشی")
+        }
+    }
+
     /**
      * The local cache does not reach back far enough: ask the provider for the real bars of this
      * pair/timeframe with the user's own read-only key. Display only — no order, no signal.
@@ -1266,8 +1080,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun saveNewsAiConfig(apiKey: String, baseUrl: String, model: String, format: String = "AUTO") {
         val url = baseUrl.trim().trimEnd('/')
-        if (apiKey.isNotBlank() && (!url.startsWith("https://") || model.isBlank())) {
-            _toast.value = "برای کلید مستقیم، نشانی HTTPS و نام مدل هم لازم است"
+        val savedConfig = container.settingsStore.read()
+        if (!url.startsWith("https://") || model.isBlank() ||
+            com.aurum.edge.data.AiCredentialScope.key(apiKey, savedConfig, url, format, model).isBlank()) {
+            _toast.value = "کلید جداگانهٔ این سرویس، نشانی HTTPS و نام مدل لازم است؛ کلید سرویس قبلی منتقل نمی‌شود"
             return
         }
         viewModelScope.launch {
@@ -1276,17 +1092,23 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _toast.value = "ذخیرهٔ کلید مستقیم ناموفق بود"
                 return@launch
             }
+            resetAiDraftDiagnostics() // An earlier provider's success is not GLM proof.
+            container.traderAdvisor.onAiConfigChanged()
             container.news.resetAndRefresh()
-            // The companion card reacts immediately to a newly saved/cleared key.
-            container.traderAdvisor.refreshNow(force = apiKey.isNotBlank())
-            _toast.value = if (apiKey.isBlank()) "کلید مستقیم حذف شد"
-                else "کلید مستقیم ذخیره شد؛ همراه تریدر AI هم فعال شد — نظر اول چند لحظهٔ دیگر می‌آید"
+            container.traderAdvisor.refreshNow(force = true)
+            _toast.value = "تنظیمات AI ذخیره شد؛ وضعیت اتصال/تأثیر فقط پس از پاسخ واقعی مدل مشخص می‌شود"
         }
     }
 
     fun clearNewsAiConfig() {
         viewModelScope.launch {
-            withContext(Dispatchers.IO) { container.settingsStore.clearNewsAiConfig() }
+            val cleared = withContext(Dispatchers.IO) { container.settingsStore.clearNewsAiConfig() }
+            if (!cleared) {
+                _toast.value = "حذف کلید مستقیم ناموفق بود؛ تنظیمات قبلی حفظ شد"
+                return@launch
+            }
+            resetAiDraftDiagnostics()
+            container.traderAdvisor.onAiConfigChanged()
             container.news.resetAndRefresh()
             container.traderAdvisor.refreshNow() // flips the companion card to "not configured"
             _toast.value = "کلید مستقیم حذف شد"
@@ -1299,10 +1121,13 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
      * checks what the app would actually use. The key itself is never echoed.
      */
     /** Fetch the model IDs this key may use, so Settings never guesses a model name. */
-    fun loadNewsAiModels(keyInput: String, baseUrl: String, format: String = "AUTO") {
+    fun loadNewsAiModels(keyInput: String, baseUrl: String, model: String, format: String = "AUTO") {
+        val requestGeneration = ++aiModelsGeneration
         val saved = container.settingsStore.read()
-        val key = keyInput.trim().ifBlank { saved.newsAiApiKey }
+        val usingSavedEndpoint = baseUrl.isBlank()
         val url = baseUrl.trim().trimEnd('/').ifBlank { saved.newsAiBaseUrl }
+        val wireFormat = com.aurum.edge.data.AiCredentialScope.format(format, saved, usingSavedEndpoint)
+        val key = com.aurum.edge.data.AiCredentialScope.key(keyInput, saved, url, wireFormat, model)
         if (key.isBlank() || !url.startsWith("https://")) {
             _aiModels.value = AiModelsState(error = "کلید و نشانی HTTPS هر دو لازم است")
             return
@@ -1310,19 +1135,23 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         _aiModels.value = AiModelsState(loading = true)
         viewModelScope.launch {
             val result = runCatching {
-                withContext(Dispatchers.IO) { container.traderAdvisor.listModels(key, url, format) }
+                withContext(Dispatchers.IO) { container.traderAdvisor.listModels(key, url, wireFormat) }
             }
+            if (requestGeneration != aiModelsGeneration) return@launch
             _aiModels.value = result.fold(
                 onSuccess = { AiModelsState(models = it) },
-                onFailure = { AiModelsState(error = (it.message ?: "خطای نامشخص").take(120)) })
+                onFailure = { AiModelsState(error = com.aurum.edge.data.AiConnectionDiagnostics.describe(it)) })
         }
     }
 
     fun testNewsAiConnection(keyInput: String, baseUrl: String, model: String, format: String = "AUTO") {
+        val requestGeneration = ++aiProbeGeneration
         val saved = container.settingsStore.read()
-        val key = keyInput.trim().ifBlank { saved.newsAiApiKey }
+        val usingSavedEndpoint = baseUrl.isBlank()
         val url = baseUrl.trim().trimEnd('/').ifBlank { saved.newsAiBaseUrl }
+        val wireFormat = com.aurum.edge.data.AiCredentialScope.format(format, saved, usingSavedEndpoint)
         val modelName = model.trim().ifBlank { saved.newsAiModel }
+        val key = com.aurum.edge.data.AiCredentialScope.key(keyInput, saved, url, wireFormat, modelName)
         if (key.isBlank() || !url.startsWith("https://") || modelName.isBlank()) {
             _aiProbe.value = AiProbeState(message = "کلید، نشانی HTTPS و نام مدل هر سه لازم است")
             return
@@ -1331,12 +1160,26 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) {
-                    container.traderAdvisor.probe(key, url, modelName, format)
+                    container.traderAdvisor.probe(key, url, modelName, wireFormat)
                 }
             }
+            if (requestGeneration != aiProbeGeneration) return@launch
             _aiProbe.value = AiProbeState(message = result.fold(
                 onSuccess = { "اتصال تأیید شد؛ پاسخ مدل: «$it»" },
-                onFailure = { "اتصال ناموفق: ${(it.message ?: "خطای نامشخص").take(120)}" }))
+                onFailure = { "اتصال ناموفق: ${com.aurum.edge.data.AiConnectionDiagnostics.describe(it)}" }))
+        }
+    }
+
+    fun tickArchiveUrl(): String = container.settingsStore.tickArchiveUrl()
+
+    fun saveTickArchive(url: String, token: String) {
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                container.settingsStore.saveTickArchive(url, token)
+            }
+            _toast.value = if (!saved) "نشانی HTTPS یا کلید بایگانی نامعتبر است؛ ذخیره نشد"
+                else if (url.isBlank()) "بایگانی برای ورودهای تازه غیرفعال شد؛ وضعیت پوزیشن‌های قبلی تغییر نمی‌کند"
+                else "بایگانی برای ورودهای تازه تنظیم شد؛ دسترسی/اتصال و گسست‌ها را در ژورنال بررسی کنید"
         }
     }
 

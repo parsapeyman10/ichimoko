@@ -4,9 +4,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
@@ -20,12 +22,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AlertCheck
+import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.MarketTrendRead
@@ -38,18 +42,26 @@ import com.aurum.edge.core.TrendContext
 import com.aurum.edge.core.TrendDirection
 import com.aurum.edge.core.TradeMethod
 import com.aurum.edge.data.AiConnectionState
+import com.aurum.edge.data.AiEntryEffect
+import com.aurum.edge.data.DecisionRecord
+import com.aurum.edge.data.PersianNewsState
+import com.aurum.edge.data.TraderOpinionState
+import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.PairScanState
 import com.aurum.edge.data.PairScanStatus
+import com.aurum.edge.data.ScanRanking
 import com.aurum.edge.ui.components.ConfluenceRow
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.SignalSummaryCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatPrice
+import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatTime
 import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
+import kotlinx.coroutines.delay
 
 /**
  * صفحه معامله و سیگنال (Signal / Trading Tab):
@@ -57,124 +69,120 @@ import com.aurum.edge.ui.theme.AurumColors
  * ۲. سه کاندیدای برتر بازار با تفکیک دقیق نماد، دسته دارایی و امتیاز شروط
  * ۳. خلاصه سیگنال و دکمه‌های ورود دستی به معامله برای نماد فعلی
  * ۴. چک‌لیست شواهد و شروط تکنیکال نماد فعلی
- * ۵. وضعیت پایش پیوسته ۵۰+ نماد در پس‌زمینه
+ * ۵. وضعیت پایش واچ‌لیست فعال در پس‌زمینه
  */
 @Composable
-fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onOpenNews: () -> Unit) {
-    val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val trades by viewModel.trades.collectAsStateWithLifecycle()
-    val autoStatus by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
+fun SignalScreen(viewModel: AurumViewModel, onChartSymbol: (String) -> Unit) {
     val scanState by viewModel.pairScan.collectAsStateWithLifecycle()
-    val playbook by viewModel.playbook.collectAsStateWithLifecycle()
-    val marketTrend by viewModel.marketTrend.collectAsStateWithLifecycle()
-    val symbolTrend by viewModel.symbolTrend.collectAsStateWithLifecycle()
-    val trendContext by viewModel.trendContext.collectAsStateWithLifecycle()
-    val entryDiagnostics by viewModel.entryDiagnostics.collectAsStateWithLifecycle()
-    val aiConnection by viewModel.aiConnection.collectAsStateWithLifecycle()
-    val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
-    val signal = market.signal
-
-    val openTrades = trades.filter { it.isOpen }
-    val targetClass = AssetClass.of(market.symbol)
-    val openInClass = openTrades.count { AssetClass.of(it.symbol) == targetClass }
-
-    val positionBlocker = when {
-        openTrades.size >= 4 -> "سقف ۴ معاملهٔ همزمان باز پورتفو پر است (${openTrades.size}/4)"
-        openTrades.any { it.symbol == market.symbol } -> "پوزیشن این نماد هنوز باز است"
-        openInClass >= targetClass.maxSlots -> "ظرفیت پوزیشن در دستهٔ «${targetClass.label}» تکمیل است (۱/۱)"
-        signal != null && trades.any { it.symbol == market.symbol && it.signalBarTime != null &&
-            it.signalBarTime == signal.barTime } -> "این کندل قبلاً معامله شده است"
-        else -> IctEntryRules.assess(market).reason
+    val decisionLog by viewModel.decisionLog.collectAsStateWithLifecycle()
+    var showAllDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var visibleDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(12) }
+    var scanClock by androidx.compose.runtime.remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(60_000L)
+            scanClock = System.currentTimeMillis() // expire historical recommendations without a new sweep
+        }
     }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(bottom = 14.dp),
-    ) {
-
-        // ── ۱. بنر وضعیت ۴ دسته دارایی (رمزارز، فارکس، طلا/کالا، سهام) در ۴ مستطیل بالا ──
-        com.aurum.edge.ui.components.AssetClass4SlotsBanner(
-            openTrades = openTrades,
-            livePrices = livePrices,
-            onSelectSymbol = { symbol -> viewModel.selectChartSymbol(symbol) },
-        )
-
-        // ── ۲. بهترین فرصت معاملاتی (#1 Best Opportunity) با تشریح کامل شروط ──
+    val freshCandidates = ScanRanking.rank(scanState.statuses, com.aurum.edge.core.Interval.M5, scanClock)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 14.dp)) {
+        // The background scanner publishes each finished symbol immediately. Never require
+        // the user to press Scan or wait for the entire sweep to display a fresh best pick.
         BestOpportunityDetailedCard(
-            best = scanState.bestPick,
+            best = freshCandidates.firstOrNull(),
             sweeping = scanState.sweeping,
-            onScan = { viewModel.scanPairs() },
-            onTrade = { symbol ->
-                viewModel.selectChartSymbol(symbol)
-                viewModel.selectAndTradeBestPick()
-            },
+            onTrade = onChartSymbol,
+        )
+        Als5OpportunityMonitorCard(
+            status = scanState.statuses.firstOrNull { it.symbol == "XAU/USD" },
+            sweeping = scanState.sweeping,
         )
 
-        // ── ۳. سه کاندیدای برتر بازار (Top 3 Candidates) با تفکیک دسته و شروط ──
-        if (scanState.topThree.isNotEmpty()) {
-            TopCandidatesDetailedSection(
-                candidates = scanState.topThree,
-                currentSymbol = market.symbol,
-                onSelectSymbol = { viewModel.selectChartSymbol(it) },
-            )
-        }
-
-        // ── ۴. خلاصه سیگنال نماد انتخابی و موتور تلفیقی ایچیموکو ─────────
-        SignalSummaryCard(
-            signal = signal,
-            symbol = market.symbol,
-            onOpenPaperTrade = { signal?.let { viewModel.openPaperTrade(it) } },
-            entryBlocker = positionBlocker,
-            allowManualPaperTrade = true,
-        )
-
-        // ── ۵. وضعیت معامله خودکار کاغذی ─────────────────────────────────
-        SectionCard("معاملهٔ خودکار کاغذی (تخصیص متوازن ۴ بازار)") {
-            Text(
-                if (settings.autoPaperTrading) autoStatus else "خاموش (از بخش تنظیمات یا صفحه اصلی قابل فعال‌سازی است)",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (settings.autoPaperTrading) AurumColors.TextSecondary else AurumColors.Gold,
-            )
-        }
-
-        // ── ۵٫۱ «کدام روش برای کدام بازار» — روتر متد بازار ──────────────────
-        MarketPlaybookCard(playbook, market.symbol)
-
-        // ── ۵٫۲ «روند کلی بازار» — چطور به دست می‌آید و چطور به معامله اضافه می‌شود ──
-        MarketTrendCard(marketTrend, symbolTrend, trendContext, market.symbol)
-
-        // ── ۵٫۳ «چرا الان معامله/هشدار نداریم؟» — پیش‌نیازهای صادقانه ─────────
-        WhyNoTradeCard(entryDiagnostics, aiConnection)
-
-        // ── ۶. چک‌لیست کامل شواهد و شروط تکنیکال نماد انتخابی ──────────────
-        signal?.let { s ->
-            SectionCard(
-                title = "چک‌لیست شروط تکنیکال ایچیموکو و پرایس‌اکشن · ${market.symbol}",
-                subtitle = "ابر کومو ۸/۲۴/۷۲، تقاطع TK، آزادی ۲۴ دوره‌ای چیکو، فیلتر ضد رنج، مومنتوم و تراز MTF",
-                trailing = {
-                    val count = s.confluence.count { it.ok }
-                    Pill("$count از ${s.confluence.size} تایید", if (count == s.confluence.size) AurumColors.Green else AurumColors.Gold)
-                },
-            ) {
-                if (s.confluence.isEmpty()) {
-                    Text("در حال پردازش شروط تکنیکال...", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
-                } else {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        s.confluence.forEach { ConfluenceRow(it) }
-                    }
+        SectionCard("دلیل بررسی") {
+            if (decisionLog.isEmpty()) Text("هنوز بررسی ثبت نشده است")
+            // An AI entry review is a separate event, not the technical scan's latest score.
+            val latestBySymbol = decisionLog.filter { AiEntryEffect.fromAction(it.action) == null }
+                .distinctBy { it.symbol }
+            if (decisionLog.size > latestBySymbol.size) OutlinedButton(onClick = { showAllDecisions = !showAllDecisions }) {
+                Text(if (showAllDecisions) "آخرین دلیل هر نماد" else "تاریخچهٔ ${decisionLog.size} بررسی اخیر")
+            }
+            val records = if (showAllDecisions) decisionLog else latestBySymbol.ifEmpty { decisionLog.distinctBy { it.symbol } }
+            records.take(visibleDecisions).forEach { record ->
+                Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                    .background(AurumColors.SurfaceAlt, RoundedCornerShape(12.dp))
+                    .padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                val aiEffect = AiEntryEffect.fromAction(record.action)
+                Text(if (aiEffect != null)
+                    "🤖 ${record.symbol} · ${record.interval} · ${formatTime(record.checkedAt)} · ${aiEffect.label}" +
+                        (record.aiModel?.let { " · مدل $it" } ?: " · بدون پاسخ معتبر مدل")
+                    else "${record.symbol} · ${record.interval} · ${formatTime(record.checkedAt)} · " +
+                        "${record.action} · ${record.score?.toInt() ?: "—"}/۱۰۰",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.clickable { onChartSymbol(record.symbol) })
+                Text(record.reason, style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary)
+                record.method?.let { method ->
+                    Text("متد: $method · ${record.methodReason.orEmpty()}",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
+                record.layers.forEach { layer ->
+                    Text("${layer.name}: ${layer.points ?: "—"}/۲۵ · ${layer.status} · ${layer.detail}",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                }
+                }
+            }
+            if (records.size > visibleDecisions) OutlinedButton(onClick = { visibleDecisions += 12 }) {
+                Text("نمایش ۱۲ بررسیٔ دیگر · ${records.size - visibleDecisions} باقی‌مانده")
             }
         }
 
-        // ── ۷. وضعیت پایش پیوسته ۵۰+ نماد در پس‌زمینه (رادار خودکار) ───────
-        PairRadarSummaryCard(
-            scan = scanState,
-            onScan = { viewModel.scanPairs() },
-            onSelectSymbol = { viewModel.selectChartSymbol(it) },
-            now = System.currentTimeMillis(),
-        )
+    }
+}
+
+/** Live, read-only timing evidence; no fabricated buy window or forex volume. */
+@Composable
+private fun EvidenceTimingCard(market: MarketState, entryBlocker: String?) {
+    val now = System.currentTimeMillis()
+    val live = market.feed.mode in setOf(com.aurum.edge.core.FeedMode.LIVE,
+        com.aurum.edge.core.FeedMode.POLLING) && !market.showingCachedData &&
+        com.aurum.edge.core.FeedLiveness.hasRecentReceipt(market.feed, now)
+    val bar = market.candles.lastOrNull { it.closed }
+    val freshBar = bar != null && bar.time == market.signal?.barTime &&
+        now - (bar.time + market.interval.millis) in 0L..(market.interval.millis + 90_000L)
+    val buy = live && freshBar && entryBlocker == null && market.signal?.isActionable == true &&
+        market.signal?.action == SignalAction.BUY
+    val hours = if (live) com.aurum.edge.core.VolumeSessionStats.cryptoHours(
+        market.symbol, market.interval, market.candles, now) else emptyList()
+    SectionCard("زمان خرید و ساعات پرحجم · ${market.symbol}",
+        "بر پایهٔ دادهٔ همین نماد؛ توصیف آماری، نه پیش‌بینی سود") {
+        Text(if (buy) "اکنون سیگنال خرید چهارلایهٔ تازه و قابل بررسی وجود دارد · " +
+            "کندل ${market.signal?.barTime?.let { formatTime(it) } ?: "—"}"
+             else "اکنون زمان خرید تأییدشده‌ای نداریم؛ " +
+                 (entryBlocker ?: if (live) "سیگنال خرید چهارلایهٔ معتبر وجود ندارد" else "فید تازه در دسترس نیست"),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (buy) AurumColors.Green else AurumColors.Gold)
+        Text("منبع فعلی: ${market.feed.provider} · آخرین دریافت ${market.feed.lastSuccessAt?.let { formatTime(it) } ?: "—"} · " +
+            "بازه ${market.interval.label} · قیمت/حجم فقط از همان جفتِ منبع، بدون تبدیل دلار به تتر. " +
+            "دسترسی از اینترنت ایران فقط با آزمون روی دستگاه و شبکهٔ همان کاربر قابل تأیید است.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 5.dp))
+        if (hours.isEmpty()) {
+            Text("ساعت اوج حجم قابل محاسبه نیست: فقط رمزارز با فید تازه، کندل H1 بستهٔ واقعی، " +
+                "حجم مثبت و حداقل ۵ نمونه در تک‌تک ۲۴ ساعت UTC طی ۱۴ روز پذیرفته می‌شود. " +
+                "در فارکس/نفت حجم قراردادِ هم‌هویت تأیید نشده؛ عددی حدس نمی‌زنیم.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 8.dp))
+        } else {
+            Text("۳ ساعت با میانگین بیشترین حجم ثبت‌شده در ۱۴ روز گذشته (UTC، نه پیشنهاد خرید):",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 8.dp))
+            hours.forEachIndexed { index, hour ->
+                Text("${index + 1}. ${"%02d".format(java.util.Locale.US, hour.utcHour)}:00–" +
+                    "${"%02d".format(java.util.Locale.US, (hour.utcHour + 1) % 24)}:00 UTC · " +
+                    "میانگین ${"%.2f".format(java.util.Locale.US, hour.meanVolume)} واحد پایه · ${hour.samples} کندل",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.Cyan)
+            }
+        }
     }
 }
 
@@ -195,7 +203,7 @@ private fun MarketPlaybookCard(decision: PlaybookDecision?, symbol: String) {
     }
     SectionCard(
         title = "متد مناسب این بازار · $symbol",
-        subtitle = "هر بازار یک روش دارد: طلا/فارکس در لندن و نیویورک روند، فارکس در آسیا رنج، رمزارز شکست مومنتوم، سهام درایو بازگشایی",
+        subtitle = "خوانش زمینه‌ای بازار؛ مجوز ورود فقط از موتور چهارلایه و قفل‌های ریسک/بازار صادر می‌شود",
         trailing = { Pill(method?.label ?: "در حال ارزیابی", color) },
     ) {
         if (decision == null) {
@@ -210,17 +218,16 @@ private fun MarketPlaybookCard(decision: PlaybookDecision?, symbol: String) {
             Text("اندازه‌گیری‌های واقعی: ER=${fmt2(decision.efficiencyRatio)} · ATR/میانه=${fmt2(decision.atrRatio)} · اسپرد/ATR=" +
                     (decision.spreadAtrRatio?.let { fmt2(it * 100.0) + "٪" } ?: "—"),
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            Text("پارامترهای مجاز این متد: کف امتیاز ${decision.minScore} · کف اطمینان ${decision.minConfidence.toInt()}٪ · " +
-                    "R:R بین ${fmt2(decision.rrMin)} و ${fmt2(decision.rrMax)} · استاپ بین ${fmt2(decision.stopAtrMin)} و ${fmt2(decision.stopAtrMax)} برابر ATR",
+            Text("خوانش پژوهشی رژیم بازار (نه قفل ورود): کف R:R اولیهٔ واقعی ۱٫۵ است؛ خروج ثابت یا سقف نهایی برای معاملات V1 وجود ندارد.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             Text("کف سود واقعی: ${fmt2(decision.minRewardBps)}bps و حداقل ${fmt2(decision.costRewardMultiple)} برابر هزینهٔ رفت‌وبرگشت · مرجع هزینه: ${decision.venue}",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             Text(decision.reasonFa, style = MaterialTheme.typography.labelSmall, color = color)
             decision.blockers.forEach { blocker ->
-                Text("⛔ $blocker", style = MaterialTheme.typography.labelSmall, color = AurumColors.Red)
+                Text("زمینهٔ بازار: $blocker", style = MaterialTheme.typography.labelSmall, color = AurumColors.Red)
             }
             if (decision.allowed) {
-                Text("✅ ورود با این متد مجاز است؛ بقیهٔ گیت‌ها (کراس تأییدشده، MTF، ICT، تازگی قیمت، مارجین و اسپرد) جداگانه بررسی می‌شوند.",
+                Text("این خوانش صرفاً زمینهٔ بازار است؛ امتیاز چهارلایه، تازگی داده و قفل‌های مطلق مرجع ورود هستند.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             }
         }
@@ -240,7 +247,9 @@ private fun MarketTrendCard(
     context: TrendContext?,
     symbol: String,
 ) {
-    val biasColor = when (read?.bias) {
+    val stale = read != null && System.currentTimeMillis() - read.computedAt !in 0L..10 * 60_000L
+    val currentRead = read?.takeUnless { stale }
+    val biasColor = when (currentRead?.bias) {
         TrendDirection.UP -> AurumColors.Green
         TrendDirection.DOWN -> AurumColors.Red
         TrendDirection.SIDEWAYS -> AurumColors.Gold
@@ -249,38 +258,41 @@ private fun MarketTrendCard(
     SectionCard(
         title = "روند کلی بازار · $symbol",
         subtitle = "سه لایهٔ اندازه‌گیری از کندل‌های بستهٔ واقعی: روندِ تایم‌فریم مرجعِ خودِ نماد، " +
-            "عرض بازار در ۵۰+ نماد، و جهت دلار + جوّ ریسک‌پذیری",
+            "عرض نمادهای واقعاً سنجیده‌شده (هر نماد یک رأی)، و جهت دلار + جوّ ریسک‌پذیری",
         trailing = {
             Pill(
-                if (read == null) "هنوز اندازه گرفته نشد" else "${read.bias.label} · ${read.strength}٪",
+                if (currentRead == null) "هنوز اندازه گرفته نشد" else "${currentRead.bias.label} · ${currentRead.strength}٪",
                 biasColor,
             )
         },
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("نمونهٔ هر بازار متغیر است؛ این عدد ارزش‌وزن/حجم‌وزن کل بازار نیست. " +
+                "نبود دادهٔ هم‌نماد از ایران به معنی روند خنثی نیست.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             Text("چطور به دست می‌آید؟ (۱) کندل‌های تایم‌فریم پایه به تایم‌فریم مرجع تجمیع می‌شوند " +
                     "(M5→H1، M15→H4، H1→H4، H4→D1) و شش رأی مستقل شمرده می‌شود: قیمت نسبت به EMA50، " +
                     "EMA20 نسبت به EMA50، شیب EMA50 بر حسب ATR، Efficiency Ratio، ساختار سقف/کف " +
                     "(HH/HL یا LH/LL) و جابه‌جایی خالص بر حسب ATR. مجموع ≥+۲ صعودی و ≤−۲ نزولی است. " +
                     "(۲) همان اندازه‌گیری برای همهٔ نمادهای پویش‌شده تکرار می‌شود و «عرض بازار» را می‌سازد. " +
-                    "(۳) جهت دلار از شش جفت اصلی و جوّ ریسک از رمزارز/سهام در برابر طلا خوانده می‌شود.",
+                    "(۳) جهت دلار از شش جفت اصلی و جوّ ریسک از رمزارز در برابر طلا خوانده می‌شود.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatTile("جهت بازار", read?.bias?.label ?: "—", biasColor, Modifier.weight(1f))
-                StatTile("قدرت", read?.let { "${it.strength}٪" } ?: "—", AurumColors.TextPrimary, Modifier.weight(1f))
-                StatTile("عرض بازار", read?.let { "${it.breadthUp}↑/${it.breadthDown}↓" } ?: "—",
+                StatTile("جهت بازار", currentRead?.bias?.label ?: "—", biasColor, Modifier.weight(1f))
+                StatTile("قدرت", currentRead?.let { "${it.strength}٪" } ?: "—", AurumColors.TextPrimary, Modifier.weight(1f))
+                StatTile("عرض بازار", currentRead?.let { "${it.breadthUp}↑/${it.breadthDown}↓" } ?: "—",
                     AurumColors.Cyan, Modifier.weight(1f))
-                StatTile("دلار", read?.dollarBias?.label ?: "—", AurumColors.TextPrimary, Modifier.weight(1f))
+                StatTile("دلار", currentRead?.dollarBias?.label ?: "—", AurumColors.TextPrimary, Modifier.weight(1f))
             }
             Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatTile("جوّ بازار", read?.riskTone?.label ?: "—",
-                    when (read?.riskTone) {
+                StatTile("جوّ بازار", currentRead?.riskTone?.label ?: "—",
+                    when (currentRead?.riskTone) {
                         RiskTone.RISK_ON -> AurumColors.Green
                         RiskTone.RISK_OFF -> AurumColors.Red
                         else -> AurumColors.Gold
                     }, Modifier.weight(1f))
-                StatTile("نمادِ سنجیده", read?.let { "${it.measured}" } ?: "—",
+                StatTile("نمادِ سنجیده", currentRead?.let { "${it.measured}" } ?: "—",
                     AurumColors.TextPrimary, Modifier.weight(1f))
                 StatTile("روندِ خودِ نماد", symbolTrend?.direction?.label ?: "—",
                     when (symbolTrend?.direction) {
@@ -293,16 +305,19 @@ private fun MarketTrendCard(
                     AurumColors.TextPrimary, Modifier.weight(1f))
             }
 
-            if (read == null) {
+            if (stale) Text("خوانش قبلی مربوط به ${read?.computedAt?.let { formatTime(it) } ?: "—"} است و " +
+                "بیش از ۱۰ دقیقه عمر دارد؛ تا تکمیل پویش جدید، جهت کلی به‌عنوان دادهٔ زنده نمایش/اعمال نمی‌شود.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+            if (currentRead == null) {
                 Text("هنوز هیچ پویشی چیزی اندازه نگرفته است (یا کندل بستهٔ کافی نرسیده). تا وقتی " +
                         "روند کلی بازار مجهول است، معامله‌ها فقط با روندِ خودِ نماد و بقیهٔ گیت‌ها " +
                         "سنجیده می‌شوند و هیچ جهتِ کلیِ حدسی ساخته نمی‌شود.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             } else {
-                read.drivers.forEach { driver ->
+                currentRead.drivers.forEach { driver ->
                     Text("• $driver", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
                 }
-                read.families.forEach { family ->
+                currentRead.families.forEach { family ->
                     Text(family.summaryFa + " · قدرت ${family.strength}٪",
                         style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
@@ -320,19 +335,18 @@ private fun MarketTrendCard(
             if (context != null) {
                 val aligned = context.alignment == TrendAlignment.WITH
                 Text("چطور به معامله اضافه می‌شود: ${context.alignment.label}" +
-                        if (context.gate.allowed) "" else " → ورود مسدود شد",
+                        if (context.gate.allowed) "" else " → در این خوانش زمینه‌ای، خلاف روند",
                     style = MaterialTheme.typography.labelSmall,
                     color = when {
-                        !context.gate.allowed -> AurumColors.Red
+                        !context.gate.allowed -> AurumColors.Gold
                         aligned -> AurumColors.Green
                         context.alignment == TrendAlignment.AGAINST -> AurumColors.Red
                         else -> AurumColors.Gold
                     })
                 Text(context.noteFa, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-                Text("قاعدهٔ اجرا: روش روندی (پولبک/شکست/درایو بازگشایی) خلاف جهتِ اندازه‌گیری‌شده مسدود " +
-                        "می‌شود؛ بازگشت به میانگین فقط در بازارِ بی‌روند مجاز است؛ ورودِ دارایی ریسکی " +
-                        "خلافِ جوّ بازار منع نمی‌شود ولی کف امتیاز +۶ و کف اطمینان +۵ می‌گیرد. همین خوانش " +
-                        "در لحظهٔ ورود در ژورنال ثبت و در پنجرهٔ همان معامله روی صفحهٔ چارت نشان داده می‌شود.",
+                Text("این خوانشِ روند، زمینهٔ بازار و رتبه‌بندی است؛ قفل ورود یا آستانهٔ " +
+                        "مخفی اضافه نمی‌کند. مرجع ورود موتور چهارلایهٔ V1، وتوی معتبر AI و " +
+                        "قواعد ریسک/تازگی است؛ عکس خوانش در ژورنال ثبت می‌شود.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             } else {
                 Text("برای دیدن جایگاهِ ورود نسبت به روند، باید سیگنالِ همین نماد و یک پویشِ " +
@@ -340,6 +354,94 @@ private fun MarketTrendCard(
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             }
         }
+    }
+}
+
+/** Evidence for the selected SIGNAL symbol, never for the chart-only TradingView selection.
+ * The decision log is durable; old responses must not be passed off as this bar's analysis.
+ */
+@Composable
+private fun AiProofCard(
+    market: MarketState,
+    configured: Boolean,
+    connection: AiConnectionState,
+    opinion: TraderOpinionState,
+    news: PersianNewsState,
+    decisions: List<DecisionRecord>,
+    now: Long,
+    onRefreshOpinion: () -> Unit,
+) {
+    val symbol = market.symbol
+    val signal = market.signal
+    val lastEntry = decisions.firstOrNull { it.symbol == symbol && AiEntryEffect.fromAction(it.action) != null }
+    val effect = lastEntry?.let { AiEntryEffect.fromAction(it.action) }
+    val currentBarReview = lastEntry != null && signal != null && lastEntry.barTime > 0L &&
+        lastEntry.barTime == signal.barTime && now - lastEntry.checkedAt in 0L..300_000L
+    val ownOpinion = opinion.opinion?.takeIf { it.symbol == symbol }
+    val aiVeto = signal?.blockers?.firstOrNull { it.startsWith("وتوی AI معتبر:") }
+    val alignment = signal?.let { NewsConfluence.alignment(symbol, it.action, news, now) }
+    val newsVerdict = news.aiBySymbol[symbol] ?: news.ai.takeIf { it.symbol == symbol }
+
+    SectionCard("نقش واقعی AI · $symbol", "نماد فعال تحلیل (مستقل از انتخاب چارت) · اتصال ≠ پاسخ ≠ اثر") {
+        Text(when {
+            !configured -> "اتصال: کلید/مدل تنظیم نشده؛ هیچ پاسخ مدل را از روی اسکن فنی فرض نکنید."
+            connection.reachable == true -> "اتصال: تست موفق در ${connection.checkedAt?.let(::formatTime) ?: "—"}؛ صرفاً دسترسی به سرویس تأیید شده است."
+            connection.reachable == false -> "اتصال: ناموفق در ${connection.checkedAt?.let(::formatTime) ?: "—"}؛ ${connection.detail}"
+            else -> "اتصال: تنظیم شده، اما در این اجرا هنوز تست نشده است."
+        }, style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+
+        Text("ورود خودکار کاغذی: ابتدا سیگنال چهارلایه، فید و ریسک بررسی می‌شوند؛ " +
+            "تنها برای کاندیدای عبورکرده مدل می‌تواند صریحاً وتو کند. بازبینی دستی/نظر تریدر مجوز ورود نیست.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 6.dp))
+        if (lastEntry == null || effect == null) {
+            Text("برای $symbol هنوز هیچ درخواستِ بررسی ارزندگی ورود خودکار در گزارش ثبت نشده است؛ " +
+                "اسکن فنی و تست اتصال، پاسخ مدل برای این نماد نیستند.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold,
+                modifier = Modifier.padding(top = 8.dp))
+        } else {
+            Text("آخرین بررسی ورود · ${formatDateTime(lastEntry.checkedAt)} · ${lastEntry.interval}" +
+                (lastEntry.aiModel?.let { " · مدل $it" } ?: " · بدون پاسخ معتبر مدل") +
+                if (currentBarReview) " · همین کندل" else " · تاریخی؛ مربوط به تحلیل فعلی نیست",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 8.dp))
+            Text("قبل از بررسی AI: کاندیدای عبورکرده از شروط اولیهٔ فنی/ورود خودکار. " +
+                "بعد از بررسی AI: ${lastEntry.reason}. " +
+                (if (effect == AiEntryEffect.VETO) "ورود متوقف شد." else "بازبینی نهایی فید، خبر و ریسک ادامه یافت؛ این رکورد اثبات ثبت معامله نیست."),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (effect == AiEntryEffect.VETO) AurumColors.Red else AurumColors.Gold)
+        }
+
+        Text("خبر/مدل: " + when {
+            aiVeto != null -> "$aiVeto (سیگنال این کندل مسدود شد)"
+            alignment?.status == ConfluenceStatus.CONFIRMED && newsVerdict != null ->
+                "پاسخ معتبر ${newsVerdict.model} برای $symbol در ${newsVerdict.checkedAt?.let(::formatDateTime) ?: "—"}؛ " +
+                    "هم‌جهت سیگنال فنی، فقط شاهد خبری/ژورنال؛ مجوز معامله نیست."
+            else -> "برای این سیگنال وتوی معتبر AI ثبت نشده؛ " +
+                "${alignment?.detail ?: "هنوز سیگنال/شاهد خبری معتبر برای تطبیق وجود ندارد"}. " +
+                "نبود شاهد را تأیید AI تلقی نکنید."
+        }, style = MaterialTheme.typography.labelSmall, color = if (aiVeto != null) AurumColors.Red else AurumColors.TextSecondary,
+            modifier = Modifier.padding(top = 8.dp))
+
+        if (ownOpinion != null) {
+            val fresh = now - ownOpinion.generatedAt in 0L..600_000L
+            Text("نظر مشورتی مستقل · ${ownOpinion.model} · ${formatDateTime(ownOpinion.generatedAt)}" +
+                (if (fresh) "" else " · قدیمی") + ": ${ownOpinion.bias} — ${ownOpinion.summary}",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 8.dp))
+        } else {
+            Text("نظر مشورتی برای $symbol: هنوز پاسخ معتبر همین نماد دریافت نشده است.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 8.dp))
+        }
+        opinion.error?.let { Text("خطای آخرین درخواست نظر مشورتی: $it",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.Red) }
+        if (configured) OutlinedButton(onClick = onRefreshOpinion, enabled = !opinion.loading) {
+            Text(if (opinion.loading) "در حال دریافت نظر..." else "درخواست نظر مشورتی (مصرف API)")
+        }
+        Text("این کارت نقش اجرایی مدل را نشان می‌دهد، نه بهبود سودآوری. " +
+            "برای اثبات تأثیر بر بازده، مقایسهٔ معاملات واقعیِ با/بی AI لازم است.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
     }
 }
 
@@ -371,7 +473,7 @@ private fun WhyNoTradeCard(checks: List<AlertCheck>, ai: AiConnectionState) {
             Text(
                 when {
                     !ai.configured -> "🤖 اتصال AI: کلید/مدل تنظیم نشده — معاملات کاغذی بدون AI و فقط با شرط‌های فنی انجام می‌شوند."
-                    ai.reachable == true -> "🤖 اتصال AI: برقرار است — ارزنده‌بودن ورود و بازبینی پوزیشن باز از مدل پرسیده می‌شود."
+                    ai.reachable == true -> "🤖 تست اتصال AI موفق بود؛ این به‌تنهایی پاسخ مدل برای این نماد یا اثر آن بر ورود نیست (جزئیات در کارت پایین)."
                     ai.reachable == false -> "🤖 اتصال AI: قطع است (${ai.detail.ifBlank { "اتصال برقرار نشد" }}) — معاملات بدون AI ادامه دارند و این وضعیت اعلان می‌شود."
                     else -> "🤖 اتصال AI: هنوز در این اجرا بررسی نشده است."
                 },
@@ -387,7 +489,7 @@ private fun WhyNoTradeCard(checks: List<AlertCheck>, ai: AiConnectionState) {
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             }
             if (failed == 0 && checks.isNotEmpty()) {
-                Text("اگر همه‌چیز سبز است و معامله‌ای باز نشد، دلیل لحظه‌ای‌اش در بخش «معاملهٔ خودکار کاغذی» پایین نوشته می‌شود (مثلاً کراس تأییدنشده یا گیت متد بازار).",
+                Text("اگر همه‌چیز سبز است و معامله‌ای باز نشد، دلیل لحظه‌ای را در بخش «معاملهٔ خودکار کاغذی» و گزارش تصمیم ببینید.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             }
         }
@@ -397,6 +499,90 @@ private fun WhyNoTradeCard(checks: List<AlertCheck>, ai: AiConnectionState) {
 private fun fmt2(value: Double?): String =
     if (value == null) "—" else String.format(java.util.Locale.US, "%.2f", value)
 
+/** Four buckets are ALWAYS shown. No eligible candle => show coverage and an actual reason,
+ * not an invented "best". Observations outside the watchlist are never entry permissions.
+ */
+@Composable
+private fun PerMarketRecommendations(scan: PairScanState, interval: com.aurum.edge.core.Interval,
+                                     now: Long, onSelect: (String) -> Unit) {
+    val picks = ScanRanking.byMarket(scan.statuses, interval, now)
+    AssetClass.entries.filter { it != AssetClass.STOCK }.forEach { category ->
+        val rows = scan.statuses.filter { it.assetClass == category }
+        val openRows = rows.filterNot { com.aurum.edge.core.MarketHours.closedFor(it.symbol, now) }
+        val checked = openRows.count { it.state != "pending" && it.state != "closed" }
+        val closedCount = rows.size - openRows.size
+        val pending = openRows.any { it.state == "pending" }
+        val ranked = picks[category].orEmpty()
+        SectionCard("برترین‌های ${category.label}",
+            "بازار باز: $checked/${openRows.size} بررسی‌شده · " +
+                "$closedCount بسته (بدون درخواست/اسکن) · " +
+                "${rows.count { it.state == "error" }} فید ناموفق · ${rows.count { it.state == "partial" }} دادهٔ ناقص",
+            trailing = { Pill(when {
+                openRows.isEmpty() -> "بسته؛ بدون اسکن"
+                scan.sweeping && pending -> "در انتظار پاسخ منبع"
+                scan.sweeping -> "این دسته بررسی شد"
+                else -> "آخرین دور"
+            }, if (openRows.isEmpty()) AurumColors.Gold else AurumColors.Cyan) }) {
+            Box(Modifier.fillMaxWidth().height(6.dp)
+                .background(AurumColors.SurfaceAlt, RoundedCornerShape(8.dp))) {
+                Box(Modifier.fillMaxWidth(if (openRows.isEmpty()) 0f else checked.toFloat() / openRows.size)
+                    .height(6.dp).background(AurumColors.Cyan, RoundedCornerShape(8.dp)))
+            }
+            Text("رتبه فقط از کندل‌های بستهٔ تازه است؛ «مشاهده» نه مجوز ورود است نه قیمت لحظه‌ای. " +
+                "اگر دادهٔ هفت بازه یا فید معتبر نباشد، رتبه ساخته نمی‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                modifier = Modifier.padding(vertical = 6.dp))
+            if (openRows.isEmpty() && rows.isNotEmpty()) Text(
+                "این دسته طبق ساعت سشن بسته است؛ هیچ قیمت جدید یا سیگنالی برای آن اسکن نمی‌شود. " +
+                    "تاریخچهٔ قبلی، قیمت آنلاین و مجوز ورود نیست.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+            else if (ranked.isEmpty()) {
+                val reason = openRows.firstOrNull { it.state == "error" || it.state == "partial" || it.state == "blocked" }
+                Text(if (checked == 0) "بازار باز است اما هنوز بررسی نشده؛ منتظر نوبت اسکن بمانید."
+                     else "فعلاً گزینهٔ معتبر نیست. ${reason?.symbol.orEmpty()}: ${reason?.detail ?: "شرایط کافی نیست"}",
+                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            } else ranked.forEachIndexed { index, row ->
+                val approved = row.state == "candidate"
+                Column(Modifier.fillMaxWidth().padding(vertical = 5.dp)
+                    .background(AurumColors.SurfaceAlt, RoundedCornerShape(14.dp))
+                    .clickable { onSelect(row.symbol) }.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("#${index + 1}  ${row.symbol}", style = MaterialTheme.typography.titleSmall,
+                            color = AurumColors.TextPrimary, fontWeight = FontWeight.Bold)
+                        Pill(if (approved) "کاندیدای ورود" else if (row.state == "watch") "فشردگی · آماده‌باش" else "فقط مشاهده",
+                            if (approved) AurumColors.Green else AurumColors.Gold)
+                    }
+                    if (category == AssetClass.CRYPTO) Text(
+                        com.aurum.edge.data.CryptoFamilies.label(row.symbol),
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
+                    Text("${row.action?.name ?: "—"} · امتیاز ${row.confidence?.toInt() ?: 0}/۱۰۰ · " +
+                        "متد ${row.methodLabel ?: "نامشخص"} · ${row.trendLabel ?: "روند نامشخص"}",
+                        style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+                    Box(Modifier.fillMaxWidth().height(5.dp)
+                        .background(AurumColors.Bg, RoundedCornerShape(5.dp))) {
+                        Box(Modifier.fillMaxWidth(((row.confidence ?: 0.0) / 100.0).toFloat().coerceIn(0f, 1f))
+                            .height(5.dp).background(if (approved) AurumColors.Green else AurumColors.Gold,
+                                RoundedCornerShape(5.dp)))
+                    }
+                    Text("بررسی ${row.lastScanAt?.let { formatTime(it) } ?: "—"} · " +
+                        "قیمت کندل ${formatPrice(row.price)} · لمس کنید برای بررسی نماد",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                    Text("منبع کندل پایه: ${row.baseSource ?: "نامعلوم"} · آخرین کندل بسته: " +
+                        (row.lastBarAt?.let { formatTime(it) } ?: "نامعلوم") +
+                        " · بازه‌های M5/M15/H1 مستقل‌اند؛ این قیمت تیک ورود نیست.",
+                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                    if (!approved) Text(row.detail, style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Gold)
+                }
+            }
+            if (ranked.size in 1..3) Text("گزینهٔ بیشتری با شواهد تازه پیدا نشد؛ رتبهٔ فرضی نمایش داده نمی‌شود.",
+                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+        }
+    }
+}
+
 /**
  * کارت بهترین فرصت معاملاتی با تشریح کامل شروط تکنیکال و تفکیک نماد/دسته دارایی.
  */
@@ -404,7 +590,6 @@ private fun fmt2(value: Double?): String =
 private fun BestOpportunityDetailedCard(
     best: PairScanStatus?,
     sweeping: Boolean,
-    onScan: () -> Unit,
     onTrade: (String) -> Unit,
 ) {
     val assetClass = best?.let { AssetClass.of(it.symbol) } ?: AssetClass.FOREX
@@ -416,14 +601,13 @@ private fun BestOpportunityDetailedCard(
     }
 
     SectionCard(
-        title = "✨ برترین فرصت معاملاتی (#1 Best Opportunity)",
-        subtitle = if (best != null) "بالاترین شواهد تاییدشده، آزادی کامل چیکو اسپن و بهترین نسبت R:R" else "اسکن هوشمند ۵۰+ سهم و نماد در پس‌زمینه",
+        title = "برترین کاندید مجاز",
         trailing = {
             if (sweeping) {
                 Pill("در حال اسکن...", AurumColors.Gold)
             } else if (best != null) {
                 Pill(
-                    text = if (isBuy) "خرید LONG (${(best.confidence ?: 95.0).toInt()}%)" else "فروش SHORT (${(best.confidence ?: 95.0).toInt()}%)",
+                    text = if (isBuy) "خرید LONG" else "فروش SHORT",
                     color = actionColor,
                 )
             }
@@ -445,7 +629,7 @@ private fun BestOpportunityDetailedCard(
                             color = AurumColors.Gold,
                         )
                         Pill(assetClass.label, AurumColors.SurfaceAlt)
-                        Pill("شانس ${(best.confidence ?: 95.0).toInt()}%", actionColor)
+                        Pill("امتیاز ${best.confidence?.toInt() ?: 0}/۱۰۰", actionColor)
                     }
                     best.riskReward?.let { rr ->
                         Pill("R:R 1:${String.format(java.util.Locale.US, "%.1f", rr)}", AurumColors.Cyan)
@@ -533,31 +717,8 @@ private fun BestOpportunityDetailedCard(
                             ConfluenceRow(item)
                         }
                     } else {
-                        SignalConditionItemRow(
-                            label = "موقعیت قیمت نسبت به ابر کومو (Kumo 8/24/72)",
-                            detail = if (isBuy) "قیمت بالای ابر صعودی مستقر است" else "قیمت زیر ابر نزولی مستقر است",
-                            ok = true,
-                        )
-                        SignalConditionItemRow(
-                            label = "هم‌جهتی و تقاطع تنکان‌سن و کیجون‌سن (TK Cross)",
-                            detail = if (isBuy) "تنکان بالای کیجون و تراز صعودی" else "تنکان زیر کیجون و تراز نزولی",
-                            ok = true,
-                        )
-                        SignalConditionItemRow(
-                            label = "آزادی کامل چیکواسپن (Chikou Clearance 24)",
-                            detail = if (isBuy) "چیکو اسپن بدون مانع بالای کندل‌های ۲۴ دوره گذشته" else "چیکو اسپن بدون مانع زیر کندل‌های ۲۴ دوره گذشته",
-                            ok = true,
-                        )
-                        SignalConditionItemRow(
-                            label = "فیلتر ضد ساید و قدرت ترند (Anti-Sideways Guard)",
-                            detail = "عدم وجود فشردگی یا رنج، اسلوپ مومنتوم فعال",
-                            ok = true,
-                        )
-                        SignalConditionItemRow(
-                            label = "تراز چندتایم‌فریم و نسبت ریسک به ریوارد (MTF & R:R)",
-                            detail = "تایید تراز بالاتر، نسبت ریوارد 1:${String.format(java.util.Locale.US, "%.1f", best.riskReward ?: 2.2)}",
-                            ok = true,
-                        )
+                        Text("شواهد تفصیلی از فید ثبت نشده‌اند؛ تأیید تکنیکال فرض نمی‌شود.",
+                            style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
                     }
                 }
 
@@ -568,36 +729,15 @@ private fun BestOpportunityDetailedCard(
                     modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 ) {
                     Text(
-                        if (isBuy) "انتقال به چارت و ورود به معامله خرید ${best.symbol}" else "انتقال به چارت و ورود به معامله فروش ${best.symbol}",
+                        "نمایش چارت ${best.symbol} · بررسی پیش از ورود",
                         color = androidx.compose.ui.graphics.Color.Black,
                         fontWeight = FontWeight.Bold,
                     )
                 }
             }
         } else {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "برای شکار بهترین ستاپ معاملاتی از میان تمامی ۵۰ نماد، دکمهٔ اسکن را بزنید.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = AurumColors.TextSecondary,
-                    modifier = Modifier.weight(1f),
-                )
-                Button(
-                    onClick = onScan,
-                    enabled = !sweeping,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AurumColors.Gold,
-                        contentColor = androidx.compose.ui.graphics.Color.Black,
-                    ),
-                    modifier = Modifier.padding(start = 8.dp),
-                ) {
-                    Text(if (sweeping) "در حال اسکن..." else "اسکن ۵۰ نماد")
-                }
-            }
+            Text(if (sweeping) "در حال بررسی بازارها" else "کاندیدای مجازِ تازه‌ای موجود نیست",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted)
         }
     }
 }
@@ -613,7 +753,7 @@ private fun TopCandidatesDetailedSection(
 ) {
     SectionCard(
         title = "🏆 ۳ کاندیدای برتر بازار (Top 3 Candidates)",
-        subtitle = "فرصت‌های ممتاز استخراج‌شده از میان ۵۰+ نماد با تفکیک دقیق دسته دارایی و امتیاز شروط",
+        subtitle = "فرصت‌های ممتاز استخراج‌شده از میان ۲۰۰ کریپتو و نمادهای فارکس/کالا با تفکیک دقیق دسته دارایی و امتیاز شروط",
         trailing = {
             Pill("${candidates.size} کاندیدا", AurumColors.Gold)
         },
@@ -668,7 +808,7 @@ private fun CandidateDetailedItemCard(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Pill("امتیاز ${(candidate.confidence ?: 90.0).toInt()}%", actionColor)
+                Pill("امتیاز ${candidate.confidence?.toInt() ?: 0}/۱۰۰", actionColor)
                 candidate.riskReward?.let { rr ->
                     Pill("R:R 1:${String.format(java.util.Locale.US, "%.1f", rr)}", AurumColors.Cyan)
                 }
@@ -698,18 +838,17 @@ private fun CandidateDetailedItemCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(item.name, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-                        Pill(if (item.ok) "✓ تایید" else "✗ رد", if (item.ok) AurumColors.Green else AurumColors.Red)
+                        Pill(when (item.status) {
+                            com.aurum.edge.core.ConfluenceStatus.CONFIRMED -> "✓ کامل"
+                            com.aurum.edge.core.ConfluenceStatus.PARTIAL -> "◐ ${item.scorePercent}/۲۵"
+                            com.aurum.edge.core.ConfluenceStatus.UNKNOWN -> "؟ نامعلوم"
+                            com.aurum.edge.core.ConfluenceStatus.CONFLICT -> "✗ رد"
+                        }, if (item.ok) AurumColors.Green else AurumColors.Gold)
                     }
                 }
             } else {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("کومو ۸/۲۴/۷۲ + تنکان/کیجون + چیکو ۲۴", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
-                    Pill("✓ تایید کامل شروط", AurumColors.Green)
-                }
+                Text("شواهد تکنیکال این کاندیدا در دسترس نیست؛ تأیید فرض نمی‌شود.",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             }
         }
 
@@ -726,10 +865,10 @@ private fun CandidateDetailedItemCard(
                 color = AurumColors.TextMuted,
             )
             if (isCurrent) {
-                Pill("روی چارت فعال است", AurumColors.Green)
+                Pill("نماد انتخابی", AurumColors.Green)
             } else {
                 Text(
-                    text = "نمایش روی چارت ↗",
+                    text = "انتخاب نماد ↗",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.Cyan,
                     modifier = Modifier
@@ -741,41 +880,17 @@ private fun CandidateDetailedItemCard(
     }
 }
 
-@Composable
-private fun SignalConditionItemRow(
-    label: String,
-    detail: String,
-    ok: Boolean,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(label, style = MaterialTheme.typography.labelMedium, color = AurumColors.TextPrimary)
-            Text(detail, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-        }
-        Pill(
-            text = if (ok) "✓ تایید" else "✗ رد",
-            color = if (ok) AurumColors.Green else AurumColors.Red,
-        )
-    }
-}
-
 /** All-pairs background radar summary */
 @Composable
-internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, onSelectSymbol: (String) -> Unit, now: Long) {
+internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, now: Long) {
     LaunchedEffect(scan.lastSweepAt) { if (scan.lastSweepAt == null) onScan() }
     SectionCard(
-        title = "پایش پیوستهٔ ۵۰+ نماد در پس‌زمینه",
-        subtitle = "دیتاگیری و کشف خودکار فرصت‌ها از بازار کریپتو، طلا، نفت، فارکس و سهام",
+        title = "پایش پیوستهٔ ۲۰۰ کریپتو و نمادهای فارکس/کالا در پس‌زمینه",
+        subtitle = "دیتاگیری و کشف خودکار فرصت‌ها از بازار کریپتو، طلا، نفت و فارکس",
         trailing = {
             Pill(
                 when {
-                    scan.sweeping -> "در حال اسکن ۵۰+ نماد…"
+                    scan.sweeping -> "بررسی ${scan.checkedCount} از ${scan.totalCount} نماد…"
                     scan.lastSweepAt != null -> "آخرین اسکن " + relativeTime(scan.lastSweepAt, now)
                     else -> "اسکن نشده"
                 },
@@ -789,19 +904,30 @@ internal fun PairRadarSummaryCard(scan: PairScanState, onScan: () -> Unit, onSel
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "اسکنر با نرخ هوشمند ۵۰+ سهم و نماد را پایش و معاملات واجد بالاترین R:R را به پورتفو اضافه می‌کند.",
+                "هر یک از ۲۳۰ نماد موتور مستقل دارد؛ نماد کند، بقیه را پشت یک دور سراسری نگه نمی‌دارد. " +
+                    "فقط دادهٔ واقعی هم‌نماد معتبر است؛ منبع پرظرفیت صف نمی‌سازد و موتور همان نماد دوباره تلاش می‌کند. " +
+                    "محدودیت ناشر حذف نشده و دریافت آنی همهٔ نمادها تضمین نیست. پایش پس‌زمینه نیازمند سرویس فعال است.",
                 style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextSecondary,
                 modifier = Modifier.weight(1f),
             )
             OutlinedButton(
                 onClick = onScan,
-                enabled = !scan.sweeping,
+                enabled = true,
                 modifier = Modifier.padding(start = 8.dp),
             ) {
-                Text(if (scan.sweeping) "اسکن..." else "اسکن مجدد")
+                Text("بازبینی مستقل")
             }
         }
+        val skipped = scan.statuses.count { com.aurum.edge.core.MarketHours.closedFor(it.symbol, now) }
+        val requested = scan.statuses.count { it.state != "pending" && it.state != "closed" }
+        Text("بازارهای بازِ بررسی‌شده: $requested/${scan.totalCount - skipped} · " +
+            "$skipped نماد بسته بدون درخواست فید · " +
+            "آخرین موتور تکمیل‌شده: ${scan.lastSweepAt?.let { formatTime(it) } ?: "هنوز تکمیل نشده"}" +
+            (scan.lastSweepDurationMs?.let { " · مدت همان نماد: ${it / 1000.0} ثانیه" } ?: "") + " · " +
+            "هر موتور پس از بررسی خودش حداقل ۳۰ ثانیه فاصله دارد؛ انتظار ظرفیت با تلاش مجدد کوتاه همان موتور است. " +
+            "زمان واقعی به شبکه و محدودیت منبع بستگی دارد؛ دلیل هر بررسی در انتهای صفحه است.",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         scan.lastError?.let { Text(it, color = AurumColors.Red, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp)) }
     }
 }

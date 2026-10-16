@@ -4,6 +4,7 @@ import com.aurum.edge.core.Candle
 import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
 import com.aurum.edge.engine.MtfAnalyzer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -23,11 +24,11 @@ import java.util.concurrent.TimeUnit
  *
  * This adapter is deliberately narrow and honest: only fixed Yahoo Finance chart symbols for the
  * app's forex/gold workspace are accepted, the response identity/currency is checked, rows with
- * missing OHLC are skipped, and fewer than [HistoryPolicy.TARGET_CANDLES] real bars is reported as
+ * missing OHLC are skipped, and fewer than the caller's required real bars is reported as
  * a provider limitation instead of filling gaps with generated prices.
  */
 class PublicCandleHistoryClient(
-    private val client: OkHttpClient = OkHttpClient.Builder()
+    private val client: OkHttpClient = AppNetwork.builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
         .callTimeout(35, TimeUnit.SECONDS)
@@ -56,26 +57,26 @@ class PublicCandleHistoryClient(
             ?: throw DataFeedException("برای این نماد تاریخچهٔ رایگانِ بدون کلید تعریف نشده است")
         val keepSize = HistoryPolicy.deepProviderRequestSize(desiredSize, minimumSize)
         val requestInterval = requestInterval(interval)
-        val url = "https://query1.finance.yahoo.com/v8/finance/chart/" +
-            encodeYahooPath(yahoo) +
+        val path = encodeYahooPath(yahoo) +
             "?interval=$requestInterval&range=${range(interval)}&includePrePost=false&events=history"
-        val body = try {
-            client.newCall(Request.Builder()
-                .url(url)
-                .header("Accept", "application/json")
-                .header("User-Agent", "AurumEdge/1 Android")
-                .build()).execute().use { response ->
-                    if (!response.isSuccessful) throw DataFeedException("تاریخچهٔ رایگان HTTP ${response.code}")
-                    val bytes = response.peekBody(4_000_001L).bytes()
-                    if (bytes.size > 4_000_000) throw DataFeedException("پاسخ تاریخچهٔ رایگان بیش از حد بزرگ است")
-                    bytes.toString(Charsets.UTF_8).takeIf { it.isNotBlank() }
-                        ?: throw DataFeedException("پاسخ تاریخچهٔ رایگان خالی است")
-                }
-        } catch (e: DataFeedException) {
-            throw e
-        } catch (_: Exception) {
-            throw DataFeedException("اتصال به تاریخچهٔ رایگان Yahoo Finance برقرار نشد")
-        }
+        // Same Yahoo publisher, TWO bounded hosts for availability only. These are
+        // not independent market confirmations; never count both as separate evidence.
+        val hostErrors = mutableListOf<String>()
+        val body = listOf("query1.finance.yahoo.com", "query2.finance.yahoo.com")
+            .firstNotNullOfOrNull { host ->
+                try {
+                    val url = "https://$host/v8/finance/chart/$path"
+                    client.newCall(Request.Builder().url(url).header("Accept", "application/json")
+                        .header("User-Agent", "AurumEdge/1 Android").build()).execute().use { response ->
+                        if (!response.isSuccessful) throw DataFeedException("Yahoo HTTP ${response.code}")
+                        val bytes = response.peekBody(4_000_001L).bytes()
+                        if (bytes.size > 4_000_000) throw DataFeedException("پاسخ Yahoo بیش از حد بزرگ است")
+                        bytes.toString(Charsets.UTF_8).takeIf { it.isNotBlank() }
+                            ?: throw DataFeedException("پاسخ Yahoo خالی است")
+                    }
+                } catch (cancel: CancellationException) { throw cancel }
+                catch (_: Exception) { null }
+            } ?: throw DataFeedException("Yahoo هر دو میزبان ناموفق: ${hostErrors.joinToString("؛ ").take(210)}")
         val baseInterval = if (interval == Interval.H4) Interval.H1 else interval
         val parsed = parseYahooChart(body, symbol, yahoo, baseInterval,
             trimToCache = interval != Interval.H4, trimSize = keepSize)
@@ -151,8 +152,11 @@ class PublicCandleHistoryClient(
             val seconds = timestamps[i].num()?.toLong() ?: continue
             if (seconds <= 0 || seconds > Long.MAX_VALUE / 1000L) continue
             val rawTime = seconds * 1000L
-            if (rawTime > now + 60_000L) continue
+            if (rawTime > now) continue
             val time = rawTime - (rawTime % interval.millis)
+            // Historical responses may include the currently forming candle. Do not label it
+            // closed; this adapter returns only bars whose full interval has elapsed.
+            if (time + interval.millis > now) continue
             val open = opens[i].num()?.takeIf { it.isFinite() && it > 0.0 } ?: continue
             val high = highs[i].num()?.takeIf { it.isFinite() && it > 0.0 } ?: continue
             val low = lows[i].num()?.takeIf { it.isFinite() && it > 0.0 } ?: continue
@@ -162,29 +166,16 @@ class PublicCandleHistoryClient(
             if (seen.add(time)) out += Candle(time, open, high, low, close, volume, closed = true)
         }
         val sorted = out.sortedBy { it.time }
-        if (sorted.size < HistoryPolicy.TARGET_CANDLES) {
-            // The caller decides whether cache+live bars can complete the window, but a too-small
-            // fresh response is never silently presented as a complete 3000-bar history.
-            return sorted
-        }
-        return if (trimToCache) sorted.takeLast(trimSize.coerceAtLeast(HistoryPolicy.TARGET_CANDLES)) else sorted
+        // No 3000-bar gate in the parser: the caller enforces its own real-bar floor.
+        return if (trimToCache) sorted.takeLast(trimSize.coerceAtLeast(1)) else sorted
     }
 
-    private fun yahooSymbol(symbol: String): String? {
+    internal fun yahooSymbol(symbol: String): String? {
         val key = symbol.trim().uppercase(Locale.ROOT)
         return when (key) {
-            "XAU/USD", "XAUUSD", "GOLD" -> "GC=F"
-            "XAG/USD", "XAGUSD", "SILVER" -> "SI=F"
-            "USOIL", "WTI" -> "CL=F"
-            "UKOIL", "BRENT" -> "BZ=F"
-            "COPPER" -> "HG=F"
-            "NATGAS", "NAT_GAS" -> "NG=F"
-            "NASDAQ" -> "QQQ"
-            "SP500" -> "SPY"
-            "DOW" -> "DIA"
-            "DAX" -> "^GDAXI"
-            "FTSE" -> "^FTSE"
-            "NIKKEI" -> "^N225"
+            // Yahoo commodity futures and ETF/index proxies are NOT XAU/USD spot,
+            // XAG/USD spot, oil spot, or the named cash index. Fail over to an
+            // identity-preserving provider or report missing history; never relabel them.
             "EUR/USD" -> "EURUSD=X"
             "GBP/USD" -> "GBPUSD=X"
             "AUD/USD" -> "AUDUSD=X"
@@ -192,6 +183,7 @@ class PublicCandleHistoryClient(
             "USD/JPY" -> "JPY=X"
             "USD/CHF" -> "CHF=X"
             "USD/CAD" -> "CAD=X"
+            "DOW", "US30", "DJI", "^DJI" -> "^DJI"
             "EUR/GBP" -> "EURGBP=X"
             "EUR/JPY" -> "EURJPY=X"
             "GBP/JPY" -> "GBPJPY=X"
@@ -211,10 +203,11 @@ class PublicCandleHistoryClient(
             "CAD/CHF" -> "CADCHF=X"
             "NZD/CAD" -> "NZDCAD=X"
             else -> {
-                if (key.endsWith("USDT") || key.endsWith("/USDT") || key.endsWith("-USD") || key.endsWith("/USD")) {
-                    val base = key.replace("/USDT", "").replace("USDT", "").replace("-USD", "").replace("/USD", "")
-                    "$base-USD"
-                } else if (key.contains("/")) {
+                if (key.startsWith("XAU/") || key.startsWith("XAG/") ||
+                    key.endsWith("/USDT") || key.endsWith("USDT") ||
+                    key in setOf("XAUUSD", "XAGUSD", "GOLD", "SILVER", "USOIL", "UKOIL", "COPPER", "NATGAS",
+                        "NASDAQ", "SP500", "DOW", "DAX", "FTSE", "NIKKEI")) null
+                else if (key.contains("/")) {
                     val base = key.substringBefore("/")
                     val quote = key.substringAfter("/")
                     "$base$quote=X"
@@ -230,6 +223,7 @@ class PublicCandleHistoryClient(
 
     private fun requestInterval(interval: Interval): String = when (interval) {
         Interval.M1 -> "1m"
+        Interval.M3 -> throw DataFeedException("کندل ۳دقیقهٔ کریپتو فقط از M1 نوبیتکس ساخته می‌شود")
         Interval.M5 -> "5m"
         Interval.M15 -> "15m"
         Interval.M30 -> "30m"
@@ -239,9 +233,10 @@ class PublicCandleHistoryClient(
 
     private fun range(interval: Interval): String = when (interval) {
         Interval.M1 -> "7d"
-        Interval.M5 -> "1mo"
-        Interval.M15 -> "3mo"
-        Interval.M30 -> "6mo"
+        Interval.M3 -> "7d"
+        Interval.M5 -> "60d"
+        Interval.M15 -> "60d"
+        Interval.M30 -> "60d"
         Interval.H1, Interval.H4 -> "2y"
         Interval.D1 -> "15y"
     }

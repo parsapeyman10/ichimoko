@@ -36,7 +36,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
-import com.aurum.edge.core.HomeReadout
+import com.aurum.edge.data.DisplayMark
+import com.aurum.edge.data.OpenPositionDisplay
+import com.aurum.edge.core.LiveTradeValuation
+import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
@@ -46,8 +49,6 @@ import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
-import com.aurum.edge.ui.components.formatQuotePrice
-import com.aurum.edge.ui.components.formatSpread
 import com.aurum.edge.ui.components.relativeTime
 import com.aurum.edge.ui.theme.AurumColors
 import kotlinx.coroutines.delay
@@ -58,18 +59,13 @@ import kotlin.math.abs
  * ۱. در بالای صفحه وضعیت باز یا بسته بودن بازار
  * ۲. ترکینگ زنده و لحظه‌ای تمامی معاملات باز پورتفو با نمایش تراز SL -> قیمت ورود -> TP
  * ۳. پنل معاملهٔ خودکار و آمار کلی پورتفو
- * ۴. آخرین قیمت و اسپرد بازار
  */
 @Composable
 fun HomeScreen(
     viewModel: AurumViewModel,
     market: MarketState,
-    onChart: () -> Unit,
-    onSignal: () -> Unit,
-    onNews: () -> Unit,
-    onLearn: () -> Unit,
+    onChartSymbol: (String) -> Unit,
     onJournal: () -> Unit,
-    onSettings: () -> Unit,
 ) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -78,16 +74,20 @@ fun HomeScreen(
             now = System.currentTimeMillis()
         }
     }
+    val sourceAudits by com.aurum.edge.data.HistorySourceAudits.state.collectAsStateWithLifecycle()
+    val sourceAudit = sourceAudits[market.symbol]
     val session = MarketHours.sessionWindowFor(market.symbol, now)
-    val price = HomeReadout.from(market, now)
-    val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val configuredSpread = settings.spreadPrice.takeIf { it.isFinite() && it > 0.0 && price.value != null }
-    val displayBid = market.bid ?: configuredSpread?.let { spread -> price.value?.minus(spread / 2.0) }
-    val displayAsk = market.ask ?: configuredSpread?.let { spread -> price.value?.plus(spread / 2.0) }
-    val spread = displayBid?.let { bid -> displayAsk?.let { ask -> ask - bid } }
-
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 14.dp)) {
 
+        sourceAudit?.let { audit ->
+            SectionCard("منبع دادهٔ ${market.symbol}", "انتخاب کیفیت‌محور؛ نه تضمین صحت یا مجوز ورود") {
+                Text("انتخاب مقایسه: ${audit.selected ?: "منبع قابل انتخاب نیست"} · تاریخچهٔ فعلی: ${market.historyProvider ?: "ناموجود"}", color = AurumColors.Gold)
+                Text(audit.note, style = MaterialTheme.typography.bodySmall)
+                Text(market.feed.detail, style = MaterialTheme.typography.bodySmall)
+                Text("آخرین مقایسه: ${relativeTime(audit.checkedAt)} · قیمت زنده: ${market.feed.provider}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
+            }
+        }
         // ── ۱. وضعیت باز یا بسته بودن بازار (بالاترین بخش صفحه) ────────────
         Column(
             Modifier.fillMaxWidth()
@@ -108,17 +108,17 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top,
             ) {
-                Column {
-                    Text("وضعیت فعالیت بازار", color = AurumColors.Gold, style = MaterialTheme.typography.labelMedium)
+                Column(Modifier.weight(1f)) {
+                    Text("ساعت برنامه‌ای ${AssetClass.of(market.symbol).label} · ${market.symbol}", color = AurumColors.Gold, style = MaterialTheme.typography.labelMedium)
                     Text(
-                        if (session.closed) "بازار اکنون بسته است" else "بازار اکنون باز و فعال است",
+                        if (session.closed) "سشن این نماد بسته است" else "طبق برنامه باز؛ فید را بررسی کنید",
                         color = if (session.closed) AurumColors.Red else AurumColors.Green,
-                        style = MaterialTheme.typography.headlineMedium,
+                        style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                     )
                 }
                 Pill(
-                    text = if (session.closed) "CLOSED" else "OPEN 24/7",
+                    text = if (session.closed) "بسته" else if (AssetClass.of(market.symbol) == AssetClass.CRYPTO) "۲۴/۷" else "ساعت مجاز",
                     color = if (session.closed) AurumColors.Red else AurumColors.Green,
                 )
             }
@@ -140,73 +140,53 @@ fun HomeScreen(
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(top = 4.dp),
             )
+            listOf("EUR/USD" to "فارکس", "XAU/USD" to "طلا/کالا",
+                "BTC/USDT" to "رمزارز").forEach { (symbol, label) ->
+                val scheduled = MarketHours.sessionWindowFor(symbol, now)
+                val note = if (symbol == "BTC/USDT") "۲۴/۷" else "برای قیمت/تعطیلی خاص، فید همان نماد لازم است"
+                Text("$label: ${if (scheduled.closed) "سشن بسته" else "طبق برنامه باز"} · $note",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (scheduled.closed) AurumColors.Red else AurumColors.TextSecondary,
+                    modifier = Modifier.padding(top = 2.dp))
+            }
         }
 
         // ── ۲. بنر وضعیت ۴ دسته دارایی (رمزارز، فارکس، طلا/کالا، سهام) در ۴ مستطیل بالا ──
         val tradesState by viewModel.trades.collectAsStateWithLifecycle()
         val openTradesList = remember(tradesState) { tradesState.filter { it.isOpen } }
-        val livePricesMap by viewModel.livePrices.collectAsStateWithLifecycle()
+        val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
+        val lastMarks by viewModel.lastDisplayMarks.collectAsStateWithLifecycle()
+        val freshPrices = com.aurum.edge.data.OpenPositionQuotePolicy.prices(openTradesList, liveTicks, now)
+        // Historical display marks never enter freshPrices, account equity or risk checks.
+        val frozenPrices = openTradesList.mapNotNull { trade ->
+            OpenPositionDisplay.forTrade(trade, lastMarks)?.let { trade.symbol to it.price }
+        }.toMap()
 
+        val scan by viewModel.pairScan.collectAsStateWithLifecycle()
+        val homeSettings by viewModel.settings.collectAsStateWithLifecycle()
         com.aurum.edge.ui.components.AssetClass4SlotsBanner(
-            openTrades = openTradesList,
-            livePrices = livePricesMap,
-            onSelectSymbol = { symbol ->
-                viewModel.selectChartSymbol(symbol)
-                onChart()
-            },
-        )
-
-        // ── ۳. ترکینگ زنده و کامل تمامی معاملات باز پورتفو ──────────────────
-        LiveOpenTradesTrackingSection(
-            viewModel = viewModel,
-            currentMarket = market,
-            onJournal = onJournal,
-            onSelectTrade = { symbol ->
-                viewModel.selectChartSymbol(symbol)
-                onChart()
-            },
-        )
+                openTrades = openTradesList,
+                livePrices = freshPrices,
+                lastKnownPrices = frozenPrices,
+                onSelectSymbol = onChartSymbol,
+                entryReasons = AssetClass.entries.associateWith { asset ->
+                    com.aurum.edge.data.MarketEntryReason.forClass(asset, scan,
+                        homeSettings.autoPaperTrading, now)
+                },
+            )
+        if (openTradesList.isNotEmpty()) {
+            LiveOpenTradesTrackingSection(
+                viewModel = viewModel,
+                currentMarket = market,
+                lastMarks = lastMarks,
+                now = now,
+                onJournal = onJournal,
+                onSelectTrade = onChartSymbol,
+            )
+        }
 
         // ── ۴. پنل معاملهٔ خودکار کاغذی و تخصیص ۴ بازار ────────────────────
-        AutoPaperCard(viewModel, onJournal)
-
-        // ── ۵. قیمت لحظه‌ای و اسپرد بازار ──────────────────────────────────
-        SectionCard(
-            title = "قیمت لحظه‌ای بازار · ${market.symbol}",
-            subtitle = "فقط آخرین عدد واقعی دریافت‌شده؛ بدون داده‌های شبیه‌سازی‌شده",
-            trailing = {
-                Pill(
-                    when {
-                        price.current -> "زنده/تازه"
-                        price.value != null -> "قبلی/کش"
-                        else -> "بدون داده"
-                    },
-                    if (price.current) AurumColors.Cyan else AurumColors.Gold,
-                )
-            },
-        ) {
-            Text(
-                formatPrice(price.value),
-                style = MaterialTheme.typography.headlineMedium,
-                color = if (price.current) AurumColors.TextPrimary else AurumColors.TextMuted,
-            )
-            Text(
-                if (price.current) "${price.label} · دریافت ${formatDateTime(price.observedAt)}"
-                else "${price.label} · آخرین مشاهده ${formatDateTime(price.observedAt)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (price.current) AurumColors.Cyan else AurumColors.Gold,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                StatTile("BID", formatQuotePrice(displayBid), if (price.current) AurumColors.Green else AurumColors.TextMuted, Modifier.weight(1f))
-                StatTile("ASK", formatQuotePrice(displayAsk), if (price.current) AurumColors.Red else AurumColors.TextMuted, Modifier.weight(1f))
-                StatTile("SPREAD", formatSpread(spread), AurumColors.Gold, Modifier.weight(1f))
-            }
-            market.feed.detail.takeIf { it.isNotBlank() }?.let {
-                Text(it, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                    modifier = Modifier.padding(top = 8.dp))
-            }
-        }
+        AutoPaperCard(viewModel, onJournal, now)
     }
 }
 
@@ -217,16 +197,18 @@ fun HomeScreen(
 private fun LiveOpenTradesTrackingSection(
     viewModel: AurumViewModel,
     currentMarket: MarketState,
+    lastMarks: Map<String, DisplayMark>,
+    now: Long,
     onJournal: () -> Unit,
     onSelectTrade: (String) -> Unit,
 ) {
     val trades by viewModel.trades.collectAsStateWithLifecycle()
-    val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
+    val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
     val openTrades = remember(trades) { trades.filter { it.isOpen } }
 
     SectionCard(
-        title = "⚡ ترکینگ لحظه‌ای معاملات باز",
-        subtitle = "رهگیری زنده حرکت قیمت میان حد ضرر (SL)، نقطه ورود و حد سود (TP)",
+        title = "⚡ ترکینگ معاملات باز",
+        subtitle = "آخرین قیمت تأییدشده میان حد ضرر (SL)، ورود و حد سود (TP)",
         trailing = {
             Pill(
                 text = "${openTrades.size} از ۴ فعال",
@@ -247,7 +229,7 @@ private fun LiveOpenTradesTrackingSection(
                     color = AurumColors.TextSecondary,
                 )
                 Text(
-                    text = "سیستم به شکل پیوسته بیش از ۵۰ نماد را در ۴ دسته دارایی (رمزارز، فارکس، کالا و سهام) پایش می‌کند تا معاملات دارای بیشترین نسبت R:R را شکار کند.",
+                    text = "رادار ۲۰۰ نماد کریپتو به‌همراه فارکس و کالا را بررسی می‌کند؛ سرعت و پوشش به دسترسی منبع بستگی دارد و دادهٔ ناقص مجوز ورود نیست.",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                     textAlign = TextAlign.Center,
@@ -260,7 +242,9 @@ private fun LiveOpenTradesTrackingSection(
                     LiveTradeGaugeCard(
                         trade = trade,
                         currentMarket = currentMarket,
-                        livePrices = livePrices,
+                        liveTicks = liveTicks,
+                        lastMark = OpenPositionDisplay.forTrade(trade, lastMarks),
+                        now = now,
                         onSelect = { onSelectTrade(trade.symbol) },
                     )
                 }
@@ -290,49 +274,42 @@ private fun LiveOpenTradesTrackingSection(
 private fun LiveTradeGaugeCard(
     trade: PaperTrade,
     currentMarket: MarketState,
-    livePrices: Map<String, Double>,
+    liveTicks: Map<String, PriceTick>,
+    lastMark: DisplayMark?,
+    now: Long,
     onSelect: () -> Unit,
 ) {
     val isBuy = trade.action == SignalAction.BUY
     val assetClass = AssetClass.of(trade.symbol)
-    val livePrice = livePrices[trade.symbol]
-        ?: (if (currentMarket.symbol == trade.symbol) currentMarket.lastPrice else null)
-        ?: trade.entry
+    val selectedTick = com.aurum.edge.data.OpenPositionQuotePolicy.selectedFallback(trade, currentMarket, now)
+    val polledTick = com.aurum.edge.data.OpenPositionQuotePolicy.monitored(trade, liveTicks[trade.symbol], now)
+    val verifiedLivePrice = (polledTick ?: selectedTick)?.price
+    val observedAt = (polledTick ?: selectedTick)?.at ?: lastMark?.tickAt
+    // A frozen mark is only a previously verified display snapshot for this exact trade.
+    // It is never put back into the live tick map or used for settling/risk/equity.
+    val valuation = LiveTradeValuation.from(trade, verifiedLivePrice ?: lastMark?.price)
 
     val entry = trade.entry
     val stop = trade.stopLoss
     val target = trade.takeProfit
-
-    val pnlPerUnit = if (isBuy) livePrice - entry else entry - livePrice
-    val grossPnl = pnlPerUnit * trade.positionOz
-    val netPnl = grossPnl - (trade.effectiveCommissionUsd + trade.effectiveSpreadCostUsd)
-    val pnlPercent = if (entry > 0) (pnlPerUnit / entry) * 100.0 else 0.0
-
-    // Calculate progression on scale from SL (0%) to TP (100%)
     val totalRange = abs(target - stop).coerceAtLeast(0.000001)
-    val progress = if (isBuy) {
-        ((livePrice - stop) / totalRange).toFloat().coerceIn(0f, 1f)
-    } else {
-        ((stop - livePrice) / totalRange).toFloat().coerceIn(0f, 1f)
-    }
-
     val entryFraction = if (isBuy) {
         ((entry - stop) / totalRange).toFloat().coerceIn(0.05f, 0.95f)
     } else {
         ((stop - entry) / totalRange).toFloat().coerceIn(0.05f, 0.95f)
     }
 
-    val isProfitable = netPnl >= 0.0
     val statusColor = when {
-        netPnl > 0.0 -> AurumColors.Green
-        netPnl < 0.0 -> AurumColors.Red
+        valuation == null -> AurumColors.TextMuted
+        valuation.netPnlUsd > 0.0 -> AurumColors.Green
+        valuation.netPnlUsd < 0.0 -> AurumColors.Red
         else -> AurumColors.Gold
     }
-
     val movementLabel = when {
-        grossPnl > 0.0 -> "↗ در مسیر حد سود (TP)"
-        grossPnl < 0.0 -> "↘ در مسیر حد ضرر (SL)"
-        else -> "⚪ در نقطه ورود (Entry)"
+        valuation == null -> "در انتظار اولین قیمت"
+        (if (isBuy) valuation.price - entry else entry - valuation.price) > 0.0 -> "↗ در مسیر حد سود (TP)"
+        (if (isBuy) valuation.price - entry else entry - valuation.price) < 0.0 -> "↘ در مسیر حد ضرر (SL)"
+        else -> "⚪ آخرین قیمت روی نقطه ورود (Entry)"
     }
 
     Column(
@@ -349,28 +326,33 @@ private fun LiveTradeGaugeCard(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
                 Text(
                     text = trade.symbol,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = AurumColors.Gold,
                 )
-                Pill(assetClass.label, AurumColors.Surface)
-                Pill(
-                    text = if (isBuy) "خرید LONG" else "فروش SHORT",
-                    color = if (isBuy) AurumColors.Green else AurumColors.Red,
-                )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Pill(assetClass.label, AurumColors.Cyan)
+                    Pill(if (isBuy) "خرید" else "فروش",
+                        if (isBuy) AurumColors.Green else AurumColors.Red)
+                }
             }
-            Column(horizontalAlignment = Alignment.End) {
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.End) {
                 Text(
-                    text = "${if (netPnl >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.2f", netPnl)}$",
+                    text = valuation?.let {
+                        "${if (it.netPnlUsd >= 0) "+" else ""}${String.format(java.util.Locale.US, "%.2f", it.netPnlUsd)}$"
+                    } ?: "—",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = statusColor,
                 )
                 Text(
-                    text = "سود/زیان خالص (${String.format(java.util.Locale.US, "%.2f", pnlPercent)}%)",
+                    text = valuation?.let {
+                        "سود/زیان آخرین قیمت" +
+                            " (${String.format(java.util.Locale.US, "%.2f", it.pnlPercent)}%)"
+                    } ?: "—",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                 )
@@ -378,14 +360,12 @@ private fun LiveTradeGaugeCard(
         }
 
         // Financial Details: Leverage, Margin, Volume, Commission & Spread
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 8.dp)
                 .background(AurumColors.Surface, RoundedCornerShape(8.dp))
                 .padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 "اهرم: ${trade.effectiveLeverage}x · مارجین: $${formatPrice(trade.effectiveMarginUsd)}",
@@ -396,15 +376,12 @@ private fun LiveTradeGaugeCard(
                 "کارمزد: $${formatPrice(trade.effectiveCommissionUsd)} · اسپرد: $${formatPrice(trade.effectiveSpreadCostUsd)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 3.dp),
             )
         }
 
         // Live status & movement
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
             Text(
                 text = movementLabel,
                 style = MaterialTheme.typography.labelSmall,
@@ -412,10 +389,14 @@ private fun LiveTradeGaugeCard(
                 fontWeight = FontWeight.SemiBold,
             )
             Text(
-                text = "قیمت لحظه‌ای: ${formatPrice(livePrice)}",
+                text = valuation?.let {
+                    "آخرین قیمت: " + formatPrice(it.price) +
+                        (observedAt?.let { at -> " · ${formatDateTime(at)}" } ?: "")
+                } ?: "—",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextPrimary,
                 fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 3.dp),
             )
         }
 
@@ -492,42 +473,40 @@ private fun LiveTradeGaugeCard(
                     )
                 }
 
-                // Live Active Moving Pointer
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(progress.coerceIn(0.02f, 0.98f))
-                        .height(20.dp),
-                    contentAlignment = Alignment.CenterEnd,
-                ) {
+                // The last verified pointer stays in place when frozen; the gold divider
+                // above is the saved ENTRY marker, not a substitute current price.
+                valuation?.let { last ->
                     Box(
                         modifier = Modifier
-                            .size(16.dp)
-                            .clip(CircleShape)
-                            .background(statusColor)
-                            .border(2.dp, AurumColors.TextPrimary, CircleShape),
-                    )
+                            .fillMaxWidth(last.progress.coerceIn(0.02f, 0.98f))
+                            .height(20.dp),
+                        contentAlignment = Alignment.CenterEnd,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clip(CircleShape)
+                                .background(statusColor)
+                                .border(2.dp, AurumColors.TextPrimary, CircleShape),
+                        )
+                    }
                 }
             }
 
             // Bottom Info: R:R ratio & quick chart navigate
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
                     "ریسک به ریوارد: 1:${String.format(java.util.Locale.US, "%.1f", trade.riskReward)} · حجم: ${String.format("%.4f", trade.positionOz)} ${trade.unit}",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                 )
-                Text(
-                    "نمایش روی چارت ↗",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.Cyan,
-                    fontWeight = FontWeight.Bold,
-                )
+                Text("نمایش روی چارت ↗", style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Cyan, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 3.dp))
             }
         }
     }
@@ -537,30 +516,29 @@ private fun LiveTradeGaugeCard(
  * پنل معاملهٔ خودکار کاغذی در صفحه اصلی
  */
 @Composable
-private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit) {
+private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit, now: Long) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val stats by viewModel.stats.collectAsStateWithLifecycle()
-    val status by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
-    val livePrices by viewModel.livePrices.collectAsStateWithLifecycle()
+    val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
+    val lastMarks by viewModel.lastDisplayMarks.collectAsStateWithLifecycle()
     val enabled = settings.autoPaperTrading
     val openTrades = remember(trades) { trades.filter { it.isOpen } }
+    val freshPrices = com.aurum.edge.data.OpenPositionQuotePolicy.prices(openTrades, liveTicks, now)
     val lastTrade = trades.maxByOrNull { it.openedAt }
 
     val totalMarginUsed = openTrades.sumOf { it.effectiveMarginUsd }
-    val freeMargin = (settings.accountBalance - totalMarginUsed).coerceAtLeast(0.0)
-
-    val unrealizedTotal = openTrades.sumOf { t ->
-        val price = livePrices[t.symbol] ?: t.entry
-        val pnlPerUnit = if (t.action == SignalAction.BUY) price - t.entry else t.entry - price
-        val gross = pnlPerUnit * t.positionOz
-        gross - (t.effectiveCommissionUsd + t.effectiveSpreadCostUsd)
-    }
-    val equity = settings.accountBalance + unrealizedTotal
+    // Screen-only valuation. Never reuse these remembered prices for risk, fills or settlement.
+    val displayPrices = openTrades.mapNotNull { trade ->
+        OpenPositionDisplay.forTrade(trade, lastMarks)?.let { trade.symbol to it.price }
+    }.toMap() + freshPrices
+    val displayPnl = LiveTradeValuation.total(openTrades, displayPrices)
+    val equity = displayPnl?.let { settings.accountBalance + it }
+    val freeMargin = equity?.let { (it - totalMarginUsed).coerceAtLeast(0.0) }
 
     SectionCard(
         title = "مدیریت حساب و معاملهٔ خودکار کاغذی",
-        subtitle = "تخصیص متوازن در ۴ دسته: ۱ رمزارز · ۱ فارکس · ۱ کالا · ۱ سهام",
+        subtitle = "سقف ۴ معامله؛ حداکثر ۲ در هر دسته با کنترل ریسک",
         trailing = {
             Pill(
                 if (enabled) "روشن" else "خاموش",
@@ -570,7 +548,7 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit) {
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                if (enabled) "موتور هوشمند بازار را رصد و تا ۴ موقعیت برتر (هر بازار ۱ معامله) را شکار می‌کند."
+                if (enabled) "اسکن کندل‌های بسته با نظارت مستقلِ پوزیشن‌های باز؛ ورود فقط با تیک واقعی و عبور از ریسک."
                 else "خاموش است؛ هیچ معاملهٔ خودکاری ثبت نمی‌شود.",
                 Modifier.weight(1f),
                 style = MaterialTheme.typography.bodySmall,
@@ -579,36 +557,33 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit) {
             Switch(checked = enabled, onCheckedChange = viewModel::setAutoPaperTrading)
         }
 
+        val balanceStr = String.format(java.util.Locale.US, "$%.2f", settings.accountBalance)
+        val equityStr = equity?.let { String.format(java.util.Locale.US, "$%.2f", it) } ?: "—"
+        val freeMarginStr = freeMargin?.let { String.format(java.util.Locale.US, "$%.2f", it) } ?: "—"
+        val usedMarginStr = String.format(java.util.Locale.US, "$%.2f", totalMarginUsed)
         Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val balanceStr = String.format(java.util.Locale.US, "$%.2f", settings.accountBalance)
-            val equityStr = String.format(java.util.Locale.US, "$%.2f", equity)
-            val freeMarginStr = String.format(java.util.Locale.US, "$%.2f", freeMargin)
-            StatTile("موجودی کل (Balance)", balanceStr, modifier = Modifier.weight(1f))
-            StatTile("اکوئیتی (Equity)", equityStr, if (unrealizedTotal >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
-            StatTile("مارجین آزاد", freeMarginStr, AurumColors.Cyan, Modifier.weight(1f))
+            StatTile("موجودی", balanceStr, modifier = Modifier.weight(1f))
+            StatTile("برآورد اکوئیتی", equityStr,
+                if (displayPnl == null) AurumColors.TextMuted
+                else if (displayPnl >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
         }
-
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val usedMarginStr = String.format(java.util.Locale.US, "$%.2f", totalMarginUsed)
+            StatTile("برآورد مارجین آزاد", freeMarginStr, AurumColors.Cyan, Modifier.weight(1f))
             StatTile("مارجین درگیر", usedMarginStr, AurumColors.Gold, Modifier.weight(1f))
-            StatTile(
-                "سود/ضرر محقق‌شده",
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatTile("سود/زیان محقق‌شده",
                 (if (stats.netPnl >= 0) "+" else "") + String.format(java.util.Locale.US, "%.2f", stats.netPnl) + "$",
-                if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red,
-                Modifier.weight(1f),
-            )
+                if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red, Modifier.weight(1f))
             StatTile("پوزیشن‌های باز", "${openTrades.size}/۴", modifier = Modifier.weight(1f))
         }
-
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatTile("کل معاملات", stats.total.toString(), modifier = Modifier.weight(1f))
             StatTile("برد/باخت", "${stats.wins}/${stats.losses}", modifier = Modifier.weight(1f))
-            StatTile(
-                "وین‌ریت",
-                stats.winRate?.let { String.format("%.0f%%", it) } ?: "—",
-                modifier = Modifier.weight(1f),
-            )
         }
+        Text("وین‌ریت ثبت‌شده: ${stats.winRate?.let { String.format(java.util.Locale.US, "%.0f%%", it) } ?: "—"}",
+            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 6.dp))
 
         if (lastTrade != null) {
             val lastClass = AssetClass.of(lastTrade.symbol)
@@ -617,15 +592,6 @@ private fun AutoPaperCard(viewModel: AurumViewModel, onJournal: () -> Unit) {
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 10.dp),
-            )
-        }
-
-        if (enabled) {
-            Text(
-                "وضعیت موتور: $status",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.Gold,
-                modifier = Modifier.padding(top = 6.dp),
             )
         }
 

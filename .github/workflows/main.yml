@@ -10,11 +10,19 @@ on:
     paths:
       - 'android/**'
       - 'update/**'
+      - 'tools/probe_crypto_venues.py'
+      - 'tools/test_probe_crypto_venues.py'
+      - 'tools/verify_apk_upgrade.py'
+      - 'tools/test_verify_apk_upgrade.py'
       - '.github/workflows/main.yml'
   pull_request:
     paths:
       - 'android/**'
       - 'update/**'
+      - 'tools/probe_crypto_venues.py'
+      - 'tools/test_probe_crypto_venues.py'
+      - 'tools/verify_apk_upgrade.py'
+      - 'tools/test_verify_apk_upgrade.py'
       - '.github/workflows/main.yml'
   workflow_dispatch:
     inputs:
@@ -29,7 +37,7 @@ on:
         default: ''
         type: string
       publish_release:
-        description: 'Publish/refresh GitHub Release assets for the in-app updater. Requires stable signing secrets.'
+        description: 'Publish a NEW public updater release on an approved ref. Requires the existing pinned signing key.'
         required: false
         default: false
         type: boolean
@@ -56,10 +64,15 @@ env:
   APP_MODULE: app
   APPLICATION_ID: com.aurum.edge
   RELEASE_APK_PREFIX: AurumEdge
+  # Public signing certificate independently verified on immutable #403 and #405 release APKs.
+  # This pins the user-selected #403 channel, not a certificate read from any phone.
+  UPDATER_CERT_SHA256: '137f3f98f6c85fdd8671d1d2099b095ed82f3f91594ac9e7b1ba22c264ed4a04'
   GRADLE_FLAGS: --no-daemon --stacktrace --warning-mode=all
 
 jobs:
   apk:
+    if: >-
+      github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'verify: public v1.3.55')
     name: Build, test, package APK
     runs-on: ubuntu-latest
     timeout-minutes: 55
@@ -71,6 +84,15 @@ jobs:
       AURUM_RELEASE_KEY_PASSWORD: ${{ secrets.AURUM_RELEASE_KEY_PASSWORD }}
       AURUM_RELEASE_STORE_TYPE: ${{ secrets.AURUM_RELEASE_STORE_TYPE }}
       CI_SIGNING_CACHE_DIR: /home/runner/.aurum-ci-signing
+      # Shared predicate: only approved release runs publish; PR and ordinary pushes only validate.
+      PUBLIC_UPDATER_RELEASE: >-
+        ${{ (((github.ref == 'refs/heads/main' || github.ref_type == 'tag') &&
+          (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))) ||
+          (github.ref == 'refs/heads/arena/3d998929-ichimoko' &&
+          ((github.event_name == 'workflow_dispatch' && inputs.publish_release == true) ||
+          (github.event_name == 'push' && startsWith(github.event.head_commit.message, 'release: publish v1.3.55 updater'))) ||
+          ((startsWith(github.ref, 'refs/heads/arena/') || github.ref == 'refs/heads/main') &&
+          github.event_name == 'workflow_dispatch' && inputs.publish_release == true))) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -150,16 +172,10 @@ jobs:
           PROJECT_VERSION_NAME=$(grep -m1 'versionName = ' "$BUILD_FILE" | sed -E 's/.*"([^"]+)".*/\1/')
           PROJECT_VERSION_CODE=$(grep -m1 'versionCode = ' "$BUILD_FILE" | sed -E 's/[^0-9]*([0-9]+).*/\1/')
           VERSION_NAME="${INPUT_VERSION_NAME:-$PROJECT_VERSION_NAME}"
-          if [[ -n "$INPUT_VERSION_CODE" ]]; then
-            VERSION_CODE="$INPUT_VERSION_CODE"
-          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            VERSION_CODE="$PROJECT_VERSION_CODE"
-          else
-            VERSION_CODE="$PROJECT_VERSION_CODE"
-            if [[ "${GITHUB_RUN_NUMBER}" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_NUMBER" -gt "$VERSION_CODE" ]]; then
-              VERSION_CODE="$GITHUB_RUN_NUMBER"
-            fi
-          fi
+          # A PR can be checked after the same commit has already been published.
+          # Build the declared version, not an arbitrary Actions run number; only an
+          # actual release must have a code greater than the latest public APK.
+          VERSION_CODE="${INPUT_VERSION_CODE:-$PROJECT_VERSION_CODE}"
           if [[ ! "$VERSION_NAME" =~ ^[0-9]+(\.[0-9]+){1,3}([-+][0-9A-Za-z.-]+)?$ ]]; then
             echo "::error title=Invalid versionName::Use a semantic version such as 1.2.10"
             exit 1
@@ -229,16 +245,8 @@ jobs:
             mkdir -p "$CI_SIGNING_CACHE_DIR"
             STORE_FILE="$CI_SIGNING_CACHE_DIR/aurum-ci-updater.p12"
             if [[ ! -f "$STORE_FILE" ]]; then
-              keytool -genkeypair \
-                -storetype PKCS12 \
-                -keystore "$STORE_FILE" \
-                -storepass android \
-                -keypass android \
-                -alias aurumciupdater \
-                -keyalg RSA \
-                -keysize 4096 \
-                -validity 3650 \
-                -dname "CN=Aurum Edge CI Updater,O=parsapeyman10,C=US"
+              echo "::error title=Signing key unavailable::The updater key was not restored from the CI cache. Do not generate a replacement: previously installed APKs would reject it. Restore the SAME keystore via repository secrets."
+              exit 1
             fi
             echo "AURUM_RELEASE_STORE_FILE=$STORE_FILE" >> "$GITHUB_ENV"
             echo "AURUM_RELEASE_STORE_PASSWORD=android" >> "$GITHUB_ENV"
@@ -253,6 +261,101 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}
         run: ./gradlew :${APP_MODULE}:dependencies --configuration debugRuntimeClasspath $GRADLE_FLAGS
 
+      # A phone reading update/aurum-edge.json on the default branch must not be pointed at an
+      # older APK than the newest published release: that is exactly the state in which the in-app
+      # updater reports "no newer version" while a newer APK already exists. Composition instead of
+      # trust: the newest release with an APK is taken from the anonymous Releases API and compared
+      # with the repository file by tag, SHA-256 and size.
+      - name: Verify default-branch manifest points at the newest release
+        if: steps.guard.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          MANIFEST="update/aurum-edge.json"
+          if [[ ! -f "$MANIFEST" ]]; then
+            echo "::notice title=Manifest missing::No $MANIFEST to compare; the app falls back to the release-embedded manifest."
+            exit 0
+          fi
+          python3 - "$MANIFEST" <<'PY'
+          import json, os, re, sys, urllib.error, urllib.request
+          from pathlib import Path
+
+          APK_NAME = re.compile(r'^AurumEdge-v\d+(?:\.\d+)*\.apk$')
+          manifest_path = Path(sys.argv[1])
+          manifest = json.loads(manifest_path.read_text())
+          repo = os.environ.get('GITHUB_REPOSITORY', 'parsapeyman10/ichimoko')
+
+          def get(url, timeout=30):
+              headers = {'User-Agent': 'aurum-manifest-gate', 'Accept': 'application/vnd.github+json'}
+              token = os.environ.get('GH_TOKEN')
+              if token:
+                  headers['Authorization'] = 'Bearer ' + token
+              with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as response:
+                  return json.loads(response.read(1_048_577))
+
+          try:
+              releases = [r for r in get(f'https://api.github.com/repos/{repo}/releases?per_page=20')
+                          if not r.get('draft') and not r.get('prerelease')]
+          except (urllib.error.URLError, urllib.error.HTTPError, ValueError) as error:
+              print(f'::warning title=Manifest gate skipped::The public release list was not readable ({error}); '
+                    'update/aurum-edge.json was NOT compared with the newest release.')
+              raise SystemExit(0)
+
+          newest = None
+          for release in releases:
+              for asset in release.get('assets', []):
+                  if APK_NAME.match(asset.get('name', '')):
+                      newest = (release, asset)
+                      break
+              if newest:
+                  break
+          if newest is None:
+              print('::warning title=No published APK found::No public release carries an APK yet; nothing to compare.')
+              raise SystemExit(0)
+
+          release, asset = newest
+          tag = release.get('tag_name', '')
+          digest = (asset.get('digest') or '').removeprefix('sha256:').lower()
+          size = asset.get('size')
+          manifest_tag = (manifest.get('tagName') or '').strip()
+          manifest_sha = (manifest.get('sha256') or '').strip().lower()
+          manifest_size = manifest.get('sizeBytes')
+
+          problems = []
+          if manifest_tag != tag:
+              problems.append(f'points at {manifest_tag or "no tag"} while the newest published APK is {tag}')
+          if digest and manifest_sha and digest != manifest_sha:
+              problems.append(f'declares sha256 {manifest_sha[:16]}… while {tag} publishes {digest[:16]}…')
+          if isinstance(size, int) and isinstance(manifest_size, int) and size != manifest_size:
+              problems.append(f'declares size {manifest_size} while {tag} publishes {size}')
+
+          try:
+              sidecar = get(f'https://github.com/{repo}/releases/download/{tag}/AurumEdge-{tag}.apk.json')
+              sidecar_code = sidecar.get('versionCode')
+              if isinstance(sidecar_code, int) and isinstance(manifest.get('versionCode'), int) \
+                      and manifest['versionCode'] < sidecar_code:
+                  problems.append(f'declares versionCode {manifest["versionCode"]} but {tag} publishes {sidecar_code}')
+          except Exception as error:  # noqa: BLE001 - the API digest/tag comparison already stands
+              print(f'::notice::Sidecar of {tag} was not readable ({error}); tag/hash/size comparison still applied.')
+
+          if problems:
+              print('::error title=Stale default-branch manifest::update/aurum-edge.json ' + '; '.join(problems)
+                    + f'. A phone reading this manifest is told it is up to date. Refresh {manifest_path} from the '
+                    + f'{tag} sidecar (or delete it and rely on the release-embedded manifest).')
+              raise SystemExit(1)
+          print(f'::notice title=Manifest gate::update/aurum-edge.json is consistent with newest published APK {tag}.')
+          PY
+
+      - name: Test release compatibility and public-data tooling
+        run: python3 -m unittest discover -s tools -p 'test_*.py' -v
+
+      - name: Test durable tick archive
+        run: |
+          python3 -m venv tick-archive/.venv
+          tick-archive/.venv/bin/pip install -r tick-archive/requirements.txt
+          (cd tick-archive && .venv/bin/python -m unittest discover -s tests -v)
+
       - name: Lint Android sources
         id: lint
         if: steps.guard.outputs.ready == 'true'
@@ -264,10 +367,76 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}
         run: ./gradlew :${APP_MODULE}:testDebugUnitTest $GRADLE_FLAGS
 
+      # A silently-not-running regression suite looks exactly like a passing suite. This step
+      # fails the build if the updater tests vanish, and publishes their counts as annotations
+      # so the result is readable without downloading the (often unreachable) test artifacts.
+      - name: Verify updater regression tests ran
+        if: always() && steps.guard.outputs.ready == 'true'
+        run: |
+          set -uo pipefail
+          python3 - "$PROJECT_DIR/app/build/test-results/testDebugUnitTest" <<'PY'
+          import glob, os, sys, xml.etree.ElementTree as ET
+
+          directory = sys.argv[1]
+          if not os.path.isdir(directory):
+              print(f'::error title=No test results::The unit-test results directory {directory} does not exist; '
+                    'the updater regression suite cannot be shown to have run.')
+              raise SystemExit(1)
+
+          total = failures = 0
+          updater = {}
+          for report in sorted(glob.glob(os.path.join(directory, 'TEST-*.xml'))):
+              root = ET.parse(report).getroot()
+              cases = list(root.iter('testcase'))
+              total += len(cases)
+              failures += sum(1 for case in cases if case.find('failure') is not None or case.find('error') is not None)
+              name = root.get('name', '')
+              if 'Updater' in name:
+                  updater[name] = len(cases)
+
+          if not updater:
+              print('::error title=Updater tests missing::No Updater* test class produced results. '
+                    'The update-channel regression suite did not run.')
+              raise SystemExit(1)
+          for name, count in sorted(updater.items()):
+              print(f'::notice title=Updater regression test:: {name}: {count} test(s)')
+          print(f'::notice title=Unit test totals:: {total} test(s), {failures} failure(s); '
+                f'updater classes: {len(updater)}')
+          raise SystemExit(1 if failures else 0)
+          PY
+
+      # A failed test should expose its assertion and source line in GitHub's annotations;
+      # raw Actions logs/artifact downloads are not always accessible to contributors.
+      - name: Annotate failing unit tests
+        if: failure() && steps.guard.outputs.ready == 'true'
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import xml.etree.ElementTree as ET
+          for report in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml'):
+              root = ET.parse(report).getroot()
+              for case in root.iter('testcase'):
+                  failure = case.find('failure')
+                  if failure is None:
+                      failure = case.find('error')
+                  if failure is None:
+                      continue
+                  cls = case.get('classname', '')
+                  path = 'app/src/test/java/' + cls.replace('.', '/') + '.kt'
+                  text = failure.text or ''
+                  line_match = re.search(r'\(' + re.escape(cls.split('.')[-1]) + r'\.kt:(\d+)\)', text)
+                  line = line_match.group(1) if line_match else '1'
+                  message = (failure.get('message') or '') + '\n' + '\n'.join(text.splitlines()[:7])
+                  escaped = message[:1300].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                  print(f'::error file={path},line={line},title={cls}.{case.get("name", "test")}::{escaped}')
+          PY
+
       - name: Build debug and release APKs
         if: steps.guard.outputs.ready == 'true'
         working-directory: ${{ env.PROJECT_DIR }}
-        run: ./gradlew :${APP_MODULE}:assembleDebug :${APP_MODULE}:assembleRelease $GRADLE_FLAGS
+        run: ./gradlew :${APP_MODULE}:assembleDebug :${APP_MODULE}:assembleRelease -PaurumRequireReleaseSigning=true $GRADLE_FLAGS
 
       # The in-app updater refuses an APK whose signing certificate differs from the installed one,
       # so a rotated/lost keystore must fail HERE — never publish an APK nobody can install over.
@@ -285,20 +454,26 @@ jobs:
             "$APKSIGNER" verify --print-certs "$1" \
               | awk -F': ' '/certificate SHA-256 digest/ { print tolower($2); exit }'
           }
+          [[ "$(tr -d '\n\r ' < update/updater-signer.sha256)" == "$UPDATER_CERT_SHA256" ]] || {
+            echo "::error title=Updater signer pin mismatch::On-device fingerprint differs from CI release pin."
+            exit 1
+          }
           NEW_CERT="$(cert_of "$NEW_APK")"
           if [[ -z "$NEW_CERT" ]]; then
             echo "::error title=Unreadable signer::apksigner could not print the certificate of the built release APK"
             exit 1
           fi
           echo "Release APK signer SHA-256: $NEW_CERT (mode: ${AURUM_SIGNING_MODE:-unknown})"
+          if [[ "$NEW_CERT" != "$UPDATER_CERT_SHA256" ]]; then
+            echo "::error title=Unexpected updater signer::New APK signer differs from the user-selected #403 release certificate. Recover the SAME keystore; do not rotate it silently."
+            exit 1
+          fi
           echo "new_cert_sha256=$NEW_CERT" >> "$GITHUB_OUTPUT"
           FILTER='[.[] | select(.draft == false and .prerelease == false) | .assets[] | select((.name | startswith("'"$RELEASE_APK_PREFIX"'-v")) and (.name | endswith(".apk"))) | "\(.url) \(.name)"] | .[0] // empty'
-          PUBLISHED="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=10" --jq "$FILTER" || true)"
+          PUBLISHED="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=10" --jq "$FILTER")"
           if [[ -z "${PUBLISHED// }" ]]; then
-            echo "No published release APK yet — this build establishes the updater signature."
-            echo "published_cert_sha256=" >> "$GITHUB_OUTPUT"
-            echo "continuity=first signed build on this channel" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "::error title=No signing anchor::No published release APK was found. Cannot prove that this APK can update the installed app."
+            exit 1
           fi
           PREV_URL="${PUBLISHED%% *}"
           PREV_NAME="${PUBLISHED##* }"
@@ -310,11 +485,64 @@ jobs:
             echo "::error title=Unreadable published signer::Could not read the certificate of $PREV_NAME, so signing continuity cannot be proven"
             exit 1
           fi
+          if [[ "$PREV_CERT" != "$UPDATER_CERT_SHA256" ]]; then
+            echo "::error title=Published signer mismatch::The public APK is not signed with the pinned updater certificate; stop rather than accept a rotated/replaced release."
+            exit 1
+          fi
+          echo "::notice title=Updater signing certificate::New: $NEW_CERT; published $PREV_NAME: $PREV_CERT"
           if [[ "$NEW_CERT" != "$PREV_CERT" ]]; then
             echo "::error title=Signing key changed::The new APK is signed with $NEW_CERT but the published $PREV_NAME uses $PREV_CERT. In-app updates need the SAME key, so nothing is published. Restore the AURUM_RELEASE_* repository secrets or the aurum-ci-updater-signing-v1 cache from the default branch."
             exit 1
           fi
-          echo "continuity=verified: identical signer to $PREV_NAME" >> "$GITHUB_OUTPUT"
+          AAPT="$SDK/build-tools/${ANDROID_BUILD_TOOLS}/aapt"
+          apk_package() {
+            "$AAPT" dump badging "$1" | sed -n -E "s/^package: name='([^']+)'.*/\1/p" | head -1
+          }
+          NEW_PACKAGE="$(apk_package "$NEW_APK")"
+          PREV_PACKAGE="$(apk_package "$RUNNER_TEMP/published-release.apk")"
+          if [[ "$NEW_PACKAGE" != "$APPLICATION_ID" || "$PREV_PACKAGE" != "$APPLICATION_ID" ]]; then
+            echo "::error title=Incompatible package::New package $NEW_PACKAGE and published package $PREV_PACKAGE must both be $APPLICATION_ID"
+            exit 1
+          fi
+          apk_code() {
+            "$AAPT" dump badging "$1" | sed -n -E "s/^package: .*versionCode='([0-9]+)'.*/\1/p" | head -1
+          }
+          NEW_CODE="$(apk_code "$NEW_APK")"
+          PREV_CODE="$(apk_code "$RUNNER_TEMP/published-release.apk")"
+          if [[ -z "$NEW_CODE" || -z "$PREV_CODE" ]]; then
+            echo "::error title=Unreadable version::Cannot compare APK version codes"
+            exit 1
+          fi
+          if [[ "$PUBLIC_UPDATER_RELEASE" != "true" ]]; then
+            # PR and ordinary branch checks do not publish. They may run after the
+            # same commit has already shipped; equality is not a broken update.
+            echo "::notice title=Validation-build compatibility::Signers and package IDs match. versionCode $NEW_CODE is not tested for upgrade over $PREV_CODE because this build is not published."
+            echo "continuity=validation-only: identical signer to $PREV_NAME; release versionCode gate not applicable" >> "$GITHUB_OUTPUT"
+          else
+            if [[ "$NEW_CODE" -le "$PREV_CODE" ]]; then
+              echo "::error title=Non-upgradable version::New versionCode $NEW_CODE must exceed the published $PREV_NAME versionCode $PREV_CODE"
+              exit 1
+            fi
+            echo "::notice title=Updater version continuity::New versionCode $NEW_CODE > published $PREV_NAME versionCode $PREV_CODE"
+            echo "continuity=verified: identical signer to $PREV_NAME; versionCode $NEW_CODE > $PREV_CODE" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify built APK installation compatibility
+        if: steps.guard.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          NEWER=()
+          if [[ "$PUBLIC_UPDATER_RELEASE" == "true" ]]; then NEWER+=(--require-newer); fi
+          python3 tools/verify_apk_upgrade.py \
+            --previous "$RUNNER_TEMP/published-release.apk" \
+            --candidate "$PROJECT_DIR/app/build/outputs/apk/release/app-release.apk" \
+            --aapt "$SDK/build-tools/${ANDROID_BUILD_TOOLS}/aapt" \
+            --apksigner "$SDK/build-tools/${ANDROID_BUILD_TOOLS}/apksigner" \
+            --certificate "$UPDATER_CERT_SHA256" \
+            --version-name '${{ steps.version.outputs.name }}' \
+            --version-code '${{ steps.version.outputs.code }}' \
+            --output out/upgrade-compatibility.json "${NEWER[@]}"
 
       - name: Collect APKs and updater metadata
         if: steps.guard.outputs.ready == 'true'
@@ -360,11 +588,26 @@ jobs:
             "sizeBytes": ${SIZE_BYTES}
           }
           JSON
+          # Extra compatibility fields are optional to older updater parsers.
+          python3 - "out/${APK_NAME}.json" <<'PYMETA'
+          import json, sys
+          from pathlib import Path
+          path = Path(sys.argv[1])
+          metadata = json.loads(path.read_text())
+          audit = json.loads(Path('out/upgrade-compatibility.json').read_text())['candidate']
+          assert metadata['sha256'] == audit['sha256']
+          assert metadata['sizeBytes'] == audit['sizeBytes']
+          assert metadata['versionCode'] == audit['versionCode']
+          assert metadata['versionName'] == audit['versionName']
+          metadata.update(signerSha256=audit['signersSha256'][0], minSdk=audit['minSdk'],
+                          targetSdk=audit['targetSdk'], supportedAbis=audit['abis'])
+          path.write_text(json.dumps(metadata, indent=2) + '\n')
+          PYMETA
           cp "out/${APK_NAME}.json" out/aurum-edge.json
           {
             sha256sum "$RELEASE_APK"
-            sha256sum "$DEBUG_APK"
             sha256sum "out/${APK_NAME}.json"
+            sha256sum out/upgrade-compatibility.json
           } > out/checksums.sha256
           ls -la out
 
@@ -379,6 +622,7 @@ jobs:
             out/*.apk
             out/*.json
             out/checksums.sha256
+            out/upgrade-compatibility.json
 
       - name: Upload test and lint reports
         if: always() && steps.guard.outputs.ready == 'true'
@@ -393,16 +637,19 @@ jobs:
             android/app/build/test-results/testDebugUnitTest/**
 
       - name: Require stable signing for public updater release
-        if: steps.guard.outputs.ready == 'true' && (github.event_name == 'push' || github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))
+        if: steps.guard.outputs.ready == 'true' && env.PUBLIC_UPDATER_RELEASE == 'true'
         run: |
           set -euo pipefail
+          # signing_check already verified the built AND published APK against the fixed #403
+          # certificate, package ID and increasing versionCode. Never publish on skipped checks.
           if [[ -z "${AURUM_RELEASE_STORE_FILE:-}" || ! -f "${AURUM_RELEASE_STORE_FILE:-}" || -z "${AURUM_RELEASE_STORE_PASSWORD:-}" || -z "${AURUM_RELEASE_KEY_ALIAS:-}" || -z "${AURUM_RELEASE_KEY_PASSWORD:-}" ]]; then
             echo "::error title=Stable signing required::No updater signing key was prepared."
             exit 1
           fi
 
       - name: Publish GitHub Release for in-app updater
-        if: steps.guard.outputs.ready == 'true' && (github.event_name == 'push' || github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.publish_release == true))
+        id: publish
+        if: steps.guard.outputs.ready == 'true' && env.PUBLIC_UPDATER_RELEASE == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.collect.outputs.tag }}
@@ -412,13 +659,58 @@ jobs:
           SIZE_BYTES: ${{ steps.collect.outputs.size_bytes }}
         run: |
           set -euo pipefail
-          NOTES=$'Aurum Edge Android APK.\n\nVersion: '"$VERSION_NAME"$'\nVersion code: ${{ steps.collect.outputs.version_code }}\nSHA-256: '"$SHA256"$'\nSize bytes: '"$SIZE_BYTES"$'\nSigning: '"${AURUM_SIGNING_MODE:-prepared updater key}"$'\n\nThe in-app updater accepts this public release asset, verifies package name, signing certificate, versionCode, size and SHA-256, then opens Android Installer.'
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "$TAG" --notes "$NOTES"
-          else
-            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "$NOTES"
+          if [[ "$GITHUB_REF" == "refs/heads/arena/3d998929-ichimoko" &&
+                ( "$VERSION_NAME" != "1.3.55" || "$TAG" != "v1.3.55" || "${{ steps.collect.outputs.version_code }}" != "671" ) ]]; then
+            echo "::error title=Wrong release version::This branch can publish only the approved v1.3.55 (671) upgrade."
+            exit 1
           fi
-          gh release upload "$TAG" "out/${APK_NAME}" "out/${APK_NAME}.json" "out/checksums.sha256" --clobber
+          NOTES=$'Aurum Edge Android APK.\n\nVersion: '"$VERSION_NAME"$'\nVersion code: ${{ steps.collect.outputs.version_code }}\nSHA-256: '"$SHA256"$'\nSize bytes: '"$SIZE_BYTES"$'\nSigning: '"${AURUM_SIGNING_MODE:-prepared updater key}"$'\n\nThe in-app updater accepts this public release asset, verifies package name, signing certificate, versionCode, size and SHA-256, then opens Android Installer.'
+          if [[ "$VERSION_NAME" == "1.3.55" ]]; then
+            NOTES+=$'\n\nLightweight release requested by the user: removed embedded Tor, Snowflake/IPtProxy, jtorctl, bridge assets, daemon service, WebView proxy override and internal proxy controls/indicator. No replacement VPN SDK, AI model or Windscribe account integration is bundled. The final APK is checked for absence of embedded-proxy native libraries and DEX classes.\n\nNormal Android networking now handles REST, downloads, sockets and WebView. Connect Windscribe separately on the phone and include Aurum Edge in VPN routing/Split Tunneling. Never enter Windscribe credentials in this app. Network changes invalidate previous connections and same-route caches. Without an external VPN kill switch, Android may use direct Internet after VPN disconnects. No live Windscribe, Iranian-ISP, Google-key or physical-device test is claimed.\n\nThe old enabled-proxy preference is retired without clearing keys, account settings or journal. 230-symbol independent engines, source-integrity and paper-trade risk gates remain unchanged. Upgrade from 1.3.54 (670) to 1.3.55 (671), same pinned signer/package; install over the current app without uninstalling or clearing data.'
+          fi
+          # A tag-push release already has its tag; verify it is the exact checked-out commit.
+          # Manual dispatch on a branch must create a new tag. In both cases, never overwrite an
+          # existing public Release, since users may already have downloaded its APK.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error title=Existing release::Refusing to overwrite $TAG; bump version and code."
+            exit 1
+          fi
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            TAG_COMMIT=$(git rev-parse "${TAG}^{commit}")
+            CHECKED_OUT_COMMIT=$(git rev-parse HEAD)
+            if [[ "$GITHUB_REF_NAME" != "$TAG" || "$TAG_COMMIT" != "$CHECKED_OUT_COMMIT" || "$CHECKED_OUT_COMMIT" != "$GITHUB_SHA" ]]; then
+              echo "::error title=Tag target mismatch::Release tag $TAG must match the checked-out commit and app version."
+              exit 1
+            fi
+          elif gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "::error title=Existing release tag::Refusing to reuse tag $TAG; bump version and code."
+            exit 1
+          fi
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes "$NOTES" --draft
+          # aurum-edge.json is uploaded on purpose: the in-app updater reads it from
+          # releases/latest/download/aurum-edge.json first, because that copy cannot be older
+          # than the release it sits in. Without this asset the primary channel 404s.
+          gh release upload "$TAG" "out/${APK_NAME}" "out/${APK_NAME}.json" "out/checksums.sha256" \
+            "out/upgrade-compatibility.json" "out/aurum-edge.json"
+          # A draft is invisible to the updater; publish only once all assets are uploaded.
+          gh release edit "$TAG" --draft=false --latest
+
+      - name: Verify public updater release is discoverable
+        if: steps.guard.outputs.ready == 'true' && steps.collect.outputs.tag != '' && (steps.publish.outcome == 'success')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.collect.outputs.tag }}
+          APK_NAME: ${{ steps.collect.outputs.apk_name }}
+          SHA256: ${{ steps.collect.outputs.sha256 }}
+          SIZE_BYTES: ${{ steps.collect.outputs.size_bytes }}
+          VERSION_CODE: ${{ steps.collect.outputs.version_code }}
+          VERSION_NAME: ${{ steps.collect.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          python3 tools/verify_public_updater.py --repo "$GITHUB_REPOSITORY" \
+            --version "$VERSION_NAME" --code "$VERSION_CODE" --certificate "$UPDATER_CERT_SHA256" \
+            --sdk "$SDK/build-tools/$ANDROID_BUILD_TOOLS" --output "$RUNNER_TEMP/public-updater"
 
       - name: Job summary
         if: always() && steps.guard.outputs.ready == 'true'
@@ -453,10 +745,93 @@ jobs:
             echo "### Signing continuity (in-app updates need the SAME key)"
             echo "| Check | Value |"
             echo "|---|---|"
-            echo "| Signing key cache hit | `${{ steps.signing_cache.outputs.cache-hit }}` |"
-            echo "| New release APK signer SHA-256 | `${{ steps.signing_check.outputs.new_cert_sha256 }}` |"
-            echo "| Published release APK signer SHA-256 | `${{ steps.signing_check.outputs.published_cert_sha256 }}` |"
+            echo "| Signing key cache hit | \`${{ steps.signing_cache.outputs.cache-hit }}\` |"
+            echo "| New release APK signer SHA-256 | \`${{ steps.signing_check.outputs.new_cert_sha256 }}\` |"
+            echo "| Published release APK signer SHA-256 | \`${{ steps.signing_check.outputs.published_cert_sha256 }}\` |"
             echo "| Verdict | ${{ steps.signing_check.outputs.continuity }} |"
             echo ""
             echo "No market or AI API keys are embedded in the APK. Users enter optional keys only on their own device."
           } >> "$GITHUB_STEP_SUMMARY"
+
+  crypto-coverage:
+    name: Audit exact USDT pairs (read-only)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/arena/20dbf868-ichimoko'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify probe invariants
+        run: PYTHONPATH=tools python3 -m unittest discover -s tools -p 'test_probe_crypto_venues.py'
+      - name: Audit exact USDT spot listings
+        run: |
+          timeout 9m python3 tools/probe_crypto_venues.py > crypto-venue-coverage.json
+          python3 - <<'PY'
+          import json, os
+          data = json.load(open('crypto-venue-coverage.json'))
+          count = data['catalog_count']
+          supported = data['covered_by_non_binance_venue']
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write(f"## Read-only spot listing audit\n{supported}/{count} exact catalog symbols appear in "
+                      "at least one non-Binance public spot listing at probe time. "
+                      f"Listing request errors: {len(data['errors'])}. "
+                      "Listing is NOT proof of 1500 contiguous bars, a fresh trade, phone reachability, "
+                      "or safe execution replay. Download the JSON for per-venue reasons.\n")
+          PY
+      - name: Expose per-symbol report through the GitHub Checks API
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          report = json.load(open('crypto-venue-coverage.json'))
+          payload = {
+              'name': 'Read-only USDT venue coverage', 'head_sha': os.environ['GITHUB_SHA'],
+              'status': 'completed', 'conclusion': 'neutral',
+              'output': {'title': 'Point-in-time runner audit; not a trading authorization',
+                         'summary': '```json\n' + json.dumps(report, ensure_ascii=False, separators=(',', ':')) + '\n```'}
+          }
+          subprocess.run(['gh', 'api', '-X', 'POST', f"repos/{os.environ['GITHUB_REPOSITORY']}/check-runs", '--input', '-'],
+                         input=json.dumps(payload), text=True, stdout=subprocess.DEVNULL, check=True)
+          PY
+      - name: Attach audit report (not a venue authorization)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crypto-venue-coverage
+          path: crypto-venue-coverage.json
+          if-no-files-found: warn
+
+  public-updater-audit:
+    name: Independently verify published updater
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/arena/3d998929-ichimoko' && startsWith(github.event.head_commit.message, 'verify: public v1.3.55')
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install verification SDK tools
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" "build-tools;$ANDROID_BUILD_TOOLS"
+      - name: Anonymous download, signature, metadata and compatibility verification
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          python3 tools/verify_public_updater.py --repo "$GITHUB_REPOSITORY" \
+            --version 1.3.55 --code 671 --certificate "$UPDATER_CERT_SHA256" \
+            --sdk "$SDK/build-tools/$ANDROID_BUILD_TOOLS" --output "$RUNNER_TEMP/public-updater"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: published-updater-verification
+          path: ${{ runner.temp }}/public-updater/public-updater-verification.json
+          if-no-files-found: error

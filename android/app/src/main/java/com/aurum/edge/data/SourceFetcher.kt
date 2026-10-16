@@ -1,5 +1,6 @@
 package com.aurum.edge.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -20,7 +21,7 @@ import java.util.concurrent.TimeUnit
 
 /** Read-only provider fetcher. No custom URLs or trading credentials are accepted by the app. */
 class SourceFetcher(
-    private val http: OkHttpClient = OkHttpClient.Builder()
+    private val http: OkHttpClient = AppNetwork.builder()
         .connectTimeout(12, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .callTimeout(25, TimeUnit.SECONDS)
@@ -29,6 +30,8 @@ class SourceFetcher(
     private val retryDelay: (Long) -> Unit = Thread::sleep,
 ) {
     private val json = Json { ignoreUnknownKeys = true }
+    private val spot = SpotFallbackClient()
+    private val cryptoRadar = CryptoRadarCandleClient()
 
     suspend fun fetchAll(
         source: SourceDef,
@@ -75,17 +78,41 @@ class SourceFetcher(
     }
 
     private suspend fun fetchOne(source: SourceDef, symbol: SymbolDef, apiKey: String): Quote = try {
-        // HTML price pages address a car by PATH ("saipa/quick"), so the separator must
-        // survive encoding; URLEncoder would turn it into %2F and 404. Query-parameter
-        // sources keep the strict encoding they had.
-        val encoded = if (source.kind == SourceKind.HTML_PAGE)
-            symbol.code.split('/').joinToString("/") { encode(it) }
-        else encode(symbol.code)
-        val url = source.urlTemplate.replace("{symbol}", encoded)
-        // Dispatch on the declared kind rather than on one hardcoded source id, so every
-        // HTML price page goes through the same extractor instead of being parsed as JSON.
-        if (source.kind == SourceKind.HTML_PAGE) parseHtmlCarQuote(source, symbol, fetchText(source, url, apiKey))
-        else parseJsonQuote(source, symbol, fetchJson(source, url, apiKey))
+        if (source.kind == SourceKind.SPOT_BBO_QUOTE) {
+            val tick = spot.fetchSwissquoteOnly(symbol.code)
+            Quote(symbol.code, symbol.label, price = tick.price, providerAt = tick.at,
+                unit = source.unit, sourceId = source.id)
+        } else if (source.kind == SourceKind.CRYPTO_SPOT_TRADE) {
+            val coin = CryptoCatalog.find(symbol.code)
+                ?: throw DataFeedException("جفت USDT بایننس شناسایی نشد")
+            val tick = when (source.id) {
+                SourceCatalog.gateSolSpot.id, "gate_spot_trades" ->
+                    cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.GATE)
+                SourceCatalog.okxEthSpot.id, "okx_spot_trades" ->
+                    cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.OKX)
+                SourceCatalog.krakenXrpSpot.id, "kraken_spot_trades" ->
+                    cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.KRAKEN)
+                SourceCatalog.mexcBnbSpot.id, "mexc_spot_trades" ->
+                    cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.MEXC)
+                SourceCatalog.binanceBtcSpot.id, "binance_spot_agg_trades" ->
+                    spot.fetchQuote(coin.id)
+                else -> throw DataFeedException("منبع معاملات رمزارز ناشناخته است")
+            }
+            Quote(symbol.code, symbol.label, price = tick.price, providerAt = tick.at,
+                unit = source.unit, sourceId = source.id)
+        } else {
+            // HTML price pages address a car by PATH; query-parameter sources use
+            // strict encoding. Nobitex uses the shared budget above, not this path.
+            val encoded = if (source.kind == SourceKind.HTML_PAGE)
+                symbol.code.split('/').joinToString("/") { encode(it) }
+            else encode(symbol.code)
+            val url = source.urlTemplate.replace("{symbol}", encoded)
+            if (source.kind == SourceKind.HTML_PAGE)
+                parseHtmlCarQuote(source, symbol, fetchText(source, url, apiKey))
+            else parseJsonQuote(source, symbol, fetchJson(source, url, apiKey))
+        }
+    } catch (cancel: CancellationException) {
+        throw cancel
     } catch (error: Exception) {
         Quote(symbol.code, symbol.label, error = (error.message ?: "خطای دریافت داده").take(100), sourceId = source.id)
     }

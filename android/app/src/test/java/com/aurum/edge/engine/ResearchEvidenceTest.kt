@@ -1,6 +1,5 @@
 package com.aurum.edge.engine
 
-import com.aurum.edge.core.BacktestRecord
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.IctPriceActionRecord
 import com.aurum.edge.core.Interval
@@ -11,7 +10,6 @@ import com.aurum.edge.core.PaperNewsRecord
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
-import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.data.FOREX_CALENDAR_SOURCE_URL
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
@@ -47,6 +45,13 @@ class ResearchEvidenceTest {
         autoOpened = true, signalBarTime = barTime, mtf = mtf, newsEvidence = news,
         entryConditions = conditions, priceAction = ict)
 
+    @Test fun `current seven-condition record is recognized without inventing an eighth`() {
+        val current = paper.copy(entryConditions = conditions.take(7))
+        assertTrue(ResearchEvidence.hasRecordedSignalEvidence(current))
+        assertFalse(ResearchEvidence.hasRecordedSignalEvidence(current.copy(
+            entryConditions = current.entryConditions.dropLast(1))))
+    }
+
     @Test fun `manual older unverified and invalid news records never enter recorded signal group`() {
         assertTrue(ResearchEvidence.hasRecordedNineWay(paper))
         val manual = paper.copy(id = "manual", autoOpened = false, signalBarTime = null,
@@ -57,7 +62,7 @@ class ResearchEvidenceTest {
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = news.copy(calendarSource = null))))
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = news.copy(checkedAt = paper.openedAt + 1))))
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(priceAction = null)))
-        assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(entryConditions = conditions.drop(1))))
+        assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(entryConditions = conditions.drop(3))))
         assertNull(ResearchEvidence.paperCostWhatIf(listOf(manual), 0.30, 0.05))
     }
 
@@ -73,67 +78,5 @@ class ResearchEvidenceTest {
         assertEquals(8.4, preview.afterDoubleCostUsd, 1e-9)
         assertEquals(10.0, paper.pnlUsd!!, 1e-9)
         assertNull(ResearchEvidence.paperCostWhatIf(listOf(paper), Double.NaN, 0.05))
-    }
-
-    private fun baseline(): Backtester.Result {
-        val candles = (0..212).map { i -> Candle(barTime + i * Interval.M5.millis,
-            100.0, 100.4, 99.6, 100.0) }
-        val empty = Backtester.runWithDecisions(candles, Interval.M5,
-            { Signal(SignalAction.NO_TRADE, 0.0) })
-        val win = Backtester.Trade(SignalAction.BUY, barTime, 100.0, barTime + Interval.M5.millis,
-            101.0, 95.0, 105.0, "fixture", 1.0, 1.0, 0.2, 0.1)
-        val loss = win.copy(exit = 99.0, pnlUsd = -1.0, rMultiple = -0.2)
-        return empty.copy(trades = List(20) { win } + List(10) { loss },
-            wins = 20, losses = 10, netPnl = 10.0, finalBalance = empty.initialBalance + 10.0,
-            profitFactor = 2.0)
-    }
-
-    @Test fun `short sample bad out of sample fees and zero fees cannot imply profitable`() {
-        val base = baseline()
-        val stressed = base.copy(spreadPrice = base.spreadPrice * 2,
-            commissionPerOz = base.commissionPerOz * 2)
-        assertEquals(EvidenceGrade.LIMITED,
-            ResearchEvidence.outOfSample(base.copy(trades = base.trades.take(2)), stressed).grade)
-        assertEquals(EvidenceGrade.UNFAVORABLE,
-            ResearchEvidence.outOfSample(base.copy(netPnl = -1.0, profitFactor = 0.8), stressed).grade)
-        val lossHeavy = stressed.copy(trades = List(10) { stressed.trades[0] } +
-            List(20) { stressed.trades.last() }, netPnl = -10.0, profitFactor = 0.5)
-        assertEquals(EvidenceGrade.COST_SENSITIVE,
-            ResearchEvidence.outOfSample(base, lossHeavy).grade)
-        assertEquals(EvidenceGrade.LIMITED,
-            ResearchEvidence.outOfSample(base.copy(spreadPrice = 0.0, commissionPerOz = 0.0),
-                stressed.copy(spreadPrice = 0.0, commissionPerOz = 0.0)).grade)
-        assertEquals(EvidenceGrade.NO_DATA,
-            ResearchEvidence.outOfSample(base, stressed.copy(fromTime = stressed.fromTime + 1)).grade)
-        assertEquals(EvidenceGrade.LIMITED,
-            ResearchEvidence.outOfSample(base.copy(unresolvedGap = 1), stressed).grade)
-        assertEquals(EvidenceGrade.PRELIMINARY, ResearchEvidence.outOfSample(base, stressed).grade)
-        assertEquals(EvidenceGrade.LIMITED, ResearchEvidence.inSample(base).grade)
-        assertTrue(ResearchEvidence.outOfSample(base, stressed).title.contains("تاریخی"))
-    }
-
-    @Test fun `legacy JSON defaults cannot resurrect old optimistic verdict and new record retains stress`() {
-        val base = baseline()
-        val stressed = base.copy(spreadPrice = base.spreadPrice * 2,
-            commissionPerOz = base.commissionPerOz * 2)
-        val current = WalkForwardRecord("5m", base.bars, base.fromTime, 210, "ثبت قدیمی سودده است",
-            barTime, BacktestRecord.from(base), BacktestRecord.from(base), BacktestRecord.from(stressed))
-        val json = Json { encodeDefaults = false }
-        val saved = json.decodeFromString<WalkForwardRecord>(json.encodeToString(current))
-        assertEquals(Backtester.EXECUTION_MODEL, saved.outOfSample.executionModel)
-        assertEquals(2 * base.spreadPrice, saved.costStressOutOfSample!!.spreadPrice, 1e-9)
-        assertEquals(EvidenceGrade.PRELIMINARY, ResearchEvidence.stored(saved).grade)
-
-        val legacy = current.copy(inSample = current.inSample.copy(executionModel = "LEGACY_CLOSE_FILL"),
-            outOfSample = current.outOfSample.copy(executionModel = "LEGACY_CLOSE_FILL"),
-            costStressOutOfSample = null)
-        val legacyJson = json.encodeToString(legacy)
-        assertFalse(legacyJson.contains("costStressOutOfSample"))
-        assertFalse(legacyJson.contains("executionModel")) // default is old execution model
-        val loaded = json.decodeFromString<WalkForwardRecord>(legacyJson)
-        assertEquals(EvidenceGrade.NO_DATA, ResearchEvidence.stored(loaded).grade)
-        assertFalse(ResearchEvidence.stored(loaded).title.contains("سودده"))
-        assertEquals(EvidenceGrade.NO_DATA,
-            ResearchEvidence.stored(current.copy(outOfSample = current.outOfSample.copy(netPnl = 999.0))).grade)
     }
 }

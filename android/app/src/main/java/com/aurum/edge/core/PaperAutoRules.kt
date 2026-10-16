@@ -2,24 +2,57 @@ package com.aurum.edge.core
 
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.PersianNewsState
-import com.aurum.edge.data.WatchCatalog
+import com.aurum.edge.data.BinanceSpotClient
 import kotlin.math.abs
 
 /** Side-effect-free guard shared by service and unit tests. NEVER submits a broker order. */
 object PaperAutoRules {
     fun blocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
-                now: Long = System.currentTimeMillis()): String? {
+                now: Long = System.currentTimeMillis(),
+                allowedSymbols: List<String> = settings.activeSymbols): String? {
+        com.aurum.edge.data.SourceIntegrity.shared.blocker(market.symbol, market.sourceIntegrityRevision)?.let { return it }
+        if (market.interval != Interval.M5 || market.signal?.interval?.let { it != Interval.M5 } == true)
+            return "ورود کاغذی فقط روی کندل بستهٔ ۵ دقیقه (5m) مجاز است"
+        OilEntrySafety.blocker(market.symbol)?.let { return it }
         if (!settings.autoPaperTrading) return "معاملهٔ خودکار کاغذی خاموش است"
+        if (V1Universe.normalize(market.symbol) == "XAU/USD") {
+            val goldSignal = market.signal ?: return "سیگنال ALS-5 طلا موجود نیست"
+            if (goldSignal.als5Opportunity?.matches(goldSignal) != true)
+                return "برای طلا فقط BUY/SELL تأییدشدهٔ ALS-5 مجاز است"
+        }
+        if (AssetClass.of(market.symbol) == AssetClass.CRYPTO) {
+            val signal = market.signal ?: return "سیگنال فشردگی/انفجار موجود نیست"
+            if (signal.cryptoBreakout?.matches(signal) != true ||
+                signal.ichimokuEntry?.matches(signal) != true)
+                return "فقط استراتژی فشردگی ← انفجار با شواهد بسته مجاز است"
+            if (news.gate != com.aurum.edge.data.NewsGate.CLEAR || news.cached ||
+                news.lastCheckedAt?.let { now - it in 0L..180_000L } != true ||
+                news.calendarCheckedAt?.let { now - it in 0L..1_200_000L } != true)
+                return "خبر/تقویم پراثر یا تازه‌بودن آن قابل تأیید نیست؛ ورود رمزارز متوقف است"
+            val tick = market.lastTradeAt?.let { time -> market.lastTradePrice?.let { price ->
+                PriceTick(price, time, market.bid, market.ask)
+            } }
+            CryptoCompressionPolicy.quoteBlocker(signal, tick, now)?.let { return it }
+            if (!com.aurum.edge.data.CryptoVenuePolicy.compatible(
+                    market.symbol, market.historyProvider, market.feed.provider))
+                return "تاریخچهٔ هم‌صرافی منبع اختصاصی برای ورود تأیید نشده است"
+            val tradeAt = market.lastTradeAt
+            val tradePrice = market.lastTradePrice
+            if (market.feed.mode != FeedMode.LIVE || tradeAt == null ||
+                tradeAt !in (now - 45_000L)..(now + 10_000L) ||
+                tradePrice == null || !tradePrice.isFinite() || tradePrice <= 0.0)
+                return "معاملهٔ واقعی تازه و زمان‌دار Binance Spot برای ورود موجود نیست"
+        }
         if (market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))
             return "فید معتبر در دسترس نیست (وضعیت فید: ${market.feed.mode.label})"
         return opportunityBlocker(market, settings, news, now, requireMonitor = false,
-            allowedSymbols = WatchCatalog.scannerSymbols,
-            barAgeGraceMs = market.interval.millis + 600_000L)
+            allowedSymbols = allowedSymbols,
+            barAgeGraceMs = market.interval.millis + 90_000L)
     }
 
     /**
-     * An educational candidate alert can be enabled while automatic paper entry is OFF.
-     * Supports all 50+ universe instruments.
+     * A technical candidate alert can be enabled while automatic paper entry is OFF.
+     * Supports every user-selected symbol with a verified independent feed.
      */
     fun opportunityBlocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
                            now: Long = System.currentTimeMillis(),
@@ -27,30 +60,32 @@ object PaperAutoRules {
                            barAgeGraceMs: Long = 90_000L,
                            requireMonitor: Boolean = true): String? {
         // Per symbol: a 24/7 crypto venue must not inherit the forex weekend.
-        if (MarketHours.weekendClosedFor(market.symbol, now)) return "بازار برای نماد ${market.symbol} بسته است"
+        com.aurum.edge.data.SourceIntegrity.shared.blocker(market.symbol, market.sourceIntegrityRevision)?.let { return it }
+        if (market.interval != Interval.M5 || market.signal?.interval?.let { it != Interval.M5 } == true)
+            return "ورود کاغذی فقط روی کندل بستهٔ ۵ دقیقه (5m) مجاز است"
+        if (MarketHours.closedFor(market.symbol, now)) return "بازار برای نماد ${market.symbol} بسته است"
         if (requireMonitor && !settings.backgroundMonitor) return "برای هشدار/ورود، پایش پس‌زمینه باید روشن باشد"
         if (allowedSymbols != null) {
-            if (market.symbol !in allowedSymbols && market.symbol !in WatchCatalog.scannerSymbols && market.symbol != settings.symbol)
+            if (market.symbol !in allowedSymbols)
                 return "نماد ${market.symbol} در لیست معتبر نیست"
         } else if (market.symbol != settings.symbol || market.interval != settings.interval) {
             return "نماد/بازه عوض شده است"
         }
         if (market.showingCachedData) return "فید واقعی در دسترس نیست؛ کش برای ورود ممنوع"
+        if (market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))
+            return "فید زنده/معتبر در دسترس نیست"
         if (!FeedLiveness.hasRecentReceipt(market.feed, now))
             return "قیمت زنده/تازه در دسترس نیست"
         val signal = market.signal ?: return "سیگنال محاسبه نشده است"
+        val vetted = com.aurum.edge.engine.NewsConfluence.apply(signal, market.symbol, news, now)
+        if (vetted?.isActionable != true) return vetted?.blockers?.lastOrNull() ?: "وتوی AI یا نبود سیگنال"
         if (!signal.isActionable || signal.entry == null || signal.stopLoss == null || signal.takeProfit == null)
             return "سیگنال فنی قابل معامله موجود نیست"
-        val techItems = signal.confluence.filterNot { it.name == com.aurum.edge.engine.NewsConfluence.NEWS_LABEL }
-        if (techItems.size == 8) {
-            if (techItems.any { !it.ok || it.status != ConfluenceStatus.CONFIRMED })
-                return "تمام هشت شرط فنی اصلی هم‌زمان تأیید نشده‌اند"
-            val ict = IctEntryRules.assess(market, now, maxBarAgeMs = barAgeGraceMs)
-            if (!ict.allowed) return ict.reason
-        } else {
-            if (signal.confidence < settings.minConfidence && signal.confidence < 72.0)
-                return "احتمال سیگنال (${signal.confidence.toInt()}٪) از حد آستانه (${settings.minConfidence.toInt()}٪) کمتر است"
-        }
+        if (!TechnicalEvidence.confirmed(signal))
+            return "چهار لایهٔ فنی معتبر نیستند"
+        if (!signal.confidence.isFinite() || !settings.minConfidence.isFinite() ||
+            signal.confidence < settings.minConfidence)
+            return "اطمینان سیگنال از آستانهٔ تنظیم‌شده کمتر است"
         val lastClosed = market.candles.lastOrNull { it.closed }
         if (lastClosed?.time != signal.barTime || signal.barTime <= 0L ||
             now - (signal.barTime + market.interval.millis) !in 0L..barAgeGraceMs)

@@ -7,6 +7,9 @@ import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.IctPriceActionRecord
 import com.aurum.edge.core.MarketTrendRecord
 import com.aurum.edge.core.ConfluenceStatus
+import com.aurum.edge.core.TechnicalEvidence
+import com.aurum.edge.core.PaperPortfolioPolicy
+import com.aurum.edge.core.PaperTrailing
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PaperNewsRecord
 import com.aurum.edge.core.PaperAiReview
@@ -14,7 +17,6 @@ import com.aurum.edge.core.PaperHoldReview
 import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.Signal
-import com.aurum.edge.core.WalkForwardRecord
 import com.aurum.edge.engine.NewsConfluence
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,20 +44,8 @@ class JournalStore(
     private val settingsStore: SettingsStore? = null,
 ) {
 
-    private val reportsFile = File(context.filesDir, "walk_forward_reports.json")
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val mutex = Mutex()
-
-    /**
-     * Last walk-forward reports run **on this device**. They are persisted on purpose: a report
-     * that cannot be re-checked later would be exactly the kind of unverifiable claim this app
-     * refuses to make.
-     */
-    private val _reports = MutableStateFlow<List<WalkForwardRecord>>(emptyList())
-    val reports: StateFlow<List<WalkForwardRecord>> = _reports.asStateFlow()
-    private val _reportError = MutableStateFlow<String?>(null)
-    val reportError: StateFlow<String?> = _reportError.asStateFlow()
-    private var reportsLoaded = false
 
     private val _trades = MutableStateFlow<List<PaperTrade>>(emptyList())
     val trades: StateFlow<List<PaperTrade>> = _trades.asStateFlow()
@@ -99,42 +89,6 @@ class JournalStore(
         _trades.value = sorted
     }
 
-    suspend fun loadReports() = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            val list = try {
-                if (reportsFile.exists() || File(reportsFile.path + ".bak").exists()) {
-                    json.decodeFromString(ListSerializer(WalkForwardRecord.serializer()),
-                        AtomicFile(reportsFile).openRead().bufferedReader().use { it.readText() })
-                } else emptyList()
-            } catch (error: Exception) {
-                reportsLoaded = false
-                _reportError.value = "فایل گزارش پژوهش خوانده نشد؛ گزارش‌ها حذف یا بازنویسی نشدند"
-                throw IllegalStateException(_reportError.value, error)
-            }
-            _reports.value = list.sortedByDescending { it.generatedAt }
-            _reportError.value = null
-            reportsLoaded = true
-        }
-    }
-
-    suspend fun saveReport(report: WalkForwardRecord) = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            check(reportsLoaded && _reportError.value == null) { "گزارش‌های قبلی بارگذاری نشده/آسیب‌دیده‌اند؛ بازنویسی نمی‌شود" }
-            val next = (_reports.value + report).sortedByDescending { it.generatedAt }.take(12)
-            val atomic = AtomicFile(reportsFile)
-            val stream = atomic.startWrite()
-            try {
-                stream.write(json.encodeToString(ListSerializer(WalkForwardRecord.serializer()), next)
-                    .toByteArray(Charsets.UTF_8))
-                atomic.finishWrite(stream)
-            } catch (error: Exception) {
-                atomic.failWrite(stream)
-                throw error
-            }
-            _reports.value = next // only a durable report is called 'stored'
-        }
-    }
-
     suspend fun open(
         signal: Signal,
         symbol: String,
@@ -152,25 +106,69 @@ class JournalStore(
          * نه بعد از ورود دوباره حساب می‌شود (گیتِ روند در پویشگر/ورود خودکار اعمال شده است).
          */
         marketTrend: MarketTrendRecord? = null,
+        observedAt: Long = System.currentTimeMillis(),
+        cryptoVenue: String = "NOBITEX",
+        /** Independent same-venue trade print and observed top-of-book, never a candle close. */
+        cryptoEntryQuote: com.aurum.edge.core.PriceTick? = null,
+        cryptoNews: PersianNewsState? = null,
+        sourceIntegrityRevision: Long = 0L,
     ): PaperTrade {
-        val technicalConditions = signal.confluence.filterNot { it.name == NewsConfluence.NEWS_LABEL }
-        val isLegacyEight = technicalConditions.size == 8
-        val techOk = if (isLegacyEight) {
-            technicalConditions.all { it.ok && it.status == ConfluenceStatus.CONFIRMED }
-        } else {
-            signal.isActionable && signal.confidence >= 72.0
+        SourceIntegrity.shared.blocker(symbol, sourceIntegrityRevision)?.let { throw IllegalArgumentException(it) }
+        require(com.aurum.edge.core.V1Universe.valid(symbol)) {
+            "نماد از بازارهای فعال حذف شده است؛ فقط مدیریت سوابق قبلی مجاز است"
         }
-        require(!automatic || (!manual && signal.isActionable && signal.barTime > 0 &&
-            techOk && (mtf == null || !mtf.veto))) {
-            "شروط فنی و چندتایم‌فریم برای ورود خودکار کاغذی کامل نیست"
+        // Authoritative entry guard, independent of UI, scanner and automatic trader. Do not
+        // move this into settlement: already-open oil positions must still be manageable.
+        require(signal.interval == com.aurum.edge.core.Interval.M5) {
+            "ثبت پوزیشن تازه فقط از سیگنال کندل بستهٔ ۵ دقیقه (5m) مجاز است"
+        }
+        val isAls5Gold = com.aurum.edge.core.V1Universe.normalize(symbol) == "XAU/USD"
+        if (CryptoCatalog.isCrypto(symbol)) require(signal.cryptoBreakout?.matches(signal) == true) {
+            "فقط استراتژی فشردگی ← انفجار برای ورود تازهٔ رمزارز مجاز است"
+        }
+        if (isAls5Gold && automatic) require(signal.als5Opportunity?.matches(signal) == true) {
+            "ورود خودکار طلای جدید فقط با ستاپ خرید/فروش تأییدشدهٔ ALS-5 مجاز است"
+        } else require(signal.ichimokuEntry?.matches(signal) == true || signal.als5Opportunity?.matches(signal) == true) {
+            "شواهد ورود بستهٔ ALS-5/ایچیموکو پیش از ورود تأیید نشده‌اند"
+        }
+        require(com.aurum.edge.core.OilEntrySafety.blocker(symbol) == null) {
+            com.aurum.edge.core.OilEntrySafety.REASON
+        }
+        require(!com.aurum.edge.core.MarketHours.closedFor(symbol, observedAt)) {
+            "بازار این نماد بسته است؛ ثبت پوزیشن کاغذی ممنوع"
+        }
+        require(!CryptoCatalog.isCrypto(symbol) || cryptoVenue in setOf("NOBITEX", BinanceSpotClient.VENUE)) {
+            "صرافی ورود نامعتبر است"
+        }
+        if (CryptoCatalog.isCrypto(symbol)) {
+            require(riskPercent in 0.3..0.5) { "ریسک رمزارز باید ۰٫۳ تا ۰٫۵ درصد باشد" }
+            require(com.aurum.edge.core.CryptoCompressionPolicy.quoteBlocker(
+                signal, cryptoEntryQuote, observedAt) == null && cryptoEntryQuote?.price == price) {
+                "اسپرد و قیمت واقعی مستقل هم‌صرافی رمزارز تأیید نشده است"
+            }
+            require(cryptoNews?.gate == NewsGate.CLEAR && cryptoNews.cached == false &&
+                cryptoNews.lastCheckedAt?.let { observedAt - it in 0L..180_000L } == true &&
+                cryptoNews.calendarCheckedAt?.let { observedAt - it in 0L..1_200_000L } == true) {
+                "خبر/تقویم پراثر یا تازگی آن برای ورود رمزارز تأیید نشده است"
+            }
+        }
+        val technicalConditions = TechnicalEvidence.items(signal)
+        require(signal.isActionable && TechnicalEvidence.confirmed(signal)) {
+            "شروط فنی کامل و تأیید شده نیستند"
+        }
+        require(!automatic || (!manual && signal.barTime > 0)) {
+            "ورود خودکار فقط با سیگنال همان کندل بسته مجاز است"
         }
         val stop = signal.stopLoss ?: throw IllegalArgumentException("حد ضرر وجود ندارد")
         val target = signal.takeProfit ?: throw IllegalArgumentException("حد سود وجود ندارد")
-        require(manual || !isLegacyEight || priceAction?.matches(signal, symbol, price) == true) {
-            "شواهد همان کندلِ رنج/ICT برای ورود سیگنالی کاغذی ثبت نشده است"
+        require(priceAction == null || priceAction.matches(signal, symbol, price)) {
+            "شواهد اختیاری ICT با همان کندل مطابقت ندارد"
         }
-        val draft = PaperOrderRules.preview(signal.action, symbol, price, stop, target, balance, riskPercent)
-        val startConditions = technicalConditions.take(8)
+        if (CryptoCatalog.isCrypto(symbol)) require(kotlin.math.abs(target - price) >=
+            3.0 * kotlin.math.abs(price - stop) - 1e-9) { "نسبت واقعی ریسک به ریوارد رمزارز باید حداقل ۱:۳ باشد" }
+        val orderRiskPercent = if (isAls5Gold) riskPercent.coerceAtMost(0.25) else riskPercent
+        val draft = PaperOrderRules.preview(signal.action, symbol, price, stop, target, balance, orderRiskPercent)
+        val startConditions = technicalConditions
             .filter { it.status == ConfluenceStatus.CONFIRMED }
             .joinToString("، ") { it.name.substringAfter('·').trim() }
         val trade = PaperTrade(
@@ -181,9 +179,9 @@ class JournalStore(
             entry = price,
             stopLoss = stop,
             takeProfit = target,
-            confidence = if (manual) 0.0 else signal.confidence,
+            confidence = signal.confidence,
             riskReward = draft.rewardRisk,
-            openedAt = System.currentTimeMillis(),
+            openedAt = observedAt,
             positionOz = draft.quantity,
             positionUnit = draft.unit,
             note = when {
@@ -194,9 +192,10 @@ class JournalStore(
             },
             mtf = if (manual) null else mtf,
             autoOpened = automatic,
-            signalBarTime = if (manual) null else signal.barTime,
+            signalBarTime = signal.barTime,
+            als5SetupKey = signal.als5Opportunity?.setupKey?.takeIf { isAls5Gold },
             newsEvidence = if (manual) null else newsEvidence,
-            entryConditions = if (manual) emptyList() else technicalConditions.map {
+            entryConditions = technicalConditions.map {
                 com.aurum.edge.core.PaperConditionRecord.from(it)
             },
             priceAction = if (manual) null else priceAction,
@@ -205,31 +204,78 @@ class JournalStore(
             commissionUsd = draft.commissionUsd,
             spreadCostUsd = draft.spreadCostUsd,
             marketTrend = marketTrend,
+            initialStopLoss = stop,
+            trailExtreme = price,
+            cryptoEntryAtr = if (CryptoCatalog.isCrypto(symbol)) signal.cryptoBreakout?.atr else null,
+            usesTickArchive = CryptoCatalog.isCrypto(symbol) && cryptoVenue == "NOBITEX" &&
+                settingsStore?.hasTickArchive() == true,
+            cryptoVenue = cryptoVenue,
         )
         mutex.withLock {
-            // Serialize the check and append. Up to 4 concurrent open positions allowed (1 Crypto, 1 Forex, 1 Commodity, 1 Stock).
-            val openTrades = _trades.value.filter { it.isOpen }
-            require(openTrades.size < 4) {
-                "سقف ۴ معاملهٔ همزمان باز پورتفو پر شده است (${openTrades.size}/4)؛ ابتدا یکی از معاملات را ببندید"
+            // Settings and ledger can change while an AI/preview was running. Fail closed
+            // rather than saving a ticket sized against an old balance or risk setting.
+            val latest = settingsStore?.read()
+            require(latest == null || (kotlin.math.abs(latest.accountBalance - balance) < 0.02 &&
+                riskPercent <= latest.riskPercent + 1e-6)) {
+                "موجودی یا درصد ریسک تغییر کرد؛ بلیت را دوباره محاسبه کنید"
             }
-            require(openTrades.none { it.symbol == symbol }) {
-                "برای نماد $symbol از قبل پوزیشن کاغذی باز دارید؛ ابتدا آن را ببندید"
+            // ALS-5 consecutive-loss guard is ledger-authoritative and atomic with the append.
+            // Unknown PnL on a prior closed gold trade fails closed rather than resetting the streak.
+            if (isAls5Gold) {
+                var consecutiveGoldLosses = 0
+                val recentGoldCloses = _trades.value.filter {
+                    it.symbol == symbol && !it.isOpen && (it.closedAt ?: Long.MAX_VALUE) <= observedAt
+                }.sortedByDescending { it.closedAt ?: 0L }
+                for (closedTrade in recentGoldCloses) {
+                    val pnl = closedTrade.pnlUsd?.takeIf { it.isFinite() }
+                        ?: throw IllegalArgumentException("سابقهٔ PnL طلای بسته‌شده ناقص است؛ قفل ضرر ALS-5 بازنشانی نمی‌شود")
+                    if (pnl >= 0.0) break
+                    consecutiveGoldLosses++
+                }
+                require(consecutiveGoldLosses < 3) {
+                    "سقف ۳ ضرر متوالی طلا فعال است؛ ALS-5 تا یک معاملهٔ برنده/بازبینی ژورنال قفل می‌ماند"
+                }
             }
-            val targetClass = com.aurum.edge.core.AssetClass.of(symbol)
-            val openInClass = openTrades.count { com.aurum.edge.core.AssetClass.of(it.symbol) == targetClass }
-            require(openInClass < targetClass.maxSlots) {
-                "ظرفیت معاملهٔ همزمان در دستهٔ «${targetClass.label}» تکمیل است (حداکثر ۱ پوزیشن در هر دسته دارایی)"
-            }
-            if (automatic) require(_trades.value.none {
-                it.symbol == symbol && it.signalBarTime == signal.barTime
-            }) { "در همین کندل سیگنال، معاملهٔ کاغذی قبلاً ثبت شده است" }
-            val totalRisk = _trades.value.filter { it.isOpen }.sumOf { it.riskUsd }
-            require(totalRisk + draft.actualRiskUsd <= balance * 0.15 + 1e-4) {
-                "مجموع ریسک پوزیشن‌های کاغذی از سقف بودجه پورتفو عبور می‌کند"
-            }
+            // Check and append under the same mutex; UI/alerts are only advisory.
+            val blocker = PaperPortfolioPolicy.blocker(_trades.value, symbol, balance,
+                draft.actualRiskUsd + draft.commissionUsd + draft.spreadCostUsd,
+                signal.barTime, now = observedAt,
+                openingBalance = settingsStore?.dayOpeningEquity(observedAt),
+                maxRiskPerTradePct = if (isAls5Gold) 0.0025 else PaperPortfolioPolicy.MAX_RISK_PER_TRADE,
+                maxDailyLossPct = if (isAls5Gold) 0.01 else PaperPortfolioPolicy.MAX_DAILY_LOSS,
+                als5SetupKey = signal.als5Opportunity?.setupKey?.takeIf { isAls5Gold })
+            require(blocker == null) { blocker ?: "ظرفیت پورتفو پر است" }
+            // Recheck after scheduling, sizing and any journal-lock wait. Fresh ticks or an
+            // AI response cannot authorize a preview calculated before a source conflict.
+            SourceIntegrity.shared.blocker(symbol, sourceIntegrityRevision)?.let { throw IllegalArgumentException(it) }
             persist(_trades.value + trade)
         }
         return trade
+    }
+
+    /** Same-venue CLOSED candles only; never a fill. The intent and ATR trail are
+     * durable, but settlement waits for a later ordered executed trade on the original venue.
+     */
+    suspend fun applyCryptoClosedBars(symbol: String, openedAt: Long,
+        venue: String, m5: List<Candle>, m15: List<Candle>,
+        now: Long = System.currentTimeMillis()): Boolean = mutex.withLock {
+        if (!loaded || venue != BinanceSpotClient.VENUE) return@withLock false
+        val trade = _trades.value.singleOrNull { it.isOpen && it.symbol == symbol &&
+            it.openedAt == openedAt && it.cryptoVenue == venue && it.cryptoEntryAtr != null }
+            ?: return@withLock false
+        val decision = com.aurum.edge.engine.CryptoCompressionExit.assess(trade, m5, m15, now)
+            ?: return@withLock false
+        val suggested = decision.stop?.let { if (trade.action == SignalAction.BUY)
+            maxOf(trade.stopLoss, it) else minOf(trade.stopLoss, it) } ?: trade.stopLoss
+        val next = trade.copy(
+            stopLoss = suggested,
+            cryptoLastClosedBarAt = decision.barClosedAt,
+            cryptoExitPendingAt = if (decision.exitReason != null)
+                decision.barClosedAt else trade.cryptoExitPendingAt,
+            cryptoExitReason = decision.exitReason ?: trade.cryptoExitReason,
+        )
+        persist(_trades.value.map { if (it.id == trade.id) next else it })
+        true
     }
 
     suspend fun attachAiReview(tradeId: String, review: PaperAiReview): PaperTrade = mutex.withLock {
@@ -273,19 +319,24 @@ class JournalStore(
         val newlyClosed = mutableListOf<PaperTrade>()
         val updated = current.map { t ->
             // A historical candle timestamped before the trade was opened cannot settle this position.
-            if (!t.isOpen || t.symbol != symbol || candle.time < t.openedAt) return@map t
+            if (!t.isOpen || t.symbol != symbol || candle.time < t.openedAt ||
+                t.usesTickArchive || CryptoCatalog.isCrypto(symbol)) return@map t
 
             val hitStop = if (t.action == SignalAction.BUY) {
                 candle.low <= t.stopLoss + 1e-9
             } else {
                 candle.high >= t.stopLoss - 1e-9
             }
-            val hitTarget = if (t.action == SignalAction.BUY) {
+            val hitTarget = if (t.initialStopLoss != null) false else if (t.action == SignalAction.BUY) {
                 candle.high >= t.takeProfit - 1e-9
             } else {
                 candle.low <= t.takeProfit + 1e-9
             }
-            if (!hitStop && !hitTarget) return@map t
+            if (!hitStop && !hitTarget) {
+                val advanced = PaperTrailing.advance(t, candle.high, candle.low)
+                if (advanced != t) changed = true
+                return@map advanced
+            }
             // If both were touched inside one bar, assume the stop was hit first (conservative).
             val exit = if (hitStop) t.stopLoss else t.takeProfit
             val pnlPerOz = if (t.action == SignalAction.BUY) {
@@ -294,7 +345,8 @@ class JournalStore(
                 t.entry - exit
             }
             val pnl = kotlin.math.round(
-                PaperOrderRules.quotePnlToUsd(t.symbol, pnlPerOz * t.positionOz, exit) * 100.0) / 100.0
+                (PaperOrderRules.quotePnlToUsd(t.symbol, pnlPerOz * t.positionOz, exit) -
+                    t.effectiveCommissionUsd - t.effectiveSpreadCostUsd) * 100.0) / 100.0
             settledPnlDelta += pnl
             changed = true
             val closed = t.copy(
@@ -315,11 +367,24 @@ class JournalStore(
         return@withLock newlyClosed
     }
 
+    /** Persistent audit flag: no trade ID is provided to prove no tick was lost. */
+    suspend fun noteTickCoverageGap(symbol: String, at: Long, expectedOpenedAt: Long? = null) = mutex.withLock {
+        if (!loaded || at <= 0L || _trades.value.none {
+                it.isOpen && it.symbol == symbol && it.tickCoverageGapAt == null &&
+                    (expectedOpenedAt == null || it.openedAt == expectedOpenedAt) }) return@withLock
+        persist(_trades.value.map { trade ->
+            if (trade.isOpen && trade.symbol == symbol && trade.tickCoverageGapAt == null &&
+                (expectedOpenedAt == null || trade.openedAt == expectedOpenedAt))
+                trade.copy(tickCoverageGapAt = at) else trade
+        })
+    }
+
     /**
      * Direct live-tick settlement: whenever a fresh real-time quote arrives for any symbol,
      * immediately checks if Stop Loss or Take Profit has been touched and closes the trade automatically.
      */
-    suspend fun settleTick(symbol: String, price: Double, observedAt: Long = System.currentTimeMillis()): List<PaperTrade> = mutex.withLock {
+    suspend fun settleTick(symbol: String, price: Double, observedAt: Long = System.currentTimeMillis(),
+                           expectedOpenedAt: Long? = null, archiveSeq: Long? = null): List<PaperTrade> = mutex.withLock {
         if (!loaded || !price.isFinite() || price <= 0.0) return@withLock emptyList()
         val current = _trades.value
         val openForSymbol = current.filter { it.isOpen && it.symbol == symbol }
@@ -329,21 +394,36 @@ class JournalStore(
         var settledPnlDelta = 0.0
         val newlyClosed = mutableListOf<PaperTrade>()
         val updated = current.map { t ->
-            if (!t.isOpen || t.symbol != symbol) return@map t
-            if (observedAt < t.openedAt - 10_000L) return@map t
+            if (!t.isOpen || t.symbol != symbol ||
+                (expectedOpenedAt != null && t.openedAt != expectedOpenedAt)) return@map t
+            // A trade fetched just before entry must never close a position opened
+            // afterwards, even if the quote was still within the feed freshness window.
+            if (t.cryptoVenue == BinanceSpotClient.VENUE) return@map t
+            if (t.usesTickArchive != (archiveSeq != null)) return@map t
+            if (archiveSeq != null && archiveSeq <= t.tickArchiveSeq) return@map t
+            if (observedAt < t.openedAt) {
+                if (archiveSeq == null) return@map t
+                changed = true
+                return@map t.copy(tickArchiveSeq = archiveSeq)
+            }
+            if (archiveSeq != null) changed = true // Checkpoint is atomic with settlement/trailing.
 
             val hitStop = if (t.action == SignalAction.BUY) {
                 price <= t.stopLoss + 1e-9
             } else {
                 price >= t.stopLoss - 1e-9
             }
-            val hitTarget = if (t.action == SignalAction.BUY) {
+            val hitTarget = if (t.initialStopLoss != null) false else if (t.action == SignalAction.BUY) {
                 price >= t.takeProfit - 1e-9
             } else {
                 price <= t.takeProfit + 1e-9
             }
 
-            if (!hitStop && !hitTarget) return@map t
+            if (!hitStop && !hitTarget) {
+                val advanced = PaperTrailing.advance(t, price, price)
+                if (advanced != t) changed = true
+                return@map if (archiveSeq != null) advanced.copy(tickArchiveSeq = archiveSeq) else advanced
+            }
 
             val exit = if (hitStop) t.stopLoss else t.takeProfit
             val pnlPerOz = if (t.action == SignalAction.BUY) {
@@ -352,7 +432,8 @@ class JournalStore(
                 t.entry - exit
             }
             val pnl = kotlin.math.round(
-                PaperOrderRules.quotePnlToUsd(t.symbol, pnlPerOz * t.positionOz, exit) * 100.0) / 100.0
+                (PaperOrderRules.quotePnlToUsd(t.symbol, pnlPerOz * t.positionOz, exit) -
+                    t.effectiveCommissionUsd - t.effectiveSpreadCostUsd) * 100.0) / 100.0
             settledPnlDelta += pnl
             changed = true
             val closed = t.copy(
@@ -360,6 +441,7 @@ class JournalStore(
                 exitPrice = exit,
                 exitReason = if (hitStop) "حد ضرر (قیمت لحظه‌ای)" else "حد سود (قیمت لحظه‌ای)",
                 pnlUsd = pnl,
+                tickArchiveSeq = archiveSeq ?: t.tickArchiveSeq,
             )
             newlyClosed.add(closed)
             closed
@@ -373,13 +455,71 @@ class JournalStore(
         return@withLock newlyClosed
     }
 
+    /** One journal commit per ordered batch (not one disk sync per WebSocket publication).
+     * The sequence cursor, trailing stop and exit/balance are advanced together. A restart
+     * replays from the last committed ID. Never apply a row after an ID gap or a different venue.
+     */
+    suspend fun settleBinanceBatch(symbol: String, openedAt: Long,
+        events: List<BinanceSpotClient.Aggregate>): List<PaperTrade> = mutex.withLock {
+        if (!loaded || events.isEmpty()) return@withLock emptyList()
+        val original = _trades.value.firstOrNull { it.isOpen && it.symbol == symbol &&
+            it.openedAt == openedAt && it.cryptoVenue == BinanceSpotClient.VENUE }
+            ?: return@withLock emptyList()
+        var trade = original
+        var next = trade.binanceAggId + 1L
+        var pnlDelta = 0.0
+        val closed = mutableListOf<PaperTrade>()
+        for (event in events) {
+            if (event.id < next) continue // replay after a process restart
+            if (trade.binanceAggId >= 0 && event.id != next)
+                throw DataFeedException("شناسهٔ معاملهٔ Binance قطع شده؛ تسویه متوقف شد")
+            if (event.tick.at < openedAt || !event.tick.price.isFinite() || event.tick.price <= 0 ||
+                event.tick.at > System.currentTimeMillis() + 10_000L)
+                throw DataFeedException("تیک Binance خارج از زمان پوزیشن یا نامعتبر است")
+            val price = event.tick.price
+            val stopHit = if (trade.action == SignalAction.BUY) price <= trade.stopLoss + 1e-9
+                else price >= trade.stopLoss - 1e-9
+            val targetHit = (trade.initialStopLoss == null || trade.cryptoEntryAtr != null) &&
+                (if (trade.action == SignalAction.BUY) price >= trade.takeProfit - 1e-9
+                    else price <= trade.takeProfit + 1e-9)
+            val structureExit = trade.cryptoEntryAtr != null &&
+                trade.cryptoExitPendingAt?.let { event.tick.at >= it } == true
+            trade = if (stopHit || targetHit || structureExit) {
+                // For the new strategy, a stop/target/structural intent is executed at
+                // the OBSERVED same-venue price, not at an unobserved threshold. This
+                // models gap/slippage honestly; old saved positions retain their policy.
+                val exit = if (trade.cryptoEntryAtr != null) price
+                    else if (stopHit) trade.stopLoss else trade.takeProfit
+                val perUnit = if (trade.action == SignalAction.BUY) exit - trade.entry else trade.entry - exit
+                val pnl = kotlin.math.round((PaperOrderRules.quotePnlToUsd(symbol,
+                    perUnit * trade.positionOz, exit) - trade.effectiveCommissionUsd -
+                    trade.effectiveSpreadCostUsd) * 100.0) / 100.0
+                pnlDelta = pnl
+                trade.copy(closedAt = event.tick.at, exitPrice = exit, binanceAggId = event.id,
+                    exitReason = when {
+                        stopHit -> "حد ضرر (Binance Spot)"
+                        structureExit -> trade.cryptoExitReason ?: "خروج ساختاری (Binance Spot)"
+                        else -> "حد سود (Binance Spot)"
+                    }, pnlUsd = pnl)
+            } else PaperTrailing.advance(trade, price, price).copy(binanceAggId = event.id)
+            next = event.id + 1L
+            if (!trade.isOpen) { closed.add(trade); break }
+        }
+        if (trade != original) {
+            persist(_trades.value.map { if (it.id == original.id) trade else it })
+            if (pnlDelta != 0.0) settingsStore?.adjustBalance(pnlDelta)
+        }
+        closed
+    }
+
     suspend fun close(tradeId: String, price: Double, reason: String): PaperTrade = mutex.withLock {
         require(price.isFinite() && price > 0) { "قیمت خروج معتبر نیست" }
         val trade = _trades.value.singleOrNull { it.id == tradeId && it.isOpen }
             ?: throw IllegalArgumentException("پوزیشن باز در ژورنال پیدا نشد یا قبلاً بسته شده است")
         val pnlPerOz = if (trade.action == SignalAction.BUY) price - trade.entry else trade.entry - price
         val pnl = kotlin.math.round(
-            PaperOrderRules.quotePnlToUsd(trade.symbol, pnlPerOz * trade.positionOz, price) * 100.0) / 100.0
+            (PaperOrderRules.quotePnlToUsd(trade.symbol, pnlPerOz * trade.positionOz, price) -
+                trade.effectiveCommissionUsd - trade.effectiveSpreadCostUsd) * 100.0) / 100.0
         val closed = trade.copy(
             closedAt = System.currentTimeMillis(), exitPrice = price, exitReason = reason,
             pnlUsd = pnl,

@@ -2,7 +2,7 @@ package com.aurum.edge.data
 
 import kotlin.math.abs
 
-/** Each mapping identifies the *same* instrument and quote unit at a vetted read-only provider. */
+/** Each mapping identifies the exact instrument and its single dedicated source (1-to-1). */
 data class WatchSymbol(
     val id: String,
     val label: String,
@@ -14,72 +14,174 @@ data class WatchSymbol(
 )
 
 object WatchCatalog {
-    /** Watchlist order: Iran cash rows first, then forex, then crypto. */
-    val symbols = listOf(
-        WatchSymbol("IR_GOLD18", "طلای ۱۸ عیار ایران", "تومان/گرم", linkedMapOf(
-            "tgju_public" to "geram18",
-        ), listOf("tgju_public"), 30 * 60_000L, 2.0),
-        WatchSymbol("USD/IRR", "دلار آزاد ایران", "تومان", linkedMapOf(
-            "tgju_public" to "price_dollar_rl",
-        ), listOf("tgju_public"), 30 * 60_000L, 2.0),
-        WatchSymbol("QUICK_GXRL", "کوییک GX L دنده‌ای", "تومان", linkedMapOf(
-            "bama_car_price" to "saipa-quick-gx_l",
-        ), listOf("bama_car_price"), 4 * 3600_000L, 3.0),
-        WatchSymbol("PEUGEOT_207_TU5P", "پژو ۲۰۷ اتوماتیک TU5P", "تومان", linkedMapOf(
-            "bama_car_price" to "peugeot-207-automatic_tu5p",
-        ), listOf("bama_car_price"), 4 * 3600_000L, 3.0),
-
-        // ── جفت‌ارزهای اصلی و طلا ─────────────────────────────────────────
-        WatchSymbol("XAU/USD", "طلای جهانی (هر انس)", "$", linkedMapOf(
-            "tradingview_scanner" to "OANDA:XAUUSD", "gold_api_public" to "XAU", "stocks_yahoo" to "XAUUSD=X", "twelve_data_quote" to "XAU/USD",
-        ), listOf("tradingview_scanner"), 10 * 60_000L, 0.5),
-        WatchSymbol("EUR/USD", "یورو / دلار", "$", linkedMapOf("tradingview_scanner" to "OANDA:EURUSD", "stocks_yahoo" to "EURUSD=X", "twelve_data_quote" to "EUR/USD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("GBP/USD", "پوند / دلار", "$", linkedMapOf("tradingview_scanner" to "OANDA:GBPUSD", "stocks_yahoo" to "GBPUSD=X", "twelve_data_quote" to "GBP/USD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("AUD/USD", "دلار استرالیا / دلار", "$", linkedMapOf("tradingview_scanner" to "OANDA:AUDUSD", "stocks_yahoo" to "AUDUSD=X", "twelve_data_quote" to "AUD/USD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("NZD/USD", "دلار نیوزیلند / دلار", "$", linkedMapOf("tradingview_scanner" to "OANDA:NZDUSD", "stocks_yahoo" to "NZDUSD=X", "twelve_data_quote" to "NZD/USD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("USD/JPY", "دلار / ین ژاپن", "JPY", linkedMapOf("tradingview_scanner" to "OANDA:USDJPY", "stocks_yahoo" to "JPY=X", "twelve_data_quote" to "USD/JPY"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("USD/CHF", "دلار / فرانک سوئیس", "CHF", linkedMapOf("tradingview_scanner" to "OANDA:USDCHF", "stocks_yahoo" to "CHF=X", "twelve_data_quote" to "USD/CHF"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-        WatchSymbol("USD/CAD", "دلار / دلار کانادا", "CAD", linkedMapOf("tradingview_scanner" to "OANDA:USDCAD", "stocks_yahoo" to "CAD=X", "twelve_data_quote" to "USD/CAD"), listOf("tradingview_scanner"), 5 * 60_000L, 0.3),
-    ) + CryptoCatalog.watchlistSeed.map { coin ->
+    /**
+     * Focused 15-symbol universe with strict 1-to-1 source assignment:
+     * - 2 Metals: XAU/USD, XAG/USD
+     * - 1 Index: DOW (Dow Jones / US30)
+     * - 7 Ichimoku Forex pairs: EUR/USD, GBP/USD, USD/JPY, EUR/JPY, GBP/JPY, AUD/USD, USD/CHF
+     * - 5 High-volume Crypto pairs: BTC/USDT, ETH/USDT, SOL/USDT, BNB/USDT, XRP/USDT
+     * Every symbol has exactly one source, and no two symbols share a source.
+     */
+    val symbols: List<WatchSymbol> = listOf(
+        // ── طلا و نقره ────────────────────────────────────────────────────
         WatchSymbol(
-            id = coin.id,
-            label = coin.label,
+            id = "XAU/USD",
+            label = "طلای جهانی (هر انس)",
             unit = "$",
-            providerCodes = linkedMapOf(
-                "tradingview_scanner" to "BINANCE:${coin.binance}",
-                "stocks_yahoo" to "${coin.id.substringBefore('/')}-USD",
-                "twelve_data_quote" to coin.id,
-            ),
-            defaultSources = listOf("tradingview_scanner"),
+            providerCodes = linkedMapOf("gold_api_xau" to "XAU"),
+            defaultSources = listOf("gold_api_xau"),
+            maxAgeMillis = 10 * 60_000L,
+            tolerancePct = 0.5,
+        ),
+        WatchSymbol(
+            id = "XAG/USD",
+            label = "نقرهٔ جهانی (هر انس)",
+            unit = "$",
+            providerCodes = linkedMapOf("gold_api_xag" to "XAG"),
+            defaultSources = listOf("gold_api_xag"),
+            maxAgeMillis = 10 * 60_000L,
+            tolerancePct = 0.5,
+        ),
+
+        // ── شاخص داوجونز ──────────────────────────────────────────────────
+        WatchSymbol(
+            id = "DOW",
+            label = "شاخص داوجونز آمریکا",
+            unit = "$",
+            providerCodes = linkedMapOf("yahoo_dow" to "^DJI"),
+            defaultSources = listOf("yahoo_dow"),
+            maxAgeMillis = 10 * 60_000L,
+            tolerancePct = 0.5,
+        ),
+
+        // ── جفت‌ارزهای مناسب ایچیموکو ────────────────────────────────────
+        WatchSymbol(
+            id = "EUR/USD",
+            label = "یورو / دلار",
+            unit = "$",
+            providerCodes = linkedMapOf("yahoo_eurusd" to "EURUSD=X"),
+            defaultSources = listOf("yahoo_eurusd"),
+            maxAgeMillis = 5 * 60_000L,
+            tolerancePct = 0.3,
+        ),
+        WatchSymbol(
+            id = "GBP/USD",
+            label = "پوند / دلار",
+            unit = "$",
+            providerCodes = linkedMapOf("swissquote_gbpusd" to "GBP/USD"),
+            defaultSources = listOf("swissquote_gbpusd"),
+            maxAgeMillis = 5 * 60_000L,
+            tolerancePct = 0.3,
+        ),
+        WatchSymbol(
+            id = "USD/JPY",
+            label = "دلار / ین ژاپن",
+            unit = "JPY",
+            providerCodes = linkedMapOf("yahoo_usdjpy" to "JPY=X"),
+            defaultSources = listOf("yahoo_usdjpy"),
+            maxAgeMillis = 5 * 60_000L,
+            tolerancePct = 0.3,
+        ),
+        WatchSymbol(
+            id = "EUR/JPY",
+            label = "یورو / ین ژاپن",
+            unit = "JPY",
+            providerCodes = linkedMapOf("swissquote_eurjpy" to "EUR/JPY"),
+            defaultSources = listOf("swissquote_eurjpy"),
+            maxAgeMillis = 5 * 60_000L,
+            tolerancePct = 0.3,
+        ),
+        WatchSymbol(
+            id = "GBP/JPY",
+            label = "پوند / ین ژاپن",
+            unit = "JPY",
+            providerCodes = linkedMapOf("yahoo_gbpjpy" to "GBPJPY=X"),
+            defaultSources = listOf("yahoo_gbpjpy"),
+            maxAgeMillis = 5 * 60_000L,
+            tolerancePct = 0.3,
+        ),
+        WatchSymbol(
+            id = "AUD/USD",
+            label = "دلار استرالیا / دلار",
+            unit = "$",
+            providerCodes = linkedMapOf("swissquote_audusd" to "AUD/USD"),
+            defaultSources = listOf("swissquote_audusd"),
+            maxAgeMillis = 5 * 60_000L,
+            tolerancePct = 0.3,
+        ),
+        WatchSymbol(
+            id = "USD/CHF",
+            label = "دلار / فرانک سوئیس",
+            unit = "CHF",
+            providerCodes = linkedMapOf("swissquote_usdchf" to "USD/CHF"),
+            defaultSources = listOf("swissquote_usdchf"),
+            maxAgeMillis = 5 * 60_000L,
+            tolerancePct = 0.3,
+        ),
+
+        // ── ۵ رمزارز پرحجم و پرمعامله ─────────────────────────────────────
+        WatchSymbol(
+            id = "BTC/USDT",
+            label = "بیت‌کوین / تتر",
+            unit = "$",
+            providerCodes = linkedMapOf("binance_btc_spot" to "BTC/USDT"),
+            defaultSources = listOf("binance_btc_spot"),
             maxAgeMillis = 5 * 60_000L,
             tolerancePct = 0.5,
-        )
-    }
-
-    /** 50+ Extended Universe for continuous scanner & multi-asset analysis */
-    val scannerSymbols: List<String> = listOf(
-        "XAU/USD", "XAG/USD", "USOIL", "UKOIL", "COPPER",
-        "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD", "USD/JPY", "USD/CHF", "USD/CAD",
-        "EUR/GBP", "EUR/JPY", "GBP/JPY", "AUD/JPY", "CAD/JPY", "CHF/JPY", "NZD/JPY",
-        "EUR/AUD", "EUR/CAD", "EUR/CHF", "GBP/AUD", "GBP/CAD", "GBP/CHF",
-        "AUD/CAD", "AUD/CHF", "AUD/NZD", "CAD/CHF", "NZD/CAD",
-        "AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META", "AMD", "NFLX", "INTC",
-        "SPY", "QQQ", "PLTR", "COIN", "BABA",
-        "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT", "DOGE/USDT", "ADA/USDT",
-        "AVAX/USDT", "LINK/USDT", "SUI/USDT", "NEAR/USDT", "PEPE/USDT", "TON/USDT", "DOT/USDT", "LTC/USDT"
+        ),
+        WatchSymbol(
+            id = "ETH/USDT",
+            label = "اتریوم / تتر",
+            unit = "$",
+            providerCodes = linkedMapOf("okx_eth_spot" to "ETH/USDT"),
+            defaultSources = listOf("okx_eth_spot"),
+            maxAgeMillis = 5 * 60_000L,
+            tolerancePct = 0.5,
+        ),
+        WatchSymbol(
+            id = "SOL/USDT",
+            label = "سولانا / تتر",
+            unit = "$",
+            providerCodes = linkedMapOf("gate_sol_spot" to "SOL/USDT"),
+            defaultSources = listOf("gate_sol_spot"),
+            maxAgeMillis = 5 * 60_000L,
+            tolerancePct = 0.5,
+        ),
+        WatchSymbol(
+            id = "BNB/USDT",
+            label = "بی‌ان‌بی / تتر",
+            unit = "$",
+            providerCodes = linkedMapOf("mexc_bnb_spot" to "BNB/USDT"),
+            defaultSources = listOf("mexc_bnb_spot"),
+            maxAgeMillis = 5 * 60_000L,
+            tolerancePct = 0.5,
+        ),
+        WatchSymbol(
+            id = "XRP/USDT",
+            label = "ریپل / تتر",
+            unit = "$",
+            providerCodes = linkedMapOf("kraken_xrp_spot" to "XRP/USDT"),
+            defaultSources = listOf("kraken_xrp_spot"),
+            maxAgeMillis = 5 * 60_000L,
+            tolerancePct = 0.5,
+        ),
     )
 
-    fun find(id: String): WatchSymbol? = symbols.firstOrNull { it.id == id }
+    val scannerSymbols: List<String> = symbols.map { it.id }
 
-    /** Symbols selectable for the chart/feed. Iran cash-board rows are watch-only. */
-    val chartSymbols: List<String> = listOf(
-        "XAU/USD", "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD", "USD/JPY", "USD/CHF", "USD/CAD"
-    ) + CryptoCatalog.watchlistSeed.map { it.id }
+    fun scanUniverse(activeWatchlist: List<String>): List<String> =
+        (activeWatchlist + scannerSymbols).filter(com.aurum.edge.core.V1Universe::valid).distinct()
+
+    fun find(id: String): WatchSymbol? {
+        val normalized = com.aurum.edge.core.V1Universe.normalize(id)
+        return symbols.firstOrNull { it.id == normalized }
+    }
+
+    val chartSymbols: List<String> = symbols.map { it.id }
 }
 
 data class DisplayQuote(val quote: Quote?, val sourceId: String, val fallback: Boolean)
 
-/** Different questions: can this number be displayed, and can its publisher time confirm it? */
 enum class QuoteDisplayState { NO_DATA, ERROR, CACHED, INVALID, OLD, UNDATED, DATED }
 
 data class QuoteAssessment(val state: QuoteDisplayState, val detail: String) {
@@ -87,7 +189,6 @@ data class QuoteAssessment(val state: QuoteDisplayState, val detail: String) {
     val verifiable: Boolean get() = state == QuoteDisplayState.DATED
 }
 
-/** Retrieval time alone does not prove a price is fresh. Cached, undated and mismatched quotes cannot confirm. */
 object SourceComparison {
     fun assess(symbol: WatchSymbol, sourceId: String, quote: Quote?, now: Long = System.currentTimeMillis()): QuoteAssessment {
         if (sourceId !in symbol.providerCodes)
@@ -105,7 +206,7 @@ object SourceComparison {
             return QuoteAssessment(QuoteDisplayState.UNDATED, "صفحه/پاسخ تازه خوانده شد، ولی تاریخ کامل آخرین قیمتِ ناشر نامشخص است")
         if (quote.providerAt !in (now - symbol.maxAgeMillis)..(now + 60_000L))
             return QuoteAssessment(QuoteDisplayState.OLD, "زمان آخرین قیمت ناشر قدیمی/نامعتبر است؛ شاید بازار بسته یا منبع دیرهنگام باشد")
-        return QuoteAssessment(QuoteDisplayState.DATED, "قیمت زمان‌دار و تازهٔ یک منبع؛ هنوز لزوماً تأیید دومنبعی نیست")
+        return QuoteAssessment(QuoteDisplayState.DATED, "قیمت زمان‌دار و تازهٔ منبع اختصاصی")
     }
 
     fun isFresh(symbol: WatchSymbol, quote: Quote, now: Long = System.currentTimeMillis()): Boolean =
@@ -117,6 +218,16 @@ object SourceComparison {
             reason = "منبعی برای این نماد فعال نیست؛ از تنظیمات انتخاب کنید", badge = "منبع ندارد")
         val assessed = enabled.associateWith { assess(symbol, it, quotes[it], now) }
         val valid = enabled.mapNotNull { id -> quotes[id]?.takeIf { assessed[id]?.verifiable == true } }
+        if (symbol.providerCodes.size == 1 && enabled.size == 1 && valid.size == 1) {
+            val sourceTitle = SourceCatalog.find(enabled.single())?.title ?: enabled.single()
+            return Verification(
+                status = VerificationStatus.CONFIRMED,
+                freshSources = 1,
+                spreadPct = 0.0,
+                reason = "تأیید منبع اختصاصی و یکتا ($sourceTitle)",
+                badge = "سورس اختصاصی",
+            )
+        }
         if (valid.size < 2) {
             val issues = enabled.mapNotNull { id -> assessed[id]?.takeUnless { it.verifiable }?.let {
                 "${SourceCatalog.find(id)?.title ?: id}: ${it.detail}"
@@ -137,11 +248,11 @@ object SourceComparison {
                 else -> "نیاز به داده"
             }
             val sourceLimit = when {
-                onlyOneAvailable -> "در این نسخه برای این نماد منبع مستقل دومی تعریف نشده است. "
+                onlyOneAvailable -> "در این نسخه هر نماد دقیقاً یک منبع اختصاصی دارد. "
                 enabled.size == 1 -> "فقط یک منبع فعال است. "
                 else -> ""
             }
-            val reason = "تأیید دو منبع تازه ممکن نیست (${valid.size}/۲). $sourceLimit" + issues.joinToString("؛ ")
+            val reason = "تأیید منبع تازه ممکن نیست (${valid.size}). $sourceLimit" + issues.joinToString("؛ ")
             val hasPrice = enabled.any { id -> quotes[id]?.price?.let { it.isFinite() && it > 0 } == true }
             return Verification(if (hasPrice) VerificationStatus.UNVERIFIED else VerificationStatus.NO_DATA,
                 valid.size, reason = reason, badge = badge)
@@ -170,7 +281,6 @@ data class Verification(
 
 enum class VerificationStatus { CONFIRMED, CONFLICT, UNVERIFIED, NO_DATA }
 
-/** Display-only fallback; a recent HTML scrape is NOT proof of a fresh provider trade. */
 object WatchDisplay {
     fun choose(symbol: WatchSymbol, selection: WatchSelection, quotes: Map<String, Quote>,
                now: Long = System.currentTimeMillis()): DisplayQuote {

@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
 import com.aurum.edge.BuildConfig
 import com.aurum.edge.core.AppSettings
+import com.aurum.edge.data.GeminiAiStudio
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.service.SignalMonitorService
 import com.aurum.edge.notify.Notifier
@@ -55,8 +56,6 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     val context = LocalContext.current
     val monitorRunning by SignalMonitorService.running.collectAsStateWithLifecycle()
     // Never prefill a saved secret in an editable Compose field. Blank means keep the stored key.
-    var key by remember { mutableStateOf("") }
-    var symbol by remember { mutableStateOf(settings.symbol) }
     var newsUrl by remember { mutableStateOf(settings.newsBaseUrl) }
     // Never prefill a saved secret in an editable field; blank on entry, like the API key above.
     var newsAiKey by remember { mutableStateOf("") }
@@ -69,14 +68,12 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     var spread by remember { mutableStateOf(settings.spreadPrice.toString()) }
     var commission by remember { mutableStateOf(settings.commissionPerOz.toString()) }
     var confirmAuto by remember { mutableStateOf(false) }
-    var confirmJournalClear by remember { mutableStateOf(false) }
     var autoAfterPermission by remember { mutableStateOf(false) }
 
-    LaunchedEffect(settings.apiKey) { key = "" } // clear input only after a saved key changes
-    LaunchedEffect(settings.symbol) { symbol = settings.symbol }
     LaunchedEffect(settings.newsBaseUrl) { newsUrl = settings.newsBaseUrl }
     LaunchedEffect(settings.newsAiApiKey) { newsAiKey = "" }
     LaunchedEffect(settings.newsAiBaseUrl) { newsAiBaseUrl = settings.newsAiBaseUrl }
+    LaunchedEffect(settings.newsAiFormat) { newsAiFormat = settings.newsAiFormatNormalized }
     LaunchedEffect(settings.newsAiModel) { newsAiModel = settings.newsAiModel }
 
     val soundPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -116,92 +113,46 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             .verticalScroll(rememberScrollState())
             .padding(bottom = 12.dp),
     ) {
-        SectionCard(
-            title = "منبع دیتای واقعی",
-            subtitle = "Twelve Data برای کندل اصلی اختیاری است؛ بدون کلید هم تاریخچهٔ Yahoo و فید رایگان Swissquote/Gold-API وصل می‌شود؛ دیده‌بان پایین منابع جدا دارد",
-        ) {
-            Text(if (settings.hasKey) "✓ کلید خواندنی در همین نصب موجود است؛ اعتبارش فقط با دریافت دادهٔ تازه مشخص می‌شود."
-                else "کلید روی این نصب ذخیره نشده است؛ به‌طور خودکار از فید رایگان قیمت لحظه‌ای (Swissquote، و در صورت نیاز Gold-API برای طلا) استفاده می‌شود — بدون تاریخچهٔ REST جداگانه.",
-                style = MaterialTheme.typography.bodySmall,
-                color = if (settings.hasKey) AurumColors.Cyan else AurumColors.Gold)
-            OutlinedTextField(
-                value = key,
-                onValueChange = { key = it },
-                label = { Text(if (settings.hasKey) "کلید جدید برای جایگزینی (خالی = کلید قبلی)" else "Twelve Data API Key اختیاری") },
-                visualTransformation = PasswordVisualTransformation(),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            )
-            Text("جفت‌ارز چارت و سیگنال (انتخاب فوری؛ فقط همین ۸ نماد):", style = MaterialTheme.typography.bodySmall,
-                color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 8.dp))
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp).horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                WatchCatalog.chartSymbols.forEach { pair ->
-                    FilterChip(selected = symbol == pair, onClick = {
-                        symbol = pair
-                        viewModel.selectChartSymbol(pair)
-                    }, label = { Text(pair) })
+        SectionCard("اتصال اینترنت / VPN گوشی", "بدون پروکسی داخلی و کتابخانهٔ حجیم") {
+            TextButton(onClick = { com.aurum.edge.data.AppNetwork.refreshSystemNetwork(force = true) }) {
+                Text("بازبینی اتصال پس از تغییر VPN")
+            }
+            Text("Tor و Snowflake از برنامه حذف شده‌اند. درخواست‌ها از مسیر شبکهٔ انتخاب‌شدهٔ اندروید ارسال می‌شوند.",
+                style = MaterialTheme.typography.bodySmall)
+            Text("برای استفاده از Windscribe، برنامهٔ رسمی آن را جداگانه روی گوشی وصل کنید. " +
+                "در Split Tunneling مطمئن شوید Aurum Edge از VPN مستثنا نشده است. " +
+                "هیچ حساب، رمز یا کلید Windscribe در این برنامه دریافت نمی‌شود.",
+                style = MaterialTheme.typography.bodySmall)
+            Text("با قطع VPN ممکن است اندروید از اینترنت مستقیم استفاده کند؛ اگر این را نمی‌خواهید، " +
+                "در صورت پشتیبانی، Always-on VPN و مسدودکردن اتصال بدون VPN را در تنظیمات اندروید فعال کنید. " +
+                "اتصال VPN تضمین مجوز Google، سهمیهٔ Gemini یا دسترسی همهٔ منابع نیست.",
+                style = MaterialTheme.typography.bodySmall)
+        }
+
+        SectionCard("حالت هر بازار · روندگیر / رنج‌گیر / ترکیبی", "اعمال روی تمام ${settings.activeSymbols.size} نماد برنامه") {
+            Text("تنظیم هر دسته روی همهٔ نمادهای همان دسته اعمال می‌شود؛ اسکن و اعلان به فهرست دستی محدود نیستند. " +
+                "فعال‌بودن نماد مجوز معامله نیست؛ دادهٔ تازه، خبر و قفل‌های ریسک لازم‌اند.",
+                style = MaterialTheme.typography.bodySmall)
+            com.aurum.edge.core.AssetClass.entries.filter { it != com.aurum.edge.core.AssetClass.STOCK }.forEach { category ->
+                Text(category.label, style = MaterialTheme.typography.bodySmall)
+                if (category == com.aurum.edge.core.AssetClass.CRYPTO)
+                    Text("فشردگی ← انفجار · 5m · 9/26/52 + 103 (ثابت)",
+                        style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
+                else Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    com.aurum.edge.core.CategoryStrategy.entries.forEach { mode ->
+                        FilterChip(selected = settings.categoryStrategies[category] == mode,
+                            onClick = { viewModel.setCategoryStrategy(category, mode) },
+                            label = { Text(mode.label) })
+                    }
                 }
             }
-            Button(
-                onClick = { viewModel.saveMarketCredentials(key, symbol) },
-                enabled = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp),
-            ) { Text("ذخیره و اتصال مجدد", fontWeight = FontWeight.Bold) }
-            Text(
-                "کلید رایگان از twelvedata.com/apikey — این کلید فقط خواندنی است و دسترسی معاملاتی ندارد.",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-            Text("کلید داخل APK نیست؛ فقط در دادهٔ خصوصی این نصب ذخیره می‌شود. پاک‌کردن داده‌ها/حذف اپ، کلید را پاک می‌کند. debug و release دو نصب جدا با داده‌های جدا هستند: ${BuildConfig.APPLICATION_ID}. APKهای CI با امضای debug موقت ممکن است قابل ارتقا روی نصب قبلی نباشند؛ برای حفظ داده، امضای ثابت لازم است.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan,
-                modifier = Modifier.padding(top = 4.dp))
         }
 
-        // موتور تلفیقی: توضیح ثابت. تیک‌های آپشن (و خودتحلیلی تنظیم آپشن) حذف شدند —
-        // محافظ‌های ضد فیک‌کراس همیشه روشن‌اند و توسط کاربر قابل خاموش‌کردن نیستند.
-        SectionCard("موتور تلفیقی ایچیموکو", "توضیح ثابت موتور — بدون آپشن دستی؛ همهٔ محافظ‌ها همیشه روشن") {
-            Text(
-                "موتور واحد: ایچیموکو نهادی ۸/۲۴/۷۲ + تأیید پرایس‌اکشن + حجم/مومنتوم + تراز M15/H1 + قفل ضد ساید.",
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold,
-            )
-            Text(
-                "ورود فقط وقتی معتبر است که همهٔ این‌ها هم‌زمان تأیید شوند: قیمت بیرون ابر، تنکان/کیجون هم‌جهت، " +
-                    "آزادی چیکو اسپن (۲۴ دوره)، تازگی کراس یا پولبک کیجون، هم‌جهتی M15/H1، سمت درست EMA200 و VWAP و حجم، " +
-                    "نبود رنج/ساید و امتیاز کافی.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-            Text(
-                "«یک کراس تنها» هرگز جهت نمی‌سازد: همین کراس باید با کندل بستهٔ بعدی، جدایی واقعی تنکان/کیجون (≥ ۰٫۰۸×ATR)، " +
-                    "هم‌سویی شیب کیجون و نبود کراس مخالف تازه (ناحیهٔ رفت‌وبرگشت) تأیید شود؛ در غیر این صورت NO_TRADE.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-            Text(
-                "محافظ‌های همیشه‌فعال (قابل خاموش‌کردن نیستند): ضد فیک‌بریک‌اوت/ری‌تست، اسپرد و نقدشوندگی پویا، " +
-                    "زمان‌های خطرناک، ریسک ساختار/حد ضرر، کول‌داون بعد از کراس مخالف، تأیید تایم‌فریم بالاتر و ضد رنج.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-            Text(
-                "ارزنده‌بودن معامله با AI: اگر کلید مدل در بخش AI تنظیم شده باشد، اول اتصال بررسی و نظر مدل دربارهٔ «ارزنده‌بودن» " +
-                    "همین ستاپ گرفته می‌شود؛ اگر مدل بگوید ارزنده نیست، ورود کاغذی ثبت نمی‌شود. اگر مدل در دسترس نباشد یا خطا بدهد، " +
-                    "ورود با همان شرط‌های فنی و بدون AI ادامه پیدا می‌کند.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-            Text(
-                "هیچ سفارش واقعی ارسال نمی‌شود؛ همهٔ ورودها کاغذی و روی قیمت واقعی تسویه می‌شوند.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-        }
-
-        SectionCard("ریسک خبر و AI فارکس", "تقویم Forex Factory و خبرهای واقعی وب بی‌نیاز از سرور؛ AI فقط تأیید/هشدار کمکی است، نه امتیاز منفی فنی") {
+        SectionCard("خبر و AI · LLMsRelay / Gemini") {
+            if (settings.newsBaseUrl.isNotBlank()) Text(
+                "سرور خبر تنظیم شده و در بخش خبر بر AI مستقیم اولویت دارد؛ برای خبر مستقیم Gemini نشانی سرور را خالی و ذخیره کنید.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
             OutlinedTextField(
                 value = newsUrl, onValueChange = { newsUrl = it }, singleLine = true,
                 label = { Text("نشانی HTTPS سرور خبر فارکس (اختیاری)") },
@@ -215,72 +166,64 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
                 Switch(checked = settings.pauseOnNews, onCheckedChange = viewModel::setPauseOnNews)
             }
-            Text("خبرهای مستقیم فقط برای مطالعه‌اند؛ ورود سیگنالی/خودکار با ۸ شرط فنی سنجیده می‌شود و خبر فقط وقتی وتوی شفاف دارد مانع می‌شود. AI معتبر اگر هم‌جهت و با شاهد باشد سبز می‌شود؛ UNKNOWN زرد است. وتوی دستی جداست؛ سفارش واقعی غیرفعال.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-            Text("جایگزین بدون سرور: اگر نشانی بالا خالی باشد و کلید زیر را پر کنید، خودِ گوشی مستقیماً با RSS همین‌جا + کلید شما تحلیل می‌کند. همین کلید، «همراه تریدر AI» صفحهٔ خانه را هم روشن می‌کند (نظر خودکار هر ۱۰ دقیقه + اعلان تغییر جهت).",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold, modifier = Modifier.padding(top = 6.dp))
-            OutlinedTextField(value = newsAiKey, onValueChange = { newsAiKey = it }, singleLine = true,
-                label = { Text("کلید هوش مصنوعی تریدر — Claude یا سازگار با OpenAI (فقط روی همین گوشی)") },
+            OutlinedTextField(value = newsAiKey, onValueChange = {
+                newsAiKey = it; viewModel.resetAiDraftDiagnostics()
+            }, singleLine = true,
+                label = { Text("کلید مدل انتخابی") },
                 visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-            OutlinedTextField(value = newsAiBaseUrl, onValueChange = { newsAiBaseUrl = it }, singleLine = true,
-                label = { Text("نشانی پایهٔ HTTPS سرویس مدل") },
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = {
+                    newsAiKey = ""; newsAiModel = ""
                     newsAiBaseUrl = "https://api.llmsrelay.com"; newsAiFormat = "ANTHROPIC"
-                }, modifier = Modifier.weight(1f)) { Text("LLMsRelay (sk-cs4)", maxLines = 1) }
+                    viewModel.resetAiDraftDiagnostics()
+                }, modifier = Modifier.weight(1f)) { Text("LLMsRelay") }
                 OutlinedButton(onClick = {
-                    newsAiBaseUrl = "https://api.anthropic.com"; newsAiFormat = "ANTHROPIC"
-                }, modifier = Modifier.weight(1f)) { Text("Claude رسمی", maxLines = 1) }
-                OutlinedButton(onClick = {
-                    newsAiBaseUrl = "https://api.openai.com/v1"; newsAiFormat = "OPENAI"
-                }, modifier = Modifier.weight(1f)) { Text("OpenAI رسمی", maxLines = 1) }
+                    newsAiKey = ""; newsAiModel = ""
+                    newsAiBaseUrl = GeminiAiStudio.BASE_URL
+                    newsAiFormat = GeminiAiStudio.WIRE_FORMAT
+                    viewModel.resetAiDraftDiagnostics()
+                }, modifier = Modifier.weight(1f)) { Text("Gemini") }
             }
-            Text("«نشانی پایه» یعنی آدرسِ سرویسی که کلید شما را صادر کرده — کلید مثل رمز کارت است و نشانی مثل آدرس همان مغازه؛ هر دو را فقط پنل سایت کلید (بخش API / Base URL) می‌دهد. اپ فقط نشانی‌های امن https:// را می‌پذیرد تا کلید در مسیر لو نرود. کلیدهایی که با sk-cs4 شروع می‌شوند مال LLMsRelay هستند و نشانی‌شان با دکمهٔ بالا پر می‌شود.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 4.dp))
-            OutlinedTextField(value = newsAiModel, onValueChange = { newsAiModel = it }, singleLine = true,
-                label = { Text("نام مدل (مثلاً claude-sonnet-4.6 یا gpt-4o-mini)") },
+            Text("سرویس: " + when (newsAiBaseUrl) {
+                "https://api.llmsrelay.com", "https://api.llmsrelay.com/v1" -> "LLMsRelay"
+                GeminiAiStudio.BASE_URL -> "Gemini · API رسمی generateContent"
+                else -> "انتخاب نشده"
+            }, color = AurumColors.TextSecondary, style = MaterialTheme.typography.labelSmall)
+            OutlinedButton(onClick = {
+                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GeminiAiStudio.KEYS_URL))) }
+            }) { Text("ساخت کلید Gemini") }
+            if (newsAiFormat == GeminiAiStudio.WIRE_FORMAT) {
+                Text("کلید Gemini در سربرگ امن x-goog-api-key ارسال می‌شود. مدل را از فهرست دریافت کنید؛ " +
+                    "وجود مدل در فهرست تضمین سهمیه یا دسترسی تولید پاسخ نیست. کلید فقط روی گوشی ذخیره می‌شود؛ " +
+                    "درخواست تحلیل/تست به Google ارسال می‌شود و ممکن است هزینه داشته باشد.",
+                    style = MaterialTheme.typography.bodySmall)
+            }
+            OutlinedTextField(value = newsAiModel, onValueChange = {
+                newsAiModel = it; viewModel.resetAiDraftDiagnostics()
+            }, singleLine = true,
+                label = { Text("مدل") },
                 modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
             val models = viewModel.aiModels.collectAsStateWithLifecycle().value
-            OutlinedButton(onClick = { viewModel.loadNewsAiModels(newsAiKey, newsAiBaseUrl, newsAiFormat) },
+            OutlinedButton(onClick = { viewModel.loadNewsAiModels(newsAiKey, newsAiBaseUrl, newsAiModel, newsAiFormat) },
                 enabled = !models.loading && (newsAiKey.isNotBlank() || settings.hasClientNewsAi) &&
-                    (newsAiBaseUrl.isNotBlank() || settings.newsAiBaseUrl.isNotBlank()),
+                    newsAiBaseUrl in setOf("https://api.llmsrelay.com", "https://api.llmsrelay.com/v1", GeminiAiStudio.BASE_URL),
                 modifier = Modifier.padding(top = 6.dp)) {
-                Text(if (models.loading) "در حال دریافت…" else "فهرست مدل‌های مجازِ همین کلید")
+                Text(if (models.loading) "در حال دریافت…" else "دریافت مدل‌های سرویس")
             }
             models.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red) }
             if (models.models.isNotEmpty()) {
-                Text("روی مدل بزنید تا انتخاب شود (فهرست واقعی همان سرویس، فیلترشده با کلید شما):",
-                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
-                    modifier = Modifier.padding(top = 4.dp))
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     models.models.forEach { id ->
-                        if (id == newsAiModel) Button(onClick = { newsAiModel = id }) { Text(id, maxLines = 1) }
-                        else OutlinedButton(onClick = { newsAiModel = id }) { Text(id, maxLines = 1) }
+                        if (id == newsAiModel) Button(onClick = { newsAiModel = id; viewModel.resetAiDraftDiagnostics() }) { Text(id, maxLines = 1) }
+                        else OutlinedButton(onClick = { newsAiModel = id; viewModel.resetAiDraftDiagnostics() }) { Text(id, maxLines = 1) }
                     }
-                }
-            }
-            Text("قالب API (برای نشانی‌های غیر از دو دامنهٔ رسمی، صریح انتخاب کنید):",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 8.dp))
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(
-                    "AUTO" to "خودکار (با دامنه تشخیص)",
-                    "ANTHROPIC" to "Claude / Anthropic",
-                    "OPENAI" to "سازگار با OpenAI",
-                ).forEach { (value, label) ->
-                    val selected = newsAiFormat == value
-                    if (selected) Button(onClick = { newsAiFormat = value },
-                        modifier = Modifier.weight(1f)) { Text(label, maxLines = 1) }
-                    else OutlinedButton(onClick = { newsAiFormat = value },
-                        modifier = Modifier.weight(1f)) { Text(label, maxLines = 1) }
                 }
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { viewModel.saveNewsAiConfig(newsAiKey, newsAiBaseUrl, newsAiModel, newsAiFormat) },
+                    enabled = newsAiBaseUrl in setOf("https://api.llmsrelay.com", "https://api.llmsrelay.com/v1", GeminiAiStudio.BASE_URL),
                     modifier = Modifier.weight(1f)) { Text("ذخیرهٔ کلید مستقیم") }
                 OutlinedButton(onClick = {
                     newsAiKey = ""; newsAiBaseUrl = ""; newsAiModel = ""
@@ -290,7 +233,8 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             val probe = viewModel.aiProbe.collectAsStateWithLifecycle().value
             OutlinedButton(onClick = {
                 viewModel.testNewsAiConnection(newsAiKey, newsAiBaseUrl, newsAiModel, newsAiFormat)
-            }, enabled = !probe.running && (newsAiKey.isNotBlank() || settings.hasClientNewsAi),
+            }, enabled = !probe.running && (newsAiKey.isNotBlank() || settings.hasClientNewsAi) &&
+                newsAiBaseUrl in setOf("https://api.llmsrelay.com", "https://api.llmsrelay.com/v1", GeminiAiStudio.BASE_URL),
                 modifier = Modifier.padding(top = 8.dp)) {
                 Text(if (probe.running) "در حال آزمون…" else "تست اتصال به مدل")
             }
@@ -302,10 +246,10 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             // The gate the auto-trader itself uses before it asks the AI to judge a trade.
             val aiConnection by viewModel.aiConnection.collectAsStateWithLifecycle()
             val connectionText = when {
-                !aiConnection.configured -> "اتصال AI: کلید/مدل تنظیم نشده — معاملات کاغذی بدون AI ادامه پیدا می‌کنند"
-                aiConnection.reachable == true -> "اتصال AI: تأییدشده — ارزنده‌بودن هر ورود از مدل پرسیده می‌شود"
-                aiConnection.reachable == false -> "اتصال AI: برقرار نشد — ورودها طبق شرط‌های فنی و بدون AI ثبت می‌شوند"
-                else -> "اتصال AI: هنوز در این اجرا بررسی نشده است"
+                !aiConnection.configured -> "اتصال AI: تنظیم نشده"
+                aiConnection.reachable == true -> "اتصال AI: موفق"
+                aiConnection.reachable == false -> "اتصال AI: ناموفق"
+                else -> "اتصال AI: بررسی نشده"
             }
             Text(
                 connectionText,
@@ -340,11 +284,6 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 color = if (holdReview.alerts.isNotEmpty()) AurumColors.Gold else AurumColors.TextSecondary,
                 modifier = Modifier.padding(top = 6.dp),
             )
-            Text("نظر AI دربارهٔ ادامهٔ معامله فقط یک یادداشت/اعلان است: پوزیشن را نمی‌بندد، حد ضرر را جابه‌جا نمی‌کند و خروج همچنان فقط با لمس قیمت واقعی SL/TP انجام می‌شود.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 2.dp))
-            Text("⚠️ این کلید روی گوشی ذخیره می‌شود، هرگز به گیت‌هاب نمی‌رود، اما اگر همین APK را با کسی به‌اشتراک بگذارید، کلید همراه آن قابل استخراج است. برای ارائهٔ عمومی از سقف/rate limit سرویس کلید استفاده کنید.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.Red)
         }
 
         SectionCard(
@@ -362,7 +301,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 OutlinedTextField(
                     value = risk,
                     onValueChange = { risk = it },
-                    label = { Text("ریسک هر معامله %") },
+                    label = { Text("ریسک هر معامله % (حداکثر ۰٫۵)") },
                     singleLine = true,
                     modifier = Modifier.weight(1f),
                 )
@@ -370,7 +309,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             OutlinedTextField(
                 value = minConfidence,
                 onValueChange = { minConfidence = it },
-                label = { Text("حداقل امتیاز ورود (۷۲ تا ۹۵)") },
+                label = { Text("حداقل امتیاز ورود (۶۰ تا ۹۵)") },
                 singleLine = true,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -397,12 +336,6 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     modifier = Modifier.weight(1f),
                 )
             }
-            Text(
-                "این دو عدد از بروکر خودت گرفته می‌شوند و در همه گزارش‌ها (بک‌تست، خارج از نمونه، سیگنال زنده) به‌کار می‌روند.",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 6.dp),
-            )
             Button(
                 onClick = {
                     balance.toDoubleOrNull()?.let(viewModel::saveBalance)
@@ -428,7 +361,7 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text("پایش زنده در پس‌زمینه", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
                     Text(
-                        "وضعیت سرویس: ${if (monitorRunning) "فعال" else if (settings.backgroundMonitor) "در انتظار شروع" else "خاموش"} · هنگام قفل بودن، فید و تقویم فارکس دوره‌ای بررسی می‌شوند؛ دادهٔ دیررس معامله نیست.",
+                        "وضعیت: ${if (monitorRunning) "فعال" else if (settings.backgroundMonitor) "در انتظار شروع" else "خاموش"}",
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.TextMuted,
                     )
@@ -451,23 +384,17 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("هشدار ورود کاغذی / کاندیدای ۸/۸ فنی", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
-                    Text("با ورود خودکار روشن: اعلان فقط پس از ثبت موفق معاملهٔ کاغذی؛ با آن خاموش: اعلان کاندیدای فنی/آموزشی (نه معامله).",
-                        style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
+                    Text("هشدار کاندیدای چهارلایهٔ کاغذی", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
                 }
                 Switch(
                     checked = settings.notifyOnSignal,
                     onCheckedChange = viewModel::setNotifyOnSignal,
                 )
             }
-            Text("خبر High/USD با اعلام قبلی یا انتشار عدد (فقط اگر در تقویم باشد) در کانال مستقل «خبر پژوهشی · نه معامله» اطلاع داده می‌شود؛ عنوان/مقایسهٔ عددی سیگنال یا امتیاز فنی نیست. علت بی‌هشداری معامله در تب «معامله» است. هنگام قفل بودن، تغییر شبکه/سکوت فید بازیابی با تأخیر و برچسب دادهٔ قدیمی می‌گیرد، نه LIVE جعلی. Doze، سهمیهٔ ناشر و محدودیت dataSync در Android 15 (حدود ۶ ساعت مجموع در ۲۴ ساعتِ پس‌زمینه) قابل دورزدن نیستند.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             OutlinedButton(onClick = { runCatching {
                 context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                     Uri.parse("package:${context.packageName}")))
             } }, modifier = Modifier.fillMaxWidth()) { Text("تنظیم باتری/اعلان این برنامه در گوشی") }
-            Text("در صفحهٔ تنظیمات گوشی، اجازهٔ فعالیت پس‌زمینه و محدودیت باتری را خودتان بررسی کنید؛ برنامه مجوز را خودکار تغییر نمی‌دهد و هیچ تنظیمی اتصال ۲۴ساعته را تضمین نمی‌کند.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
             Text("صدای هشدار: ${settings.alertSoundName.ifBlank { "اعلان پیش‌فرض گوشی" }}",
                 modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.Gold)
@@ -498,13 +425,11 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
                 }) }
             }, modifier = Modifier.fillMaxWidth()) { Text("تنظیمات اعلان‌های اندروید") }
-            Text("فایل انتخابی با مجوز پایدار روی همین گوشی و حداکثر ۱۰ ثانیه توسط اپ پخش می‌شود، نه توسط کانال سیستم؛ در حالت بی‌صدا/مزاحم‌نشدن یا اگر اعلان‌ها مسدود باشند، شنیدن آلارم تضمین نیست. در اندروید ۱۱+ انتخاب/بی‌صداکردن صدا در تنظیمات همان کانال بر فایل اپ اولویت دارد. ابتدا «پخش آزمون» را امتحان کن.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
-        SectionCard("ورود خودکار کاغذی · فقط آموزشی", "بدون فرم دستی؛ بدون بروکر، بدون سفارش واقعی") {
+        SectionCard("ورود خودکار کاغذی · بدون سفارش واقعی", "بدون فرم دستی؛ بدون بروکر، بدون سفارش واقعی") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("باز کردن خودکار LONG/SHORT کاغذی پس از ۸ شرط فنی، آپشن‌های فعال و تأییدهای ICT/MTF؛ خبر فقط داده‌کاوی ژورنال",
+                Text("ورود خودکار کاغذی",
                     modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
                     color = AurumColors.TextPrimary)
                 Switch(checked = settings.autoPaperTrading, onCheckedChange = { enabled ->
@@ -515,64 +440,18 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
             Text(if (settings.autoPaperTrading) autoStatus else "خاموش؛ خطوط روی چارت معامله نیستند.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 6.dp))
-            Text("قیمت زنده، ۸ شرط فنی پایهٔ ایچیموکو، آپشن‌های فعال و تأیید ICT/MTF لازم‌اند. پایش پس‌زمینه فقط برای ادامهٔ بررسی بعد از بستن اپ است؛ در زمان باز بودن برنامه هم ورود کاغذی خودکار با همین قواعد بررسی می‌شود. AI/تقویم خبر شرط ورود نیست؛ فقط اگر نزدیک معامله شاهد معتبر داشته باشد در ژورنال برای داده‌کاوی ذخیره می‌شود. نتیجه در ژورنال روی گوشی ذخیره می‌شود؛ خروج با تیک واقعی SL/TP است. مدل و ناشران بازده یا معاملهٔ واقعی را تضمین نمی‌کنند.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
 
-        SectionCard(
-            title = "داده‌های محلی",
-            subtitle = "کش کندل‌های واقعی و ژورنال معاملات کاغذی",
-        ) {
-            Button(
-                onClick = viewModel::clearCache,
-                colors = ButtonDefaults.buttonColors(containerColor = AurumColors.SurfaceAlt, contentColor = AurumColors.TextPrimary),
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("پاک کردن کش کندل‌های واقعی") }
-            Button(
-                onClick = { confirmJournalClear = true },
-                colors = ButtonDefaults.buttonColors(containerColor = AurumColors.SurfaceAlt, contentColor = AurumColors.TextPrimary),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-            ) { Text("پاک کردن ژورنال") }
-        }
-
-        SectionCard(
-            title = "سیاست داده (بدون دموی ساختگی)",
-            subtitle = "چیزی که این اپ عمداً انجام نمی‌دهد",
-        ) {
-            listOf(
-                "هیچ کندل، قیمت، حجم یا اسپرد ساختگی تولید نمی‌شود — نه برای پر کردن صفحه، نه وقتی اینترنت قطع است.",
-                "در حالت آفلاین فقط آخرین کندل‌های واقعیِ ذخیره‌شده با برچسب زمان نمایش داده می‌شود.",
-                "هیچ آمار عملکردی جعلی وجود ندارد؛ نرخ برد و فاکتور سود فقط از نتایج واقعی محاسبه می‌شود.",
-                "تنها «دمو»: اجرای استراتژی روی همان دیتای واقعی (تب یادگیری) و معاملات کاغذی که روی قیمت واقعی تسویه می‌شوند.",
-                "کلید خواندنی در APK نیست؛ از همین گوشی فقط به HTTPS همان ارائه‌دهندهٔ انتخابی ارسال می‌شود. کلید معاملاتی در اپ پذیرفته نمی‌شود.",
-            ).forEach { line ->
-                Text("• $line", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary, modifier = Modifier.padding(vertical = 2.dp))
-            }
-            Text(
-                "Aurum Edge ${BuildConfig.VERSION_NAME} · تصمیم‌یار، نه مشاوره مالی",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
     }
     if (confirmAuto) {
         AlertDialog(onDismissRequest = { confirmAuto = false },
             title = { Text("ورود خودکار فقط کاغذی") },
-            text = { Text("هیچ سفارشی به بروکر ارسال نمی‌شود. فقط با ۸ شرط فنی، آپشن‌های فعال، قیمت زنده و تأییدهای MTF/ICT، یک رکورد LONG/SHORT کاغذی در ژورنال ایجاد می‌شود. خبر و AI فقط برای داده‌کاوی رکورد هستند و شرط ورود نیستند. اگر سرویس/فید قطع شود ورودی تازه نداریم؛ خروجِ پوزیشن باز نیز به قیمت واقعی نیاز دارد. فعال شود؟") },
+            text = { Text("فقط معاملهٔ کاغذی؛ سفارش واقعی ارسال نمی‌شود. فعال شود؟") },
             confirmButton = { TextButton(onClick = {
                 confirmAuto = false
                 viewModel.setAutoPaperTrading(true)
             }) { Text("فعال‌کردن کاغذی") } },
             dismissButton = { TextButton(onClick = { confirmAuto = false }) { Text("انصراف") } })
     }
-    if (confirmJournalClear) {
-        AlertDialog(onDismissRequest = { confirmJournalClear = false },
-            title = { Text("ژورنال کاغذی پاک شود؟") },
-            text = { Text("همهٔ پوزیشن‌های باز و بسته‌شدهٔ ثبت‌شده روی این گوشی حذف می‌شوند. این کار برگشت‌پذیر نیست؛ سیگنال‌های چارت اصلاً معاملهٔ ثبت‌شده نیستند.") },
-            confirmButton = { TextButton(onClick = { viewModel.clearJournal(); confirmJournalClear = false }) { Text("حذف قطعی") } },
-            dismissButton = { TextButton(onClick = { confirmJournalClear = false }) { Text("انصراف") } })
-    }
+
 }

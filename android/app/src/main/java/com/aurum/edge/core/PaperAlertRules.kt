@@ -13,18 +13,30 @@ object PaperAlertRules {
         if (!settings.notifyOnSignal) return "هشدار آموزشی خاموش است"
         PaperAutoRules.opportunityBlocker(market, settings, news, now, allowedSymbols, barAgeGraceMs)?.let { return it }
         val signal = market.signal ?: return "سیگنال در دسترس نیست"
-        if (mtf == null || mtf.frames.isEmpty() || mtf.veto || mtf.barTime != signal.barTime || mtf.baseInterval != signal.interval)
-            return "تراز چندتایم‌فریم برای همین کندل تأیید نشده است"
-        if (trades.count { it.isOpen } >= 3) return "سقف ۳ معاملهٔ همزمان باز پر شده است"
-        if (trades.any { it.isOpen && it.symbol == market.symbol }) return "پوزیشن کاغذی این نماد باز است"
-        if (trades.any { it.symbol == market.symbol && it.signalBarTime == signal.barTime })
-            return "این کندل پیش‌تر در ژورنال معامله شده است"
+        val isAls5Gold = V1Universe.normalize(market.symbol) == "XAU/USD"
+        if (isAls5Gold && signal.als5Opportunity?.matches(signal) != true)
+            return "فقط فرصت تأییدشدهٔ ALS-5 برای هشدار/ورود طلا مجاز است"
+        val orderRiskPct = if (isAls5Gold) settings.riskPercent.coerceAtMost(0.25) else settings.riskPercent
         val draft = runCatching { PaperOrderRules.preview(signal.action, market.symbol,
             market.lastPrice ?: 0.0, signal.stopLoss ?: 0.0, signal.takeProfit ?: 0.0,
-            settings.accountBalance, settings.riskPercent) }.getOrElse { return "ریسک برگهٔ کاغذی معتبر نیست" }
-        val totalRisk = trades.filter { it.isOpen }.sumOf { it.riskUsd }
-        if (totalRisk + draft.actualRiskUsd > settings.accountBalance * 0.05 + 1e-8)
-            return "مجموع ریسک پوزیشن‌های کاغذی از سقف ۵٪ می‌گذرد"
+            settings.accountBalance, orderRiskPct) }.getOrElse { return "ریسک برگهٔ کاغذی معتبر نیست" }
+        if (isAls5Gold) {
+            var losses = 0
+            val goldClosed = trades.filter { it.symbol == market.symbol && !it.isOpen &&
+                (it.closedAt ?: Long.MAX_VALUE) <= now }.sortedByDescending { it.closedAt ?: 0L }
+            for (closedTrade in goldClosed) {
+                val pnl = closedTrade.pnlUsd?.takeIf { it.isFinite() }
+                    ?: return "سابقهٔ PnL طلای بسته‌شده ناقص است؛ قفل ALS-5 بازنشانی نمی‌شود"
+                if (pnl >= 0.0) break
+                losses++
+            }
+            if (losses >= 3) return "سقف ۳ ضرر متوالی طلا فعال است"
+        }
+        PaperPortfolioPolicy.blocker(trades, market.symbol, settings.accountBalance,
+            draft.actualRiskUsd + draft.commissionUsd + draft.spreadCostUsd, signal.barTime,
+            maxRiskPerTradePct = if (isAls5Gold) 0.0025 else PaperPortfolioPolicy.MAX_RISK_PER_TRADE,
+            maxDailyLossPct = if (isAls5Gold) 0.01 else PaperPortfolioPolicy.MAX_DAILY_LOSS,
+            als5SetupKey = signal.als5Opportunity?.setupKey?.takeIf { isAls5Gold })?.let { return it }
         // News never blocks a paper alert/entry; it is attached later as journal-mining evidence.
         return null
     }

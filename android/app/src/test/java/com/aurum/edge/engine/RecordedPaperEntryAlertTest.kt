@@ -34,10 +34,12 @@ import org.robolectric.annotation.Config
 @Config(sdk = [30])
 class RecordedPaperEntryAlertTest {
     private val context get() = RuntimeEnvironment.getApplication()
-    private val signal = Signal(SignalAction.BUY, 87.0, entry = 3000.0, stopLoss = 2994.5,
+    private val signal = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2994.5,
         takeProfit = 3009.0, interval = Interval.M5, barTime = 1_800_000_000_000L,
-        confluence = (1..8).map { ConfluenceItem("فنی $it", true, "تأییدشده") } +
+        ichimokuEntry = com.aurum.edge.core.IchimokuEntryEvidence(SignalAction.BUY, 1_800_000_000_000L, 1_800_000_000_000L, Interval.M5, 3),
+        confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "تأییدشده", scorePercent = 25) } +
             ConfluenceItem(NewsConfluence.NEWS_LABEL, true, "خبر مدل با شاهد"))
+    private val alsSignal by lazy { asConfirmedAls5TestSignal(signal) }
     private val news = PaperNewsRecord("test-model", "BUY", 91.0, signal.barTime,
         listOf(PaperNewsEvidence("news-1", "Publisher", "Gold news",
             "https://publisher.example/news", signal.barTime)),
@@ -60,8 +62,8 @@ class RecordedPaperEntryAlertTest {
         assertTrue(manager.activeNotifications.isEmpty())
 
         val evidence = ict
-        val entry = journal.open(signal, "XAU/USD", 3000.0, 100.0, 0.5,
-            mtf = mtf, automatic = true, newsEvidence = news, priceAction = evidence)
+        val entry = journal.open(alsSignal, "XAU/USD", 3000.0, 100.0, 0.5,
+            mtf = mtf, automatic = true, newsEvidence = news, priceAction = evidence, observedAt = 1_800_000_000_000L)
         val restored = JournalStore(context, file).also { it.load() }.trades.value.single()
         assertEquals(entry, restored) // Disk record is committed before there is an entry event.
         assertTrue(Notifier.notifyRecordedAutoEntry(context, entry, ""))
@@ -69,21 +71,21 @@ class RecordedPaperEntryAlertTest {
         assertEquals(Notifier.CHANNEL_VERIFIED_DEFAULT, posted.channelId)
         assertTrue(posted.extras.getCharSequence(Notification.EXTRA_TITLE).toString().contains("ثبت شد"))
         assertTrue(posted.extras.getCharSequence(Notification.EXTRA_TEXT).toString().contains(entry.id.take(8)))
-        assertEquals(8, restored.entryConditions.size)
+        assertEquals(4, restored.entryConditions.size)
         assertEquals(evidence, restored.priceAction)
         assertEquals("news-1", restored.newsEvidence!!.evidence.single().id)
 
         // Replaying that bar cannot create a second journal entry (or a second entry event).
-        assertTrue(runCatching { journal.open(signal, "XAU/USD", 3000.0, 100.0, 0.5,
-            mtf = mtf, automatic = true, newsEvidence = news, priceAction = evidence) }.isFailure)
+        assertTrue(runCatching { journal.open(alsSignal, "XAU/USD", 3000.0, 100.0, 0.5,
+            mtf = mtf, automatic = true, newsEvidence = news, priceAction = evidence, observedAt = 1_800_000_000_000L) }.isFailure)
         assertEquals(1, manager.activeNotifications.size)
         assertFalse(Notifier.notifyRecordedAutoEntry(context, entry.copy(autoOpened = false), ""))
-        assertFalse(Notifier.notifyRecordedAutoEntry(context, entry.copy(priceAction = null), ""))
+        assertTrue(Notifier.notifyRecordedAutoEntry(context, entry.copy(priceAction = null), ""))
         assertFalse(Notifier.notifyRecordedAutoEntry(context,
             entry.copy(entryConditions = entry.entryConditions.dropLast(1)), ""))
         assertFalse(Notifier.notifyRecordedAutoEntry(context,
             entry.copy(entryConditions = entry.entryConditions.mapIndexed { index, c ->
-                if (index == 0) c.copy(status = "CONFLICT") else c
+                if (index == 0) c.copy(status = "UNKNOWN") else c
             }), ""))
         assertEquals(1, manager.activeNotifications.size)
     }

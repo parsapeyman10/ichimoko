@@ -70,7 +70,7 @@ object VenueSpecs {
     val FX_MAJOR = "IC Markets Raw Spread · ESMA 30:1"
     val GOLD = "LMAX/IC Markets XAUUSD · ESMA 20:1"
     val COMMODITY = "NYMEX/ICE contract ticks · ESMA 10:1"
-    val CRYPTO_SPOT = "Binance Spot (VIP0, 0.10%/side) · ESMA 2:1"
+    val CRYPTO_SPOT = "کاغذی USDT (قیمت نوبیتکس؛ مدل هزینهٔ مرجع Binance VIP0، نه کارمزد نوبیتکس)"
     val US_STOCK = "NYSE/Nasdaq (IBKR Lite, $0) · ESMA 5:1"
 
     /** Spec مرجعِ همان نماد، با اعداد واقعی بازار. */
@@ -81,7 +81,7 @@ object VenueSpecs {
             tickSize = 0.01,
             commissionBpsPerSide = 10.0,
             spreadBps = 1.0,
-            source = "Binance Spot VIP0 taker fee 0.10% per side ($ESMA_CAPS)",
+            source = "Nobitex USDT public trade prices; paper cost benchmark: Binance Spot VIP0 0.10%/side + 1bp spread, NOT a verified Nobitex fee ($ESMA_CAPS)",
         )
 
         AssetClass.STOCK -> VenueSpec(

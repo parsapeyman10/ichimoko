@@ -13,11 +13,11 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.aurum.edge.AurumApplication
-import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.PaperAlertRules
+import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.data.ResearchAlert
 import com.aurum.edge.data.ResearchAlerts
@@ -30,8 +30,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,9 +49,11 @@ class SignalMonitorService : Service() {
     private var stateJob: Job? = null
     private var journalJob: Job? = null
     private var newsJob: Job? = null
+    private var aiJob: Job? = null
     private var researchAlertJob: Job? = null
     private var settingsJob: Job? = null
     private var sweepJob: Job? = null
+    private var positionJobs: Job? = null
     private val notifiedResearch = mutableSetOf<String>()
     private val notifiedTrades = mutableSetOf<String>()
     private val notifiedOpenTrades = mutableSetOf<String>()
@@ -123,8 +123,6 @@ class SignalMonitorService : Service() {
         newsJob?.cancel()
         newsJob = scope.launch {
             var turns = 0
-            /** Last announced AI reachability; null = nothing announced yet. */
-            var lastAiReachable: Boolean? = null
             while (isActive) {
                 if (!notificationsPermitted()) { stopSelf(); break }
                 if (!MarketHours.weekendClosedFor(container.settingsStore.read().symbol)) {
@@ -137,6 +135,18 @@ class SignalMonitorService : Service() {
                             it.autoPaperTrading || it.pauseOnNews || it.notifyOnSignal } &&
                         container.settingsStore.read().let {
                             it.newsBaseUrl.isNotBlank() || it.hasClientNewsAi }) container.news.refreshNow()
+                }
+                delay(60_000L)
+            }
+        }
+
+        // AI reachability and advisory review are independent of news refresh, scanner,
+        // positions and quote receipt; a slow model cannot stall their worker loops.
+        aiJob?.cancel()
+        aiJob = scope.launch {
+            while (isActive) {
+                if (!notificationsPermitted()) { stopSelf(); break }
+                try {
                     // The AI companion refreshes on its own 10-minute throttle; a bias flip is
                     // surfaced once through the informational research channel — never a trade.
                     container.traderAdvisor.refreshNow()
@@ -149,27 +159,10 @@ class SignalMonitorService : Service() {
                                 "جهت از $from به ${flip.bias} تغییر کرد — ${flip.summary}")
                         }
                     }
-                    // ── وضعیت اتصال AI ────────────────────────────────────────
-                    // The connection is checked FIRST and a drop is ANNOUNCED, exactly as asked:
-                    // when the model stops answering the user is told, and paper trading simply
-                    // continues on the technical rules (never on an invented AI opinion).
+                    // Connection is checked for safety but changes are not user-facing alerts.
                     val aiConfig = container.settingsStore.read()
                     if (aiConfig.hasClientNewsAi && (aiConfig.autoPaperTrading || aiConfig.notifyOnSignal)) {
                         runCatching { container.traderAdvisor.ensureConnection() }
-                        val conn = container.traderAdvisor.connection.value
-                        if (notificationsPermitted() && conn.reachable != null &&
-                            conn.reachable != lastAiReachable) {
-                            lastAiReachable = conn.reachable
-                            Notifier.notifyResearch(this@SignalMonitorService,
-                                "ai-connection|" + conn.reachable + "|" + (conn.checkedAt ?: 0L),
-                                if (conn.reachable == true) "همراه تریدر AI · اتصال برقرار شد"
-                                else "همراه تریدر AI · اتصال قطع است",
-                                if (conn.reachable == true)
-                                    "مدل پاسخ داد؛ ارزنده‌بودن ورودها و بازبینی پوزیشن‌های باز دوباره از AI پرسیده می‌شود."
-                                else
-                                    "مدل در دسترس نیست (${conn.detail.ifBlank { "اتصال برقرار نشد" }}) — " +
-                                        "معاملات کاغذی بدون AI و فقط با شرط‌های فنی ادامه پیدا می‌کنند.")
-                        }
                     }
                     // «ادامه بده یا نه»: the companion AI reviews the OPEN paper positions on its own
                     // throttle. Advisory ONLY — a DO_NOT_CONTINUE verdict raises one research
@@ -184,6 +177,10 @@ class SignalMonitorService : Service() {
                                 "${alert.summary} — این فقط یک نظر است؛ معاملهٔ کاغذی بسته نشده و خروج تنها با لمس قیمت واقعی حد ضرر/حد سود انجام می‌شود.")
                         }
                     }
+                } catch (cancel: kotlinx.coroutines.CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    // Failure of this optional worker never blocks the real-data workers.
                 }
                 delay(60_000L)
             }
@@ -200,7 +197,7 @@ class SignalMonitorService : Service() {
                         container.pairScanner.refreshNow() // records honest online/error/alert-off statuses
                     } else {
                         try {
-                            container.pairScanner.sweepOnce { candidate ->
+                            container.pairScanner.refreshNow { candidate ->
                                 if (Notifier.canNotifyVerified(this@SignalMonitorService, config.alertSoundUri)) {
                                     Notifier.notifyVerifiedOpportunity(this@SignalMonitorService, candidate,
                                         config.alertSoundUri)
@@ -231,15 +228,9 @@ class SignalMonitorService : Service() {
                     stopSelf()
                     return@collect
                 }
-                val text = when (state.feed.mode) {
-                    FeedMode.LIVE -> "زنده · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
-                    FeedMode.POLLING -> "آخرین کندل/تاریخچه آنلاین (نه تیک زنده) · ${state.lastPrice?.let { String.format("%.2f", it) } ?: "—"}"
-                    FeedMode.MARKET_CLOSED -> "بازار طبق برنامهٔ معمول بسته است؛ قیمت/ورود بررسی نمی‌شود"
-                    FeedMode.DELAYED -> "دادهٔ دیررس؛ اتصال در حال بررسی (معامله مسدود)"
-                    FeedMode.CONNECTING -> "در حال اتصال…"
-                    FeedMode.OFFLINE -> "آفلاین — آخرین دیتای واقعی: ${state.candles.lastOrNull()?.time ?: "—"}"
-                    FeedMode.NO_KEY -> "کلید API لازم است"
-                }
+                // Android requires an ongoing foreground notification. Keep it neutral;
+                // feed failures still block entries/settlement, but never trigger an alert.
+                val text = "پایش معاملات کاغذی"
                 runCatching {
                     NotificationManagerCompat.from(this@SignalMonitorService).notify(
                         Notifier.MONITOR_NOTIFICATION_ID,
@@ -320,7 +311,10 @@ class SignalMonitorService : Service() {
                 // Notify with rich details on EVERY newly opened trade (even if user is in-app)
                 trades.filter { it.isOpen }.forEach { trade ->
                     if (notifiedOpenTrades.add(trade.id)) {
-                        Notifier.notifyTradeOpened(this@SignalMonitorService, trade, currentSettings.alertSoundUri)
+                        if (trade.autoOpened) Notifier.notifyRecordedAutoEntry(
+                            this@SignalMonitorService, trade, currentSettings.alertSoundUri)
+                        else Notifier.notifyTradeOpened(
+                            this@SignalMonitorService, trade, currentSettings.alertSoundUri)
                     }
                 }
                 // Notify on trade closed / settled (TP, SL, manual close)
@@ -332,30 +326,69 @@ class SignalMonitorService : Service() {
             }
         }
 
-        // Background multi-processing tick monitor for ALL open trades (active both in-app and out-of-app)
-        scope.launch(Dispatchers.IO) {
+        // Each OPEN symbol has its own supervised, cancellable worker. A slow/failed
+        // provider for one pair must not delay the other positions, news or scanner.
+        positionJobs?.cancel()
+        positionJobs = scope.launch {
+            try { container.journalStore.load() } catch (_: Exception) { return@launch }
+            val workers = mutableMapOf<String, Pair<Long, Job>>()
             val spot = SpotFallbackClient()
-            while (isActive) {
-                try {
-                    val openTrades = container.journalStore.trades.value.filter { it.isOpen }
-                    if (openTrades.isNotEmpty()) {
-                        kotlinx.coroutines.coroutineScope {
-                            val deferreds = openTrades.map { t ->
-                                async(Dispatchers.IO) {
-                                    val q = runCatching { spot.fetchQuote(t.symbol) }.getOrNull()
-                                    t.symbol to q?.price
-                                }
-                            }
-                            deferreds.awaitAll().forEach { (sym, price) ->
-                                if (price != null && price > 0.0) {
-                                    container.journalStore.settleTick(sym, price)
-                                }
-                            }
+            try {
+                container.journalStore.trades.collect { trades ->
+                    val open = trades.filter { it.isOpen }.groupBy { it.symbol }
+                        .mapValues { (_, rows) -> rows.minOf { it.openedAt } }
+                    workers.toMap().forEach { (symbol, worker) ->
+                        if (open[symbol] != worker.first) {
+                            worker.second.cancel()
+                            workers.remove(symbol)
                         }
                     }
-                } catch (_: Exception) {}
-                delay(1_000L)
-            }
+                    open.forEach { (symbol, openedAt) ->
+                        if (symbol !in workers) {
+                            val worker = launch(Dispatchers.IO) {
+                                val crypto = com.aurum.edge.data.CryptoCatalog.isCrypto(symbol)
+                                // Separate closed-candle lane: never slow the ordered tick stream.
+                                if (crypto) launch {
+                                    while (isActive) {
+                                        try {
+                                            container.openTradeTicks.syncCryptoClosedBars(symbol, openedAt)
+                                        } catch (cancel: kotlinx.coroutines.CancellationException) {
+                                            throw cancel
+                                        } catch (_: Exception) {
+                                            // Keep the prior real stop/valuation when history is unavailable.
+                                        }
+                                        delay(60_000L)
+                                    }
+                                }
+                                while (isActive) {
+                                    try {
+                                        if (!MarketHours.closedFor(symbol)) {
+                                            if (crypto) {
+                                                // Official same-venue trade stream; SDK reconnects and
+                                                // attempts recovery if the server advertises it. REST
+                                                // bootstrap/fallback remains inside the process-wide gate.
+                                                container.openTradeTicks.watch(symbol, openedAt)
+                                            } else {
+                                                val quote = spot.fetchQuote(symbol)
+                                                if (TradeQuotePolicy.accepts(quote))
+                                                    container.journalStore.settleTick(symbol, quote.price,
+                                                        quote.at, expectedOpenedAt = openedAt)
+                                            }
+                                        }
+                                    } catch (cancel: kotlinx.coroutines.CancellationException) {
+                                        throw cancel
+                                    } catch (_: Exception) {
+                                        // An unavailable quote is not a tick or an exit. Retry
+                                        // independently; the crypto monitor records coverage gaps.
+                                    }
+                                    delay(if (crypto) 3_000L else 1_000L)
+                                }
+                            }
+                            workers[symbol] = openedAt to worker
+                        }
+                    }
+                }
+            } finally { workers.values.forEach { it.second.cancel() } }
         }
         return START_STICKY
     }
