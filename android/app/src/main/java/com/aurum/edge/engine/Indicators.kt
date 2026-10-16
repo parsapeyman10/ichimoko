@@ -231,6 +231,10 @@ data class Ichimoku(
     /** Chikou values indexed by their display bar; source close is displacement bars ahead. */
     val chikou: List<Double?>,
     val displacement: Int,
+    /** Higher-timeframe 513-period Donchian equilibrium line on M5 (~42.75h). */
+    val line513: List<Double?> = emptyList(),
+    /** Higher-timeframe 1024-period Donchian equilibrium line on M5 (~85.3h). */
+    val line1024: List<Double?> = emptyList(),
 ) {
     /** Cloud as it is actually visible at bar [index], using only values computed no later than [index]. */
     fun cloudAt(index: Int): Pair<Double, Double>? {
@@ -247,14 +251,46 @@ data class Ichimoku(
     /** Visible Span B at chart bar [index], or null until enough history exists. */
     fun spanBAt(index: Int): Double? = senkouB.getOrNull(index - displacement)
 
+    /** Higher-timeframe direction at [index] from the 513 and 1024 M5 Ichimoku lines. */
+    fun higherTimeframeBiasAt(index: Int, close: Double): com.aurum.edge.core.SignalAction {
+        val v513 = line513.getOrNull(index)
+        val v1024 = line1024.getOrNull(index)
+        return when {
+            v513 != null && v1024 != null -> when {
+                close > v513 && close > v1024 && v513 >= v1024 -> com.aurum.edge.core.SignalAction.BUY
+                close < v513 && close < v1024 && v513 <= v1024 -> com.aurum.edge.core.SignalAction.SELL
+                else -> com.aurum.edge.core.SignalAction.NO_TRADE
+            }
+            v513 != null -> when {
+                close > v513 -> com.aurum.edge.core.SignalAction.BUY
+                close < v513 -> com.aurum.edge.core.SignalAction.SELL
+                else -> com.aurum.edge.core.SignalAction.NO_TRADE
+            }
+            else -> com.aurum.edge.core.SignalAction.NO_TRADE
+        }
+    }
+
     companion object {
-        fun compute(candles: List<Candle>, tenkanPeriod: Int, kijunPeriod: Int, spanBPeriod: Int, displacement: Int): Ichimoku {
+        const val SPAN_513 = 513
+        const val SPAN_1024 = 1024
+
+        fun compute(
+            candles: List<Candle>,
+            tenkanPeriod: Int,
+            kijunPeriod: Int,
+            spanBPeriod: Int,
+            displacement: Int,
+            span513Period: Int = SPAN_513,
+            span1024Period: Int = SPAN_1024,
+        ): Ichimoku {
             require(tenkanPeriod > 0 && kijunPeriod > 0 && spanBPeriod > 0 && displacement >= 0) {
                 "پارامترهای ایچیموکو باید مثبت باشند"
             }
             val tenkan = Indicators.donchianMid(candles, tenkanPeriod)
             val kijun = Indicators.donchianMid(candles, kijunPeriod)
             val spanB = Indicators.donchianMid(candles, spanBPeriod)
+            val line513 = Indicators.donchianMid(candles, span513Period)
+            val line1024 = Indicators.donchianMid(candles, span1024Period)
             val spanA = MutableList<Double?>(candles.size) { null }
             for (i in candles.indices) {
                 val t = tenkan[i]
@@ -268,7 +304,7 @@ data class Ichimoku(
             for (displayIndex in candles.indices) {
                 chikou[displayIndex] = candles.getOrNull(displayIndex + displacement)?.close
             }
-            return Ichimoku(tenkan, kijun, spanA, spanB, chikou, displacement)
+            return Ichimoku(tenkan, kijun, spanA, spanB, chikou, displacement, line513, line1024)
         }
     }
 }

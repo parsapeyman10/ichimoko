@@ -53,10 +53,11 @@ class BinancePositionReplayTest {
             listOf(trade)))
         val journal = JournalStore(context, path).also { it.load() }
         val end = at / Interval.M5.millis * Interval.M5.millis
-        val bars = (0 until 320).map { index ->
-            com.aurum.edge.core.Candle(end - (320-index)*Interval.M5.millis,
-                100.0, 100.3, if (index == 319) 98.7 else 99.7,
-                if (index == 319) 99.0 else 100.0, 100.0)
+        val total = com.aurum.edge.core.HistoryPolicy.LIVE_MIN_CANDLES
+        val bars = (0 until total).map { index ->
+            com.aurum.edge.core.Candle(end - (total - index) * Interval.M5.millis,
+                100.0, 100.3, if (index == total - 1) 98.7 else 99.7,
+                if (index == total - 1) 99.0 else 100.0, 100.0)
         }
         assertFalse(journal.applyCryptoClosedBars("BTC/USDT", trade.openedAt,
             "OTHER_VENUE", bars, emptyList(), at))

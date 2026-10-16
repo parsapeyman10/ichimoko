@@ -15,6 +15,11 @@ object PaperAutoRules {
             return "ورود کاغذی فقط روی کندل بستهٔ ۵ دقیقه (5m) مجاز است"
         OilEntrySafety.blocker(market.symbol)?.let { return it }
         if (!settings.autoPaperTrading) return "معاملهٔ خودکار کاغذی خاموش است"
+        if (V1Universe.normalize(market.symbol) == "XAU/USD") {
+            val goldSignal = market.signal ?: return "سیگنال ALS-5 طلا موجود نیست"
+            if (goldSignal.als5Opportunity?.matches(goldSignal) != true)
+                return "برای طلا فقط BUY/SELL تأییدشدهٔ ALS-5 مجاز است"
+        }
         if (AssetClass.of(market.symbol) == AssetClass.CRYPTO) {
             val signal = market.signal ?: return "سیگنال فشردگی/انفجار موجود نیست"
             if (signal.cryptoBreakout?.matches(signal) != true ||
@@ -28,9 +33,9 @@ object PaperAutoRules {
                 PriceTick(price, time, market.bid, market.ask)
             } }
             CryptoCompressionPolicy.quoteBlocker(signal, tick, now)?.let { return it }
-            if (market.historyProvider != BinanceSpotClient.PROVIDER ||
-                market.feed.provider?.startsWith(BinanceSpotClient.PROVIDER) != true)
-                return "تاریخچهٔ هفت بازهٔ هم‌صرافی Binance Spot برای ورود تأیید نشده است"
+            if (!com.aurum.edge.data.CryptoVenuePolicy.compatible(
+                    market.symbol, market.historyProvider, market.feed.provider))
+                return "تاریخچهٔ هم‌صرافی منبع اختصاصی برای ورود تأیید نشده است"
             val tradeAt = market.lastTradeAt
             val tradePrice = market.lastTradePrice
             if (market.feed.mode != FeedMode.LIVE || tradeAt == null ||

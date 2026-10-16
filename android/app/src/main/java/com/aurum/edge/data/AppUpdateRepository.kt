@@ -44,6 +44,8 @@ class AppUpdateRepository(
     private val context: Context,
     private val client: OkHttpClient = AppNetwork.builder().followRedirects(true)
         .callTimeout(10, java.util.concurrent.TimeUnit.MINUTES).build(),
+    /** Minimum gap between *automatic* checks. Tapping the check button always bypasses it. */
+    private val autoCheckIntervalMillis: Long = MIN_AUTO_CHECK_INTERVAL_MS,
 ) {
     companion object {
         // This is deliberately narrower than "any .apk". It prevents a debug APK, a random
@@ -51,6 +53,17 @@ class AppUpdateRepository(
         private val RELEASE_APK_NAME = Regex("^AurumEdge-v\\d+(?:\\.\\d+)*\\.apk$")
         private val SHA256 = Regex("^[0-9a-fA-F]{64}$")
         private const val MAX_APK_BYTES = 200L * 1024L * 1024L
+
+        // GitHub's anonymous API allows 60 requests per hour per public IP, and Iranian mobile
+        // networks share one IP across many subscribers. Without a gap, every app launch spent
+        // the whole quota and the check failed with HTTP 403 instead of showing the version.
+        const val MIN_AUTO_CHECK_INTERVAL_MS = 15L * 60L * 1000L
+
+        // The manifest is a small file next to the APK in the newest public release, and the
+        // repository copy is only a fallback. Reading the release asset means one request on
+        // github.com, no API quota, and a manifest that cannot be older than the release itself.
+        private val MANIFEST_RELEASE_URL =
+            "https://github.com/${BuildConfig.UPDATE_REPO}/releases/latest/download/aurum-edge.json"
     }
 
     enum class SourceKind { MANIFEST_APK, MANIFEST_METADATA, RELEASE_APK }
@@ -89,6 +102,8 @@ class AppUpdateRepository(
         val needsInstallPermission: Boolean = false,
         val message: String = "برای بررسی نسخهٔ جدید، دکمهٔ بررسی را بزنید.",
         val error: String? = null,
+        /** Per-channel outcome of the last check: which host answered and what it said. */
+        val diagnostics: String = "",
     )
 
     /** Read the actual package signature on THIS device, not the APK/build number in CI. */
@@ -115,12 +130,30 @@ class AppUpdateRepository(
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
 
+    /** Wall clock of the last completed check, used to keep automatic checks inside the API quota. */
+    @Volatile private var lastCheckAtMillis = 0L
+
     /**
      * Checks both update channels. [autoDownload] only starts the download; the ViewModel opens
      * Android's installer after this returns so the app remains on the main thread for UI work.
+     *
+     * [force] is what the check button uses. Automatic checks (app start, enabling auto-download)
+     * respect [autoCheckIntervalMillis] so repeated launches cannot burn the shared anonymous
+     * GitHub API quota and hide a real update behind an HTTP 403.
      */
-    suspend fun checkForUpdate(autoDownload: Boolean = false) = operationMutex.withLock {
+    suspend fun checkForUpdate(autoDownload: Boolean = false, force: Boolean = false) = operationMutex.withLock {
         withContext(Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            val sinceLastCheck = now - lastCheckAtMillis
+            if (!force && lastCheckAtMillis > 0L && sinceLastCheck < autoCheckIntervalMillis) {
+                val minutes = ((autoCheckIntervalMillis - sinceLastCheck) / 60_000L).coerceAtLeast(1L)
+                _state.value = _state.value.copy(
+                    checking = false,
+                    message = "بررسی خودکار به‌تازگی انجام شده است؛ برای بررسی فوری دکمهٔ «بررسی نسخه جدید» " +
+                        "را بزنید. (بررسی بعدی خودکار تا حدود $minutes دقیقهٔ دیگر)",
+                )
+                return@withContext
+            }
             _state.value = _state.value.copy(
                 checking = true,
                 error = null,
@@ -136,28 +169,40 @@ class AppUpdateRepository(
                 manifestResult.exceptionOrNull()?.message,
                 releaseResult.exceptionOrNull()?.message,
             )
+            lastCheckAtMillis = now
+            val diagnostics = listOf(
+                "manifest: " + (manifestResult.exceptionOrNull()?.message
+                    ?: manifest?.let { "نسخهٔ بالاتر ${it.versionName}" } ?: "بدون نسخهٔ بالاتر"),
+                "releases: " + (releaseResult.exceptionOrNull()?.message
+                    ?: release?.let { "نسخهٔ بالاتر ${it.displayVersion}" } ?: "بدون نسخهٔ بالاتر"),
+            ).joinToString(" · ")
 
             when {
                 update == null && failures.isNotEmpty() -> {
                     _state.value = State(
-                        message = "بررسی کامل بروزرسانی انجام نشد؛ اینترنت/دسترسی manifest و GitHub را بررسی کنید.",
+                        diagnostics = diagnostics,
+                        message = "بررسی کامل بروزرسانی انجام نشد. اگر VPN سیستم روشن است و این پیام تکرار می‌شود، " +
+                            "احتمالاً سهمیهٔ عمومی GitHub API برای این شبکهٔ مشترک تمام شده؛ چند دقیقه بعد دوباره امتحان کنید.",
                         error = failures.joinToString(" · ").take(360),
                     )
                 }
                 update == null -> {
                     _state.value = State(
-                        message = "نسخهٔ جدیدتری در Release عمومی یا manifest پیدا نشد. نسخهٔ نصب‌شده ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · ${BuildConfig.GIT_SHA.take(7)}؛ artifact خصوصی Actions از داخل اپ قابل دریافت نیست. اگر APK را از artifact گرفته‌اید، باید نسخهٔ بالاتر در Release عمومی منتشر شود.",
+                        diagnostics = diagnostics,
+                        message = "نسخهٔ جدیدتری در Release عمومی یا manifest پیدا نشد. نسخهٔ نصب‌شده ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · ${BuildConfig.GIT_SHA.take(7)}؛ artifact خصوصی Actions از داخل اپ قابل دریافت نیست و نصب فقط با APK منتشرشدهٔ همان کانال (با کد نسخهٔ بالاتر) بروزرسانی می‌شود. برای اطمینان، «گزارش تشخیص» پایین همین کارت را ببینید.",
                     )
                 }
                 !update.canDownload -> {
                     _state.value = State(
                         available = update,
+                        diagnostics = diagnostics,
                         message = "نسخهٔ بالاتر دیده شد: ${update.displayVersion}، اما APK عمومی آن هنوز منتشر نشده است. apkUrl manifest یا asset یک GitHub Release لازم است؛ artifact خام Actions قابل دانلود عمومی نیست.",
                     )
                 }
                 else -> {
                     _state.value = State(
                         available = update,
+                        diagnostics = diagnostics,
                         message = "نسخهٔ جدید پیدا شد: ${update.displayVersion} از ${update.sourceLabel}",
                     )
                     if (autoDownload) downloadAvailableLocked()
@@ -253,7 +298,12 @@ class AppUpdateRepository(
         }
     }
 
-    fun installDownloaded() {
+    /**
+     * Hands the verified APK to Android's installer. [openPermissionSettings] is false on the
+     * automatic path (app start) so a launch never hijacks the screen: the update screen shows the
+     * button instead and the user decides when to grant the install permission.
+     */
+    fun installDownloaded(openPermissionSettings: Boolean = true) {
         val apk = _state.value.downloadedApkPath?.let(::File)
         if (apk == null || !apk.isFile) {
             _state.value = _state.value.copy(error = "فایل APK آماده نیست؛ دوباره دانلود کنید")
@@ -262,9 +312,9 @@ class AppUpdateRepository(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !canInstallUnknownSources()) {
             _state.value = _state.value.copy(
                 needsInstallPermission = true,
-                message = "برای نصب خودکار باید اجازهٔ نصب از این برنامه را در Android بدهید؛ بعد از بازگشت نصب دوباره ادامه پیدا می‌کند.",
+                message = "بروزرسانی دانلود شد. برای نصب باید اجازهٔ «نصب از این برنامه» را در Android بدهید؛ بعد از بازگشت نصب ادامه پیدا می‌کند.",
             )
-            openInstallPermissionSettings()
+            if (openPermissionSettings) openInstallPermissionSettings()
             return
         }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.updateprovider", apk)
@@ -325,8 +375,20 @@ class AppUpdateRepository(
     }
 
     private fun checkManifest(): UpdateInfo? {
-        val url = BuildConfig.UPDATE_MANIFEST_URL.takeIf { it.startsWith("https://") } ?: return null
-        val obj = requestJson(url) as? JsonObject ?: return null
+        val urls = listOf(MANIFEST_RELEASE_URL, BuildConfig.UPDATE_MANIFEST_URL)
+            .filter { it.startsWith("https://") }
+            .distinct()
+        val failures = mutableListOf<String>()
+        val obj = urls.firstNotNullOfOrNull { url ->
+            runCatching { requestJson(url) as? JsonObject }
+                .onFailure { failures += (it.message ?: "manifest ناموفق") }
+                .getOrNull()
+        } ?: run {
+            // A missing manifest is not fatal (Releases are still checked), but the reason must
+            // survive into the diagnostics instead of disappearing as "no update found".
+            if (failures.isNotEmpty()) throw DataFeedException(failures.joinToString(" · "))
+            return null
+        }
         val versionCode = obj.long("versionCode") ?: return null
         if (versionCode <= BuildConfig.VERSION_CODE.toLong()) return null
         val applicationId = obj.string("applicationId")
@@ -360,7 +422,13 @@ class AppUpdateRepository(
         val currentVersion = semanticVersion(BuildConfig.VERSION_NAME)
         // Do not stop at a release that has no APK. A notes-only release must not hide the next
         // public release asset, and a debug APK must never be offered as an upgrade.
-        return releases.asSequence().mapNotNull { release ->
+        //
+        // Scan order matters for more than correctness: the sidecar lives on the release-asset
+        // host, which is slow and sometimes filtered on mobile networks. The list is newest-first,
+        // so the first release that carries a trusted APK is the only one worth a sidecar fetch;
+        // anything older cannot outrank it. Fetching a sidecar for all ten releases per check was
+        // what made this both slow and likely to fail on a restricted connection.
+        for (release in releases) {
             val tag = release.string("tag_name").orEmpty()
             val releaseName = release.string("name")?.takeIf { it.isNotBlank() } ?: tag
             val displayVersion = tag.ifBlank { releaseName.ifBlank { "GitHub Release" } }
@@ -369,7 +437,7 @@ class AppUpdateRepository(
                 val name = candidate.string("name").orEmpty()
                 val url = candidate.string("browser_download_url").orEmpty()
                 isTrustedReleaseAsset(url, name)
-            } ?: return@mapNotNull null
+            } ?: continue // a notes-only release must not hide the next release that has an APK
             val downloadUrl = asset.string("browser_download_url")!!
             val artifactName = asset.string("name")!!
             // The sidecar metadata is authoritative for rolling updater releases: the tag can stay
@@ -383,13 +451,15 @@ class AppUpdateRepository(
             }
             val metadataVersionCode = metadata?.long("versionCode")
             if (metadataVersionCode != null) {
-                if (metadataVersionCode <= BuildConfig.VERSION_CODE.toLong()) return@mapNotNull null
+                if (metadataVersionCode <= BuildConfig.VERSION_CODE.toLong()) return null
             } else if (currentVersion != null && semanticVersion(displayVersion)?.let {
                     compareVersions(it, currentVersion) <= 0
-                } == true) return@mapNotNull null
+                } == true) return null
             val commitish = metadata?.string("commitSha")?.takeIf { it.isNotBlank() }
                 ?: release.string("target_commitish")
-            UpdateInfo(
+            // Newest published APK wins. Anything further down the list is older than it, so the
+            // scan stops here instead of downloading more sidecars.
+            return UpdateInfo(
                 source = SourceKind.RELEASE_APK,
                 sourceLabel = "GitHub Release عمومی",
                 versionName = metadata?.string("versionName")?.takeIf { it.isNotBlank() } ?: displayVersion,
@@ -409,7 +479,8 @@ class AppUpdateRepository(
                 tagName = tag,
                 publishedAt = release.string("published_at"),
             )
-        }.firstOrNull()
+        }
+        return null
     }
 
     private fun requestJson(url: String): kotlinx.serialization.json.JsonElement {
@@ -417,11 +488,31 @@ class AppUpdateRepository(
             .header("Accept", "application/vnd.github+json, application/json")
             .header("User-Agent", "AurumEdge/${BuildConfig.VERSION_NAME}")
             .build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw DataFeedException("پاسخ بروزرسانی معتبر نیست (${response.code})")
+        val host = request.url.host
+        val response = try {
+            client.newCall(request).execute()
+        } catch (error: java.io.IOException) {
+            // A blocked host, a VPN that dropped, or a TLS reset all land here. Say which host
+            // failed: "no update found" without that detail is what made this hard to diagnose.
+            throw DataFeedException("اتصال به $host برقرار نشد (${error.javaClass.simpleName})؛ اینترنت/VPN سیستم را بررسی کنید")
+        }
+        response.use {
+            if (!response.isSuccessful) {
+                val rateLimited = response.header("X-RateLimit-Remaining") == "0"
+                throw DataFeedException(
+                    when {
+                        rateLimited -> "سهمیهٔ بی‌توکن GitHub API روی $host برای این شبکه تمام شده است (403)"
+                        response.code == 403 -> "دسترسی به $host رد شد (403)؛ معمولاً VPN/فیلترینگ"
+                        response.code == 404 -> "نشانی بروزرسانی روی $host پیدا نشد (404)"
+                        response.code >= 500 -> "سرور $host خطای موقت داد (${response.code})"
+                        else -> "پاسخ بروزرسانی از $host معتبر نیست (${response.code})"
+                    },
+                )
+            }
             val body = response.body?.string().orEmpty()
-            if (body.isBlank()) throw DataFeedException("پاسخ بروزرسانی خالی است")
-            return json.parseToJsonElement(body)
+            if (body.isBlank()) throw DataFeedException("پاسخ بروزرسانی از $host خالی است")
+            return runCatching { json.parseToJsonElement(body) }
+                .getOrElse { throw DataFeedException("پاسخ بروزرسانی از $host قابل خواندن نیست") }
         }
     }
 
@@ -442,10 +533,16 @@ class AppUpdateRepository(
             .header("Accept", "application/vnd.android.package-archive, application/octet-stream")
             .header("User-Agent", "AurumEdge/${BuildConfig.VERSION_NAME}")
             .build()
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) throw DataFeedException("دانلود بروزرسانی ناموفق بود (${response.code})")
-            if (!response.request.url.isHttps) throw DataFeedException("دانلود فقط از HTTPS مجاز است")
-            val body = response.body ?: throw DataFeedException("فایل بروزرسانی خالی است")
+        val host = request.url.host
+        val response = try {
+            client.newCall(request).execute()
+        } catch (error: java.io.IOException) {
+            throw DataFeedException("دانلود از $host قطع شد (${error.javaClass.simpleName})؛ VPN/اینترنت را بررسی کنید")
+        }
+        response.use { httpResponse ->
+            if (!httpResponse.isSuccessful) throw DataFeedException("دانلود بروزرسانی از $host ناموفق بود (${httpResponse.code})")
+            if (!httpResponse.request.url.isHttps) throw DataFeedException("دانلود فقط از HTTPS مجاز است")
+            val body = httpResponse.body ?: throw DataFeedException("فایل بروزرسانی خالی است")
             val declaredLength = body.contentLength()
             if (declaredLength > MAX_APK_BYTES) {
                 throw DataFeedException("حجم APK دانلودی از سقف مجاز بروزرسانی بیشتر است")

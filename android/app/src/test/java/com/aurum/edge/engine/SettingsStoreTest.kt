@@ -108,8 +108,8 @@ class SettingsStoreTest {
             for (mode in com.aurum.edge.core.CategoryStrategy.entries) {
                 store.update { it.copy(categoryStrategies = com.aurum.edge.core.AssetClass.entries.associateWith { mode }) }
                 val config = SettingsStore(context).read()
-                assertEquals(230, config.activeSymbols.size)
-                assertEquals(200, config.activeSymbols.count(com.aurum.edge.data.CryptoCatalog::isCrypto))
+                assertEquals(15, config.activeSymbols.size)
+                assertEquals(5, config.activeSymbols.count(com.aurum.edge.data.CryptoCatalog::isCrypto))
                 config.activeSymbols.forEach { symbol -> assertEquals(mode, config.strategyFor(symbol)) }
                 assertFalse(config.autoPaperTrading) // expanding coverage is not trading consent
                 assertEquals(0.5, config.riskPercent, 0.0)

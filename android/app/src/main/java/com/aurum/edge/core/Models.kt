@@ -59,7 +59,7 @@ enum class AssetClass(val code: String, val label: String, val maxSlots: Int) {
         private val fiat = setOf("USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD",
             "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "TRY", "ZAR", "MXN", "SGD", "HKD")
         private val equities = setOf("AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "GOOGL", "META",
-            "AMD", "NFLX", "INTC", "NASDAQ", "SP500", "DOW", "DAX", "FTSE", "NIKKEI")
+            "AMD", "NFLX", "INTC", "NASDAQ", "SP500", "DOW", "US30", "DJI", "^DJI", "DJIA", "DAX", "FTSE", "NIKKEI")
 
         fun of(symbol: String): AssetClass {
             val s = symbol.trim().uppercase(java.util.Locale.ROOT)
@@ -239,6 +239,68 @@ data class CryptoBreakoutEvidence(
             signal.takeProfit <= signal.entry - 3 * (signal.stopLoss - signal.entry))
 }
 
+/**
+ * ALS-5 — Adaptive Liquidity & Structure Trading System opportunity & state-machine record for XAU/USD.
+ * Captures both incomplete candidate setups (WAIT) and fully confirmed entries (BUY / SELL).
+ */
+@Serializable
+data class Als5OpportunityRecord(
+    val strategyName: String = "ALS-5",
+    val state: String, // BUY | SELL | WAIT | NO_TRADE
+    val setupType: String, // ENGINE_A_TREND | ENGINE_B_SWEEP | ENGINE_C_RANGE | NONE
+    val direction: SignalAction,
+    val structuralLevel: Double?,
+    val regime: String, // BULLISH_TREND | BEARISH_TREND | RANGE | UNCERTAIN_HIGH_VOL
+    val satisfiedConditions: List<String>,
+    val missingConditions: List<String>,
+    val invalidationLevel: Double?,
+    val candidateEntry: Double?,
+    val estimatedStopLoss: Double?,
+    val estimatedTakeProfit: Double?,
+    val rewardToRisk: Double?,
+    val candidateSinceBarTime: Long? = null,
+    val expirationBarsRemaining: Int,
+    val scoreOutOf10: Int,
+    val structureScore: Int, // 0..2
+    val setupLevelScore: Int, // 0..2
+    val confirmationScore: Int, // 0..2
+    val rrScore: Int, // 0..2
+    val executionScore: Int, // 0..2
+    val positionLots: Double = 0.0,
+    val positionOz: Double = 0.0,
+    val exitModel: String = "FIXED_RR",
+    val setupKey: String = "",
+    val barTime: Long = 0L,
+) {
+    fun matches(signal: Signal): Boolean {
+        val entry = candidateEntry ?: return false
+        val stop = estimatedStopLoss ?: return false
+        val target = estimatedTakeProfit ?: return false
+        val rr = rewardToRisk ?: return false
+        return strategyName == "ALS-5" &&
+            state == direction.name && state in setOf("BUY", "SELL") &&
+            setupType in setOf("ENGINE_A_TREND", "ENGINE_B_SWEEP", "ENGINE_C_RANGE") &&
+            regime in setOf("BULLISH_TREND", "BEARISH_TREND", "RANGE") &&
+            signal.action == direction && signal.interval == Interval.M5 &&
+            barTime == signal.barTime && barTime > 0L &&
+            scoreOutOf10 in 8..10 &&
+            listOf(structureScore, setupLevelScore, confirmationScore, rrScore, executionScore)
+                .all { it in 0..2 } &&
+            structureScore + setupLevelScore + confirmationScore + rrScore + executionScore == scoreOutOf10 &&
+            rr.isFinite() && rr >= 1.5 &&
+            entry.isFinite() && entry > 0.0 &&
+            stop.isFinite() && stop > 0.0 &&
+            target.isFinite() && target > 0.0 &&
+            signal.entry?.let { kotlin.math.abs(it - entry) < 1e-8 } == true &&
+            signal.stopLoss?.let { kotlin.math.abs(it - stop) < 1e-8 } == true &&
+            signal.takeProfit?.let { kotlin.math.abs(it - target) < 1e-8 } == true &&
+            signal.riskReward?.let { kotlin.math.abs(it - rr) < 1e-8 } == true &&
+            positionLots.isFinite() && positionLots > 0.0 &&
+            positionOz.isFinite() && positionOz > 0.0 &&
+            !setupKey.isBlank()
+    }
+}
+
 data class Signal(
     val action: SignalAction,
     val confidence: Double,
@@ -254,6 +316,7 @@ data class Signal(
     val evaluatedAt: Long = System.currentTimeMillis(),
     val ichimokuEntry: IchimokuEntryEvidence? = null,
     val cryptoBreakout: CryptoBreakoutEvidence? = null,
+    val als5Opportunity: Als5OpportunityRecord? = null,
 ) {
     val isActionable: Boolean get() = action != SignalAction.NO_TRADE
 }
@@ -413,6 +476,8 @@ data class PaperTrade(
     /** Defaults keep older journal JSON readable. Auto is always PAPER, never a broker fill. */
     val autoOpened: Boolean = false,
     val signalBarTime: Long? = null,
+    /** Stable ALS-5 structure key prevents a repeat entry from the same setup after a close. */
+    val als5SetupKey: String? = null,
     val newsEvidence: PaperNewsRecord? = null,
     /** Companion AI's post-open educational review; never a gate and never financial advice. */
     val aiReview: PaperAiReview? = null,
@@ -687,7 +752,7 @@ data class AppSettings(
     /** Automatic orders here are local paper records, never broker orders. */
     val autoPaperTrading: Boolean = false,
     /** Check for a public APK when the app starts and download it when one is available. */
-    val autoDownloadUpdates: Boolean = false,
+    val autoDownloadUpdates: Boolean = true,
     /**
      * OPTIONAL alternative to [newsBaseUrl] for the Forex ninth-condition AI gate: instead of your
      * own backend server, the phone calls this endpoint DIRECTLY with your own key - either the

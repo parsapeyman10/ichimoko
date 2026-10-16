@@ -22,7 +22,7 @@ import org.junit.Test
 class IctEntryRulesTest {
     private val now = 1_800_000_000_000L // 03:00 in New York (London window)
     private val bar = now - Interval.M5.millis
-    private val config = AppSettings(symbol = "XAU/USD", interval = Interval.M5,
+    private val config = AppSettings(symbol = "EUR/USD", interval = Interval.M5,
         backgroundMonitor = true, autoPaperTrading = true)
     private val news = PersianNewsState(
         articles = listOf(PersianHeadline("gold-news", "Gold", "fixture", "Publisher",
@@ -31,7 +31,7 @@ class IctEntryRulesTest {
         sources = listOf(NewsSourceStatus("Publisher", "online", "https://publisher.example/rss"),
             NewsSourceStatus("Forex Factory", "online", "https://nfs.faireconomy.media/ff_calendar_thisweek.json")),
         calendarCheckedAt = now,
-        ai = AiNewsVerdict("AVAILABLE", "XAU/USD", "BUY", 91.0, "test-model",
+        ai = AiNewsVerdict("AVAILABLE", "EUR/USD", "BUY", 91.0, "test-model",
             "fixture", now, listOf("gold-news")),
     )
     private val signal = Signal(SignalAction.BUY, 100.0, entry = 3000.0,
@@ -39,8 +39,8 @@ class IctEntryRulesTest {
         confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
             "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی")
             .map { ConfluenceItem(it, true, "fixture", scorePercent = 25) })
-    private val verified get() = NewsConfluence.apply(signal, "XAU/USD", news, now)!!
-    private val market get() = MarketState(symbol = "XAU/USD", interval = Interval.M5,
+    private val verified get() = NewsConfluence.apply(signal, "EUR/USD", news, now)!!
+    private val market get() = MarketState(symbol = "EUR/USD", interval = Interval.M5,
         candles = IctTestBars.readyAt(bar), lastPrice = 3000.0,
         feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now), signal = verified)
 
@@ -109,7 +109,7 @@ class IctEntryRulesTest {
             articles = news.articles.map { it.copy(direction = "SELL") })
         val raw = signal.copy(action = SignalAction.SELL, stopLoss = 3005.5,
             takeProfit = 2991.5)
-        val sell = NewsConfluence.apply(raw, "XAU/USD", reversedNews, now)!!
+        val sell = NewsConfluence.apply(raw, "EUR/USD", reversedNews, now)!!
         val current = market.copy(candles = IctTestBars.readyAt(bar, mirror = true), signal = sell)
         assertEquals(SignalAction.SELL, sell.action)
         assertEquals(IctRangeAnalyzer.State.READY, IctRangeAnalyzer.analyze(current.candles, Interval.M5).sell.state)

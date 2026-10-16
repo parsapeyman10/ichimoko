@@ -39,6 +39,7 @@ class RecordedPaperEntryAlertTest {
         ichimokuEntry = com.aurum.edge.core.IchimokuEntryEvidence(SignalAction.BUY, 1_800_000_000_000L, 1_800_000_000_000L, Interval.M5, 3),
         confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "تأییدشده", scorePercent = 25) } +
             ConfluenceItem(NewsConfluence.NEWS_LABEL, true, "خبر مدل با شاهد"))
+    private val alsSignal by lazy { asConfirmedAls5TestSignal(signal) }
     private val news = PaperNewsRecord("test-model", "BUY", 91.0, signal.barTime,
         listOf(PaperNewsEvidence("news-1", "Publisher", "Gold news",
             "https://publisher.example/news", signal.barTime)),
@@ -61,7 +62,7 @@ class RecordedPaperEntryAlertTest {
         assertTrue(manager.activeNotifications.isEmpty())
 
         val evidence = ict
-        val entry = journal.open(signal, "XAU/USD", 3000.0, 100.0, 0.5,
+        val entry = journal.open(alsSignal, "XAU/USD", 3000.0, 100.0, 0.5,
             mtf = mtf, automatic = true, newsEvidence = news, priceAction = evidence, observedAt = 1_800_000_000_000L)
         val restored = JournalStore(context, file).also { it.load() }.trades.value.single()
         assertEquals(entry, restored) // Disk record is committed before there is an entry event.
@@ -75,7 +76,7 @@ class RecordedPaperEntryAlertTest {
         assertEquals("news-1", restored.newsEvidence!!.evidence.single().id)
 
         // Replaying that bar cannot create a second journal entry (or a second entry event).
-        assertTrue(runCatching { journal.open(signal, "XAU/USD", 3000.0, 100.0, 0.5,
+        assertTrue(runCatching { journal.open(alsSignal, "XAU/USD", 3000.0, 100.0, 0.5,
             mtf = mtf, automatic = true, newsEvidence = news, priceAction = evidence, observedAt = 1_800_000_000_000L) }.isFailure)
         assertEquals(1, manager.activeNotifications.size)
         assertFalse(Notifier.notifyRecordedAutoEntry(context, entry.copy(autoOpened = false), ""))

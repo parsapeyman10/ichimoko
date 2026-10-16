@@ -115,20 +115,17 @@ class MarketRepository(
     private val refreshMutex = Mutex()
     private val binanceHistory = BinanceSpotClient()
     private val cryptoReadOnly = CryptoRadarCandleClient()
-    private val cryptoBundle = CryptoRadarBundle { symbol, frame, source -> when (source) {
-        CryptoRadarBundle.Source.GATE -> cryptoReadOnly.fetch(symbol, frame, CryptoRadarCandleClient.Venue.GATE)
-        CryptoRadarBundle.Source.OKX -> cryptoReadOnly.fetch(symbol, frame, CryptoRadarCandleClient.Venue.OKX)
-        CryptoRadarBundle.Source.KRAKEN -> cryptoReadOnly.fetch(symbol, frame, CryptoRadarCandleClient.Venue.KRAKEN)
-        CryptoRadarBundle.Source.MEXC -> cryptoReadOnly.fetch(symbol, frame, CryptoRadarCandleClient.Venue.MEXC)
-    } }
+    private val cryptoBundle = CryptoRadarBundle { symbol, frame, source ->
+        cryptoReadOnly.fetch(symbol, frame, source.venue)
+    }
     private val nonCryptoBundle = NonCryptoRadarBundle { symbol, frame, source, apiKey ->
-        when (source) {
-            SourceRouting.HistorySource.YAHOO -> publicHistory.fetchCandles(symbol, frame,
+        when {
+            source.usesYahoo -> publicHistory.fetchCandles(symbol, frame,
                 minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
-            SourceRouting.HistorySource.DUKASCOPY -> dukascopyHistory.fetchCandles(symbol, frame,
+            source.usesDukascopy -> dukascopyHistory.fetchCandles(symbol, frame,
                 minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
                 .let { PublicCandleHistoryClient.Result(it.candles, it.provider, it.fetchedAt) }
-            SourceRouting.HistorySource.TWELVE_DATA -> PublicCandleHistoryClient.Result(
+            else -> PublicCandleHistoryClient.Result(
                 client.fetchCandles(apiKey, symbol, frame, outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
                     minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES), "Twelve Data")
         }

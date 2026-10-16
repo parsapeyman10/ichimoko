@@ -306,9 +306,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
         // Do this once per process, not on every tab change. If the user enabled automatic
         // download, a verified public APK is downloaded and Android's installer is opened.
+        // Automatic checks keep a gap (see AppUpdateRepository): the anonymous GitHub API quota
+        // is shared per public IP, so re-checking on every launch hid real updates behind 403s.
         if (!updateCheckStarted) {
             updateCheckStarted = true
-            checkForAppUpdate(settings.value.autoDownloadUpdates)
+            checkForAppUpdate(settings.value.autoDownloadUpdates, force = false)
         }
     }
 
@@ -480,11 +482,13 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshNow() = container.market.refreshNow()
 
-    fun checkForAppUpdate(autoDownload: Boolean = settings.value.autoDownloadUpdates) {
+    fun checkForAppUpdate(autoDownload: Boolean = settings.value.autoDownloadUpdates, force: Boolean = true) {
         viewModelScope.launch {
-            container.updater.checkForUpdate(autoDownload)
+            container.updater.checkForUpdate(autoDownload, force)
             if (autoDownload && container.updater.state.value.downloadedApkPath != null) {
-                container.updater.installDownloaded()
+                // Automatic path: prepare the install without jumping to Android settings; the
+                // update screen offers the permission button when it is actually needed.
+                container.updater.installDownloaded(openPermissionSettings = false)
             }
         }
     }
@@ -498,7 +502,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setAutoDownloadUpdates(enabled: Boolean) {
         container.settingsStore.update { it.copy(autoDownloadUpdates = enabled) }
-        if (enabled) checkForAppUpdate(autoDownload = true)
+        if (enabled) checkForAppUpdate(autoDownload = true, force = false)
         _toast.value = if (enabled)
             "بررسی و دانلود خودکار فعال شد؛ نصب نهایی با تأیید Android انجام می‌شود"
         else "دانلود خودکار بروزرسانی خاموش شد"

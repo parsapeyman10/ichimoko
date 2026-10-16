@@ -47,27 +47,21 @@ class FeedNavigationTest {
         assertTrue(AurumTab.Update in moreTabs)
         assertTrue(AurumTab.Settings in moreTabs)
         assertTrue(AurumTab.Api in moreTabs)
-        assertTrue(primaryTabs.size <= 5) // bottom bar stays usable on small screens
+        assertTrue(primaryTabs.size <= 5)
     }
 
-    @Test fun `watch catalog keeps Iran cash rows first, then forex, then crypto`() {
-        // Order matters: the Iran cash board is what the user opens the app for, the forex
-        // workspace follows, and crypto is appended so existing positions in the list do
-        // not shift. Crypto is chartable like forex; the Iran rows stay watch-only.
-        val forexFirst = listOf("IR_GOLD18", "USD/IRR", "QUICK_GXRL", "PEUGEOT_207_TU5P",
-            "XAU/USD", "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD", "USD/JPY", "USD/CHF", "USD/CAD")
+    @Test fun `watch catalog keeps metals and Dow Jones first, then Ichimoku forex, then 5 crypto pairs`() {
+        val nonCrypto = listOf(
+            "XAU/USD", "XAG/USD", "DOW",
+            "EUR/USD", "GBP/USD", "USD/JPY", "EUR/JPY", "GBP/JPY", "AUD/USD", "USD/CHF",
+        )
         val ids = WatchCatalog.symbols.map { it.id }
-        assertEquals(forexFirst, ids.take(forexFirst.size))
-        assertEquals(com.aurum.edge.data.CryptoCatalog.watchlistSeed.map { it.id }, ids.drop(forexFirst.size))
-
-        assertEquals(listOf("XAU/USD", "EUR/USD", "GBP/USD", "AUD/USD", "NZD/USD",
-            "USD/JPY", "USD/CHF", "USD/CAD") +
-            com.aurum.edge.data.CryptoCatalog.watchlistSeed.map { it.id },
-            WatchCatalog.chartSymbols)
-        assertEquals("tgju_public", WatchCatalog.find("IR_GOLD18")!!.defaultSources.single())
-        assertEquals("تومان", WatchCatalog.find("USD/IRR")!!.unit)
-        assertEquals("bama_car_price", WatchCatalog.find("QUICK_GXRL")!!.defaultSources.single())
-        assertEquals("XAU/USD", WatchCatalog.find("XAU/USD")!!.providerCodes["swissquote_bbo"])
+        assertEquals(nonCrypto, ids.take(nonCrypto.size))
+        assertEquals(com.aurum.edge.data.CryptoCatalog.watchlistSeed.map { it.id }, ids.drop(nonCrypto.size))
+        assertEquals(ids, WatchCatalog.chartSymbols)
+        assertEquals("gold_api_xau", WatchCatalog.find("XAU/USD")!!.defaultSources.single())
+        assertEquals("gold_api_xag", WatchCatalog.find("XAG/USD")!!.defaultSources.single())
+        assertEquals("yahoo_dow", WatchCatalog.find("DOW")!!.defaultSources.single())
         assertEquals("JPY", WatchCatalog.find("USD/JPY")!!.unit)
     }
 }

@@ -55,7 +55,7 @@ fun UpdateScreen(viewModel: AurumViewModel) {
                 Column(Modifier.weight(1f)) {
                     Text("دانلود خودکار نسخهٔ جدید", style = MaterialTheme.typography.bodySmall,
                         color = AurumColors.TextPrimary)
-                    Text("هنگام باز شدن برنامه نسخه را بررسی می‌کند و APK عمومی را می‌گیرد؛ نصب نهایی به تأیید Android نیاز دارد.",
+                    Text("روشن است: هنگام باز شدن برنامه نسخه بررسی و APK عمومی دانلود می‌شود؛ نصب نهایی یک تأیید Android لازم دارد. اگر نمی‌خواهید، همین کلید را خاموش کنید.",
                         style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 }
                 Switch(
@@ -68,6 +68,11 @@ fun UpdateScreen(viewModel: AurumViewModel) {
             state.error?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall,
                     color = AurumColors.Red, modifier = Modifier.padding(top = 8.dp))
+            }
+            if (state.diagnostics.isNotBlank()) {
+                Text("گزارش تشخیص: ${state.diagnostics}",
+                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
+                    modifier = Modifier.padding(top = 6.dp))
             }
             state.available?.let { info -> UpdateInfoCard(info) }
             if (state.installing) {
@@ -112,8 +117,11 @@ fun UpdateScreen(viewModel: AurumViewModel) {
         }
 
         SectionCard("سازگاری و محدودیت Android", "برای بیشترین سازگاری، اپ چند مسیر بروزرسانی را امتحان می‌کند") {
-            Text("• اول manifest پایدار مالک پروژه و سپس GitHub Releases عمومی بررسی می‌شود. artifact خام GitHub Actions از داخل اپ دانلود نمی‌شود چون معمولاً بدون ورود GitHub خطای 401 می‌دهد.",
+            Text("• اول manifest داخل جدیدترین Release عمومی، بعد نسخهٔ manifest شاخهٔ main و در پایان فهرست GitHub Releases بررسی می‌شود. artifact خام GitHub Actions از داخل اپ دانلود نمی‌شود چون بدون ورود GitHub خطای 401 می‌دهد.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)
+            Text("• بررسی خودکار (هنگام باز شدن برنامه) زودتر از هر ۱۵ دقیقه تکرار نمی‌شود، چون سهمیهٔ بی‌توکن GitHub API برای هر IP مشترک است و تکرار پشت‌سرهم آن را تمام می‌کند. دکمهٔ «بررسی نسخه جدید» همیشه بررسی فوری انجام می‌دهد.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 5.dp))
             Text("• Android اجازهٔ نصب بی‌صدا نمی‌دهد؛ اپ فایل را از داخل خودش می‌گیرد، اما نصب نهایی باید با صفحهٔ Package Installer تأیید شود.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
                 modifier = Modifier.padding(top = 5.dp))

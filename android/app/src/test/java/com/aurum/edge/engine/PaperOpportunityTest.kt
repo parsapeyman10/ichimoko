@@ -39,7 +39,7 @@ import java.nio.file.Files
 class PaperOpportunityTest {
     private val now = 1_800_000_000_000L
     private val bar = now - Interval.M5.millis
-    private val config = AppSettings(backgroundMonitor = true, notifyOnSignal = true,
+    private val config = AppSettings(symbol = "EUR/USD", backgroundMonitor = true, notifyOnSignal = true,
         autoPaperTrading = false, accountBalance = 100.0)
     private val news = PersianNewsState(
         articles = listOf(PersianHeadline("id", "Gold and USD", "", "Publisher",
@@ -48,21 +48,21 @@ class PaperOpportunityTest {
         sources = listOf(NewsSourceStatus("Publisher", "online", "https://publisher.example/rss"),
             NewsSourceStatus("Forex Factory", "online", "https://nfs.faireconomy.media/ff_calendar_thisweek.json")),
         calendarCheckedAt = now,
-        ai = AiNewsVerdict("AVAILABLE", "XAU/USD", "BUY", 91.0, "test-model",
+        ai = AiNewsVerdict("AVAILABLE", "EUR/USD", "BUY", 91.0, "test-model",
             "fixture", now, listOf("id")),
     )
     private val raw = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2994.5,
         takeProfit = 3009.0, interval = Interval.M5, barTime = bar,
         ichimokuEntry = com.aurum.edge.core.IchimokuEntryEvidence(SignalAction.BUY, bar, bar, Interval.M5, 3),
         confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "fixture", scorePercent = 25) })
-    private val signal get() = NewsConfluence.apply(raw, "XAU/USD", news, now)!!
+    private val signal get() = NewsConfluence.apply(raw, "EUR/USD", news, now)!!
     private val snapshot = MtfAnalyzer.Snapshot(Interval.M5,
         frames = listOf(MtfAnalyzer.FrameBias(Interval.M5, SignalAction.BUY, 80,
             3000.0, 2950.0, 2940.0, 2980.0, 60.0, 25.0, 0.2, "fixture")),
         bias = SignalAction.BUY, score = 1.0, alignment = 1.0,
         buyCount = 1, sellCount = 0, neutralCount = 0, veto = false,
         vetoReason = null, advisory = "fixture", barTime = bar, skippedFrames = emptyList())
-    private val market get() = MarketState(symbol = "XAU/USD", interval = Interval.M5,
+    private val market get() = MarketState(symbol = "EUR/USD", interval = Interval.M5,
         candles = IctTestBars.readyAt(bar),
         lastPrice = 3000.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now), signal = signal)
     private val context get() = RuntimeEnvironment.getApplication()
@@ -84,7 +84,7 @@ class PaperOpportunityTest {
                 if (idx == i) item.copy(ok = false, status = com.aurum.edge.core.ConfluenceStatus.CONFLICT, scorePercent = 0) else item
             })
             assertNotNull("tech $i", PaperAlertRules.blocker(market.copy(signal =
-                NewsConfluence.apply(fail, "XAU/USD", news, now)), config, news, emptyList(), snapshot, now))
+                NewsConfluence.apply(fail, "EUR/USD", news, now)), config, news, emptyList(), snapshot, now))
         }
         assertNotNull(PaperAlertRules.blocker(market.copy(symbol = "XAG/USD"), config, news, emptyList(), snapshot, now))
     }
@@ -94,8 +94,8 @@ class PaperOpportunityTest {
         val file = File(root, "opportunities.json")
         val journalFile = File(root, "journal.json")
         val ict = IctEntryRules.approvedEvidence(market, now)!!
-        val opportunity = PaperOpportunity.from(signal, "XAU/USD", 3000.0,
-            MtfSnapshotRecord.from(snapshot), NewsConfluence.record(news)!!, ict, now)
+        val opportunity = PaperOpportunity.from(signal, "EUR/USD", 3000.0,
+            MtfSnapshotRecord.from(snapshot), NewsConfluence.record(news, "EUR/USD")!!, ict, now)
         val store = PaperOpportunityStore(context, file)
         store.load()
         assertTrue(store.record(opportunity))
@@ -108,7 +108,7 @@ class PaperOpportunityTest {
         assertEquals(0, journal.stats().total)
         val reopened = PaperOpportunityStore(context, file).also { it.load() }
         assertFalse(reopened.record(opportunity))
-        val trade = journal.open(signal, "XAU/USD", 3000.0, 100.0, 0.5,
+        val trade = journal.open(signal, "EUR/USD", 3000.0, 100.0, 0.5,
             automatic = true, mtf = MtfSnapshotRecord.from(snapshot),
             newsEvidence = NewsConfluence.record(news), priceAction = ict, observedAt = now)
         reopened.linkTrade(trade)

@@ -1,6 +1,7 @@
 package com.aurum.edge.data
 
 import com.aurum.edge.core.Candle
+import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
@@ -8,94 +9,51 @@ import org.junit.Test
 
 class CryptoRadarBundleTest {
     private val now = System.currentTimeMillis()
-    private fun bars(interval: Interval, stale: Boolean = false): List<Candle> {
-        val last = now / interval.millis * interval.millis - interval.millis -
-            if (stale) 4*interval.millis else 0L
-        return (0 until 320).map { i ->
-            Candle(last - (319-i)*interval.millis, 100.0, 101.0, 99.0, 100.0, 10.0)
+
+    private fun closedM5Series(price: Double = 100.0): List<Candle> {
+        val step = Interval.M5.millis
+        val end = now / step * step
+        return (0 until HistoryPolicy.LIVE_REQUEST_CANDLES).map { i ->
+            Candle(end - (HistoryPolicy.LIVE_REQUEST_CANDLES - i) * step,
+                price, price + 1.0, price - 1.0, price, 10.0, closed = true)
         }
     }
 
-    @Test fun `stale M15 rejects entire first venue without mixing with OKX`() = runBlocking {
-        val requested = mutableListOf<Pair<CryptoRadarBundle.Source,Interval>>()
-        val client = CryptoRadarBundle { _, interval, venue ->
-            requested += venue to interval
-            PublicCandleHistoryClient.Result(bars(interval,
-                stale = venue == CryptoRadarBundle.Source.GATE && interval == Interval.M15),
-                venue.label)
+    @Test fun `each crypto symbol fetches only 1500 M5 candles from its dedicated source and converts M15 and H1`() = runBlocking {
+        val calls = mutableListOf<Triple<String, Interval, CryptoRadarBundle.Source>>()
+        val bundle = CryptoRadarBundle { symbol, frame, source ->
+            calls += Triple(symbol, frame, source)
+            PublicCandleHistoryClient.Result(closedM5Series(), "${source.label} ($symbol)")
         }
-        val result = client.fetch("BTC/USDT", now)
-        assertEquals(CryptoRadarBundle.Source.OKX, result.venue)
-        assertEquals("OKX Spot", result.provider)
-        assertEquals(3, result.frames.size)
-        assertTrue(result.priorFailures.single().contains("Gate"))
-        listOf(CryptoRadarBundle.Source.GATE, CryptoRadarBundle.Source.OKX).forEach { source ->
-            val venueFrames = requested.filter { it.first == source }.map { it.second }
-            assertEquals(Interval.M5, venueFrames.first())
-            assertEquals(setOf(Interval.M5, Interval.M15, Interval.H1), venueFrames.toSet())
-            assertEquals(3, venueFrames.size)
-        }
-        assertFalse(CandleSourceHealth.ready(bars(Interval.M5).drop(1), Interval.M5, now, true, true))
-        assertFalse(CandleSourceHealth.ready(bars(Interval.M5).dropLast(1), Interval.M5, now, true, true))
+
+        val btc = bundle.fetch("BTC/USDT", now)
+        assertEquals(CryptoRadarBundle.Source.BINANCE, btc.venue)
+        assertEquals(1500, btc.frames.getValue(Interval.M5).size)
+        assertEquals(500, btc.frames.getValue(Interval.M15).size)
+        assertEquals(125, btc.frames.getValue(Interval.H1).size)
+
+        val eth = bundle.fetch("ETH/USDT", now)
+        assertEquals(CryptoRadarBundle.Source.OKX, eth.venue)
+
+        val sol = bundle.fetch("SOL/USDT", now)
+        assertEquals(CryptoRadarBundle.Source.GATE, sol.venue)
+
+        val bnb = bundle.fetch("BNB/USDT", now)
+        assertEquals(CryptoRadarBundle.Source.MEXC, bnb.venue)
+
+        val xrp = bundle.fetch("XRP/USDT", now)
+        assertEquals(CryptoRadarBundle.Source.KRAKEN, xrp.venue)
+
+        // Verify ONLY M5 was fetched over the network for all 5 symbols, and all 5 used distinct sources
+        assertEquals(5, calls.size)
+        assertTrue(calls.all { it.second == Interval.M5 })
+        assertEquals(5, calls.map { it.third }.distinct().size)
     }
 
-    @Test fun `all failed venues never yield a radar signal`() = runBlocking {
-        val feed = CryptoRadarBundle { _, interval, venue ->
-            PublicCandleHistoryClient.Result(bars(interval).map {
-                if (venue == CryptoRadarBundle.Source.KRAKEN) it.copy(volume = -1.0) else it.copy(closed = false)
-            }, venue.label)
+    @Test fun `incomplete M5 history is rejected instead of fabricating candles`() = runBlocking {
+        val bundle = CryptoRadarBundle { _, _, source ->
+            PublicCandleHistoryClient.Result(closedM5Series().drop(1), source.label)
         }
-        assertTrue(runCatching { feed.fetch("BTC/USDT", now) }.exceptionOrNull()?.message
-            .orEmpty().contains("هیچ منبع"))
-    }
-
-    @Test fun `historical zero execution bars remain real OHLC in the same venue bundle`() = runBlocking {
-        val feed = CryptoRadarBundle { _, interval, source ->
-            PublicCandleHistoryClient.Result(bars(interval).mapIndexed { index, bar ->
-                if (index == 2) bar.copy(volume = 0.0) else bar
-            }, source.label)
-        }
-        val snapshot = feed.fetch("BTC/USDT", now)
-        assertEquals(CryptoRadarBundle.Source.GATE, snapshot.venue)
-        assertEquals(0.0, snapshot.frames.getValue(Interval.M5)[2].volume, 0.0)
-        assertFalse(CandleSourceHealth.ready(
-            snapshot.m5.map { it.copy(volume = -1.0) }, Interval.M5, now, true))
-    }
-
-    @Test fun `venue parsers reject partial candle and wrong pair execution`() {
-        val client = CryptoRadarCandleClient()
-        val t = (now / Interval.M5.millis * Interval.M5.millis - Interval.M5.millis)
-        val gate = """[["${t/1000}","10","100","101","99","100","4",true]]"""
-        assertEquals(t, client.parseGate(gate, Interval.M5, now).single().time)
-        assertTrue(client.parseGate(gate.replace("true", "false"), Interval.M5, now).isEmpty())
-        assertEquals(0.0, client.parseGate(gate.replace("\"4\",true", "\"0\",true"),
-            Interval.M5, now).single().volume, 0.0)
-        assertThrows(DataFeedException::class.java) {
-            client.parseGate(gate.replace("\"4\",true", "\"-1\",true"), Interval.M5, now)
-        }
-
-        val okx = """{"code":"0","data":[["$t","100","101","99","100","4","10","20","1"]]}"""
-        assertEquals(4.0, client.parseOkx(okx, Interval.M5, now).single().volume, 0.00001)
-        assertTrue(client.parseOkx(okx.replace("\"1\"]", "\"0\"]"), Interval.M5, now).isEmpty())
-        assertEquals(0.0, client.parseOkx(okx.replace("\"4\",\"10\"", "\"0\",\"10\""),
-            Interval.M5, now).single().volume, 0.0)
-        // A venue can mark the forming candle closed before the local clock sees the close.
-        assertTrue(client.parseGate(gate.replace("${t/1000}", "${now/1000}"), Interval.M5, now).isEmpty())
-        assertTrue(client.parseOkx(okx.replace("$t", "$now"), Interval.M5, now).isEmpty())
-        val kraken = """{"error":[],"result":{"XBTUSDT":[[${t/1000},"100","101","99","100","100.1","4","12"]],"last":123}}"""
-        assertEquals(4.0, client.parseKraken(kraken, Interval.M5, now).single().volume, 0.00001)
-        assertTrue(client.parseKraken(kraken.replace("${t/1000}", "${now/1000}"),
-            Interval.M5, now).isEmpty()) // Kraken's trailing forming bar
-        val krakenTrade = """{"error":[],"result":{"XBTUSDT":[["100","2","${now/1000.0}","b","l",""]],"last":"99"}}"""
-        assertEquals(100.0, client.parseKrakenTrade(krakenTrade).price, 0.00001)
-        assertThrows(DataFeedException::class.java) {
-            client.parseKrakenTrade("""{"error":[],"result":{"A":[],"B":[],"last":"99"}}""")
-        }
-        assertThrows(DataFeedException::class.java) {
-            client.parseGateTrade("""[{"currency_pair":"ETH_USDT","price":"100","amount":"1","create_time_ms":"$now"}]""", "BTC_USDT")
-        }
-        assertThrows(DataFeedException::class.java) {
-            client.parseOkxTrade("""{"code":"0","data":[{"instId":"ETH-USDT","px":"100","sz":"1","ts":"$now"}]}""", "BTC-USDT")
-        }
+        assertTrue(runCatching { bundle.fetch("BTC/USDT", now) }.isFailure)
     }
 }

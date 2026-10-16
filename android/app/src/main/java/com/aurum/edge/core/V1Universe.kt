@@ -2,26 +2,56 @@ package com.aurum.edge.core
 
 import java.util.Locale
 
-/** Six editable defaults for the three active risk buckets. This is a *watchlist*, not a closed catalog.
- * Additional symbols still need a real independently timestamped feed: a symbol string alone
- * never manufactures prices or authorizes a paper trade.
+/**
+ * Focused 15-symbol trading universe:
+ * - 5 high-volume crypto pairs: BTC/USDT, ETH/USDT, SOL/USDT, BNB/USDT, XRP/USDT
+ * - 2 precious metals: XAU/USD (Gold), XAG/USD (Silver)
+ * - 7 Ichimoku-suitable forex pairs: EUR/USD, GBP/USD, USD/JPY, EUR/JPY, GBP/JPY, AUD/USD, USD/CHF
+ * - 1 index: DOW (Dow Jones / US30)
  */
 object V1Universe {
-    val defaults = listOf("EUR/USD", "GBP/USD", "XAU/USD", "XAG/USD",
-        "BTC/USDT", "ETH/USDT")
+    val cryptoSymbols = listOf(
+        "BTC/USDT",
+        "ETH/USDT",
+        "SOL/USDT",
+        "BNB/USDT",
+        "XRP/USDT",
+    )
 
-    private val fiat = setOf("USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD",
-        "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "TRY", "ZAR", "MXN", "SGD", "HKD")
+    val metalSymbols = listOf(
+        "XAU/USD",
+        "XAG/USD",
+    )
 
-    fun normalize(raw: String): String = raw.trim().uppercase(Locale.ROOT)
+    val forexSymbols = listOf(
+        "EUR/USD",
+        "GBP/USD",
+        "USD/JPY",
+        "EUR/JPY",
+        "GBP/JPY",
+        "AUD/USD",
+        "USD/CHF",
+    )
+
+    val indexSymbols = listOf(
+        "DOW",
+    )
+
+    val allSymbols: List<String> = metalSymbols + indexSymbols + forexSymbols + cryptoSymbols
+    val defaults: List<String> = allSymbols
+    private val allowedSet: Set<String> = allSymbols.toSet()
+
+    fun normalize(raw: String): String {
+        val cleaned = raw.trim().uppercase(Locale.ROOT)
+        return when (cleaned) {
+            "US30", "DJI", "^DJI", "DJIA", "DOWJONES", "DOW_JONES" -> "DOW"
+            else -> cleaned
+        }
+    }
+
     fun valid(raw: String): Boolean {
         val symbol = normalize(raw)
-        return symbol.matches(Regex("[A-Z0-9]{1,12}(/[A-Z0-9]{2,12})?")) &&
-            (symbol.contains("/") || symbol in setOf("USOIL", "UKOIL", "COPPER", "WTI", "BRENT", "NATGAS") ||
-                (symbol.length == 6 && AssetClass.of(symbol) == AssetClass.FOREX &&
-                    symbol.take(3) in fiat && symbol.takeLast(3) in fiat)) &&
-            AssetClass.of(symbol) != AssetClass.STOCK &&
-            !symbol.contains("IRT") && !symbol.contains("IRR") && symbol !in setOf("GOLD", "SILVER")
+        return symbol in allowedSet
     }
 
     fun watchlist(symbols: List<String>): List<String> =

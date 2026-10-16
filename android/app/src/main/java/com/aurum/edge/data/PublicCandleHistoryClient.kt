@@ -152,8 +152,11 @@ class PublicCandleHistoryClient(
             val seconds = timestamps[i].num()?.toLong() ?: continue
             if (seconds <= 0 || seconds > Long.MAX_VALUE / 1000L) continue
             val rawTime = seconds * 1000L
-            if (rawTime > now + 60_000L) continue
+            if (rawTime > now) continue
             val time = rawTime - (rawTime % interval.millis)
+            // Historical responses may include the currently forming candle. Do not label it
+            // closed; this adapter returns only bars whose full interval has elapsed.
+            if (time + interval.millis > now) continue
             val open = opens[i].num()?.takeIf { it.isFinite() && it > 0.0 } ?: continue
             val high = highs[i].num()?.takeIf { it.isFinite() && it > 0.0 } ?: continue
             val low = lows[i].num()?.takeIf { it.isFinite() && it > 0.0 } ?: continue
@@ -180,6 +183,7 @@ class PublicCandleHistoryClient(
             "USD/JPY" -> "JPY=X"
             "USD/CHF" -> "CHF=X"
             "USD/CAD" -> "CAD=X"
+            "DOW", "US30", "DJI", "^DJI" -> "^DJI"
             "EUR/GBP" -> "EURGBP=X"
             "EUR/JPY" -> "EURJPY=X"
             "GBP/JPY" -> "GBPJPY=X"
@@ -230,9 +234,9 @@ class PublicCandleHistoryClient(
     private fun range(interval: Interval): String = when (interval) {
         Interval.M1 -> "7d"
         Interval.M3 -> "7d"
-        Interval.M5 -> "1mo"
-        Interval.M15 -> "3mo"
-        Interval.M30 -> "6mo"
+        Interval.M5 -> "60d"
+        Interval.M15 -> "60d"
+        Interval.M30 -> "60d"
         Interval.H1, Interval.H4 -> "2y"
         Interval.D1 -> "15y"
     }

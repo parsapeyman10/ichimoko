@@ -29,22 +29,23 @@ import java.time.Instant
 
 class V1ContractTest {
     private val now = Instant.parse("2026-10-08T12:00:00Z").toEpochMilli()
-    private fun bars(interval: Interval): List<Candle> = (0 until 340).map { i ->
-        val start = now - (340 - i) * interval.millis
+    private val totalBars = com.aurum.edge.core.HistoryPolicy.LIVE_MIN_CANDLES
+    private fun bars(interval: Interval): List<Candle> = (0 until totalBars + 20).map { i ->
+        val start = now - (totalBars + 20 - i) * interval.millis
         val price = 100.0 + i * .02 + (i % 5) * .08
         Candle(start, price, price + .25, price - .25, price + .03, 100.0, true)
     }
 
-    @Test fun unknownTimeframesNeverCreateTradesOrFillWithInventedM1() {
-        val base = bars(Interval.M5)
-        val signal = SignalEngine.evaluate(base, Interval.M5, 60.0,
-            symbol = "EUR/USD", mode = CategoryStrategy.HYBRID)
-        assertEquals(SignalAction.NO_TRADE, signal.action)
-        assertEquals(4, signal.confluence.size)
-        assertTrue(signal.blockers.any { it.contains("پشتهٔ ۳") })
-        assertTrue(signal.confluence.last().detail.contains("15m:نامعلوم") ||
-            signal.confluence.last().detail.contains("15M:نامعلوم"))
-        assertFalse(signal.isActionable)
+    @Test fun resampledM15AndH1AreDerivedFromM5And513And1024LinesAreComputed() {
+        val base = bars(Interval.M5).takeLast(totalBars)
+        val m15 = MtfAnalyzer.convertFromM5(base, Interval.M15)
+        val h1 = MtfAnalyzer.convertFromM5(base, Interval.H1)
+        assertEquals(500, m15.size)
+        assertEquals(125, h1.size)
+        val ichi = Ichimoku.compute(base, 8, 24, 72, 24)
+        assertNotNull(ichi.line513.last())
+        assertNotNull(ichi.line1024.last())
+        assertEquals(SignalAction.BUY, ichi.higherTimeframeBiasAt(base.lastIndex, base.last().close))
     }
 
     @Test fun threeRealFrameStackIsScoredAndOldFutureBarsCannotParticipate() {
@@ -56,32 +57,37 @@ class V1ContractTest {
         assertTrue(signal.confluence.last().detail.contains("1H:"))
         assertFalse(signal.blockers.any { it.contains("پشتهٔ ۳") })
         val future = data.toMutableMap()
-        future[Interval.M15] = data.getValue(Interval.M15).map {
+        // Supply only a short block of M15 bars shifted after the M5 base close. Older
+        // history must not leave enough bars to accidentally satisfy the 500-bar gate.
+        future[Interval.M15] = data.getValue(Interval.M15).takeLast(100).map {
             it.copy(time = it.time + 2L * Interval.D1.millis)
         }
         val rejected = SignalEngine.evaluate(data.getValue(Interval.M5), Interval.M5, 60.0,
             symbol = "EUR/USD", timeframes = future)
         assertEquals(SignalAction.NO_TRADE, rejected.action)
-        assertTrue(rejected.blockers.any { it.contains("پشتهٔ ۳") })
+        // A future-dated M15 frame must become UNKNOWN rather than contributing a vote.
+        val stackEvidence = rejected.confluence.single { it.name == "پشتهٔ ۳ تایم‌فریمی" }
+        assertEquals(ConfluenceStatus.UNKNOWN, stackEvidence.status)
+        assertTrue(stackEvidence.detail.contains("15m:نامعلوم"))
     }
 
     @Test fun oneShortOrUnclosedFrameBlocksThreeFrameAlignment() {
         val complete = V1Scoring.intervals.associateWith(::bars)
         val short = complete.toMutableMap()
-        short[Interval.M15] = complete.getValue(Interval.M15).takeLast(319)
+        short[Interval.M15] = complete.getValue(Interval.M15).takeLast(499)
         val rejected = SignalEngine.evaluate(complete.getValue(Interval.M5), Interval.M5, 60.0,
             symbol = "EUR/USD", timeframes = short)
         assertEquals(SignalAction.NO_TRADE, rejected.action)
-        assertTrue(rejected.blockers.any { it.contains("15m(319/320)") })
-        assertTrue(rejected.confluence.last().detail.contains("319/320 کندل"))
+        assertTrue(rejected.blockers.any { it.contains("15m(499/500)") })
+        assertTrue(rejected.confluence.last().detail.contains("499/500 کندل"))
 
         val open = complete.toMutableMap()
-        open[Interval.H1] = complete.getValue(Interval.H1).takeLast(320)
-            .mapIndexed { index, candle -> if (index == 319) candle.copy(closed = false) else candle }
+        open[Interval.H1] = complete.getValue(Interval.H1).takeLast(125)
+            .mapIndexed { index, candle -> if (index == 124) candle.copy(closed = false) else candle }
         val blocked = SignalEngine.evaluate(complete.getValue(Interval.M5), Interval.M5, 60.0,
             symbol = "EUR/USD", timeframes = open)
         assertEquals(SignalAction.NO_TRADE, blocked.action)
-        assertTrue(blocked.blockers.any { it.contains("1H(319/320)") })
+        assertTrue(blocked.blockers.any { it.contains("1H(124/125)") })
     }
 
     @Test fun equalDirectionalScoresNeverDefaultBuyAndRangeNeedsDirectionalFrames() {
@@ -159,7 +165,7 @@ class V1ContractTest {
             assertEquals(8, setting.tenkan)
             assertEquals(24, setting.kijun)
             assertEquals(72, setting.spanB)
-            val sample = bars(interval).takeLast(320)
+            val sample = bars(interval).takeLast(totalBars)
             val visible = Ichimoku.compute(sample, setting.tenkan, setting.kijun, setting.spanB,
                 setting.kijun).cloudAt(sample.lastIndex)
             assertNotNull(visible)

@@ -52,34 +52,23 @@ class SourceIntegrityTest {
         assertNotNull(gate.blocker(symbol, firstRecovery))
     }
 
-    @Test fun `another reader conflict invalidates preferred venue and only fresh comparison can recover`() = runBlocking {
-        val gate = SourceIntegrity.shared
+    @Test fun `dedicated history rejects a different publisher without trying a fallback`() = runBlocking {
         val now = System.currentTimeMillis()
-        var phase = 0
-        fun bundle() = NonCryptoRadarBundle { _, frame, source, _ ->
-            val price = if (phase == 1) 100.0 + source.ordinal * 10.0 else 100.0
-            if (phase == 2 && source != SourceRouting.HistorySource.YAHOO) throw DataFeedException("offline")
+        val requestedSources = mutableListOf<SourceRouting.HistorySource>()
+        val bundle = NonCryptoRadarBundle { _, frame, source, _ ->
+            requestedSources += source
+            val count = HistoryPolicy.LIVE_REQUEST_CANDLES
             val last = now / frame.millis * frame.millis - frame.millis
-            val bars = (0 until 320).map { i -> Candle(last - (319-i)*frame.millis, price, price+1, price-1, price, 10.0) }
-            PublicCandleHistoryClient.Result(bars, when (source) {
-                SourceRouting.HistorySource.YAHOO -> "Yahoo Finance"
-                SourceRouting.HistorySource.DUKASCOPY -> "Dukascopy"
-                SourceRouting.HistorySource.TWELVE_DATA -> "Twelve Data"
-            })
+            val bars = (0 until count).map { i ->
+                val price = 100.0
+                Candle(last - (count - 1 - i) * frame.millis, price, price + 1.0, price - 1.0, price, 10.0)
+            }
+            // EUR/USD is contractually routed only to Yahoo; a different provider is rejected.
+            PublicCandleHistoryClient.Result(bars, "Dukascopy")
         }
-        val original = bundle()
-        val initial = original.fetch("EUR/USD", "synthetic", now)
-        assertEquals(0L, initial.integrityRevision)
-        phase = 1
-        assertTrue(runCatching { bundle().fetch("EUR/USD", "synthetic", now) }.isFailure)
-        assertNotNull(gate.blocker("EUR/USD", 0))
-        phase = 2 // a healthy cached primary alone must not clear a previously known conflict
-        assertTrue(runCatching { original.fetch("EUR/USD", "synthetic", now) }.isFailure)
-        phase = 0
-        val recovered = original.fetch("EUR/USD", "synthetic", now)
-        assertTrue(recovered.integrityRevision > initial.integrityRevision)
-        assertNull(gate.blocker("EUR/USD", recovered.integrityRevision))
-        assertNotNull(gate.blocker("EUR/USD", initial.integrityRevision))
+
+        assertTrue(runCatching { bundle.fetch("EUR/USD", "", now) }.isFailure)
+        assertEquals(listOf(SourceRouting.HistorySource.YAHOO_EURUSD), requestedSources)
     }
 
     @Test fun `automatic and opportunity entry gates reject fresh ticks with stale analysis revision`() {

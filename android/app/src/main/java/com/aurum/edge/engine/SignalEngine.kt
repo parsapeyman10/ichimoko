@@ -77,9 +77,26 @@ object SignalEngine {
      * Category mode and threshold can never diverge between callers.
      */
     fun evaluateLive(candles: List<Candle>, interval: Interval, settings: AppSettings,
-                     symbol: String, timeframes: Map<Interval, List<Candle>>): Signal =
-        evaluate(candles, interval, settings.minConfidence, symbol,
+                     symbol: String, timeframes: Map<Interval, List<Candle>>): Signal {
+        if (com.aurum.edge.core.V1Universe.normalize(symbol) == "XAU/USD") {
+            val als5Config = Als5GoldEngine.Config(
+                accountEquityUsd = settings.accountBalance,
+                // ALS-5 starts at 0.25%; a lower user setting remains allowed, never a higher one.
+                riskPerTradePct = settings.riskPercent.coerceIn(0.01, 0.25),
+            )
+            return Als5GoldEngine.evaluate(
+                input = candles,
+                interval = interval,
+                symbol = symbol,
+                threshold = settings.minConfidence,
+                mode = settings.strategyFor(symbol),
+                external = timeframes,
+                config = als5Config,
+            )
+        }
+        return evaluate(candles, interval, settings.minConfidence, symbol,
             settings.strategyFor(symbol), timeframes)
+    }
 
     /** Only V1 inputs are accepted. Legacy profile/strategy/spread settings do not masquerade
      * as scoring filters; execution costs are checked separately by PaperOrderRules.
@@ -87,8 +104,11 @@ object SignalEngine {
     fun evaluate(candles: List<Candle>, interval: Interval, threshold: Double = 85.0,
                  symbol: String = "XAU/USD", mode: com.aurum.edge.core.CategoryStrategy =
                      com.aurum.edge.core.CategoryStrategy.HYBRID,
-                 timeframes: Map<Interval, List<Candle>> = emptyMap()): Signal =
-        if (AssetClass.of(symbol) == AssetClass.CRYPTO)
+                 timeframes: Map<Interval, List<Candle>> = emptyMap()): Signal = when {
+        AssetClass.of(symbol) == AssetClass.CRYPTO ->
             CryptoCompressionEngine.evaluate(candles, interval, symbol, timeframes)
-        else V1Scoring.evaluate(candles, interval, symbol, threshold, mode, timeframes)
+        com.aurum.edge.core.V1Universe.normalize(symbol) == "XAU/USD" ->
+            Als5GoldEngine.evaluate(candles, interval, symbol, threshold, mode, timeframes)
+        else -> V1Scoring.evaluate(candles, interval, symbol, threshold, mode, timeframes)
+    }
 }

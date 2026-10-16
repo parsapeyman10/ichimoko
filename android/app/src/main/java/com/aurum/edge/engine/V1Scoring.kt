@@ -20,7 +20,14 @@ import kotlin.math.min
  */
 internal object V1Scoring {
     val intervals = listOf(Interval.M5, Interval.M15, Interval.H1)
-    private const val MIN_BARS = HistoryPolicy.LIVE_MIN_CANDLES // 320 genuine closed bars per interval
+    private const val MIN_BARS = HistoryPolicy.LIVE_MIN_CANDLES // 1500 genuine closed M5 bars
+
+    fun minBarsFor(interval: Interval): Int = when (interval) {
+        Interval.M5 -> HistoryPolicy.LIVE_MIN_CANDLES
+        Interval.M15 -> HistoryPolicy.RESAMPLED_M15_CANDLES
+        Interval.H1 -> HistoryPolicy.RESAMPLED_H1_CANDLES
+        else -> HistoryPolicy.LIVE_MIN_CANDLES
+    }
 
     fun evaluate(input: List<Candle>, interval: Interval, symbol: String, threshold: Double,
                  mode: CategoryStrategy, external: Map<Interval, List<Candle>>): Signal {
@@ -79,21 +86,27 @@ internal object V1Scoring {
         if (!macd.isFinite() || !prevMacd.isFinite()) return blocked("MACD نامعتبر است")
         val support = bars.dropLast(1).takeLast(20).minOf { it.low }
         val resistance = bars.dropLast(1).takeLast(20).maxOf { it.high }
-        // On a live higher-timeframe chart, its last CLOSED bar may be hours old while
-        // M1/M5 have moved on. Compare their latest completed bars at the live clock, not
-        // at yesterday's D1 close. Historical evaluation stays bounded by the base close.
-        val frameAsOf = if (clock - asOf in 0L..(interval.millis + 90_000L)) clock else asOf
+        // The M5 entry path must never read an M15/H1 bar that closed after its own base
+        // candle, even if the wall clock has advanced. For non-M5 analysis views only,
+        // allow the most recent closed frame at the live clock when the base bar is fresh.
+        val frameAsOf = if (interval != Interval.M5 &&
+            clock - asOf in 0L..(interval.millis + 90_000L)) clock else asOf
+        val resolvedExternal = if (external.isEmpty() && interval == Interval.M5) {
+            mapOf(
+                Interval.M15 to MtfAnalyzer.convertFromM5(bars, Interval.M15),
+                Interval.H1 to MtfAnalyzer.convertFromM5(bars, Interval.H1),
+            )
+        } else external
         val frameCounts = mutableMapOf<Interval, Int>()
         val stack = intervals.map { target ->
-            // One independently fetched series for each interval. No higher timeframe is
-            // invented from the selected chart's bars; a missing series is UNKNOWN.
-            val source = if (target == interval) bars else external[target].orEmpty()
+            val reqBars = minBarsFor(target)
+            val source = if (target == interval) bars else resolvedExternal[target].orEmpty()
                 .filter { it.closed && it.time + target.millis <= frameAsOf }
                 .sortedBy { it.time }.takeLast(MIN_BARS)
             frameCounts[target] = source.size
-            target to frameBias(source, target, frameAsOf)
+            target to frameBias(source, target, frameAsOf, reqBars)
         }
-        val missing = stack.filter { it.second == null }.map { "${it.first.label}(${frameCounts[it.first]}/$MIN_BARS)" }
+        val missing = stack.filter { it.second == null }.map { "${it.first.label}(${frameCounts[it.first]}/${minBarsFor(it.first)})" }
         if (missing.isNotEmpty()) blockers += "پشتهٔ ۳ تایم‌فریمی کامل نیست: ${missing.joinToString("، ")}؛ هیچ بازه‌ای حدس زده نمی‌شود"
 
         fun score(side: SignalAction): Pair<Int, List<ConfluenceItem>> {
@@ -132,7 +145,7 @@ internal object V1Scoring {
                 item("پرایس‌اکشن · حمایت/مقاومت", priceAction,
                     "حمایت=$support · مقاومت=$resistance · ATR=$atr · $priceAction/25"),
                 item("پشتهٔ ۳ تایم‌فریمی", tfScore,
-                    stack.joinToString(" · ") { "${it.first.label}:${it.second?.name ?: "نامعلوم"} (${frameCounts[it.first]}/$MIN_BARS کندل)" } + " · $tfScore/25",
+                    stack.joinToString(" · ") { "${it.first.label}:${it.second?.name ?: "نامعلوم"} (${frameCounts[it.first]}/${minBarsFor(it.first)} کندل)" } + " · $tfScore/25",
                     missing.isNotEmpty()),
             )
             return (trend + momentum + priceAction + tfScore) to items
@@ -186,9 +199,9 @@ internal object V1Scoring {
         else -> SignalAction.NO_TRADE
     }
 
-    private fun frameBias(input: List<Candle>, interval: Interval, asOf: Long): SignalAction? {
+    private fun frameBias(input: List<Candle>, interval: Interval, asOf: Long, reqBars: Int = minBarsFor(interval)): SignalAction? {
         val bars = input.takeLast(MIN_BARS)
-        if (bars.size != MIN_BARS || bars.zipWithNext().any { (a, b) -> b.time <= a.time }) return null
+        if (bars.size < reqBars || bars.zipWithNext().any { (a, b) -> b.time <= a.time }) return null
         val last = bars.last()
         if (!last.closed || last.time + interval.millis > asOf ||
             asOf - (last.time + interval.millis) > interval.millis * 3 ||
@@ -198,7 +211,8 @@ internal object V1Scoring {
         val ichi = Ichimoku.compute(bars, setting.tenkan, setting.kijun, setting.spanB, setting.kijun)
         val atr = Indicators.atr(bars, 14).lastOrNull() ?: return null
         val read = IchimokuAlignment.read(bars, ichi, atr) ?: return null
-        val ema = Indicators.ema(bars.map { it.close }, 200).lastOrNull() ?: return null
+        val emaPeriod = if (bars.size >= 200) 200 else 50
+        val ema = Indicators.ema(bars.map { it.close }, emaPeriod).lastOrNull() ?: return null
         return when {
             last.close > ema && read.trendAligned(SignalAction.BUY, last.close) -> SignalAction.BUY
             last.close < ema && read.trendAligned(SignalAction.SELL, last.close) -> SignalAction.SELL

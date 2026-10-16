@@ -76,6 +76,33 @@ object MtfAnalyzer {
     }
 
     /**
+     * Convert closed 5-minute (M5) candles directly into closed M15 (every 3 M5 candles = 1 M15 candle)
+     * or H1 (every 12 M5 candles = 1 H1 candle) candles.
+     */
+    fun convertFromM5(m5Candles: List<Candle>, target: Interval): List<Candle> {
+        val closed = m5Candles.filter { it.closed }.sortedBy { it.time }
+        if (target == Interval.M5 || target.minutes <= Interval.M5.minutes) return closed
+        val factor = (target.minutes / Interval.M5.minutes).coerceAtLeast(1)
+        if (closed.size < factor) return emptyList()
+        val remainder = closed.size % factor
+        val aligned = if (remainder == 0) closed else closed.drop(remainder)
+        val out = ArrayList<Candle>(aligned.size / factor)
+        for (idx in aligned.indices step factor) {
+            val group = aligned.subList(idx, idx + factor)
+            out += Candle(
+                time = group.first().time,
+                open = group.first().open,
+                high = group.maxOf { it.high },
+                low = group.minOf { it.low },
+                close = group.last().close,
+                volume = group.sumOf { it.volume },
+                closed = true,
+            )
+        }
+        return out
+    }
+
+    /**
      * Aggregate real bars into [target]. The newest bucket stays open (its bar is marked
      * not-closed) and buckets that are clearly incomplete are dropped.
      */
@@ -135,13 +162,19 @@ object MtfAnalyzer {
         if (price > ema) score += 1 else if (price < ema) score -= 1
         if (tenkan > kijun) score += 1 else if (tenkan < kijun) score -= 1
         if (rsi >= 52.0 && rsi <= 72.0) score += 1 else if (rsi >= 28.0 && rsi <= 48.0) score -= 1
+        val line513 = series.ichimoku.line513.getOrNull(i)
+        val line1024 = series.ichimoku.line1024.getOrNull(i)
+        val htfBias = series.ichimoku.higherTimeframeBiasAt(i, price)
+        if (interval == Interval.M5 && htfBias == SignalAction.BUY) score += 1
+        else if (interval == Interval.M5 && htfBias == SignalAction.SELL) score -= 1
 
         val bias = when {
             score >= 2 -> SignalAction.BUY
             score <= -2 -> SignalAction.SELL
             else -> SignalAction.NO_TRADE
         }
-        val strength = ((abs(score) / 5.0) * 100.0).roundToInt().coerceIn(0, 100)
+        val maxScore = if (interval == Interval.M5 && line513 != null) 6.0 else 5.0
+        val strength = ((abs(score) / maxScore) * 100.0).roundToInt().coerceIn(0, 100)
         val cloudNote = when {
             price > cloudTop -> "بالای ابر"
             price < cloudBottom -> "زیر ابر"
@@ -152,6 +185,14 @@ object MtfAnalyzer {
             append(cloudNote)
             append(" · ")
             append(if (price > ema) "بالای EMA200" else "زیر EMA200")
+            if (interval == Interval.M5 && line513 != null && line1024 != null) {
+                append(" · ۵۱۳/۱۰۲۴ ")
+                append(when (htfBias) {
+                    SignalAction.BUY -> "صعودی"
+                    SignalAction.SELL -> "نزولی"
+                    SignalAction.NO_TRADE -> "خنثی"
+                })
+            }
             append(" · ")
             append("RSI ")
             append(String.format("%.1f", rsi))
@@ -185,7 +226,11 @@ object MtfAnalyzer {
         val frames = ArrayList<FrameBias>()
         val skipped = ArrayList<String>()
         framesFor(base).forEach { target ->
-            val bars = resample(closed, target, base)
+            val bars = if (base == Interval.M5 && target != Interval.M5) {
+                convertFromM5(closed, target)
+            } else {
+                resample(closed, target, base)
+            }
             val frame = frameOf(bars, target)
             if (frame == null) skipped += target.label else frames += frame
         }

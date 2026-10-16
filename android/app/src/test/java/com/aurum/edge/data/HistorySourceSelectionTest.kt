@@ -10,8 +10,11 @@ class HistorySourceSelectionTest {
     private val now = 1_800_000_010_000L
     private fun candidate(name: String, price: Double, older: Boolean = false) =
         HistorySourceSelection.Candidate(name, name, listOf(Interval.M5, Interval.M15, Interval.H1).associateWith { frame ->
+            val count = CandleSourceHealth.requiredSize(frame)
             val last = now / frame.millis * frame.millis - frame.millis - if (older) frame.millis else 0L
-            (0 until 320).map { i -> Candle(last - (319-i)*frame.millis, price, price+1, price-1, price, 10.0) }
+            (0 until count).map { i ->
+                Candle(last - (count - 1 - i) * frame.millis, price, price + 1, price - 1, price, 10.0)
+            }
         })
 
     @Test fun `unique majority excludes an outlier without averaging or stitching data`() {

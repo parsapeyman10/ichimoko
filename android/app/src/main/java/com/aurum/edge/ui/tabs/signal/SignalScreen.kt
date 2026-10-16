@@ -93,6 +93,10 @@ fun SignalScreen(viewModel: AurumViewModel, onChartSymbol: (String) -> Unit) {
             sweeping = scanState.sweeping,
             onTrade = onChartSymbol,
         )
+        Als5OpportunityMonitorCard(
+            status = scanState.statuses.firstOrNull { it.symbol == "XAU/USD" },
+            sweeping = scanState.sweeping,
+        )
 
         SectionCard("دلیل بررسی") {
             if (decisionLog.isEmpty()) Text("هنوز بررسی ثبت نشده است")

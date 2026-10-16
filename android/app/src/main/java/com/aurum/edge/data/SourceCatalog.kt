@@ -1,11 +1,60 @@
 package com.aurum.edge.data
 
-/** Built-in public sources. Providers remain separate; conflicting values are never blended. */
+/**
+ * 1-to-1 dedicated public watch sources:
+ * Every symbol in WatchCatalog has its own unique SourceDef so that no two symbols
+ * share the same sourceId or block each other.
+ */
 object SourceCatalog {
-    val yahoo = SourceDef(
-        id = "stocks_yahoo",
-        title = "Yahoo Finance",
-        subtitle = "قیمت/جرقهٔ عمومی فارکس و طلا بدون کلید",
+    val goldApiXau = SourceDef(
+        id = "gold_api_xau",
+        title = "Gold-API · طلای جهانی (XAU/USD)",
+        subtitle = "منبع اختصاصی انس طلا، بدون کلید",
+        kind = SourceKind.JSON_REST,
+        urlTemplate = "https://api.gold-api.com/price/{symbol}",
+        pricePath = "price",
+        changeMode = ChangeMode.NONE,
+        timestampPath = "updatedAt",
+        timestampMode = SourceTime.UTC_DATETIME,
+        unit = "$",
+        symbols = listOf(SymbolDef("XAU", "طلای جهانی (هر انس)")),
+    )
+
+    val goldApiXag = SourceDef(
+        id = "gold_api_xag",
+        title = "Gold-API · نقرهٔ جهانی (XAG/USD)",
+        subtitle = "منبع اختصاصی انس نقره، بدون کلید",
+        kind = SourceKind.JSON_REST,
+        urlTemplate = "https://api.gold-api.com/price/{symbol}",
+        pricePath = "price",
+        changeMode = ChangeMode.NONE,
+        timestampPath = "updatedAt",
+        timestampMode = SourceTime.UTC_DATETIME,
+        unit = "$",
+        symbols = listOf(SymbolDef("XAG", "نقرهٔ جهانی (هر انس)")),
+    )
+
+    val yahooDow = SourceDef(
+        id = "yahoo_dow",
+        title = "Yahoo Index · شاخص داوجونز (DOW)",
+        subtitle = "منبع اختصاصی شاخص داوجونز آمریکا بدون کلید",
+        kind = SourceKind.JSON_REST,
+        urlTemplate = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=5m&range=5d&includePrePost=false",
+        pricePath = "chart.result[0].meta.regularMarketPrice",
+        changePath = "chart.result[0].meta.chartPreviousClose",
+        changeMode = ChangeMode.PREV_CLOSE,
+        sparkPath = "chart.result[0].indicators.quote[0].close",
+        volumePath = "chart.result[0].indicators.quote[0].volume",
+        timestampPath = "chart.result[0].meta.regularMarketTime",
+        timestampMode = SourceTime.UNIX_SECONDS,
+        unit = "$",
+        symbols = listOf(SymbolDef("^DJI", "شاخص داوجونز آمریکا")),
+    )
+
+    val yahooEurusd = SourceDef(
+        id = "yahoo_eurusd",
+        title = "Yahoo FX · EUR/USD",
+        subtitle = "منبع اختصاصی یورو / دلار بدون کلید",
         kind = SourceKind.JSON_REST,
         urlTemplate = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=5m&range=1d&includePrePost=false",
         pricePath = "chart.result[0].meta.regularMarketPrice",
@@ -16,14 +65,147 @@ object SourceCatalog {
         timestampPath = "chart.result[0].meta.regularMarketTime",
         timestampMode = SourceTime.UNIX_SECONDS,
         unit = "$",
-        symbols = listOf("XAUUSD=X", "EURUSD=X", "GBPUSD=X", "AUDUSD=X", "NZDUSD=X", "JPY=X", "CHF=X", "CAD=X").map { SymbolDef(it, it) },
+        symbols = listOf(SymbolDef("EURUSD=X", "یورو / دلار")),
     )
 
-    /** Read-only quote endpoint. The user's API key is inserted only into this HTTPS request. */
+    val swissquoteGbpusd = SourceDef(
+        id = "swissquote_gbpusd",
+        title = "Swissquote BBO · GBP/USD",
+        subtitle = "منبع اختصاصی پوند / دلار",
+        kind = SourceKind.SPOT_BBO_QUOTE,
+        urlTemplate = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/{symbol}",
+        unit = "$",
+        symbols = listOf(SymbolDef("GBP/USD", "پوند / دلار")),
+    )
+
+    val yahooUsdjpy = SourceDef(
+        id = "yahoo_usdjpy",
+        title = "Yahoo FX · USD/JPY",
+        subtitle = "منبع اختصاصی دلار / ین ژاپن بدون کلید",
+        kind = SourceKind.JSON_REST,
+        urlTemplate = "https://query2.finance.yahoo.com/v8/finance/chart/{symbol}?interval=5m&range=1d&includePrePost=false",
+        pricePath = "chart.result[0].meta.regularMarketPrice",
+        changePath = "chart.result[0].meta.chartPreviousClose",
+        changeMode = ChangeMode.PREV_CLOSE,
+        sparkPath = "chart.result[0].indicators.quote[0].close",
+        volumePath = "chart.result[0].indicators.quote[0].volume",
+        timestampPath = "chart.result[0].meta.regularMarketTime",
+        timestampMode = SourceTime.UNIX_SECONDS,
+        unit = "JPY",
+        symbols = listOf(SymbolDef("JPY=X", "دلار / ین ژاپن")),
+    )
+
+    val swissquoteEurjpy = SourceDef(
+        id = "swissquote_eurjpy",
+        title = "Swissquote BBO · EUR/JPY",
+        subtitle = "منبع اختصاصی یورو / ین ژاپن",
+        kind = SourceKind.SPOT_BBO_QUOTE,
+        urlTemplate = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/{symbol}",
+        unit = "JPY",
+        symbols = listOf(SymbolDef("EUR/JPY", "یورو / ین ژاپن")),
+    )
+
+    val yahooGbpjpy = SourceDef(
+        id = "yahoo_gbpjpy",
+        title = "Yahoo FX · GBP/JPY",
+        subtitle = "منبع اختصاصی پوند / ین ژاپن بدون کلید",
+        kind = SourceKind.JSON_REST,
+        urlTemplate = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=5m&range=1d&includePrePost=false",
+        pricePath = "chart.result[0].meta.regularMarketPrice",
+        changePath = "chart.result[0].meta.chartPreviousClose",
+        changeMode = ChangeMode.PREV_CLOSE,
+        sparkPath = "chart.result[0].indicators.quote[0].close",
+        volumePath = "chart.result[0].indicators.quote[0].volume",
+        timestampPath = "chart.result[0].meta.regularMarketTime",
+        timestampMode = SourceTime.UNIX_SECONDS,
+        unit = "JPY",
+        symbols = listOf(SymbolDef("GBPJPY=X", "پوند / ین ژاپن")),
+    )
+
+    val swissquoteAudusd = SourceDef(
+        id = "swissquote_audusd",
+        title = "Swissquote BBO · AUD/USD",
+        subtitle = "منبع اختصاصی دلار استرالیا / دلار",
+        kind = SourceKind.SPOT_BBO_QUOTE,
+        urlTemplate = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/{symbol}",
+        unit = "$",
+        symbols = listOf(SymbolDef("AUD/USD", "دلار استرالیا / دلار")),
+    )
+
+    val swissquoteUsdchf = SourceDef(
+        id = "swissquote_usdchf",
+        title = "Swissquote BBO · USD/CHF",
+        subtitle = "منبع اختصاصی دلار / فرانک سوئیس",
+        kind = SourceKind.SPOT_BBO_QUOTE,
+        urlTemplate = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/{symbol}",
+        unit = "CHF",
+        symbols = listOf(SymbolDef("USD/CHF", "دلار / فرانک سوئیس")),
+    )
+
+    val binanceBtcSpot = SourceDef(
+        id = "binance_btc_spot",
+        title = "Binance Spot · BTC/USDT",
+        subtitle = "منبع اختصاصی بیت‌کوین در بایننس",
+        kind = SourceKind.CRYPTO_SPOT_TRADE,
+        urlTemplate = "https://data-api.binance.vision/api/v3/aggTrades?symbol={symbol}",
+        unit = "$",
+        symbols = listOf(SymbolDef("BTC/USDT", "بیت‌کوین / تتر")),
+    )
+
+    val okxEthSpot = SourceDef(
+        id = "okx_eth_spot",
+        title = "OKX Spot · ETH/USDT",
+        subtitle = "منبع اختصاصی اتریوم در OKX",
+        kind = SourceKind.CRYPTO_SPOT_TRADE,
+        urlTemplate = "https://www.okx.com/api/v5/market/trades?instId={symbol}",
+        unit = "$",
+        symbols = listOf(SymbolDef("ETH/USDT", "اتریوم / تتر")),
+    )
+
+    val gateSolSpot = SourceDef(
+        id = "gate_sol_spot",
+        title = "Gate.io Spot · SOL/USDT",
+        subtitle = "منبع اختصاصی سولانا در Gate.io",
+        kind = SourceKind.CRYPTO_SPOT_TRADE,
+        urlTemplate = "https://api.gateio.ws/api/v4/spot/trades?currency_pair={symbol}",
+        unit = "$",
+        symbols = listOf(SymbolDef("SOL/USDT", "سولانا / تتر")),
+    )
+
+    val mexcBnbSpot = SourceDef(
+        id = "mexc_bnb_spot",
+        title = "MEXC Spot · BNB/USDT",
+        subtitle = "منبع اختصاصی بی‌ان‌بی در MEXC",
+        kind = SourceKind.CRYPTO_SPOT_TRADE,
+        urlTemplate = "https://api.mexc.com/api/v3/trades?symbol={symbol}",
+        unit = "$",
+        symbols = listOf(SymbolDef("BNB/USDT", "بی‌ان‌بی / تتر")),
+    )
+
+    val krakenXrpSpot = SourceDef(
+        id = "kraken_xrp_spot",
+        title = "Kraken Spot · XRP/USDT",
+        subtitle = "منبع اختصاصی ریپل در Kraken",
+        kind = SourceKind.CRYPTO_SPOT_TRADE,
+        urlTemplate = "https://api.kraken.com/0/public/Trades?pair={symbol}",
+        unit = "$",
+        symbols = listOf(SymbolDef("XRP/USDT", "ریپل / تتر")),
+    )
+
+    // Backward-compatible references for tests/helpers
+    val yahoo: SourceDef get() = yahooEurusd
+    val goldApi: SourceDef get() = goldApiXau
+    val swissquoteBbo: SourceDef get() = swissquoteGbpusd
+    val binanceTrades: SourceDef get() = binanceBtcSpot
+    val okxTrades: SourceDef get() = okxEthSpot
+    val gateTrades: SourceDef get() = gateSolSpot
+    val mexcTrades: SourceDef get() = mexcBnbSpot
+    val krakenTrades: SourceDef get() = krakenXrpSpot
+
     val twelveData = SourceDef(
         id = "twelve_data_quote",
         title = "Twelve Data",
-        subtitle = "آخرین قیمت و زمان به‌روزرسانی ارائه‌دهنده",
+        subtitle = "آخرین قیمت ارائه‌دهنده",
         kind = SourceKind.JSON_REST,
         urlTemplate = "https://api.twelvedata.com/quote?symbol={symbol}&timezone=UTC&apikey={api_key}",
         pricePath = "close|price",
@@ -35,106 +217,25 @@ object SourceCatalog {
         requiresKey = true,
     )
 
-    val swissquoteBbo = SourceDef(
-        id = "swissquote_bbo", title = "Swissquote · bid/ask عمومی",
-        subtitle = "مظنهٔ هم‌نماد و زمان‌دار FX/طلا؛ فقط دیده‌بان",
-        kind = SourceKind.SPOT_BBO_QUOTE,
-        urlTemplate = "https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/{symbol}",
-        unit = "$",
+    /** Exactly 15 dedicated sources — 1-to-1 with the 15 symbols in WatchCatalog. */
+    val all: List<SourceDef> = listOf(
+        goldApiXau,
+        goldApiXag,
+        yahooDow,
+        yahooEurusd,
+        swissquoteGbpusd,
+        yahooUsdjpy,
+        swissquoteEurjpy,
+        yahooGbpjpy,
+        swissquoteAudusd,
+        swissquoteUsdchf,
+        binanceBtcSpot,
+        okxEthSpot,
+        gateSolSpot,
+        mexcBnbSpot,
+        krakenXrpSpot,
     )
 
-    val bamaCars = SourceDef(
-        id = "bama_car_price",
-        title = "Bama · قیمت خودرو",
-        subtitle = "قیمت بازار خودرو بدون کلید",
-        kind = SourceKind.HTML_PAGE,
-        urlTemplate = "https://bama.ir/price/{symbol}",
-        unit = "تومان",
-        symbols = listOf(
-            SymbolDef("quick_gxr_lmt", "کوییک GXRL / GXR-L"),
-            SymbolDef("peugeot_207_manualtu5p", "پژو ۲۰۷ دستی TU5P / TU5Plus"),
-        ),
-    )
-
-    /**
-     * Public TGJU board used only for the watchlist's Iran rows. TGJU publishes Rial strings;
-     * scale=0.1 converts them to Toman for the UI. This is not used by the chart/signal engine.
-     */
-    val tgju = SourceDef(
-        id = "tgju_public",
-        title = "TGJU عمومی",
-        subtitle = "دلار آزاد و طلای ایران بدون کلید",
-        kind = SourceKind.JSON_REST,
-        urlTemplate = "https://call1.tgju.org/ajax.json",
-        batchTemplate = "https://call1.tgju.org/ajax.json",
-        pricePath = "current.{symbol}.p",
-        changePath = "current.{symbol}.dp",
-        changeMode = ChangeMode.PERCENT,
-        timestampPath = "current.{symbol}.ts",
-        timestampMode = SourceTime.NONE,
-        scale = 0.1,
-        unit = "تومان",
-        symbols = listOf(
-            SymbolDef("geram18", "طلای ۱۸ عیار ایران"),
-            SymbolDef("price_dollar_rl", "دلار آزاد ایران"),
-        ),
-    )
-
-    // Only vetted built-ins can be selected from the UI.
-    /**
-     * Spot gold, from the same keyless feed the live chart already trusts.
-     *
-     * Yahoo's XAUUSD=X row returns no usable quote for this workspace, so the watchlist
-     * showed global gold as permanently empty. gold-api serves a plain price with its own
-     * update timestamp and needs no key.
-     */
-    val goldApi = SourceDef(
-        id = "gold_api_public",
-        title = "Gold-API · طلای جهانی",
-        subtitle = "قیمت لحظه‌ای انس طلا، بدون کلید",
-        kind = SourceKind.JSON_REST,
-        urlTemplate = "https://api.gold-api.com/price/{symbol}",
-        pricePath = "price",
-        changeMode = ChangeMode.NONE,
-        timestampPath = "updatedAt",
-        timestampMode = SourceTime.UTC_DATETIME,
-        unit = "$",
-        symbols = listOf(SymbolDef("XAU", "طلای جهانی (هر انس)"), SymbolDef("XAG", "نقره (هر انس)")),
-    )
-
-    /** Documented, timestamped Binance Spot aggregate executions. Watch display only;
-     * open-position settlement has a separate higher-priority ID-ordered stream.
-     */
-    val binanceTrades = SourceDef(
-        id = "binance_spot_agg_trades",
-        title = "Binance Spot · aggTrade",
-        subtitle = "معاملهٔ زمان‌دار بازار USDT بایننس، بدون کلید",
-        kind = SourceKind.CRYPTO_SPOT_TRADE,
-        urlTemplate = "https://data-api.binance.vision/api/v3/aggTrades?symbol={symbol}",
-        unit = "$",
-    )
-
-    val gateTrades = SourceDef(
-        id = "gate_spot_trades", title = "Gate Spot · معاملات USDT",
-        subtitle = "معاملهٔ عمومی زمان‌دار، فقط برای دیده‌بان؛ بدون ورود/خروج",
-        kind = SourceKind.CRYPTO_SPOT_TRADE,
-        urlTemplate = "https://api.gateio.ws/api/v4/spot/trades?currency_pair={symbol}", unit = "$",
-    )
-    val okxTrades = SourceDef(
-        id = "okx_spot_trades", title = "OKX Spot · معاملات USDT",
-        subtitle = "معاملهٔ عمومی زمان‌دار، فقط برای دیده‌بان؛ بدون ورود/خروج",
-        kind = SourceKind.CRYPTO_SPOT_TRADE,
-        urlTemplate = "https://www.okx.com/api/v5/market/trades?instId={symbol}", unit = "$",
-    )
-
-    val krakenTrades = SourceDef(
-        id = "kraken_spot_trades", title = "Kraken Spot · معاملات USDT",
-        subtitle = "فقط جفت USDT فعال و زمان‌دار؛ دیده‌بان، نه ورود/خروج",
-        kind = SourceKind.CRYPTO_SPOT_TRADE,
-        urlTemplate = "https://api.kraken.com/0/public/Trades?pair={symbol}", unit = "$",
-    )
-
-    val all = listOf(yahoo, tgju, bamaCars, goldApi, twelveData, swissquoteBbo,
-        gateTrades, okxTrades, krakenTrades, binanceTrades)
     fun find(id: String): SourceDef? = all.firstOrNull { it.id == id }
+        ?: if (id == twelveData.id) twelveData else null
 }

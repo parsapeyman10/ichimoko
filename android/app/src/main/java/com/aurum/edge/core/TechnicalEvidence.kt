@@ -10,12 +10,19 @@ object TechnicalEvidence {
         "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی")
     private val CRYPTO_NAMES = setOf("فشردگی · ۲۰ کندل", "انفجار · حجم/ADX/چیکو",
         "فیلتر کلان · ۵۲/۱۰۳ و M15/H1", "ورود · کندل/ریسک/سشن")
+    private val ALS5_NAMES = setOf(
+        "رژیم و ساختار بازار · ALS-5",
+        "کیفیت ستاپ و سطح نقدینگی · ALS-5",
+        "تأیید ورود و شکست ریزساختار · ALS-5",
+        "نسبت ریسک به ریوارد و شرایط اجرا · ALS-5",
+    )
     private const val NEWS_LABEL = "خبر/تقویم · داده‌کاوی ژورنال"
 
     fun items(signal: Signal): List<ConfluenceItem> = signal.confluence.filterNot { it.name == NEWS_LABEL }
 
     fun confirmed(items: List<ConfluenceItem>): Boolean =
-        items.size == CURRENT_COUNT && items.map { it.name }.toSet() == REQUIRED_NAMES &&
+        items.size == CURRENT_COUNT &&
+            (items.map { it.name }.toSet() == REQUIRED_NAMES || items.map { it.name }.toSet() == ALS5_NAMES) &&
             items.all { item -> when (item.scorePercent) {
                 25 -> item.ok && item.status == ConfluenceStatus.CONFIRMED
                 in 1..24 -> !item.ok && item.status == ConfluenceStatus.PARTIAL
@@ -30,6 +37,11 @@ object TechnicalEvidence {
             core.size == CURRENT_COUNT && core.map { it.name }.toSet() == CRYPTO_NAMES &&
             core.all { it.ok && it.status == ConfluenceStatus.CONFIRMED && it.scorePercent == 25 } &&
             signal.confidence == 100.0
+        if (signal.als5Opportunity != null && signal.isActionable) {
+            return signal.als5Opportunity.matches(signal) &&
+                confirmed(core) && signal.confidence.isFinite() &&
+                kotlin.math.abs(core.sumOf { it.scorePercent ?: 0 }.toDouble() - signal.confidence) < 1e-6
+        }
         return confirmed(core) && signal.confidence.isFinite() &&
             kotlin.math.abs(core.sumOf { it.scorePercent ?: 0 }.toDouble() - signal.confidence) < 1e-6
     }
@@ -37,7 +49,8 @@ object TechnicalEvidence {
     fun confirmedRecords(items: List<PaperConditionRecord>): Boolean = when (items.size) {
         CURRENT_COUNT -> (items.map { it.name }.toSet() == REQUIRED_NAMES ||
                 items.map { it.name }.toSet() == REQUIRED_NAMES - "پشتهٔ ۳ تایم‌فریمی" + "پشتهٔ ۷ تایم‌فریمی" ||
-                items.map { it.name }.toSet() == CRYPTO_NAMES) &&
+                items.map { it.name }.toSet() == CRYPTO_NAMES ||
+                items.map { it.name }.toSet() == ALS5_NAMES) &&
             items.all { it.status in setOf("CONFIRMED", "PARTIAL", "CONFLICT") }
         7, LEGACY_COUNT -> items.map { it.name }.distinct().size == items.size &&
             items.all { it.status == "CONFIRMED" }

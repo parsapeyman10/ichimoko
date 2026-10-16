@@ -122,11 +122,14 @@ class JournalStore(
         require(signal.interval == com.aurum.edge.core.Interval.M5) {
             "ثبت پوزیشن تازه فقط از سیگنال کندل بستهٔ ۵ دقیقه (5m) مجاز است"
         }
+        val isAls5Gold = com.aurum.edge.core.V1Universe.normalize(symbol) == "XAU/USD"
         if (CryptoCatalog.isCrypto(symbol)) require(signal.cryptoBreakout?.matches(signal) == true) {
             "فقط استراتژی فشردگی ← انفجار برای ورود تازهٔ رمزارز مجاز است"
         }
-        require(signal.ichimokuEntry?.matches(signal) == true) {
-            "کراس بستهٔ تنکان/کیجون، ابر نازک و فشردگی پیش از ورود تأیید نشده‌اند"
+        if (isAls5Gold && automatic) require(signal.als5Opportunity?.matches(signal) == true) {
+            "ورود خودکار طلای جدید فقط با ستاپ خرید/فروش تأییدشدهٔ ALS-5 مجاز است"
+        } else require(signal.ichimokuEntry?.matches(signal) == true || signal.als5Opportunity?.matches(signal) == true) {
+            "شواهد ورود بستهٔ ALS-5/ایچیموکو پیش از ورود تأیید نشده‌اند"
         }
         require(com.aurum.edge.core.OilEntrySafety.blocker(symbol) == null) {
             com.aurum.edge.core.OilEntrySafety.REASON
@@ -163,7 +166,8 @@ class JournalStore(
         }
         if (CryptoCatalog.isCrypto(symbol)) require(kotlin.math.abs(target - price) >=
             3.0 * kotlin.math.abs(price - stop) - 1e-9) { "نسبت واقعی ریسک به ریوارد رمزارز باید حداقل ۱:۳ باشد" }
-        val draft = PaperOrderRules.preview(signal.action, symbol, price, stop, target, balance, riskPercent)
+        val orderRiskPercent = if (isAls5Gold) riskPercent.coerceAtMost(0.25) else riskPercent
+        val draft = PaperOrderRules.preview(signal.action, symbol, price, stop, target, balance, orderRiskPercent)
         val startConditions = technicalConditions
             .filter { it.status == ConfluenceStatus.CONFIRMED }
             .joinToString("، ") { it.name.substringAfter('·').trim() }
@@ -189,6 +193,7 @@ class JournalStore(
             mtf = if (manual) null else mtf,
             autoOpened = automatic,
             signalBarTime = signal.barTime,
+            als5SetupKey = signal.als5Opportunity?.setupKey?.takeIf { isAls5Gold },
             newsEvidence = if (manual) null else newsEvidence,
             entryConditions = technicalConditions.map {
                 com.aurum.edge.core.PaperConditionRecord.from(it)
@@ -214,11 +219,31 @@ class JournalStore(
                 riskPercent <= latest.riskPercent + 1e-6)) {
                 "موجودی یا درصد ریسک تغییر کرد؛ بلیت را دوباره محاسبه کنید"
             }
+            // ALS-5 consecutive-loss guard is ledger-authoritative and atomic with the append.
+            // Unknown PnL on a prior closed gold trade fails closed rather than resetting the streak.
+            if (isAls5Gold) {
+                var consecutiveGoldLosses = 0
+                val recentGoldCloses = _trades.value.filter {
+                    it.symbol == symbol && !it.isOpen && (it.closedAt ?: Long.MAX_VALUE) <= observedAt
+                }.sortedByDescending { it.closedAt ?: 0L }
+                for (closedTrade in recentGoldCloses) {
+                    val pnl = closedTrade.pnlUsd?.takeIf { it.isFinite() }
+                        ?: throw IllegalArgumentException("سابقهٔ PnL طلای بسته‌شده ناقص است؛ قفل ضرر ALS-5 بازنشانی نمی‌شود")
+                    if (pnl >= 0.0) break
+                    consecutiveGoldLosses++
+                }
+                require(consecutiveGoldLosses < 3) {
+                    "سقف ۳ ضرر متوالی طلا فعال است؛ ALS-5 تا یک معاملهٔ برنده/بازبینی ژورنال قفل می‌ماند"
+                }
+            }
             // Check and append under the same mutex; UI/alerts are only advisory.
             val blocker = PaperPortfolioPolicy.blocker(_trades.value, symbol, balance,
                 draft.actualRiskUsd + draft.commissionUsd + draft.spreadCostUsd,
                 signal.barTime, now = observedAt,
-                openingBalance = settingsStore?.dayOpeningEquity(observedAt))
+                openingBalance = settingsStore?.dayOpeningEquity(observedAt),
+                maxRiskPerTradePct = if (isAls5Gold) 0.0025 else PaperPortfolioPolicy.MAX_RISK_PER_TRADE,
+                maxDailyLossPct = if (isAls5Gold) 0.01 else PaperPortfolioPolicy.MAX_DAILY_LOSS,
+                als5SetupKey = signal.als5Opportunity?.setupKey?.takeIf { isAls5Gold })
             require(blocker == null) { blocker ?: "ظرفیت پورتفو پر است" }
             // Recheck after scheduling, sizing and any journal-lock wait. Fresh ticks or an
             // AI response cannot authorize a preview calculated before a source conflict.

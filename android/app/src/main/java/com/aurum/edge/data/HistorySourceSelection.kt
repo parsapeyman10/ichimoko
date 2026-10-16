@@ -1,6 +1,7 @@
 package com.aurum.edge.data
 
 import com.aurum.edge.core.Candle
+import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,7 +28,8 @@ internal object HistorySourceSelection {
     fun <T> choose(symbol: String, rows: List<Candidate<T>>, now: Long): Choice<T> {
         val valid = rows.distinctBy { it.publisher }.map { candidate ->
             candidate.copy(frames = candidate.frames.mapValues { (frame, bars) ->
-                bars.filter { it.closed && it.time + frame.millis <= now }.sortedBy { it.time }.takeLast(320)
+                bars.filter { it.closed && it.time + frame.millis <= now }.sortedBy { it.time }
+                    .takeLast(CandleSourceHealth.requiredSize(frame).coerceAtMost(HistoryPolicy.MAX_CACHED_CANDLES))
             })
         }.filter { candidate ->
             listOf(Interval.M5, Interval.M15, Interval.H1).all { frame ->

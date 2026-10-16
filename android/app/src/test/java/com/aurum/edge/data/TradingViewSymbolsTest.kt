@@ -1,56 +1,47 @@
 package com.aurum.edge.data
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/**
- * The chart must draw the instrument that was selected.
- *
- * The mapping used to be inline with `else -> OANDA:XAUUSD`, so anything missing from the
- * list rendered GOLD while the rest of the screen said otherwise — a wrong chart with no
- * error anywhere. These tests exist so a symbol can never silently become gold again.
- */
 class TradingViewSymbolsTest {
 
-    @Test fun `every chartable catalog symbol resolves to a real ticker`() {
+    @Test fun `every chartable symbol maps to its own TradingView ticker`() {
+        val seen = mutableSetOf<String>()
         WatchCatalog.chartSymbols.forEach { id ->
-            val ticker = TradingViewSymbols.find(id)
-            assertTrue("no TradingView ticker for $id", ticker != null)
-            assertTrue("malformed ticker for $id: $ticker", ticker!!.contains(':'))
+            val tv = TradingViewSymbols.find(id)
+            assertNotNull("no TradingView mapping for $id", tv)
+            assertTrue("bad TradingView ticker for $id: $tv", ":" in tv!!)
+            assertTrue("duplicate TradingView ticker $tv", seen.add(tv))
+            assertFalse("$id fell back to XAUUSD", id != "XAU/USD" && tv.endsWith("XAUUSD"))
         }
-    }
-
-    @Test fun `every seeded coin resolves to its exchange ticker`() {
+        assertEquals(15, seen.size)
         CryptoCatalog.symbols.forEach { coin ->
             assertEquals("BINANCE:${coin.binance}", TradingViewSymbols.find(coin.id))
         }
     }
 
-    @Test fun `gold and the majors map to OANDA`() {
+    @Test fun `known major pairs and Dow Jones resolve to their real venues`() {
         assertEquals("OANDA:XAUUSD", TradingViewSymbols.find("XAU/USD"))
+        assertEquals("OANDA:XAGUSD", TradingViewSymbols.find("XAG/USD"))
+        assertEquals("BLACKBULL:US30", TradingViewSymbols.find("DOW"))
+        assertEquals("BLACKBULL:US30", TradingViewSymbols.find("US30"))
         assertEquals("OANDA:EURUSD", TradingViewSymbols.find("EUR/USD"))
         assertEquals("OANDA:USDJPY", TradingViewSymbols.find("USD/JPY"))
-        assertEquals("OANDA:XAUUSD", TradingViewSymbols.find("xau/usd"))   // case-insensitive
-    }
-
-    @Test fun `an unknown symbol is reported, not quietly turned into gold`() {
+        assertEquals("OANDA:GBPJPY", TradingViewSymbols.find("GBP/JPY"))
+        assertEquals("BINANCE:BTCUSDT", TradingViewSymbols.find("BTC/USDT"))
+        assertEquals("BINANCE:ETHUSDT", TradingViewSymbols.find("eth/usdt"))
+        assertNull(TradingViewSymbols.find("IR_GOLD18"))
         assertNull(TradingViewSymbols.find("NOT/REAL"))
-        assertNull(TradingViewSymbols.find(""))
-        assertTrue(!TradingViewSymbols.isChartable("NOT/REAL"))
-        // `of()` used to return OANDA:XAUUSD for anything unmapped, so a caller could draw a
-        // wrong-but-plausible chart by accident. It is gone: `find()` returning null is the only
-        // answer, and the UI must say "this symbol has no TradingView mapping".
     }
 
-    @Test fun `TradingView stays visual only and exchange watch prices stay with their venue`() {
-        assertTrue(SourceCatalog.all.none { it.id == "tradingview_scanner" })
-        CryptoCatalog.watchlistSeed.forEach { coin ->
-            val watch = WatchCatalog.find(coin.id)!!
-            assertEquals(coin.id, watch.providerCodes["binance_spot_agg_trades"])
-            assertEquals("BINANCE:${coin.binance}", TradingViewSymbols.find(coin.id))
-        }
+    @Test fun `every symbol in WatchCatalog uses its own single dedicated source`() {
+        val sources = WatchCatalog.symbols.map { it.defaultSources.single() }
+        assertEquals(15, sources.distinct().size)
         assertTrue(WatchCatalog.symbols.none { "tradingview_scanner" in it.providerCodes })
+        assertTrue(SourceCatalog.all.none { it.id == "tradingview_scanner" })
     }
 }

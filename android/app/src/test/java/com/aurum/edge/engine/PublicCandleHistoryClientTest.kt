@@ -33,8 +33,8 @@ class PublicCandleHistoryClientTest {
             interval = Interval.M1,
             now = startMs + (HistoryPolicy.TARGET_CANDLES + 2L) * Interval.M1.millis,
         )
-        assertEquals(HistoryPolicy.TARGET_CANDLES + 2, bars.size)
-        assertEquals(startMs, bars.first().time)
+        assertEquals(HistoryPolicy.MAX_CACHED_CANDLES, bars.size)
+        assertEquals(startMs + 2L * Interval.M1.millis, bars.first().time)
         assertEquals(startMs + (HistoryPolicy.TARGET_CANDLES + 1L) * Interval.M1.millis, bars.last().time)
         assertTrue(bars.all { it.closed && it.high >= it.open && it.low <= it.close })
     }
@@ -48,8 +48,10 @@ class PublicCandleHistoryClientTest {
             now = startMs + 400L * Interval.M1.millis,
             trimSize = HistoryPolicy.LIVE_REQUEST_CANDLES,
         )
-        assertEquals(HistoryPolicy.LIVE_REQUEST_CANDLES, bars.size)
-        assertEquals(startMs + 10L * Interval.M1.millis, bars.first().time)
+        assertEquals(400, bars.size) // Only bars whose close time is not later than `now` survive.
+        assertEquals(startMs, bars.first().time)
+        assertEquals(startMs + 399L * Interval.M1.millis, bars.last().time)
+        assertTrue(bars.all { it.closed })
     }
 
     @Test fun `commodity futures and index ETFs never masquerade as the requested spot instrument`() {

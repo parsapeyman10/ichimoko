@@ -29,6 +29,8 @@
 
 ## ساخت و انتشار
 
+**بروزرسانی درجا (پیش‌فرض فعال از ۲.۰.۲):** اپ اول `releases/latest/download/aurum-edge.json` (کنار خود APK در Release) و بعد manifest شاخهٔ `main` و در پایان فهرست Releases را می‌خواند؛ بررسی خودکار زودتر از هر ۱۵ دقیقه تکرار نمی‌شود تا سهمیهٔ بی‌توکن GitHub تمام نشود. اگر بروزرسانی از داخل اپ کار نکرد، اول `python3 tools/diagnose_in_app_update.py --installed-code <کد نصب>` را اجرا کن؛ تشخیص علت‌ها و اصلاح‌ها در [`docs/IN_APP_UPDATE_TROUBLESHOOTING_FA.md`](docs/IN_APP_UPDATE_TROUBLESHOOTING_FA.md) است. مرحلهٔ CI «Verify default-branch manifest points at the newest release» نمی‌گذارد `update/aurum-edge.json` از آخرین انتشار عقب بماند.
+
 پیش‌نیاز: JDK 17 و Android SDK 35 (build-tools 35.0.0).
 
 ```bash
