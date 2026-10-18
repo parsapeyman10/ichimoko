@@ -205,7 +205,7 @@ class PaperJournalPersistenceTest {
         val file = journalFile()
         val store = JournalStore(context, file).also { it.load() }
         val opened = store.open(alsSignal, "XAU/USD", 3000.0, 50_000.0, 0.5,
-            automatic = true, mtf = mtf(signal.barTime), newsEvidence = news,
+            automatic = true, mtf = mtf(signal.barTime),
             observedAt = 1_800_000_000_000L)
         assertTrue(opened.autoOpened)
         assertNull(opened.priceAction)
