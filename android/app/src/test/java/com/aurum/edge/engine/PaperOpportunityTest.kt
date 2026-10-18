@@ -54,15 +54,15 @@ class PaperOpportunityTest {
 
     @Test fun qualifiedAlertIsIndependentOfAutoEntryButFailsClosedForEveryCheck() {
         assertNull(PaperAlertRules.blocker(market, config, emptyList(), snapshot, now))
-        assertNotNull(PaperAlertRules.blocker(market, config.copy(notifyOnSignal = false), news, emptyList(), snapshot, now))
-        assertNotNull(PaperAlertRules.blocker(market, config.copy(backgroundMonitor = false), news, emptyList(), snapshot, now))
+        assertNotNull(PaperAlertRules.blocker(market, config.copy(notifyOnSignal = false), emptyList(), snapshot, now))
+        assertNotNull(PaperAlertRules.blocker(market, config.copy(backgroundMonitor = false), emptyList(), snapshot, now))
         assertNull(PaperAlertRules.blocker(market, config, emptyList(), null, now))
         assertNull(PaperAlertRules.blocker(market, config, emptyList(), snapshot.copy(veto = true), now))
         assertNull(PaperAlertRules.blocker(market, config, emptyList(), snapshot.copy(barTime = bar - 1), now))
         assertNotNull(PaperAlertRules.blocker(market.copy(showingCachedData = true), config, emptyList(), snapshot, now))
         assertNotNull(PaperAlertRules.blocker(market.copy(feed = FeedStatus(FeedMode.OFFLINE, lastSuccessAt = now)),
             config, emptyList(), snapshot, now))
-        assertNotNull(PaperAlertRules.blocker(market, config.copy(accountBalance = 5.0), news, emptyList(), snapshot, now))
+        assertNotNull(PaperAlertRules.blocker(market, config.copy(accountBalance = 5.0), emptyList(), snapshot, now))
         for (i in 0..3) {
             val fail = raw.copy(confluence = raw.confluence.mapIndexed { idx, item ->
                 if (idx == i) item.copy(ok = false, status = com.aurum.edge.core.ConfluenceStatus.CONFLICT, scorePercent = 0) else item
