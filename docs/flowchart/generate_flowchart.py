@@ -180,7 +180,7 @@ HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>نقشهٔ فلوچارت Aurum Edge — طرح جدید اپ</title>
+<title>نقشهٔ فلوچارت Aurum Edge — معماری فعلی اپ</title>
 <style>
 :root{
   --bg:#0b1020; --panel:#111a30; --panel2:#0e1526; --line:#233252; --txt:#dbe4f5;
