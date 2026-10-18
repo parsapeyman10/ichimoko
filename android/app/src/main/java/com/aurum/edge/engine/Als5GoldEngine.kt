@@ -987,7 +987,7 @@ object Als5GoldEngine {
         val m15Bars = external[Interval.M15]?.filter { it.closed && it.time + Interval.M15.millis <= barCloseTime }
             ?.sortedBy { it.time }
             ?.takeIf { it.isNotEmpty() }
-            ?: MtfAnalyzer.convertFromM5(closed, Interval.M15)
+            ?: emptyList() // M15 must be independently fetched; never resampled from M5
 
         if (m15Bars.size < 30) {
             return blocked("ALS-5: کندل‌های بستهٔ ۱۵ دقیقه برای تشخیص رژیم بازار کافی نیستند")

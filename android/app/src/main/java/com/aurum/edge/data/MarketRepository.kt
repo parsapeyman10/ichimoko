@@ -121,13 +121,13 @@ class MarketRepository(
     private val nonCryptoBundle = NonCryptoRadarBundle { symbol, frame, source, apiKey ->
         when {
             source.usesYahoo -> publicHistory.fetchCandles(symbol, frame,
-                minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
+                minimumSize = HistoryPolicy.minSize(frame), desiredSize = HistoryPolicy.fetchSize(frame))
             source.usesDukascopy -> dukascopyHistory.fetchCandles(symbol, frame,
-                minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
+                minimumSize = HistoryPolicy.minSize(frame), desiredSize = HistoryPolicy.fetchSize(frame))
                 .let { PublicCandleHistoryClient.Result(it.candles, it.provider, it.fetchedAt) }
             else -> PublicCandleHistoryClient.Result(
-                client.fetchCandles(apiKey, symbol, frame, outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
-                    minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES), "Twelve Data")
+                client.fetchCandles(apiKey, symbol, frame, outputSize = HistoryPolicy.fetchSize(frame),
+                    minimumOutputSize = HistoryPolicy.minSize(frame)), "Twelve Data")
         }
     }
     private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client, binanceHistory)

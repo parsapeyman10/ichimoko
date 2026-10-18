@@ -45,7 +45,10 @@ class AppContainer(context: Context) {
     val appContext: Context = context.applicationContext
 
     val settingsStore = SettingsStore(appContext)
-    init { com.aurum.edge.data.AppNetwork.start(appContext) }
+    init {
+        com.aurum.edge.data.AppNetwork.start(appContext)
+        com.aurum.edge.data.SourcePromotion.attach(appContext)
+    }
     val decisionLog = com.aurum.edge.data.DecisionLogStore(appContext)
     val candleCache = CandleCache(appContext)
     val journalStore = JournalStore(appContext, settingsStore = settingsStore)

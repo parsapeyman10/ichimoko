@@ -3,18 +3,25 @@ package com.aurum.edge.data
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
-import com.aurum.edge.engine.MtfAnalyzer
+import kotlinx.coroutines.CancellationException
 
 /**
- * 1-to-1 single-source non-crypto bundle (Gold, Silver, Dow Jones, and 7 Ichimoku Forex pairs):
- * Each symbol has its own dedicated HistorySource (no two symbols share a source),
- * fetches ONLY 1500 closed M5 candles, and derives M15 (3x M5) and H1 (12x M5) by conversion.
+ * Non-crypto history bundle (Gold, Silver, Dow Jones, 7 Ichimoku Forex pairs):
+ *
+ * M5, M15 and H1 are each fetched INDEPENDENTLY from the same publisher — higher
+ * timeframes are never built from the M5 series. The dedicated source is tried
+ * first; if it does not answer with a healthy full bundle, the next free source
+ * is tried immediately and the first healthy responder becomes the sticky
+ * primary for the symbol (see [SourcePromotion]). Every failure is recorded and
+ * surfaced in the audit note / [Snapshot.priorFailures] — dead sources are
+ * announced, never silently skipped.
  */
 internal class NonCryptoRadarBundle(
     private val read: suspend (String, Interval, SourceRouting.HistorySource, String) -> PublicCandleHistoryClient.Result,
 ) {
     companion object {
         private val admission = PublisherBudget(SourceRouting.HistorySource.entries.associateWith { 1 })
+        private val FRAMES = listOf(Interval.M5, Interval.M15, Interval.H1)
     }
 
     data class Snapshot(
@@ -28,38 +35,82 @@ internal class NonCryptoRadarBundle(
     }
 
     suspend fun fetch(symbol: String, apiKey: String, now: Long = System.currentTimeMillis()): Snapshot {
-        val source = SourceRouting.historySources(symbol, apiKey.isNotBlank()).singleOrNull()
-            ?: throw DataFeedException("$symbol: منبع اختصاصی تاریخچهٔ M5 تعریف نشده است")
+        val candidates = SourcePromotion.ordered(
+            symbol, SourcePromotion.Kind.HISTORY,
+            SourceRouting.historyCandidates(symbol, apiKey.isNotBlank()),
+        ) { it.name }
+        if (candidates.isEmpty())
+            throw DataFeedException("$symbol: منبع تاریخچه برای این نماد تعریف نشده است")
+
         val gate = SourceIntegrity.shared
         val token = gate.begin(symbol, SourceIntegrity.Channel.HISTORY)
-        val snapshot = admission.tryRead(source) {
-            val result = read(symbol, Interval.M5, source, apiKey)
-            val receivedAt = System.currentTimeMillis()
-            val m5Bars = result.candles
-                .filter { it.closed && it.time + Interval.M5.millis <= receivedAt }
-                .sortedBy { it.time }
-                .takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
-            if (!SourceRouting.matchesSource(result.provider, source) ||
-                !CandleSourceHealth.ready(m5Bars, Interval.M5, receivedAt))
-                throw DataFeedException("5m: منبع متفاوت یا ${HistoryPolicy.LIVE_REQUEST_CANDLES} کندل بستهٔ تازه/کامل ندارد")
-            val m15Bars = MtfAnalyzer.convertFromM5(m5Bars, Interval.M15)
-            val h1Bars = MtfAnalyzer.convertFromM5(m5Bars, Interval.H1)
-            val frames = linkedMapOf(
-                Interval.M5 to m5Bars,
-                Interval.M15 to m15Bars,
-                Interval.H1 to h1Bars,
-            )
-            Snapshot(result.provider, source, frames, emptyList())
+        val failures = mutableListOf<String>()
+
+        for (source in candidates) {
+            try {
+                val snapshot = admission.tryRead(source) { readBundle(symbol, source, apiKey) }
+                SourcePromotion.onSuccess(symbol, SourcePromotion.Kind.HISTORY, source.name)
+                val receivedAt = System.currentTimeMillis()
+                val verifiedRevision = gate.accept(symbol, SourceIntegrity.Channel.HISTORY, token, 2)
+                    ?: gate.revision(symbol)
+                HistorySourceAudits.record(
+                    symbol,
+                    snapshot.provider,
+                    "M5/M15/H1 مستقل از ${source.providerLabel} · " +
+                        SourcePromotion.summaryFa(symbol, SourcePromotion.Kind.HISTORY) { id ->
+                            SourceRouting.HistorySource.entries.firstOrNull { it.name == id }?.providerLabel ?: id
+                        } +
+                        if (failures.isEmpty()) "" else " · پیش از آن ناموفق: ${failures.joinToString("؛ ").take(220)}",
+                    receivedAt,
+                )
+                return snapshot.copy(priorFailures = failures.toList(),
+                    integrityRevision = verifiedRevision)
+            } catch (occupied: PublisherOccupied) {
+                // Local admission pressure is not a source outage: never demote for it.
+                failures += "${source.providerLabel}: ظرفیت محلی پر است"
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                val count = SourcePromotion.onFailure(symbol, SourcePromotion.Kind.HISTORY,
+                    source.name, error.message ?: "خطای نامشخص")
+                failures += "${source.providerLabel}: ${(error.message ?: "خطای نامشخص").take(110)}" +
+                    " (خطای متوالی $count)"
+            }
         }
-        val receivedAt = System.currentTimeMillis()
-        val verifiedRevision = gate.accept(symbol, SourceIntegrity.Channel.HISTORY, token, 2)
-            ?: gate.revision(symbol)
+
         HistorySourceAudits.record(
-            symbol,
-            snapshot.provider,
-            "منبع اختصاصی تک‌سورس (${source.providerLabel}) · ۱۵۰۰ کندل M5 + تبدیل M15 (۵۰۰) و H1 (۱۲۵)",
-            receivedAt,
+            symbol, null,
+            "همهٔ منابع تاریخچه بی‌پاسخ‌اند و باید جایگزین شوند: ${failures.joinToString("؛ ").take(300)}",
+            System.currentTimeMillis(),
         )
-        return snapshot.copy(integrityRevision = verifiedRevision)
+        throw DataFeedException(
+            "$symbol: هیچ منبع تاریخچه‌ای بستهٔ سالم نداد — ${failures.joinToString("؛ ").take(300)}")
+    }
+
+    /** One publisher must deliver ALL THREE independent frames healthy, or it does not count. */
+    private suspend fun readBundle(
+        symbol: String,
+        source: SourceRouting.HistorySource,
+        apiKey: String,
+    ): Snapshot {
+        val frames = linkedMapOf<Interval, List<Candle>>()
+        var provider = ""
+        for (frame in FRAMES) {
+            val result = read(symbol, frame, source, apiKey)
+            val receivedAt = System.currentTimeMillis()
+            if (frame == Interval.M5) provider = result.provider
+            val bars = result.candles
+                .filter { it.closed && it.time + frame.millis <= receivedAt }
+                .sortedBy { it.time }
+                .distinctBy { it.time }
+                .takeLast(HistoryPolicy.fetchSize(frame))
+            if (!SourceRouting.matchesSource(result.provider, source))
+                throw DataFeedException("${frame.label}: ناشرِ پاسخ با منبع انتخابی یکی نیست (${result.provider})")
+            if (!CandleSourceHealth.ready(bars, frame, receivedAt))
+                throw DataFeedException(
+                    "${frame.label}: کندل بستهٔ تازه/کافی ندارد (${bars.size}/${HistoryPolicy.minSize(frame)})")
+            frames[frame] = bars
+        }
+        return Snapshot(provider, source, frames, emptyList())
     }
 }

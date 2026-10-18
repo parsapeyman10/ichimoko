@@ -5,51 +5,65 @@ import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
 
 class NonCryptoRadarBundleTest {
     private val now = System.currentTimeMillis()
 
-    private fun closedM5Series(price: Double = 2400.0): List<Candle> {
-        val step = Interval.M5.millis
-        val end = now / step * step
-        return (0 until HistoryPolicy.LIVE_REQUEST_CANDLES).map { i ->
-            Candle(end - (HistoryPolicy.LIVE_REQUEST_CANDLES - i) * step,
+    @Before fun reset() { SourcePromotion.resetForTests() }
+
+    private fun closedSeries(frame: Interval, count: Int, price: Double = 2400.0): List<Candle> {
+        val end = now / frame.millis * frame.millis
+        return (0 until count).map { i ->
+            Candle(end - (count - i) * frame.millis,
                 price, price + 1.0, price - 1.0, price, 10.0, closed = true)
         }
     }
 
-    @Test fun `each non-crypto symbol fetches only 1500 M5 candles from its dedicated source and converts M15 and H1`() = runBlocking {
+    @Test fun `each non-crypto symbol fetches M5 M15 H1 independently from its dedicated source`() = runBlocking {
         val calls = mutableListOf<Triple<String, Interval, SourceRouting.HistorySource>>()
         val bundle = NonCryptoRadarBundle { symbol, frame, source, _ ->
             calls += Triple(symbol, frame, source)
-            PublicCandleHistoryClient.Result(closedM5Series(), source.providerLabel)
+            PublicCandleHistoryClient.Result(
+                closedSeries(frame, HistoryPolicy.fetchSize(frame)), source.providerLabel)
         }
 
         val gold = bundle.fetch("XAU/USD", "", now)
         assertEquals(SourceRouting.HistorySource.DUKASCOPY_XAU, gold.source)
-        assertEquals(1500, gold.frames.getValue(Interval.M5).size)
-        assertEquals(500, gold.frames.getValue(Interval.M15).size)
-        assertEquals(125, gold.frames.getValue(Interval.H1).size)
+        assertEquals(400, gold.frames.getValue(Interval.M5).size)
+        assertEquals(300, gold.frames.getValue(Interval.M15).size)
+        assertEquals(250, gold.frames.getValue(Interval.H1).size)
+        assertTrue(gold.priorFailures.isEmpty())
 
-        val silver = bundle.fetch("XAG/USD", "", now)
-        assertEquals(SourceRouting.HistorySource.DUKASCOPY_XAG, silver.source)
+        assertEquals(SourceRouting.HistorySource.DUKASCOPY_XAG, bundle.fetch("XAG/USD", "", now).source)
+        assertEquals(SourceRouting.HistorySource.YAHOO_DOW, bundle.fetch("DOW", "", now).source)
+        assertEquals(SourceRouting.HistorySource.YAHOO_EURUSD, bundle.fetch("EUR/USD", "", now).source)
 
-        val dow = bundle.fetch("DOW", "", now)
-        assertEquals(SourceRouting.HistorySource.YAHOO_DOW, dow.source)
-
-        val eur = bundle.fetch("EUR/USD", "", now)
-        assertEquals(SourceRouting.HistorySource.YAHOO_EURUSD, eur.source)
-
-        // Only M5 is fetched over the network; M15 and H1 are converted from M5
-        assertEquals(4, calls.size)
-        assertTrue(calls.all { it.second == Interval.M5 })
+        // Three independent frame fetches per symbol — nothing is resampled from M5
+        assertEquals(12, calls.size)
+        assertEquals(setOf(Interval.M5, Interval.M15, Interval.H1), calls.map { it.second }.toSet())
         assertEquals(4, calls.map { it.third }.distinct().size)
     }
 
-    @Test fun `incomplete M5 history is rejected`() = runBlocking {
-        val bundle = NonCryptoRadarBundle { _, _, source, _ ->
-            PublicCandleHistoryClient.Result(closedM5Series().drop(1), source.providerLabel)
+    @Test fun `unresponsive dedicated source is replaced and the responder becomes primary`() = runBlocking {
+        val bundle = NonCryptoRadarBundle { _, frame, source, _ ->
+            if (source == SourceRouting.HistorySource.DUKASCOPY_XAU)
+                throw DataFeedException("Dukascopy unreachable")
+            PublicCandleHistoryClient.Result(
+                closedSeries(frame, HistoryPolicy.fetchSize(frame)), source.providerLabel)
+        }
+        val gold = bundle.fetch("XAU/USD", "", now)
+        assertEquals(SourceRouting.HistorySource.YAHOO, gold.source)
+        assertEquals(1, gold.priorFailures.size)
+        assertTrue(gold.priorFailures.single().contains("Dukascopy"))
+        assertEquals("YAHOO", SourcePromotion.primaryId("XAU/USD", SourcePromotion.Kind.HISTORY))
+    }
+
+    @Test fun `incomplete history from every source is rejected`() = runBlocking {
+        val bundle = NonCryptoRadarBundle { _, frame, source, _ ->
+            PublicCandleHistoryClient.Result(
+                closedSeries(frame, 100), source.providerLabel)
         }
         assertTrue(runCatching { bundle.fetch("XAU/USD", "", now) }.isFailure)
     }

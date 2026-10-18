@@ -127,14 +127,14 @@ class PairScanner(
     private val nonCryptoBundle = NonCryptoRadarBundle { symbol, frame, source, apiKey ->
         when {
             source.usesYahoo -> publicHistory.fetchCandles(symbol, frame,
-                minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
+                minimumSize = HistoryPolicy.minSize(frame), desiredSize = HistoryPolicy.fetchSize(frame))
             source.usesDukascopy -> dukascopyHistory.fetchCandles(symbol, frame,
-                minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
+                minimumSize = HistoryPolicy.minSize(frame), desiredSize = HistoryPolicy.fetchSize(frame))
                 .let { PublicCandleHistoryClient.Result(it.candles, it.provider, it.fetchedAt) }
             else -> PublicCandleHistoryClient.Result(
                 withContext(Dispatchers.IO) { client.fetchCandles(apiKey, symbol, frame,
-                    outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
-                    minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES) }, "Twelve Data · fallback")
+                    outputSize = HistoryPolicy.fetchSize(frame),
+                    minimumOutputSize = HistoryPolicy.minSize(frame)) }, "Twelve Data · fallback")
         }
     }
     private val cryptoReadOnly = CryptoRadarCandleClient()
@@ -461,7 +461,8 @@ class PairScanner(
                 // «روند کلی بازار چطور به دست می‌آید؟» — لایهٔ اول: از همان کندل‌های بستهٔ واقعیِ
                 // همین نماد، هم روی تایم‌فریم پایه و هم روی تایم‌فریم مرجع (تجمیع‌شده، نه ساخته‌شده).
                 val trend = withContext(Dispatchers.Default) {
-                    runCatching { MarketTrend.symbolTrend(symbol, candles, interval) }.getOrNull()
+                    runCatching { MarketTrend.symbolTrend(symbol, candles, interval,
+                        higherCandles = MarketTrend.higherFor(interval)?.let { frames[it] }.orEmpty()) }.getOrNull()
                 }
                 if (trend != null && trend.known) trendSample[symbol] = System.currentTimeMillis() to trend
 
@@ -528,7 +529,7 @@ class PairScanner(
 
                 )
                 val mtf = withContext(Dispatchers.Default) {
-                    runCatching { MtfAnalyzer.analyze(candles, interval) }.getOrNull()
+                    runCatching { MtfAnalyzer.analyzeFrames(frames, interval) }.getOrNull()
                 }
                 // This runs for EVERY supported catalog row, not only editable watchlist rows.
                 // The callback MUST obtain a separate same-symbol trade tick and route through

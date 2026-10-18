@@ -1,34 +1,52 @@
 package com.aurum.edge.core
 
 /**
- * Unified 5-minute (M5) candle history policy:
- * Always fetch and retain the latest 1500 closed M5 candles so that:
- * - Higher-timeframe Ichimoku lines (513 and 1024) are computed directly on M5
- * - M15 Ichimoku is computed from 500 resampled candles (every 3 M5 candles = 1 M15 candle)
- * - H1 Ichimoku is computed from 125 resampled candles (every 12 M5 candles = 1 H1 candle)
+ * Candle-count policy (the old flat "1500 M5 candles for everything" rule is retired):
+ *
+ * Every timeframe used for alignment is fetched INDEPENDENTLY from the source —
+ * higher timeframes are never built by resampling the M5 series. Counts are sized
+ * by the deepest indicator lookback in the engines (EMA-200 + Ichimoku 52/26),
+ * with headroom, instead of one oversized number for all frames:
+ *  - M5  fetch 400 · healthy minimum 280
+ *  - M15 fetch 300 · healthy minimum 240
+ *  - H1  fetch 250 · healthy minimum 200
  */
 object HistoryPolicy {
-    const val LIVE_MIN_CANDLES: Int = 1500
-    const val LIVE_REQUEST_CANDLES: Int = 1500
-    const val LIVE_FETCH_CANDLES: Int = 1500
+    /** Healthy minimum closed M5 bars before any live signal work. */
+    const val LIVE_MIN_CANDLES: Int = 280
+    /** Default M5 request/retention size for live paths. */
+    const val LIVE_REQUEST_CANDLES: Int = 400
+    const val LIVE_FETCH_CANDLES: Int = 400
 
-    const val TARGET_CANDLES: Int = 1500
-    const val DEEP_CHART_CANDLES: Int = 1500
+    /** Display depth for trade/chart history downloads (not an entry requirement). */
+    const val TARGET_CANDLES: Int = 500
+    const val DEEP_CHART_CANDLES: Int = 500
 
-    const val CHART_BOOTSTRAP_CANDLES: Int = 1500
-    const val CHART_BOOTSTRAP_MINIMUM: Int = 1500
+    const val CHART_BOOTSTRAP_CANDLES: Int = 500
+    const val CHART_BOOTSTRAP_MINIMUM: Int = 280
 
-    const val MAX_CACHED_CANDLES: Int = 1500
-    const val MAX_TWELVE_CANDLES: Int = 1500
-    const val MAX_PROVIDER_CANDLES: Int = 1500
+    const val MAX_CACHED_CANDLES: Int = 600
+    const val MAX_TWELVE_CANDLES: Int = 600
+    const val MAX_PROVIDER_CANDLES: Int = 600
 
-    const val ICHIMOKU_HTF_513: Int = 513
-    const val ICHIMOKU_HTF_1024: Int = 1024
-    const val RESAMPLED_M15_CANDLES: Int = LIVE_REQUEST_CANDLES / 3
-    const val RESAMPLED_H1_CANDLES: Int = LIVE_REQUEST_CANDLES / 12
+    /** Independent per-frame request size. Frames are fetched, never resampled from M5. */
+    fun fetchSize(interval: Interval): Int = when (interval) {
+        Interval.M5 -> 400
+        Interval.M15 -> 300
+        Interval.H1 -> 250
+        else -> LIVE_FETCH_CANDLES
+    }
+
+    /** Minimum healthy closed bars for a frame to be usable as alignment evidence. */
+    fun minSize(interval: Interval): Int = when (interval) {
+        Interval.M5 -> LIVE_MIN_CANDLES
+        Interval.M15 -> 240
+        Interval.H1 -> 200
+        else -> LIVE_MIN_CANDLES
+    }
 
     fun chartTargetCandles(symbol: String, interval: Interval): Int =
-        LIVE_REQUEST_CANDLES
+        fetchSize(interval)
 
     fun providerRequestSize(requested: Int, minimum: Int = TARGET_CANDLES): Int =
         requested.coerceAtLeast(minimum).coerceAtMost(MAX_TWELVE_CANDLES)

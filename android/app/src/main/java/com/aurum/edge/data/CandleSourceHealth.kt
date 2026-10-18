@@ -5,22 +5,17 @@ import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
 
 /**
- * Validates that the symbol's single dedicated source returned 1500 fresh, closed M5 candles
- * (or the corresponding 500 converted M15 candles / 125 converted H1 candles).
+ * Validates that a source returned enough fresh, closed, ordered candles for
+ * the frame (per-frame minima from [HistoryPolicy.minSize]).
  */
 internal object CandleSourceHealth {
-    fun requiredSize(interval: Interval): Int = when (interval) {
-        Interval.M5 -> HistoryPolicy.LIVE_MIN_CANDLES
-        Interval.M15 -> HistoryPolicy.RESAMPLED_M15_CANDLES
-        Interval.H1 -> HistoryPolicy.RESAMPLED_H1_CANDLES
-        else -> HistoryPolicy.LIVE_MIN_CANDLES
-    }
+    fun requiredSize(interval: Interval): Int = HistoryPolicy.minSize(interval)
 
     fun ready(rows: List<Candle>, interval: Interval, now: Long,
               requireContiguous: Boolean = false, requireVolume: Boolean = false): Boolean {
         val minBars = requiredSize(interval)
         val bars = rows.filter { it.closed && it.time + interval.millis <= now }
-            .sortedBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
+            .sortedBy { it.time }.takeLast(HistoryPolicy.fetchSize(interval))
         if (bars.size < minBars ||
             now - (bars.last().time + interval.millis) !in 0L..(interval.millis + 90_000L) ||
             bars.zipWithNext().any { (a,b) -> a.time >= b.time ||

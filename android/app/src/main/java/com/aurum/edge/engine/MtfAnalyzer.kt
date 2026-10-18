@@ -76,33 +76,6 @@ object MtfAnalyzer {
     }
 
     /**
-     * Convert closed 5-minute (M5) candles directly into closed M15 (every 3 M5 candles = 1 M15 candle)
-     * or H1 (every 12 M5 candles = 1 H1 candle) candles.
-     */
-    fun convertFromM5(m5Candles: List<Candle>, target: Interval): List<Candle> {
-        val closed = m5Candles.filter { it.closed }.sortedBy { it.time }
-        if (target == Interval.M5 || target.minutes <= Interval.M5.minutes) return closed
-        val factor = (target.minutes / Interval.M5.minutes).coerceAtLeast(1)
-        if (closed.size < factor) return emptyList()
-        val remainder = closed.size % factor
-        val aligned = if (remainder == 0) closed else closed.drop(remainder)
-        val out = ArrayList<Candle>(aligned.size / factor)
-        for (idx in aligned.indices step factor) {
-            val group = aligned.subList(idx, idx + factor)
-            out += Candle(
-                time = group.first().time,
-                open = group.first().open,
-                high = group.maxOf { it.high },
-                low = group.minOf { it.low },
-                close = group.last().close,
-                volume = group.sumOf { it.volume },
-                closed = true,
-            )
-        }
-        return out
-    }
-
-    /**
      * Aggregate real bars into [target]. The newest bucket stays open (its bar is marked
      * not-closed) and buckets that are clearly incomplete are dropped.
      */
@@ -219,18 +192,23 @@ object MtfAnalyzer {
         )
     }
 
-    fun analyze(candles: List<Candle>, base: Interval): Snapshot? {
-        val closed = candles.filter { it.closed }
+    /** Base-series-only snapshot: higher frames are reported as skipped, never built. */
+    fun analyze(candles: List<Candle>, base: Interval): Snapshot? =
+        analyzeFrames(mapOf(base to candles), base)
+
+    /**
+     * Multi-timeframe snapshot from INDEPENDENTLY fetched frame series.
+     * A frame whose real candles were not supplied is skipped (and named in
+     * [Snapshot.skippedFrames]) — higher timeframes are never resampled here.
+     */
+    fun analyzeFrames(series: Map<Interval, List<Candle>>, base: Interval): Snapshot? {
+        val closed = series[base].orEmpty().filter { it.closed }
         if (closed.size < MIN_BASE_BARS) return null
 
         val frames = ArrayList<FrameBias>()
         val skipped = ArrayList<String>()
         framesFor(base).forEach { target ->
-            val bars = if (base == Interval.M5 && target != Interval.M5) {
-                convertFromM5(closed, target)
-            } else {
-                resample(closed, target, base)
-            }
+            val bars = series[target].orEmpty().filter { it.closed }
             val frame = frameOf(bars, target)
             if (frame == null) skipped += target.label else frames += frame
         }

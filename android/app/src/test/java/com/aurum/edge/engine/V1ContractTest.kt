@@ -31,16 +31,21 @@ class V1ContractTest {
         Candle(start, price, price + .25, price - .25, price + .03, 100.0, true)
     }
 
-    @Test fun resampledM15AndH1AreDerivedFromM5And513And1024LinesAreComputed() {
-        val base = bars(Interval.M5).takeLast(totalBars)
-        val m15 = MtfAnalyzer.convertFromM5(base, Interval.M15)
-        val h1 = MtfAnalyzer.convertFromM5(base, Interval.H1)
-        assertEquals(500, m15.size)
-        assertEquals(125, h1.size)
-        val ichi = Ichimoku.compute(base, 8, 24, 72, 24)
+    @Test fun independentFramesAreUsedDirectlyAnd513And1024LinesAreComputedOnLongSeries() {
+        // Frames are independent series now (never derived from M5).
+        val m15 = bars(Interval.M15)
+        val h1 = bars(Interval.H1)
+        assertEquals(totalBars + 20, m15.size)
+        assertEquals(totalBars + 20, h1.size)
+        // The 513/1024 Donchian math still works when a long series is supplied.
+        val long = (0 until 1100).map { i ->
+            val price = 100.0 + i * .02 + (i % 5) * .08
+            Candle(now - (1100 - i) * Interval.M5.millis, price, price + .25, price - .25, price + .03, 100.0, true)
+        }
+        val ichi = Ichimoku.compute(long, 8, 24, 72, 24)
         assertNotNull(ichi.line513.last())
         assertNotNull(ichi.line1024.last())
-        assertEquals(SignalAction.BUY, ichi.higherTimeframeBiasAt(base.lastIndex, base.last().close))
+        assertEquals(SignalAction.BUY, ichi.higherTimeframeBiasAt(long.lastIndex, long.last().close))
     }
 
     @Test fun threeRealFrameStackIsScoredAndOldFutureBarsCannotParticipate() {
