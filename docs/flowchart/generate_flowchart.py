@@ -136,8 +136,6 @@ FUN_CHART = {
     "publishCandles": "fn-publish", "onTick": "fn-publish", "startWatchdog": "fn-publish",
     "sweepAll": "fn-scanner-sweep", "sweepOnce": "fn-scanner-sweep",
     "rankOpportunities": "fn-scanner-sweep",
-    "refreshServerMode": "fn-news-refresh", "refreshClientMode": "fn-news-refresh",
-    "apply": "fn-newsconfluence", "alignment": "fn-newsconfluence",
     "planTradeWithAi": "fn-ai-plan", "fromResponse": "fn-ai-plan",
     "ensureConnection": "fn-ai-plan", "reviewOpenPositions": "fn-ai-plan",
     "watch": "fn-tickmonitor", "poll": "fn-tickmonitor",

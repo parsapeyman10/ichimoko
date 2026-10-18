@@ -672,9 +672,9 @@
 | `resetAndRefresh()` | NewsRepository | 120 | — |
 | `refreshNow()` | NewsRepository | 126 | — |
 | `refresh()` | NewsRepository | 128 | `#fn-market-refresh` در نقشهٔ HTML |
-| `refreshServerMode()` | NewsRepository | 144 | `#fn-news-refresh` در نقشهٔ HTML |
+| `refreshServerMode()` | NewsRepository | 144 | — |
 | `sameAiConfig()` | NewsRepository | 168 | — |
-| `refreshClientMode()` | NewsRepository | 172 | `#fn-news-refresh` در نقشهٔ HTML |
+| `refreshClientMode()` | NewsRepository | 172 | — |
 | `clientAiAnalyze()` | NewsRepository | 260 | — |
 | `apiUrl()` | NewsRepository | 334 | — |
 | `newsUrl()` | NewsRepository | 343 | — |
@@ -1279,11 +1279,11 @@
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `alignment()` | NewsConfluence | 30 | `#fn-newsconfluence` در نقشهٔ HTML |
+| `alignment()` | NewsConfluence | 30 | — |
 | `unknown()` | Alignment | 32 | — |
 | `trustedPublisher()` | NewsConfluence | 82 | — |
 | `record()` | NewsConfluence | 95 | — |
-| `apply()` | NewsConfluence | 111 | `#fn-newsconfluence` در نقشهٔ HTML |
+| `apply()` | NewsConfluence | 111 | — |
 
 ### `engine/PerformanceMetrics.kt` — 99 خط · 2 فانکشن
 
