@@ -75,11 +75,11 @@ class NineWayAutoPaperTest {
             confluence = confirmed.confluence.mapIndexed { index, item ->
                 if (index == 0) item.copy(status = ConfluenceStatus.UNKNOWN) else item
             })), settings, now))
-        assertNotNull(PaperAutoRules.blocker(ready, settings.copy(autoPaperTrading = false), news, now))
-        assertNull(PaperAutoRules.blocker(ready, settings.copy(backgroundMonitor = false), news, now))
-        assertNotNull(PaperAutoRules.opportunityBlocker(ready, settings.copy(backgroundMonitor = false), news, now))
+        assertNotNull(PaperAutoRules.blocker(ready, settings.copy(autoPaperTrading = false), now))
+        assertNull(PaperAutoRules.blocker(ready, settings.copy(backgroundMonitor = false), now))
+        assertNotNull(PaperAutoRules.opportunityBlocker(ready, settings.copy(backgroundMonitor = false), now))
         assertNotNull(PaperAutoRules.blocker(ready.copy(symbol = "UNKNOWN_XYZ"), settings, now))
-        assertNotNull(PaperAutoRules.blocker(ready, settings, news, now + 700_000L))
+        assertNotNull(PaperAutoRules.blocker(ready, settings, now + 700_000L))
         // A late WebSocket tick near Friday's close cannot authorize a weekend entry/alert.
         val closedAt = Instant.parse("2027-01-15T22:00:00Z").toEpochMilli()
         assertTrue(PaperAutoRules.opportunityBlocker(ready.copy(feed = FeedStatus(FeedMode.LIVE,
