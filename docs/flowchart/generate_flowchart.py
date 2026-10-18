@@ -184,7 +184,7 @@ HTML = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>نقشهٔ فلوچارت Aurum Edge — اپ چه می‌کند؟</title>
+<title>نقشهٔ فلوچارت Aurum Edge — طرح جدید اپ</title>
 <style>
 :root{
   --bg:#0b1020; --panel:#111a30; --panel2:#0e1526; --line:#233252; --txt:#dbe4f5;
@@ -199,6 +199,8 @@ header.hero{padding:34px 22px 18px;background:linear-gradient(160deg,#0e1a38,#0b
   border-bottom:1px solid var(--line)}
 header.hero h1{margin:0 0 6px;font-size:27px}
 header.hero p{margin:4px 0;color:var(--mut);max-width:980px}
+.banner{max-width:980px;margin-top:14px;background:#2a1f07;border:1px solid #92600a;color:#fcd34d;
+  border-radius:12px;padding:10px 16px;font-size:13.5px}
 .stats{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
 .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 16px}
 .stat b{font-size:19px;color:#fff}
@@ -256,10 +258,13 @@ footer{color:var(--mut);font-size:12.5px;padding:8px 22px 34px;max-width:1560px;
 </head>
 <body>
 <header class="hero">
-  <h1>🗺️ نقشهٔ فلوچارت اپ Aurum Edge</h1>
-  <p>این صفحه از روی سورس‌کد واقعی مخزن ساخته شده است: اول نقشهٔ کلانِ «اپ چه می‌کند»، بعد جریان‌های اصلی زمان اجرا،
-  و در سطح سوم فلوچارت عمیقِ تک‌تک فانکشن‌های تصمیم‌گیر. روی هر گرهٔ بنفشِ «زیرنمودار» کلیک کن تا به فلوچارت همان فانکشن بپری.
-  با دکمه‌های ＋／－ یا چرخ موس زوم کن و با درگ جابه‌جا شو. در انتها کاتالوگ کامل همهٔ فانکشن‌های مخزن آمده است.</p>
+  <h1>🗺️ نقشهٔ طرح جدید اپ Aurum Edge</h1>
+  <p>این نقشه، معماری هدفِ اپ بعد از ریفکتورِ درخواستی است: خبر و تقویم اقتصادی کامل حذف شده‌اند؛ هر تایم‌فریم کندل واقعی و مستقل خودش را از منبع رایگان می‌گیرد
+  (دیگر نه سیاست ۱۵۰۰ کندل هست نه ساخت تایم‌فریم از روی M5)؛ دروازهٔ تأیید بازار با «گارد فید» سبک جایگزین شده؛ پایش پس‌زمینه تطبیقی است
+  (متناسب با تایم‌فریم و وضعیت پوزیشن)؛ و هر سورسی که داده ندهد صراحتاً «مرده» اعلام و جایگزینش فعال می‌شود.
+  روی هر گرهٔ بنفشِ «زیرنمودار» کلیک کن تا به فلوچارت همان فانکشن بپری؛ با ＋／－ یا چرخ موس زوم کن و با درگ جابه‌جا شو.</p>
+  <div class="banner">⚠️ <b>وضعیت:</b> این صفحه «طرح هدف» است و هنوز روی کد اعمال نشده — برای سازماندهی و تأیید منطق جدید است.
+  کاتالوگ انتهای صفحه هنوز از کد فعلی استخراج می‌شود و بعد از هر فاز ریفکتور با نقشه تطبیق داده خواهد شد.</div>
   <div class="stats">__STATS__</div>
 </header>
 <div class="layout">
