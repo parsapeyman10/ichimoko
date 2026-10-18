@@ -74,20 +74,20 @@ class V1ContractTest {
     @Test fun oneShortOrUnclosedFrameBlocksThreeFrameAlignment() {
         val complete = V1Scoring.intervals.associateWith(::bars)
         val short = complete.toMutableMap()
-        short[Interval.M15] = complete.getValue(Interval.M15).takeLast(499)
+        short[Interval.M15] = complete.getValue(Interval.M15).takeLast(239)
         val rejected = SignalEngine.evaluate(complete.getValue(Interval.M5), Interval.M5, 60.0,
             symbol = "EUR/USD", timeframes = short)
         assertEquals(SignalAction.NO_TRADE, rejected.action)
-        assertTrue(rejected.blockers.any { it.contains("15m(499/500)") })
-        assertTrue(rejected.confluence.last().detail.contains("499/500 کندل"))
+        assertTrue(rejected.blockers.any { it.contains("15m(239/240)") })
+        assertTrue(rejected.confluence.last().detail.contains("239/240 کندل"))
 
         val open = complete.toMutableMap()
-        open[Interval.H1] = complete.getValue(Interval.H1).takeLast(125)
-            .mapIndexed { index, candle -> if (index == 124) candle.copy(closed = false) else candle }
+        open[Interval.H1] = complete.getValue(Interval.H1).takeLast(200)
+            .mapIndexed { index, candle -> if (index == 199) candle.copy(closed = false) else candle }
         val blocked = SignalEngine.evaluate(complete.getValue(Interval.M5), Interval.M5, 60.0,
             symbol = "EUR/USD", timeframes = open)
         assertEquals(SignalAction.NO_TRADE, blocked.action)
-        assertTrue(blocked.blockers.any { it.contains("1H(124/125)") })
+        assertTrue(blocked.blockers.any { it.contains("1H(199/200)") })
     }
 
     @Test fun equalDirectionalScoresNeverDefaultBuyAndRangeNeedsDirectionalFrames() {

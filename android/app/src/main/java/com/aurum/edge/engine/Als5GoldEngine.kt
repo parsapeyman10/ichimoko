@@ -113,7 +113,6 @@ object Als5GoldEngine {
         val newYorkZoneId: String = "America/New_York",
         val newYorkStartHourLocal: Int = 8,
         val newYorkEndHourLocal: Int = 16,
-        val newsBlackoutMinutes: Int = 30,
         val exitModel: ExitModel = ExitModel.FIXED_RR,
         val enableEngineA: Boolean = true,
         val enableEngineB: Boolean = true,
@@ -950,7 +949,7 @@ object Als5GoldEngine {
             config.riskPerTradePct !in 0.01..0.25 || config.minRewardRisk < 1.5 ||
             config.maxDailyLossPct !in 0.1..1.0 || config.contractSizeOz <= 0.0 ||
             config.minLot <= 0.0 || config.lotStep <= 0.0 || config.maxSpreadAtrRatio <= 0.0 ||
-            config.newsBlackoutMinutes < 0 || config.mssWindowBars < 1) {
+            config.mssWindowBars < 1) {
             return blocked("ALS-5: پارامترهای ریسک، قرارداد یا حدآستانه نامعتبر هستند")
         }
         if (interval != Interval.M5) {

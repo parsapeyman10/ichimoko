@@ -131,7 +131,10 @@ class SignalMonitorService : Service() {
                         } catch (_: Exception) { /* radar statuses carry per-pair errors */ }
                     }
                 }
-                delay(60_000L)
+                // Adaptive cadence: 60s baseline for M5, tightening to 20s while any
+                // symbol is a live candidate / near entry quality (MonitorCadence).
+                delay(com.aurum.edge.core.MonitorCadence.sweepDelayMs(
+                    container.pairScanner.state.value.statuses.map { it.state to it.confidence }))
             }
         }
 

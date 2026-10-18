@@ -32,13 +32,15 @@ class MarketTrendTest {
     private val start = 1_699_999_200_000L
     private val m5 = 300_000L
 
-    private fun series(count: Int, price: (Int) -> Double): List<Candle> {
+    private fun series(count: Int, price: (Int) -> Double): List<Candle> = series(count, m5, price)
+
+    private fun series(count: Int, step: Long, price: (Int) -> Double): List<Candle> {
         val out = ArrayList<Candle>(count)
         var previous = price(0)
         for (i in 0 until count) {
             val close = price(i)
             out += Candle(
-                time = start + i * m5,
+                time = start + i * step,
                 open = previous,
                 high = maxOf(previous, close) + 0.1,
                 low = minOf(previous, close) - 0.1,
@@ -51,10 +53,14 @@ class MarketTrendTest {
         return out
     }
 
-    /** 1200 closed M5 bars = 100 H1 buckets, so the reference timeframe really can be measured. */
     private val upCandles = series(1200) { i -> 100.0 + 0.5 * i }
     private val downCandles = series(1200) { i -> 1000.0 - 0.5 * i }
     private val flatCandles = series(1200) { 100.0 }
+
+    /** Independently supplied H1 reference series (never aggregated from the M5 tape). */
+    private val upH1 = series(100, 3_600_000L) { i -> 100.0 + 6.0 * i }
+    private val downH1 = series(100, 3_600_000L) { i -> 1000.0 - 6.0 * i }
+    private val flatH1 = series(100, 3_600_000L) { 100.0 }
 
     private fun trend(symbol: String, direction: TrendDirection, strength: Int = 60): SymbolTrend = SymbolTrend(
         symbol = symbol,
@@ -77,13 +83,13 @@ class MarketTrendTest {
         detailFa = "",
     )
 
-    @Test fun cleanUptrendIsMeasuredUpOnTheAggregatedReferenceTimeframe() {
-        val read = MarketTrend.symbolTrend("BTC/USDT", upCandles, Interval.M5)
+    @Test fun cleanUptrendIsMeasuredUpOnTheIndependentReferenceTimeframe() {
+        val read = MarketTrend.symbolTrend("BTC/USDT", upCandles, Interval.M5, higherCandles = upH1)
         assertEquals(TrendDirection.UP, read.direction)
         assertEquals(TrendDirection.UP, read.baseDirection)
         assertEquals(TrendDirection.UP, read.higherDirection)
         assertEquals(Interval.H1.label, read.higherLabel)
-        assertTrue("تایم‌فریم مرجع باید از همان کندل‌ها تجمیع شود", read.higherBars >= MarketTrend.MIN_BARS)
+        assertTrue("تایم‌فریم مرجع باید از کندل‌های مستقل H1 اندازه گرفته شود", read.higherBars >= MarketTrend.MIN_BARS)
         assertTrue(read.strength >= 80)
         assertFalse(read.conflict)
         assertNotNull(read.efficiencyRatio)
@@ -92,15 +98,21 @@ class MarketTrendTest {
     }
 
     @Test fun cleanDowntrendIsMeasuredDown() {
-        val read = MarketTrend.symbolTrend("XAU/USD", downCandles, Interval.M5)
+        val read = MarketTrend.symbolTrend("XAU/USD", downCandles, Interval.M5, higherCandles = downH1)
         assertEquals(TrendDirection.DOWN, read.direction)
         assertEquals(TrendDirection.DOWN, read.higherDirection)
         assertTrue(read.strength >= 80)
         assertTrue(read.detailFa.contains("نزولی"))
     }
 
+    @Test fun withoutIndependentHigherCandlesTheReferenceDirectionStaysUnknown() {
+        val read = MarketTrend.symbolTrend("BTC/USDT", upCandles, Interval.M5)
+        assertEquals(TrendDirection.UNKNOWN, read.higherDirection)
+        assertEquals(0, read.higherBars)
+    }
+
     @Test fun flatTapeIsSidewaysAndNeverBecomesATrendByGuessing() {
-        val read = MarketTrend.symbolTrend("EUR/USD", flatCandles, Interval.M5)
+        val read = MarketTrend.symbolTrend("EUR/USD", flatCandles, Interval.M5, higherCandles = flatH1)
         assertEquals(TrendDirection.SIDEWAYS, read.direction)
         assertEquals(TrendDirection.SIDEWAYS, read.higherDirection)
         assertEquals(0, read.vote)
