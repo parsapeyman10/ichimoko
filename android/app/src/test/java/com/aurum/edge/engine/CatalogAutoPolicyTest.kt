@@ -8,7 +8,6 @@ import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.data.CatalogQuotePolicy
 import com.aurum.edge.data.MarketState
-import com.aurum.edge.data.PersianNewsState
 import com.aurum.edge.data.WatchCatalog
 import java.time.Instant
 import org.junit.Assert.assertEquals
@@ -45,16 +44,16 @@ class CatalogAutoPolicyTest {
             historyProvider = "Twelve Data")
         assertFalse(com.aurum.edge.data.CryptoVenuePolicy.compatible("BTC/USDT",
             observed.historyProvider, observed.feed.provider))
-        assertTrue(PaperAutoRules.blocker(observed, config, PersianNewsState(), now = weekday,
+        assertTrue(PaperAutoRules.blocker(observed, config, now = weekday,
             allowedSymbols = WatchCatalog.scannerSymbols)!!.contains("فشردگی"))
         val matched = observed.copy(historyProvider = com.aurum.edge.data.BinanceSpotClient.PROVIDER,
             feed = observed.feed.copy(provider = "Binance Spot / USDT aggTrade"),
             lastTradeAt = weekday, lastTradePrice = 100.0)
         assertTrue(PaperAutoRules.blocker(matched.copy(lastTradeAt = weekday - 46_000L), config,
-            PersianNewsState(), now = weekday,
+            now = weekday,
             allowedSymbols = WatchCatalog.scannerSymbols)!!.contains("فشردگی"))
         assertEquals("سیگنال فشردگی/انفجار موجود نیست",
-            PaperAutoRules.blocker(matched, config, PersianNewsState(), now = weekday,
+            PaperAutoRules.blocker(matched, config, now = weekday,
                 allowedSymbols = WatchCatalog.scannerSymbols))
     }
 
@@ -62,12 +61,11 @@ class CatalogAutoPolicyTest {
         val config = AppSettings(autoPaperTrading = true)
         val state = MarketState(symbol = "USD/JPY", interval = Interval.M5,
             lastPrice = 150.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = weekday))
-        val news = PersianNewsState()
-        assertEquals("سیگنال محاسبه نشده است", PaperAutoRules.blocker(state, config, news, now = weekday))
-        assertTrue(PaperAutoRules.blocker(state, config, news, now = weekday,
+        assertEquals("سیگنال محاسبه نشده است", PaperAutoRules.blocker(state, config, now = weekday))
+        assertTrue(PaperAutoRules.blocker(state, config, now = weekday,
             allowedSymbols = listOf("EUR/USD"))!!.contains("لیست"))
         assertEquals("سیگنال محاسبه نشده است",
-            PaperAutoRules.blocker(state, config, news, now = weekday,
+            PaperAutoRules.blocker(state, config, now = weekday,
                 allowedSymbols = WatchCatalog.scannerSymbols))
     }
 }

@@ -1,7 +1,6 @@
 package com.aurum.edge.ui
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Home
@@ -33,7 +32,6 @@ enum class AurumTab(val label: String, val icon: ImageVector) {
     Chart("چارت", Icons.Filled.ShowChart),
     Signal("معامله", Icons.Filled.Bolt),
     Watch("دیده‌بان", Icons.Filled.ViewList),
-    News("خبر", Icons.Filled.Article),
     Journal("ژورنال", Icons.Filled.Bookmarks),
     Update("بروزرسانی", Icons.Filled.Refresh),
     Settings("تنظیمات", Icons.Filled.Settings),
@@ -41,11 +39,11 @@ enum class AurumTab(val label: String, val icon: ImageVector) {
 }
 
 internal val primaryTabs = listOf(
-    AurumTab.Home, AurumTab.Chart, AurumTab.Signal, AurumTab.Watch, AurumTab.News,
+    AurumTab.Home, AurumTab.Chart, AurumTab.Signal, AurumTab.Watch, AurumTab.Journal,
 )
 
 internal val moreTabs = listOf(
-    AurumTab.Journal, AurumTab.Update, AurumTab.Settings, AurumTab.Api,
+    AurumTab.Update, AurumTab.Settings, AurumTab.Api,
 )
 
 @Composable

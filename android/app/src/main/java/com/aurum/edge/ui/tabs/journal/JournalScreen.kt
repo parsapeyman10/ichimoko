@@ -51,7 +51,6 @@ import com.aurum.edge.core.PaperAiReview
 import com.aurum.edge.core.PaperHoldReview
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.TradeReplay
-import com.aurum.edge.data.HoldReviewCycle
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.engine.PerformanceMetrics
 import com.aurum.edge.engine.ResearchEvidence
@@ -73,7 +72,6 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val loadError by viewModel.journalError.collectAsStateWithLifecycle()
     val tickFeeds by viewModel.tickFeeds.collectAsStateWithLifecycle()
-    val holdReview by viewModel.holdReview.collectAsStateWithLifecycle()
     var confirmClear by remember { mutableStateOf(false) }
     var showCombined by remember { mutableStateOf(false) }
     var selectedCategory by rememberSaveable { mutableStateOf<AssetClass?>(null) }
@@ -196,7 +194,6 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
         val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
         if (filteredOpen.isNotEmpty()) {
             SectionCard("پوزیشن‌های باز · ${selectedCategory?.label ?: "همهٔ بازارها"}", "ارزش‌گذاری با آخرین قیمت واقعی دریافتی") {
-                HoldReviewStatus(holdReview) { viewModel.reviewOpenPositionsNow() }
                 filteredOpen.forEach { trade ->
                     val currentPrice = (com.aurum.edge.data.OpenPositionQuotePolicy.monitored(
                         trade, liveTicks[trade.symbol], now)
@@ -647,49 +644,11 @@ private fun PaperAiReview.verdictFa(): String = when (verdict) {
     else -> verdict
 }
 
-/**
- * «ادامه بده یا نه» — status of the companion AI's advisory pass over the OPEN positions.
- * Purely informational: the button only asks for an opinion; exits stay price-driven.
- */
-@Composable
-private fun HoldReviewStatus(cycle: HoldReviewCycle, onReview: () -> Unit) {
-    val checkedAt = cycle.checkedAt
-    Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                when {
-                    cycle.alerts.isNotEmpty() ->
-                        "نظر AI: ادامهٔ ${cycle.alerts.size} پوزیشن توصیه نمی‌شود — فقط هشدار، معامله بسته نشده"
-                    cycle.reviewed > 0 && checkedAt != null ->
-                        "آخرین بازبینی AI پوزیشن‌های باز: ${cycle.reviewed} مورد · ${formatDateTime(checkedAt)}"
-                    checkedAt != null -> "بازبینی AI در ${formatDateTime(checkedAt)} نتیجهٔ معتبری نداد"
-                    else -> "بازبینی AI پوزیشن‌های باز هنوز انجام نشده است"
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = when {
-                    cycle.alerts.isNotEmpty() -> AurumColors.Red
-                    cycle.reviewed > 0 -> AurumColors.Gold
-                    else -> AurumColors.TextMuted
-                },
-                modifier = Modifier.weight(1f),
-            )
-            OutlinedButton(onClick = onReview) {
-                Text("بازبینی AI", style = MaterialTheme.typography.labelSmall)
-            }
-        }
-        cycle.skipped.takeIf { it.isNotBlank() }?.let { reason ->
-            Text(reason, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-        }
-        Text("پوزیشن‌های جدید V1 در ۱R استاپ را به نقطهٔ ورود و در ۲R به ۱R سود می‌رسانند؛ پس از آن استاپ پویا دنبال‌کننده است و هدف اولیه خروج ثابت نیست. رکوردهای قدیمی طبق قواعد ثبت‌شدهٔ خود تسویه می‌شوند. AI معامله را نمی‌بندد و پارامترها را عوض نمی‌کند.",
-            style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
-    }
-}
-
 @Composable
 private fun HoldReviewDisclosure(review: PaperHoldReview?, showEmptyHint: Boolean = true) {
     if (review == null) {
         if (showEmptyHint) {
-            Text("نظر AI دربارهٔ ادامهٔ این پوزیشن ثبت نشده؛ با «بازبینی AI» یا روشن بودن پایش پس‌زمینه گرفته می‌شود.",
+            Text("برای این پوزیشن بازبینی همراه ثبت نشده است.",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         }
         return

@@ -10,15 +10,7 @@ import com.aurum.edge.core.Interval
 import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
-import com.aurum.edge.data.AiNewsVerdict
 import com.aurum.edge.data.MarketState
-import com.aurum.edge.data.NewsGate
-import com.aurum.edge.data.NewsSourceStatus
-import com.aurum.edge.data.PersianHeadline
-import com.aurum.edge.data.PersianNewsState
-import com.aurum.edge.data.parseWebNews
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -27,23 +19,13 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Contract fixtures only: no claim that a mocked LLM predicted real gold or a broker order. */
+/** Contract fixtures only: technical gates of the four-layer paper policy. */
 class NineWayAutoPaperTest {
     private val now = 1_800_000_000_000L
     private val barTime = now - Interval.M5.millis
     private val four = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "دادهٔ آزمون", scorePercent = 25) }
     private val settings = AppSettings(symbol = "EUR/USD", interval = Interval.M5,
         backgroundMonitor = true, autoPaperTrading = true)
-    private val headline = PersianHeadline("id1", "Gold reacts to dollar weakness", "headline fixture",
-        "Publisher", "https://publisher.example/news", now - 60_000L,
-        "MEDIUM", "BUY", "rule-label", "en")
-    private val news = PersianNewsState(
-        articles = listOf(headline), sources = listOf(NewsSourceStatus("Publisher", "online", "https://publisher.example/rss"),
-            NewsSourceStatus("Forex Factory", "online", "https://nfs.faireconomy.media/ff_calendar_thisweek.json")),
-        gate = NewsGate.CLEAR, lastCheckedAt = now, calendarCheckedAt = now,
-        ai = AiNewsVerdict("AVAILABLE", "EUR/USD", "BUY", 91.0, "test-model",
-            "fixture classification", now, listOf("id1")),
-    )
     private val raw = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2994.5,
         takeProfit = 3009.0, interval = Interval.M5, barTime = barTime, confluence = four)
 
@@ -54,144 +36,25 @@ class NineWayAutoPaperTest {
     @Test fun automaticReviewRequiresFiveMinuteMarketAndSignal() {
         for (interval in listOf(Interval.M3, Interval.M15, Interval.H1)) {
             assertTrue(PaperAutoRules.blocker(market(raw).copy(interval = interval),
-                settings, news, now).orEmpty().contains("۵ دقیقه"))
+                settings, now).orEmpty().contains("۵ دقیقه"))
             assertTrue(PaperAutoRules.opportunityBlocker(market(raw.copy(interval = interval)),
-                settings, news, now).orEmpty().contains("۵ دقیقه"))
+                settings, now).orEmpty().contains("۵ دقیقه"))
         }
-        assertNull(PaperAutoRules.blocker(market(raw), settings, news, now))
+        assertNull(PaperAutoRules.blocker(market(raw), settings, now))
     }
 
-    @Test fun backendWebNewsJsonToNineWayAndAutoPolicyIsOneContract() {
-        val published = Instant.ofEpochMilli(now - 60_000L)
-        val received = Instant.ofEpochMilli(now)
-        val payload = """{
-            "status":{"configured":true,"state":"online","cached":false,
-                "sources":[{"name":"Publisher","state":"online","feed":"https://publisher.example/rss"},
-                    {"name":"Forex Factory","state":"online","feed":"https://nfs.faireconomy.media/ff_calendar_thisweek.json"}]},
-            "calendar":{"status":"online","source":"https://nfs.faireconomy.media/ff_calendar_thisweek.json",
-                "checked_at":"$received","events":[{"country":"USD"}],"guard":{"state":"CLEAR"}},
-            "articles":[{"id":"id1","source":"Publisher","headline":"Gold reacts to dollar weakness",
-                "published_at":"$published","url":"https://publisher.example/news","analysis":{"source":"rules"}}],
-            "guard":{"state":"CLEAR","reason":"fixture"},
-            "ai_confluence":{"status":"AVAILABLE","symbol":"EUR/USD","direction":"BUY",
-                "confidence":91,"model":"test-model","reason":"gold macro context",
-                "checked_at":"$received","evidence_ids":["id1"]},
-            "checked_at":"$received"
-        }"""
-        val parsed = parseWebNews(Json.parseToJsonElement(payload) as JsonObject, now)
-        assertEquals(NewsGate.CLEAR, parsed.gate)
-        assertEquals("rules", parsed.articles.single().analysisSource) // rule label isn't AI
-        val combined = NewsConfluence.apply(raw, "EUR/USD", parsed, now)!!
-        assertEquals(SignalAction.BUY, combined.action)
-        assertNull(PaperAutoRules.blocker(market(combined), settings, parsed, now))
-        assertEquals("id1", NewsConfluence.record(parsed, "EUR/USD")!!.evidence.single().id)
-        val missingAi = parseWebNews(Json.parseToJsonElement(payload.replace("ai_confluence", "not_ai")) as JsonObject, now)
-        assertEquals("UNKNOWN news is yellow/advisory, not a technical veto", SignalAction.BUY,
-            NewsConfluence.apply(raw, "EUR/USD", missingAi, now)!!.action)
-        val withoutCalendar = parseWebNews(Json.parseToJsonElement(payload.replace("\"calendar\":", "\"ignoredCalendar\":")) as JsonObject, now)
-        assertEquals(NewsGate.UNKNOWN, withoutCalendar.gate)
-        assertEquals("missing calendar cannot claim green news, but does not erase the 8-condition score",
-            SignalAction.BUY, NewsConfluence.apply(raw, "EUR/USD", withoutCalendar, now)!!.action)
-        val blockedCalendar = parseWebNews(Json.parseToJsonElement(payload.replace(
-            "\"events\":[{\"country\":\"USD\"}],\"guard\":{\"state\":\"CLEAR\"}",
-            "\"events\":[{\"country\":\"USD\"}],\"guard\":{\"state\":\"BLOCKED\"}")) as JsonObject, now)
-        assertEquals(NewsGate.BLOCKED, blockedCalendar.gate)
-        assertEquals("calendar/news conflict is journal context only", SignalAction.BUY,
-            NewsConfluence.apply(raw, "EUR/USD", blockedCalendar, now)!!.action)
-        val agedCalendar = parseWebNews(Json.parseToJsonElement(payload) as JsonObject, now + 1_200_001L)
-        assertEquals(NewsGate.UNKNOWN, agedCalendar.gate)
-    }
-
-    @Test fun everyTechnicalComponentMustPassWhileNewsStaysJournalContext() {
-        val result = NewsConfluence.apply(raw, "EUR/USD", news, now)!!
-        assertEquals(SignalAction.BUY, result.action)
-        assertEquals(5, result.confluence.size)
-        assertEquals(NewsConfluence.NEWS_LABEL, result.confluence[4].name)
-        assertEquals(ConfluenceStatus.CONFIRMED, result.confluence[4].status)
-        assertNotNull(NewsConfluence.record(news, "EUR/USD"))
-        assertNull(PaperAutoRules.blocker(market(result), settings, news, now))
+    @Test fun everyTechnicalComponentMustPass() {
+        assertEquals(SignalAction.BUY, raw.action)
+        assertEquals(4, raw.confluence.size)
+        assertNull(PaperAutoRules.blocker(market(raw), settings, now))
         for (failed in four.indices) {
             val input = raw.copy(confluence = four.mapIndexed { i, item -> if (i == failed) item.copy(ok = false, status = ConfluenceStatus.CONFLICT, scorePercent = 0) else item })
-            val combined = NewsConfluence.apply(input, "EUR/USD", news, now)!!
-            assertEquals("technical $failed", SignalAction.NO_TRADE, combined.action)
-            assertNull(combined.entry)
-            assertEquals(5, combined.confluence.size)
-            assertNotNull(PaperAutoRules.blocker(market(combined), settings, news, now))
+            assertNotNull("technical $failed", PaperAutoRules.blocker(market(input), settings, now))
         }
-    }
-
-    @Test fun newsContextIsEvaluatedPerPairForAllCatalogMajors() {
-        // Client mode returns one verdict per catalog pair; gold may be absent while EUR/USD passes.
-        val eurNews = news.copy(
-            ai = AiNewsVerdict(),
-            aiBySymbol = mapOf("EUR/USD" to AiNewsVerdict("AVAILABLE", "EUR/USD", "BUY", 88.0,
-                "test-model", "euro context", now, listOf("id1"))),
-            vetoedSymbols = setOf("USD/JPY"),
-        )
-        val combined = NewsConfluence.apply(raw, "EUR/USD", eurNews, now)!!
-        assertEquals(SignalAction.BUY, combined.action)
-        assertEquals(ConfluenceStatus.CONFIRMED, combined.confluence[4].status)
-        assertEquals("id1", NewsConfluence.record(eurNews, "EUR/USD")!!.evidence.single().id)
-        assertNull(NewsConfluence.record(eurNews)) // gold verdict absent -> no gold evidence
-        // A High-impact event is still labelled CONFLICT, but it no longer blocks paper entry.
-        val jpyNews = eurNews.copy(aiBySymbol = mapOf("USD/JPY" to AiNewsVerdict("AVAILABLE", "USD/JPY",
-            "SELL", 85.0, "test-model", "jpy context", now, listOf("id1"))))
-        val jpyBlocked = NewsConfluence.apply(raw, "USD/JPY", jpyNews, now)!!
-        assertEquals(SignalAction.NO_TRADE, jpyBlocked.action)
-        assertTrue(jpyBlocked.blockers.any { it.contains("وتوی AI") })
-        assertEquals(ConfluenceStatus.CONFLICT, jpyBlocked.confluence[4].status)
-        // Server mode (per-pair map empty): a non-gold pair stays honestly UNKNOWN but technical signal remains visible.
-        val serverOnlyNews = news.copy(ai = AiNewsVerdict(), aiBySymbol = emptyMap())
-        val serverOnly = NewsConfluence.apply(raw, "EUR/USD", serverOnlyNews, now)!!
-        assertEquals(SignalAction.BUY, serverOnly.action)
-        assertEquals(ConfluenceStatus.UNKNOWN, serverOnly.confluence[4].status)
-    }
-
-    @Test fun unknownAndConflictNewsStayAdvisoryForPaperEntries() {
-        val advisoryCases = listOf(
-            news.copy(ai = AiNewsVerdict()),
-            news.copy(ai = news.ai.copy(status = "UNKNOWN")),
-            news.copy(ai = news.ai.copy(confidence = 79.0)),
-            news.copy(ai = news.ai.copy(model = "deterministic-fallback")),
-            news.copy(ai = news.ai.copy(evidenceIds = listOf("made-up"))),
-            news.copy(ai = news.ai.copy(evidenceIds = listOf("id1", "id1"))),
-            news.copy(sources = listOf(NewsSourceStatus("Publisher", "unavailable", "https://publisher.example/rss"))),
-            news.copy(loading = true),
-            news.copy(lastCheckedAt = now - 180_001),
-            news.copy(ai = news.ai.copy(checkedAt = now - 180_001)),
-            news.copy(articles = listOf(headline.copy(publishedAt = now - 181 * 60_000L))),
-            news.copy(articles = listOf(headline.copy(link = null))),
-            news.copy(articles = listOf(headline.copy(link = "https://publisher.example.attacker.net/news"))),
-        )
-        advisoryCases.forEachIndexed { idx, input ->
-            val combined = NewsConfluence.apply(raw, "EUR/USD", input, now)!!
-            assertEquals("advisory news $idx", SignalAction.BUY, combined.action)
-            assertFalse("advisory news $idx", combined.confluence[4].ok)
-            assertEquals(ConfluenceStatus.UNKNOWN, combined.confluence[4].status)
-            assertEquals(raw.confidence, combined.confidence, 0.001)
-            assertNull(PaperAutoRules.blocker(market(combined), settings, input, now))
-        }
-        listOf(
-            news.copy(ai = news.ai.copy(direction = "SELL")),
-            news.copy(gate = NewsGate.BLOCKED),
-        ).forEachIndexed { idx, input ->
-            val combined = NewsConfluence.apply(raw, "EUR/USD", input, now)!!
-            assertEquals("opposing validated AI vetoes; calendar-only conflict is context",
-                if (idx == 0) SignalAction.NO_TRADE else SignalAction.BUY, combined.action)
-            assertEquals(ConfluenceStatus.CONFLICT, combined.confluence[4].status)
-            if (idx == 0) {
-                assertNotNull(PaperAutoRules.blocker(market(combined), settings, input, now))
-                // Preserve model identity and the validated verdict time on the vetoed signal.
-                assertTrue(combined.blockers.last().contains(news.ai.model!!))
-                assertTrue(combined.blockers.last().contains(Instant.ofEpochMilli(news.ai.checkedAt!!).toString()))
-            } else assertNull(PaperAutoRules.blocker(market(combined), settings, input, now))
-        }
-        assertEquals(ConfluenceStatus.UNKNOWN,
-            NewsConfluence.apply(raw, "EUR/USD", news.copy(ai = AiNewsVerdict()), now)!!.confluence[4].status)
     }
 
     @Test fun liveQuoteSettingsSymbolAndClosedBarFreshnessMustAlsoMatch() {
-        val confirmed = NewsConfluence.apply(raw, "EUR/USD", news, now)!!
+        val confirmed = raw
         val ready = market(confirmed)
         listOf(
             ready.copy(feed = FeedStatus(FeedMode.OFFLINE, lastSuccessAt = now)),
@@ -201,34 +64,27 @@ class NineWayAutoPaperTest {
             ready.copy(candles = listOf(Candle(barTime - Interval.M5.millis, 3000.0, 3002.0, 2999.0, 3000.0))),
             ready.copy(signal = confirmed.copy(barTime = now)),
         ).forEachIndexed { idx, input ->
-            assertNotNull("market $idx", PaperAutoRules.blocker(input, settings, news, now))
+            assertNotNull("market $idx", PaperAutoRules.blocker(input, settings, now))
         }
         val restOnly = ready.copy(feed = FeedStatus(FeedMode.POLLING, lastSuccessAt = now))
         assertNull("a verified polling feed can trigger automatic paper entry",
-            PaperAutoRules.blocker(restOnly, settings, news, now))
+            PaperAutoRules.blocker(restOnly, settings, now))
         assertNull("a verified REST candle may still trigger an educational candidate alert",
-            PaperAutoRules.opportunityBlocker(restOnly, settings, news, now))
+            PaperAutoRules.opportunityBlocker(restOnly, settings, now))
         assertNotNull(PaperAutoRules.blocker(ready.copy(signal = confirmed.copy(
             confluence = confirmed.confluence.mapIndexed { index, item ->
                 if (index == 0) item.copy(status = ConfluenceStatus.UNKNOWN) else item
-            })), settings, news, now))
-        assertNull(PaperAutoRules.blocker(ready.copy(signal = confirmed.copy(
-            confluence = confirmed.confluence.mapIndexed { index, item ->
-                if (index == 4) item.copy(status = ConfluenceStatus.CONFLICT) else item
-            })), settings, news, now))
-        assertNull(PaperAutoRules.blocker(ready, settings,
-            news.copy(ai = news.ai.copy(model = "another-verified-model")), now))
+            })), settings, now))
         assertNotNull(PaperAutoRules.blocker(ready, settings.copy(autoPaperTrading = false), news, now))
         assertNull(PaperAutoRules.blocker(ready, settings.copy(backgroundMonitor = false), news, now))
         assertNotNull(PaperAutoRules.opportunityBlocker(ready, settings.copy(backgroundMonitor = false), news, now))
-        assertNotNull(PaperAutoRules.blocker(ready.copy(symbol = "UNKNOWN_XYZ"), settings, news, now))
+        assertNotNull(PaperAutoRules.blocker(ready.copy(symbol = "UNKNOWN_XYZ"), settings, now))
         assertNotNull(PaperAutoRules.blocker(ready, settings, news, now + 700_000L))
         // A late WebSocket tick near Friday's close cannot authorize a weekend entry/alert.
         val closedAt = Instant.parse("2027-01-15T22:00:00Z").toEpochMilli()
         assertTrue(PaperAutoRules.opportunityBlocker(ready.copy(feed = FeedStatus(FeedMode.LIVE,
-            lastSuccessAt = closedAt)), settings, news, closedAt)!!.contains("بسته"))
+            lastSuccessAt = closedAt)), settings, closedAt)!!.contains("بسته"))
         assertNotNull(PaperAutoRules.blocker(ready.copy(feed = FeedStatus(FeedMode.MARKET_CLOSED)),
-            settings, news, closedAt))
-        assertEquals(ConfluenceStatus.UNKNOWN, NewsConfluence.alignment("AAPL", SignalAction.BUY, news, now).status)
+            settings, closedAt))
     }
 }

@@ -1,17 +1,16 @@
 package com.aurum.edge.core
 
 import com.aurum.edge.data.MarketState
-import com.aurum.edge.data.PersianNewsState
 import com.aurum.edge.engine.MtfAnalyzer
 
 /** Exact pre-alert checks. No alert is an entry, and none of these checks sends an order. */
 object PaperAlertRules {
-    fun blocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
+    fun blocker(market: MarketState, settings: AppSettings,
                 trades: List<PaperTrade>, mtf: MtfAnalyzer.Snapshot?,
                 now: Long = System.currentTimeMillis(),
                 allowedSymbols: List<String>? = null, barAgeGraceMs: Long = 90_000L): String? {
         if (!settings.notifyOnSignal) return "هشدار آموزشی خاموش است"
-        PaperAutoRules.opportunityBlocker(market, settings, news, now, allowedSymbols, barAgeGraceMs)?.let { return it }
+        PaperAutoRules.opportunityBlocker(market, settings, now, allowedSymbols, barAgeGraceMs)?.let { return it }
         val signal = market.signal ?: return "سیگنال در دسترس نیست"
         val isAls5Gold = V1Universe.normalize(market.symbol) == "XAU/USD"
         if (isAls5Gold && signal.als5Opportunity?.matches(signal) != true)
@@ -37,7 +36,7 @@ object PaperAlertRules {
             maxRiskPerTradePct = if (isAls5Gold) 0.0025 else PaperPortfolioPolicy.MAX_RISK_PER_TRADE,
             maxDailyLossPct = if (isAls5Gold) 0.01 else PaperPortfolioPolicy.MAX_DAILY_LOSS,
             als5SetupKey = signal.als5Opportunity?.setupKey?.takeIf { isAls5Gold })?.let { return it }
-        // News never blocks a paper alert/entry; it is attached later as journal-mining evidence.
+        // Only technical evidence and risk caps gate a paper alert.
         return null
     }
 }

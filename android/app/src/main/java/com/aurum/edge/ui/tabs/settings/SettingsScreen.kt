@@ -43,7 +43,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.content.ContextCompat
 import com.aurum.edge.BuildConfig
 import com.aurum.edge.core.AppSettings
-import com.aurum.edge.data.GeminiAiStudio
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.service.SignalMonitorService
 import com.aurum.edge.notify.Notifier
@@ -55,13 +54,6 @@ import com.aurum.edge.ui.theme.AurumColors
 fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     val context = LocalContext.current
     val monitorRunning by SignalMonitorService.running.collectAsStateWithLifecycle()
-    // Never prefill a saved secret in an editable Compose field. Blank means keep the stored key.
-    var newsUrl by remember { mutableStateOf(settings.newsBaseUrl) }
-    // Never prefill a saved secret in an editable field; blank on entry, like the API key above.
-    var newsAiKey by remember { mutableStateOf("") }
-    var newsAiBaseUrl by remember { mutableStateOf(settings.newsAiBaseUrl) }
-    var newsAiModel by remember { mutableStateOf(settings.newsAiModel) }
-    var newsAiFormat by remember { mutableStateOf(settings.newsAiFormatNormalized) }
     var balance by remember { mutableStateOf(settings.accountBalance.toString()) }
     var risk by remember { mutableStateOf(settings.riskPercent.toString()) }
     var minConfidence by remember { mutableStateOf(settings.minConfidence.toString()) }
@@ -69,12 +61,6 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
     var commission by remember { mutableStateOf(settings.commissionPerOz.toString()) }
     var confirmAuto by remember { mutableStateOf(false) }
     var autoAfterPermission by remember { mutableStateOf(false) }
-
-    LaunchedEffect(settings.newsBaseUrl) { newsUrl = settings.newsBaseUrl }
-    LaunchedEffect(settings.newsAiApiKey) { newsAiKey = "" }
-    LaunchedEffect(settings.newsAiBaseUrl) { newsAiBaseUrl = settings.newsAiBaseUrl }
-    LaunchedEffect(settings.newsAiFormat) { newsAiFormat = settings.newsAiFormatNormalized }
-    LaunchedEffect(settings.newsAiModel) { newsAiModel = settings.newsAiModel }
 
     val soundPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) viewModel.selectAlertSound(context, uri)
@@ -125,13 +111,13 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                 style = MaterialTheme.typography.bodySmall)
             Text("با قطع VPN ممکن است اندروید از اینترنت مستقیم استفاده کند؛ اگر این را نمی‌خواهید، " +
                 "در صورت پشتیبانی، Always-on VPN و مسدودکردن اتصال بدون VPN را در تنظیمات اندروید فعال کنید. " +
-                "اتصال VPN تضمین مجوز Google، سهمیهٔ Gemini یا دسترسی همهٔ منابع نیست.",
+                "اتصال VPN تضمین دسترسی همهٔ منابع داده نیست.",
                 style = MaterialTheme.typography.bodySmall)
         }
 
         SectionCard("حالت هر بازار · روندگیر / رنج‌گیر / ترکیبی", "اعمال روی تمام ${settings.activeSymbols.size} نماد برنامه") {
             Text("تنظیم هر دسته روی همهٔ نمادهای همان دسته اعمال می‌شود؛ اسکن و اعلان به فهرست دستی محدود نیستند. " +
-                "فعال‌بودن نماد مجوز معامله نیست؛ دادهٔ تازه، خبر و قفل‌های ریسک لازم‌اند.",
+                "فعال‌بودن نماد مجوز معامله نیست؛ دادهٔ تازه و قفل‌های ریسک لازم‌اند.",
                 style = MaterialTheme.typography.bodySmall)
             com.aurum.edge.core.AssetClass.entries.filter { it != com.aurum.edge.core.AssetClass.STOCK }.forEach { category ->
                 Text(category.label, style = MaterialTheme.typography.bodySmall)
@@ -147,143 +133,6 @@ fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
                     }
                 }
             }
-        }
-
-        SectionCard("خبر و AI · LLMsRelay / Gemini") {
-            if (settings.newsBaseUrl.isNotBlank()) Text(
-                "سرور خبر تنظیم شده و در بخش خبر بر AI مستقیم اولویت دارد؛ برای خبر مستقیم Gemini نشانی سرور را خالی و ذخیره کنید.",
-                style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
-            OutlinedTextField(
-                value = newsUrl, onValueChange = { newsUrl = it }, singleLine = true,
-                label = { Text("نشانی HTTPS سرور خبر فارکس (اختیاری)") },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Button(onClick = { viewModel.saveNewsBaseUrl(newsUrl) }, modifier = Modifier.padding(top = 8.dp)) {
-                Text("ذخیره/حذف نشانی سرور خبر فارکس")
-            }
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("وتوی خبر برای ورود دستی کاغذی هنگام عدم‌دسترسی", Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
-                Switch(checked = settings.pauseOnNews, onCheckedChange = viewModel::setPauseOnNews)
-            }
-            OutlinedTextField(value = newsAiKey, onValueChange = {
-                newsAiKey = it; viewModel.resetAiDraftDiagnostics()
-            }, singleLine = true,
-                label = { Text("کلید مدل انتخابی") },
-                visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = {
-                    newsAiKey = ""; newsAiModel = ""
-                    newsAiBaseUrl = "https://api.llmsrelay.com"; newsAiFormat = "ANTHROPIC"
-                    viewModel.resetAiDraftDiagnostics()
-                }, modifier = Modifier.weight(1f)) { Text("LLMsRelay") }
-                OutlinedButton(onClick = {
-                    newsAiKey = ""; newsAiModel = ""
-                    newsAiBaseUrl = GeminiAiStudio.BASE_URL
-                    newsAiFormat = GeminiAiStudio.WIRE_FORMAT
-                    viewModel.resetAiDraftDiagnostics()
-                }, modifier = Modifier.weight(1f)) { Text("Gemini") }
-            }
-            Text("سرویس: " + when (newsAiBaseUrl) {
-                "https://api.llmsrelay.com", "https://api.llmsrelay.com/v1" -> "LLMsRelay"
-                GeminiAiStudio.BASE_URL -> "Gemini · API رسمی generateContent"
-                else -> "انتخاب نشده"
-            }, color = AurumColors.TextSecondary, style = MaterialTheme.typography.labelSmall)
-            OutlinedButton(onClick = {
-                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GeminiAiStudio.KEYS_URL))) }
-            }) { Text("ساخت کلید Gemini") }
-            if (newsAiFormat == GeminiAiStudio.WIRE_FORMAT) {
-                Text("کلید Gemini در سربرگ امن x-goog-api-key ارسال می‌شود. مدل را از فهرست دریافت کنید؛ " +
-                    "وجود مدل در فهرست تضمین سهمیه یا دسترسی تولید پاسخ نیست. کلید فقط روی گوشی ذخیره می‌شود؛ " +
-                    "درخواست تحلیل/تست به Google ارسال می‌شود و ممکن است هزینه داشته باشد.",
-                    style = MaterialTheme.typography.bodySmall)
-            }
-            OutlinedTextField(value = newsAiModel, onValueChange = {
-                newsAiModel = it; viewModel.resetAiDraftDiagnostics()
-            }, singleLine = true,
-                label = { Text("مدل") },
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
-            val models = viewModel.aiModels.collectAsStateWithLifecycle().value
-            OutlinedButton(onClick = { viewModel.loadNewsAiModels(newsAiKey, newsAiBaseUrl, newsAiModel, newsAiFormat) },
-                enabled = !models.loading && (newsAiKey.isNotBlank() || settings.hasClientNewsAi) &&
-                    newsAiBaseUrl in setOf("https://api.llmsrelay.com", "https://api.llmsrelay.com/v1", GeminiAiStudio.BASE_URL),
-                modifier = Modifier.padding(top = 6.dp)) {
-                Text(if (models.loading) "در حال دریافت…" else "دریافت مدل‌های سرویس")
-            }
-            models.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = AurumColors.Red) }
-            if (models.models.isNotEmpty()) {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    models.models.forEach { id ->
-                        if (id == newsAiModel) Button(onClick = { newsAiModel = id; viewModel.resetAiDraftDiagnostics() }) { Text(id, maxLines = 1) }
-                        else OutlinedButton(onClick = { newsAiModel = id; viewModel.resetAiDraftDiagnostics() }) { Text(id, maxLines = 1) }
-                    }
-                }
-            }
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { viewModel.saveNewsAiConfig(newsAiKey, newsAiBaseUrl, newsAiModel, newsAiFormat) },
-                    enabled = newsAiBaseUrl in setOf("https://api.llmsrelay.com", "https://api.llmsrelay.com/v1", GeminiAiStudio.BASE_URL),
-                    modifier = Modifier.weight(1f)) { Text("ذخیرهٔ کلید مستقیم") }
-                OutlinedButton(onClick = {
-                    newsAiKey = ""; newsAiBaseUrl = ""; newsAiModel = ""
-                    viewModel.clearNewsAiConfig()
-                }, modifier = Modifier.weight(1f)) { Text("حذف کلید مستقیم") }
-            }
-            val probe = viewModel.aiProbe.collectAsStateWithLifecycle().value
-            OutlinedButton(onClick = {
-                viewModel.testNewsAiConnection(newsAiKey, newsAiBaseUrl, newsAiModel, newsAiFormat)
-            }, enabled = !probe.running && (newsAiKey.isNotBlank() || settings.hasClientNewsAi) &&
-                newsAiBaseUrl in setOf("https://api.llmsrelay.com", "https://api.llmsrelay.com/v1", GeminiAiStudio.BASE_URL),
-                modifier = Modifier.padding(top = 8.dp)) {
-                Text(if (probe.running) "در حال آزمون…" else "تست اتصال به مدل")
-            }
-            probe.message?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall,
-                    color = if (it.startsWith("اتصال تأیید شد")) AurumColors.Green else AurumColors.Red,
-                    modifier = Modifier.padding(top = 4.dp))
-            }
-            // The gate the auto-trader itself uses before it asks the AI to judge a trade.
-            val aiConnection by viewModel.aiConnection.collectAsStateWithLifecycle()
-            val connectionText = when {
-                !aiConnection.configured -> "اتصال AI: تنظیم نشده"
-                aiConnection.reachable == true -> "اتصال AI: موفق"
-                aiConnection.reachable == false -> "اتصال AI: ناموفق"
-                else -> "اتصال AI: بررسی نشده"
-            }
-            Text(
-                connectionText,
-                style = MaterialTheme.typography.labelSmall,
-                color = when (aiConnection.reachable) {
-                    true -> AurumColors.Green
-                    false -> if (aiConnection.configured) AurumColors.Red else AurumColors.Gold
-                    null -> AurumColors.TextMuted
-                },
-                modifier = Modifier.padding(top = 6.dp),
-            )
-            aiConnection.checkedAt?.let { at ->
-                Text(
-                    "آخرین بررسی اتصال: ${formatDateTime(at)}" +
-                        if (aiConnection.detail.isNotBlank()) " · ${aiConnection.detail}" else "",
-                    style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-            // «ادامه بده یا نه»: advisory review of the OPEN paper positions.
-            val holdReview by viewModel.holdReview.collectAsStateWithLifecycle()
-            Text(
-                when {
-                    holdReview.alerts.isNotEmpty() ->
-                        "بازبینی پوزیشن‌های باز: نظر AI ادامهٔ ${holdReview.alerts.size} مورد را توصیه نمی‌کند (فقط هشدار)"
-                    holdReview.reviewed > 0 && holdReview.checkedAt != null ->
-                        "بازبینی پوزیشن‌های باز: ${holdReview.reviewed} مورد با AI بررسی شد · ${formatDateTime(holdReview.checkedAt!!)}"
-                    holdReview.skipped.isNotBlank() -> "بازبینی پوزیشن‌های باز: ${holdReview.skipped}"
-                    else -> "بازبینی پوزیشن‌های باز: هنوز انجام نشده (هر ۱۰ دقیقه برای هر پوزیشن، اول اتصال بررسی می‌شود)"
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = if (holdReview.alerts.isNotEmpty()) AurumColors.Gold else AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 6.dp),
-            )
         }
 
         SectionCard(

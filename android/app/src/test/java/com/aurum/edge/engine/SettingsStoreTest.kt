@@ -60,16 +60,6 @@ class SettingsStoreTest {
         assertEquals("XAU/USD", SettingsStore(context).read().symbol)
     }
 
-    @Test fun `server URL save is independent of market key and survives a new store`() {
-        val context = RuntimeEnvironment.getApplication()
-        context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit().clear().commit()
-        val store = SettingsStore(context)
-        assertTrue(store.saveNewsBaseUrl("https://news.example.org"))
-        assertEquals("https://news.example.org", SettingsStore(context).read().newsBaseUrl)
-        assertFalse(SettingsStore(context).read().hasKey)
-        assertTrue(store.saveNewsBaseUrl(""))
-        assertEquals("", SettingsStore(context).read().newsBaseUrl)
-    }
     @Test fun `legacy stocks migrate without deleting journal or optional credentials`() {
         val context = RuntimeEnvironment.getApplication()
         val prefs = context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE)

@@ -77,10 +77,9 @@ class SourceIntegrityTest {
             feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = System.currentTimeMillis()))
         gate.reject(symbol, history, "independent source disagreement")
         val settings = AppSettings()
-        val news = PersianNewsState()
-        assertEquals("independent source disagreement", PaperAutoRules.blocker(market, settings, news))
-        assertEquals("independent source disagreement", PaperAutoRules.opportunityBlocker(market, settings, news))
+        assertEquals("independent source disagreement", PaperAutoRules.blocker(market, settings))
+        assertEquals("independent source disagreement", PaperAutoRules.opportunityBlocker(market, settings))
         gate.accept(symbol, history, gate.begin(symbol, history), 2)
-        assertTrue(PaperAutoRules.blocker(market, settings, news)!!.contains("دوباره"))
+        assertTrue(PaperAutoRules.blocker(market, settings)!!.contains("دوباره"))
     }
 }

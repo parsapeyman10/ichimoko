@@ -18,11 +18,6 @@ import com.aurum.edge.core.SignalAction
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import com.aurum.edge.data.AiNewsVerdict
-import com.aurum.edge.data.NewsGate
-import com.aurum.edge.data.NewsSourceStatus
-import com.aurum.edge.data.PersianHeadline
-import com.aurum.edge.data.PersianNewsState
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
@@ -194,30 +189,6 @@ class V1ContractTest {
         }
         assertEquals(null, PaperPortfolioPolicy.blocker(olderLosses, "EUR/USD", 975.0, 4.8,
             now = now, openingBalance = 975.0))
-    }
-
-    @Test fun validatedOppositeAiVetoesButUnavailableAiCannotAuthorizeTrades() {
-        val labels = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
-            "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی")
-        val raw = Signal(SignalAction.BUY, 100.0, entry = 100.0,
-            stopLoss = 99.0, takeProfit = 101.5, interval = Interval.M5,
-            barTime = now - Interval.M5.millis,
-            confluence = labels.map { ConfluenceItem(it, true, "real-frame fixture", scorePercent = 25) })
-        val headline = PersianHeadline("id1", "FX context", "fixture", "Publisher",
-            "https://publisher.example/news", now - 60_000L,
-            "MEDIUM", "SELL", "rule-label", "en")
-        val news = PersianNewsState(
-            articles = listOf(headline),
-            sources = listOf(NewsSourceStatus("Publisher", "online", "https://publisher.example/rss"),
-                NewsSourceStatus("Forex Factory", "online", "https://nfs.faireconomy.media/ff_calendar_thisweek.json")),
-            gate = NewsGate.CLEAR, lastCheckedAt = now, calendarCheckedAt = now,
-            ai = AiNewsVerdict("AVAILABLE", "EUR/USD", "SELL", 91.0,
-                "test-model", "opposing validated evidence", now, listOf("id1")))
-        val vetoed = NewsConfluence.apply(raw, "EUR/USD", news, now)!!
-        assertEquals(SignalAction.NO_TRADE, vetoed.action)
-        assertTrue(vetoed.blockers.any { it.contains("وتوی AI") })
-        assertEquals(SignalAction.BUY,
-            NewsConfluence.apply(raw, "EUR/USD", news.copy(ai = AiNewsVerdict()), now)!!.action)
     }
 
     @Test fun shortTrailingLocksTheFirstRAfterTwoR() {

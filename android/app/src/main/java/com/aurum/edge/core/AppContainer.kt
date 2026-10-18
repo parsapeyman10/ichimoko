@@ -6,15 +6,10 @@ import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.data.CandleCache
 import com.aurum.edge.data.DataFeedException
 import com.aurum.edge.data.DukascopyHistoryClient
-import com.aurum.edge.data.ForexCalendarRepository
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.MarketRepository
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.OpenTradeTickMonitor
-import com.aurum.edge.data.NewsRepository
-import com.aurum.edge.data.PublicWebNewsRepository
-import com.aurum.edge.data.PublicNewsCategory
-import com.aurum.edge.data.PublicNewsFeeds
 import com.aurum.edge.data.PaperAutoTrader
 import com.aurum.edge.data.CatalogPaperTrader
 import com.aurum.edge.data.PublicCandleHistoryClient
@@ -22,12 +17,10 @@ import com.aurum.edge.data.PaperOpportunityStore
 import com.aurum.edge.data.PairScanner
 import com.aurum.edge.data.SettingsStore
 import com.aurum.edge.data.TwelveDataClient
-import com.aurum.edge.data.TraderAdvisor
 import com.aurum.edge.data.QuoteHistoryStore
 import com.aurum.edge.data.SourceFetcher
 import com.aurum.edge.data.WatchRepository
 import com.aurum.edge.data.WatchSettingsStore
-import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.notify.Notifier
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -69,17 +62,13 @@ class AppContainer(context: Context) {
     val watchSettings = WatchSettingsStore(appContext)
     val quoteHistory = QuoteHistoryStore(appContext)
     val watch = WatchRepository(SourceFetcher(), quoteHistory, watchSettings, settingsStore, appScope)
-    // Forex publisher headlines only: FXStreet/BLS feed the research context, never the AI gate.
-    val publicWebNews = PublicWebNewsRepository(appScope,
-        feeds = PublicNewsFeeds.all.filter { it.category in setOf(PublicNewsCategory.MARKETS, PublicNewsCategory.ECONOMY) })
-    val forexCalendar = ForexCalendarRepository(appScope) // public schedule UI; server checks it independently for the AI gate
-    // Backend server mode (preferred if configured) OR direct-from-phone client mode (publicWebNews
-    // + forexCalendar + the user's own key) — see NewsRepository's class doc.
-    val news = NewsRepository(settingsStore, appScope, publicWebNews, forexCalendar)
-    /** Shared by chart, signal tab, notifications and automatic *paper* entries. Expires on time. */
+    /** Feed-guard view of the selected market (replaces the old "verified" concept): shows the
+     * feed as-delayed instead of silently fresh, nulls the signal when the feed is delayed or a
+     * source-integrity conflict is active, and audits every candidate. Shared by chart, signal
+     * tab, notifications and automatic *paper* entries. Expires on time. */
     val verifiedMarket: StateFlow<MarketState> = combine(
-        market.state, news.state, com.aurum.edge.data.SourceIntegrity.shared.state, flow { while (true) { emit(System.currentTimeMillis()); delay(20_000L) } },
-    ) { raw, headlines, _, _ ->
+        market.state, com.aurum.edge.data.SourceIntegrity.shared.state, flow { while (true) { emit(System.currentTimeMillis()); delay(20_000L) } },
+    ) { raw, _, _ ->
         // The periodic clock only forces recomposition; a one-second market tick must always be
         // judged against the real current clock, not the last 20-second timer emission.
         val now = System.currentTimeMillis()
@@ -89,7 +78,7 @@ class AppContainer(context: Context) {
         val verified = raw.copy(feed = observedFeed,
             evaluationError = integrityBlocker ?: raw.evaluationError,
             showingCachedData = raw.showingCachedData || delayed,
-            signal = if (delayed || integrityBlocker != null) null else NewsConfluence.apply(raw.signal, raw.symbol, headlines, now))
+            signal = if (delayed || integrityBlocker != null) null else raw.signal)
         if (raw.candles.isNotEmpty()) decisionLog.append(raw.symbol, raw.interval.label,
             when {
                 verified.evaluationError != null -> "error"
@@ -97,18 +86,14 @@ class AppContainer(context: Context) {
                 verified.signal == null -> "waiting_data"
                 else -> "no_signal"
             },
-            verified.evaluationError ?: verified.signal?.blockers?.joinToString("، ")?.ifBlank { "چهار لایه و AI بررسی شدند" }
+            verified.evaluationError ?: verified.signal?.blockers?.joinToString("، ")?.ifBlank { "چهار لایهٔ فنی بررسی شدند" }
                 ?: "در انتظار دادهٔ معتبر؛ ${observedFeed.provider}: ${observedFeed.detail.take(240)}؛ تحلیل/ورود انجام نشد",
             verified.signal, now, dedupe = true)
         verified // four-layer engine owns the price plan; ICT remains optional research context
     }.stateIn(appScope, SharingStarted.Eagerly, market.state.value.copy(signal = null))
     /** Periodic sweep of the editable V1 watchlist; only verified independent bars can become candidates. */
-    val pairScanner = PairScanner(client, publicHistory, settingsStore, news, journalStore, opportunityStore, appScope, dukascopyHistory, decisionLog)
-    /** The user's own AI (Claude or OpenAI-compatible) as an educational trading companion. */
-    // The advisor also reads the journal so it can review OPEN positions ("continue or not"),
-    // which is advisory only: JournalStore.attachHoldReview never closes or re-prices a trade.
-    val traderAdvisor = TraderAdvisor(settingsStore, market, pairScanner, news, journalStore, appScope)
-    val autoPaperTrader = PaperAutoTrader(settingsStore, news, journalStore, traderAdvisor, decisionLog)
+    val pairScanner = PairScanner(client, publicHistory, settingsStore, journalStore, opportunityStore, appScope, dukascopyHistory, decisionLog)
+    val autoPaperTrader = PaperAutoTrader(settingsStore, journalStore)
     val catalogPaperTrader = CatalogPaperTrader(settingsStore, autoPaperTrader)
 
     init {
@@ -135,7 +120,10 @@ class AppContainer(context: Context) {
         appScope.launch {
             verifiedMarket.collect { state ->
                 val cfg = settingsStore.read()
-                if (cfg.autoPaperTrading) {
+                // Dedupe: when the foreground monitor service runs it feeds the same state to
+                // the auto trader itself; running both collectors would double the review work.
+                if (cfg.autoPaperTrading &&
+                    !com.aurum.edge.service.SignalMonitorService.running.value) {
                     try {
                         val opened = autoPaperTrader.onMarketUpdate(state)
                         if (opened != null) {

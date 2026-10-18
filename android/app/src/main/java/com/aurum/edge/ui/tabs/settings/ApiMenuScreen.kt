@@ -27,7 +27,6 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AppSettings
-import com.aurum.edge.data.GeminiAiStudio
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.theme.AurumColors
@@ -38,26 +37,8 @@ fun ApiMenuScreen(viewModel: AurumViewModel, settings: AppSettings, onForexSetti
     val context = LocalContext.current
     var twelveKey by remember { mutableStateOf("") }
     LaunchedEffect(settings.apiKey) { twelveKey = "" }
-    val probe by viewModel.aiProbe.collectAsStateWithLifecycle()
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
-        SectionCard("AI · LLMsRelay / Gemini",
-            trailing = { Pill(if (settings.hasClientNewsAi) "فعال" else "خاموش",
-                if (settings.hasClientNewsAi) AurumColors.Green else AurumColors.TextMuted) }) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onForexSettings, modifier = Modifier.weight(1f)) { Text("مدیریت مدل") }
-                Button(onClick = { viewModel.testNewsAiConnection("", "", "") },
-                    enabled = !probe.running && settings.hasClientNewsAi,
-                    modifier = Modifier.weight(1f)) { Text(if (probe.running) "در حال تست…" else "تست اتصال") }
-            }
-            probe.message?.let { Text(it, color = if (it.startsWith("اتصال تأیید")) AurumColors.Green else AurumColors.Red,
-                style = MaterialTheme.typography.bodySmall) }
-        }
-        SectionCard("Gemini · API Keys") {
-            OutlinedButton(onClick = {
-                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GeminiAiStudio.KEYS_URL))) }
-            }, modifier = Modifier.fillMaxWidth()) { Text("ساخت کلید Gemini") }
-        }
         SectionCard("Twelve Data") {
             Text(if (settings.hasKey) "کلید ثبت شده" else "کلید ثبت نشده",
                 color = AurumColors.TextSecondary, style = MaterialTheme.typography.bodySmall)

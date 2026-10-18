@@ -3,7 +3,6 @@ package com.aurum.edge.engine
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.TechnicalEvidence
-import com.aurum.edge.data.FOREX_CALENDAR_SOURCE_URL
 
 /** Caution labels, not a statistical test, trading advice or an AI-news verdict. */
 enum class EvidenceGrade { NO_DATA, LIMITED, UNFAVORABLE, COST_SENSITIVE, PRELIMINARY }
@@ -22,22 +21,13 @@ object ResearchEvidence {
     /** Heuristic caution threshold only. Thirty is NOT statistical significance or a profit guarantee. */
     const val CAUTION_MIN_CLOSED = 30
 
-    /** Recorded evidence, not a fresh verification of a historical publisher or AI model. */
+    /** Recorded technical evidence only (news/AI layers were removed from the app). */
     fun hasRecordedSignalEvidence(trade: PaperTrade): Boolean {
         val bar = trade.signalBarTime ?: return false
-        val news = trade.newsEvidence
         val ict = trade.priceAction
-        val technicalConditions = trade.entryConditions.filterNot { it.name == NewsConfluence.NEWS_LABEL }
-        val newsEvidenceOk = news == null || (
-            news.model.isNotBlank() && news.model != "deterministic-fallback" &&
-                news.confidence in 80.0..100.0 &&
-                news.checkedAt > 0L && trade.openedAt - news.checkedAt in 0L..180_000L &&
-                news.calendarSource == FOREX_CALENDAR_SOURCE_URL &&
-                news.calendarCheckedAt?.let { trade.openedAt - it in 0L..1_200_000L } == true &&
-                news.evidence.isNotEmpty() && news.evidence.all { it.id.isNotBlank() &&
-                    it.source.isNotBlank() && it.url.startsWith("https://") &&
-                    news.checkedAt - it.publishedAt in 0L..10_800_000L })
-        val common = trade.action != SignalAction.NO_TRADE && bar > 0L && newsEvidenceOk &&
+        // Historical journal records may still contain the removed news confluence row.
+        val technicalConditions = trade.entryConditions.filterNot { it.name == "خبر/تقویم · داده‌کاوی ژورنال" }
+        val common = trade.action != SignalAction.NO_TRADE && bar > 0L &&
             TechnicalEvidence.confirmedRecords(technicalConditions)
         if (technicalConditions.size == TechnicalEvidence.CURRENT_COUNT)
             return common && trade.confidence in 60.0..100.0 && trade.initialStopLoss != null

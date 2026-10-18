@@ -12,14 +12,9 @@ import com.aurum.edge.core.PaperAlertRules
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
-import com.aurum.edge.data.AiNewsVerdict
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.MarketState
-import com.aurum.edge.data.NewsGate
-import com.aurum.edge.data.NewsSourceStatus
 import com.aurum.edge.data.PaperOpportunityStore
-import com.aurum.edge.data.PersianHeadline
-import com.aurum.edge.data.PersianNewsState
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -41,21 +36,11 @@ class PaperOpportunityTest {
     private val bar = now - Interval.M5.millis
     private val config = AppSettings(symbol = "EUR/USD", backgroundMonitor = true, notifyOnSignal = true,
         autoPaperTrading = false, accountBalance = 100.0)
-    private val news = PersianNewsState(
-        articles = listOf(PersianHeadline("id", "Gold and USD", "", "Publisher",
-            "https://publisher.example/article", now - 60_000, "LOW", "BUY", "rules")),
-        gate = NewsGate.CLEAR, lastCheckedAt = now,
-        sources = listOf(NewsSourceStatus("Publisher", "online", "https://publisher.example/rss"),
-            NewsSourceStatus("Forex Factory", "online", "https://nfs.faireconomy.media/ff_calendar_thisweek.json")),
-        calendarCheckedAt = now,
-        ai = AiNewsVerdict("AVAILABLE", "EUR/USD", "BUY", 91.0, "test-model",
-            "fixture", now, listOf("id")),
-    )
     private val raw = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2994.5,
         takeProfit = 3009.0, interval = Interval.M5, barTime = bar,
         ichimokuEntry = com.aurum.edge.core.IchimokuEntryEvidence(SignalAction.BUY, bar, bar, Interval.M5, 3),
         confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "fixture", scorePercent = 25) })
-    private val signal get() = NewsConfluence.apply(raw, "EUR/USD", news, now)!!
+    private val signal get() = raw
     private val snapshot = MtfAnalyzer.Snapshot(Interval.M5,
         frames = listOf(MtfAnalyzer.FrameBias(Interval.M5, SignalAction.BUY, 80,
             3000.0, 2950.0, 2940.0, 2980.0, 60.0, 25.0, 0.2, "fixture")),
@@ -68,25 +53,24 @@ class PaperOpportunityTest {
     private val context get() = RuntimeEnvironment.getApplication()
 
     @Test fun qualifiedAlertIsIndependentOfAutoEntryButFailsClosedForEveryCheck() {
-        assertNull(PaperAlertRules.blocker(market, config, news, emptyList(), snapshot, now))
+        assertNull(PaperAlertRules.blocker(market, config, emptyList(), snapshot, now))
         assertNotNull(PaperAlertRules.blocker(market, config.copy(notifyOnSignal = false), news, emptyList(), snapshot, now))
         assertNotNull(PaperAlertRules.blocker(market, config.copy(backgroundMonitor = false), news, emptyList(), snapshot, now))
-        assertNull(PaperAlertRules.blocker(market, config, news, emptyList(), null, now))
-        assertNull(PaperAlertRules.blocker(market, config, news, emptyList(), snapshot.copy(veto = true), now))
-        assertNull(PaperAlertRules.blocker(market, config, news, emptyList(), snapshot.copy(barTime = bar - 1), now))
-        assertNotNull(PaperAlertRules.blocker(market.copy(showingCachedData = true), config, news, emptyList(), snapshot, now))
+        assertNull(PaperAlertRules.blocker(market, config, emptyList(), null, now))
+        assertNull(PaperAlertRules.blocker(market, config, emptyList(), snapshot.copy(veto = true), now))
+        assertNull(PaperAlertRules.blocker(market, config, emptyList(), snapshot.copy(barTime = bar - 1), now))
+        assertNotNull(PaperAlertRules.blocker(market.copy(showingCachedData = true), config, emptyList(), snapshot, now))
         assertNotNull(PaperAlertRules.blocker(market.copy(feed = FeedStatus(FeedMode.OFFLINE, lastSuccessAt = now)),
-            config, news, emptyList(), snapshot, now))
-        assertNull(PaperAlertRules.blocker(market, config, news.copy(ai = AiNewsVerdict()), emptyList(), snapshot, now))
+            config, emptyList(), snapshot, now))
         assertNotNull(PaperAlertRules.blocker(market, config.copy(accountBalance = 5.0), news, emptyList(), snapshot, now))
         for (i in 0..3) {
             val fail = raw.copy(confluence = raw.confluence.mapIndexed { idx, item ->
                 if (idx == i) item.copy(ok = false, status = com.aurum.edge.core.ConfluenceStatus.CONFLICT, scorePercent = 0) else item
             })
-            assertNotNull("tech $i", PaperAlertRules.blocker(market.copy(signal =
-                NewsConfluence.apply(fail, "EUR/USD", news, now)), config, news, emptyList(), snapshot, now))
+            assertNotNull("tech $i", PaperAlertRules.blocker(market.copy(signal = fail),
+                config, emptyList(), snapshot, now))
         }
-        assertNotNull(PaperAlertRules.blocker(market.copy(symbol = "XAG/USD"), config, news, emptyList(), snapshot, now))
+        assertNotNull(PaperAlertRules.blocker(market.copy(symbol = "XAG/USD"), config, emptyList(), snapshot, now))
     }
 
     @Test fun candidateDedupsAcrossRestartAndKeepsItsOwnHistoryOutOfTradeStatistics() = runBlocking {
@@ -95,7 +79,7 @@ class PaperOpportunityTest {
         val journalFile = File(root, "journal.json")
         val ict = IctEntryRules.approvedEvidence(market, now)!!
         val opportunity = PaperOpportunity.from(signal, "EUR/USD", 3000.0,
-            MtfSnapshotRecord.from(snapshot), NewsConfluence.record(news, "EUR/USD")!!, ict, now)
+            MtfSnapshotRecord.from(snapshot), ict, now)
         val store = PaperOpportunityStore(context, file)
         store.load()
         assertTrue(store.record(opportunity))
@@ -110,13 +94,13 @@ class PaperOpportunityTest {
         assertFalse(reopened.record(opportunity))
         val trade = journal.open(signal, "EUR/USD", 3000.0, 100.0, 0.5,
             automatic = true, mtf = MtfSnapshotRecord.from(snapshot),
-            newsEvidence = NewsConfluence.record(news), priceAction = ict, observedAt = now)
+            priceAction = ict, observedAt = now)
         reopened.linkTrade(trade)
         assertEquals(trade.id, PaperOpportunityStore(context, file).also { it.load() }.items.value.single().paperTradeId)
         val persisted = JournalStore(context, journalFile).also { it.load() }.trades.value.single()
         assertEquals(4, persisted.entryConditions.size)
         assertEquals(ict, persisted.priceAction)
-        assertTrue(trade.entryConditions.none { it.name == NewsConfluence.NEWS_LABEL })
+        assertTrue(trade.entryConditions.none { it.name == "خبر/تقویم · داده‌کاوی ژورنال" })
         assertEquals(1, journal.stats().open)
         assertEquals(0, journal.stats().total)
     }

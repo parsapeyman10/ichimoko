@@ -18,7 +18,6 @@ import com.aurum.edge.core.PaperAlertRules
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.engine.MtfAnalyzer
-import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.engine.SignalEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -108,7 +107,6 @@ class PairScanner(
     private val client: TwelveDataClient,
     private val publicHistory: PublicCandleHistoryClient,
     private val settings: SettingsStore,
-    private val news: NewsRepository,
     private val journal: JournalStore,
     private val opportunities: PaperOpportunityStore,
     private val scope: CoroutineScope,
@@ -307,7 +305,6 @@ class PairScanner(
             }
         }
 
-        val headlines = news.state.value
 
         // All symbols start without waiting for an asset-class slot. Only each external
         // publisher's own HTTP capacity is bounded; position monitoring is independent.
@@ -426,11 +423,7 @@ class PairScanner(
                         catch (_: Exception) { null }
                     }
                     if (evaluated == null) unavailable += "${candidate.label}: محاسبه ناموفق"
-                    else {
-                        val vetted = NewsConfluence.apply(evaluated, symbol, headlines, now)
-                        if (vetted != null) reads += CryptoIntervalChoice.Read(candidate, bars, vetted)
-                        else unavailable += "${candidate.label}: ارزیابی خبر/AI ناموفق"
-                    }
+                    else reads += CryptoIntervalChoice.Read(candidate, bars, evaluated)
                 }
                 val selected = CryptoIntervalChoice.pick(reads) ?: run {
                     update(symbol, "partial", "هیچ‌یک از بازه‌های ${candidates.joinToString { it.label }} قابل ارزیابی نبود: " +
@@ -480,8 +473,8 @@ class PairScanner(
                 }
                 // The playbook is context only; V1Scoring has the absolute market locks.
 
-                val combined = NewsConfluence.apply(evaluated, symbol, headlines, now)!!
-                val score = combined.confluence.take(NewsConfluence.TECHNICAL_COUNT).count { it.ok }
+                val combined = evaluated
+                val score = com.aurum.edge.core.TechnicalEvidence.items(combined).count { it.ok }
                 if (!combined.isActionable) {
                     update(
                         symbol = symbol,
@@ -557,7 +550,7 @@ class PairScanner(
                         trendGate?.noteFa?.take(200), combined.als5Opportunity)
                     return@async
                 }
-                val blocker = PaperAlertRules.blocker(market, config, headlines, journal.trades.value, mtf,
+                val blocker = PaperAlertRules.blocker(market, config, journal.trades.value, mtf,
                     System.currentTimeMillis(), allowedSymbols = config.activeSymbols, barAgeGraceMs = graceMs)
                 if (blocker != null) {
                     // A technically actionable closed-bar read is still useful when alerts,
@@ -577,13 +570,12 @@ class PairScanner(
                     return@async
                 }
 
-                val evidence = NewsConfluence.record(headlines, symbol)
                 val ict = IctEntryRules.approvedEvidence(market, System.currentTimeMillis(), graceMs)
 
 
                 val item = runCatching {
                     val mtfRec = MtfSnapshotRecord.from(mtf ?: error("نمایش MTF پایه موجود نیست"))
-                    PaperOpportunity.from(combined, symbol, price ?: combined.entry ?: 0.0, mtfRec, evidence, ict)
+                    PaperOpportunity.from(combined, symbol, price ?: combined.entry ?: 0.0, mtfRec, ict)
                 }.getOrNull()
 
                 if (item == null) {

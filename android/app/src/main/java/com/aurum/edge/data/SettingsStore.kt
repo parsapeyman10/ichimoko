@@ -58,11 +58,11 @@ class SettingsStore(context: Context) {
             prefs.getString(KEY_ACTIVE_STRATEGY, "ICHIMOKU"))
             ?: com.aurum.edge.core.StrategyKind.ICHIMOKU_PRICE_ACTION
         // Retired v1_watchlist is intentionally ignored. It cannot narrow the app catalog.
-        val (aiUrl, aiFormat) = GeminiAiStudio.migratePreset(storedNewsAiUrl,
-            prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" })
-        val aiModel = if (aiFormat == GeminiAiStudio.WIRE_FORMAT)
-            runCatching { GeminiAiStudio.modelId(storedNewsAiModel) }.getOrDefault(storedNewsAiModel)
-            else storedNewsAiModel
+        // AI/news fields are retired: stored values stay readable for old installs but nothing
+        // in the app consumes them anymore (kept only so AppSettings keeps its stored shape).
+        val aiUrl = storedNewsAiUrl
+        val aiFormat = prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" }
+        val aiModel = storedNewsAiModel
         val categoryStrategies = AssetClass.entries.associateWith { category ->
             CategoryStrategy.fromStored(prefs.getString("v1_strategy_${category.name}", null))
         }
@@ -164,60 +164,6 @@ class SettingsStore(context: Context) {
         if (token.length < 32 || token.any { it.isWhitespace() }) return false
         return prefs.edit().putString(KEY_TICK_ARCHIVE_URL, url)
             .putString(KEY_TICK_ARCHIVE_TOKEN, token).commit()
-    }
-
-    /** Server configuration must also survive process death before we say it was saved. */
-    @Synchronized
-    fun saveNewsBaseUrl(url: String): Boolean {
-        val saved = prefs.edit().putString(KEY_NEWS_URL, url).commit()
-        if (saved && prefs.getString(KEY_NEWS_URL, null) == url) {
-            _settings.value = read()
-            return true
-        }
-        return false
-    }
-
-    /**
-     * User's OWN key for a DIRECT-FROM-PHONE AI news call (native Gemini, Anthropic or OpenAI-compatible,
-     * see the format parameter), replacing the need
-     * for a self-hosted backend for the Forex ninth-condition gate. Explicit, on-device only;
-     * never logged. A blank key keeps the previous secret only for the same URL and wire format
-     * (and on LLMsRelay, the same model group). Use [clearNewsAiConfig] to remove it.
-     */
-    @Synchronized
-    fun saveNewsAiConfig(apiKey: String, baseUrl: String, model: String, format: String = "AUTO"): Boolean {
-        val requestedFormat = format.trim().uppercase(java.util.Locale.ROOT).let {
-            if (it in setOf("ANTHROPIC", "OPENAI", "GEMINI")) it else "AUTO"
-        }
-        val (url, wireFormat) = GeminiAiStudio.migratePreset(baseUrl.trim().trimEnd('/'), requestedFormat)
-        val modelName = if (wireFormat == GeminiAiStudio.WIRE_FORMAT) {
-            if (!GeminiAiStudio.isOfficialNativeEndpoint(url)) return false
-            runCatching { GeminiAiStudio.modelId(model) }.getOrNull() ?: return false
-        } else if (wireFormat == "ANTHROPIC") model.trim() else GeminiAiStudio.openAiModelId(url, model)
-        val key = AiCredentialScope.key(apiKey, read(), url, wireFormat, modelName)
-        if (key.isBlank() || !url.startsWith("https://") || modelName.isBlank()) return false
-        val saved = prefs.edit()
-            .putString(KEY_NEWS_AI_KEY, key)
-            .putString(KEY_NEWS_AI_URL, url)
-            .putString(KEY_NEWS_AI_MODEL, modelName)
-            .putString(KEY_NEWS_AI_FORMAT, wireFormat)
-            .commit()
-        if (saved && prefs.getString(KEY_NEWS_AI_KEY, null) == key) {
-            _settings.value = read()
-            return true
-        }
-        return false
-    }
-
-    @Synchronized
-    fun clearNewsAiConfig(): Boolean {
-        val saved = prefs.edit().remove(KEY_NEWS_AI_KEY).remove(KEY_NEWS_AI_URL)
-            .remove(KEY_NEWS_AI_MODEL).remove(KEY_NEWS_AI_FORMAT).commit()
-        if (saved && prefs.getString(KEY_NEWS_AI_KEY, null) == null) {
-            _settings.value = read()
-            return true
-        }
-        return false
     }
 
     /**

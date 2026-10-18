@@ -10,7 +10,6 @@ import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.SignalProfile
 import com.aurum.edge.core.TechnicalEvidence
-import com.aurum.edge.data.PersianNewsState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -26,21 +25,17 @@ class UnifiedContractTest {
         stopLoss = 95.0, takeProfit = 110.0, interval = Interval.M5, barTime = 1_700_000_000_000L,
         confluence = conditions)
 
-    @Test fun fourScoredLayersAreRequiredAndNewsNeverRepairsMissingEvidence() {
+    @Test fun fourScoredLayersAreRequired() {
         assertTrue(TechnicalEvidence.confirmed(TechnicalEvidence.items(candidate)))
         for (index in conditions.indices) {
             val incomplete = candidate.copy(confluence = conditions.filterIndexed { i, _ -> i != index })
             assertFalse(TechnicalEvidence.confirmed(TechnicalEvidence.items(incomplete)))
-            assertEquals(SignalAction.NO_TRADE,
-                NewsConfluence.apply(incomplete, "XAU/USD", PersianNewsState())!!.action)
         }
         val unknown = candidate.copy(confluence = conditions.toMutableList().also {
             it[0] = it[0].copy(status = ConfluenceStatus.UNKNOWN)
         })
         assertFalse(TechnicalEvidence.confirmed(TechnicalEvidence.items(unknown)))
         assertFalse(TechnicalEvidence.confirmed(conditions + conditions[0])) // duplicate layer must not authorize entry
-        assertEquals(SignalAction.BUY,
-            NewsConfluence.apply(candidate, "XAU/USD", PersianNewsState())!!.action)
     }
 
     @Test fun portfolioCapSlotsAndRiskAreOnePolicy() {
