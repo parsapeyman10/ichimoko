@@ -98,7 +98,7 @@ class RecordedPaperEntryAlertTest {
         val journal = JournalStore(context, file)
         assertTrue(runCatching { journal.load() }.isFailure)
         assertNull(runCatching { journal.open(signal, "XAU/USD", 3000.0, 100.0, 0.5,
-            mtf = mtf, automatic = true, newsEvidence = news) }.getOrNull())
+            mtf = mtf, automatic = true) }.getOrNull())
         assertTrue(manager.activeNotifications.isEmpty())
         assertEquals("{invalid}", file.readText())
     }
