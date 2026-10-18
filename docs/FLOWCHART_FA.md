@@ -3,6 +3,16 @@
 نقشهٔ تصویری و تعاملی کل اپ در [`docs/flowchart/index.html`](flowchart/index.html) است؛
 کافی است همان یک فایل را در مرورگر باز کنی (بدون اینترنت و بدون سرور کار می‌کند).
 
+## 🔗 لینک‌های دائمی نقشه (بوکمارک کن)
+
+- **لینک اصلی — همیشه آخرین نسخهٔ همین شاخه را نشان می‌دهد:**
+  https://htmlpreview.github.io/?https://github.com/parsapeyman10/ichimoko/blob/arena/668fb7a1-ichimoko/docs/flowchart/index.html
+- لینک جایگزین (یک کلیک «Open the page» می‌خواهد):
+  https://raw.githack.com/parsapeyman10/ichimoko/arena/668fb7a1-ichimoko/docs/flowchart/index.html
+- خود فایل در مخزن: `docs/flowchart/index.html` (آفلاین هم کامل کار می‌کند)
+
+بعد از هر بازسازی نقشه و پوش به همین شاخه، **همین لینک‌ها خودکار نسخهٔ جدید را نشان می‌دهند** و آدرس عوض نمی‌شود.
+
 ## ساختار نقشه (سه سطحِ تو‌در‌تو)
 
 | سطح | محتوا |
