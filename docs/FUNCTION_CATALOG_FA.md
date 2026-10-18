@@ -1,9 +1,9 @@
 # کاتالوگ کامل فانکشن‌های مخزن (استخراج خودکار از سورس)
 
 > این فایل با `docs/flowchart/generate_flowchart.py` ساخته می‌شود؛ دستی ویرایشش نکنید.
-> مجموع: 257 فایل · 36429 خط · 1043 فانکشن. نقشهٔ تصویری تعاملی: `docs/flowchart/index.html`
+> مجموع: 224 فایل · 31526 خط · 913 فانکشن. نقشهٔ تصویری تعاملی: `docs/flowchart/index.html`
 
-## اپ اندروید — کد اصلی — `android/app/src/main/java/com/aurum/edge` (145 فایل · 825 فانکشن)
+## اپ اندروید — کد اصلی — `android/app/src/main/java/com/aurum/edge` (127 فایل · 706 فانکشن)
 
 ### `AurumApplication.kt` — 17 خط · 1 فانکشن
 
@@ -17,22 +17,22 @@
 |---|---|---|---|
 | `onCreate()` | MainActivity | 13 | — |
 
-### `core/AlertDiagnostics.kt` — 137 خط · 2 فانکشن
+### `core/AlertDiagnostics.kt` — 107 خط · 2 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `checks()` | AlertDiagnostics | 22 | — |
-| `ago()` | AlertDiagnostics | 129 | — |
+| `checks()` | AlertDiagnostics | 18 | — |
+| `ago()` | AlertDiagnostics | 99 | — |
 
-### `core/AppContainer.kt` — 258 خط · 4 فانکشن
+### `core/AppContainer.kt` — 249 خط · 4 فانکشن
 > Process-wide wiring. Single source of truth for settings, real market data, journal and engine.
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `exportJournalPdf()` | AppContainer | 155 | — |
-| `downloadCandles()` | AppContainer | 173 | — |
-| `cachedCandles()` | AppContainer | 241 | — |
-| `fetchTradeCandles()` | AppContainer | 249 | — |
+| `exportJournalPdf()` | AppContainer | 146 | — |
+| `downloadCandles()` | AppContainer | 164 | — |
+| `cachedCandles()` | AppContainer | 232 | — |
+| `fetchTradeCandles()` | AppContainer | 240 | — |
 
 ### `core/CryptoCompressionPolicy.kt` — 43 خط · 2 فانکشن
 > London and New York DST are evaluated by their own IANA clocks; no Asian session.
@@ -52,21 +52,17 @@
 | `freshDetail()` | FeedLiveness | 29 | — |
 | `looksLikeLiveTickProvider()` | FeedLiveness | 35 | — |
 
-### `core/ForexNewsDecision.kt` — 50 خط · 1 فانکشن
+### `core/HistoryPolicy.kt` — 59 خط · 6 فانکشن
+> Candle-count policy (the old flat "1500 M5 candles for everything" rule is retired):
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `assess()` | ForexNewsDecisions | 19 | `#fn-entrysetup` در نقشهٔ HTML |
-
-### `core/HistoryPolicy.kt` — 41 خط · 4 فانکشن
-> Unified 5-minute (M5) candle history policy:
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `chartTargetCandles()` | HistoryPolicy | 30 | — |
-| `providerRequestSize()` | HistoryPolicy | 33 | — |
-| `deepProviderRequestSize()` | HistoryPolicy | 36 | — |
-| `trimForCache()` | HistoryPolicy | 39 | — |
+| `fetchSize()` | HistoryPolicy | 33 | — |
+| `minSize()` | HistoryPolicy | 41 | — |
+| `chartTargetCandles()` | HistoryPolicy | 48 | — |
+| `providerRequestSize()` | HistoryPolicy | 51 | — |
+| `deepProviderRequestSize()` | HistoryPolicy | 54 | — |
+| `trimForCache()` | HistoryPolicy | 57 | — |
 
 ### `core/IctEntryRules.kt` — 147 خط · 3 فانکشن
 > Plan an SL beyond the swept wick and TP *before* the opposing range line. This
@@ -119,27 +115,27 @@
 | `buildReason()` | MarketPlaybook | 504 | — |
 | `fmt()` | MarketPlaybook | 537 | — |
 
-### `core/MarketTrend.kt` — 689 خط · 16 فانکشن
+### `core/MarketTrend.kt` — 686 خط · 16 فانکشن
 > «روند کلی بازار» — چه چیزی اندازه گرفته می‌شود و چطور به خودِ معامله اضافه می‌شود.
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
 | `higherFor()` | MarketTrend | 213 | — |
 | `symbolTrend()` | MarketTrend | 230 | — |
-| `measure()` | MarketTrend | 310 | — |
-| `structureOf()` | MarketTrend | 377 | — |
-| `directionOf()` | MarketTrend | 404 | — |
-| `strengthOf()` | MarketTrend | 411 | — |
-| `overall()` | MarketTrend | 422 | — |
-| `familyTrendOf()` | MarketTrend | 480 | — |
-| `dollarBias()` | MarketTrend | 496 | — |
-| `riskTone()` | MarketTrend | 524 | — |
-| `alignmentOf()` | MarketTrend | 547 | — |
-| `entryGate()` | MarketTrend | 566 | — |
-| `contextOf()` | MarketTrend | 665 | — |
-| `sideLabel()` | MarketTrend | 678 | — |
-| `fmt()` | MarketTrend | 684 | — |
-| `fmtPct()` | MarketTrend | 687 | — |
+| `measure()` | MarketTrend | 307 | — |
+| `structureOf()` | MarketTrend | 374 | — |
+| `directionOf()` | MarketTrend | 401 | — |
+| `strengthOf()` | MarketTrend | 408 | — |
+| `overall()` | MarketTrend | 419 | — |
+| `familyTrendOf()` | MarketTrend | 477 | — |
+| `dollarBias()` | MarketTrend | 493 | — |
+| `riskTone()` | MarketTrend | 521 | — |
+| `alignmentOf()` | MarketTrend | 544 | — |
+| `entryGate()` | MarketTrend | 563 | — |
+| `contextOf()` | MarketTrend | 662 | — |
+| `sideLabel()` | MarketTrend | 675 | — |
+| `fmt()` | MarketTrend | 681 | — |
+| `fmtPct()` | MarketTrend | 684 | — |
 
 ### `core/Models.kt` — 783 خط · 17 فانکشن
 > Real market data contracts.
@@ -164,6 +160,14 @@
 | `from()` | MtfSnapshotRecord | 707 | — |
 | `strategyFor()` | AppSettings | 781 | — |
 
+### `core/MonitorCadence.kt` — 32 خط · 2 فانکشن
+> Adaptive monitoring cadence, proportional to the traded timeframe:
+
+| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
+|---|---|---|---|
+| `isHot()` | MonitorCadence | 25 | — |
+| `sweepDelayMs()` | MonitorCadence | 29 | — |
+
 ### `core/OilEntrySafety.kt` — 14 خط · 1 فانکشن
 > Fail-closed quarantine for NEW paper oil entries until the user's losing trades can be
 
@@ -171,19 +175,19 @@
 |---|---|---|---|
 | `blocker()` | OilEntrySafety | 12 | `#fn-autorules` در نقشهٔ HTML |
 
-### `core/PaperAlertRules.kt` — 43 خط · 1 فانکشن
+### `core/PaperAlertRules.kt` — 42 خط · 1 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `blocker()` | PaperAlertRules | 9 | `#fn-autorules` در نقشهٔ HTML |
+| `blocker()` | PaperAlertRules | 8 | `#fn-autorules` در نقشهٔ HTML |
 
-### `core/PaperAutoRules.kt` — 100 خط · 2 فانکشن
-> A technical candidate alert can be enabled while automatic paper entry is OFF.
+### `core/PaperAutoRules.kt` — 94 خط · 2 فانکشن
+> News/AI layers were removed: only feed freshness, source integrity, technical evidence
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `blocker()` | PaperAutoRules | 10 | `#fn-autorules` در نقشهٔ HTML |
-| `opportunityBlocker()` | PaperAutoRules | 57 | `#fn-autorules` در نقشهٔ HTML |
+| `blocker()` | PaperAutoRules | 11 | `#fn-autorules` در نقشهٔ HTML |
+| `opportunityBlocker()` | PaperAutoRules | 54 | `#fn-autorules` در نقشهٔ HTML |
 
 ### `core/PaperOrderRules.kt` — 161 خط · 5 فانکشن
 > سقف اهرم همان بازار، از [VenueSpecs]: جفت‌ارز اصلی ۳۰:۱ · جفت‌ارز غیراصلی و طلا ۲۰:۱ ·
@@ -264,59 +268,6 @@
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
 | `cryptoHours()` | VolumeSessionStats | 13 | — |
-
-### `data/AiConnectionDiagnostics.kt` — 35 خط · 1 فانکشن
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `describe()` | AiConnectionDiagnostics | 10 | — |
-
-### `data/AiCredentialScope.kt` — 35 خط · 3 فانکشن
-> Switching to a GLM profile must never forward an existing Claude/OpenAI key to LLMsRelay.
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `sameNewsClientConfig()` | AiCredentialScope | 10 | — |
-| `format()` | AiCredentialScope | 17 | — |
-| `key()` | AiCredentialScope | 20 | — |
-
-### `data/AiEntryProof.kt` — 24 خط · 2 فانکشن
-> execution of PaperAutoTrader's model-review branch, never presumed AI performance.
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `fromAction()` | AiEntryEffect | 14 | — |
-| `fromResponse()` | AiEntryEffect | 16 | `#fn-ai-plan` در نقشهٔ HTML |
-
-### `data/AiNewsPresentation.kt` — 27 خط · 1 فانکشن
-> as AI analysis. A keyword classifier, stale verdict or an unrelated gold card is never AI.
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `forHeadline()` | AiNewsPresentation | 10 | — |
-
-### `data/AiProvider.kt` — 253 خط · 17 فانکشن
-> Direct, on-device AI calls with the user's OWN key. Three request formats are supported and
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `isLlmRelay()` | AiProvider | 32 | — |
-| `providerError()` | AiProvider | 35 | — |
-| `isAnthropic()` | AiProvider | 45 | — |
-| `usesAnthropic()` | AiProvider | 53 | — |
-| `anthropicMessagesUrl()` | AiProvider | 60 | — |
-| `openAiChatUrl()` | AiProvider | 66 | — |
-| `modelsUrl()` | AiProvider | 72 | — |
-| `listModels()` | AiProvider | 82 | — |
-| `parseModelIds()` | AiProvider | 113 | — |
-| `completeJson()` | AiProvider | 121 | — |
-| `probe()` | AiProvider | 135 | — |
-| `completeText()` | AiProvider | 150 | — |
-| `requestBody()` | AiProvider | 163 | — |
-| `post()` | AiProvider | 184 | — |
-| `extractAnthropicText()` | AiProvider | 221 | — |
-| `extractOpenAiText()` | AiProvider | 233 | — |
-| `parseJsonObjectLoose()` | AiProvider | 243 | — |
 
 ### `data/AppNetwork.kt` — 105 خط · 6 فانکشن
 > when Android routes this app through it. No embedded proxy, custom DNS or TLS bypass. */
@@ -401,13 +352,13 @@
 | `merge()` | CandleCache | 64 | — |
 | `clear()` | CandleCache | 73 | — |
 
-### `data/CandleSourceHealth.kt` — 35 خط · 2 فانکشن
-> Validates that the symbol's single dedicated source returned 1500 fresh, closed M5 candles
+### `data/CandleSourceHealth.kt` — 30 خط · 2 فانکشن
+> Validates that a source returned enough fresh, closed, ordered candles for
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
 | `requiredSize()` | CandleSourceHealth | 12 | — |
-| `ready()` | CandleSourceHealth | 19 | — |
+| `ready()` | CandleSourceHealth | 14 | — |
 
 ### `data/CatalogPaperTrader.kt` — 72 خط · 3 فانکشن
 > timestamped trade ticks. Nobitex executed USDT trades are separate from UDF candle closes.
@@ -447,13 +398,14 @@
 |---|---|---|---|
 | `pick()` | CryptoIntervalChoice | 13 | — |
 
-### `data/CryptoRadarBundle.kt` — 83 خط · 2 فانکشن
-> 1-to-1 single-source crypto bundle:
+### `data/CryptoRadarBundle.kt` — 127 خط · 3 فانکشن
+> Crypto history bundle (5 USDT spot pairs):
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `dedicatedSource()` | Snapshot | 38 | — |
-| `fetch()` | CryptoRadarBundle | 48 | — |
+| `dedicatedSource()` | Snapshot | 44 | — |
+| `fetch()` | CryptoRadarBundle | 54 | — |
+| `readBundle()` | CryptoRadarBundle | 106 | — |
 
 ### `data/CryptoRadarCandleClient.kt` — 364 خط · 23 فانکشن
 > Exact USDT pair is checked against the venue's live SPOT listing, not a guessed ticker.
@@ -517,65 +469,11 @@
 | `parseRawCandlePayload()` | Result | 249 | — |
 | `validOhlc()` | Result | 281 | — |
 
-### `data/ForexCalendarRepository.kt` — 111 خط · 7 فانکشن
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `online()` | ForexCalendarState | 33 | — |
-| `highImpactUsdWindow()` | ForexCalendarState | 37 | — |
-| `parseForexCalendar()` | — | 43 | — |
-| `str()` | ForexCalendarState | 47 | — |
-| `metric()` | ForexCalendarState | 58 | — |
-| `refreshNow()` | ForexCalendarRepository | 84 | — |
-| `refresh()` | ForexCalendarRepository | 86 | `#fn-market-refresh` در نقشهٔ HTML |
-
-### `data/GeminiAiStudio.kt` — 53 خط · 7 فانکشن
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `isOfficialNativeEndpoint()` | GeminiAiStudio | 13 | — |
-| `nativeBase()` | GeminiAiStudio | 19 | — |
-| `modelId()` | GeminiAiStudio | 24 | — |
-| `usesNative()` | GeminiAiStudio | 29 | — |
-| `migratePreset()` | GeminiAiStudio | 34 | — |
-| `isOfficialOpenAiEndpoint()` | GeminiAiStudio | 41 | — |
-| `openAiModelId()` | GeminiAiStudio | 49 | — |
-
-### `data/GeminiHttpDiagnostics.kt` — 44 خط · 1 فانکشن
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `failure()` | GeminiHttpDiagnostics | 24 | — |
-
-### `data/GeminiNativeClient.kt` — 134 خط · 7 فانکشن
-> follows redirects with x-goog-api-key. No key in URLs, diagnostics, prompts or bundled APK.
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `transport()` | GeminiNativeClient | 20 | — |
-| `request()` | GeminiNativeClient | 25 | — |
-| `execute()` | GeminiNativeClient | 33 | — |
-| `listModels()` | GeminiNativeClient | 46 | — |
-| `body()` | GeminiNativeClient | 75 | — |
-| `generate()` | GeminiNativeClient | 93 | — |
-| `extractText()` | GeminiNativeClient | 104 | — |
-
-### `data/HeadlineImpact.kt` — 62 خط · 2 فانکشن
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `explain()` | HeadlineImpact | 28 | — |
-| `matches()` | Subject | 31 | — |
-
-### `data/HistorySourceSelection.kt` — 67 خط · 4 فانکشن
-> With two disagreeing publishers we cannot know which is right: fail closed. With
+### `data/HistorySourceSelection.kt` — 19 خط · 1 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
 | `record()` | HistorySourceAudits | 16 | — |
-| `choose()` | HistorySourceSelection | 28 | — |
-| `price()` | Choice | 51 | — |
-| `agree()` | Choice | 52 | — |
 
 ### `data/JournalPdfExporter.kt` — 95 خط · 2 فانکشن
 > Renders a REAL PDF straight from the trades already saved in [com.aurum.edge.data.JournalStore] —
@@ -585,24 +483,22 @@
 | `export()` | JournalPdfExporter | 26 | — |
 | `ensureSpace()` | JournalPdfExporter | 42 | — |
 
-### `data/JournalStore.kt` — 566 خط · 13 فانکشن
+### `data/JournalStore.kt` — 530 خط · 11 فانکشن
 > Journal of *paper* trades executed at *real* prices.
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `load()` | JournalStore | 56 | — |
-| `persist()` | JournalStore | 75 | — |
-| `open()` | JournalStore | 92 | `#fn-journal-open` در نقشهٔ HTML |
-| `applyCryptoClosedBars()` | JournalStore | 259 | `#fn-settle` در نقشهٔ HTML |
-| `attachAiReview()` | JournalStore | 281 | — |
-| `attachHoldReview()` | JournalStore | 297 | — |
-| `settle()` | JournalStore | 310 | `#fn-settle` در نقشهٔ HTML |
-| `noteTickCoverageGap()` | JournalStore | 371 | — |
-| `settleTick()` | JournalStore | 386 | `#fn-settle` در نقشهٔ HTML |
-| `settleBinanceBatch()` | JournalStore | 462 | `#fn-settle` در نقشهٔ HTML |
-| `close()` | JournalStore | 515 | — |
-| `clear()` | JournalStore | 534 | — |
-| `stats()` | JournalStore | 537 | — |
+| `load()` | JournalStore | 52 | — |
+| `persist()` | JournalStore | 71 | — |
+| `open()` | JournalStore | 88 | `#fn-journal-open` در نقشهٔ HTML |
+| `applyCryptoClosedBars()` | JournalStore | 248 | `#fn-settle` در نقشهٔ HTML |
+| `settle()` | JournalStore | 274 | `#fn-settle` در نقشهٔ HTML |
+| `noteTickCoverageGap()` | JournalStore | 335 | — |
+| `settleTick()` | JournalStore | 350 | `#fn-settle` در نقشهٔ HTML |
+| `settleBinanceBatch()` | JournalStore | 426 | `#fn-settle` در نقشهٔ HTML |
+| `close()` | JournalStore | 479 | — |
+| `clear()` | JournalStore | 498 | — |
+| `stats()` | JournalStore | 501 | — |
 
 ### `data/JsonPath.kt` — 49 خط · 4 فانکشن
 
@@ -657,38 +553,6 @@
 | `currentPeriodStart()` | MarketRepository | 928 | — |
 | `hasInternet()` | MarketRepository | 933 | — |
 | `lastSyncAt()` | MarketRepository | 940 | — |
-
-### `data/NewsClassifier.kt` — 54 خط · 1 فانکشن
-> Rule-based keyword scan of an ALREADY-FETCHED real headline (title+excerpt) — never a model,
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `classify()` | NewsClassifier | 37 | — |
-
-### `data/NewsRepository.kt` — 424 خط · 11 فانکشن
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `resetAndRefresh()` | NewsRepository | 120 | — |
-| `refreshNow()` | NewsRepository | 126 | — |
-| `refresh()` | NewsRepository | 128 | `#fn-market-refresh` در نقشهٔ HTML |
-| `refreshServerMode()` | NewsRepository | 144 | — |
-| `sameAiConfig()` | NewsRepository | 168 | — |
-| `refreshClientMode()` | NewsRepository | 172 | — |
-| `clientAiAnalyze()` | NewsRepository | 260 | — |
-| `apiUrl()` | NewsRepository | 334 | — |
-| `newsUrl()` | NewsRepository | 343 | — |
-| `parseWebNews()` | — | 348 | — |
-| `string()` | — | 424 | — |
-
-### `data/NewsResearch.kt` — 76 خط · 3 فانکشن
-> if the week's download is missing/stale. Differences never become a gold BUY/SELL.
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `metric()` | NewsResearch | 14 | — |
-| `gold()` | NewsResearch | 28 | — |
-| `headline()` | NewsResearch | 57 | — |
 
 ### `data/NobitexHistoryClient.kt` — 186 خط · 7 فانکشن
 > Crypto candles from Nobitex, for networks where Binance is unreachable.
@@ -749,12 +613,13 @@
 |---|---|---|---|
 | `parse()` | NobitexTradeQuote | 17 | — |
 
-### `data/NonCryptoRadarBundle.kt` — 65 خط · 1 فانکشن
-> 1-to-1 single-source non-crypto bundle (Gold, Silver, Dow Jones, and 7 Ichimoku Forex pairs):
+### `data/NonCryptoRadarBundle.kt` — 116 خط · 2 فانکشن
+> Non-crypto history bundle (Gold, Silver, Dow Jones, 7 Ichimoku Forex pairs):
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `fetch()` | NonCryptoRadarBundle | 30 | — |
+| `fetch()` | NonCryptoRadarBundle | 37 | — |
+| `readBundle()` | NonCryptoRadarBundle | 91 | — |
 
 ### `data/OpenPositionDisplay.kt` — 34 خط · 3 فانکشن
 
@@ -801,29 +666,28 @@
 | `watchBinance()` | OpenTradeTickMonitor | 311 | `#fn-tickmonitor` در نقشهٔ HTML |
 | `watch()` | OpenTradeTickMonitor | 423 | `#fn-tickmonitor` در نقشهٔ HTML |
 
-### `data/PairScanner.kt` — 643 خط · 9 فانکشن
+### `data/PairScanner.kt` — 636 خط · 9 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `attachAutoReview()` | PairScanner | 125 | — |
-| `refreshNow()` | PairScanner | 152 | — |
-| `sweepOnce()` | PairScanner | 157 | `#fn-scanner-sweep` در نقشهٔ HTML |
-| `schedule()` | PairScanner | 162 | — |
-| `publishFailure()` | PairScanner | 202 | — |
-| `freshTrend()` | PairScanner | 213 | — |
-| `rankOpportunities()` | PairScanner | 221 | `#fn-scanner-sweep` در نقشهٔ HTML |
-| `sweepAll()` | PairScanner | 224 | `#fn-scanner-sweep` در نقشهٔ HTML |
-| `update()` | PairScanner | 248 | — |
+| `attachAutoReview()` | PairScanner | 123 | — |
+| `refreshNow()` | PairScanner | 150 | — |
+| `sweepOnce()` | PairScanner | 155 | `#fn-scanner-sweep` در نقشهٔ HTML |
+| `schedule()` | PairScanner | 160 | — |
+| `publishFailure()` | PairScanner | 200 | — |
+| `freshTrend()` | PairScanner | 211 | — |
+| `rankOpportunities()` | PairScanner | 219 | `#fn-scanner-sweep` در نقشهٔ HTML |
+| `sweepAll()` | PairScanner | 222 | `#fn-scanner-sweep` در نقشهٔ HTML |
+| `update()` | PairScanner | 246 | — |
 
-### `data/PaperAutoTrader.kt` — 202 خط · 4 فانکشن
-> «روند کلی بازار» از پویشِ پیوستهٔ ۵۰+ نماد می‌آید (عرض بازار + جهت دلار + جوّ ریسک).
+### `data/PaperAutoTrader.kt` — 138 خط · 3 فانکشن
+> Purely technical: no AI and no news layer participates in entries anymore. */
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `attachTrendSource()` | PaperAutoTrader | 38 | — |
-| `stopped()` | PaperAutoTrader | 42 | — |
-| `onMarketUpdate()` | PaperAutoTrader | 45 | `#fn-autotrader` در نقشهٔ HTML |
-| `auditAiEntry()` | PaperAutoTrader | 193 | `#fn-autotrader` در نقشهٔ HTML |
+| `attachTrendSource()` | PaperAutoTrader | 35 | — |
+| `stopped()` | PaperAutoTrader | 39 | — |
+| `onMarketUpdate()` | PaperAutoTrader | 42 | `#fn-autotrader` در نقشهٔ HTML |
 
 ### `data/PaperOpportunityStore.kt` — 79 خط · 5 فانکشن
 
@@ -852,21 +716,6 @@
 | `text()` | PublicCandleHistoryClient | 246 | — |
 | `num()` | PublicCandleHistoryClient | 247 | — |
 
-### `data/PublicWebNewsRepository.kt` — 216 خط · 10 فانکشن
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `online()` | PublicFeedHealth | 70 | — |
-| `parsePublicFeed()` | — | 87 | — |
-| `localTag()` | — | 115 | — |
-| `field()` | — | 116 | — |
-| `cleanFeedText()` | — | 119 | — |
-| `safePublisherLink()` | — | 122 | — |
-| `parseFeedDate()` | — | 131 | — |
-| `refreshNow()` | PublicWebNewsRepository | 149 | — |
-| `refresh()` | PublicWebNewsRepository | 152 | `#fn-market-refresh` در نقشهٔ HTML |
-| `fetchOne()` | PublicWebNewsRepository | 182 | — |
-
 ### `data/PublisherBudget.kt` — 27 خط · 2 فانکشن
 > All symbol jobs start immediately. A publisher can still throttle its own requests;
 
@@ -892,12 +741,6 @@
 | `longOrNull()` | QuoteHistoryStore | 83 | — |
 | `toQuote()` | QuoteHistoryStore | 87 | — |
 
-### `data/ResearchAlerts.kt` — 24 خط · 1 فانکشن
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `forex()` | ResearchAlerts | 7 | — |
-
 ### `data/ScanFreshness.kt` — 9 خط · 1 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
@@ -912,7 +755,7 @@
 | `rank()` | ScanRanking | 12 | — |
 | `byMarket()` | ScanRanking | 24 | — |
 
-### `data/SettingsStore.kt` — 348 خط · 16 فانکشن
+### `data/SettingsStore.kt` — 294 خط · 13 فانکشن
 > Local settings. The Twelve Data key is a read-only market-data credential
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
@@ -925,14 +768,11 @@
 | `tickArchiveUrl()` | SettingsStore | 152 | — |
 | `hasTickArchive()` | SettingsStore | 153 | — |
 | `saveTickArchive()` | SettingsStore | 156 | — |
-| `saveNewsBaseUrl()` | SettingsStore | 171 | — |
-| `saveNewsAiConfig()` | SettingsStore | 188 | — |
-| `clearNewsAiConfig()` | SettingsStore | 213 | — |
-| `dayOpeningEquity()` | SettingsStore | 231 | — |
-| `adjustBalance()` | SettingsStore | 245 | — |
-| `update()` | SettingsStore | 255 | — |
-| `setLastSync()` | SettingsStore | 303 | — |
-| `lastSync()` | SettingsStore | 307 | — |
+| `dayOpeningEquity()` | SettingsStore | 177 | — |
+| `adjustBalance()` | SettingsStore | 191 | — |
+| `update()` | SettingsStore | 201 | — |
+| `setLastSync()` | SettingsStore | 249 | — |
+| `lastSync()` | SettingsStore | 253 | — |
 
 ### `data/SigningContinuity.kt` — 5 خط · 1 فانکشن
 
@@ -972,17 +812,35 @@
 |---|---|---|---|
 | `parse()` | Num | 91 | — |
 
-### `data/SourceRouting.kt` — 100 خط · 6 فانکشن
-> Strict 1-to-1 source routing:
+### `data/SourcePromotion.kt` — 113 خط · 11 فانکشن
+> Sticky source promotion ("the source that answers IS the primary source").
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `dedicatedFor()` | SourceRouting | 61 | — |
-| `cryptoVenueFor()` | SourceRouting | 64 | — |
-| `historySources()` | SourceRouting | 67 | — |
-| `fromProvider()` | SourceRouting | 72 | — |
-| `matchesSource()` | SourceRouting | 85 | — |
-| `historyPlan()` | SourceRouting | 95 | — |
+| `key()` | SourcePromotion | 33 | — |
+| `healthOf()` | SourcePromotion | 34 | — |
+| `attach()` | SourcePromotion | 38 | — |
+| `persist()` | SourcePromotion | 50 | — |
+| `primaryId()` | SourcePromotion | 58 | — |
+| `failuresOf()` | SourcePromotion | 60 | — |
+| `ordered()` | SourcePromotion | 67 | — |
+| `onSuccess()` | SourcePromotion | 79 | — |
+| `onFailure()` | SourcePromotion | 89 | — |
+| `resetForTests()` | SourcePromotion | 102 | — |
+| `summaryFa()` | SourcePromotion | 105 | — |
+
+### `data/SourceRouting.kt` — 120 خط · 7 فانکشن
+> Source routing with a dedicated primary per symbol plus free fallbacks:
+
+| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
+|---|---|---|---|
+| `dedicatedFor()` | SourceRouting | 62 | — |
+| `cryptoVenueFor()` | SourceRouting | 65 | — |
+| `historySources()` | SourceRouting | 68 | — |
+| `historyCandidates()` | SourceRouting | 79 | — |
+| `fromProvider()` | SourceRouting | 89 | — |
+| `matchesSource()` | SourceRouting | 102 | — |
+| `historyPlan()` | SourceRouting | 112 | — |
 
 ### `data/SpotFallbackClient.kt` — 275 خط · 10 فانکشن
 > Automatic real spot-price source: Swissquote's public BBO for FX, gold-api.com for gold,
@@ -1041,44 +899,14 @@
 | `fromMinutes()` | ThreeMinuteCandles | 11 | — |
 | `takeLastWhileIndexed()` | ThreeMinuteCandles | 34 | — |
 
-### `data/TimeframeFeed.kt` — 42 خط · 1 فانکشن
-> Only M5 (1500 closed candles) is fetched over the network.
+### `data/TimeframeFeed.kt` — 117 خط · 3 فانکشن
+> Reference alignment frames for the SELECTED market.
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `fetch()` | TimeframeFeed | 19 | — |
-
-### `data/TraderAdvisor.kt` — 723 خط · 26 فانکشن
-> The model's own verdict on whether this setup is worth taking at all. It is asked for
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `onAiConfigChanged()` | TraderAdvisor | 152 | — |
-| `ensureConnection()` | TraderAdvisor | 176 | `#fn-ai-plan` در نقشهٔ HTML |
-| `refreshNow()` | TraderAdvisor | 214 | — |
-| `refresh()` | TraderAdvisor | 216 | `#fn-market-refresh` در نقشهٔ HTML |
-| `listModels()` | TraderAdvisor | 246 | — |
-| `probe()` | TraderAdvisor | 253 | — |
-| `planTradeWithAi()` | TraderAdvisor | 260 | `#fn-ai-plan` در نقشهٔ HTML |
-| `num()` | TraderAdvisor | 295 | — |
-| `reviewPaperEntry()` | TraderAdvisor | 338 | — |
-| `reviewOpenPositions()` | TraderAdvisor | 394 | `#fn-ai-plan` در نقشهٔ HTML |
-| `consumeHoldAlerts()` | TraderAdvisor | 482 | — |
-| `reviewOpenPosition()` | TraderAdvisor | 494 | — |
-| `consumeBiasFlip()` | TraderAdvisor | 552 | — |
-| `analyze()` | TraderAdvisor | 559 | `#fn-mtf` در نقشهٔ HTML |
-| `parseWorthAnswer()` | TraderAdvisor | 621 | — |
-| `parseHoldReview()` | TraderAdvisor | 639 | — |
-| `str()` | WorthAnswer | 641 | — |
-| `list()` | WorthAnswer | 642 | — |
-| `parseTradeReview()` | TraderAdvisor | 663 | — |
-| `str()` | WorthAnswer | 664 | — |
-| `list()` | WorthAnswer | 665 | — |
-| `parseOpinion()` | TraderAdvisor | 684 | — |
-| `str()` | WorthAnswer | 685 | — |
-| `list()` | WorthAnswer | 686 | — |
-| `toSignal()` | — | 711 | — |
-| `averageOrNull()` | — | 722 | — |
+| `fetch()` | TimeframeFeed | 23 | — |
+| `readFrame()` | TimeframeFeed | 82 | — |
+| `healthy()` | TimeframeFeed | 108 | — |
 
 ### `data/TradingViewSymbols.kt` — 40 خط · 2 فانکشن
 > Resolution of the 15 supported app symbols (2 Metals, 1 Dow Jones Index,
@@ -1155,25 +983,24 @@
 | `keyOverride()` | WatchSettingsStore | 60 | — |
 | `setKeyOverride()` | WatchSettingsStore | 65 | — |
 
-### `engine/Als5GoldEngine.kt` — 1195 خط · 14 فانکشن
+### `engine/Als5GoldEngine.kt` — 1183 خط · 13 فانکشن
 > ALS-5 — Adaptive Liquidity & Structure Trading System for Gold (XAU/USD) on M5.
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `confirmedSwings()` | Als5GoldEngine | 177 | — |
-| `classifyRegime()` | Als5GoldEngine | 216 | `#fn-als5` در نقشهٔ HTML |
-| `evaluateEngineA()` | Als5GoldEngine | 367 | `#fn-als5` در نقشهٔ HTML |
-| `evaluateEngineB()` | Als5GoldEngine | 567 | `#fn-als5` در نقشهٔ HTML |
-| `evaluateEngineC()` | Als5GoldEngine | 731 | `#fn-als5` در نقشهٔ HTML |
-| `computeTarget()` | Als5GoldEngine | 848 | — |
-| `netRewardRisk()` | Als5GoldEngine | 873 | — |
-| `calculatePositionSize()` | Als5GoldEngine | 887 | `#fn-als5` در نقشهٔ HTML |
-| `sessionAllowed()` | Als5GoldEngine | 906 | `#fn-als5` در نقشهٔ HTML |
-| `inNewsBlackout()` | Als5GoldEngine | 920 | — |
-| `evaluate()` | Als5GoldEngine | 928 | `#fn-signalengine` در نقشهٔ HTML |
-| `blocked()` | CandidateSetup | 945 | — |
-| `buildConfluenceItems()` | Als5GoldEngine | 1142 | — |
-| `item()` | CandidateSetup | 1147 | — |
+| `confirmedSwings()` | Als5GoldEngine | 175 | — |
+| `classifyRegime()` | Als5GoldEngine | 214 | `#fn-als5` در نقشهٔ HTML |
+| `evaluateEngineA()` | Als5GoldEngine | 365 | `#fn-als5` در نقشهٔ HTML |
+| `evaluateEngineB()` | Als5GoldEngine | 565 | `#fn-als5` در نقشهٔ HTML |
+| `evaluateEngineC()` | Als5GoldEngine | 729 | `#fn-als5` در نقشهٔ HTML |
+| `computeTarget()` | Als5GoldEngine | 846 | — |
+| `netRewardRisk()` | Als5GoldEngine | 871 | — |
+| `calculatePositionSize()` | Als5GoldEngine | 885 | `#fn-als5` در نقشهٔ HTML |
+| `sessionAllowed()` | Als5GoldEngine | 904 | `#fn-als5` در نقشهٔ HTML |
+| `evaluate()` | Als5GoldEngine | 919 | `#fn-signalengine` در نقشهٔ HTML |
+| `blocked()` | CandidateSetup | 936 | — |
+| `buildConfluenceItems()` | Als5GoldEngine | 1130 | — |
+| `item()` | CandidateSetup | 1135 | — |
 
 ### `engine/BarFillRules.kt` — 57 خط · 3 فانکشن
 
@@ -1183,22 +1010,22 @@
 | `protectiveExit()` | BarFillRules | 29 | — |
 | `nextOpenExit()` | BarFillRules | 45 | — |
 
-### `engine/CryptoCompressionEngine.kt` — 267 خط · 4 فانکشن
+### `engine/CryptoCompressionEngine.kt` — 260 خط · 4 فانکشن
 > confirmations, never entry candles. This does not backfill missing trades, volumes or quotes.
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
 | `blocked()` | CryptoCompressionEngine | 27 | — |
 | `evaluate()` | CryptoCompressionEngine | 33 | `#fn-signalengine` در نقشهٔ HTML |
-| `valid()` | CryptoCompressionEngine | 252 | — |
-| `compressionType()` | CryptoCompressionEngine | 257 | — |
+| `valid()` | CryptoCompressionEngine | 245 | — |
+| `compressionType()` | CryptoCompressionEngine | 250 | — |
 
-### `engine/CryptoCompressionExit.kt` — 76 خط · 1 فانکشن
+### `engine/CryptoCompressionExit.kt` — 77 خط · 1 فانکشن
 > the journal executes an intent only on a later, ordered same-venue trade print.
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `assess()` | CryptoCompressionExit | 17 | `#fn-entrysetup` در نقشهٔ HTML |
+| `assess()` | CryptoCompressionExit | 18 | `#fn-entrysetup` در نقشهٔ HTML |
 
 ### `engine/DirectionalIndex.kt` — 35 خط · 1 فانکشن
 > No zero-volume fallback or synthetic history is used for entry.
@@ -1261,29 +1088,18 @@
 | `higherTimeframeBiasAt()` | Ichimoku | 255 | — |
 | `compute()` | Ichimoku | 277 | `#fn-ichimoku` در نقشهٔ HTML |
 
-### `engine/MtfAnalyzer.kt` — 288 خط · 7 فانکشن
+### `engine/MtfAnalyzer.kt` — 266 خط · 7 فانکشن
 > Multi-timeframe confluence, computed **on the phone** from the real candles that were
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
 | `framesFor()` | MtfAnalyzer | 56 | — |
 | `weightFor()` | MtfAnalyzer | 67 | — |
-| `convertFromM5()` | MtfAnalyzer | 82 | `#fn-mtf` در نقشهٔ HTML |
-| `resample()` | MtfAnalyzer | 109 | `#fn-mtf` در نقشهٔ HTML |
-| `frameOf()` | MtfAnalyzer | 140 | — |
-| `analyze()` | MtfAnalyzer | 222 | `#fn-mtf` در نقشهٔ HTML |
-| `direction()` | MtfAnalyzer | 283 | — |
-
-### `engine/NewsConfluence.kt` — 156 خط · 5 فانکشن
-> News adds a green/amber/red journal evidence row, not a positive entry prerequisite.
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `alignment()` | NewsConfluence | 30 | — |
-| `unknown()` | Alignment | 32 | — |
-| `trustedPublisher()` | NewsConfluence | 82 | — |
-| `record()` | NewsConfluence | 95 | — |
-| `apply()` | NewsConfluence | 111 | — |
+| `resample()` | MtfAnalyzer | 82 | `#fn-mtf` در نقشهٔ HTML |
+| `frameOf()` | MtfAnalyzer | 113 | — |
+| `analyze()` | MtfAnalyzer | 196 | `#fn-mtf` در نقشهٔ HTML |
+| `analyzeFrames()` | MtfAnalyzer | 204 | — |
+| `direction()` | MtfAnalyzer | 261 | — |
 
 ### `engine/PerformanceMetrics.kt` — 99 خط · 2 فانکشن
 
@@ -1292,13 +1108,13 @@
 | `fromPaper()` | PerformanceMetrics | 39 | — |
 | `from()` | PerformanceMetrics | 45 | — |
 
-### `engine/ResearchEvidence.kt` — 66 خط · 3 فانکشن
+### `engine/ResearchEvidence.kt` — 56 خط · 3 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `hasRecordedSignalEvidence()` | ResearchEvidence | 26 | — |
-| `hasRecordedNineWay()` | ResearchEvidence | 52 | — |
-| `paperCostWhatIf()` | ResearchEvidence | 55 | — |
+| `hasRecordedSignalEvidence()` | ResearchEvidence | 25 | — |
+| `hasRecordedNineWay()` | ResearchEvidence | 42 | — |
+| `paperCostWhatIf()` | ResearchEvidence | 45 | — |
 
 ### `engine/SignalEngine.kt` — 114 خط · 6 فانکشن
 > Single V1 closed-bar four-layer paper signal facade.
@@ -1312,19 +1128,19 @@
 | `evaluateLive()` | SignalEngine | 79 | `#fn-signalengine` در نقشهٔ HTML |
 | `evaluate()` | SignalEngine | 104 | `#fn-signalengine` در نقشهٔ HTML |
 
-### `engine/V1Scoring.kt` — 222 خط · 8 فانکشن
+### `engine/V1Scoring.kt` — 215 خط · 8 فانکشن
 > Four independent layers, each worth 25 points. Only M5/M15/H1 vote on alignment.
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `minBarsFor()` | V1Scoring | 25 | — |
-| `evaluate()` | V1Scoring | 32 | `#fn-signalengine` در نقشهٔ HTML |
-| `blocked()` | V1Scoring | 40 | — |
-| `score()` | V1Scoring | 112 | `#fn-v1score-side` در نقشهٔ HTML |
-| `item()` | V1Scoring | 132 | — |
-| `directionalAlignment()` | V1Scoring | 184 | `#fn-v1score-side` در نقشهٔ HTML |
-| `chooseSide()` | V1Scoring | 196 | `#fn-v1score-side` در نقشهٔ HTML |
-| `frameBias()` | V1Scoring | 202 | `#fn-v1score-side` در نقشهٔ HTML |
+| `minBarsFor()` | V1Scoring | 26 | — |
+| `evaluate()` | V1Scoring | 28 | `#fn-signalengine` در نقشهٔ HTML |
+| `blocked()` | V1Scoring | 36 | — |
+| `score()` | V1Scoring | 105 | `#fn-v1score-side` در نقشهٔ HTML |
+| `item()` | V1Scoring | 125 | — |
+| `directionalAlignment()` | V1Scoring | 177 | `#fn-v1score-side` در نقشهٔ HTML |
+| `chooseSide()` | V1Scoring | 189 | `#fn-v1score-side` در نقشهٔ HTML |
+| `frameBias()` | V1Scoring | 195 | `#fn-v1score-side` در نقشهٔ HTML |
 
 ### `notify/AlertSoundPlayer.kt` — 105 خط · 5 فانکشن
 > One brief notification-usage clip from a persistable SAF document. Playback is done by the
@@ -1355,39 +1171,37 @@
 | `notifyRecordedAutoEntry()` | Notifier | 251 | `#fn-notifier` در نقشهٔ HTML |
 | `postVerified()` | Notifier | 262 | — |
 
-### `service/SignalMonitorService.kt` — 451 خط · 8 فانکشن
+### `service/SignalMonitorService.kt` — 352 خط · 7 فانکشن
 > Keeps the real Forex feed alive while the app is in the background and alerts only on
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `onBind()` | SignalMonitorService | 61 | — |
-| `notificationsPermitted()` | SignalMonitorService | 63 | — |
-| `onStartCommand()` | SignalMonitorService | 67 | `#service` در نقشهٔ HTML |
-| `postResearchAlert()` | SignalMonitorService | 400 | — |
-| `onTimeout()` | SignalMonitorService | 418 | — |
-| `onDestroy()` | SignalMonitorService | 422 | — |
-| `start()` | SignalMonitorService | 441 | — |
-| `stop()` | SignalMonitorService | 446 | — |
+| `onBind()` | SignalMonitorService | 53 | — |
+| `notificationsPermitted()` | SignalMonitorService | 55 | — |
+| `onStartCommand()` | SignalMonitorService | 59 | `#service` در نقشهٔ HTML |
+| `onTimeout()` | SignalMonitorService | 319 | — |
+| `onDestroy()` | SignalMonitorService | 323 | — |
+| `start()` | SignalMonitorService | 342 | — |
+| `stop()` | SignalMonitorService | 347 | — |
 
-### `ui/components/Common.kt` — 405 خط · 14 فانکشن
-> Purely orientational for a human reader — never a trading signal or the server's AI news gate. */
+### `ui/components/Common.kt` — 372 خط · 13 فانکشن
+> Price with the exact decimals the instrument is actually quoted in.
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `NewsClassificationRow()` | — | 37 | — |
-| `formatPrice()` | — | 64 | — |
-| `formatPriceFor()` | — | 83 | — |
-| `formatSigned()` | — | 87 | — |
-| `formatTime()` | — | 93 | — |
-| `formatDateTime()` | — | 98 | — |
-| `relativeTime()` | — | 103 | — |
-| `SectionCard()` | — | 115 | — |
-| `StatTile()` | — | 147 | — |
-| `Pill()` | — | 167 | — |
-| `FeedBanner()` | — | 179 | — |
-| `ConfluenceRow()` | — | 223 | — |
-| `EmptyState()` | — | 261 | — |
-| `AssetClass4SlotsBanner()` | — | 286 | — |
+| `formatPrice()` | — | 31 | — |
+| `formatPriceFor()` | — | 50 | — |
+| `formatSigned()` | — | 54 | — |
+| `formatTime()` | — | 60 | — |
+| `formatDateTime()` | — | 65 | — |
+| `relativeTime()` | — | 70 | — |
+| `SectionCard()` | — | 82 | — |
+| `StatTile()` | — | 114 | — |
+| `Pill()` | — | 134 | — |
+| `FeedBanner()` | — | 146 | — |
+| `ConfluenceRow()` | — | 190 | — |
+| `EmptyState()` | — | 228 | — |
+| `AssetClass4SlotsBanner()` | — | 253 | — |
 
 ### `ui/components/SignalCard.kt` — 148 خط · 1 فانکشن
 
@@ -1408,7 +1222,7 @@
 |---|---|---|---|
 | `AppHeader()` | — | 29 | — |
 
-### `ui/shell/AurumRoot.kt` — 112 خط · 3 فانکشن
+### `ui/shell/AurumRoot.kt` — 110 خط · 3 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
@@ -1416,87 +1230,75 @@
 | `open()` | — | 72 | `#fn-journal-open` در نقشهٔ HTML |
 | `openChartFor()` | — | 75 | — |
 
-### `ui/shell/AurumViewModel.kt` — 1229 خط · 70 فانکشن
+### `ui/shell/AurumViewModel.kt` — 999 خط · 58 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `resetAiDraftDiagnostics()` | AurumViewModel | 217 | — |
-| `startApp()` | AurumViewModel | 283 | `#fn-viewmodel` در نقشهٔ HTML |
-| `resumeVisibleForexFeed()` | AurumViewModel | 318 | — |
-| `pauseInvisibleForexFeed()` | AurumViewModel | 324 | — |
-| `ensureVisibleOnlineLoop()` | AurumViewModel | 337 | `#fn-viewmodel` در نقشهٔ HTML |
-| `ensureLiveTickerLoop()` | AurumViewModel | 381 | `#fn-viewmodel` در نقشهٔ HTML |
-| `refreshNow()` | AurumViewModel | 483 | — |
-| `checkForAppUpdate()` | AurumViewModel | 485 | — |
-| `downloadAppUpdate()` | AurumViewModel | 496 | — |
-| `setAutoDownloadUpdates()` | AurumViewModel | 503 | — |
-| `installDownloadedUpdate()` | AurumViewModel | 511 | — |
-| `resumeUpdateInstall()` | AurumViewModel | 513 | — |
-| `openUpdateInstallPermission()` | AurumViewModel | 515 | — |
-| `refreshWatch()` | AurumViewModel | 517 | — |
-| `refreshTraderOpinion()` | AurumViewModel | 520 | — |
-| `reviewOpenPositionsNow()` | AurumViewModel | 526 | — |
-| `scanPairs()` | AurumViewModel | 538 | — |
-| `selectAndTradeBestPick()` | AurumViewModel | 550 | — |
-| `refreshNews()` | AurumViewModel | 556 | — |
-| `refreshPublicWebNews()` | AurumViewModel | 558 | — |
-| `refreshForexCalendar()` | AurumViewModel | 560 | — |
-| `saveApiKey()` | AurumViewModel | 562 | — |
-| `selectChartSymbol()` | AurumViewModel | 571 | — |
-| `saveMarketCredentials()` | AurumViewModel | 598 | — |
-| `setCategoryStrategy()` | AurumViewModel | 627 | — |
-| `saveRiskPercent()` | AurumViewModel | 637 | — |
-| `saveBalance()` | AurumViewModel | 639 | — |
-| `saveMinConfidence()` | AurumViewModel | 641 | — |
-| `saveSpread()` | AurumViewModel | 644 | — |
-| `saveCommission()` | AurumViewModel | 646 | — |
-| `setNotifyOnSignal()` | AurumViewModel | 648 | — |
-| `selectAlertSound()` | AurumViewModel | 650 | — |
-| `resetAlertSound()` | AurumViewModel | 662 | — |
-| `reportNotificationTest()` | AurumViewModel | 668 | — |
-| `testAlertSound()` | AurumViewModel | 673 | — |
-| `setMonitorFlag()` | AurumViewModel | 686 | — |
-| `setAutoPaperTrading()` | AurumViewModel | 691 | — |
-| `freshPaperQuote()` | AurumViewModel | 701 | — |
-| `entryBlocker()` | AurumViewModel | 717 | — |
-| `previewManualTicket()` | AurumViewModel | 756 | — |
-| `openPaperTrade()` | AurumViewModel | 766 | — |
-| `openManualPaperTrade()` | AurumViewModel | 768 | — |
-| `submitPaper()` | AurumViewModel | 780 | `#fn-viewmodel` در نقشهٔ HTML |
-| `verified()` | AurumViewModel | 786 | — |
-| `closePaperTrade()` | AurumViewModel | 878 | — |
-| `clearJournal()` | AurumViewModel | 906 | — |
-| `clearOpportunityHistory()` | AurumViewModel | 918 | — |
-| `clearCache()` | AurumViewModel | 929 | — |
-| `selectWatchSource()` | AurumViewModel | 937 | — |
-| `setWatchPreferred()` | AurumViewModel | 942 | — |
-| `watchKeyOverride()` | AurumViewModel | 944 | — |
-| `setWatchKeyOverride()` | AurumViewModel | 946 | — |
-| `showWatchHistory()` | AurumViewModel | 959 | — |
-| `moreWatchHistory()` | AurumViewModel | 974 | — |
-| `clearWatchHistory()` | AurumViewModel | 986 | — |
-| `showTradeChart()` | AurumViewModel | 999 | — |
-| `refreshVisibleTradeChart()` | AurumViewModel | 1027 | — |
-| `downloadTradeChart()` | AurumViewModel | 1050 | — |
-| `setInterval()` | AurumViewModel | 1079 | — |
-| `saveNewsAiConfig()` | AurumViewModel | 1081 | — |
-| `clearNewsAiConfig()` | AurumViewModel | 1103 | — |
-| `loadNewsAiModels()` | AurumViewModel | 1124 | — |
-| `testNewsAiConnection()` | AurumViewModel | 1147 | — |
-| `tickArchiveUrl()` | AurumViewModel | 1173 | — |
-| `saveTickArchive()` | AurumViewModel | 1175 | — |
-| `saveNewsBaseUrl()` | AurumViewModel | 1186 | — |
-| `setPauseOnNews()` | AurumViewModel | 1204 | — |
-| `exportJournalPdf()` | AurumViewModel | 1210 | — |
-| `consumeToast()` | AurumViewModel | 1221 | — |
-| `create()` | AurumViewModelFactory | 1228 | — |
+| `startApp()` | AurumViewModel | 227 | `#fn-viewmodel` در نقشهٔ HTML |
+| `resumeVisibleForexFeed()` | AurumViewModel | 262 | — |
+| `pauseInvisibleForexFeed()` | AurumViewModel | 268 | — |
+| `ensureVisibleOnlineLoop()` | AurumViewModel | 281 | `#fn-viewmodel` در نقشهٔ HTML |
+| `ensureLiveTickerLoop()` | AurumViewModel | 309 | `#fn-viewmodel` در نقشهٔ HTML |
+| `refreshNow()` | AurumViewModel | 411 | — |
+| `checkForAppUpdate()` | AurumViewModel | 413 | — |
+| `downloadAppUpdate()` | AurumViewModel | 424 | — |
+| `setAutoDownloadUpdates()` | AurumViewModel | 431 | — |
+| `installDownloadedUpdate()` | AurumViewModel | 439 | — |
+| `resumeUpdateInstall()` | AurumViewModel | 441 | — |
+| `openUpdateInstallPermission()` | AurumViewModel | 443 | — |
+| `refreshWatch()` | AurumViewModel | 445 | — |
+| `scanPairs()` | AurumViewModel | 448 | — |
+| `selectAndTradeBestPick()` | AurumViewModel | 460 | — |
+| `saveApiKey()` | AurumViewModel | 466 | — |
+| `selectChartSymbol()` | AurumViewModel | 475 | — |
+| `saveMarketCredentials()` | AurumViewModel | 502 | — |
+| `setCategoryStrategy()` | AurumViewModel | 531 | — |
+| `saveRiskPercent()` | AurumViewModel | 541 | — |
+| `saveBalance()` | AurumViewModel | 543 | — |
+| `saveMinConfidence()` | AurumViewModel | 545 | — |
+| `saveSpread()` | AurumViewModel | 548 | — |
+| `saveCommission()` | AurumViewModel | 550 | — |
+| `setNotifyOnSignal()` | AurumViewModel | 552 | — |
+| `selectAlertSound()` | AurumViewModel | 554 | — |
+| `resetAlertSound()` | AurumViewModel | 566 | — |
+| `reportNotificationTest()` | AurumViewModel | 572 | — |
+| `testAlertSound()` | AurumViewModel | 577 | — |
+| `setMonitorFlag()` | AurumViewModel | 590 | — |
+| `setAutoPaperTrading()` | AurumViewModel | 595 | — |
+| `freshPaperQuote()` | AurumViewModel | 604 | — |
+| `entryBlocker()` | AurumViewModel | 620 | — |
+| `previewManualTicket()` | AurumViewModel | 648 | — |
+| `openPaperTrade()` | AurumViewModel | 658 | — |
+| `openManualPaperTrade()` | AurumViewModel | 660 | — |
+| `submitPaper()` | AurumViewModel | 672 | `#fn-viewmodel` در نقشهٔ HTML |
+| `verified()` | AurumViewModel | 678 | — |
+| `closePaperTrade()` | AurumViewModel | 763 | — |
+| `clearJournal()` | AurumViewModel | 791 | — |
+| `clearOpportunityHistory()` | AurumViewModel | 803 | — |
+| `clearCache()` | AurumViewModel | 814 | — |
+| `selectWatchSource()` | AurumViewModel | 822 | — |
+| `setWatchPreferred()` | AurumViewModel | 827 | — |
+| `watchKeyOverride()` | AurumViewModel | 829 | — |
+| `setWatchKeyOverride()` | AurumViewModel | 831 | — |
+| `showWatchHistory()` | AurumViewModel | 844 | — |
+| `moreWatchHistory()` | AurumViewModel | 859 | — |
+| `clearWatchHistory()` | AurumViewModel | 871 | — |
+| `showTradeChart()` | AurumViewModel | 884 | — |
+| `refreshVisibleTradeChart()` | AurumViewModel | 912 | — |
+| `downloadTradeChart()` | AurumViewModel | 935 | — |
+| `setInterval()` | AurumViewModel | 964 | — |
+| `tickArchiveUrl()` | AurumViewModel | 966 | — |
+| `saveTickArchive()` | AurumViewModel | 968 | — |
+| `exportJournalPdf()` | AurumViewModel | 980 | — |
+| `consumeToast()` | AurumViewModel | 991 | — |
+| `create()` | AurumViewModelFactory | 998 | — |
 
-### `ui/shell/TabNavigation.kt` — 91 خط · 2 فانکشن
+### `ui/shell/TabNavigation.kt` — 89 خط · 2 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `AurumBottomBar()` | — | 52 | — |
-| `MoreTabsSheet()` | — | 75 | — |
+| `AurumBottomBar()` | — | 50 | — |
+| `MoreTabsSheet()` | — | 73 | — |
 
 ### `ui/tabs/chart/ChartScreen.kt` — 145 خط · 1 فانکشن
 
@@ -1521,28 +1323,27 @@
 | `LiveTradeGaugeCard()` | — | 274 | — |
 | `AutoPaperCard()` | — | 519 | — |
 
-### `ui/tabs/journal/JournalScreen.kt` — 1073 خط · 18 فانکشن
+### `ui/tabs/journal/JournalScreen.kt` — 1032 خط · 17 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `JournalScreen()` | — | 70 | — |
-| `PaperEvidencePanel()` | — | 369 | — |
-| `EntryConditionsLine()` | — | 403 | — |
-| `conditionTone()` | — | 414 | — |
-| `conditionLabel()` | — | 420 | — |
-| `TradeRow()` | — | 428 | — |
-| `TradeChartDisclosure()` | — | 516 | — |
-| `AiReviewDisclosure()` | — | 611 | — |
-| `verdictFa()` | — | 643 | — |
-| `HoldReviewStatus()` | — | 655 | — |
-| `HoldReviewDisclosure()` | — | 689 | — |
-| `verdictFa()` | — | 725 | — |
-| `IctDisclosure()` | — | 733 | — |
-| `ConditionDisclosure()` | — | 765 | — |
-| `PnlIncomeCalendarSection()` | — | 789 | — |
-| `trendDirectionFa()` | — | 1054 | — |
-| `trendAlignmentFa()` | — | 1061 | — |
-| `riskToneFa()` | — | 1068 | — |
+| `JournalScreen()` | — | 69 | — |
+| `PaperEvidencePanel()` | — | 366 | — |
+| `EntryConditionsLine()` | — | 400 | — |
+| `conditionTone()` | — | 411 | — |
+| `conditionLabel()` | — | 417 | — |
+| `TradeRow()` | — | 425 | — |
+| `TradeChartDisclosure()` | — | 513 | — |
+| `AiReviewDisclosure()` | — | 608 | — |
+| `verdictFa()` | — | 640 | — |
+| `HoldReviewDisclosure()` | — | 648 | — |
+| `verdictFa()` | — | 684 | — |
+| `IctDisclosure()` | — | 692 | — |
+| `ConditionDisclosure()` | — | 724 | — |
+| `PnlIncomeCalendarSection()` | — | 748 | — |
+| `trendDirectionFa()` | — | 1013 | — |
+| `trendAlignmentFa()` | — | 1020 | — |
+| `riskToneFa()` | — | 1027 | — |
 
 ### `ui/tabs/journal/JournalUiState.kt` — 13 خط · 0 فانکشن
 
@@ -1558,31 +1359,18 @@
 | `marker()` | — | 139 | — |
 | `argbOf()` | — | 174 | — |
 
-### `ui/tabs/news/PersianNewsScreen.kt` — 219 خط · 6 فانکشن
+### `ui/tabs/settings/ApiMenuScreen.kt` — 55 خط · 1 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `PersianNewsScreen()` | — | 41 | — |
-| `CalendarImpactCard()` | — | 110 | — |
-| `NewsImpactCard()` | — | 139 | — |
-| `importanceLabel()` | — | 192 | — |
-| `calendarTimeLabel()` | — | 198 | — |
-| `calendarExplanation()` | — | 208 | — |
+| `ApiMenuScreen()` | — | 36 | — |
 
-### `ui/tabs/settings/AiUiState.kt` — 10 خط · 0 فانکشن
-
-### `ui/tabs/settings/ApiMenuScreen.kt` — 74 خط · 1 فانکشن
+### `ui/tabs/settings/SettingsScreen.kt` — 306 خط · 2 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `ApiMenuScreen()` | — | 37 | — |
-
-### `ui/tabs/settings/SettingsScreen.kt` — 457 خط · 2 فانکشن
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `SettingsScreen()` | — | 55 | — |
-| `startMonitorIfAllowed()` | — | 97 | — |
+| `SettingsScreen()` | — | 54 | — |
+| `startMonitorIfAllowed()` | — | 83 | — |
 
 ### `ui/tabs/signal/Als5OpportunityMonitorCard.kt` — 100 خط · 1 فانکشن
 
@@ -1596,22 +1384,20 @@
 |---|---|---|---|
 | `PaperTicketSection()` | — | 35 | — |
 
-### `ui/tabs/signal/SignalScreen.kt` — 933 خط · 12 فانکشن
+### `ui/tabs/signal/SignalScreen.kt` — 785 خط · 10 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `SignalScreen()` | — | 75 | — |
-| `EvidenceTimingCard()` | — | 144 | — |
-| `MarketPlaybookCard()` | — | 194 | — |
-| `MarketTrendCard()` | — | 244 | — |
-| `AiProofCard()` | — | 364 | — |
-| `WhyNoTradeCard()` | — | 453 | — |
-| `fmt2()` | — | 499 | — |
-| `PerMarketRecommendations()` | — | 506 | — |
-| `BestOpportunityDetailedCard()` | — | 590 | — |
-| `TopCandidatesDetailedSection()` | — | 749 | — |
-| `CandidateDetailedItemCard()` | — | 775 | — |
-| `PairRadarSummaryCard()` | — | 885 | — |
+| `SignalScreen()` | — | 70 | — |
+| `EvidenceTimingCard()` | — | 135 | — |
+| `MarketPlaybookCard()` | — | 185 | — |
+| `MarketTrendCard()` | — | 235 | — |
+| `fmt2()` | — | 351 | — |
+| `PerMarketRecommendations()` | — | 358 | — |
+| `BestOpportunityDetailedCard()` | — | 442 | — |
+| `TopCandidatesDetailedSection()` | — | 601 | — |
+| `CandidateDetailedItemCard()` | — | 627 | — |
+| `PairRadarSummaryCard()` | — | 737 | — |
 
 ### `ui/tabs/update/UpdateScreen.kt` — 190 خط · 3 فانکشن
 
@@ -1636,7 +1422,7 @@
 |---|---|---|---|
 | `AurumTheme()` | — | 63 | — |
 
-## اپ اندروید — تست‌ها — `android/app/src/test/java/com/aurum/edge` (100 فایل · 95 فانکشن)
+## اپ اندروید — تست‌ها — `android/app/src/test/java/com/aurum/edge` (85 فایل · 84 فانکشن)
 
 ### `MarketPlaybookTest.kt` — 286 خط · 4 فانکشن
 > «کدام روش برای کدام بازار» — pinned with FIXED wall clocks and synthetic CLOSED candles, so a
@@ -1648,33 +1434,16 @@
 | `rangeSeries()` | MarketPlaybookTest | 273 | — |
 | `withTail()` | MarketPlaybookTest | 281 | — |
 
-### `MarketTrendTest.kt` — 331 خط · 2 فانکشن
+### `MarketTrendTest.kt` — 343 خط · 3 فانکشن
 > «روند کلی بازار» — pinned with synthetic CLOSED candles and hand-built breadth samples.
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
 | `series()` | MarketTrendTest | 35 | — |
-| `trend()` | MarketTrendTest | 59 | — |
+| `series()` | MarketTrendTest | 37 | — |
+| `trend()` | MarketTrendTest | 65 | — |
 
-### `data/AiConnectionDiagnosticsTest.kt` — 40 خط · 0 فانکشن
-
-### `data/AiEntryProofTest.kt` — 54 خط · 1 فانکشن
-> {"worth":"false","worth_reason":"plausible but not boolean"}""").jsonObject).worth)
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `plan()` | AiEntryProofTest | 13 | — |
-
-### `data/AiNewsPresentationTest.kt` — 33 خط · 0 فانکشن
-
-### `data/AiTraderTest.kt` — 253 خط · 3 فانکشن
-> Truth tests for the on-device AI layer: provider detection, response extraction for BOTH
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `opinionJson()` | AiTraderTest | 121 | — |
-| `tradeReviewJson()` | AiTraderTest | 172 | — |
-| `holdReviewJson()` | AiTraderTest | 205 | — |
+### `core/MonitorCadenceTest.kt` — 23 خط · 0 فانکشن
 
 ### `data/AppNetworkTest.kt` — 90 خط · 4 فانکشن
 
@@ -1720,45 +1489,15 @@
 
 ### `data/CryptoQuoteTaskIsolationTest.kt` — 43 خط · 0 فانکشن
 
-### `data/CryptoRadarBundleTest.kt` — 59 خط · 1 فانکشن
+### `data/CryptoRadarBundleTest.kt` — 68 خط · 1 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `closedM5Series()` | CryptoRadarBundleTest | 13 | — |
+| `closedSeries()` | CryptoRadarBundleTest | 16 | — |
 
 ### `data/CryptoUniverse200Test.kt` — 45 خط · 0 فانکشن
 
 ### `data/CryptoVenuePolicyTest.kt` — 18 خط · 0 فانکشن
-
-### `data/GeminiAiStudioTest.kt` — 126 خط · 0 فانکشن
-> {"data":[{"id":"models/gemini-3.8-flash"},{"id":"gemini-3.8-flash"}]}
-
-### `data/GeminiHttpDiagnosticsTest.kt` — 26 خط · 0 فانکشن
-> {"error":{"message":"synthetic-secret-do-not-echo","details":[{"reason":"$reason","metadata":{"key":"synthetic-secret-do-not-echo"
-
-### `data/GeminiNativeClientTest.kt` — 150 خط · 3 فانکشن
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `root()` | GeminiNativeClientTest | 15 | — |
-| `reply()` | GeminiNativeClientTest | 16 | — |
-| `client()` | GeminiNativeClientTest | 24 | — |
-
-### `data/GlmRelayTest.kt` — 130 خط · 1 فانکشن
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `client()` | GlmRelayTest | 21 | — |
-
-### `data/GlmSettingsStoreTest.kt` — 35 خط · 0 فانکشن
-
-### `data/HeadlineImpactTest.kt` — 30 خط · 0 فانکشن
-
-### `data/HistorySourceSelectionTest.kt` — 60 خط · 1 فانکشن
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `candidate()` | HistorySourceSelectionTest | 11 | — |
 
 ### `data/MarketEntryReasonTest.kt` — 28 خط · 0 فانکشن
 
@@ -1802,11 +1541,11 @@
 |---|---|---|---|
 | `body()` | NobitexTradeQuoteTest | 11 | — |
 
-### `data/NonCryptoRadarBundleTest.kt` — 56 خط · 1 فانکشن
+### `data/NonCryptoRadarBundleTest.kt` — 70 خط · 1 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `closedM5Series()` | NonCryptoRadarBundleTest | 13 | — |
+| `closedSeries()` | NonCryptoRadarBundleTest | 16 | — |
 
 ### `data/OpenPositionDisplayTest.kt` — 55 خط · 1 فانکشن
 
@@ -1832,7 +1571,7 @@
 
 ### `data/SigningContinuityTest.kt` — 15 خط · 0 فانکشن
 
-### `data/SourceIntegrityTest.kt` — 86 خط · 0 فانکشن
+### `data/SourceIntegrityTest.kt` — 91 خط · 0 فانکشن
 
 ### `data/SourceRoutingTest.kt` — 58 خط · 0 فانکشن
 
@@ -1881,14 +1620,18 @@
 |---|---|---|---|
 | `health()` | WatchSourceProgressTest | 8 | — |
 
-### `engine/AlertDiagnosticsTest.kt` — 88 خط · 2 فانکشن
+### `engine/AlertDiagnosticsTest.kt` — 83 خط · 2 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `report()` | AlertDiagnosticsTest | 43 | — |
-| `report()` | AlertDiagnosticsTest | 60 | — |
+| `report()` | AlertDiagnosticsTest | 39 | — |
+| `report()` | AlertDiagnosticsTest | 55 | — |
 
-### `engine/Als5GoldEngineTest.kt` — 146 خط · 0 فانکشن
+### `engine/Als5GoldEngineTest.kt` — 149 خط · 1 فانکشن
+
+| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
+|---|---|---|---|
+| `m15Bars()` | Als5GoldEngineTest | 21 | — |
 
 ### `engine/Als5TestFixtures.kt` — 56 خط · 1 فانکشن
 
@@ -1902,7 +1645,7 @@
 |---|---|---|---|
 | `getFilesDir()` | CandleCacheContractTest | 41 | — |
 
-### `engine/CatalogAutoPolicyTest.kt` — 73 خط · 0 فانکشن
+### `engine/CatalogAutoPolicyTest.kt` — 71 خط · 0 فانکشن
 
 ### `engine/CryptoCompressionEngineTest.kt` — 152 خط · 2 فانکشن
 
@@ -1924,15 +1667,7 @@
 
 ### `engine/FeedNavigationTest.kt` — 67 خط · 0 فانکشن
 
-### `engine/ForexCalendarTest.kt` — 51 خط · 1 فانکشن
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `parse()` | ForexCalendarTest | 21 | — |
-
-### `engine/ForexNewsDecisionTest.kt` — 47 خط · 0 فانکشن
-
-### `engine/HistoryPolicyTest.kt` — 25 خط · 0 فانکشن
+### `engine/HistoryPolicyTest.kt` — 29 خط · 0 فانکشن
 
 ### `engine/IchimokuAlignmentTest.kt` — 54 خط · 0 فانکشن
 
@@ -1942,7 +1677,7 @@
 |---|---|---|---|
 | `setup()` | IchimokuEntrySetupTest | 26 | — |
 
-### `engine/IctEntryRulesTest.kt` — 118 خط · 0 فانکشن
+### `engine/IctEntryRulesTest.kt` — 99 خط · 0 فانکشن
 
 ### `engine/IctRangeAnalyzerTest.kt` — 133 خط · 7 فانکشن
 
@@ -1988,29 +1723,23 @@
 |---|---|---|---|
 | `at()` | MarketHoursTest | 11 | — |
 
-### `engine/NewsResearchTest.kt` — 75 خط · 1 فانکشن
+### `engine/NineWayAutoPaperTest.kt` — 90 خط · 1 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `calendar()` | NewsResearchTest | 24 | — |
-
-### `engine/NineWayAutoPaperTest.kt` — 234 خط · 1 فانکشن
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `market()` | NineWayAutoPaperTest | 50 | — |
+| `market()` | NineWayAutoPaperTest | 32 | — |
 
 ### `engine/OilEntrySafetyTest.kt` — 26 خط · 0 فانکشن
 
-### `engine/PaperJournalPersistenceTest.kt` — 356 خط · 3 فانکشن
+### `engine/PaperJournalPersistenceTest.kt` — 308 خط · 3 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `journalFile()` | PaperJournalPersistenceTest | 42 | — |
-| `mtf()` | PaperJournalPersistenceTest | 49 | — |
-| `ictFor()` | PaperJournalPersistenceTest | 51 | — |
+| `journalFile()` | PaperJournalPersistenceTest | 41 | — |
+| `mtf()` | PaperJournalPersistenceTest | 48 | — |
+| `ictFor()` | PaperJournalPersistenceTest | 50 | — |
 
-### `engine/PaperOpportunityTest.kt` — 133 خط · 0 فانکشن
+### `engine/PaperOpportunityTest.kt` — 117 خط · 0 فانکشن
 
 ### `engine/PaperOrderRulesTest.kt` — 129 خط · 1 فانکشن
 
@@ -2025,22 +1754,9 @@
 | `yahooJson()` | PublicCandleHistoryClientTest | 17 | — |
 | `nums()` | PublicCandleHistoryClientTest | 19 | — |
 
-### `engine/PublicWebNewsTest.kt` — 127 خط · 1 فانکشن
-> .trimIndent()
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `rss()` | PublicWebNewsTest | 38 | — |
-
 ### `engine/RecordedPaperEntryAlertTest.kt` — 105 خط · 0 فانکشن
 
-### `engine/ResearchAlertsTest.kt` — 39 خط · 1 فانکشن
-
-| فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
-|---|---|---|---|
-| `calendar()` | ResearchAlertsTest | 17 | — |
-
-### `engine/ResearchEvidenceTest.kt` — 82 خط · 0 فانکشن
+### `engine/ResearchEvidenceTest.kt` — 80 خط · 0 فانکشن
 
 ### `engine/ScanFreshnessTest.kt` — 17 خط · 0 فانکشن
 
@@ -2052,7 +1768,7 @@
 
 ### `engine/ScanUniverseTest.kt` — 31 خط · 0 فانکشن
 
-### `engine/SettingsStoreTest.kt` — 121 خط · 0 فانکشن
+### `engine/SettingsStoreTest.kt` — 111 خط · 0 فانکشن
 
 ### `engine/SignalProfileTest.kt` — 50 خط · 0 فانکشن
 
@@ -2074,17 +1790,17 @@
 | `json()` | TwelveDataCandleContractTest | 27 | — |
 | `parse()` | TwelveDataCandleContractTest | 29 | — |
 
-### `engine/UnifiedContractTest.kt` — 63 خط · 1 فانکشن
+### `engine/UnifiedContractTest.kt` — 58 خط · 1 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `trade()` | UnifiedContractTest | 47 | — |
+| `trade()` | UnifiedContractTest | 42 | — |
 
-### `engine/V1ContractTest.kt` — 245 خط · 2 فانکشن
+### `engine/V1ContractTest.kt` — 221 خط · 2 فانکشن
 
 | فانکشن | کلاس/آبجکت | خط | فلوچارت عمیق |
 |---|---|---|---|
-| `bars()` | V1ContractTest | 33 | — |
+| `bars()` | V1ContractTest | 28 | — |
 | `trade()` | V1ContractTest | 175 | — |
 
 ### `engine/VerifiedAlertChannelsTest.kt` — 29 خط · 0 فانکشن

@@ -136,8 +136,6 @@ FUN_CHART = {
     "publishCandles": "fn-publish", "onTick": "fn-publish", "startWatchdog": "fn-publish",
     "sweepAll": "fn-scanner-sweep", "sweepOnce": "fn-scanner-sweep",
     "rankOpportunities": "fn-scanner-sweep",
-    "planTradeWithAi": "fn-ai-plan", "fromResponse": "fn-ai-plan",
-    "ensureConnection": "fn-ai-plan", "reviewOpenPositions": "fn-ai-plan",
     "watch": "fn-tickmonitor", "poll": "fn-tickmonitor",
     "watchBinance": "fn-tickmonitor", "pollArchive": "fn-tickmonitor",
     "checkForUpdate": "fn-updater", "downloadApk": "fn-updater",
@@ -261,7 +259,7 @@ footer{color:var(--mut);font-size:12.5px;padding:8px 22px 34px;max-width:1560px;
   (دیگر نه سیاست ۱۵۰۰ کندل هست نه ساخت تایم‌فریم از روی M5)؛ دروازهٔ تأیید بازار با «گارد فید» سبک جایگزین شده؛ پایش پس‌زمینه تطبیقی است
   (متناسب با تایم‌فریم و وضعیت پوزیشن)؛ و هر سورسی که داده ندهد صراحتاً «مرده» اعلام و جایگزینش فعال می‌شود.
   روی هر گرهٔ بنفشِ «زیرنمودار» کلیک کن تا به فلوچارت همان فانکشن بپری؛ با ＋／－ یا چرخ موس زوم کن و با درگ جابه‌جا شو.</p>
-  <div class="banner">⚠️ <b>وضعیت:</b> این صفحه «طرح هدف» است و هنوز روی کد اعمال نشده — برای سازماندهی و تأیید منطق جدید است.
+  <div class="banner">✅ <b>وضعیت:</b> این نقشه از روی کدِ پیاده‌سازی‌شده و سبز در CI ساخته شده است — بازتاب معماری فعلی اپ.
   کاتالوگ انتهای صفحه هنوز از کد فعلی استخراج می‌شود و بعد از هر فاز ریفکتور با نقشه تطبیق داده خواهد شد.</div>
   <div class="stats">__STATS__</div>
 </header>
