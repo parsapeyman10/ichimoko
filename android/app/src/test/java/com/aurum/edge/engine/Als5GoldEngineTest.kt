@@ -78,13 +78,6 @@ class Als5GoldEngineTest {
         assertEquals(SignalAction.NO_TRADE, consecBlocked.action)
         assertTrue(consecBlocked.blockers.any { it.contains("ضرر متوالی") })
 
-        val newsBlocked = Als5GoldEngine.evaluate(
-            bars, Interval.M5, "XAU/USD", 80.0,
-            config = Als5GoldEngine.Config(scheduledNewsTimestampsMs = listOf(now - 5 * 60_000L)),
-            now = now,
-        )
-        assertEquals(SignalAction.NO_TRADE, newsBlocked.action)
-        assertTrue(newsBlocked.blockers.any { it.contains("خبر اقتصادی") })
     }
 
     @Test fun `SignalEngine routes XAU_USD through Als5GoldEngine and produces ALS5 opportunity record`() {

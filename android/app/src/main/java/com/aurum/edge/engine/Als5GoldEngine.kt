@@ -114,7 +114,6 @@ object Als5GoldEngine {
         val newYorkStartHourLocal: Int = 8,
         val newYorkEndHourLocal: Int = 16,
         val newsBlackoutMinutes: Int = 30,
-        val scheduledNewsTimestampsMs: List<Long> = emptyList(),
         val exitModel: ExitModel = ExitModel.FIXED_RR,
         val enableEngineA: Boolean = true,
         val enableEngineB: Boolean = true,
@@ -917,13 +916,6 @@ object Als5GoldEngine {
             (inNewYork && config.allowNewYorkSession)
     }
 
-    fun inNewsBlackout(barCloseTimeMs: Long, config: Config): Boolean {
-        if (config.scheduledNewsTimestampsMs.isEmpty()) return false
-        val windowMs = config.newsBlackoutMinutes * 60_000L
-        return config.scheduledNewsTimestampsMs.any { eventAt ->
-            abs(barCloseTimeMs - eventAt) <= windowMs
-        }
-    }
 
     fun evaluate(
         input: List<Candle>,
@@ -990,9 +982,6 @@ object Als5GoldEngine {
         }
         if (!sessionAllowed(barCloseTime, config)) {
             blockers += "ALS-5: خارج از سشن معاملاتی مجاز طلا"
-        }
-        if (inNewsBlackout(barCloseTime, config)) {
-            blockers += "ALS-5: پنجرهٔ ممنوعهٔ خبر اقتصادی فعال است"
         }
 
         val m15Bars = external[Interval.M15]?.filter { it.closed && it.time + Interval.M15.millis <= barCloseTime }
