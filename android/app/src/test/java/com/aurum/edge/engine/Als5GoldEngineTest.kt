@@ -17,6 +17,13 @@ class Als5GoldEngineTest {
     private val step = Interval.M5.millis
     private val totalBars = HistoryPolicy.LIVE_MIN_CANDLES
 
+    /** Independently generated M15 series (ALS-5 never derives it from M5). */
+    private fun m15Bars(): List<Candle> = (0 until 120).map { i ->
+        val time = now - (120 - i) * Interval.M15.millis
+        val price = 2400.0 + sin(i / 2.0) * 3.0
+        Candle(time, price, price + 1.2, price - 1.2, price + 0.2, 100.0, true)
+    }
+
     @Test fun `confirmed pivots never use future bars before rightBars close`() {
         val bars = (0 until 20).map { i ->
             val high = if (i == 10) 2450.0 else 2400.0 + (i % 2)
@@ -56,7 +63,7 @@ class Als5GoldEngineTest {
         assertEquals(0.0, tooWideLots, 1e-6)
     }
 
-    @Test fun `daily loss cap consecutive loss guard and news blackout block new entries`() {
+    @Test fun `daily loss cap and consecutive loss guard block new entries`() {
         val bars = (0 until totalBars).map { i ->
             val t = now - (totalBars - i) * step
             val p = 2400.0 + sin(i / 6.0) * 3.0
@@ -64,6 +71,7 @@ class Als5GoldEngineTest {
         }
         val dailyCapped = Als5GoldEngine.evaluate(
             bars, Interval.M5, "XAU/USD", 80.0,
+            external = mapOf(Interval.M15 to m15Bars()),
             config = Als5GoldEngine.Config(dailyRealizedLossPct = 1.0, maxDailyLossPct = 1.0),
             now = now,
         )
@@ -72,19 +80,13 @@ class Als5GoldEngineTest {
 
         val consecBlocked = Als5GoldEngine.evaluate(
             bars, Interval.M5, "XAU/USD", 80.0,
+            external = mapOf(Interval.M15 to m15Bars()),
             config = Als5GoldEngine.Config(consecutiveLosses = 3, maxConsecutiveLosses = 3),
             now = now,
         )
         assertEquals(SignalAction.NO_TRADE, consecBlocked.action)
         assertTrue(consecBlocked.blockers.any { it.contains("ضرر متوالی") })
 
-        val newsBlocked = Als5GoldEngine.evaluate(
-            bars, Interval.M5, "XAU/USD", 80.0,
-            config = Als5GoldEngine.Config(scheduledNewsTimestampsMs = listOf(now - 5 * 60_000L)),
-            now = now,
-        )
-        assertEquals(SignalAction.NO_TRADE, newsBlocked.action)
-        assertTrue(newsBlocked.blockers.any { it.contains("خبر اقتصادی") })
     }
 
     @Test fun `SignalEngine routes XAU_USD through Als5GoldEngine and produces ALS5 opportunity record`() {
@@ -94,7 +96,8 @@ class Als5GoldEngineTest {
             val base = 2400.0 + i * 0.03 + wave
             Candle(t, base - 0.3, base + 1.1, base - 1.1, base + 0.4, 150.0, true)
         }
-        val signal = SignalEngine.evaluate(bars, Interval.M5, 80.0, "XAU/USD")
+        val signal = SignalEngine.evaluate(bars, Interval.M5, 80.0, "XAU/USD",
+            timeframes = mapOf(Interval.M15 to m15Bars()))
         assertNotNull(signal.als5Opportunity)
         assertEquals("ALS-5", signal.als5Opportunity!!.strategyName)
         assertEquals(4, signal.confluence.size)

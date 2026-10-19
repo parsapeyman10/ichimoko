@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger
 class RadarFrameCacheTest {
     private val count = HistoryPolicy.LIVE_REQUEST_CANDLES
 
-    @Test fun `reuse requires 1500 closed M5 candles and all original health gates`() {
+    @Test fun `reuse requires the healthy minimum of closed M5 candles and all original health gates`() {
         val interval = Interval.M5
         val boundary = 1_800_000_000_000L / interval.millis * interval.millis
         val rows = (0 until count).map { i ->
@@ -28,13 +28,13 @@ class RadarFrameCacheTest {
         assertTrue(client.reusable(rows, interval, boundary + 1))
         assertTrue(client.reusable(rows, interval, boundary + interval.millis - 1))
         assertFalse(client.reusable(rows, interval, boundary + interval.millis))
-        assertFalse(client.reusable(rows.drop(1), interval, boundary + 1))
+        assertFalse(client.reusable(rows.drop(121), interval, boundary + 1)) // 279 < healthy M5 minimum (280)
         assertFalse(client.reusable(rows.map { it.copy(closed = false) }, interval, boundary + 1))
         assertFalse(client.reusable(rows.map { it.copy(volume = -1.0) }, interval, boundary + 1))
         assertFalse(client.reusable(rows, interval, boundary - 1))
     }
 
-    @Test fun `concurrent same frame reads coalesce and reuse 1500 valid M5 bars`() = runBlocking {
+    @Test fun `concurrent same frame reads coalesce and reuse valid M5 bars`() = runBlocking {
         AppNetwork.observeNetwork("test", true, force = true)
         val interval = Interval.M5
         val boundary = System.currentTimeMillis() / interval.millis * interval.millis
@@ -58,9 +58,9 @@ class RadarFrameCacheTest {
         }.build()
         val client = CryptoRadarCandleClient(http, clock = { boundary + 10_000L })
         val rows = (1..3).map { async { client.fetch("SOL/USDT", interval, CryptoRadarCandleClient.Venue.GATE) } }.awaitAll()
-        assertEquals(1500, rows.first().candles.size)
-        assertEquals(3, calls.get()) // 1 listing + 2 history pages for 1500 candles
+        assertEquals(HistoryPolicy.LIVE_REQUEST_CANDLES, rows.first().candles.size)
+        assertEquals(2, calls.get()) // 1 listing + 1 history page (950 bars already cover the 400 target)
         assertEquals(rows.first(), client.fetch("SOL/USDT", interval, CryptoRadarCandleClient.Venue.GATE))
-        assertEquals(3, calls.get())
+        assertEquals(2, calls.get())
     }
 }

@@ -11,13 +11,9 @@ import com.aurum.edge.core.TechnicalEvidence
 import com.aurum.edge.core.PaperPortfolioPolicy
 import com.aurum.edge.core.PaperTrailing
 import com.aurum.edge.core.PaperTrade
-import com.aurum.edge.core.PaperNewsRecord
-import com.aurum.edge.core.PaperAiReview
-import com.aurum.edge.core.PaperHoldReview
 import com.aurum.edge.core.PaperOrderRules
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.Signal
-import com.aurum.edge.engine.NewsConfluence
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -98,7 +94,6 @@ class JournalStore(
         mtf: MtfSnapshotRecord? = null,
         manual: Boolean = false,
         automatic: Boolean = false,
-        newsEvidence: PaperNewsRecord? = null,
         priceAction: IctPriceActionRecord? = null,
         customNote: String? = null,
         /**
@@ -110,7 +105,6 @@ class JournalStore(
         cryptoVenue: String = "NOBITEX",
         /** Independent same-venue trade print and observed top-of-book, never a candle close. */
         cryptoEntryQuote: com.aurum.edge.core.PriceTick? = null,
-        cryptoNews: PersianNewsState? = null,
         sourceIntegrityRevision: Long = 0L,
     ): PaperTrade {
         SourceIntegrity.shared.blocker(symbol, sourceIntegrityRevision)?.let { throw IllegalArgumentException(it) }
@@ -145,11 +139,6 @@ class JournalStore(
             require(com.aurum.edge.core.CryptoCompressionPolicy.quoteBlocker(
                 signal, cryptoEntryQuote, observedAt) == null && cryptoEntryQuote?.price == price) {
                 "اسپرد و قیمت واقعی مستقل هم‌صرافی رمزارز تأیید نشده است"
-            }
-            require(cryptoNews?.gate == NewsGate.CLEAR && cryptoNews.cached == false &&
-                cryptoNews.lastCheckedAt?.let { observedAt - it in 0L..180_000L } == true &&
-                cryptoNews.calendarCheckedAt?.let { observedAt - it in 0L..1_200_000L } == true) {
-                "خبر/تقویم پراثر یا تازگی آن برای ورود رمزارز تأیید نشده است"
             }
         }
         val technicalConditions = TechnicalEvidence.items(signal)
@@ -194,7 +183,7 @@ class JournalStore(
             autoOpened = automatic,
             signalBarTime = signal.barTime,
             als5SetupKey = signal.als5Opportunity?.setupKey?.takeIf { isAls5Gold },
-            newsEvidence = if (manual) null else newsEvidence,
+            newsEvidence = null,
             entryConditions = technicalConditions.map {
                 com.aurum.edge.core.PaperConditionRecord.from(it)
             },
@@ -212,7 +201,7 @@ class JournalStore(
             cryptoVenue = cryptoVenue,
         )
         mutex.withLock {
-            // Settings and ledger can change while an AI/preview was running. Fail closed
+            // Settings and ledger can change while this request was running. Fail closed
             // rather than saving a ticket sized against an old balance or risk setting.
             val latest = settingsStore?.read()
             require(latest == null || (kotlin.math.abs(latest.accountBalance - balance) < 0.02 &&
@@ -246,7 +235,7 @@ class JournalStore(
                 als5SetupKey = signal.als5Opportunity?.setupKey?.takeIf { isAls5Gold })
             require(blocker == null) { blocker ?: "ظرفیت پورتفو پر است" }
             // Recheck after scheduling, sizing and any journal-lock wait. Fresh ticks or an
-            // AI response cannot authorize a preview calculated before a source conflict.
+            // fresh receipt cannot authorize a preview calculated before a source conflict.
             SourceIntegrity.shared.blocker(symbol, sourceIntegrityRevision)?.let { throw IllegalArgumentException(it) }
             persist(_trades.value + trade)
         }
@@ -276,31 +265,6 @@ class JournalStore(
         )
         persist(_trades.value.map { if (it.id == trade.id) next else it })
         true
-    }
-
-    suspend fun attachAiReview(tradeId: String, review: PaperAiReview): PaperTrade = mutex.withLock {
-        val current = _trades.value
-        val index = current.indexOfFirst { it.id == tradeId }
-        require(index >= 0) { "معاملهٔ کاغذی برای ثبت نظر AI پیدا نشد" }
-        val updated = current[index].copy(aiReview = review)
-        persist(current.toMutableList().also { it[index] = updated })
-        updated
-    }
-
-    /**
-     * Attach the companion AI's advisory opinion about an OPEN position.
-     *
-     * Deliberately limited to a note: it never touches entry/stop/target, never sets [PaperTrade.closedAt]
-     * and never adjusts the balance. A position still closes ONLY inside [settle]/[settleTick] when a real
-     * price reaches its stop or target.
-     */
-    suspend fun attachHoldReview(tradeId: String, review: PaperHoldReview): PaperTrade? = mutex.withLock {
-        val current = _trades.value
-        val index = current.indexOfFirst { it.id == tradeId && it.isOpen }
-        if (index < 0) return@withLock null // closed meanwhile -> nothing to annotate
-        val updated = current[index].copy(holdReview = review)
-        persist(current.toMutableList().also { it[index] = updated })
-        updated
     }
 
     /**

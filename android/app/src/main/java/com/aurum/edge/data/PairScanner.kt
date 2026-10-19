@@ -18,7 +18,6 @@ import com.aurum.edge.core.PaperAlertRules
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.engine.MtfAnalyzer
-import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.engine.SignalEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -108,7 +107,6 @@ class PairScanner(
     private val client: TwelveDataClient,
     private val publicHistory: PublicCandleHistoryClient,
     private val settings: SettingsStore,
-    private val news: NewsRepository,
     private val journal: JournalStore,
     private val opportunities: PaperOpportunityStore,
     private val scope: CoroutineScope,
@@ -129,14 +127,14 @@ class PairScanner(
     private val nonCryptoBundle = NonCryptoRadarBundle { symbol, frame, source, apiKey ->
         when {
             source.usesYahoo -> publicHistory.fetchCandles(symbol, frame,
-                minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
+                minimumSize = HistoryPolicy.minSize(frame), desiredSize = HistoryPolicy.fetchSize(frame))
             source.usesDukascopy -> dukascopyHistory.fetchCandles(symbol, frame,
-                minimumSize = HistoryPolicy.LIVE_MIN_CANDLES, desiredSize = HistoryPolicy.LIVE_FETCH_CANDLES)
+                minimumSize = HistoryPolicy.minSize(frame), desiredSize = HistoryPolicy.fetchSize(frame))
                 .let { PublicCandleHistoryClient.Result(it.candles, it.provider, it.fetchedAt) }
             else -> PublicCandleHistoryClient.Result(
                 withContext(Dispatchers.IO) { client.fetchCandles(apiKey, symbol, frame,
-                    outputSize = HistoryPolicy.LIVE_FETCH_CANDLES,
-                    minimumOutputSize = HistoryPolicy.LIVE_MIN_CANDLES) }, "Twelve Data · fallback")
+                    outputSize = HistoryPolicy.fetchSize(frame),
+                    minimumOutputSize = HistoryPolicy.minSize(frame)) }, "Twelve Data · fallback")
         }
     }
     private val cryptoReadOnly = CryptoRadarCandleClient()
@@ -149,15 +147,26 @@ class PairScanner(
         statuses = com.aurum.edge.core.V1Universe.defaults.map { PairScanStatus(it, "pending", "هنوز اسکن نشده") }))
     val state: StateFlow<PairScanState> = _state.asStateFlow()
 
-    fun refreshNow(minIntervalMs: Long = SWEEP_PERIOD_MS,
+    fun refreshNow(minIntervalMs: Long = -1L,
                    onCandidate: (suspend (PaperOpportunity) -> Unit)? = null) {
-        schedule(minIntervalMs, onCandidate)
+        schedule(effectiveInterval(minIntervalMs), onCandidate)
     }
 
-    suspend fun sweepOnce(minIntervalMs: Long = SWEEP_PERIOD_MS,
+    suspend fun sweepOnce(minIntervalMs: Long = -1L,
                           onCandidate: (suspend (PaperOpportunity) -> Unit)? = null) {
-        schedule(minIntervalMs, onCandidate).joinAll()
+        schedule(effectiveInterval(minIntervalMs), onCandidate).joinAll()
     }
+
+    /**
+     * The scanner's own per-symbol throttle IS the app-wide cadence: 60s normally,
+     * 20s while any symbol is a live candidate / near entry (MonitorCadence).
+     * Callers may still force an explicit interval (0 = event-driven immediate
+     * re-check after a network/settings change).
+     */
+    private fun effectiveInterval(requested: Long): Long =
+        if (requested >= 0) requested
+        else com.aurum.edge.core.MonitorCadence.sweepDelayMs(
+            state.value.statuses.map { it.state to it.confidence })
 
     private fun schedule(minIntervalMs: Long, onCandidate: (suspend (PaperOpportunity) -> Unit)?): List<Job> {
         val config = settings.read()
@@ -307,7 +316,6 @@ class PairScanner(
             }
         }
 
-        val headlines = news.state.value
 
         // All symbols start without waiting for an asset-class slot. Only each external
         // publisher's own HTTP capacity is bounded; position monitoring is independent.
@@ -426,11 +434,7 @@ class PairScanner(
                         catch (_: Exception) { null }
                     }
                     if (evaluated == null) unavailable += "${candidate.label}: محاسبه ناموفق"
-                    else {
-                        val vetted = NewsConfluence.apply(evaluated, symbol, headlines, now)
-                        if (vetted != null) reads += CryptoIntervalChoice.Read(candidate, bars, vetted)
-                        else unavailable += "${candidate.label}: ارزیابی خبر/AI ناموفق"
-                    }
+                    else reads += CryptoIntervalChoice.Read(candidate, bars, evaluated)
                 }
                 val selected = CryptoIntervalChoice.pick(reads) ?: run {
                     update(symbol, "partial", "هیچ‌یک از بازه‌های ${candidates.joinToString { it.label }} قابل ارزیابی نبود: " +
@@ -468,7 +472,8 @@ class PairScanner(
                 // «روند کلی بازار چطور به دست می‌آید؟» — لایهٔ اول: از همان کندل‌های بستهٔ واقعیِ
                 // همین نماد، هم روی تایم‌فریم پایه و هم روی تایم‌فریم مرجع (تجمیع‌شده، نه ساخته‌شده).
                 val trend = withContext(Dispatchers.Default) {
-                    runCatching { MarketTrend.symbolTrend(symbol, candles, interval) }.getOrNull()
+                    runCatching { MarketTrend.symbolTrend(symbol, candles, interval,
+                        higherCandles = MarketTrend.higherFor(interval)?.let { frames[it] }.orEmpty()) }.getOrNull()
                 }
                 if (trend != null && trend.known) trendSample[symbol] = System.currentTimeMillis() to trend
 
@@ -480,8 +485,8 @@ class PairScanner(
                 }
                 // The playbook is context only; V1Scoring has the absolute market locks.
 
-                val combined = NewsConfluence.apply(evaluated, symbol, headlines, now)!!
-                val score = combined.confluence.take(NewsConfluence.TECHNICAL_COUNT).count { it.ok }
+                val combined = evaluated
+                val score = com.aurum.edge.core.TechnicalEvidence.items(combined).count { it.ok }
                 if (!combined.isActionable) {
                     update(
                         symbol = symbol,
@@ -535,7 +540,7 @@ class PairScanner(
 
                 )
                 val mtf = withContext(Dispatchers.Default) {
-                    runCatching { MtfAnalyzer.analyze(candles, interval) }.getOrNull()
+                    runCatching { MtfAnalyzer.analyzeFrames(frames, interval) }.getOrNull()
                 }
                 // This runs for EVERY supported catalog row, not only editable watchlist rows.
                 // The callback MUST obtain a separate same-symbol trade tick and route through
@@ -557,7 +562,7 @@ class PairScanner(
                         trendGate?.noteFa?.take(200), combined.als5Opportunity)
                     return@async
                 }
-                val blocker = PaperAlertRules.blocker(market, config, headlines, journal.trades.value, mtf,
+                val blocker = PaperAlertRules.blocker(market, config, journal.trades.value, mtf,
                     System.currentTimeMillis(), allowedSymbols = config.activeSymbols, barAgeGraceMs = graceMs)
                 if (blocker != null) {
                     // A technically actionable closed-bar read is still useful when alerts,
@@ -577,13 +582,12 @@ class PairScanner(
                     return@async
                 }
 
-                val evidence = NewsConfluence.record(headlines, symbol)
                 val ict = IctEntryRules.approvedEvidence(market, System.currentTimeMillis(), graceMs)
 
 
                 val item = runCatching {
                     val mtfRec = MtfSnapshotRecord.from(mtf ?: error("نمایش MTF پایه موجود نیست"))
-                    PaperOpportunity.from(combined, symbol, price ?: combined.entry ?: 0.0, mtfRec, evidence, ict)
+                    PaperOpportunity.from(combined, symbol, price ?: combined.entry ?: 0.0, mtfRec, ict)
                 }.getOrNull()
 
                 if (item == null) {
@@ -638,6 +642,6 @@ class PairScanner(
     }
 
     companion object {
-        const val SWEEP_PERIOD_MS = 30_000L
+        const val SWEEP_PERIOD_MS = com.aurum.edge.core.MonitorCadence.BASE_SWEEP_MS
     }
 }

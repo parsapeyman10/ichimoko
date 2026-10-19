@@ -1,13 +1,14 @@
 package com.aurum.edge.core
 
 import com.aurum.edge.data.MarketState
-import com.aurum.edge.data.PersianNewsState
 import com.aurum.edge.data.BinanceSpotClient
 import kotlin.math.abs
 
-/** Side-effect-free guard shared by service and unit tests. NEVER submits a broker order. */
+/** Side-effect-free guard shared by service and unit tests. NEVER submits a broker order.
+ * News/AI layers were removed: only feed freshness, source integrity, technical evidence
+ * and risk rules gate a paper entry now. */
 object PaperAutoRules {
-    fun blocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
+    fun blocker(market: MarketState, settings: AppSettings,
                 now: Long = System.currentTimeMillis(),
                 allowedSymbols: List<String> = settings.activeSymbols): String? {
         com.aurum.edge.data.SourceIntegrity.shared.blocker(market.symbol, market.sourceIntegrityRevision)?.let { return it }
@@ -25,10 +26,6 @@ object PaperAutoRules {
             if (signal.cryptoBreakout?.matches(signal) != true ||
                 signal.ichimokuEntry?.matches(signal) != true)
                 return "فقط استراتژی فشردگی ← انفجار با شواهد بسته مجاز است"
-            if (news.gate != com.aurum.edge.data.NewsGate.CLEAR || news.cached ||
-                news.lastCheckedAt?.let { now - it in 0L..180_000L } != true ||
-                news.calendarCheckedAt?.let { now - it in 0L..1_200_000L } != true)
-                return "خبر/تقویم پراثر یا تازه‌بودن آن قابل تأیید نیست؛ ورود رمزارز متوقف است"
             val tick = market.lastTradeAt?.let { time -> market.lastTradePrice?.let { price ->
                 PriceTick(price, time, market.bid, market.ask)
             } }
@@ -45,7 +42,7 @@ object PaperAutoRules {
         }
         if (market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))
             return "فید معتبر در دسترس نیست (وضعیت فید: ${market.feed.mode.label})"
-        return opportunityBlocker(market, settings, news, now, requireMonitor = false,
+        return opportunityBlocker(market, settings, now, requireMonitor = false,
             allowedSymbols = allowedSymbols,
             barAgeGraceMs = market.interval.millis + 90_000L)
     }
@@ -54,7 +51,7 @@ object PaperAutoRules {
      * A technical candidate alert can be enabled while automatic paper entry is OFF.
      * Supports every user-selected symbol with a verified independent feed.
      */
-    fun opportunityBlocker(market: MarketState, settings: AppSettings, news: PersianNewsState,
+    fun opportunityBlocker(market: MarketState, settings: AppSettings,
                            now: Long = System.currentTimeMillis(),
                            allowedSymbols: List<String>? = null,
                            barAgeGraceMs: Long = 90_000L,
@@ -77,8 +74,6 @@ object PaperAutoRules {
         if (!FeedLiveness.hasRecentReceipt(market.feed, now))
             return "قیمت زنده/تازه در دسترس نیست"
         val signal = market.signal ?: return "سیگنال محاسبه نشده است"
-        val vetted = com.aurum.edge.engine.NewsConfluence.apply(signal, market.symbol, news, now)
-        if (vetted?.isActionable != true) return vetted?.blockers?.lastOrNull() ?: "وتوی AI یا نبود سیگنال"
         if (!signal.isActionable || signal.entry == null || signal.stopLoss == null || signal.takeProfit == null)
             return "سیگنال فنی قابل معامله موجود نیست"
         if (!TechnicalEvidence.confirmed(signal))
@@ -97,4 +92,3 @@ object PaperAutoRules {
         return null
     }
 }
-

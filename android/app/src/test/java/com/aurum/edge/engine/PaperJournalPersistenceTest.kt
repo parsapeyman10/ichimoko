@@ -17,7 +17,6 @@ import com.aurum.edge.core.SignalAction
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.SettingsStore
-import com.aurum.edge.data.parseWebNews
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import java.time.Instant
@@ -44,7 +43,7 @@ class PaperJournalPersistenceTest {
         takeProfit = 3009.0, interval = Interval.M5, barTime = 1_800_000_000_000L - Interval.M5.millis,
         ichimokuEntry = com.aurum.edge.core.IchimokuEntryEvidence(SignalAction.BUY, 1_800_000_000_000L - Interval.M5.millis, 1_800_000_000_000L - Interval.M5.millis, Interval.M5, 3),
         confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "fixture", scorePercent = 25) } +
-            ConfluenceItem(NewsConfluence.NEWS_LABEL, true, "خبر مدل با شاهد"))
+            ConfluenceItem("خبر/تقویم · داده‌کاوی ژورنال", true, "خبر مدل با شاهد"))
     private val alsSignal by lazy { asConfirmedAls5TestSignal(signal) }
     private fun mtf(at: Long) = MtfSnapshotRecord("5m", "BUY", 1.0, 1, 0, 0, false, "fixture", at,
         frames = listOf(MtfFrameRecord("5m", "BUY", 80, "fixture", 1.0)))
@@ -133,53 +132,6 @@ class PaperJournalPersistenceTest {
             expectedOpenedAt = at).size)
     }
 
-    @Test fun backendJsonEightTechnicalChecksNinthAiPaperOpenTickCloseAndReload() = runBlocking {
-        val now = 1_800_000_000_000L
-        val observed = Instant.ofEpochMilli(now)
-        val articleTime = Instant.ofEpochMilli(now - 60_000)
-        val json = """{"status":{"configured":true,"state":"online","sources":[
-            {"name":"Publisher","state":"online","feed":"https://publisher.example/rss"},
-            {"name":"Forex Factory","state":"online","feed":"https://nfs.faireconomy.media/ff_calendar_thisweek.json"}]},
-            "calendar":{"status":"online","source":"https://nfs.faireconomy.media/ff_calendar_thisweek.json",
-                "checked_at":"$observed","events":[{"country":"USD"}],"guard":{"state":"CLEAR"}},
-            "articles":[{"id":"verified","source":"Publisher","headline":"Gold dollar update",
-                "published_at":"$articleTime","url":"https://publisher.example/news"}],
-            "guard":{"state":"CLEAR"},"checked_at":"$observed",
-            "ai_confluence":{"status":"AVAILABLE","symbol":"XAU/USD","direction":"BUY",
-                "confidence":90,"model":"test-model","checked_at":"$observed",
-                "evidence_ids":["verified"]}}"""
-        val parsed = parseWebNews(Json.parseToJsonElement(json) as JsonObject, now)
-        val bar = now - Interval.M5.millis
-        val technical = asConfirmedAls5TestSignal(signal.copy(barTime = bar,
-            ichimokuEntry = signal.ichimokuEntry!!.copy(barTime = bar, crossTime = bar), stopLoss = 2994.5, takeProfit = 3009.0,
-            confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "fixture", scorePercent = 25) }))
-        val verified = NewsConfluence.apply(technical, "XAU/USD", parsed, now)!!
-        val current = MarketState(symbol = "XAU/USD", interval = Interval.M5,
-            candles = IctTestBars.readyAt(bar),
-            lastPrice = 3000.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now), signal = verified)
-        val config = AppSettings(backgroundMonitor = true, autoPaperTrading = true)
-        assertEquals(SignalAction.BUY, verified.action)
-        assertEquals(5, verified.confluence.size)
-        assertNull(PaperAutoRules.blocker(current, config, parsed, now))
-        val file = journalFile()
-        val store = JournalStore(context, file)
-        store.load()
-        val evidence = IctEntryRules.approvedEvidence(current, now)!!
-        val opened = store.open(verified, "XAU/USD", 3000.0, 50_000.0, 0.5,
-            automatic = true, mtf = mtf(bar),
-            newsEvidence = NewsConfluence.record(parsed), priceAction = evidence, observedAt = now)
-        val tick = opened.openedAt + 1000L
-        store.settle(Candle(tick, 3010.0, 3011.0, 3010.0, 3011.0), "XAU/USD", tick)
-        assertTrue(store.trades.value.single().isOpen) // target is not a fixed exit in V1
-        store.settleTick("XAU/USD", 3004.0, tick + 1_000L)
-        val restored = JournalStore(context, file).also { it.load() }
-        assertEquals(1, restored.stats().total)
-        assertEquals(opened.id, restored.trades.value.single().id)
-        assertEquals("verified", restored.trades.value.single().newsEvidence!!.evidence.single().id)
-        assertEquals(evidence, restored.trades.value.single().priceAction)
-        assertFalse(restored.trades.value.single().isOpen)
-    }
-
     @Test fun usdJpyPaperSettlesInDollarsThroughItsOwnExitPrice() = runBlocking {
         val file = journalFile()
         val store = JournalStore(context, file)
@@ -209,7 +161,7 @@ class PaperJournalPersistenceTest {
         store.load()
         val evidence = ictFor(signal, signal.barTime + Interval.M5.millis)
         val opened = store.open(alsSignal, "XAU/USD", 3000.0, 50_000.0, 0.5,
-            automatic = true, mtf = mtf(signal.barTime), newsEvidence = news, priceAction = evidence,
+            automatic = true, mtf = mtf(signal.barTime), priceAction = evidence,
             observedAt = 1_800_000_000_000L)
         assertEquals(1, store.stats().open)
         assertTrue(file.exists())
@@ -235,14 +187,14 @@ class PaperJournalPersistenceTest {
         assertFalse(closed.isOpen)
         assertEquals(opened.positionOz * (closed.exitPrice!! - opened.entry) -
             opened.effectiveCommissionUsd - opened.effectiveSpreadCostUsd, closed.pnlUsd!!, 0.01)
-        assertEquals(news, closed.newsEvidence)
+        assertNull(closed.newsEvidence) // news layer removed: new entries store none
         assertEquals(evidence, closed.priceAction)
         assertTrue(closed.autoOpened)
         assertEquals(signal.barTime, closed.signalBarTime)
         // Even after SL/TP and a process restart the same candle cannot auto-open again.
         try {
             completed.open(alsSignal, "XAU/USD", 3000.0, 50_000.0, 0.5,
-                automatic = true, mtf = mtf(signal.barTime), newsEvidence = news, priceAction = evidence,
+                automatic = true, mtf = mtf(signal.barTime), priceAction = evidence,
             observedAt = 1_800_000_000_000L)
             throw AssertionError("double auto entry in one bar")
         } catch (_: IllegalArgumentException) { /* must reject */ }
@@ -253,7 +205,7 @@ class PaperJournalPersistenceTest {
         val file = journalFile()
         val store = JournalStore(context, file).also { it.load() }
         val opened = store.open(alsSignal, "XAU/USD", 3000.0, 50_000.0, 0.5,
-            automatic = true, mtf = mtf(signal.barTime), newsEvidence = news,
+            automatic = true, mtf = mtf(signal.barTime),
             observedAt = 1_800_000_000_000L)
         assertTrue(opened.autoOpened)
         assertNull(opened.priceAction)

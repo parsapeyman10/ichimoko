@@ -19,11 +19,8 @@ import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.PaperAlertRules
 import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.core.PaperOpportunity
-import com.aurum.edge.data.ResearchAlert
-import com.aurum.edge.data.ResearchAlerts
 import com.aurum.edge.data.SpotFallbackClient
 import com.aurum.edge.engine.MtfAnalyzer
-import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.notify.AlertSoundPlayer
 import com.aurum.edge.notify.Notifier
 import kotlinx.coroutines.CoroutineScope
@@ -37,7 +34,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.security.MessageDigest
 
 /**
  * Keeps the real Forex feed alive while the app is in the background and alerts only on
@@ -48,13 +44,9 @@ class SignalMonitorService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var stateJob: Job? = null
     private var journalJob: Job? = null
-    private var newsJob: Job? = null
-    private var aiJob: Job? = null
-    private var researchAlertJob: Job? = null
     private var settingsJob: Job? = null
     private var sweepJob: Job? = null
     private var positionJobs: Job? = null
-    private val notifiedResearch = mutableSetOf<String>()
     private val notifiedTrades = mutableSetOf<String>()
     private val notifiedOpenTrades = mutableSetOf<String>()
 
@@ -113,84 +105,17 @@ class SignalMonitorService : Service() {
                 }
             }
         }
-        researchAlertJob?.cancel()
-        researchAlertJob = scope.launch {
-            container.forexCalendar.state.collect { state ->
-                if (container.settingsStore.read().backgroundMonitor && !MarketHours.weekendClosedFor(container.settingsStore.read().symbol))
-                    ResearchAlerts.forex(state, System.currentTimeMillis()).forEach(::postResearchAlert)
-            }
-        }
-        newsJob?.cancel()
-        newsJob = scope.launch {
-            var turns = 0
-            while (isActive) {
-                if (!notificationsPermitted()) { stopSelf(); break }
-                if (!MarketHours.weekendClosedFor(container.settingsStore.read().symbol)) {
-                    container.forexCalendar.refreshNow() // weekly export, 1m near release only
-                    if (turns % 3 == 0) container.watch.refreshNow() // display/radar cards stay warm under their own throttle
-                    if (turns++ % 15 == 0) container.publicWebNews.refreshNow()
-                    // The ninth condition expires after ~3 minutes: refresh in server OR client
-                    // mode (user's own on-device key) whenever alerts/auto-paper depend on it.
-                    if (container.settingsStore.read().let {
-                            it.autoPaperTrading || it.pauseOnNews || it.notifyOnSignal } &&
-                        container.settingsStore.read().let {
-                            it.newsBaseUrl.isNotBlank() || it.hasClientNewsAi }) container.news.refreshNow()
-                }
-                delay(60_000L)
-            }
-        }
-
-        // AI reachability and advisory review are independent of news refresh, scanner,
-        // positions and quote receipt; a slow model cannot stall their worker loops.
-        aiJob?.cancel()
-        aiJob = scope.launch {
-            while (isActive) {
-                if (!notificationsPermitted()) { stopSelf(); break }
-                try {
-                    // The AI companion refreshes on its own 10-minute throttle; a bias flip is
-                    // surfaced once through the informational research channel — never a trade.
-                    container.traderAdvisor.refreshNow()
-                    container.traderAdvisor.consumeBiasFlip()?.let { flip ->
-                        if (notificationsPermitted()) {
-                            val from = container.traderAdvisor.state.value.previousBias ?: "—"
-                            Notifier.notifyResearch(this@SignalMonitorService,
-                                "trader-ai|" + flip.symbol + "|" + flip.generatedAt,
-                                "همراه تریدر AI · تغییر جهت ${flip.symbol}",
-                                "جهت از $from به ${flip.bias} تغییر کرد — ${flip.summary}")
-                        }
-                    }
-                    // Connection is checked for safety but changes are not user-facing alerts.
-                    val aiConfig = container.settingsStore.read()
-                    if (aiConfig.hasClientNewsAi && (aiConfig.autoPaperTrading || aiConfig.notifyOnSignal)) {
-                        runCatching { container.traderAdvisor.ensureConnection() }
-                    }
-                    // «ادامه بده یا نه»: the companion AI reviews the OPEN paper positions on its own
-                    // throttle. Advisory ONLY — a DO_NOT_CONTINUE verdict raises one research
-                    // notification; the position is still closed exclusively by a real price touching
-                    // its stop/target (JournalStore.settle / settleTick).
-                    runCatching { container.traderAdvisor.reviewOpenPositions() }.getOrNull()
-                    container.traderAdvisor.consumeHoldAlerts().forEach { alert ->
-                        if (notificationsPermitted()) {
-                            Notifier.notifyResearch(this@SignalMonitorService,
-                                "hold-ai|" + alert.tradeId + "|" + alert.checkedAt,
-                                "همراه تریدر AI · ادامهٔ ${alert.symbol} توصیه نمی‌شود",
-                                "${alert.summary} — این فقط یک نظر است؛ معاملهٔ کاغذی بسته نشده و خروج تنها با لمس قیمت واقعی حد ضرر/حد سود انجام می‌شود.")
-                        }
-                    }
-                } catch (cancel: kotlinx.coroutines.CancellationException) {
-                    throw cancel
-                } catch (_: Exception) {
-                    // Failure of this optional worker never blocks the real-data workers.
-                }
-                delay(60_000L)
-            }
-        }
-
-        // Periodic 50+ universe continuous sweep across commodities, forex, crypto, stocks:
+        // Periodic 50+ universe continuous sweep across commodities, forex, crypto, stocks.
+        // (The old separate news/AI loops are gone; the watchlist cards warm-up folds in here:
+        // one watch refresh every third sweep tick, under WatchRepository's own throttle.)
         sweepJob?.cancel()
         sweepJob = scope.launch {
+            var sweepTurns = 0
             while (isActive) {
                 if (!notificationsPermitted()) { stopSelf(); break }
+                if (sweepTurns++ % 3 == 0 &&
+                    !MarketHours.weekendClosedFor(container.settingsStore.read().symbol))
+                    container.watch.refreshNow() // display/radar cards stay warm under their own throttle
                 val config = container.settingsStore.read()
                 if (config.backgroundMonitor) {
                     if (!config.notifyOnSignal) {
@@ -206,7 +131,10 @@ class SignalMonitorService : Service() {
                         } catch (_: Exception) { /* radar statuses carry per-pair errors */ }
                     }
                 }
-                delay(60_000L)
+                // Adaptive cadence: 60s baseline for M5, tightening to 20s while any
+                // symbol is a live candidate / near entry quality (MonitorCadence).
+                delay(com.aurum.edge.core.MonitorCadence.sweepDelayMs(
+                    container.pairScanner.state.value.statuses.map { it.state to it.confidence }))
             }
         }
 
@@ -243,23 +171,20 @@ class SignalMonitorService : Service() {
                     container.settingsStore.read().notifyOnSignal) {
                     val snapshot = runCatching { MtfAnalyzer.analyze(state.candles, state.interval) }.getOrNull()
                     val config = container.settingsStore.read()
-                    val headlines = container.news.state.value
-                    if (PaperAlertRules.blocker(state, config, headlines,
+                    if (PaperAlertRules.blocker(state, config,
                             container.journalStore.trades.value, snapshot) == null) {
                         // Re-check after computation: technical/price/MTF state can change between flows.
                         val latest = container.verifiedMarket.value
-                        val recentNews = container.news.state.value
                         val recentConfig = container.settingsStore.read()
                         if (latest.symbol == state.symbol &&
                             latest.signal?.barTime == signal.barTime &&
-                            PaperAlertRules.blocker(latest, recentConfig, recentNews,
+                            PaperAlertRules.blocker(latest, recentConfig,
                                 container.journalStore.trades.value, snapshot) == null) {
-                            val evidence = NewsConfluence.record(recentNews, latest.symbol)
                             val ict = IctEntryRules.approvedEvidence(latest)
                             if (ict != null && snapshot != null &&
                                 Notifier.canNotifyVerified(this@SignalMonitorService, recentConfig.alertSoundUri)) {
                                 val item = runCatching { PaperOpportunity.from(latest.signal!!, latest.symbol,
-                                    latest.lastPrice!!, MtfSnapshotRecord.from(snapshot), evidence, ict) }.getOrNull()
+                                    latest.lastPrice!!, MtfSnapshotRecord.from(snapshot), ict) }.getOrNull()
                                 newCandidate = item
                             }
                         }
@@ -276,12 +201,8 @@ class SignalMonitorService : Service() {
                         newCandidate?.let { container.opportunityStore.record(it) }
                         container.opportunityStore.linkTrade(opened)
                     }
-                    val reviewed = runCatching {
-                        val review = container.traderAdvisor.reviewPaperEntry(opened, state)
-                        container.journalStore.attachAiReview(opened.id, review)
-                    }.getOrNull() ?: opened
                     if (canAlert) {
-                        Notifier.notifyRecordedAutoEntry(this@SignalMonitorService, reviewed,
+                        Notifier.notifyRecordedAutoEntry(this@SignalMonitorService, opened,
                             currentSettings.alertSoundUri)
                     }
                 } else if (!autoEnabled) {
@@ -391,26 +312,6 @@ class SignalMonitorService : Service() {
             } finally { workers.values.forEach { it.second.cancel() } }
         }
         return START_STICKY
-    }
-
-    /** De-duplicate informational news across process/service restarts. No article or key is
-     * stored in prefs, only a short digest and timestamp; a notification is NOT a trade.
-     */
-    @Synchronized
-    private fun postResearchAlert(alert: ResearchAlert) {
-        val key = MessageDigest.getInstance("SHA-256").digest(alert.evidenceId.toByteArray(Charsets.UTF_8))
-            .take(12).joinToString("") { "%02x".format(it) }
-        val prefs = getSharedPreferences("observed_news_alerts", MODE_PRIVATE)
-        if (prefs.contains(key) || key in notifiedResearch) return
-        if (Notifier.notifyResearch(this, alert.evidenceId, alert.title, alert.text)) {
-            notifiedResearch.add(key)
-            val now = System.currentTimeMillis()
-            val update = prefs.edit().putLong(key, now)
-            if (prefs.all.size > 500) prefs.all.forEach { (oldKey, time) ->
-                if (time is Long && now - time > 7 * 86_400_000L) update.remove(oldKey)
-            }
-            update.commit() // notifies at most once when device storage permits
-        }
     }
 
     // Android 15+ limits dataSync foreground services to 6 hours per 24 hours in background.

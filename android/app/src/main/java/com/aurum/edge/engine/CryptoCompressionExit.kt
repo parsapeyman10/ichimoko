@@ -1,6 +1,7 @@
 package com.aurum.edge.engine
 
 import com.aurum.edge.core.Candle
+import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
@@ -17,7 +18,7 @@ internal object CryptoCompressionExit {
     fun assess(trade: PaperTrade, m5: List<Candle>, m15: List<Candle>,
                now: Long): Decision? {
         val atr = trade.cryptoEntryAtr ?: return null
-        if (!trade.isOpen || atr <= 0 || !atr.isFinite() || m5.size < 320 ||
+        if (!trade.isOpen || atr <= 0 || !atr.isFinite() || m5.size < HistoryPolicy.minSize(Interval.M5) ||
             m5.any { !it.closed || it.time <= 0 || it.low <= 0 || it.high < it.low } ||
             m5.zipWithNext().any { (a,b) -> b.time-a.time != Interval.M5.millis }) return null
         val last = m5.last()
@@ -48,12 +49,12 @@ internal object CryptoCompressionExit {
             } == true)
         val mainExit = if (buy) last.close < kijun || last.close <= max(visible.first, visible.second)
             else last.close > kijun || last.close >= min(visible.first, visible.second)
-        val oppositeM15 = m15.size >= 320 && m15.all { it.closed && it.time > 0 } &&
+        val oppositeM15 = m15.size >= HistoryPolicy.minSize(Interval.M15) && m15.all { it.closed && it.time > 0 } &&
             m15.zipWithNext().all { (a,b) -> b.time-a.time == Interval.M15.millis } &&
             m15.last().time + Interval.M15.millis <= closeAt &&
             closeAt - (m15.last().time + Interval.M15.millis) <= 2*Interval.M15.millis &&
             run {
-                val h = Ichimoku.compute(m15.takeLast(320), 9, 26, 52, 26)
+                val h = Ichimoku.compute(m15.takeLast(HistoryPolicy.fetchSize(Interval.M15)), 9, 26, 52, 26)
                 val j = m15.lastIndex
                 val t = h.tenkan[j] ?: return@run false
                 val k = h.kijun[j] ?: return@run false

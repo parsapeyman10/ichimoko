@@ -35,16 +35,13 @@ import com.aurum.edge.core.TradeReplay
 import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.data.JournalStats
 import com.aurum.edge.data.MarketState
-import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.SpotFallbackClient
 import com.aurum.edge.data.OpenTickSnapshot
 import com.aurum.edge.data.DisplayMark
 import com.aurum.edge.data.OpenPositionDisplay
-import com.aurum.edge.data.NewsRepository
 import com.aurum.edge.data.WatchSelection
 import com.aurum.edge.data.WatchState
 import com.aurum.edge.engine.MtfAnalyzer
-import com.aurum.edge.engine.NewsConfluence
 import com.aurum.edge.notify.AlertSoundPlayer
 import com.aurum.edge.notify.Notifier
 import com.aurum.edge.service.SignalMonitorService
@@ -74,18 +71,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     val watchSettings: StateFlow<Map<String, WatchSelection>> = container.watchSettings.selections
     val watch: StateFlow<WatchState> = container.watch.state
-    val news = container.news.state
-    val publicWebNews = container.publicWebNews.state // Forex publisher snippets, not ninth-confluence evidence
-    val forexCalendar = container.forexCalendar.state
     /** All-pairs radar: periodic online candle sweep status of every catalog pair. */
     val pairScan = container.pairScanner.state
     val decisionLog = container.decisionLog.records
-    /** The AI trading companion's latest strictly-validated opinion (analysis, never a signal). */
-    val traderOpinion = container.traderAdvisor.state
-    /** Reachability of the model, checked before any AI judgement of a trade. */
-    val aiConnection = container.traderAdvisor.connection
-    /** «ادامه بده یا نه» — the companion AI's advisory pass over the OPEN paper positions. */
-    val holdReview = container.traderAdvisor.holdReviews
 
     val market = container.verifiedMarket
     val trades: StateFlow<List<PaperTrade>> = container.journalStore.trades
@@ -153,13 +141,13 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
      * Green checks are prerequisites, never a forecast.
      */
     val entryDiagnostics: StateFlow<List<com.aurum.edge.core.AlertCheck>> = combine(
-        container.verifiedMarket, settings, trades, news, pairScan,
-    ) { market, config, openTrades, headlines, scan ->
+        container.verifiedMarket, settings, trades, pairScan,
+    ) { market, config, openTrades, scan ->
         withContext(Dispatchers.Default) {
             val mtf = runCatching { MtfAnalyzer.analyze(market.candles, market.interval) }.getOrNull()
             runCatching {
                 com.aurum.edge.core.AlertDiagnostics.checks(
-                    market = market, settings = config, news = headlines,
+                    market = market, settings = config,
                     monitorRunning = SignalMonitorService.running.value,
                     androidNotificationsReady = Notifier.canNotifyVerified(
                         container.appContext, config.alertSoundUri),
@@ -201,26 +189,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private val _tradeChart = MutableStateFlow(TradeChartState())
     val tradeChart: StateFlow<TradeChartState> = _tradeChart.asStateFlow()
 
-    /** Result of the one-tap AI connectivity probe from the API settings tab. */
-    private val _aiProbe = MutableStateFlow(AiProbeState())
-    val aiProbe: StateFlow<AiProbeState> = _aiProbe.asStateFlow()
-
-    /** Allowed model IDs for the user's key, fetched live from the service catalogue. */
-    private val _aiModels = MutableStateFlow(AiModelsState())
-    val aiModels: StateFlow<AiModelsState> = _aiModels.asStateFlow()
-
-    // HTTP calls can finish after a user edits the draft or switches provider. An old
-    // response must never be displayed as proof of the new model's connection.
-    private var aiProbeGeneration = 0L
-    private var aiModelsGeneration = 0L
-
-    fun resetAiDraftDiagnostics() {
-        aiProbeGeneration++
-        aiModelsGeneration++
-        _aiProbe.value = AiProbeState()
-        _aiModels.value = AiModelsState()
-    }
-
     init {
         // The market and background service can settle trades without going through a UI
         // button. Keep Home/Journal statistics attached to the same persisted ledger.
@@ -237,33 +205,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             _stats.value = container.journalStore.stats()
         }
         viewModelScope.launch {
-            // «وضعیت اتصال هوش مصنوعی را چک کن و اگر قطع بود اعلام کن»: announced in the app
-            // itself, once per real change of state — never on every tick, never as a guess.
-            var announced: Boolean? = null
-            container.traderAdvisor.connection.collect { connection ->
-                val reachable = connection.reachable
-                if (connection.configured && reachable != null && reachable != announced) {
-                    announced = reachable
-                    _toast.value = if (reachable) {
-                        "🤖 اتصال AI برقرار شد — ارزنده‌بودن ورودها و بازبینی پوزیشن‌های باز دوباره از مدل پرسیده می‌شود"
-                    } else {
-                        "🤖 اتصال AI قطع است (${connection.detail.ifBlank { "پاسخی از مدل نگرفتیم" }}) — " +
-                            "معاملات کاغذی بدون AI و فقط با شرط‌های فنی ادامه پیدا می‌کنند"
-                    }
-                }
-            }
-        }
-        viewModelScope.launch {
             // Automatic SL/TP settlement happens in MarketRepository, not in this ViewModel.
             // Keep totals in sync with the journal flow even while a screen is not open.
             trades.collect { _stats.value = container.journalStore.stats() }
-        }
-        viewModelScope.launch {
-            while (isActive) {
-                if (!MarketHours.weekendClosedFor(settings.value.symbol) &&
-                    settings.value.pauseOnNews && settings.value.newsBaseUrl.isNotBlank()) container.news.refreshNow()
-                delay(120_000L)
-            }
         }
         viewModelScope.launch {
             container.market.state.collect { state ->
@@ -337,13 +281,15 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private fun ensureVisibleOnlineLoop() {
         if (visibleOnlineLoopStarted) return
         visibleOnlineLoopStarted = true
-        // Radar has its own clock: a stalled news or AI request must never delay the next
-        // symbol sweep. The scanner itself rejects closed markets and respects provider pacing.
+        // Radar runs on the shared MonitorCadence: 60s base, 20s while a symbol is a
+        // live candidate / near entry. The scanner's own per-symbol throttle enforces
+        // the same grid even if other callers ask sooner.
         viewModelScope.launch {
             while (isActive) {
                 if (visibleOnlineLoopEnabled || SignalMonitorService.running.value)
                     container.pairScanner.refreshNow()
-                delay(60_000L)
+                delay(com.aurum.edge.core.MonitorCadence.sweepDelayMs(
+                    container.pairScanner.state.value.statuses.map { it.state to it.confidence }))
             }
         }
         viewModelScope.launch {
@@ -351,22 +297,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             while (isActive) {
                 if ((visibleOnlineLoopEnabled || SignalMonitorService.running.value) && !MarketHours.weekendClosedFor(settings.value.symbol)) {
                     if (turns % 3 == 0) container.watch.refreshNow()
-                    container.forexCalendar.refreshNow()
-                    if (turns % 5 == 0) container.publicWebNews.refreshNow()
-                    if (settings.value.pauseOnNews &&
-                        (settings.value.newsBaseUrl.isNotBlank() || settings.value.hasClientNewsAi)) {
-                        container.news.refreshNow()
-                    }
-                    container.traderAdvisor.refreshNow()
-                    // وضعیت اتصال AI در پیش‌زمینه هم تازه می‌ماند (TTL پنج دقیقه + cooldown روی
-                    // پروب ناموفق)، تا اگر قطع شد هم در کارت «چرا معامله نداریم؟» و هم با پیام
-                    // روی صفحه اعلام شود.
-                    if (settings.value.hasClientNewsAi) {
-                        runCatching { container.traderAdvisor.ensureConnection() }.getOrNull()
-                    }
-                    // Advisory review of the open positions while the app is visible (the monitor
-                    // service does the same when it runs). Never closes or re-prices a trade.
-                    runCatching { container.traderAdvisor.reviewOpenPositions() }.getOrNull()
                 }
                 turns++
                 delay(60_000L)
@@ -516,24 +446,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshWatch() = container.watch.refreshNow()
 
-    /** Ask the companion AI for a fresh opinion; throttled inside the advisor (10 minutes). */
-    fun refreshTraderOpinion(force: Boolean = false) = container.traderAdvisor.refreshNow(force)
-
-    /**
-     * Runs the «continue or not» pass on demand (the loops also run it on their own throttle).
-     * Connection is probed first inside; an unreachable model leaves every position untouched.
-     */
-    fun reviewOpenPositionsNow() {
-        viewModelScope.launch {
-            runCatching { container.traderAdvisor.reviewOpenPositions() }.getOrNull()
-            // Alerts are NOT consumed here: the monitor service owns the notification channel, and
-            // the journal keeps showing the verdict either way.
-            container.traderAdvisor.holdReviews.value.alerts.firstOrNull()?.let { alert ->
-                _toast.value = "نظر AI دربارهٔ ${alert.symbol}: ادامه توصیه نمی‌شود — ${alert.summary}"
-            }
-        }
-    }
-
     /** Manual all-pairs sweep across 50+ instruments. */
     fun scanPairs() {
         viewModelScope.launch {
@@ -552,12 +464,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         selectChartSymbol(best.symbol)
         _toast.value = "بهترین فرصت انتخاب شد: ${best.symbol} (${best.action?.name ?: "سیگنال"})"
     }
-
-    fun refreshNews() = container.news.refreshNow()
-
-    fun refreshPublicWebNews() = container.publicWebNews.refreshNow()
-
-    fun refreshForexCalendar() = container.forexCalendar.refreshNow()
 
     fun saveApiKey(key: String) = saveMarketCredentials(key, settings.value.symbol)
 
@@ -690,8 +596,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setAutoPaperTrading(enabled: Boolean) {
         container.settingsStore.update { it.copy(autoPaperTrading = enabled) }
-        if (enabled) container.news.refreshNow()
-        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ فقط با موتور چهارلایه، هفت بازهٔ واقعی و قفل‌های ریسک/AI ثبت می‌شود"
+        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ فقط با موتور چهارلایه، هفت بازهٔ واقعی و قفل‌های ریسک ثبت می‌شود"
             else "معاملهٔ خودکار کاغذی خاموش شد"
     }
 
@@ -723,10 +628,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         if (com.aurum.edge.core.MarketHours.closedFor(current.symbol)) return "بازار بسته است"
         val candidate = current.signal
         if (com.aurum.edge.core.AssetClass.of(current.symbol) == com.aurum.edge.core.AssetClass.CRYPTO) {
-            if (news.value.gate != com.aurum.edge.data.NewsGate.CLEAR || news.value.cached ||
-                news.value.lastCheckedAt?.let { System.currentTimeMillis() - it in 0L..180_000L } != true ||
-                news.value.calendarCheckedAt?.let { System.currentTimeMillis() - it in 0L..1_200_000L } != true)
-                return "خبر و تقویم تازهٔ بدون رویداد پراثر لازم است"
             val quote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { price ->
                 PriceTick(price, at, current.bid, current.ask)
             } }
@@ -735,13 +636,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
         if (candidate?.isActionable != true || !TechnicalEvidence.confirmed(candidate))
             return candidate?.blockers?.joinToString("، ") ?: "سیگنال چهارلایهٔ معتبر وجود ندارد"
-        if (settings.value.pauseOnNews) {
-            val checked = news.value.lastCheckedAt
-            if (news.value.gate != NewsGate.CLEAR || checked == null ||
-                System.currentTimeMillis() - checked !in 0L..180_000L) {
-                return "خبر پراثر، نامعتبر یا وضعیت خبری نامشخص/قدیمی؛ توقف ورود جدید"
-            }
-        }
         WatchCatalog.find(current.symbol)?.let { watched ->
             val selected = watchSettings.value[current.symbol]
             if (selected != null && SourceComparison.verify(watched, selected.enabledSources,
@@ -790,7 +684,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             if (manual) {
                 require(current.signal?.isActionable == true && current.signal?.action == signal.action &&
                     current.signal?.barTime == signal.barTime && TechnicalEvidence.confirmed(signal)) {
-                    "سیگنال چهارلایه یا وتوی AI تغییر کرده است"
+                    "سیگنال چهارلایه تغییر کرده است"
                 }
                 require(expectedSymbol == current.symbol && expectedPrice != null && expectedPrice.isFinite() &&
                     expectedPrice > 0.0 && abs(price / expectedPrice - 1.0) <= 0.001) {
@@ -800,7 +694,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 require(signal.isActionable && current.signal == signal && signal.interval == current.interval &&
                     signal.entry != null && signal.entry.isFinite() && signal.entry > 0.0 &&
                     abs(price / signal.entry - 1.0) <= 0.005) {
-                    "سیگنال قدیمی، وتوشده یا دور از قیمت تازه است"
+                    "سیگنال قدیمی، نامعتبر یا دور از قیمت تازه است"
                 }
                 require(TechnicalEvidence.confirmed(signal)) {
                     "شروط فنی دیگر معتبر نیست؛ ورود سیگنالی متوقف شد"
@@ -824,7 +718,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 // Repeat all checks after scheduling; never persist a stale or switched symbol.
                 val (current, price) = verified()
                 val s = container.settingsStore.read()
-                val newsRecord = if (manual) null else NewsConfluence.record(news.value, current.symbol)
                 val ict = if (manual) null else IctEntryRules.approvedEvidence(current) // optional historical detail
                 // «روند کلی بازار» در همان لحظهٔ ورود عکس گرفته و در ژورنال ثبت می‌شود تا برای
                 // هر معامله معلوم باشد با روند بوده یا خلافش. فقط ثبت است؛ گیتِ ورود همان‌جاست
@@ -844,9 +737,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     balance = s.accountBalance, riskPercent = s.riskPercent,
                     mtf = if (manual) null else _mtf.value?.let { MtfSnapshotRecord.from(it) },
                     manual = manual,
-                    newsEvidence = newsRecord, priceAction = ict,
+                    priceAction = ict,
                     marketTrend = trendRecord,
-                    cryptoNews = news.value,
                     sourceIntegrityRevision = current.sourceIntegrityRevision,
                     cryptoEntryQuote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { quote ->
                         com.aurum.edge.core.PriceTick(quote, at, current.bid, current.ask)
@@ -857,16 +749,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _stats.value = container.journalStore.stats()
                 // Linking is metadata only; a damaged opportunity file must not erase a saved trade.
                 runCatching { container.opportunityStore.linkTrade(trade) }
-                val reviewedTrade = runCatching {
-                    val review = container.traderAdvisor.reviewPaperEntry(trade, current)
-                    container.journalStore.attachAiReview(trade.id, review)
-                }.getOrNull()
-                reviewedTrade?.let { _stats.value = container.journalStore.stats() }
                 val conditions = trade.entryConditions.joinToString("، ") {
                     it.name.substringAfter('·').trim()
                 }
                 _toast.value = "کاغذی: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} ${trade.symbol} · شروع: $conditions"
-                Notifier.notifyTradeOpened(container.appContext, reviewedTrade ?: trade, s.alertSoundUri)
+                Notifier.notifyTradeOpened(container.appContext, trade, s.alertSoundUri)
             } catch (e: Exception) {
                 _toast.value = "ورود کاغذی انجام نشد: ${e.message ?: "ذخیره ممکن نیست"}"
             } finally {
@@ -1078,98 +965,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setInterval(interval: Interval) = container.market.setInterval(interval)
 
-    fun saveNewsAiConfig(apiKey: String, baseUrl: String, model: String, format: String = "AUTO") {
-        val url = baseUrl.trim().trimEnd('/')
-        val savedConfig = container.settingsStore.read()
-        if (!url.startsWith("https://") || model.isBlank() ||
-            com.aurum.edge.data.AiCredentialScope.key(apiKey, savedConfig, url, format, model).isBlank()) {
-            _toast.value = "کلید جداگانهٔ این سرویس، نشانی HTTPS و نام مدل لازم است؛ کلید سرویس قبلی منتقل نمی‌شود"
-            return
-        }
-        viewModelScope.launch {
-            val saved = withContext(Dispatchers.IO) { container.settingsStore.saveNewsAiConfig(apiKey, url, model, format) }
-            if (!saved) {
-                _toast.value = "ذخیرهٔ کلید مستقیم ناموفق بود"
-                return@launch
-            }
-            resetAiDraftDiagnostics() // An earlier provider's success is not GLM proof.
-            container.traderAdvisor.onAiConfigChanged()
-            container.news.resetAndRefresh()
-            container.traderAdvisor.refreshNow(force = true)
-            _toast.value = "تنظیمات AI ذخیره شد؛ وضعیت اتصال/تأثیر فقط پس از پاسخ واقعی مدل مشخص می‌شود"
-        }
-    }
-
-    fun clearNewsAiConfig() {
-        viewModelScope.launch {
-            val cleared = withContext(Dispatchers.IO) { container.settingsStore.clearNewsAiConfig() }
-            if (!cleared) {
-                _toast.value = "حذف کلید مستقیم ناموفق بود؛ تنظیمات قبلی حفظ شد"
-                return@launch
-            }
-            resetAiDraftDiagnostics()
-            container.traderAdvisor.onAiConfigChanged()
-            container.news.resetAndRefresh()
-            container.traderAdvisor.refreshNow() // flips the companion card to "not configured"
-            _toast.value = "کلید مستقیم حذف شد"
-        }
-    }
-
-    /**
-     * One-tap proof of life for the user's own model endpoint. Empty fields fall back to the
-     * SAVED values (the key field is intentionally blanked after saving) so the test always
-     * checks what the app would actually use. The key itself is never echoed.
-     */
-    /** Fetch the model IDs this key may use, so Settings never guesses a model name. */
-    fun loadNewsAiModels(keyInput: String, baseUrl: String, model: String, format: String = "AUTO") {
-        val requestGeneration = ++aiModelsGeneration
-        val saved = container.settingsStore.read()
-        val usingSavedEndpoint = baseUrl.isBlank()
-        val url = baseUrl.trim().trimEnd('/').ifBlank { saved.newsAiBaseUrl }
-        val wireFormat = com.aurum.edge.data.AiCredentialScope.format(format, saved, usingSavedEndpoint)
-        val key = com.aurum.edge.data.AiCredentialScope.key(keyInput, saved, url, wireFormat, model)
-        if (key.isBlank() || !url.startsWith("https://")) {
-            _aiModels.value = AiModelsState(error = "کلید و نشانی HTTPS هر دو لازم است")
-            return
-        }
-        _aiModels.value = AiModelsState(loading = true)
-        viewModelScope.launch {
-            val result = runCatching {
-                withContext(Dispatchers.IO) { container.traderAdvisor.listModels(key, url, wireFormat) }
-            }
-            if (requestGeneration != aiModelsGeneration) return@launch
-            _aiModels.value = result.fold(
-                onSuccess = { AiModelsState(models = it) },
-                onFailure = { AiModelsState(error = com.aurum.edge.data.AiConnectionDiagnostics.describe(it)) })
-        }
-    }
-
-    fun testNewsAiConnection(keyInput: String, baseUrl: String, model: String, format: String = "AUTO") {
-        val requestGeneration = ++aiProbeGeneration
-        val saved = container.settingsStore.read()
-        val usingSavedEndpoint = baseUrl.isBlank()
-        val url = baseUrl.trim().trimEnd('/').ifBlank { saved.newsAiBaseUrl }
-        val wireFormat = com.aurum.edge.data.AiCredentialScope.format(format, saved, usingSavedEndpoint)
-        val modelName = model.trim().ifBlank { saved.newsAiModel }
-        val key = com.aurum.edge.data.AiCredentialScope.key(keyInput, saved, url, wireFormat, modelName)
-        if (key.isBlank() || !url.startsWith("https://") || modelName.isBlank()) {
-            _aiProbe.value = AiProbeState(message = "کلید، نشانی HTTPS و نام مدل هر سه لازم است")
-            return
-        }
-        _aiProbe.value = AiProbeState(running = true)
-        viewModelScope.launch {
-            val result = runCatching {
-                withContext(Dispatchers.IO) {
-                    container.traderAdvisor.probe(key, url, modelName, wireFormat)
-                }
-            }
-            if (requestGeneration != aiProbeGeneration) return@launch
-            _aiProbe.value = AiProbeState(message = result.fold(
-                onSuccess = { "اتصال تأیید شد؛ پاسخ مدل: «$it»" },
-                onFailure = { "اتصال ناموفق: ${com.aurum.edge.data.AiConnectionDiagnostics.describe(it)}" }))
-        }
-    }
-
     fun tickArchiveUrl(): String = container.settingsStore.tickArchiveUrl()
 
     fun saveTickArchive(url: String, token: String) {
@@ -1181,29 +976,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 else if (url.isBlank()) "بایگانی برای ورودهای تازه غیرفعال شد؛ وضعیت پوزیشن‌های قبلی تغییر نمی‌کند"
                 else "بایگانی برای ورودهای تازه تنظیم شد؛ دسترسی/اتصال و گسست‌ها را در ژورنال بررسی کنید"
         }
-    }
-
-    fun saveNewsBaseUrl(value: String) {
-        val url = value.trim().trimEnd('/')
-        if (url.isNotBlank() && NewsRepository.newsUrl(url) == null) {
-            _toast.value = "آدرس HTTPS سرور خبر بدون مسیر و کلید وارد کنید"
-            return
-        }
-        viewModelScope.launch {
-            val saved = withContext(Dispatchers.IO) { container.settingsStore.saveNewsBaseUrl(url) }
-            if (!saved) {
-                _toast.value = "ذخیرهٔ آدرس سرور روی دستگاه ناموفق بود؛ خبر AI هنوز تأیید نشده است"
-                return@launch
-            }
-            container.news.resetAndRefresh()
-            _toast.value = if (url.isBlank()) "سرور خبر جدا شد؛ تیترهای وب در تب خبر بدون سرور قابل دریافت‌اند؛ خبر فقط ریسک زرد/وتو می‌دهد"
-                else "آدرس سرور ذخیره شد؛ پاسخ فید، مدل AI و ریسک خبر را در تب خبر جداگانه بررسی کنید"
-        }
-    }
-
-    fun setPauseOnNews(enabled: Boolean) {
-        container.settingsStore.update { it.copy(pauseOnNews = enabled) }
-        if (enabled) container.news.refreshNow()
     }
 
     /** PDF export of REAL journal trades already on disk. */

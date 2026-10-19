@@ -3,13 +3,18 @@ package com.aurum.edge.data
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
-import com.aurum.edge.engine.MtfAnalyzer
+import kotlinx.coroutines.CancellationException
 
 /**
- * 1-to-1 single-source crypto bundle:
- * Each of the 5 crypto symbols has its own dedicated exchange source (no two symbols share a source),
- * fetches ONLY 1500 closed M5 candles, and derives M15 (every 3 M5 candles = 1 M15 candle) and
- * H1 (every 12 M5 candles = 1 H1 candle) by direct conversion from M5.
+ * Crypto history bundle (5 USDT spot pairs):
+ *
+ * M5, M15 and H1 are each fetched INDEPENDENTLY from the same exchange venue —
+ * never derived from the M5 series. The symbol's dedicated venue is tried first;
+ * if it does not answer with a healthy full bundle, the next free venue is tried
+ * and the first healthy responder becomes the sticky primary for that symbol
+ * (see [SourcePromotion]). Venue promotion here is about DATA reliability only:
+ * paper-entry venue rules (same-venue history + executed-trade tick) still gate
+ * entries separately and are not weakened by a promoted read source.
  */
 internal class CryptoRadarBundle(
     private val read: suspend (String, Interval, Source) -> PublicCandleHistoryClient.Result,
@@ -34,6 +39,7 @@ internal class CryptoRadarBundle(
 
     companion object {
         private val admission = PublisherBudget(Source.entries.associateWith { 1 })
+        private val FRAMES = listOf(Interval.M5, Interval.M15, Interval.H1)
 
         fun dedicatedSource(symbol: String): Source? = when (symbol.trim().uppercase()) {
             "BTC/USDT" -> Source.BINANCE
@@ -46,38 +52,76 @@ internal class CryptoRadarBundle(
     }
 
     suspend fun fetch(symbol: String, now: Long = System.currentTimeMillis()): Snapshot {
-        val source = dedicatedSource(symbol)
-            ?: throw DataFeedException("$symbol: منبع اختصاصی تک‌سورس برای این رمزارز تعریف نشده است")
+        val dedicated = dedicatedSource(symbol)
+            ?: throw DataFeedException("$symbol: منبع اختصاصی این رمزارز تعریف نشده است")
+        val natural = listOf(dedicated) + Source.entries.filter { it != dedicated }
+        val candidates = SourcePromotion.ordered(
+            symbol, SourcePromotion.Kind.CRYPTO, natural) { it.name }
+
         val gate = SourceIntegrity.shared
         val token = gate.begin(symbol, SourceIntegrity.Channel.HISTORY)
-        val snapshot = admission.tryRead(source) {
-            val result = read(symbol, Interval.M5, source)
-            val receivedAt = System.currentTimeMillis()
-            val m5Bars = result.candles
-                .filter { it.closed && it.time + Interval.M5.millis <= receivedAt }
-                .sortedBy { it.time }
-                .takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
-            if (!CandleSourceHealth.ready(m5Bars, Interval.M5, receivedAt,
-                    requireContiguous = true, requireVolume = false))
-                throw DataFeedException("${HistoryPolicy.LIVE_REQUEST_CANDLES} کندل بستهٔ پیوسته و تازهٔ 5m از ${source.label} ناقص است")
-            val m15Bars = MtfAnalyzer.convertFromM5(m5Bars, Interval.M15)
-            val h1Bars = MtfAnalyzer.convertFromM5(m5Bars, Interval.H1)
-            val series = linkedMapOf(
-                Interval.M5 to m5Bars,
-                Interval.M15 to m15Bars,
-                Interval.H1 to h1Bars,
-            )
-            Snapshot(result.provider, source, series, emptyList())
+        val failures = mutableListOf<String>()
+
+        for (source in candidates) {
+            try {
+                val snapshot = admission.tryRead(source) { readBundle(symbol, source) }
+                SourcePromotion.onSuccess(symbol, SourcePromotion.Kind.CRYPTO, source.name)
+                val receivedAt = System.currentTimeMillis()
+                val verifiedRevision = gate.accept(symbol, SourceIntegrity.Channel.HISTORY, token, 2)
+                    ?: gate.revision(symbol)
+                HistorySourceAudits.record(
+                    symbol,
+                    snapshot.provider,
+                    "M5/M15/H1 مستقل از ${source.label} · " +
+                        SourcePromotion.summaryFa(symbol, SourcePromotion.Kind.CRYPTO) { id ->
+                            Source.entries.firstOrNull { it.name == id }?.label ?: id
+                        } +
+                        if (failures.isEmpty()) "" else " · پیش از آن ناموفق: ${failures.joinToString("؛ ").take(220)}",
+                    receivedAt,
+                )
+                return snapshot.copy(priorFailures = failures.toList(),
+                    integrityRevision = verifiedRevision)
+            } catch (occupied: PublisherOccupied) {
+                failures += "${source.label}: ظرفیت محلی پر است"
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                val count = SourcePromotion.onFailure(symbol, SourcePromotion.Kind.CRYPTO,
+                    source.name, error.message ?: "خطای نامشخص")
+                failures += "${source.label}: ${(error.message ?: "خطای نامشخص").take(110)}" +
+                    " (خطای متوالی $count)"
+            }
         }
-        val receivedAt = System.currentTimeMillis()
-        val verifiedRevision = gate.accept(symbol, SourceIntegrity.Channel.HISTORY, token, 2)
-            ?: gate.revision(symbol)
+
         HistorySourceAudits.record(
-            symbol,
-            snapshot.provider,
-            "منبع اختصاصی تک‌سورس (${source.label}) · ۱۵۰۰ کندل M5 + تبدیل M15 (۵۰۰) و H1 (۱۲۵)",
-            receivedAt,
+            symbol, null,
+            "همهٔ صرافی‌های منبع تاریخچه بی‌پاسخ‌اند و باید جایگزین شوند: ${failures.joinToString("؛ ").take(300)}",
+            System.currentTimeMillis(),
         )
-        return snapshot.copy(integrityRevision = verifiedRevision)
+        throw DataFeedException(
+            "$symbol: هیچ صرافی‌ای بستهٔ سالم نداد — ${failures.joinToString("؛ ").take(300)}")
+    }
+
+    /** One venue must deliver ALL THREE independent frames healthy and contiguous. */
+    private suspend fun readBundle(symbol: String, source: Source): Snapshot {
+        val frames = linkedMapOf<Interval, List<Candle>>()
+        var provider = ""
+        for (frame in FRAMES) {
+            val result = read(symbol, frame, source)
+            val receivedAt = System.currentTimeMillis()
+            if (frame == Interval.M5) provider = result.provider
+            val bars = result.candles
+                .filter { it.closed && it.time + frame.millis <= receivedAt }
+                .sortedBy { it.time }
+                .distinctBy { it.time }
+                .takeLast(HistoryPolicy.fetchSize(frame))
+            if (!CandleSourceHealth.ready(bars, frame, receivedAt,
+                    requireContiguous = true, requireVolume = false))
+                throw DataFeedException(
+                    "${frame.label}: کندل بستهٔ پیوسته/تازه از ${source.label} کافی نیست " +
+                        "(${bars.size}/${HistoryPolicy.minSize(frame)})")
+            frames[frame] = bars
+        }
+        return Snapshot(provider, source, frames, emptyList())
     }
 }

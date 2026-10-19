@@ -232,6 +232,7 @@ object MarketTrend {
         candles: List<Candle>,
         interval: Interval = Interval.M5,
         higher: Interval? = higherFor(interval),
+        higherCandles: List<Candle> = emptyList(),
     ): SymbolTrend {
         val family = MarketPlaybook.familyOf(symbol)
         val allClosed = candles.filter { it.closed }
@@ -249,14 +250,10 @@ object MarketTrend {
             )
         }
 
-        val canResample = higher != null && higher.minutes > interval.minutes &&
-            higher.minutes % interval.minutes == 0
-        val higherBars = if (canResample && higher != null) {
-            val ratio = higher.minutes / interval.minutes
-            val needed = MIN_BARS * ratio * HTF_WINDOW_FACTOR
-            val source = allClosed.takeLast(maxOf(MAX_BARS, needed))
-            MtfAnalyzer.resample(source, higher, interval).filter { it.closed }
-        } else emptyList()
+        // The reference-frame trend is measured ONLY from independently fetched
+        // higher candles supplied by the caller — never resampled from the base
+        // series. Without them the higher direction stays UNKNOWN (not guessed).
+        val higherBars = higherCandles.filter { it.closed }
         val higherMeasure = if (higherBars.size >= MIN_BARS) measure(higherBars) else null
 
         val baseDirection = directionOf(base)
@@ -271,7 +268,7 @@ object MarketTrend {
 
         val detail = buildString {
             append("روند ${direction.label} با قدرت $strength٪")
-            append(if (higherMeasure != null) " روی ${higher?.label ?: interval.label} (${higherBars.size} کندل بستهٔ تجمیع‌شده)"
+            append(if (higherMeasure != null) " روی ${higher?.label ?: interval.label} (${higherBars.size} کندل بستهٔ مستقل)"
             else " روی خودِ ${interval.label} (${closed.size} کندل بسته)")
             append(" · ER=${fmt(reference.er)}")
             reference.slopeAtr?.let { append(" · شیب EMA50 ${fmt(it)}×ATR") }

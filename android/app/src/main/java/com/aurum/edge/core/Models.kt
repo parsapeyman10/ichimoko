@@ -580,7 +580,7 @@ data class PaperOpportunity(
 ) {
     companion object {
         fun from(signal: Signal, symbol: String, price: Double, mtf: MtfSnapshotRecord,
-                 news: PaperNewsRecord?, ict: IctPriceActionRecord? = null,
+                 ict: IctPriceActionRecord? = null,
                  now: Long = System.currentTimeMillis()): PaperOpportunity {
             val technicalConditions = TechnicalEvidence.items(signal)
             require(PaperOrderRules.paperable(symbol) && signal.isActionable && signal.barTime > 0 &&
@@ -596,7 +596,7 @@ data class PaperOpportunity(
                 signalBarTime = signal.barTime, priceAtAlert = price,
                 stopLoss = signal.stopLoss, takeProfit = signal.takeProfit,
                 alertedAt = now, conditions = technicalConditions.map(PaperConditionRecord::from),
-                mtf = mtf, newsEvidence = news, priceAction = ict,
+                mtf = mtf, newsEvidence = null, priceAction = ict,
             )
         }
     }

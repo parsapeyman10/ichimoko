@@ -20,14 +20,10 @@ import kotlin.math.min
  */
 internal object V1Scoring {
     val intervals = listOf(Interval.M5, Interval.M15, Interval.H1)
-    private const val MIN_BARS = HistoryPolicy.LIVE_MIN_CANDLES // 1500 genuine closed M5 bars
+    private const val MIN_BARS = HistoryPolicy.LIVE_MIN_CANDLES
 
-    fun minBarsFor(interval: Interval): Int = when (interval) {
-        Interval.M5 -> HistoryPolicy.LIVE_MIN_CANDLES
-        Interval.M15 -> HistoryPolicy.RESAMPLED_M15_CANDLES
-        Interval.H1 -> HistoryPolicy.RESAMPLED_H1_CANDLES
-        else -> HistoryPolicy.LIVE_MIN_CANDLES
-    }
+    /** Per-frame healthy minimum for the independently fetched frame series. */
+    fun minBarsFor(interval: Interval): Int = HistoryPolicy.minSize(interval)
 
     fun evaluate(input: List<Candle>, interval: Interval, symbol: String, threshold: Double,
                  mode: CategoryStrategy, external: Map<Interval, List<Candle>>): Signal {
@@ -91,12 +87,9 @@ internal object V1Scoring {
         // allow the most recent closed frame at the live clock when the base bar is fresh.
         val frameAsOf = if (interval != Interval.M5 &&
             clock - asOf in 0L..(interval.millis + 90_000L)) clock else asOf
-        val resolvedExternal = if (external.isEmpty() && interval == Interval.M5) {
-            mapOf(
-                Interval.M15 to MtfAnalyzer.convertFromM5(bars, Interval.M15),
-                Interval.H1 to MtfAnalyzer.convertFromM5(bars, Interval.H1),
-            )
-        } else external
+        // Alignment frames must be independently fetched real candles. When they are
+        // absent the stack stays incomplete and blocks below — never resampled from M5.
+        val resolvedExternal = external
         val frameCounts = mutableMapOf<Interval, Int>()
         val stack = intervals.map { target ->
             val reqBars = minBarsFor(target)

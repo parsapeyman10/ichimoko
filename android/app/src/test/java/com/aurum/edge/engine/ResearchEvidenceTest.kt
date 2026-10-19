@@ -10,7 +10,6 @@ import com.aurum.edge.core.PaperNewsRecord
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
-import com.aurum.edge.data.FOREX_CALENDAR_SOURCE_URL
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
@@ -25,7 +24,7 @@ class ResearchEvidenceTest {
     private val barTime = 1_700_000_000_000L
     private val news = PaperNewsRecord("test-model", "BUY", 91.0, barTime + 1_000L,
         listOf(PaperNewsEvidence("one", "Publisher", "fixture", "https://publisher.example/story", barTime)),
-        FOREX_CALENDAR_SOURCE_URL, barTime + 1_000L)
+        "https://nfs.faireconomy.media/ff_calendar_thisweek.json", barTime + 1_000L)
     private val ict = IctPriceActionRecord(symbol = "XAU/USD", interval = Interval.M5,
         barTime = barTime, action = SignalAction.BUY, feedProvider = "test", checkedAt = barTime + 1_000L,
         nyDate = "2026-01-01", nySession = "LONDON", nyTime = "03:00", support = 95.0,
@@ -37,7 +36,7 @@ class ResearchEvidenceTest {
         stopBoundary = 95.0, opposingLevel = 105.0, rewardRisk = 2.0)
     private val mtf = MtfSnapshotRecord("5m", "BUY", 0.8, 3, 0, 0, false, "fixture", barTime)
     private val conditions = (1..8).map { PaperConditionRecord("فنی $it", "CONFIRMED", "fixture") } +
-        PaperConditionRecord(NewsConfluence.NEWS_LABEL, "CONFIRMED", "fixture")
+        PaperConditionRecord("خبر/تقویم · داده‌کاوی ژورنال", "CONFIRMED", "fixture")
     private val paper = PaperTrade("paper", "XAU/USD", Interval.M5, SignalAction.BUY,
         entry = 100.0, stopLoss = 95.0, takeProfit = 110.0, confidence = 91.0,
         riskReward = 2.0, openedAt = barTime + 1_000L, closedAt = barTime + 600_000L,
@@ -52,15 +51,14 @@ class ResearchEvidenceTest {
             entryConditions = current.entryConditions.dropLast(1))))
     }
 
-    @Test fun `manual older unverified and invalid news records never enter recorded signal group`() {
+    @Test fun `manual older and unverified records never enter recorded signal group`() {
         assertTrue(ResearchEvidence.hasRecordedNineWay(paper))
         val manual = paper.copy(id = "manual", autoOpened = false, signalBarTime = null,
             newsEvidence = null, entryConditions = emptyList(), priceAction = null)
         assertFalse(ResearchEvidence.hasRecordedNineWay(manual))
         assertTrue(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = null)))
-        assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = news.copy(model = "deterministic-fallback"))))
-        assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = news.copy(calendarSource = null))))
-        assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = news.copy(checkedAt = paper.openedAt + 1))))
+        // News layer removed: recorded news evidence on historical trades is no longer graded.
+        assertTrue(ResearchEvidence.hasRecordedNineWay(paper.copy(newsEvidence = news.copy(model = "deterministic-fallback"))))
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(priceAction = null)))
         assertFalse(ResearchEvidence.hasRecordedNineWay(paper.copy(entryConditions = conditions.drop(3))))
         assertNull(ResearchEvidence.paperCostWhatIf(listOf(manual), 0.30, 0.05))

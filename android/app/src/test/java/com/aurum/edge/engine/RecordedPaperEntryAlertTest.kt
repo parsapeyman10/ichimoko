@@ -38,7 +38,7 @@ class RecordedPaperEntryAlertTest {
         takeProfit = 3009.0, interval = Interval.M5, barTime = 1_800_000_000_000L,
         ichimokuEntry = com.aurum.edge.core.IchimokuEntryEvidence(SignalAction.BUY, 1_800_000_000_000L, 1_800_000_000_000L, Interval.M5, 3),
         confluence = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "تأییدشده", scorePercent = 25) } +
-            ConfluenceItem(NewsConfluence.NEWS_LABEL, true, "خبر مدل با شاهد"))
+            ConfluenceItem("خبر/تقویم · داده‌کاوی ژورنال", true, "خبر مدل با شاهد"))
     private val alsSignal by lazy { asConfirmedAls5TestSignal(signal) }
     private val news = PaperNewsRecord("test-model", "BUY", 91.0, signal.barTime,
         listOf(PaperNewsEvidence("news-1", "Publisher", "Gold news",
@@ -63,7 +63,7 @@ class RecordedPaperEntryAlertTest {
 
         val evidence = ict
         val entry = journal.open(alsSignal, "XAU/USD", 3000.0, 100.0, 0.5,
-            mtf = mtf, automatic = true, newsEvidence = news, priceAction = evidence, observedAt = 1_800_000_000_000L)
+            mtf = mtf, automatic = true, priceAction = evidence, observedAt = 1_800_000_000_000L)
         val restored = JournalStore(context, file).also { it.load() }.trades.value.single()
         assertEquals(entry, restored) // Disk record is committed before there is an entry event.
         assertTrue(Notifier.notifyRecordedAutoEntry(context, entry, ""))
@@ -73,11 +73,11 @@ class RecordedPaperEntryAlertTest {
         assertTrue(posted.extras.getCharSequence(Notification.EXTRA_TEXT).toString().contains(entry.id.take(8)))
         assertEquals(4, restored.entryConditions.size)
         assertEquals(evidence, restored.priceAction)
-        assertEquals("news-1", restored.newsEvidence!!.evidence.single().id)
+        assertNull(restored.newsEvidence) // news layer removed: new entries store none
 
         // Replaying that bar cannot create a second journal entry (or a second entry event).
         assertTrue(runCatching { journal.open(alsSignal, "XAU/USD", 3000.0, 100.0, 0.5,
-            mtf = mtf, automatic = true, newsEvidence = news, priceAction = evidence, observedAt = 1_800_000_000_000L) }.isFailure)
+            mtf = mtf, automatic = true, priceAction = evidence, observedAt = 1_800_000_000_000L) }.isFailure)
         assertEquals(1, manager.activeNotifications.size)
         assertFalse(Notifier.notifyRecordedAutoEntry(context, entry.copy(autoOpened = false), ""))
         assertTrue(Notifier.notifyRecordedAutoEntry(context, entry.copy(priceAction = null), ""))
@@ -98,7 +98,7 @@ class RecordedPaperEntryAlertTest {
         val journal = JournalStore(context, file)
         assertTrue(runCatching { journal.load() }.isFailure)
         assertNull(runCatching { journal.open(signal, "XAU/USD", 3000.0, 100.0, 0.5,
-            mtf = mtf, automatic = true, newsEvidence = news) }.getOrNull())
+            mtf = mtf, automatic = true) }.getOrNull())
         assertTrue(manager.activeNotifications.isEmpty())
         assertEquals("{invalid}", file.readText())
     }

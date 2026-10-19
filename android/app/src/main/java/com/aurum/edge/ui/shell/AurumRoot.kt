@@ -92,8 +92,6 @@ fun AurumRoot(viewModel: AurumViewModel) {
                         AurumTab.Signal -> SignalScreen(viewModel, onChartSymbol = ::openChartFor)
                         AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { open(AurumTab.Api) },
                             onOpenChart = ::openChartFor)
-                        AurumTab.News -> PersianNewsScreen(viewModel, onOpenSettings = { open(AurumTab.Settings) },
-                            onOpenSignal = { open(AurumTab.Signal) })
                         AurumTab.Journal -> JournalScreen(viewModel, market)
                         AurumTab.Update -> UpdateScreen(viewModel)
                         AurumTab.Settings -> SettingsScreen(viewModel, settings)

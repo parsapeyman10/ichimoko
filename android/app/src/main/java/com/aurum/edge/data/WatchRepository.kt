@@ -68,13 +68,12 @@ class WatchRepository(
     private var autoRefresh: kotlinx.coroutines.Job? = null
 
     /**
-     * Keep the watchlist live.
-     *
-     * Previously it only refreshed when something called [refreshNow], behind a 3-minute
-     * lock, so the screen sat on stale numbers and felt frozen. A short loop keeps it
-     * moving; the per-source throttle below still prevents hammering any provider.
+     * Keep the watchlist live on the app-wide base cadence (60s): watch cards are
+     * display snapshots on an M5 rhythm, so there is no reason to re-poll every
+     * provider faster than the base sweep. The per-source throttles below (crypto /
+     * BBO lanes) run on the same 60s grid.
      */
-    fun startAutoRefresh(intervalMs: Long = 20_000L) {
+    fun startAutoRefresh(intervalMs: Long = com.aurum.edge.core.MonitorCadence.BASE_SWEEP_MS) {
         if (autoRefresh?.isActive == true) return
         autoRefresh = scope.launch {
             while (true) {
@@ -113,8 +112,8 @@ class WatchRepository(
     private suspend fun refresh() = mutex.withLock {
         ensureLoaded()
         val elapsed = SystemClock.elapsedRealtime()
-        if (attemptedAtElapsed != 0L && elapsed - attemptedAtElapsed in 0L until 15_000L) {
-            _state.value = _state.value.copy(error = "برای سهمیهٔ منابع، حداقل ۱۵ ثانیه بین تلاش‌های دیده‌بان صبر کنید؛ نمادهای رمزارز هر ۶۰ ثانیه بررسی می‌شوند")
+        if (attemptedAtElapsed != 0L && elapsed - attemptedAtElapsed in 0L until com.aurum.edge.core.MonitorCadence.BASE_SWEEP_MS) {
+            _state.value = _state.value.copy(error = "دیده‌بان با ریت پایهٔ ۶۰ ثانیه به‌روز می‌شود؛ تلاش بعدی در نوبت بعدیِ ریت انجام می‌شود")
             return@withLock
         }
         attemptedAtElapsed = elapsed

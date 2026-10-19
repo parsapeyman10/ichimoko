@@ -42,7 +42,7 @@ class FeedNavigationTest {
     @Test fun `every destination is reachable from the forex navigation`() {
         assertEquals(AurumTab.entries.toSet(), (primaryTabs + moreTabs).toSet())
         assertEquals(AurumTab.Home, primaryTabs.first())
-        assertTrue(AurumTab.News in primaryTabs)
+        assertTrue(AurumTab.Journal in primaryTabs) // News tab removed with the news layer
         assertFalse((primaryTabs + moreTabs).any { it.label == "یادگیری" })
         assertTrue(AurumTab.Update in moreTabs)
         assertTrue(AurumTab.Settings in moreTabs)

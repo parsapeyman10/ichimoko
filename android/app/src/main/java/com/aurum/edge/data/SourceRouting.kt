@@ -3,10 +3,11 @@ package com.aurum.edge.data
 import com.aurum.edge.core.V1Universe
 
 /**
- * Strict 1-to-1 source routing:
- * Every symbol in the 15-symbol catalog comes from exactly one dedicated source,
- * and no two symbols share the same source. All history is fetched only on M5 (1500 candles),
- * while M15 and H1 are derived by resampling from M5.
+ * Source routing with a dedicated primary per symbol plus free fallbacks:
+ * every symbol in the 15-symbol catalog starts from its dedicated source, and
+ * if that source does not answer, the next free source takes over and becomes
+ * the sticky primary (see SourcePromotion). M5/M15/H1 are each fetched
+ * independently — higher timeframes are never resampled from M5.
  */
 internal object SourceRouting {
     enum class DedicatedSource(
@@ -69,6 +70,22 @@ internal object SourceRouting {
         return listOfNotNull(dedicated.historySource)
     }
 
+    /**
+     * Ordered free candidates for failover: the dedicated source first, then the
+     * other free publisher, then Twelve Data when a key exists. A candidate that
+     * cannot serve the symbol (e.g. Yahoo futures are not spot XAU/USD) fails
+     * closed inside its client and the next candidate is tried.
+     */
+    fun historyCandidates(symbol: String, keyed: Boolean = false): List<HistorySource> {
+        val dedicated = dedicatedFor(symbol)?.historySource ?: return emptyList()
+        val fallbacks = buildList {
+            if (!dedicated.usesYahoo) add(HistorySource.YAHOO)
+            if (!dedicated.usesDukascopy) add(HistorySource.DUKASCOPY)
+            if (keyed) add(HistorySource.TWELVE_DATA)
+        }
+        return listOf(dedicated) + fallbacks
+    }
+
     fun fromProvider(provider: String?): HistorySource? {
         if (provider == null) return null
         DedicatedSource.entries.firstOrNull {
@@ -95,6 +112,9 @@ internal object SourceRouting {
     fun historyPlan(symbol: String, keyed: Boolean = false): String {
         val dedicated = dedicatedFor(symbol)
             ?: return "منبع تاریخچهٔ دقیق M5 تعریف نشده؛ بررسی فقط خطا نشان می‌دهد"
-        return "منبع اختصاصی تک‌سورس M5 (۱۵۰۰ کندل): ${dedicated.title} · تبدیل M15 و H1 از کندل ۵ دقیقه"
+        val fallbacks = historyCandidates(symbol, keyed).drop(1)
+            .joinToString(" ← ") { it.providerLabel }
+        return "منبع اصلی: ${dedicated.title} · M5/M15/H1 مستقل" +
+            if (fallbacks.isBlank()) "" else " · جایگزین هنگام بی‌پاسخی: $fallbacks (پاسخ‌گو منبع اصلی می‌شود)"
     }
 }

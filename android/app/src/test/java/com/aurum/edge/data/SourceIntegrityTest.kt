@@ -52,23 +52,29 @@ class SourceIntegrityTest {
         assertNotNull(gate.blocker(symbol, firstRecovery))
     }
 
-    @Test fun `dedicated history rejects a different publisher without trying a fallback`() = runBlocking {
+    @Test fun `publisher mismatch on the dedicated source fails over to the next free source`() = runBlocking {
+        SourcePromotion.resetForTests()
         val now = System.currentTimeMillis()
         val requestedSources = mutableListOf<SourceRouting.HistorySource>()
         val bundle = NonCryptoRadarBundle { _, frame, source, _ ->
             requestedSources += source
-            val count = HistoryPolicy.LIVE_REQUEST_CANDLES
+            val count = HistoryPolicy.fetchSize(frame)
             val last = now / frame.millis * frame.millis - frame.millis
             val bars = (0 until count).map { i ->
                 val price = 100.0
                 Candle(last - (count - 1 - i) * frame.millis, price, price + 1.0, price - 1.0, price, 10.0)
             }
-            // EUR/USD is contractually routed only to Yahoo; a different provider is rejected.
+            // Whatever is asked, this fake answers as Dukascopy: the Yahoo attempt
+            // must fail the publisher check, then the Dukascopy candidate wins.
             PublicCandleHistoryClient.Result(bars, "Dukascopy")
         }
 
-        assertTrue(runCatching { bundle.fetch("EUR/USD", "", now) }.isFailure)
-        assertEquals(listOf(SourceRouting.HistorySource.YAHOO_EURUSD), requestedSources)
+        val snapshot = bundle.fetch("EUR/USD", "", now)
+        assertEquals(SourceRouting.HistorySource.DUKASCOPY, snapshot.source)
+        assertEquals(1, snapshot.priorFailures.size)
+        assertEquals(SourceRouting.HistorySource.YAHOO_EURUSD, requestedSources.first())
+        assertTrue(requestedSources.drop(1).all { it == SourceRouting.HistorySource.DUKASCOPY })
+        assertEquals("DUKASCOPY", SourcePromotion.primaryId("EUR/USD", SourcePromotion.Kind.HISTORY))
     }
 
     @Test fun `automatic and opportunity entry gates reject fresh ticks with stale analysis revision`() {
@@ -77,10 +83,9 @@ class SourceIntegrityTest {
             feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = System.currentTimeMillis()))
         gate.reject(symbol, history, "independent source disagreement")
         val settings = AppSettings()
-        val news = PersianNewsState()
-        assertEquals("independent source disagreement", PaperAutoRules.blocker(market, settings, news))
-        assertEquals("independent source disagreement", PaperAutoRules.opportunityBlocker(market, settings, news))
+        assertEquals("independent source disagreement", PaperAutoRules.blocker(market, settings))
+        assertEquals("independent source disagreement", PaperAutoRules.opportunityBlocker(market, settings))
         gate.accept(symbol, history, gate.begin(symbol, history), 2)
-        assertTrue(PaperAutoRules.blocker(market, settings, news)!!.contains("دوباره"))
+        assertTrue(PaperAutoRules.blocker(market, settings)!!.contains("دوباره"))
     }
 }

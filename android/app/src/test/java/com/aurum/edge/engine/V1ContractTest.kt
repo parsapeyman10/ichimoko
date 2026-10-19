@@ -18,11 +18,6 @@ import com.aurum.edge.core.SignalAction
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import com.aurum.edge.data.AiNewsVerdict
-import com.aurum.edge.data.NewsGate
-import com.aurum.edge.data.NewsSourceStatus
-import com.aurum.edge.data.PersianHeadline
-import com.aurum.edge.data.PersianNewsState
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
@@ -36,16 +31,21 @@ class V1ContractTest {
         Candle(start, price, price + .25, price - .25, price + .03, 100.0, true)
     }
 
-    @Test fun resampledM15AndH1AreDerivedFromM5And513And1024LinesAreComputed() {
-        val base = bars(Interval.M5).takeLast(totalBars)
-        val m15 = MtfAnalyzer.convertFromM5(base, Interval.M15)
-        val h1 = MtfAnalyzer.convertFromM5(base, Interval.H1)
-        assertEquals(500, m15.size)
-        assertEquals(125, h1.size)
-        val ichi = Ichimoku.compute(base, 8, 24, 72, 24)
+    @Test fun independentFramesAreUsedDirectlyAnd513And1024LinesAreComputedOnLongSeries() {
+        // Frames are independent series now (never derived from M5).
+        val m15 = bars(Interval.M15)
+        val h1 = bars(Interval.H1)
+        assertEquals(totalBars + 20, m15.size)
+        assertEquals(totalBars + 20, h1.size)
+        // The 513/1024 Donchian math still works when a long series is supplied.
+        val long = (0 until 1100).map { i ->
+            val price = 100.0 + i * .02 + (i % 5) * .08
+            Candle(now - (1100 - i) * Interval.M5.millis, price, price + .25, price - .25, price + .03, 100.0, true)
+        }
+        val ichi = Ichimoku.compute(long, 8, 24, 72, 24)
         assertNotNull(ichi.line513.last())
         assertNotNull(ichi.line1024.last())
-        assertEquals(SignalAction.BUY, ichi.higherTimeframeBiasAt(base.lastIndex, base.last().close))
+        assertEquals(SignalAction.BUY, ichi.higherTimeframeBiasAt(long.lastIndex, long.last().close))
     }
 
     @Test fun threeRealFrameStackIsScoredAndOldFutureBarsCannotParticipate() {
@@ -74,20 +74,20 @@ class V1ContractTest {
     @Test fun oneShortOrUnclosedFrameBlocksThreeFrameAlignment() {
         val complete = V1Scoring.intervals.associateWith(::bars)
         val short = complete.toMutableMap()
-        short[Interval.M15] = complete.getValue(Interval.M15).takeLast(499)
+        short[Interval.M15] = complete.getValue(Interval.M15).takeLast(239)
         val rejected = SignalEngine.evaluate(complete.getValue(Interval.M5), Interval.M5, 60.0,
             symbol = "EUR/USD", timeframes = short)
         assertEquals(SignalAction.NO_TRADE, rejected.action)
-        assertTrue(rejected.blockers.any { it.contains("15m(499/500)") })
-        assertTrue(rejected.confluence.last().detail.contains("499/500 کندل"))
+        assertTrue(rejected.blockers.any { it.contains("15m(239/240)") })
+        assertTrue(rejected.confluence.last().detail.contains("239/240 کندل"))
 
         val open = complete.toMutableMap()
-        open[Interval.H1] = complete.getValue(Interval.H1).takeLast(125)
-            .mapIndexed { index, candle -> if (index == 124) candle.copy(closed = false) else candle }
+        open[Interval.H1] = complete.getValue(Interval.H1).takeLast(200)
+            .mapIndexed { index, candle -> if (index == 199) candle.copy(closed = false) else candle }
         val blocked = SignalEngine.evaluate(complete.getValue(Interval.M5), Interval.M5, 60.0,
             symbol = "EUR/USD", timeframes = open)
         assertEquals(SignalAction.NO_TRADE, blocked.action)
-        assertTrue(blocked.blockers.any { it.contains("1H(124/125)") })
+        assertTrue(blocked.blockers.any { it.contains("1H(199/200)") })
     }
 
     @Test fun equalDirectionalScoresNeverDefaultBuyAndRangeNeedsDirectionalFrames() {
@@ -194,30 +194,6 @@ class V1ContractTest {
         }
         assertEquals(null, PaperPortfolioPolicy.blocker(olderLosses, "EUR/USD", 975.0, 4.8,
             now = now, openingBalance = 975.0))
-    }
-
-    @Test fun validatedOppositeAiVetoesButUnavailableAiCannotAuthorizeTrades() {
-        val labels = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD",
-            "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی")
-        val raw = Signal(SignalAction.BUY, 100.0, entry = 100.0,
-            stopLoss = 99.0, takeProfit = 101.5, interval = Interval.M5,
-            barTime = now - Interval.M5.millis,
-            confluence = labels.map { ConfluenceItem(it, true, "real-frame fixture", scorePercent = 25) })
-        val headline = PersianHeadline("id1", "FX context", "fixture", "Publisher",
-            "https://publisher.example/news", now - 60_000L,
-            "MEDIUM", "SELL", "rule-label", "en")
-        val news = PersianNewsState(
-            articles = listOf(headline),
-            sources = listOf(NewsSourceStatus("Publisher", "online", "https://publisher.example/rss"),
-                NewsSourceStatus("Forex Factory", "online", "https://nfs.faireconomy.media/ff_calendar_thisweek.json")),
-            gate = NewsGate.CLEAR, lastCheckedAt = now, calendarCheckedAt = now,
-            ai = AiNewsVerdict("AVAILABLE", "EUR/USD", "SELL", 91.0,
-                "test-model", "opposing validated evidence", now, listOf("id1")))
-        val vetoed = NewsConfluence.apply(raw, "EUR/USD", news, now)!!
-        assertEquals(SignalAction.NO_TRADE, vetoed.action)
-        assertTrue(vetoed.blockers.any { it.contains("وتوی AI") })
-        assertEquals(SignalAction.BUY,
-            NewsConfluence.apply(raw, "EUR/USD", news.copy(ai = AiNewsVerdict()), now)!!.action)
     }
 
     @Test fun shortTrailingLocksTheFirstRAfterTwoR() {

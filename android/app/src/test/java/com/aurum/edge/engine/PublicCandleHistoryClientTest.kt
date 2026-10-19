@@ -14,7 +14,7 @@ class PublicCandleHistoryClientTest {
     private val client = PublicCandleHistoryClient()
     private val startMs = 1_700_000_000_000L - (1_700_000_000_000L % Interval.M1.millis)
 
-    private fun yahooJson(rows: Int = HistoryPolicy.TARGET_CANDLES + 2, currency: String = "USD"): String {
+    private fun yahooJson(rows: Int = HistoryPolicy.MAX_CACHED_CANDLES + 2, currency: String = "USD"): String {
         val ts = (0 until rows).joinToString(",") { ((startMs / 1000L) + it * 60L).toString() }
         fun nums(offset: Double) = (0 until rows).joinToString(",") { String.format(java.util.Locale.US, "%.5f", 1.10 + offset + it * 0.00001) }
         val open = nums(0.0)
@@ -31,11 +31,11 @@ class PublicCandleHistoryClientTest {
             expectedSymbol = "EUR/USD",
             expectedYahooSymbol = "EURUSD=X",
             interval = Interval.M1,
-            now = startMs + (HistoryPolicy.TARGET_CANDLES + 2L) * Interval.M1.millis,
+            now = startMs + (HistoryPolicy.MAX_CACHED_CANDLES + 2L) * Interval.M1.millis,
         )
         assertEquals(HistoryPolicy.MAX_CACHED_CANDLES, bars.size)
         assertEquals(startMs + 2L * Interval.M1.millis, bars.first().time)
-        assertEquals(startMs + (HistoryPolicy.TARGET_CANDLES + 1L) * Interval.M1.millis, bars.last().time)
+        assertEquals(startMs + (HistoryPolicy.MAX_CACHED_CANDLES + 1L) * Interval.M1.millis, bars.last().time)
         assertTrue(bars.all { it.closed && it.high >= it.open && it.low <= it.close })
     }
 

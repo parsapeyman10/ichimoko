@@ -31,8 +31,8 @@ class CryptoCompressionEngineTest {
     }
     private val five get() = bars(Interval.M5)
     private val frames get() = mapOf(
-        Interval.M15 to MtfAnalyzer.convertFromM5(five, Interval.M15),
-        Interval.H1 to MtfAnalyzer.convertFromM5(five, Interval.H1),
+        Interval.M15 to bars(Interval.M15),
+        Interval.H1 to bars(Interval.H1),
     )
 
     @Test fun `crypto does not fall through to EMA RSI range or old breakout when setup is absent`() {

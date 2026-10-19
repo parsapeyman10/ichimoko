@@ -1,4 +1,5 @@
 import org.gradle.api.tasks.testing.Test
+import org.gradle.api.attributes.Usage
 import org.gradle.api.tasks.testing.TestDescriptor
 import org.gradle.api.tasks.testing.TestListener
 import org.gradle.api.tasks.testing.TestResult
@@ -62,8 +63,8 @@ android {
         minSdk = 26
         targetSdk = 35
         // Keep the published update channel upgradeable: 2.0.2 is code 674 after v2.0.1 (673).
-        versionCode = 674
-        versionName = "2.0.2"
+        versionCode = 675
+        versionName = "2.0.3"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
@@ -169,6 +170,53 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.robolectric:robolectric:4.14.1")
+}
+
+// Install ALL Robolectric test-requirements through Gradle itself.
+// By default Robolectric downloads its android-all runtime jars from Maven Central the
+// first time a test class runs — outside Gradle's dependency graph — so a transient
+// network failure on the CI runner kills the unit-test step (and with it the APK build).
+// Declaring the exact artifacts here means they are downloaded and cached together with
+// every other build prerequisite, then handed to Robolectric in OFFLINE mode.
+// SDKs used by the suite: 30 and 33 (explicit @Config) + the targetSdk default (35).
+// IMPORTANT: one configuration PER VERSION. All three are the same module
+// (org.robolectric:android-all-instrumented) at different versions, so a single
+// configuration would conflict-resolve down to only the newest jar.
+val robolectricJarFiles: FileCollection = files(
+    listOf(
+        "11-robolectric-6757853-i7",
+        "13-robolectric-9030017-i7",
+        "15-robolectric-12650502-i7",
+    ).map { version ->
+        val config = configurations.create("robolectricRuntime_${version.substringBefore('-')}") {
+            isCanBeConsumed = false
+            isCanBeResolved = true
+            isTransitive = false
+            attributes {
+                attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage::class.java, Usage.JAVA_RUNTIME))
+            }
+        }
+        dependencies.add(config.name, "org.robolectric:android-all-instrumented:$version")
+        config.incoming.artifactView { }.files
+    },
+)
+
+val robolectricDepsDir = layout.buildDirectory.dir("robolectric-deps")
+
+tasks.withType<Test>().configureEach {
+    inputs.files(robolectricJarFiles)
+    doFirst {
+        val dir = robolectricDepsDir.get().asFile
+        dir.mkdirs()
+        val jars = robolectricJarFiles.files
+        check(jars.size == 3) {
+            "expected 3 Robolectric runtime jars (SDK 30/33/35) but resolved ${jars.size}: $jars"
+        }
+        jars.forEach { jar -> jar.copyTo(dir.resolve(jar.name), overwrite = true) }
+        logger.lifecycle("Robolectric offline deps installed: " + jars.joinToString { it.name })
+    }
+    systemProperty("robolectric.offline", "true")
+    systemProperty("robolectric.dependency.dir", robolectricDepsDir.get().asFile.absolutePath)
 }
 
 // GitHub test logs and the HTML report are hosted on storage that is not reachable from

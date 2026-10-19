@@ -48,18 +48,11 @@ internal object CryptoCompressionEngine {
         val longLine = Indicators.donchianMid(bars, 103)
         val atrs = Indicators.atr(bars, 14)
         val adxs = Indicators.adx(bars, 14)
-        val resolvedFrames = if (frames.isEmpty()) {
-            mapOf(
-                Interval.M15 to MtfAnalyzer.convertFromM5(bars, Interval.M15),
-                Interval.H1 to MtfAnalyzer.convertFromM5(bars, Interval.H1),
-            )
-        } else frames
+        // M15/H1 confirmation must come from independently fetched venue candles;
+        // a missing frame blocks below instead of being resampled from M5.
+        val resolvedFrames = frames
         val readyFrames = listOf(Interval.M15, Interval.H1).associateWith { frame ->
-            val minFrameSize = when (frame) {
-                Interval.M15 -> HistoryPolicy.RESAMPLED_M15_CANDLES
-                Interval.H1 -> HistoryPolicy.RESAMPLED_H1_CANDLES
-                else -> WINDOW
-            }
+            val minFrameSize = HistoryPolicy.minSize(frame)
             resolvedFrames[frame].orEmpty().filter { it.closed && it.time + frame.millis <= asOf }
                 .takeLast(WINDOW).takeIf { series ->
                     series.size >= minFrameSize && series.all(::valid) &&

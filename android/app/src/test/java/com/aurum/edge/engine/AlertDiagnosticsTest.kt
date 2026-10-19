@@ -9,10 +9,8 @@ import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
 import com.aurum.edge.data.MarketState
-import com.aurum.edge.data.NewsGate
 import com.aurum.edge.data.PairScanState
 import com.aurum.edge.data.PairScanStatus
-import com.aurum.edge.data.PersianNewsState
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -21,18 +19,16 @@ class AlertDiagnosticsTest {
     private val now = 1_800_000_000_000L
 
     @Test fun `no key no server no foreground monitor reports independent reasons`() {
-        val checks = AlertDiagnostics.checks(MarketState(), AppSettings(), PersianNewsState(),
+        val checks = AlertDiagnostics.checks(MarketState(), AppSettings(),
             monitorRunning = false, androidNotificationsReady = false, trades = emptyList(), mtf = null, now = now)
         for (kind in listOf(AlertCheckKind.KEY, AlertCheckKind.MARKET, AlertCheckKind.HISTORY,
             AlertCheckKind.MONITOR, AlertCheckKind.ANDROID_ALERT, AlertCheckKind.NINE_WAY)) {
             assertFalse(checks.single { it.kind == kind }.ready)
         }
-        assertTrue(checks.single { it.kind == AlertCheckKind.AI_NEWS }.ready)
-        assertTrue(checks.single { it.kind == AlertCheckKind.AI_NEWS }.detail.contains("مدل خبر تنظیم نشده"))
         assertTrue(checks.single { it.kind == AlertCheckKind.APP_ALERT }.ready) // opt-in, but not deliverable yet
     }
 
-    @Test fun `recent REST bars allow live prerequisites but no AI signal or automatic entry`() {
+    @Test fun `recent REST bars allow live prerequisites but no automatic entry`() {
         val count = HistoryPolicy.LIVE_MIN_CANDLES
         val bars = (0 until count).map { i ->
             Candle(now - (count - i) * Interval.M5.millis, 3100.0, 3101.0, 3099.0, 3100.0, closed = true)
@@ -41,14 +37,13 @@ class AlertDiagnosticsTest {
         val settings = AppSettings(apiKey = "synthetic-only", backgroundMonitor = true,
             notifyOnSignal = true, newsBaseUrl = "https://news.example.org")
         fun report(state: MarketState, running: Boolean = true, error: String? = null) =
-            AlertDiagnostics.checks(state, settings, PersianNewsState(gate = NewsGate.UNKNOWN),
+            AlertDiagnostics.checks(state, settings,
                 monitorRunning = running, androidNotificationsReady = true, trades = emptyList(),
                 mtf = null, opportunityError = error, now = now)
         val checks = report(market)
         assertTrue(checks.single { it.kind == AlertCheckKind.MARKET }.ready)
         assertTrue(checks.single { it.kind == AlertCheckKind.HISTORY }.ready)
         assertTrue(checks.single { it.kind == AlertCheckKind.MONITOR }.ready)
-        assertTrue(checks.single { it.kind == AlertCheckKind.AI_NEWS }.ready)
         assertFalse(checks.single { it.kind == AlertCheckKind.NINE_WAY }.ready)
         assertFalse(report(market, running = false).single { it.kind == AlertCheckKind.MONITOR }.ready)
         assertFalse(report(market.copy(showingCachedData = true)).single { it.kind == AlertCheckKind.MARKET }.ready)
@@ -58,7 +53,7 @@ class AlertDiagnosticsTest {
     @Test fun `continuous symbol scanning is itself monitored and goes red when it stalls`() {
         val settings = AppSettings(backgroundMonitor = true, notifyOnSignal = true)
         fun report(scan: PairScanState?) =
-            AlertDiagnostics.checks(MarketState(), settings, PersianNewsState(), monitorRunning = true,
+            AlertDiagnostics.checks(MarketState(), settings, monitorRunning = true,
                 androidNotificationsReady = true, trades = emptyList(), mtf = null, scan = scan, now = now)
 
         val fresh = report(PairScanState(

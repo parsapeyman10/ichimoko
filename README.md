@@ -2,6 +2,8 @@
 
 [قرارداد فعلی V1 و محدودیت‌های اجرا](docs/CURRENT_CONTRACT_FA.md) مرجع واحد قوانین محصول است؛ توضیح نسخه‌های قدیمی نباید جایگزین آن شود. پروژهٔ بومی Kotlin / Jetpack Compose در `android/` قرار دارد. **هیچ سفارش واقعی به بروکر/صرافی ارسال نمی‌شود.**
 
+🗺️ **[نقشهٔ فلوچارت تعاملی اپ — لینک دائمی](https://htmlpreview.github.io/?https://github.com/parsapeyman10/ichimoko/blob/arena/668fb7a1-ichimoko/docs/flowchart/index.html)** — ۴۲ نمودار چندسطحی از کل منطق اپ + کاتالوگ کامل فانکشن‌ها؛ نسخهٔ آفلاین در `docs/flowchart/index.html` و راهنما در [`docs/FLOWCHART_FA.md`](docs/FLOWCHART_FA.md).
+
 ## نمادها و اتصال مستقل
 
 - **۲۰۰ نماد کریپتو/USDT** در کاتالوگ آفلاین، جستجو و اسکن؛ فارکس و کالا حفظ شده‌اند. سهام آمریکا/ETF از انتخاب فعال حذف شده و سابقهٔ معاملات قبلی محفوظ است.
