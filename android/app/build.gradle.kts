@@ -171,6 +171,37 @@ dependencies {
     testImplementation("org.robolectric:robolectric:4.14.1")
 }
 
+// Install ALL Robolectric test-requirements through Gradle itself.
+// By default Robolectric downloads its android-all runtime jars from Maven Central the
+// first time a test class runs — outside Gradle's dependency graph — so a transient
+// network failure on the CI runner kills the unit-test step (and with it the APK build).
+// Declaring the exact artifacts here means they are downloaded and cached together with
+// every other build prerequisite, then handed to Robolectric in OFFLINE mode.
+// SDKs used by the suite: 30 and 33 (explicit @Config) + the targetSdk default (35).
+val robolectricRuntime by configurations.creating {
+    isCanBeConsumed = false
+    isCanBeResolved = true
+}
+
+dependencies {
+    robolectricRuntime("org.robolectric:android-all-instrumented:11-robolectric-6757853-i7")
+    robolectricRuntime("org.robolectric:android-all-instrumented:13-robolectric-9030017-i7")
+    robolectricRuntime("org.robolectric:android-all-instrumented:15-robolectric-12650502-i7")
+}
+
+val robolectricDepsDir = layout.buildDirectory.dir("robolectric-deps")
+
+val prepareRobolectricDeps by tasks.registering(Copy::class) {
+    from(robolectricRuntime)
+    into(robolectricDepsDir)
+}
+
+tasks.withType<Test>().configureEach {
+    dependsOn(prepareRobolectricDeps)
+    systemProperty("robolectric.offline", "true")
+    systemProperty("robolectric.dependency.dir", robolectricDepsDir.get().asFile.absolutePath)
+}
+
 // GitHub test logs and the HTML report are hosted on storage that is not reachable from
 // every environment, and ::error:: workflow commands printed by a test listener do not
 // reliably become annotations. The Gradle FAILURE MESSAGE does, so the authoritative list
