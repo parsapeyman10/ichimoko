@@ -1,4 +1,5 @@
 import org.gradle.api.tasks.testing.Test
+import org.gradle.api.attributes.Usage
 import org.gradle.api.tasks.testing.TestDescriptor
 import org.gradle.api.tasks.testing.TestListener
 import org.gradle.api.tasks.testing.TestResult
@@ -181,6 +182,9 @@ dependencies {
 val robolectricRuntime by configurations.creating {
     isCanBeConsumed = false
     isCanBeResolved = true
+    attributes {
+        attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage::class.java, Usage.JAVA_RUNTIME))
+    }
 }
 
 dependencies {
@@ -191,13 +195,19 @@ dependencies {
 
 val robolectricDepsDir = layout.buildDirectory.dir("robolectric-deps")
 
-val prepareRobolectricDeps by tasks.registering(Copy::class) {
-    from(robolectricRuntime)
-    into(robolectricDepsDir)
-}
-
 tasks.withType<Test>().configureEach {
-    dependsOn(prepareRobolectricDeps)
+    val runtimeJars = robolectricRuntime.incoming.artifactView { }.files
+    inputs.files(runtimeJars)
+    doFirst {
+        val dir = robolectricDepsDir.get().asFile
+        dir.mkdirs()
+        val jars = runtimeJars.files
+        check(jars.isNotEmpty()) {
+            "robolectricRuntime resolved to no files; Robolectric offline deps are not installed"
+        }
+        jars.forEach { jar -> jar.copyTo(dir.resolve(jar.name), overwrite = true) }
+        logger.lifecycle("Robolectric offline deps installed: " + jars.joinToString { it.name })
+    }
     systemProperty("robolectric.offline", "true")
     systemProperty("robolectric.dependency.dir", robolectricDepsDir.get().asFile.absolutePath)
 }
