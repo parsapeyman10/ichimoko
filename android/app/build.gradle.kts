@@ -63,6 +63,7 @@ android {
         minSdk = 26
         targetSdk = 35
         // Keep the published update channel upgradeable: 2.0.4 is code 676 after 2.0.3 (675).
+        // 2.0.4 ships the Dukascopy chart-JSON history transport (docs/DATA_SOURCE_RECOVERY_2_0_4_FA.md).
         versionCode = 676
         versionName = "2.0.4"
         resourceConfigurations += listOf("en", "fa")
