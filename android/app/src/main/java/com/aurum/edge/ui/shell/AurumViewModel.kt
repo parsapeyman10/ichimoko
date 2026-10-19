@@ -281,13 +281,15 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private fun ensureVisibleOnlineLoop() {
         if (visibleOnlineLoopStarted) return
         visibleOnlineLoopStarted = true
-        // Radar has its own clock: a stalled news or AI request must never delay the next
-        // symbol sweep. The scanner itself rejects closed markets and respects provider pacing.
+        // Radar runs on the shared MonitorCadence: 60s base, 20s while a symbol is a
+        // live candidate / near entry. The scanner's own per-symbol throttle enforces
+        // the same grid even if other callers ask sooner.
         viewModelScope.launch {
             while (isActive) {
                 if (visibleOnlineLoopEnabled || SignalMonitorService.running.value)
                     container.pairScanner.refreshNow()
-                delay(60_000L)
+                delay(com.aurum.edge.core.MonitorCadence.sweepDelayMs(
+                    container.pairScanner.state.value.statuses.map { it.state to it.confidence }))
             }
         }
         viewModelScope.launch {

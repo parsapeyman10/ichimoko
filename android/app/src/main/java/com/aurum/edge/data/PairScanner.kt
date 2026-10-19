@@ -147,15 +147,26 @@ class PairScanner(
         statuses = com.aurum.edge.core.V1Universe.defaults.map { PairScanStatus(it, "pending", "هنوز اسکن نشده") }))
     val state: StateFlow<PairScanState> = _state.asStateFlow()
 
-    fun refreshNow(minIntervalMs: Long = SWEEP_PERIOD_MS,
+    fun refreshNow(minIntervalMs: Long = -1L,
                    onCandidate: (suspend (PaperOpportunity) -> Unit)? = null) {
-        schedule(minIntervalMs, onCandidate)
+        schedule(effectiveInterval(minIntervalMs), onCandidate)
     }
 
-    suspend fun sweepOnce(minIntervalMs: Long = SWEEP_PERIOD_MS,
+    suspend fun sweepOnce(minIntervalMs: Long = -1L,
                           onCandidate: (suspend (PaperOpportunity) -> Unit)? = null) {
-        schedule(minIntervalMs, onCandidate).joinAll()
+        schedule(effectiveInterval(minIntervalMs), onCandidate).joinAll()
     }
+
+    /**
+     * The scanner's own per-symbol throttle IS the app-wide cadence: 60s normally,
+     * 20s while any symbol is a live candidate / near entry (MonitorCadence).
+     * Callers may still force an explicit interval (0 = event-driven immediate
+     * re-check after a network/settings change).
+     */
+    private fun effectiveInterval(requested: Long): Long =
+        if (requested >= 0) requested
+        else com.aurum.edge.core.MonitorCadence.sweepDelayMs(
+            state.value.statuses.map { it.state to it.confidence })
 
     private fun schedule(minIntervalMs: Long, onCandidate: (suspend (PaperOpportunity) -> Unit)?): List<Job> {
         val config = settings.read()
@@ -631,6 +642,6 @@ class PairScanner(
     }
 
     companion object {
-        const val SWEEP_PERIOD_MS = 30_000L
+        const val SWEEP_PERIOD_MS = com.aurum.edge.core.MonitorCadence.BASE_SWEEP_MS
     }
 }
