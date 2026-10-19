@@ -50,6 +50,27 @@ class SourceRoutingTest {
         assertEquals(CryptoRadarCandleClient.Venue.KRAKEN, SourceRouting.cryptoVenueFor("XRP/USDT"))
     }
 
+    @Test fun `history candidates only include publishers that can serve the instrument`() {
+        // Yahoo has no spot XAU/USD chart: a Yahoo attempt for gold is a guaranteed failure.
+        assertEquals(listOf(SourceRouting.HistorySource.DUKASCOPY_XAU),
+            SourceRouting.historyCandidates("XAU/USD"))
+        assertEquals(listOf(SourceRouting.HistorySource.DUKASCOPY_XAG),
+            SourceRouting.historyCandidates("XAG/USD"))
+        assertEquals(
+            listOf(SourceRouting.HistorySource.DUKASCOPY_XAU, SourceRouting.HistorySource.TWELVE_DATA),
+            SourceRouting.historyCandidates("XAU/USD", keyed = true),
+        )
+        // Forex keeps the real cross-publisher fallback.
+        assertEquals(
+            listOf(SourceRouting.HistorySource.YAHOO_EURUSD, SourceRouting.HistorySource.DUKASCOPY),
+            SourceRouting.historyCandidates("EUR/USD"),
+        )
+        assertEquals(
+            listOf(SourceRouting.HistorySource.DUKASCOPY_GBPUSD, SourceRouting.HistorySource.YAHOO),
+            SourceRouting.historyCandidates("GBP/USD"),
+        )
+    }
+
     @Test fun `unknown symbols have no dedicated source or history fallback`() {
         assertNull(SourceRouting.dedicatedFor("AAPL"))
         assertNull(SourceRouting.cryptoVenueFor("AAPL"))
