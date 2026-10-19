@@ -75,7 +75,10 @@ class PublicCandleHistoryClient(
                             ?: throw DataFeedException("پاسخ Yahoo خالی است")
                     }
                 } catch (cancel: CancellationException) { throw cancel }
-                catch (_: Exception) { null }
+                catch (error: Exception) {
+                    hostErrors += "$host: ${(error.message ?: "خطای نامشخص").take(80)}"
+                    null
+                }
             } ?: throw DataFeedException("Yahoo هر دو میزبان ناموفق: ${hostErrors.joinToString("؛ ").take(210)}")
         val baseInterval = if (interval == Interval.H4) Interval.H1 else interval
         val parsed = parseYahooChart(body, symbol, yahoo, baseInterval,

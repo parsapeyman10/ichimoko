@@ -78,9 +78,16 @@ internal object SourceRouting {
      */
     fun historyCandidates(symbol: String, keyed: Boolean = false): List<HistorySource> {
         val dedicated = dedicatedFor(symbol)?.historySource ?: return emptyList()
+        // Never offer a publisher that cannot serve this exact instrument: a guaranteed
+        // failure is reported as an outage and hides the sources that can actually answer.
+        // Yahoo has no spot XAU/USD or XAG/USD chart symbol (only futures/ETF proxies that
+        // must not be relabeled), so gold and silver fall back to the Dukascopy chart feed
+        // and, when a key exists, Twelve Data instead of a dead Yahoo attempt.
+        val yahooServes = PublicCandleHistoryClient.yahooSymbol(symbol) != null
+        val dukascopyServes = DukascopyHistoryClient.instrument(symbol) != null
         val fallbacks = buildList {
-            if (!dedicated.usesYahoo) add(HistorySource.YAHOO)
-            if (!dedicated.usesDukascopy) add(HistorySource.DUKASCOPY)
+            if (!dedicated.usesYahoo && yahooServes) add(HistorySource.YAHOO)
+            if (!dedicated.usesDukascopy && dukascopyServes) add(HistorySource.DUKASCOPY)
             if (keyed) add(HistorySource.TWELVE_DATA)
         }
         return listOf(dedicated) + fallbacks
@@ -114,7 +121,9 @@ internal object SourceRouting {
             ?: return "منبع تاریخچهٔ دقیق M5 تعریف نشده؛ بررسی فقط خطا نشان می‌دهد"
         val fallbacks = historyCandidates(symbol, keyed).drop(1)
             .joinToString(" ← ") { it.providerLabel }
-        return "منبع اصلی: ${dedicated.title} · M5/M15/H1 مستقل" +
+        val transports = if (dedicated.historySource?.usesDukascopy == true)
+            " · دو مسیر انتقال همان ناشر (نمودار JSON + آرشیو bi5)" else ""
+        return "منبع اصلی: ${dedicated.title}$transports · M5/M15/H1 مستقل" +
             if (fallbacks.isBlank()) "" else " · جایگزین هنگام بی‌پاسخی: $fallbacks (پاسخ‌گو منبع اصلی می‌شود)"
     }
 }

@@ -28,7 +28,7 @@ Raw Senkou values remain at their computation index. `cloudAt(index)`, `spanAAt(
 
 ## Provider policy
 
-For chart/research history the public, keyless history adapter is tried first. A user-entered Twelve Data key is the last fallback, not the primary. Provider output is checked for symbol, currency, interval, timestamps, OHLC validity, duplicate timestamps, freshness and minimum real-bar count. Observed time gaps are retained in provenance and passed through unchanged; a gap never becomes a synthetic candle.
+For chart/research history the public, keyless history adapter is tried first. Dukascopy gold/FX history has two transports of the same publisher (chart JSON and the bi5 archive); a publisher that cannot serve the requested instrument (Yahoo spot XAU/USD) is not offered as a fallback. A user-entered Twelve Data key is the last fallback, not the primary. Provider output is checked for symbol, currency, interval, timestamps, OHLC validity, duplicate timestamps, freshness and minimum real-bar count. Observed time gaps are retained in provenance and passed through unchanged; a gap never becomes a synthetic candle.
 
 The app is a forex/XAU workspace. Crypto-only APIs such as Binance, Kraken, CoinGecko, and similar services are not treated as valid XAU/USD or FX history providers. A source must match the requested instrument and timeframe; broad coverage is not a substitute for venue/instrument identity.
 

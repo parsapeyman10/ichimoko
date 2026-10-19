@@ -48,16 +48,27 @@ class NonCryptoRadarBundleTest {
 
     @Test fun `unresponsive dedicated source is replaced and the responder becomes primary`() = runBlocking {
         val bundle = NonCryptoRadarBundle { _, frame, source, _ ->
-            if (source == SourceRouting.HistorySource.DUKASCOPY_XAU)
-                throw DataFeedException("Dukascopy unreachable")
+            if (source == SourceRouting.HistorySource.YAHOO_EURUSD)
+                throw DataFeedException("Yahoo unreachable")
             PublicCandleHistoryClient.Result(
                 closedSeries(frame, HistoryPolicy.fetchSize(frame)), source.providerLabel)
         }
-        val gold = bundle.fetch("XAU/USD", "", now)
-        assertEquals(SourceRouting.HistorySource.YAHOO, gold.source)
-        assertEquals(1, gold.priorFailures.size)
-        assertTrue(gold.priorFailures.single().contains("Dukascopy"))
-        assertEquals("YAHOO", SourcePromotion.primaryId("XAU/USD", SourcePromotion.Kind.HISTORY))
+        val eur = bundle.fetch("EUR/USD", "", now)
+        assertEquals(SourceRouting.HistorySource.DUKASCOPY, eur.source)
+        assertEquals(1, eur.priorFailures.size)
+        assertTrue(eur.priorFailures.single().contains("Yahoo"))
+        assertEquals("DUKASCOPY", SourcePromotion.primaryId("EUR/USD", SourcePromotion.Kind.HISTORY))
+    }
+
+    @Test fun `spot gold never falls back to a publisher that cannot serve it`() = runBlocking {
+        val requested = mutableListOf<SourceRouting.HistorySource>()
+        val bundle = NonCryptoRadarBundle { _, _, source, _ ->
+            requested += source
+            throw DataFeedException("${source.providerLabel} unreachable")
+        }
+        assertTrue(runCatching { bundle.fetch("XAU/USD", "", now) }.isFailure)
+        assertEquals(listOf(SourceRouting.HistorySource.DUKASCOPY_XAU), requested.distinct())
+        assertTrue(requested.all { it == SourceRouting.HistorySource.DUKASCOPY_XAU })
     }
 
     @Test fun `incomplete history from every source is rejected`() = runBlocking {

@@ -78,13 +78,15 @@ internal class NonCryptoRadarBundle(
             }
         }
 
+        val hint = if (apiKey.isBlank())
+            " · جایگزین: کلید رایگان Twelve Data را در تنظیمات وارد کنید" else ""
         HistorySourceAudits.record(
             symbol, null,
-            "همهٔ منابع تاریخچه بی‌پاسخ‌اند و باید جایگزین شوند: ${failures.joinToString("؛ ").take(300)}",
+            "همهٔ منابع تاریخچه بی‌پاسخ‌اند و باید جایگزین شوند$hint: ${failures.joinToString("؛ ").take(300)}",
             System.currentTimeMillis(),
         )
         throw DataFeedException(
-            "$symbol: هیچ منبع تاریخچه‌ای بستهٔ سالم نداد — ${failures.joinToString("؛ ").take(300)}")
+            "$symbol: هیچ منبع تاریخچه‌ای بستهٔ سالم نداد$hint — ${failures.joinToString("؛ ").take(300)}")
     }
 
     /** One publisher must deliver ALL THREE independent frames healthy, or it does not count. */
