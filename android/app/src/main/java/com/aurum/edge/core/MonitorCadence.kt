@@ -30,3 +30,5 @@ object MonitorCadence {
         if (statuses.any { (state, confidence) -> isHot(state, confidence) }) HOT_SWEEP_MS
         else BASE_SWEEP_MS
 }
+
+// CI build trigger — no behavior change.
