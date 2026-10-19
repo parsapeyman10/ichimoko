@@ -173,7 +173,39 @@ class PublicCandleHistoryClient(
         return if (trimToCache) sorted.takeLast(trimSize.coerceAtLeast(1)) else sorted
     }
 
-    internal fun yahooSymbol(symbol: String): String? {
+    internal fun yahooSymbol(symbol: String): String? = yahooChartSymbol(symbol)
+
+    private fun encodeYahooPath(value: String): String =
+        URLEncoder.encode(value, "UTF-8").replace("+", "%20").replace("%3D", "=")
+
+    private fun requestInterval(interval: Interval): String = when (interval) {
+        Interval.M1 -> "1m"
+        Interval.M3 -> throw DataFeedException("کندل ۳دقیقهٔ کریپتو فقط از M1 نوبیتکس ساخته می‌شود")
+        Interval.M5 -> "5m"
+        Interval.M15 -> "15m"
+        Interval.M30 -> "30m"
+        Interval.H1, Interval.H4 -> "60m"
+        Interval.D1 -> "1d"
+    }
+
+    private fun range(interval: Interval): String = when (interval) {
+        Interval.M1 -> "7d"
+        Interval.M3 -> "7d"
+        Interval.M5 -> "60d"
+        Interval.M15 -> "60d"
+        Interval.M30 -> "60d"
+        Interval.H1, Interval.H4 -> "2y"
+        Interval.D1 -> "15y"
+    }
+
+    private fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
+    private fun JsonObject.array(key: String): JsonArray? = this[key] as? JsonArray
+    private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
+    private fun JsonElement.num(): Double? = (this as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()
+}
+
+/** Yahoo chart symbol for an exact instrument; `null` means the publisher cannot serve it. */
+internal fun yahooChartSymbol(symbol: String): String? {
         val key = symbol.trim().uppercase(Locale.ROOT)
         return when (key) {
             // Yahoo commodity futures and ETF/index proxies are NOT XAU/USD spot,
@@ -219,33 +251,4 @@ class PublicCandleHistoryClient(
                 } else null
             }
         }
-    }
-
-    private fun encodeYahooPath(value: String): String =
-        URLEncoder.encode(value, "UTF-8").replace("+", "%20").replace("%3D", "=")
-
-    private fun requestInterval(interval: Interval): String = when (interval) {
-        Interval.M1 -> "1m"
-        Interval.M3 -> throw DataFeedException("کندل ۳دقیقهٔ کریپتو فقط از M1 نوبیتکس ساخته می‌شود")
-        Interval.M5 -> "5m"
-        Interval.M15 -> "15m"
-        Interval.M30 -> "30m"
-        Interval.H1, Interval.H4 -> "60m"
-        Interval.D1 -> "1d"
-    }
-
-    private fun range(interval: Interval): String = when (interval) {
-        Interval.M1 -> "7d"
-        Interval.M3 -> "7d"
-        Interval.M5 -> "60d"
-        Interval.M15 -> "60d"
-        Interval.M30 -> "60d"
-        Interval.H1, Interval.H4 -> "2y"
-        Interval.D1 -> "15y"
-    }
-
-    private fun JsonObject.obj(key: String): JsonObject? = this[key] as? JsonObject
-    private fun JsonObject.array(key: String): JsonArray? = this[key] as? JsonArray
-    private fun JsonObject.text(key: String): String? = (this[key] as? JsonPrimitive)?.contentOrNull
-    private fun JsonElement.num(): Double? = (this as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()
 }

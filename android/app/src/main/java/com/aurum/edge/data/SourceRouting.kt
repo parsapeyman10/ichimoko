@@ -83,7 +83,7 @@ internal object SourceRouting {
         // Yahoo has no spot XAU/USD or XAG/USD chart symbol (only futures/ETF proxies that
         // must not be relabeled), so gold and silver fall back to the Dukascopy chart feed
         // and, when a key exists, Twelve Data instead of a dead Yahoo attempt.
-        val yahooServes = PublicCandleHistoryClient.yahooSymbol(symbol) != null
+        val yahooServes = yahooChartSymbol(symbol) != null
         val dukascopyServes = DukascopyHistoryClient.instrument(symbol) != null
         val fallbacks = buildList {
             if (!dedicated.usesYahoo && yahooServes) add(HistorySource.YAHOO)
