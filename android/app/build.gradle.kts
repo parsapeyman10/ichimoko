@@ -179,31 +179,38 @@ dependencies {
 // Declaring the exact artifacts here means they are downloaded and cached together with
 // every other build prerequisite, then handed to Robolectric in OFFLINE mode.
 // SDKs used by the suite: 30 and 33 (explicit @Config) + the targetSdk default (35).
-val robolectricRuntime by configurations.creating {
-    isCanBeConsumed = false
-    isCanBeResolved = true
-    attributes {
-        attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage::class.java, Usage.JAVA_RUNTIME))
-    }
-}
-
-dependencies {
-    robolectricRuntime("org.robolectric:android-all-instrumented:11-robolectric-6757853-i7")
-    robolectricRuntime("org.robolectric:android-all-instrumented:13-robolectric-9030017-i7")
-    robolectricRuntime("org.robolectric:android-all-instrumented:15-robolectric-12650502-i7")
-}
+// IMPORTANT: one configuration PER VERSION. All three are the same module
+// (org.robolectric:android-all-instrumented) at different versions, so a single
+// configuration would conflict-resolve down to only the newest jar.
+val robolectricJarFiles: FileCollection = files(
+    listOf(
+        "11-robolectric-6757853-i7",
+        "13-robolectric-9030017-i7",
+        "15-robolectric-12650502-i7",
+    ).map { version ->
+        val config = configurations.create("robolectricRuntime_${version.substringBefore('-')}") {
+            isCanBeConsumed = false
+            isCanBeResolved = true
+            isTransitive = false
+            attributes {
+                attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage::class.java, Usage.JAVA_RUNTIME))
+            }
+        }
+        dependencies.add(config.name, "org.robolectric:android-all-instrumented:$version")
+        config.incoming.artifactView { }.files
+    },
+)
 
 val robolectricDepsDir = layout.buildDirectory.dir("robolectric-deps")
 
 tasks.withType<Test>().configureEach {
-    val runtimeJars = robolectricRuntime.incoming.artifactView { }.files
-    inputs.files(runtimeJars)
+    inputs.files(robolectricJarFiles)
     doFirst {
         val dir = robolectricDepsDir.get().asFile
         dir.mkdirs()
-        val jars = runtimeJars.files
-        check(jars.isNotEmpty()) {
-            "robolectricRuntime resolved to no files; Robolectric offline deps are not installed"
+        val jars = robolectricJarFiles.files
+        check(jars.size == 3) {
+            "expected 3 Robolectric runtime jars (SDK 30/33/35) but resolved ${jars.size}: $jars"
         }
         jars.forEach { jar -> jar.copyTo(dir.resolve(jar.name), overwrite = true) }
         logger.lifecycle("Robolectric offline deps installed: " + jars.joinToString { it.name })
