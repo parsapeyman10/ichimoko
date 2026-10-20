@@ -197,14 +197,14 @@ class AppContainer(context: Context) {
             } catch (deepFailure: Exception) {
                 deepFailure
             }
-            if (!s.hasKey) {
+            if (!s.hasKeyFor(symbol)) {
                 throw DataFeedException(
                     "Yahoo و Dukascopy تاریخچهٔ معتبر ندادند و کلید fallback تنظیم نشده است: " +
                         (dukascopyFailure.message ?: publicFailure.message ?: "خطای نامشخص").take(140)
                 )
             }
             try {
-                val candles = client.fetchCandles(s.apiKey, symbol, interval, twelveRequested)
+                val candles = client.fetchCandles(s.apiKeyFor(symbol), symbol, interval, twelveRequested)
                 if (candles.size < HistoryPolicy.TARGET_CANDLES) {
                     throw DataFeedException("Twelve Data فقط ${candles.size} کندل داد؛ حداقل ${HistoryPolicy.TARGET_CANDLES} کندل واقعی لازم است")
                 }

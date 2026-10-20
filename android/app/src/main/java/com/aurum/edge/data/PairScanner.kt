@@ -206,7 +206,7 @@ class PairScanner(
         _state.update { old -> old.copy(totalCount = universe.size,
             statuses = universe.map { symbol -> old.statuses.find { it.symbol == symbol }
                 ?: PairScanStatus(symbol, "pending", "موتور مستقل این نماد هنوز داده ندارد",
-                    sourcePlan = SourceRouting.historyPlan(symbol, config.hasKey)) }) }
+                    sourcePlan = SourceRouting.historyPlan(symbol, config.hasKeyFor(symbol))) }) }
         // Randomize admission order, so scarce publisher slots do not always favor the
         // first catalog rows. No symbol waits for the last symbol of a previous pass.
         return universe.shuffled().mapNotNull { symbol -> workers.submit(symbol, minIntervalMs) {
@@ -244,7 +244,7 @@ class PairScanner(
         trendSample.remove(symbol)
         _state.update { old ->
             val rows = old.statuses.map { if (it.symbol == symbol) PairScanStatus(symbol, state, detail,
-                lastScanAt = System.currentTimeMillis(), sourcePlan = SourceRouting.historyPlan(symbol, settings.read().hasKey)) else it }
+                lastScanAt = System.currentTimeMillis(), sourcePlan = SourceRouting.historyPlan(symbol, settings.read().hasKeyFor(symbol))) else it }
             val ranked = rankOpportunities(rows)
             old.copy(statuses = rows, checkedCount = rows.count { it.lastScanAt != null },
                 topThree = ranked.take(3), bestPick = ranked.firstOrNull(), marketTrend = freshTrend())
@@ -282,7 +282,7 @@ class PairScanner(
         _state.update { old ->
             val rows = old.statuses.map { row -> if (row.symbol in universe)
                 PairScanStatus(row.symbol, "pending", "موتور مستقل در حال دریافت و مقایسهٔ منابع",
-                    sourcePlan = SourceRouting.historyPlan(row.symbol, config.hasKey)) else row }
+                    sourcePlan = SourceRouting.historyPlan(row.symbol, config.hasKeyFor(row.symbol))) else row }
             val ranked = rankOpportunities(rows)
             old.copy(statuses = rows, topThree = ranked.take(3), bestPick = ranked.firstOrNull())
         }
@@ -317,7 +317,7 @@ class PairScanner(
                 detail = detail,
                 interval = chosenIntervals[symbol],
                 lastScanAt = System.currentTimeMillis(),
-                sourcePlan = SourceRouting.historyPlan(symbol, config.hasKey),
+                sourcePlan = SourceRouting.historyPlan(symbol, config.hasKeyFor(symbol)),
                 baseSource = baseSources[symbol],
                 lastBarAt = barTimes[symbol],
                 price = price,
@@ -413,7 +413,7 @@ class PairScanner(
                     return@async
                 } else null
                 val nonCryptoSnapshot = if (!crypto) try {
-                    nonCryptoBundle.fetch(symbol, config.apiKey, now)
+                    nonCryptoBundle.fetch(symbol, config.apiKeyFor(symbol), now)
                 } catch (cancel: CancellationException) { throw cancel }
                 catch (failure: Exception) {
                     update(symbol, if (failure is PublisherOccupied) "capacity" else "error",

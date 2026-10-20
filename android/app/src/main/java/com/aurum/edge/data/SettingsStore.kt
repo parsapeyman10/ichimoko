@@ -9,6 +9,9 @@ import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.CategoryStrategy
 import com.aurum.edge.core.V1Universe
 import com.aurum.edge.core.SignalProfile
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -42,8 +45,54 @@ class SettingsStore(context: Context) {
             .apply()
     }
 
+    // Declared BEFORE the first read(): read() parses the per-symbol key map, and a property
+    // initialised later would still be null on that first call.
+    private var symbolKeyCache: Pair<String, Map<String, String>>? = null
+
     private val _settings = MutableStateFlow(read())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
+
+    /**
+     * Dedicated Twelve Data keys, one per catalog symbol. The free plan meters every key
+     * separately, so a symbol with its own key is not starved by the other thirteen.
+     * Anything unreadable (corrupt JSON, unknown symbol, whitespace) is dropped rather than
+     * guessed: a bad entry silently means "use the global key" and never a made-up credential.
+     */
+    private fun readSymbolKeys(): Map<String, String> {
+        val raw = prefs.getString(KEY_TD_KEYS, null).orEmpty()
+        symbolKeyCache?.let { (cachedRaw, cached) -> if (cachedRaw == raw) return cached }
+        val map: Map<String, String> = if (raw.isBlank()) emptyMap() else
+            runCatching { KEY_JSON.decodeFromString(symbolKeySerializer, raw) }
+                .getOrElse { emptyMap<String, String>() }
+                .entries.mapNotNull { entry ->
+                    val symbol = V1Universe.normalize(entry.key)
+                    val key = entry.value.trim()
+                    if (!V1Universe.valid(symbol) || key.isEmpty() || key.any { it.isWhitespace() }) null
+                    else symbol to key
+                }.toMap()
+        symbolKeyCache = raw to map
+        return map
+    }
+
+    /** Persist one dedicated key (blank removes it) as a single verified disk write. */
+    @Synchronized
+    fun saveSymbolKey(symbolInput: String, keyInput: String): Boolean {
+        val symbol = V1Universe.normalize(symbolInput)
+        if (!V1Universe.valid(symbol)) return false
+        val key = keyInput.trim()
+        if (key.any { it.isWhitespace() }) return false
+        val next = readSymbolKeys().toMutableMap()
+        if (key.isBlank()) next.remove(symbol) else next[symbol] = key
+        val encoded = KEY_JSON.encodeToString(symbolKeySerializer, next)
+        if (!prefs.edit().putString(KEY_TD_KEYS, encoded).commit()) return false
+        symbolKeyCache = null
+        if (readSymbolKeys() != next) return false
+        _settings.value = read()
+        return true
+    }
+
+    /** The dedicated key for one symbol, or blank when it falls back to the global key. */
+    fun symbolKey(symbol: String): String = readSymbolKeys()[V1Universe.normalize(symbol)].orEmpty()
 
     fun read(): AppSettings {
         // Legacy profile preferences remain readable for existing on-device records, but
@@ -69,6 +118,7 @@ class SettingsStore(context: Context) {
         return AppSettings(
         apiKey = storedApiKey?.takeIf { it.isNotBlank() }
             ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY.trim(),
+        twelveDataKeys = readSymbolKeys(),
         // Symbol can be any instrument in the 15-symbol catalog (metals, Dow Jones, Ichimoku forex, top-5 crypto)
         symbol = V1Universe.normalize(prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD")
             .takeIf(V1Universe::valid) ?: "XAU/USD",
@@ -254,7 +304,11 @@ class SettingsStore(context: Context) {
         prefs.getLong("last_sync_${symbol}_${interval.label}", 0L).takeIf { it > 0L }
 
     companion object {
+        /** Dedicated keys are a symbol→key JSON map; unknown keys are ignored, never guessed. */
+        private val symbolKeySerializer = MapSerializer(String.serializer(), String.serializer())
+        private val KEY_JSON = Json { ignoreUnknownKeys = true }
         private const val KEY_API = "td_api_key"
+        private const val KEY_TD_KEYS = "td_symbol_keys_json"
         private const val KEY_SYMBOL = "symbol"
         private const val KEY_INTERVAL = "interval"
         private const val KEY_RISK = "risk_percent"

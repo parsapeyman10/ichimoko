@@ -160,7 +160,7 @@ class MarketRepository(
         val current = settings.read()
         // Entering the screen while the user-started service is already running must NOT
         // tear down a healthy socket, roll back its last tick, or duplicate REST requests.
-        if (started && activeKey == current.apiKey && _state.value.symbol == current.symbol &&
+        if (started && activeKey == current.apiKeyFor(current.symbol) && _state.value.symbol == current.symbol &&
             _state.value.interval == current.interval &&
             ((marketClosed() && _state.value.feed.mode == FeedMode.MARKET_CLOSED) ||
                 // Both keyed and keyless modes keep a history-refresh poll plus the live/fallback
@@ -168,7 +168,7 @@ class MarketRepository(
                 (pollJob?.isActive == true && streamJob?.isActive == true))) return
         stop()
         started = true
-        activeKey = current.apiKey
+        activeKey = current.apiKeyFor(current.symbol)
         lastQuietReconnect = SystemClock.elapsedRealtime()
         val session = generation
         if (_state.value.symbol != current.symbol || _state.value.interval != current.interval) {
@@ -182,7 +182,7 @@ class MarketRepository(
                 detail = if (closed) "تعطیلی معمول پایان هفته؛ قیمت تازه دریافت نمی‌شود" else "در حال دریافت…",
                 // Without a key the free keyless mode uses public Yahoo history plus the same
                 // Swissquote/Gold-API real-tick pipeline — it is not blocked on Twelve Data.
-                provider = marketProviderLabel(current.symbol, current.hasKey),
+                provider = marketProviderLabel(current.symbol, current.hasKeyFor(current.symbol)),
             ),
             signal = null,
             showingCachedData = closed && _state.value.candles.isNotEmpty(),
@@ -344,10 +344,10 @@ class MarketRepository(
                 } catch (cancel: CancellationException) {
                     throw cancel
                 } catch (binanceFailure: Exception) {
-                    if (!current.hasKey || current.autoPaperTrading) throw DataFeedException(
+                    if (!current.hasKeyFor(current.symbol) || current.autoPaperTrading) throw DataFeedException(
                         "فید ${current.symbol} از نوبیتکس و Binance Spot معتبر نبود: " +
                             "${(nobitexFailure ?: (binanceFailure.message ?: "بدون داده")).take(100)}؛ ورود با تاریخچهٔ صرافی دیگر ممنوع است")
-                    fetched = client.fetchCandles(current.apiKey, current.symbol, current.interval,
+                    fetched = client.fetchCandles(current.apiKeyFor(current.symbol), current.symbol, current.interval,
                         outputSize = requestedSize, minimumOutputSize = minimumSize)
                     if (fetched.size < minimumSize) throw DataFeedException(
                         "فید جایگزین ${current.symbol} فقط ${fetched.size} کندل واقعی داد")
@@ -356,7 +356,7 @@ class MarketRepository(
                 }
             } else if (current.interval == Interval.M5 && requestedSize <= HistoryPolicy.LIVE_FETCH_CANDLES &&
                 !MarketHours.closedFor(current.symbol)) {
-                val book = nonCryptoBundle.fetch(current.symbol, current.apiKey)
+                val book = nonCryptoBundle.fetch(current.symbol, current.apiKeyFor(current.symbol))
                 pinnedNonCrypto = book
                 fetched = book.m5
                 historyProvider = book.provider
@@ -407,11 +407,11 @@ class MarketRepository(
                     deepFailure
                 }
                 if (dukascopyFailure != null) {
-                    if (!current.hasKey) {
+                    if (!current.hasKeyFor(current.symbol)) {
                         throw DataFeedException("Yahoo و Dukascopy تاریخچهٔ معتبر ندادند: ${(dukascopyFailure.message ?: publicFailure.message ?: "خطای نامشخص").take(120)}")
                     }
                     try {
-                        fetched = client.fetchCandles(current.apiKey, current.symbol, current.interval,
+                        fetched = client.fetchCandles(current.apiKeyFor(current.symbol), current.symbol, current.interval,
                             outputSize = requestedSize, minimumOutputSize = minimumSize)
                         if (fetched.size < minimumSize) {
                             throw DataFeedException("Twelve Data فقط ${fetched.size} کندل داد؛ حداقل ${minimumSize} کندل واقعی لازم است")
@@ -430,8 +430,10 @@ class MarketRepository(
             if (fetched.isEmpty()) throw DataFeedException("تاریخچهٔ واقعی از هیچ منبعی دریافت نشد")
             if (!started || generation != session ||
                 settings.read().symbol != current.symbol || settings.read().interval != current.interval ||
-                (current.hasKey && settings.read().apiKey != current.apiKey) ||
-                settings.read().hasKey != current.hasKey || _state.value.symbol != current.symbol) return@withLock
+                (current.hasKeyFor(current.symbol) &&
+                    settings.read().apiKeyFor(current.symbol) != current.apiKeyFor(current.symbol)) ||
+                settings.read().hasKeyFor(current.symbol) != current.hasKeyFor(current.symbol) ||
+                _state.value.symbol != current.symbol) return@withLock
             val acceptedRevision = pinnedNobitex?.integrityRevision ?: pinnedCrypto?.integrityRevision
                 ?: pinnedNonCrypto?.integrityRevision ?: integrityAtStart
             SourceIntegrity.shared.blocker(current.symbol, acceptedRevision)?.let { reason ->
@@ -524,7 +526,9 @@ class MarketRepository(
         pollJob?.cancel()
         pollJob = scope?.launch {
             while (isActive) {
-                delay(if (settings.read().hasKey) POLL_INTERVAL_MS else FREE_HISTORY_POLL_INTERVAL_MS)
+                val symbol = settings.read().symbol
+                delay(if (settings.read().hasKeyFor(symbol)) POLL_INTERVAL_MS
+                else FREE_HISTORY_POLL_INTERVAL_MS)
                 refresh()
             }
         }
@@ -552,7 +556,7 @@ class MarketRepository(
                     continue
                 }
                 if (!hasInternet()) {
-                    publishDelayed(if (current.hasKey)
+                    publishDelayed(if (current.hasKeyFor(current.symbol))
                         "شبکه موقتاً در دسترس نیست؛ WebSocket بعد از بازگشت شبکه دوباره وصل می‌شود"
                     else "شبکه موقتاً در دسترس نیست؛ فید رایگان بعد از بازگشت شبکه دوباره وصل می‌شود")
                     delay(RECONNECT_WHEN_OFFLINE_MS); continue
@@ -565,8 +569,9 @@ class MarketRepository(
                     val collectBlock: suspend () -> Unit = {
                         spotFallback.streamQuotes(current.symbol).collect { tick ->
                             val active = settings.read()
-                            if (!stillCurrent(active) || active.hasKey != current.hasKey ||
-                                (current.hasKey && active.apiKey != current.apiKey)) return@collect
+                            if (!stillCurrent(active) || active.hasKeyFor(current.symbol) != current.hasKeyFor(current.symbol) ||
+                                (current.hasKeyFor(current.symbol) &&
+                                active.apiKeyFor(current.symbol) != current.apiKeyFor(current.symbol))) return@collect
                             if (!TradeQuotePolicy.accepts(tick)) return@collect
                             emitted = true
                             backoff = 2_000L
@@ -661,17 +666,17 @@ class MarketRepository(
                             if (started && generation == session && streamEpoch == epoch)
                                 publishStreamUnavailable("جریان معاملات نوبیتکس قطع شد — تلاش مجدد")
                         }
-                    } else if (current.hasKey) {
+                    } else if (current.hasKeyFor(current.symbol)) {
                         // Twelve Data is the reference publisher for spot GOLD: its WebSocket is
                         // tried first and the keyless public feeds are the fallback. Every other
                         // symbol keeps the public-first order.
                         suspend fun streamTwelve(label: String): Boolean {
                             var emitted = false
                             try {
-                                client.streamPrice(current.apiKey, current.symbol).collect { tick ->
+                                client.streamPrice(current.apiKeyFor(current.symbol), current.symbol).collect { tick ->
                                     // Ignore an already queued tick when the user changed markets/intervals.
                                     val active = settings.read()
-                                    if (!stillCurrent(active) || active.apiKey != current.apiKey) return@collect
+                                    if (!stillCurrent(active) || active.apiKeyFor(current.symbol) != current.apiKeyFor(current.symbol)) return@collect
                                     if (!TradeQuotePolicy.accepts(tick)) return@collect
                                     emitted = true
                                     backoff = 2_000L
@@ -708,10 +713,10 @@ class MarketRepository(
                 } catch (e: DataFeedException) {
                     if (started && generation == session && streamEpoch == epoch)
                         publishStreamUnavailable(e.message
-                            ?: (if (current.hasKey) "قطع آخرین fallback زنده" else "قطع جریان فید رایگان"))
+                            ?: (if (current.hasKeyFor(current.symbol)) "قطع آخرین fallback زنده" else "قطع جریان فید رایگان"))
                 } catch (_: Exception) {
                     if (started && generation == session && streamEpoch == epoch)
-                        publishStreamUnavailable(if (current.hasKey)
+                        publishStreamUnavailable(if (current.hasKeyFor(current.symbol))
                             "فید عمومی/آخرین fallback زنده قطع شد؛ اینترنت/دسترسی را بررسی کنید"
                         else "اتصال فید رایگان قطع شد؛ اینترنت را بررسی کنید")
                 }
@@ -743,7 +748,7 @@ class MarketRepository(
                 if (_state.value.feed.mode == FeedMode.MARKET_CLOSED) {
                     _state.value = _state.value.copy(feed = FeedStatus(
                         FeedMode.CONNECTING, "برنامهٔ معمول بازگشایی شد؛ منتظر تیک/کندل معتبر هستیم",
-                        provider = marketProviderLabel(settings.read().symbol, settings.read().hasKey)),
+                        provider = marketProviderLabel(settings.read().symbol, settings.read().hasKeyFor(settings.read().symbol))),
                         signal = null)
                     startStream()
                     refreshNow() // keyed Twelve or keyless public-history backfill
@@ -995,7 +1000,7 @@ class MarketRepository(
             lastFrameRefreshAt = frameNow
             val session = generation
             timeframeJob = scope?.launch(Dispatchers.IO) {
-                val fetched = timeframeFeed.fetch(current.symbol, current.interval, bars, current.apiKey,
+                val fetched = timeframeFeed.fetch(current.symbol, current.interval, bars, current.apiKeyFor(current.symbol),
                     requireBinanceCrypto = sameVenueCrypto,
                     requireNobitexCrypto = nobitexReferenceFrames,
                     pinnedSource = pinnedSource)

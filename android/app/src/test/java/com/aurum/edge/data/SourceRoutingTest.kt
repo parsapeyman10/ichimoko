@@ -19,6 +19,21 @@ class SourceRoutingTest {
         assertEquals("no two symbols may share a source", 15, dedicated.distinct().size)
     }
 
+    @Test fun `tick-only publishers are never offered as candle candidates`() {
+        // Swissquote and Gold-API publish a live price and no history at all. They stay in the
+        // app as labelled ticks, but a candle bundle must never be requested from them.
+        V1Universe.allSymbols.forEach { symbol ->
+            listOf(false, true).forEach { keyed ->
+                SourceRouting.historyCandidates(symbol, keyed).forEach { source ->
+                    assertFalse("$symbol/$keyed: Swissquote is not a candle publisher",
+                        source.providerLabel.contains("Swissquote", ignoreCase = true))
+                    assertFalse("$symbol/$keyed: Gold-API is not a candle publisher",
+                        source.providerLabel.contains("Gold-API", ignoreCase = true))
+                }
+            }
+        }
+    }
+
     @Test fun `non-crypto symbols each map to their own dedicated HistorySource`() {
         assertEquals(listOf(SourceRouting.HistorySource.DUKASCOPY_XAU),
             SourceRouting.historySources("XAU/USD"))

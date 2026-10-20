@@ -730,6 +730,13 @@ data class MtfSnapshotRecord(
 
 data class AppSettings(
     val apiKey: String = "",
+    /**
+     * Optional dedicated Twelve Data key per catalog symbol (e.g. one free key per instrument).
+     * The free plan meters each key separately (credits/minute and /day), so a symbol with its
+     * own key cannot be starved by the others. A symbol without an entry falls back to [apiKey].
+     * Keys are read-only market-data credentials; they are never logged or shown after saving.
+     */
+    val twelveDataKeys: Map<String, String> = emptyMap(),
     val symbol: String = "XAU/USD",
     val interval: Interval = Interval.M5,
     val riskPercent: Double = 0.5,
@@ -774,7 +781,18 @@ data class AppSettings(
     val activeStrategy: StrategyKind = StrategyKind.ICHIMOKU_PRICE_ACTION,
     val categoryStrategies: Map<AssetClass, CategoryStrategy> = AssetClass.entries.associateWith { CategoryStrategy.HYBRID },
 ) {
-    val hasKey: Boolean get() = apiKey.isNotBlank()
+    /** Any read-only Twelve Data credential exists (global or per symbol). */
+    val hasKey: Boolean get() = apiKey.isNotBlank() || twelveDataKeys.values.any { it.isNotBlank() }
+
+    /** The key actually used for this symbol: its dedicated key first, then the global one. */
+    fun apiKeyFor(symbol: String): String =
+        twelveDataKeys[V1Universe.normalize(symbol)]?.takeIf { it.isNotBlank() } ?: apiKey
+
+    fun hasKeyFor(symbol: String): Boolean = apiKeyFor(symbol).isNotBlank()
+
+    /** Symbols that have their own key; used to explain the quota split in the UI. */
+    fun dedicatedKeySymbols(): List<String> =
+        twelveDataKeys.filterValues { it.isNotBlank() }.keys.sorted()
     val hasClientNewsAi: Boolean get() = newsAiApiKey.isNotBlank() && newsAiBaseUrl.isNotBlank() && newsAiModel.isNotBlank()
     /** Full app catalog, never a hidden user-entered subset. Legacy preferences are ignored. */
     val activeSymbols: List<String> get() = com.aurum.edge.data.WatchCatalog.scannerSymbols

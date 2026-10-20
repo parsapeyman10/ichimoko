@@ -830,6 +830,34 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setWatchPreferred(symbolId: String, sourceId: String) = container.watchSettings.setPreferred(symbolId, sourceId)
 
+    /** True when this symbol has its own Twelve Data key instead of the global one. */
+    fun hasDedicatedKey(symbol: String): Boolean =
+        container.settingsStore.symbolKey(symbol).isNotBlank()
+
+    /**
+     * Save or remove ONE dedicated Twelve Data key for a symbol. The free plan meters each key
+     * separately, so a per-symbol key keeps this instrument inside its own 8/minute quota.
+     * The key is never echoed back: only "saved / removed" is reported.
+     */
+    fun saveDedicatedKey(symbol: String, key: String) {
+        if (key.isNotBlank() && key.trim().any { it.isWhitespace() }) {
+            _toast.value = "کلید نباید فاصله یا خط جدید داشته باشد؛ چیزی ذخیره نشد"
+            return
+        }
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) { container.settingsStore.saveSymbolKey(symbol, key) }
+            if (!saved) {
+                _toast.value = "کلید اختصاصی ${symbol} ذخیره نشد؛ فاصله/خط جدید یا حافظهٔ دستگاه را بررسی کنید"
+                return@launch
+            }
+            container.market.restart()
+            container.pairScanner.refreshNow(minIntervalMs = 0L)
+            _toast.value = if (key.isBlank())
+                "کلید اختصاصی ${symbol} حذف شد؛ کلید عمومی (اگر باشد) استفاده می‌شود"
+            else "کلید اختصاصی ${symbol} روی همین نصب ذخیره شد"
+        }
+    }
+
     fun watchKeyOverride(symbolId: String): String = container.watchSettings.keyOverride(symbolId)
 
     fun setWatchKeyOverride(symbolId: String, key: String) {
