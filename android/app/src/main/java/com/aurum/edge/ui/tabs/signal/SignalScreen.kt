@@ -199,7 +199,7 @@ private fun MarketPlaybookCard(decision: PlaybookDecision?, symbol: String) {
     }
     SectionCard(
         title = "متد مناسب این بازار · $symbol",
-        subtitle = "خوانش زمینه‌ای بازار؛ مجوز ورود فقط از موتور چهارلایه و قفل‌های ریسک/بازار صادر می‌شود",
+        subtitle = "خوانش زمینه‌ای بازار؛ مجوز ورود فقط از موتور صاحب همین نماد (ALS-5، BTC-ARES، چهارلایهٔ V1 یا فشردگی) و قفل‌های ریسک/بازار صادر می‌شود",
         trailing = { Pill(method?.label ?: "در حال ارزیابی", color) },
     ) {
         if (decision == null) {
@@ -341,8 +341,9 @@ private fun MarketTrendCard(
                     })
                 Text(context.noteFa, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 Text("این خوانشِ روند، زمینهٔ بازار و رتبه‌بندی است؛ قفل ورود یا آستانهٔ " +
-                        "مخفی اضافه نمی‌کند. مرجع ورود موتور چهارلایهٔ V1 و " +
-                        "قواعد ریسک/تازگی است؛ عکس خوانش در ژورنال ثبت می‌شود.",
+                        "مخفی اضافه نمی‌کند. مرجع ورود، موتور صاحب همین نماد " +
+                        "(ALS-5 / BTC-ARES / چهارلایهٔ V1 / فشردگی) و قواعد ریسک/تازگی است؛ " +
+                        "عکس خوانش در ژورنال ثبت می‌شود.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             } else {
                 Text("برای دیدن جایگاهِ ورود نسبت به روند، باید سیگنالِ همین نماد و یک پویشِ " +

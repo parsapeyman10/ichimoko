@@ -49,6 +49,14 @@ object EngineRegistry {
         }
     }
 
+    /**
+     * Journal/UI note for an automatic entry. It names the engine that actually authorised the
+     * trade: calling a BTC-ARES or ALS-5 entry «چهارلایه» would misdescribe the method, and a user
+     * reading the journal later would have no way to tell which model opened the position.
+     */
+    fun autoEntryNote(symbol: String): String =
+        "ورود خودکار صرفاً فنی: طرح SL/TP ${engineFor(symbol).labelFa} + کنترل ریسک ژورنال"
+
     /** Every symbol with its single owning engine, used by tests and by diagnostics. */
     fun assignments(): Map<String, SymbolEngine> =
         V1Universe.allSymbols.associateWith { engineFor(it) }

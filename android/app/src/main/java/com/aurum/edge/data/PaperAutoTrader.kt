@@ -9,6 +9,7 @@ import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.TradeQuotePolicy
+import com.aurum.edge.engine.EngineRegistry
 import com.aurum.edge.engine.MtfAnalyzer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -120,7 +121,7 @@ class PaperAutoTrader(
                 mtf = mtf?.let { MtfSnapshotRecord.from(it) },
                 automatic = true,
                 priceAction = ict,
-                customNote = "ورود خودکار صرفاً فنی: طرح SL/TP موتور چهارلایه + کنترل ریسک ژورنال",
+                customNote = EngineRegistry.autoEntryNote(current.symbol),
                 cryptoEntryQuote = catalogQuote,
                 sourceIntegrityRevision = current.sourceIntegrityRevision,
                 marketTrend = trendContext?.let { MarketTrendRecord.from(it) },

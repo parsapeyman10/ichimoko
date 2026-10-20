@@ -2,6 +2,7 @@ package com.aurum.edge.engine
 
 import com.aurum.edge.core.V1Universe
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -14,6 +15,22 @@ import org.junit.Test
  * two of them score the same symbol, or make a new engine silently own a symbol it was not given.
  */
 class EngineRegistryTest {
+
+    @Test fun `the automatic entry note names the engine that actually authorised it`() {
+        val gold = EngineRegistry.autoEntryNote("XAU/USD")
+        val btc = EngineRegistry.autoEntryNote("BTC/USDT")
+        val silver = EngineRegistry.autoEntryNote("XAG/USD")
+        val eth = EngineRegistry.autoEntryNote("ETH/USDT")
+        assertTrue(gold.contains("ALS-5"))
+        assertTrue(btc.contains("BTC-ARES"))
+        assertTrue(silver.contains("V1"))
+        assertTrue(eth.contains("فشردگی"))
+        // A gold or BTC trade must never be described to the user as a four-layer entry.
+        assertFalse(btc.contains("چهارلایه"))
+        assertFalse(gold.contains("چهارلایه"))
+        assertFalse(btc.contains("فشردگی"))
+        assertEquals(4, setOf(gold, btc, silver, eth).size)
+    }
 
     @Test fun `every symbol of the universe has exactly one engine`() {
         val assignments = EngineRegistry.assignments()

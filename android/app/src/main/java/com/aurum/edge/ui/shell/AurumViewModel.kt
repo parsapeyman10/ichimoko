@@ -596,7 +596,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setAutoPaperTrading(enabled: Boolean) {
         container.settingsStore.update { it.copy(autoPaperTrading = enabled) }
-        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ فقط با موتور چهارلایه، هفت بازهٔ واقعی و قفل‌های ریسک ثبت می‌شود"
+        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ هر نماد فقط با موتور خودش (ALS-5 طلا، BTC-ARES بیت‌کوین، چهارلایهٔ V1، فشردگی ← انفجار)، کندل‌های واقعی و قفل‌های ریسک ثبت می‌شود"
             else "معاملهٔ خودکار کاغذی خاموش شد"
     }
 
