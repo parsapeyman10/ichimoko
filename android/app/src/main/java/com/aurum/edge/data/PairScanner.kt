@@ -77,6 +77,8 @@ data class PairScanStatus(
     val btcAres: com.aurum.edge.core.BtcAresRecord? = null,
     /** ALS-5S per-engine record; present for XAG/USD only, including NO_TRADE. */
     val als5s: com.aurum.edge.core.XagAresRecord? = null,
+    /** EUR-ARES per-engine record; present for EUR/USD only, including NO_TRADE. */
+    val eurAres: com.aurum.edge.core.EurAresRecord? = null,
 )
 
 data class PairScanState(
@@ -319,6 +321,7 @@ class PairScanner(
             als5Opportunity: com.aurum.edge.core.Als5OpportunityRecord? = null,
             btcAres: com.aurum.edge.core.BtcAresRecord? = null,
             als5s: com.aurum.edge.core.XagAresRecord? = null,
+            eurAres: com.aurum.edge.core.EurAresRecord? = null,
         ) = synchronized(statusLock) {
             if (state != "capacity") decisionLog?.append(symbol, (chosenIntervals[symbol] ?: Interval.M5).label, state, detail,
                 signal = if (conditions.isNotEmpty()) com.aurum.edge.core.Signal(
@@ -353,6 +356,7 @@ class PairScanner(
                 als5Opportunity = als5Opportunity,
                 btcAres = btcAres,
                 als5s = als5s,
+                eurAres = eurAres,
             )
             _state.update { old ->
                 val currentList = old.statuses.map { statuses[it.symbol] ?: it }
@@ -560,7 +564,7 @@ class PairScanner(
                         playbookReason = playbook?.reasonFa?.take(160),
                         trend = trend,
                         als5Opportunity = combined.als5Opportunity, btcAres = combined.btcAres,
-                        als5s = combined.als5s,
+                        als5s = combined.als5s, eurAres = combined.eurAres,
                     )
                     return@async
                 }
@@ -631,7 +635,8 @@ class PairScanner(
                         playbookAllowed = playbook?.allowed,
                         playbookReason = playbook?.reasonFa?.take(160), trend = trend,
                         trendAligned = aligned, trendNote = trendGate?.noteFa?.take(200),
-                        als5Opportunity = combined.als5Opportunity, btcAres = combined.btcAres, als5s = combined.als5s)
+                        als5Opportunity = combined.als5Opportunity, btcAres = combined.btcAres,
+                        als5s = combined.als5s, eurAres = combined.eurAres)
                     return@async
                 }
 
@@ -689,7 +694,7 @@ class PairScanner(
                     trendAligned = aligned,
                     trendNote = trendGate?.noteFa?.take(200),
                     als5Opportunity = combined.als5Opportunity, btcAres = combined.btcAres,
-                        als5s = combined.als5s,
+                        als5s = combined.als5s, eurAres = combined.eurAres,
                 )
             } }.awaitAll()
         } // independent symbol evaluations; publisher-limited requests

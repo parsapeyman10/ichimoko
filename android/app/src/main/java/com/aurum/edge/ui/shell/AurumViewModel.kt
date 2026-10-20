@@ -649,6 +649,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             com.aurum.edge.core.XagAresPolicy.quoteBlocker(
                 silverSignal, quote, silverSignal.als5s?.atr)?.let { return it }
         }
+        if (com.aurum.edge.core.EurAresPolicy.appliesTo(current.symbol)) {
+            val eurSignal = candidate ?: return "سیگنال EUR-ARES موجود نیست"
+            val quote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { price ->
+                PriceTick(price, at, current.bid, current.ask)
+            } }
+            com.aurum.edge.core.EurAresPolicy.quoteBlocker(
+                eurSignal, quote, eurSignal.eurAres?.atr)?.let { return it }
+        }
         if (candidate?.isActionable != true || !TechnicalEvidence.confirmed(candidate))
             return candidate?.blockers?.joinToString("، ") ?: "سیگنال معتبر موتور صاحب این نماد وجود ندارد"
         WatchCatalog.find(current.symbol)?.let { watched ->

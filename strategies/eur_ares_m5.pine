@@ -1,0 +1,515 @@
+// EUR-ARES — Adaptive Euro-Dollar Regime, Execution & Signal Intelligence System
+// Instrument: EUR/USD spot FX or a EUR/USD CFD. Primary timeframe M5.
+// This is a STRATEGY (it places orders), not an indicator.
+//
+// It is the Pine mirror of engine/EurAresEngine.kt and tools/eur_ares_backtest.py: the same pip
+// arithmetic, the same DST-aware sessions, the same five-state regime with hysteresis, the same four
+// price engines (plus the news engine that has no data source and says so), the same 0–100 score
+// and the same cost veto.
+//
+// NON-REPAINTING CONTRACT
+//   * decisions are made on a closed bar (`barstate.isconfirmed`) and filled by the strategy engine
+//     on the next bar's open (`process_orders_on_close = false`);
+//   * pivots are only visible after `right` bars closed (`ta.pivothigh/pivotlow`);
+//   * every `request.security` uses `lookahead_off` and a `[1]` offset;
+//   * session boundaries come from real timezones (`Europe/London`, `America/New_York`, `Asia/Tokyo`),
+//     so DST moves them — a fixed UTC hour mislabels the London/New York overlap for half the year.
+//
+// WHAT IS *NOT* HERE (and is never faked)
+//   * no news engine: the platform has no reliable timestamped economic calendar in this build, so
+//     the engine is reported as "no data" instead of inventing event windows;
+//   * no yield differentials / DXY / SPX correlation: without a measured series the macro module
+//     stays off;
+//   * no swap estimate: financing is unknown, therefore 0 is reported and labelled as unknown.
+
+//@version=6
+strategy(
+     title                   = "EUR-ARES · EUR/USD · M5",
+     shorttitle              = "EUR-ARES",
+     overlay                 = true,
+     initial_capital         = 10000,
+     currency                = currency.USD,
+     default_qty_type        = strategy.fixed,
+     default_qty_value       = 1,
+     // 3.5 USD per 100,000 units per side = 0.000035 per unit. Quantity is expressed in units
+     // (see unitsPerLot), because TradingView's FX contract is one unit: quoting 0.22 "lots" would
+     // understate every P&L by 100,000×. Keep this constant in line with `commPerLotSide` below.
+     commission_type         = strategy.commission.cash_per_contract,
+     commission_value        = 0.000035,
+     slippage                = 2,
+     calc_on_every_tick      = false,
+     process_orders_on_close = false,
+     pyramiding              = 0,
+     max_bars_back           = 500)
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 1. Contract and cost inputs — everything is pips
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+grpCost = "Execution / costs"
+spreadTicks    = input.float(10, "Spread (ticks of syminfo.mintick)", minval = 0, step = 1, group = grpCost,
+     tooltip = "EUR/USD on a raw-spread account: 0.1 pip = 10 ticks of 0.00001. Verify on your venue.")
+commPerLotSide = input.float(3.5, "Commission per lot per side (USD)", minval = 0, step = 0.5, group = grpCost,
+     tooltip = "Used by the cost model. Keep it equal to strategy()'s commission_value × unitsPerLot.")
+unitsPerLot     = input.float(100000, "Units per standard lot", minval = 1, step = 1000, group = grpCost)
+slipPips       = input.float(0.2, "Slippage per side (pips)", minval = 0, step = 0.1, group = grpCost)
+maxSpreadPips  = input.float(1.5, "Absolute spread cap (pips)", minval = 0.1, step = 0.1, group = grpCost)
+maxSpreadAtrFrac = input.float(0.25, "Spread cap as a fraction of ATR", minval = 0.02, step = 0.01, group = grpCost)
+maxCostToRisk  = input.float(0.30, "Cost ceiling as a fraction of the stop", minval = 0.05, step = 0.01, group = grpCost)
+
+grpRisk = "Risk"
+riskPerTradePct = input.float(0.25, "Risk per trade (% of equity)", minval = 0.01, step = 0.05, group = grpRisk)
+maxDailyLossPct = input.float(1.0, "Daily loss lockout (%)", minval = 0.05, step = 0.05, group = grpRisk)
+pipValuePerLot  = input.float(10.0, "Pip value per standard lot (USD)", minval = 0.01, step = 0.5, group = grpRisk)
+lotStep         = input.float(0.01, "Lot step", minval = 0.001, step = 0.01, group = grpRisk)
+minLots         = input.float(0.01, "Minimum order (lots)", minval = 0.001, step = 0.01, group = grpRisk)
+minStopPips     = input.float(4.0, "Minimum stop (pips)", minval = 1.0, step = 0.5, group = grpRisk)
+maxStopPips     = input.float(30.0, "Maximum stop (pips)", minval = 5.0, step = 1.0, group = grpRisk)
+stopBufferAtr   = input.float(0.30, "Structural stop buffer (× ATR)", minval = 0.0, step = 0.05, group = grpRisk)
+targetRr        = input.float(2.0, "Target R:R", minval = 1.0, step = 0.1, group = grpRisk)
+minNetRr        = input.float(1.5, "Minimum net R:R", minval = 1.0, step = 0.05, group = grpRisk)
+scoreThreshold  = input.int(70, "Score threshold (0–100)", minval = 0, maxval = 100, group = grpRisk)
+conflictMargin  = input.int(10, "Conflict margin between opposite engines", minval = 0, group = grpRisk)
+maxHoldBars     = input.int(48, "Time stop (bars)", minval = 6, group = grpRisk)
+
+grpStruct = "Structure and volatility"
+pivotLeft       = input.int(3, "Pivot left bars", minval = 1, group = grpStruct)
+pivotRight      = input.int(3, "Pivot right bars", minval = 1, group = grpStruct,
+     tooltip = "A pivot exists only after this many bars closed: no future data.")
+microRight      = input.int(1, "Micro pivot right bars", minval = 1, group = grpStruct)
+atrLen          = input.int(14, "ATR length", minval = 2, group = grpStruct)
+adxLen          = input.int(14, "ADX length", minval = 2, group = grpStruct)
+emaFastLen      = input.int(21, "EMA fast", minval = 2, group = grpStruct)
+rsiLen          = input.int(14, "RSI length", minval = 2, group = grpStruct)
+htfEmaLen       = input.int(50, "H1 EMA length", minval = 2, group = grpStruct)
+volMedianLen    = input.int(60, "ATR median lookback", minval = 10, group = grpStruct)
+atrRankLen      = input.int(240, "ATR percentile lookback", minval = 20, group = grpStruct)
+expansionFast   = input.int(3, "Range expansion fast bars", minval = 1, group = grpStruct)
+expansionBase   = input.int(20, "Range expansion baseline bars", minval = 5, group = grpStruct)
+lowAtrRatio     = input.float(0.70, "LOW below this ATR ratio", step = 0.05, group = grpStruct)
+elevatedAtrRatio = input.float(1.40, "ELEVATED above this ATR ratio", step = 0.05, group = grpStruct)
+extremeAtrRatio = input.float(2.20, "EXTREME above this ATR ratio", step = 0.05, group = grpStruct)
+trendAdxMin     = input.float(22.0, "Trend needs ADX ≥", step = 0.5, group = grpStruct)
+rangeAdxMax     = input.float(18.0, "Range needs ADX ≤", step = 0.5, group = grpStruct)
+compressionMax  = input.float(0.80, "Compression width ≤ × ATR", step = 0.05, group = grpStruct)
+minRangeWidthAtr = input.float(1.2, "Range width ≥ × ATR", step = 0.1, group = grpStruct)
+maxRangeWidthAtr = input.float(5.0, "Range width ≤ × ATR", step = 0.1, group = grpStruct)
+confirmBars     = input.int(2, "Regime confirmation bars", minval = 1, group = grpStruct)
+
+grpA = "Engine A · trend pullback"
+minImpulseAtr   = input.float(1.20, "Impulse ≥ × ATR", step = 0.05, group = grpA)
+minImpulsePips  = input.float(6.0, "Impulse ≥ pips", step = 0.5, group = grpA)
+pullbackZoneAtr = input.float(0.55, "Pullback zone ≤ × ATR", step = 0.05, group = grpA)
+minPullbackFrac = input.float(0.25, "Pullback depth ≥", step = 0.01, group = grpA)
+maxPullbackFrac = input.float(0.85, "Pullback depth ≤", step = 0.01, group = grpA)
+minBodyFrac     = input.float(0.50, "Body ≥ fraction of range", step = 0.05, group = grpA)
+maxChaseAtr     = input.float(2.40, "Max distance from EMA × ATR (no chasing)", step = 0.05, group = grpA)
+
+grpB = "Engine B · failed breakout"
+sweepWindow   = input.int(6, "Sweep window (bars)", minval = 1, group = grpB)
+minSweepAtr   = input.float(0.15, "Minimum penetration × ATR", step = 0.05, group = grpB)
+maxSweepAtr   = input.float(1.20, "Maximum penetration × ATR", step = 0.05, group = grpB)
+minSweepPips  = input.float(0.8, "Minimum penetration (pips)", step = 0.1, group = grpB)
+
+grpC = "Engine C · range reversion"
+rangeTouchFrac = input.float(0.20, "Range touch zone (fraction)", step = 0.02, group = grpC)
+minWickFrac    = input.float(0.40, "Rejection wick ≥ fraction of range", step = 0.05, group = grpC)
+rangeInvalidAtr = input.float(0.25, "Range invalidation × ATR", step = 0.05, group = grpC)
+
+grpD = "Engine D · session breakout"
+breakoutAtr    = input.float(0.15, "Close beyond boundary × ATR", step = 0.05, group = grpD)
+minExpansion   = input.float(1.15, "Range expansion ≥", step = 0.05, group = grpD)
+followFrac     = input.float(0.55, "Close in breakout direction ≥", step = 0.05, group = grpD)
+maxChaseAtrD   = input.float(1.00, "Max distance from boundary × ATR", step = 0.05, group = grpD)
+minRoomR       = input.float(1.50, "Room to the next obstacle ≥ R", step = 0.1, group = grpD)
+roundPips      = input.float(50.0, "Round-number grid (pips)", step = 10, group = grpD)
+
+grpSes = "Sessions (timezone-aware, DST handled by the platform)"
+londonSession  = input.session("0800-1700", "London hours", group = grpSes)
+nySession      = input.session("0800-1700", "New York hours", group = grpSes)
+asiaSession    = input.session("0900-1800", "Tokyo hours", group = grpSes)
+londonTz       = input.string("Europe/London", "London timezone", group = grpSes)
+nyTz           = input.string("America/New_York", "New York timezone", group = grpSes)
+tokyoTz        = input.string("Asia/Tokyo", "Tokyo timezone", group = grpSes)
+rolloverMinutes = input.int(10, "Rollover window (minutes after 17:00 NY)", minval = 0, group = grpSes)
+sessionGate    = input.bool(false, "Block entries outside LONDON/OVERLAP/NY", group = grpSes)
+
+grpShow = "Display"
+showPanel = input.bool(true, "Show the EUR-ARES panel", group = grpShow)
+showMarks = input.bool(true, "Mark structures", group = grpShow)
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 2. Indicators and structure — computed on every bar, never inside a branch
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+atr      = ta.atr(atrLen)
+atrPips  = atr / 0.0001
+[diPlus, diMinus, adx] = ta.dmi(adxLen, adxLen)
+emaFast  = ta.ema(close, emaFastLen)
+rsi      = ta.rsi(close, rsiLen)
+[macdLine, macdSignal, macdHist] = ta.macd(close, 12, 26, 9)
+atrRank  = nz(ta.percentrank(atr, atrRankLen), 50)
+atrMedian = ta.percentile_linear_interpolation(atr, volMedianLen, 50)
+atrRatio = nz(atrMedian, 0) > 0 ? atr / atrMedian : 1.0
+rangeExpansion = ta.sma(high - low, expansionFast) / math.max(ta.sma(high - low, expansionBase), 0.00001)
+
+ph = ta.pivothigh(high, pivotLeft, pivotRight)
+pl = ta.pivotlow(low, pivotLeft, pivotRight)
+mph = ta.pivothigh(high, 2, microRight)
+mpl = ta.pivotlow(low, 2, microRight)
+
+var float swingHigh1 = na
+var float swingHigh2 = na
+var float swingLow1  = na
+var float swingLow2  = na
+var float microHigh  = na
+var float microLow   = na
+if not na(ph)
+    swingHigh2 := swingHigh1
+    swingHigh1 := ph
+if not na(pl)
+    swingLow2 := swingLow1
+    swingLow1 := pl
+if not na(mph)
+    microHigh := mph
+if not na(mpl)
+    microLow := mpl
+
+hh = not na(swingHigh1) and not na(swingHigh2) and swingHigh1 > swingHigh2
+lh = not na(swingHigh1) and not na(swingHigh2) and swingHigh1 < swingHigh2
+hl = not na(swingLow1) and not na(swingLow2) and swingLow1 > swingLow2
+ll = not na(swingLow1) and not na(swingLow2) and swingLow1 < swingLow2
+bosUp = not na(swingHigh1) and close > swingHigh1
+bosDown = not na(swingLow1) and close < swingLow1
+
+rangeHigh = ta.highest(high, 24)[1]
+rangeLow  = ta.lowest(low, 24)[1]
+rangeWidth = rangeHigh - rangeLow
+compressionRatio = atr > 0 ? rangeWidth / (atr * math.sqrt(24)) : 1.0
+
+// Higher-timeframe context: confirmed H1 close only.
+h1Close = request.security(syminfo.tickerid, "60", close[1], lookahead = barmerge.lookahead_off)
+h1Ema   = request.security(syminfo.tickerid, "60", ta.ema(close, htfEmaLen)[1], lookahead = barmerge.lookahead_off)
+h1Ready = not na(h1Close) and not na(h1Ema)
+htfBias = h1Ready ? (h1Close > h1Ema ? 1 : h1Close < h1Ema ? -1 : 0) : 0
+prevDayHigh = request.security(syminfo.tickerid, "D", high[1], lookahead = barmerge.lookahead_off)
+prevDayLow  = request.security(syminfo.tickerid, "D", low[1],  lookahead = barmerge.lookahead_off)
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 3. Sessions — timezone-based, so DST moves the boundaries
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+inLondon  = not na(time(timeframe.period, londonSession, londonTz))
+inNewYork = not na(time(timeframe.period, nySession, nyTz))
+inTokyo   = not na(time(timeframe.period, asiaSession, tokyoTz))
+nyHour    = hour(time, nyTz)
+nyMinute  = minute(time, nyTz)
+rollover  = nyHour == 17 and nyMinute < rolloverMinutes
+sessionName = rollover ? "ROLLOVER" : inLondon and inNewYork ? "OVERLAP" :
+     inLondon ? "LONDON" : inNewYork ? "NEW_YORK" : inTokyo ? "ASIA" : "OFF"
+tradableSession = sessionName == "LONDON" or sessionName == "OVERLAP" or sessionName == "NEW_YORK"
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 4. Session ranges — reset daily, and only usable once complete
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+newDay = nz(ta.change(time("D")), 0) != 0
+var float asiaHigh = na
+var float asiaLow = na
+var int asiaBars = 0
+var float londonOpenHigh = na
+var float londonOpenLow = na
+var int londonOpenBars = 0
+if newDay
+    asiaHigh := na
+    asiaLow := na
+    asiaBars := 0
+    londonOpenHigh := na
+    londonOpenLow := na
+    londonOpenBars := 0
+if inTokyo and not inLondon and not inNewYork
+    asiaHigh := na(asiaHigh) ? high : math.max(asiaHigh, high)
+    asiaLow := na(asiaLow) ? low : math.min(asiaLow, low)
+    asiaBars += 1
+// London 08:00–08:59 local, only while that hour is in the past.
+if inLondon and hour(time, londonTz) == 8
+    londonOpenHigh := na(londonOpenHigh) ? high : math.max(londonOpenHigh, high)
+    londonOpenLow := na(londonOpenLow) ? low : math.min(londonOpenLow, low)
+    londonOpenBars += 1
+londonOpenReady = londonOpenBars > 0 and hour(time, londonTz) >= 9
+asiaReady = asiaBars >= 12 and sessionName != "ASIA"
+sessionRangeHigh = londonOpenReady ? londonOpenHigh : asiaHigh
+sessionRangeLow = londonOpenReady ? londonOpenLow : asiaLow
+sessionRangeName = londonOpenReady ? "London OR" : "Asian range"
+sessionRangeReady = londonOpenReady or asiaReady
+
+roundBelow = math.floor(close / (roundPips * 0.0001)) * roundPips * 0.0001
+roundAbove = roundBelow + roundPips * 0.0001
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 5. Volatility and regime (hysteresis: protection in at once, out only with confirmation)
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+volState = atrRatio >= extremeAtrRatio or atrRank >= 97 ? "EXTREME" :
+     atrRatio >= elevatedAtrRatio or atrRank >= 85 ? "ELEVATED" :
+     atrRatio <= lowAtrRatio and atrRank <= 25 ? "LOW" :
+     rangeExpansion >= 1.35 and atrRatio >= 0.85 ? "TRANSITION" : "NORMAL"
+
+rawRegime = volState == "EXTREME" ? "EVENT_UNSTABLE" :
+     volState == "ELEVATED" and rangeExpansion >= 1.80 ? "EVENT_UNSTABLE" :
+     ((hh and hl) or bosUp) and ((lh and ll) or bosDown) ? "EVENT_UNSTABLE" :
+     compressionRatio <= compressionMax and adx < trendAdxMin ? "COMPRESSION" :
+     ((hh and hl) or bosUp) and adx >= trendAdxMin and htfBias != -1 ? "BULL_TREND" :
+     ((lh and ll) or bosDown) and adx >= trendAdxMin and htfBias != 1 ? "BEAR_TREND" :
+     rangeWidth / math.max(atr, 0.00001) >= minRangeWidthAtr and
+       rangeWidth / math.max(atr, 0.00001) <= maxRangeWidthAtr and adx <= rangeAdxMax ? "RANGE" :
+     "EVENT_UNSTABLE"
+
+// Protection engages at once, release needs `confirmBars` bars agreeing.
+// A raw label that flickers therefore cannot open a trade on its first bar.
+var string confirmedRegime = "EVENT_UNSTABLE"
+var int agreeCount = 0
+agreeCount := rawRegime == confirmedRegime ? agreeCount + 1 : 0
+if rawRegime == "EVENT_UNSTABLE" or agreeCount >= confirmBars
+    confirmedRegime := rawRegime
+    agreeCount := 0
+regime = confirmedRegime
+
+bullTrend = regime == "BULL_TREND"
+bearTrend = regime == "BEAR_TREND"
+inRange   = regime == "RANGE"
+compressed = regime == "COMPRESSION"
+eventVol  = regime == "EVENT_UNSTABLE"
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 6. Costs in pips, and the pip-value sizing rule
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+spreadPips = spreadTicks * syminfo.mintick / 0.0001
+commPips = 2.0 * (commPerLotSide / unitsPerLot) / 0.0001
+roundTripCostPips = spreadPips + commPips + 2.0 * slipPips
+spreadCap = math.min(maxSpreadPips, maxSpreadAtrFrac * atrPips)
+spreadOk = spreadPips <= spreadCap
+sessionPts = sessionName == "OVERLAP" ? 10 : sessionName == "LONDON" ? 9 :
+     sessionName == "NEW_YORK" ? 7 : sessionName == "ASIA" ? 3 : 0
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 7. Engines — each independent, each scored separately
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Engine A · trend continuation after a pullback
+aDir = bullTrend ? 1 : bearTrend ? -1 : 0
+aUp = aDir == 1
+aLevel = aUp ? swingLow1 : swingHigh1
+aOther = aUp ? swingHigh1 : swingLow1
+aImpulse = na(aLevel) ? 0.0 : math.abs(close - aLevel)
+aDistance = na(aLevel) ? 1e9 : math.abs(close - aLevel)
+// Depth of the retracement, measured on the last leg only.
+aDepth = na(aLevel) or na(aOther) or aLevel == aOther ? na : math.abs(aOther - close) / math.abs(aOther - aLevel)
+aBody = (high - low) > 0 ? math.abs(close - open) / (high - low) : 0.0
+aDirectional = (aUp ? close > open : close < open) and aBody >= minBodyFrac
+aWick = (high - low) > 0 ? (aUp ? (math.min(open, close) - low) / (high - low) :
+     (high - math.max(open, close)) / (high - low)) : 0.0
+aRejection = aDirectional or aWick >= 0.30
+aMicro = aUp ? (not na(microHigh) and close > microHigh) : (not na(microLow) and close < microLow)
+aNotChasing = math.abs(close - emaFast) / math.max(atr, 0.00001) <= maxChaseAtr
+aMomentum = aUp ? macdHist > 0 and rsi >= 45 : macdHist < 0 and rsi <= 55
+aDepthOk = not na(aDepth) and aDepth >= minPullbackFrac and aDepth <= maxPullbackFrac
+aTrendCtx = aDir != 0 and h1Ready and htfBias != -aDir
+aReady = aTrendCtx and aImpulse >= minImpulseAtr * atr and aImpulse / 0.0001 >= minImpulsePips and
+     aDistance <= pullbackZoneAtr * atr and aDepthOk and aRejection and aNotChasing and aMomentum and
+     (aMicro or aDirectional)
+aScoreRaw = (bullTrend or bearTrend ? 15 : 0) +
+     (aImpulse >= minImpulseAtr * atr and aDepthOk ? 15 : aDistance <= pullbackZoneAtr * atr ? 9 : 4) +
+     (aDistance <= pullbackZoneAtr * atr and aDepthOk ? 10 : aDistance <= pullbackZoneAtr * atr ? 6 : 2) +
+     ((aMicro and aRejection) ? 15 : (aRejection or aMicro) ? 9 : 3) +
+     (volState == "NORMAL" ? 10 : volState == "TRANSITION" ? 8 : volState == "LOW" ? 6 :
+      volState == "ELEVATED" ? 3 : 0) +
+     sessionPts
+
+// Engine B · failed breakout / sweep
+bWindowHigh = ta.highest(high, sweepWindow)
+bWindowLow  = ta.lowest(low, sweepWindow)
+bLevelLow = not na(swingLow1) and bWindowLow < swingLow1 and
+     bWindowLow >= swingLow1 - maxSweepAtr * atr and close > swingLow1
+bLevelHigh = not na(swingHigh1) and bWindowHigh > swingHigh1 and
+     bWindowHigh <= swingHigh1 + maxSweepAtr * atr and close < swingHigh1
+bDir = bLevelLow ? 1 : bLevelHigh ? -1 : 0
+bLevel = bLevelLow ? swingLow1 : bLevelHigh ? swingHigh1 : na
+bPenetrationPips = bDir == 1 ? (nz(swingLow1) - bWindowLow) / 0.0001 :
+     bDir == -1 ? (bWindowHigh - nz(swingHigh1)) / 0.0001 : 0.0
+bShift = bDir == 1 ? (not na(microHigh) and close > microHigh) :
+     bDir == -1 ? (not na(microLow) and close < microLow) : false
+bCloseLoc = (high - low) > 0 ? (close - low) / (high - low) : 0.5
+bCloseOk = bDir == 1 ? bCloseLoc >= 0.55 : bDir == -1 ? bCloseLoc <= 0.45 : false
+bReady = not eventVol and bDir != 0 and bPenetrationPips >= minSweepPips and
+     bPenetrationPips / math.max(atrPips, 0.001) >= minSweepAtr and bShift and bCloseOk and
+     not rollover
+bScoreRaw = ((inRange or compressed) ? 15 : 9) +
+     (bPenetrationPips >= minSweepPips and
+       (math.abs(nz(bLevel) - rangeLow) < 0.5 * atr or math.abs(nz(bLevel) - rangeHigh) < 0.5 * atr) ? 15 :
+      bPenetrationPips >= minSweepPips ? 10 : 4) +
+     (bCloseOk ? 10 : 5) + ((bShift and bCloseOk) ? 15 : (bShift or bCloseOk) ? 9 : 3) +
+     (volState == "NORMAL" or volState == "LOW" ? 10 : volState == "TRANSITION" ? 6 :
+      volState == "ELEVATED" ? 4 : 0) +
+     sessionPts
+
+// Engine C · range mean reversion
+cPosition = rangeWidth > 0 ? (close - rangeLow) / rangeWidth : 0.5
+cNearLow = inRange and cPosition <= rangeTouchFrac
+cNearHigh = inRange and cPosition >= 1 - rangeTouchFrac
+cInvalid = close > rangeHigh + rangeInvalidAtr * atr or close < rangeLow - rangeInvalidAtr * atr
+cDir = cNearLow ? 1 : cNearHigh ? -1 : 0
+cWick = (high - low) > 0 ? (cDir == 1 ? (math.min(open, close) - low) / (high - low) :
+     (high - math.max(open, close)) / (high - low)) : 0.0
+cRsiOk = cDir == 1 ? rsi <= 40 : cDir == -1 ? rsi >= 60 : false
+cAdxOk = adx <= rangeAdxMax + 4
+cReady = inRange and not cInvalid and cDir != 0 and cWick >= minWickFrac and cRsiOk and cAdxOk and
+     not rollover
+cScoreRaw = (inRange ? 15 : 0) + (cInvalid ? 4 : 15) + (cDir != 0 ? 10 : 5) +
+     ((cWick >= minWickFrac and cRsiOk) ? 15 : cWick >= minWickFrac ? 9 : 3) +
+     (volState == "NORMAL" or volState == "LOW" ? 10 : volState == "TRANSITION" ? 6 :
+      volState == "ELEVATED" ? 4 : 0) + sessionPts
+
+// Engine D · session range breakout
+dWidth = nz(sessionRangeHigh) - nz(sessionRangeLow)
+dWidthAtr = dWidth / math.max(atr, 0.00001)
+dUp = sessionRangeReady and close > nz(sessionRangeHigh) + breakoutAtr * atr
+dDown = sessionRangeReady and close < nz(sessionRangeLow) - breakoutAtr * atr
+dDir = dUp ? 1 : dDown ? -1 : 0
+dExpansionOk = rangeExpansion >= minExpansion
+dCloseLoc = (high - low) > 0 ? (close - low) / (high - low) : 0.5
+dFollow = dDir == 1 ? dCloseLoc >= followFrac : dDir == -1 ? dCloseLoc <= 1 - followFrac : false
+dLate = dDir == 1 ? (close - nz(sessionRangeHigh)) / math.max(atr, 0.00001) :
+     dDir == -1 ? (nz(sessionRangeLow) - close) / math.max(atr, 0.00001) : 0.0
+dNotLate = dLate <= breakoutAtr + maxChaseAtrD
+// The closest thing in the way of the breakout: prior day extreme or the next round number.
+// Only levels still ahead of price count: a prior-day extreme already traded through is not resistance.
+dObstacle = dDir == 1 ? (na(prevDayHigh) or prevDayHigh <= close ? roundAbove : math.min(prevDayHigh, roundAbove)) :
+     dDir == -1 ? (na(prevDayLow) or prevDayLow >= close ? roundBelow : math.max(prevDayLow, roundBelow)) : na
+dReady = not eventVol and dDir != 0 and sessionRangeReady and
+     dWidthAtr >= minRangeWidthAtr and dWidthAtr <= maxRangeWidthAtr and
+     dExpansionOk and dFollow and dNotLate and not rollover
+dScoreRaw = (volState == "TRANSITION" or volState == "NORMAL" ? 15 : 9) +
+     (dWidthAtr >= minRangeWidthAtr and dWidthAtr <= maxRangeWidthAtr ? 15 : 6) +
+     (dNotLate ? 10 : 4) + ((dExpansionOk and dFollow) ? 15 : (dExpansionOk or dFollow) ? 8 : 2) +
+     (volState == "TRANSITION" ? 10 : volState == "NORMAL" ? 8 : volState == "LOW" ? 5 :
+      volState == "ELEVATED" ? 3 : 0) + sessionPts
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 8. Arbitration — only a READY engine may be chosen, and a close conflict is NO_TRADE
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+engineName = aReady and (not bReady or aScoreRaw >= bScoreRaw) and (not cReady or aScoreRaw >= cScoreRaw) and (not dReady or aScoreRaw >= dScoreRaw) ? "A" :
+     bReady and (not cReady or bScoreRaw >= cScoreRaw) and (not dReady or bScoreRaw >= dScoreRaw) ? "B" :
+     cReady and (not dReady or cScoreRaw >= dScoreRaw) ? "C" :
+     dReady ? "D" : "NONE"
+dir = engineName == "A" ? aDir : engineName == "B" ? bDir :
+     engineName == "C" ? cDir : engineName == "D" ? dDir : 0
+engineScore = engineName == "A" ? aScoreRaw : engineName == "B" ? bScoreRaw :
+     engineName == "C" ? cScoreRaw : engineName == "D" ? dScoreRaw : 0
+// A ready engine pointing the other way is a conflict, never something to average away.
+bestOpposite = math.max(math.max(aReady and aDir == -dir ? aScoreRaw : 0,
+     bReady and bDir == -dir ? bScoreRaw : 0),
+     math.max(cReady and cDir == -dir ? cScoreRaw : 0, dReady and dDir == -dir ? dScoreRaw : 0))
+conflict = engineName != "NONE" and bestOpposite > 0 and engineScore - bestOpposite < conflictMargin
+
+// Structure → stop → target → net R:R → cost gate.
+// The stop sits behind the structure that must break for the idea to be wrong, plus a
+// volatility buffer. It is clamped to [minStopPips, maxStopPips] and is never widened later.
+structLevel = engineName == "A" ? (aUp ? nz(swingLow1, close - atr) : nz(swingHigh1, close + atr)) :
+     engineName == "B" ? nz(bLevel, close - dir * atr) :
+     engineName == "C" ? (dir == 1 ? rangeLow : rangeHigh) :
+     engineName == "D" ? (dir == 1 ? nz(sessionRangeLow) : nz(sessionRangeHigh)) : na
+stopDistance = dir == 0 or na(structLevel) ? maxStopPips * 0.0001 :
+     math.min(math.max(math.abs(close - structLevel) + stopBufferAtr * atr, minStopPips * 0.0001),
+              maxStopPips * 0.0001)
+stopPrice = dir == 1 ? close - stopDistance : dir == -1 ? close + stopDistance : na
+stopPips = stopDistance / 0.0001
+// Engine D also has to have somewhere to go: room to the next obstacle, in R.
+dRoomR = engineName == "D" and not na(dObstacle) and stopDistance > 0 ?
+     math.abs(dObstacle - close) / stopDistance : na
+dRoomOk = engineName != "D" or na(dRoomR) or dRoomR >= minRoomR
+// A measured move may extend the target, never beyond 3R of the initial risk.
+targetDistance = math.max(targetRr * stopDistance, minNetRr * stopDistance + roundTripCostPips * 0.0001)
+targetDistanceAdj = engineName == "D" ? math.max(targetDistance, math.min(nz(dWidth), 3.0 * stopDistance)) :
+     targetDistance
+targetPrice = dir == 1 ? close + targetDistanceAdj : dir == -1 ? close - targetDistanceAdj : na
+targetPips = targetDistanceAdj / 0.0001
+netRr = dir != 0 and stopPips > 0 ? (targetPips - roundTripCostPips) / (stopPips + roundTripCostPips) : na
+costToRisk = stopPips > 0 ? roundTripCostPips / stopPips : 1.0
+rrPoints = na(netRr) ? 0 : netRr >= 2.0 ? 15 : netRr >= 1.75 ? 12 : netRr >= minNetRr ? 9 : 0
+costPts = costToRisk <= 0.10 ? 10 : costToRisk <= 0.20 ? 7 : costToRisk <= maxCostToRisk ? 4 : 0
+score = math.min(100, engineScore + rrPoints + costPts)
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 9. Gates, sizing and orders
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+var float dayStartEquity = strategy.equity
+if newDay
+    dayStartEquity := strategy.equity
+dayLossPct = dayStartEquity > 0 ? math.max(0.0, (dayStartEquity - strategy.equity) / dayStartEquity * 100) : 0.0
+dayLocked = dayLossPct >= maxDailyLossPct
+confirmed = barstate.isconfirmed
+flat = strategy.position_size == 0
+riskUsd = strategy.equity * riskPerTradePct / 100
+// Size from risk, not from hope: risk USD ÷ (stop + costs) in pips ÷ pip value, floored to the
+// venue's lot step. Below the minimum order size the trade is skipped, never rounded up.
+lots = math.max(0.0, math.floor(riskUsd / math.max((stopPips + roundTripCostPips) * pipValuePerLot, 1e-9) / lotStep + 1e-9) * lotStep)
+units = lots * unitsPerLot
+allowEntry = confirmed and flat and dir != 0 and not na(netRr) and
+     score >= scoreThreshold and netRr >= minNetRr and costToRisk <= maxCostToRisk and
+     spreadOk and not conflict and not eventVol and not rollover and dRoomOk and
+     (not sessionGate or tradableSession) and not dayLocked and lots >= minLots
+
+if allowEntry
+    if dir == 1
+        strategy.entry("EUR-ARES Long", strategy.long, qty = units,
+             comment = "EUR-ARES " + engineName + " " + str.tostring(score) + "/100")
+        strategy.exit("EUR-ARES Long exit", from_entry = "EUR-ARES Long",
+             stop = stopPrice, limit = targetPrice, comment_loss = "structure stop", comment_profit = "target")
+    else
+        strategy.entry("EUR-ARES Short", strategy.short, qty = units,
+             comment = "EUR-ARES " + engineName + " " + str.tostring(score) + "/100")
+        strategy.exit("EUR-ARES Short exit", from_entry = "EUR-ARES Short",
+             stop = stopPrice, limit = targetPrice, comment_loss = "structure stop", comment_profit = "target")
+
+// Time stop: a setup that has not worked within `maxHoldBars` is closed, never nursed.
+if strategy.position_size != 0 and bar_index - strategy.opentrades.entry_bar_index(strategy.opentrades - 1) >= maxHoldBars
+    strategy.close_all(comment = "time stop")
+
+strategy.risk.max_intraday_loss(maxDailyLossPct, strategy.percent_of_equity)
+strategy.risk.max_position_size(100 * 100000)  // 100 lots in units, hard exposure cap
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 10. Chart output — sparse, and nothing is drawn for a bar that has not closed
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+plot(showMarks and not na(swingHigh1) ? swingHigh1 : na, "Swing high", color.new(color.red, 40), 1, plot.style_stepline)
+plot(showMarks and not na(swingLow1) ? swingLow1 : na, "Swing low", color.new(color.teal, 40), 1, plot.style_stepline)
+plot(emaFast, "EMA fast", color.new(color.orange, 30))
+plot(showMarks and sessionRangeReady ? sessionRangeHigh : na, "Session high", color.new(color.gray, 50), 1, plot.style_circles)
+plot(showMarks and sessionRangeReady ? sessionRangeLow : na, "Session low", color.new(color.gray, 50), 1, plot.style_circles)
+bgcolor(eventVol ? color.new(color.red, 92) : rollover ? color.new(color.orange, 92) :
+     inRange ? color.new(color.gray, 95) : color.new(color.green, 96), title = "Regime")
+plotshape(showMarks and allowEntry and dir == 1, "Entry long", shape.triangleup, location.belowbar, color.green, size = size.small)
+plotshape(showMarks and allowEntry and dir == -1, "Entry short", shape.triangledown, location.abovebar, color.red, size = size.small)
+
+var table panel = table.new(position.top_right, 2, 11, border_width = 1)
+if showPanel and barstate.islast
+    table.cell(panel, 0, 0, "EUR-ARES · EUR/USD", text_color = color.white, bgcolor = color.new(color.blue, 20))
+    table.cell(panel, 1, 0, "M5 · pips", text_color = color.white, bgcolor = color.new(color.blue, 20))
+    table.cell(panel, 0, 1, "Regime")
+    table.cell(panel, 1, 1, regime, text_color = eventVol ? color.red : color.gray)
+    table.cell(panel, 0, 2, "Volatility")
+    table.cell(panel, 1, 2, volState + " · ATR×" + str.tostring(atrRatio, "#.##"))
+    table.cell(panel, 0, 3, "ATR")
+    table.cell(panel, 1, 3, str.tostring(atrPips, "#.0") + " pips")
+    table.cell(panel, 0, 4, "Session")
+    table.cell(panel, 1, 4, sessionName + (rollover ? " · no entry" : ""))
+    table.cell(panel, 0, 5, "Engines")
+    table.cell(panel, 1, 5, (aReady ? "A " : "") + (bReady ? "B " : "") + (cReady ? "C " : "") + (dReady ? "D " : "") + (engineName == "NONE" ? "—" : ""))
+    table.cell(panel, 0, 6, "Score")
+    table.cell(panel, 1, 6, str.tostring(score) + "/100")
+    table.cell(panel, 0, 7, "Net R:R")
+    table.cell(panel, 1, 7, na(netRr) ? "—" : str.tostring(netRr, "#.##"))
+    table.cell(panel, 0, 8, "Cost / risk")
+    table.cell(panel, 1, 8, str.tostring(costToRisk * 100, "#.#") + "% of " + str.tostring(stopPips, "#.0") + "p")
+    table.cell(panel, 0, 9, "Round trip")
+    table.cell(panel, 1, 9, str.tostring(roundTripCostPips, "#.##") + " pips (spread " + str.tostring(spreadPips, "#.##") + ")")
+    table.cell(panel, 0, 10, dayLocked ? "Daily lockout" : "Trading allowed")
+    table.cell(panel, 1, 10, str.tostring(dayLossPct, "#.##") + "% today")
+
+alertcondition(allowEntry and dir == 1, "EUR-ARES long", "EUR-ARES long setup on {{ticker}} {{interval}}")
+alertcondition(allowEntry and dir == -1, "EUR-ARES short", "EUR-ARES short setup on {{ticker}} {{interval}}")

@@ -321,6 +321,8 @@ data class Signal(
     val btcAres: BtcAresRecord? = null,
     /** ALS-5S per-engine record for silver; present for XAG/USD only, including NO_TRADE. */
     val als5s: XagAresRecord? = null,
+    /** EUR-ARES per-engine record for EUR/USD; present for that one pair, including NO_TRADE. */
+    val eurAres: EurAresRecord? = null,
 ) {
     val isActionable: Boolean get() = action != SignalAction.NO_TRADE
 }
@@ -486,6 +488,8 @@ data class PaperTrade(
     val btcAresSetupKey: String? = null,
     /** Silver ALS-5S setup key: engine + setup type + level + bar, namespaced away from gold. */
     val als5sSetupKey: String? = null,
+    /** EUR-ARES setup key: symbol + engine + level + bar, namespaced away from every other pair. */
+    val eurAresSetupKey: String? = null,
     val newsEvidence: PaperNewsRecord? = null,
     /** Companion AI's post-open educational review; never a gate and never financial advice. */
     val aiReview: PaperAiReview? = null,

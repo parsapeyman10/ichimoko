@@ -32,6 +32,18 @@ object PaperAutoRules {
             if (market.feed.mode != FeedMode.LIVE || market.lastTradeAt == null ||
                 market.lastTradeAt !in (now - 45_000L)..(now + 10_000L))
                 return "تیک تازه و دوطرفهٔ نقره برای ورود موجود نیست"
+        } else if (EurAresPolicy.appliesTo(market.symbol)) {
+            // EUR/USD has one owner: EUR-ARES. Gold/silver/BTC records cannot open it.
+            val signal = market.signal ?: return "سیگنال EUR-ARES موجود نیست"
+            if (signal.eurAres?.matches(signal) != true)
+                return "فقط ستاپ READY موتور EUR-ARES (با سطح/حد ضرر یکسان) برای یورو/دلار مجاز است"
+            val tick = market.lastTradeAt?.let { time -> market.lastTradePrice?.let { price ->
+                PriceTick(price, time, market.bid, market.ask)
+            } }
+            EurAresPolicy.quoteBlocker(signal, tick, signal.eurAres?.atr, now)?.let { return it }
+            if (market.feed.mode != FeedMode.LIVE || market.lastTradeAt == null ||
+                market.lastTradeAt !in (now - 45_000L)..(now + 10_000L))
+                return "تیک تازه و دوطرفهٔ یورو/دلار برای ورود موجود نیست"
         } else if (BtcAresPolicy.appliesTo(market.symbol)) {
             // BTC has its own model: it is not allowed to borrow the compression evidence, and the
             // compression engine is not allowed to act on BTC.

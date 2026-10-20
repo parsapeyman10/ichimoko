@@ -26,7 +26,7 @@ class EngineRegistryTest {
         assertTrue(btc.contains("BTC-ARES"))
         assertTrue(silver.contains("ALS-5S"))
         assertTrue(eth.contains("فشردگی"))
-        assertTrue(eur.contains("V1"))
+        assertTrue(eur.contains("EUR-ARES"))
         assertFalse(silver.contains("V1"))
         // A gold or BTC trade must never be described to the user as a four-layer entry.
         assertFalse(btc.contains("چهارلایه"))
@@ -49,7 +49,7 @@ class EngineRegistryTest {
         assertEquals(SymbolEngine.ALS5S_SILVER, EngineRegistry.engineFor("XAG/USD"))
         assertEquals(SymbolEngine.BTC_ARES, EngineRegistry.engineFor("BTC/USDT"))
         assertEquals(SymbolEngine.CRYPTO_COMPRESSION, EngineRegistry.engineFor("ETH/USDT"))
-        assertEquals(SymbolEngine.V1_FOUR_LAYER, EngineRegistry.engineFor("EUR/USD"))
+        assertEquals(SymbolEngine.EUR_ARES, EngineRegistry.engineFor("EUR/USD"))
         assertEquals(SymbolEngine.V1_FOUR_LAYER, EngineRegistry.engineFor("DOW"))
     }
 
@@ -57,6 +57,7 @@ class EngineRegistryTest {
         assertEquals(setOf("XAU/USD"), EngineRegistry.goldSymbols())
         assertEquals(setOf("BTC/USDT"), EngineRegistry.btcAresSymbols())
         assertEquals(setOf("XAG/USD"), EngineRegistry.silverAresSymbols())
+        assertEquals(setOf("EUR/USD"), EngineRegistry.eurAresSymbols())
         assertTrue("BTC/USDT" !in EngineRegistry.goldSymbols())
         assertTrue("XAG/USD" !in EngineRegistry.btcAresSymbols())
         assertTrue("XAU/USD" !in EngineRegistry.silverAresSymbols())
@@ -81,6 +82,20 @@ class EngineRegistryTest {
         assertTrue(EngineRegistry.engineFor("DOGE/USDT") != SymbolEngine.BTC_ARES)
         assertEquals(SymbolEngine.V1_FOUR_LAYER, EngineRegistry.engineFor("SOMETHING/NOTCRYPTO"))
         assertEquals(SymbolEngine.ALS5S_SILVER, EngineRegistry.engineFor("XAG/USD"))
+    }
+
+    @Test fun `euro-dollar belongs to EUR-ARES alone`() {
+        assertEquals(SymbolEngine.EUR_ARES, EngineRegistry.engineFor("EUR/USD"))
+        assertEquals(SymbolEngine.EUR_ARES, EngineRegistry.engineFor("eur/usd"))
+        assertNotEquals(SymbolEngine.V1_FOUR_LAYER, EngineRegistry.engineFor("EUR/USD"))
+        assertNotEquals(SymbolEngine.ALS5_GOLD, EngineRegistry.engineFor("EUR/USD"))
+        // The other six forex pairs keep the four-layer model.
+        listOf("GBP/USD", "USD/JPY", "EUR/JPY", "GBP/JPY", "AUD/USD", "USD/CHF").forEach {
+            assertEquals(SymbolEngine.V1_FOUR_LAYER, EngineRegistry.engineFor(it))
+        }
+        assertTrue("EUR/USD" !in EngineRegistry.goldSymbols())
+        assertTrue("EUR/USD" !in EngineRegistry.silverAresSymbols())
+        assertTrue("EUR/USD" !in EngineRegistry.btcAresSymbols())
     }
 
     @Test fun `setup keys are namespaced by symbol and engine`() {

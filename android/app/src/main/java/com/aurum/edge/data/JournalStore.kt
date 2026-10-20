@@ -119,7 +119,14 @@ class JournalStore(
         val isAls5Gold = com.aurum.edge.core.V1Universe.normalize(symbol) == "XAU/USD"
         val isBtcAres = com.aurum.edge.core.BtcAresPolicy.appliesTo(symbol)
         val isSilverAres = com.aurum.edge.core.XagAresPolicy.appliesTo(symbol)
-        if (isSilverAres) {
+        val isEurAres = com.aurum.edge.core.EurAresPolicy.appliesTo(symbol)
+        if (isEurAres) {
+            // EUR/USD belongs to EUR-ARES alone: no other record may authorise it, and this one
+            // cannot authorise any other symbol (checked inside matches()).
+            require(signal.eurAres?.matches(signal) == true) {
+                "ورود یورو/دلار فقط با رکورد تأییدشدهٔ EUR-ARES (موتور، سطح، حد ضرر و حد سود یکسان) مجاز است"
+            }
+        } else if (isSilverAres) {
             // Silver has its own model: a gold ALS-5 record, a V1 record or a hand-built signal
             // cannot authorise a silver entry, and the reverse is locked the same way.
             require(signal.als5s?.matches(signal) == true) {
@@ -139,7 +146,7 @@ class JournalStore(
         }
         if (isAls5Gold && automatic) require(signal.als5Opportunity?.matches(signal) == true) {
             "ورود خودکار طلای جدید فقط با ستاپ خرید/فروش تأییدشدهٔ ALS-5 مجاز است"
-        } else if (!isBtcAres && !isSilverAres) require(
+        } else if (!isBtcAres && !isSilverAres && !isEurAres) require(
             signal.ichimokuEntry?.matches(signal) == true || signal.als5Opportunity?.matches(signal) == true
         ) {
             "شواهد ورود بستهٔ ALS-5/ایچیموکو پیش از ورود تأیید نشده‌اند"
@@ -161,6 +168,19 @@ class JournalStore(
                 signal, cryptoEntryQuote, signal.btcAres?.atr, observedAt) == null &&
                 cryptoEntryQuote?.price == price) {
                 "اسپرد، تیک تازه و شواهد BTC-ARES برای ورود تأیید نشده است"
+            }
+        } else if (isEurAres) {
+            // EUR/USD: 0.25 % cap, a real two-sided tick, pip-based spread/cost gates and the
+            // rollover window. A last-trade print is never accepted as a spread.
+            require(riskPercent in 0.1..0.25) { "ریسک EUR-ARES باید حداکثر ۰٫۲۵ درصد باشد" }
+            require(com.aurum.edge.core.EurAresPolicy.quoteBlocker(
+                signal, cryptoEntryQuote, signal.eurAres?.atr, observedAt) == null &&
+                cryptoEntryQuote?.price == price) {
+                "اسپرد، تیک تازه، هزینه/ریسک و شواهد EUR-ARES برای ورود تأیید نشده است"
+            }
+            require(signal.eurAres?.costToRiskFraction?.let {
+                it <= com.aurum.edge.core.EurAresPolicy.MAX_COST_TO_RISK_FRACTION + 1e-9 } == true) {
+                "هزینهٔ رفت‌وبرگشت نسبت به فاصلهٔ حد ضرر بیش از حد مجاز است"
             }
         } else if (isSilverAres) {
             // Silver: 0.25 % cap, a real two-sided tick, and the cost-aware net R:R gates.
@@ -201,10 +221,14 @@ class JournalStore(
             (signal.als5s?.netRewardRisk ?: 0.0) >= 1.5 - 1e-9) {
             "R:R خالص پس از هزینه برای ALS-5S باید حداقل ۱:۱٫۵ باشد"
         }
+        if (isEurAres) require(signal.eurAres?.matches(signal) == true &&
+            (signal.eurAres?.netRewardRisk ?: 0.0) >= 1.5 - 1e-9) {
+            "R:R خالص پس از هزینه برای EUR-ARES باید حداقل ۱:۱٫۵ باشد"
+        }
         if (!isBtcAres && CryptoCatalog.isCrypto(symbol)) require(kotlin.math.abs(target - price) >=
             3.0 * kotlin.math.abs(price - stop) - 1e-9) { "نسبت واقعی ریسک به ریوارد رمزارز باید حداقل ۱:۳ باشد" }
-        val orderRiskPercent = if (isAls5Gold || isBtcAres || isSilverAres) riskPercent.coerceAtMost(0.25)
-        else riskPercent
+        val orderRiskPercent = if (isAls5Gold || isBtcAres || isSilverAres || isEurAres)
+            riskPercent.coerceAtMost(0.25) else riskPercent
         val draft = PaperOrderRules.preview(signal.action, symbol, price, stop, target, balance, orderRiskPercent)
         val startConditions = technicalConditions
             .filter { it.status == ConfluenceStatus.CONFIRMED }
@@ -234,6 +258,7 @@ class JournalStore(
             als5SetupKey = signal.als5Opportunity?.setupKey?.takeIf { isAls5Gold },
             btcAresSetupKey = signal.btcAres?.setupKey?.takeIf { isBtcAres },
             als5sSetupKey = signal.als5s?.setupKey?.takeIf { isSilverAres },
+            eurAresSetupKey = signal.eurAres?.setupKey?.takeIf { isEurAres },
             newsEvidence = null,
             entryConditions = technicalConditions.map {
                 com.aurum.edge.core.PaperConditionRecord.from(it)
@@ -281,12 +306,13 @@ class JournalStore(
                 draft.actualRiskUsd + draft.commissionUsd + draft.spreadCostUsd,
                 signal.barTime, now = observedAt,
                 openingBalance = settingsStore?.dayOpeningEquity(observedAt),
-                maxRiskPerTradePct = if (isAls5Gold || isBtcAres || isSilverAres) 0.0025
+                maxRiskPerTradePct = if (isAls5Gold || isBtcAres || isSilverAres || isEurAres) 0.0025
                     else PaperPortfolioPolicy.MAX_RISK_PER_TRADE,
-                maxDailyLossPct = if (isAls5Gold || isBtcAres || isSilverAres) 0.01
+                maxDailyLossPct = if (isAls5Gold || isBtcAres || isSilverAres || isEurAres) 0.01
                     else PaperPortfolioPolicy.MAX_DAILY_LOSS,
                 als5SetupKey = signal.als5Opportunity?.setupKey?.takeIf { isAls5Gold },
                 silverSetupKey = signal.als5s?.setupKey?.takeIf { isSilverAres },
+                eurAresSetupKey = signal.eurAres?.setupKey?.takeIf { isEurAres },
                 setupKey = when {
                     isAls5Gold -> signal.als5Opportunity?.setupKey
                     isBtcAres -> signal.btcAres?.setupKey

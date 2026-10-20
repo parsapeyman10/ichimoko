@@ -117,6 +117,18 @@ object SignalEngine {
                     riskPerTradePct = settings.riskPercent.coerceIn(0.01, 0.25),
                 ),
             )
+            SymbolEngine.EUR_ARES -> EurAresEngine.evaluate(
+                input = candles,
+                interval = interval,
+                symbol = symbol,
+                threshold = settings.minConfidence,
+                mode = settings.strategyFor(symbol),
+                external = timeframes,
+                config = EurAresEngine.Config(
+                    accountEquityUsd = settings.accountBalance,
+                    riskPerTradePct = settings.riskPercent.coerceIn(0.01, 0.25),
+                ),
+            )
             SymbolEngine.V1_FOUR_LAYER, SymbolEngine.CRYPTO_COMPRESSION ->
                 evaluate(candles, interval, settings.minConfidence, symbol,
                     settings.strategyFor(symbol), timeframes)
@@ -139,6 +151,8 @@ object SignalEngine {
             SymbolEngine.ALS5S_SILVER ->
                 XagAresEngine.evaluate(candles, interval, symbol, threshold, mode, timeframes,
                     goldBars = goldBars)
+            SymbolEngine.EUR_ARES ->
+                EurAresEngine.evaluate(candles, interval, symbol, threshold, mode, timeframes)
             SymbolEngine.CRYPTO_COMPRESSION ->
                 CryptoCompressionEngine.evaluate(candles, interval, symbol, timeframes)
             SymbolEngine.V1_FOUR_LAYER ->

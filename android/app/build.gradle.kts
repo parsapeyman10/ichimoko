@@ -70,8 +70,12 @@ android {
         // 2.0.7 adds ALS-5S, the dedicated silver engine (XAG/USD M5): its own regimes, sweep and
         // range/breakout engines, cost gate and separate card in the trade tab. It also ships the
         // Pine v6 strategy and the offline replay harness. See docs/ALS5S_SILVER_FA.md.
-        versionCode = 679
-        versionName = "2.0.7"
+        // 2.0.8 adds EUR-ARES, the dedicated euro/dollar engine (EUR/USD M5): pip-native economics,
+        // DST-correct sessions, trend/sweep/range/session-breakout engines, a cost veto measured in
+        // pips, its own card in the trade tab, the Pine v6 strategy and an offline harness.
+        // See docs/EUR_ARES_FA.md.
+        versionCode = 680
+        versionName = "2.0.8"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

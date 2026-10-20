@@ -30,6 +30,13 @@ object TechnicalEvidence {
         "تأیید و موتور · ALS-5S",
         "هزینه و اجرا · ALS-5S",
     )
+    /** EUR-ARES rows: the euro-dollar evidence is pip-based and belongs to nobody else. */
+    private val EUR_ARES_NAMES = setOf(
+        "رژیم و نوسان · EUR-ARES",
+        "ساختار و سطح · EUR-ARES",
+        "تأیید و موتور · EUR-ARES",
+        "هزینه، پیپ و اجرا · EUR-ARES",
+    )
     private const val NEWS_LABEL = "خبر/تقویم · داده‌کاوی ژورنال"
 
     fun items(signal: Signal): List<ConfluenceItem> = signal.confluence.filterNot { it.name == NEWS_LABEL }
@@ -52,6 +59,14 @@ object TechnicalEvidence {
             // not be able to authorise a BTC entry, and vice versa.
             return signal.btcAres.matches(signal) &&
                 core.size == CURRENT_COUNT && core.map { it.name }.toSet() == BTC_ARES_NAMES &&
+                core.all { it.ok && it.status == ConfluenceStatus.CONFIRMED && it.scorePercent == 25 } &&
+                kotlin.math.abs(core.sumOf { it.scorePercent ?: 0 }.toDouble() - signal.confidence) < 1e-6
+        }
+        if (signal.eurAres != null) {
+            // EUR-ARES: the per-pair record is the authority. A gold, silver or V1 record can never
+            // authorise a euro-dollar entry, and this branch cannot authorise any other symbol.
+            return signal.eurAres.matches(signal) &&
+                core.size == CURRENT_COUNT && core.map { it.name }.toSet() == EUR_ARES_NAMES &&
                 core.all { it.ok && it.status == ConfluenceStatus.CONFIRMED && it.scorePercent == 25 } &&
                 kotlin.math.abs(core.sumOf { it.scorePercent ?: 0 }.toDouble() - signal.confidence) < 1e-6
         }

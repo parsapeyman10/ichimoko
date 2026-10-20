@@ -22,6 +22,7 @@ import com.aurum.edge.core.V1Universe
 enum class SymbolEngine(val labelFa: String) {
     ALS5_GOLD("ALS-5 طلا · XAU/USD"),
     ALS5S_SILVER("ALS-5S نقره · XAG/USD"),
+    EUR_ARES("EUR-ARES · یورو/دلار"),
     V1_FOUR_LAYER("چهارلایهٔ V1 · فارکس/شاخص"),
     BTC_ARES("BTC-ARES · بیت‌کوین"),
     CRYPTO_COMPRESSION("فشردگی ← انفجار · سایر رمزارزها"),
@@ -32,6 +33,7 @@ object EngineRegistry {
     private val exact: Map<String, SymbolEngine> = mapOf(
         "XAU/USD" to SymbolEngine.ALS5_GOLD,
         "XAG/USD" to SymbolEngine.ALS5S_SILVER,
+        "EUR/USD" to SymbolEngine.EUR_ARES,
         "BTC/USDT" to SymbolEngine.BTC_ARES,
     )
 
@@ -43,6 +45,9 @@ object EngineRegistry {
 
     /** The only symbol ALS-5S accepts. */
     fun silverAresSymbols(): Set<String> = exact.filterValues { it == SymbolEngine.ALS5S_SILVER }.keys
+
+    /** The only symbol EUR-ARES accepts: one pair, its own pip-based model. */
+    fun eurAresSymbols(): Set<String> = exact.filterValues { it == SymbolEngine.EUR_ARES }.keys
 
     fun engineFor(symbol: String): SymbolEngine {
         val key = V1Universe.normalize(symbol)

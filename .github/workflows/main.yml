@@ -20,6 +20,8 @@ on:
       - 'tools/test_btc_ares_backtest.py'
       - 'tools/als5s_backtest.py'
       - 'tools/test_als5s_backtest.py'
+      - 'tools/eur_ares_backtest.py'
+      - 'tools/test_eur_ares_backtest.py'
       - 'strategies/**'
       - '.github/workflows/main.yml'
   pull_request:
@@ -36,6 +38,8 @@ on:
       - 'tools/test_btc_ares_backtest.py'
       - 'tools/als5s_backtest.py'
       - 'tools/test_als5s_backtest.py'
+      - 'tools/eur_ares_backtest.py'
+      - 'tools/test_eur_ares_backtest.py'
       - 'strategies/**'
       - '.github/workflows/main.yml'
   workflow_dispatch:
