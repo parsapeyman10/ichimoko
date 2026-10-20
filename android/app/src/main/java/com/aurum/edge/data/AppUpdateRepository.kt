@@ -77,6 +77,8 @@ class AppUpdateRepository(
         val notes: String,
         val downloadUrl: String? = null,
         val expectedSha256: String? = null,
+        /** Signer published next to the APK; only used when the device cannot parse the file. */
+        val expectedSignerSha256: String? = null,
         val artifactName: String? = null,
         val sizeBytes: Long? = null,
         val tagName: String? = null,
@@ -134,6 +136,22 @@ class AppUpdateRepository(
     @Volatile private var lastCheckAtMillis = 0L
 
     /**
+     * What a channel answered even when the answer was "nothing newer". Without it the screen said
+     * "no newer version" while the phone had no way to show which version the channel actually
+     * published, which is indistinguishable from a silent update bug.
+     */
+    private data class Seen(val versionName: String, val versionCode: Long?, val tag: String?) {
+        val label: String get() = buildString {
+            append(versionName)
+            versionCode?.let { append(" (").append(it).append(")") }
+            tag?.takeIf { it.isNotBlank() && it != versionName }?.let { append(" · ").append(it) }
+        }
+    }
+
+    private var seenManifest: Seen? = null
+    private var seenRelease: Seen? = null
+
+    /**
      * Checks both update channels. [autoDownload] only starts the download; the ViewModel opens
      * Android's installer after this returns so the app remains on the main thread for UI work.
      *
@@ -154,6 +172,8 @@ class AppUpdateRepository(
                 )
                 return@withContext
             }
+            seenManifest = null
+            seenRelease = null
             _state.value = _state.value.copy(
                 checking = true,
                 error = null,
@@ -170,12 +190,21 @@ class AppUpdateRepository(
                 releaseResult.exceptionOrNull()?.message,
             )
             lastCheckAtMillis = now
+            fun describeChannel(label: String, failure: Throwable?, found: UpdateInfo?, seen: Seen?): String =
+                when {
+                    failure?.message != null -> "$label: ${failure.message}"
+                    found != null -> "$label: نسخهٔ بالاتر ${found.displayVersion}"
+                    seen != null -> "$label: جدیدترین ${seen.label} — برابر یا قدیمی‌تر از نصب فعلی"
+                    else -> "$label: بدون نسخهٔ بالاتر"
+                }
             val diagnostics = listOf(
-                "manifest: " + (manifestResult.exceptionOrNull()?.message
-                    ?: manifest?.let { "نسخهٔ بالاتر ${it.versionName}" } ?: "بدون نسخهٔ بالاتر"),
-                "releases: " + (releaseResult.exceptionOrNull()?.message
-                    ?: release?.let { "نسخهٔ بالاتر ${it.displayVersion}" } ?: "بدون نسخهٔ بالاتر"),
+                describeChannel("manifest", manifestResult.exceptionOrNull(), manifest, seenManifest),
+                describeChannel("releases", releaseResult.exceptionOrNull(), release, seenRelease),
             ).joinToString(" · ")
+            // Only a release asset is installable. Naming it explicitly is what turns "the app
+            // never updates" into either "you are current" or "a newer APK exists but was not
+            // offered", which are different problems with different fixes.
+            val newestPublished = (seenRelease ?: seenManifest)?.label
 
             when {
                 update == null && failures.isNotEmpty() -> {
@@ -187,9 +216,13 @@ class AppUpdateRepository(
                     )
                 }
                 update == null -> {
+                    val published = newestPublished?.let { "جدیدترین نسخهٔ منتشرشده: $it؛ " }.orEmpty()
                     _state.value = State(
                         diagnostics = diagnostics,
-                        message = "نسخهٔ جدیدتری در Release عمومی یا manifest پیدا نشد. نسخهٔ نصب‌شده ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · ${BuildConfig.GIT_SHA.take(7)}؛ artifact خصوصی Actions از داخل اپ قابل دریافت نیست و نصب فقط با APK منتشرشدهٔ همان کانال (با کد نسخهٔ بالاتر) بروزرسانی می‌شود. برای اطمینان، «گزارش تشخیص» پایین همین کارت را ببینید.",
+                        message = "نسخهٔ جدیدتری در Release عمومی یا manifest پیدا نشد. $published" +
+                            "نسخهٔ نصب‌شده ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) · ${BuildConfig.GIT_SHA.take(7)}؛ " +
+                            "artifact خصوصی Actions از داخل اپ قابل دریافت نیست و نصب فقط با APK منتشرشدهٔ همان کانال " +
+                            "(با کد نسخهٔ بالاتر) بروزرسانی می‌شود. برای اطمینان، «گزارش تشخیص» پایین همین کارت را ببینید.",
                     )
                 }
                 !update.canDownload -> {
@@ -243,47 +276,79 @@ class AppUpdateRepository(
             } else {
                 PackageManager.GET_SIGNATURES
             }
-            val packageInfo = context.packageManager.getPackageArchiveInfo(apk.absolutePath, archiveFlags)
-                ?: throw DataFeedException("APK دانلودشده قابل خواندن نیست")
-            if (packageInfo.packageName != context.packageName) {
-                throw DataFeedException(
-                    "این APK برای ${packageInfo.packageName} است، اما نصب فعلی ${context.packageName} است؛ نسخهٔ debug و release جدا هستند.",
+            val installedSigners = runCatching {
+                signingCertificateDigests(
+                    context.packageManager.getPackageInfo(context.packageName, archiveFlags),
                 )
-            }
-            val installedInfo = context.packageManager.getPackageInfo(context.packageName, archiveFlags)
-            val installedSigners = signingCertificateDigests(installedInfo)
-            val downloadedSigners = signingCertificateDigests(packageInfo)
-            if (installedSigners.isEmpty() || downloadedSigners.isEmpty()) {
-                throw DataFeedException("گواهی نصب فعلی یا APK دریافتی خوانده نشد؛ سازگاری امضا نامعلوم است. نصب ادامه نمی‌یابد.")
-            }
-            // A single overlapping signer is insufficient for a multi-signer package: Android
-            // may reject it. This updater does not support key rotation; fail closed instead.
-            if (!sameCurrentSigners(installedSigners, downloadedSigners)) {
-                throw DataFeedException(
-                    "امضای APK با نصب فعلی یکسان نیست (نصب: ${installedSigners.sorted().joinToString()}؛ دانلود: ${downloadedSigners.sorted().joinToString()}). Android بروزرسانی را رد می‌کند. بدون پشتیبان‌گیریِ مطمئن برنامه را حذف نکنید؛ حذف نصب داده‌های محلی را از بین می‌برد.",
+            }.getOrElse { emptySet() }
+            val enforcePin = context.packageName == "com.aurum.edge"
+            // Android answers this from the system package service, another process. On some
+            // devices it cannot read a file inside this app's private cache even when the download
+            // is intact, which used to end the update at "APK is not readable". A local read
+            // failure is not evidence about the bytes: size and SHA-256 were already verified
+            // against the published release, so there is a second, still-pinned route below.
+            val packageInfo = runCatching {
+                context.packageManager.getPackageArchiveInfo(apk.absolutePath, archiveFlags)
+            }.getOrNull()
+            val downloadedVersionName: String
+            val downloadedVersionCode: Long
+            var archiveUnreadable = false
+            if (packageInfo != null) {
+                if (packageInfo.packageName != context.packageName) {
+                    throw DataFeedException(
+                        "این APK برای ${packageInfo.packageName} است، اما نصب فعلی ${context.packageName} است؛ نسخهٔ debug و release جدا هستند.",
+                    )
+                }
+                val signerProblem = UpdateVerification.signerProblem(
+                    installed = installedSigners,
+                    downloaded = signingCertificateDigests(packageInfo),
+                    enforcePin = enforcePin,
+                    pinned = BuildConfig.UPDATER_CERT_SHA256,
                 )
-            }
-            if (context.packageName == "com.aurum.edge" &&
-                !sameCurrentSigners(downloadedSigners, setOf(BuildConfig.UPDATER_CERT_SHA256))
-            ) {
-                throw DataFeedException("APK منتشرشده با گواهی pin‌شدهٔ کانال انتشار مطابقت ندارد؛ نصب متوقف شد.")
-            }
-            val versionCode = PackageInfoCompat.getLongVersionCode(packageInfo)
-            if (info.versionCode != null && versionCode < info.versionCode) {
-                throw DataFeedException("APK دریافت‌شده از نسخهٔ اعلام‌شده قدیمی‌تر است")
-            }
-            if (versionCode <= BuildConfig.VERSION_CODE) {
-                throw DataFeedException("این فایل نسخهٔ جدیدتری از نصب فعلی نیست")
+                if (signerProblem != null) throw DataFeedException(signerProblem)
+                val verdict = UpdateVerification.versionVerdict(
+                    downloadedCode = PackageInfoCompat.getLongVersionCode(packageInfo),
+                    declaredCode = info.versionCode,
+                    installedCode = BuildConfig.VERSION_CODE,
+                )
+                verdict.problem?.let { throw DataFeedException(it) }
+                downloadedVersionCode = verdict.code
+                    ?: throw DataFeedException("نسخهٔ APK دانلودشده خوانده نشد")
+                downloadedVersionName = packageInfo.versionName ?: info.versionName
+            } else {
+                archiveUnreadable = true
+                val signerProblem = UpdateVerification.metadataSignerProblem(
+                    installed = installedSigners,
+                    publishedSigner = info.expectedSignerSha256,
+                    enforcePin = enforcePin,
+                    pinned = BuildConfig.UPDATER_CERT_SHA256,
+                )
+                if (signerProblem != null) throw DataFeedException(signerProblem)
+                val verdict = UpdateVerification.versionVerdict(
+                    downloadedCode = null,
+                    declaredCode = info.versionCode,
+                    installedCode = BuildConfig.VERSION_CODE,
+                )
+                verdict.problem?.let { throw DataFeedException(it) }
+                downloadedVersionCode = verdict.code
+                    ?: throw DataFeedException("نسخهٔ فایل بروزرسانی مشخص نیست")
+                downloadedVersionName = info.versionName
             }
             _state.value = _state.value.copy(
                 checking = false,
                 downloading = false,
                 progressPercent = 100,
                 downloadedApkPath = apk.absolutePath,
-                downloadedVersionName = packageInfo.versionName ?: info.versionName,
-                downloadedVersionCode = versionCode,
+                downloadedVersionName = downloadedVersionName,
+                downloadedVersionCode = downloadedVersionCode,
                 needsInstallPermission = false,
-                message = "دانلود کامل شد؛ نصب خودکار آغاز می‌شود و تأیید نهایی با Android است.",
+                diagnostics = if (archiveUnreadable)
+                    "APK روی این گوشی مستقیم خوانده نشد؛ گواهی اعلام‌شدهٔ انتشار و اثر انگشت فایل " +
+                        "بررسی شد و بررسی نهایی امضا هنگام نصب با Android است."
+                else _state.value.diagnostics,
+                message = if (archiveUnreadable)
+                    "دانلود و SHA-256 تأیید شد؛ نصب خودکار آغاز می‌شود و Android امضا را هنگام نصب بررسی می‌کند."
+                else "دانلود کامل شد؛ نصب خودکار آغاز می‌شود و تأیید نهایی با Android است.",
             )
         }.onFailure { error ->
             _state.value = _state.value.copy(
@@ -390,6 +455,11 @@ class AppUpdateRepository(
             return null
         }
         val versionCode = obj.long("versionCode") ?: return null
+        seenManifest = Seen(
+            versionName = obj.string("versionName")?.takeIf { it.isNotBlank() } ?: versionCode.toString(),
+            versionCode = versionCode,
+            tag = obj.string("tagName") ?: obj.string("tag"),
+        )
         if (versionCode <= BuildConfig.VERSION_CODE.toLong()) return null
         val applicationId = obj.string("applicationId")
         if (!applicationId.isNullOrBlank() && applicationId != context.packageName) return null
@@ -407,6 +477,7 @@ class AppUpdateRepository(
             notes = obj.string("notes") ?: "انتشار پایدار مالک پروژه",
             downloadUrl = apkUrl,
             expectedSha256 = digest,
+            expectedSignerSha256 = UpdateVerification.sha256OrNull(obj.string("signerSha256")),
             artifactName = artifactName,
             sizeBytes = obj.long("sizeBytes")?.takeIf { it > 0L },
             tagName = obj.string("tagName") ?: obj.string("tag"),
@@ -450,6 +521,11 @@ class AppUpdateRepository(
                 runCatching { requestJson(metadataUrl).jsonObject }.getOrNull()
             }
             val metadataVersionCode = metadata?.long("versionCode")
+            seenRelease = Seen(
+                versionName = metadata?.string("versionName")?.takeIf { it.isNotBlank() } ?: displayVersion,
+                versionCode = metadataVersionCode,
+                tag = tag,
+            )
             if (metadataVersionCode != null) {
                 if (metadataVersionCode <= BuildConfig.VERSION_CODE.toLong()) return null
             } else if (currentVersion != null && semanticVersion(displayVersion)?.let {
@@ -473,6 +549,7 @@ class AppUpdateRepository(
                 downloadUrl = downloadUrl,
                 expectedSha256 = normalizeSha256(asset.string("digest"))
                     ?: normalizeSha256(metadata?.string("sha256")),
+                expectedSignerSha256 = UpdateVerification.sha256OrNull(metadata?.string("signerSha256")),
                 artifactName = artifactName,
                 sizeBytes = asset.long("size")?.takeIf { it > 0L }
                     ?: metadata?.long("sizeBytes")?.takeIf { it > 0L },
