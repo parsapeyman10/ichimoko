@@ -1,17 +1,49 @@
 package com.aurum.edge.data
 
 /**
- * Candles used to place levels and the executed entry/exit tick must belong to the
- * same dedicated crypto exchange venue.
+ * Crypto venue identity: candles used to place levels and the executed entry/exit tick must
+ * belong to ONE exchange.
+ *
+ * Nobitex is the reference venue: `Nobitex history + Nobitex executed trade` is the normal,
+ * allowed pair. Legacy positions on the per-symbol exchange (Binance Spot, historically
+ * OKX/Gate/MEXC/Kraken read-only radar frames) remain readable and settle only against their
+ * own venue — labels are never swapped to make a cross-venue pair look valid.
  */
 object CryptoVenuePolicy {
     fun compatible(symbol: String, historyProvider: String?, tickProvider: String?): Boolean {
         if (!CryptoCatalog.isCrypto(symbol)) return true
+        return sameVenue(historyProvider, tickProvider)
+    }
+
+    /** True only when both providers resolve to the SAME live venue. */
+    fun sameVenue(historyProvider: String?, tickProvider: String?): Boolean {
         if (historyProvider.isNullOrBlank() || tickProvider.isNullOrBlank()) return false
-        if (historyProvider == BinanceSpotClient.PROVIDER &&
-            tickProvider.startsWith(BinanceSpotClient.PROVIDER)) return true
-        val dedicated = SourceRouting.cryptoVenueFor(symbol)?.provider ?: return false
-        val prefix = dedicated.substringBefore(" (")
-        return historyProvider.startsWith(prefix) && tickProvider.startsWith(prefix)
+        val historyVenue = venueOf(historyProvider) ?: return false
+        return historyVenue == (venueOf(tickProvider) ?: return false)
+    }
+
+    /** Canonical venue id of a provider label; null = unknown, never guessed. */
+    fun venueOf(provider: String?): String? {
+        if (provider == null) return null
+        return when {
+            NobitexReference.isHistoryProvider(provider) -> NobitexReference.VENUE
+            provider.startsWith(BinanceSpotClient.PROVIDER) -> BinanceSpotClient.VENUE
+            provider.startsWith(CryptoRadarCandleClient.Venue.OKX.provider) -> "OKX_SPOT"
+            provider.startsWith(CryptoRadarCandleClient.Venue.GATE.provider) -> "GATE_SPOT"
+            provider.startsWith(CryptoRadarCandleClient.Venue.MEXC.provider) -> "MEXC_SPOT"
+            provider.startsWith(CryptoRadarCandleClient.Venue.KRAKEN.provider) -> "KRAKEN_SPOT"
+            else -> null
+        }
+    }
+
+    /** Venue a paper position must be recorded with, given the bars it was built on. */
+    fun entryVenue(historyProvider: String?): String =
+        if (NobitexReference.isHistoryProvider(historyProvider)) NobitexReference.VENUE
+        else BinanceSpotClient.VENUE
+
+    /** Venues whose live trade feed this app can actually stream for the selected market. */
+    fun tickVenueAvailable(historyProvider: String?): Boolean {
+        val venue = venueOf(historyProvider) ?: return false
+        return venue == NobitexReference.VENUE || venue == BinanceSpotClient.VENUE
     }
 }

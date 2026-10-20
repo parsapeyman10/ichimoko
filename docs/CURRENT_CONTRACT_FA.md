@@ -34,11 +34,28 @@
 | `GBP/JPY` | فارکس | `YAHOO_GBPJPY` (`GBPJPY=X`) | `yahoo_gbpjpy` |
 | `AUD/USD` | فارکس | `DUKASCOPY_AUDUSD` | `swissquote_audusd` |
 | `USD/CHF` | فارکس | `YAHOO_USDCHF` (`CHF=X`) | `swissquote_usdchf` |
-| `BTC/USDT` | رمزارز | `BINANCE_SPOT` | `binance_btc_spot` |
-| `ETH/USDT` | رمزارز | `OKX_SPOT` | `okx_eth_spot` |
-| `SOL/USDT` | رمزارز | `GATE_SPOT` | `gate_sol_spot` |
-| `BNB/USDT` | رمزارز | `MEXC_SPOT` | `mexc_bnb_spot` |
-| `XRP/USDT` | رمزارز | `KRAKEN_SPOT` | `kraken_xrp_spot` |
+| `BTC/USDT` | رمزارز | **`NOBITEX` (مرجع)** — جایگزین فقط‌خواندنی: `BINANCE_SPOT` | `binance_btc_spot` |
+| `ETH/USDT` | رمزارز | **`NOBITEX` (مرجع)** — جایگزین فقط‌خواندنی: `OKX_SPOT` | `okx_eth_spot` |
+| `SOL/USDT` | رمزارز | **`NOBITEX` (مرجع)** — جایگزین فقط‌خواندنی: `GATE_SPOT` | `gate_sol_spot` |
+| `BNB/USDT` | رمزارز | **`NOBITEX` (مرجع)** — جایگزین فقط‌خواندنی: `MEXC_SPOT` | `mexc_bnb_spot` |
+| `XRP/USDT` | رمزارز | **`NOBITEX` (مرجع)** — جایگزین فقط‌خواندنی: `KRAKEN_SPOT` | `kraken_xrp_spot` |
+
+### ۲٫۱ مرجع‌های فعال (به‌روزرسانی ۲۰۲۶-۱۰-۲۰)
+
+- **رمزارز — نوبیتکس مرجع است.** کندل‌های `M5`/`M15`/`H1` و «تیک معاملهٔ اجراشده» هر دو از
+  نوبیتکس می‌آیند (`NobitexCryptoBundle` + `NobitexPublicTradeStream`). اگر نوبیتکس بستهٔ سالم
+  نداد، صرافی اختصاصی همان نماد فقط **برای نمایش/رادار** و با **برچسب خودش** استفاده می‌شود؛
+  ورود کاغذی با تاریخچهٔ یک صرافی و تیک صرافی دیگر ممنوع است (`CryptoVenuePolicy.sameVenue`).
+  پوزیشن با `cryptoVenue = NOBITEX` ثبت می‌شود و خروجش با جریان معاملات/آرشیو همان نوبیتکس
+  پایش می‌شود. اگر نوبیتکس جفتی را سرو نکند (`BNBUSDT` در فهرست نوبیتکس نیست) همان مسیر
+  جایگزین با برچسب خودش فعال می‌ماند و «نوبیتکس» جا زده نمی‌شود.
+- **طلا — Twelve Data اول.** با وجود کلید خواندنی، Twelve Data مرجع `XAU/USD` است: هم تاریخچه
+  (`historyCandidates` با کلید = `TWELVE_DATA` سپس `DUKASCOPY_XAU`) و هم تیک زنده (ابتدا
+  WebSocket دوازده، بعد Swissquote/Gold-API). بدون کلید، همان مسیر عمومی قبلی است.
+- **نقره — ایراد تیک زنده رفع شد.** `XAG/USD` دیگر به مسیر «فقط XAU» فرستاده نمی‌شود:
+  gold-api.com با مسیر `/price/XAG` و بررسی اینکه پاسخ واقعاً `XAG` است خوانده می‌شود و در
+  صورت خطا Swissquote BBO همان `XAG/USD` جایگزین می‌شود؛ هر دو با برچسب خودشان.
+  قیمت طلا هرگز به‌عنوان نقره برچسب نمی‌خورد.
 
 > نکتهٔ نسخهٔ ۲٫۰٫۴: مسیر تاریخچهٔ `XAU/USD` و `XAG/USD` همان ناشر Dukascopy است ولی دو انتقال مستقل دارد:
 > فید نمودار JSON (`freeserv.dukascopy.com`) و آرشیو `bi5` (`datafeed.dukascopy.com`). آرشیو در

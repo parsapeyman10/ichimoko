@@ -124,8 +124,11 @@ class PaperAutoTrader(
                 cryptoEntryQuote = catalogQuote,
                 sourceIntegrityRevision = current.sourceIntegrityRevision,
                 marketTrend = trendContext?.let { MarketTrendRecord.from(it) },
+                // The recorded venue must be the venue of the candles the signal was built on:
+                // Nobitex reference normally, Binance only for legacy Binance-based bars.
                 cryptoVenue = if (com.aurum.edge.data.CryptoCatalog.isCrypto(current.symbol))
-                    BinanceSpotClient.VENUE else "NOBITEX",
+                    com.aurum.edge.data.CryptoVenuePolicy.entryVenue(current.historyProvider)
+                else "NOBITEX",
             )
             _status.value = "کاغذی ثبت شد: ${trade.symbol} ${trade.action} (${signal.confidence.toInt()}٪)" +
                 (trendContext?.let { " · روند: ${it.alignment.label}" } ?: "")

@@ -24,11 +24,13 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 /**
- * Automatic real spot-price source: Swissquote's public BBO for FX, gold-api.com for gold,
- * and Binance Spot aggregate executions for NEW USDT entries. Legacy Nobitex
- * positions retain their dedicated same-venue replay method.
- * MarketRepository tries this public source before its final Twelve Data live fallback,
- * whether or not a key is configured.
+ * Automatic real spot-price source: Swissquote's public BBO for FX and both metals,
+ * gold-api.com for spot gold and silver, Nobitex executed trades as the crypto REFERENCE,
+ * and the per-symbol exchange (Binance/OKX/Gate/MEXC/Kraken) only as a read-only fallback
+ * for crypto. Legacy Binance/Nobitex positions retain their dedicated same-venue replay.
+ * MarketRepository tries this public source before its final Twelve Data live fallback for
+ * every market except spot gold, where Twelve Data is the reference publisher and these
+ * public feeds are the fallback instead.
  *
  * This is not a mock/synthetic generator: every value returned is parsed from a live provider
  * response, and any parsing/staleness problem raises [DataFeedException] — never a fabricated
@@ -112,13 +114,21 @@ class SpotFallbackClient(
         fetchSwissquote(symbol)
     }
 
-    /** gold-api.com: a second, independent, keyless source — gold (XAU/USD) only. */
+    /**
+     * gold-api.com: a second, independent, keyless source for BOTH spot metals.
+     *
+     * The endpoint is `/price/{metal}`: asking for XAU and accepting it for a silver request
+     * (the previous behaviour) always failed for XAG/USD. The requested metal is now part of
+     * the URL AND of the response check, so a silver tick can never be a gold price.
+     */
     private fun fetchGoldApi(symbol: String): PriceTick {
-        if (!symbol.trim().equals("XAU/USD", ignoreCase = true)) {
-            throw DataFeedException("Gold-API فقط برای XAU/USD در دسترس است")
+        val parts = symbol.trim().uppercase(Locale.ROOT).split("/").map { it.trim() }
+        val metal = parts.getOrNull(0).orEmpty()
+        if (parts.size != 2 || parts[1] != "USD" || metal !in METALS) {
+            throw DataFeedException("Gold-API فقط XAU/USD و XAG/USD را پوشش می‌دهد")
         }
         val body = try {
-            get("https://api.gold-api.com/price/XAU")
+            get("https://api.gold-api.com/price/$metal")
         } catch (e: DataFeedException) {
             throw e
         } catch (e: Exception) {
@@ -126,8 +136,9 @@ class SpotFallbackClient(
         }
         val obj = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
             ?: throw DataFeedException("پاسخ Gold-API معتبر نیست")
-        if (obj["symbol"]?.jsonPrimitive?.contentOrNull?.uppercase(Locale.ROOT) != "XAU") {
-            throw DataFeedException("پاسخ Gold-API معتبر نیست")
+        val answered = obj["symbol"]?.jsonPrimitive?.contentOrNull?.uppercase(Locale.ROOT)
+        if (answered != metal) {
+            throw DataFeedException("پاسخ Gold-API برای $metal معتبر نیست")
         }
         val price = obj["price"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
             ?: throw DataFeedException("قیمت Gold-API معتبر نیست")
@@ -214,20 +225,71 @@ class SpotFallbackClient(
         }
     }
 
+    /**
+     * Spot metal quote: Gold-API first, Swissquote BBO second. Both publish the requested
+     * metal only; a failure is reported instead of relabelling the other metal's price.
+     */
+    private fun fetchMetalQuote(symbol: String): PriceTick {
+        val failures = mutableListOf<String>()
+        for (read in listOf<() -> PriceTick>({ fetchGoldApi(symbol) }, { fetchSwissquote(symbol) })) {
+            try {
+                return read()
+            } catch (e: DataFeedException) {
+                failures += e.message.orEmpty()
+            }
+        }
+        throw DataFeedException("قیمت لحظه‌ای $symbol از Gold-API و Swissquote دریافت نشد: " +
+            failures.joinToString("؛ ").take(160))
+    }
+
+    /**
+     * Crypto reference quote. Nobitex executed trades are the primary and the only feed that
+     * can confirm a Nobitex-labelled paper entry; the symbol's dedicated exchange is a
+     * read-only fallback that keeps its OWN provider label (so the venue gate still fails).
+     */
+    private suspend fun fetchCryptoQuote(symbol: String): PriceTick {
+        var nobitexFailure: String? = null
+        if (NobitexReference.serves(symbol)) {
+            try {
+                val body = cryptoTradeResponse(symbol)
+                return NobitexTradeQuote.parse(body).copy(
+                    provider = NobitexReference.TICK_PROVIDER,
+                    sourceConfirmations = 1,
+                    sourceNote = "معاملهٔ اجراشدهٔ نوبیتکس — مرجع رمزارز",
+                )
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (error: Exception) {
+                nobitexFailure = (error.message ?: "بدون پاسخ").take(100)
+            }
+        }
+        val venue = SourceRouting.cryptoVenueFor(symbol)
+            ?: throw DataFeedException("منبع رمزارز تعریف نشده: $symbol" +
+                (nobitexFailure?.let { " · نوبیتکس: $it" } ?: ""))
+        val fallback = try {
+            if (venue == CryptoRadarCandleClient.Venue.BINANCE) {
+                binance.fetchQuote(symbol)
+            } else {
+                CryptoRadarCandleClient(client).fetchWatchTrade(symbol, venue)
+            }
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: Exception) {
+            throw DataFeedException("قیمت ${symbol} از نوبیتکس و ${venue.provider} دریافت نشد: " +
+                listOfNotNull(nobitexFailure, error.message).joinToString("؛ ").take(140))
+        }
+        return fallback.copy(
+            provider = venue.provider,
+            sourceNote = "جایگزین فقط‌خواندنی؛ تاریخچه/ورود نوبیتکس با این تیک تأیید نمی‌شود",
+        )
+    }
+
     /** Single dedicated source per symbol (1-to-1). Never fabricated. */
     suspend fun fetchQuote(symbol: String): PriceTick {
         val canonical = com.aurum.edge.core.V1Universe.normalize(symbol)
-        if (CryptoCatalog.isCrypto(canonical)) {
-            val venue = SourceRouting.cryptoVenueFor(canonical)
-                ?: throw DataFeedException("منبع اختصاصی رمزارز تعریف نشده: $canonical")
-            return if (venue == CryptoRadarCandleClient.Venue.BINANCE) {
-                binance.fetchQuote(canonical)
-            } else {
-                CryptoRadarCandleClient(client).fetchWatchTrade(canonical, venue)
-            }
-        }
+        if (CryptoCatalog.isCrypto(canonical)) return fetchCryptoQuote(canonical)
         return when (canonical) {
-            "XAU/USD", "XAG/USD" -> withContext(Dispatchers.IO) { fetchGoldApi(canonical) }
+            "XAU/USD", "XAG/USD" -> withContext(Dispatchers.IO) { fetchMetalQuote(canonical) }
             "DOW" -> withContext(Dispatchers.IO) { fetchYahooIndexQuote("^DJI") }
             "EUR/USD" -> withContext(Dispatchers.IO) { fetchYahooIndexQuote("EURUSD=X") }
             "USD/JPY" -> withContext(Dispatchers.IO) { fetchYahooIndexQuote("JPY=X") }
@@ -269,6 +331,7 @@ class SpotFallbackClient(
     }
 
     companion object {
+        private val METALS = setOf("XAU", "XAG")
         private const val MAX_QUOTE_AGE_MS = 45_000L
         const val POLL_INTERVAL_MS = 1_000L
     }

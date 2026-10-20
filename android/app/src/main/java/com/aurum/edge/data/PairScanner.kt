@@ -138,8 +138,40 @@ class PairScanner(
         }
     }
     private val cryptoReadOnly = CryptoRadarCandleClient()
+    private val nobitexCrypto = NobitexCryptoBundle()
+    // Read-only quote path: Nobitex executed trade first, per-symbol exchange as fallback.
+    private val spotQuote = SpotFallbackClient()
     private val cryptoBundle = CryptoRadarBundle { symbol, interval, source ->
         cryptoReadOnly.fetch(symbol, interval, source.venue)
+    }
+
+    /**
+     * Crypto candles for the sweep: the Nobitex REFERENCE first, then the per-symbol exchange
+     * as a labelled read-only fallback. Failures from both are reported together; a fallback
+     * venue never inherits the Nobitex label and cannot authorize a Nobitex entry.
+     */
+    private suspend fun cryptoBook(symbol: String, now: Long): CryptoHistoryBook {
+        var nobitexFailure: Exception? = null
+        if (NobitexReference.serves(symbol)) {
+            try {
+                return nobitexCrypto.fetch(symbol, now)
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (failure: Exception) {
+                nobitexFailure = failure
+            }
+        }
+        try {
+            return cryptoBundle.fetch(symbol, now)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (failure: Exception) {
+            if (nobitexFailure == null) throw failure
+            throw DataFeedException(
+                "$symbol: نوبیتکس (مرجع رمزارز) پاسخ نداد: " +
+                    "${(nobitexFailure.message ?: "خطای نامشخص").take(90)}؛ جایگزین فقط‌خواندنی هم ناموفق بود: " +
+                    (failure.message ?: "بدون داده").take(90))
+        }
     }
     /** One latest real trend sample per symbol, independently expired. */
     private val trendSample = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, SymbolTrend>>()
@@ -350,8 +382,8 @@ class PairScanner(
                     return@async
                 }
 
-                val cryptoSnapshot = if (crypto) try {
-                    cryptoBundle.fetch(symbol, now)
+                val cryptoSnapshot: CryptoHistoryBook? = if (crypto) try {
+                    cryptoBook(symbol, now)
                 } catch (cancel: CancellationException) { throw cancel }
                 catch (failure: Exception) {
                     if (!AppNetwork.route.value.ready) {
@@ -365,19 +397,18 @@ class PairScanner(
                         update(symbol, "capacity", failure.message.orEmpty())
                         return@async
                     }
-                    val quote = listOf(CryptoRadarCandleClient.Venue.GATE,
-                        CryptoRadarCandleClient.Venue.OKX, CryptoRadarCandleClient.Venue.KRAKEN, CryptoRadarCandleClient.Venue.MEXC)
-                        .firstNotNullOfOrNull { venue ->
-                            try {
-                                venue to cryptoReadOnly.fetchWatchTrade(symbol, venue)
-                            } catch (cancel: CancellationException) { throw cancel }
-                            catch (_: Exception) { null }
-                        }
+                    val quote = try {
+                        spotQuote.fetchQuote(symbol)
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (_: Exception) {
+                        null
+                    }
                     if (quote != null) {
                         update(symbol, "partial",
-                            "${quote.first.provider}: معاملهٔ زمان‌دار ${quote.second.at}؛ " +
+                            "${quote.provider ?: "منبع تیک"}: معاملهٔ زمان‌دار ${quote.at}؛ " +
                                 "۳۲۰ کندل بستهٔ M5/M15/H1 تأیید نشد؛ فقط قیمت مشاهده‌ای، بدون سیگنال/ورود",
-                            price = quote.second.price)
+                            price = quote.price)
                     } else update(symbol, "error", (failure.message ?: "منبع هم‌نماد موجود نیست").take(420))
                     return@async
                 } else null

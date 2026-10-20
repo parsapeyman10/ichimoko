@@ -744,7 +744,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                         com.aurum.edge.core.PriceTick(quote, at, current.bid, current.ask)
                     } },
                     cryptoVenue = if (com.aurum.edge.data.CryptoCatalog.isCrypto(current.symbol))
-                        com.aurum.edge.data.BinanceSpotClient.VENUE else "NOBITEX",
+                        com.aurum.edge.data.CryptoVenuePolicy.entryVenue(current.historyProvider)
+                    else "NOBITEX",
                 )
                 _stats.value = container.journalStore.stats()
                 // Linking is metadata only; a damaged opportunity file must not erase a saved trade.

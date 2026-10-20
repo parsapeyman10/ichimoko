@@ -145,7 +145,7 @@ object SourceCatalog {
     val binanceBtcSpot = SourceDef(
         id = "binance_btc_spot",
         title = "Binance Spot · BTC/USDT",
-        subtitle = "منبع اختصاصی بیت‌کوین در بایننس",
+        subtitle = "جایگزین فقط‌خواندنی · مرجع رمزارز: نوبیتکس — منبع اختصاصی بیت‌کوین در بایننس",
         kind = SourceKind.CRYPTO_SPOT_TRADE,
         urlTemplate = "https://data-api.binance.vision/api/v3/aggTrades?symbol={symbol}",
         unit = "$",
@@ -155,7 +155,7 @@ object SourceCatalog {
     val okxEthSpot = SourceDef(
         id = "okx_eth_spot",
         title = "OKX Spot · ETH/USDT",
-        subtitle = "منبع اختصاصی اتریوم در OKX",
+        subtitle = "جایگزین فقط‌خواندنی · مرجع رمزارز: نوبیتکس — منبع اختصاصی اتریوم در OKX",
         kind = SourceKind.CRYPTO_SPOT_TRADE,
         urlTemplate = "https://www.okx.com/api/v5/market/trades?instId={symbol}",
         unit = "$",
@@ -165,7 +165,7 @@ object SourceCatalog {
     val gateSolSpot = SourceDef(
         id = "gate_sol_spot",
         title = "Gate.io Spot · SOL/USDT",
-        subtitle = "منبع اختصاصی سولانا در Gate.io",
+        subtitle = "جایگزین فقط‌خواندنی · مرجع رمزارز: نوبیتکس — منبع اختصاصی سولانا در Gate.io",
         kind = SourceKind.CRYPTO_SPOT_TRADE,
         urlTemplate = "https://api.gateio.ws/api/v4/spot/trades?currency_pair={symbol}",
         unit = "$",
@@ -175,7 +175,7 @@ object SourceCatalog {
     val mexcBnbSpot = SourceDef(
         id = "mexc_bnb_spot",
         title = "MEXC Spot · BNB/USDT",
-        subtitle = "منبع اختصاصی بی‌ان‌بی در MEXC",
+        subtitle = "جایگزین فقط‌خواندنی · مرجع رمزارز: نوبیتکس — منبع اختصاصی بی‌ان‌بی در MEXC",
         kind = SourceKind.CRYPTO_SPOT_TRADE,
         urlTemplate = "https://api.mexc.com/api/v3/trades?symbol={symbol}",
         unit = "$",
@@ -185,7 +185,7 @@ object SourceCatalog {
     val krakenXrpSpot = SourceDef(
         id = "kraken_xrp_spot",
         title = "Kraken Spot · XRP/USDT",
-        subtitle = "منبع اختصاصی ریپل در Kraken",
+        subtitle = "جایگزین فقط‌خواندنی · مرجع رمزارز: نوبیتکس — منبع اختصاصی ریپل در Kraken",
         kind = SourceKind.CRYPTO_SPOT_TRADE,
         urlTemplate = "https://api.kraken.com/0/public/Trades?pair={symbol}",
         unit = "$",

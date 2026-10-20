@@ -1,7 +1,6 @@
 package com.aurum.edge.core
 
 import com.aurum.edge.data.MarketState
-import com.aurum.edge.data.BinanceSpotClient
 import kotlin.math.abs
 
 /** Side-effect-free guard shared by service and unit tests. NEVER submits a broker order.
@@ -38,7 +37,7 @@ object PaperAutoRules {
             if (market.feed.mode != FeedMode.LIVE || tradeAt == null ||
                 tradeAt !in (now - 45_000L)..(now + 10_000L) ||
                 tradePrice == null || !tradePrice.isFinite() || tradePrice <= 0.0)
-                return "معاملهٔ واقعی تازه و زمان‌دار Binance Spot برای ورود موجود نیست"
+                return "معاملهٔ واقعی تازه و زمان‌دار همان صرافی (مرجع: نوبیتکس) برای ورود موجود نیست"
         }
         if (market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))
             return "فید معتبر در دسترس نیست (وضعیت فید: ${market.feed.mode.label})"
