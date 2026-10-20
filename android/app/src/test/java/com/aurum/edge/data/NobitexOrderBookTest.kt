@@ -16,8 +16,8 @@ class NobitexOrderBookTest {
     private val now = 1_800_000_000_000L
 
     private fun book(
-        bids: String = """[["517870","294.14"],["517980","5215.36"]]""",
-        asks: String = """[["517860","70"],["517810","4"]]""",
+        bids: String = """[["517800","294.14"],["517850","5215.36"]]""",
+        asks: String = """[["517900","70"],["517950","4"]]""",
         status: String = "ok",
         lastUpdate: Long = now,
     ) = """{"status":"$status","lastUpdate":$lastUpdate,"lastTradePrice":"517870",
@@ -30,7 +30,7 @@ class NobitexOrderBookTest {
                  asks = """[["518200","1"],["518000","2"],["518100","3"]]"""), now)
         assertEquals(517_980.0, parsed.bid, 1e-9)
         assertEquals(518_000.0, parsed.ask, 1e-9)
-        assertEquals(10.0, parsed.spread, 1e-9)
+        assertEquals(20.0, parsed.spread, 1e-9)
         assertEquals(now, parsed.at)
     }
 

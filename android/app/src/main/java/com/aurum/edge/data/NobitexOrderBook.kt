@@ -17,8 +17,10 @@ import kotlinx.serialization.json.jsonPrimitive
  *
  * The parser is deliberately strict and fails closed:
  *  - it takes the **best** prices (`max` bid, `min` ask) instead of trusting array order;
- *  - if the result is inverted (`ask < bid`) the book is rejected rather than relabelled, so a
- *    provider that swaps the two sides can never manufacture a negative spread;
+ *  - if the result is inverted (`ask < bid`) the book is rejected rather than relabelled. Nobitex
+ *    has published payloads whose two arrays look swapped (the "bids" ladder ascending above the
+ *    "asks" ladder), and a crossed book is indistinguishable from that bug; guessing which side is
+ *    which would manufacture a spread nobody measured, so the honest answer is "no quote";
  *  - a stale `lastUpdate` is a failure, not a quote;
  *  - amounts are not used for anything, so a truncated book still gives honest best prices.
  */

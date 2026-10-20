@@ -57,6 +57,8 @@ class MetalQuoteRoutingTest {
         // The mid price is derived from the two sides, never from a different instrument.
         assertEquals(31.43, tick.price, 1e-9)
         assertTrue(tick.at > 0L)
+        // A valid two-sided quote is enough: Gold-API is not asked, so no single-print can win.
+        assertEquals(1, requested.size)
     }
 
     @Test fun `silver falls back to gold-api and then has no spread to trade on`() = runBlocking {
@@ -82,15 +84,14 @@ class MetalQuoteRoutingTest {
     @Test fun `a gold answer is never accepted as silver`() = runBlocking {
         val requested = mutableListOf<String>()
         val result = runCatching {
+            // Swissquote is down and Gold-API answers XAU to an XAG question: there is no quote.
             spot(requested) { url ->
-                if (url.contains("/price/")) singlePrice("XAU") else bbo(31.40, 31.46)
+                if (url.endsWith("/price/XAG")) singlePrice("XAU", "2400.5") else null
             }.fetchQuote("XAG/USD")
         }
-        // The mismatched Gold-API answer is rejected. The Swissquote leg answers a valid XAG/USD
-        // BBO here, so the quote that survives is silver's own — never gold's 2400-level price.
+        assertTrue("a mismatched metal answer must fail closed", result.isFailure)
+        assertTrue(requested.first().contains("swissquote"))
         assertTrue(requested.any { it.endsWith("/price/XAG") })
-        val tick = result.getOrNull()
-        if (tick != null) assertTrue("silver must not become gold", tick.price < 100.0)
     }
 
     @Test fun `euro-dollar is quoted by swissquote so it can price its spread`() = runBlocking {
