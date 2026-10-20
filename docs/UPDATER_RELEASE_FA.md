@@ -74,6 +74,12 @@ python3 tools/refresh_update_manifest.py --tag v2.0.6 --check   # فقط برر�
 موجود را پاک نمی‌کند**. اگر این کار را نکنی، مرحلهٔ «Verify default-branch manifest points at the
 newest release» PR بعدی را متوقف می‌کند و پیامش همین دستور را نشان می‌دهد.
 
+از این نسخه، خود workflow هم بعد از انتشار موفق و فقط **روی `main`** همین کار را می‌کند
+(مرحلهٔ «Keep the default-branch manifest on the newest release»: فایل را از sidecar همان Release
+تازه می‌کند و با پیام `chore(update): … [skip ci]` push می‌کند). دستی‌کردن فقط وقتی لازم است که
+انتشار از تگ یا شاخهٔ `arena/*` انجام شود؛ در آن حالت خودِ Release نسخهٔ درست manifest را دارد و
+پس از merge باید یک‌بار دستور بالا اجرا شود.
+
 ## ۵) گیت‌های روی گوشی و پیام هرکدام
 
 به ترتیب اجرا؛ اولین گیتی که رد شود همان پیام روی کارت «بروزرسانی برنامه» دیده می‌شود:
