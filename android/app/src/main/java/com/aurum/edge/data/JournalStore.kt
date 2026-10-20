@@ -248,7 +248,10 @@ class JournalStore(
     suspend fun applyCryptoClosedBars(symbol: String, openedAt: Long,
         venue: String, m5: List<Candle>, m15: List<Candle>,
         now: Long = System.currentTimeMillis()): Boolean = mutex.withLock {
-        if (!loaded || venue != BinanceSpotClient.VENUE) return@withLock false
+        // Two venues are writable: the Nobitex reference and legacy Binance Spot positions.
+        // Bars from one venue are never applied to the other's position.
+        if (!loaded || venue !in setOf(NobitexReference.VENUE, BinanceSpotClient.VENUE))
+            return@withLock false
         val trade = _trades.value.singleOrNull { it.isOpen && it.symbol == symbol &&
             it.openedAt == openedAt && it.cryptoVenue == venue && it.cryptoEntryAtr != null }
             ?: return@withLock false
