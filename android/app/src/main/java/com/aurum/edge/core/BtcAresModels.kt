@@ -59,6 +59,8 @@ data class BtcAresRecord(
     val stopLoss: Double? = null,
     val takeProfit: Double? = null,
     val rewardToRisk: Double? = null,
+    /** R:R after the modelled round-trip cost; the number the entry gate actually tests. */
+    val netRewardRisk: Double? = null,
     val positionQty: Double = 0.0,
     val riskUsd: Double = 0.0,
     val conflicts: List<String> = emptyList(),
@@ -87,6 +89,10 @@ data class BtcAresRecord(
         val s = stopLoss ?: return false
         val t = takeProfit ?: return false
         if (!(e > 0.0 && s > 0.0 && t > 0.0 && rr.isFinite() && rr >= 1.5)) return false
+        // The gross ratio is not enough: a 10 bps stop with 23 bps of round-trip cost is a losing
+        // trade no matter how good "2R" looks on the card.
+        val net = netRewardRisk ?: return false
+        if (!net.isFinite() || net < 1.5) return false
         // 60 is the floor of the engine's own configurable threshold range; the exact bar the user
         // chose is enforced inside the engine, not re-invented here.
         if (score !in 60..100) return false

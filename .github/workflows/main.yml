@@ -16,6 +16,8 @@ on:
       - 'tools/test_verify_apk_upgrade.py'
       - 'tools/refresh_update_manifest.py'
       - 'tools/test_refresh_update_manifest.py'
+      - 'tools/btc_ares_backtest.py'
+      - 'tools/test_btc_ares_backtest.py'
       - '.github/workflows/main.yml'
   pull_request:
     paths:
@@ -27,6 +29,8 @@ on:
       - 'tools/test_verify_apk_upgrade.py'
       - 'tools/refresh_update_manifest.py'
       - 'tools/test_refresh_update_manifest.py'
+      - 'tools/btc_ares_backtest.py'
+      - 'tools/test_btc_ares_backtest.py'
       - '.github/workflows/main.yml'
   workflow_dispatch:
     inputs:

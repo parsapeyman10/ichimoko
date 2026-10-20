@@ -134,6 +134,29 @@ class BtcAresEngineTest {
         assertEquals(0.0, BtcAresEngine.positionSize(60_000.0, 60_000.0, cfg).first, 1e-12)
     }
 
+    @Test fun `net reward risk pays for the round trip and a tight stop is refused`() {
+        val cfg = BtcAresEngine.Config()
+        // 23 bps round trip on 60,000 = 138 USD per BTC of cost, whatever the chart says.
+        val tight = BtcAresEngine.netRewardRisk(60_000.0, 59_990.0, 60_020.0, cfg)
+        assertTrue("a 10 USD stop cannot clear 138 USD of cost (got $tight)", tight < 1.0)
+        val wide = BtcAresEngine.netRewardRisk(60_000.0, 59_300.0, 61_400.0, cfg)
+        assertTrue("a wide stop must still earn after costs (got $wide)", wide >= 1.5)
+        // Free trading must reproduce the gross ratio exactly, which proves the formula is linear.
+        val free = BtcAresEngine.Config(commissionBpsPerSide = 0.0, spreadBps = 0.0, slippageBps = 0.0)
+        assertEquals(2.0, BtcAresEngine.netRewardRisk(60_000.0, 59_700.0, 60_600.0, free), 1e-9)
+        // Costs strictly reduce the ratio; they never improve it.
+        assertTrue(BtcAresEngine.netRewardRisk(60_000.0, 59_700.0, 60_600.0, cfg) < 2.0)
+    }
+
+    @Test fun `a gross-only record without a net ratio cannot authorise an entry`() {
+        val record = sampleRecord()
+        val signal = sampleSignal(record)
+        assertFalse("a record that does not state its post-cost ratio is not evidence",
+            record.copy(netRewardRisk = null).matches(signal))
+        assertFalse(record.copy(netRewardRisk = 1.2).matches(signal))
+        assertTrue(record.matches(signal))
+    }
+
     @Test fun `a hand built record cannot authorise a signal it does not describe`() {
         val record = sampleRecord()
         val signal = sampleSignal(record)
@@ -213,8 +236,8 @@ class BtcAresEngineTest {
             structuralLevel = 59_900.0,
             invalidationLevel = 59_700.0,
             entry = 60_000.0,
-            stopLoss = 59_800.0,
-            takeProfit = 60_400.0,
+            stopLoss = 59_300.0,
+            takeProfit = 61_400.0,
             rewardToRisk = 2.0,
         )
         return BtcAresRecord(
@@ -229,9 +252,10 @@ class BtcAresEngineTest {
             structuralLevel = 59_900.0,
             invalidationLevel = 59_700.0,
             entry = 60_000.0,
-            stopLoss = 59_800.0,
-            takeProfit = 60_400.0,
+            stopLoss = 59_300.0,
+            takeProfit = 61_400.0,
             rewardToRisk = 2.0,
+            netRewardRisk = 1.51,
             positionQty = 0.05713,
             riskUsd = 25.0,
             setupKey = "BTC-ARES|BTC/USDT|ENGINE_A_TREND|BUY|59900.00|$now",

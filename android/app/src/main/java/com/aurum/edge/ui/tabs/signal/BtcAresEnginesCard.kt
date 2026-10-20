@@ -76,7 +76,9 @@ internal fun BtcAresEnginesCard(status: PairScanStatus?, sweeping: Boolean) {
         if (record.isActionable) {
             Text(
                 "ورود ${record.entry?.let(::formatPrice) ?: "—"} · SL ${record.stopLoss?.let(::formatPrice) ?: "—"} · " +
-                    "TP ${record.takeProfit?.let(::formatPrice) ?: "—"} · RR ${"%.2f".format(record.rewardToRisk ?: 0.0)}",
+                    "TP ${record.takeProfit?.let(::formatPrice) ?: "—"} · " +
+                    "RR خام ${"%.2f".format(record.rewardToRisk ?: 0.0)} · " +
+                    "خالص ${"%.2f".format(record.netRewardRisk ?: 0.0)} (پس از هزینه)",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Green,
                 modifier = Modifier.padding(top = 6.dp),
             )
@@ -142,7 +144,7 @@ private fun EngineRow(engine: BtcAresEngineReport, chosen: Boolean) {
             style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
         if (engine.entry != null && engine.state == "READY") {
             Text("ورود ${formatPrice(engine.entry!!)} · SL ${engine.stopLoss?.let(::formatPrice) ?: "—"} · " +
-                "TP ${engine.takeProfit?.let(::formatPrice) ?: "—"} · RR ${"%.2f".format(engine.rewardToRisk ?: 0.0)}",
+                "TP ${engine.takeProfit?.let(::formatPrice) ?: "—"} · RR خام ${"%.2f".format(engine.rewardToRisk ?: 0.0)}",
                 style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
         }
         if (engine.satisfied.isNotEmpty()) {

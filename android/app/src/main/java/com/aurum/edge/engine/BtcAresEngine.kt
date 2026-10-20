@@ -120,6 +120,8 @@ object BtcAresEngine {
         val minStopAtr: Double = 0.35,
         val maxStopAtr: Double = 4.00,
         val minRewardRisk: Double = 1.50,
+        /** Gating on net (post-cost) R:R. Turning it off would re-open trades whose costs eat the edge. */
+        val enforceNetRewardRisk: Boolean = true,
         val scoreThreshold: Int = 70,
         val conflictMargin: Int = 15,
         val riskPerTradePct: Double = 0.25,
@@ -752,6 +754,23 @@ object BtcAresEngine {
         maxAgeBars = cfg.maxSetupAgeBars,
     )
 
+    /**
+     * Reward:risk *after* the round-trip cost — the only R:R a trade actually earns.
+     *
+     * BTC M5 stops are often a few basis points wide while the modelled round trip is
+     * `2 × commission + spread + slippage` (23 bps with the shipped defaults). A gross 2R setup
+     * with a 10 bps stop is therefore a losing trade by construction. The engine refuses those
+     * instead of displaying a flattering gross ratio, and [BtcAresRecord.netRewardRisk] carries
+     * the number that was gated on so the trade tab can show both.
+     */
+    fun netRewardRisk(entry: Double, stop: Double, target: Double, cfg: Config = Config()): Double {
+        if (!entry.isFinite() || !stop.isFinite() || !target.isFinite()) return 0.0
+        val costPerUnit = entry * (2 * cfg.commissionBpsPerSide + cfg.spreadBps + cfg.slippageBps) / 10_000.0
+        val risk = abs(entry - stop) + costPerUnit
+        if (risk <= 0.0) return 0.0
+        return (abs(target - entry) - costPerUnit) / risk
+    }
+
     /** Position size from equity, permitted risk and the entry-to-stop distance plus costs. */
     fun positionSize(entry: Double, stop: Double, cfg: Config): Pair<Double, Double> {
         if (!entry.isFinite() || !stop.isFinite() || entry <= 0.0 || stop <= 0.0 || entry == stop) return 0.0 to 0.0
@@ -903,6 +922,14 @@ object BtcAresEngine {
         if (vol == Volatility.EXTREME && regime == Regime.EXTREME_VOL)
             noTradeReasons += "نوسان بحرانی: ورود تازه مجاز نیست"
 
+        val netRr = best?.let { c ->
+            if (c.entry != null && c.stop != null && c.target != null)
+                netRewardRisk(c.entry, c.stop, c.target, config) else null
+        }
+        if (best != null && config.enforceNetRewardRisk && netRr != null && netRr < config.minRewardRisk)
+            noTradeReasons += "R:R خالص بعد از هزینه‌ها ${pct(netRr, 2)} کمتر از ${pct(config.minRewardRisk, 2)} است " +
+                "(RR خام ${pct(best.rr ?: 0.0, 2)}؛ حد ضرر برای هزینهٔ ${pct((2 * config.commissionBpsPerSide + config.spreadBps + config.slippageBps), 0)}bps خیلی تنگ است)"
+
         val actionableCandidate = best?.takeIf { noTradeReasons.isEmpty() }
         val (qty, riskUsd) = if (actionableCandidate?.entry != null && actionableCandidate.stop != null)
             positionSize(actionableCandidate.entry, actionableCandidate.stop, config) else 0.0 to 0.0
@@ -935,6 +962,7 @@ object BtcAresEngine {
             stopLoss = if (finalAction != SignalAction.NO_TRADE) actionableCandidate?.stop else null,
             takeProfit = if (finalAction != SignalAction.NO_TRADE) actionableCandidate?.target else null,
             rewardToRisk = if (finalAction != SignalAction.NO_TRADE) actionableCandidate?.rr else null,
+            netRewardRisk = netRr,
             positionQty = qty,
             riskUsd = riskUsd,
             conflicts = conflicts,
