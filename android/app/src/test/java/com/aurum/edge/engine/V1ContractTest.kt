@@ -48,10 +48,12 @@ class V1ContractTest {
         assertEquals(SignalAction.BUY, ichi.higherTimeframeBiasAt(long.lastIndex, long.last().close))
     }
 
+    // GBP/USD: EUR/USD belongs to EUR-ARES now, so the four-layer contract is exercised on a pair
+    // that still owns it (V1 must never evaluate euro-dollar).
     @Test fun threeRealFrameStackIsScoredAndOldFutureBarsCannotParticipate() {
         val data = V1Scoring.intervals.associateWith(::bars)
         val signal = SignalEngine.evaluate(data.getValue(Interval.M5), Interval.M5, 85.0,
-            symbol = "EUR/USD", timeframes = data)
+            symbol = "GBP/USD", timeframes = data)
         assertEquals(4, signal.confluence.size)
         assertEquals(listOf(Interval.M5, Interval.M15, Interval.H1), V1Scoring.intervals)
         assertTrue(signal.confluence.last().detail.contains("1H:"))
@@ -63,7 +65,7 @@ class V1ContractTest {
             it.copy(time = it.time + 2L * Interval.D1.millis)
         }
         val rejected = SignalEngine.evaluate(data.getValue(Interval.M5), Interval.M5, 60.0,
-            symbol = "EUR/USD", timeframes = future)
+            symbol = "GBP/USD", timeframes = future)
         assertEquals(SignalAction.NO_TRADE, rejected.action)
         // A future-dated M15 frame must become UNKNOWN rather than contributing a vote.
         val stackEvidence = rejected.confluence.single { it.name == "پشتهٔ ۳ تایم‌فریمی" }
@@ -76,7 +78,7 @@ class V1ContractTest {
         val short = complete.toMutableMap()
         short[Interval.M15] = complete.getValue(Interval.M15).takeLast(239)
         val rejected = SignalEngine.evaluate(complete.getValue(Interval.M5), Interval.M5, 60.0,
-            symbol = "EUR/USD", timeframes = short)
+            symbol = "GBP/USD", timeframes = short)
         assertEquals(SignalAction.NO_TRADE, rejected.action)
         assertTrue(rejected.blockers.any { it.contains("15m(239/240)") })
         assertTrue(rejected.confluence.last().detail.contains("239/240 کندل"))
@@ -85,7 +87,7 @@ class V1ContractTest {
         open[Interval.H1] = complete.getValue(Interval.H1).takeLast(200)
             .mapIndexed { index, candle -> if (index == 199) candle.copy(closed = false) else candle }
         val blocked = SignalEngine.evaluate(complete.getValue(Interval.M5), Interval.M5, 60.0,
-            symbol = "EUR/USD", timeframes = open)
+            symbol = "GBP/USD", timeframes = open)
         assertEquals(SignalAction.NO_TRADE, blocked.action)
         assertTrue(blocked.blockers.any { it.contains("1H(199/200)") })
     }
@@ -144,17 +146,17 @@ class V1ContractTest {
         listOf(CategoryStrategy.TREND, CategoryStrategy.RANGE, CategoryStrategy.HYBRID).forEach { mode ->
             val settings = AppSettings(minConfidence = 85.0,
                 categoryStrategies = AssetClass.entries.associateWith { mode })
-            val chart = SignalEngine.evaluateLive(base, Interval.M5, settings, "EUR/USD", data)
-            val scanner = SignalEngine.evaluateLive(base, Interval.M5, settings, "EUR/USD", data)
+            val chart = SignalEngine.evaluateLive(base, Interval.M5, settings, "GBP/USD", data)
+            val scanner = SignalEngine.evaluateLive(base, Interval.M5, settings, "GBP/USD", data)
             val direct = SignalEngine.evaluate(base, Interval.M5, 85.0,
-                symbol = "EUR/USD", mode = mode, timeframes = data)
+                symbol = "GBP/USD", mode = mode, timeframes = data)
             assertEquals(chart.action, scanner.action)
             assertEquals(chart.blockers, scanner.blockers)
             assertEquals(chart.confluence, direct.confluence)
             assertEquals(chart.action, direct.action)
         }
         val incomplete = data - Interval.M15
-        val blocked = SignalEngine.evaluateLive(base, Interval.M5, AppSettings(), "EUR/USD", incomplete)
+        val blocked = SignalEngine.evaluateLive(base, Interval.M5, AppSettings(), "GBP/USD", incomplete)
         assertFalse(blocked.isActionable)
         assertTrue(blocked.blockers.any { it.contains("پشتهٔ ۳") })
     }
