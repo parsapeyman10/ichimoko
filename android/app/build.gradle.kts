@@ -67,8 +67,8 @@ android {
         // (docs/SYMBOL_SOURCES_FA.md) and an updater that reports which published version it saw
         // (docs/UPDATER_RELEASE_FA.md). A versionCode must be bumped here before a release run,
         // because the workflow only publishes explicit `release: publish` commits.
-        versionCode = 677
-        versionName = "2.0.5"
+        versionCode = 678
+        versionName = "2.0.6"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
