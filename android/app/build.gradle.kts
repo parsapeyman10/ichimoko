@@ -62,10 +62,13 @@ android {
         applicationId = "com.aurum.edge"
         minSdk = 26
         targetSdk = 35
-        // Keep the published update channel upgradeable: 2.0.4 is code 676 after 2.0.3 (675).
-        // 2.0.4 ships the Dukascopy chart-JSON history transport (docs/DATA_SOURCE_RECOVERY_2_0_4_FA.md).
-        versionCode = 676
-        versionName = "2.0.4"
+        // Keep the published update channel upgradeable: 2.0.5 is code 677 after 2.0.4 (676).
+        // 2.0.5 ships the per-symbol Twelve Data keys, the symbol→source map
+        // (docs/SYMBOL_SOURCES_FA.md) and an updater that reports which published version it saw
+        // (docs/UPDATER_RELEASE_FA.md). A versionCode must be bumped here before a release run,
+        // because the workflow only publishes explicit `release: publish` commits.
+        versionCode = 677
+        versionName = "2.0.5"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
