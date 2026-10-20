@@ -54,6 +54,21 @@ gh workflow run main.yml --ref main \
   -f version_name=2.0.6 -f version_code=678 -f publish_release=true
 ```
 
+همین کار از شاخهٔ `arena/*` هم مجاز است، پس می‌توان بدون merge منتشر کرد
+(`version_name`/`version_code` خالی = همان مقادیر `build.gradle.kts`):
+
+```bash
+gh workflow run main.yml --ref arena/b726ddc6-ichimoko \
+  -f version_name=2.0.5 -f version_code=677 -f publish_release=true
+```
+
+در رابط وب: **Actions → Android APK → Run workflow**، شاخه را انتخاب کن،
+`publish_release` را `true` بگذار و Run. حدود ۱۵ دقیقه بعد Release عمومی `v2.0.5` با همین
+assetها ساخته می‌شود. انتشار از شاخه یعنی تگ روی همان کامیت شاخه می‌نشیند و **manifest روی
+`main` عقب می‌ماند**؛ مرحلهٔ خودکار فقط روی `main` می‌نویسد، پس بعد از انتشار یک‌بار
+`python3 tools/refresh_update_manifest.py --tag v2.0.5` را روی همان شاخه اجرا و کامیت کن تا
+merge بعدی، `main` را هم‌خوان کند و گیت «manifest کهنه» سبز بماند.
+
 پس از موفقیت، Release شامل `AurumEdge-v2.0.6.apk`، `AurumEdge-v2.0.6.apk.json`،
 `aurum-edge.json`، `checksums.sha256` و `upgrade-compatibility.json` است و مرحلهٔ
 «Verify public updater release is discoverable» همان APK را بدون توکن دانلود و تأیید می‌کند.
