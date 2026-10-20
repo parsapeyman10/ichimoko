@@ -75,6 +75,8 @@ data class PairScanStatus(
     val als5Opportunity: com.aurum.edge.core.Als5OpportunityRecord? = null,
     /** BTC-ARES per-engine record; present for BTC/USDT only, including NO_TRADE. */
     val btcAres: com.aurum.edge.core.BtcAresRecord? = null,
+    /** ALS-5S per-engine record; present for XAG/USD only, including NO_TRADE. */
+    val als5s: com.aurum.edge.core.XagAresRecord? = null,
 )
 
 data class PairScanState(
@@ -175,6 +177,13 @@ class PairScanner(
                     (failure.message ?: "بدون داده").take(90))
         }
     }
+    /**
+     * Newest closed XAU/USD bars from this scanner. The silver engine uses them only as an aligned
+     * context module; when they are missing or out of step the module reports UNAVAILABLE and
+     * silver keeps working alone. Never fetched by the silver evaluation itself.
+     */
+    @Volatile private var lastGoldBars: List<com.aurum.edge.core.Candle> = emptyList()
+
     /** One latest real trend sample per symbol, independently expired. */
     private val trendSample = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, SymbolTrend>>()
     private val _state = MutableStateFlow(PairScanState(
@@ -309,6 +318,7 @@ class PairScanner(
             trendNote: String? = null,
             als5Opportunity: com.aurum.edge.core.Als5OpportunityRecord? = null,
             btcAres: com.aurum.edge.core.BtcAresRecord? = null,
+            als5s: com.aurum.edge.core.XagAresRecord? = null,
         ) = synchronized(statusLock) {
             if (state != "capacity") decisionLog?.append(symbol, (chosenIntervals[symbol] ?: Interval.M5).label, state, detail,
                 signal = if (conditions.isNotEmpty()) com.aurum.edge.core.Signal(
@@ -342,6 +352,7 @@ class PairScanner(
                 trendNote = trendNote ?: trend?.detailFa?.take(200),
                 als5Opportunity = als5Opportunity,
                 btcAres = btcAres,
+                als5s = als5s,
             )
             _state.update { old ->
                 val currentList = old.statuses.map { statuses[it.symbol] ?: it }
@@ -441,6 +452,9 @@ class PairScanner(
                 var candles = rawCandles.filter { it.closed && it.time + interval.millis <= now }
                     .sortedBy { it.time }.distinctBy { it.time }.takeLast(HistoryPolicy.LIVE_REQUEST_CANDLES)
                 candles.lastOrNull()?.let { barTimes[symbol] = it.time + interval.millis }
+                // The silver model reads this aligned snapshot as *context only*; it is refreshed
+                // here because XAU/USD is scanned by this same sweep.
+                if (symbol == "XAU/USD") lastGoldBars = candles.takeLast(120)
                 if (candles.size < HistoryPolicy.LIVE_MIN_CANDLES) {
                     update(symbol, "partial", "فقط مشاهدهٔ کندل قبلی ${candles.lastOrNull()?.time ?: "—"}: " +
                         "${candles.size} کندل بستهٔ واقعی در ${interval.label}؛ برای سیگنال/معامله ${HistoryPolicy.LIVE_MIN_CANDLES} لازم است",
@@ -464,7 +478,10 @@ class PairScanner(
                         continue
                     }
                     val evaluated = withContext(Dispatchers.Default) {
-                        try { SignalEngine.evaluateLive(bars, candidate, config, symbol, frames) }
+                        try {
+                            SignalEngine.evaluateLive(bars, candidate, config, symbol, frames,
+                                goldBars = if (symbol == "XAG/USD") lastGoldBars else emptyList())
+                        }
                         catch (cancel: CancellationException) { throw cancel }
                         catch (_: Exception) { null }
                     }
@@ -543,6 +560,7 @@ class PairScanner(
                         playbookReason = playbook?.reasonFa?.take(160),
                         trend = trend,
                         als5Opportunity = combined.als5Opportunity, btcAres = combined.btcAres,
+                        als5s = combined.als5s,
                     )
                     return@async
                 }
@@ -613,7 +631,7 @@ class PairScanner(
                         playbookAllowed = playbook?.allowed,
                         playbookReason = playbook?.reasonFa?.take(160), trend = trend,
                         trendAligned = aligned, trendNote = trendGate?.noteFa?.take(200),
-                        als5Opportunity = combined.als5Opportunity, btcAres = combined.btcAres)
+                        als5Opportunity = combined.als5Opportunity, btcAres = combined.btcAres, als5s = combined.als5s)
                     return@async
                 }
 
@@ -671,6 +689,7 @@ class PairScanner(
                     trendAligned = aligned,
                     trendNote = trendGate?.noteFa?.take(200),
                     als5Opportunity = combined.als5Opportunity, btcAres = combined.btcAres,
+                        als5s = combined.als5s,
                 )
             } }.awaitAll()
         } // independent symbol evaluations; publisher-limited requests

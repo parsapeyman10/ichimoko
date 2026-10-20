@@ -22,7 +22,9 @@ object PaperPortfolioPolicy {
                 maxDailyLossPct: Double = MAX_DAILY_LOSS,
                 als5SetupKey: String? = null,
                 /** Generic per-engine setup key (BTC-ARES); checked against both journal fields. */
-                setupKey: String? = null): String? {
+                setupKey: String? = null,
+                /** ALS-5S setup key for silver; a gold key can never block or unlock it. */
+                silverSetupKey: String? = null): String? {
         // Oil entry quarantine: the reported loss series cannot be audited without the device
         // journal and venue-matched history. No new paper entry (manual or automatic) is safe to
         // authorize yet. This intentionally does NOT alter or close existing trades.
@@ -48,6 +50,9 @@ object PaperPortfolioPolicy {
         if (!setupKey.isNullOrBlank() && trades.any {
                 it.symbol == symbol && it.btcAresSetupKey == setupKey
             }) return "این ستاپ ساختاری BTC-ARES پیش‌تر معامله شده است"
+        if (!silverSetupKey.isNullOrBlank() && trades.any {
+                it.symbol == symbol && it.als5sSetupKey == silverSetupKey
+            }) return "این ستاپ ساختاری ALS-5S پیش‌تر معامله شده است"
         if (!maxRiskPerTradePct.isFinite() || maxRiskPerTradePct !in 0.0001..MAX_RISK_PER_TRADE ||
             !maxDailyLossPct.isFinite() || maxDailyLossPct !in 0.0001..MAX_DAILY_LOSS ||
             !balance.isFinite() || balance <= 0.0 || !addedRiskUsd.isFinite() || addedRiskUsd < 0.0 ||

@@ -76,7 +76,8 @@ object SignalEngine {
      * Category mode and threshold can never diverge between callers.
      */
     fun evaluateLive(candles: List<Candle>, interval: Interval, settings: AppSettings,
-                     symbol: String, timeframes: Map<Interval, List<Candle>>): Signal =
+                     symbol: String, timeframes: Map<Interval, List<Candle>>,
+                     goldBars: List<Candle> = emptyList()): Signal =
         when (EngineRegistry.engineFor(symbol)) {
             SymbolEngine.ALS5_GOLD -> Als5GoldEngine.evaluate(
                 input = candles,
@@ -103,6 +104,19 @@ object SignalEngine {
                     riskPerTradePct = settings.riskPercent.coerceIn(0.01, 0.25),
                 ),
             )
+            SymbolEngine.ALS5S_SILVER -> XagAresEngine.evaluate(
+                input = candles,
+                interval = interval,
+                symbol = symbol,
+                threshold = settings.minConfidence,
+                mode = settings.strategyFor(symbol),
+                external = timeframes,
+                goldBars = goldBars,
+                config = XagAresEngine.Config(
+                    accountEquityUsd = settings.accountBalance,
+                    riskPerTradePct = settings.riskPercent.coerceIn(0.01, 0.25),
+                ),
+            )
             SymbolEngine.V1_FOUR_LAYER, SymbolEngine.CRYPTO_COMPRESSION ->
                 evaluate(candles, interval, settings.minConfidence, symbol,
                     settings.strategyFor(symbol), timeframes)
@@ -114,13 +128,17 @@ object SignalEngine {
     fun evaluate(candles: List<Candle>, interval: Interval, threshold: Double = 85.0,
                  symbol: String = "XAU/USD", mode: com.aurum.edge.core.CategoryStrategy =
                      com.aurum.edge.core.CategoryStrategy.HYBRID,
-                 timeframes: Map<Interval, List<Candle>> = emptyMap()): Signal =
+                 timeframes: Map<Interval, List<Candle>> = emptyMap(),
+                 goldBars: List<Candle> = emptyList()): Signal =
         when (EngineRegistry.engineFor(symbol)) {
             // One owner per symbol, decided in EngineRegistry — never by a second `if` here.
             SymbolEngine.ALS5_GOLD ->
                 Als5GoldEngine.evaluate(candles, interval, symbol, threshold, mode, timeframes)
             SymbolEngine.BTC_ARES ->
                 BtcAresEngine.evaluate(candles, interval, symbol, threshold, mode, timeframes)
+            SymbolEngine.ALS5S_SILVER ->
+                XagAresEngine.evaluate(candles, interval, symbol, threshold, mode, timeframes,
+                    goldBars = goldBars)
             SymbolEngine.CRYPTO_COMPRESSION ->
                 CryptoCompressionEngine.evaluate(candles, interval, symbol, timeframes)
             SymbolEngine.V1_FOUR_LAYER ->

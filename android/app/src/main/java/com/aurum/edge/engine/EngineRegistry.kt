@@ -21,7 +21,8 @@ import com.aurum.edge.core.V1Universe
  */
 enum class SymbolEngine(val labelFa: String) {
     ALS5_GOLD("ALS-5 طلا · XAU/USD"),
-    V1_FOUR_LAYER("چهارلایهٔ V1 · نقره/فارکس/شاخص"),
+    ALS5S_SILVER("ALS-5S نقره · XAG/USD"),
+    V1_FOUR_LAYER("چهارلایهٔ V1 · فارکس/شاخص"),
     BTC_ARES("BTC-ARES · بیت‌کوین"),
     CRYPTO_COMPRESSION("فشردگی ← انفجار · سایر رمزارزها"),
 }
@@ -30,6 +31,7 @@ object EngineRegistry {
     /** Exact-symbol owners. A symbol here can never be claimed by another engine. */
     private val exact: Map<String, SymbolEngine> = mapOf(
         "XAU/USD" to SymbolEngine.ALS5_GOLD,
+        "XAG/USD" to SymbolEngine.ALS5S_SILVER,
         "BTC/USDT" to SymbolEngine.BTC_ARES,
     )
 
@@ -39,10 +41,14 @@ object EngineRegistry {
     /** The only symbol BTC-ARES accepts. */
     fun btcAresSymbols(): Set<String> = exact.filterValues { it == SymbolEngine.BTC_ARES }.keys
 
+    /** The only symbol ALS-5S accepts. */
+    fun silverAresSymbols(): Set<String> = exact.filterValues { it == SymbolEngine.ALS5S_SILVER }.keys
+
     fun engineFor(symbol: String): SymbolEngine {
         val key = V1Universe.normalize(symbol)
         exact[key]?.let { return it }
-        if (key.startsWith("XAG")) return SymbolEngine.V1_FOUR_LAYER
+        // A silver alias (XAGUSD, SILVER…) belongs to the silver model, not to gold or to V1.
+        if (key.startsWith("XAG")) return SymbolEngine.ALS5S_SILVER
         return when (AssetClass.of(key)) {
             AssetClass.CRYPTO -> SymbolEngine.CRYPTO_COMPRESSION
             else -> SymbolEngine.V1_FOUR_LAYER

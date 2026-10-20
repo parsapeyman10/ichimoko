@@ -43,7 +43,7 @@ class EngineRegistryTest {
 
     @Test fun `gold silver and bitcoin never share a model`() {
         assertEquals(SymbolEngine.ALS5_GOLD, EngineRegistry.engineFor("XAU/USD"))
-        assertEquals(SymbolEngine.V1_FOUR_LAYER, EngineRegistry.engineFor("XAG/USD"))
+        assertEquals(SymbolEngine.ALS5S_SILVER, EngineRegistry.engineFor("XAG/USD"))
         assertEquals(SymbolEngine.BTC_ARES, EngineRegistry.engineFor("BTC/USDT"))
         assertEquals(SymbolEngine.CRYPTO_COMPRESSION, EngineRegistry.engineFor("ETH/USDT"))
         assertEquals(SymbolEngine.V1_FOUR_LAYER, EngineRegistry.engineFor("EUR/USD"))
@@ -53,8 +53,20 @@ class EngineRegistryTest {
     @Test fun `btc is not a member of the gold or silver symbol sets`() {
         assertEquals(setOf("XAU/USD"), EngineRegistry.goldSymbols())
         assertEquals(setOf("BTC/USDT"), EngineRegistry.btcAresSymbols())
+        assertEquals(setOf("XAG/USD"), EngineRegistry.silverAresSymbols())
         assertTrue("BTC/USDT" !in EngineRegistry.goldSymbols())
         assertTrue("XAG/USD" !in EngineRegistry.btcAresSymbols())
+        assertTrue("XAU/USD" !in EngineRegistry.silverAresSymbols())
+        assertTrue("ETH/USDT" !in EngineRegistry.silverAresSymbols())
+    }
+
+    @Test fun `silver aliases cannot fall back to gold or to the four layer model`() {
+        assertEquals(SymbolEngine.ALS5S_SILVER, EngineRegistry.engineFor("xag/usd"))
+        assertEquals(SymbolEngine.ALS5S_SILVER, EngineRegistry.engineFor("XAGUSD"))
+        assertNotEquals(SymbolEngine.ALS5_GOLD, EngineRegistry.engineFor("XAGUSD"))
+        assertNotEquals(SymbolEngine.V1_FOUR_LAYER, EngineRegistry.engineFor("XAGUSD"))
+        // Gold must not be re-routed to silver by the alias branch.
+        assertEquals(SymbolEngine.ALS5_GOLD, EngineRegistry.engineFor("XAUUSD"))
     }
 
     @Test fun `normalisation cannot route an alias into the wrong engine`() {
@@ -65,6 +77,7 @@ class EngineRegistryTest {
         assertEquals(SymbolEngine.CRYPTO_COMPRESSION, EngineRegistry.engineFor("DOGE/USDT"))
         assertTrue(EngineRegistry.engineFor("DOGE/USDT") != SymbolEngine.BTC_ARES)
         assertEquals(SymbolEngine.V1_FOUR_LAYER, EngineRegistry.engineFor("SOMETHING/NOTCRYPTO"))
+        assertEquals(SymbolEngine.ALS5S_SILVER, EngineRegistry.engineFor("XAG/USD"))
     }
 
     @Test fun `setup keys are namespaced by symbol and engine`() {

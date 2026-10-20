@@ -20,7 +20,19 @@ object PaperAutoRules {
             if (goldSignal.als5Opportunity?.matches(goldSignal) != true)
                 return "برای طلا فقط BUY/SELL تأییدشدهٔ ALS-5 مجاز است"
         }
-        if (BtcAresPolicy.appliesTo(market.symbol)) {
+        if (XagAresPolicy.appliesTo(market.symbol)) {
+            // Silver has one owner: ALS-5S. Gold's record and V1's candles cannot open it.
+            val signal = market.signal ?: return "سیگنال ALS-5S موجود نیست"
+            if (signal.als5s?.matches(signal) != true)
+                return "فقط ستاپ READY موتور ALS-5S (با سطح/حد ضرر یکسان) برای نقره مجاز است"
+            val tick = market.lastTradeAt?.let { time -> market.lastTradePrice?.let { price ->
+                PriceTick(price, time, market.bid, market.ask)
+            } }
+            XagAresPolicy.quoteBlocker(signal, tick, signal.als5s?.atr, now)?.let { return it }
+            if (market.feed.mode != FeedMode.LIVE || market.lastTradeAt == null ||
+                market.lastTradeAt !in (now - 45_000L)..(now + 10_000L))
+                return "تیک تازه و دوطرفهٔ نقره برای ورود موجود نیست"
+        } else if (BtcAresPolicy.appliesTo(market.symbol)) {
             // BTC has its own model: it is not allowed to borrow the compression evidence, and the
             // compression engine is not allowed to act on BTC.
             val signal = market.signal ?: return "سیگنال BTC-ARES موجود نیست"

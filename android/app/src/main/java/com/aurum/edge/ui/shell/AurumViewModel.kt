@@ -596,7 +596,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setAutoPaperTrading(enabled: Boolean) {
         container.settingsStore.update { it.copy(autoPaperTrading = enabled) }
-        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ هر نماد فقط با موتور خودش (ALS-5 طلا، BTC-ARES بیت‌کوین، چهارلایهٔ V1، فشردگی ← انفجار)، کندل‌های واقعی و قفل‌های ریسک ثبت می‌شود"
+        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ هر نماد فقط با موتور خودش (ALS-5 طلا، ALS-5S نقره، BTC-ARES بیت‌کوین، چهارلایهٔ V1، فشردگی ← انفجار)، کندل‌های واقعی و قفل‌های ریسک ثبت می‌شود"
             else "معاملهٔ خودکار کاغذی خاموش شد"
     }
 
@@ -641,8 +641,16 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     candidate ?: return "سیگنال رمزارز موجود نیست", quote)?.let { return it }
             }
         }
+        if (com.aurum.edge.core.XagAresPolicy.appliesTo(current.symbol)) {
+            val silverSignal = candidate ?: return "سیگنال ALS-5S موجود نیست"
+            val quote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { price ->
+                PriceTick(price, at, current.bid, current.ask)
+            } }
+            com.aurum.edge.core.XagAresPolicy.quoteBlocker(
+                silverSignal, quote, silverSignal.als5s?.atr)?.let { return it }
+        }
         if (candidate?.isActionable != true || !TechnicalEvidence.confirmed(candidate))
-            return candidate?.blockers?.joinToString("، ") ?: "سیگنال چهارلایهٔ معتبر وجود ندارد"
+            return candidate?.blockers?.joinToString("، ") ?: "سیگنال معتبر موتور صاحب این نماد وجود ندارد"
         WatchCatalog.find(current.symbol)?.let { watched ->
             val selected = watchSettings.value[current.symbol]
             if (selected != null && SourceComparison.verify(watched, selected.enabledSources,
