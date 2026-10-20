@@ -44,8 +44,10 @@ class EngineRegistryTest {
         assertEquals(SymbolEngine.ALS5_GOLD, EngineRegistry.engineFor(" xau/usd "))
         assertEquals(SymbolEngine.BTC_ARES, EngineRegistry.engineFor("btc/usdt"))
         assertEquals(SymbolEngine.V1_FOUR_LAYER, EngineRegistry.engineFor("^DJI"))
-        // An unknown name must not be guessed into the crypto family.
-        assertEquals(SymbolEngine.V1_FOUR_LAYER, EngineRegistry.engineFor("DOGE/USDT"))
+        // An unknown pair still gets ONE owner; it must never be guessed into BTC-ARES.
+        assertEquals(SymbolEngine.CRYPTO_COMPRESSION, EngineRegistry.engineFor("DOGE/USDT"))
+        assertTrue(EngineRegistry.engineFor("DOGE/USDT") != SymbolEngine.BTC_ARES)
+        assertEquals(SymbolEngine.V1_FOUR_LAYER, EngineRegistry.engineFor("SOMETHING/NOTCRYPTO"))
     }
 
     @Test fun `setup keys are namespaced by symbol and engine`() {

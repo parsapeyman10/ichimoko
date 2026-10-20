@@ -39,10 +39,11 @@ class CatalogAutoPolicyTest {
 
     @Test fun `crypto entry requires the new breakout proof before any venue or quote`() {
         val config = AppSettings(autoPaperTrading = true)
-        val observed = MarketState(symbol = "BTC/USDT", interval = Interval.M5,
+        // ETH/USDT, not BTC: the compression gate now protects the non-BTC crypto family only.
+        val observed = MarketState(symbol = "ETH/USDT", interval = Interval.M5,
             lastPrice = 100.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = weekday),
             historyProvider = "Twelve Data")
-        assertFalse(com.aurum.edge.data.CryptoVenuePolicy.compatible("BTC/USDT",
+        assertFalse(com.aurum.edge.data.CryptoVenuePolicy.compatible("ETH/USDT",
             observed.historyProvider, observed.feed.provider))
         assertTrue(PaperAutoRules.blocker(observed, config, now = weekday,
             allowedSymbols = WatchCatalog.scannerSymbols)!!.contains("فشردگی"))

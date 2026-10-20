@@ -112,9 +112,11 @@ class BinancePositionReplayTest {
                 "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map {
                 ConfluenceItem(it, true, "old fixture", scorePercent = 25)
             })
+        // BTC is owned by BTC-ARES now, so an old compression/four-layer signal must be refused
+        // there instead of being interpreted by a model that no longer serves this symbol.
         assertTrue(runCatching { fresh.open(legacySignal, "BTC/USDT", 100.0,
             50_000.0, 0.5, observedAt = at) }.exceptionOrNull()?.message
-            .orEmpty().contains("فشردگی ← انفجار"))
+            .orEmpty().contains("BTC-ARES"))
         assertTrue(fresh.trades.value.isEmpty())
     }
 
