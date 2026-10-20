@@ -318,6 +318,10 @@ class PineContractTest(unittest.TestCase):
                        "minNetRr", "riskPerTradePct", "maxDailyLossPct"):
             self.assertIn(needle, self.code, needle)
 
+    def test_only_a_ready_engine_can_be_chosen(self) -> None:
+        self.assertIn("aReady and aScore >=", self.code)
+        self.assertIn('cbReady ? "CB" : "NONE"', self.code)
+
     def test_no_martingale_or_stop_widening_helpers(self) -> None:
         lowered = self.code.lower()
         for banned in ("martingale", "averaging", "strategy.entry(\"add", "pyramiding           = "):

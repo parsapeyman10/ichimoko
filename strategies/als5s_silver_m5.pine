@@ -329,9 +329,11 @@ clampStop(dir, raw) =>
 
 engineReady = aReady or bReady or cReady or cbReady
 aDir = aReady ? (bullTrend ? 1 : -1) : 0
-engineName = aReady and aScore >= math.max(bScore, math.max(cScore, cbScore)) ? "A" :
-     bReady and bScore >= math.max(cScore, cbScore) ? "B" :
-     cReady and cScore >= cbScore ? "C" : cbReady ? "CB" : "NONE"
+// Only a READY engine may be chosen: an idle engine's score must never win the arbitration.
+engineName = aReady and aScore >= math.max(bReady ? bScore : -1, math.max(cReady ? cScore : -1, cbReady ? cbScore : -1)) ? "A" :
+     bReady and bScore >= math.max(cReady ? cScore : -1, cbReady ? cbScore : -1) ? "B" :
+     cReady and cScore >= (cbReady ? cbScore : -1) ? "C" :
+     cbReady ? "CB" : "NONE"
 dir = engineName == "A" ? aDir : engineName == "B" ? bDir : engineName == "C" ? cDir : engineName == "CB" ? cbDir : 0
 score3 = engineName == "A" ? aScore : engineName == "B" ? bScore : engineName == "C" ? cScore : cbScore
 
