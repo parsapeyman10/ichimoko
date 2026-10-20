@@ -284,17 +284,18 @@ class SpotFallbackClient(
         )
     }
 
-    /** Single dedicated source per symbol (1-to-1). Never fabricated. */
+    /** Single dedicated route per symbol (1-to-1). Never fabricated. */
     suspend fun fetchQuote(symbol: String): PriceTick {
         val canonical = com.aurum.edge.core.V1Universe.normalize(symbol)
         if (CryptoCatalog.isCrypto(canonical)) return fetchCryptoQuote(canonical)
-        return when (canonical) {
-            "XAU/USD", "XAG/USD" -> withContext(Dispatchers.IO) { fetchMetalQuote(canonical) }
-            "DOW" -> withContext(Dispatchers.IO) { fetchYahooIndexQuote("^DJI") }
-            "EUR/USD" -> withContext(Dispatchers.IO) { fetchYahooIndexQuote("EURUSD=X") }
-            "USD/JPY" -> withContext(Dispatchers.IO) { fetchYahooIndexQuote("JPY=X") }
-            "GBP/JPY" -> withContext(Dispatchers.IO) { fetchYahooIndexQuote("GBPJPY=X") }
-            else -> withContext(Dispatchers.IO) { fetchSwissquote(canonical) }
+        val plan = tickPlanFor(canonical)
+        return withContext(Dispatchers.IO) {
+            when (plan.route) {
+                TickRoute.METAL -> fetchMetalQuote(canonical)
+                TickRoute.YAHOO_INDEX -> fetchYahooIndexQuote(plan.yahooSymbol
+                    ?: throw DataFeedException("نماد Yahoo برای $canonical تعریف نشده است"))
+                TickRoute.SWISSQUOTE -> fetchSwissquote(canonical)
+            }
         }
     }
 
@@ -335,4 +336,24 @@ class SpotFallbackClient(
         private const val MAX_QUOTE_AGE_MS = 45_000L
         const val POLL_INTERVAL_MS = 1_000L
     }
+}
+
+/** Where a keyless/keyed live price for a non-crypto symbol is read from. Pure + testable. */
+internal enum class TickRoute { METAL, YAHOO_INDEX, SWISSQUOTE }
+
+internal data class TickPlan(val route: TickRoute, val yahooSymbol: String? = null)
+
+/**
+ * The tick table of docs/SYMBOL_SOURCES_FA.md, in code. Metals use Gold-API then Swissquote;
+ * the Dow and three FX pairs are quoted by Yahoo (same family as their candle source);
+ * everything else keeps the Swissquote BBO. A symbol without a route never becomes another
+ * instrument's price.
+ */
+internal fun tickPlanFor(canonical: String): TickPlan = when (canonical) {
+    "XAU/USD", "XAG/USD" -> TickPlan(TickRoute.METAL)
+    "DOW" -> TickPlan(TickRoute.YAHOO_INDEX, "^DJI")
+    "EUR/USD" -> TickPlan(TickRoute.YAHOO_INDEX, "EURUSD=X")
+    "USD/JPY" -> TickPlan(TickRoute.YAHOO_INDEX, "JPY=X")
+    "GBP/JPY" -> TickPlan(TickRoute.YAHOO_INDEX, "GBPJPY=X")
+    else -> TickPlan(TickRoute.SWISSQUOTE)
 }
