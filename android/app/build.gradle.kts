@@ -206,6 +206,10 @@ val robolectricDepsDir = layout.buildDirectory.dir("robolectric-deps")
 
 tasks.withType<Test>().configureEach {
     inputs.files(robolectricJarFiles)
+    // Robolectric loads a full android-all runtime per SDK and keeps it for the whole worker,
+    // so the default 512 MB test heap ran the engine/keystore suites into OutOfMemoryError
+    // long before they could fail on an assertion.
+    maxHeapSize = "2g"
     doFirst {
         val dir = robolectricDepsDir.get().asFile
         dir.mkdirs()

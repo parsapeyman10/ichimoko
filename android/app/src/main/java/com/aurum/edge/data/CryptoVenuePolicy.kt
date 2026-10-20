@@ -36,10 +36,18 @@ object CryptoVenuePolicy {
         }
     }
 
-    /** Venue a paper position must be recorded with, given the bars it was built on. */
+    /**
+     * Venue a paper position must be recorded with, given the bars it was built on.
+     *
+     * Only two venues are writable: the Nobitex reference and the legacy Binance Spot venue.
+     * Anything else (unknown label, read-only radar frame) falls back to the reference venue
+     * instead of silently inheriting Binance — an unknown frame can never open on Binance.
+     */
     fun entryVenue(historyProvider: String?): String =
-        if (NobitexReference.isHistoryProvider(historyProvider)) NobitexReference.VENUE
-        else BinanceSpotClient.VENUE
+        when (venueOf(historyProvider)) {
+            BinanceSpotClient.VENUE -> BinanceSpotClient.VENUE
+            else -> NobitexReference.VENUE
+        }
 
     /** Venues whose live trade feed this app can actually stream for the selected market. */
     fun tickVenueAvailable(historyProvider: String?): Boolean {
