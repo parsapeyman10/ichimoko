@@ -24,12 +24,14 @@ class NineWayAutoPaperTest {
     private val now = 1_800_000_000_000L
     private val barTime = now - Interval.M5.millis
     private val four = listOf("ساختار روند · EMA + ایچیموکو", "مومنتوم · RSI + MACD", "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی").map { ConfluenceItem(it, true, "دادهٔ آزمون", scorePercent = 25) }
-    private val settings = AppSettings(symbol = "EUR/USD", interval = Interval.M5,
+    // A pair that still belongs to the four-layer model: EUR/USD now belongs to EUR-ARES and
+    // refuses a generic four-layer signal, which is covered by its own test below.
+    private val settings = AppSettings(symbol = "GBP/USD", interval = Interval.M5,
         backgroundMonitor = true, autoPaperTrading = true)
     private val raw = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2994.5,
         takeProfit = 3009.0, interval = Interval.M5, barTime = barTime, confluence = four)
 
-    private fun market(s: Signal, symbol: String = "EUR/USD") = MarketState(symbol = symbol, interval = Interval.M5,
+    private fun market(s: Signal, symbol: String = "GBP/USD") = MarketState(symbol = symbol, interval = Interval.M5,
         candles = IctTestBars.readyAt(barTime),
         lastPrice = 3000.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now), signal = s)
 
@@ -41,6 +43,16 @@ class NineWayAutoPaperTest {
                 settings, now).orEmpty().contains("۵ دقیقه"))
         }
         assertNull(PaperAutoRules.blocker(market(raw), settings, now))
+    }
+
+    @Test fun euroDollarIsNoLongerAFourLayerPair() {
+        val euro = raw.copy()
+        val blocked = PaperAutoRules.blocker(market(euro, "EUR/USD"),
+            settings.copy(symbol = "EUR/USD"), now).orEmpty()
+        // The refusal names the owning engine instead of silently reusing the four-layer policy.
+        assertTrue(blocked, blocked.contains("EUR-ARES"))
+        // The same signal on a pair that still uses the four-layer model is not blocked.
+        assertNull(PaperAutoRules.blocker(market(raw, "GBP/USD"), settings, now))
     }
 
     @Test fun everyTechnicalComponentMustPass() {
