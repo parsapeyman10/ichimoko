@@ -116,23 +116,22 @@ class OpenTradeTickMonitor(
             session.lastStrategyCheckAt = now
             // The closed-bar exit monitor must read the SAME venue the position was opened on;
             // a Nobitex position is never trailed with Binance bars (and vice versa).
-            val publisher: (Interval) -> PublicCandleHistoryClient.Result =
-                if (venue == NobitexReference.VENUE) { interval ->
-                    nobitex.fetchCandles(symbol, interval, 321, 320)
-                } else { interval ->
-                    binance.fetchCandles(symbol, interval, 321, 320)
-                }
             fun rightVenue(result: PublicCandleHistoryClient.Result): Boolean =
                 if (venue == NobitexReference.VENUE) NobitexReference.isHistoryProvider(result.provider)
                 else result.provider == BinanceSpotClient.PROVIDER
-            val m5 = publisher(Interval.M5)
+            val m5 = if (venue == NobitexReference.VENUE)
+                nobitex.fetchCandles(symbol, Interval.M5, 321, 320)
+            else binance.fetchCandles(symbol, Interval.M5, 321, 320)
             if (!rightVenue(m5)) return@withLock
             if (m5.candles.lastOrNull()?.time?.let { it + Interval.M5.millis <=
                     (trade.cryptoLastClosedBarAt ?: 0L) } != false) return@withLock
             // M15 is a separate structural exit confirmation, never an entry timeframe.
             // If it is unavailable, independent M5 protection still works.
             val m15 = try {
-                publisher(Interval.M15).takeIf { rightVenue(it) }?.candles.orEmpty()
+                val bars = if (venue == NobitexReference.VENUE)
+                    nobitex.fetchCandles(symbol, Interval.M15, 321, 320)
+                else binance.fetchCandles(symbol, Interval.M15, 321, 320)
+                bars.takeIf { rightVenue(it) }?.candles.orEmpty()
             } catch (cancel: CancellationException) { throw cancel }
             catch (_: Exception) { emptyList() }
             if (stillOpen(symbol, session))
