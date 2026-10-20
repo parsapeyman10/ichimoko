@@ -18,6 +18,9 @@ on:
       - 'tools/test_refresh_update_manifest.py'
       - 'tools/btc_ares_backtest.py'
       - 'tools/test_btc_ares_backtest.py'
+      - 'tools/als5s_backtest.py'
+      - 'tools/test_als5s_backtest.py'
+      - 'strategies/**'
       - '.github/workflows/main.yml'
   pull_request:
     paths:
@@ -31,6 +34,9 @@ on:
       - 'tools/test_refresh_update_manifest.py'
       - 'tools/btc_ares_backtest.py'
       - 'tools/test_btc_ares_backtest.py'
+      - 'tools/als5s_backtest.py'
+      - 'tools/test_als5s_backtest.py'
+      - 'strategies/**'
       - '.github/workflows/main.yml'
   workflow_dispatch:
     inputs:
