@@ -74,8 +74,13 @@ android {
         // DST-correct sessions, trend/sweep/range/session-breakout engines, a cost veto measured in
         // pips, its own card in the trade tab, the Pine v6 strategy and an offline harness.
         // See docs/EUR_ARES_FA.md.
-        versionCode = 680
-        versionName = "2.0.8"
+        // 2.0.9 fixes the quote routes that made three engine families unreachable: EUR/USD had a
+        // single-number Yahoo tick, silver was read from a one-price Gold-API feed, and every crypto
+        // pair only had a trade print. The engines correctly refuse to enter without a real
+        // bid/ask, so no auto paper trade could ever open. EUR/USD and silver now use the
+        // Swissquote BBO, and crypto attaches the best bid/ask from the Nobitex order book.
+        versionCode = 681
+        versionName = "2.0.9"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

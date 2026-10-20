@@ -28,7 +28,7 @@
 | نماد | کندل بدون کلید | کندل با کلید | تیک (قیمت لحظه‌ای) | ردیف دیده‌بان | Twelve Data |
 |---|---|---|---|---|---|
 | `XAU/USD` | **Dukascopy Swiss** (`XAUUSD`، دو مسیر انتقال: نمودار JSON + آرشیو bi5) | **Twelve Data (مرجع طلا)** → Dukascopy | **Gold-API** `/price/XAU` → **Swissquote** `XAU/USD`؛ با کلید: ابتدا WebSocket Twelve، بعد همین‌ها | `gold_api_xau` | ⚠️ کالا؛ پلن Grow به بالا |
-| `XAG/USD` | **Dukascopy Metal** (`XAGUSD`) | **Dukascopy** → Twelve Data | **Gold-API** `/price/XAG` (پاسخ باید `XAG` باشد) → **Swissquote** `XAG/USD` | `gold_api_xag` | ⚠️ کالا؛ پلن Grow به بالا |
+| `XAG/USD` | **Dukascopy Metal** (`XAGUSD`) | **Dukascopy** → Twelve Data | **Swissquote** `XAG/USD` (دو‌طرفه: bid/ask) → **Gold-API** `/price/XAG` (پاسخ باید `XAG` باشد، تک‌قیمت) | `gold_api_xag` | ⚠️ کالا؛ پلن Grow به بالا |
 
 نکته‌ها:
 - تنها نمادی که Twelve Data برایش **اول** است طلاست (`SourceRouting.twelveDataFirst` فقط
@@ -51,7 +51,7 @@
 
 | نماد | کندل بدون کلید | کندل با کلید | تیک | دیده‌بان | Twelve Data |
 |---|---|---|---|---|---|
-| `EUR/USD` | **Yahoo** `EURUSD=X` → Dukascopy `EURUSD` | همان → Twelve Data | **Yahoo** `EURUSD=X` | `yahoo_eurusd` | ✅ شناسهٔ یکسان |
+| `EUR/USD` | **Yahoo** `EURUSD=X` → Dukascopy `EURUSD` | همان → Twelve Data | **Swissquote** BBO (دو‌طرفه) | `yahoo_eurusd` | ✅ شناسهٔ یکسان |
 | `GBP/USD` | **Dukascopy** `GBPUSD` → Yahoo `GBPUSD=X` | همان → Twelve Data | **Swissquote** BBO | `swissquote_gbpusd` | ✅ |
 | `USD/JPY` | **Yahoo** `JPY=X` → Dukascopy `USDJPY` | همان → Twelve Data | **Yahoo** `JPY=X` | `yahoo_usdjpy` | ✅ |
 | `EUR/JPY` | **Dukascopy** `EURJPY` → Yahoo `EURJPY=X` | همان → Twelve Data | **Swissquote** BBO | `swissquote_eurjpy` | ✅ |
@@ -62,8 +62,12 @@
 نکته‌ها:
 - «Yahoo اول» یا «Dukascopy اول» یعنی همان چیزی که `SourceRouting.DedicatedSource` برای آن نماد
   تعیین کرده؛ ناشر دیگر همیشه جایگزین دوم است و **پاسخ‌گو، برچسب خودش را نگه می‌دارد**.
-- Swissquote برای **هر ۷ جفت** تیک می‌دهد، اما اپ تیک چهار جفت را از Yahoo می‌گیرد تا مسیر
-  کندل و تیک هم‌خانواده بماند؛ عمداً عوض نشده است.
+- Swissquote برای **هر ۷ جفت** تیک می‌دهد. تیک `USD/JPY` و `GBP/JPY` از Yahoo می‌آید تا با
+  مسیر کندل هم‌خانواده بماند؛ بقیه (از جمله `EUR/USD`) از Swissquote خوانده می‌شوند.
+- **چرا `EUR/USD` از Yahoo به Swissquote منتقل شد:** یاهو فقط یک عدد می‌دهد و bid/ask ندارد.
+  EUR-ARES پیش از هر ورود، اسپرد را با ATR مقایسه می‌کند و بدون اسپرد واقعی refuses می‌کند
+  («قیمت دوطرفهٔ واقعی موجود نیست»). با تیک تک‌عددی، این جفت **هرگز** نمی‌توانست وارد شود.
+  کندل همان Yahoo/Dukascopy است؛ فقط مسیر تیک عوض شد.
 - Yahoo دو میزبان دارد (`query1`/`query2`) ولی **یک ناشر** است؛ دو تأیید مستقل نیستند.
 - Twelve Data برای هر ۷ جفت با **همان شناسه** کار می‌کند (پلن Basic) و پایین‌ترین اولویت است،
   جز زمان‌هایی که کلید اختصاصی همان نماد گذاشته‌اید.
@@ -88,14 +92,20 @@
   خودش (`Binance Spot / USDT`) — یعنی برای همین پنج جفت `*USDT`؛ هیچ نماد `USD` جایگزین نمی‌شود.
 - وضعیت زندهٔ نوبیتکس (۲۰۲۶-۱۰-۲۰): هر پنج جفت در orderbook و در UDF کندل داشتند، از جمله
   `BNBUSDT` (ادعای قدیمی سند که «BNBUSDT در نوبیتکس نیست» دیگر درست نیست).
+- **bid/ask رمزارز (افزودهٔ ۲.۰.۹):** تیک معامله فقط یک عدد است و اسپرد ندارد؛ موتورهای BTC-ARES و
+  فشردگی بدون اسپرد واقعی وارد نمی‌شوند (و نباید بشوند). پس بهترین خرید/فروش از
+  `GET {HOST}/v2/orderbook/{SYMBOL}` همان نوبیتکس خوانده و به تیک معامله چسبانده می‌شود
+  (`NobitexOrderBook`). قیمت مرجع همان معاملهٔ اجراشده می‌ماند، زمان قابل‌استفاده **قدیمی‌ترِ** دو
+  مأخذ است، و اگر دفتر سفارش در دسترس/تازه نباشد یا خرید و فروش وارونه باشد، تیک **بدون** اسپرد
+  برمی‌گردد تا موتور با دلیل روشن رد کند — هیچ اسپردی تخمین زده نمی‌شود.
 
 ## ۵) نگاه یک‌خطی (زنجیرهٔ کامل)
 
 ```
 XAU/USD  کندل: Dukascopy → [Twelve Data]      تیک: Gold-API → Swissquote / [Twelve WS]
-XAG/USD  کندل: Dukascopy → [Twelve Data]      تیک: Gold-API(/price/XAG) → Swissquote
+XAG/USD  کندل: Dukascopy → [Twelve Data]      تیک: Swissquote (bid/ask) → Gold-API(/price/XAG)
 DOW      کندل: Yahoo ^DJI → Dukascopy         تیک: Yahoo ^DJI
-EUR/USD  کندل: Yahoo → Dukascopy → [Twelve]   تیک: Yahoo
+EUR/USD  کندل: Yahoo → Dukascopy → [Twelve]   تیک: Swissquote (bid/ask)
 GBP/USD  کندل: Dukascopy → Yahoo → [Twelve]   تیک: Swissquote
 USD/JPY  کندل: Yahoo → Dukascopy → [Twelve]   تیک: Yahoo
 EUR/JPY  کندل: Dukascopy → Yahoo → [Twelve]   تیک: Swissquote

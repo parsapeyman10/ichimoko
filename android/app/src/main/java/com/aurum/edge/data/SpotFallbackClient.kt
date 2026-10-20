@@ -55,8 +55,13 @@ class SpotFallbackClient(
         val responses = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, String>>()
         val lastAttempt = java.util.concurrent.ConcurrentHashMap<String, Long>()
         val budget = NobitexTradeBudget()
+        // The order book changes less often than the tape; 15 s keeps the spread honest without
+        // spending the public request budget twice per tick.
+        val bookLocks = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+        val books = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, NobitexBook>>()
         const val MIN_CRYPTO_FETCH_MS = 10_000L
         const val OPEN_POSITION_FETCH_MS = 3_000L
+        const val BOOK_CACHE_MS = 15_000L
     }
 
     private fun get(url: String): String {
@@ -177,6 +182,47 @@ class SpotFallbackClient(
         }
     }
 
+    /**
+     * The trade print stays the reference price; the best bid/ask is attached from the same
+     * venue's order book. If the book is unavailable the tick is returned **without** a spread and
+     * the engines keep refusing — an estimated spread is never substituted for a measured one.
+     * The usable time is the older of the two timestamps, so a stale book cannot pass as fresh.
+     */
+    private suspend fun nobitexTwoSided(symbol: String, trade: PriceTick): PriceTick {
+        val book = try {
+            nobitexBook(symbol)
+        } catch (cancel: CancellationException) {
+            throw cancel
+        } catch (error: Exception) {
+            return trade.copy(sourceNote = "معاملهٔ اجراشدهٔ نوبیتکس — دفتر سفارش در دسترس نبود؛ " +
+                "اسپرد واقعی تأیید نشده")
+        }
+        val at = minOf(trade.at, book.at)
+        if (System.currentTimeMillis() - at > MAX_QUOTE_AGE_MS)
+            return trade.copy(sourceNote = "معاملهٔ اجراشدهٔ نوبیتکس — دفتر سفارش کهنه؛ اسپرد تأیید نشد")
+        return trade.copy(bid = book.bid, ask = book.ask, at = at,
+            sourceNote = "معاملهٔ اجراشده + بهترین خرید/فروش دفتر سفارش نوبیتکس")
+    }
+
+    private suspend fun nobitexBook(symbol: String): NobitexBook {
+        val code = NobitexHistoryClient.ticker(symbol)
+            ?: throw DataFeedException("نماد USDT برای دفتر سفارش نوبیتکس معتبر نیست")
+        val lock = CryptoTradeCache.bookLocks.computeIfAbsent(symbol) { Mutex() }
+        return lock.withLock {
+            val now = System.currentTimeMillis()
+            CryptoTradeCache.books[symbol]?.takeIf { (fetchedAt, _) ->
+                now - fetchedAt in 0L..BOOK_CACHE_MS
+            }?.let { return@withLock it.second }
+            // The book is an extra request: it yields to the trade budget instead of crowding it.
+            if (!CryptoTradeCache.budget.tryAcquire(now, false))
+                throw DataFeedException("سهمیهٔ درخواست عمومی پر است؛ دفتر سفارش خوانده نشد")
+            val body = withContext(Dispatchers.IO) { get("${NobitexHistoryClient.HOST}/v2/orderbook/$code") }
+            val book = NobitexOrderBook.parse(body)
+            CryptoTradeCache.books[symbol] = now to book
+            book
+        }
+    }
+
     /** The only priority lane: an actually OPEN paper position, still capped at 3s/pair.
      * A display quote and a scanner candidate never acquire this reservation.
      */
@@ -230,8 +276,15 @@ class SpotFallbackClient(
      * metal only; a failure is reported instead of relabelling the other metal's price.
      */
     private fun fetchMetalQuote(symbol: String): PriceTick {
+        // Gold-API publishes one price; Swissquote publishes a two-sided BBO. ALS-5S refuses to
+        // enter without a real bid/ask (that refusal is the cost gate, not a bug), so silver asks
+        // the BBO first and keeps Gold-API as the fallback. Gold is unchanged: Gold-API first.
+        val order: List<() -> PriceTick> = if (symbol == "XAG/USD")
+            listOf({ fetchSwissquote(symbol) }, { fetchGoldApi(symbol) })
+        else
+            listOf({ fetchGoldApi(symbol) }, { fetchSwissquote(symbol) })
         val failures = mutableListOf<String>()
-        for (read in listOf<() -> PriceTick>({ fetchGoldApi(symbol) }, { fetchSwissquote(symbol) })) {
+        for (read in order) {
             try {
                 return read()
             } catch (e: DataFeedException) {
@@ -252,10 +305,10 @@ class SpotFallbackClient(
         if (NobitexReference.serves(symbol)) {
             try {
                 val body = cryptoTradeResponse(symbol)
-                return NobitexTradeQuote.parse(body).copy(
+                val trade = NobitexTradeQuote.parse(body)
+                return nobitexTwoSided(symbol, trade).copy(
                     provider = NobitexReference.TICK_PROVIDER,
                     sourceConfirmations = 1,
-                    sourceNote = "معاملهٔ اجراشدهٔ نوبیتکس — مرجع رمزارز",
                 )
             } catch (cancel: CancellationException) {
                 throw cancel
@@ -345,14 +398,17 @@ internal data class TickPlan(val route: TickRoute, val yahooSymbol: String? = nu
 
 /**
  * The tick table of docs/SYMBOL_SOURCES_FA.md, in code. Metals use Gold-API then Swissquote;
- * the Dow and three FX pairs are quoted by Yahoo (same family as their candle source);
+ * the Dow and two FX pairs are quoted by Yahoo (same family as their candle source);
  * everything else keeps the Swissquote BBO. A symbol without a route never becomes another
  * instrument's price.
  */
 internal fun tickPlanFor(canonical: String): TickPlan = when (canonical) {
     "XAU/USD", "XAG/USD" -> TickPlan(TickRoute.METAL)
     "DOW" -> TickPlan(TickRoute.YAHOO_INDEX, "^DJI")
-    "EUR/USD" -> TickPlan(TickRoute.YAHOO_INDEX, "EURUSD=X")
+    // EUR/USD is quoted by Swissquote, not Yahoo: EUR-ARES prices its spread before every entry and
+    // Yahoo publishes a single number with no bid/ask, so the pair could never pass its own cost
+    // gate. Candles still come from Yahoo/Dukascopy; only the tick moved. USD/JPY and GBP/JPY stay
+    // on Yahoo because the four-layer model does not need a two-sided quote.
     "USD/JPY" -> TickPlan(TickRoute.YAHOO_INDEX, "JPY=X")
     "GBP/JPY" -> TickPlan(TickRoute.YAHOO_INDEX, "GBPJPY=X")
     else -> TickPlan(TickRoute.SWISSQUOTE)

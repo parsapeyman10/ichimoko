@@ -60,10 +60,12 @@ class SymbolSourceMapTest {
         assertEquals(TickRoute.METAL, tickPlanFor("XAU/USD").route)
         assertEquals(TickRoute.METAL, tickPlanFor("XAG/USD").route)
         assertEquals(TickPlan(TickRoute.YAHOO_INDEX, "^DJI"), tickPlanFor("DOW"))
-        assertEquals(TickPlan(TickRoute.YAHOO_INDEX, "EURUSD=X"), tickPlanFor("EUR/USD"))
+        // EUR/USD is quoted by Swissquote: EUR-ARES needs a real bid/ask before it can price its
+        // cost gate, and the Yahoo quote carries a single number.
+        assertEquals(TickRoute.SWISSQUOTE, tickPlanFor("EUR/USD").route)
         assertEquals(TickPlan(TickRoute.YAHOO_INDEX, "JPY=X"), tickPlanFor("USD/JPY"))
         assertEquals(TickPlan(TickRoute.YAHOO_INDEX, "GBPJPY=X"), tickPlanFor("GBP/JPY"))
-        listOf("GBP/USD", "EUR/JPY", "AUD/USD", "USD/CHF").forEach { symbol ->
+        listOf("EUR/USD", "GBP/USD", "EUR/JPY", "AUD/USD", "USD/CHF").forEach { symbol ->
             assertEquals(symbol, TickRoute.SWISSQUOTE, tickPlanFor(symbol).route)
         }
         // Only Yahoo routes carry a symbol; a metal/Swissquote route must not invent one.
