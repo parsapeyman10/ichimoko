@@ -624,7 +624,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         freshPaperQuote(current)?.let { return it }
         if (!com.aurum.edge.data.CryptoVenuePolicy.compatible(current.symbol,
                 current.historyProvider, current.feed.provider))
-            return "ورود کریپتو مسدود: کندل تحلیل و تیک ورود باید هر دو از بازار Binance Spot باشند"
+            return "ورود کریپتو مسدود: کندل تحلیل و تیک ورود باید هر دو از یک صرافی باشند " +
+                "(مرجع: نوبیتکس؛ پوزیشن قدیمی Binance فقط با تیک Binance)"
         if (com.aurum.edge.core.MarketHours.closedFor(current.symbol)) return "بازار بسته است"
         val candidate = current.signal
         if (com.aurum.edge.core.AssetClass.of(current.symbol) == com.aurum.edge.core.AssetClass.CRYPTO) {
