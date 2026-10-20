@@ -211,7 +211,7 @@ class SpotFallbackClient(
         return lock.withLock {
             val now = System.currentTimeMillis()
             CryptoTradeCache.books[symbol]?.takeIf { (fetchedAt, _) ->
-                now - fetchedAt in 0L..BOOK_CACHE_MS
+                now - fetchedAt in 0L..CryptoTradeCache.BOOK_CACHE_MS
             }?.let { return@withLock it.second }
             // The book is an extra request: it yields to the trade budget instead of crowding it.
             if (!CryptoTradeCache.budget.tryAcquire(now, false))
