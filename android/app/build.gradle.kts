@@ -67,8 +67,11 @@ android {
         // (docs/SYMBOL_SOURCES_FA.md) and an updater that reports which published version it saw
         // (docs/UPDATER_RELEASE_FA.md). A versionCode must be bumped here before a release run,
         // because the workflow only publishes explicit `release: publish` commits.
-        versionCode = 678
-        versionName = "2.0.6"
+        // 2.0.7 adds ALS-5S, the dedicated silver engine (XAG/USD M5): its own regimes, sweep and
+        // range/breakout engines, cost gate and separate card in the trade tab. It also ships the
+        // Pine v6 strategy and the offline replay harness. See docs/ALS5S_SILVER_FA.md.
+        versionCode = 679
+        versionName = "2.0.7"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
