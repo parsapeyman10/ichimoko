@@ -37,6 +37,8 @@ class CryptoVenuePolicyTest {
         assertEquals(BinanceSpotClient.VENUE, CryptoVenuePolicy.entryVenue(BinanceSpotClient.PROVIDER))
         // Unknown / read-only frames never silently become Binance.
         assertEquals("NOBITEX", CryptoVenuePolicy.entryVenue(null))
+        // A read-only radar frame or an unknown label is not a licence to record Binance.
+        assertEquals("NOBITEX", CryptoVenuePolicy.entryVenue("OKX Spot / USDT (radar only)"))
         assertTrue(CryptoVenuePolicy.tickVenueAvailable(NobitexHistoryClient.PROVIDER))
         assertTrue(CryptoVenuePolicy.tickVenueAvailable(BinanceSpotClient.PROVIDER))
         assertFalse(CryptoVenuePolicy.tickVenueAvailable("Gate Spot / USDT (radar only)"))

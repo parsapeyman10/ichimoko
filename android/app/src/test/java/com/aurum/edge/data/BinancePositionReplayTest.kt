@@ -72,6 +72,35 @@ class BinancePositionReplayTest {
         assertFalse(journal.trades.value.single().isOpen)
     }
 
+    @Test fun `nobitex compression position exits only on nobitex bars, never binance bars`() = runBlocking {
+        val path = file()
+        val trade = com.aurum.edge.core.PaperTrade("compression-nobitex", "BTC/USDT", Interval.M5,
+            SignalAction.BUY, 100.0, 99.0, 103.0, 100.0, 3.0,
+            at - 2*Interval.M5.millis, positionOz = 1.0,
+            initialStopLoss = 99.0, trailExtreme = 100.0,
+            cryptoVenue = NobitexReference.VENUE, cryptoEntryAtr = 1.0)
+        path.writeText(kotlinx.serialization.json.Json.encodeToString(
+            kotlinx.serialization.builtins.ListSerializer(com.aurum.edge.core.PaperTrade.serializer()),
+            listOf(trade)))
+        val journal = JournalStore(context, path).also { it.load() }
+        val end = at / Interval.M5.millis * Interval.M5.millis
+        val total = com.aurum.edge.core.HistoryPolicy.LIVE_MIN_CANDLES
+        val bars = (0 until total).map { index ->
+            com.aurum.edge.core.Candle(end - (total - index) * Interval.M5.millis,
+                100.0, 100.3, if (index == total - 1) 98.7 else 99.7,
+                if (index == total - 1) 99.0 else 100.0, 100.0)
+        }
+        // A Nobitex position must not be trailed with Binance candles ...
+        assertFalse(journal.applyCryptoClosedBars("BTC/USDT", trade.openedAt,
+            BinanceSpotClient.VENUE, bars, emptyList(), at))
+        // ... but its own venue is a writable venue, not the Binance-only gate it used to be.
+        assertTrue(journal.applyCryptoClosedBars("BTC/USDT", trade.openedAt,
+            NobitexReference.VENUE, bars, emptyList(), at))
+        assertTrue(journal.trades.value.single().isOpen) // a closed candle is still not a fill
+        assertEquals(end, journal.trades.value.single().cryptoExitPendingAt)
+        assertEquals(NobitexReference.VENUE, journal.trades.value.single().cryptoVenue)
+    }
+
     @Test fun `retired crypto entry signal is rejected but old positions remain loadable`() = runBlocking {
         val fresh = JournalStore(context, file()).also { it.load() }
         val legacySignal = Signal(SignalAction.BUY, 100.0, entry = 100.0,
