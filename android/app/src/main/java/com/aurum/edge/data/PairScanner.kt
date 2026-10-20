@@ -73,6 +73,8 @@ data class PairScanStatus(
     val trendNote: String? = null,
     /** ALS-5 pre-confirmation monitor record; present for XAU/USD, including WAIT/NO_TRADE. */
     val als5Opportunity: com.aurum.edge.core.Als5OpportunityRecord? = null,
+    /** BTC-ARES per-engine record; present for BTC/USDT only, including NO_TRADE. */
+    val btcAres: com.aurum.edge.core.BtcAresRecord? = null,
 )
 
 data class PairScanState(
@@ -306,6 +308,7 @@ class PairScanner(
             trendAligned: Boolean? = null,
             trendNote: String? = null,
             als5Opportunity: com.aurum.edge.core.Als5OpportunityRecord? = null,
+            btcAres: com.aurum.edge.core.BtcAresRecord? = null,
         ) = synchronized(statusLock) {
             if (state != "capacity") decisionLog?.append(symbol, (chosenIntervals[symbol] ?: Interval.M5).label, state, detail,
                 signal = if (conditions.isNotEmpty()) com.aurum.edge.core.Signal(
@@ -338,6 +341,7 @@ class PairScanner(
                 trendAligned = trendAligned,
                 trendNote = trendNote ?: trend?.detailFa?.take(200),
                 als5Opportunity = als5Opportunity,
+                btcAres = btcAres,
             )
             _state.update { old ->
                 val currentList = old.statuses.map { statuses[it.symbol] ?: it }
@@ -538,7 +542,7 @@ class PairScanner(
                         playbookAllowed = playbook?.allowed,
                         playbookReason = playbook?.reasonFa?.take(160),
                         trend = trend,
-                        als5Opportunity = combined.als5Opportunity,
+                        als5Opportunity = combined.als5Opportunity, btcAres = combined.btcAres,
                     )
                     return@async
                 }
@@ -609,7 +613,7 @@ class PairScanner(
                         playbookAllowed = playbook?.allowed,
                         playbookReason = playbook?.reasonFa?.take(160), trend = trend,
                         trendAligned = aligned, trendNote = trendGate?.noteFa?.take(200),
-                        als5Opportunity = combined.als5Opportunity)
+                        als5Opportunity = combined.als5Opportunity, btcAres = combined.btcAres)
                     return@async
                 }
 
@@ -666,7 +670,7 @@ class PairScanner(
                     trend = trend,
                     trendAligned = aligned,
                     trendNote = trendGate?.noteFa?.take(200),
-                    als5Opportunity = combined.als5Opportunity,
+                    als5Opportunity = combined.als5Opportunity, btcAres = combined.btcAres,
                 )
             } }.awaitAll()
         } // independent symbol evaluations; publisher-limited requests

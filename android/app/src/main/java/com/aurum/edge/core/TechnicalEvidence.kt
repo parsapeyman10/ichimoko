@@ -16,6 +16,13 @@ object TechnicalEvidence {
         "تأیید ورود و شکست ریزساختار · ALS-5",
         "نسبت ریسک به ریوارد و شرایط اجرا · ALS-5",
     )
+    /** BTC-ARES has its own four evidence rows; they are not interchangeable with ALS-5's. */
+    private val BTC_ARES_NAMES = setOf(
+        "رژیم و نوسان · BTC-ARES",
+        "ساختار و سطح · BTC-ARES",
+        "تأیید و موتور · BTC-ARES",
+        "ریسک، هزینه و اجرا · BTC-ARES",
+    )
     private const val NEWS_LABEL = "خبر/تقویم · داده‌کاوی ژورنال"
 
     fun items(signal: Signal): List<ConfluenceItem> = signal.confluence.filterNot { it.name == NEWS_LABEL }
@@ -33,6 +40,14 @@ object TechnicalEvidence {
 
     fun confirmed(signal: Signal): Boolean {
         val core = items(signal)
+        if (signal.btcAres != null) {
+            // BTC-ARES: the per-engine record is the authority. A crypto compression record must
+            // not be able to authorise a BTC entry, and vice versa.
+            return signal.btcAres.matches(signal) &&
+                core.size == CURRENT_COUNT && core.map { it.name }.toSet() == BTC_ARES_NAMES &&
+                core.all { it.ok && it.status == ConfluenceStatus.CONFIRMED && it.scorePercent == 25 } &&
+                kotlin.math.abs(core.sumOf { it.scorePercent ?: 0 }.toDouble() - signal.confidence) < 1e-6
+        }
         if (signal.cryptoBreakout != null) return signal.cryptoBreakout.matches(signal) &&
             core.size == CURRENT_COUNT && core.map { it.name }.toSet() == CRYPTO_NAMES &&
             core.all { it.ok && it.status == ConfluenceStatus.CONFIRMED && it.scorePercent == 25 } &&
@@ -50,7 +65,8 @@ object TechnicalEvidence {
         CURRENT_COUNT -> (items.map { it.name }.toSet() == REQUIRED_NAMES ||
                 items.map { it.name }.toSet() == REQUIRED_NAMES - "پشتهٔ ۳ تایم‌فریمی" + "پشتهٔ ۷ تایم‌فریمی" ||
                 items.map { it.name }.toSet() == CRYPTO_NAMES ||
-                items.map { it.name }.toSet() == ALS5_NAMES) &&
+                items.map { it.name }.toSet() == ALS5_NAMES ||
+                items.map { it.name }.toSet() == BTC_ARES_NAMES) &&
             items.all { it.status in setOf("CONFIRMED", "PARTIAL", "CONFLICT") }
         7, LEGACY_COUNT -> items.map { it.name }.distinct().size == items.size &&
             items.all { it.status == "CONFIRMED" }

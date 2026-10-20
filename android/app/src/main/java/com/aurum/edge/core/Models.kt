@@ -317,6 +317,8 @@ data class Signal(
     val ichimokuEntry: IchimokuEntryEvidence? = null,
     val cryptoBreakout: CryptoBreakoutEvidence? = null,
     val als5Opportunity: Als5OpportunityRecord? = null,
+    /** BTC-ARES per-engine record; present for BTC/USDT only, including NO_TRADE. */
+    val btcAres: BtcAresRecord? = null,
 ) {
     val isActionable: Boolean get() = action != SignalAction.NO_TRADE
 }
@@ -478,6 +480,8 @@ data class PaperTrade(
     val signalBarTime: Long? = null,
     /** Stable ALS-5 structure key prevents a repeat entry from the same setup after a close. */
     val als5SetupKey: String? = null,
+    /** Same idea for BTC-ARES: symbol + engine + level + bar, so engines cannot share a key. */
+    val btcAresSetupKey: String? = null,
     val newsEvidence: PaperNewsRecord? = null,
     /** Companion AI's post-open educational review; never a gate and never financial advice. */
     val aiReview: PaperAiReview? = null,

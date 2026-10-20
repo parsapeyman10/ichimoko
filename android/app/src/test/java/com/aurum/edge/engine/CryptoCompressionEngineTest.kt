@@ -36,38 +36,38 @@ class CryptoCompressionEngineTest {
     )
 
     @Test fun `crypto does not fall through to EMA RSI range or old breakout when setup is absent`() {
-        val trend = SignalEngine.evaluate(five, Interval.M5, 60.0, "BTC/USDT",
+        val trend = SignalEngine.evaluate(five, Interval.M5, 60.0, "ETH/USDT",
             CategoryStrategy.TREND, frames)
-        val range = SignalEngine.evaluate(five, Interval.M5, 95.0, "BTC/USDT",
+        val range = SignalEngine.evaluate(five, Interval.M5, 95.0, "ETH/USDT",
             CategoryStrategy.RANGE, frames)
         assertEquals(SignalAction.NO_TRADE, trend.action)
         assertEquals(trend.blockers, range.blockers)
         assertNull(trend.cryptoBreakout)
         assertFalse(trend.reasons.any { it.contains("EMA") || it.contains("RSI") })
         assertEquals(SignalAction.NO_TRADE, SignalEngine.evaluate(five, Interval.M5, 60.0,
-            "BTC/USDT", timeframes = frames - Interval.H1).action)
+            "ETH/USDT", timeframes = frames - Interval.H1).action)
         assertTrue(SignalEngine.evaluate(five, Interval.M5, 60.0,
-            "BTC/USDT", timeframes = frames - Interval.H1).blockers.single().contains("H1"))
+            "ETH/USDT", timeframes = frames - Interval.H1).blockers.single().contains("H1"))
         assertEquals(SignalAction.NO_TRADE, SignalEngine.evaluate(bars(Interval.M15),
-            Interval.M15, 60.0, "BTC/USDT", timeframes = frames).action)
+            Interval.M15, 60.0, "ETH/USDT", timeframes = frames).action)
         assertEquals(SignalAction.NO_TRADE, SignalEngine.evaluate(
             five.dropLast(1) + five.last().copy(volume = 0.0),
-            Interval.M5, 60.0, "BTC/USDT", timeframes = frames).action)
+            Interval.M5, 60.0, "ETH/USDT", timeframes = frames).action)
     }
 
     @Test fun `a zero volume recent bar blocks entry but an old zero bar is valid history`() {
         val recent = CryptoCompressionEngine.evaluate(
             five.mapIndexed { i, bar -> if (i == totalBars - 15) bar.copy(volume = 0.0) else bar },
-            Interval.M5, "BTC/USDT", frames, now)
+            Interval.M5, "ETH/USDT", frames, now)
         assertEquals(SignalAction.NO_TRADE, recent.action)
         assertTrue(recent.blockers.toString(), recent.blockers.any { it.contains("۴۰ کندل") })
         val old = CryptoCompressionEngine.evaluate(
             five.mapIndexed { i, bar -> if (i == 1) bar.copy(volume = 0.0) else bar },
-            Interval.M5, "BTC/USDT", frames, now)
+            Interval.M5, "ETH/USDT", frames, now)
         assertEquals(SignalAction.NO_TRADE, old.action)
         assertFalse(old.blockers.toString(), old.blockers.any { it.contains("۱۵۰۰ کندل") })
         val noMacroVolume = CryptoCompressionEngine.evaluate(five, Interval.M5,
-            "BTC/USDT", frames.mapValues { (frame, bars) ->
+            "ETH/USDT", frames.mapValues { (frame, bars) ->
                 if (frame == Interval.H1) bars.dropLast(1) + bars.last().copy(volume = 0.0) else bars
             }, now)
         assertEquals(SignalAction.NO_TRADE, noMacroVolume.action)
@@ -81,12 +81,27 @@ class CryptoCompressionEngineTest {
                 low = 100.0 - if (i < totalBars - 50) 0.6 else 0.02,
                 volume = if (i < totalBars - 31) 1000.0 else 10.0)
         }
-        val signal = SignalEngine.evaluate(quiet, Interval.M5, 60.0, "BTC/USDT",
+        val signal = SignalEngine.evaluate(quiet, Interval.M5, 60.0, "ETH/USDT",
             timeframes = frames)
         assertEquals(signal.blockers.toString(), SignalAction.NO_TRADE, signal.action)
         assertTrue(signal.blockers.toString(), signal.blockers.any { it.contains("واچ‌لیست") })
         assertTrue(signal.reasons.toString(), signal.reasons.any { it.contains("12/26") })
         assertNull(signal.cryptoBreakout)
+    }
+
+    @Test fun `btc has its own engine and the compression model refuses it`() {
+        // Routing is owned by EngineRegistry: BTC/USDT is BTC-ARES, so the compression model must
+        // not evaluate it at all. Otherwise two crypto models would score the same closed bar.
+        assertEquals(SymbolEngine.BTC_ARES, EngineRegistry.engineFor("BTC/USDT"))
+        assertEquals(SymbolEngine.CRYPTO_COMPRESSION, EngineRegistry.engineFor("ETH/USDT"))
+        val btc = CryptoCompressionEngine.evaluate(five, Interval.M5, "BTC/USDT", frames, now)
+        assertEquals(SignalAction.NO_TRADE, btc.action)
+        assertTrue(btc.blockers.single().contains("BTC-ARES"))
+        assertNull(btc.cryptoBreakout)
+        val routed = SignalEngine.evaluate(five, Interval.M5, 60.0, "BTC/USDT", timeframes = frames)
+        assertNotNull("BTC must still be evaluated, just by its own model", routed.btcAres)
+        assertEquals(6, routed.btcAres!!.engines.size)
+        assertNull(routed.cryptoBreakout)
     }
 
     private val names = listOf("فشردگی · ۲۰ کندل", "انفجار · حجم/ADX/چیکو",

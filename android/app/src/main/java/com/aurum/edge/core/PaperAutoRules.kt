@@ -20,7 +20,26 @@ object PaperAutoRules {
             if (goldSignal.als5Opportunity?.matches(goldSignal) != true)
                 return "برای طلا فقط BUY/SELL تأییدشدهٔ ALS-5 مجاز است"
         }
-        if (AssetClass.of(market.symbol) == AssetClass.CRYPTO) {
+        if (BtcAresPolicy.appliesTo(market.symbol)) {
+            // BTC has its own model: it is not allowed to borrow the compression evidence, and the
+            // compression engine is not allowed to act on BTC.
+            val signal = market.signal ?: return "سیگنال BTC-ARES موجود نیست"
+            if (signal.btcAres?.matches(signal) != true)
+                return "فقط ستاپ READY موتور BTC-ARES (با سطح/حد ضرر یکسان) مجاز است"
+            val tick = market.lastTradeAt?.let { time -> market.lastTradePrice?.let { price ->
+                PriceTick(price, time, market.bid, market.ask)
+            } }
+            BtcAresPolicy.quoteBlocker(signal, tick, signal.btcAres?.atr, now)?.let { return it }
+            if (!com.aurum.edge.data.CryptoVenuePolicy.compatible(
+                    market.symbol, market.historyProvider, market.feed.provider))
+                return "تاریخچهٔ هم‌صرافی منبع اختصاصی برای ورود تأیید نشده است"
+            val tradeAt = market.lastTradeAt
+            val tradePrice = market.lastTradePrice
+            if (market.feed.mode != FeedMode.LIVE || tradeAt == null ||
+                tradeAt !in (now - 45_000L)..(now + 10_000L) ||
+                tradePrice == null || !tradePrice.isFinite() || tradePrice <= 0.0)
+                return "معاملهٔ واقعی تازه و زمان‌دار همان صرافی (مرجع: نوبیتکس) برای ورود موجود نیست"
+        } else if (AssetClass.of(market.symbol) == AssetClass.CRYPTO) {
             val signal = market.signal ?: return "سیگنال فشردگی/انفجار موجود نیست"
             if (signal.cryptoBreakout?.matches(signal) != true ||
                 signal.ichimokuEntry?.matches(signal) != true)

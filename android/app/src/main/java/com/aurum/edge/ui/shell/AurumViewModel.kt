@@ -632,8 +632,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             val quote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { price ->
                 PriceTick(price, at, current.bid, current.ask)
             } }
-            com.aurum.edge.core.CryptoCompressionPolicy.quoteBlocker(
-                candidate ?: return "سیگنال رمزارز موجود نیست", quote)?.let { return it }
+            if (com.aurum.edge.core.BtcAresPolicy.appliesTo(current.symbol)) {
+                val btcSignal = candidate ?: return "سیگنال BTC-ARES موجود نیست"
+                com.aurum.edge.core.BtcAresPolicy.quoteBlocker(
+                    btcSignal, quote, btcSignal.btcAres?.atr)?.let { return it }
+            } else {
+                com.aurum.edge.core.CryptoCompressionPolicy.quoteBlocker(
+                    candidate ?: return "سیگنال رمزارز موجود نیست", quote)?.let { return it }
+            }
         }
         if (candidate?.isActionable != true || !TechnicalEvidence.confirmed(candidate))
             return candidate?.blockers?.joinToString("، ") ?: "سیگنال چهارلایهٔ معتبر وجود ندارد"

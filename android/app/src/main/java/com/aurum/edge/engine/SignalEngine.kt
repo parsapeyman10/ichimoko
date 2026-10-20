@@ -2,7 +2,6 @@ package com.aurum.edge.engine
 
 import com.aurum.edge.core.Candle
 import com.aurum.edge.core.AppSettings
-import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.CategoryStrategy
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.Signal
@@ -77,26 +76,37 @@ object SignalEngine {
      * Category mode and threshold can never diverge between callers.
      */
     fun evaluateLive(candles: List<Candle>, interval: Interval, settings: AppSettings,
-                     symbol: String, timeframes: Map<Interval, List<Candle>>): Signal {
-        if (com.aurum.edge.core.V1Universe.normalize(symbol) == "XAU/USD") {
-            val als5Config = Als5GoldEngine.Config(
-                accountEquityUsd = settings.accountBalance,
-                // ALS-5 starts at 0.25%; a lower user setting remains allowed, never a higher one.
-                riskPerTradePct = settings.riskPercent.coerceIn(0.01, 0.25),
-            )
-            return Als5GoldEngine.evaluate(
+                     symbol: String, timeframes: Map<Interval, List<Candle>>): Signal =
+        when (EngineRegistry.engineFor(symbol)) {
+            SymbolEngine.ALS5_GOLD -> Als5GoldEngine.evaluate(
                 input = candles,
                 interval = interval,
                 symbol = symbol,
                 threshold = settings.minConfidence,
                 mode = settings.strategyFor(symbol),
                 external = timeframes,
-                config = als5Config,
+                config = Als5GoldEngine.Config(
+                    accountEquityUsd = settings.accountBalance,
+                    // ALS-5 starts at 0.25%; a lower user setting remains allowed, never a higher one.
+                    riskPerTradePct = settings.riskPercent.coerceIn(0.01, 0.25),
+                ),
             )
+            SymbolEngine.BTC_ARES -> BtcAresEngine.evaluate(
+                input = candles,
+                interval = interval,
+                symbol = symbol,
+                threshold = settings.minConfidence,
+                mode = settings.strategyFor(symbol),
+                external = timeframes,
+                config = BtcAresEngine.Config(
+                    accountEquityUsd = settings.accountBalance,
+                    riskPerTradePct = settings.riskPercent.coerceIn(0.01, 0.25),
+                ),
+            )
+            SymbolEngine.V1_FOUR_LAYER, SymbolEngine.CRYPTO_COMPRESSION ->
+                evaluate(candles, interval, settings.minConfidence, symbol,
+                    settings.strategyFor(symbol), timeframes)
         }
-        return evaluate(candles, interval, settings.minConfidence, symbol,
-            settings.strategyFor(symbol), timeframes)
-    }
 
     /** Only V1 inputs are accepted. Legacy profile/strategy/spread settings do not masquerade
      * as scoring filters; execution costs are checked separately by PaperOrderRules.
@@ -104,11 +114,16 @@ object SignalEngine {
     fun evaluate(candles: List<Candle>, interval: Interval, threshold: Double = 85.0,
                  symbol: String = "XAU/USD", mode: com.aurum.edge.core.CategoryStrategy =
                      com.aurum.edge.core.CategoryStrategy.HYBRID,
-                 timeframes: Map<Interval, List<Candle>> = emptyMap()): Signal = when {
-        AssetClass.of(symbol) == AssetClass.CRYPTO ->
-            CryptoCompressionEngine.evaluate(candles, interval, symbol, timeframes)
-        com.aurum.edge.core.V1Universe.normalize(symbol) == "XAU/USD" ->
-            Als5GoldEngine.evaluate(candles, interval, symbol, threshold, mode, timeframes)
-        else -> V1Scoring.evaluate(candles, interval, symbol, threshold, mode, timeframes)
-    }
+                 timeframes: Map<Interval, List<Candle>> = emptyMap()): Signal =
+        when (EngineRegistry.engineFor(symbol)) {
+            // One owner per symbol, decided in EngineRegistry — never by a second `if` here.
+            SymbolEngine.ALS5_GOLD ->
+                Als5GoldEngine.evaluate(candles, interval, symbol, threshold, mode, timeframes)
+            SymbolEngine.BTC_ARES ->
+                BtcAresEngine.evaluate(candles, interval, symbol, threshold, mode, timeframes)
+            SymbolEngine.CRYPTO_COMPRESSION ->
+                CryptoCompressionEngine.evaluate(candles, interval, symbol, timeframes)
+            SymbolEngine.V1_FOUR_LAYER ->
+                V1Scoring.evaluate(candles, interval, symbol, threshold, mode, timeframes)
+        }
 }

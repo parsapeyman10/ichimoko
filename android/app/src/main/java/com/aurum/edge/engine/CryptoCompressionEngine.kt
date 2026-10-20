@@ -33,6 +33,10 @@ internal object CryptoCompressionEngine {
     fun evaluate(input: List<Candle>, interval: Interval, symbol: String,
                  frames: Map<Interval, List<Candle>>, now: Long = System.currentTimeMillis()): Signal {
         val bars = input.filter { it.closed && it.time + interval.millis <= now }.takeLast(WINDOW)
+        // BTC/USDT has its own multi-engine model (BtcAresEngine). Refusing it here is what keeps
+        // the two crypto models from both scoring the same bar.
+        if (com.aurum.edge.core.V1Universe.normalize(symbol) == BtcAresEngine.SYMBOL)
+            return blocked(interval, bars, "BTC/USDT با موتور BTC-ARES ارزیابی می‌شود، نه فشردگی")
         if (interval != Interval.M5) return blocked(interval, bars, "ورود رمزارز فقط بر پایهٔ کندل بستهٔ 5m است")
         if (bars.size != WINDOW || bars.any { !valid(it) } ||
             bars.zipWithNext().any { (a,b) -> b.time - a.time != interval.millis } ||

@@ -92,6 +92,11 @@ fun SignalScreen(viewModel: AurumViewModel, onChartSymbol: (String) -> Unit) {
             status = scanState.statuses.firstOrNull { it.symbol == "XAU/USD" },
             sweeping = scanState.sweeping,
         )
+        // BTC has its own registry entry and its own records: no shared card, no shared score.
+        BtcAresEnginesCard(
+            status = scanState.statuses.firstOrNull { it.symbol == "BTC/USDT" },
+            sweeping = scanState.sweeping,
+        )
 
         SectionCard("دلیل بررسی") {
             if (decisionLog.isEmpty()) Text("هنوز بررسی ثبت نشده است")

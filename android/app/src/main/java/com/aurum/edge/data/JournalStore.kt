@@ -117,8 +117,18 @@ class JournalStore(
             "ثبت پوزیشن تازه فقط از سیگنال کندل بستهٔ ۵ دقیقه (5m) مجاز است"
         }
         val isAls5Gold = com.aurum.edge.core.V1Universe.normalize(symbol) == "XAU/USD"
-        if (CryptoCatalog.isCrypto(symbol)) require(signal.cryptoBreakout?.matches(signal) == true) {
-            "فقط استراتژی فشردگی ← انفجار برای ورود تازهٔ رمزارز مجاز است"
+        val isBtcAres = com.aurum.edge.core.BtcAresPolicy.appliesTo(symbol)
+        if (isBtcAres) {
+            require(signal.btcAres?.matches(signal) == true) {
+                "ورود BTC فقط با رکورد تأییدشدهٔ BTC-ARES (موتور، سطح، حد ضرر و حد سود یکسان) مجاز است"
+            }
+        } else if (CryptoCatalog.isCrypto(symbol)) {
+            require(signal.cryptoBreakout?.matches(signal) == true) {
+                "فقط استراتژی فشردگی ← انفجار برای ورود تازهٔ رمزارز مجاز است"
+            }
+        }
+        if (isBtcAres && automatic) require(signal.btcAres?.matches(signal) == true) {
+            "ورود خودکار بیت‌کوین فقط با ستاپ READY موتور BTC-ARES مجاز است"
         }
         if (isAls5Gold && automatic) require(signal.als5Opportunity?.matches(signal) == true) {
             "ورود خودکار طلای جدید فقط با ستاپ خرید/فروش تأییدشدهٔ ALS-5 مجاز است"
@@ -134,7 +144,16 @@ class JournalStore(
         require(!CryptoCatalog.isCrypto(symbol) || cryptoVenue in setOf("NOBITEX", BinanceSpotClient.VENUE)) {
             "صرافی ورود نامعتبر است"
         }
-        if (CryptoCatalog.isCrypto(symbol)) {
+        if (isBtcAres) {
+            // BTC-ARES is specified at 0.25% risk per trade with a 1.5R floor, so the older
+            // crypto floors (0.3–0.5%, 3R) would silently forbid every valid ARES setup.
+            require(riskPercent in 0.1..0.25) { "ریسک BTC-ARES باید حداکثر ۰٫۲۵ درصد باشد" }
+            require(com.aurum.edge.core.BtcAresPolicy.quoteBlocker(
+                signal, cryptoEntryQuote, signal.btcAres?.atr, observedAt) == null &&
+                cryptoEntryQuote?.price == price) {
+                "اسپرد، تیک تازه و شواهد BTC-ARES برای ورود تأیید نشده است"
+            }
+        } else if (CryptoCatalog.isCrypto(symbol)) {
             require(riskPercent in 0.3..0.5) { "ریسک رمزارز باید ۰٫۳ تا ۰٫۵ درصد باشد" }
             require(com.aurum.edge.core.CryptoCompressionPolicy.quoteBlocker(
                 signal, cryptoEntryQuote, observedAt) == null && cryptoEntryQuote?.price == price) {
@@ -153,9 +172,13 @@ class JournalStore(
         require(priceAction == null || priceAction.matches(signal, symbol, price)) {
             "شواهد اختیاری ICT با همان کندل مطابقت ندارد"
         }
-        if (CryptoCatalog.isCrypto(symbol)) require(kotlin.math.abs(target - price) >=
+        if (isBtcAres) require(signal.btcAres?.matches(signal) == true &&
+            signal.riskReward != null && signal.riskReward!! >= 1.5 - 1e-9) {
+            "نسبت ریسک به ریوارد BTC-ARES باید حداقل ۱:۱٫۵ باشد"
+        }
+        if (!isBtcAres && CryptoCatalog.isCrypto(symbol)) require(kotlin.math.abs(target - price) >=
             3.0 * kotlin.math.abs(price - stop) - 1e-9) { "نسبت واقعی ریسک به ریوارد رمزارز باید حداقل ۱:۳ باشد" }
-        val orderRiskPercent = if (isAls5Gold) riskPercent.coerceAtMost(0.25) else riskPercent
+        val orderRiskPercent = if (isAls5Gold || isBtcAres) riskPercent.coerceAtMost(0.25) else riskPercent
         val draft = PaperOrderRules.preview(signal.action, symbol, price, stop, target, balance, orderRiskPercent)
         val startConditions = technicalConditions
             .filter { it.status == ConfluenceStatus.CONFIRMED }
@@ -183,6 +206,7 @@ class JournalStore(
             autoOpened = automatic,
             signalBarTime = signal.barTime,
             als5SetupKey = signal.als5Opportunity?.setupKey?.takeIf { isAls5Gold },
+            btcAresSetupKey = signal.btcAres?.setupKey?.takeIf { isBtcAres },
             newsEvidence = null,
             entryConditions = technicalConditions.map {
                 com.aurum.edge.core.PaperConditionRecord.from(it)
@@ -230,9 +254,15 @@ class JournalStore(
                 draft.actualRiskUsd + draft.commissionUsd + draft.spreadCostUsd,
                 signal.barTime, now = observedAt,
                 openingBalance = settingsStore?.dayOpeningEquity(observedAt),
-                maxRiskPerTradePct = if (isAls5Gold) 0.0025 else PaperPortfolioPolicy.MAX_RISK_PER_TRADE,
-                maxDailyLossPct = if (isAls5Gold) 0.01 else PaperPortfolioPolicy.MAX_DAILY_LOSS,
-                als5SetupKey = signal.als5Opportunity?.setupKey?.takeIf { isAls5Gold })
+                maxRiskPerTradePct = if (isAls5Gold || isBtcAres) 0.0025
+                    else PaperPortfolioPolicy.MAX_RISK_PER_TRADE,
+                maxDailyLossPct = if (isAls5Gold || isBtcAres) 0.01 else PaperPortfolioPolicy.MAX_DAILY_LOSS,
+                als5SetupKey = signal.als5Opportunity?.setupKey?.takeIf { isAls5Gold },
+                setupKey = when {
+                    isAls5Gold -> signal.als5Opportunity?.setupKey
+                    isBtcAres -> signal.btcAres?.setupKey
+                    else -> null
+                })
             require(blocker == null) { blocker ?: "ظرفیت پورتفو پر است" }
             // Recheck after scheduling, sizing and any journal-lock wait. Fresh ticks or an
             // fresh receipt cannot authorize a preview calculated before a source conflict.
