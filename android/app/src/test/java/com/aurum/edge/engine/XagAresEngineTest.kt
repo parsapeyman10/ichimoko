@@ -149,14 +149,20 @@ class XagAresEngineTest {
 
     @Test fun `volatility uses its own distribution rather than one fixed number`() {
         val cfg = XagAresEngine.Config()
-        val calm = bars(amplitude = 0.01)
-        val violent = bars(amplitude = 0.30)
-        val calmRegime = XagAresEngine.analyze(calm, frames(calm)[Interval.M15]!!, frames(calm)[Interval.H1]!!, config = cfg)
-        val violentRegime = XagAresEngine.analyze(violent, frames(violent)[Interval.M15]!!, frames(violent)[Interval.H1]!!, config = cfg)
-        // A quiet tape must never be labelled extreme, and a violent one must not be labelled calm.
-        assertTrue(calmRegime.second != XagAresEngine.Volatility.EXTREME)
-        assertTrue(violentRegime.second == XagAresEngine.Volatility.ELEVATED ||
-            violentRegime.second == XagAresEngine.Volatility.EXTREME)
+        // A *constant* amplitude is self-similar: percentile ranks correctly call both tapes normal.
+        // What must register is an expansion against the instrument's own recent history.
+        val calm = bars(amplitude = 0.02)
+        val expansion = calm.dropLast(30) + calm.takeLast(30).mapIndexed { i, bar ->
+            val shock = 0.02 + i * 0.02
+            bar.copy(open = bar.close, high = bar.close + shock, low = bar.close - shock, volume = 20.0)
+        }
+        val calmState = XagAresEngine.analyze(calm, frames(calm)[Interval.M15]!!, frames(calm)[Interval.H1]!!, config = cfg)
+        val shockedState = XagAresEngine.analyze(
+            expansion, frames(expansion)[Interval.M15]!!, frames(expansion)[Interval.H1]!!, config = cfg)
+        assertEquals(XagAresEngine.Volatility.NORMAL, calmState.second)
+        assertTrue("an expansion must lift volatility (got ${shockedState.second})",
+            shockedState.second == XagAresEngine.Volatility.ELEVATED ||
+                shockedState.second == XagAresEngine.Volatility.EXTREME)
     }
 
     // -------------------------------------------------------------------------------------

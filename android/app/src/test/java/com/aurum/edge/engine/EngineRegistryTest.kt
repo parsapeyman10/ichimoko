@@ -21,15 +21,18 @@ class EngineRegistryTest {
         val btc = EngineRegistry.autoEntryNote("BTC/USDT")
         val silver = EngineRegistry.autoEntryNote("XAG/USD")
         val eth = EngineRegistry.autoEntryNote("ETH/USDT")
+        val eur = EngineRegistry.autoEntryNote("EUR/USD")
         assertTrue(gold.contains("ALS-5"))
         assertTrue(btc.contains("BTC-ARES"))
-        assertTrue(silver.contains("V1"))
+        assertTrue(silver.contains("ALS-5S"))
         assertTrue(eth.contains("فشردگی"))
+        assertTrue(eur.contains("V1"))
+        assertFalse(silver.contains("V1"))
         // A gold or BTC trade must never be described to the user as a four-layer entry.
         assertFalse(btc.contains("چهارلایه"))
         assertFalse(gold.contains("چهارلایه"))
         assertFalse(btc.contains("فشردگی"))
-        assertEquals(4, setOf(gold, btc, silver, eth).size)
+        assertEquals(5, setOf(gold, btc, silver, eth, eur).size)
     }
 
     @Test fun `every symbol of the universe has exactly one engine`() {

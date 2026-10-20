@@ -47,8 +47,10 @@ object EngineRegistry {
     fun engineFor(symbol: String): SymbolEngine {
         val key = V1Universe.normalize(symbol)
         exact[key]?.let { return it }
-        // A silver alias (XAGUSD, SILVER…) belongs to the silver model, not to gold or to V1.
+        // Precious-metal aliases must not silently fall into the four-layer model:
+        // XAG* (XAGUSD, SILVER…) belongs to silver, XAU* to gold.
         if (key.startsWith("XAG")) return SymbolEngine.ALS5S_SILVER
+        if (key.startsWith("XAU") || key == "GOLD") return SymbolEngine.ALS5_GOLD
         return when (AssetClass.of(key)) {
             AssetClass.CRYPTO -> SymbolEngine.CRYPTO_COMPRESSION
             else -> SymbolEngine.V1_FOUR_LAYER

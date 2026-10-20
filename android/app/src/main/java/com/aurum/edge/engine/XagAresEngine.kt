@@ -469,7 +469,7 @@ object XagAresEngine {
         if (previous == null || now == previous) return now to ""
         if (now == Regime.HIGH_VOL) return now to "ورود فوری به حالت محافظتی نوسان بالا"
         if (previous == Regime.HIGH_VOL)
-            return now to "خروج از حالت محافظتی با تأیید کندل بعدی"
+            return previous to "خروج از حالت محافظتی فقط با تأیید یک کندل دیگر"
         if (cfg.regimeConfirmBars <= 1) return now to ""
         return previous to "هیسترزیس: ${previous.labelFa} تا تأیید ${cfg.regimeConfirmBars} کندل حفظ شد"
     }
