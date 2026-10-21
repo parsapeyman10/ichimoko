@@ -28,6 +28,12 @@ import com.aurum.edge.data.SourceFetcher
 import com.aurum.edge.data.WatchRepository
 import com.aurum.edge.data.WatchSettingsStore
 import com.aurum.edge.notify.Notifier
+import com.aurum.edge.engine.ArbitratorSpec
+import com.aurum.edge.engine.EngineSpec
+import com.aurum.edge.engine.RiskParams
+import com.aurum.edge.engine.StrategyEvaluator
+import com.aurum.edge.engine.StrategySpec
+import com.aurum.edge.engine.StrategyAdapters
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -68,6 +74,87 @@ class AppContainer(context: Context) {
     /** Process-wide owner of every open-position tick worker (see OpenPositionCoordinator). */
     val spotFallback = SpotFallbackClient()
     val openPositionCoordinator = OpenPositionCoordinator(journalStore, spotFallback, openTradeTicks)
+
+    /** Strategy specifications — declarative, one per engine. These are the data that
+     * [StrategyEvaluator] runs; no engine logic lives here. */
+    val als5GoldSpec = StrategySpec(
+        id = "ALS5_GOLD",
+        labelFa = "ALS-5 طلا · XAU/USD",
+        symbol = "XAU/USD",
+        interval = com.aurum.edge.domain.Interval.M5,
+        risk = RiskParams(riskPerTradePct = 0.25, accountEquityUsd = 10_000.0, minRewardRisk = 1.5, maxDailyLossPct = 1.0),
+        engines = listOf(
+            EngineSpec(id = "ENGINE_A_TREND", labelFa = "موتور A · ادامهٔ روند", enabled = true),
+            EngineSpec(id = "ENGINE_B_SWEEP", labelFa = "موتور B · سوییپ نقدینگی", enabled = true),
+            EngineSpec(id = "ENGINE_C_RANGE", labelFa = "موتور C · بازگشت به میانگین رنج", enabled = true),
+        ),
+        arbitrator = ArbitratorSpec(conflictMargin = 15, minScore = 80, enforceNetRewardRisk = true),
+        minBars = 280,
+        enforceFreshness = true,
+        maxSetupAgeBars = 12,
+    )
+    val btcAresSpec = StrategySpec(
+        id = "BTC_ARES",
+        labelFa = "BTC-ARES · بیت‌کوین",
+        symbol = "BTC/USDT",
+        interval = com.aurum.edge.domain.Interval.M5,
+        risk = RiskParams(riskPerTradePct = 0.25, accountEquityUsd = 10_000.0, minRewardRisk = 1.5, maxDailyLossPct = 1.0),
+        engines = listOf(
+            EngineSpec(id = "ENGINE_A_TREND", labelFa = "موتور A · ادامهٔ روند", enabled = true),
+            EngineSpec(id = "ENGINE_B_SWEEP", labelFa = "موتور B · شکست ناموفق / سوییپ", enabled = true),
+            EngineSpec(id = "ENGINE_C_COMPRESSION", labelFa = "موتور C · شکست فشردگی", enabled = true),
+            EngineSpec(id = "ENGINE_D_RANGE", labelFa = "موتور D · رنج و بازگشت", enabled = true),
+            EngineSpec(id = "ENGINE_E_EXHAUSTION", labelFa = "موتور E · خستگی مومنتوم", enabled = true),
+        ),
+        arbitrator = ArbitratorSpec(conflictMargin = 15, minScore = 70, enforceNetRewardRisk = true),
+        minBars = 280,
+        enforceFreshness = true,
+        maxSetupAgeBars = 12,
+    )
+    val xagAresSpec = StrategySpec(
+        id = "ALS5S_SILVER",
+        labelFa = "ALS-5S نقره · XAG/USD",
+        symbol = "XAG/USD",
+        interval = com.aurum.edge.domain.Interval.M5,
+        risk = RiskParams(riskPerTradePct = 0.25, accountEquityUsd = 10_000.0, minRewardRisk = 1.5, maxDailyLossPct = 1.0),
+        engines = listOf(
+            EngineSpec(id = "ENGINE_A_TREND", labelFa = "موتور A · ادامهٔ روند", enabled = true),
+            EngineSpec(id = "ENGINE_B_SWEEP", labelFa = "موتور B · سوییپ نقدینگی", enabled = true),
+            EngineSpec(id = "ENGINE_C_RANGE", labelFa = "موتور C · بازگشت به میانگین رنج", enabled = true),
+            EngineSpec(id = "ENGINE_C_BREAKOUT", labelFa = "موتور C · شکست نوسان", enabled = true),
+        ),
+        arbitrator = ArbitratorSpec(conflictMargin = 2, minScore = 80, enforceNetRewardRisk = true),
+        minBars = 280,
+        enforceFreshness = true,
+        maxSetupAgeBars = 12,
+    )
+    val eurAresSpec = StrategySpec(
+        id = "EUR_ARES",
+        labelFa = "EUR-ARES · یورو/دلار",
+        symbol = "EUR/USD",
+        interval = com.aurum.edge.domain.Interval.M5,
+        risk = RiskParams(riskPerTradePct = 0.25, accountEquityUsd = 10_000.0, minRewardRisk = 1.5, maxDailyLossPct = 1.0),
+        engines = listOf(
+            EngineSpec(id = "ENGINE_A_TREND", labelFa = "موتور A · ادامهٔ روند و پولبک", enabled = true),
+            EngineSpec(id = "ENGINE_B_SWEEP", labelFa = "موتور B · شکست ناموفق / سوییپ", enabled = true),
+            EngineSpec(id = "ENGINE_C_RANGE", labelFa = "موتور C · بازگشت به میانگین رنج", enabled = true),
+            EngineSpec(id = "ENGINE_D_SESSION", labelFa = "موتور D · شکست رنج سشن", enabled = true),
+        ),
+        arbitrator = ArbitratorSpec(conflictMargin = 10, minScore = 70, enforceNetRewardRisk = true),
+        minBars = 280,
+        enforceFreshness = true,
+        maxSetupAgeBars = 12,
+    )
+
+    /** Strategy evaluator wired with the existing engines via [StrategyAdapters].
+     * Additive: [SignalEngine] keeps working unchanged; this is an alternative path. */
+    val strategyEvaluator = StrategyEvaluator(engineEvaluators = mapOf(
+        "ALS5_GOLD" to { bars, external -> StrategyAdapters.als5Gold(bars, external) },
+        "BTC_ARES" to { bars, external -> StrategyAdapters.btcAres(bars, external) },
+        "ALS5S_SILVER" to { bars, external -> StrategyAdapters.xagAres(bars, external) },
+        "EUR_ARES" to { bars, external -> StrategyAdapters.eurAres(bars, external) },
+    ))
+
     val opportunityStore = PaperOpportunityStore(appContext)
     val client = TwelveDataClient()
     val publicHistory = PublicCandleHistoryClient()
