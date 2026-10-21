@@ -9,7 +9,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.aurum.edge.core.AppContainer
+import com.aurum.edge.app.AppContainer
 import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.domain.FeedMode

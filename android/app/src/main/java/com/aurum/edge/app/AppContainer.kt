@@ -1,7 +1,10 @@
-package com.aurum.edge.core
+package com.aurum.edge.app
 
 import android.content.Context
 import android.net.Uri
+import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.FeedMode
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.data.CandleCache
 import com.aurum.edge.data.DataFeedException
