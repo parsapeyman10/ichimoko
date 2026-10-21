@@ -81,13 +81,7 @@ fun JournalScreen(viewModel: AurumViewModel, market: MarketState) {
         pendingPdf = null
         if (uri != null && request != null) viewModel.exportJournalPdf(uri, request.first, request.second)
     }
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(20_000L)
-            now = System.currentTimeMillis()
-        }
-    }
+    val now by viewModel.clock.collectAsStateWithLifecycle()
     val filteredTrades = remember(trades, selectedCategory) {
         if (selectedCategory == null) trades else trades.filter { it.assetClass == selectedCategory }
     }

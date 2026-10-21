@@ -35,7 +35,6 @@ import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.data.JournalStats
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.SpotFallbackClient
-import com.aurum.edge.data.OpenTickSnapshot
 import com.aurum.edge.data.DisplayMark
 import com.aurum.edge.data.OpenPositionDisplay
 import com.aurum.edge.data.WatchSelection
@@ -64,6 +63,14 @@ import kotlin.math.abs
 import kotlin.math.min
 
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
+
+    companion object {
+        /** The watch keep-warm loop checks every WATCH_CHECK_MS; a symbol whose last attempt
+         * is older than WATCH_STALE_MS gets one (throttled) refresh. No turn-counting, no
+         * fixed 3-minute gap after a failure. */
+        private const val WATCH_CHECK_MS = 60_000L
+        private const val WATCH_STALE_MS = 180_000L
+    }
 
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
 
@@ -98,7 +105,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
-     * «روند کلی بازار» — خوانشِ عرض بازار از همان پویشِ پیوستهٔ ۵۰+ نماد: چند نماد صعودی/نزولی/
+     * «روند کلی بازار» — خوانشِ عرض بازار از همان پویشِ پیوستهٔ همهٔ نمادهای جهانِ برنامه: چند نماد صعودی/نزولی/
      * خنثی اندازه گرفته شد، جهت دلار از شش جفت اصلی، و جوّ ریسک‌پذیری از دارایی‌های ریسکی در
      * برابر طلا و دلار. null تا وقتی یک پویش چیزی اندازه نگرفته باشد (و هرگز حدس زده نمی‌شود).
      */
@@ -133,6 +140,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }.getOrNull()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    /** The app's ONE wall clock (see AppContainer.clock). Screens read this instead of
+     * starting their own `while(true)` timer, so a backgrounded screen stops ticking. */
+    val clock: StateFlow<Long> = container.clock
     val updateState: StateFlow<AppUpdateRepository.State> = container.updater.state
     val updateSigningDiagnostic: String by lazy { container.updater.installedSigningDiagnostic() }
 
@@ -251,131 +261,69 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private fun ensureVisibleOnlineLoop() {
         if (visibleOnlineLoopStarted) return
         visibleOnlineLoopStarted = true
-        // Radar runs on the shared MonitorCadence: 60s base, 20s while a symbol is a
-        // live candidate / near entry. The scanner's own per-symbol throttle enforces
-        // the same grid even if other callers ask sooner.
+        // One adaptive sweep driver owns the universe radar (see SweepCoordinator); the UI
+        // only switches it on while the tab is visible. The background service keeps it
+        // running via `sweepCoordinator.isServiceRunning`.
+        container.sweepCoordinator.enabled.value = true
+
         viewModelScope.launch {
             while (isActive) {
-                if (visibleOnlineLoopEnabled || SignalMonitorService.running.value)
-                    container.pairScanner.refreshNow()
-                delay(com.aurum.edge.core.MonitorCadence.sweepDelayMs(
-                    container.pairScanner.state.value.statuses.map { it.state to it.confidence }))
-            }
-        }
-        viewModelScope.launch {
-            var turns = 0
-            while (isActive) {
-                if ((visibleOnlineLoopEnabled || SignalMonitorService.running.value) && !MarketHours.weekendClosedFor(settings.value.symbol)) {
-                    if (turns % 3 == 0) container.watch.refreshNow()
+                if (visibleOnlineLoopEnabled || SignalMonitorService.running.value) {
+                    // Staleness-driven, not turn-driven: after a failed attempt the next
+                    // refresh is one check away instead of up to three minutes away. The
+                    // repository still applies its own throttle to every request.
+                    val last = container.watch.state.value.lastAttemptAt ?: 0L
+                    if (System.currentTimeMillis() - last >= WATCH_STALE_MS) container.watch.refreshNow()
                 }
-                turns++
-                delay(60_000L)
+                delay(WATCH_CHECK_MS)
             }
         }
     }
 
-    /** Each OPEN symbol has an independent UI worker, so one slow quote cannot hold
-     * another position's display behind awaitAll. The service keeps its own same-venue
-     * ordered exit monitor; this map is only timestamped, verified on-screen valuation.
-     */
+    /** UI rendering of live open-position ticks. The coordinator owns one worker per open
+     * symbol and the single [settleTick] path; this loop only paints what is already fresh,
+     * so no network fetch happens here and no quote is ever fetched twice. */
     private fun ensureLiveTickerLoop() {
         if (liveTickerLoopStarted) return
         liveTickerLoopStarted = true
-        viewModelScope.launch(Dispatchers.IO) {
-            val spot = SpotFallbackClient()
-            val workers = mutableMapOf<String, Pair<Long, kotlinx.coroutines.Job>>()
-            try {
-                container.journalStore.trades.collect { trades ->
-                    val open = trades.filter { it.isOpen }.groupBy { it.symbol }
-                        .mapValues { (_, positions) -> positions.minOf { it.openedAt } }
-                    workers.toMap().forEach { (symbol, worker) ->
-                        if (open[symbol] != worker.first) {
-                            worker.second.cancel()
-                            workers.remove(symbol)
-                        }
-                    }
-                    _liveTicks.update { current -> current.filter { (symbol, tick) ->
-                        symbol in open && tick.at >= open.getValue(symbol) && TradeQuotePolicy.accepts(tick)
-                    } }
-                    _lastDisplayMarks.update { OpenPositionDisplay.onlyOpen(it, trades) }
-                    open.forEach { (symbol, openedAt) ->
-                        if (symbol !in workers) {
-                            val worker = launch(Dispatchers.IO) {
-                                val crypto = com.aurum.edge.data.CryptoCatalog.isCrypto(symbol)
-                                // Separate closed-candle lane: never slow the ordered tick stream.
-                                if (crypto) launch {
-                                    while (isActive) {
-                                        try {
-                                            container.openTradeTicks.syncCryptoClosedBars(symbol, openedAt)
-                                        } catch (cancel: kotlinx.coroutines.CancellationException) {
-                                            throw cancel
-                                        } catch (_: Exception) {
-                                            // Keep the prior real stop/valuation when history is unavailable.
-                                        }
-                                        delay(60_000L)
-                                    }
-                                }
-                                while (isActive) {
-                                    if (!visibleOnlineLoopEnabled && !SignalMonitorService.running.value) {
-                                        _liveTicks.update { it - symbol }
-                                        delay(1_000L)
-                                        continue
-                                    }
-                                    if (MarketHours.closedFor(symbol)) {
-                                        _liveTicks.update { it - symbol }
-                                        delay(10_000L)
-                                        continue
-                                    }
-                                    try {
-                                        val selected = if (!crypto)
-                                            container.verifiedMarket.value.let { market ->
-                                                container.journalStore.trades.value
-                                                    .firstOrNull { it.symbol == symbol && it.isOpen && it.openedAt == openedAt }
-                                                    ?.let { com.aurum.edge.data.OpenPositionQuotePolicy.selectedFallback(it, market) }
-                                            } else null
-                                        val isSelected = !crypto && container.verifiedMarket.value.symbol == symbol
-                                        // Never use the selected chart as a crypto trade source.
-                                        val quote = if (isSelected) selected else if (crypto)
-                                            container.openTradeTicks.poll(symbol, openedAt) else spot.fetchQuote(symbol)
-                                        if (!isActive) break
-                                        val fresh = quote?.takeIf {
-                                            it.at >= openedAt && !MarketHours.closedFor(symbol) && TradeQuotePolicy.accepts(it)
-                                        }
-                                        if (fresh != null) {
-                                            container.journalStore.trades.value.firstOrNull { trade ->
-                                                trade.isOpen && trade.symbol == symbol && trade.openedAt == openedAt
-                                            }?.let { trade -> _lastDisplayMarks.update { old ->
-                                                OpenPositionDisplay.record(old, trade, fresh)
-                                            } }
-                                        }
-                                        _liveTicks.update { previous -> OpenTickSnapshot.updated(previous,
-                                            symbol, fresh, container.journalStore.trades.value.filter { it.isOpen }
-                                                .map { it.symbol }.toSet()) }
-                                        if (fresh != null && !crypto && !isSelected) {
-                                            val closed = container.journalStore.settleTick(symbol, fresh.price,
-                                                fresh.at, expectedOpenedAt = openedAt)
-                                            if (closed.isNotEmpty()) {
-                                                _stats.value = container.journalStore.stats()
-                                                closed.forEach { trade -> _toast.value =
-                                                    "معاملهٔ ${trade.symbol} (${trade.exitReason}) بسته و تسویه شد: ${trade.pnlUsd}$" }
-                                            }
-                                        }
-                                    } catch (cancel: CancellationException) {
-                                        throw cancel
-                                    } catch (_: Exception) {
-                                        // Only this symbol becomes unknown. Keep other real ticks.
-                                        _liveTicks.update { it - symbol }
-                                    }
-                                    delay(if (crypto) 3_000L else 1_000L)
-                                }
-                            }
-                            workers[symbol] = openedAt to worker
-                        }
+        viewModelScope.launch {
+            val trades = container.journalStore.trades
+            val ticks = container.openPositionCoordinator.liveTicks
+            var lastOpenIds = emptySet<String>()
+            combine(trades, ticks) { openTrades, live ->
+                Pair(openTrades.filter { it.isOpen }, live)
+            }.collect { (openTrades, live) ->
+                val now = System.currentTimeMillis()
+                val openBySymbol = openTrades.associateBy { it.symbol }
+                // The coordinator keeps settling in the background; the UI only paints live
+                // ticks while the foreground feed is meant to be visible.
+                val visible = visibleOnlineLoopEnabled || SignalMonitorService.running.value
+                val shown = if (visible) live else emptyMap<String, PriceTick>()
+                val accepted = shown.filter { (symbol, tick) ->
+                    val trade = openBySymbol[symbol]
+                    trade != null && trade.isOpen && tick.at >= trade.openedAt &&
+                        TradeQuotePolicy.accepts(tick)
+                }
+                _liveTicks.value = accepted
+                var marks = _lastDisplayMarks.value
+                for ((symbol, tick) in accepted) {
+                    val trade = openBySymbol[symbol]
+                    if (trade != null) {
+                        marks = OpenPositionDisplay.record(marks, trade, tick, now)
                     }
                 }
-            } finally {
-                workers.values.forEach { it.second.cancel() }
-                _liveTicks.value = emptyMap()
+                _lastDisplayMarks.value = marks
+                _stats.value = container.journalStore.stats()
+                // Toast on newly closed positions.
+                val newlyClosed = lastOpenIds - openTrades.map { it.id }.toSet()
+                lastOpenIds = openTrades.map { it.id }.toSet()
+                newlyClosed.forEach { id ->
+                    openTrades.firstOrNull { it.id == id }?.let { trade ->
+                        _toast.value = "معاملهٔ ${trade.symbol}" +
+                            (trade.exitReason?.let { " (${it})" } ?: "") +
+                            " بسته و تسویه شد: ${trade.pnlUsd}$"
+                    }
+                }
             }
         }
     }

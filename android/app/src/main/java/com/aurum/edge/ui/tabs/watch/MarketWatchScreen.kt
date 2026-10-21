@@ -44,16 +44,11 @@ fun MarketWatchScreen(viewModel: AurumViewModel, onOpenSettings: () -> Unit,
                       onOpenChart: (String) -> Unit) {
     val state by viewModel.watch.collectAsStateWithLifecycle()
     val selections by viewModel.watchSettings.collectAsStateWithLifecycle()
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-
-    LaunchedEffect(Unit) {
-        viewModel.refreshWatch()
-        while (true) {
-            delay(30_000L)
-            now = System.currentTimeMillis()
-            if (now - (state.lastAttemptAt ?: 0L) >= 180_000L) viewModel.refreshWatch()
-        }
-    }
+    val now by viewModel.clock.collectAsStateWithLifecycle()
+    // One refresh when the tab opens — an intent, not a schedule. The 30s keep-warm loop
+    // belongs to the ViewModel: a composable must not own a network schedule that dies
+    // with the tab and restarts on every recomposition of the screen.
+    LaunchedEffect(Unit) { viewModel.refreshWatch() }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) {
         SectionCard("دیده‌بان بازار") {

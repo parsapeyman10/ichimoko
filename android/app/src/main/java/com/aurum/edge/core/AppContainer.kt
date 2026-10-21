@@ -9,13 +9,16 @@ import com.aurum.edge.data.DukascopyHistoryClient
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.MarketRepository
 import com.aurum.edge.data.MarketState
+import com.aurum.edge.data.OpenPositionCoordinator
 import com.aurum.edge.data.OpenTradeTickMonitor
+import com.aurum.edge.data.SpotFallbackClient
 import com.aurum.edge.data.PaperAutoTrader
 import com.aurum.edge.data.CatalogPaperTrader
 import com.aurum.edge.data.PublicCandleHistoryClient
 import com.aurum.edge.data.PaperOpportunityStore
 import com.aurum.edge.data.PairScanner
 import com.aurum.edge.data.SettingsStore
+import com.aurum.edge.data.SweepCoordinator
 import com.aurum.edge.data.TwelveDataClient
 import com.aurum.edge.data.QuoteHistoryStore
 import com.aurum.edge.data.SourceFetcher
@@ -42,6 +45,12 @@ import kotlinx.coroutines.withContext
  */
 class AppContainer(context: Context) {
 
+    companion object {
+        /** Relative timestamps ("۲ دقیقه پیش") and feed-freshness windows do not need
+         * second resolution; 20s keeps every clock reader honest without waking the CPU. */
+        private const val CLOCK_PERIOD_MS = 20_000L
+    }
+
     val appContext: Context = context.applicationContext
 
     val settingsStore = SettingsStore(appContext)
@@ -53,6 +62,9 @@ class AppContainer(context: Context) {
     val candleCache = CandleCache(appContext)
     val journalStore = JournalStore(appContext, settingsStore = settingsStore)
     val openTradeTicks = OpenTradeTickMonitor(journalStore, settings = settingsStore)
+    /** Process-wide owner of every open-position tick worker (see OpenPositionCoordinator). */
+    val spotFallback = SpotFallbackClient()
+    val openPositionCoordinator = OpenPositionCoordinator(journalStore, spotFallback, openTradeTicks)
     val opportunityStore = PaperOpportunityStore(appContext)
     val client = TwelveDataClient()
     val publicHistory = PublicCandleHistoryClient()
@@ -62,6 +74,22 @@ class AppContainer(context: Context) {
     val updater = AppUpdateRepository(appContext)
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /**
+     * ONE wall clock for the whole app.
+     *
+     * Before this, six independent `while (true) { delay(...) }` timers ticked separately: one
+     * inlined inside [verifiedMarket] below and five more inside Home/Journal/Watch/Signal
+     * composables. Every consumer now reads this single flow, so a screen that goes to the
+     * background stops its own timer instead of leaving it running until the composable dies.
+     * Started eagerly enough to be warm, stopped 5s after the last consumer goes away.
+     */
+    val clock: StateFlow<Long> = flow {
+        while (true) {
+            emit(System.currentTimeMillis())
+            delay(CLOCK_PERIOD_MS)
+        }
+    }.stateIn(appScope, SharingStarted.WhileSubscribed(5_000L), System.currentTimeMillis())
     val watchSettings = WatchSettingsStore(appContext)
     val quoteHistory = QuoteHistoryStore(appContext)
     val watch = WatchRepository(SourceFetcher(), quoteHistory, watchSettings, settingsStore, appScope)
@@ -70,10 +98,10 @@ class AppContainer(context: Context) {
      * source-integrity conflict is active, and audits every candidate. Shared by chart, signal
      * tab, notifications and automatic *paper* entries. Expires on time. */
     val verifiedMarket: StateFlow<MarketState> = combine(
-        market.state, com.aurum.edge.data.SourceIntegrity.shared.state, flow { while (true) { emit(System.currentTimeMillis()); delay(20_000L) } },
+        market.state, com.aurum.edge.data.SourceIntegrity.shared.state, clock,
     ) { raw, _, _ ->
-        // The periodic clock only forces recomposition; a one-second market tick must always be
-        // judged against the real current clock, not the last 20-second timer emission.
+        // The shared clock only forces recomputation; a one-second market tick must always be
+        // judged against the real current clock, not the last clock emission.
         val now = System.currentTimeMillis()
         val observedFeed = FeedLiveness.display(raw.feed, now)
         val delayed = observedFeed.mode == FeedMode.DELAYED
@@ -96,6 +124,8 @@ class AppContainer(context: Context) {
     }.stateIn(appScope, SharingStarted.Eagerly, market.state.value.copy(signal = null))
     /** Periodic sweep of the editable V1 watchlist; only verified independent bars can become candidates. */
     val pairScanner = PairScanner(client, publicHistory, settingsStore, journalStore, opportunityStore, appScope, dukascopyHistory, decisionLog)
+    /** Single adaptive sweep driver for the whole app universe (see SweepCoordinator). */
+    val sweepCoordinator = SweepCoordinator(pairScanner) { com.aurum.edge.service.SignalMonitorService.running.value }
     val autoPaperTrader = PaperAutoTrader(settingsStore, journalStore)
     val catalogPaperTrader = CatalogPaperTrader(settingsStore, autoPaperTrader)
 
@@ -113,6 +143,8 @@ class AppContainer(context: Context) {
         }
         autoPaperTrader.attachTrendSource { pairScanner.state.value.marketTrend }
         market.attach(appScope)
+        openPositionCoordinator.start()
+        sweepCoordinator.start()
         appScope.launch {
             com.aurum.edge.data.AppNetwork.route.collect { route ->
                 if (route.ready) market.refreshNow()

@@ -35,7 +35,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/** One row of the 50+ universe radar: what the continuous sweep observed for this instrument. */
+/** One row of the universe radar: what the continuous sweep observed for this instrument. */
 data class PairScanStatus(
     val symbol: String,
     /** pending | closed | error | partial | no_signal | watch | blocked | observed | candidate | opened */
@@ -90,7 +90,7 @@ data class PairScanState(
     /** Elapsed time of the most recently completed symbol engine; never a universe-wide SLA. */
     val lastSweepDurationMs: Long? = null,
     val lastError: String? = null,
-    /** The Top 3 highest-ranking opportunities from the 50+ scan. */
+    /** The Top 3 highest-ranking opportunities from the universe scan. */
     val topThree: List<PairScanStatus> = emptyList(),
     /** The single #1 absolute best opportunity to trade. */
     val bestPick: PairScanStatus? = null,

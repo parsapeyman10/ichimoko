@@ -67,13 +67,7 @@ fun HomeScreen(
     onChartSymbol: (String) -> Unit,
     onJournal: () -> Unit,
 ) {
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(20_000L)
-            now = System.currentTimeMillis()
-        }
-    }
+    val now by viewModel.clock.collectAsStateWithLifecycle()
     val sourceAudits by com.aurum.edge.data.HistorySourceAudits.state.collectAsStateWithLifecycle()
     val sourceAudit = sourceAudits[market.symbol]
     val session = MarketHours.sessionWindowFor(market.symbol, now)
@@ -229,7 +223,8 @@ private fun LiveOpenTradesTrackingSection(
                     color = AurumColors.TextSecondary,
                 )
                 Text(
-                    text = "رادار ۲۰۰ نماد کریپتو به‌همراه فارکس و کالا را بررسی می‌کند؛ سرعت و پوشش به دسترسی منبع بستگی دارد و دادهٔ ناقص مجوز ورود نیست.",
+                    text = "رادار ${com.aurum.edge.data.WatchCatalog.scannerSymbols.size} نمادِ کریپتو، فارکس و کالا را پیوسته بررسی می‌کند؛ " +
+                        "سرعت و پوشش به دسترسی منبع بستگی دارد و دادهٔ ناقص مجوز ورود نیست.",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                     textAlign = TextAlign.Center,

@@ -52,13 +52,9 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onChartSymbol: 
     val decisionLog by viewModel.decisionLog.collectAsStateWithLifecycle()
     var showAllDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var visibleDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(12) }
-    var scanClock by androidx.compose.runtime.remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(60_000L)
-            scanClock = System.currentTimeMillis() // expire historical recommendations without a new sweep
-        }
-    }
+    // Shared clock, not a private timer: expiring historical recommendations must not keep
+    // a second `while(true)` alive for as long as this screen exists.
+    val scanClock by viewModel.clock.collectAsStateWithLifecycle()
     val freshCandidates = ScanRanking.rank(scanState.statuses, com.aurum.edge.core.Interval.M5, scanClock)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 14.dp)) {
         // The background scanner publishes each finished symbol immediately. Never require

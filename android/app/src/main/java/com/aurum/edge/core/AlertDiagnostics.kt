@@ -20,7 +20,7 @@ object AlertDiagnostics {
         monitorRunning: Boolean, androidNotificationsReady: Boolean,
         trades: List<PaperTrade>, mtf: MtfAnalyzer.Snapshot?,
         opportunityError: String? = null, journalError: String? = null,
-        /** Continuous 50+ symbol radar state; scanning itself must be monitored, not assumed. */
+        /** Continuous universe radar state; scanning itself must be monitored, not assumed. */
         scan: com.aurum.edge.data.PairScanState? = null,
         now: Long = System.currentTimeMillis(),
     ): List<AlertCheck> {
