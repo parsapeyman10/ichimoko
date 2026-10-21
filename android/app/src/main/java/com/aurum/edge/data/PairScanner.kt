@@ -121,6 +121,13 @@ class PairScanner(
     private val binanceHistory: BinanceSpotClient = BinanceSpotClient(),
 ) {
     private val workers = SymbolWorkers(scope) { SystemClock.elapsedRealtime() }
+    /** Radar history is bar-scoped, never clock-scoped: see [ScanHistoryCache]. */
+    private val historyCache = ScanHistoryCache()
+    private data class ScanHistory(
+        val provider: String,
+        val frames: Map<Interval, List<com.aurum.edge.core.Candle>>,
+        val integrityRevision: Long,
+    )
     private val activeWorkers = java.util.concurrent.atomic.AtomicInteger()
     private val autoReviewMutex = Mutex() // serialize the non-atomic AI/entry review across scanner workers
     private var onAutoSignal: (suspend (MarketState) -> CatalogAutoReview)? = null
@@ -255,6 +262,7 @@ class PairScanner(
 
     private fun publishFailure(symbol: String, state: String, detail: String) {
         trendSample.remove(symbol)
+        historyCache.invalidate(symbol) // the next attempt must re-read, not replay a bad bundle
         _state.update { old ->
             val rows = old.statuses.map { if (it.symbol == symbol) PairScanStatus(symbol, state, detail,
                 lastScanAt = System.currentTimeMillis(), sourcePlan = SourceRouting.historyPlan(symbol, settings.read().hasKeyFor(symbol))) else it }
@@ -401,55 +409,66 @@ class PairScanner(
                     return@async
                 }
 
-                val cryptoSnapshot: CryptoHistoryBook? = if (crypto) try {
-                    cryptoBook(symbol, now)
-                } catch (cancel: CancellationException) { throw cancel }
-                catch (failure: Exception) {
-                    if (!AppNetwork.route.value.ready) {
-                        update(symbol, "waiting_connection", "شبکهٔ گوشی آماده نیست؛ تحلیل و ورود انجام نشد")
-                        return@async
+                // Complete bundles are reused for the rest of their M5 bar; everything else
+                // (tick, spread, entry review, ranking) still runs on every sweep.
+                val history: ScanHistory = historyCache.get(symbol, now)
+                    ?.let { ScanHistory(it.provider, it.frames, it.integrityRevision) }
+                    ?: if (crypto) {
+                        val book = try {
+                            cryptoBook(symbol, now)
+                        } catch (cancel: CancellationException) { throw cancel }
+                        catch (failure: Exception) {
+                            if (!AppNetwork.route.value.ready) {
+                                update(symbol, "waiting_connection", "شبکهٔ گوشی آماده نیست؛ تحلیل و ورود انجام نشد")
+                                return@async
+                            }
+                            // A venue may supply a FRESH, exact-pair trade even when it cannot
+                            // supply 320 contiguous closed candles. Show that price as a
+                            // READ-ONLY partial observation, never as a candle, signal or fill.
+                            if (failure is PublisherOccupied) {
+                                update(symbol, "capacity", failure.message.orEmpty())
+                                return@async
+                            }
+                            val quote = try {
+                                spotQuote.fetchQuote(symbol)
+                            } catch (cancel: CancellationException) {
+                                throw cancel
+                            } catch (_: Exception) {
+                                null
+                            }
+                            if (quote != null) {
+                                update(symbol, "partial",
+                                    "${quote.provider ?: "منبع تیک"}: معاملهٔ زمان‌دار ${quote.at}؛ " +
+                                        "۳۲۰ کندل بستهٔ M5/M15/H1 تأیید نشد؛ فقط قیمت مشاهده‌ای، بدون سیگنال/ورود",
+                                    price = quote.price)
+                            } else update(symbol, "error", (failure.message ?: "منبع هم‌نماد موجود نیست").take(420))
+                            return@async
+                        }
+                        ScanHistory(book.provider, book.frames, book.integrityRevision)
+                    } else {
+                        val snapshot = try {
+                            nonCryptoBundle.fetch(symbol, config.apiKeyFor(symbol), now)
+                        } catch (cancel: CancellationException) { throw cancel }
+                        catch (failure: Exception) {
+                            update(symbol, if (failure is PublisherOccupied) "capacity" else "error",
+                                (failure.message ?: "منبع هم‌نماد موجود نیست").take(420))
+                            return@async
+                        }
+                        ScanHistory(snapshot.provider, snapshot.frames, snapshot.integrityRevision)
                     }
-                    // A venue may supply a FRESH, exact-pair trade even when it cannot
-                    // supply 320 contiguous closed candles. Show that price as a
-                    // READ-ONLY partial observation, never as a candle, signal or fill.
-                    if (failure is PublisherOccupied) {
-                        update(symbol, "capacity", failure.message.orEmpty())
-                        return@async
-                    }
-                    val quote = try {
-                        spotQuote.fetchQuote(symbol)
-                    } catch (cancel: CancellationException) {
-                        throw cancel
-                    } catch (_: Exception) {
-                        null
-                    }
-                    if (quote != null) {
-                        update(symbol, "partial",
-                            "${quote.provider ?: "منبع تیک"}: معاملهٔ زمان‌دار ${quote.at}؛ " +
-                                "۳۲۰ کندل بستهٔ M5/M15/H1 تأیید نشد؛ فقط قیمت مشاهده‌ای، بدون سیگنال/ورود",
-                            price = quote.price)
-                    } else update(symbol, "error", (failure.message ?: "منبع هم‌نماد موجود نیست").take(420))
-                    return@async
-                } else null
-                val nonCryptoSnapshot = if (!crypto) try {
-                    nonCryptoBundle.fetch(symbol, config.apiKeyFor(symbol), now)
-                } catch (cancel: CancellationException) { throw cancel }
-                catch (failure: Exception) {
-                    update(symbol, if (failure is PublisherOccupied) "capacity" else "error",
-                        (failure.message ?: "منبع هم‌نماد موجود نیست").take(420))
-                    return@async
-                } else null
                 // Network permits and fallback can outlast a bar boundary. Use receipt time,
                 // not the clock captured before the publisher wait.
                 now = System.currentTimeMillis()
-                val integrityRevision = cryptoSnapshot?.integrityRevision ?: nonCryptoSnapshot!!.integrityRevision
+                val integrityRevision = history.integrityRevision
                 SourceIntegrity.shared.blocker(symbol, integrityRevision)?.let { reason ->
+                    // The stored bundle belongs to a rejected revision: never reuse it.
+                    historyCache.invalidate(symbol)
                     update(symbol, "blocked", reason)
                     return@async
                 }
-                val rawCandles = cryptoSnapshot?.m5 ?: nonCryptoSnapshot!!.m5
-                val baseSource = cryptoSnapshot?.provider ?: nonCryptoSnapshot!!.provider
-
+                val rawCandles = history.frames[Interval.M5].orEmpty()
+                val baseSource = history.provider
+                val frames = history.frames
                 baseSources[symbol] = baseSource
                 // Provider flags can mark an in-progress bar as closed. Never score, settle or
                 // construct MTF snapshots from it, even when its OHLC parses correctly.
@@ -460,14 +479,12 @@ class PairScanner(
                 // here because XAU/USD is scanned by this same sweep.
                 if (symbol == "XAU/USD") lastGoldBars = candles.takeLast(120)
                 if (candles.size < HistoryPolicy.LIVE_MIN_CANDLES) {
+                    historyCache.invalidate(symbol) // an incomplete bundle must be re-read next time
                     update(symbol, "partial", "فقط مشاهدهٔ کندل قبلی ${candles.lastOrNull()?.time ?: "—"}: " +
                         "${candles.size} کندل بستهٔ واقعی در ${interval.label}؛ برای سیگنال/معامله ${HistoryPolicy.LIVE_MIN_CANDLES} لازم است",
                         price = candles.lastOrNull()?.close)
                     return@async
                 }
-
-                // The complete decision uses ONE publisher for all three independent frames.
-                val frames = cryptoSnapshot?.frames ?: nonCryptoSnapshot!!.frames
                 val candidates = listOf(Interval.M5)
                 val reads = mutableListOf<CryptoIntervalChoice.Read>()
                 val unavailable = mutableListOf<String>()
@@ -510,10 +527,13 @@ class PairScanner(
                 // must never make that history look fresh in rankings or the market-wide trend.
                 if (lastClosed == null || now - (lastClosed.time + interval.millis) !in
                     0L..(interval.millis + 90_000L)) {
+                    historyCache.invalidate(symbol) // a stale source must be re-read, not reused
                     update(symbol, "partial", "آخرین کندل بستهٔ منبع قدیمی است؛ رتبه/روند تازه ساخته نشد",
                         price = price)
                     return@async
                 }
+                // Cache only what proved complete: three healthy frames ending on the live bar.
+                historyCache.record(symbol, baseSource, integrityRevision, frames, now)
                 // A REST candle close is not a live tick. Never settle a position as if it were one.
                 if (lastClosed != null && !crypto) {
                     try {

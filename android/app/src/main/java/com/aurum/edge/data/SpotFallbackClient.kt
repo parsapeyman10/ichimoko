@@ -340,6 +340,12 @@ class SpotFallbackClient(
     /** Single dedicated route per symbol (1-to-1). Never fabricated. */
     suspend fun fetchQuote(symbol: String): PriceTick {
         val canonical = com.aurum.edge.core.V1Universe.normalize(symbol)
+        // Eight components each own a client but they ask for the same quote. Sharing one
+        // in-flight read per symbol is what removes the duplicate request, not a change of source.
+        return Quotes.quote(canonical) { fetchQuoteUncached(canonical) }
+    }
+
+    private suspend fun fetchQuoteUncached(canonical: String): PriceTick {
         if (CryptoCatalog.isCrypto(canonical)) return fetchCryptoQuote(canonical)
         val plan = tickPlanFor(canonical)
         return withContext(Dispatchers.IO) {
@@ -352,9 +358,33 @@ class SpotFallbackClient(
         }
     }
 
+    /**
+     * Yahoo's chart endpoint is the only keyless source for the Dow, but the response is a full
+     * candle series — `range=1d&interval=5m` returns ~78 bars to read ONE meta price. Polled as a
+     * live quote that was the single largest consumer in the app. The meta block does not depend
+     * on the interval, so the smallest series (`range=1d&interval=1d`, one bar) is tried first and
+     * the previous shape is kept as a fallback for accounts/endpoints that reject it.
+     */
     private fun fetchYahooIndexQuote(yahooSymbol: String): PriceTick {
         val encoded = java.net.URLEncoder.encode(yahooSymbol, "UTF-8").replace("%3D", "=")
-        val url = "https://query1.finance.yahoo.com/v8/finance/chart/$encoded?interval=5m&range=1d&includePrePost=false"
+        if (yahooLightAllowed) {
+            val light = runCatching {
+                readYahooMeta("https://query1.finance.yahoo.com/v8/finance/chart/$encoded" +
+                    "?interval=1d&range=1d&includePrePost=false", yahooSymbol)
+            }.getOrNull()
+            if (light != null) {
+                yahooLightFailures = 0
+                return light
+            }
+            // A transient miss must not downgrade every future poll: three misses in a row switch
+            // to the full series for this process instead of paying twice on every request.
+            if (++yahooLightFailures >= 3) yahooLightAllowed = false
+        }
+        return readYahooMeta("https://query1.finance.yahoo.com/v8/finance/chart/$encoded" +
+            "?interval=5m&range=1d&includePrePost=false", yahooSymbol)
+    }
+
+    private fun readYahooMeta(url: String, yahooSymbol: String): PriceTick {
         val body = get(url)
         val root = runCatching { json.parseToJsonElement(body) as? JsonObject }.getOrNull()
             ?: throw DataFeedException("پاسخ Yahoo معتبر نیست")
@@ -376,7 +406,14 @@ class SpotFallbackClient(
         )
     }
 
-    /** Infinite real-tick stream, polled every [POLL_INTERVAL_MS]. A failure closes the flow. */
+    /**
+     * Passive quote stream, polled every [POLL_INTERVAL_MS]. A failure closes the flow.
+     *
+     * This is a REST poll, not a push feed: at 1 s it kept the radio busy around the clock for a
+     * price that only has to be younger than 45 s ([TradeQuotePolicy]) on an M5 chart. 5 s is
+     * still far inside that contract and cuts the request count of the selected market by 80 %.
+     * Open positions keep their own 1 s lane; this stream is only the display/entry quote.
+     */
     fun streamQuotes(symbol: String): Flow<PriceTick> = flow {
         while (true) {
             emit(fetchQuote(symbol))
@@ -386,8 +423,18 @@ class SpotFallbackClient(
 
     companion object {
         private val METALS = setOf("XAU", "XAG")
+        /** Process-wide: every component shares one short-lived quote per symbol. */
+        private val Quotes = QuoteCoalescer()
+        internal fun clearQuoteCache() = Quotes.clear()
+        @Volatile private var yahooLightAllowed = true
+        @Volatile private var yahooLightFailures = 0
+        /** Test-only: restore the probe state; production never calls this. */
+        internal fun resetYahooProbe() {
+            yahooLightAllowed = true
+            yahooLightFailures = 0
+        }
         private const val MAX_QUOTE_AGE_MS = 45_000L
-        const val POLL_INTERVAL_MS = 1_000L
+        const val POLL_INTERVAL_MS = 5_000L
     }
 }
 

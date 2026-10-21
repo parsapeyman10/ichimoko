@@ -79,8 +79,13 @@ android {
         // pair only had a trade print. The engines correctly refuse to enter without a real
         // bid/ask, so no auto paper trade could ever open. EUR/USD and silver now use the
         // Swissquote BBO, and crypto attaches the best bid/ask from the Nobitex order book.
-        versionCode = 681
-        versionName = "2.0.9"
+        // 2.0.10 cuts data usage: the scanner reuses a complete candle bundle until the next M5
+        // bar can exist (it used to download 950 candles per symbol five times per bar), the
+        // passive quote stream polls every 5 s instead of 1 s, the Dow asks Yahoo for one bar
+        // instead of a whole day of candles, and one process-wide quote cache merges the
+        // duplicate reads of the service/UI/scanner loops. See docs/DATA_USAGE_FA.md.
+        versionCode = 682
+        versionName = "2.0.10"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
