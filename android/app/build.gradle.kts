@@ -84,8 +84,8 @@ android {
         // passive quote stream polls every 5 s instead of 1 s, the Dow asks Yahoo for one bar
         // instead of a whole day of candles, and one process-wide quote cache merges the
         // duplicate reads of the service/UI/scanner loops. See docs/DATA_USAGE_FA.md.
-        versionCode = 682
-        versionName = "2.0.10"
+        versionCode = 683
+        versionName = "2.0.11"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
