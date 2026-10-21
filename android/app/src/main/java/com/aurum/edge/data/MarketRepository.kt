@@ -146,7 +146,28 @@ class MarketRepository(
     @Volatile private var streamEpoch = 0L
     private var activeKey: String? = null // never logged; compare to prevent needless service/UI restarts
     private var lastQuietReconnect = 0L
+
+    /**
+     * The live candle window of the selected market.
+     *
+     * It is written by three independent coroutines at the same time: the periodic REST refresh
+     * (holding [refreshMutex]), the live tick stream ([onTick]) and the reference-frame publisher
+     * that re-publishes after M15/H1 arrive. A plain HashMap mutated from several threads is not
+     * safe — a resize while another coroutine iterates it throws ConcurrentModificationException
+     * or silently corrupts the series the engine scores. Every read/write therefore goes through
+     * [barsLock], and none of the critical sections is long enough to matter for contention.
+     */
     private var cachedBars: MutableMap<Long, Candle> = mutableMapOf()
+    private val barsLock = Any()
+
+    /** Ordered copy of the current window; safe to hand to the engine while bars keep arriving. */
+    private fun barsSnapshot(): List<Candle> = synchronized(barsLock) { cachedBars.values.sortedBy { it.time } }
+
+    private fun barsClosedCount(): Int = synchronized(barsLock) { cachedBars.values.count { it.closed } }
+
+    private inline fun <T> withBars(block: (MutableMap<Long, Candle>) -> T): T =
+        synchronized(barsLock) { block(cachedBars) }
+
     private var lastCacheWrite = 0L
     private var lastCryptoEvaluationAt = 0L
     private var lastCryptoEvaluationPeriod = -1L
@@ -172,7 +193,7 @@ class MarketRepository(
         lastQuietReconnect = SystemClock.elapsedRealtime()
         val session = generation
         if (_state.value.symbol != current.symbol || _state.value.interval != current.interval) {
-            cachedBars.clear() // never reuse a different instrument's bars or signal
+            withBars { it.clear() } // never reuse a different instrument's bars or signal
             _state.value = MarketState(symbol = current.symbol, interval = current.interval)
         }
         val closed = marketClosed()
@@ -219,7 +240,7 @@ class MarketRepository(
 
     fun restart() {
         stop()
-        cachedBars.clear()
+        withBars { it.clear() }
         val current = settings.read()
         _state.value = MarketState(symbol = current.symbol, interval = current.interval)
         start()
@@ -244,7 +265,7 @@ class MarketRepository(
             if (!started || generation != session ||
                 settings.read().symbol != current.symbol || settings.read().interval != current.interval) return@launch
             if (cached.isNotEmpty()) {
-                cached.forEach { bar -> if (bar.time !in cachedBars) cachedBars[bar.time] = bar }
+                withBars { bars -> cached.forEach { bar -> if (bar.time !in bars) bars[bar.time] = bar } }
                 evaluateAndPublish(showingCache = true)
             }
             // One bounded live window is enough for EMA200/Ichimoku evaluation. Do not
@@ -461,18 +482,20 @@ class MarketRepository(
             val periodStart = currentPeriodStart(current.interval)
             // A persisted crypto candle lacks a venue tag. Never blend an older Twelve
             // or Nobitex series with a newly verified Binance venue window.
-            if (CryptoCatalog.isCrypto(current.symbol) || _state.value.historyProvider != historyProvider) cachedBars.clear()
+            if (CryptoCatalog.isCrypto(current.symbol) || _state.value.historyProvider != historyProvider) withBars { it.clear() }
             _state.value = _state.value.copy(historyProvider = historyProvider)
-            fetched.forEach { bar ->
-                // The bar whose period is still open is kept as "forming" and excluded from the engine.
-                // A recent WebSocket/fallback tick can be newer than this REST response; do not overwrite it.
-                if (streamRecent && bar.time == periodStart) return@forEach
-                cachedBars[bar.time] = bar.copy(closed = bar.time < periodStart)
+            withBars { bars ->
+                fetched.forEach { bar ->
+                    // The bar whose period is still open is kept as "forming" and excluded from the engine.
+                    // A recent WebSocket/fallback tick can be newer than this REST response; do not overwrite it.
+                    if (streamRecent && bar.time == periodStart) return@forEach
+                    bars[bar.time] = bar.copy(closed = bar.time < periodStart)
+                }
+                cachedBars = trimCachedBars(bars)
             }
-            trimCachedBars()
             settings.setLastSync(current.symbol, current.interval, receivedAt)
             persistCache()
-            val closedCount = cachedBars.values.count { it.closed }
+            val closedCount = barsClosedCount()
             val enoughHistory = closedCount >= minimumSize
             evaluateAndPublish(showingCache = (!historyCurrent && !streamRecent) || !enoughHistory)
             if (marketClosed()) {
@@ -832,28 +855,31 @@ class MarketRepository(
         if (!isCurrentIntervalTick(at, current.interval, now)) return
         val wallPeriodStart = now - now % current.interval.millis
         val periodStart = at - at % current.interval.millis
-        val existing = cachedBars[periodStart]
-        val bar = existing?.copy(
-            high = maxOf(existing.high, price),
-            low = minOf(existing.low, price),
-            close = price,
-            closed = periodStart < wallPeriodStart,
-        ) ?: Candle(
-            time = periodStart,
-            open = price,
-            high = price,
-            low = price,
-            close = price,
-            volume = 0.0,
-            closed = periodStart < wallPeriodStart,
-        )
-        cachedBars[periodStart] = bar
-        trimCachedBars()
-
-        // Any older bar still flagged as forming is now finished → keep it as a closed, real bar.
-        cachedBars.keys.filter { it < periodStart }.forEach { key ->
-            val value = cachedBars[key]
-            if (value != null && !value.closed) cachedBars[key] = value.copy(closed = true)
+        withBars { bars ->
+            val existing = bars[periodStart]
+            val bar = existing?.copy(
+                high = maxOf(existing.high, price),
+                low = minOf(existing.low, price),
+                close = price,
+                closed = periodStart < wallPeriodStart,
+            ) ?: Candle(
+                time = periodStart,
+                open = price,
+                high = price,
+                low = price,
+                close = price,
+                volume = 0.0,
+                closed = periodStart < wallPeriodStart,
+            )
+            bars[periodStart] = bar
+            val trimmed = trimCachedBars(bars)
+            // Any older bar still flagged as forming is now finished → keep it as a closed, real bar.
+            // Snapshot the keys first: the map is mutated inside the loop.
+            trimmed.keys.filter { it < periodStart }.forEach { key ->
+                val value = trimmed[key]
+                if (value != null && !value.closed) trimmed[key] = value.copy(closed = true)
+            }
+            cachedBars = trimmed
         }
 
         val configuredSpread = current.spreadPrice.takeIf { it.isFinite() && it > 0.0 }
@@ -947,17 +973,18 @@ class MarketRepository(
         )
     }
 
-    private fun trimCachedBars() {
-        if (cachedBars.size <= HistoryPolicy.MAX_CACHED_CANDLES) return
-        val keep = cachedBars.values.sortedBy { it.time }.takeLast(HistoryPolicy.MAX_CACHED_CANDLES)
-        cachedBars = keep.associateBy { it.time }.toMutableMap()
+    /** Caller must hold [barsLock]; returns the (possibly replaced) map to store in [cachedBars]. */
+    private fun trimCachedBars(bars: MutableMap<Long, Candle>): MutableMap<Long, Candle> {
+        if (bars.size <= HistoryPolicy.MAX_CACHED_CANDLES) return bars
+        val keep = bars.values.sortedBy { it.time }.takeLast(HistoryPolicy.MAX_CACHED_CANDLES)
+        return keep.associateBy { it.time }.toMutableMap()
     }
 
     private suspend fun persistCache() {
         val current = settings.read()
         if (_state.value.symbol != current.symbol || _state.value.interval != current.interval) return
         // Do not turn an unfinished live bar into a closed historical candle on restart.
-        val bars = cachedBars.values.sortedBy { it.time }
+        val bars = barsSnapshot()
         if (bars.isNotEmpty()) cache.save(current.symbol, current.interval, bars)
     }
 
@@ -969,7 +996,7 @@ class MarketRepository(
         val current = settings.read()
         val evaluatedRevision = historyIntegrityRevision
         val integrityBlocker = SourceIntegrity.shared.blocker(current.symbol, evaluatedRevision)
-        val bars = cachedBars.values.sortedBy { it.time }
+        val bars = barsSnapshot()
         val lastPrice = bars.lastOrNull()?.close ?: _state.value.lastPrice
         if (bars.isEmpty()) {
             _state.value = _state.value.copy(candles = emptyList(), lastPrice = null, bid = null, ask = null,

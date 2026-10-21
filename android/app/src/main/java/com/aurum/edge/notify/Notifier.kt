@@ -33,9 +33,25 @@ object Notifier {
     const val CHANNEL_RESEARCH = "aurum_edge_research"
     const val MONITOR_NOTIFICATION_ID = 4201
 
+    /**
+     * Channels already created for this app context in this process.
+     *
+     * `createNotificationChannels` is idempotent, but each call is a binder transaction. This
+     * object is called on every verified-attempt check — which the market gate re-runs on every
+     * live tick — so without this guard the app paid four IPC round-trips per second just to
+     * re-declare channels the system already stores.
+     */
+    private val ensuredContexts = java.util.Collections.newSetFromMap(
+        java.util.Collections.synchronizedMap(java.util.IdentityHashMap<Context, Boolean>()))
+
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        val appContext = context.applicationContext ?: context
+        // Never cache by a short-lived wrapper: only the application context is process-stable.
+        if (ensuredContexts.contains(appContext)) return
+        val manager = appContext.getSystemService(NotificationManager::class.java) ?: return
+        // Recorded only after the channels really exist, so a transient failure is retried.
+        ensuredContexts.add(appContext)
 
         val serviceChannel = NotificationChannel(
             CHANNEL_SERVICE,

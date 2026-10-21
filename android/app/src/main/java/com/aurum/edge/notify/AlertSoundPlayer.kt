@@ -20,6 +20,8 @@ import android.provider.OpenableColumns
 object AlertSoundPlayer {
     private const val MAX_FILE_BYTES = 20_000_000L
     private const val MAX_PLAY_MS = 10_000L
+    /** Short enough to notice a revoked grant, long enough to cover a burst of ticks. */
+    private const val OPEN_PROBE_TTL_MS = 5_000L
     private val main = Handler(Looper.getMainLooper())
     private val attributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
@@ -47,11 +49,32 @@ object AlertSoundPlayer {
             "فایل صوتی محلی باید قابل خواندن و حداکثر ۲۰ مگابایت باشد"
         }
         context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        openProbes.remove(uri.toString()) // a just-granted Uri must be probed again, not served from cache
         require(canOpen(context, uri.toString())) { "دسترسی به فایل صوتی برقرار نشد" }
         return nameAndSize.first?.take(70)?.ifBlank { "فایل صوتی انتخابی" } ?: "فایل صوتی انتخابی"
     }
 
-    fun canOpen(context: Context, uriString: String): Boolean = runCatching {
+    /**
+     * Latest probe result per Uri, valid for [OPEN_PROBE_TTL_MS].
+     *
+     * A probe is a content-resolver type lookup plus `openFileDescriptor`: two binder calls and
+     * possibly real storage I/O. `canNotifyVerified` runs it on every market tick (once a second)
+     * to decide which channel to use, so an uncached probe meant a file open per second for the
+     * lifetime of the feed. A few seconds of staleness cannot change a notification decision,
+     * and [select] clears the entry for a Uri the user just picked.
+     */
+    private val openProbes = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, Boolean>>()
+
+    fun canOpen(context: Context, uriString: String): Boolean {
+        if (uriString.isBlank()) return false
+        val now = android.os.SystemClock.elapsedRealtime()
+        openProbes[uriString]?.let { (at, ok) -> if (now - at in 0L..OPEN_PROBE_TTL_MS) return ok }
+        val result = probe(context, uriString)
+        openProbes[uriString] = now to result
+        return result
+    }
+
+    private fun probe(context: Context, uriString: String): Boolean = runCatching {
         val uri = Uri.parse(uriString)
         if (uri.scheme != "content" || context.contentResolver.getType(uri)?.startsWith("audio/") != true) return false
         context.contentResolver.openFileDescriptor(uri, "r")?.use { true } ?: false

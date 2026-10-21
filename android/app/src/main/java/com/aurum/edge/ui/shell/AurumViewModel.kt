@@ -204,11 +204,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             }
             _stats.value = container.journalStore.stats()
         }
-        viewModelScope.launch {
-            // Automatic SL/TP settlement happens in MarketRepository, not in this ViewModel.
-            // Keep totals in sync with the journal flow even while a screen is not open.
-            trades.collect { _stats.value = container.journalStore.stats() }
-        }
+        // Automatic SL/TP settlement happens in MarketRepository, not in this ViewModel.
+        // One collector only: a second one re-ran JournalStore.stats() over every trade on
+        // every emission of the same flow and wrote the identical result twice.
         viewModelScope.launch {
             container.market.state.collect { state ->
                 val lastClosed = state.candles.lastOrNull { it.closed }?.time ?: -1L
