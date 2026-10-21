@@ -33,26 +33,6 @@ class WatchSettingsStore(context: Context) {
         return WatchSelection(enabled, preferred)
     }
 
-    fun selectSource(symbolId: String, sourceId: String, enabled: Boolean) {
-        val symbol = WatchCatalog.find(symbolId) ?: return
-        if (sourceId !in symbol.providerCodes) return
-        val current = _selections.value[symbolId] ?: read(symbol)
-        val updated = symbol.providerCodes.keys.filter { id ->
-            if (id == sourceId) enabled else id in current.enabledSources
-        }
-        val preferred = current.preferredSourceId.takeIf { it in updated } ?: updated.firstOrNull().orEmpty()
-        prefs.edit().putString("sources_$symbolId", updated.joinToString(","))
-            .putString("preferred_$symbolId", preferred).apply()
-        _selections.value = _selections.value + (symbolId to WatchSelection(updated, preferred))
-    }
-
-    fun setPreferred(symbolId: String, sourceId: String) {
-        val current = _selections.value[symbolId] ?: return
-        if (sourceId !in current.enabledSources) return
-        prefs.edit().putString("preferred_$symbolId", sourceId).apply()
-        _selections.value = _selections.value + (symbolId to current.copy(preferredSourceId = sourceId))
-    }
-
     /** A blank override uses the chart's read-only Twelve Data key, if any. */
     fun apiKeyFor(symbolId: String, chartKey: String): String =
         prefs.getString("key_$symbolId", null)?.takeIf { it.isNotBlank() } ?: chartKey

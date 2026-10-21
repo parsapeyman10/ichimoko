@@ -4,7 +4,6 @@ import com.aurum.edge.core.Candle
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sqrt
 
 /**
  * Pure indicator math over *real* closed candles.
@@ -115,22 +114,6 @@ object Indicators {
         return out
     }
 
-    fun bollinger(candles: List<Candle>, period: Int = 20, mult: Double = 2.0): Triple<List<Double?>, List<Double?>, List<Double?>> {
-        val upper = MutableList<Double?>(candles.size) { null }
-        val lower = MutableList<Double?>(candles.size) { null }
-        val mid = MutableList<Double?>(candles.size) { null }
-        for (i in candles.indices) {
-            if (i < period - 1) continue
-            val window = candles.subList(i - period + 1, i + 1).map { it.close }
-            val mean = window.average()
-            val sd = sqrt(window.sumOf { (it - mean) * (it - mean) } / period)
-            mid[i] = mean
-            upper[i] = mean + mult * sd
-            lower[i] = mean - mult * sd
-        }
-        return Triple(upper, mid, lower)
-    }
-
     fun adx(candles: List<Candle>, period: Int = 14): List<Double?> {
         val out = MutableList<Double?>(candles.size) { null }
         if (candles.size <= period * 2) return out
@@ -169,35 +152,6 @@ object Indicators {
             for (i in firstAdxIndex + 1 until candles.size) {
                 adxValue = ((adxValue ?: 0.0) * (period - 1) + dx[i]) / period
                 out[i] = adxValue
-            }
-        }
-        return out
-    }
-
-    /** Session VWAP, reset at 00:00 UTC. Falls back to a plain typical-price average when the feed reports no volume. */
-    fun sessionVwap(candles: List<Candle>, sessionMillis: Long = 86_400_000L): List<Double> {
-        val out = MutableList(candles.size) { 0.0 }
-        var pv = 0.0
-        var vol = 0.0
-        var priceSum = 0.0
-        var count = 0
-        var sessionStart = Long.MIN_VALUE
-        for (i in candles.indices) {
-            val c = candles[i]
-            val session = c.time / sessionMillis
-            if (session != sessionStart) {
-                sessionStart = session
-                pv = 0.0; vol = 0.0; priceSum = 0.0; count = 0
-            }
-            val typical = (c.high + c.low + c.close) / 3.0
-            pv += typical * c.volume
-            vol += c.volume
-            priceSum += typical
-            count++
-            out[i] = when {
-                vol > 0.0 -> pv / vol
-                count > 0 -> priceSum / count
-                else -> c.close
             }
         }
         return out
@@ -244,12 +198,6 @@ data class Ichimoku(
         val b = senkouB.getOrNull(i) ?: return null
         return a to b
     }
-
-    /** Visible Span A at chart bar [index], or null until enough history exists. */
-    fun spanAAt(index: Int): Double? = senkouA.getOrNull(index - displacement)
-
-    /** Visible Span B at chart bar [index], or null until enough history exists. */
-    fun spanBAt(index: Int): Double? = senkouB.getOrNull(index - displacement)
 
     /** Higher-timeframe direction at [index] from the 513 and 1024 M5 Ichimoku lines. */
     fun higherTimeframeBiasAt(index: Int, close: Double): com.aurum.edge.core.SignalAction {

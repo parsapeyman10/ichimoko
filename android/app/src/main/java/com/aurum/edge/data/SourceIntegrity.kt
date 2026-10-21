@@ -44,6 +44,3 @@ internal class SourceIntegrity {
     internal fun resetForTests() { mutable.value = emptyMap() }
     companion object { val shared = SourceIntegrity() }
 }
-
-/** Typed separately from a transient socket failure; its message never includes credentials. */
-internal class SourceDisagreement(message: String) : DataFeedException(message)

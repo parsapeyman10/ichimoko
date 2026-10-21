@@ -13,7 +13,6 @@ import com.aurum.edge.core.AppContainer
 import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.core.FeedMode
-import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.data.SourceComparison
 import com.aurum.edge.data.VerificationStatus
 import com.aurum.edge.data.WatchCatalog
@@ -134,30 +133,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }.getOrNull()
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    /**
-     * «چرا معامله/هشدار نداریم؟» — the honest prerequisites (feed, history, monitor, notification
-     * channels, storage, news/AI, the current seven-condition technical gate and the CONTINUOUS SYMBOL SCAN itself),
-     * computed from live app state.
-     * Green checks are prerequisites, never a forecast.
-     */
-    val entryDiagnostics: StateFlow<List<com.aurum.edge.core.AlertCheck>> = combine(
-        container.verifiedMarket, settings, trades, pairScan,
-    ) { market, config, openTrades, scan ->
-        withContext(Dispatchers.Default) {
-            val mtf = runCatching { MtfAnalyzer.analyze(market.candles, market.interval) }.getOrNull()
-            runCatching {
-                com.aurum.edge.core.AlertDiagnostics.checks(
-                    market = market, settings = config,
-                    monitorRunning = SignalMonitorService.running.value,
-                    androidNotificationsReady = Notifier.canNotifyVerified(
-                        container.appContext, config.alertSoundUri),
-                    trades = openTrades, mtf = mtf,
-                    opportunityError = opportunityError.value, journalError = journalError.value,
-                    scan = scan,
-                )
-            }.getOrElse { emptyList() }
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val updateState: StateFlow<AppUpdateRepository.State> = container.updater.state
     val updateSigningDiagnostic: String by lazy { container.updater.installedSigningDiagnostic() }
 
@@ -181,9 +156,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     private val _toast = MutableStateFlow<String?>(null)
     val toast: StateFlow<String?> = _toast.asStateFlow()
-
-    private val _watchHistory = MutableStateFlow(WatchHistory())
-    val watchHistory: StateFlow<WatchHistory> = _watchHistory.asStateFlow()
 
     /** Candles behind ONE journal row. Only one trade is expanded at a time. */
     private val _tradeChart = MutableStateFlow(TradeChartState())
@@ -444,27 +416,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshWatch() = container.watch.refreshNow()
 
-    /** Manual all-pairs sweep across 50+ instruments. */
-    fun scanPairs() {
-        viewModelScope.launch {
-            _toast.value = "اسکن ۲۰۰ کریپتو و فارکس/کالا آغاز شد؛ بهترین فرصت‌ها شناسایی می‌شوند"
-            try {
-                container.pairScanner.sweepOnce(minIntervalMs = 1 * 60_000L) { }
-            } catch (_: Exception) {
-                _toast.value = "اسکن همگانی ناتمام ماند؛ وضعیت هر نماد در رادار مشخص است"
-            }
-        }
-    }
-
-    /** Selects the #1 Best Pick symbol, loads its chart and opens the paper trade. */
-    fun selectAndTradeBestPick() {
-        val best = container.pairScanner.state.value.bestPick ?: return
-        selectChartSymbol(best.symbol)
-        _toast.value = "بهترین فرصت انتخاب شد: ${best.symbol} (${best.action?.name ?: "سیگنال"})"
-    }
-
-    fun saveApiKey(key: String) = saveMarketCredentials(key, settings.value.symbol)
-
     /**
      * Switch the chart/signal/paper symbol to one of the catalog pairs. Needs no API key:
      * the keyless Swissquote feed serves ticks for every pair; REST history still needs a key.
@@ -678,8 +629,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             settings.value.accountBalance, settings.value.riskPercent)
     }
 
-    fun openPaperTrade(signal: Signal) = submitPaper(signal, manual = false)
-
     fun openManualPaperTrade(side: SignalAction, stop: Double, target: Double,
                              expectedPrice: Double, expectedSymbol: String) {
         val verified = market.value.signal
@@ -824,36 +773,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    fun clearOpportunityHistory() {
-        viewModelScope.launch {
-            try {
-                container.opportunityStore.clear()
-                _toast.value = "فقط تاریخچهٔ فرصت‌های اسکن‌شده پاک شد؛ آمار معامله تغییر نکرد"
-            } catch (error: Exception) {
-                _toast.value = "حذف کاندیدا انجام نشد؛ فایل قبلی حفظ شد: ${error.message ?: "خطای ذخیره"}"
-            }
-        }
-    }
-
-    fun clearCache() {
-        viewModelScope.launch {
-            container.candleCache.clear()
-            _toast.value = "کش دیتای واقعی پاک شد"
-            container.market.restart()
-        }
-    }
-
-    fun selectWatchSource(symbolId: String, sourceId: String, enabled: Boolean) {
-        container.watchSettings.selectSource(symbolId, sourceId, enabled)
-        if (enabled) container.watch.refreshNow()
-    }
-
-    fun setWatchPreferred(symbolId: String, sourceId: String) = container.watchSettings.setPreferred(symbolId, sourceId)
-
-    /** True when this symbol has its own Twelve Data key instead of the global one. */
-    fun hasDedicatedKey(symbol: String): Boolean =
-        container.settingsStore.symbolKey(symbol).isNotBlank()
-
     /**
      * Save or remove ONE dedicated Twelve Data key for a symbol. The free plan meters each key
      * separately, so a per-symbol key keeps this instrument inside its own 8/minute quota.
@@ -875,56 +794,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             _toast.value = if (key.isBlank())
                 "کلید اختصاصی ${symbol} حذف شد؛ کلید عمومی (اگر باشد) استفاده می‌شود"
             else "کلید اختصاصی ${symbol} روی همین نصب ذخیره شد"
-        }
-    }
-
-    fun watchKeyOverride(symbolId: String): String = container.watchSettings.keyOverride(symbolId)
-
-    fun setWatchKeyOverride(symbolId: String, key: String) {
-        viewModelScope.launch {
-            val saved = withContext(Dispatchers.IO) { container.watchSettings.setKeyOverride(symbolId, key) }
-            if (!saved) {
-                _toast.value = "کلید اختصاصی ذخیره نشد؛ فاصله/خط جدید یا حافظهٔ دستگاه را بررسی کنید"
-                return@launch
-            }
-            container.watch.refreshNow()
-            _toast.value = if (key.isBlank()) "کلید اختصاصی این نماد حذف شد؛ کلید چارت در صورت وجود استفاده می‌شود"
-                else "کلید خواندنی این نماد روی همین نصب ذخیره و بازخوانی شد"
-        }
-    }
-
-    fun showWatchHistory(symbolId: String, sourceId: String) {
-        if (_watchHistory.value.symbolId == symbolId && _watchHistory.value.sourceId == sourceId) {
-            _watchHistory.value = WatchHistory()
-            return
-        }
-        _watchHistory.value = WatchHistory(symbolId, sourceId, loading = true)
-        viewModelScope.launch {
-            val page = container.watch.page(symbolId, sourceId)
-            val total = container.watch.count(symbolId, sourceId)
-            if (_watchHistory.value.symbolId == symbolId && _watchHistory.value.sourceId == sourceId) {
-                _watchHistory.value = WatchHistory(symbolId, sourceId, page, total)
-            }
-        }
-    }
-
-    fun moreWatchHistory() {
-        val current = _watchHistory.value
-        if (current.loading || current.total <= current.entries.size || current.entries.isEmpty()) return
-        _watchHistory.value = current.copy(loading = true)
-        viewModelScope.launch {
-            val next = container.watch.page(current.symbolId, current.sourceId, current.entries.last().ts)
-            if (_watchHistory.value.symbolId == current.symbolId && _watchHistory.value.sourceId == current.sourceId) {
-                _watchHistory.value = current.copy(entries = current.entries + next)
-            }
-        }
-    }
-
-    fun clearWatchHistory() {
-        viewModelScope.launch {
-            container.watch.clearHistory()
-            _watchHistory.value = WatchHistory()
-            _toast.value = "تاریخچهٔ دریافت‌شدهٔ دیده‌بان پاک شد"
         }
     }
 

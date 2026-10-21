@@ -300,9 +300,6 @@ class SettingsStore(context: Context) {
         prefs.edit().putLong("last_sync_${symbol}_${interval.label}", at).apply()
     }
 
-    fun lastSync(symbol: String, interval: Interval): Long? =
-        prefs.getLong("last_sync_${symbol}_${interval.label}", 0L).takeIf { it > 0L }
-
     companion object {
         /** Dedicated keys are a symbol→key JSON map; unknown keys are ignored, never guessed. */
         private val symbolKeySerializer = MapSerializer(String.serializer(), String.serializer())

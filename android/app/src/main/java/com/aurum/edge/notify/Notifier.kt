@@ -24,13 +24,11 @@ import java.util.Locale
  * Android system notification delivery with exact channel separation:
  * 1. CHANNEL_VERIFIED_DEFAULT / CHANNEL_VERIFIED_FILE: High-priority heads-up alerts on every trade entry & opportunity
  * 2. CHANNEL_SERVICE: Foreground service persistent status notification
- * 3. CHANNEL_RESEARCH: Background informational notifications
  */
 object Notifier {
     const val CHANNEL_SERVICE = "aurum_edge_service_channel"
     const val CHANNEL_VERIFIED_DEFAULT = "aurum_edge_verified_default"
     const val CHANNEL_VERIFIED_FILE = "aurum_edge_verified_file"
-    const val CHANNEL_RESEARCH = "aurum_edge_research"
     const val MONITOR_NOTIFICATION_ID = 4201
 
     /**
@@ -83,16 +81,7 @@ object Notifier {
             setShowBadge(true)
         }
 
-        val researchChannel = NotificationChannel(
-            CHANNEL_RESEARCH,
-            "دیده‌بان بازار و پژوهش",
-            NotificationManager.IMPORTANCE_DEFAULT,
-        ).apply {
-            description = "اطلاع‌رسانی تغییرات روند و رخدادهای بازار"
-            setShowBadge(false)
-        }
-
-        manager.createNotificationChannels(listOf(serviceChannel, verifiedDefault, verifiedFile, researchChannel))
+        manager.createNotificationChannels(listOf(serviceChannel, verifiedDefault, verifiedFile))
     }
 
     private fun contentIntent(context: Context): PendingIntent {
@@ -119,28 +108,6 @@ object Notifier {
 
     fun buildMonitorNotification(context: Context, text: String): Notification =
         buildForegroundServiceNotification(context, text)
-
-    /** Separate informational channel: a publisher observation is NEVER an entry/candidate alert. */
-    fun notifyResearch(context: Context, evidenceId: String, title: String, text: String): Boolean {
-        ensureChannels(context)
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
-        if (!NotificationManagerCompat.from(context).areNotificationsEnabled() ||
-            manager.getNotificationChannel(CHANNEL_RESEARCH)?.importance?.let {
-                it > NotificationManager.IMPORTANCE_NONE
-            } != true) return false
-        val notification = NotificationCompat.Builder(context, CHANNEL_RESEARCH)
-            .setContentTitle(title.take(110))
-            .setContentText(text.take(220))
-            .setStyle(NotificationCompat.BigTextStyle().bigText(text.take(600)))
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentIntent(contentIntent(context))
-            .setAutoCancel(true)
-            .build()
-        return runCatching {
-            NotificationManagerCompat.from(context).notify(5100 + ((evidenceId.hashCode() and 0x7fffffff) % 400), notification)
-            true
-        }.getOrDefault(false)
-    }
 
     fun canNotifyVerified(context: Context, customSoundUri: String): Boolean {
         ensureChannels(context)

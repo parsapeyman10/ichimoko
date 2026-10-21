@@ -57,9 +57,6 @@ internal object SourcePromotion {
 
     fun primaryId(symbol: String, kind: Kind): String? = healthOf(symbol, kind).primary
 
-    fun failuresOf(symbol: String, kind: Kind, sourceId: String): Int =
-        healthOf(symbol, kind).consecutiveFailures[sourceId] ?: 0
-
     /**
      * Candidate order for the next fetch: sticky primary first, then the caller's
      * natural order, with demoted (repeatedly failing) sources pushed to the end.

@@ -6,7 +6,6 @@ import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneId
 import kotlin.math.abs
-import kotlin.math.max
 import kotlin.math.min
 
 /**
@@ -109,9 +108,7 @@ data class PlaybookDecision(
     val venue: String,
     val reasonFa: String,
     val blockers: List<String>,
-) {
-    val isStandAside: Boolean get() = method == TradeMethod.STAND_ASIDE || !allowed
-}
+)
 
 object MarketPlaybook {
 

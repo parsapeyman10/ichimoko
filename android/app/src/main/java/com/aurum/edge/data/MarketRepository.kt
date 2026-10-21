@@ -14,7 +14,6 @@ import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.Interval
 import com.aurum.edge.core.Signal
-import com.aurum.edge.core.SignalAction
 import com.aurum.edge.engine.SignalEngine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -72,7 +71,6 @@ data class MarketState(
     val lastTradePrice: Double? = null,
 ) {
     val closedCount: Int get() = candles.count { it.closed }
-    val hasRealData: Boolean get() = candles.isNotEmpty()
 }
 
 /**
@@ -1117,11 +1115,6 @@ class MarketRepository(
         val network = cm.activeNetwork ?: return false
         val caps = cm.getNetworkCapabilities(network) ?: return false
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-    }
-
-    fun lastSyncAt(): Long? {
-        val current = settings.read()
-        return settings.lastSync(current.symbol, current.interval)
     }
 
     companion object {

@@ -6,7 +6,6 @@ The Compose UI keeps navigation, tab state, and tab presentation separate so a c
 
 - `ui/shell/AurumRoot.kt`: lifecycle, snackbar, bottom navigation, and dispatch to a selected tab only.
 - `ui/shell/TabNavigation.kt`: tab names, labels, icons, and primary/more grouping.
-- `ui/shell/AppHeader.kt`: market header used by Signal; the Chart tab is widget-only.
 - `ui/shell/AurumViewModel.kt`: application coordinator only; it does not contain tab UI.
 
 ## Tab entry points
@@ -14,21 +13,15 @@ The Compose UI keeps navigation, tab state, and tab presentation separate so a c
 - `ui/tabs/home/HomeScreen.kt`: home dashboard.
 - `ui/tabs/chart/ChartScreen.kt` and `TradingViewEmbed.kt`: one full-tab TradingView Advanced Chart widget with its own controls; app feed and trade rules are not part of the chart.
 - `ui/tabs/signal/SignalScreen.kt` and `PaperTicketSection.kt`: signal and paper-entry view.
+- `ui/tabs/signal/Als5OpportunityMonitorCard.kt`, `SilverAresEnginesCard.kt`, `BtcAresEnginesCard.kt` and `EurAresEnginesCard.kt`: one card per engine, each reporting its own conditions, costs and refusals.
 - `ui/tabs/watch/MarketWatchScreen.kt`: watch list and historical watch observations.
-- `ui/tabs/news/PersianNewsScreen.kt`: news and calendar.
-- `ui/tabs/learn/LearnScreen.kt`: research inputs and controls.
-- `ui/tabs/learn/LearnReports.kt`: backtest and walk-forward report cards.
-- `ui/tabs/learn/ReplayPanel.kt`: bar replay controls and interactive paper-test results.
-- `ui/tabs/journal/JournalScreen.kt`: paper journal.
+- `ui/tabs/journal/JournalScreen.kt` and `TradeReplayChart.kt`: paper journal and the per-trade replay chart.
 - `ui/tabs/update/UpdateScreen.kt`: update discovery and Package Installer handoff.
-- `ui/tabs/settings/SettingsScreen.kt` and `ApiMenuScreen.kt`: device, provider, and AI settings.
+- `ui/tabs/settings/SettingsScreen.kt` and `ApiMenuScreen.kt`: device, provider, and API settings.
 
 ## Tab-owned state models
 
-- `ui/tabs/learn/LearnUiState.kt`: research, walk-forward, and replay state.
-- `ui/tabs/watch/WatchUiState.kt`: paginated watch history state.
 - `ui/tabs/journal/JournalUiState.kt`: expanded journal trade-chart state.
-- `ui/tabs/settings/AiUiState.kt`: AI probe and model catalogue state.
 
 Shared visual pieces live under `ui/shared` and `ui/components`; strategy, data, and persistence remain outside the UI tree.
 

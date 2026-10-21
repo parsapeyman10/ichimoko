@@ -1,7 +1,6 @@
 package com.aurum.edge.data
 
 import android.os.SystemClock
-import com.aurum.edge.core.MarketHours
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -82,8 +81,6 @@ class WatchRepository(
             }
         }
     }
-
-    fun stopAutoRefresh() { autoRefresh?.cancel(); autoRefresh = null }
 
     fun refreshNow() {
         scope.launch { refresh() }
@@ -199,11 +196,4 @@ class WatchRepository(
         return history.count(symbolId, sourceId)
     }
 
-    suspend fun clearHistory() = mutex.withLock {
-        val ids = WatchCatalog.symbols.map { it.id }
-        history.clear(ids)
-        _state.value = _state.value.copy(quotes = _state.value.quotes.mapValues { (symbolId, quotes) ->
-            if (symbolId in ids) quotes.filterValues { !it.stale } else quotes
-        })
-    }
 }

@@ -22,7 +22,7 @@ A cursor before the engine warm-up is a valid state. It shows real candles and `
 4. Senkou Span B;
 5. Chikou Span.
 
-Raw Senkou values remain at their computation index. `cloudAt(index)`, `spanAAt(index)`, and `spanBAt(index)` read the values computed `displacement` bars earlier, which is the execution-safe visible cloud. Chikou is indexed by its display bar and reads the close `displacement` bars ahead; the right edge is `null` until that source close exists. No padding, interpolation, or estimated line is allowed.
+Raw Senkou values remain at their computation index. `cloudAt(index)` reads the values computed `displacement` bars earlier, which is the execution-safe visible cloud. Chikou is indexed by its display bar and reads the close `displacement` bars ahead; the right edge is `null` until that source close exists. No padding, interpolation, or estimated line is allowed.
 
 `SignalEngine` uses current-bar Chikou confirmation (`close` above the high or below the low of the Kijun lookback structure). It is enabled by default and can be disabled only as an explicit `SignalProfile` experiment. The same profile is used by live, replay, and batch backtest paths.
 

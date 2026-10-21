@@ -29,9 +29,6 @@ object NobitexReference {
     fun isHistoryProvider(provider: String?): Boolean =
         provider?.startsWith(NobitexHistoryClient.PROVIDER) == true
 
-    /** True only for ticks/quotes published by Nobitex. */
-    fun isTickProvider(provider: String?): Boolean =
-        provider?.startsWith(NobitexHistoryClient.PROVIDER) == true
 }
 
 /**

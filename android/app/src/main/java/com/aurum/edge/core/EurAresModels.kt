@@ -196,6 +196,5 @@ object EurPips {
     const val PIPETTE = 0.00001
 
     fun of(distance: Double): Double = distance / PIP
-    fun toPrice(pips: Double): Double = pips * PIP
     fun format(pips: Double): String = String.format(java.util.Locale.US, "%.1f", pips)
 }

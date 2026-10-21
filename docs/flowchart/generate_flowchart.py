@@ -134,7 +134,7 @@ FUN_CHART = {
     "settleBinanceBatch": "fn-settle", "applyCryptoClosedBars": "fn-settle",
     "refresh": "fn-market-refresh",
     "publishCandles": "fn-publish", "onTick": "fn-publish", "startWatchdog": "fn-publish",
-    "sweepAll": "fn-scanner-sweep", "sweepOnce": "fn-scanner-sweep",
+    "sweepAll": "fn-scanner-sweep",
     "rankOpportunities": "fn-scanner-sweep",
     "watch": "fn-tickmonitor", "poll": "fn-tickmonitor",
     "watchBinance": "fn-tickmonitor", "pollArchive": "fn-tickmonitor",

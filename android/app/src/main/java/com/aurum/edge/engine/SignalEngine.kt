@@ -41,14 +41,6 @@ object SignalEngine {
     /** One setting for the chart, MTF analyzer and current signal engine. */
     fun ichimokuSetting(interval: Interval): IchiSetting = IchiSetting(8, 24, 72)
 
-    /** Bars a signal stays valid before it must be re-confirmed. */
-    fun barsValid(interval: Interval): Int = when (interval) {
-        Interval.M1 -> 8
-        Interval.M3 -> 6
-        Interval.M5 -> 6
-        else -> 4
-    }
-
     fun minBars(interval: Interval): Int {
         val s = ichimokuSetting(interval)
         return max(s.spanB + s.kijun + 20, HistoryPolicy.LIVE_MIN_CANDLES)
@@ -69,8 +61,6 @@ object SignalEngine {
             adx = Indicators.adx(bars, 14),
         )
     }
-
-    const val ENGINE_WINDOW = 400
 
     /** One settings-to-engine adapter for chart, scanner and paper-entry paths.
      * Category mode and threshold can never diverge between callers.

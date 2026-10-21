@@ -194,13 +194,6 @@ object SourceCatalog {
 
     // Backward-compatible references for tests/helpers
     val yahoo: SourceDef get() = yahooEurusd
-    val goldApi: SourceDef get() = goldApiXau
-    val swissquoteBbo: SourceDef get() = swissquoteGbpusd
-    val binanceTrades: SourceDef get() = binanceBtcSpot
-    val okxTrades: SourceDef get() = okxEthSpot
-    val gateTrades: SourceDef get() = gateSolSpot
-    val mexcTrades: SourceDef get() = mexcBnbSpot
-    val krakenTrades: SourceDef get() = krakenXrpSpot
 
     val twelveData = SourceDef(
         id = "twelve_data_quote",

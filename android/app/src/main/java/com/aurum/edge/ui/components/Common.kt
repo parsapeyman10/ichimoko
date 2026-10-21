@@ -20,8 +20,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aurum.edge.core.ConfluenceItem
 import com.aurum.edge.core.ConfluenceStatus
-import com.aurum.edge.core.FeedMode
-import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.LiveTradeValuation
 import com.aurum.edge.ui.theme.AurumColors
 import java.text.SimpleDateFormat
@@ -50,12 +48,6 @@ fun formatPrice(value: Double?): String {
 fun formatPriceFor(symbol: String, value: Double?): String =
     if (value == null) "—"
     else String.format(Locale.US, "%,.${com.aurum.edge.data.CryptoCatalog.digitsFor(symbol)}f", value)
-
-fun formatSigned(value: Double?, digits: Int = 2): String {
-    if (value == null) return "—"
-    val sign = if (value >= 0) "+" else "−"
-    return sign + String.format(Locale.US, "%,.${digits}f", kotlin.math.abs(value))
-}
 
 fun formatTime(millis: Long?): String {
     if (millis == null || millis <= 0) return "—"
@@ -143,50 +135,6 @@ fun Pill(text: String, color: Color, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun FeedBanner(status: FeedStatus, lastPrice: Double?, lastBarTime: Long?, showingCache: Boolean) {
-    val (color, title) = when (status.mode) {
-        FeedMode.LIVE -> AurumColors.Green to "زنده — ${status.provider}"
-        FeedMode.POLLING -> AurumColors.Gold to "کندل/تاریخچه آنلاین دوره‌ای (نه تیک زنده) — ${status.provider}"
-        FeedMode.MARKET_CLOSED -> AurumColors.Gold to "بازار طبق برنامهٔ معمول بسته است — دریافت متوقف"
-        FeedMode.DELAYED -> AurumColors.Gold to "دادهٔ بازار دیررس/نامعلوم — ${status.provider}"
-        FeedMode.CONNECTING -> AurumColors.Cyan to "در حال اتصال…"
-        FeedMode.OFFLINE -> AurumColors.Red to "آفلاین — داده ساختگی نمایش داده نمی‌شود"
-        FeedMode.NO_KEY -> AurumColors.Red to "کلید API لازم است"
-    }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .background(color.copy(alpha = 0.10f), RoundedCornerShape(10.dp))
-            .border(1.dp, color.copy(alpha = 0.32f), RoundedCornerShape(10.dp))
-            .padding(horizontal = 12.dp, vertical = 9.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.background(color, RoundedCornerShape(50)).padding(4.dp))
-            Text(title, style = MaterialTheme.typography.bodySmall, color = color, fontWeight = FontWeight.SemiBold)
-        }
-        val detail = buildString {
-            if (status.detail.isNotBlank()) append(status.detail)
-            if (showingCache && lastBarTime != null) {
-                if (isNotEmpty()) append(" · ")
-                append("آخرین کندل واقعی: ${formatDateTime(lastBarTime)}")
-            }
-            if (status.lastSuccessAt != null) {
-                if (isNotEmpty()) append(" · ")
-                append("آخرین دریافت ${relativeTime(status.lastSuccessAt)}")
-            }
-            lastPrice?.let {
-                if (isNotEmpty()) append(" · ")
-                append("${if (status.mode in setOf(FeedMode.LIVE, FeedMode.POLLING) && !showingCache) "قیمت دریافت‌شده" else "قیمت قبلی (نه آنلاین)"} ${formatPrice(it)}")
-            }
-        }
-        if (detail.isNotBlank()) {
-            Text(detail, style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary, modifier = Modifier.padding(top = 3.dp))
-        }
-    }
-}
-
-@Composable
 fun ConfluenceRow(item: ConfluenceItem) {
     val tone = when (item.status) {
         ConfluenceStatus.CONFIRMED -> AurumColors.Green
@@ -221,27 +169,6 @@ fun ConfluenceRow(item: ConfluenceItem) {
                 Text(item.detail, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             }
         }
-    }
-}
-
-@Composable
-fun EmptyState(title: String, message: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 18.dp)
-            .background(AurumColors.SurfaceAlt, RoundedCornerShape(12.dp))
-            .border(1.dp, AurumColors.Line, RoundedCornerShape(12.dp))
-            .padding(18.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(title, style = MaterialTheme.typography.titleMedium, color = AurumColors.TextPrimary)
-        Text(
-            message,
-            style = MaterialTheme.typography.bodySmall,
-            color = AurumColors.TextSecondary,
-            modifier = Modifier.padding(top = 6.dp),
-        )
     }
 }
 

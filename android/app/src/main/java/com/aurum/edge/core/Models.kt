@@ -124,9 +124,6 @@ data class SignalProfile(
     /** The standard Chikou confirmation can be explicitly disabled for profile experiments. */
     val chikouConfirmation: Boolean = true,
 ) {
-    val isBaseOnly: Boolean get() = !momentumVolume && !flatSpanB && !rangeChopFilter &&
-        !higherTimeframeFilter && !fakeBreakoutFilter && !dynamicSpreadFilter &&
-        !riskyTimingFilter && !structureRiskFilter && !cooldownFilter && chikouConfirmation
     val title: String get() = activeLabels().joinToString(" + ")
 
     fun activeLabels(): List<String> = buildList {
@@ -158,15 +155,6 @@ data class SignalProfile(
 
     companion object {
         val BASE = SignalProfile()
-
-        fun forStrategy(kind: StrategyKind): SignalProfile = SignalProfile(
-            momentumVolume = true,
-            higherTimeframeFilter = true,
-            rangeChopFilter = true,
-            dynamicSpreadFilter = true,
-            chikouConfirmation = true,
-            flatSpanB = true,
-        )
 
         /** Migrates the previous single-choice enum value, and also accepts comma lists. */
         fun fromName(raw: String?): SignalProfile {

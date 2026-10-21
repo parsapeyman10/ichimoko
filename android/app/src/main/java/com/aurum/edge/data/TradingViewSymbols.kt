@@ -35,6 +35,4 @@ object TradingViewSymbols {
         CryptoCatalog.find(key)?.let { return "BINANCE:${it.binance}" }
         return null
     }
-
-    fun isChartable(symbol: String): Boolean = find(symbol) != null
 }

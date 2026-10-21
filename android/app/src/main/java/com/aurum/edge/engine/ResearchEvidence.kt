@@ -4,11 +4,6 @@ import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.SignalAction
 import com.aurum.edge.core.TechnicalEvidence
 
-/** Caution labels, not a statistical test, trading advice or an AI-news verdict. */
-enum class EvidenceGrade { NO_DATA, LIMITED, UNFAVORABLE, COST_SENSITIVE, PRELIMINARY }
-
-data class EvidenceAssessment(val grade: EvidenceGrade, val title: String, val detail: String)
-
 data class PaperCostWhatIf(
     val trades: Int,
     val rawPnlUsd: Double,

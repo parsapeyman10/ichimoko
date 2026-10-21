@@ -49,7 +49,6 @@ object EurAresPolicy {
 
     /** A stop tighter than this is inside ordinary EUR/USD noise and is refused. */
     const val MIN_STOP_PIPS = 4.0
-    const val MAX_STOP_PIPS = 40.0
 
     /** How far the live price may drift from the confirmed entry before the setup is stale. */
     const val MAX_ENTRY_DRIFT_ATR_FRACTION = 0.30
@@ -140,17 +139,6 @@ object EurAresPolicy {
         val commission = 2.0 * commissionPerUnit / PIP
         val slippage = 2.0 * slippagePips
         return spread + commission + slippage
-    }
-
-    /** Opening cost only (one side of the spread + one commission + one slippage). */
-    fun entryCostPips(
-        price: Double,
-        spreadPips: Double?,
-        commissionPerUnit: Double = VenueSpecs.of(SYMBOL).commissionPerUnit,
-        slippagePips: Double = 0.2,
-    ): Double {
-        val total = roundTripCostPips(price, spreadPips, commissionPerUnit, slippagePips)
-        return if (total.isFinite()) total / 2.0 else Double.NaN
     }
 
     /** R:R after the round trip. Negative when the costs are larger than the whole reward. */

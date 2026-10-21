@@ -123,10 +123,6 @@ object MarketHours {
         )
     }
 
-    fun marketLabel(now: Long = System.currentTimeMillis()): String =
-        if (forexWeekendClosed(now)) "فارکس/طلا: تعطیلی معمول پایان هفته؛ قیمت/ورود متوقف"
-        else "فارکس: داخل برنامهٔ معمول؛ بازبودن واقعی فقط با فید تازه تأیید می‌شود"
-
     private fun nextAt(local: ZonedDateTime, day: DayOfWeek, time: LocalTime): ZonedDateTime {
         var candidate = local.with(java.time.temporal.TemporalAdjusters.nextOrSame(day)).with(time)
         if (!candidate.isAfter(local)) candidate = candidate.plusWeeks(1)

@@ -29,7 +29,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
@@ -202,11 +201,6 @@ class PairScanner(
     fun refreshNow(minIntervalMs: Long = -1L,
                    onCandidate: (suspend (PaperOpportunity) -> Unit)? = null) {
         schedule(effectiveInterval(minIntervalMs), onCandidate)
-    }
-
-    suspend fun sweepOnce(minIntervalMs: Long = -1L,
-                          onCandidate: (suspend (PaperOpportunity) -> Unit)? = null) {
-        schedule(effectiveInterval(minIntervalMs), onCandidate).joinAll()
     }
 
     /**
@@ -718,9 +712,5 @@ class PairScanner(
                 )
             } }.awaitAll()
         } // independent symbol evaluations; publisher-limited requests
-    }
-
-    companion object {
-        const val SWEEP_PERIOD_MS = com.aurum.edge.core.MonitorCadence.BASE_SWEEP_MS
     }
 }

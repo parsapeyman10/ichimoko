@@ -2,9 +2,6 @@ package com.aurum.edge.data
 
 import com.aurum.edge.core.PriceTick
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -230,45 +227,6 @@ class SpotFallbackClient(
         if (!CryptoCatalog.isCrypto(symbol) || openedAt <= 0L)
             throw DataFeedException("پوزیشن باز معتبر برای فید اولویت‌دار وجود ندارد")
         return NobitexTradeBatch.parse(cryptoTradeResponse(symbol, openPosition = true, openedAt = openedAt))
-    }
-
-    private object GoldBudget {
-        val mutex = Mutex()
-        var cached: PriceTick? = null
-        var receivedAt = 0L
-        var revision = -1L
-    }
-
-    private suspend fun compareGold(): PriceTick = GoldBudget.mutex.withLock {
-        val route = AppNetwork.route.value
-        if (!route.ready) throw DataFeedException("پروکسی آماده نیست؛ قیمت زنده تأیید نشد")
-        val gate = SourceIntegrity.shared
-        val token = gate.begin("XAU/USD", SourceIntegrity.Channel.GOLD_QUOTE)
-        val now = System.currentTimeMillis()
-        GoldBudget.cached?.takeIf { !gate.channelBlocked("XAU/USD", SourceIntegrity.Channel.GOLD_QUOTE) && GoldBudget.revision == route.revision &&
-            now - GoldBudget.receivedAt in 0L..5_000L && now - it.at in -10_000L..45_000L
-        }?.let { return@withLock it }
-        val quotes = coroutineScope {
-            listOf<suspend () -> PriceTick>(
-                { withContext(Dispatchers.IO) { fetchSwissquote("XAU/USD") } },
-                { withContext(Dispatchers.IO) { fetchGoldApi("XAU/USD") } },
-            ).map { read -> async {
-                try { read() } catch (cancel: CancellationException) { throw cancel }
-                catch (_: Exception) { null }
-            } }.awaitAll().filterNotNull()
-        }
-        if (route != AppNetwork.route.value) throw DataFeedException("مسیر قیمت طلا تغییر کرد؛ دریافت دوباره لازم است")
-        GoldBudget.cached = null // a new conflict must not reuse a previous agreement
-        val selected = try { SpotPriceSelection.gold(quotes, System.currentTimeMillis()) }
-        catch (failure: SourceDisagreement) {
-            gate.reject("XAU/USD", SourceIntegrity.Channel.GOLD_QUOTE, failure.message.orEmpty())
-            throw failure
-        }
-        if (gate.accept("XAU/USD", SourceIntegrity.Channel.GOLD_QUOTE, token, selected.sourceConfirmations) == null)
-            throw DataFeedException("اختلاف قیمت طلا هنوز رفع نشده؛ دو منبع همخوان لازم است")
-        selected.also {
-            GoldBudget.cached = it; GoldBudget.receivedAt = System.currentTimeMillis(); GoldBudget.revision = route.revision
-        }
     }
 
     /**

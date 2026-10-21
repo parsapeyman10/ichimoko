@@ -20,7 +20,6 @@ object HistoryPolicy {
 
     /** Display depth for trade/chart history downloads (not an entry requirement). */
     const val TARGET_CANDLES: Int = 500
-    const val DEEP_CHART_CANDLES: Int = 500
 
     const val CHART_BOOTSTRAP_CANDLES: Int = 500
     const val CHART_BOOTSTRAP_MINIMUM: Int = 280
