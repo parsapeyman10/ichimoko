@@ -6,6 +6,8 @@ import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.TradeQuotePolicy
+import com.aurum.edge.core.MarketState
+
 
 /** The selected chart's latest quote is not evidence that an OPEN crypto position's
  * ordered, same-venue execution feed has been replayed. Crypto valuations must come

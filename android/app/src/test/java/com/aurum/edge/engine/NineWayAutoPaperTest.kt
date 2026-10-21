@@ -10,7 +10,7 @@ import com.aurum.edge.core.Interval
 import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
-import com.aurum.edge.data.MarketState
+import com.aurum.edge.core.MarketState
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

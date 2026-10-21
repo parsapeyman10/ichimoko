@@ -21,7 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.aurum.edge.core.PaperTicket
 import com.aurum.edge.domain.SignalAction
-import com.aurum.edge.data.MarketState
+import com.aurum.edge.core.MarketState
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.theme.AurumColors

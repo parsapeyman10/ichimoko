@@ -1,6 +1,5 @@
 package com.aurum.edge.core
 
-import com.aurum.edge.data.MarketState
 import com.aurum.edge.engine.IctRangeAnalyzer
 import kotlin.math.abs
 

@@ -7,7 +7,7 @@ import com.aurum.edge.core.Interval
 import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.data.CatalogQuotePolicy
-import com.aurum.edge.data.MarketState
+import com.aurum.edge.core.MarketState
 import com.aurum.edge.data.WatchCatalog
 import java.time.Instant
 import org.junit.Assert.assertEquals

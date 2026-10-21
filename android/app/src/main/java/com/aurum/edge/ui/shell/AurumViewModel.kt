@@ -33,7 +33,7 @@ import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.core.TradeReplay
 import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.data.JournalStats
-import com.aurum.edge.data.MarketState
+import com.aurum.edge.core.MarketState
 import com.aurum.edge.data.SpotFallbackClient
 import com.aurum.edge.data.DisplayMark
 import com.aurum.edge.data.OpenPositionDisplay

@@ -51,7 +51,7 @@ import com.aurum.edge.core.PaperAiReview
 import com.aurum.edge.core.PaperHoldReview
 import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.core.TradeReplay
-import com.aurum.edge.data.MarketState
+import com.aurum.edge.core.MarketState
 import com.aurum.edge.engine.PerformanceMetrics
 import com.aurum.edge.engine.ResearchEvidence
 import com.aurum.edge.ui.components.Pill

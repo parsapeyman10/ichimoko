@@ -12,6 +12,7 @@ import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.domain.FeedMode
 import com.aurum.edge.domain.FeedStatus
 import com.aurum.edge.core.MarketHours
+import com.aurum.edge.core.MarketState
 import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.Signal
 import com.aurum.edge.engine.SignalEngine
@@ -49,29 +50,6 @@ internal fun hasCurrentRestBar(bars: List<Candle>, interval: Interval, now: Long
 /** A live tick may arrive a few seconds after its source timestamp, even across a candle boundary. */
 internal fun isCurrentIntervalTick(at: Long, interval: Interval, now: Long): Boolean =
     at in (now - 90_000L)..(now + 10_000L)
-
-data class MarketState(
-    val symbol: String = "XAU/USD",
-    val interval: Interval = Interval.M5,
-    val candles: List<Candle> = emptyList(),
-    val lastPrice: Double? = null,
-    val bid: Double? = null,
-    val ask: Double? = null,
-    val feed: FeedStatus = FeedStatus(FeedMode.NO_KEY),
-    val signal: Signal? = null,
-    val showingCachedData: Boolean = false,
-    /** Distinct from a valid NO_TRADE or insufficient history; never authorizes entry. */
-    val evaluationError: String? = null,
-    /** Source comparison generation used for this evaluation, not the latest tick receipt. */
-    val sourceIntegrityRevision: Long = 0L,
-    /** Live history provenance; a disk cache has no verified venue. */
-    val historyProvider: String? = null,
-    /** Original exchange timestamp/price of the last executed trade; not REST receipt time. */
-    val lastTradeAt: Long? = null,
-    val lastTradePrice: Double? = null,
-) {
-    val closedCount: Int get() = candles.count { it.closed }
-}
 
 /**
  * Owns the real-data pipeline: REST bootstrap + WebSocket ticks + disk cache + signal evaluation.

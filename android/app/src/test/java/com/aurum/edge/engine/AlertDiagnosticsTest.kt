@@ -8,7 +8,7 @@ import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.Interval
-import com.aurum.edge.data.MarketState
+import com.aurum.edge.core.MarketState
 import com.aurum.edge.data.PairScanState
 import com.aurum.edge.data.PairScanStatus
 import org.junit.Assert.assertFalse

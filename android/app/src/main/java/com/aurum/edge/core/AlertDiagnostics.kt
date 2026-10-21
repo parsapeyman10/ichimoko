@@ -1,6 +1,5 @@
 package com.aurum.edge.core
 
-import com.aurum.edge.data.MarketState
 import com.aurum.edge.engine.MtfAnalyzer
 
 /** Read-only, independent checks. Green checks are prerequisites, NOT a forecast or an entry. */

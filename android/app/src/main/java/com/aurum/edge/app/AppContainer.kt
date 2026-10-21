@@ -11,7 +11,7 @@ import com.aurum.edge.data.DataFeedException
 import com.aurum.edge.data.DukascopyHistoryClient
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.MarketRepository
-import com.aurum.edge.data.MarketState
+import com.aurum.edge.core.MarketState
 import com.aurum.edge.data.OpenPositionCoordinator
 import com.aurum.edge.data.OpenTradeTickMonitor
 import com.aurum.edge.data.SpotFallbackClient

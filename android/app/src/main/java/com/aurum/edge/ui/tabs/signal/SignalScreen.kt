@@ -28,7 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.domain.SignalAction
-import com.aurum.edge.data.MarketState
+import com.aurum.edge.core.MarketState
 import com.aurum.edge.data.PairScanStatus
 import com.aurum.edge.data.ScanRanking
 import com.aurum.edge.ui.components.ConfluenceRow

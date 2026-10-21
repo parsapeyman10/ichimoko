@@ -9,7 +9,7 @@ import com.aurum.edge.core.Interval
 import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.SignalAction
-import com.aurum.edge.data.MarketState
+import com.aurum.edge.core.MarketState
 import org.junit.Assert.*
 import org.junit.Test
 

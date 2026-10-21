@@ -16,6 +16,8 @@ import com.aurum.edge.core.TrendAlignment
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperAlertRules
 import com.aurum.edge.core.PaperOpportunity
+import com.aurum.edge.core.MarketState
+
 import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.SignalEngine

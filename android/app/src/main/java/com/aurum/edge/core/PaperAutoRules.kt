@@ -1,6 +1,5 @@
 package com.aurum.edge.core
 
-import com.aurum.edge.data.MarketState
 import kotlin.math.abs
 
 /** Side-effect-free guard shared by service and unit tests. NEVER submits a broker order.
