@@ -133,7 +133,8 @@ class WatchRepository(
                     if (source.kind == SourceKind.CRYPTO_SPOT_TRADE && !cryptoDue) return@mapNotNull null
                     if (source.kind == SourceKind.SPOT_BBO_QUOTE && !bboDue) return@mapNotNull null
                     val code = symbol.providerCodes[sourceId] ?: return@mapNotNull null
-                    Target(symbol, source, code, if (source.requiresKey) preferences.apiKeyFor(symbol.id, chartSettings.read().apiKey) else "")
+                    Target(symbol, source, code, if (source.requiresKey)
+                        preferences.apiKeyFor(symbol.id, chartSettings.read().apiKeyFor(symbol.id)) else "")
                 }
             }
             if (targets.any { it.source.kind == SourceKind.CRYPTO_SPOT_TRADE })

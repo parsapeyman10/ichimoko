@@ -117,12 +117,38 @@ class JournalStore(
             "ثبت پوزیشن تازه فقط از سیگنال کندل بستهٔ ۵ دقیقه (5m) مجاز است"
         }
         val isAls5Gold = com.aurum.edge.core.V1Universe.normalize(symbol) == "XAU/USD"
-        if (CryptoCatalog.isCrypto(symbol)) require(signal.cryptoBreakout?.matches(signal) == true) {
-            "فقط استراتژی فشردگی ← انفجار برای ورود تازهٔ رمزارز مجاز است"
+        val isBtcAres = com.aurum.edge.core.BtcAresPolicy.appliesTo(symbol)
+        val isSilverAres = com.aurum.edge.core.XagAresPolicy.appliesTo(symbol)
+        val isEurAres = com.aurum.edge.core.EurAresPolicy.appliesTo(symbol)
+        if (isEurAres) {
+            // EUR/USD belongs to EUR-ARES alone: no other record may authorise it, and this one
+            // cannot authorise any other symbol (checked inside matches()).
+            require(signal.eurAres?.matches(signal) == true) {
+                "ورود یورو/دلار فقط با رکورد تأییدشدهٔ EUR-ARES (موتور، سطح، حد ضرر و حد سود یکسان) مجاز است"
+            }
+        } else if (isSilverAres) {
+            // Silver has its own model: a gold ALS-5 record, a V1 record or a hand-built signal
+            // cannot authorise a silver entry, and the reverse is locked the same way.
+            require(signal.als5s?.matches(signal) == true) {
+                "ورود نقره فقط با رکورد تأییدشدهٔ ALS-5S (موتور، سطح، حد ضرر و حد سود یکسان) مجاز است"
+            }
+        } else if (isBtcAres) {
+            require(signal.btcAres?.matches(signal) == true) {
+                "ورود BTC فقط با رکورد تأییدشدهٔ BTC-ARES (موتور، سطح، حد ضرر و حد سود یکسان) مجاز است"
+            }
+        } else if (CryptoCatalog.isCrypto(symbol)) {
+            require(signal.cryptoBreakout?.matches(signal) == true) {
+                "فقط استراتژی فشردگی ← انفجار برای ورود تازهٔ رمزارز مجاز است"
+            }
+        }
+        if (isBtcAres && automatic) require(signal.btcAres?.matches(signal) == true) {
+            "ورود خودکار بیت‌کوین فقط با ستاپ READY موتور BTC-ARES مجاز است"
         }
         if (isAls5Gold && automatic) require(signal.als5Opportunity?.matches(signal) == true) {
             "ورود خودکار طلای جدید فقط با ستاپ خرید/فروش تأییدشدهٔ ALS-5 مجاز است"
-        } else require(signal.ichimokuEntry?.matches(signal) == true || signal.als5Opportunity?.matches(signal) == true) {
+        } else if (!isBtcAres && !isSilverAres && !isEurAres) require(
+            signal.ichimokuEntry?.matches(signal) == true || signal.als5Opportunity?.matches(signal) == true
+        ) {
             "شواهد ورود بستهٔ ALS-5/ایچیموکو پیش از ورود تأیید نشده‌اند"
         }
         require(com.aurum.edge.core.OilEntrySafety.blocker(symbol) == null) {
@@ -134,7 +160,41 @@ class JournalStore(
         require(!CryptoCatalog.isCrypto(symbol) || cryptoVenue in setOf("NOBITEX", BinanceSpotClient.VENUE)) {
             "صرافی ورود نامعتبر است"
         }
-        if (CryptoCatalog.isCrypto(symbol)) {
+        if (isBtcAres) {
+            // BTC-ARES is specified at 0.25% risk per trade with a 1.5R floor, so the older
+            // crypto floors (0.3–0.5%, 3R) would silently forbid every valid ARES setup.
+            require(riskPercent in 0.1..0.25) { "ریسک BTC-ARES باید حداکثر ۰٫۲۵ درصد باشد" }
+            require(com.aurum.edge.core.BtcAresPolicy.quoteBlocker(
+                signal, cryptoEntryQuote, signal.btcAres?.atr, observedAt) == null &&
+                cryptoEntryQuote?.price == price) {
+                "اسپرد، تیک تازه و شواهد BTC-ARES برای ورود تأیید نشده است"
+            }
+        } else if (isEurAres) {
+            // EUR/USD: 0.25 % cap, a real two-sided tick, pip-based spread/cost gates and the
+            // rollover window. A last-trade print is never accepted as a spread.
+            require(riskPercent in 0.1..0.25) { "ریسک EUR-ARES باید حداکثر ۰٫۲۵ درصد باشد" }
+            require(com.aurum.edge.core.EurAresPolicy.quoteBlocker(
+                signal, cryptoEntryQuote, signal.eurAres?.atr, observedAt) == null &&
+                cryptoEntryQuote?.price == price) {
+                "اسپرد، تیک تازه، هزینه/ریسک و شواهد EUR-ARES برای ورود تأیید نشده است"
+            }
+            require(signal.eurAres?.costToRiskFraction?.let {
+                it <= com.aurum.edge.core.EurAresPolicy.MAX_COST_TO_RISK_FRACTION + 1e-9 } == true) {
+                "هزینهٔ رفت‌وبرگشت نسبت به فاصلهٔ حد ضرر بیش از حد مجاز است"
+            }
+        } else if (isSilverAres) {
+            // Silver: 0.25 % cap, a real two-sided tick, and the cost-aware net R:R gates.
+            require(riskPercent in 0.1..0.25) { "ریسک ALS-5S باید حداکثر ۰٫۲۵ درصد باشد" }
+            require(com.aurum.edge.core.XagAresPolicy.quoteBlocker(
+                signal, cryptoEntryQuote, signal.als5s?.atr, observedAt) == null &&
+                cryptoEntryQuote?.price == price) {
+                "اسپرد، تیک تازه، هزینه/ریسک و شواهد ALS-5S برای ورود تأیید نشده است"
+            }
+            require(signal.als5s?.costToRiskFraction?.let {
+                it <= com.aurum.edge.core.XagAresPolicy.MAX_COST_TO_RISK_FRACTION + 1e-9 } == true) {
+                "هزینهٔ رفت‌وبرگشت نسبت به فاصلهٔ حد ضرر بیش از حد مجاز است"
+            }
+        } else if (CryptoCatalog.isCrypto(symbol)) {
             require(riskPercent in 0.3..0.5) { "ریسک رمزارز باید ۰٫۳ تا ۰٫۵ درصد باشد" }
             require(com.aurum.edge.core.CryptoCompressionPolicy.quoteBlocker(
                 signal, cryptoEntryQuote, observedAt) == null && cryptoEntryQuote?.price == price) {
@@ -153,9 +213,22 @@ class JournalStore(
         require(priceAction == null || priceAction.matches(signal, symbol, price)) {
             "شواهد اختیاری ICT با همان کندل مطابقت ندارد"
         }
-        if (CryptoCatalog.isCrypto(symbol)) require(kotlin.math.abs(target - price) >=
+        if (isBtcAres) require(signal.btcAres?.matches(signal) == true &&
+            signal.riskReward != null && signal.riskReward!! >= 1.5 - 1e-9) {
+            "نسبت ریسک به ریوارد BTC-ARES باید حداقل ۱:۱٫۵ باشد"
+        }
+        if (isSilverAres) require(signal.als5s?.matches(signal) == true &&
+            (signal.als5s?.netRewardRisk ?: 0.0) >= 1.5 - 1e-9) {
+            "R:R خالص پس از هزینه برای ALS-5S باید حداقل ۱:۱٫۵ باشد"
+        }
+        if (isEurAres) require(signal.eurAres?.matches(signal) == true &&
+            (signal.eurAres?.netRewardRisk ?: 0.0) >= 1.5 - 1e-9) {
+            "R:R خالص پس از هزینه برای EUR-ARES باید حداقل ۱:۱٫۵ باشد"
+        }
+        if (!isBtcAres && CryptoCatalog.isCrypto(symbol)) require(kotlin.math.abs(target - price) >=
             3.0 * kotlin.math.abs(price - stop) - 1e-9) { "نسبت واقعی ریسک به ریوارد رمزارز باید حداقل ۱:۳ باشد" }
-        val orderRiskPercent = if (isAls5Gold) riskPercent.coerceAtMost(0.25) else riskPercent
+        val orderRiskPercent = if (isAls5Gold || isBtcAres || isSilverAres || isEurAres)
+            riskPercent.coerceAtMost(0.25) else riskPercent
         val draft = PaperOrderRules.preview(signal.action, symbol, price, stop, target, balance, orderRiskPercent)
         val startConditions = technicalConditions
             .filter { it.status == ConfluenceStatus.CONFIRMED }
@@ -183,6 +256,9 @@ class JournalStore(
             autoOpened = automatic,
             signalBarTime = signal.barTime,
             als5SetupKey = signal.als5Opportunity?.setupKey?.takeIf { isAls5Gold },
+            btcAresSetupKey = signal.btcAres?.setupKey?.takeIf { isBtcAres },
+            als5sSetupKey = signal.als5s?.setupKey?.takeIf { isSilverAres },
+            eurAresSetupKey = signal.eurAres?.setupKey?.takeIf { isEurAres },
             newsEvidence = null,
             entryConditions = technicalConditions.map {
                 com.aurum.edge.core.PaperConditionRecord.from(it)
@@ -230,9 +306,18 @@ class JournalStore(
                 draft.actualRiskUsd + draft.commissionUsd + draft.spreadCostUsd,
                 signal.barTime, now = observedAt,
                 openingBalance = settingsStore?.dayOpeningEquity(observedAt),
-                maxRiskPerTradePct = if (isAls5Gold) 0.0025 else PaperPortfolioPolicy.MAX_RISK_PER_TRADE,
-                maxDailyLossPct = if (isAls5Gold) 0.01 else PaperPortfolioPolicy.MAX_DAILY_LOSS,
-                als5SetupKey = signal.als5Opportunity?.setupKey?.takeIf { isAls5Gold })
+                maxRiskPerTradePct = if (isAls5Gold || isBtcAres || isSilverAres || isEurAres) 0.0025
+                    else PaperPortfolioPolicy.MAX_RISK_PER_TRADE,
+                maxDailyLossPct = if (isAls5Gold || isBtcAres || isSilverAres || isEurAres) 0.01
+                    else PaperPortfolioPolicy.MAX_DAILY_LOSS,
+                als5SetupKey = signal.als5Opportunity?.setupKey?.takeIf { isAls5Gold },
+                silverSetupKey = signal.als5s?.setupKey?.takeIf { isSilverAres },
+                eurAresSetupKey = signal.eurAres?.setupKey?.takeIf { isEurAres },
+                setupKey = when {
+                    isAls5Gold -> signal.als5Opportunity?.setupKey
+                    isBtcAres -> signal.btcAres?.setupKey
+                    else -> null
+                })
             require(blocker == null) { blocker ?: "ظرفیت پورتفو پر است" }
             // Recheck after scheduling, sizing and any journal-lock wait. Fresh ticks or an
             // fresh receipt cannot authorize a preview calculated before a source conflict.
@@ -248,7 +333,10 @@ class JournalStore(
     suspend fun applyCryptoClosedBars(symbol: String, openedAt: Long,
         venue: String, m5: List<Candle>, m15: List<Candle>,
         now: Long = System.currentTimeMillis()): Boolean = mutex.withLock {
-        if (!loaded || venue != BinanceSpotClient.VENUE) return@withLock false
+        // Two venues are writable: the Nobitex reference and legacy Binance Spot positions.
+        // Bars from one venue are never applied to the other's position.
+        if (!loaded || venue !in setOf(NobitexReference.VENUE, BinanceSpotClient.VENUE))
+            return@withLock false
         val trade = _trades.value.singleOrNull { it.isOpen && it.symbol == symbol &&
             it.openedAt == openedAt && it.cryptoVenue == venue && it.cryptoEntryAtr != null }
             ?: return@withLock false

@@ -95,7 +95,9 @@ class SourceFetcher(
                 SourceCatalog.mexcBnbSpot.id, "mexc_spot_trades" ->
                     cryptoRadar.fetchWatchTrade(coin.id, CryptoRadarCandleClient.Venue.MEXC)
                 SourceCatalog.binanceBtcSpot.id, "binance_spot_agg_trades" ->
-                    spot.fetchQuote(coin.id)
+                    // This row is the BINANCE source; the Nobitex reference quote must not be
+                    // returned under a Binance label (autoReview does the Nobitex-first quote).
+                    BinanceSpotClient().fetchQuote(coin.id)
                 else -> throw DataFeedException("منبع معاملات رمزارز ناشناخته است")
             }
             Quote(symbol.code, symbol.label, price = tick.price, providerAt = tick.at,

@@ -128,6 +128,9 @@ fun UpdateScreen(viewModel: AurumViewModel) {
             Text("• برای اینکه بروزرسانی روی نصب قبلی بنشیند، امضای APK باید همان امضای نسخهٔ نصب‌شده باشد. اثر انگشت نصب همین گوشی و کانال عمومی بالای همین صفحه دیده می‌شود؛ CI امضای گوشی شما را از راه دور نمی‌بیند. حذف نصب ممکن است ژورنال و تنظیمات خصوصی را از بین ببرد.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold,
                 modifier = Modifier.padding(top = 5.dp))
+            Text("• اگر پیام «نسخهٔ جدیدتری پیدا نشد» همراه «جدیدترین نسخهٔ منتشرشده» می‌آید، یعنی همان نسخه روی گوشی نصب است؛ تغییر کد روی شاخه یا merge بدون انتشار، APK تازه نمی‌سازد. بروزرسانی فقط با انتشار نسخهٔ بعدی (versionCode بالاتر) در Release عمومی انجام می‌شود؛ جزئیات در docs/UPDATER_RELEASE_FA.md.",
+                style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 5.dp))
             Text("• کد برنامه در Android به‌صورت امن با APK بروزرسانی می‌شود؛ فقط تنظیمات/داده‌های قابل پیکربندی می‌توانند بدون نصب APK تغییر کنند. قیمت، حجم یا سیگنال ساختگی برای بروزرسانی ساخته نمی‌شود.",
                 style = MaterialTheme.typography.bodySmall, color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 5.dp))

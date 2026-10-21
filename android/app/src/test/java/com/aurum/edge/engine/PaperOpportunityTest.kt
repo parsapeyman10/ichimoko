@@ -34,7 +34,7 @@ import java.nio.file.Files
 class PaperOpportunityTest {
     private val now = 1_800_000_000_000L
     private val bar = now - Interval.M5.millis
-    private val config = AppSettings(symbol = "EUR/USD", backgroundMonitor = true, notifyOnSignal = true,
+    private val config = AppSettings(symbol = "GBP/USD", backgroundMonitor = true, notifyOnSignal = true,
         autoPaperTrading = false, accountBalance = 100.0)
     private val raw = Signal(SignalAction.BUY, 100.0, entry = 3000.0, stopLoss = 2994.5,
         takeProfit = 3009.0, interval = Interval.M5, barTime = bar,
@@ -47,7 +47,7 @@ class PaperOpportunityTest {
         bias = SignalAction.BUY, score = 1.0, alignment = 1.0,
         buyCount = 1, sellCount = 0, neutralCount = 0, veto = false,
         vetoReason = null, advisory = "fixture", barTime = bar, skippedFrames = emptyList())
-    private val market get() = MarketState(symbol = "EUR/USD", interval = Interval.M5,
+    private val market get() = MarketState(symbol = "GBP/USD", interval = Interval.M5,
         candles = IctTestBars.readyAt(bar),
         lastPrice = 3000.0, feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now), signal = signal)
     private val context get() = RuntimeEnvironment.getApplication()
@@ -78,7 +78,7 @@ class PaperOpportunityTest {
         val file = File(root, "opportunities.json")
         val journalFile = File(root, "journal.json")
         val ict = IctEntryRules.approvedEvidence(market, now)!!
-        val opportunity = PaperOpportunity.from(signal, "EUR/USD", 3000.0,
+        val opportunity = PaperOpportunity.from(signal, "GBP/USD", 3000.0,
             MtfSnapshotRecord.from(snapshot), ict, now)
         val store = PaperOpportunityStore(context, file)
         store.load()
@@ -92,7 +92,7 @@ class PaperOpportunityTest {
         assertEquals(0, journal.stats().total)
         val reopened = PaperOpportunityStore(context, file).also { it.load() }
         assertFalse(reopened.record(opportunity))
-        val trade = journal.open(signal, "EUR/USD", 3000.0, 100.0, 0.5,
+        val trade = journal.open(signal, "GBP/USD", 3000.0, 100.0, 0.5,
             automatic = true, mtf = MtfSnapshotRecord.from(snapshot),
             priceAction = ict, observedAt = now)
         reopened.linkTrade(trade)

@@ -17,7 +17,9 @@ import org.junit.Test
 class IctEntryRulesTest {
     private val now = 1_800_000_000_000L // 03:00 in New York (London window)
     private val bar = now - Interval.M5.millis
-    private val config = AppSettings(symbol = "EUR/USD", interval = Interval.M5,
+    // A four-layer pair: EUR/USD now belongs to EUR-ARES and has its own gate (see
+    // NineWayAutoPaperTest.euroDollarIsNoLongerAFourLayerPair), so it would fail for the wrong reason here.
+    private val config = AppSettings(symbol = "GBP/USD", interval = Interval.M5,
         backgroundMonitor = true, autoPaperTrading = true)
     private val signal = Signal(SignalAction.BUY, 100.0, entry = 3000.0,
         stopLoss = 2994.5, takeProfit = 3009.0, interval = Interval.M5, barTime = bar,
@@ -25,7 +27,7 @@ class IctEntryRulesTest {
             "پرایس‌اکشن · حمایت/مقاومت", "پشتهٔ ۳ تایم‌فریمی")
             .map { ConfluenceItem(it, true, "fixture", scorePercent = 25) })
     private val verified get() = signal
-    private val market get() = MarketState(symbol = "EUR/USD", interval = Interval.M5,
+    private val market get() = MarketState(symbol = "GBP/USD", interval = Interval.M5,
         candles = IctTestBars.readyAt(bar), lastPrice = 3000.0,
         feed = FeedStatus(FeedMode.LIVE, lastSuccessAt = now), signal = verified)
 

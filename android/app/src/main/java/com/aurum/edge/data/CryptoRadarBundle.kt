@@ -15,6 +15,10 @@ import kotlinx.coroutines.CancellationException
  * (see [SourcePromotion]). Venue promotion here is about DATA reliability only:
  * paper-entry venue rules (same-venue history + executed-trade tick) still gate
  * entries separately and are not weakened by a promoted read source.
+ *
+ * This is the READ-ONLY FALLBACK for crypto. Nobitex is the reference venue
+ * ([NobitexCryptoBundle]); these bars are only used, and labelled, when Nobitex cannot
+ * deliver the bundle. A fallback venue's bars never authorize an entry on another venue.
  */
 internal class CryptoRadarBundle(
     private val read: suspend (String, Interval, Source) -> PublicCandleHistoryClient.Result,
@@ -28,14 +32,12 @@ internal class CryptoRadarBundle(
     }
 
     data class Snapshot(
-        val provider: String,
+        override val provider: String,
         val venue: Source,
-        val frames: Map<Interval, List<Candle>>,
+        override val frames: Map<Interval, List<Candle>>,
         val priorFailures: List<String>,
-        val integrityRevision: Long = 0,
-    ) {
-        val m5: List<Candle> get() = frames.getValue(Interval.M5)
-    }
+        override val integrityRevision: Long = 0,
+    ) : CryptoHistoryBook
 
     companion object {
         private val admission = PublisherBudget(Source.entries.associateWith { 1 })

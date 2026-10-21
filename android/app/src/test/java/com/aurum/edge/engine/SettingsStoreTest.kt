@@ -37,6 +37,45 @@ class SettingsStoreTest {
         assertTrue(reopened.backgroundMonitor)
     }
 
+    @Test fun `a dedicated key per symbol beats the global key and survives reopen`() {
+        val context = RuntimeEnvironment.getApplication()
+        context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit().clear().commit()
+        val store = SettingsStore(context)
+        assertTrue(store.saveMarketCredentials("global-read-only-key", "XAU/USD"))
+        // Whitespace is a rejected credential, never a silently trimmed one.
+        assertFalse(store.saveSymbolKey("EUR/USD", "bad key"))
+        // Outside the catalog: refused, nothing stored.
+        assertFalse(store.saveSymbolKey("NOT-A-SYMBOL", "synthetic"))
+        assertTrue(store.saveSymbolKey(" eur/usd ", " eur-only-key "))
+        assertEquals("eur-only-key", store.symbolKey("EUR/USD"))
+        val read = SettingsStore(context).read()
+        // The dedicated key wins for its own symbol only; the global key still serves the rest.
+        assertEquals("eur-only-key", read.apiKeyFor("EUR/USD"))
+        assertEquals("global-read-only-key", read.apiKeyFor("GBP/USD"))
+        assertEquals("global-read-only-key", read.apiKey)
+        assertEquals(listOf("EUR/USD"), read.dedicatedKeySymbols())
+        assertTrue(read.hasKeyFor("GBP/USD"))
+        // Explicit blank removes the override; the global key is used again.
+        assertTrue(store.saveSymbolKey("EUR/USD", ""))
+        assertEquals("", SettingsStore(context).symbolKey("EUR/USD"))
+        assertEquals("global-read-only-key", SettingsStore(context).read().apiKeyFor("EUR/USD"))
+    }
+
+    @Test fun `a corrupt per-symbol key blob is ignored instead of inventing a credential`() {
+        val context = RuntimeEnvironment.getApplication()
+        context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit().clear().commit()
+        val store = SettingsStore(context)
+        assertTrue(store.saveMarketCredentials("global-read-only-key", "XAU/USD"))
+        context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit()
+            .putString("td_symbol_keys_json", "{not json").commit()
+        val reopened = SettingsStore(context).read()
+        assertTrue(reopened.twelveDataKeys.isEmpty())
+        assertEquals("global-read-only-key", reopened.apiKeyFor("EUR/USD"))
+        // A fresh valid write repairs the blob rather than inheriting the broken one.
+        assertTrue(store.saveSymbolKey("EUR/USD", "eur-only-key"))
+        assertEquals("eur-only-key", SettingsStore(context).read().apiKeyFor("EUR/USD"))
+    }
+
     @Test fun `symbol writes accept catalog pairs including crypto, and removed symbols migrate to gold`() {
         val context = RuntimeEnvironment.getApplication()
         context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE).edit().clear().commit()

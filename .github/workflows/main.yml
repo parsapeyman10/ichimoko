@@ -14,6 +14,15 @@ on:
       - 'tools/test_probe_crypto_venues.py'
       - 'tools/verify_apk_upgrade.py'
       - 'tools/test_verify_apk_upgrade.py'
+      - 'tools/refresh_update_manifest.py'
+      - 'tools/test_refresh_update_manifest.py'
+      - 'tools/btc_ares_backtest.py'
+      - 'tools/test_btc_ares_backtest.py'
+      - 'tools/als5s_backtest.py'
+      - 'tools/test_als5s_backtest.py'
+      - 'tools/eur_ares_backtest.py'
+      - 'tools/test_eur_ares_backtest.py'
+      - 'strategies/**'
       - '.github/workflows/main.yml'
   pull_request:
     paths:
@@ -23,6 +32,15 @@ on:
       - 'tools/test_probe_crypto_venues.py'
       - 'tools/verify_apk_upgrade.py'
       - 'tools/test_verify_apk_upgrade.py'
+      - 'tools/refresh_update_manifest.py'
+      - 'tools/test_refresh_update_manifest.py'
+      - 'tools/btc_ares_backtest.py'
+      - 'tools/test_btc_ares_backtest.py'
+      - 'tools/als5s_backtest.py'
+      - 'tools/test_als5s_backtest.py'
+      - 'tools/eur_ares_backtest.py'
+      - 'tools/test_eur_ares_backtest.py'
+      - 'strategies/**'
       - '.github/workflows/main.yml'
   workflow_dispatch:
     inputs:
@@ -340,8 +358,9 @@ jobs:
 
           if problems:
               print('::error title=Stale default-branch manifest::update/aurum-edge.json ' + '; '.join(problems)
-                    + f'. A phone reading this manifest is told it is up to date. Refresh {manifest_path} from the '
-                    + f'{tag} sidecar (or delete it and rely on the release-embedded manifest).')
+                    + f'. A phone reading this manifest is told it is up to date. Refresh {manifest_path} with '
+                    + f'`python3 tools/refresh_update_manifest.py --tag {tag}` (or delete it and rely on the '
+                    + 'release-embedded manifest).')
               raise SystemExit(1)
           print(f'::notice title=Manifest gate::update/aurum-edge.json is consistent with newest published APK {tag}.')
           PY
@@ -710,6 +729,36 @@ jobs:
           python3 tools/verify_public_updater.py --repo "$GITHUB_REPOSITORY" \
             --version "$VERSION_NAME" --code "$VERSION_CODE" --certificate "$UPDATER_CERT_SHA256" \
             --sdk "$SDK/build-tools/$ANDROID_BUILD_TOOLS" --output "$RUNNER_TEMP/public-updater"
+
+      # A published release makes update/aurum-edge.json on the default branch stale in the same
+      # second. That copy is what a phone reads when it cannot reach the release assets, and a
+      # stale copy is exactly the state in which the in-app updater answers "no newer version"
+      # while a newer APK exists. Refreshing it from the sidecar that was just verified keeps the
+      # repository and the release in agreement without a manual follow-up commit.
+      - name: Keep the default-branch manifest on the newest release
+        if: steps.guard.outputs.ready == 'true' && steps.publish.outcome == 'success' && steps.collect.outputs.tag != ''
+        env:
+          TAG: ${{ steps.collect.outputs.tag }}
+        run: |
+          set -uo pipefail
+          if ! python3 tools/refresh_update_manifest.py --tag "$TAG" --output update/aurum-edge.json; then
+            echo "::warning title=Manifest refresh failed::The sidecar of $TAG was not readable after publish; run tools/refresh_update_manifest.py --tag $TAG."
+            exit 0
+          fi
+          if git diff --quiet -- update/aurum-edge.json; then
+            echo "::notice title=Manifest current::update/aurum-edge.json already describes $TAG."
+            exit 0
+          fi
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::notice title=Manifest left for the merge::This run is not on main, so $TAG keeps its own manifest asset; run tools/refresh_update_manifest.py --tag $TAG after merging."
+            git checkout -- update/aurum-edge.json
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add update/aurum-edge.json
+          git commit -m "chore(update): manifest شاخهٔ پیش‌فرض برای $TAG [skip ci]"
+          git push origin HEAD:main || echo "::warning title=Manifest not pushed::update/aurum-edge.json still describes an older release; run python3 tools/refresh_update_manifest.py --tag $TAG"
 
       - name: Job summary
         if: always() && steps.guard.outputs.ready == 'true'

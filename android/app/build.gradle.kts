@@ -62,10 +62,30 @@ android {
         applicationId = "com.aurum.edge"
         minSdk = 26
         targetSdk = 35
-        // Keep the published update channel upgradeable: 2.0.4 is code 676 after 2.0.3 (675).
-        // 2.0.4 ships the Dukascopy chart-JSON history transport (docs/DATA_SOURCE_RECOVERY_2_0_4_FA.md).
-        versionCode = 676
-        versionName = "2.0.4"
+        // Keep the published update channel upgradeable: 2.0.5 is code 677 after 2.0.4 (676).
+        // 2.0.5 ships the per-symbol Twelve Data keys, the symbol→source map
+        // (docs/SYMBOL_SOURCES_FA.md) and an updater that reports which published version it saw
+        // (docs/UPDATER_RELEASE_FA.md). A versionCode must be bumped here before a release run,
+        // because the workflow only publishes explicit `release: publish` commits.
+        // 2.0.7 adds ALS-5S, the dedicated silver engine (XAG/USD M5): its own regimes, sweep and
+        // range/breakout engines, cost gate and separate card in the trade tab. It also ships the
+        // Pine v6 strategy and the offline replay harness. See docs/ALS5S_SILVER_FA.md.
+        // 2.0.8 adds EUR-ARES, the dedicated euro/dollar engine (EUR/USD M5): pip-native economics,
+        // DST-correct sessions, trend/sweep/range/session-breakout engines, a cost veto measured in
+        // pips, its own card in the trade tab, the Pine v6 strategy and an offline harness.
+        // See docs/EUR_ARES_FA.md.
+        // 2.0.9 fixes the quote routes that made three engine families unreachable: EUR/USD had a
+        // single-number Yahoo tick, silver was read from a one-price Gold-API feed, and every crypto
+        // pair only had a trade print. The engines correctly refuse to enter without a real
+        // bid/ask, so no auto paper trade could ever open. EUR/USD and silver now use the
+        // Swissquote BBO, and crypto attaches the best bid/ask from the Nobitex order book.
+        // 2.0.10 cuts data usage: the scanner reuses a complete candle bundle until the next M5
+        // bar can exist (it used to download 950 candles per symbol five times per bar), the
+        // passive quote stream polls every 5 s instead of 1 s, the Dow asks Yahoo for one bar
+        // instead of a whole day of candles, and one process-wide quote cache merges the
+        // duplicate reads of the service/UI/scanner loops. See docs/DATA_USAGE_FA.md.
+        versionCode = 682
+        versionName = "2.0.10"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
@@ -206,6 +226,10 @@ val robolectricDepsDir = layout.buildDirectory.dir("robolectric-deps")
 
 tasks.withType<Test>().configureEach {
     inputs.files(robolectricJarFiles)
+    // Robolectric loads a full android-all runtime per SDK and keeps it for the whole worker,
+    // so the default 512 MB test heap ran the engine/keystore suites into OutOfMemoryError
+    // long before they could fail on an assertion.
+    maxHeapSize = "2g"
     doFirst {
         val dir = robolectricDepsDir.get().asFile
         dir.mkdirs()

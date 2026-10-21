@@ -60,9 +60,11 @@ class CatalogPaperTrader(
             lastTradeAt = tick.at, lastTradePrice = tick.price,
             // Provider timestamp, NOT scanner download time. This is the same tick contract
             // used for settling all non-crypto open positions in the service/UI.
+            // Keep the publisher that actually answered: a Nobitex reference quote must not be
+            // labelled Binance, and a read-only fallback must not inherit the Nobitex label.
             feed = FeedStatus(FeedMode.LIVE, tick.sourceNote ?: "تیک مستقل تأییدشده", tick.at,
-                provider = if (CryptoCatalog.isCrypto(scanned.symbol))
-                    "${BinanceSpotClient.PROVIDER} aggTrade" else tick.provider ?: "منبع تیک نامعلوم"),
+                provider = tick.provider ?: if (CryptoCatalog.isCrypto(scanned.symbol))
+                    NobitexReference.TICK_PROVIDER else "منبع تیک نامعلوم"),
             showingCachedData = false,
         )
         val opened = trader.onMarketUpdate(verified, catalogQuote = tick)

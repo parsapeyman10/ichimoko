@@ -32,9 +32,13 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
-/** Reference frames must come from the publisher of the BASE, including manual crypto mode. */
+/**
+ * Reference frames must come from the publisher of the BASE, including manual crypto mode.
+ * Nobitex is the crypto reference; Binance remains for legacy Binance positions.
+ */
 internal fun canRefreshSamePublisherFrames(symbol: String, provider: String?): Boolean =
-    if (CryptoCatalog.isCrypto(symbol)) provider == BinanceSpotClient.PROVIDER
+    if (CryptoCatalog.isCrypto(symbol)) NobitexReference.isHistoryProvider(provider) ||
+        provider == BinanceSpotClient.PROVIDER
     else SourceRouting.fromProvider(provider) != null
 
 /** A successful REST download is not proof that the market has a current bar. */
@@ -130,6 +134,7 @@ class MarketRepository(
                     minimumOutputSize = HistoryPolicy.minSize(frame)), "Twelve Data")
         }
     }
+    private val nobitexBook = NobitexCryptoBundle()
     private val timeframeFeed = TimeframeFeed(publicHistory, dukascopyHistory, client, binanceHistory)
     private var timeframeJob: Job? = null
     @Volatile private var timeframeSnapshot: Map<Interval, List<Candle>> = emptyMap()
@@ -155,7 +160,7 @@ class MarketRepository(
         val current = settings.read()
         // Entering the screen while the user-started service is already running must NOT
         // tear down a healthy socket, roll back its last tick, or duplicate REST requests.
-        if (started && activeKey == current.apiKey && _state.value.symbol == current.symbol &&
+        if (started && activeKey == current.apiKeyFor(current.symbol) && _state.value.symbol == current.symbol &&
             _state.value.interval == current.interval &&
             ((marketClosed() && _state.value.feed.mode == FeedMode.MARKET_CLOSED) ||
                 // Both keyed and keyless modes keep a history-refresh poll plus the live/fallback
@@ -163,7 +168,7 @@ class MarketRepository(
                 (pollJob?.isActive == true && streamJob?.isActive == true))) return
         stop()
         started = true
-        activeKey = current.apiKey
+        activeKey = current.apiKeyFor(current.symbol)
         lastQuietReconnect = SystemClock.elapsedRealtime()
         val session = generation
         if (_state.value.symbol != current.symbol || _state.value.interval != current.interval) {
@@ -177,14 +182,14 @@ class MarketRepository(
                 detail = if (closed) "تعطیلی معمول پایان هفته؛ قیمت تازه دریافت نمی‌شود" else "در حال دریافت…",
                 // Without a key the free keyless mode uses public Yahoo history plus the same
                 // Swissquote/Gold-API real-tick pipeline — it is not blocked on Twelve Data.
-                provider = if (current.hasKey) "Yahoo/Dukascopy عمومی · Twelve Data فقط fallback + فید زنده" else "Yahoo/Dukascopy عمومی + Swissquote/Gold-API",
+                provider = marketProviderLabel(current.symbol, current.hasKeyFor(current.symbol)),
             ),
             signal = null,
             showingCachedData = closed && _state.value.candles.isNotEmpty(),
         )
         loadCacheThenRefresh(session) // cached real bars are read-only even without the key
-        if (!closed) startStream() // public Swissquote/Gold-API first; Twelve WebSocket is final fallback
-        if (!closed) startPolling() // public history first; Twelve REST is final history fallback
+        if (!closed) startStream() // crypto: Nobitex reference; gold: Twelve first; else public first
+        if (!closed) startPolling() // public history first; Twelve REST is the final history fallback
         registerNetworkCallback()
         startWatchdog(session) // local clock re-arms the feed at the next scheduled opening
     }
@@ -277,36 +282,72 @@ class MarketRepository(
             ))
         try {
             var fetched: List<Candle> = emptyList()
+            var pinnedNobitex: NobitexCryptoBundle.Snapshot? = null
             var pinnedCrypto: CryptoRadarBundle.Snapshot? = null
             var pinnedNonCrypto: NonCryptoRadarBundle.Snapshot? = null
+            // Why the Nobitex reference did not answer; surfaced instead of a silent venue swap.
+            var nobitexFailure: String? = null
             var historyProvider = ""
             var staleDetail = "تاریخچهٔ آنلاین پاسخ داد اما آخرین کندل آن باید با تیک زنده تأیید شود"
             if (CryptoCatalog.isCrypto(current.symbol) && current.interval == Interval.M5 &&
                 requestedSize <= HistoryPolicy.LIVE_FETCH_CANDLES) {
-                // One publisher across M5/M15/H1. Gate/OKX are strictly read-only;
-                // never mix their candles with Binance executions or MTF frames.
-                val book = cryptoBundle.fetch(current.symbol)
-                pinnedCrypto = book
-                fetched = book.m5
-                historyProvider = book.provider
-                staleDetail = "${book.provider}: کندل بسته دریافت شد؛ ورود فقط با تیک همان صرافی مجاز است"
+                // Nobitex is the crypto REFERENCE: one venue delivers M5/M15/H1 and owns the
+                // executed-trade tick used for display and paper entry. The per-symbol exchange
+                // below is a labelled read-only fallback, never a silent relabel.
+                val nobitex = if (NobitexReference.serves(current.symbol)) try {
+                    nobitexBook.fetch(current.symbol)
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (failure: Exception) {
+                    nobitexFailure = (failure.message ?: "خطای نامشخص").take(110)
+                    null
+                } else null
+                if (nobitex != null) {
+                    pinnedNobitex = nobitex
+                    fetched = nobitex.m5
+                    historyProvider = nobitex.provider
+                    staleDetail = "مرجع رمزارز نوبیتکس: M5/M15/H1 از یک صرافی؛ ورود فقط با معاملهٔ همان صرافی"
+                } else {
+                    // One publisher across M5/M15/H1. Gate/OKX are strictly read-only;
+                    // never mix their candles with another venue's executions or MTF frames.
+                    val book = cryptoBundle.fetch(current.symbol)
+                    pinnedCrypto = book
+                    fetched = book.m5
+                    historyProvider = book.provider
+                    staleDetail = "${book.provider}: کندل بسته دریافت شد؛ ورود فقط با تیک همان صرافی مجاز است" +
+                        (nobitexFailure?.let { " · نوبیتکس پاسخ نداد: $it" } ?: "")
+                }
             } else if (CryptoCatalog.isCrypto(current.symbol)) {
-                // Only Binance Spot USDT bars may authorize Binance paper entries.
-                // If geo-blocked (HTTP 451), show the provider error rather than
-                // silently replacing the same-pair execution feed with another exchange.
+                // Nobitex first for every timeframe as well (never resampled across venues).
+                // The dedicated exchange stays as a labelled read-only fallback; if neither can
+                // answer, the provider error is shown rather than an invented series.
                 // Never treat BTC/USD from Yahoo as if it were BTC/USDT.
-                try {
+                val nobitexLive = if (NobitexReference.serves(current.symbol)) try {
+                    nobitexFrame(current.symbol, current.interval, requestedSize, minimumSize)
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (failure: Exception) {
+                    nobitexFailure = (failure.message ?: "خطای نامشخص").take(110)
+                    null
+                } else null
+                if (nobitexLive != null) {
+                    fetched = nobitexLive.candles
+                    historyProvider = nobitexLive.provider
+                    staleDetail = "مرجع رمزارز نوبیتکس (${current.interval.label}): کندل بستهٔ یک صرافی؛ تیک همان صرافی لازم است"
+                } else try {
                     val book = binanceHistory.fetchCandles(current.symbol, current.interval,
                         desiredSize = requestedSize, minimumSize = minimumSize)
                     fetched = book.candles
                     historyProvider = book.provider
-                    staleDetail = "${book.provider} تاریخچه داد اما آخرین کندل آن باید با قیمت زنده تأیید شود"
+                    staleDetail = "${book.provider} تاریخچه داد اما آخرین کندل آن باید با قیمت زنده تأیید شود" +
+                        (nobitexFailure?.let { " · نوبیتکس پاسخ نداد: $it" } ?: "")
                 } catch (cancel: CancellationException) {
                     throw cancel
                 } catch (binanceFailure: Exception) {
-                    if (!current.hasKey || current.autoPaperTrading) throw DataFeedException(
-                        "فید ${current.symbol} از Binance Spot معتبر نبود: ${(binanceFailure.message ?: "بدون داده").take(100)}؛ ورود با تاریخچهٔ صرافی دیگر ممنوع است")
-                    fetched = client.fetchCandles(current.apiKey, current.symbol, current.interval,
+                    if (!current.hasKeyFor(current.symbol) || current.autoPaperTrading) throw DataFeedException(
+                        "فید ${current.symbol} از نوبیتکس و Binance Spot معتبر نبود: " +
+                            "${(nobitexFailure ?: (binanceFailure.message ?: "بدون داده")).take(100)}؛ ورود با تاریخچهٔ صرافی دیگر ممنوع است")
+                    fetched = client.fetchCandles(current.apiKeyFor(current.symbol), current.symbol, current.interval,
                         outputSize = requestedSize, minimumOutputSize = minimumSize)
                     if (fetched.size < minimumSize) throw DataFeedException(
                         "فید جایگزین ${current.symbol} فقط ${fetched.size} کندل واقعی داد")
@@ -315,7 +356,7 @@ class MarketRepository(
                 }
             } else if (current.interval == Interval.M5 && requestedSize <= HistoryPolicy.LIVE_FETCH_CANDLES &&
                 !MarketHours.closedFor(current.symbol)) {
-                val book = nonCryptoBundle.fetch(current.symbol, current.apiKey)
+                val book = nonCryptoBundle.fetch(current.symbol, current.apiKeyFor(current.symbol))
                 pinnedNonCrypto = book
                 fetched = book.m5
                 historyProvider = book.provider
@@ -366,11 +407,11 @@ class MarketRepository(
                     deepFailure
                 }
                 if (dukascopyFailure != null) {
-                    if (!current.hasKey) {
+                    if (!current.hasKeyFor(current.symbol)) {
                         throw DataFeedException("Yahoo و Dukascopy تاریخچهٔ معتبر ندادند: ${(dukascopyFailure.message ?: publicFailure.message ?: "خطای نامشخص").take(120)}")
                     }
                     try {
-                        fetched = client.fetchCandles(current.apiKey, current.symbol, current.interval,
+                        fetched = client.fetchCandles(current.apiKeyFor(current.symbol), current.symbol, current.interval,
                             outputSize = requestedSize, minimumOutputSize = minimumSize)
                         if (fetched.size < minimumSize) {
                             throw DataFeedException("Twelve Data فقط ${fetched.size} کندل داد؛ حداقل ${minimumSize} کندل واقعی لازم است")
@@ -389,9 +430,12 @@ class MarketRepository(
             if (fetched.isEmpty()) throw DataFeedException("تاریخچهٔ واقعی از هیچ منبعی دریافت نشد")
             if (!started || generation != session ||
                 settings.read().symbol != current.symbol || settings.read().interval != current.interval ||
-                (current.hasKey && settings.read().apiKey != current.apiKey) ||
-                settings.read().hasKey != current.hasKey || _state.value.symbol != current.symbol) return@withLock
-            val acceptedRevision = pinnedCrypto?.integrityRevision ?: pinnedNonCrypto?.integrityRevision ?: integrityAtStart
+                (current.hasKeyFor(current.symbol) &&
+                    settings.read().apiKeyFor(current.symbol) != current.apiKeyFor(current.symbol)) ||
+                settings.read().hasKeyFor(current.symbol) != current.hasKeyFor(current.symbol) ||
+                _state.value.symbol != current.symbol) return@withLock
+            val acceptedRevision = pinnedNobitex?.integrityRevision ?: pinnedCrypto?.integrityRevision
+                ?: pinnedNonCrypto?.integrityRevision ?: integrityAtStart
             SourceIntegrity.shared.blocker(current.symbol, acceptedRevision)?.let { reason ->
                 _state.value = _state.value.copy(signal = null, evaluationError = reason)
                 return@withLock
@@ -402,7 +446,7 @@ class MarketRepository(
                 timeframeSnapshot = emptyMap()
                 lastFrameRefreshAt = 0L
             }
-            (pinnedCrypto?.frames ?: pinnedNonCrypto?.frames)?.let { frames ->
+            (pinnedNobitex?.frames ?: pinnedCrypto?.frames ?: pinnedNonCrypto?.frames)?.let { frames ->
                 timeframeJob?.cancel(); timeframeJob = null
                 timeframeSnapshot = frames
                 timeframeAutoMode = current.autoPaperTrading
@@ -410,7 +454,7 @@ class MarketRepository(
             }
             val receivedAt = System.currentTimeMillis()
             val streamRecent = (!CryptoCatalog.isCrypto(current.symbol) ||
-                historyProvider == BinanceSpotClient.PROVIDER) &&
+                CryptoVenuePolicy.tickVenueAvailable(historyProvider)) &&
                 _state.value.feed.mode == FeedMode.LIVE &&
                 FeedLiveness.hasRecentReceipt(_state.value.feed, receivedAt)
             val historyCurrent = hasCurrentRestBar(fetched, current.interval, receivedAt)
@@ -482,7 +526,9 @@ class MarketRepository(
         pollJob?.cancel()
         pollJob = scope?.launch {
             while (isActive) {
-                delay(if (settings.read().hasKey) POLL_INTERVAL_MS else FREE_HISTORY_POLL_INTERVAL_MS)
+                val symbol = settings.read().symbol
+                delay(if (settings.read().hasKeyFor(symbol)) POLL_INTERVAL_MS
+                else FREE_HISTORY_POLL_INTERVAL_MS)
                 refresh()
             }
         }
@@ -500,13 +546,17 @@ class MarketRepository(
             while (isActive && started && generation == session && streamEpoch == epoch) {
                 val current = settings.read()
                 if (marketClosed()) { publishClosed(); delay(60_000L); continue }
-                if (CryptoCatalog.isCrypto(current.symbol) && _state.value.historyProvider != null &&
-                    _state.value.historyProvider != BinanceSpotClient.PROVIDER) {
-                    delay(10_000L) // read-only alternate candle source; Binance is not its tick stream
+                // Which live venue this market actually uses. Crypto's reference is Nobitex;
+                // a read-only radar venue (OKX/Gate/MEXC/Kraken) has no same-venue tick job.
+                val cryptoTickVenue = if (CryptoCatalog.isCrypto(current.symbol))
+                    CryptoVenuePolicy.venueOf(_state.value.historyProvider) else null
+                if (CryptoCatalog.isCrypto(current.symbol) && cryptoTickVenue != null &&
+                    cryptoTickVenue !in setOf(NobitexReference.VENUE, BinanceSpotClient.VENUE)) {
+                    delay(10_000L) // read-only alternate candle source; it is not the tick stream
                     continue
                 }
                 if (!hasInternet()) {
-                    publishDelayed(if (current.hasKey)
+                    publishDelayed(if (current.hasKeyFor(current.symbol))
                         "شبکه موقتاً در دسترس نیست؛ WebSocket بعد از بازگشت شبکه دوباره وصل می‌شود"
                     else "شبکه موقتاً در دسترس نیست؛ فید رایگان بعد از بازگشت شبکه دوباره وصل می‌شود")
                     delay(RECONNECT_WHEN_OFFLINE_MS); continue
@@ -519,8 +569,9 @@ class MarketRepository(
                     val collectBlock: suspend () -> Unit = {
                         spotFallback.streamQuotes(current.symbol).collect { tick ->
                             val active = settings.read()
-                            if (!stillCurrent(active) || active.hasKey != current.hasKey ||
-                                (current.hasKey && active.apiKey != current.apiKey)) return@collect
+                            if (!stillCurrent(active) || active.hasKeyFor(current.symbol) != current.hasKeyFor(current.symbol) ||
+                                (current.hasKeyFor(current.symbol) &&
+                                active.apiKeyFor(current.symbol) != current.apiKeyFor(current.symbol))) return@collect
                             if (!TradeQuotePolicy.accepts(tick)) return@collect
                             emitted = true
                             backoff = 2_000L
@@ -532,9 +583,11 @@ class MarketRepository(
                     return emitted
                 }
                 try {
-                    if (CryptoCatalog.isCrypto(current.symbol)) {
-                        // Selected-market display also streams Binance executions. An OPEN
-                        // trade has its own higher-priority ordered ID+REST recovery worker.
+                    if (CryptoCatalog.isCrypto(current.symbol) &&
+                        cryptoTickVenue == BinanceSpotClient.VENUE) {
+                        // Legacy/fallback venue: selected-market display also streams Binance
+                        // executions. An OPEN trade has its own higher-priority ordered ID+REST
+                        // recovery worker.
                         val events = Channel<BinanceAggregateStream.Event>(2_048)
                         val socket = BinanceAggregateStream().open(current.symbol) { event ->
                             if (!events.trySend(event).isSuccess) events.trySend(BinanceAggregateStream.Event.Invalid)
@@ -562,27 +615,93 @@ class MarketRepository(
                         // On blocked WebSocket, use same-venue REST with explicit timestamps.
                         // Not a different exchange and never a synthetic per-second tick.
                         collectSpotFallback("${BinanceSpotClient.PROVIDER} aggTrade", 10_000L)
-                    } else if (current.hasKey) {
-                        // Public, keyless live quote is tried first. Twelve Data WebSocket is the
-                        // last live fallback, matching the history provider policy.
-                        val publicWorked = try {
-                            collectSpotFallback("فید زندهٔ عمومی (Swissquote/Gold-API)", TWELVE_WS_FALLBACK_WINDOW_MS)
-                        } catch (_: Exception) {
-                            false
+                    } else if (CryptoCatalog.isCrypto(current.symbol)) {
+                        // REFERENCE venue (Nobitex). The public executed-trade socket is primary;
+                        // the same-venue REST page covers a blocked/silent socket. An OPEN
+                        // position has its own higher-priority ordered recovery worker
+                        // (OpenTradeTickMonitor), so this stream never settles crypto by candle.
+                        val events = Channel<NobitexPublicTradeStream.Event>(2_048)
+                        var socket: java.io.Closeable? = null
+                        try {
+                            socket = NobitexPublicTradeStream().open(current.symbol) { event ->
+                                if (!events.trySend(event).isSuccess)
+                                    events.trySend(NobitexPublicTradeStream.Event.Invalid)
+                            }
+                            withTimeoutOrNull(24L * 60 * 60_000) {
+                                while (isActive && stillCurrent(settings.read())) {
+                                    when (val event = withTimeoutOrNull(30_000L) { events.receive() }) {
+                                        is NobitexPublicTradeStream.Event.Publication -> {
+                                            val trade = try {
+                                                NobitexStreamTrade.parse(event.data)
+                                            } catch (cancel: CancellationException) {
+                                                throw cancel
+                                            } catch (_: Exception) {
+                                                null
+                                            }
+                                            val tick = trade?.tick
+                                            if (tick != null && TradeQuotePolicy.accepts(tick)) {
+                                                backoff = 2_000L
+                                                onTick(tick.copy(
+                                                    provider = NobitexReference.TICK_PROVIDER,
+                                                    sourceConfirmations = 1,
+                                                    sourceNote = "معاملهٔ اجراشدهٔ نوبیتکس",
+                                                ), NobitexReference.TICK_PROVIDER)
+                                            }
+                                        }
+                                        is NobitexPublicTradeStream.Event.Subscribed,
+                                        NobitexPublicTradeStream.Event.Subscribing -> Unit
+                                        NobitexPublicTradeStream.Event.Unsubscribed,
+                                        NobitexPublicTradeStream.Event.Invalid, null -> break
+                                    }
+                                }
+                            }
+                        } finally {
+                            runCatching { socket?.close() }
+                            events.close()
                         }
-                        if (!publicWorked && started && generation == session && streamEpoch == epoch) {
-                            publishStreamUnavailable("فید زندهٔ عمومی در دسترس نبود؛ آخرین fallback Twelve Data بررسی می‌شود")
+                        if (stillCurrent(settings.read())) {
+                            // Same venue only; the provider label is kept so the venue gate can
+                            // verify history and tick belong together.
+                            collectSpotFallback("${NobitexReference.TICK_PROVIDER} · REST", 10_000L)
+                            if (started && generation == session && streamEpoch == epoch)
+                                publishStreamUnavailable("جریان معاملات نوبیتکس قطع شد — تلاش مجدد")
+                        }
+                    } else if (current.hasKeyFor(current.symbol)) {
+                        // Twelve Data is the reference publisher for spot GOLD: its WebSocket is
+                        // tried first and the keyless public feeds are the fallback. Every other
+                        // symbol keeps the public-first order.
+                        suspend fun streamTwelve(label: String): Boolean {
+                            var emitted = false
                             try {
-                                client.streamPrice(current.apiKey, current.symbol).collect { tick ->
+                                client.streamPrice(current.apiKeyFor(current.symbol), current.symbol).collect { tick ->
                                     // Ignore an already queued tick when the user changed markets/intervals.
                                     val active = settings.read()
-                                    if (!stillCurrent(active) || active.apiKey != current.apiKey) return@collect
+                                    if (!stillCurrent(active) || active.apiKeyFor(current.symbol) != current.apiKeyFor(current.symbol)) return@collect
+                                    if (!TradeQuotePolicy.accepts(tick)) return@collect
+                                    emitted = true
                                     backoff = 2_000L
-                                    onTick(tick, "Twelve Data WebSocket · آخرین fallback")
+                                    onTick(tick, label)
                                 }
                             } catch (e: DataFeedException) {
-                                publishStreamUnavailable(e.message ?: "WebSocket آخرین fallback Twelve Data در دسترس نیست")
+                                if (stillCurrent(settings.read()))
+                                    publishStreamUnavailable(e.message ?: "WebSocket Twelve Data در دسترس نیست")
                             }
+                            return emitted
+                        }
+                        if (SourceRouting.twelveDataFirst(current.symbol)) {
+                            val twelveWorked = streamTwelve("Twelve Data WebSocket · مرجع طلا")
+                            if (!twelveWorked && started && generation == session && streamEpoch == epoch) {
+                                publishStreamUnavailable("Twelve Data پاسخ نداد؛ فیدهای عمومی طلا بررسی می‌شوند")
+                                collectSpotFallback("فید زندهٔ عمومی (Swissquote/Gold-API)")
+                            }
+                        } else {
+                            val publicWorked = try {
+                                collectSpotFallback("فید زندهٔ عمومی (Swissquote/Gold-API)", TWELVE_WS_FALLBACK_WINDOW_MS)
+                            } catch (_: Exception) {
+                                false
+                            }
+                            if (!publicWorked && started && generation == session && streamEpoch == epoch)
+                                streamTwelve("Twelve Data WebSocket · آخرین fallback")
                         }
                     } else {
                         collectSpotFallback("فید رایگان خودکار (Swissquote/Gold-API)")
@@ -594,10 +713,10 @@ class MarketRepository(
                 } catch (e: DataFeedException) {
                     if (started && generation == session && streamEpoch == epoch)
                         publishStreamUnavailable(e.message
-                            ?: (if (current.hasKey) "قطع آخرین fallback زنده" else "قطع جریان فید رایگان"))
+                            ?: (if (current.hasKeyFor(current.symbol)) "قطع آخرین fallback زنده" else "قطع جریان فید رایگان"))
                 } catch (_: Exception) {
                     if (started && generation == session && streamEpoch == epoch)
-                        publishStreamUnavailable(if (current.hasKey)
+                        publishStreamUnavailable(if (current.hasKeyFor(current.symbol))
                             "فید عمومی/آخرین fallback زنده قطع شد؛ اینترنت/دسترسی را بررسی کنید"
                         else "اتصال فید رایگان قطع شد؛ اینترنت را بررسی کنید")
                 }
@@ -629,7 +748,7 @@ class MarketRepository(
                 if (_state.value.feed.mode == FeedMode.MARKET_CLOSED) {
                     _state.value = _state.value.copy(feed = FeedStatus(
                         FeedMode.CONNECTING, "برنامهٔ معمول بازگشایی شد؛ منتظر تیک/کندل معتبر هستیم",
-                        provider = if (settings.read().hasKey) "Yahoo/Dukascopy عمومی · Twelve Data فقط fallback + فید زنده" else "Yahoo/Dukascopy عمومی + Swissquote/Gold-API"),
+                        provider = marketProviderLabel(settings.read().symbol, settings.read().hasKeyFor(settings.read().symbol))),
                         signal = null)
                     startStream()
                     refreshNow() // keyed Twelve or keyless public-history backfill
@@ -698,10 +817,11 @@ class MarketRepository(
         // or settle a paper position from a re-timestamped close.
         if (!TradeQuotePolicy.accepts(tick)) return
         val current = settings.read()
-        // A Binance trade cannot mutate Gate/OKX historical bars or become a
-        // same-venue quote for their read-only radar. Open-position replay is separate.
+        // A tick from one exchange cannot mutate another venue's historical bars or become a
+        // same-venue quote. Nobitex reference and legacy Binance positions are each judged
+        // against the venue that produced the candles. Open-position replay is separate.
         if (CryptoCatalog.isCrypto(current.symbol) &&
-            _state.value.historyProvider != BinanceSpotClient.PROVIDER) return
+            !CryptoVenuePolicy.sameVenue(_state.value.historyProvider, provider)) return
         val now = System.currentTimeMillis()
         val price = tick.price
         val at = tick.at
@@ -866,8 +986,10 @@ class MarketRepository(
         }
         val frameNow = System.currentTimeMillis()
         val baseProvider = _state.value.historyProvider
-        val sameVenueCrypto = CryptoCatalog.isCrypto(current.symbol) &&
-            baseProvider == BinanceSpotClient.PROVIDER
+        val cryptoBookVenue = if (CryptoCatalog.isCrypto(current.symbol))
+            CryptoVenuePolicy.venueOf(baseProvider) else null
+        val nobitexReferenceFrames = cryptoBookVenue == NobitexReference.VENUE
+        val sameVenueCrypto = cryptoBookVenue == BinanceSpotClient.VENUE
         val pinnedSource = if (CryptoCatalog.isCrypto(current.symbol)) null
             else SourceRouting.fromProvider(baseProvider)
         // Gate/OKX/Kraken read-only bundles are refreshed with their BASE candles.
@@ -878,8 +1000,10 @@ class MarketRepository(
             lastFrameRefreshAt = frameNow
             val session = generation
             timeframeJob = scope?.launch(Dispatchers.IO) {
-                val fetched = timeframeFeed.fetch(current.symbol, current.interval, bars, current.apiKey,
-                    requireBinanceCrypto = sameVenueCrypto, pinnedSource = pinnedSource)
+                val fetched = timeframeFeed.fetch(current.symbol, current.interval, bars, current.apiKeyFor(current.symbol),
+                    requireBinanceCrypto = sameVenueCrypto,
+                    requireNobitexCrypto = nobitexReferenceFrames,
+                    pinnedSource = pinnedSource)
                 if (started && generation == session && settings.read().symbol == current.symbol &&
                     settings.read().interval == current.interval &&
                     settings.read().autoPaperTrading == current.autoPaperTrading &&
@@ -923,6 +1047,37 @@ class MarketRepository(
             bars.filter { it.closed }.lastOrNull()?.let { bar ->
                 journal.settle(bar, current.symbol, bar.time + current.interval.millis)
             }
+    }
+
+    /**
+     * One Nobitex frame for deep history / non-M5 charts. The same venue must serve the whole
+     * window; a partial or stale frame fails instead of being padded from another exchange.
+     */
+    private suspend fun nobitexFrame(
+        symbol: String,
+        interval: Interval,
+        desiredSize: Int,
+        minimumSize: Int,
+    ): PublicCandleHistoryClient.Result {
+        val result = nobitexBook.fetchFrame(symbol, interval, desiredSize, minimumSize)
+        if (desiredSize <= HistoryPolicy.LIVE_FETCH_CANDLES &&
+            !CandleSourceHealth.ready(result.candles, interval, System.currentTimeMillis()))
+            throw DataFeedException("نوبیتکس کندل بستهٔ تازه/کامل برای ${interval.label} ندارد")
+        return result
+    }
+
+    /**
+     * Honest pre-connection label: crypto is read from Nobitex; gold is read from Twelve Data
+     * first when the key exists; everything else keeps the public Yahoo/Dukascopy pipeline.
+     */
+    private fun marketProviderLabel(symbol: String, hasKey: Boolean): String = when {
+        CryptoCatalog.isCrypto(symbol) && NobitexReference.serves(symbol) ->
+            "نوبیتکس · مرجع رمزارز (کندل + معاملهٔ همان صرافی)"
+        CryptoCatalog.isCrypto(symbol) -> "صرافی اختصاصی رمزارز · نوبیتکس این جفت را ندارد"
+        hasKey && SourceRouting.twelveDataFirst(symbol) ->
+            "Twelve Data · مرجع طلا + جایگزین‌های عمومی"
+        hasKey -> "Yahoo/Dukascopy عمومی · Twelve Data فقط fallback + فید زنده"
+        else -> "Yahoo/Dukascopy عمومی + Swissquote/Gold-API"
     }
 
     private fun currentPeriodStart(interval: Interval): Long {

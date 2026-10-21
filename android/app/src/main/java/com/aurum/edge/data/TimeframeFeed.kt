@@ -19,6 +19,7 @@ internal class TimeframeFeed(
     private val dukascopy: DukascopyHistoryClient,
     private val twelve: TwelveDataClient,
     private val binance: BinanceSpotClient = BinanceSpotClient(),
+    private val nobitex: NobitexHistoryClient = NobitexHistoryClient(),
 ) {
     suspend fun fetch(
         symbol: String,
@@ -27,6 +28,7 @@ internal class TimeframeFeed(
         apiKey: String,
         now: Long = System.currentTimeMillis(),
         requireBinanceCrypto: Boolean = false,
+        requireNobitexCrypto: Boolean = false,
         pinnedSource: SourceRouting.HistorySource? = null,
     ): Map<Interval, List<Candle>> {
         val m5Closed = baseBars
@@ -39,6 +41,23 @@ internal class TimeframeFeed(
         }
         val frames = linkedMapOf<Interval, List<Candle>>(Interval.M5 to m5Closed)
 
+        // Nobitex is the crypto reference: its M15/H1 frames are fetched independently from
+        // the same venue as the M5 base. Its absence is reported, never padded from Binance.
+        if (requireNobitexCrypto) {
+            for (frame in listOf(Interval.M15, Interval.H1)) {
+                val bars = try {
+                    healthy(nobitex.fetchCandles(symbol, frame,
+                        desiredSize = HistoryPolicy.fetchSize(frame),
+                        minimumSize = HistoryPolicy.minSize(frame)).candles, frame)
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (_: Exception) {
+                    null
+                }
+                if (bars != null) frames[frame] = bars
+            }
+            return frames
+        }
         if (requireBinanceCrypto) {
             for (frame in listOf(Interval.M15, Interval.H1)) {
                 val bars = try {

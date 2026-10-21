@@ -596,7 +596,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setAutoPaperTrading(enabled: Boolean) {
         container.settingsStore.update { it.copy(autoPaperTrading = enabled) }
-        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ فقط با موتور چهارلایه، هفت بازهٔ واقعی و قفل‌های ریسک ثبت می‌شود"
+        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ هر نماد فقط با موتور خودش (ALS-5 طلا، ALS-5S نقره، BTC-ARES بیت‌کوین، چهارلایهٔ V1، فشردگی ← انفجار)، کندل‌های واقعی و قفل‌های ریسک ثبت می‌شود"
             else "معاملهٔ خودکار کاغذی خاموش شد"
     }
 
@@ -624,18 +624,41 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         freshPaperQuote(current)?.let { return it }
         if (!com.aurum.edge.data.CryptoVenuePolicy.compatible(current.symbol,
                 current.historyProvider, current.feed.provider))
-            return "ورود کریپتو مسدود: کندل تحلیل و تیک ورود باید هر دو از بازار Binance Spot باشند"
+            return "ورود کریپتو مسدود: کندل تحلیل و تیک ورود باید هر دو از یک صرافی باشند " +
+                "(مرجع: نوبیتکس؛ پوزیشن قدیمی Binance فقط با تیک Binance)"
         if (com.aurum.edge.core.MarketHours.closedFor(current.symbol)) return "بازار بسته است"
         val candidate = current.signal
         if (com.aurum.edge.core.AssetClass.of(current.symbol) == com.aurum.edge.core.AssetClass.CRYPTO) {
             val quote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { price ->
                 PriceTick(price, at, current.bid, current.ask)
             } }
-            com.aurum.edge.core.CryptoCompressionPolicy.quoteBlocker(
-                candidate ?: return "سیگنال رمزارز موجود نیست", quote)?.let { return it }
+            if (com.aurum.edge.core.BtcAresPolicy.appliesTo(current.symbol)) {
+                val btcSignal = candidate ?: return "سیگنال BTC-ARES موجود نیست"
+                com.aurum.edge.core.BtcAresPolicy.quoteBlocker(
+                    btcSignal, quote, btcSignal.btcAres?.atr)?.let { return it }
+            } else {
+                com.aurum.edge.core.CryptoCompressionPolicy.quoteBlocker(
+                    candidate ?: return "سیگنال رمزارز موجود نیست", quote)?.let { return it }
+            }
+        }
+        if (com.aurum.edge.core.XagAresPolicy.appliesTo(current.symbol)) {
+            val silverSignal = candidate ?: return "سیگنال ALS-5S موجود نیست"
+            val quote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { price ->
+                PriceTick(price, at, current.bid, current.ask)
+            } }
+            com.aurum.edge.core.XagAresPolicy.quoteBlocker(
+                silverSignal, quote, silverSignal.als5s?.atr)?.let { return it }
+        }
+        if (com.aurum.edge.core.EurAresPolicy.appliesTo(current.symbol)) {
+            val eurSignal = candidate ?: return "سیگنال EUR-ARES موجود نیست"
+            val quote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { price ->
+                PriceTick(price, at, current.bid, current.ask)
+            } }
+            com.aurum.edge.core.EurAresPolicy.quoteBlocker(
+                eurSignal, quote, eurSignal.eurAres?.atr)?.let { return it }
         }
         if (candidate?.isActionable != true || !TechnicalEvidence.confirmed(candidate))
-            return candidate?.blockers?.joinToString("، ") ?: "سیگنال چهارلایهٔ معتبر وجود ندارد"
+            return candidate?.blockers?.joinToString("، ") ?: "سیگنال معتبر موتور صاحب این نماد وجود ندارد"
         WatchCatalog.find(current.symbol)?.let { watched ->
             val selected = watchSettings.value[current.symbol]
             if (selected != null && SourceComparison.verify(watched, selected.enabledSources,
@@ -744,7 +767,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                         com.aurum.edge.core.PriceTick(quote, at, current.bid, current.ask)
                     } },
                     cryptoVenue = if (com.aurum.edge.data.CryptoCatalog.isCrypto(current.symbol))
-                        com.aurum.edge.data.BinanceSpotClient.VENUE else "NOBITEX",
+                        com.aurum.edge.data.CryptoVenuePolicy.entryVenue(current.historyProvider)
+                    else "NOBITEX",
                 )
                 _stats.value = container.journalStore.stats()
                 // Linking is metadata only; a damaged opportunity file must not erase a saved trade.
@@ -827,6 +851,34 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun setWatchPreferred(symbolId: String, sourceId: String) = container.watchSettings.setPreferred(symbolId, sourceId)
+
+    /** True when this symbol has its own Twelve Data key instead of the global one. */
+    fun hasDedicatedKey(symbol: String): Boolean =
+        container.settingsStore.symbolKey(symbol).isNotBlank()
+
+    /**
+     * Save or remove ONE dedicated Twelve Data key for a symbol. The free plan meters each key
+     * separately, so a per-symbol key keeps this instrument inside its own 8/minute quota.
+     * The key is never echoed back: only "saved / removed" is reported.
+     */
+    fun saveDedicatedKey(symbol: String, key: String) {
+        if (key.isNotBlank() && key.trim().any { it.isWhitespace() }) {
+            _toast.value = "کلید نباید فاصله یا خط جدید داشته باشد؛ چیزی ذخیره نشد"
+            return
+        }
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) { container.settingsStore.saveSymbolKey(symbol, key) }
+            if (!saved) {
+                _toast.value = "کلید اختصاصی ${symbol} ذخیره نشد؛ فاصله/خط جدید یا حافظهٔ دستگاه را بررسی کنید"
+                return@launch
+            }
+            container.market.restart()
+            container.pairScanner.refreshNow(minIntervalMs = 0L)
+            _toast.value = if (key.isBlank())
+                "کلید اختصاصی ${symbol} حذف شد؛ کلید عمومی (اگر باشد) استفاده می‌شود"
+            else "کلید اختصاصی ${symbol} روی همین نصب ذخیره شد"
+        }
+    }
 
     fun watchKeyOverride(symbolId: String): String = container.watchSettings.keyOverride(symbolId)
 

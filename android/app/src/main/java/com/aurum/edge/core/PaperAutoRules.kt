@@ -1,7 +1,6 @@
 package com.aurum.edge.core
 
 import com.aurum.edge.data.MarketState
-import com.aurum.edge.data.BinanceSpotClient
 import kotlin.math.abs
 
 /** Side-effect-free guard shared by service and unit tests. NEVER submits a broker order.
@@ -21,7 +20,50 @@ object PaperAutoRules {
             if (goldSignal.als5Opportunity?.matches(goldSignal) != true)
                 return "برای طلا فقط BUY/SELL تأییدشدهٔ ALS-5 مجاز است"
         }
-        if (AssetClass.of(market.symbol) == AssetClass.CRYPTO) {
+        if (XagAresPolicy.appliesTo(market.symbol)) {
+            // Silver has one owner: ALS-5S. Gold's record and V1's candles cannot open it.
+            val signal = market.signal ?: return "سیگنال ALS-5S موجود نیست"
+            if (signal.als5s?.matches(signal) != true)
+                return "فقط ستاپ READY موتور ALS-5S (با سطح/حد ضرر یکسان) برای نقره مجاز است"
+            val tick = market.lastTradeAt?.let { time -> market.lastTradePrice?.let { price ->
+                PriceTick(price, time, market.bid, market.ask)
+            } }
+            XagAresPolicy.quoteBlocker(signal, tick, signal.als5s?.atr, now)?.let { return it }
+            if (market.feed.mode != FeedMode.LIVE || market.lastTradeAt == null ||
+                market.lastTradeAt !in (now - 45_000L)..(now + 10_000L))
+                return "تیک تازه و دوطرفهٔ نقره برای ورود موجود نیست"
+        } else if (EurAresPolicy.appliesTo(market.symbol)) {
+            // EUR/USD has one owner: EUR-ARES. Gold/silver/BTC records cannot open it.
+            val signal = market.signal ?: return "سیگنال EUR-ARES موجود نیست"
+            if (signal.eurAres?.matches(signal) != true)
+                return "فقط ستاپ READY موتور EUR-ARES (با سطح/حد ضرر یکسان) برای یورو/دلار مجاز است"
+            val tick = market.lastTradeAt?.let { time -> market.lastTradePrice?.let { price ->
+                PriceTick(price, time, market.bid, market.ask)
+            } }
+            EurAresPolicy.quoteBlocker(signal, tick, signal.eurAres?.atr, now)?.let { return it }
+            if (market.feed.mode != FeedMode.LIVE || market.lastTradeAt == null ||
+                market.lastTradeAt !in (now - 45_000L)..(now + 10_000L))
+                return "تیک تازه و دوطرفهٔ یورو/دلار برای ورود موجود نیست"
+        } else if (BtcAresPolicy.appliesTo(market.symbol)) {
+            // BTC has its own model: it is not allowed to borrow the compression evidence, and the
+            // compression engine is not allowed to act on BTC.
+            val signal = market.signal ?: return "سیگنال BTC-ARES موجود نیست"
+            if (signal.btcAres?.matches(signal) != true)
+                return "فقط ستاپ READY موتور BTC-ARES (با سطح/حد ضرر یکسان) مجاز است"
+            val tick = market.lastTradeAt?.let { time -> market.lastTradePrice?.let { price ->
+                PriceTick(price, time, market.bid, market.ask)
+            } }
+            BtcAresPolicy.quoteBlocker(signal, tick, signal.btcAres?.atr, now)?.let { return it }
+            if (!com.aurum.edge.data.CryptoVenuePolicy.compatible(
+                    market.symbol, market.historyProvider, market.feed.provider))
+                return "تاریخچهٔ هم‌صرافی منبع اختصاصی برای ورود تأیید نشده است"
+            val tradeAt = market.lastTradeAt
+            val tradePrice = market.lastTradePrice
+            if (market.feed.mode != FeedMode.LIVE || tradeAt == null ||
+                tradeAt !in (now - 45_000L)..(now + 10_000L) ||
+                tradePrice == null || !tradePrice.isFinite() || tradePrice <= 0.0)
+                return "معاملهٔ واقعی تازه و زمان‌دار همان صرافی (مرجع: نوبیتکس) برای ورود موجود نیست"
+        } else if (AssetClass.of(market.symbol) == AssetClass.CRYPTO) {
             val signal = market.signal ?: return "سیگنال فشردگی/انفجار موجود نیست"
             if (signal.cryptoBreakout?.matches(signal) != true ||
                 signal.ichimokuEntry?.matches(signal) != true)
@@ -38,7 +80,7 @@ object PaperAutoRules {
             if (market.feed.mode != FeedMode.LIVE || tradeAt == null ||
                 tradeAt !in (now - 45_000L)..(now + 10_000L) ||
                 tradePrice == null || !tradePrice.isFinite() || tradePrice <= 0.0)
-                return "معاملهٔ واقعی تازه و زمان‌دار Binance Spot برای ورود موجود نیست"
+                return "معاملهٔ واقعی تازه و زمان‌دار همان صرافی (مرجع: نوبیتکس) برای ورود موجود نیست"
         }
         if (market.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING))
             return "فید معتبر در دسترس نیست (وضعیت فید: ${market.feed.mode.label})"

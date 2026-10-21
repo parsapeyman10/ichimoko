@@ -142,6 +142,24 @@ class UpdaterChannelOutcomeTest {
             assertTrue(repo.state.value.message.contains("نسخهٔ جدیدتری"))
         }
 
+    @Test fun `an install on the newest published build is told which version that is`() = runBlocking {
+        val repo = repository(adCode = BuildConfig.VERSION_CODE)
+        repo.checkForUpdate(force = true)
+        val state = repo.state.value
+        assertNull(state.available)
+        assertTrue("the report must name the newest published code",
+            state.diagnostics.contains("(${BuildConfig.VERSION_CODE})"))
+        assertTrue(state.diagnostics.contains("جدیدترین"))
+        assertTrue("the message must repeat it, not only the diagnostics line",
+            state.message.contains("جدیدترین نسخهٔ منتشرشده"))
+    }
+
+    @Test fun `the published signer travels with a discovered release`() = runBlocking {
+        val repo = repository()
+        repo.checkForUpdate(force = true)
+        assertEquals(BuildConfig.UPDATER_CERT_SHA256, repo.state.value.available!!.expectedSignerSha256)
+    }
+
     @Test fun `only the newest release sidecar is fetched`() = runBlocking {
         val repo = repository()
         repo.checkForUpdate(force = true)

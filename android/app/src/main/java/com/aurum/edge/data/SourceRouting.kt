@@ -8,6 +8,12 @@ import com.aurum.edge.core.V1Universe
  * if that source does not answer, the next free source takes over and becomes
  * the sticky primary (see SourcePromotion). M5/M15/H1 are each fetched
  * independently — higher timeframes are never resampled from M5.
+ *
+ * Two explicit reference rules:
+ *  - crypto: Nobitex is the reference venue (candles + executed-trade tick). The
+ *    per-symbol exchange in [DedicatedSource.cryptoVenue] stays a read-only fallback.
+ *  - XAU/USD: when a Twelve Data key exists, Twelve Data is the reference publisher for
+ *    gold; Dukascopy and the keyless public feeds are the fallback.
  */
 internal object SourceRouting {
     enum class DedicatedSource(
@@ -62,8 +68,16 @@ internal object SourceRouting {
     fun dedicatedFor(symbol: String): DedicatedSource? =
         bySymbol[V1Universe.normalize(symbol)]
 
+    /** Read-only fallback exchange for crypto; Nobitex is tried first (see [NobitexReference]). */
     fun cryptoVenueFor(symbol: String): CryptoRadarCandleClient.Venue? =
         dedicatedFor(symbol)?.cryptoVenue
+
+    /** True when the symbol is served by the Nobitex reference venue. */
+    fun usesNobitexReference(symbol: String): Boolean = NobitexReference.serves(symbol)
+
+    /** Twelve Data is the reference publisher for spot gold when a read-only key exists. */
+    fun twelveDataFirst(symbol: String): Boolean =
+        V1Universe.normalize(symbol) == "XAU/USD"
 
     fun historySources(symbol: String, keyed: Boolean = false): List<HistorySource> {
         val dedicated = dedicatedFor(symbol) ?: return emptyList()
@@ -90,6 +104,11 @@ internal object SourceRouting {
             if (!dedicated.usesDukascopy && dukascopyServes) add(HistorySource.DUKASCOPY)
             if (keyed) add(HistorySource.TWELVE_DATA)
         }
+        // Gold's reference publisher is Twelve Data when the key is configured; its keyless
+        // public publisher (Dukascopy) remains the fallback instead of the other way round.
+        if (keyed && twelveDataFirst(symbol))
+            return listOf(HistorySource.TWELVE_DATA, dedicated) +
+                fallbacks.filter { it != HistorySource.TWELVE_DATA }
         return listOf(dedicated) + fallbacks
     }
 
@@ -119,11 +138,28 @@ internal object SourceRouting {
     fun historyPlan(symbol: String, keyed: Boolean = false): String {
         val dedicated = dedicatedFor(symbol)
             ?: return "منبع تاریخچهٔ دقیق M5 تعریف نشده؛ بررسی فقط خطا نشان می‌دهد"
+        if (CryptoCatalog.isCrypto(symbol)) return cryptoPlan(symbol, dedicated)
         val fallbacks = historyCandidates(symbol, keyed).drop(1)
             .joinToString(" ← ") { it.providerLabel }
         val transports = if (dedicated.historySource?.usesDukascopy == true)
             " · دو مسیر انتقال همان ناشر (نمودار JSON + آرشیو bi5)" else ""
-        return "منبع اصلی: ${dedicated.title}$transports · M5/M15/H1 مستقل" +
+        val primary = if (keyed && twelveDataFirst(symbol))
+            "${HistorySource.TWELVE_DATA.providerLabel} (مرجع طلا · کلید خواندنی) · جایگزین: ${dedicated.title}"
+        else dedicated.title
+        return "منبع اصلی: $primary$transports · M5/M15/H1 مستقل" +
             if (fallbacks.isBlank()) "" else " · جایگزین هنگام بی‌پاسخی: $fallbacks (پاسخ‌گو منبع اصلی می‌شود)"
+    }
+
+    /**
+     * Crypto reference plan. Nobitex is the primary venue for candles AND executed trades;
+     * the per-symbol exchange is only a read-only fallback and can never authorize an entry
+     * that would be settled on Nobitex.
+     */
+    private fun cryptoPlan(symbol: String, dedicated: DedicatedSource): String {
+        val readOnly = dedicated.cryptoVenue?.provider
+        return if (NobitexReference.serves(symbol))
+            "منبع اصلی: نوبیتکس (مرجع رمزارز) · M5/M15/H1 مستقل از یک صرافی و تیک معاملهٔ همان صرافی" +
+                (if (readOnly == null) "" else " · جایگزین فقط‌خواندنی هنگام بی‌پاسخی: $readOnly")
+        else "منبع اصلی: ${dedicated.title} · نوبیتکس این جفت را سرو نمی‌کند؛ ورود فقط هم‌صرافی مجاز است"
     }
 }

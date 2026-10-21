@@ -29,6 +29,7 @@ class OpenTradeTickMonitor(
     private val spot: SpotFallbackClient = SpotFallbackClient(),
     private val settings: SettingsStore? = null,
     private val binance: BinanceSpotClient = BinanceSpotClient(),
+    private val nobitex: NobitexHistoryClient = NobitexHistoryClient(),
 ) {
     private val archive = NobitexTickArchiveClient()
     enum class Feed { CONNECTING, STREAM, STREAM_RECOVERABLE, ARCHIVE, RECOVERING, REST_FALLBACK, BINANCE_STREAM }
@@ -91,33 +92,50 @@ class OpenTradeTickMonitor(
         journal.trades.value.any { it.isOpen && it.symbol == symbol &&
             it.openedAt == openedAt && it.cryptoVenue == BinanceSpotClient.VENUE }
 
+    private fun nobitexPosition(symbol: String, openedAt: Long): Boolean =
+        journal.trades.value.any { it.isOpen && it.symbol == symbol &&
+            it.openedAt == openedAt && it.cryptoVenue == NobitexReference.VENUE }
+
     /** Only NEW compression positions. This is independent of the tick stream and
      * serialised per symbol across foreground UI and background service. A failed
      * candle request does not make a tick, an exit, or a new stop.
      */
     suspend fun syncCryptoClosedBars(symbol: String, openedAt: Long) {
-        if (!binancePosition(symbol, openedAt)) return
+        val venue = when {
+            binancePosition(symbol, openedAt) -> BinanceSpotClient.VENUE
+            nobitexPosition(symbol, openedAt) -> NobitexReference.VENUE
+            else -> return
+        }
         val session = session(symbol, openedAt)
         session.strategyMutex.withLock {
             val trade = journal.trades.value.singleOrNull { it.isOpen && it.symbol == symbol &&
-                it.openedAt == openedAt && it.cryptoVenue == BinanceSpotClient.VENUE &&
+                it.openedAt == openedAt && it.cryptoVenue == venue &&
                 it.cryptoEntryAtr != null } ?: return@withLock
             val now = System.currentTimeMillis()
             if (now - session.lastStrategyCheckAt in 0 until 60_000L) return@withLock
             session.lastStrategyCheckAt = now
-            val m5 = binance.fetchCandles(symbol, Interval.M5, 321, 320)
-            if (m5.provider != BinanceSpotClient.PROVIDER) return@withLock
+            // The closed-bar exit monitor must read the SAME venue the position was opened on;
+            // a Nobitex position is never trailed with Binance bars (and vice versa).
+            fun rightVenue(result: PublicCandleHistoryClient.Result): Boolean =
+                if (venue == NobitexReference.VENUE) NobitexReference.isHistoryProvider(result.provider)
+                else result.provider == BinanceSpotClient.PROVIDER
+            val m5 = if (venue == NobitexReference.VENUE)
+                nobitex.fetchCandles(symbol, Interval.M5, 321, 320)
+            else binance.fetchCandles(symbol, Interval.M5, 321, 320)
+            if (!rightVenue(m5)) return@withLock
             if (m5.candles.lastOrNull()?.time?.let { it + Interval.M5.millis <=
                     (trade.cryptoLastClosedBarAt ?: 0L) } != false) return@withLock
             // M15 is a separate structural exit confirmation, never an entry timeframe.
             // If it is unavailable, independent M5 protection still works.
             val m15 = try {
-                binance.fetchCandles(symbol, Interval.M15, 321, 320)
-                    .takeIf { it.provider == BinanceSpotClient.PROVIDER }?.candles.orEmpty()
+                val bars = if (venue == NobitexReference.VENUE)
+                    nobitex.fetchCandles(symbol, Interval.M15, 321, 320)
+                else binance.fetchCandles(symbol, Interval.M15, 321, 320)
+                bars.takeIf { rightVenue(it) }?.candles.orEmpty()
             } catch (cancel: CancellationException) { throw cancel }
             catch (_: Exception) { emptyList() }
             if (stillOpen(symbol, session))
-                journal.applyCryptoClosedBars(symbol, openedAt, BinanceSpotClient.VENUE,
+                journal.applyCryptoClosedBars(symbol, openedAt, venue,
                     m5.candles, m15, System.currentTimeMillis())
         }
     }

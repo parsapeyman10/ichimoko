@@ -92,6 +92,21 @@ fun SignalScreen(viewModel: AurumViewModel, onChartSymbol: (String) -> Unit) {
             status = scanState.statuses.firstOrNull { it.symbol == "XAU/USD" },
             sweeping = scanState.sweeping,
         )
+        // BTC has its own registry entry and its own records: no shared card, no shared score.
+        BtcAresEnginesCard(
+            status = scanState.statuses.firstOrNull { it.symbol == "BTC/USDT" },
+            sweeping = scanState.sweeping,
+        )
+        // Silver likewise: ALS-5S shows its own engines, costs and no-trade reasons.
+        SilverAresEnginesCard(
+            status = scanState.statuses.firstOrNull { it.symbol == "XAG/USD" },
+            sweeping = scanState.sweeping,
+        )
+        // EUR/USD likewise: EUR-ARES reports its own engines, pips, session clocks and refusals.
+        EurAresEnginesCard(
+            status = scanState.statuses.firstOrNull { it.symbol == "EUR/USD" },
+            sweeping = scanState.sweeping,
+        )
 
         SectionCard("دلیل بررسی") {
             if (decisionLog.isEmpty()) Text("هنوز بررسی ثبت نشده است")
@@ -194,7 +209,7 @@ private fun MarketPlaybookCard(decision: PlaybookDecision?, symbol: String) {
     }
     SectionCard(
         title = "متد مناسب این بازار · $symbol",
-        subtitle = "خوانش زمینه‌ای بازار؛ مجوز ورود فقط از موتور چهارلایه و قفل‌های ریسک/بازار صادر می‌شود",
+        subtitle = "خوانش زمینه‌ای بازار؛ مجوز ورود فقط از موتور صاحب همین نماد (ALS-5 طلا، ALS-5S نقره، EUR-ARES یورو/دلار، BTC-ARES، چهارلایهٔ V1 یا فشردگی) و قفل‌های ریسک/بازار صادر می‌شود",
         trailing = { Pill(method?.label ?: "در حال ارزیابی", color) },
     ) {
         if (decision == null) {
@@ -336,8 +351,9 @@ private fun MarketTrendCard(
                     })
                 Text(context.noteFa, style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
                 Text("این خوانشِ روند، زمینهٔ بازار و رتبه‌بندی است؛ قفل ورود یا آستانهٔ " +
-                        "مخفی اضافه نمی‌کند. مرجع ورود موتور چهارلایهٔ V1 و " +
-                        "قواعد ریسک/تازگی است؛ عکس خوانش در ژورنال ثبت می‌شود.",
+                        "مخفی اضافه نمی‌کند. مرجع ورود، موتور صاحب همین نماد " +
+                        "(ALS-5 / ALS-5S / EUR-ARES / BTC-ARES / چهارلایهٔ V1 / فشردگی) و قواعد ریسک/تازگی است؛ " +
+                        "عکس خوانش در ژورنال ثبت می‌شود.",
                     style = MaterialTheme.typography.labelSmall, color = AurumColors.TextMuted)
             } else {
                 Text("برای دیدن جایگاهِ ورود نسبت به روند، باید سیگنالِ همین نماد و یک پویشِ " +

@@ -1,0 +1,453 @@
+// ALS-5S — Adaptive Liquidity, Structure & Silver Volatility System
+// Instrument: XAG/USD (spot silver), primary timeframe M5. Higher frames are context only.
+// This is a *strategy* (it places orders), not an indicator. It is the Pine mirror of
+// engine/XagAresEngine.kt and tools/als5s_backtest.py — same regimes, same scores, same cost gate.
+//
+// NON-REPAINTING CONTRACT
+//   * every decision is made on a closed bar (`barstate.isconfirmed`) and filled by the strategy
+//     engine on the next bar's open (process_orders_on_close = false);
+//   * pivots are only visible after `right` bars have closed (`ta.pivothigh/pivotlow`);
+//   * `request.security` is called with lookahead_off and a [1] offset on the higher frame;
+//   * no `strategy.entry` is ever issued for a bar that has not closed.
+//
+// WHAT THIS FILE DOES NOT DO (and must not pretend to do)
+//   * no copper / industrial index / USD index / yield input — the app has no reliable source, so
+//     the module is absent rather than faked;
+//   * no news calendar; session rules are the only time restriction;
+//   * no martingale, no averaging, no stop widening, no duplicate entries;
+//   * one position at a time, one symbol: this is a silver engine, not a multi-asset one.
+
+//@version=6
+strategy(
+     title                = "ALS-5S · Silver XAG/USD · M5",
+     shorttitle           = "ALS-5S",
+     overlay              = true,
+     initial_capital      = 10000,
+     currency             = currency.USD,
+     default_qty_type     = strategy.fixed,
+     default_qty_value    = 1,
+     commission_type      = strategy.commission.cash_per_contract,
+     commission_value     = 0.0007,
+     slippage             = 2,
+     calc_on_every_tick   = false,
+     process_orders_on_close = false,
+     pyramiding           = 0,
+     max_bars_back        = 500)
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 1. Inputs — every number the Kotlin engine uses, in one place
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+grpStruct = "Structure"
+pivotLeft          = input.int(3,  "Pivot left bars",  minval = 1, group = grpStruct)
+pivotRight         = input.int(3,  "Pivot right bars", minval = 1, group = grpStruct,
+     tooltip = "A pivot exists only after this many bars closed: no future data.")
+microLeft          = input.int(2,  "Micro pivot left",  minval = 1, group = grpStruct)
+microRight         = input.int(1,  "Micro pivot right", minval = 1, group = grpStruct)
+rangeWindow        = input.int(24, "Range window (bars)", minval = 6, group = grpStruct)
+atrLen             = input.int(14, "ATR length", minval = 2, group = grpStruct)
+adxLen             = input.int(14, "ADX length", minval = 2, group = grpStruct)
+emaFastLen         = input.int(21, "EMA fast", minval = 2, group = grpStruct)
+emaSlowLen         = input.int(55, "EMA slow", minval = 2, group = grpStruct)
+rsiLen             = input.int(14, "RSI length", minval = 2, group = grpStruct)
+volLookback        = input.int(60, "Volatility median lookback", minval = 10, group = grpStruct)
+atrRankLookback    = input.int(240, "ATR percentile lookback", minval = 20, group = grpStruct)
+expansionFast      = input.int(3,  "Expansion fast bars", minval = 1, group = grpStruct)
+expansionBase      = input.int(20, "Expansion baseline bars", minval = 5, group = grpStruct)
+
+grpVol = "Volatility / regime"
+lowAtrRatio        = input.float(0.65, "LOW below this ATR ratio",  step = 0.05, group = grpVol)
+elevatedAtrRatio   = input.float(1.45, "ELEVATED above this ATR ratio", step = 0.05, group = grpVol)
+extremeAtrRatio    = input.float(2.30, "EXTREME above this ATR ratio", step = 0.05, group = grpVol)
+trendAdxMin        = input.float(22.0, "Trend needs ADX ≥", step = 0.5, group = grpVol)
+rangeAdxMax        = input.float(20.0, "Range needs ADX ≤", step = 0.5, group = grpVol)
+compressionMaxAtr  = input.float(0.85, "Compression width ≤ × ATR", step = 0.05, group = grpVol)
+minRangeWidthAtr   = input.float(1.40, "Range width ≥ × ATR", step = 0.05, group = grpVol)
+maxRangeWidthAtr   = input.float(6.50, "Range width ≤ × ATR", step = 0.05, group = grpVol)
+confirmBars        = input.int(2, "Regime confirmation bars", minval = 1, group = grpVol)
+
+grpA = "Engine A · trend continuation"
+minImpulseAtr      = input.float(1.10, "Impulse ≥ × ATR", step = 0.05, group = grpA)
+pullbackZoneAtr    = input.float(0.65, "Pullback zone ≤ × ATR", step = 0.05, group = grpA)
+minPullbackFrac    = input.float(0.25, "Pullback depth ≥ %", step = 0.01, group = grpA)
+maxPullbackFrac    = input.float(0.90, "Pullback depth ≤ %", step = 0.01, group = grpA)
+maxChaseAtr        = input.float(1.15, "Max distance from EMA × ATR", step = 0.05, group = grpA)
+minBodyFrac        = input.float(0.50, "Candle body ≥ % of range", step = 0.05, group = grpA)
+
+grpB = "Engine B · liquidity sweep"
+sweepWindowBars    = input.int(4, "Sweep lookback (bars)", minval = 1, group = grpB)
+minSweepAtr        = input.float(0.15, "Minimum penetration × ATR", step = 0.05, group = grpB)
+maxSweepAtr        = input.float(1.40, "Maximum penetration × ATR", step = 0.05, group = grpB)
+requireRetest      = input.bool(false, "Require a retest of the reclaimed level", group = grpB)
+retestToleranceAtr = input.float(0.25, "Retest tolerance × ATR", step = 0.05, group = grpB)
+
+grpC = "Engine C · range / breakout"
+rangeTouchFrac     = input.float(0.22, "Range touch zone (fraction)", step = 0.02, group = grpC)
+minRejectionWick   = input.float(0.40, "Rejection wick ≥ % of range", step = 0.05, group = grpC)
+rangeInvalidAtr    = input.float(0.25, "Range invalidation × ATR", step = 0.05, group = grpC)
+minBreakoutAtr     = input.float(0.18, "Breakout close beyond boundary × ATR", step = 0.02, group = grpC)
+minBreakoutRvol    = input.float(1.20, "Breakout relative volume ≥", step = 0.05, group = grpC)
+minExpansion       = input.float(1.15, "Range expansion ≥", step = 0.05, group = grpC)
+followThroughFrac  = input.float(0.55, "Close in breakout direction ≥ %", step = 0.05, group = grpC)
+maxMeasuredMoveRr  = input.float(3.0, "Measured-move target cap × R", step = 0.1, group = grpC)
+
+grpRisk = "Risk / costs"
+riskPerTradePct    = input.float(0.25, "Risk per trade % of equity", step = 0.05, minval = 0.01, group = grpRisk)
+maxDailyLossPct    = input.float(1.00, "Daily loss lockout %", step = 0.05, minval = 0.05, group = grpRisk)
+stopBufferAtr      = input.float(0.28, "Stop buffer × ATR", step = 0.02, group = grpRisk)
+minStopAtr         = input.float(0.80, "Minimum stop × ATR", step = 0.05, group = grpRisk)
+maxStopAtr         = input.float(5.00, "Maximum stop × ATR", step = 0.10, group = grpRisk)
+targetRr           = input.float(2.00, "Target R:R", step = 0.10, group = grpRisk)
+minNetRr           = input.float(1.50, "Minimum *net* R:R", step = 0.05, group = grpRisk)
+maxCostToRisk      = input.float(0.30, "Cost ceiling as fraction of risk", step = 0.01, group = grpRisk)
+spreadTicks        = input.float(20, "Spread (ticks of syminfo.mintick)", step = 1, group = grpRisk,
+     tooltip = "XAGUSD broker spread is usually 15–40 ticks (0.015–0.040 USD) — verify on your venue.")
+commissionPerOz    = input.float(0.0007, "Commission per ounce, per side", step = 0.0001, group = grpRisk)
+slipBps            = input.float(2.0, "Slippage per side (bps)", step = 0.5, group = grpRisk)
+scoreThreshold     = input.int(8, "Score threshold (of 10)", minval = 0, maxval = 10, group = grpRisk)
+conflictMargin     = input.int(2, "Conflict margin between opposite engines", minval = 0, group = grpRisk)
+
+grpTime = "Time / sessions"
+allowedSessions    = input.session("0700-2100", "Allowed entry session (exchange time)", group = grpTime,
+     tooltip = "London open through the New York afternoon. DST is handled by the chart timezone.")
+blockAfterEntryMin = input.int(12, "Minimum minutes between entries", minval = 0, group = grpTime)
+maxHoldBars        = input.int(48, "Time stop (bars)", minval = 6, group = grpTime)
+
+grpGold = "Gold context (optional)"
+useGoldContext     = input.bool(true, "Show gold context", group = grpGold,
+     tooltip = "Context only. A cross-market filter must earn its place out-of-sample — see the doc.")
+goldSymbol         = input.symbol("OANDA:XAUUSD", "Gold symbol", group = grpGold)
+requireGoldConfirm = input.bool(false, "Require gold agreement to enter", group = grpGold)
+
+grpShow = "Display"
+showPanel          = input.bool(true, "Show the ALS-5S panel", group = grpShow)
+showMarks          = input.bool(true, "Mark structures", group = grpShow)
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 2. Indicators — all computed on every bar, never inside a branch (Pine history rule)
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+atr        = ta.atr(atrLen)
+[diPlus, diMinus, adx] = ta.dmi(adxLen, adxLen)
+emaFast    = ta.ema(close, emaFastLen)
+emaSlow    = ta.ema(close, emaSlowLen)
+rsi        = ta.rsi(close, rsiLen)
+[macdLine, macdSignal, macdHist] = ta.macd(close, 12, 26, 9)
+rvolBase   = ta.sma(volume, 30)
+// Spot XAGUSD often reports no volume: the ratio then defaults to 1.0 instead of poisoning the test.
+rvol       = nz(rvolBase, 0) > 0 ? nz(volume, 0) / rvolBase : 1.0
+atrRankRaw = ta.percentrank(atr, atrRankLookback)
+atrRank    = nz(atrRankRaw, 50)
+atrMedian  = ta.percentile_linear_interpolation(atr, volLookback, 50)
+atrRatio   = nz(atrMedian, 0) > 0 ? atr / atrMedian : 1.0
+rangeExpansion = ta.sma(high - low, expansionFast) / math.max(ta.sma(high - low, expansionBase), syminfo.mintick)
+
+ph = ta.pivothigh(high, pivotLeft, pivotRight)
+pl = ta.pivotlow(low, pivotLeft, pivotRight)
+mph = ta.pivothigh(high, microLeft, microRight)
+mpl = ta.pivotlow(low, microLeft, microRight)
+
+var float swingHigh1 = na
+var float swingHigh2 = na
+var float swingLow1  = na
+var float swingLow2  = na
+var float microHigh  = na
+var float microLow   = na
+if not na(ph)
+    swingHigh2 := swingHigh1
+    swingHigh1 := ph
+if not na(pl)
+    swingLow2 := swingLow1
+    swingLow1 := pl
+if not na(mph)
+    microHigh := mph
+if not na(mpl)
+    microLow := mpl
+
+hh = not na(swingHigh1) and not na(swingHigh2) and swingHigh1 > swingHigh2
+lh = not na(swingHigh1) and not na(swingHigh2) and swingHigh1 < swingHigh2
+hl = not na(swingLow1) and not na(swingLow2) and swingLow1 > swingLow2
+ll = not na(swingLow1) and not na(swingLow2) and swingLow1 < swingLow2
+bosUp   = not na(swingHigh1) and close > swingHigh1
+bosDown = not na(swingLow1) and close < swingLow1
+
+// Previous bars only: the range must never include the bar being evaluated.
+rangeHigh = ta.highest(high, rangeWindow)[1]
+rangeLow  = ta.lowest(low, rangeWindow)[1]
+rangeWidth = rangeHigh - rangeLow
+compressionRatio = atr > 0 ? rangeWidth / (atr * math.sqrt(rangeWindow)) : 1.0
+
+// Higher timeframe context, confirmed and un-repainted.
+m15Close  = request.security(syminfo.tickerid, "15", close[1], lookahead = barmerge.lookahead_off)
+m15Ema    = request.security(syminfo.tickerid, "15", ta.ema(close, emaFastLen)[1], lookahead = barmerge.lookahead_off)
+m15Ready  = not na(m15Close) and not na(m15Ema)
+htfBias   = m15Ready ? (m15Close > m15Ema ? 1 : m15Close < m15Ema ? -1 : 0) : 0
+
+goldClose = request.security(goldSymbol, timeframe.period, close, lookahead = barmerge.lookahead_off)
+goldBarsOk = useGoldContext and not na(goldClose)
+goldCorr  = goldBarsOk ? ta.correlation(close / close[1] - 1, goldClose / goldClose[1] - 1, 60) : na
+ratioSeries = goldBarsOk ? close / goldClose : na
+silverRet  = ta.change(close, 12) / close[12]
+goldRet    = goldBarsOk ? ta.change(goldClose, 12) / goldClose[12] : na
+goldBias   = goldBarsOk and not na(goldCorr) and not na(silverRet) and not na(goldRet) and math.abs(goldCorr) >= 0.35 ?
+     (silverRet > goldRet ? 1 : silverRet < goldRet ? -1 : 0) : 0
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 3. Volatility state and regime (with hysteresis)
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+volState = atrRatio >= extremeAtrRatio or atrRank >= 97 ? "EXTREME" :
+     atrRatio >= elevatedAtrRatio or atrRank >= 85 ? "ELEVATED" :
+     atrRatio <= lowAtrRatio and atrRank <= 25 ? "LOW" : "NORMAL"
+
+rawRegime = volState == "EXTREME" ? "HIGH_VOL" :
+     ((hh and hl) or bosUp) and ((lh and ll) or bosDown) ? "HIGH_VOL" :
+     compressionRatio <= compressionMaxAtr and adx < trendAdxMin ? "COMPRESSION" :
+     ((hh and hl) or bosUp) and adx >= trendAdxMin and htfBias != -1 ? "BULL_TREND" :
+     ((lh and ll) or bosDown) and adx >= trendAdxMin and htfBias != 1 ? "BEAR_TREND" :
+     rangeWidth / math.max(atr, syminfo.mintick) >= minRangeWidthAtr and
+       rangeWidth / math.max(atr, syminfo.mintick) <= maxRangeWidthAtr and adx <= rangeAdxMax ? "RANGE" :
+     "HIGH_VOL"
+
+var string prevRaw = na
+// Protective HIGH_VOL is entered at once; every other label must survive a confirmation bar.
+regime = na(prevRaw) or rawRegime == prevRaw ? rawRegime :
+     rawRegime == "HIGH_VOL" ? "HIGH_VOL" :
+     prevRaw == "HIGH_VOL" or confirmBars > 1 ? prevRaw : rawRegime
+prevRaw := rawRegime
+
+bullTrend = regime == "BULL_TREND"
+bearTrend = regime == "BEAR_TREND"
+inRange   = regime == "RANGE"
+compressed = regime == "COMPRESSION"
+highVol   = regime == "HIGH_VOL"
+trending  = bullTrend or bearTrend
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 4. Costs — silver-specific, never inherited from a gold contract
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+spreadPerOz   = spreadTicks * syminfo.mintick
+roundTripCost = 2 * commissionPerOz + spreadPerOz + 2 * close * slipBps / 10000
+sessionOk     = not na(time(timeframe.period, allowedSessions, syminfo.timezone))
+barRange      = high - low
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 5. Engines — each evaluated independently, before anything is combined
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Engine A · trend continuation: impulse, pullback into the zone, rejection, micro shift.
+aUp        = bullTrend
+aLevel     = aUp ? swingLow1 : swingHigh1
+aImpulse   = not na(aLevel) ? math.abs(close - aLevel) : 0.0
+aZone      = aUp ? math.max(nz(aLevel, emaFast), emaFast) : math.min(nz(aLevel, emaFast), emaFast)
+aDistance  = math.abs(close - aZone)
+aDepth     = not na(aLevel) and not na(aUp ? swingHigh1 : swingLow1) and aLevel != (aUp ? swingHigh1 : swingLow1) ?
+     math.abs((aUp ? swingHigh1 : swingLow1) - close) / math.abs((aUp ? swingHigh1 : swingLow1) - aLevel) : na
+aBody      = barRange > 0 ? math.abs(close - open) / barRange : 0.0
+aBullCandle = close > open and aBody >= minBodyFrac
+aBearCandle = close < open and aBody >= minBodyFrac
+aRejection  = aUp ? aBullCandle : aBearCandle
+aMicroBreak = aUp ? (not na(microHigh) and close > microHigh) : (not na(microLow) and close < microLow)
+aMomentum   = aUp ? macdHist > 0 and rsi >= 45 : macdHist < 0 and rsi <= 55
+aReady      = trending and m15Ready and
+     aImpulse >= minImpulseAtr * atr and
+     aDistance <= pullbackZoneAtr * atr and
+     not na(aDepth) and aDepth >= minPullbackFrac and aDepth <= maxPullbackFrac and
+     aRejection and
+     math.abs(close - emaFast) <= maxChaseAtr * 2 * atr and
+     (aMicroBreak or aRejection) and
+     aMomentum
+aScore = (trending ? 2 : 0) +
+     (aImpulse >= minImpulseAtr * atr and not na(aDepth) and aDepth >= minPullbackFrac ? 2 : aDistance <= pullbackZoneAtr * atr ? 1 : 0) +
+     (aMicroBreak and aRejection ? 2 : aRejection or aMicroBreak ? 1 : 0)
+
+// Engine B · liquidity sweep: pierce a confirmed level, close back inside, micro shift.
+bWindowHigh = ta.highest(high, sweepWindowBars)
+bWindowLow  = ta.lowest(low, sweepWindowBars)
+bSweptLow   = not na(swingLow1) and bWindowLow < swingLow1 and bWindowLow >= swingLow1 - maxSweepAtr * atr and close > swingLow1
+bSweptHigh  = not na(swingHigh1) and bWindowHigh > swingHigh1 and bWindowHigh <= swingHigh1 + maxSweepAtr * atr and close < swingHigh1
+bDir        = bSweptLow ? 1 : bSweptHigh ? -1 : 0
+bLevel      = bSweptLow ? swingLow1 : bSweptHigh ? swingHigh1 : na
+bPenetration = bDir == 1 ? (nz(swingLow1) - bWindowLow) / math.max(atr, syminfo.mintick) :
+     bDir == -1 ? (bWindowHigh - nz(swingHigh1)) / math.max(atr, syminfo.mintick) : 0.0
+bShift      = bDir == 1 ? (not na(microHigh) and close > microHigh) :
+     bDir == -1 ? (not na(microLow) and close < microLow) : false
+bCloseHalf  = barRange > 0 and (bDir == 1 ? (close - low) / barRange >= 0.55 :
+     bDir == -1 ? (high - close) / barRange >= 0.55 : false)
+bRetestOk   = not requireRetest or (bDir == 1 ? low <= nz(bLevel) + retestToleranceAtr * atr and close > nz(bLevel) :
+     bDir == -1 ? high >= nz(bLevel) - retestToleranceAtr * atr and close < nz(bLevel) : false)
+bReady      = not highVol and bDir != 0 and bPenetration >= minSweepAtr and bShift and bCloseHalf and bRetestOk
+bScore      = ((inRange or compressed) ? 2 : 1) +
+     (bPenetration >= minSweepAtr and (math.abs(nz(bLevel) - rangeLow) < atr * 0.5 or math.abs(nz(bLevel) - rangeHigh) < atr * 0.5) ? 2 : bPenetration >= minSweepAtr ? 1 : 0) +
+     (bShift and bCloseHalf ? 2 : bShift or bCloseHalf ? 1 : 0)
+
+// Engine C · range reversion.
+cPosition  = rangeWidth > 0 ? (close - rangeLow) / rangeWidth : 0.5
+cNearLow   = inRange and cPosition <= rangeTouchFrac
+cNearHigh  = inRange and cPosition >= 1 - rangeTouchFrac
+cInvalid   = close > rangeHigh + rangeInvalidAtr * atr or close < rangeLow - rangeInvalidAtr * atr
+cWickLow   = barRange > 0 ? (math.min(open, close) - low) / barRange : 0.0
+cWickHigh  = barRange > 0 ? (high - math.max(open, close)) / barRange : 0.0
+cDir       = cNearLow ? 1 : cNearHigh ? -1 : 0
+cWick      = cDir == 1 ? cWickLow : cWickHigh
+cRsiOk     = cDir == 1 ? rsi <= 40 : cDir == -1 ? rsi >= 60 : false
+cReady     = inRange and not cInvalid and cDir != 0 and cWick >= minRejectionWick and cRsiOk and adx <= rangeAdxMax + 2
+cScore     = (inRange ? 2 : 0) + (cDir != 0 ? 2 : 0) + (cWick >= minRejectionWick and cRsiOk ? 2 : cWick >= minRejectionWick ? 1 : 0)
+
+// Engine C · volatility breakout (separate mode, separate score).
+cUpBreak   = close > rangeHigh + minBreakoutAtr * atr
+cDownBreak = close < rangeLow - minBreakoutAtr * atr
+cbDir      = cUpBreak ? 1 : cDownBreak ? -1 : 0
+cbExpansionOk = rangeExpansion >= minExpansion
+cbVolumeOk    = rvol >= minBreakoutRvol
+cbCloseFrac   = barRange > 0 ? (close - low) / barRange : 0.5
+cbFollow      = cbDir == 1 ? cbCloseFrac >= followThroughFrac : cbDir == -1 ? cbCloseFrac <= 1 - followThroughFrac : false
+cbLate        = cbDir == 1 ? (close - rangeHigh) / math.max(atr, syminfo.mintick) :
+     cbDir == -1 ? (rangeLow - close) / math.max(atr, syminfo.mintick) : 0.0
+cbReady   = not highVol and cbDir != 0 and (compressed or compressionRatio <= compressionMaxAtr) and
+     cbExpansionOk and cbVolumeOk and cbFollow and cbLate <= minBreakoutAtr + maxChaseAtr
+cbScore   = ((compressed or compressionRatio <= compressionMaxAtr) ? 2 : 1) +
+     ((compressed or compressionRatio <= compressionMaxAtr) and cbDir != 0 ? 2 : 0) +
+     (cbExpansionOk and cbVolumeOk and cbFollow ? 2 : cbExpansionOk or cbVolumeOk ? 1 : 0)
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 6. Structure → stop, target, cost gate. Nothing here widens a stop or averages a loss.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+structLevel(dir, engine) =>
+    float level = na
+    if engine == "A"
+        level := dir == 1 ? math.min(nz(swingLow1, close - atr), emaFast) : math.max(nz(swingHigh1, close + atr), emaFast)
+    else if engine == "B"
+        level := nz(bLevel, close - dir * atr)
+    else if engine == "C"
+        level := dir == 1 ? rangeLow : rangeHigh
+    else
+        level := dir == 1 ? rangeHigh : rangeLow
+    level
+
+clampStop(dir, raw) =>
+    float distance = math.abs(close - raw) + stopBufferAtr * atr
+    distance := math.max(distance, minStopAtr * atr)
+    distance := math.min(distance, maxStopAtr * atr)
+    dir == 1 ? close - distance : close + distance
+
+engineReady = aReady or bReady or cReady or cbReady
+aDir = aReady ? (bullTrend ? 1 : -1) : 0
+// Only a READY engine may be chosen: an idle engine's score must never win the arbitration.
+engineName = aReady and aScore >= math.max(bReady ? bScore : -1, math.max(cReady ? cScore : -1, cbReady ? cbScore : -1)) ? "A" :
+     bReady and bScore >= math.max(cReady ? cScore : -1, cbReady ? cbScore : -1) ? "B" :
+     cReady and cScore >= (cbReady ? cbScore : -1) ? "C" :
+     cbReady ? "CB" : "NONE"
+dir = engineName == "A" ? aDir : engineName == "B" ? bDir : engineName == "C" ? cDir : engineName == "CB" ? cbDir : 0
+score3 = engineName == "A" ? aScore : engineName == "B" ? bScore : engineName == "C" ? cScore : cbScore
+
+// A close conflict between opposite directions is reported, never averaged into an entry.
+oppositeReady = (aReady and aDir == 1 and ((bReady and bDir == -1) or (cReady and cDir == -1) or (cbReady and cbDir == -1))) or
+     (aReady and aDir == -1 and ((bReady and bDir == 1) or (cReady and cDir == 1) or (cbReady and cbDir == 1)))
+oppositeScore = math.max(
+     aDir == 1 ? math.max(bReady and bDir == -1 ? bScore : 0, math.max(cReady and cDir == -1 ? cScore : 0, cbReady and cbDir == -1 ? cbScore : 0)) :
+     aDir == -1 ? math.max(bReady and bDir == 1 ? bScore : 0, math.max(cReady and cDir == 1 ? cScore : 0, cbReady and cbDir == 1 ? cbScore : 0)) :
+     math.max(bDir == 1 ? math.max(cReady and cDir == -1 ? cScore : 0, cbReady and cbDir == -1 ? cbScore : 0) : 0,
+              bDir == -1 ? math.max(cReady and cDir == 1 ? cScore : 0, cbReady and cbDir == 1 ? cbScore : 0) : 0))
+conflict = oppositeReady and engineName != "NONE" and score3 - oppositeScore < conflictMargin
+
+rawStop   = dir != 0 ? structLevel(dir, engineName) : na
+stopPrice = dir != 0 ? clampStop(dir, rawStop) : na
+stopDist  = dir != 0 ? math.abs(close - stopPrice) : na
+targetDistBase = not na(stopDist) ? math.max(targetRr * stopDist, minNetRr * stopDist + roundTripCost) : na
+// Breakouts may aim at the measured move, but never further than maxMeasuredMoveRr × initial risk.
+targetDist = engineName == "CB" and not na(targetDistBase) ?
+     math.max(targetDistBase, math.min(rangeWidth, maxMeasuredMoveRr * stopDist)) : targetDistBase
+targetPrice = dir == 1 ? close + targetDist : close - targetDist
+rrRaw     = not na(stopDist) and stopDist > 0 ? targetDist / stopDist : na
+netRr     = not na(stopDist) and stopDist > 0 ? (targetDist - roundTripCost) / (stopDist + roundTripCost) : na
+costToRisk = not na(stopDist) and stopDist > 0 ? roundTripCost / stopDist : 1.0
+
+rrPoints   = netRr >= 2.0 ? 2 : netRr >= minNetRr ? 1 : 0
+sessionPts = sessionOk ? 2 : 0
+costOk     = costToRisk <= maxCostToRisk
+execPoints = costOk and sessionPts == 2 ? 2 : costOk and sessionPts == 0 ? 0 : costOk ? 1 : 0
+score = math.min(10, score3 + rrPoints + execPoints)
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 7. Daily lockout, cooldown, session, and the one entry per setup rule
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+dayChange = nz(ta.change(time("D")), 0)
+newDay = dayChange != 0
+var float dayStartEquity = strategy.equity
+if newDay
+    dayStartEquity := strategy.equity
+dayLossPct = dayStartEquity > 0 ? math.max(0, (dayStartEquity - strategy.equity) / dayStartEquity * 100) : 0.0
+dayLocked  = dayLossPct >= maxDailyLossPct
+
+var int lastEntryTime = na
+cooldownOk = time - nz(lastEntryTime, time - blockAfterEntryMin * 60 * 1000) >= blockAfterEntryMin * 60 * 1000
+flat       = strategy.position_size == 0
+confirmed  = barstate.isconfirmed
+
+goldVeto = requireGoldConfirm and (not goldBarsOk or (dir != 0 and goldBias != 0 and goldBias != dir))
+
+allowEntry = confirmed and flat and dir != 0 and score >= scoreThreshold and
+     not na(netRr) and netRr >= minNetRr and costOk and not conflict and
+     sessionOk and cooldownOk and not dayLocked and not highVol and not goldVeto
+
+riskUsd = strategy.equity * riskPerTradePct / 100
+qty = not na(stopDist) and stopDist > 0 ? math.max(0.0, math.floor(riskUsd / (stopDist + roundTripCost) / 0.01) * 0.01) : 0.0
+qtyOk = qty > 0 and qty * close >= 5.0
+
+if allowEntry and qtyOk
+    lastEntryTime := time
+    if dir == 1
+        strategy.entry("ALS-5S Long", strategy.long, qty = qty,
+             comment = "ALS-5S " + engineName + " " + str.tostring(score) + "/10")
+        strategy.exit("ALS-5S Long exit", from_entry = "ALS-5S Long",
+             stop = stopPrice, limit = targetPrice, comment_loss = "structure stop", comment_profit = "target")
+    else
+        strategy.entry("ALS-5S Short", strategy.short, qty = qty,
+             comment = "ALS-5S " + engineName + " " + str.tostring(score) + "/10")
+        strategy.exit("ALS-5S Short exit", from_entry = "ALS-5S Short",
+             stop = stopPrice, limit = targetPrice, comment_loss = "structure stop", comment_profit = "target")
+
+// Time stop: a setup that has not worked within `maxHoldBars` is closed, never held on hope.
+if strategy.position_size != 0 and bar_index - strategy.opentrades.entry_bar_index(strategy.opentrades - 1) >= maxHoldBars
+    strategy.close_all(comment = "time stop")
+
+// Absolute guard rails, enforced by the strategy engine itself.
+strategy.risk.max_intraday_loss(maxDailyLossPct, strategy.percent_of_equity)
+strategy.risk.max_position_size(100000)
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// 8. Chart output — deliberately sparse: levels, no repainting shapes on unclosed bars
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+plot(showMarks and not na(swingHigh1) ? swingHigh1 : na, "Swing high", color.new(color.red, 40), 1, plot.style_stepline)
+plot(showMarks and not na(swingLow1) ? swingLow1 : na, "Swing low", color.new(color.teal, 40), 1, plot.style_stepline)
+plot(showMarks and not na(rangeHigh) ? rangeHigh : na, "Range high", color.new(color.gray, 55), 1, plot.style_circles)
+plot(showMarks and not na(rangeLow) ? rangeLow : na, "Range low", color.new(color.gray, 55), 1, plot.style_circles)
+plot(emaFast, "EMA fast", color.new(color.orange, 30))
+plot(emaSlow, "EMA slow", color.new(color.blue, 40))
+bgcolor(highVol ? color.new(color.red, 92) : compressed ? color.new(color.yellow, 94) :
+     inRange ? color.new(color.gray, 95) : color.new(color.green, 96), title = "Regime")
+plotshape(showMarks and allowEntry and dir == 1, "Entry long", shape.triangleup, location.belowbar, color.green, size = size.small)
+plotshape(showMarks and allowEntry and dir == -1, "Entry short", shape.triangledown, location.abovebar, color.red, size = size.small)
+
+var table panel = table.new(position.top_right, 2, 10, border_width = 1)
+if showPanel and barstate.islast
+    table.cell(panel, 0, 0, "ALS-5S · XAG/USD", text_color = color.white, bgcolor = color.new(color.blue, 20))
+    table.cell(panel, 1, 0, "M5", text_color = color.white, bgcolor = color.new(color.blue, 20))
+    table.cell(panel, 0, 1, "Regime")
+    table.cell(panel, 1, 1, regime, text_color = highVol ? color.red : compressed ? color.orange : color.gray)
+    table.cell(panel, 0, 2, "Volatility")
+    table.cell(panel, 1, 2, volState + " · ATR×" + str.tostring(atrRatio, "#.##"))
+    table.cell(panel, 0, 3, "Engines")
+    table.cell(panel, 1, 3, (aReady ? "A " : "") + (bReady ? "B " : "") + (cReady ? "C " : "") + (cbReady ? "CB " : "") + (engineReady ? "" : "—"))
+    table.cell(panel, 0, 4, "Score")
+    table.cell(panel, 1, 4, str.tostring(score) + "/10")
+    table.cell(panel, 0, 5, "Net R:R")
+    table.cell(panel, 1, 5, na(netRr) ? "—" : str.tostring(netRr, "#.##"))
+    table.cell(panel, 0, 6, "Cost / risk")
+    table.cell(panel, 1, 6, str.tostring(costToRisk * 100, "#.#") + "%")
+    table.cell(panel, 0, 7, "Cost per oz")
+    table.cell(panel, 1, 7, "$" + str.tostring(roundTripCost, "#.####"))
+    table.cell(panel, 0, 8, "Gold ctx")
+    table.cell(panel, 1, 8, goldBarsOk ? (goldBias == 1 ? "silver leads" : goldBias == -1 ? "gold leads" : "neutral") : "unavailable")
+    table.cell(panel, 0, 9, dayLocked ? "Daily lockout" : "Trading allowed")
+    table.cell(panel, 1, 9, str.tostring(dayLossPct, "#.##") + "% today")
+
+alertcondition(allowEntry and dir == 1, "ALS-5S long", "ALS-5S long setup on {{ticker}} {{interval}}")
+alertcondition(allowEntry and dir == -1, "ALS-5S short", "ALS-5S short setup on {{ticker}} {{interval}}")
