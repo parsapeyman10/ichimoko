@@ -158,7 +158,7 @@ class DataUsageBudgetTest {
     @Test fun `the Dow quote asks for the smallest series and keeps the meta price`() = runBlocking {
         val requested = mutableListOf<String>()
         val now = System.currentTimeMillis()
-        val tick = yahoo(requested) { meta("41234.5", now) }.fetchQuote("DOW")
+        val tick = yahoo(requested) { 200 to meta("41234.5", now) }.fetchQuote("DOW")
         assertEquals("Yahoo Dedicated (^DJI)", tick.provider)
         assertEquals(41234.5, tick.price, 0.0)
         assertEquals(1, requested.size)
