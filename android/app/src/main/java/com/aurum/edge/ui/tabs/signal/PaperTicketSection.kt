@@ -44,7 +44,7 @@ fun PaperTicketSection(viewModel: AurumViewModel, market: MarketState) {
 
     SectionCard(
         title = "برگهٔ معاملهٔ دوطرفه · فقط کاغذی",
-        subtitle = "ورود دستی فقط هم‌جهت سیگنال چهارلایهٔ تأییدشده و دادهٔ تازه؛ قفل‌های AI و ریسک برقرارند",
+        subtitle = "ورود دستی فقط هم‌جهت سیگنال چهارلایهٔ تأییدشده و دادهٔ تازه؛ قفل‌های ریسک، تازگیِ فید و یکپارچگیِ منبع برقرارند (هیچ لایهٔ هوش مصنوعی‌ای در تصمیم نیست)",
     ) {
         Text("${market.symbol} · ورود تقریبی ${formatPrice(market.lastPrice)} · فقط نمادهای دارای قیمت مستقل معتبر",
             style = MaterialTheme.typography.bodySmall, color = AurumColors.TextSecondary)

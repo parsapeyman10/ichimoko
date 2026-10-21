@@ -67,7 +67,7 @@ import kotlinx.coroutines.delay
  * ۵. وضعیت پایش واچ‌لیست فعال در پس‌زمینه
  */
 @Composable
-fun SignalScreen(viewModel: AurumViewModel, onChartSymbol: (String) -> Unit) {
+fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onChartSymbol: (String) -> Unit) {
     val scanState by viewModel.pairScan.collectAsStateWithLifecycle()
     val decisionLog by viewModel.decisionLog.collectAsStateWithLifecycle()
     var showAllDecisions by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
@@ -107,6 +107,12 @@ fun SignalScreen(viewModel: AurumViewModel, onChartSymbol: (String) -> Unit) {
             status = scanState.statuses.firstOrNull { it.symbol == "EUR/USD" },
             sweeping = scanState.sweeping,
         )
+
+        // Manual paper ticket for the SELECTED symbol. It was fully implemented and guarded
+        // (preview -> confirm -> atomic journal write) but no screen rendered it, so the only
+        // reachable entry path was the automatic one. It needs `market` from the root, which
+        // already collects it, so the ticket re-previews whenever the live price changes.
+        PaperTicketSection(viewModel, market)
 
         SectionCard("دلیل بررسی") {
             if (decisionLog.isEmpty()) Text("هنوز بررسی ثبت نشده است")

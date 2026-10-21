@@ -89,7 +89,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
                             onChartSymbol = ::openChartFor, onJournal = { open(AurumTab.Journal) })
                         AurumTab.Chart -> ChartScreen(initialTicker = chartTicker,
                             onSelectTicker = { chartTicker = it })
-                        AurumTab.Signal -> SignalScreen(viewModel, onChartSymbol = ::openChartFor)
+                        AurumTab.Signal -> SignalScreen(viewModel, market, onChartSymbol = ::openChartFor)
                         AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { open(AurumTab.Api) },
                             onOpenChart = ::openChartFor)
                         AurumTab.Journal -> JournalScreen(viewModel, market)
