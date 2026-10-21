@@ -9,6 +9,7 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 import java.time.Instant
 
@@ -23,6 +24,12 @@ import java.time.Instant
  *     source publishes a two-sided price.
  */
 class MetalQuoteRoutingTest {
+    /**
+     * The quote cache is process-wide by design (that is what removes duplicate downloads), so a
+     * test that must observe the requests it makes has to start from an empty cache.
+     */
+    @Before fun clearSharedQuoteCache() = SpotFallbackClient.clearQuoteCache()
+
     private fun bbo(bid: Double, ask: Double, at: Long = System.currentTimeMillis()): String =
         """[{"spreadProfilePrices":[{"spreadProfile":"prime","bid":$bid,"ask":$ask}],"ts":$at}]"""
 
