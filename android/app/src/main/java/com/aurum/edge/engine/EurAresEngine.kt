@@ -291,15 +291,8 @@ object EurAresEngine {
         return out
     }
 
-    /** Percentile rank of the latest ATR inside its own lookback; ties count as half. */
-    internal fun atrPercentile(series: List<Double?>, lookback: Int): Double {
-        val window = series.takeLast(lookback).filterNotNull().filter { it.isFinite() && it > 0.0 }
-        if (window.isEmpty()) return 0.0
-        val last = window.last()
-        val below = window.count { it < last }
-        val equal = window.count { it == last }
-        return (below + 0.5 * equal) / window.size
-    }
+    internal fun atrPercentile(series: List<Double?>, lookback: Int): Double =
+        StrategyMath.atrPercentile(series, lookback)
 
     /** Session of a bar, DST-aware. */
     fun sessionOf(timeMs: Long): EurAresSessionInfo = EurAresPolicy.sessionAt(timeMs)
@@ -600,10 +593,8 @@ object EurAresEngine {
         return if (direction == SignalAction.BUY) price - distance else price + distance
     }
 
-    private fun targetAt(direction: SignalAction, entry: Double, stop: Double, rr: Double): Double {
-        val risk = abs(entry - stop)
-        return if (direction == SignalAction.BUY) entry + rr * risk else entry - rr * risk
-    }
+    private fun targetAt(direction: SignalAction, entry: Double, stop: Double, rr: Double): Double =
+        StrategyMath.targetAt(direction, entry, stop, rr)
 
     private fun noTrade(
         id: EngineId,

@@ -237,19 +237,8 @@ object BtcAresEngine {
         return out
     }
 
-    /**
-     * Percentile rank of the latest ATR among its own history, with ties counted as half.
-     * Counting ties as "below" would make a flat series look like an extreme (rank 1.0), and
-     * calling a quiet market extreme is exactly the mistake that blocks valid setups.
-     */
-    private fun atrPercentile(series: List<Double?>, lookback: Int): Double {
-        val values = series.takeLast(lookback).filterNotNull().filter { it > 0.0 && it.isFinite() }
-        if (values.size < 20) return 0.5
-        val current = values.last()
-        val below = values.count { it < current }
-        val equal = values.count { it == current }
-        return (below + 0.5 * equal) / values.size
-    }
+    private fun atrPercentile(series: List<Double?>, lookback: Int): Double =
+        StrategyMath.atrPercentile(series, lookback)
 
     private fun features(bars: List<Candle>, m15: List<Candle>, h1: List<Candle>, cfg: Config): Features {
         val closes = bars.map { it.close }
@@ -354,14 +343,11 @@ object BtcAresEngine {
         return Regime.UNCERTAIN
     }
 
-    private fun stopFor(direction: SignalAction, raw: Double, price: Double, atr: Double, cfg: Config): Double {
-        val distance = max(abs(price - raw) + cfg.stopBufferAtr * atr, cfg.minStopAtr * atr)
-            .coerceAtMost(cfg.maxStopAtr * atr)
-        return if (direction == SignalAction.BUY) price - distance else price + distance
-    }
+    private fun stopFor(direction: SignalAction, raw: Double, price: Double, atr: Double, cfg: Config): Double =
+        StrategyMath.stopForAtr(direction, raw, price, atr, cfg.stopBufferAtr, cfg.minStopAtr, cfg.maxStopAtr)
 
     private fun targetAt(direction: SignalAction, entry: Double, stop: Double, rr: Double): Double =
-        if (direction == SignalAction.BUY) entry + rr * (entry - stop) else entry - rr * (entry - stop)
+        StrategyMath.targetAt(direction, entry, stop, rr)
 
     /** Engine A — trend continuation after a measured pullback and a renewed micro break. */
     private fun engineA(bars: List<Candle>, f: Features, regime: Regime, cfg: Config): Candidate {

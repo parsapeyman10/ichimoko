@@ -62,90 +62,127 @@ object SignalEngine {
         )
     }
 
+    /**
+     * ONE dispatch block for every engine. Both public entry points (`evaluate` and
+     * `evaluateLive`) route through here, so adding or removing an engine changes exactly
+     * one `when` arm instead of two parallel copies.
+     *
+     * When [als5Config]/[btcConfig]/[xagConfig]/[eurConfig] is null the engine's default
+     * `Config` is used (the `evaluate` path). When non-null the caller-supplied config is
+     * used (the `evaluateLive` path, which injects user risk settings).
+     */
+    private fun dispatch(
+        engine: SymbolEngine,
+        candles: List<Candle>,
+        interval: Interval,
+        symbol: String,
+        threshold: Double,
+        mode: com.aurum.edge.core.CategoryStrategy,
+        timeframes: Map<Interval, List<Candle>>,
+        goldBars: List<Candle>,
+        als5Config: Als5GoldEngine.Config? = null,
+        btcConfig: BtcAresEngine.Config? = null,
+        xagConfig: XagAresEngine.Config? = null,
+        eurConfig: EurAresEngine.Config? = null,
+    ): Signal = when (engine) {
+        SymbolEngine.ALS5_GOLD -> Als5GoldEngine.evaluate(
+            input = candles,
+            interval = interval,
+            symbol = symbol,
+            threshold = threshold,
+            mode = mode,
+            external = timeframes,
+            config = als5Config ?: Als5GoldEngine.Config(),
+        )
+        SymbolEngine.BTC_ARES -> BtcAresEngine.evaluate(
+            input = candles,
+            interval = interval,
+            symbol = symbol,
+            threshold = threshold,
+            mode = mode,
+            external = timeframes,
+            config = btcConfig ?: BtcAresEngine.Config(),
+        )
+        SymbolEngine.ALS5S_SILVER -> XagAresEngine.evaluate(
+            input = candles,
+            interval = interval,
+            symbol = symbol,
+            threshold = threshold,
+            mode = mode,
+            external = timeframes,
+            goldBars = goldBars,
+            config = xagConfig ?: XagAresEngine.Config(),
+        )
+        SymbolEngine.EUR_ARES -> EurAresEngine.evaluate(
+            input = candles,
+            interval = interval,
+            symbol = symbol,
+            threshold = threshold,
+            mode = mode,
+            external = timeframes,
+            config = eurConfig ?: EurAresEngine.Config(),
+        )
+        SymbolEngine.CRYPTO_COMPRESSION ->
+            CryptoCompressionEngine.evaluate(candles, interval, symbol, timeframes)
+        SymbolEngine.V1_FOUR_LAYER ->
+            V1Scoring.evaluate(candles, interval, symbol, threshold, mode, timeframes)
+    }
+
     /** One settings-to-engine adapter for chart, scanner and paper-entry paths.
-     * Category mode and threshold can never diverge between callers.
+     * Category mode and threshold can never diverge between callers. Injects user risk
+     * settings into each engine's [Config].
      */
     fun evaluateLive(candles: List<Candle>, interval: Interval, settings: AppSettings,
                      symbol: String, timeframes: Map<Interval, List<Candle>>,
-                     goldBars: List<Candle> = emptyList()): Signal =
-        when (EngineRegistry.engineFor(symbol)) {
-            SymbolEngine.ALS5_GOLD -> Als5GoldEngine.evaluate(
-                input = candles,
-                interval = interval,
-                symbol = symbol,
-                threshold = settings.minConfidence,
-                mode = settings.strategyFor(symbol),
-                external = timeframes,
-                config = Als5GoldEngine.Config(
-                    accountEquityUsd = settings.accountBalance,
-                    // ALS-5 starts at 0.25%; a lower user setting remains allowed, never a higher one.
-                    riskPerTradePct = settings.riskPercent.coerceIn(0.01, 0.25),
-                ),
-            )
-            SymbolEngine.BTC_ARES -> BtcAresEngine.evaluate(
-                input = candles,
-                interval = interval,
-                symbol = symbol,
-                threshold = settings.minConfidence,
-                mode = settings.strategyFor(symbol),
-                external = timeframes,
-                config = BtcAresEngine.Config(
-                    accountEquityUsd = settings.accountBalance,
-                    riskPerTradePct = settings.riskPercent.coerceIn(0.01, 0.25),
-                ),
-            )
-            SymbolEngine.ALS5S_SILVER -> XagAresEngine.evaluate(
-                input = candles,
-                interval = interval,
-                symbol = symbol,
-                threshold = settings.minConfidence,
-                mode = settings.strategyFor(symbol),
-                external = timeframes,
-                goldBars = goldBars,
-                config = XagAresEngine.Config(
-                    accountEquityUsd = settings.accountBalance,
-                    riskPerTradePct = settings.riskPercent.coerceIn(0.01, 0.25),
-                ),
-            )
-            SymbolEngine.EUR_ARES -> EurAresEngine.evaluate(
-                input = candles,
-                interval = interval,
-                symbol = symbol,
-                threshold = settings.minConfidence,
-                mode = settings.strategyFor(symbol),
-                external = timeframes,
-                config = EurAresEngine.Config(
-                    accountEquityUsd = settings.accountBalance,
-                    riskPerTradePct = settings.riskPercent.coerceIn(0.01, 0.25),
-                ),
-            )
-            SymbolEngine.V1_FOUR_LAYER, SymbolEngine.CRYPTO_COMPRESSION ->
-                evaluate(candles, interval, settings.minConfidence, symbol,
-                    settings.strategyFor(symbol), timeframes)
-        }
+                     goldBars: List<Candle> = emptyList()): Signal {
+        val risk = settings.riskPercent.coerceIn(0.01, 0.25)
+        val equity = settings.accountBalance
+        return dispatch(
+            engine = EngineRegistry.engineFor(symbol),
+            candles = candles,
+            interval = interval,
+            symbol = symbol,
+            threshold = settings.minConfidence,
+            mode = settings.strategyFor(symbol),
+            timeframes = timeframes,
+            goldBars = goldBars,
+            als5Config = Als5GoldEngine.Config(
+                accountEquityUsd = equity,
+                // ALS-5 starts at 0.25%; a lower user setting remains allowed, never a higher one.
+                riskPerTradePct = risk,
+            ),
+            btcConfig = BtcAresEngine.Config(
+                accountEquityUsd = equity,
+                riskPerTradePct = risk,
+            ),
+            xagConfig = XagAresEngine.Config(
+                accountEquityUsd = equity,
+                riskPerTradePct = risk,
+            ),
+            eurConfig = EurAresEngine.Config(
+                accountEquityUsd = equity,
+                riskPerTradePct = risk,
+            ),
+        )
+    }
 
     /** Only V1 inputs are accepted. Legacy profile/strategy/spread settings do not masquerade
      * as scoring filters; execution costs are checked separately by PaperOrderRules.
+     * Uses each engine's default [Config] — test-friendly and callable without [AppSettings].
      */
     fun evaluate(candles: List<Candle>, interval: Interval, threshold: Double = 85.0,
                  symbol: String = "XAU/USD", mode: com.aurum.edge.core.CategoryStrategy =
                      com.aurum.edge.core.CategoryStrategy.HYBRID,
                  timeframes: Map<Interval, List<Candle>> = emptyMap(),
                  goldBars: List<Candle> = emptyList()): Signal =
-        when (EngineRegistry.engineFor(symbol)) {
-            // One owner per symbol, decided in EngineRegistry — never by a second `if` here.
-            SymbolEngine.ALS5_GOLD ->
-                Als5GoldEngine.evaluate(candles, interval, symbol, threshold, mode, timeframes)
-            SymbolEngine.BTC_ARES ->
-                BtcAresEngine.evaluate(candles, interval, symbol, threshold, mode, timeframes)
-            SymbolEngine.ALS5S_SILVER ->
-                XagAresEngine.evaluate(candles, interval, symbol, threshold, mode, timeframes,
-                    goldBars = goldBars)
-            SymbolEngine.EUR_ARES ->
-                EurAresEngine.evaluate(candles, interval, symbol, threshold, mode, timeframes)
-            SymbolEngine.CRYPTO_COMPRESSION ->
-                CryptoCompressionEngine.evaluate(candles, interval, symbol, timeframes)
-            SymbolEngine.V1_FOUR_LAYER ->
-                V1Scoring.evaluate(candles, interval, symbol, threshold, mode, timeframes)
-        }
+        dispatch(
+            engine = EngineRegistry.engineFor(symbol),
+            candles = candles,
+            interval = interval,
+            symbol = symbol,
+            threshold = threshold,
+            mode = mode,
+            timeframes = timeframes,
+            goldBars = goldBars,
+        )
 }
