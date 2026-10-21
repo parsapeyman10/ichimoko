@@ -18,7 +18,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.dp
 import com.aurum.edge.core.PaperTrade
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.core.TradeReplay
 import com.aurum.edge.ui.components.formatPrice
 import com.aurum.edge.ui.theme.AurumColors

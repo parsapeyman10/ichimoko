@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import com.aurum.edge.core.AppSettings
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.CategoryStrategy
 import com.aurum.edge.core.V1Universe

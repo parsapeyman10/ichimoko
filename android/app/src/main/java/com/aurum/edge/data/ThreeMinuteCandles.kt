@@ -1,7 +1,7 @@
 package com.aurum.edge.data
 
-import com.aurum.edge.core.Candle
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.Interval
 
 /** M3 from three *completed, consecutive* one-minute OHLC buckets on the same venue/pair.
  * No tick or candle is fabricated for minutes without trades; such a gap invalidates the

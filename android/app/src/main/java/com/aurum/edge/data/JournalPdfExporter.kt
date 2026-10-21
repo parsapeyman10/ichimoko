@@ -6,7 +6,7 @@ import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import com.aurum.edge.core.PaperTrade
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.engine.PerformanceMetrics
 import java.text.SimpleDateFormat
 import java.util.Date

@@ -41,8 +41,8 @@ internal fun BtcAresEnginesCard(status: PairScanStatus?, sweeping: Boolean) {
         else -> "بدون ورود · ${record.regimeLabelFa}"
     }
     val headlineColor = when {
-        record?.action == com.aurum.edge.core.SignalAction.BUY -> AurumColors.Green
-        record?.action == com.aurum.edge.core.SignalAction.SELL -> AurumColors.Red
+        record?.action == com.aurum.edge.domain.SignalAction.BUY -> AurumColors.Green
+        record?.action == com.aurum.edge.domain.SignalAction.SELL -> AurumColors.Red
         record?.conflicts?.isNotEmpty() == true -> AurumColors.Red
         record != null -> AurumColors.Gold
         else -> AurumColors.TextMuted
@@ -113,8 +113,8 @@ private fun EngineRow(engine: BtcAresEngineReport, chosen: Boolean) {
     val color = when {
         !engine.dataAvailable -> AurumColors.TextMuted
         engine.state == "READY" || engine.state == "ACTIVE" -> when (engine.direction) {
-            com.aurum.edge.core.SignalAction.BUY -> AurumColors.Green
-            com.aurum.edge.core.SignalAction.SELL -> AurumColors.Red
+            com.aurum.edge.domain.SignalAction.BUY -> AurumColors.Green
+            com.aurum.edge.domain.SignalAction.SELL -> AurumColors.Red
             else -> AurumColors.Gold
         }
         engine.state == "INVALIDATED" -> AurumColors.Red
@@ -133,7 +133,7 @@ private fun EngineRow(engine: BtcAresEngineReport, chosen: Boolean) {
             Pill(
                 when {
                     !engine.dataAvailable -> "داده نیست"
-                    engine.state == "READY" && engine.direction != com.aurum.edge.core.SignalAction.NO_TRADE ->
+                    engine.state == "READY" && engine.direction != com.aurum.edge.domain.SignalAction.NO_TRADE ->
                         "${stateLabel(engine.state)} · ${engine.direction.name}"
                     else -> stateLabel(engine.state)
                 },

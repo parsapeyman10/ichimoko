@@ -1,7 +1,7 @@
 package com.aurum.edge.engine
 
 import com.aurum.edge.core.PaperTrade
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import kotlin.math.sqrt
 
 data class ClosedOutcome(

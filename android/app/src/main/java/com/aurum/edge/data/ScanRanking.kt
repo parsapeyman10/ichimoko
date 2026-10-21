@@ -1,7 +1,7 @@
 package com.aurum.edge.data
 
 import com.aurum.edge.core.AssetClass
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.MarketHours
 
 /** Rankings only from the *current*, fresh sweep. Observed means technically actionable

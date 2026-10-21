@@ -1,6 +1,6 @@
 package com.aurum.edge.engine
 
-import com.aurum.edge.core.Candle
+import com.aurum.edge.domain.Candle
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -200,21 +200,21 @@ data class Ichimoku(
     }
 
     /** Higher-timeframe direction at [index] from the 513 and 1024 M5 Ichimoku lines. */
-    fun higherTimeframeBiasAt(index: Int, close: Double): com.aurum.edge.core.SignalAction {
+    fun higherTimeframeBiasAt(index: Int, close: Double): com.aurum.edge.domain.SignalAction {
         val v513 = line513.getOrNull(index)
         val v1024 = line1024.getOrNull(index)
         return when {
             v513 != null && v1024 != null -> when {
-                close > v513 && close > v1024 && v513 >= v1024 -> com.aurum.edge.core.SignalAction.BUY
-                close < v513 && close < v1024 && v513 <= v1024 -> com.aurum.edge.core.SignalAction.SELL
-                else -> com.aurum.edge.core.SignalAction.NO_TRADE
+                close > v513 && close > v1024 && v513 >= v1024 -> com.aurum.edge.domain.SignalAction.BUY
+                close < v513 && close < v1024 && v513 <= v1024 -> com.aurum.edge.domain.SignalAction.SELL
+                else -> com.aurum.edge.domain.SignalAction.NO_TRADE
             }
             v513 != null -> when {
-                close > v513 -> com.aurum.edge.core.SignalAction.BUY
-                close < v513 -> com.aurum.edge.core.SignalAction.SELL
-                else -> com.aurum.edge.core.SignalAction.NO_TRADE
+                close > v513 -> com.aurum.edge.domain.SignalAction.BUY
+                close < v513 -> com.aurum.edge.domain.SignalAction.SELL
+                else -> com.aurum.edge.domain.SignalAction.NO_TRADE
             }
-            else -> com.aurum.edge.core.SignalAction.NO_TRADE
+            else -> com.aurum.edge.domain.SignalAction.NO_TRADE
         }
     }
 

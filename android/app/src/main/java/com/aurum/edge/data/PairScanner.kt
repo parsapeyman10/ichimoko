@@ -1,11 +1,11 @@
 package com.aurum.edge.data
 
 import android.os.SystemClock
-import com.aurum.edge.core.Candle
-import com.aurum.edge.core.FeedMode
-import com.aurum.edge.core.FeedStatus
+import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.FeedMode
+import com.aurum.edge.domain.FeedStatus
 import com.aurum.edge.core.IctEntryRules
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.HistoryPolicy
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.MarketPlaybook
@@ -16,7 +16,7 @@ import com.aurum.edge.core.TrendAlignment
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperAlertRules
 import com.aurum.edge.core.PaperOpportunity
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.engine.SignalEngine
 import kotlinx.coroutines.CancellationException
@@ -124,7 +124,7 @@ class PairScanner(
     private val historyCache = ScanHistoryCache()
     private data class ScanHistory(
         val provider: String,
-        val frames: Map<Interval, List<com.aurum.edge.core.Candle>>,
+        val frames: Map<Interval, List<com.aurum.edge.domain.Candle>>,
         val integrityRevision: Long,
     )
     private val activeWorkers = java.util.concurrent.atomic.AtomicInteger()
@@ -190,7 +190,7 @@ class PairScanner(
      * context module; when they are missing or out of step the module reports UNAVAILABLE and
      * silver keeps working alone. Never fetched by the silver evaluation itself.
      */
-    @Volatile private var lastGoldBars: List<com.aurum.edge.core.Candle> = emptyList()
+    @Volatile private var lastGoldBars: List<com.aurum.edge.domain.Candle> = emptyList()
 
     /** One latest real trend sample per symbol, independently expired. */
     private val trendSample = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, SymbolTrend>>()

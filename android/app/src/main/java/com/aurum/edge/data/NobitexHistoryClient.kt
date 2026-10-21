@@ -1,7 +1,7 @@
 package com.aurum.edge.data
 
-import com.aurum.edge.core.Candle
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.Interval
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json

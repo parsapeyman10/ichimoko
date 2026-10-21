@@ -1,7 +1,7 @@
 package com.aurum.edge.data
 
 import com.aurum.edge.core.FeedLiveness
-import com.aurum.edge.core.FeedMode
+import com.aurum.edge.domain.FeedMode
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick

@@ -49,7 +49,7 @@ import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.LiveTradeValuation
 import com.aurum.edge.core.PaperAiReview
 import com.aurum.edge.core.PaperHoldReview
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.core.TradeReplay
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.engine.PerformanceMetrics

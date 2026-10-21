@@ -1,7 +1,7 @@
 package com.aurum.edge.data
 
-import com.aurum.edge.core.Candle
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.Signal
 
 /** Legacy crypto selector kept for journal/scanner compatibility. Only 5m can

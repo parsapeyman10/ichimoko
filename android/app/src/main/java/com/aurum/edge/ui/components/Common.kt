@@ -255,7 +255,7 @@ fun AssetClass4SlotsBanner(
                                     livePrices[trade.symbol] ?: lastKnownPrices[trade.symbol])
 
                                 Text(
-                                    text = "${trade.symbol} · ${if (trade.action == com.aurum.edge.core.SignalAction.BUY) "BUY ↗" else "SELL ↘"}",
+                                    text = "${trade.symbol} · ${if (trade.action == com.aurum.edge.domain.SignalAction.BUY) "BUY ↗" else "SELL ↘"}",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = AurumColors.Gold,

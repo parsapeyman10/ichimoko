@@ -27,7 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.data.PairScanStatus
 import com.aurum.edge.data.ScanRanking
@@ -55,7 +55,7 @@ fun SignalScreen(viewModel: AurumViewModel, market: MarketState, onChartSymbol: 
     // Shared clock, not a private timer: expiring historical recommendations must not keep
     // a second `while(true)` alive for as long as this screen exists.
     val scanClock by viewModel.clock.collectAsStateWithLifecycle()
-    val freshCandidates = ScanRanking.rank(scanState.statuses, com.aurum.edge.core.Interval.M5, scanClock)
+    val freshCandidates = ScanRanking.rank(scanState.statuses, com.aurum.edge.domain.Interval.M5, scanClock)
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 14.dp)) {
         // The background scanner publishes each finished symbol immediately. Never require
         // the user to press Scan or wait for the entire sweep to display a fresh best pick.

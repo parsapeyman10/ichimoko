@@ -1,8 +1,8 @@
 package com.aurum.edge.data
 
-import com.aurum.edge.core.Candle
+import com.aurum.edge.domain.Candle
 import com.aurum.edge.core.HistoryPolicy
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update

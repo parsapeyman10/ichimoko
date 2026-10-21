@@ -1,5 +1,10 @@
 package com.aurum.edge.core
 
+import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.FeedMode
+import com.aurum.edge.domain.FeedStatus
+import com.aurum.edge.domain.Interval
+import com.aurum.edge.domain.SignalAction
 import kotlinx.serialization.Serializable
 
 /**
@@ -9,43 +14,11 @@ import kotlinx.serialization.Serializable
  * (Twelve Data REST/WebSocket, labelled live fallback ticks) or from a local cache of previously received real prices.
  * There is no generator, no random walk, no seeded simulation anywhere in this module.
  */
-@Serializable
-data class Candle(
-    /** Bar open time, epoch millis (UTC). */
-    val time: Long,
-    val open: Double,
-    val high: Double,
-    val low: Double,
-    val close: Double,
-    val volume: Double = 0.0,
-    /** false only for the bar that is still forming right now. */
-    val closed: Boolean = true,
-) {
-}
-
-enum class Interval(val api: String, val label: String, val minutes: Int) {
-    M1("1min", "1m", 1),
-    M3("3min", "3m", 3),
-    M5("5min", "5m", 5),
-    M15("15min", "15m", 15),
-    M30("30min", "30m", 30),
-    H1("1h", "1H", 60),
-    H4("4h", "4H", 240),
-    D1("1day", "1D", 1440);
-
-    val millis: Long get() = minutes * 60_000L
-
-    companion object {
-        fun fromLabel(label: String): Interval = entries.firstOrNull { it.label == label } ?: M5
-    }
-}
-
 data class PriceTick(val price: Double, val at: Long, val bid: Double? = null, val ask: Double? = null,
                      val isTradeTick: Boolean = true, val provider: String? = null, val sourceNote: String? = null, val sourceConfirmations: Int = 0) {
     val spread: Double? get() = if (bid != null && ask != null && ask >= bid) ask - bid else null
 }
 
-enum class SignalAction { BUY, SELL, NO_TRADE }
 
 enum class AssetClass(val code: String, val label: String, val maxSlots: Int) {
     CRYPTO("CRYPTO", "رمزارز", 2),
@@ -316,22 +289,8 @@ data class Signal(
 }
 
 /** Connection truth for the UI. OFFLINE is a first-class state — never replaced by invented data. */
-enum class FeedMode(val label: String) {
-    NO_KEY("کلید API وارد نشده"),
-    CONNECTING("در حال اتصال"),
-    LIVE("زنده — تیک تازه"),
-    POLLING("کندل/تاریخچه آنلاین دوره‌ای — نه تیک زنده"),
-    MARKET_CLOSED("تعطیلی معمول بازار؛ دریافت قیمت متوقف"),
-    DELAYED("دادهٔ بازار قدیمی؛ اتصال/بازار را بررسی کنید"),
-    OFFLINE("آفلاین"),
-}
 
-data class FeedStatus(
-    val mode: FeedMode,
-    val detail: String = "",
-    val lastSuccessAt: Long? = null,
-    val provider: String = "Twelve Data",
-)
+
 
 @Serializable
 data class PaperNewsEvidence(

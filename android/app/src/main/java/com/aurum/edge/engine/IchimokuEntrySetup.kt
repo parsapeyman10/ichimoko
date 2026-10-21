@@ -1,9 +1,9 @@
 package com.aurum.edge.engine
 
-import com.aurum.edge.core.Candle
+import com.aurum.edge.domain.Candle
 import com.aurum.edge.core.IchimokuEntryEvidence
-import com.aurum.edge.core.Interval
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.Interval
+import com.aurum.edge.domain.SignalAction
 import kotlin.math.abs
 
 /** Mandatory entry gate; only CLOSED, contiguous, authentic bars can establish a setup.

@@ -1,8 +1,8 @@
 package com.aurum.edge.data
 
 import com.aurum.edge.core.AssetClass
-import com.aurum.edge.core.FeedMode
-import com.aurum.edge.core.FeedStatus
+import com.aurum.edge.domain.FeedMode
+import com.aurum.edge.domain.FeedStatus
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick

@@ -42,7 +42,7 @@ import com.aurum.edge.core.LiveTradeValuation
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.PaperTrade
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.data.MarketState
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard

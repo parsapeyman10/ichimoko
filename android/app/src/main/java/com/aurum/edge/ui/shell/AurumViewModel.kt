@@ -12,11 +12,11 @@ import androidx.lifecycle.viewModelScope
 import com.aurum.edge.core.AppContainer
 import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.FeedLiveness
-import com.aurum.edge.core.FeedMode
+import com.aurum.edge.domain.FeedMode
 import com.aurum.edge.data.SourceComparison
 import com.aurum.edge.data.VerificationStatus
 import com.aurum.edge.data.WatchCatalog
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.MtfSnapshotRecord
@@ -29,7 +29,7 @@ import com.aurum.edge.core.TechnicalEvidence
 import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.core.PaperTicket
 import com.aurum.edge.core.Signal
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.core.TradeReplay
 import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.data.JournalStats
@@ -131,7 +131,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val trendContext: StateFlow<com.aurum.edge.core.TrendContext?> = combine(
         symbolTrend, marketTrend, container.verifiedMarket, playbook,
     ) { trend, overall, state, decision ->
-        val side = state.signal?.action ?: com.aurum.edge.core.SignalAction.NO_TRADE
+        val side = state.signal?.action ?: com.aurum.edge.domain.SignalAction.NO_TRADE
         if (trend != null && trend.symbol != state.symbol) return@combine null
         runCatching {
             com.aurum.edge.core.MarketTrend.contextOf(side, trend,

@@ -13,7 +13,7 @@ import com.aurum.edge.MainActivity
 import com.aurum.edge.R
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.PaperTrade
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.core.TechnicalEvidence
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice

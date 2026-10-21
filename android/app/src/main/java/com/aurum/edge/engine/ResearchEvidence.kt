@@ -1,7 +1,7 @@
 package com.aurum.edge.engine
 
 import com.aurum.edge.core.PaperTrade
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.core.TechnicalEvidence
 
 data class PaperCostWhatIf(

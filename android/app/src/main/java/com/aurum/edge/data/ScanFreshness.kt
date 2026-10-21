@@ -1,6 +1,6 @@
 package com.aurum.edge.data
 
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 
 /** A scored historical candidate is not a standing offer. It expires without a new check. */
 object ScanFreshness {

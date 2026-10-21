@@ -1,6 +1,6 @@
 package com.aurum.edge.ui
 
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.engine.SignalEngine
 import kotlinx.serialization.json.*
 

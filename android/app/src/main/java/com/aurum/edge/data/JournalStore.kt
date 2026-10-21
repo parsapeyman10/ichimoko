@@ -2,7 +2,7 @@ package com.aurum.edge.data
 
 import android.content.Context
 import android.util.AtomicFile
-import com.aurum.edge.core.Candle
+import com.aurum.edge.domain.Candle
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.IctPriceActionRecord
 import com.aurum.edge.core.MarketTrendRecord
@@ -12,7 +12,7 @@ import com.aurum.edge.core.PaperPortfolioPolicy
 import com.aurum.edge.core.PaperTrailing
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PaperOrderRules
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.core.Signal
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -113,7 +113,7 @@ class JournalStore(
         }
         // Authoritative entry guard, independent of UI, scanner and automatic trader. Do not
         // move this into settlement: already-open oil positions must still be manageable.
-        require(signal.interval == com.aurum.edge.core.Interval.M5) {
+        require(signal.interval == com.aurum.edge.domain.Interval.M5) {
             "ثبت پوزیشن تازه فقط از سیگنال کندل بستهٔ ۵ دقیقه (5m) مجاز است"
         }
         val isAls5Gold = com.aurum.edge.core.V1Universe.normalize(symbol) == "XAU/USD"

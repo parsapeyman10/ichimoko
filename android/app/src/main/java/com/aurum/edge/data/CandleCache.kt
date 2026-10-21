@@ -2,9 +2,9 @@ package com.aurum.edge.data
 
 import android.content.Context
 import android.util.AtomicFile
-import com.aurum.edge.core.Candle
+import com.aurum.edge.domain.Candle
 import com.aurum.edge.core.HistoryPolicy
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
