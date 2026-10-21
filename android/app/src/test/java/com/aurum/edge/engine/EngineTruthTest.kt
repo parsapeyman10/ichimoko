@@ -1,7 +1,7 @@
 package com.aurum.edge.engine
 
-import com.aurum.edge.core.Candle
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.Interval
 import kotlin.random.Random
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull

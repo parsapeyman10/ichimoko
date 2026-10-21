@@ -1,6 +1,6 @@
 package com.aurum.edge.engine
 
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.data.DukascopyHistoryClient
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue

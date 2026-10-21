@@ -2,8 +2,8 @@ package com.aurum.edge.engine
 
 import android.content.ContextWrapper
 import android.util.AtomicFile
-import com.aurum.edge.core.Candle
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.data.CandleCache
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals

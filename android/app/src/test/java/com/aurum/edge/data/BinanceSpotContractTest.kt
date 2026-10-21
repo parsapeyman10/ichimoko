@@ -1,6 +1,6 @@
 package com.aurum.edge.data
 
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.TradeQuotePolicy
 import org.junit.Assert.*
 import kotlinx.coroutines.runBlocking

@@ -3,7 +3,7 @@ package com.aurum.edge.engine
 import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.data.CatalogQuotePolicy

@@ -1,11 +1,11 @@
 package com.aurum.edge
 
-import com.aurum.edge.core.Candle
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.MarketPlaybook
 import com.aurum.edge.core.MarketTrend
 import com.aurum.edge.core.RiskTone
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.core.SymbolTrend
 import com.aurum.edge.core.TradeMethod
 import com.aurum.edge.core.TrendAlignment

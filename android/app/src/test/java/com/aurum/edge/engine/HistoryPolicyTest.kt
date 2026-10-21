@@ -1,7 +1,7 @@
 package com.aurum.edge.engine
 
 import com.aurum.edge.core.HistoryPolicy
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test

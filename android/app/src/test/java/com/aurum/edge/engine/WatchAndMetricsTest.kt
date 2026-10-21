@@ -1,6 +1,6 @@
 package com.aurum.edge.engine
 
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.data.Quote
 import com.aurum.edge.data.SourceComparison
 import com.aurum.edge.data.VerificationStatus

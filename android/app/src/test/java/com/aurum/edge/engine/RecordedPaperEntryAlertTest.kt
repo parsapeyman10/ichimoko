@@ -6,13 +6,13 @@ import com.aurum.edge.core.ConfluenceItem
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.IctEntryRules
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.MtfFrameRecord
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperNewsEvidence
 import com.aurum.edge.core.PaperNewsRecord
 import com.aurum.edge.core.Signal
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.core.MarketState
 import com.aurum.edge.notify.Notifier

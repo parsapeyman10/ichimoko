@@ -1,18 +1,18 @@
 package com.aurum.edge.engine
 
 import com.aurum.edge.core.AssetClass
-import com.aurum.edge.core.Candle
+import com.aurum.edge.domain.Candle
 import com.aurum.edge.core.CategoryStrategy
 import com.aurum.edge.core.ConfluenceItem
 import com.aurum.edge.core.CryptoBreakoutEvidence
 import com.aurum.edge.core.CryptoCompressionPolicy
 import com.aurum.edge.core.IchimokuEntryEvidence
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.PaperPortfolioPolicy
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.Signal
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.core.TechnicalEvidence
 import org.junit.Assert.*
 import org.junit.Test

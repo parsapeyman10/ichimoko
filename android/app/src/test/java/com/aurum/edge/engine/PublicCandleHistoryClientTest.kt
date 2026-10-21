@@ -1,7 +1,7 @@
 package com.aurum.edge.engine
 
 import com.aurum.edge.core.HistoryPolicy
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.data.DataFeedException
 import com.aurum.edge.data.PublicCandleHistoryClient
 import org.junit.Assert.assertEquals

@@ -1,13 +1,13 @@
 package com.aurum.edge.engine
 
-import com.aurum.edge.core.Candle
+import com.aurum.edge.domain.Candle
 import com.aurum.edge.core.ConfluenceItem
 import com.aurum.edge.core.ConfluenceStatus
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.PaperPortfolioPolicy
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.Signal
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.core.SignalProfile
 import com.aurum.edge.core.TechnicalEvidence
 import org.junit.Assert.assertEquals

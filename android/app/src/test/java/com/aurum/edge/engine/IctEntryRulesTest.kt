@@ -5,10 +5,10 @@ import com.aurum.edge.core.ConfluenceItem
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.IctEntryRules
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.Signal
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.core.MarketState
 import org.junit.Assert.*
 import org.junit.Test

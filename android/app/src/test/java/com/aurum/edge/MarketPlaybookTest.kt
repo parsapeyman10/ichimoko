@@ -1,6 +1,6 @@
 package com.aurum.edge
 
-import com.aurum.edge.core.Candle
+import com.aurum.edge.domain.Candle
 import com.aurum.edge.core.MarketFamily
 import com.aurum.edge.core.MarketPlaybook
 import com.aurum.edge.core.MarketSession

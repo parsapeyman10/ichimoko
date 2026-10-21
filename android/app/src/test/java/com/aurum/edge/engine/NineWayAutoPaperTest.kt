@@ -1,15 +1,15 @@
 package com.aurum.edge.engine
 
 import com.aurum.edge.core.AppSettings
-import com.aurum.edge.core.Candle
+import com.aurum.edge.domain.Candle
 import com.aurum.edge.core.ConfluenceItem
 import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.Signal
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.core.MarketState
 import java.time.Instant
 import org.junit.Assert.assertEquals

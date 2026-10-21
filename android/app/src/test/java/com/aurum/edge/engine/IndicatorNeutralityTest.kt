@@ -1,6 +1,6 @@
 package com.aurum.edge.engine
 
-import com.aurum.edge.core.Candle
+import com.aurum.edge.domain.Candle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test

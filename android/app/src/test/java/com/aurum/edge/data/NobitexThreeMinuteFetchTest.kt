@@ -1,6 +1,6 @@
 package com.aurum.edge.data
 
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient

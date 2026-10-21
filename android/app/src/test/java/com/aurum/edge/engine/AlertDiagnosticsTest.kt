@@ -3,11 +3,11 @@ package com.aurum.edge.engine
 import com.aurum.edge.core.AlertCheckKind
 import com.aurum.edge.core.AlertDiagnostics
 import com.aurum.edge.core.AppSettings
-import com.aurum.edge.core.Candle
+import com.aurum.edge.domain.Candle
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
 import com.aurum.edge.core.HistoryPolicy
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.MarketState
 import com.aurum.edge.data.PairScanState
 import com.aurum.edge.data.PairScanStatus

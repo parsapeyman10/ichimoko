@@ -1,8 +1,8 @@
 package com.aurum.edge.engine
 
 import com.aurum.edge.core.AssetClass
-import com.aurum.edge.core.Interval
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.Interval
+import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.data.PairScanStatus
 import com.aurum.edge.data.ScanRanking
 import org.junit.Assert.assertEquals

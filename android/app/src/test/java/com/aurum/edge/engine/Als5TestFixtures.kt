@@ -4,7 +4,7 @@ import com.aurum.edge.core.Als5OpportunityRecord
 import com.aurum.edge.core.ConfluenceItem
 import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.Signal
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import kotlin.math.abs
 
 /** Deterministic proof fixture for journal-contract tests; not a market signal or test result. */

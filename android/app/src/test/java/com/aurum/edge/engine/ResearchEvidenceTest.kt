@@ -1,15 +1,15 @@
 package com.aurum.edge.engine
 
-import com.aurum.edge.core.Candle
+import com.aurum.edge.domain.Candle
 import com.aurum.edge.core.IctPriceActionRecord
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperConditionRecord
 import com.aurum.edge.core.PaperNewsEvidence
 import com.aurum.edge.core.PaperNewsRecord
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.Signal
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json

@@ -2,10 +2,10 @@ package com.aurum.edge.data
 
 import com.aurum.edge.core.FeedMode
 import com.aurum.edge.core.FeedStatus
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick
-import com.aurum.edge.core.SignalAction
+import com.aurum.edge.domain.SignalAction
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test

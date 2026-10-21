@@ -1,6 +1,6 @@
 package com.aurum.edge.data
 
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.*
