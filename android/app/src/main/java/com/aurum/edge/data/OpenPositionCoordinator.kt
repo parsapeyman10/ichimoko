@@ -54,6 +54,7 @@ class OpenPositionCoordinator(
             } catch (_: Exception) {
                 return@launch
             }
+            val workers = mutableMapOf<String, Pair<Long, Job>>()
             try {
                 journal.trades.collect { trades ->
                     val open = trades.filter { it.isOpen }.groupBy { it.symbol }
@@ -61,7 +62,9 @@ class OpenPositionCoordinator(
                     val openSymbols = open.keys.toSet()
 
                     // Drop workers whose position has been closed.
-                    workers.toMap().forEach { (symbol, worker) ->
+                    workers.toMap().forEach { entry ->
+                        val symbol = entry.key
+                        val worker = entry.value
                         if (open[symbol] != worker.first) {
                             worker.second.cancel()
                             workers.remove(symbol)
