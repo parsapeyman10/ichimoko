@@ -1,4 +1,6 @@
 package com.aurum.edge.core
+import com.aurum.edge.domain.FeedMode
+import com.aurum.edge.domain.FeedStatus
 
 /** Receipt freshness is independent of socket existence and of the Android screen state.
  * This is a presentation/safety downgrade ONLY: it never fabricates a tick or extends its time.

@@ -1,6 +1,9 @@
 package com.aurum.edge.core
 
 import kotlin.math.abs
+import com.aurum.edge.domain.FeedMode
+import com.aurum.edge.domain.Interval
+import com.aurum.edge.domain.SignalAction
 
 /** Side-effect-free guard shared by service and unit tests. NEVER submits a broker order.
  * News/AI layers were removed: only feed freshness, source integrity, technical evidence

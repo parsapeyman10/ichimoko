@@ -2,6 +2,9 @@ package com.aurum.edge.core
 
 import com.aurum.edge.engine.Indicators
 import com.aurum.edge.engine.MtfAnalyzer
+import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.Interval
+import com.aurum.edge.domain.SignalAction
 import kotlin.math.abs
 import kotlin.math.roundToInt
 

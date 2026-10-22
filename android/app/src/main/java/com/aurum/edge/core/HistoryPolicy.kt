@@ -1,4 +1,6 @@
 package com.aurum.edge.core
+import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.Interval
 
 /**
  * Candle-count policy (the old flat "1500 M5 candles for everything" rule is retired):

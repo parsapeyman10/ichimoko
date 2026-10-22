@@ -2,6 +2,8 @@ package com.aurum.edge.core
 
 import java.time.Instant
 import java.time.ZoneOffset
+import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.Interval
 
 /** Descriptive exchange-volume hours, never a buy forecast or a substitute for V1 signals.
  * Require at least five separate closed H1 bars at EVERY UTC hour within 14 days. Zero/unknown

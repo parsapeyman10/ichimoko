@@ -1,6 +1,8 @@
 package com.aurum.edge.core
 
 import com.aurum.edge.engine.IctRangeAnalyzer
+import com.aurum.edge.domain.FeedMode
+import com.aurum.edge.domain.SignalAction
 import kotlin.math.abs
 
 /** Additional, conservative PAPER-only gate. Never replaces the seven technical checks; news remains journal context. */

@@ -1,6 +1,8 @@
 package com.aurum.edge.core
 
 import kotlin.math.abs
+import com.aurum.edge.domain.Interval
+import com.aurum.edge.domain.SignalAction
 
 /**
  * EUR-ARES — Adaptive Euro-Dollar Regime, Execution & Signal Intelligence System (EUR/USD, M5).

@@ -1,6 +1,7 @@
 package com.aurum.edge.core
 
 import com.aurum.edge.engine.MtfAnalyzer
+import com.aurum.edge.domain.FeedMode
 
 /** Read-only, independent checks. Green checks are prerequisites, NOT a forecast or an entry. */
 enum class AlertCheckKind(val label: String) {

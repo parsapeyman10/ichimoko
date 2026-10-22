@@ -2,6 +2,7 @@ package com.aurum.edge.core
 
 import kotlin.math.max
 import kotlin.math.min
+import com.aurum.edge.domain.SignalAction
 
 /** Long-lived V1 paper positions have no fixed take-profit exit. Stop advances on observed
  * prices only. Original stop/risk stays immutable for R and portfolio budgeting. On an OHLC

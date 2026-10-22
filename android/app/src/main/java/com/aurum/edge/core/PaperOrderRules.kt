@@ -3,6 +3,7 @@ package com.aurum.edge.core
 import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.max
+import com.aurum.edge.domain.SignalAction
 
 /** Pure validation for a two-sided *paper-only* ticket. No venue order is ever sent. */
 data class PaperTicket(

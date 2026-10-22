@@ -1,6 +1,8 @@
 package com.aurum.edge.core
 
 import kotlin.math.abs
+import com.aurum.edge.domain.Interval
+import com.aurum.edge.domain.SignalAction
 
 /**
  * ALS-5S — per-engine report and aggregate record for XAG/USD (silver).

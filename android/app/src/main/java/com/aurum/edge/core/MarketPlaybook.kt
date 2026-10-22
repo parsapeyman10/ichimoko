@@ -1,6 +1,8 @@
 package com.aurum.edge.core
 
 import com.aurum.edge.engine.Indicators
+import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.Interval
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalTime
