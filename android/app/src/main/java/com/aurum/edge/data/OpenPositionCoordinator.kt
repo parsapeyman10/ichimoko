@@ -1,6 +1,5 @@
 package com.aurum.edge.data
 
-import com.aurum.edge.core.CryptoCatalog
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.TradeQuotePolicy
@@ -55,70 +54,71 @@ class OpenPositionCoordinator(
             } catch (_: Exception) {
                 return@launch
             }
-            val workers = mutableMapOf<String, Pair<Long, Job>>()
-            journal.trades.collect { trades ->
-                val open = trades.filter { it.isOpen }.groupBy { it.symbol }
-                    .mapValues { (_, rows) -> rows.minOf { it.openedAt } }
-                val openSymbols = open.keys.toSet()
+            try {
+                journal.trades.collect { trades ->
+                    val open = trades.filter { it.isOpen }.groupBy { it.symbol }
+                        .mapValues { (_, rows) -> rows.minOf { it.openedAt } }
+                    val openSymbols = open.keys.toSet()
 
-                // Drop workers whose position has been closed.
-                workers.toMap().forEach { (symbol, worker) ->
-                    if (open[symbol] != worker.first) {
-                        worker.second.cancel()
-                        workers.remove(symbol)
+                    // Drop workers whose position has been closed.
+                    workers.toMap().forEach { (symbol, worker) ->
+                        if (open[symbol] != worker.first) {
+                            worker.second.cancel()
+                            workers.remove(symbol)
+                        }
                     }
-                }
 
-                // Start one independent worker per open position.
-                open.forEach { (symbol, openedAt) ->
-                    if (symbol !in workers) {
-                        val worker = launch(Dispatchers.IO) {
-                            val crypto = CryptoCatalog.isCrypto(symbol)
-                            // Separate closed-candle lane: never slow the ordered tick stream.
-                            if (crypto) launch {
+                    // Start one independent worker per open position.
+                    open.forEach { (symbol, openedAt) ->
+                        if (symbol !in workers) {
+                            val worker = launch(Dispatchers.IO) {
+                                val crypto = CryptoCatalog.isCrypto(symbol)
+                                // Separate closed-candle lane: never slow the ordered tick stream.
+                                if (crypto) launch {
+                                    while (isActive) {
+                                        try {
+                                            ticks.syncCryptoClosedBars(symbol, openedAt)
+                                        } catch (cancel: CancellationException) {
+                                            throw cancel
+                                        } catch (_: Exception) {
+                                            // Keep the prior stop/valuation when history is unavailable.
+                                        }
+                                        delay(60_000L)
+                                    }
+                                }
                                 while (isActive) {
                                     try {
-                                        ticks.syncCryptoClosedBars(symbol, openedAt)
+                                        if (!MarketHours.closedFor(symbol)) {
+                                            val quote: PriceTick? = when {
+                                                crypto -> ticks.poll(symbol, openedAt)
+                                                else -> spot.fetchQuote(symbol)
+                                            }
+                                            val fresh = quote?.takeIf {
+                                                it.at >= openedAt && TradeQuotePolicy.accepts(it)
+                                            }
+                                            if (fresh != null) {
+                                                _liveTicks.update { previous ->
+                                                    OpenTickSnapshot.updated(
+                                                        previous, symbol, fresh, openSymbols,
+                                                    )
+                                                }
+                                                // Single settlement path for every symbol and every caller.
+                                                journal.settleTick(
+                                                    symbol, fresh.price, fresh.at,
+                                                    expectedOpenedAt = openedAt,
+                                                )
+                                            }
+                                        }
                                     } catch (cancel: CancellationException) {
                                         throw cancel
                                     } catch (_: Exception) {
-                                        // Keep the prior stop/valuation when history is unavailable.
+                                        // Only this symbol becomes unknown; keep the others ticking.
                                     }
-                                    delay(60_000L)
+                                    delay(if (crypto) 3_000L else 1_000L)
                                 }
                             }
-                            while (isActive) {
-                                try {
-                                    if (!MarketHours.closedFor(symbol)) {
-                                        val quote: PriceTick? = when {
-                                            crypto -> ticks.poll(symbol, openedAt)
-                                            else -> spot.fetchQuote(symbol)
-                                        }
-                                        val fresh = quote?.takeIf {
-                                            it.at >= openedAt && TradeQuotePolicy.accepts(it)
-                                        }
-                                        if (fresh != null) {
-                                            _liveTicks.update { previous ->
-                                                OpenTickSnapshot.updated(
-                                                    previous, symbol, fresh, openSymbols,
-                                                )
-                                            }
-                                            // Single settlement path for every symbol and every caller.
-                                            journal.settleTick(
-                                                symbol, fresh.price, fresh.at,
-                                                expectedOpenedAt = openedAt,
-                                            )
-                                        }
-                                    }
-                                } catch (cancel: CancellationException) {
-                                    throw cancel
-                                } catch (_: Exception) {
-                                    // Only this symbol becomes unknown; keep the others ticking.
-                                }
-                                delay(if (crypto) 3_000L else 1_000L)
-                            }
+                            workers[symbol] = openedAt to worker
                         }
-                        workers[symbol] = openedAt to worker
                     }
                 }
             } finally {

@@ -1,5 +1,6 @@
 package com.aurum.edge.core
 
+import com.aurum.edge.domain.SignalAction
 import kotlin.math.abs
 
 /** DISPLAY-ONLY valuation from a freshly validated same-symbol quote.
