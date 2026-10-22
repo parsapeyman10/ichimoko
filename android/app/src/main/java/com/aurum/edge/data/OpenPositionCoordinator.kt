@@ -100,11 +100,9 @@ class OpenPositionCoordinator(
                                                 it.at >= openedAt && TradeQuotePolicy.accepts(it)
                                             }
                                             if (fresh != null) {
-                                                _liveTicks.update { previous ->
-                                                    OpenTickSnapshot.updated(
-                                                        previous, symbol, fresh, openSymbols,
-                                                    )
-                                                }
+                                                _liveTicks.value = OpenTickSnapshot.updated(
+                                                    _liveTicks.value, symbol, fresh, openSymbols,
+                                                )
                                                 // Single settlement path for every symbol and every caller.
                                                 journal.settleTick(
                                                     symbol, fresh.price, fresh.at,
