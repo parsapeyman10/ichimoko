@@ -131,9 +131,7 @@ data class StrategyResult(
     /** The chosen engine id, or null if no trade. */
     val chosenEngine: String?,
 ) {
-    /** True if the result is actionable (entry/stop/target populated). */
-    val isActionable: Boolean
-        get() = action != SignalAction.NO_TRADE && entry != null && stopLoss != null && takeProfit != null
+
 }
 
 /**
