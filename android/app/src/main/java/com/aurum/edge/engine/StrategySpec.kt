@@ -277,7 +277,7 @@ class StrategyEvaluator(
 
         val avgConfidence = if (verdicts.isEmpty()) 0.0 else verdicts.sumOf { it.score }.toDouble() / verdicts.size
 
-        StrategyResult(
+        return StrategyResult(
             specId = spec.id,
             symbol = spec.symbol,
             barTime = barTime,
