@@ -1,6 +1,7 @@
 package com.aurum.edge.data
 
 import com.aurum.edge.core.ConfluenceItem
+import com.aurum.edge.domain.Candle
 import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.Signal

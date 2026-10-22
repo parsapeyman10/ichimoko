@@ -1,13 +1,13 @@
 package com.aurum.edge.engine
 
 import com.aurum.edge.core.AppSettings
-import com.aurum.edge.core.FeedMode
-import com.aurum.edge.core.FeedStatus
+import com.aurum.edge.domain.FeedMode
+import com.aurum.edge.domain.FeedStatus
 import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.data.CatalogQuotePolicy
-import com.aurum.edge.core.MarketState
+import com.aurum.edge.domain.MarketState
 import com.aurum.edge.data.WatchCatalog
 import java.time.Instant
 import org.junit.Assert.assertEquals

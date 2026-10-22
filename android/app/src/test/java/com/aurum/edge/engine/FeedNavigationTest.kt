@@ -1,7 +1,7 @@
 package com.aurum.edge.engine
 
-import com.aurum.edge.core.FeedMode
-import com.aurum.edge.core.FeedStatus
+import com.aurum.edge.domain.FeedMode
+import com.aurum.edge.domain.FeedStatus
 import com.aurum.edge.core.FeedLiveness
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.ui.AurumTab
