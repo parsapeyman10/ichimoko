@@ -1,6 +1,7 @@
 package com.aurum.edge.data
 
 import com.aurum.edge.core.*
+import com.aurum.edge.domain.Candle
 import org.junit.Assert.*
 import org.junit.After
 import org.junit.Before
