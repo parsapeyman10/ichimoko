@@ -10,7 +10,6 @@ import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.Signal
 import com.aurum.edge.core.MarketState
 import com.aurum.edge.domain.SignalAction
-import com.aurum.edge.domain.MarketState
 import org.junit.Assert.*
 import org.junit.Test
 

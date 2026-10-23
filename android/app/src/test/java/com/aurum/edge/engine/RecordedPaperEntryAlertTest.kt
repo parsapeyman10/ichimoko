@@ -15,7 +15,6 @@ import com.aurum.edge.core.Signal
 import com.aurum.edge.core.MarketState
 import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.data.JournalStore
-import com.aurum.edge.domain.MarketState
 import com.aurum.edge.notify.Notifier
 import java.io.File
 import java.nio.file.Files
