@@ -11,6 +11,7 @@ import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.PaperAlertRules
 import com.aurum.edge.core.PaperOpportunity
 import com.aurum.edge.core.Signal
+import com.aurum.edge.core.MarketState
 import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.domain.MarketState

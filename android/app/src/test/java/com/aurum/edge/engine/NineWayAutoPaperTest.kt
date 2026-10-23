@@ -9,6 +9,7 @@ import com.aurum.edge.domain.FeedStatus
 import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.Signal
+import com.aurum.edge.core.MarketState
 import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.domain.MarketState
 import java.time.Instant

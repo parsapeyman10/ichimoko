@@ -1,6 +1,7 @@
 package com.aurum.edge.data
 
 import com.aurum.edge.core.*
+import com.aurum.edge.core.MarketState
 import com.aurum.edge.domain.Candle
 import com.aurum.edge.domain.FeedMode
 import com.aurum.edge.domain.FeedStatus
