@@ -2,6 +2,8 @@ package com.aurum.edge.data
 
 import com.aurum.edge.core.*
 import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.FeedMode
+import com.aurum.edge.domain.FeedStatus
 import org.junit.Assert.*
 import org.junit.After
 import org.junit.Before

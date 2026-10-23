@@ -2,7 +2,7 @@ package com.aurum.edge.data
 
 import com.aurum.edge.domain.FeedMode
 import com.aurum.edge.domain.FeedStatus
-import com.aurum.edge.domain.MarketState
+import com.aurum.edge.core.MarketState
 import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick
