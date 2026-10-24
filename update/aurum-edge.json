@@ -1,0 +1,20 @@
+{
+  "applicationId": "com.aurum.edge",
+  "versionCode": 683,
+  "versionName": "2.0.11",
+  "tagName": "v2.0.11",
+  "commitSha": "18fbe584a402437dc0d143c4f7050d47d34537cc",
+  "publishedAt": "2026-10-23T07:54:00Z",
+  "artifactName": "AurumEdge-v2.0.11.apk",
+  "notes": "نسخه ۲.۰.۱۱ (کد ۶۸۳) — آخرین نسخهٔ خط ۲.x و پیش‌نیاز نسخهٔ ۳.۰.۰. مدل‌های مشترک بازار به core منتقل شدند و StrategyEvaluator به مسیر پویش وصل شد؛ قوانین ورود، سقف ریسک، موتورهای ALS-5 / ALS-5S / EUR-ARES / BTC-ARES و رفتار بروزرسانی درجا تغییری نکرده‌اند. نسخهٔ ۳.۰.۰ (کد ۷۰۰) کامل‌ترین درخت منبع این مخزن است و با همان گواهی امضا منتشر می‌شود.",
+  "apkUrl": "https://github.com/parsapeyman10/ichimoko/releases/download/v2.0.11/AurumEdge-v2.0.11.apk",
+  "sha256": "b82da8b8c0959f68f3e26889a1725ccff12d574a92ef3aecb16531698adcc0e3",
+  "sizeBytes": 12475309,
+  "signerSha256": "137f3f98f6c85fdd8671d1d2099b095ed82f3f91594ac9e7b1ba22c264ed4a04",
+  "minSdk": 26,
+  "targetSdk": 35,
+  "supportedAbis": [
+    "arm64-v8a",
+    "armeabi-v7a"
+  ]
+}
