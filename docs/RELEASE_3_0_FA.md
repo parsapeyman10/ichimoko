@@ -54,7 +54,7 @@
 6. **دانلود خودکار نسخهٔ جدید:** سوییچ با حالت برجسته (قاب طلایی) و توضیح اینکه نصب نهایی
    همیشه یک تأیید Android لازم دارد.
 7. **پیام وضعیت + گزارش تشخیص:** نتیجهٔ هر سه کانال؛ مثلاً
-   `manifest: 2.0.11 (683) · v2.0.11 · releases: 2.0.11 (683) · v2.0.11`.
+   `manifest: 3.0.0 (700) · v3.0.0 · releases: 3.0.0 (700) · v3.0.0`.
 8. **دو دکمه:** «بررسی نسخه جدید» (همیشه فوری) و «دانلود و نصب» (تا وجود APK عمومی با
    `https` غیرفعال است).
 9. **کارت‌های «سازگاری و محدودیت Android»** و **«نسخهٔ ۳ — چه چیزی آماده شد»**.
@@ -92,7 +92,19 @@ cd android
 python3 -m unittest discover -s tools -p 'test_*.py' -v   # ۱۳۰ آزمون، همه سبز
 ```
 
-## ۵) انتشار عمومی ۳.۰.۰
+## ۵) انتشار عمومی ۳.۰.۰ — **انجام شد**
+
+| مورد | مقدار منتشرشده |
+|---|---|
+| تگ | `v3.0.0` روی کامیت `5da4663` |
+| زمان انتشار | `2026-10-24T08:56:18Z` |
+| assetها | `AurumEdge-v3.0.0.apk`، `AurumEdge-v3.0.0.apk.json`، `aurum-edge.json`، `checksums.sha256`، `upgrade-compatibility.json` |
+| حجم APK | `12,475,305` بایت |
+| SHA-256 | `912de663be41f7ec40f2e32c5257d4f104d2bce87ce47136c2a7edd0f6c311d3` |
+| امضا | همان گواهی کانال `137f3f98…4a04` (گام «Verify signing continuity» سبز شد) |
+| اجرای CI | `40079352848` — همهٔ گام‌ها سبز، از جمله «Verify public updater release is discoverable» |
+
+مسیرهایی که برای انتشار **بعدی** استفاده می‌شود (برای مرجع):
 
 انتشار فقط در سه حالت مجاز است (جزئیات در [`UPDATER_RELEASE_FA.md`](UPDATER_RELEASE_FA.md)):
 
@@ -141,6 +153,6 @@ git add update/aurum-edge.json && git commit -m "release: publish v3.0.0 (700)"
 | `android/app/build.gradle.kts` | `versionCode` / `versionName`، `BuildConfig` بروزرسانی |
 | `android/app/src/main/java/com/aurum/edge/data/AppUpdateRepository.kt` | سه کانال، گیت امضا/نسخه/هش، دانلود، نصاب |
 | `android/app/src/main/java/com/aurum/edge/ui/tabs/update/UpdateScreen.kt` | صفحهٔ تصویرشده |
-| `update/aurum-edge.json` | manifest شاخهٔ پیش‌فرض (اکنون `v2.0.11`) |
+| `update/aurum-edge.json` | manifest شاخهٔ پیش‌فرض (اکنون `v3.0.0`) |
 | `update/updater-signer.sha256` | گواهی pin‌شدهٔ کانال |
 | `.github/workflows/main.yml` | تست، lint، ساخت، گیت manifest و انتشار |
