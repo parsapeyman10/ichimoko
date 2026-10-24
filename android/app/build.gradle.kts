@@ -84,8 +84,18 @@ android {
         // passive quote stream polls every 5 s instead of 1 s, the Dow asks Yahoo for one bar
         // instead of a whole day of candles, and one process-wide quote cache merges the
         // duplicate reads of the service/UI/scanner loops. See docs/DATA_USAGE_FA.md.
-        versionCode = 683
-        versionName = "2.0.11"
+        // 2.0.11 is the last 2.x code: it moved the shared market models into `core`, wired the
+        // StrategyEvaluator into the scan path and kept the published updater channel upgradeable
+        // (683 on top of 682). It is the direct predecessor of 3.0.0.
+        // 3.0.0 (code 700) is the first COMPLETE 3.x source tree: every Kotlin/Compose file needed
+        // to assemble the APK is present in the repository again (the 2.0.11 merge had left only
+        // part of `android/` behind), the update screen shows the installed certificate next to the
+        // pinned release channel before any download, and the in-app updater keeps its three
+        // channels + 15-minute automatic-check floor. See docs/RELEASE_3_0_FA.md and
+        // CHANGELOG_FA.md. A versionCode must be bumped here before a release run, because the
+        // workflow only publishes explicit tags / `release: publish` commits / approved dispatch.
+        versionCode = 700
+        versionName = "3.0.0"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
