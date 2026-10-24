@@ -1,4 +1,6 @@
 package com.aurum.edge.core
+import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.Interval
 
 /**
  * Chart window of an *already recorded* paper trade.
