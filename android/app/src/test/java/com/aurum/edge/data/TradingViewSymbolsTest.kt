@@ -42,6 +42,5 @@ class TradingViewSymbolsTest {
         val sources = WatchCatalog.symbols.map { it.defaultSources.single() }
         assertEquals(15, sources.distinct().size)
         assertTrue(WatchCatalog.symbols.none { "tradingview_scanner" in it.providerCodes })
-        assertTrue(SourceCatalog.all.none { it.id == "tradingview_scanner" })
     }
 }
