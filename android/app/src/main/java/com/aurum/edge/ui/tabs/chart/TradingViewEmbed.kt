@@ -1,16 +1,17 @@
 package com.aurum.edge.ui
 
-import com.aurum.edge.domain.Interval
-import com.aurum.edge.engine.SignalEngine
 import kotlinx.serialization.json.*
 
 /** Official widget constructor owns ONE chart. Ichimoku is a study on that chart, not an
  * app label. Its ID contains the literal `%1`, not the old malformed `%Cloud` string. */
 internal object TradingViewEmbed {
     private val ticker = Regex("^[A-Za-z0-9:./_-]{1,64}$")
+    private const val TENKAN = 8
+    private const val KIJUN = 24
+    private const val SPAN_B = 72
+
     fun html(symbol: String): String? {
         if (!ticker.matches(symbol) || com.aurum.edge.data.ChartSymbolChoices.all.none { it.ticker == symbol }) return null
-        val ichi = SignalEngine.ichimokuSetting(Interval.M5)
         val config = buildJsonObject {
             put("container_id", "tradingview_chart")
             put("autosize", true); put("symbol", symbol); put("interval", "5")
@@ -19,10 +20,10 @@ internal object TradingViewEmbed {
             put("withdateranges", true); put("save_image", false)
             put("studies", buildJsonArray { add("STD;Ichimoku%1Cloud") })
             put("studies_overrides", buildJsonObject {
-                put("ichimoku cloud.conversion line periods", ichi.tenkan)
-                put("ichimoku cloud.base line periods", ichi.kijun)
-                put("ichimoku cloud.leading span b periods", ichi.spanB)
-                put("ichimoku cloud.lagging span periods", ichi.kijun)
+                put("ichimoku cloud.conversion line periods", TENKAN)
+                put("ichimoku cloud.base line periods", KIJUN)
+                put("ichimoku cloud.leading span b periods", SPAN_B)
+                put("ichimoku cloud.lagging span periods", KIJUN)
             })
         }
         return """<!DOCTYPE html>

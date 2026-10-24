@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -24,23 +23,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.data.TradingViewSymbols
 import com.aurum.edge.ui.theme.AurumColors
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AurumRoot(viewModel: AurumViewModel) {
     var tab by rememberSaveable { mutableStateOf(AurumTab.Home.name) }
-    var showMore by remember { mutableStateOf(false) }
     var started by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val market by viewModel.market.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val toast by viewModel.toast.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
-    // The selected tab is removed from composition on every navigation. Keep its
-    // saveable scroll/filter state so returning to Journal does not jump to entry/top.
     val tabStates = rememberSaveableStateHolder()
 
-    // After process recreation Compose may restore a visible screen, but the new app
-    // container has no running feed. Start it as soon as the UI is visible again.
     LaunchedEffect(Unit) {
         if (!started) {
             started = true
@@ -58,52 +51,45 @@ fun AurumRoot(viewModel: AurumViewModel) {
         com.aurum.edge.data.AppNetwork.refreshSystemNetwork()
         if (started) {
             viewModel.resumeVisibleForexFeed()
-            // Returning from Android's "install unknown apps" settings should continue a
-            // previously downloaded update without making the user find the update tab again.
             viewModel.resumeUpdateInstall()
         }
     }
-    val selectedTab = AurumTab.entries.firstOrNull { it.name == tab && it in primaryTabs + moreTabs } ?: primaryTabs.first()
-    // This only chooses the widget's opening ticker; it does not select an app feed or trade.
+    val selectedTab = AurumTab.entries.firstOrNull { it.name == tab && it in primaryTabs } ?: primaryTabs.first()
     var chartTicker by rememberSaveable { mutableStateOf(TradingViewSymbols.find(settings.symbol) ?: settings.symbol) }
-    // Do not reset an independently selected chart back to the app's default gold feed
-    // when settings load or the market symbol changes. Chart changes are visual only.
+
     fun open(destination: AurumTab) {
-        if (destination in primaryTabs + moreTabs) tab = destination.name
+        if (destination in primaryTabs) tab = destination.name
     }
     fun openChartFor(symbol: String) {
         chartTicker = TradingViewSymbols.find(symbol) ?: symbol
         open(AurumTab.Chart)
     }
 
-    Scaffold(containerColor = AurumColors.Bg, snackbarHost = { SnackbarHost(snackbarHostState) },
+    Scaffold(
+        containerColor = AurumColors.Bg,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
-            AurumBottomBar(selectedTab, onSelect = ::open, onMore = { showMore = true })
-        }) { padding ->
+            AurumBottomBar(selectedTab, onSelect = ::open)
+        },
+    ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             Box(Modifier.fillMaxSize()) {
                 tabStates.SaveableStateProvider(selectedTab.name) {
                     when (selectedTab) {
-                        AurumTab.Home -> HomeScreen(viewModel, market,
-                            onChartSymbol = ::openChartFor, onJournal = { open(AurumTab.Journal) })
-                        AurumTab.Chart -> ChartScreen(initialTicker = chartTicker,
-                            onSelectTicker = { chartTicker = it })
-                        AurumTab.Signal -> SignalScreen(viewModel, market, onChartSymbol = ::openChartFor)
-                        AurumTab.Watch -> MarketWatchScreen(viewModel, onOpenSettings = { open(AurumTab.Api) },
-                            onOpenChart = ::openChartFor)
-                        AurumTab.Journal -> JournalScreen(viewModel, market)
+                        AurumTab.Home -> HomeScreen(
+                            viewModel = viewModel,
+                            market = market,
+                            onChartSymbol = ::openChartFor,
+                            onJournal = {},
+                        )
+                        AurumTab.Chart -> ChartScreen(
+                            initialTicker = chartTicker,
+                            onSelectTicker = { chartTicker = it },
+                        )
                         AurumTab.Update -> UpdateScreen(viewModel)
-                        AurumTab.Settings -> SettingsScreen(viewModel, settings)
-                        AurumTab.Api -> ApiMenuScreen(viewModel, settings, onForexSettings = { open(AurumTab.Settings) })
                     }
                 }
             }
         }
-    }
-    if (showMore && moreTabs.isNotEmpty()) {
-        MoreTabsSheet(
-            onDismiss = { showMore = false },
-            onOpen = { destination -> open(destination); showMore = false },
-        )
     }
 }
