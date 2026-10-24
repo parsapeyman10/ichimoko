@@ -9,6 +9,8 @@ import com.aurum.edge.core.PaperAutoRules
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.TradeQuotePolicy
+import com.aurum.edge.core.MarketState
+
 import com.aurum.edge.engine.EngineRegistry
 import com.aurum.edge.engine.MtfAnalyzer
 import kotlinx.coroutines.Dispatchers

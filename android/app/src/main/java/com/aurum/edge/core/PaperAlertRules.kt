@@ -1,6 +1,5 @@
 package com.aurum.edge.core
 
-import com.aurum.edge.data.MarketState
 import com.aurum.edge.engine.MtfAnalyzer
 
 /** Exact pre-alert checks. No alert is an entry, and none of these checks sends an order. */

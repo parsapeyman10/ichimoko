@@ -1,6 +1,6 @@
 package com.aurum.edge.data
 
-import com.aurum.edge.core.Interval
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.TradeQuotePolicy
 import kotlinx.coroutines.CancellationException

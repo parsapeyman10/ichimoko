@@ -13,13 +13,11 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.aurum.edge.AurumApplication
-import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.MtfSnapshotRecord
 import com.aurum.edge.core.IctEntryRules
 import com.aurum.edge.core.PaperAlertRules
 import com.aurum.edge.core.TradeQuotePolicy
 import com.aurum.edge.core.PaperOpportunity
-import com.aurum.edge.data.SpotFallbackClient
 import com.aurum.edge.engine.MtfAnalyzer
 import com.aurum.edge.notify.AlertSoundPlayer
 import com.aurum.edge.notify.Notifier
@@ -28,7 +26,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,8 +42,6 @@ class SignalMonitorService : Service() {
     private var stateJob: Job? = null
     private var journalJob: Job? = null
     private var settingsJob: Job? = null
-    private var sweepJob: Job? = null
-    private var positionJobs: Job? = null
     private val notifiedTrades = mutableSetOf<String>()
     private val notifiedOpenTrades = mutableSetOf<String>()
 
@@ -105,212 +100,7 @@ class SignalMonitorService : Service() {
                 }
             }
         }
-        // Periodic 50+ universe continuous sweep across commodities, forex, crypto, stocks.
-        // (The old separate news/AI loops are gone; the watchlist cards warm-up folds in here:
-        // one watch refresh every third sweep tick, under WatchRepository's own throttle.)
-        sweepJob?.cancel()
-        sweepJob = scope.launch {
-            var sweepTurns = 0
-            while (isActive) {
-                if (!notificationsPermitted()) { stopSelf(); break }
-                if (sweepTurns++ % 3 == 0 &&
-                    !MarketHours.weekendClosedFor(container.settingsStore.read().symbol))
-                    container.watch.refreshNow() // display/radar cards stay warm under their own throttle
-                val config = container.settingsStore.read()
-                if (config.backgroundMonitor) {
-                    if (!config.notifyOnSignal) {
-                        container.pairScanner.refreshNow() // records honest online/error/alert-off statuses
-                    } else {
-                        try {
-                            container.pairScanner.refreshNow { candidate ->
-                                if (Notifier.canNotifyVerified(this@SignalMonitorService, config.alertSoundUri)) {
-                                    Notifier.notifyVerifiedOpportunity(this@SignalMonitorService, candidate,
-                                        config.alertSoundUri)
-                                }
-                            }
-                        } catch (_: Exception) { /* radar statuses carry per-pair errors */ }
-                    }
-                }
-                // Adaptive cadence: 60s baseline for M5, tightening to 20s while any
-                // symbol is a live candidate / near entry quality (MonitorCadence).
-                delay(com.aurum.edge.core.MonitorCadence.sweepDelayMs(
-                    container.pairScanner.state.value.statuses.map { it.state to it.confidence }))
-            }
-        }
-
-        stateJob?.cancel()
-        stateJob = scope.launch {
-            try {
-                container.journalStore.load()
-            } catch (_: Exception) {
-                container.autoPaperTrader.stopped("ژورنال آسیب‌دیده است؛ ورود خودکار کاغذی متوقف شد")
-                return@launch
-            }
-            val alertsAvailable = runCatching { container.opportunityStore.load(); true }.getOrDefault(false)
-            container.market.start()
-            // Use collect, not collectLatest: never cancel a partially persisted paper entry
-            // just because another tick arrives during the atomic journal write.
-            container.verifiedMarket.collect { state ->
-                if (!container.settingsStore.read().backgroundMonitor) {
-                    container.autoPaperTrader.stopped("پایش متوقف شد")
-                    stopSelf()
-                    return@collect
-                }
-                // Android requires an ongoing foreground notification. Keep it neutral;
-                // feed failures still block entries/settlement, but never trigger an alert.
-                val text = "پایش معاملات کاغذی"
-                runCatching {
-                    NotificationManagerCompat.from(this@SignalMonitorService).notify(
-                        Notifier.MONITOR_NOTIFICATION_ID,
-                        Notifier.buildMonitorNotification(this@SignalMonitorService, text),
-                    )
-                }
-                val signal = state.signal
-                var newCandidate: PaperOpportunity? = null
-                if (alertsAvailable && signal?.isActionable == true &&
-                    container.settingsStore.read().notifyOnSignal) {
-                    val snapshot = runCatching { MtfAnalyzer.analyze(state.candles, state.interval) }.getOrNull()
-                    val config = container.settingsStore.read()
-                    if (PaperAlertRules.blocker(state, config,
-                            container.journalStore.trades.value, snapshot) == null) {
-                        // Re-check after computation: technical/price/MTF state can change between flows.
-                        val latest = container.verifiedMarket.value
-                        val recentConfig = container.settingsStore.read()
-                        if (latest.symbol == state.symbol &&
-                            latest.signal?.barTime == signal.barTime &&
-                            PaperAlertRules.blocker(latest, recentConfig,
-                                container.journalStore.trades.value, snapshot) == null) {
-                            val ict = IctEntryRules.approvedEvidence(latest)
-                            if (ict != null && snapshot != null &&
-                                Notifier.canNotifyVerified(this@SignalMonitorService, recentConfig.alertSoundUri)) {
-                                val item = runCatching { PaperOpportunity.from(latest.signal!!, latest.symbol,
-                                    latest.lastPrice!!, MtfSnapshotRecord.from(snapshot), ict) }.getOrNull()
-                                newCandidate = item
-                            }
-                        }
-                    }
-                }
-                // A candidate is NOT an entry. Wait for the atomic journal write before notifying.
-                val currentSettings = container.settingsStore.read()
-                val autoEnabled = currentSettings.autoPaperTrading
-                val canAlert = currentSettings.notifyOnSignal &&
-                    Notifier.canNotifyVerified(this@SignalMonitorService, currentSettings.alertSoundUri)
-                val opened = if (autoEnabled) container.autoPaperTrader.onMarketUpdate(state) else null
-                if (opened != null) {
-                    if (alertsAvailable) runCatching {
-                        newCandidate?.let { container.opportunityStore.record(it) }
-                        container.opportunityStore.linkTrade(opened)
-                    }
-                    if (canAlert) {
-                        Notifier.notifyRecordedAutoEntry(this@SignalMonitorService, opened,
-                            currentSettings.alertSoundUri)
-                    }
-                } else if (!autoEnabled) {
-                    val candidate = newCandidate
-                    val currentSettings = container.settingsStore.read()
-                    if (candidate != null && currentSettings.notifyOnSignal &&
-                        runCatching { container.opportunityStore.record(candidate) }.getOrDefault(false)) {
-                        Notifier.notifyVerifiedOpportunity(this@SignalMonitorService, candidate,
-                            currentSettings.alertSoundUri)
-                    }
-                }
-            }
-        }
-
-        journalJob?.cancel()
-        journalJob = scope.launch {
-            try { container.journalStore.load() } catch (_: Exception) { return@launch }
-            val canLink = runCatching { container.opportunityStore.load(); true }.getOrDefault(false)
-            // A service restart must not re-notify all old, already processed paper trades.
-            notifiedTrades.addAll(container.journalStore.trades.value.filterNot { it.isOpen }.map { it.id })
-            notifiedOpenTrades.addAll(container.journalStore.trades.value.filter { it.isOpen }.map { it.id })
-            container.journalStore.trades.collect { trades ->
-                val currentSettings = container.settingsStore.read()
-                if (canLink) trades.filter { it.signalBarTime != null }.forEach { trade ->
-                    runCatching { container.opportunityStore.linkTrade(trade) }
-                }
-                // Notify with rich details on EVERY newly opened trade (even if user is in-app)
-                trades.filter { it.isOpen }.forEach { trade ->
-                    if (notifiedOpenTrades.add(trade.id)) {
-                        if (trade.autoOpened) Notifier.notifyRecordedAutoEntry(
-                            this@SignalMonitorService, trade, currentSettings.alertSoundUri)
-                        else Notifier.notifyTradeOpened(
-                            this@SignalMonitorService, trade, currentSettings.alertSoundUri)
-                    }
-                }
-                // Notify on trade closed / settled (TP, SL, manual close)
-                trades.filter { !it.isOpen }.forEach { trade ->
-                    if (notifiedTrades.add(trade.id)) {
-                        Notifier.notifyClosedTrade(this@SignalMonitorService, trade)
-                    }
-                }
-            }
-        }
-
-        // Each OPEN symbol has its own supervised, cancellable worker. A slow/failed
-        // provider for one pair must not delay the other positions, news or scanner.
-        positionJobs?.cancel()
-        positionJobs = scope.launch {
-            try { container.journalStore.load() } catch (_: Exception) { return@launch }
-            val workers = mutableMapOf<String, Pair<Long, Job>>()
-            val spot = SpotFallbackClient()
-            try {
-                container.journalStore.trades.collect { trades ->
-                    val open = trades.filter { it.isOpen }.groupBy { it.symbol }
-                        .mapValues { (_, rows) -> rows.minOf { it.openedAt } }
-                    workers.toMap().forEach { (symbol, worker) ->
-                        if (open[symbol] != worker.first) {
-                            worker.second.cancel()
-                            workers.remove(symbol)
-                        }
-                    }
-                    open.forEach { (symbol, openedAt) ->
-                        if (symbol !in workers) {
-                            val worker = launch(Dispatchers.IO) {
-                                val crypto = com.aurum.edge.data.CryptoCatalog.isCrypto(symbol)
-                                // Separate closed-candle lane: never slow the ordered tick stream.
-                                if (crypto) launch {
-                                    while (isActive) {
-                                        try {
-                                            container.openTradeTicks.syncCryptoClosedBars(symbol, openedAt)
-                                        } catch (cancel: kotlinx.coroutines.CancellationException) {
-                                            throw cancel
-                                        } catch (_: Exception) {
-                                            // Keep the prior real stop/valuation when history is unavailable.
-                                        }
-                                        delay(60_000L)
-                                    }
-                                }
-                                while (isActive) {
-                                    try {
-                                        if (!MarketHours.closedFor(symbol)) {
-                                            if (crypto) {
-                                                // Official same-venue trade stream; SDK reconnects and
-                                                // attempts recovery if the server advertises it. REST
-                                                // bootstrap/fallback remains inside the process-wide gate.
-                                                container.openTradeTicks.watch(symbol, openedAt)
-                                            } else {
-                                                val quote = spot.fetchQuote(symbol)
-                                                if (TradeQuotePolicy.accepts(quote))
-                                                    container.journalStore.settleTick(symbol, quote.price,
-                                                        quote.at, expectedOpenedAt = openedAt)
-                                            }
-                                        }
-                                    } catch (cancel: kotlinx.coroutines.CancellationException) {
-                                        throw cancel
-                                    } catch (_: Exception) {
-                                        // An unavailable quote is not a tick or an exit. Retry
-                                        // independently; the crypto monitor records coverage gaps.
-                                    }
-                                    delay(if (crypto) 3_000L else 1_000L)
-                                }
-                            }
-                            workers[symbol] = openedAt to worker
-                        }
-                    }
-                }
-            } finally { workers.values.forEach { it.second.cancel() } }
-        }
+        // Continuous universe sweep is now owned by AppContainer.sweepCoordinator.
         return START_STICKY
     }
 
