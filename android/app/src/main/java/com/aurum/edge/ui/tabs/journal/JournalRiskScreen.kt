@@ -197,13 +197,13 @@ private fun CapitalAndRiskLimitsCard(
             StatTile(
                 label = "موجودی فعلی حساب",
                 value = String.format(Locale.US, "$%.2f", settings.accountBalance),
-                color = AurumColors.Gold,
+                valueColor = AurumColors.Gold,
                 modifier = Modifier.weight(1f),
             )
             StatTile(
                 label = "ریسک هر معامله",
                 value = "${String.format(Locale.US, "%.2f", settings.riskPercent).trimEnd('0').trimEnd('.')}% ($${String.format(Locale.US, "%.2f", settings.accountBalance * settings.riskPercent / 100.0)})",
-                color = AurumColors.Cyan,
+                valueColor = AurumColors.Cyan,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -227,13 +227,13 @@ private fun CapitalAndRiskLimitsCard(
                     if (riskLimits.todayRealizedPnlUsd >= 0.0) "+" else "",
                     riskLimits.todayRealizedPnlUsd,
                 ),
-                color = todayColor,
+                valueColor = todayColor,
                 modifier = Modifier.weight(1f),
             )
             StatTile(
                 label = "ریسک باز فعلی",
                 value = String.format(Locale.US, "$%.2f", riskLimits.openTradesRiskUsd),
-                color = if (riskLimits.openTradesRiskUsd > 0.0) AurumColors.Orange else AurumColors.TextSecondary,
+                valueColor = if (riskLimits.openTradesRiskUsd > 0.0) AurumColors.Orange else AurumColors.TextSecondary,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -770,13 +770,13 @@ private fun RiskCalculatorAndAutoTradeCard(
                     StatTile(
                         label = "حجم پوزیشن / لات",
                         value = calcResult.lotDescription,
-                        color = AurumColors.Gold,
+                        valueColor = AurumColors.Gold,
                         modifier = Modifier.weight(1f),
                     )
                     StatTile(
                         label = "نسبت ریسک به ریوارد",
                         value = String.format(Locale.US, "1 : %.2f", calcResult.riskReward),
-                        color = if (calcResult.riskReward >= 1.5) AurumColors.Green else AurumColors.Orange,
+                        valueColor = if (calcResult.riskReward >= 1.5) AurumColors.Green else AurumColors.Orange,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -785,13 +785,13 @@ private fun RiskCalculatorAndAutoTradeCard(
                     StatTile(
                         label = "مقدار دلار در ریسک (SL)",
                         value = String.format(Locale.US, "-$%.2f (%.1f%%)", calcResult.riskBudgetUsd, calcResult.riskPercent),
-                        color = AurumColors.Red,
+                        valueColor = AurumColors.Red,
                         modifier = Modifier.weight(1f),
                     )
                     StatTile(
                         label = "سود خالص در هدف (TP)",
                         value = String.format(Locale.US, "+$%.2f", calcResult.netProfitAtTpUsd),
-                        color = AurumColors.Green,
+                        valueColor = AurumColors.Green,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -1174,19 +1174,19 @@ private fun MonthlyPnlCalendarSection(
                     if (calendar.monthNetPnlUsd >= 0.0) "+" else "",
                     calendar.monthNetPnlUsd,
                 ),
-                color = if (calendar.monthNetPnlUsd >= 0.0) AurumColors.Green else AurumColors.Red,
+                valueColor = if (calendar.monthNetPnlUsd >= 0.0) AurumColors.Green else AurumColors.Red,
                 modifier = Modifier.weight(1f),
             )
             StatTile(
                 label = "روزهای سودده / ضررده",
                 value = "${calendar.winningDays} سبز / ${calendar.losingDays} قرمز",
-                color = AurumColors.Gold,
+                valueColor = AurumColors.Gold,
                 modifier = Modifier.weight(1f),
             )
             StatTile(
                 label = "وین‌ریت ماه (${calendar.totalClosedTrades})",
                 value = calendar.monthWinRate?.let { String.format(Locale.US, "%.0f%%", it) } ?: "—",
-                color = AurumColors.Cyan,
+                valueColor = AurumColors.Cyan,
                 modifier = Modifier.weight(1f),
             )
         }
@@ -1273,19 +1273,19 @@ private fun MonthlyPnlCalendarSection(
                 StatTile(
                     label = "برآیند کل",
                     value = String.format(Locale.US, "%s$%.2f", if (stats.netPnl >= 0) "+" else "", stats.netPnl),
-                    color = if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red,
+                    valueColor = if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red,
                     modifier = Modifier.weight(1f),
                 )
                 StatTile(
                     label = "وین‌ریت کل",
                     value = stats.winRate?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—",
-                    color = AurumColors.Cyan,
+                    valueColor = AurumColors.Cyan,
                     modifier = Modifier.weight(1f),
                 )
                 StatTile(
                     label = "پرافیت فاکتور",
                     value = stats.profitFactor?.let { String.format(Locale.US, "%.2f", it) } ?: "—",
-                    color = AurumColors.Gold,
+                    valueColor = AurumColors.Gold,
                     modifier = Modifier.weight(1f),
                 )
             }
