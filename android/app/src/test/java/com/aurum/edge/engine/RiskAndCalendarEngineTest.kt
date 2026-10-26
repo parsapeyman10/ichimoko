@@ -307,19 +307,22 @@ class RiskAndCalendarEngineTest {
         fun buildBullishPullbackSeries(stepMs: Long): List<Candle> {
             val list = mutableListOf<Candle>()
             for (i in 0 until 90) {
-                val base = 60_000.0 + i * 120.0
+                val base = 60_000.0 + i * 35.0
                 val (o, h, l, c) = when {
-                    // Bars 85..87: controlled pullback toward Tenkan/Kijun
+                    // Bars 85..87: controlled pullback toward Tenkan/Kijun without breaking 9-bar low
                     i in 85..87 -> {
-                        val dip = base - (i - 84) * 180.0
-                        listOf(dip + 60.0, dip + 110.0, dip - 140.0, dip - 20.0)
+                        listOf(base - 40.0, base + 200.0, base - 240.0, base - 110.0)
                     }
-                    // Bar 89 (latest closed): bullish bounce closing back above Tenkan
+                    // Bar 88: stabilize near Tenkan
+                    i == 88 -> {
+                        listOf(base - 90.0, base + 250.0, base - 220.0, base + 30.0)
+                    }
+                    // Bar 89 (latest closed): bullish bounce closing back above Tenkan with fresh high
                     i == 89 -> {
-                        listOf(base - 220.0, base + 190.0, base - 320.0, base + 150.0)
+                        listOf(base - 80.0, base + 320.0, base - 200.0, base + 180.0)
                     }
                     else -> {
-                        listOf(base - 40.0, base + 140.0, base - 90.0, base + 90.0)
+                        listOf(base - 60.0, base + 300.0, base - 300.0, base + 120.0)
                     }
                 }
                 list += Candle(
@@ -350,7 +353,10 @@ class RiskAndCalendarEngineTest {
 
         assertEquals(IchimokuStrategyEngine.BTC_SYMBOL, report.symbol)
         assertEquals(6, report.conditions.size)
-        assertTrue(report.conditions.all { it.passed })
+        assertTrue(
+            report.conditions.joinToString(" | ") { "${it.id}:${it.passed}(${it.detailFa})" },
+            report.conditions.all { it.passed }
+        )
         assertEquals(StrategyReadinessState.SIGNAL_BUY, report.readiness)
         assertEquals(SignalAction.BUY, report.action)
         assertNotNull(report.waveProjection)

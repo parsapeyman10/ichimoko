@@ -433,12 +433,12 @@ object IchimokuStrategyEngine {
             for (i in cSearchStart..lastIdx) {
                 if (bars[i].low <= bars[idxC].low) idxC = i
             }
-            val bSearchStart = (idxC - 18).coerceAtLeast(2)
+            val bSearchStart = (idxC - 22).coerceAtLeast(2)
             var idxB = bSearchStart
             for (i in bSearchStart until idxC) {
                 if (bars[i].high >= bars[idxB].high) idxB = i
             }
-            val aSearchStart = (idxB - 26).coerceAtLeast(0)
+            val aSearchStart = (idxB - 45).coerceAtLeast(0)
             var idxA = aSearchStart
             for (i in aSearchStart..idxB) {
                 if (bars[i].low <= bars[idxA].low) idxA = i
@@ -447,10 +447,10 @@ object IchimokuStrategyEngine {
             val rawA = bars[idxA].low
             val rawB = max(bars[idxB].high, snapshot.close)
             val rawC = min(bars[idxC].low, snapshot.tenkan)
-            val waveHeight = max(rawB - rawA, snapshot.atr14 * 2.2)
+            val waveHeight = max(rawB - rawA, max(snapshot.distanceToKijun * 2.4, snapshot.atr14 * 3.0))
             val pointA = rawB - waveHeight
             val pointB = rawB
-            val pointC = rawC.coerceIn(pointA + snapshot.atr14 * 0.3, pointB - snapshot.atr14 * 0.4)
+            val pointC = rawC.coerceIn(pointA + snapshot.atr14 * 0.3, pointB - snapshot.atr14 * 0.3)
 
             val targetV = pointB + (pointB - pointC)
             val targetN = pointC + (pointB - pointA)
@@ -482,12 +482,12 @@ object IchimokuStrategyEngine {
             for (i in cSearchStart..lastIdx) {
                 if (bars[i].high >= bars[idxC].high) idxC = i
             }
-            val bSearchStart = (idxC - 18).coerceAtLeast(2)
+            val bSearchStart = (idxC - 22).coerceAtLeast(2)
             var idxB = bSearchStart
             for (i in bSearchStart until idxC) {
                 if (bars[i].low <= bars[idxB].low) idxB = i
             }
-            val aSearchStart = (idxB - 26).coerceAtLeast(0)
+            val aSearchStart = (idxB - 45).coerceAtLeast(0)
             var idxA = aSearchStart
             for (i in aSearchStart..idxB) {
                 if (bars[i].high >= bars[idxA].high) idxA = i
@@ -496,10 +496,10 @@ object IchimokuStrategyEngine {
             val rawA = bars[idxA].high
             val rawB = min(bars[idxB].low, snapshot.close)
             val rawC = max(bars[idxC].high, snapshot.tenkan)
-            val waveHeight = max(rawA - rawB, snapshot.atr14 * 2.2)
+            val waveHeight = max(rawA - rawB, max(snapshot.distanceToKijun * 2.4, snapshot.atr14 * 3.0))
             val pointA = rawB + waveHeight
             val pointB = rawB
-            val pointC = rawC.coerceIn(pointB + snapshot.atr14 * 0.4, pointA - snapshot.atr14 * 0.3)
+            val pointC = rawC.coerceIn(pointB + snapshot.atr14 * 0.3, pointA - snapshot.atr14 * 0.3)
 
             val targetV = pointB - (pointC - pointB)
             val targetN = pointC - (pointA - pointB)
@@ -709,10 +709,14 @@ object IchimokuStrategyEngine {
         val wave = computeHosodaWave(strategyCandles, candidateDirection, stratSnap)
         val stopDist = abs(livePrice - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.5)
 
-        val rawPrimaryTp = when (activeModel) {
-            BitcoinStrategyModel.ELLIOTT_HOSODA_WAVE -> wave?.targetN
-            else -> wave?.targetN ?: wave?.targetV
-        } ?: if (isLong) {
+        val candidateTargets = if (wave != null) {
+            listOf(wave.targetV, wave.targetN, wave.targetE).sortedBy { abs(it - livePrice) }
+        } else {
+            emptyList()
+        }
+        val rawPrimaryTp = candidateTargets.firstOrNull {
+            abs(it - livePrice) / stopDist >= effectiveConfig.minRiskReward
+        } ?: candidateTargets.lastOrNull() ?: if (isLong) {
             livePrice + stopDist * max(effectiveConfig.minRiskReward, 2.0)
         } else {
             (livePrice - stopDist * max(effectiveConfig.minRiskReward, 2.0)).coerceAtLeast(1.0)
