@@ -215,9 +215,25 @@ data class AppSettings(
     val newsAiFormat: String = "AUTO",
     val signalProfile: SignalProfile = SignalProfile.BASE,
     val activeStrategy: StrategyKind = StrategyKind.ICHIMOKU_PRICE_ACTION,
+    val selectedBitcoinStrategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+    val baseStrategyConfig: BaseStrategyConfig = BaseStrategyConfig(),
+    val customStrategies: List<CustomStrategySlot> = emptyList(),
     val categoryStrategies: Map<AssetClass, CategoryStrategy> = AssetClass.entries.associateWith { CategoryStrategy.HYBRID },
 ) {
     val hasKey: Boolean get() = apiKey.isNotBlank() || twelveDataKeys.values.any { it.isNotBlank() }
+
+    fun activeCustomStrategySlot(): CustomStrategySlot? =
+        customStrategies.firstOrNull { it.id == selectedBitcoinStrategyId }
+
+    fun activeBitcoinStrategyModel(): BitcoinStrategyModel =
+        activeCustomStrategySlot()?.let { BitcoinStrategyModel.fromId(it.baseModelId) }
+            ?: BitcoinStrategyModel.fromId(selectedBitcoinStrategyId)
+
+    fun activeBitcoinStrategyTitleFa(): String =
+        activeCustomStrategySlot()?.titleFa ?: activeBitcoinStrategyModel().titleFa
+
+    fun activeBitcoinStrategyConfig(): BaseStrategyConfig =
+        activeCustomStrategySlot()?.config ?: baseStrategyConfig
 
     fun apiKeyFor(symbol: String): String =
         twelveDataKeys[V1Universe.normalize(symbol)]?.takeIf { it.isNotBlank() } ?: apiKey

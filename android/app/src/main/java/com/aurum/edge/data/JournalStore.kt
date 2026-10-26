@@ -91,6 +91,34 @@ class JournalStore(
     }
 
     /**
+     * به‌روزرسانی خودکار حد ضرر (Break-Even در `1R`، تریل با `Kijun-sen` یا `Preserve Mode` پشت `Tenkan-sen`)
+     * روی معاملات باز بیت‌کوین.
+     */
+    @Synchronized
+    fun updateTradeStopLoss(
+        tradeId: String,
+        newStopLoss: Double,
+        stageNote: String,
+    ): PaperTrade? {
+        if (!newStopLoss.isFinite() || newStopLoss <= 0.0) return null
+        val target = _trades.value.firstOrNull { it.id == tradeId && it.isOpen } ?: return null
+        val updatedNote = if (stageNote.isBlank() || target.note.contains(stageNote)) {
+            target.note
+        } else if (target.note.isBlank()) {
+            stageNote
+        } else {
+            "${target.note} · $stageNote"
+        }
+        val modified = target.copy(
+            stopLoss = newStopLoss,
+            initialStopLoss = target.initialStopLoss ?: target.stopLoss,
+            note = updatedNote,
+        )
+        persist(_trades.value.map { if (it.id == tradeId) modified else it })
+        return modified
+    }
+
+    /**
      * Evaluates an incoming live market tick against all open trades for [symbolInput].
      * Any trade whose TP or SL is reached is automatically closed, persisted, and settled
      * against account balance.

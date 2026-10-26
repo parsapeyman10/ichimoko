@@ -179,6 +179,9 @@ fun HomeScreen(
             )
         }
 
+        // ── ۳. موتور استراتژی‌های ایچیموکوی بیت‌کوین (انتخابگر انحصاری + استراتژی بیس) ──
+        com.aurum.edge.ui.components.BitcoinIchimokuStrategyCard(viewModel = viewModel)
+
         // ── ۴. پنل معاملهٔ خودکار کاغذی و تخصیص ۴ بازار ────────────────────
         AutoPaperCard(viewModel, onJournal, now)
     }

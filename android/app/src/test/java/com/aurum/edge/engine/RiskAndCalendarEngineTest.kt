@@ -2,12 +2,18 @@ package com.aurum.edge.engine
 
 import android.content.Context
 import com.aurum.edge.core.AutoExitKind
+import com.aurum.edge.core.BaseStrategyConfig
+import com.aurum.edge.core.BitcoinStrategyModel
+import com.aurum.edge.core.CustomStrategySlot
+import com.aurum.edge.core.IchimokuStrategyEngine
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.RiskAndCalendarEngine
+import com.aurum.edge.core.StrategyReadinessState
 import com.aurum.edge.data.AvalAiAdvisor
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.SettingsStore
 import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.domain.SignalAction
 import java.io.File
 import java.time.LocalDate
@@ -255,4 +261,122 @@ class RiskAndCalendarEngineTest {
         assertEquals("aa-test-key-123", reloaded.newsAiApiKey)
         assertEquals("gemini-2.0-flash", reloaded.newsAiModel)
     }
+
+    @Test
+    fun `base ichimoku strategy evaluates 3 timeframes hosoda targets preserve mode and enforces single active strategy`() {
+        // 1. Verify exclusive single-active strategy selection in SettingsStore
+        val context = RuntimeEnvironment.getApplication()
+        val store = SettingsStore(context)
+        assertEquals(BitcoinStrategyModel.BASE_ICHIMOKU.id, store.read().selectedBitcoinStrategyId)
+
+        // Activate Patel model -> Base is no longer the active ID
+        store.update {
+            it.copy(
+                selectedBitcoinStrategyId = BitcoinStrategyModel.PATEL_KIJUN_PULLBACK.id,
+                autoPaperTrading = true,
+            )
+        }
+        assertEquals(BitcoinStrategyModel.PATEL_KIJUN_PULLBACK.id, store.read().selectedBitcoinStrategyId)
+        assertEquals(BitcoinStrategyModel.PATEL_KIJUN_PULLBACK, store.read().activeBitcoinStrategyModel())
+
+        // Add a custom strategy slot and activate it -> replaces previous active strategy
+        val customSlot = CustomStrategySlot(
+            id = "CUSTOM_TEST_1",
+            titleFa = "استراتژی شخصی تست ۱",
+            summaryFa = "نسخه سفارشی بر پایه استراتژی بیس",
+            baseModelId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+            config = BaseStrategyConfig(minRiskReward = 2.0),
+        )
+        store.update {
+            it.copy(
+                customStrategies = listOf(customSlot),
+                selectedBitcoinStrategyId = customSlot.id,
+            )
+        }
+        val reloaded = SettingsStore(context).read()
+        assertEquals("CUSTOM_TEST_1", reloaded.selectedBitcoinStrategyId)
+        assertEquals("استراتژی شخصی تست ۱", reloaded.activeBitcoinStrategyTitleFa())
+        assertEquals(2.0, reloaded.activeBitcoinStrategyConfig().minRiskReward, 0.001)
+
+        // Switch back to BASE_ICHIMOKU -> custom strategy is automatically deactivated
+        store.update { it.copy(selectedBitcoinStrategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id) }
+        assertEquals(BitcoinStrategyModel.BASE_ICHIMOKU.id, store.read().selectedBitcoinStrategyId)
+
+        // 2. Build a realistic 90-bar bullish trend + pullback bounce series for BTC/USDT
+        val baseTime = 1_760_000_000_000L
+        fun buildBullishPullbackSeries(stepMs: Long): List<Candle> {
+            val list = mutableListOf<Candle>()
+            for (i in 0 until 90) {
+                val base = 60_000.0 + i * 120.0
+                val (o, h, l, c) = when {
+                    // Bars 85..87: controlled pullback toward Tenkan/Kijun
+                    i in 85..87 -> {
+                        val dip = base - (i - 84) * 180.0
+                        listOf(dip + 60.0, dip + 110.0, dip - 140.0, dip - 20.0)
+                    }
+                    // Bar 89 (latest closed): bullish bounce closing back above Tenkan
+                    i == 89 -> {
+                        listOf(base - 220.0, base + 190.0, base - 320.0, base + 150.0)
+                    }
+                    else -> {
+                        listOf(base - 40.0, base + 140.0, base - 90.0, base + 90.0)
+                    }
+                }
+                list += Candle(
+                    time = baseTime + i * stepMs,
+                    open = o,
+                    high = h,
+                    low = l,
+                    close = c,
+                    volume = 120.0 + i,
+                    closed = true,
+                )
+            }
+            return list
+        }
+
+        val macroBars = buildBullishPullbackSeries(Interval.H4.millis)
+        val stratBars = buildBullishPullbackSeries(Interval.H1.millis)
+        val trigBars = buildBullishPullbackSeries(Interval.M15.millis)
+
+        val config = BaseStrategyConfig()
+        val report = IchimokuStrategyEngine.evaluateBitcoinStrategy(
+            activeModel = BitcoinStrategyModel.BASE_ICHIMOKU,
+            config = config,
+            macroCandles = macroBars,
+            strategyCandles = stratBars,
+            triggerCandles = trigBars,
+        )
+
+        assertEquals(IchimokuStrategyEngine.BTC_SYMBOL, report.symbol)
+        assertEquals(6, report.conditions.size)
+        assertTrue(report.conditions.all { it.passed })
+        assertEquals(StrategyReadinessState.SIGNAL_BUY, report.readiness)
+        assertEquals(SignalAction.BUY, report.action)
+        assertNotNull(report.waveProjection)
+        assertTrue((report.targetN ?: 0.0) > report.livePrice)
+        assertTrue((report.suggestedStopLoss ?: Double.MAX_VALUE) < report.livePrice)
+
+        // 3. Test Break-Even and Preserve Mode on an open BTC/USDT trade
+        val journal = JournalStore(context, File(context.filesDir, "test_btc_preserve.json"), store)
+        journal.clear()
+        val calc = RiskAndCalendarEngine.calculatePosition(
+            symbolInput = "BTC/USDT",
+            accountBalance = 5_000.0,
+            riskPercent = 1.0,
+            entry = 68_000.0,
+            stopLoss = 67_000.0,
+            takeProfit = 72_000.0,
+            preferredAction = SignalAction.BUY,
+        )!!
+        val opened = journal.openTrade(calc, note = "تست استراتژی بیس")
+        val preserveEval = IchimokuStrategyEngine.evaluateOpenTradeManagement(
+            trade = opened,
+            report = report.copy(livePrice = 71_200.0), // > 3R profit
+            config = config,
+        )
+        assertNotNull(preserveEval)
+        assertTrue(preserveEval!!.newStopLoss > opened.entry)
+    }
 }
+

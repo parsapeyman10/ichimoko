@@ -3,6 +3,7 @@ package com.aurum.edge.data
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.V1Universe
 import com.aurum.edge.domain.Candle
+import com.aurum.edge.domain.Interval
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlin.math.max
@@ -180,6 +181,93 @@ object LiveQuoteFetcher {
             }
         }
         null
+    }
+
+    /**
+     * دریافت کندل‌های تایم‌فریم مشخص (مثلاً `4H`، `1H`، `15m`) برای اجرای استراتژی ایچیموکوی بیت‌کوین (`BTC/USDT`).
+     * کندل در حال تشکیل (که هنوز بسته نشده است) با `closed = false` علامت‌گذاری می‌شود تا موتور ایچیموکو
+     * طبق قانون کارن پلویل روی کندل‌های بسته‌شده تصمیم بگیرد.
+     */
+    suspend fun fetchTimeframeCandles(
+        symbolInput: String = "BTC/USDT",
+        interval: Interval,
+        limit: Int = 120,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): Pair<List<Candle>, String>? = withContext(Dispatchers.IO) {
+        val symbol = V1Universe.normalize(symbolInput)
+        if (!V1Universe.valid(symbol)) return@withContext null
+        val base = symbol.substringBefore('/')
+        val binanceInterval = when (interval) {
+            Interval.M1 -> "1m"
+            Interval.M3 -> "3m"
+            Interval.M5 -> "5m"
+            Interval.M15 -> "15m"
+            Interval.M30 -> "30m"
+            Interval.H1 -> "1h"
+            Interval.H4 -> "4h"
+            Interval.D1 -> "1d"
+        }
+        val okxBar = when (interval) {
+            Interval.M1 -> "1m"
+            Interval.M3 -> "3m"
+            Interval.M5 -> "5m"
+            Interval.M15 -> "15m"
+            Interval.M30 -> "30m"
+            Interval.H1 -> "1H"
+            Interval.H4 -> "4H"
+            Interval.D1 -> "1D"
+        }
+        val gateInterval = when (interval) {
+            Interval.M1 -> "1m"
+            Interval.M3 -> "5m"
+            Interval.M5 -> "5m"
+            Interval.M15 -> "15m"
+            Interval.M30 -> "30m"
+            Interval.H1 -> "1h"
+            Interval.H4 -> "4h"
+            Interval.D1 -> "1d"
+        }
+        val sinceMillis = nowMillis - interval.millis * (limit + 5L)
+
+        val attempts: List<() -> Pair<List<Candle>, String>?> = listOf(
+            {
+                fetchBinanceKlines("${base}USDT", binanceInterval, sinceMillis, nowMillis)?.let { (bars, prov) ->
+                    markClosedFlags(bars, interval, nowMillis) to prov
+                }
+            },
+            {
+                fetchOkxCandles("$base-USDT", okxBar, sinceMillis)?.let { (bars, prov) ->
+                    markClosedFlags(bars, interval, nowMillis) to prov
+                }
+            },
+            {
+                fetchGateCandles("${base}_USDT", gateInterval, sinceMillis, nowMillis)?.let { (bars, prov) ->
+                    markClosedFlags(bars, interval, nowMillis) to prov
+                }
+            },
+        )
+
+        for (attempt in attempts) {
+            val res = runCatching { attempt() }.getOrNull()
+            if (res != null && res.first.size >= 35) {
+                return@withContext res
+            }
+        }
+        null
+    }
+
+    private fun markClosedFlags(
+        bars: List<Candle>,
+        interval: Interval,
+        nowMillis: Long,
+    ): List<Candle> {
+        if (bars.isEmpty()) return bars
+        val sorted = bars.sortedBy { it.time }
+        return sorted.mapIndexed { idx, bar ->
+            val isLast = idx == sorted.lastIndex
+            val isClosed = !isLast || (bar.time + interval.millis <= nowMillis + 2_000L)
+            bar.copy(closed = isClosed)
+        }
     }
 
     private fun fetchBinanceKlines(

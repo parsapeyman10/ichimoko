@@ -7,12 +7,18 @@ import androidx.lifecycle.viewModelScope
 import com.aurum.edge.app.AppContainer
 import com.aurum.edge.core.AppSettings
 import com.aurum.edge.core.AutoExitKind
+import com.aurum.edge.core.BaseStrategyConfig
+import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.CandleBackfillSummary
+import com.aurum.edge.core.CustomStrategySlot
+import com.aurum.edge.core.IchimokuStrategyEngine
 import com.aurum.edge.core.MarketState
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.RiskAndCalendarEngine
 import com.aurum.edge.core.RiskCalculationResult
+import com.aurum.edge.core.StrategyEvaluationReport
+import com.aurum.edge.core.StrategyReadinessState
 import com.aurum.edge.core.V1Universe
 import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.data.AiTradeVerdict
@@ -22,7 +28,9 @@ import com.aurum.edge.data.JournalStats
 import com.aurum.edge.data.LiveQuoteFetcher
 import com.aurum.edge.data.OpenPositionDisplay
 import com.aurum.edge.data.PairScanState
+import com.aurum.edge.data.PairScanStatus
 import java.util.Locale
+import java.util.UUID
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,7 +44,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
     val market: StateFlow<MarketState> = container.verifiedMarket
     val trades: StateFlow<List<PaperTrade>> = container.journalStore.trades
-    val pairScan: StateFlow<PairScanState> = MutableStateFlow(PairScanState()).asStateFlow()
+    private val _pairScan = MutableStateFlow(PairScanState())
+    val pairScan: StateFlow<PairScanState> = _pairScan.asStateFlow()
     val clock: StateFlow<Long> = container.clock
     val updateState: StateFlow<AppUpdateRepository.State> = container.updater.state
     val updateSigningDiagnostic: String by lazy { container.updater.installedSigningDiagnostic() }
@@ -60,6 +69,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private val _lastAiVerdict = MutableStateFlow<AiTradeVerdict?>(null)
     val lastAiVerdict: StateFlow<AiTradeVerdict?> = _lastAiVerdict.asStateFlow()
 
+    private val _btcStrategyReport = MutableStateFlow<StrategyEvaluationReport?>(null)
+    val btcStrategyReport: StateFlow<StrategyEvaluationReport?> = _btcStrategyReport.asStateFlow()
+
+    private val _isScanningBtcStrategy = MutableStateFlow(false)
+    val isScanningBtcStrategy: StateFlow<Boolean> = _isScanningBtcStrategy.asStateFlow()
+
     private val _activeRiskSymbol = MutableStateFlow(container.settingsStore.read().symbol)
     val activeRiskSymbol: StateFlow<String> = _activeRiskSymbol.asStateFlow()
 
@@ -71,6 +86,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     private var updateCheckStarted = false
     private var liveMonitorJob: Job? = null
+    private var lastBtcStrategyEvalMillis: Long = 0L
+    private var lastAutoFiredBarTimeByStrategy: Map<String, Long> = emptyMap()
 
     init {
         viewModelScope.launch {
@@ -97,13 +114,18 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             while (isActive) {
                 val openSymbols = trades.value.filter { it.isOpen }.map { V1Universe.normalize(it.symbol) }
                 val watchedSymbol = V1Universe.normalize(_activeRiskSymbol.value)
-                val symbolsToPoll = (openSymbols + watchedSymbol).filter(V1Universe::valid).distinct()
+                val symbolsToPoll = (openSymbols + watchedSymbol + IchimokuStrategyEngine.BTC_SYMBOL)
+                    .filter(V1Universe::valid).distinct()
                 for (symbol in symbolsToPoll) {
                     val tick = LiveQuoteFetcher.fetchLiveTick(symbol)
                     if (tick != null) {
                         applyIncomingTick(symbol, tick)
                         container.settingsStore.setLastSync(symbol, at = tick.at)
                     }
+                }
+                val now = System.currentTimeMillis()
+                if (now - lastBtcStrategyEvalMillis >= 25_000L || _btcStrategyReport.value == null) {
+                    evaluateActiveBitcoinStrategyInternal(userInitiated = false)
                 }
                 val delayMs = if (openSymbols.isNotEmpty()) 4_000L else 8_000L
                 delay(delayMs)
@@ -499,7 +521,258 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setAutoPaperTrading(enabled: Boolean) {
         container.settingsStore.update { it.copy(autoPaperTrading = enabled) }
-        _toast.value = if (enabled) "معاملهٔ خودکار کاغذی روشن شد" else "معاملهٔ خودکار کاغذی خاموش شد"
+        val activeTitle = settings.value.activeBitcoinStrategyTitleFa()
+        _toast.value = if (enabled) {
+            "✅ اجرای خودکار «$activeTitle» روی BTC/USDT روشن شد (فقط این متود فعال است)"
+        } else {
+            "اجرای خودکار استراتژی بیت‌کوین خاموش شد"
+        }
+        if (enabled) {
+            scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
+        }
+    }
+
+    /**
+     * انتخاب و فعال‌سازی انحصاری یک استراتژی:
+     * طبق قانون سیستم، فقط یک متود در هر لحظه قابل اجراست و با فعال‌سازی استراتژی جدید،
+     * استراتژی قبلی بلافاصله غیرفعال می‌شود.
+     */
+    fun activateSingleBitcoinStrategy(strategyId: String, enableExecution: Boolean = true) {
+        val prevTitle = settings.value.activeBitcoinStrategyTitleFa()
+        val prevId = settings.value.selectedBitcoinStrategyId
+        container.settingsStore.update {
+            it.copy(
+                selectedBitcoinStrategyId = strategyId,
+                autoPaperTrading = if (enableExecution) true else it.autoPaperTrading,
+            )
+        }
+        val newTitle = settings.value.activeBitcoinStrategyTitleFa()
+        _toast.value = if (prevId != strategyId) {
+            "✅ «$newTitle» فعال شد و استراتژی قبلی («$prevTitle») غیرفعال گردید"
+        } else {
+            "✅ «$newTitle» به‌عنوان تنها استراتژی فعال روی BTC/USDT تنظیم شد"
+        }
+        scanAndEvaluateBitcoinStrategyNow(userInitiated = true)
+    }
+
+    fun updateBaseStrategyConfig(newConfig: BaseStrategyConfig) {
+        container.settingsStore.update { current ->
+            val customSlot = current.activeCustomStrategySlot()
+            if (customSlot != null) {
+                current.copy(
+                    customStrategies = current.customStrategies.map {
+                        if (it.id == customSlot.id) it.copy(config = newConfig) else it
+                    }
+                )
+            } else {
+                current.copy(baseStrategyConfig = newConfig)
+            }
+        }
+        _toast.value = "✅ تنظیمات استراتژی ذخیره شد؛ در حال بازسنجی چارت BTC/USDT..."
+        scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
+    }
+
+    fun addCustomStrategyModel(
+        titleFa: String,
+        summaryFa: String,
+        baseModel: BitcoinStrategyModel = BitcoinStrategyModel.BASE_ICHIMOKU,
+        activateImmediately: Boolean = true,
+    ) {
+        val cleanTitle = titleFa.trim()
+        if (cleanTitle.isEmpty()) {
+            _toast.value = "لطفاً نام استراتژی جدید را وارد کنید"
+            return
+        }
+        val slot = CustomStrategySlot(
+            id = "CUSTOM_${UUID.randomUUID().toString().take(8).uppercase(Locale.ROOT)}",
+            titleFa = cleanTitle,
+            badgeFa = "مدل استراتژی سفارشی",
+            summaryFa = summaryFa.trim().ifBlank { "مبتنی بر ${baseModel.titleFa} روی بیت‌کوین (BTC/USDT)" },
+            baseModelId = baseModel.id,
+            config = settings.value.baseStrategyConfig,
+        )
+        container.settingsStore.update { current ->
+            current.copy(
+                customStrategies = current.customStrategies + slot,
+                selectedBitcoinStrategyId = if (activateImmediately) slot.id else current.selectedBitcoinStrategyId,
+                autoPaperTrading = if (activateImmediately) true else current.autoPaperTrading,
+            )
+        }
+        _toast.value = if (activateImmediately) {
+            "✅ استراتژی «$cleanTitle» اضافه و فعال شد (استراتژی قبلی غیرفعال گردید)"
+        } else {
+            "✅ استراتژی «$cleanTitle» به لیست استراتژی‌ها اضافه شد"
+        }
+        if (activateImmediately) {
+            scanAndEvaluateBitcoinStrategyNow(userInitiated = true)
+        }
+    }
+
+    fun deleteCustomStrategyModel(strategyId: String) {
+        container.settingsStore.update { current ->
+            val remaining = current.customStrategies.filterNot { it.id == strategyId }
+            val nextActiveId = if (current.selectedBitcoinStrategyId == strategyId) {
+                BitcoinStrategyModel.BASE_ICHIMOKU.id
+            } else {
+                current.selectedBitcoinStrategyId
+            }
+            current.copy(
+                customStrategies = remaining,
+                selectedBitcoinStrategyId = nextActiveId,
+            )
+        }
+        _toast.value = "استراتژی سفارشی حذف شد"
+        scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
+    }
+
+    fun scanAndEvaluateBitcoinStrategyNow(userInitiated: Boolean = true) {
+        viewModelScope.launch {
+            evaluateActiveBitcoinStrategyInternal(userInitiated = userInitiated)
+        }
+    }
+
+    private suspend fun evaluateActiveBitcoinStrategyInternal(userInitiated: Boolean) {
+        if (_isScanningBtcStrategy.value) return
+        _isScanningBtcStrategy.value = true
+        try {
+            val cfg = settings.value
+            val activeModel = cfg.activeBitcoinStrategyModel()
+            val activeCustom = cfg.activeCustomStrategySlot()
+            val stratConfig = cfg.activeBitcoinStrategyConfig()
+            val now = System.currentTimeMillis()
+
+            val macroBars = LiveQuoteFetcher.fetchTimeframeCandles(
+                symbolInput = IchimokuStrategyEngine.BTC_SYMBOL,
+                interval = stratConfig.macroInterval,
+                limit = 110,
+                nowMillis = now,
+            )?.first.orEmpty()
+
+            val strategyBars = LiveQuoteFetcher.fetchTimeframeCandles(
+                symbolInput = IchimokuStrategyEngine.BTC_SYMBOL,
+                interval = stratConfig.strategyInterval,
+                limit = 110,
+                nowMillis = now,
+            )?.first.orEmpty()
+
+            val triggerBars = LiveQuoteFetcher.fetchTimeframeCandles(
+                symbolInput = IchimokuStrategyEngine.BTC_SYMBOL,
+                interval = stratConfig.triggerInterval,
+                limit = 110,
+                nowMillis = now,
+            )?.first.orEmpty()
+
+            val liveTick = LiveQuoteFetcher.fetchLiveTick(IchimokuStrategyEngine.BTC_SYMBOL)
+                ?: _liveTicks.value[IchimokuStrategyEngine.BTC_SYMBOL]
+            if (liveTick != null) {
+                applyIncomingTick(IchimokuStrategyEngine.BTC_SYMBOL, liveTick)
+            }
+
+            val report = IchimokuStrategyEngine.evaluateBitcoinStrategy(
+                activeModel = activeModel,
+                config = stratConfig,
+                macroCandles = macroBars,
+                strategyCandles = strategyBars,
+                triggerCandles = triggerBars,
+                livePriceOverride = liveTick?.price,
+                customTitleOverride = activeCustom?.titleFa,
+                customIdOverride = activeCustom?.id,
+                nowMillis = now,
+            )
+
+            _btcStrategyReport.value = report
+            lastBtcStrategyEvalMillis = now
+
+            // Update PairScanState for Home Screen AssetClass4SlotsBanner
+            val scanStateCode = when (report.readiness) {
+                StrategyReadinessState.SIGNAL_BUY, StrategyReadinessState.SIGNAL_SELL -> "candidate"
+                StrategyReadinessState.WATCH_SETUP -> "watch"
+                StrategyReadinessState.BLOCKED -> "no_signal"
+                StrategyReadinessState.INSUFFICIENT_DATA -> "partial"
+            }
+            _pairScan.value = PairScanState(
+                statuses = listOf(
+                    PairScanStatus(
+                        symbol = IchimokuStrategyEngine.BTC_SYMBOL,
+                        state = scanStateCode,
+                        detail = report.summaryFa,
+                        interval = report.triggerInterval,
+                        lastScanAt = now,
+                        action = report.action,
+                    )
+                ),
+                sweeping = false,
+                checkedCount = 1,
+                totalCount = 1,
+            )
+
+            // 1. Dynamic trade management (Preserve Mode / Kijun Trail / Break-Even) on open BTC trades
+            val openBtcTrades = trades.value.filter {
+                it.isOpen && V1Universe.normalize(it.symbol) == IchimokuStrategyEngine.BTC_SYMBOL
+            }
+            for (openTrade in openBtcTrades) {
+                val preserveUpdate = IchimokuStrategyEngine.evaluateOpenTradeManagement(
+                    trade = openTrade,
+                    report = report,
+                    config = stratConfig,
+                )
+                if (preserveUpdate != null) {
+                    container.journalStore.updateTradeStopLoss(
+                        tradeId = openTrade.id,
+                        newStopLoss = preserveUpdate.newStopLoss,
+                        stageNote = preserveUpdate.stageTitleFa,
+                    )
+                    _toast.value = "${preserveUpdate.stageTitleFa}: استاپ ${openTrade.symbol} به ${preserveUpdate.newStopLoss} منتقل شد (${preserveUpdate.reasonFa})"
+                }
+            }
+
+            // 2. If user clicked manual scan, show feedback
+            if (userInitiated) {
+                _toast.value = report.summaryFa
+            }
+
+            // 3. Automated trade firing if strategy execution is enabled & signal is actionable
+            if (cfg.autoPaperTrading && report.isActionable && openBtcTrades.isEmpty()) {
+                val lastFiredBar = lastAutoFiredBarTimeByStrategy[report.strategyId] ?: 0L
+                if (report.triggerBarTime > 0L && report.triggerBarTime != lastFiredBar) {
+                    val entry = report.suggestedEntry ?: return
+                    val sl = report.suggestedStopLoss ?: return
+                    val tp = report.primaryTakeProfit ?: return
+                    val calc = RiskAndCalendarEngine.calculatePosition(
+                        symbolInput = IchimokuStrategyEngine.BTC_SYMBOL,
+                        accountBalance = cfg.accountBalance,
+                        riskPercent = cfg.riskPercent,
+                        entry = entry,
+                        stopLoss = sl,
+                        takeProfit = tp,
+                        preferredAction = report.action,
+                    ) ?: return
+
+                    val limits = RiskAndCalendarEngine.evaluateRiskLimits(
+                        accountBalance = cfg.accountBalance,
+                        initialCapital = cfg.initialCapital,
+                        dayOpeningEquity = dayOpeningEquity(now),
+                        dailyLossLimitPercent = cfg.dailyLossLimitPercent,
+                        maxDrawdownLimitPercent = cfg.maxDrawdownLimitPercent,
+                        trades = trades.value,
+                        now = now,
+                    )
+                    if (!limits.canOpenTrade(calc.riskBudgetUsd)) {
+                        return
+                    }
+
+                    lastAutoFiredBarTimeByStrategy = lastAutoFiredBarTimeByStrategy + (report.strategyId to report.triggerBarTime)
+                    val autoNote = "⚡ خودکار (${report.strategyTitleFa}) · ${report.triggerType.titleFa}"
+                    openAutoTrackedTrade(
+                        calc = calc,
+                        note = autoNote,
+                        strategyContext = report.toAiStrategyContext(),
+                    )
+                }
+            }
+        } finally {
+            _isScanningBtcStrategy.value = false
+        }
     }
 
     fun consumeToast() {

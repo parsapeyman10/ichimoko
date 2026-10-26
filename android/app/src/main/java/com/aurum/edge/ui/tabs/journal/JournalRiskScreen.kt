@@ -125,6 +125,9 @@ fun JournalRiskScreen(
             onSaveSettings = viewModel::saveRiskAndCapitalSettings,
         )
 
+        // ── ۱.۲. موتور استراتژی‌های ایچیموکوی بیت‌کوین (انتخابگر انحصاری + استراتژی بیس) ──
+        com.aurum.edge.ui.components.BitcoinIchimokuStrategyCard(viewModel = viewModel)
+
         // ── ۱.۵. مشاور و فیلتر هوش مصنوعی AvalAI (قبل از هر خرید یا فروش) ────
         AvalAiPreTradeGateCard(
             settings = settings,

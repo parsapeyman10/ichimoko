@@ -4,11 +4,15 @@ import android.content.Context
 import android.content.SharedPreferences
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import com.aurum.edge.core.AppSettings
-import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.AssetClass
+import com.aurum.edge.core.BaseStrategyConfig
+import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.CategoryStrategy
-import com.aurum.edge.core.V1Universe
+import com.aurum.edge.core.CustomStrategySlot
 import com.aurum.edge.core.SignalProfile
+import com.aurum.edge.core.V1Universe
+import com.aurum.edge.domain.Interval
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -113,6 +117,26 @@ class SettingsStore(context: Context) {
         val aiFormat = prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" }
         val aiModel = storedNewsAiModel.ifBlank { com.aurum.edge.data.AvalAiAdvisor.DEFAULT_MODEL }
         val avalAiEnabled = prefs.getBoolean(KEY_AVAL_AI_ENABLED, false)
+        val storedBtcStrategyId = prefs.getString(KEY_BTC_STRATEGY_ID, BitcoinStrategyModel.BASE_ICHIMOKU.id)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: BitcoinStrategyModel.BASE_ICHIMOKU.id
+        val storedBaseConfig = prefs.getString(KEY_BASE_STRATEGY_CONFIG_JSON, null)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { raw -> runCatching { KEY_JSON.decodeFromString(BaseStrategyConfig.serializer(), raw) }.getOrNull() }
+            ?: BaseStrategyConfig()
+        val storedCustomStrategies = prefs.getString(KEY_CUSTOM_STRATEGIES_JSON, null)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { raw -> runCatching { KEY_JSON.decodeFromString(customStrategiesSerializer, raw) }.getOrNull() }
+            ?: emptyList()
+        val validStrategyId = if (
+            BitcoinStrategyModel.entries.any { it.id == storedBtcStrategyId } ||
+            storedCustomStrategies.any { it.id == storedBtcStrategyId }
+        ) {
+            storedBtcStrategyId
+        } else {
+            BitcoinStrategyModel.BASE_ICHIMOKU.id
+        }
         val categoryStrategies = AssetClass.entries.associateWith { category ->
             CategoryStrategy.fromStored(prefs.getString("v1_strategy_${category.name}", null))
         }
@@ -150,6 +174,9 @@ class SettingsStore(context: Context) {
         newsAiFormat = aiFormat,
         signalProfile = profile,
         activeStrategy = storedStrategy,
+        selectedBitcoinStrategyId = validStrategyId,
+        baseStrategyConfig = storedBaseConfig,
+        customStrategies = storedCustomStrategies,
         categoryStrategies = categoryStrategies,
     )
     }
@@ -297,6 +324,9 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_SIGNAL_COOLDOWN, next.signalProfile.cooldownFilter)
             .putBoolean(KEY_SIGNAL_CHIKOU, next.signalProfile.chikouConfirmation)
             .putString(KEY_ACTIVE_STRATEGY, next.activeStrategy.id)
+            .putString(KEY_BTC_STRATEGY_ID, next.selectedBitcoinStrategyId)
+            .putString(KEY_BASE_STRATEGY_CONFIG_JSON, KEY_JSON.encodeToString(BaseStrategyConfig.serializer(), next.baseStrategyConfig))
+            .putString(KEY_CUSTOM_STRATEGIES_JSON, KEY_JSON.encodeToString(customStrategiesSerializer, next.customStrategies))
             .apply {
                 AssetClass.entries.forEach { category ->
                     putString("v1_strategy_${category.name}",
@@ -328,7 +358,8 @@ class SettingsStore(context: Context) {
     companion object {
         /** Dedicated keys are a symbol→key JSON map; unknown keys are ignored, never guessed. */
         private val symbolKeySerializer = MapSerializer(String.serializer(), String.serializer())
-        private val KEY_JSON = Json { ignoreUnknownKeys = true }
+        private val customStrategiesSerializer = ListSerializer(CustomStrategySlot.serializer())
+        private val KEY_JSON = Json { ignoreUnknownKeys = true; encodeDefaults = true }
         private const val KEY_API = "td_api_key"
         private const val KEY_TD_KEYS = "td_symbol_keys_json"
         private const val KEY_SYMBOL = "symbol"
@@ -370,5 +401,8 @@ class SettingsStore(context: Context) {
         private const val KEY_SIGNAL_COOLDOWN = "signal_cooldown_filter"
         private const val KEY_SIGNAL_CHIKOU = "signal_chikou_confirmation"
         private const val KEY_ACTIVE_STRATEGY = "active_strategy"
+        private const val KEY_BTC_STRATEGY_ID = "btc_exclusive_strategy_id"
+        private const val KEY_BASE_STRATEGY_CONFIG_JSON = "btc_base_strategy_config_json"
+        private const val KEY_CUSTOM_STRATEGIES_JSON = "btc_custom_strategies_json"
     }
 }
