@@ -354,7 +354,7 @@ class RiskAndCalendarEngineTest {
         assertEquals(IchimokuStrategyEngine.BTC_SYMBOL, report.symbol)
         assertEquals(6, report.conditions.size)
         assertTrue(
-            report.conditions.joinToString(" | ") { "${it.id}:${it.passed}(${it.detailFa})" },
+            report.conditions.joinToString(" | ") { "${it.index}:${it.passed}(${it.detailFa})" },
             report.conditions.all { it.passed }
         )
         assertEquals(StrategyReadinessState.SIGNAL_BUY, report.readiness)
