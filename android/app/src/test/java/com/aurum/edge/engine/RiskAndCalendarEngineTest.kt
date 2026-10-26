@@ -8,7 +8,10 @@ import com.aurum.edge.core.CustomStrategySlot
 import com.aurum.edge.core.IchimokuStrategyEngine
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.RiskAndCalendarEngine
+import com.aurum.edge.core.Smart15mSyncPlanner
 import com.aurum.edge.core.StrategyReadinessState
+import com.aurum.edge.core.SymbolPollTier
+import com.aurum.edge.core.V1Universe
 import com.aurum.edge.data.AvalAiAdvisor
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.SettingsStore
@@ -383,6 +386,58 @@ class RiskAndCalendarEngineTest {
         )
         assertNotNull(preserveEval)
         assertTrue(preserveEval!!.newStopLoss > opened.entry)
+
+        // 4. Verify all 15 symbols in V1Universe are supported on 15m timeframe + Smart15mSyncPlanner
+        assertEquals(15, V1Universe.allSymbols.size)
+        val eurusdReport = IchimokuStrategyEngine.evaluateBitcoinStrategy(
+            activeModel = BitcoinStrategyModel.BASE_ICHIMOKU,
+            config = config,
+            macroCandles = macroBars.map { it.copy(open = it.open / 55_000.0, high = it.high / 55_000.0, low = it.low / 55_000.0, close = it.close / 55_000.0) },
+            strategyCandles = stratBars.map { it.copy(open = it.open / 55_000.0, high = it.high / 55_000.0, low = it.low / 55_000.0, close = it.close / 55_000.0) },
+            triggerCandles = trigBars.map { it.copy(open = it.open / 55_000.0, high = it.high / 55_000.0, low = it.low / 55_000.0, close = it.close / 55_000.0) },
+            symbolInput = "EUR/USD",
+        )
+        assertEquals("EUR/USD", eurusdReport.symbol)
+        assertEquals(6, eurusdReport.conditions.size)
+        assertTrue(eurusdReport.livePrice in 1.0..1.5)
+
+        // Verify Smart15mSyncPlanner candle-boundary alignment and delta fetch sizing
+        val sampleNow = 1_760_000_120_000L // inside a 15m bucket
+        val bucket15m = Smart15mSyncPlanner.currentCandleBucket(sampleNow, Interval.M15)
+        assertFalse(
+            Smart15mSyncPlanner.shouldFetchCandlesFromNetwork(
+                lastCachedBucket = bucket15m,
+                cachedBarCount = 110,
+                nowMillis = sampleNow + 60_000L,
+                interval = Interval.M15,
+            )
+        )
+        assertTrue(
+            Smart15mSyncPlanner.shouldFetchCandlesFromNetwork(
+                lastCachedBucket = bucket15m,
+                cachedBarCount = 110,
+                nowMillis = sampleNow + Interval.M15.millis,
+                interval = Interval.M15,
+            )
+        )
+        val deltaLimit = Smart15mSyncPlanner.computeOptimalFetchLimit(
+            lastClosedBarTimeMs = sampleNow - Interval.M15.millis,
+            cachedBarCount = 110,
+            nowMillis = sampleNow,
+            interval = Interval.M15,
+            fullLimit = 110,
+        )
+        assertEquals(4, deltaLimit)
+
+        val openTier = Smart15mSyncPlanner.classifySymbolTier(
+            symbol = "BTC/USDT",
+            hasOpenTrade = true,
+            isFocusedSymbol = false,
+            readiness = StrategyReadinessState.BLOCKED,
+            nowMillis = sampleNow,
+        )
+        assertEquals(SymbolPollTier.OPEN_POSITION, openTier)
+        assertEquals(15_000L, openTier.tickIntervalMs)
     }
 }
 

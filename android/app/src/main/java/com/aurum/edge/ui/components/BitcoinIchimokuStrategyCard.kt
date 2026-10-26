@@ -25,7 +25,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -37,17 +39,26 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.BaseStrategyConfig
 import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.CustomStrategySlot
 import com.aurum.edge.core.IchimokuStrategyEngine
+import com.aurum.edge.core.MarketHours
+import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.RiskAndCalendarEngine
+import com.aurum.edge.core.Smart15mSyncPlanner
 import com.aurum.edge.core.StrategyEvaluationReport
 import com.aurum.edge.core.StrategyReadinessState
+import com.aurum.edge.core.SymbolPollTier
+import com.aurum.edge.core.V1Universe
+import com.aurum.edge.data.BandwidthSyncStats
+import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.ui.AurumViewModel
 import com.aurum.edge.ui.theme.AurumColors
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 private data class SelectableStrategyItem(
     val id: String,
@@ -65,17 +76,26 @@ fun BitcoinIchimokuStrategyCard(
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val report by viewModel.btcStrategyReport.collectAsStateWithLifecycle()
+    val allReports by viewModel.allSymbolStrategyReports.collectAsStateWithLifecycle()
+    val focusedSymbol by viewModel.focusedStrategySymbol.collectAsStateWithLifecycle()
+    val bandwidthStats by viewModel.bandwidthStats.collectAsStateWithLifecycle()
+    val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
+    val trades by viewModel.trades.collectAsStateWithLifecycle()
     val isScanning by viewModel.isScanningBtcStrategy.collectAsStateWithLifecycle()
     val aiChecking by viewModel.aiChecking.collectAsStateWithLifecycle()
 
     var showAllModels by rememberSaveable { mutableStateOf(true) }
     var showTuneBasePanel by rememberSaveable { mutableStateOf(false) }
     var showAddModelForm by rememberSaveable { mutableStateOf(false) }
+    var show15SymbolsRadar by rememberSaveable { mutableStateOf(true) }
 
     val selectedId = settings.selectedBitcoinStrategyId
     val executionEnabled = settings.autoPaperTrading
     val activeTitle = settings.activeBitcoinStrategyTitleFa()
     val currentConfig = settings.activeBitcoinStrategyConfig()
+    val openSymbolSet = remember(trades) {
+        trades.filter { it.isOpen }.map { V1Universe.normalize(it.symbol) }.toSet()
+    }
 
     val allItems = remember(settings.customStrategies) {
         val builtIns = BitcoinStrategyModel.entries.map { m ->
@@ -351,7 +371,30 @@ fun BitcoinIchimokuStrategyCard(
             )
         }
 
-        // ── ۴. رادار زنده ۳ تایم‌فریمی و چک‌لیست ۶ شرطی بیت‌کوین ────────────────
+        // ── ۳.۵. پنل زمان‌بندی هوشمند ۱۵ دقیقه و بهینه‌سازی مصرف اینترنت ─────────
+        Spacer(modifier = Modifier.height(10.dp))
+        Smart15mScheduleAndBandwidthBox(
+            config = currentConfig,
+            bandwidthStats = bandwidthStats,
+            checkedSymbolsCount = allReports.size,
+            totalSymbolsCount = V1Universe.allSymbols.size,
+            isScanning = isScanning,
+            onManualSweep15Symbols = { viewModel.scanAndEvaluateBitcoinStrategyNow(userInitiated = true) },
+        )
+
+        // ── ۳.۸. رادار زنده هر ۱۵ نماد اپ در تایم‌فریم معامله ۱۵ دقیقه ───────────
+        Spacer(modifier = Modifier.height(10.dp))
+        All15Symbols15mRadarSection(
+            expanded = show15SymbolsRadar,
+            onToggleExpand = { show15SymbolsRadar = !show15SymbolsRadar },
+            focusedSymbol = focusedSymbol,
+            allReports = allReports,
+            liveTicks = liveTicks,
+            openSymbolSet = openSymbolSet,
+            onSelectSymbol = { sym -> viewModel.selectFocusedStrategySymbol(sym) },
+        )
+
+        // ── ۴. رادار زنده ۳ تایم‌فریمی و چک‌لیست ۶ شرطی نماد منتخب ────────────────
         Spacer(modifier = Modifier.height(10.dp))
         LiveBtcStrategyReportBox(
             report = report,
@@ -367,7 +410,7 @@ fun BitcoinIchimokuStrategyCard(
                 val tp = evalReport.primaryTakeProfit ?: return@LiveBtcStrategyReportBox
                 onApplySignalToCalculator?.invoke(entry, sl, tp, evalReport.action)
                 val calc = RiskAndCalendarEngine.calculatePosition(
-                    symbolInput = IchimokuStrategyEngine.BTC_SYMBOL,
+                    symbolInput = evalReport.symbol,
                     accountBalance = settings.accountBalance,
                     riskPercent = settings.riskPercent,
                     entry = entry,
@@ -378,12 +421,278 @@ fun BitcoinIchimokuStrategyCard(
                 if (calc != null) {
                     viewModel.openAutoTrackedTrade(
                         calc = calc,
-                        note = "⚡ ${evalReport.strategyTitleFa} · ${evalReport.triggerType.titleFa}",
+                        note = "⚡ ${evalReport.strategyTitleFa} · ${evalReport.symbol} · ${evalReport.triggerType.titleFa}",
                         strategyContext = evalReport.toAiStrategyContext(),
                     )
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun Smart15mScheduleAndBandwidthBox(
+    config: BaseStrategyConfig,
+    bandwidthStats: BandwidthSyncStats,
+    checkedSymbolsCount: Int,
+    totalSymbolsCount: Int,
+    isScanning: Boolean,
+    onManualSweep15Symbols: () -> Unit,
+) {
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            nowMs = System.currentTimeMillis()
+            delay(1_000L)
+        }
+    }
+
+    val secLeft = Smart15mSyncPlanner.secondsUntilNextBoundary(nowMs, config.triggerInterval)
+    val mm = secLeft / 60L
+    val ss = secLeft % 60L
+    val countdownStr = String.format(Locale.US, "%02d:%02d", mm, ss)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(AurumColors.SurfaceAlt, RoundedCornerShape(12.dp))
+            .border(1.dp, AurumColors.Cyan.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "⏱ زمان‌بندی هوشمند ۱۵ دقیقه و صرفه‌جویی اینترنت",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = AurumColors.Cyan,
+                )
+                Text(
+                    text = "تنظیم‌شده برای تایم‌فریم معامله ${config.triggerIntervalLabel} روی $totalSymbolsCount نماد بدون از دست رفتن دیتا",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                )
+            }
+            Pill(
+                text = "کندل ${config.triggerIntervalLabel} بعدی: $countdownStr",
+                color = AurumColors.Gold,
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            StatTile(
+                label = "پوشش رادار",
+                value = "$checkedSymbolsCount/$totalSymbolsCount نماد",
+                valueColor = AurumColors.Green,
+                modifier = Modifier.weight(1f),
+            )
+            StatTile(
+                label = "صرفه‌جویی کش",
+                value = "${bandwidthStats.totalRequestsSaved} درخواست",
+                valueColor = AurumColors.Cyan,
+                modifier = Modifier.weight(1f),
+            )
+            StatTile(
+                label = "دریافت Delta",
+                value = "${bandwidthStats.deltaFetches} بار",
+                valueColor = AurumColors.Gold,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(AurumColors.Surface, RoundedCornerShape(8.dp))
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = "• کندل‌های ۱۵m (ماشه ورود ۱۵ نماد): بررسی دقیق راس بسته شدن هر کندل ۱۵ دقیقه (:00، :15، :30، :45 + ۳ ثانیه) فقط با دریافت کندل‌های جدید (Delta)",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextPrimary,
+            )
+            Text(
+                text = "• کندل‌های 1H و 4H: کش در حافظه و بروزرسانی فقط سر هر ۱ ساعت و ۴ ساعت (تجمیع خودکار 1H->4H برای طلا/فارکس با ۰ دانلود اضافه)",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextSecondary,
+            )
+            Text(
+                text = "• تیک قیمت سطح‌بندی‌شده: پوزیشن باز هر ۱۵ ثانیه (۵ رمزارز یکجا در ۱ درخواست ۲۰۰ بایتی) · نماد آماده ماشه هر ۶۰ ثانیه · عادی هر ۳ دقیقه",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextSecondary,
+            )
+            Text(
+                text = "• فیلتر سشن بازار: توقف کامل درخواست‌های نمادهای بسته (۰ کیلوبایت در تعطیلات آخر هفته فارکس/طلا)",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.Green,
+            )
+        }
+    }
+}
+
+@Composable
+private fun All15Symbols15mRadarSection(
+    expanded: Boolean,
+    onToggleExpand: () -> Unit,
+    focusedSymbol: String,
+    allReports: Map<String, StrategyEvaluationReport>,
+    liveTicks: Map<String, PriceTick>,
+    openSymbolSet: Set<String>,
+    onSelectSymbol: (String) -> Unit,
+) {
+    val now = System.currentTimeMillis()
+    val buySignals = allReports.values.count { it.readiness == StrategyReadinessState.SIGNAL_BUY }
+    val sellSignals = allReports.values.count { it.readiness == StrategyReadinessState.SIGNAL_SELL }
+    val watchSetups = allReports.values.count { it.readiness == StrategyReadinessState.WATCH_SETUP }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(AurumColors.SurfaceAlt, RoundedCornerShape(12.dp))
+            .border(1.dp, AurumColors.Gold.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "📡 رادار ۱۵ نماد اپ (تایم‌فریم معامله ۱۵ دقیقه)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = AurumColors.Gold,
+                )
+                Text(
+                    text = "خرید: $buySignals · فروش: $sellSignals · آماده ماشه (۴+ شرط): $watchSetups · روی هر نماد بزنید تا چک‌لیست ۶ شرطی آن باز شود",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                )
+            }
+            Pill(
+                text = if (expanded) "بستن رادار ▲" else "نمایش ۱۵ نماد ▼",
+                color = AurumColors.Cyan,
+                modifier = Modifier.clickable { onToggleExpand() },
+            )
+        }
+
+        if (expanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                V1Universe.allSymbols.forEach { sym ->
+                    val rep = allReports[sym]
+                    val tick = liveTicks[sym]
+                    val watchInfo = WatchCatalog.find(sym)
+                    val isSelected = sym == focusedSymbol
+                    val marketClosed = MarketHours.closedFor(sym, now)
+                    val hasOpen = sym in openSymbolSet
+                    val tier = Smart15mSyncPlanner.classifySymbolTier(
+                        symbol = sym,
+                        hasOpenTrade = hasOpen,
+                        isFocusedSymbol = isSelected,
+                        readiness = rep?.readiness,
+                        nowMillis = now,
+                    )
+                    val passedCount = rep?.conditions?.count { it.passed } ?: 0
+                    val totalConds = rep?.conditions?.size ?: 6
+                    val displayPrice = tick?.price ?: rep?.livePrice
+
+                    val statusColor = when {
+                        rep?.readiness == StrategyReadinessState.SIGNAL_BUY -> AurumColors.Green
+                        rep?.readiness == StrategyReadinessState.SIGNAL_SELL -> AurumColors.Red
+                        rep?.readiness == StrategyReadinessState.WATCH_SETUP -> AurumColors.Gold
+                        marketClosed -> AurumColors.TextMuted
+                        else -> AurumColors.Cyan
+                    }
+
+                    val statusLabel = when {
+                        rep?.readiness == StrategyReadinessState.SIGNAL_BUY -> "🟢 سیگنال خرید 15m"
+                        rep?.readiness == StrategyReadinessState.SIGNAL_SELL -> "🔴 سیگنال فروش 15m"
+                        rep?.readiness == StrategyReadinessState.WATCH_SETUP -> "🟡 آماده ماشه ($passedCount/$totalConds)"
+                        marketClosed && rep != null -> "⏸ سشن بسته ($passedCount/$totalConds)"
+                        marketClosed -> "⏸ سشن بسته (۰ دیتا)"
+                        rep != null && rep.conditions.isNotEmpty() -> "⚪ رصد ($passedCount/$totalConds شرط)"
+                        else -> "⏳ در حال دریافت..."
+                    }
+
+                    val pollBadge = when (tier) {
+                        SymbolPollTier.OPEN_POSITION -> "پوزیشن باز · ۱۵s"
+                        SymbolPollTier.WATCH_OR_FOCUSED -> "اولویت · ۶۰s"
+                        SymbolPollTier.ACTIVE_15M_RADAR -> "مرز ۱۵m · ۳m"
+                        SymbolPollTier.MARKET_CLOSED_PAUSED -> "بسته · توقف دیتا"
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                if (isSelected) AurumColors.Surface else AurumColors.Surface.copy(alpha = 0.6f),
+                                RoundedCornerShape(10.dp),
+                            )
+                            .border(
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = if (isSelected) AurumColors.Gold else statusColor.copy(alpha = 0.3f),
+                                shape = RoundedCornerShape(10.dp),
+                            )
+                            .clickable { onSelectSymbol(sym) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Text(
+                                    text = sym,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected) AurumColors.Gold else AurumColors.TextPrimary,
+                                )
+                                Text(
+                                    text = watchInfo?.label ?: AssetClass.of(sym).label,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AurumColors.TextSecondary,
+                                )
+                            }
+                            Text(
+                                text = "بررسی مجدد: $pollBadge" +
+                                    (rep?.riskReward?.let { " · R:R 1:$it" } ?: ""),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextMuted,
+                            )
+                        }
+
+                        Column(horizontalAlignment = Alignment.End) {
+                            Pill(
+                                text = statusLabel,
+                                color = statusColor,
+                            )
+                            if (displayPrice != null && displayPrice > 0.0) {
+                                Text(
+                                    text = formatPrice(displayPrice),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AurumColors.TextPrimary,
+                                    modifier = Modifier.padding(top = 2.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -622,21 +931,21 @@ private fun LiveBtcStrategyReportBox(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "📊 رادار زنده BTC/USDT با استراتژی فعال",
+                    text = "📊 چک‌لیست ۶ شرطی و امواج هوسودا (${report?.symbol ?: "BTC/USDT"})",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
                     color = AurumColors.Gold,
                 )
                 if (report != null) {
                     Text(
-                        text = "قیمت لحظه‌ای بیت‌کوین: $${formatPrice(report.livePrice)} · تایم‌فریم‌ها: ${report.macroInterval.label}/${report.strategyInterval.label}/${report.triggerInterval.label}",
+                        text = "قیمت لحظه‌ای ${report.symbol}: ${formatPrice(report.livePrice)} · تایم‌فریم‌ها: ${report.macroInterval.label}/${report.strategyInterval.label}/${report.triggerInterval.label}",
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.TextSecondary,
                     )
                 }
             }
             Pill(
-                text = if (isScanning) "در حال اسکن..." else "🔄 بازسنجی فوری",
+                text = if (isScanning) "در حال اسکن..." else "🔄 بازسنجی ۱۵ نماد",
                 color = AurumColors.Cyan,
                 modifier = Modifier.clickable(enabled = !isScanning) { onScanNow() },
             )

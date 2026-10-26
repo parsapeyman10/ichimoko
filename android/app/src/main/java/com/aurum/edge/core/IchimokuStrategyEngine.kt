@@ -180,7 +180,179 @@ enum class StrategyReadinessState(val labelFa: String) {
     SIGNAL_SELL("سیگنال فروش (Short) آماده شلیک"),
     WATCH_SETUP("همگرایی تایم‌فریم بالا برقرار؛ در انتظار ماشه ورود"),
     BLOCKED("قفل توسط فیلترهای استراتژی"),
-    INSUFFICIENT_DATA("در حال دریافت کندل‌های مولتی‌تایم‌فریم بیت‌کوین"),
+    INSUFFICIENT_DATA("در حال دریافت کندل‌های مولتی‌تایم‌فریم"),
+}
+
+/**
+ * برنامه‌ریز هوشمند زمان‌بندی بررسی مجدد و بهینه‌سازی مصرف اینترنت برای تایم‌فریم معامله ۱۵ دقیقه (`15m`)
+ * روی هر ۱۵ نماد داخل اپ (`V1Universe.allSymbols`):
+ *
+ * ۱. همگام‌سازی دقیق با بسته شدن کندل ۱۵ دقیقه (`:00`، `:15`، `:30`، `:45` + ۳ ثانیه فرصت تسویه صرافی):
+ *    هیچ کندل بسته‌شده‌ای از دست نمی‌رود و بین دو کندل ۱۵ دقیقه‌ای دانلود تکراری تاریخچه انجام نمی‌شود.
+ * ۲. دریافت فقط کندل‌های جدید (`Delta Candle Sync`):
+ *    پس از بارگذاری اولیه، در هر مرز ۱۵ دقیقه فقط کندل‌های جدید (`۳ تا ۵ کندل`) دانلود و به کش اضافه می‌شوند
+ *    و کندل‌های `1H` و `4H` فقط سر ساعت و هر ۴ ساعت بروزرسانی می‌گردند.
+ * ۳. سطح‌بندی هوشمند تیک قیمت زنده (`4-Tier Adaptive Polling`):
+ *    - سطح ۱ (نمادهای دارای معامله باز برای رصد TP/SL و Preserve Mode): هر ۱۵ ثانیه
+ *    - سطح ۲ (نماد منتخب یا نمادهای در آستانه ماشه `WATCH_SETUP`): هر ۶۰ ثانیه + چک میان‌کندلی در دقیقه ۷:۳۰
+ *    - سطح ۳ (سایر نمادهای باز از ۱۵ نماد): اسکن کندل در مرز ۱۵ دقیقه + تیک قیمت هر ۱۸۰ ثانیه (۳ دقیقه)
+ *    - سطح ۴ (نمادهای در ساعت تعطیلی بازار مثل فارکس/طلا در آخر هفته): توقف کامل (`۰ کیلوبایت`)
+ */
+enum class SymbolPollTier(
+    val titleFa: String,
+    val tickIntervalMs: Long,
+    val descriptionFa: String,
+) {
+    OPEN_POSITION(
+        titleFa = "سطح ۱ · معامله باز (TP/SL)",
+        tickIntervalMs = 15_000L,
+        descriptionFa = "بررسی هر ۱۵ ثانیه برای حفظ دقیق حد سود/ضرر و Preserve Mode",
+    ),
+    WATCH_OR_FOCUSED(
+        titleFa = "سطح ۲ · آماده ماشه / منتخب",
+        tickIntervalMs = 60_000L,
+        descriptionFa = "بررسی هر ۶۰ ثانیه + چک میان‌کندلی ۷.۵ دقیقه",
+    ),
+    ACTIVE_15M_RADAR(
+        titleFa = "سطح ۳ · رادار ۱۵ دقیقه",
+        tickIntervalMs = 180_000L,
+        descriptionFa = "اسکن کامل راس بسته شدن کندل ۱۵m (:00/:15/:30/:45) + تیک هر ۳ دقیقه",
+    ),
+    MARKET_CLOSED_PAUSED(
+        titleFa = "سطح ۴ · سشن بسته (توقف دیتا)",
+        tickIntervalMs = Long.MAX_VALUE,
+        descriptionFa = "توقف کامل درخواست شبکه در ساعات تعطیلی بازار برای جلوگیری از مصرف اینترنت",
+    ),
+}
+
+object Smart15mSyncPlanner {
+    const val CANDLE_SETTLE_DELAY_MS = 3_000L
+    const val OPEN_POSITION_TICK_MS = 15_000L
+    const val WATCH_SYMBOL_TICK_MS = 60_000L
+    const val RADAR_SYMBOL_TICK_MS = 180_000L
+    const val MID_BAR_CHECK_OFFSET_MS = 450_000L // 7m 30s inside a 15m candle
+
+    /**
+     * شماره باکت کندل فعلی بر اساس تایم‌فریم (با احتساب ۳ ثانیه زمان نهایی شدن کندل در سرور).
+     */
+    fun currentCandleBucket(nowMillis: Long, interval: Interval): Long {
+        val adjusted = (nowMillis - CANDLE_SETTLE_DELAY_MS).coerceAtLeast(0L)
+        return adjusted / interval.millis
+    }
+
+    /**
+     * زمان دقیق (بر حسب میلی‌ثانیه) بسته شدن کندل بعدی تایم‌فریم معامله (پیش‌فرض `15m`) به علاوه ۳ ثانیه.
+     */
+    fun nextTriggerBoundaryCheckMillis(
+        nowMillis: Long,
+        triggerInterval: Interval = Interval.M15,
+    ): Long {
+        val period = triggerInterval.millis
+        val currentBucket = currentCandleBucket(nowMillis, triggerInterval)
+        return (currentBucket + 1L) * period + CANDLE_SETTLE_DELAY_MS
+    }
+
+    /**
+     * زمان چک میان‌کندلی (دقیقه ۷:۳۰ برای کندل ۱۵ دقیقه) جهت نمادهایی که ۴ یا ۵ شرط از ۶ شرط را دارند.
+     */
+    fun nextMidBarOrBoundaryCheckMillis(
+        nowMillis: Long,
+        triggerInterval: Interval = Interval.M15,
+    ): Long {
+        val period = triggerInterval.millis
+        val bucketStart = currentCandleBucket(nowMillis, triggerInterval) * period
+        val midPoint = bucketStart + (period / 2L) + CANDLE_SETTLE_DELAY_MS
+        return if (nowMillis < midPoint) {
+            midPoint
+        } else {
+            nextTriggerBoundaryCheckMillis(nowMillis, triggerInterval)
+        }
+    }
+
+    /**
+     * ثانیه‌های باقی‌مانده تا بسته شدن کندل ۱۵ دقیقه‌ای بعدی.
+     */
+    fun secondsUntilNextBoundary(
+        nowMillis: Long,
+        triggerInterval: Interval = Interval.M15,
+    ): Long = ((nextTriggerBoundaryCheckMillis(nowMillis, triggerInterval) - nowMillis) / 1000L).coerceAtLeast(0L)
+
+    /**
+     * آیا برای این تایم‌فریم کندل جدیدی بسته شده است که نیاز به درخواست شبکه داشته باشد؟
+     * اگر در همان باکت زمانی باشیم و حداقل ۷۵ کندل در کش داشته باشیم، نیازی به دانلود مجدد نیست.
+     */
+    fun shouldFetchCandlesFromNetwork(
+        lastCachedBucket: Long?,
+        cachedBarCount: Int,
+        nowMillis: Long,
+        interval: Interval,
+        minRequiredBars: Int = 75,
+    ): Boolean {
+        if (lastCachedBucket == null || cachedBarCount < minRequiredBars) return true
+        val nowBucket = currentCandleBucket(nowMillis, interval)
+        return nowBucket > lastCachedBucket
+    }
+
+    /**
+     * محاسبه تعداد کندل موردنیاز برای دانلود (Delta Sync):
+     * اگر کش قبلی موجود باشد، فقط کندل‌های جدیدِ تشکیل‌شده از آخرین کندل بسته‌شده درخواست می‌شود
+     * تا هیچ دیتایی از دست نرود و مصرف اینترنت بیش از ۹۵٪ کاهش یابد.
+     */
+    fun computeOptimalFetchLimit(
+        lastClosedBarTimeMs: Long?,
+        cachedBarCount: Int,
+        nowMillis: Long,
+        interval: Interval,
+        fullLimit: Int = 110,
+        minRequiredBars: Int = 75,
+    ): Int {
+        if (lastClosedBarTimeMs == null || cachedBarCount < minRequiredBars) return fullLimit
+        val elapsedMs = (nowMillis - lastClosedBarTimeMs).coerceAtLeast(0L)
+        val missedBars = (elapsedMs / interval.millis).toInt()
+        if (missedBars <= 0) return 3
+        return (missedBars + 3).coerceIn(4, fullLimit)
+    }
+
+    /**
+     * تعیین سطح اولویت و فاصله زمانی بررسی مجدد تیک قیمت برای هر یک از ۱۵ نماد.
+     */
+    fun classifySymbolTier(
+        symbol: String,
+        hasOpenTrade: Boolean,
+        isFocusedSymbol: Boolean,
+        readiness: StrategyReadinessState?,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): SymbolPollTier {
+        val normalized = V1Universe.normalize(symbol)
+        val isClosed = MarketHours.closedFor(normalized, nowMillis)
+        if (isClosed && !hasOpenTrade) {
+            return SymbolPollTier.MARKET_CLOSED_PAUSED
+        }
+        if (hasOpenTrade) {
+            return SymbolPollTier.OPEN_POSITION
+        }
+        if (isFocusedSymbol ||
+            readiness == StrategyReadinessState.SIGNAL_BUY ||
+            readiness == StrategyReadinessState.SIGNAL_SELL ||
+            readiness == StrategyReadinessState.WATCH_SETUP
+        ) {
+            return SymbolPollTier.WATCH_OR_FOCUSED
+        }
+        return SymbolPollTier.ACTIVE_15M_RADAR
+    }
+
+    /**
+     * آیا زمان دریافت تیک قیمت زنده برای این نماد فرا رسیده است؟
+     */
+    fun isTickPollDue(
+        lastTickAtMs: Long?,
+        tier: SymbolPollTier,
+        nowMillis: Long = System.currentTimeMillis(),
+    ): Boolean {
+        if (tier == SymbolPollTier.MARKET_CLOSED_PAUSED) return lastTickAtMs == null
+        if (lastTickAtMs == null || lastTickAtMs <= 0L) return true
+        return (nowMillis - lastTickAtMs) >= tier.tickIntervalMs
+    }
 }
 
 data class StrategyConditionCheck(
@@ -516,10 +688,10 @@ object IchimokuStrategyEngine {
                 pointB = round2(pointB),
                 pointC = round2(pointC),
                 sPointHeld = pointC <= snapshot.kumoTop,
-                targetV = round2(min(targetV, snapshot.close - snapshot.atr14 * 1.5).coerceAtLeast(1.0)),
-                targetN = round2(min(targetN, snapshot.close - snapshot.atr14 * 2.2).coerceAtLeast(1.0)),
-                targetE = round2(min(targetE, snapshot.close - snapshot.atr14 * 3.0).coerceAtLeast(1.0)),
-                targetNT = round2(min(targetNT, snapshot.close - snapshot.atr14 * 1.2).coerceAtLeast(1.0)),
+                targetV = round2(min(targetV, snapshot.close - snapshot.atr14 * 1.5).coerceAtLeast(0.00001)),
+                targetN = round2(min(targetN, snapshot.close - snapshot.atr14 * 2.2).coerceAtLeast(0.00001)),
+                targetE = round2(min(targetE, snapshot.close - snapshot.atr14 * 3.0).coerceAtLeast(0.00001)),
+                targetNT = round2(min(targetNT, snapshot.close - snapshot.atr14 * 1.2).coerceAtLeast(0.00001)),
                 barsSinceWaveStart = barsSinceA,
                 nearestTimeCycleNumber = nearestCycle,
                 isNearTimeCycleChangeDay = nearChangeDay,
@@ -528,7 +700,7 @@ object IchimokuStrategyEngine {
     }
 
     /**
-     * ارزیابی کامل بیت‌کوین (`BTC/USDT`) بر اساس تنها استراتژی فعال انتخاب‌شده.
+     * ارزیابی کامل هر یک از ۱۵ نماد داخل اپ (`V1Universe.allSymbols`) بر اساس تنها استراتژی فعال انتخاب‌شده.
      */
     fun evaluateBitcoinStrategy(
         activeModel: BitcoinStrategyModel,
@@ -540,7 +712,9 @@ object IchimokuStrategyEngine {
         customTitleOverride: String? = null,
         customIdOverride: String? = null,
         nowMillis: Long = System.currentTimeMillis(),
+        symbolInput: String = BTC_SYMBOL,
     ): StrategyEvaluationReport {
+        val normalizedSymbol = V1Universe.normalize(symbolInput).takeIf { V1Universe.valid(it) } ?: BTC_SYMBOL
         val effectiveId = customIdOverride ?: activeModel.id
         val effectiveTitle = customTitleOverride ?: activeModel.titleFa
 
@@ -550,6 +724,7 @@ object IchimokuStrategyEngine {
 
         if (stratSnap == null || trigSnap == null) {
             return StrategyEvaluationReport(
+                symbol = normalizedSymbol,
                 strategyId = effectiveId,
                 strategyTitleFa = effectiveTitle,
                 strategyBadgeFa = activeModel.badgeFa,
@@ -573,7 +748,7 @@ object IchimokuStrategyEngine {
                 triggerSnapshot = trigSnap,
                 waveProjection = null,
                 conditions = emptyList(),
-                summaryFa = "در حال تکمیل کندل‌های ۳ تایم‌فریم (${config.macroInterval.label}/${config.strategyInterval.label}/${config.triggerInterval.label}) برای بیت‌کوین...",
+                summaryFa = "در حال تکمیل کندل‌های ۳ تایم‌فریم (${config.macroInterval.label}/${config.strategyInterval.label}/${config.triggerInterval.label}) برای $normalizedSymbol...",
                 triggerBarTime = trigSnap?.time ?: 0L,
                 evaluatedAt = nowMillis,
             )
@@ -719,7 +894,7 @@ object IchimokuStrategyEngine {
         } ?: candidateTargets.lastOrNull() ?: if (isLong) {
             livePrice + stopDist * max(effectiveConfig.minRiskReward, 2.0)
         } else {
-            (livePrice - stopDist * max(effectiveConfig.minRiskReward, 2.0)).coerceAtLeast(1.0)
+            (livePrice - stopDist * max(effectiveConfig.minRiskReward, 2.0)).coerceAtLeast(0.00001)
         }
 
         // Check nearest HTF horizontal plateau (Karen Péloille's Flat SSB/Kijun wall)
@@ -786,21 +961,21 @@ object IchimokuStrategyEngine {
 
         val summaryFa = when (readiness) {
             StrategyReadinessState.SIGNAL_BUY ->
-                "✅ سیگنال خرید (Long) روی BTC/USDT توسط «$effectiveTitle» صادر شد (${triggerType.titleFa})"
+                "✅ سیگنال خرید (Long) روی $normalizedSymbol توسط «$effectiveTitle» صادر شد (${triggerType.titleFa})"
             StrategyReadinessState.SIGNAL_SELL ->
-                "✅ سیگنال فروش (Short) روی BTC/USDT توسط «$effectiveTitle» صادر شد (${triggerType.titleFa})"
+                "✅ سیگنال فروش (Short) روی $normalizedSymbol توسط «$effectiveTitle» صادر شد (${triggerType.titleFa})"
             StrategyReadinessState.WATCH_SETUP ->
-                "⏳ $passedCount از ۶ شرط همگرایی برقرار است؛ در انتظار بسته شدن کندل ماشه ورود در تایم‌فریم ${config.triggerInterval.label}"
+                "⏳ $passedCount از ۶ شرط همگرایی روی $normalizedSymbol برقرار است؛ در انتظار بسته شدن کندل ماشه ورود در تایم‌فریم ${config.triggerInterval.label}"
             StrategyReadinessState.BLOCKED -> {
                 val firstFailed = conditions.firstOrNull { !it.passed }
-                "🛑 ورود مجاز نیست: ${firstFailed?.titleFa ?: ""} (${firstFailed?.detailFa ?: ""})"
+                "🛑 ورود روی $normalizedSymbol مجاز نیست: ${firstFailed?.titleFa ?: ""} (${firstFailed?.detailFa ?: ""})"
             }
             StrategyReadinessState.INSUFFICIENT_DATA ->
-                "در حال دریافت کندل‌های مولتی‌تایم‌فریم..."
+                "در حال دریافت کندل‌های مولتی‌تایم‌فریم $normalizedSymbol..."
         }
 
         return StrategyEvaluationReport(
-            symbol = BTC_SYMBOL,
+            symbol = normalizedSymbol,
             strategyId = effectiveId,
             strategyTitleFa = effectiveTitle,
             strategyBadgeFa = activeModel.badgeFa,
@@ -919,7 +1094,7 @@ object IchimokuStrategyEngine {
         report: StrategyEvaluationReport,
         config: BaseStrategyConfig,
     ): PreserveModeEvaluation? {
-        if (!trade.isOpen || V1Universe.normalize(trade.symbol) != BTC_SYMBOL) return null
+        if (!trade.isOpen || V1Universe.normalize(trade.symbol) != V1Universe.normalize(report.symbol)) return null
         val trigSnap = report.triggerSnapshot ?: return null
         val stratSnap = report.strategySnapshot ?: trigSnap
         val livePrice = report.livePrice.takeIf { it > 0.0 } ?: return null
@@ -1033,4 +1208,14 @@ object IchimokuStrategyEngine {
     }
 }
 
-private fun round2(v: Double): Double = round(v * 100.0) / 100.0
+private fun round2(v: Double): Double {
+    if (!v.isFinite()) return 0.0
+    val a = abs(v)
+    val factor = when {
+        a >= 500.0 -> 100.0
+        a >= 10.0 -> 1_000.0
+        a >= 0.01 -> 100_000.0
+        else -> 1_000_000.0
+    }
+    return round(v * factor) / factor
+}
