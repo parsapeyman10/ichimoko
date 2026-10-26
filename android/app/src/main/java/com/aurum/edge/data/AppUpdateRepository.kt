@@ -32,6 +32,8 @@ import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.Locale
 
+class DataFeedException(message: String) : Exception(message)
+
 /**
  * Sideload-friendly updater. Android still requires the system package installer confirmation;
  * no app can silently replace its own code outside managed/Play channels. The repository only

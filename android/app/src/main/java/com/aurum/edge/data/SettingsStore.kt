@@ -109,9 +109,10 @@ class SettingsStore(context: Context) {
         // Retired v1_watchlist is intentionally ignored. It cannot narrow the app catalog.
         // AI/news fields are retired: stored values stay readable for old installs but nothing
         // in the app consumes them anymore (kept only so AppSettings keeps its stored shape).
-        val aiUrl = storedNewsAiUrl
+        val aiUrl = storedNewsAiUrl.ifBlank { com.aurum.edge.data.AvalAiAdvisor.DEFAULT_BASE_URL }
         val aiFormat = prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" }
-        val aiModel = storedNewsAiModel
+        val aiModel = storedNewsAiModel.ifBlank { com.aurum.edge.data.AvalAiAdvisor.DEFAULT_MODEL }
+        val avalAiEnabled = prefs.getBoolean(KEY_AVAL_AI_ENABLED, false)
         val categoryStrategies = AssetClass.entries.associateWith { category ->
             CategoryStrategy.fromStored(prefs.getString("v1_strategy_${category.name}", null))
         }
@@ -123,8 +124,14 @@ class SettingsStore(context: Context) {
         symbol = V1Universe.normalize(prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD")
             .takeIf(V1Universe::valid) ?: "XAU/USD",
         interval = Interval.M5,
-        riskPercent = prefs.getFloat(KEY_RISK, 0.5f).toDouble().takeIf { it.isFinite() }?.coerceIn(0.1, 0.5) ?: 0.5,
+        riskPercent = prefs.getFloat(KEY_RISK, 0.5f).toDouble().takeIf { it.isFinite() }?.coerceIn(0.1, 10.0) ?: 0.5,
         accountBalance = prefs.getFloat(KEY_BALANCE, 1000f).toDouble(),
+        initialCapital = prefs.getFloat(KEY_INITIAL_CAPITAL, prefs.getFloat(KEY_BALANCE, 1000f)).toDouble()
+            .takeIf { it.isFinite() && it >= 10.0 } ?: 1000.0,
+        dailyLossLimitPercent = prefs.getFloat(KEY_DAILY_LOSS_LIMIT, 3.0f).toDouble()
+            .takeIf { it.isFinite() }?.coerceIn(0.5, 25.0) ?: 3.0,
+        maxDrawdownLimitPercent = prefs.getFloat(KEY_MAX_DRAWDOWN_LIMIT, 10.0f).toDouble()
+            .takeIf { it.isFinite() }?.coerceIn(1.0, 50.0) ?: 10.0,
         minConfidence = prefs.getFloat(KEY_MIN_CONF, 85f).toDouble().takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
         spreadPrice = prefs.getFloat(KEY_SPREAD, 0.12f).toDouble(),
         commissionPerOz = prefs.getFloat(KEY_COMMISSION, 0.035f).toDouble(),
@@ -136,6 +143,7 @@ class SettingsStore(context: Context) {
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
         autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
         autoDownloadUpdates = prefs.getBoolean(KEY_AUTO_DOWNLOAD_UPDATES, true),
+        avalAiEnabled = avalAiEnabled,
         newsAiApiKey = storedNewsAiKey,
         newsAiBaseUrl = aiUrl,
         newsAiModel = aiModel,
@@ -254,7 +262,10 @@ class SettingsStore(context: Context) {
         val next = proposed.copy(
             symbol = V1Universe.normalize(proposed.symbol).takeIf(V1Universe::valid) ?: "XAU/USD",
             interval = Interval.M5,
-            riskPercent = proposed.riskPercent.takeIf { it.isFinite() }?.coerceIn(0.1, 0.5) ?: 0.5,
+            riskPercent = proposed.riskPercent.takeIf { it.isFinite() }?.coerceIn(0.1, 10.0) ?: 0.5,
+            initialCapital = proposed.initialCapital.takeIf { it.isFinite() && it >= 10.0 } ?: proposed.accountBalance.coerceAtLeast(10.0),
+            dailyLossLimitPercent = proposed.dailyLossLimitPercent.takeIf { it.isFinite() }?.coerceIn(0.5, 25.0) ?: 3.0,
+            maxDrawdownLimitPercent = proposed.maxDrawdownLimitPercent.takeIf { it.isFinite() }?.coerceIn(1.0, 50.0) ?: 10.0,
             minConfidence = proposed.minConfidence.takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
         )
         prefs.edit()
@@ -263,6 +274,9 @@ class SettingsStore(context: Context) {
             .putString(KEY_INTERVAL, next.interval.label)
             .putFloat(KEY_RISK, next.riskPercent.toFloat())
             .putFloat(KEY_BALANCE, next.accountBalance.toFloat())
+            .putFloat(KEY_INITIAL_CAPITAL, next.initialCapital.toFloat())
+            .putFloat(KEY_DAILY_LOSS_LIMIT, next.dailyLossLimitPercent.toFloat())
+            .putFloat(KEY_MAX_DRAWDOWN_LIMIT, next.maxDrawdownLimitPercent.toFloat())
             .putFloat(KEY_MIN_CONF, next.minConfidence.toFloat())
             .putFloat(KEY_SPREAD, next.spreadPrice.toFloat())
             .putFloat(KEY_COMMISSION, next.commissionPerOz.toFloat())
@@ -292,12 +306,23 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
             .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
             .putBoolean(KEY_AUTO_DOWNLOAD_UPDATES, next.autoDownloadUpdates)
+            .putBoolean(KEY_AVAL_AI_ENABLED, next.avalAiEnabled)
+            .putString(KEY_NEWS_AI_KEY, next.newsAiApiKey.trim())
+            .putString(KEY_NEWS_AI_URL, next.newsAiBaseUrl.trim().ifBlank { com.aurum.edge.data.AvalAiAdvisor.DEFAULT_BASE_URL })
+            .putString(KEY_NEWS_AI_MODEL, next.newsAiModel.trim().ifBlank { com.aurum.edge.data.AvalAiAdvisor.DEFAULT_MODEL })
             .apply()
         _settings.value = next
     }
 
-    fun setLastSync(symbol: String, interval: Interval, at: Long) {
-        prefs.edit().putLong("last_sync_${symbol}_${interval.label}", at).apply()
+    fun setLastSync(symbol: String, interval: Interval = Interval.M5, at: Long = System.currentTimeMillis()) {
+        val norm = V1Universe.normalize(symbol)
+        prefs.edit().putLong("last_sync_${norm}_${interval.label}", at).apply()
+    }
+
+    fun getLastSync(symbol: String, interval: Interval = Interval.M5): Long? {
+        val norm = V1Universe.normalize(symbol)
+        val ts = prefs.getLong("last_sync_${norm}_${interval.label}", 0L)
+        return ts.takeIf { it > 0L }
     }
 
     companion object {
@@ -310,6 +335,9 @@ class SettingsStore(context: Context) {
         private const val KEY_INTERVAL = "interval"
         private const val KEY_RISK = "risk_percent"
         private const val KEY_BALANCE = "balance"
+        private const val KEY_INITIAL_CAPITAL = "initial_capital"
+        private const val KEY_DAILY_LOSS_LIMIT = "daily_loss_limit_percent"
+        private const val KEY_MAX_DRAWDOWN_LIMIT = "max_drawdown_limit_percent"
         private const val KEY_MIN_CONF = "min_confidence"
         private const val KEY_SPREAD = "spread_price"
         private const val KEY_COMMISSION = "commission_per_oz"
@@ -325,6 +353,7 @@ class SettingsStore(context: Context) {
         private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"
         private const val KEY_AUTO_DOWNLOAD_UPDATES = "auto_download_updates"
         private const val KEY_AUTO_DOWNLOAD_MIGRATED = "auto_download_updates_migrated_2_0_2"
+        private const val KEY_AVAL_AI_ENABLED = "aval_ai_pretrade_enabled"
         private const val KEY_NEWS_AI_KEY = "news_ai_client_key"
         private const val KEY_NEWS_AI_URL = "news_ai_client_base_url"
         private const val KEY_NEWS_AI_MODEL = "news_ai_client_model"
