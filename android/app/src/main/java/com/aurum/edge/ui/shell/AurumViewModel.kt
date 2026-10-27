@@ -1,343 +1,768 @@
 package com.aurum.edge.ui
 
-import android.Manifest
 import android.content.Context
-import android.content.pm.PackageManager
-import android.net.Uri
-import android.os.Build
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.aurum.edge.app.AppContainer
 import com.aurum.edge.core.AppSettings
-import com.aurum.edge.core.FeedLiveness
-import com.aurum.edge.domain.FeedMode
-import com.aurum.edge.data.SourceComparison
-import com.aurum.edge.data.VerificationStatus
-import com.aurum.edge.data.WatchCatalog
-import com.aurum.edge.domain.Interval
-import com.aurum.edge.core.MarketHours
-import com.aurum.edge.core.IctEntryRules
-import com.aurum.edge.core.MtfSnapshotRecord
-import com.aurum.edge.core.PaperOpportunity
+import com.aurum.edge.core.AutoExitKind
+import com.aurum.edge.core.BaseStrategyConfig
+import com.aurum.edge.core.BitcoinStrategyModel
+import com.aurum.edge.core.CandleBackfillSummary
+import com.aurum.edge.core.CustomStrategySlot
+import com.aurum.edge.core.DualTimeframeSymbolReport
+import com.aurum.edge.core.IchimokuStrategyEngine
+import com.aurum.edge.core.MarketState
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick
-import com.aurum.edge.core.PaperOrderRules
-import com.aurum.edge.core.PaperPortfolioPolicy
-import com.aurum.edge.core.TechnicalEvidence
-import com.aurum.edge.core.TradeQuotePolicy
-import com.aurum.edge.core.PaperTicket
-import com.aurum.edge.core.Signal
-import com.aurum.edge.domain.SignalAction
-import com.aurum.edge.core.TradeReplay
+import com.aurum.edge.core.RiskAndCalendarEngine
+import com.aurum.edge.core.RiskCalculationResult
+import com.aurum.edge.core.Smart15mSyncPlanner
+import com.aurum.edge.core.StrategyEvaluationReport
+import com.aurum.edge.core.StrategyReadinessState
+import com.aurum.edge.core.SymbolPollTier
+import com.aurum.edge.core.V1Universe
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.data.AppUpdateRepository
-import com.aurum.edge.data.JournalStats
-import com.aurum.edge.core.MarketState
-import com.aurum.edge.data.SpotFallbackClient
+import com.aurum.edge.data.AiTradeVerdict
+import com.aurum.edge.data.AvalAiAdvisor
+import com.aurum.edge.data.BandwidthSyncStats
 import com.aurum.edge.data.DisplayMark
+import com.aurum.edge.data.JournalStats
+import com.aurum.edge.data.LiveQuoteFetcher
 import com.aurum.edge.data.OpenPositionDisplay
-import com.aurum.edge.data.WatchSelection
-import com.aurum.edge.data.WatchState
-import com.aurum.edge.engine.MtfAnalyzer
-import com.aurum.edge.notify.AlertSoundPlayer
-import com.aurum.edge.notify.Notifier
-import com.aurum.edge.service.SignalMonitorService
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.Dispatchers
+import com.aurum.edge.data.PairScanState
+import com.aurum.edge.data.PairScanStatus
+import com.aurum.edge.service.BackgroundTradingService
+import java.util.Locale
+import java.util.UUID
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
-import kotlin.math.abs
-import kotlin.math.min
 
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
-    companion object {
-        /** The watch keep-warm loop checks every WATCH_CHECK_MS; a symbol whose last attempt
-         * is older than WATCH_STALE_MS gets one (throttled) refresh. No turn-counting, no
-         * fixed 3-minute gap after a failure. */
-        private const val WATCH_CHECK_MS = 60_000L
-        private const val WATCH_STALE_MS = 180_000L
-    }
-
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
-
-
-    val watchSettings: StateFlow<Map<String, WatchSelection>> = container.watchSettings.selections
-    val watch: StateFlow<WatchState> = container.watch.state
-    /** All-pairs radar: periodic online candle sweep status of every catalog pair. */
-    val pairScan = container.pairScanner.state
-    val decisionLog = container.decisionLog.records
-
-    val market = container.verifiedMarket
+    val market: StateFlow<MarketState> = container.verifiedMarket
     val trades: StateFlow<List<PaperTrade>> = container.journalStore.trades
-    val opportunities: StateFlow<List<PaperOpportunity>> = container.opportunityStore.items
-    val opportunityError: StateFlow<String?> = container.opportunityStore.loadError
-    val journalError: StateFlow<String?> = container.journalStore.loadError
-    val tickFeeds = container.openTradeTicks.feeds
-    val autoPaperStatus: StateFlow<String> = container.autoPaperTrader.status
-
-    /**
-     * «کدام روش برای کدام بازار» — per-market method router for the SELECTED symbol, recomputed
-     * on every market emission from real closed candles + the real session clocks. Read-only: it
-     * never creates a signal, it says which method is legal right now and why not when it isn't.
-     */
-    val playbook: StateFlow<com.aurum.edge.core.PlaybookDecision?> = container.verifiedMarket
-        .map { state ->
-            withContext(Dispatchers.Default) {
-                runCatching {
-                    com.aurum.edge.core.MarketPlaybook.assess(state.symbol, state.candles, state.interval)
-                }.getOrNull()
-            }
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
-    /**
-     * «روند کلی بازار» — خوانشِ عرض بازار از همان پویشِ پیوستهٔ همهٔ نمادهای جهانِ برنامه: چند نماد صعودی/نزولی/
-     * خنثی اندازه گرفته شد، جهت دلار از شش جفت اصلی، و جوّ ریسک‌پذیری از دارایی‌های ریسکی در
-     * برابر طلا و دلار. null تا وقتی یک پویش چیزی اندازه نگرفته باشد (و هرگز حدس زده نمی‌شود).
-     */
-    val marketTrend: StateFlow<com.aurum.edge.core.MarketTrendRead?> = pairScan
-        .map { it.marketTrend }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
-    /**
-     * لایهٔ اولِ همان روند: جهتِ اندازه‌گیری‌شدهٔ **خودِ نمادِ انتخابی** روی تایم‌فریم پایه و
-     * تایم‌فریم مرجع (تجمیع‌شده از همان کندل‌های واقعی)، با ER و شیب EMA50 بر حسب ATR.
-     */
-    val symbolTrend: StateFlow<com.aurum.edge.core.SymbolTrend?> = container.verifiedMarket
-        .map { state ->
-            withContext(Dispatchers.Default) {
-                runCatching {
-                    com.aurum.edge.core.MarketTrend.symbolTrend(state.symbol, state.candles, state.interval)
-                }.getOrNull()
-            }
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
-    /** جایگاه آخرین سیگنالِ همین نماد نسبت به روندِ بازار — برای نمایش و ثبت، نه برای ساخت سیگنال. */
-    val trendContext: StateFlow<com.aurum.edge.core.TrendContext?> = combine(
-        symbolTrend, marketTrend, container.verifiedMarket, playbook,
-    ) { trend, overall, state, decision ->
-        val side = state.signal?.action ?: com.aurum.edge.domain.SignalAction.NO_TRADE
-        if (trend != null && trend.symbol != state.symbol) return@combine null
-        runCatching {
-            com.aurum.edge.core.MarketTrend.contextOf(side, trend,
-                overall?.takeIf { System.currentTimeMillis() - it.computedAt in 0L..10 * 60_000L },
-                decision?.method)
-        }.getOrNull()
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
-    /** The app's ONE wall clock (see AppContainer.clock). Screens read this instead of
-     * starting their own `while(true)` timer, so a backgrounded screen stops ticking. */
+    private val _pairScan = MutableStateFlow(PairScanState())
+    val pairScan: StateFlow<PairScanState> = _pairScan.asStateFlow()
     val clock: StateFlow<Long> = container.clock
     val updateState: StateFlow<AppUpdateRepository.State> = container.updater.state
     val updateSigningDiagnostic: String by lazy { container.updater.installedSigningDiagnostic() }
-    /** Installed certificate vs. the pinned release channel — read once, shown line by line. */
     val updateSigningSummary: AppUpdateRepository.SigningSummary by lazy { container.updater.signingSummary() }
 
-    /** One atomic price+original-time snapshot for the open-position UI.
-     * It is never persisted as a new tick and never used to replay an exit.
-     */
     private val _liveTicks = MutableStateFlow<Map<String, PriceTick>>(emptyMap())
     val liveTicks: StateFlow<Map<String, PriceTick>> = _liveTicks.asStateFlow()
-    // UI-only memory of the last verified tick for each *trade id*. Stale values never enter liveTicks.
+
     private val _lastDisplayMarks = MutableStateFlow<Map<String, DisplayMark>>(emptyMap())
     val lastDisplayMarks: StateFlow<Map<String, DisplayMark>> = _lastDisplayMarks.asStateFlow()
-    private var liveTickerLoopStarted = false
+
+    private val _backfillSummaries = MutableStateFlow<Map<String, CandleBackfillSummary>>(emptyMap())
+    val backfillSummaries: StateFlow<Map<String, CandleBackfillSummary>> = _backfillSummaries.asStateFlow()
+
+    private val _isBackfilling = MutableStateFlow(false)
+    val isBackfilling: StateFlow<Boolean> = _isBackfilling.asStateFlow()
+
+    private val _aiChecking = MutableStateFlow(false)
+    val aiChecking: StateFlow<Boolean> = _aiChecking.asStateFlow()
+
+    private val _lastAiVerdict = MutableStateFlow<AiTradeVerdict?>(null)
+    val lastAiVerdict: StateFlow<AiTradeVerdict?> = _lastAiVerdict.asStateFlow()
+
+    private val _btcStrategyReport = MutableStateFlow<StrategyEvaluationReport?>(null)
+    val btcStrategyReport: StateFlow<StrategyEvaluationReport?> = _btcStrategyReport.asStateFlow()
+
+    private val _allSymbolStrategyReports = MutableStateFlow<Map<String, StrategyEvaluationReport>>(emptyMap())
+    val allSymbolStrategyReports: StateFlow<Map<String, StrategyEvaluationReport>> = _allSymbolStrategyReports.asStateFlow()
+
+    private val _dualSymbolStrategyReports = MutableStateFlow<Map<String, DualTimeframeSymbolReport>>(emptyMap())
+    val dualSymbolStrategyReports: StateFlow<Map<String, DualTimeframeSymbolReport>> = _dualSymbolStrategyReports.asStateFlow()
+
+    private val _focusedStrategySymbol = MutableStateFlow(IchimokuStrategyEngine.BTC_SYMBOL)
+    val focusedStrategySymbol: StateFlow<String> = _focusedStrategySymbol.asStateFlow()
+
+    private val _focusedStrategyInterval = MutableStateFlow(Interval.M15)
+    val focusedStrategyInterval: StateFlow<Interval> = _focusedStrategyInterval.asStateFlow()
+
+    val bandwidthStats: StateFlow<BandwidthSyncStats> = LiveQuoteFetcher.syncStats
+
+    private val _isScanningBtcStrategy = MutableStateFlow(false)
+    val isScanningBtcStrategy: StateFlow<Boolean> = _isScanningBtcStrategy.asStateFlow()
+
+    private val _activeRiskSymbol = MutableStateFlow(container.settingsStore.read().symbol)
+    val activeRiskSymbol: StateFlow<String> = _activeRiskSymbol.asStateFlow()
 
     private val _stats = MutableStateFlow(container.journalStore.stats())
     val stats: StateFlow<JournalStats> = _stats.asStateFlow()
 
-    /** Multi-timeframe confluence, recomputed on the phone whenever a new real bar closes. */
-    private val _mtf = MutableStateFlow<MtfAnalyzer.Snapshot?>(null)
-    val mtf: StateFlow<MtfAnalyzer.Snapshot?> = _mtf.asStateFlow()
-    private var mtfBarTime: Long = -1L
-
     private val _toast = MutableStateFlow<String?>(null)
     val toast: StateFlow<String?> = _toast.asStateFlow()
 
-    /** Candles behind ONE journal row. Only one trade is expanded at a time. */
-    private val _tradeChart = MutableStateFlow(TradeChartState())
-    val tradeChart: StateFlow<TradeChartState> = _tradeChart.asStateFlow()
+    private var updateCheckStarted = false
+    private var liveMonitorJob: Job? = null
+    private var lastScanned15mBucket: Long = -1L
+    private var lastScanned5mBucket: Long = -1L
+    private var lastMidBarCheckedBucket: Long = -1L
+    private var lastAutoFiredBarTimeByKey: Map<String, Long> = emptyMap()
 
     init {
-        // The market and background service can settle trades without going through a UI
-        // button. Keep Home/Journal statistics attached to the same persisted ledger.
-        viewModelScope.launch {
-            container.journalStore.trades.collect { _stats.value = container.journalStore.stats() }
-        }
-        viewModelScope.launch {
-            runCatching { container.journalStore.load() }.onFailure {
-                _toast.value = "ژورنال خوانده نشد؛ فایل قبلی برای بازیابی نگه داشته شد"
-            }
-            runCatching { container.opportunityStore.load() }.onFailure {
-                _toast.value = "تاریخچهٔ فرصت‌ها خوانده نشد؛ فایل قبلی نگه داشته شد و هشدار تکراری متوقف است"
-            }
-            _stats.value = container.journalStore.stats()
-        }
-        // Automatic SL/TP settlement happens in MarketRepository, not in this ViewModel.
-        // One collector only: a second one re-ran JournalStore.stats() over every trade on
-        // every emission of the same flow and wrote the identical result twice.
-        viewModelScope.launch {
-            container.market.state.collect { state ->
-                val lastClosed = state.candles.lastOrNull { it.closed }?.time ?: -1L
-                if (lastClosed == mtfBarTime) return@collect
-                mtfBarTime = lastClosed
-                val snapshot = withContext(Dispatchers.Default) {
-                    runCatching { MtfAnalyzer.analyze(state.candles, state.interval) }.getOrNull()
-                }
-                _mtf.value = snapshot
+        container.settingsStore.ensureBalance100kMigrated()
+        container.appScope.launch {
+            container.journalStore.trades.collect { currentTrades ->
+                _stats.value = container.journalStore.stats()
+                _lastDisplayMarks.value = OpenPositionDisplay.onlyOpen(_lastDisplayMarks.value, currentTrades)
+                syncBackgroundServiceState()
             }
         }
-        ensureLiveTickerLoop()
+        syncBackgroundServiceState()
+        startLiveMonitor()
     }
 
-    /** Open on gold on each cold launch; in-session symbol selections remain available. */
-    fun startApp(context: Context) {
-        if (container.settingsStore.read().symbol != "XAU/USD") {
-            // Save before starting the market feed, so it cannot start on the previously
-            // viewed symbol. This changes only the chart selection, never open positions.
-            if (!container.settingsStore.saveChartSymbol("XAU/USD")) {
-                _toast.value = "شروع با طلا ذخیره نشد؛ نماد قبلی حفظ شد"
-            }
-        }
-        visibleOnlineLoopEnabled = true
-        container.market.start()
-        container.watch.loadCached()
-        ensureVisibleOnlineLoop()
-        ensureLiveTickerLoop()
-        // A saved opt-in can outlive a killed service. Re-arm only when the UI is in the
-        // foreground again; it stays off otherwise.
-        if (settings.value.backgroundMonitor && !SignalMonitorService.running.value) {
-            val permitted = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
-                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
-                    PackageManager.PERMISSION_GRANTED
-            if (!permitted || !SignalMonitorService.start(context)) {
-                setMonitorFlag(false)
-                _toast.value = "سرویس پایش شروع نشد؛ مجوز اعلان یا محدودیت باتری گوشی را بررسی کنید"
-            }
-        }
-        // Do this once per process, not on every tab change. If the user enabled automatic
-        // download, a verified public APK is downloaded and Android's installer is opened.
-        // Automatic checks keep a gap (see AppUpdateRepository): the anonymous GitHub API quota
-        // is shared per public IP, so re-checking on every launch hid real updates behind 403s.
+    fun startApp(@Suppress("UNUSED_PARAMETER") context: Context) {
+        container.settingsStore.ensureBalance100kMigrated()
         if (!updateCheckStarted) {
             updateCheckStarted = true
             checkForAppUpdate(settings.value.autoDownloadUpdates, force = false)
         }
+        syncBackgroundServiceState()
+        syncAllOpenAndActiveSymbolsGap(notifyOnSuccess = false)
+        startLiveMonitor()
     }
 
-    /** UI resume must not restart a healthy service socket; start() is idempotent. */
-    fun resumeVisibleForexFeed() {
-        visibleOnlineLoopEnabled = true
-        container.market.start()
+    fun setBackgroundMonitor(enabled: Boolean) {
+        container.settingsStore.update { it.copy(backgroundMonitor = enabled) }
+        syncBackgroundServiceState()
+        _toast.value = if (enabled) {
+            "پایش ۲۴/۷ در بک‌گراند فعال شد"
+        } else {
+            "پایش بک‌گراند غیرفعال شد"
+        }
     }
 
-    /** When no user-enabled foreground service remains, do not keep a headless feed alive. */
-    fun pauseInvisibleForexFeed() {
-        visibleOnlineLoopEnabled = false
-        if (!SignalMonitorService.running.value) container.market.stop()
+    private fun syncBackgroundServiceState() {
+        val cfg = settings.value
+        val hasOpenTrades = trades.value.any { it.isOpen }
+        val shouldRunBg = cfg.backgroundMonitor || cfg.autoPaperTrading || hasOpenTrades
+        BackgroundTradingService.syncServiceState(
+            context = container.appContext,
+            enabled = shouldRunBg,
+            title = "Aurum Edge · رادار ۱۵ نماد (15m + 5m)",
+            text = "${cfg.activeBitcoinStrategyTitleFa()} · پوزیشن باز: ${trades.value.count { it.isOpen }}",
+        )
     }
 
-    private var visibleOnlineLoopStarted = false
-    @Volatile private var visibleOnlineLoopEnabled = false
-    private var updateCheckStarted = false
+    private fun startLiveMonitor() {
+        if (liveMonitorJob?.isActive == true) return
+        liveMonitorJob = container.appScope.launch {
+            while (isActive) {
+                val now = System.currentTimeMillis()
+                val openSymbolSet = trades.value
+                    .filter { it.isOpen }
+                    .map { V1Universe.normalize(it.symbol) }
+                    .toSet()
+                val focused = V1Universe.normalize(_focusedStrategySymbol.value)
+                val riskWatched = V1Universe.normalize(_activeRiskSymbol.value)
+                val currentReports = _allSymbolStrategyReports.value
+                val currentTicks = _liveTicks.value
+
+                // ۱. دسته‌بندی هوشمند ۱۵ نماد بر اساس ۴ سطح اولویت (بدون هدررفت اینترنت)
+                val dueCrypto = mutableListOf<String>()
+                val dueTradFi = mutableListOf<String>()
+                var skippedClosed = 0
+
+                for (symbol in V1Universe.allSymbols) {
+                    val hasOpen = symbol in openSymbolSet
+                    val isFocused = (symbol == focused || symbol == riskWatched)
+                    val readiness = currentReports[symbol]?.readiness
+                    val tier = Smart15mSyncPlanner.classifySymbolTier(
+                        symbol = symbol,
+                        hasOpenTrade = hasOpen,
+                        isFocusedSymbol = isFocused,
+                        readiness = readiness,
+                        nowMillis = now,
+                    )
+                    val lastTickAt = currentTicks[symbol]?.at
+                    if (tier == SymbolPollTier.MARKET_CLOSED_PAUSED && lastTickAt != null) {
+                        skippedClosed++
+                        continue
+                    }
+                    if (Smart15mSyncPlanner.isTickPollDue(lastTickAt, tier, now)) {
+                        if (symbol in V1Universe.cryptoSymbols) {
+                            dueCrypto += symbol
+                        } else {
+                            dueTradFi += symbol
+                        }
+                    }
+                }
+                if (skippedClosed > 0) {
+                    LiveQuoteFetcher.recordSkippedClosedMarketCheck(skippedClosed)
+                }
+
+                // ۲. دریافت یکپارچه ۵ رمزارز در ۱ درخواست واحد (۲۰۰ بایت) در صورت سررسید
+                if (dueCrypto.isNotEmpty()) {
+                    val batchTicks = LiveQuoteFetcher.fetchCryptoBatchTicks(dueCrypto, now)
+                    batchTicks.forEach { (sym, tick) ->
+                        applyIncomingTick(sym, tick)
+                        container.settingsStore.setLastSync(sym, at = tick.at)
+                    }
+                }
+
+                // ۳. دریافت موازی تیک نمادهای فارکس/طلا/شاخص که سررسید آن‌ها رسیده و بازارشان باز است
+                if (dueTradFi.isNotEmpty()) {
+                    coroutineScope {
+                        dueTradFi.chunked(5).forEach { batch ->
+                            batch.map { symbol ->
+                                async {
+                                    symbol to LiveQuoteFetcher.fetchLiveTick(symbol)
+                                }
+                            }.awaitAll().forEach { (symbol, tick) ->
+                                if (tick != null) {
+                                    LiveQuoteFetcher.applyLiveTickToCachedCandles(symbol, tick)
+                                    applyIncomingTick(symbol, tick)
+                                    container.settingsStore.setLastSync(symbol, at = tick.at)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ۴. رصد هم‌زمان تایم‌فریم‌های ورود 15m و 5m هماهنگ با بسته شدن کندل ۵ دقیقه و ۱۵ دقیقه (Delta Sync بدون مصرف اضافه دیتا)
+                val current15mBucket = Smart15mSyncPlanner.currentCandleBucket(now, Interval.M15)
+                val current5mBucket = Smart15mSyncPlanner.currentCandleBucket(now, Interval.M5)
+                val currentMidBucket = now / 120_000L // هر ۲ دقیقه چک میان‌کندلی نمادهای آماده ماشه
+
+                if (current15mBucket > lastScanned15mBucket ||
+                    current5mBucket > lastScanned5mBucket ||
+                    _allSymbolStrategyReports.value.isEmpty()
+                ) {
+                    evaluateAll15SymbolsStrategyInternal(
+                        userInitiated = false,
+                        fullSweep = true,
+                    )
+                    lastScanned15mBucket = current15mBucket
+                    lastScanned5mBucket = current5mBucket
+                    lastMidBarCheckedBucket = currentMidBucket
+                    LiveQuoteFetcher.recordScheduled15mSweep(
+                        lastSweepAt = System.currentTimeMillis(),
+                        nextSweepAt = Smart15mSyncPlanner.nextTriggerBoundaryCheckMillis(
+                            nowMillis = System.currentTimeMillis(),
+                            triggerInterval = Interval.M5,
+                        ),
+                    )
+                } else if (currentMidBucket > lastMidBarCheckedBucket) {
+                    // چک سریع میان‌کندلی برای شکار اول روند روی نمادهای آماده ماشه و پوزیشن‌های باز
+                    lastMidBarCheckedBucket = currentMidBucket
+                    evaluateAll15SymbolsStrategyInternal(
+                        userInitiated = false,
+                        fullSweep = false,
+                    )
+                }
+
+                delay(4_000L)
+            }
+        }
+    }
 
     /**
-     * While the app UI is open (or the user-enabled foreground monitor is running), keep every
-     * data section warm automatically. Individual repositories still enforce their own rate limits.
+     * Automatically backfills any offline gap for all open positions + the active symbol,
+     * replaying historical 1m/5m candles chronologically to catch any TP/SL crossed while offline.
      */
-    private fun ensureVisibleOnlineLoop() {
-        if (visibleOnlineLoopStarted) return
-        visibleOnlineLoopStarted = true
-        // One adaptive sweep driver owns the universe radar (see SweepCoordinator); the UI
-        // only switches it on while the tab is visible. The background service keeps it
-        // running via `sweepCoordinator.isServiceRunning`.
-        container.sweepCoordinator.enabled.value = true
-
+    fun syncAllOpenAndActiveSymbolsGap(
+        hoursOverride: Int? = null,
+        notifyOnSuccess: Boolean = true,
+    ) {
         viewModelScope.launch {
-            while (isActive) {
-                if (visibleOnlineLoopEnabled || SignalMonitorService.running.value) {
-                    // Staleness-driven, not turn-driven: after a failed attempt the next
-                    // refresh is one check away instead of up to three minutes away. The
-                    // repository still applies its own throttle to every request.
-                    val last = container.watch.state.value.lastAttemptAt ?: 0L
-                    if (System.currentTimeMillis() - last >= WATCH_STALE_MS) container.watch.refreshNow()
+            _isBackfilling.value = true
+            try {
+                val openSymbols = trades.value.filter { it.isOpen }.map { V1Universe.normalize(it.symbol) }
+                val active = V1Universe.normalize(_activeRiskSymbol.value)
+                val targets = (openSymbols + active).filter(V1Universe::valid).distinct()
+                var totalTriggered = 0
+                var lastSummary: CandleBackfillSummary? = null
+
+                for (symbol in targets) {
+                    val summaryAndHits = backfillSingleSymbolInternal(symbol, hoursOverride)
+                    if (summaryAndHits != null) {
+                        if (symbol == active || lastSummary == null) {
+                            lastSummary = summaryAndHits.first
+                        }
+                        totalTriggered += summaryAndHits.second
+                    }
                 }
-                delay(WATCH_CHECK_MS)
+
+                if (notifyOnSuccess && totalTriggered == 0 && lastSummary != null) {
+                    _toast.value = "✅ ${lastSummary.candlesCount} کندل ساعات قطعی (${lastSummary.symbol}) بازیابی و تا این لحظه همگام شد"
+                }
+            } finally {
+                _isBackfilling.value = false
             }
         }
     }
 
-    /** UI rendering of live open-position ticks. The coordinator owns one worker per open
-     * symbol and the single [settleTick] path; this loop only paints what is already fresh,
-     * so no network fetch happens here and no quote is ever fetched twice. */
-    private fun ensureLiveTickerLoop() {
-        if (liveTickerLoopStarted) return
-        liveTickerLoopStarted = true
+    private suspend fun backfillSingleSymbolInternal(
+        symbolInput: String,
+        hoursOverride: Int? = null,
+    ): Pair<CandleBackfillSummary, Int>? {
+        val symbol = V1Universe.normalize(symbolInput)
+        if (!V1Universe.valid(symbol)) return null
+        val now = System.currentTimeMillis()
+        val earliestOpenTradeAt = trades.value
+            .filter { it.isOpen && V1Universe.normalize(it.symbol) == symbol }
+            .minOfOrNull { it.openedAt }
+        val lastSynced = container.settingsStore.getLastSync(symbol)
+        val defaultSixHoursAgo = now - 6L * 3600_000L
+
+        val sinceMillis = when {
+            hoursOverride != null && hoursOverride > 0 -> now - hoursOverride * 3600_000L
+            earliestOpenTradeAt != null && lastSynced != null -> minOf(earliestOpenTradeAt, lastSynced)
+            earliestOpenTradeAt != null -> earliestOpenTradeAt
+            lastSynced != null && (now - lastSynced) in (2 * 60_000L)..(5L * 24L * 3600_000L) -> lastSynced
+            else -> defaultSixHoursAgo
+        }
+
+        val fetched = LiveQuoteFetcher.fetchGapCandles(symbol, sinceMillis, now) ?: return null
+        val (candles, provider) = fetched
+        val summary = RiskAndCalendarEngine.summarizeBackfill(
+            symbolInput = symbol,
+            requestedFromMillis = sinceMillis,
+            candles = candles,
+            provider = provider,
+            syncedAt = now,
+        ) ?: return null
+
+        _backfillSummaries.value = _backfillSummaries.value + (symbol to summary)
+
+        // Chronologically replay the gap candles against open trades for this symbol
+        val autoClosed = container.journalStore.onBackfillCandles(symbol, candles)
+        if (autoClosed.isNotEmpty()) {
+            val first = autoClosed.first()
+            val pnlStr = String.format(Locale.US, "%s$%.2f", if (first.netPnlUsd >= 0) "+" else "", first.netPnlUsd)
+            _toast.value = when (first.kind) {
+                AutoExitKind.TAKE_PROFIT ->
+                    "🎯 در ساعات قطعی، ${first.symbol} به حد سود (TP) رسیده و خودکار در ژورنال ثبت شد ($pnlStr)"
+                AutoExitKind.STOP_LOSS ->
+                    "🛑 در ساعات قطعی، ${first.symbol} به حد ضرر (SL) رسیده و خودکار در ژورنال ثبت شد ($pnlStr)"
+            }
+        }
+
+        // Also update the latest price tick from the newest candle close + live quote
+        val liveTick = LiveQuoteFetcher.fetchLiveTick(symbol) ?: PriceTick(
+            price = summary.lastClose,
+            at = now,
+            isTradeTick = true,
+            provider = provider,
+        )
+        applyIncomingTick(symbol, liveTick)
+        container.settingsStore.setLastSync(symbol, at = now)
+
+        return summary to autoClosed.size
+    }
+
+    private fun applyIncomingTick(symbolInput: String, tick: PriceTick) {
+        val symbol = V1Universe.normalize(symbolInput)
+        _liveTicks.value = _liveTicks.value + (symbol to tick)
+
+        // Update display marks for open trades of this symbol
+        var marks = _lastDisplayMarks.value
+        trades.value.filter { it.isOpen && V1Universe.normalize(it.symbol) == symbol }.forEach { trade ->
+            marks = OpenPositionDisplay.record(marks, trade, tick, tick.at)
+        }
+        _lastDisplayMarks.value = marks
+
+        // Automatically evaluate TP / SL hits and close triggered trades
+        val autoClosed = container.journalStore.onLiveTick(symbol, tick)
+        if (autoClosed.isNotEmpty()) {
+            val first = autoClosed.first()
+            val pnlStr = String.format(Locale.US, "%s$%.2f", if (first.netPnlUsd >= 0) "+" else "", first.netPnlUsd)
+            val msg = when (first.kind) {
+                AutoExitKind.TAKE_PROFIT -> "🎯 معامله ${first.symbol} با برخورد به حد سود (TP) بسته شد ($pnlStr)"
+                AutoExitKind.STOP_LOSS -> "🛑 معامله ${first.symbol} با برخورد به حد ضرر (SL) بسته شد ($pnlStr)"
+            }
+            _toast.value = msg
+            BackgroundTradingService.postTradeEventNotification(
+                context = container.appContext,
+                title = "بسته شدن خودکار ${first.symbol}",
+                body = msg,
+            )
+        }
+
+        // شکار لحظه‌ای نقطه‌زنی ورود (Real-Time Sniper Pocket Fill) روی هر دو تایم‌فریم 15m و 5m و همه استراتژی‌های فعال (بدون محدودیت تعداد معامله و باخت متوالی)
+        val cfg = settings.value
+        val dualReport = _dualSymbolStrategyReports.value[symbol]
+        val armedCandidates = dualReport?.sniperArmedReports
+            ?.sortedByDescending { it.coreTrendScore }
+            ?: listOfNotNull(_allSymbolStrategyReports.value[symbol]).filter { it.isActionable || it.isSniperArmedPendingRetest }
+        if (cfg.autoPaperTrading && !com.aurum.edge.core.MarketHours.closedFor(symbol, tick.at)) {
+            for (armedReport in armedCandidates.filter { it.isPriceInSniperWindow(tick.price) }) {
+                val openAll = trades.value.filter { it.isOpen }
+                val hasOpenSameStrategyTf = openAll.any {
+                    it.strategyId == armedReport.strategyId &&
+                        V1Universe.normalize(it.symbol) == symbol &&
+                        it.interval == armedReport.triggerInterval
+                }
+                val fireKey = "${armedReport.strategyId}|$symbol|${armedReport.triggerInterval.label}"
+                val lastFiredBar = lastAutoFiredBarTimeByKey[fireKey] ?: 0L
+                if (!hasOpenSameStrategyTf &&
+                    armedReport.triggerBarTime > 0L && armedReport.triggerBarTime != lastFiredBar
+                ) {
+                    val sl = armedReport.suggestedStopLoss
+                    val tp = armedReport.primaryTakeProfit
+                    if (sl != null && tp != null) {
+                        val calc = RiskAndCalendarEngine.calculatePosition(
+                            symbolInput = symbol,
+                            accountBalance = cfg.accountBalance,
+                            riskPercent = cfg.riskPercent,
+                            entry = tick.price,
+                            stopLoss = sl,
+                            takeProfit = tp,
+                            preferredAction = armedReport.action,
+                            fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
+                        )
+                        if (calc != null) {
+                            lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
+                            val tfLabel = armedReport.triggerInterval.label
+                            val sniperNote = "🎯 نقطه‌زنی [تایم $tfLabel] · [${armedReport.strategyTitleFa}] · (${armedReport.trendPhase.badgeFa} · دقت ${armedReport.sniperEntryScore.toInt()}%)"
+                            openAutoTrackedTrade(
+                                calc = calc,
+                                note = sniperNote,
+                                strategyContext = armedReport.toAiStrategyContext(),
+                                entryInterval = armedReport.triggerInterval,
+                                strategyId = armedReport.strategyId,
+                                strategyTitleFa = armedReport.strategyTitleFa,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun selectRiskSymbol(symbolInput: String) {
+        val normalized = V1Universe.normalize(symbolInput)
+        if (!V1Universe.valid(normalized)) return
+        _activeRiskSymbol.value = normalized
+        refreshSymbolLivePrice(normalized)
+        if (_backfillSummaries.value[normalized] == null) {
+            viewModelScope.launch {
+                backfillSingleSymbolInternal(normalized, hoursOverride = 6)
+            }
+        }
+    }
+
+    fun refreshSymbolLivePrice(symbolInput: String = _activeRiskSymbol.value, onLoaded: ((PriceTick?) -> Unit)? = null) {
+        val normalized = V1Universe.normalize(symbolInput)
         viewModelScope.launch {
-            val trades = container.journalStore.trades
-            val ticks = container.openPositionCoordinator.liveTicks
-            var lastOpenIds = emptySet<String>()
-            combine(trades, ticks) { openTrades, live ->
-                Pair(openTrades.filter { it.isOpen }, live)
-            }.collect { (openTrades, live) ->
+            val tick = LiveQuoteFetcher.fetchLiveTick(normalized)
+            if (tick != null) {
+                applyIncomingTick(normalized, tick)
+                container.settingsStore.setLastSync(normalized, at = tick.at)
+            }
+            onLoaded?.invoke(tick)
+        }
+    }
+
+    fun saveRiskAndCapitalSettings(
+        accountBalance: Double,
+        initialCapital: Double,
+        riskPercent: Double,
+        dailyLossLimitPercent: Double,
+        maxDrawdownLimitPercent: Double,
+        targetCapital: Double = settings.value.targetCapital,
+        useFixedDollarRisk: Boolean = settings.value.useFixedDollarRisk,
+        fixedRiskUsd: Double = settings.value.fixedRiskUsd,
+    ) {
+        if (!accountBalance.isFinite() || accountBalance < 10.0) {
+            _toast.value = "موجودی حساب باید حداقل ۱۰ دلار باشد"
+            return
+        }
+        val safeInitial = if (initialCapital.isFinite() && initialCapital >= 10.0) initialCapital else accountBalance
+        val safeTarget = if (targetCapital.isFinite() && targetCapital >= 100.0) targetCapital else 100_000.0
+        val safeFixedRisk = if (fixedRiskUsd.isFinite() && fixedRiskUsd >= 0.5) fixedRiskUsd else 5.0
+        val safeRisk = riskPercent.coerceIn(0.1, 10.0)
+        val safeDaily = dailyLossLimitPercent.coerceIn(0.5, 100.0)
+        val safeMaxDd = maxDrawdownLimitPercent.coerceIn(1.0, 100.0)
+        container.settingsStore.update {
+            it.copy(
+                accountBalance = accountBalance,
+                initialCapital = safeInitial,
+                targetCapital = safeTarget,
+                useFixedDollarRisk = useFixedDollarRisk,
+                fixedRiskUsd = safeFixedRisk,
+                riskPercent = safeRisk,
+                dailyLossLimitPercent = safeDaily,
+                maxDrawdownLimitPercent = safeMaxDd,
+            )
+        }
+        _toast.value = if (useFixedDollarRisk) {
+            "✅ موجودی حساب ($${String.format(Locale.US, "%,.0f", accountBalance)}) با ریسک ثابت $${safeFixedRisk} در هر معامله ذخیره شد"
+        } else {
+            "تنظیمات مدیریت سرمایه و ریسک ذخیره شد"
+        }
+    }
+
+    fun setAvalAiEnabled(enabled: Boolean) {
+        val current = settings.value
+        val effectiveKey = current.newsAiApiKey.ifBlank { AvalAiAdvisor.PRECONFIGURED_USER_KEY }
+        container.settingsStore.update {
+            it.copy(
+                avalAiEnabled = enabled,
+                newsAiApiKey = effectiveKey,
+            )
+        }
+        _toast.value = if (!enabled) {
+            "پرسش بله/نه هوش مصنوعی قبل از معامله غیرفعال شد"
+        } else {
+            "🤖 هوش مصنوعی AvalAI فعال شد؛ قبل از هر معامله بر اساس شرایط مدل استراتژی پاسخ «بله» یا «نه» می‌دهد"
+        }
+    }
+
+    fun saveAvalAiConfig(
+        apiKey: String,
+        model: String = AvalAiAdvisor.DEFAULT_MODEL,
+        baseUrl: String = AvalAiAdvisor.DEFAULT_BASE_URL,
+        enableAfterSave: Boolean = true,
+    ) {
+        val cleanKey = apiKey.trim().ifBlank { AvalAiAdvisor.PRECONFIGURED_USER_KEY }
+        val (valid, msg) = AvalAiAdvisor.validateApiKeyFormat(cleanKey)
+        if (!valid) {
+            _toast.value = "⚠️ $msg"
+            return
+        }
+        val cleanModel = model.trim().ifBlank { AvalAiAdvisor.DEFAULT_MODEL }
+        val cleanUrl = baseUrl.trim().ifBlank { AvalAiAdvisor.DEFAULT_BASE_URL }
+        container.settingsStore.update {
+            it.copy(
+                newsAiApiKey = cleanKey,
+                newsAiModel = cleanModel,
+                newsAiBaseUrl = cleanUrl,
+                avalAiEnabled = if (enableAfterSave) true else it.avalAiEnabled,
+            )
+        }
+        _toast.value = "✅ $msg · مدل $cleanModel ذخیره شد"
+    }
+
+    fun testAvalAiYesNoQuestion() {
+        val cfg = settings.value
+        val sym = V1Universe.normalize(_focusedStrategySymbol.value)
+        val report = _dualSymbolStrategyReports.value[sym]?.primaryReport
+            ?: _allSymbolStrategyReports.value[sym]
+        val liveP = _liveTicks.value[sym]?.price ?: report?.livePrice ?: 2650.0
+        val action = if (report?.action == SignalAction.SELL) SignalAction.SELL else SignalAction.BUY
+        val entry = report?.suggestedEntry ?: liveP
+        val sl = report?.suggestedStopLoss ?: if (action == SignalAction.BUY) entry * 0.995 else entry * 1.005
+        val tp = report?.primaryTakeProfit ?: if (action == SignalAction.BUY) entry * 1.01 else entry * 0.99
+        val rr = (kotlin.math.abs(tp - entry) / kotlin.math.abs(entry - sl).coerceAtLeast(1e-8)).coerceIn(0.5, 20.0)
+        val stratContext = report?.toAiStrategyContext()
+            ?: "مدل استراتژی: ${cfg.activeBitcoinStrategyTitleFa()} · نماد $sym"
+
+        viewModelScope.launch {
+            _aiChecking.value = true
+            try {
+                val res = AvalAiAdvisor.evaluateTradeTiming(
+                    apiKey = cfg.newsAiApiKey.ifBlank { AvalAiAdvisor.PRECONFIGURED_USER_KEY },
+                    baseUrl = cfg.newsAiBaseUrl,
+                    model = cfg.newsAiModel,
+                    symbolInput = sym,
+                    action = action,
+                    entry = entry,
+                    stopLoss = sl,
+                    takeProfit = tp,
+                    riskReward = rr,
+                    strategyContext = stratContext,
+                )
+                res.onSuccess { verdict ->
+                    _lastAiVerdict.value = verdict
+                    _toast.value = "🤖 پاسخ هوش مصنوعی ($sym): ${verdict.yesNoLabelFa} — ${verdict.reasonFa}"
+                }.onFailure { err ->
+                    _toast.value = "⚠️ خطا در تست اتصال کلید AvalAI: ${err.message}"
+                }
+            } finally {
+                _aiChecking.value = false
+            }
+        }
+    }
+
+    fun checkTradeTimingWithAi(
+        calc: RiskCalculationResult,
+        strategyContext: String = "",
+    ) {
+        val cfg = settings.value
+        val normSym = V1Universe.normalize(calc.symbol)
+        val effectiveContext = strategyContext.ifBlank {
+            _dualSymbolStrategyReports.value[normSym]?.primaryReport?.toAiStrategyContext()
+                ?: _allSymbolStrategyReports.value[normSym]?.toAiStrategyContext()
+                ?: "مدل استراتژی: ${cfg.activeBitcoinStrategyTitleFa()}"
+        }
+        viewModelScope.launch {
+            _aiChecking.value = true
+            try {
                 val now = System.currentTimeMillis()
-                val openBySymbol = openTrades.associateBy { it.symbol }
-                // The coordinator keeps settling in the background; the UI only paints live
-                // ticks while the foreground feed is meant to be visible.
-                val visible = visibleOnlineLoopEnabled || SignalMonitorService.running.value
-                val shown = if (visible) live else emptyMap<String, PriceTick>()
-                val accepted = shown.filter { (symbol, tick) ->
-                    val trade = openBySymbol[symbol]
-                    trade != null && trade.isOpen && tick.at >= trade.openedAt &&
-                        TradeQuotePolicy.accepts(tick)
+                val recentCandles = LiveQuoteFetcher.fetchGapCandles(calc.symbol, now - 2 * 3600_000L, now)?.first.orEmpty()
+                val res = AvalAiAdvisor.evaluateTradeTiming(
+                    apiKey = cfg.newsAiApiKey.ifBlank { AvalAiAdvisor.PRECONFIGURED_USER_KEY },
+                    baseUrl = cfg.newsAiBaseUrl,
+                    model = cfg.newsAiModel,
+                    symbolInput = calc.symbol,
+                    action = calc.action,
+                    entry = calc.entry,
+                    stopLoss = calc.stopLoss,
+                    takeProfit = calc.takeProfit,
+                    riskReward = calc.riskReward,
+                    recentCandles = recentCandles,
+                    strategyContext = effectiveContext,
+                )
+                res.onSuccess { verdict ->
+                    _lastAiVerdict.value = verdict
+                    _toast.value = "🤖 پاسخ هوش مصنوعی: ${verdict.yesNoLabelFa} — ${verdict.reasonFa}"
+                }.onFailure { err ->
+                    _toast.value = "⚠️ خطا در ارتباط با هوش مصنوعی AvalAI: ${err.message}"
                 }
-                _liveTicks.value = accepted
-                var marks = _lastDisplayMarks.value
-                for ((symbol, tick) in accepted) {
-                    val trade = openBySymbol[symbol]
-                    if (trade != null) {
-                        marks = OpenPositionDisplay.record(marks, trade, tick, now)
-                    }
-                }
-                _lastDisplayMarks.value = marks
-                _stats.value = container.journalStore.stats()
-                // Toast on newly closed positions.
-                val newlyClosed = lastOpenIds - openTrades.map { it.id }.toSet()
-                lastOpenIds = openTrades.map { it.id }.toSet()
-                newlyClosed.forEach { id ->
-                    openTrades.firstOrNull { it.id == id }?.let { trade ->
-                        _toast.value = "معاملهٔ ${trade.symbol}" +
-                            (trade.exitReason?.let { " (${it})" } ?: "") +
-                            " بسته و تسویه شد: ${trade.pnlUsd}$"
-                    }
-                }
+            } finally {
+                _aiChecking.value = false
             }
         }
     }
 
-    fun refreshNow() = container.market.refreshNow()
+    fun openAutoTrackedTrade(
+        calc: RiskCalculationResult,
+        note: String = "",
+        strategyContext: String = "",
+        entryInterval: Interval = Interval.M15,
+        strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+        strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
+    ) {
+        val cfg = settings.value
+        if (!cfg.avalAiEnabled) {
+            executeOpenTradeNow(calc, note, entryInterval, strategyId, strategyTitleFa)
+            return
+        }
+
+        val normSym = V1Universe.normalize(calc.symbol)
+        val effectiveContext = strategyContext.ifBlank {
+            _dualSymbolStrategyReports.value[normSym]?.reportFor(entryInterval, strategyId)?.toAiStrategyContext()
+                ?: "مدل استراتژی: $strategyTitleFa · تایم‌فریم ${entryInterval.label}"
+        }
+
+        container.appScope.launch {
+            _aiChecking.value = true
+            try {
+                val now = System.currentTimeMillis()
+                val recentCandles = LiveQuoteFetcher.fetchGapCandles(calc.symbol, now - 2 * 3600_000L, now)?.first.orEmpty()
+                val res = AvalAiAdvisor.evaluateTradeTiming(
+                    apiKey = cfg.newsAiApiKey.ifBlank { AvalAiAdvisor.PRECONFIGURED_USER_KEY },
+                    baseUrl = cfg.newsAiBaseUrl,
+                    model = cfg.newsAiModel,
+                    symbolInput = calc.symbol,
+                    action = calc.action,
+                    entry = calc.entry,
+                    stopLoss = calc.stopLoss,
+                    takeProfit = calc.takeProfit,
+                    riskReward = calc.riskReward,
+                    recentCandles = recentCandles,
+                    strategyContext = effectiveContext,
+                )
+                res.onSuccess { verdict ->
+                    _lastAiVerdict.value = verdict
+                    if (verdict.approved) {
+                        val combinedNote = buildString {
+                            if (note.isNotBlank()) append(note.trim()).append(" · ")
+                            append("🤖 AI: بله (${verdict.confidence}%)")
+                        }
+                        executeOpenTradeNow(calc, combinedNote, entryInterval, strategyId, strategyTitleFa)
+                    } else {
+                        _toast.value = "🛑 پاسخ هوش مصنوعی «نه» بود — معامله باز نشد: ${verdict.reasonFa}"
+                    }
+                }.onFailure { err ->
+                    _toast.value = "⚠️ خطا در استعلام هوش مصنوعی AvalAI: ${err.message}"
+                }
+            } finally {
+                _aiChecking.value = false
+            }
+        }
+    }
+
+    private fun executeOpenTradeNow(
+        calc: RiskCalculationResult,
+        note: String,
+        entryInterval: Interval = Interval.M15,
+        strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+        strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
+    ) {
+        val now = System.currentTimeMillis()
+        val trade = container.journalStore.openTrade(
+            calc = calc,
+            note = note,
+            now = now,
+            entryInterval = entryInterval,
+            strategyId = strategyId,
+            strategyTitleFa = strategyTitleFa,
+        )
+        _liveTicks.value[trade.symbol]?.let { tick ->
+            _lastDisplayMarks.value = OpenPositionDisplay.record(_lastDisplayMarks.value, trade, tick, now)
+        }
+        refreshSymbolLivePrice(trade.symbol)
+        syncBackgroundServiceState()
+        val msg = "⚡ معامله ${trade.symbol} [تایم ${trade.interval.label}] · [${trade.strategyTitleFa}] (${if (trade.action == com.aurum.edge.domain.SignalAction.BUY) "خرید" else "فروش"}) باز شد · ریسک: $${trade.fixedRiskUsd}"
+        _toast.value = msg
+        BackgroundTradingService.postTradeEventNotification(
+            context = container.appContext,
+            title = "باز شدن معامله ${trade.symbol} (${trade.strategyTitleFa})",
+            body = msg,
+        )
+    }
+
+    fun closeTradeManually(
+        tradeId: String,
+        exitPrice: Double,
+        reason: String = "بستن با قیمت لحظه‌ای",
+    ) {
+        val closed = container.journalStore.closeTradeAtPrice(
+            tradeId = tradeId,
+            exitPrice = exitPrice,
+            reason = reason,
+            now = System.currentTimeMillis(),
+        )
+        if (closed != null) {
+            val pnl = closed.pnlUsd ?: 0.0
+            val pnlStr = String.format(Locale.US, "%s$%.2f", if (pnl >= 0) "+" else "", pnl)
+            _toast.value = "معامله ${closed.symbol} بسته و در تقویم ژورنال ثبت شد ($pnlStr)"
+        }
+    }
+
+    fun deleteJournalTrade(tradeId: String) {
+        container.journalStore.deleteTrade(tradeId)
+        _toast.value = "معامله از ژورنال حذف شد"
+    }
+
+    fun clearAllJournalTrades() {
+        container.journalStore.clear()
+        _toast.value = "تمام سوابق ژورنال پاک شد"
+    }
+
+    fun dayOpeningEquity(now: Long = System.currentTimeMillis()): Double =
+        runCatching { container.settingsStore.dayOpeningEquity(now) }
+            .getOrDefault(settings.value.accountBalance)
+
+    fun resumeVisibleForexFeed() {
+        syncAllOpenAndActiveSymbolsGap(notifyOnSuccess = false)
+        startLiveMonitor()
+    }
+
+    fun pauseInvisibleForexFeed() = Unit
 
     fun checkForAppUpdate(autoDownload: Boolean = settings.value.autoDownloadUpdates, force: Boolean = true) {
         viewModelScope.launch {
             container.updater.checkForUpdate(autoDownload, force)
             if (autoDownload && container.updater.state.value.downloadedApkPath != null) {
-                // Automatic path: prepare the install without jumping to Android settings; the
-                // update screen offers the permission button when it is actually needed.
                 container.updater.installDownloaded(openPermissionSettings = false)
             }
         }
@@ -364,499 +789,471 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun openUpdateInstallPermission() = container.updater.openInstallPermissionSettings()
 
-    fun refreshWatch() = container.watch.refreshNow()
-
-    /**
-     * Switch the chart/signal/paper symbol to one of the catalog pairs. Needs no API key:
-     * the keyless Swissquote feed serves ticks for every pair; REST history still needs a key.
-     * One verified write, one feed restart.
-     */
-    private val symbolSelectionMutex = Mutex()
-
-    fun selectChartSymbol(symbol: String) {
-        if (symbol == settings.value.symbol) return
-        val valid = com.aurum.edge.core.V1Universe.valid(symbol)
-        if (!valid) {
-            _toast.value = "نماد $symbol در کاتالوگ نمادها پیدا نشد"
-            return
-        }
-        viewModelScope.launch {
-            symbolSelectionMutex.withLock {
-                try {
-                    val saved = withContext(Dispatchers.IO) { container.settingsStore.saveChartSymbol(symbol) }
-                    if (!saved) {
-                        _toast.value = "ذخیرهٔ نماد روی دستگاه تأیید نشد؛ دوباره تلاش کنید"
-                        return@withLock
-                    }
-                    container.market.restart()
-                    _toast.value = "نماد چارت و سیگنال: $symbol"
-                } catch (cancel: CancellationException) {
-                    throw cancel
-                } catch (_: Exception) {
-                    _toast.value = "تغییر نماد ناموفق بود؛ دوباره تلاش کنید"
-                }
-            }
-        }
-    }
-
-    /** One verified write, one feed restart; never echo a credential into a toast or log. */
-    fun saveMarketCredentials(key: String, symbol: String) {
-        if (marketSaveInFlight) return
-        if (key.trim().any { it.isWhitespace() }) {
-            _toast.value = "کلید نباید فاصله یا خط جدید داشته باشد؛ چیزی ذخیره نشد"
-            return
-        }
-        marketSaveInFlight = true
-        viewModelScope.launch {
-            try {
-                val saved = withContext(Dispatchers.IO) { container.settingsStore.saveMarketCredentials(key, symbol) }
-                if (!saved) {
-                    _toast.value = "ذخیرهٔ کلید روی دستگاه تأیید نشد؛ کلید قبلی را حذف نکنید و دوباره تلاش کنید"
-                    return@launch
-                }
-                container.market.restart()
-                container.watch.refreshNow()
-                _toast.value = if (key.isBlank() && !settings.value.hasKey)
-                    "نماد ذخیره شد؛ اتصال رایگان Yahoo/TradingView/Swissquote بازخوانی شد"
-                else "کلید و نماد روی همین نصب ذخیره و بازخوانی شدند؛ وضعیت اتصال بازار را بررسی کنید"
-            } catch (_: Exception) {
-                _toast.value = "ذخیره/اتصال مجدد ناموفق بود؛ وضعیت دادهٔ بازار را بررسی کنید"
-            } finally {
-                marketSaveInFlight = false
-            }
-        }
-    }
-
-    private var marketSaveInFlight = false
-
-    fun setCategoryStrategy(category: com.aurum.edge.core.AssetClass,
-                            mode: com.aurum.edge.core.CategoryStrategy) {
-        if (category in setOf(com.aurum.edge.core.AssetClass.CRYPTO, com.aurum.edge.core.AssetClass.STOCK)) return // retired legacy crypto modes
-        container.settingsStore.update {
-            it.copy(categoryStrategies = it.categoryStrategies + (category to mode))
-        }
-        container.market.refreshNow()
-        container.pairScanner.refreshNow(minIntervalMs = 0L)
-    }
-
-    fun saveRiskPercent(value: Double) = container.settingsStore.update { it.copy(riskPercent = value.coerceIn(0.1, 0.5)) }
-
-    fun saveBalance(value: Double) = container.settingsStore.update { it.copy(accountBalance = value.coerceAtLeast(10.0)) }
-
-    fun saveMinConfidence(value: Double) = container.settingsStore.update { it.copy(minConfidence = value.coerceIn(60.0, 95.0)) }
-
-    /** Cost assumptions are the user's responsibility; they are echoed in every report. */
-    fun saveSpread(value: Double) = container.settingsStore.update { it.copy(spreadPrice = value.coerceIn(0.0, 5.0)) }
-
-    fun saveCommission(value: Double) = container.settingsStore.update { it.copy(commissionPerOz = value.coerceIn(0.0, 5.0)) }
-
-    fun setNotifyOnSignal(enabled: Boolean) = container.settingsStore.update { it.copy(notifyOnSignal = enabled) }
-
-    fun selectAlertSound(context: Context, uri: Uri) {
-        viewModelScope.launch {
-            try {
-                val name = withContext(Dispatchers.IO) { AlertSoundPlayer.select(context, uri) }
-                container.settingsStore.update { it.copy(alertSoundUri = uri.toString(), alertSoundName = name) }
-                _toast.value = "صدای هشدار: $name؛ برای بررسی «پخش آزمون» را بزنید"
-            } catch (error: Exception) {
-                _toast.value = "صدای فایل انتخاب نشد: ${error.message ?: "دسترسی به فایل برقرار نیست"}"
-            }
-        }
-    }
-
-    fun resetAlertSound() {
-        AlertSoundPlayer.stop()
-        container.settingsStore.update { it.copy(alertSoundUri = "", alertSoundName = "") }
-        _toast.value = "صدای پیش‌فرض اعلان گوشی انتخاب شد"
-    }
-
-    fun reportNotificationTest(posted: Boolean) {
-        _toast.value = if (posted) "اعلان آزمایشی تحویل سیستم اندروید شد؛ نمایش/صدا را روی گوشی بررسی کنید"
-            else "اعلان ارسال نشد: مجوز اعلان یا کانال آن بسته است؛ تنظیمات اعلان‌های اندروید را باز کنید"
-    }
-
-    fun testAlertSound(context: Context) {
-        val uri = settings.value.alertSoundUri
-        if (uri.isBlank()) {
-            _toast.value = "برای شنیدن صدای سیستم، تنظیمات اعلان‌های اندروید را بررسی کنید"
-            return
-        }
-        viewModelScope.launch {
-            val queued = withContext(Dispatchers.IO) { AlertSoundPlayer.play(context, uri) }
-            _toast.value = if (queued) "آزمون پخش فایل تا ۱۰ ثانیه؛ بلندی صدا/مزاحم‌نشدن دستگاه را بررسی کنید"
-                else "فایل صوتی دیگر قابل خواندن نیست؛ دوباره انتخاب کنید"
-        }
-    }
-
-    fun setMonitorFlag(enabled: Boolean) {
-        container.settingsStore.update { it.copy(backgroundMonitor = enabled) }
-        if (!enabled) _toast.value = "پایش پس‌زمینه خاموش/ناموفق است؛ ورود کاغذی خودکار در زمان باز بودن برنامه همچنان با قواعد موتور بررسی می‌شود"
-    }
-
     fun setAutoPaperTrading(enabled: Boolean) {
-        container.settingsStore.update { it.copy(autoPaperTrading = enabled) }
-        _toast.value = if (enabled) "خودکار کاغذی روشن است؛ هر نماد فقط با موتور خودش (ALS-5 طلا، ALS-5S نقره، BTC-ARES بیت‌کوین، چهارلایهٔ V1، فشردگی ← انفجار)، کندل‌های واقعی و قفل‌های ریسک ثبت می‌شود"
-            else "معاملهٔ خودکار کاغذی خاموش شد"
-    }
-
-    private var paperOpening = false
-
-    /** A price received recently is still not an exchange fill; only a paper ticket can use it. */
-    private fun freshPaperQuote(current: MarketState): String? {
-        val now = System.currentTimeMillis()
-        val lastBar = current.candles.lastOrNull()?.time
-        return when {
-            current.symbol != settings.value.symbol || current.interval != settings.value.interval ->
-                "نماد یا بازهٔ قیمت با تنظیمات فعلی فرق دارد"
-            current.feed.mode !in setOf(FeedMode.LIVE, FeedMode.POLLING) || current.showingCachedData ->
-                "قیمت زنده نیست؛ ورود/خروج روی کش ممنوع است"
-            current.lastPrice?.let { it.isFinite() && it > 0.0 } != true -> "قیمت معتبر موجود نیست"
-            !FeedLiveness.hasRecentReceipt(current.feed, now) -> "آخرین دریافت قیمت قدیمی است"
-            lastBar == null || now - lastBar !in 0L..min(180_000L, current.interval.millis * 2) ->
-                "کندل این نماد برای ورود خیلی قدیمی است"
-            else -> null
+        container.settingsStore.update {
+            it.copy(
+                autoPaperTrading = enabled,
+                backgroundMonitor = if (enabled) true else it.backgroundMonitor,
+            )
+        }
+        syncBackgroundServiceState()
+        val activeTitle = settings.value.activeBitcoinStrategyTitleFa()
+        _toast.value = if (enabled) {
+            "✅ معامله خودکار و پایش بک‌گراند «$activeTitle» فعال شد"
+        } else {
+            "معامله خودکار خاموش شد"
+        }
+        if (enabled) {
+            scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
         }
     }
 
-    private fun entryBlocker(current: MarketState): String? {
-        com.aurum.edge.core.OilEntrySafety.blocker(current.symbol)?.let { return it }
-        freshPaperQuote(current)?.let { return it }
-        if (!com.aurum.edge.data.CryptoVenuePolicy.compatible(current.symbol,
-                current.historyProvider, current.feed.provider))
-            return "ورود کریپتو مسدود: کندل تحلیل و تیک ورود باید هر دو از یک صرافی باشند " +
-                "(مرجع: نوبیتکس؛ پوزیشن قدیمی Binance فقط با تیک Binance)"
-        if (com.aurum.edge.core.MarketHours.closedFor(current.symbol)) return "بازار بسته است"
-        val candidate = current.signal
-        if (com.aurum.edge.core.AssetClass.of(current.symbol) == com.aurum.edge.core.AssetClass.CRYPTO) {
-            val quote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { price ->
-                PriceTick(price, at, current.bid, current.ask)
-            } }
-            if (com.aurum.edge.core.BtcAresPolicy.appliesTo(current.symbol)) {
-                val btcSignal = candidate ?: return "سیگنال BTC-ARES موجود نیست"
-                com.aurum.edge.core.BtcAresPolicy.quoteBlocker(
-                    btcSignal, quote, btcSignal.btcAres?.atr)?.let { return it }
+    /**
+     * انتخاب و فعال‌سازی انحصاری یک استراتژی:
+     * طبق قانون سیستم، فقط یک متود در هر لحظه قابل اجراست و با فعال‌سازی استراتژی جدید،
+     * استراتژی قبلی بلافاصله غیرفعال می‌شود.
+     */
+    fun activateSingleBitcoinStrategy(strategyId: String, enableExecution: Boolean = true) {
+        container.settingsStore.update {
+            val nextEnabled = it.enabledStrategyIds + strategyId
+            it.copy(
+                selectedBitcoinStrategyId = strategyId,
+                enabledStrategyIds = nextEnabled,
+                autoPaperTrading = if (enableExecution) true else it.autoPaperTrading,
+            )
+        }
+        val focused = V1Universe.normalize(_focusedStrategySymbol.value)
+        val focusedTf = _focusedStrategyInterval.value
+        _dualSymbolStrategyReports.value[focused]?.reportFor(focusedTf, strategyId)?.let {
+            _btcStrategyReport.value = it
+        }
+        _toast.value = "✅ استراتژی منتخب برای نمایش چک‌لیست تغییر کرد (اجرای هم‌زمان استراتژی‌ها فعال است)"
+        scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
+    }
+
+    fun setRunAllStrategiesSimultaneously(enabled: Boolean) {
+        container.settingsStore.update { current ->
+            val allIds = (BitcoinStrategyModel.entries.map { it.id } + current.customStrategies.map { it.id }).toSet()
+            current.copy(
+                runAllStrategiesSimultaneously = enabled,
+                enabledStrategyIds = if (enabled && current.enabledStrategyIds.isEmpty()) allIds else current.enabledStrategyIds,
+            )
+        }
+        _toast.value = if (enabled) {
+            "✅ اجرای هم‌زمان همه استراتژی‌ها فعال شد؛ معاملات در ژورنال به تفکیک استراتژی دسته‌بندی می‌شوند"
+        } else {
+            "حالت تک‌استراتژی فعال شد"
+        }
+        scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
+    }
+
+    fun toggleStrategyEnabledInMultiMode(strategyId: String, enabled: Boolean) {
+        container.settingsStore.update { current ->
+            val updated = if (enabled) {
+                current.enabledStrategyIds + strategyId
             } else {
-                com.aurum.edge.core.CryptoCompressionPolicy.quoteBlocker(
-                    candidate ?: return "سیگنال رمزارز موجود نیست", quote)?.let { return it }
+                val candidate = current.enabledStrategyIds - strategyId
+                if (candidate.isEmpty()) setOf(strategyId) else candidate
             }
+            current.copy(
+                enabledStrategyIds = updated,
+                selectedBitcoinStrategyId = if (enabled) strategyId else current.selectedBitcoinStrategyId,
+            )
         }
-        if (com.aurum.edge.core.XagAresPolicy.appliesTo(current.symbol)) {
-            val silverSignal = candidate ?: return "سیگنال ALS-5S موجود نیست"
-            val quote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { price ->
-                PriceTick(price, at, current.bid, current.ask)
-            } }
-            com.aurum.edge.core.XagAresPolicy.quoteBlocker(
-                silverSignal, quote, silverSignal.als5s?.atr)?.let { return it }
-        }
-        if (com.aurum.edge.core.EurAresPolicy.appliesTo(current.symbol)) {
-            val eurSignal = candidate ?: return "سیگنال EUR-ARES موجود نیست"
-            val quote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { price ->
-                PriceTick(price, at, current.bid, current.ask)
-            } }
-            com.aurum.edge.core.EurAresPolicy.quoteBlocker(
-                eurSignal, quote, eurSignal.eurAres?.atr)?.let { return it }
-        }
-        if (candidate?.isActionable != true || !TechnicalEvidence.confirmed(candidate))
-            return candidate?.blockers?.joinToString("، ") ?: "سیگنال معتبر موتور صاحب این نماد وجود ندارد"
-        WatchCatalog.find(current.symbol)?.let { watched ->
-            val selected = watchSettings.value[current.symbol]
-            if (selected != null && SourceComparison.verify(watched, selected.enabledSources,
-                    watch.value.quotes[current.symbol].orEmpty()).status == VerificationStatus.CONFLICT) {
-                return "قیمت منابع مستقل با هم تعارض دارد"
-            }
-        }
-        PaperPortfolioPolicy.blocker(trades.value, current.symbol, settings.value.accountBalance, 0.0)?.let { return it }
-        return null
+        scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
     }
 
-    fun previewManualTicket(side: SignalAction, stop: Double?, target: Double?): Result<PaperTicket> = runCatching {
-        val current = market.value
-        entryBlocker(current)?.let { throw IllegalArgumentException(it) }
-        require(current.signal?.action == side) { "جهت انتخابی باید با سیگنال چهارلایه برابر باشد" }
-        PaperOrderRules.preview(side, current.symbol, current.lastPrice!!,
-            stop ?: throw IllegalArgumentException("حد ضرر را وارد کنید"),
-            target ?: throw IllegalArgumentException("حد سود را وارد کنید"),
-            settings.value.accountBalance, settings.value.riskPercent)
-    }
-
-    fun openManualPaperTrade(side: SignalAction, stop: Double, target: Double,
-                             expectedPrice: Double, expectedSymbol: String) {
-        val verified = market.value.signal
-        if (verified?.isActionable != true || verified.action != side ||
-            !TechnicalEvidence.confirmed(verified)) {
-            _toast.value = "ورود دستی بدون سیگنال چهارلایهٔ هم‌جهت ممنوع است"
-            return
-        }
-        submitPaper(verified.copy(stopLoss = stop, takeProfit = target),
-            manual = true, expectedPrice = expectedPrice, expectedSymbol = expectedSymbol)
-    }
-
-    private fun submitPaper(signal: Signal, manual: Boolean, expectedPrice: Double? = null,
-                            expectedSymbol: String? = null) {
-        if (paperOpening) {
-            _toast.value = "درخواست کاغذی قبلی هنوز ذخیره نشده است"
-            return
-        }
-        fun verified(): Pair<MarketState, Double> {
-            val current = market.value
-            entryBlocker(current)?.let { throw IllegalArgumentException(it) }
-            val price = current.lastPrice!!
-            if (manual) {
-                require(current.signal?.isActionable == true && current.signal?.action == signal.action &&
-                    current.signal?.barTime == signal.barTime && TechnicalEvidence.confirmed(signal)) {
-                    "سیگنال چهارلایه تغییر کرده است"
-                }
-                require(expectedSymbol == current.symbol && expectedPrice != null && expectedPrice.isFinite() &&
-                    expectedPrice > 0.0 && abs(price / expectedPrice - 1.0) <= 0.001) {
-                    "قیمت/نماد نسبت به پیش‌نمایش تغییر کرده است؛ دوباره بررسی کنید"
-                }
-            } else {
-                require(signal.isActionable && current.signal == signal && signal.interval == current.interval &&
-                    signal.entry != null && signal.entry.isFinite() && signal.entry > 0.0 &&
-                    abs(price / signal.entry - 1.0) <= 0.005) {
-                    "سیگنال قدیمی، نامعتبر یا دور از قیمت تازه است"
-                }
-                require(TechnicalEvidence.confirmed(signal)) {
-                    "شروط فنی دیگر معتبر نیست؛ ورود سیگنالی متوقف شد"
-                }
-            }
-            PaperOrderRules.preview(signal.action, current.symbol, price,
-                signal.stopLoss ?: throw IllegalArgumentException("حد ضرر لازم است"),
-                signal.takeProfit ?: throw IllegalArgumentException("حد سود لازم است"),
-                settings.value.accountBalance, settings.value.riskPercent)
-            return current to price
-        }
-        try {
-            verified()
-        } catch (error: Exception) {
-            _toast.value = "ورود کاغذی متوقف: ${error.message ?: "شرایط ورود معتبر نیست"}"
-            return
-        }
-        paperOpening = true
-        viewModelScope.launch {
-            try {
-                // Repeat all checks after scheduling; never persist a stale or switched symbol.
-                val (current, price) = verified()
-                val s = container.settingsStore.read()
-                val ict = if (manual) null else IctEntryRules.approvedEvidence(current) // optional historical detail
-                // «روند کلی بازار» در همان لحظهٔ ورود عکس گرفته و در ژورنال ثبت می‌شود تا برای
-                // هر معامله معلوم باشد با روند بوده یا خلافش. فقط ثبت است؛ گیتِ ورود همان‌جاست
-                // که تصمیم گرفته می‌شود (پویشگر و ورود خودکار)، نه بعد از ذخیره.
-                val trendRecord = runCatching {
-                    val trend = symbolTrend.value?.takeIf { it.symbol == current.symbol }
-                    com.aurum.edge.core.MarketTrendRecord.from(
-                        com.aurum.edge.core.MarketTrend.contextOf(
-                            signal.action, trend,
-                            marketTrend.value?.takeIf { System.currentTimeMillis() - it.computedAt in 0L..10 * 60_000L },
-                            playbook.value?.method,
-                        ),
-                    )
-                }.getOrNull()
-                val trade = container.journalStore.open(
-                    signal = signal, symbol = current.symbol, price = price,
-                    balance = s.accountBalance, riskPercent = s.riskPercent,
-                    mtf = if (manual) null else _mtf.value?.let { MtfSnapshotRecord.from(it) },
-                    manual = manual,
-                    priceAction = ict,
-                    marketTrend = trendRecord,
-                    sourceIntegrityRevision = current.sourceIntegrityRevision,
-                    cryptoEntryQuote = current.lastTradeAt?.let { at -> current.lastTradePrice?.let { quote ->
-                        com.aurum.edge.core.PriceTick(quote, at, current.bid, current.ask)
-                    } },
-                    cryptoVenue = if (com.aurum.edge.data.CryptoCatalog.isCrypto(current.symbol))
-                        com.aurum.edge.data.CryptoVenuePolicy.entryVenue(current.historyProvider)
-                    else "NOBITEX",
+    fun updateBaseStrategyConfig(newConfig: BaseStrategyConfig) {
+        container.settingsStore.update { current ->
+            val customSlot = current.activeCustomStrategySlot()
+            if (customSlot != null) {
+                current.copy(
+                    customStrategies = current.customStrategies.map {
+                        if (it.id == customSlot.id) it.copy(config = newConfig) else it
+                    }
                 )
-                _stats.value = container.journalStore.stats()
-                // Linking is metadata only; a damaged opportunity file must not erase a saved trade.
-                runCatching { container.opportunityStore.linkTrade(trade) }
-                val conditions = trade.entryConditions.joinToString("، ") {
-                    it.name.substringAfter('·').trim()
-                }
-                _toast.value = "کاغذی: ${if (trade.action == SignalAction.BUY) "لانگ" else "شورت"} ${trade.symbol} · شروع: $conditions"
-                Notifier.notifyTradeOpened(container.appContext, trade, s.alertSoundUri)
-            } catch (e: Exception) {
-                _toast.value = "ورود کاغذی انجام نشد: ${e.message ?: "ذخیره ممکن نیست"}"
-            } finally {
-                paperOpening = false
+            } else {
+                current.copy(baseStrategyConfig = newConfig)
             }
         }
+        _toast.value = "✅ تنظیمات استراتژی ذخیره شد؛ در حال بازسنجی چارت BTC/USDT..."
+        scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
     }
 
-    fun closePaperTrade(trade: PaperTrade) {
-        val crypto = com.aurum.edge.data.CryptoCatalog.isCrypto(trade.symbol)
-        viewModelScope.launch {
-            try {
-                // Read and validate at the moment of manual close, not at the earlier UI
-                // click. An old price left in a StateFlow must never become a fresh fill.
-                // Crypto always uses its own same-venue replay monitor, never chart prices.
-                // Even a fresh quote observed BEFORE this paper entry is not an exit fill.
-                val exitTick = if (crypto) container.openTradeTicks.quoteForManualClose(trade.symbol, trade.openedAt)
-                else {
-                    com.aurum.edge.data.OpenPositionQuotePolicy.monitored(trade, _liveTicks.value[trade.symbol])
-                        ?: com.aurum.edge.data.OpenPositionQuotePolicy.selectedFallback(trade, market.value)
-                        ?: runCatching { SpotFallbackClient().fetchQuote(trade.symbol) }.getOrNull()
-                }
-                val exitPrice = exitTick?.takeIf {
-                    it.at >= trade.openedAt && TradeQuotePolicy.accepts(it)
-                }?.price
-                require(exitPrice != null) { "قیمت خروج تازه برای ${trade.symbol} در دسترس نیست" }
-                val closed = container.journalStore.close(trade.id, exitPrice, "بستن دستی روی قیمت دریافتی")
-                _stats.value = container.journalStore.stats()
-                _toast.value = "پوزیشن کاغذی ${trade.symbol} با سود/ضرر ${String.format(java.util.Locale.US, "%.2f", closed.pnlUsd ?: 0.0)}$ بسته شد"
-                Notifier.notifyClosedTrade(container.appContext, closed)
-            } catch (error: Exception) {
-                _toast.value = "بستن انجام نشد: ${error.message ?: "خطا در ذخیره"}"
-            }
-        }
-    }
-
-    fun clearJournal() {
-        viewModelScope.launch {
-            try {
-                container.journalStore.clear()
-                _stats.value = container.journalStore.stats()
-                _toast.value = "ژورنال کاغذی روی دستگاه پاک شد"
-            } catch (e: Exception) {
-                _toast.value = "پاک‌کردن انجام نشد؛ فایل حفظ شد: ${e.message ?: "خطای ذخیره"}"
-            }
-        }
-    }
-
-    /**
-     * Save or remove ONE dedicated Twelve Data key for a symbol. The free plan meters each key
-     * separately, so a per-symbol key keeps this instrument inside its own 8/minute quota.
-     * The key is never echoed back: only "saved / removed" is reported.
-     */
-    fun saveDedicatedKey(symbol: String, key: String) {
-        if (key.isNotBlank() && key.trim().any { it.isWhitespace() }) {
-            _toast.value = "کلید نباید فاصله یا خط جدید داشته باشد؛ چیزی ذخیره نشد"
+    fun addCustomStrategyModel(
+        titleFa: String,
+        summaryFa: String,
+        baseModel: BitcoinStrategyModel = BitcoinStrategyModel.BASE_ICHIMOKU,
+        activateImmediately: Boolean = true,
+    ) {
+        val cleanTitle = titleFa.trim()
+        if (cleanTitle.isEmpty()) {
+            _toast.value = "لطفاً نام استراتژی جدید را وارد کنید"
             return
         }
-        viewModelScope.launch {
-            val saved = withContext(Dispatchers.IO) { container.settingsStore.saveSymbolKey(symbol, key) }
-            if (!saved) {
-                _toast.value = "کلید اختصاصی ${symbol} ذخیره نشد؛ فاصله/خط جدید یا حافظهٔ دستگاه را بررسی کنید"
-                return@launch
-            }
-            container.market.restart()
-            container.pairScanner.refreshNow(minIntervalMs = 0L)
-            _toast.value = if (key.isBlank())
-                "کلید اختصاصی ${symbol} حذف شد؛ کلید عمومی (اگر باشد) استفاده می‌شود"
-            else "کلید اختصاصی ${symbol} روی همین نصب ذخیره شد"
+        val slot = CustomStrategySlot(
+            id = "CUSTOM_${UUID.randomUUID().toString().take(8).uppercase(Locale.ROOT)}",
+            titleFa = cleanTitle,
+            badgeFa = "مدل استراتژی سفارشی",
+            summaryFa = summaryFa.trim().ifBlank { "مبتنی بر ${baseModel.titleFa} روی بیت‌کوین (BTC/USDT)" },
+            baseModelId = baseModel.id,
+            config = settings.value.baseStrategyConfig,
+        )
+        container.settingsStore.update { current ->
+            current.copy(
+                customStrategies = current.customStrategies + slot,
+                selectedBitcoinStrategyId = if (activateImmediately) slot.id else current.selectedBitcoinStrategyId,
+                autoPaperTrading = if (activateImmediately) true else current.autoPaperTrading,
+            )
+        }
+        _toast.value = if (activateImmediately) {
+            "✅ استراتژی «$cleanTitle» اضافه و فعال شد (استراتژی قبلی غیرفعال گردید)"
+        } else {
+            "✅ استراتژی «$cleanTitle» به لیست استراتژی‌ها اضافه شد"
+        }
+        if (activateImmediately) {
+            scanAndEvaluateBitcoinStrategyNow(userInitiated = true)
         }
     }
 
-    /**
-     * Draw a *recorded* paper trade on the real candles this device already verified.
-     * Tapping the same trade again closes the chart. Nothing here re-evaluates the trade: the
-     * entry/SL/TP levels are read from the stored record, never recomputed from today's engine.
-     */
-    fun showTradeChart(trade: PaperTrade) {
-        if (_tradeChart.value.tradeId == trade.id) {
-            _tradeChart.value = TradeChartState()
-            return
-        }
-        _tradeChart.value = TradeChartState(tradeId = trade.id, loading = true)
-        viewModelScope.launch {
-            val cached = runCatching { container.cachedCandles(trade.symbol, trade.interval) }
-            if (_tradeChart.value.tradeId != trade.id) return@launch
-            val bars = cached.getOrNull()
-            if (bars == null) {
-                _tradeChart.value = TradeChartState(tradeId = trade.id,
-                    error = "کش کندل این نماد خوانده نشد؛ برای جلوگیری از نمایش دادهٔ نامعتبر، نموداری رسم نمی‌شود")
-                return@launch
+    fun deleteCustomStrategyModel(strategyId: String) {
+        container.settingsStore.update { current ->
+            val remaining = current.customStrategies.filterNot { it.id == strategyId }
+            val nextActiveId = if (current.selectedBitcoinStrategyId == strategyId) {
+                BitcoinStrategyModel.BASE_ICHIMOKU.id
+            } else {
+                current.selectedBitcoinStrategyId
             }
-            val window = withContext(Dispatchers.Default) { TradeReplay.window(trade, bars) }
-            _tradeChart.value = TradeChartState(
-                tradeId = trade.id,
-                window = window,
-                source = if (window.bars.isEmpty()) "" else "کش کندل‌های تأییدشدهٔ همین گوشی",
+            current.copy(
+                customStrategies = remaining,
+                selectedBitcoinStrategyId = nextActiveId,
+            )
+        }
+        _toast.value = "استراتژی سفارشی حذف شد"
+        scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
+    }
+
+    fun selectFocusedStrategySymbol(
+        symbolInput: String,
+        intervalOverride: Interval? = null,
+    ) {
+        val normalized = V1Universe.normalize(symbolInput)
+        if (!V1Universe.valid(normalized)) return
+        _focusedStrategySymbol.value = normalized
+        if (intervalOverride != null) {
+            _focusedStrategyInterval.value = intervalOverride
+        }
+        val targetInterval = _focusedStrategyInterval.value
+        val cachedDual = _dualSymbolStrategyReports.value[normalized]
+        if (cachedDual != null) {
+            _btcStrategyReport.value = cachedDual.reportFor(targetInterval)
+        } else {
+            val cachedReport = _allSymbolStrategyReports.value[normalized]
+            if (cachedReport != null) {
+                _btcStrategyReport.value = cachedReport
+            } else {
+                viewModelScope.launch {
+                    evaluateSingleSymbolStrategy(normalized, forceNetwork = false)?.let { dual ->
+                        _btcStrategyReport.value = dual.reportFor(targetInterval)
+                    }
+                }
+            }
+        }
+    }
+
+    fun selectFocusedStrategyInterval(interval: Interval) {
+        val safeInterval = if (interval == Interval.M5) Interval.M5 else Interval.M15
+        _focusedStrategyInterval.value = safeInterval
+        val focused = V1Universe.normalize(_focusedStrategySymbol.value)
+        _dualSymbolStrategyReports.value[focused]?.let { dual ->
+            _btcStrategyReport.value = dual.reportFor(safeInterval)
+        }
+    }
+
+    fun scanAndEvaluateBitcoinStrategyNow(userInitiated: Boolean = true) {
+        viewModelScope.launch {
+            evaluateAll15SymbolsStrategyInternal(
+                userInitiated = userInitiated,
+                fullSweep = true,
             )
         }
     }
 
-    /** Refresh the expanded journal picture on return to its tab and while it is visible.
-     * Only verified cached candles are read; this NEVER restarts a tick stream, rewinds the
-     * position cursor, modifies a trade, or turns a historical candle into an exit quote.
-     */
-    suspend fun refreshVisibleTradeChart(trade: PaperTrade) {
-        val before = _tradeChart.value
-        if (before.tradeId != trade.id || before.loading || before.downloading) return
-        val bars = container.cachedCandles(trade.symbol, trade.interval)
-        if (_tradeChart.value.tradeId != trade.id || _tradeChart.value.loading ||
-            _tradeChart.value.downloading || bars.isEmpty()) return
-        val window = withContext(Dispatchers.Default) { TradeReplay.window(trade, bars) }
-        val current = _tradeChart.value
-        if (current.tradeId != trade.id || current.loading || current.downloading) return
-        // A provider download can finish during the disk read. Never replace a newer
-        // downloaded chart with an older cache (including when its entry is off-screen).
-        if ((window.bars.lastOrNull()?.time ?: 0L) <
-            (current.window.bars.lastOrNull()?.time ?: 0L)) return
-        if (current.window != window) {
-            _tradeChart.value = current.copy(window = window,
-                source = "کش کندل‌های تأییدشدهٔ همین گوشی")
+    private suspend fun evaluateSingleSymbolStrategy(
+        symbol: String,
+        forceNetwork: Boolean = false,
+    ): DualTimeframeSymbolReport? {
+        val cfg = settings.value
+        val activeModel = cfg.activeBitcoinStrategyModel()
+        val activeCustom = cfg.activeCustomStrategySlot()
+        val stratConfig = cfg.activeBitcoinStrategyConfig()
+        val now = System.currentTimeMillis()
+
+        // ۱. ابتدا 1H را می‌گیریم تا در نمادهای Yahoo کش 4H هم به‌صورت خودکار و بدون درخواست اضافه ساخته شود
+        val bars1h = LiveQuoteFetcher.fetchTimeframeCandles(
+            symbolInput = symbol,
+            interval = Interval.H1,
+            limit = 110,
+            nowMillis = now,
+            forceNetwork = forceNetwork,
+        )?.first.orEmpty()
+
+        val bars4h = LiveQuoteFetcher.fetchTimeframeCandles(
+            symbolInput = symbol,
+            interval = Interval.H4,
+            limit = 110,
+            nowMillis = now,
+            forceNetwork = forceNetwork,
+        )?.first.orEmpty()
+
+        // ۲. دریافت دلتای کندل‌های 15m و 5m (با کش هوشمند فقط ۳ کندل جدید دانلود می‌شود و بین هر دو تایم‌فریم به اشتراک گذاشته می‌شود)
+        val bars15m = LiveQuoteFetcher.fetchTimeframeCandles(
+            symbolInput = symbol,
+            interval = Interval.M15,
+            limit = 110,
+            nowMillis = now,
+            forceNetwork = forceNetwork,
+        )?.first.orEmpty()
+
+        val bars5m = LiveQuoteFetcher.fetchTimeframeCandles(
+            symbolInput = symbol,
+            interval = Interval.M5,
+            limit = 110,
+            nowMillis = now,
+            forceNetwork = forceNetwork,
+        )?.first.orEmpty()
+
+        val liveTick = _liveTicks.value[symbol] ?: LiveQuoteFetcher.fetchLiveTick(symbol)?.also { tick ->
+            LiveQuoteFetcher.applyLiveTickToCachedCandles(symbol, tick)
+            applyIncomingTick(symbol, tick)
         }
+
+        val dualReport = IchimokuStrategyEngine.evaluateDualTimeframeStrategy(
+            activeModel = activeModel,
+            config = stratConfig,
+            candles4h = bars4h,
+            candles1h = bars1h,
+            candles15m = bars15m,
+            candles5m = bars5m,
+            livePriceOverride = liveTick?.price,
+            customTitleOverride = activeCustom?.titleFa,
+            customIdOverride = activeCustom?.id,
+            nowMillis = now,
+            symbolInput = symbol,
+            runAllSimultaneously = cfg.runAllStrategiesSimultaneously,
+            enabledStrategyIds = cfg.enabledStrategyIds,
+            customStrategies = cfg.customStrategies,
+        )
+
+        val updatedDualMap = _dualSymbolStrategyReports.value.toMutableMap()
+        updatedDualMap[symbol] = dualReport
+        _dualSymbolStrategyReports.value = updatedDualMap
+
+        val updatedMap = _allSymbolStrategyReports.value.toMutableMap()
+        updatedMap[symbol] = dualReport.primaryReport
+        _allSymbolStrategyReports.value = updatedMap
+        return dualReport
     }
 
     /**
-     * The local cache does not reach back far enough: ask the provider for the real bars of this
-     * pair/timeframe with the user's own read-only key. Display only — no order, no signal.
+     * بررسی هوشمند هر ۱۵ نماد داخل اپ (`V1Universe.allSymbols`) هم‌زمان در دو تایم‌فریم ورود `15m` و `5m`:
+     * - با اشتراک‌گذاری کندل‌های `4H`/`1H`/`15m` و Delta Sync، هیچ دیتای تکراری دانلود نمی‌شود.
+     * - در هر سیگنال، اعلان و معامله ثبت‌شده در ژورنال، تایم‌فریم ورود (`15m` یا `5m`) صراحتاً درج می‌شود.
      */
-    fun downloadTradeChart(trade: PaperTrade) {
-        val current = _tradeChart.value
-        if (current.tradeId != trade.id || current.downloading) return
-        _tradeChart.value = current.copy(downloading = true, error = null)
-        viewModelScope.launch {
-            try {
-                val (bars, source) = container.fetchTradeCandles(trade.symbol, trade.interval)
-                if (_tradeChart.value.tradeId != trade.id) return@launch
-                val window = withContext(Dispatchers.Default) { TradeReplay.window(trade, bars) }
-                _tradeChart.value = TradeChartState(
-                    tradeId = trade.id,
-                    window = window,
-                    source = if (window.bars.isEmpty()) "" else "دریافت تازه از $source",
-                )
-                if (window.bars.isEmpty()) {
-                    _toast.value = "ناشر برای این بازه کندلی برنگرداند؛ تاریخچهٔ این معامله در دسترس نیست"
+    private suspend fun evaluateAll15SymbolsStrategyInternal(
+        userInitiated: Boolean,
+        fullSweep: Boolean = true,
+    ) {
+        if (_isScanningBtcStrategy.value) return
+        _isScanningBtcStrategy.value = true
+        try {
+            val cfg = settings.value
+            val stratConfig = cfg.activeBitcoinStrategyConfig()
+            val now = System.currentTimeMillis()
+            val focused = V1Universe.normalize(_focusedStrategySymbol.value)
+            val focusedInterval = _focusedStrategyInterval.value
+            val openTradeSymbols = trades.value.filter { it.isOpen }.map { V1Universe.normalize(it.symbol) }.toSet()
+
+            // ابتدا ۵ رمزارز را در ۱ درخواست دسته‌ای آپدیت کن تا قیمت لحظه‌ای همه تازه باشد
+            val batchCrypto = LiveQuoteFetcher.fetchCryptoBatchTicks(V1Universe.cryptoSymbols, now)
+            batchCrypto.forEach { (sym, tick) ->
+                applyIncomingTick(sym, tick)
+                container.settingsStore.setLastSync(sym, at = tick.at)
+            }
+
+            val symbolsToEvaluate = if (fullSweep) {
+                V1Universe.allSymbols
+            } else {
+                V1Universe.allSymbols.filter { sym ->
+                    val dual = _dualSymbolStrategyReports.value[sym]
+                    sym == focused ||
+                        sym in openTradeSymbols ||
+                        dual?.report15m?.readiness == StrategyReadinessState.WATCH_SETUP ||
+                        dual?.report5m?.readiness == StrategyReadinessState.WATCH_SETUP ||
+                        dual?.actionableReports?.isNotEmpty() == true
                 }
-            } catch (error: CancellationException) {
-                throw error
-            } catch (error: Exception) {
-                if (_tradeChart.value.tradeId != trade.id) return@launch
-                _tradeChart.value = _tradeChart.value.copy(
-                    downloading = false,
-                    error = error.message ?: "دریافت کندل‌های این بازه انجام نشد",
-                )
             }
+
+            val dualMap = _dualSymbolStrategyReports.value.toMutableMap()
+            val reportsMap = _allSymbolStrategyReports.value.toMutableMap()
+            val newlyEvaluatedDuals = mutableListOf<DualTimeframeSymbolReport>()
+
+            // اسکن موازی (Parallel Fan-Out در دسته‌های ۵ تایی) برای تصمیم‌گیری ۴ برابر سریع‌تر
+            val activeSymbolsToFetch = symbolsToEvaluate.filter { symbol ->
+                val marketClosed = com.aurum.edge.core.MarketHours.closedFor(symbol, now)
+                if (marketClosed && dualMap[symbol] != null && !userInitiated) {
+                    LiveQuoteFetcher.recordSkippedClosedMarketCheck(1)
+                    false
+                } else {
+                    true
+                }
+            }
+
+            coroutineScope {
+                activeSymbolsToFetch.chunked(5).forEach { batch ->
+                    val batchResults = batch.map { symbol ->
+                        async {
+                            evaluateSingleSymbolStrategy(symbol, forceNetwork = false)
+                        }
+                    }.awaitAll()
+                    batchResults.filterNotNull().forEach { dual ->
+                        dualMap[dual.symbol] = dual
+                        reportsMap[dual.symbol] = dual.primaryReport
+                        newlyEvaluatedDuals += dual
+                        if (dual.symbol == focused || (_btcStrategyReport.value == null && dual.symbol == IchimokuStrategyEngine.BTC_SYMBOL)) {
+                            _btcStrategyReport.value = dual.reportFor(focusedInterval)
+                        }
+                    }
+                    updatePairScanStateFromReports(reportsMap, sweeping = true, now = now)
+                }
+            }
+
+            // ۱. مدیریت پویا ۴ مرحله‌ای (Preserve Mode / Kijun Trend-Ride / Break-Even) روی معاملات باز بر اساس تایم‌فریم ورود همان معامله
+            for (dual in newlyEvaluatedDuals) {
+                val symbol = dual.symbol
+                val openSymbolTrades = trades.value.filter {
+                    it.isOpen && V1Universe.normalize(it.symbol) == symbol
+                }
+                for (openTrade in openSymbolTrades) {
+                    val matchingReport = dual.reportFor(openTrade.interval, openTrade.strategyId)
+                    val preserveUpdate = IchimokuStrategyEngine.evaluateOpenTradeManagement(
+                        trade = openTrade,
+                        report = matchingReport,
+                        config = stratConfig,
+                    )
+                    if (preserveUpdate != null) {
+                        container.journalStore.updateTradeStopLoss(
+                            tradeId = openTrade.id,
+                            newStopLoss = preserveUpdate.newStopLoss,
+                            stageNote = preserveUpdate.stageTitleFa,
+                        )
+                        _toast.value = "${preserveUpdate.stageTitleFa} [${openTrade.interval.label}]: استاپ ${openTrade.symbol} به ${preserveUpdate.newStopLoss} منتقل شد (${preserveUpdate.reasonFa})"
+                    }
+                }
+            }
+
+            // ۲. رصد هم‌زمان 15m و 5m برای ورود خودکار همه استراتژی‌ها (بدون محدودیت تعداد معامله و بدون محدودیت باخت‌های متوالی)
+            if (cfg.autoPaperTrading) {
+                val rankedCandidates = newlyEvaluatedDuals
+                    .flatMap { it.actionableReports }
+                    .filter { rep ->
+                        !com.aurum.edge.core.MarketHours.closedFor(rep.symbol, now)
+                    }
+                    .sortedByDescending { it.coreTrendScore }
+
+                for (report in rankedCandidates) {
+                    val symbol = report.symbol
+                    val openAll = trades.value.filter { it.isOpen }
+                    val hasOpenSameStrategyTf = openAll.any {
+                        it.strategyId == report.strategyId &&
+                            V1Universe.normalize(it.symbol) == symbol &&
+                            it.interval == report.triggerInterval
+                    }
+                    val fireKey = "${report.strategyId}|$symbol|${report.triggerInterval.label}"
+                    val lastFiredBar = lastAutoFiredBarTimeByKey[fireKey] ?: 0L
+                    if (!hasOpenSameStrategyTf &&
+                        report.triggerBarTime > 0L && report.triggerBarTime != lastFiredBar
+                    ) {
+                        val entry = report.suggestedEntry
+                        val sl = report.suggestedStopLoss
+                        val tp = report.primaryTakeProfit
+                        if (entry != null && sl != null && tp != null) {
+                            val calc = RiskAndCalendarEngine.calculatePosition(
+                                symbolInput = symbol,
+                                accountBalance = cfg.accountBalance,
+                                riskPercent = cfg.riskPercent,
+                                entry = entry,
+                                stopLoss = sl,
+                                takeProfit = tp,
+                                preferredAction = report.action,
+                                fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
+                            )
+                            if (calc != null) {
+                                lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to report.triggerBarTime)
+                                val tfLabel = report.triggerInterval.label
+                                val autoNote = "⚡ خودکار [تایم $tfLabel] · [${report.strategyTitleFa}] · (${report.trendPhase.badgeFa} · امتیاز ${report.coreTrendScore.toInt()})"
+                                openAutoTrackedTrade(
+                                    calc = calc,
+                                    note = autoNote,
+                                    strategyContext = report.toAiStrategyContext(),
+                                    entryInterval = report.triggerInterval,
+                                    strategyId = report.strategyId,
+                                    strategyTitleFa = report.strategyTitleFa,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            _dualSymbolStrategyReports.value = dualMap
+            _allSymbolStrategyReports.value = reportsMap
+            dualMap[focused]?.let { _btcStrategyReport.value = it.reportFor(focusedInterval) }
+            updatePairScanStateFromReports(reportsMap, sweeping = false, now = now)
+
+            if (userInitiated) {
+                val buy15 = dualMap.values.count { it.report15m.readiness == StrategyReadinessState.SIGNAL_BUY }
+                val sell15 = dualMap.values.count { it.report15m.readiness == StrategyReadinessState.SIGNAL_SELL }
+                val buy5 = dualMap.values.count { it.report5m.readiness == StrategyReadinessState.SIGNAL_BUY }
+                val sell5 = dualMap.values.count { it.report5m.readiness == StrategyReadinessState.SIGNAL_SELL }
+                _toast.value = "✅ رصد هم‌زمان ۱۵ نماد — تایم 15m (خرید: $buy15 · فروش: $sell15) | تایم 5m (خرید: $buy5 · فروش: $sell5)"
+            }
+        } finally {
+            _isScanningBtcStrategy.value = false
         }
     }
 
-    fun setInterval(interval: Interval) = container.market.setInterval(interval)
-
-    fun tickArchiveUrl(): String = container.settingsStore.tickArchiveUrl()
-
-    fun saveTickArchive(url: String, token: String) {
-        viewModelScope.launch {
-            val saved = withContext(Dispatchers.IO) {
-                container.settingsStore.saveTickArchive(url, token)
+    private fun updatePairScanStateFromReports(
+        reportsMap: Map<String, StrategyEvaluationReport>,
+        sweeping: Boolean,
+        now: Long,
+    ) {
+        val dualMap = _dualSymbolStrategyReports.value
+        val statuses = V1Universe.allSymbols.map { sym ->
+            val rep = reportsMap[sym]
+            val dual = dualMap[sym]
+            val stateCode = when (rep?.readiness) {
+                StrategyReadinessState.SIGNAL_BUY, StrategyReadinessState.SIGNAL_SELL -> "candidate"
+                StrategyReadinessState.WATCH_SETUP -> "watch"
+                StrategyReadinessState.BLOCKED -> "no_signal"
+                StrategyReadinessState.INSUFFICIENT_DATA -> "partial"
+                null -> "pending"
             }
-            _toast.value = if (!saved) "نشانی HTTPS یا کلید بایگانی نامعتبر است؛ ذخیره نشد"
-                else if (url.isBlank()) "بایگانی برای ورودهای تازه غیرفعال شد؛ وضعیت پوزیشن‌های قبلی تغییر نمی‌کند"
-                else "بایگانی برای ورودهای تازه تنظیم شد؛ دسترسی/اتصال و گسست‌ها را در ژورنال بررسی کنید"
+            PairScanStatus(
+                symbol = sym,
+                state = stateCode,
+                detail = dual?.combinedSummaryFa ?: rep?.summaryFa ?: "در صف بررسی هم‌زمان 15m و 5m",
+                interval = rep?.triggerInterval ?: com.aurum.edge.domain.Interval.M15,
+                lastScanAt = rep?.evaluatedAt ?: now,
+                action = rep?.action,
+            )
         }
-    }
-
-    /** PDF export of REAL journal trades already on disk. */
-    fun exportJournalPdf(uri: Uri, title: String, tradesForPdf: List<PaperTrade>) {
-        viewModelScope.launch {
-            try {
-                container.exportJournalPdf(uri, title, tradesForPdf, settings.value.accountBalance)
-                _toast.value = "PDF ژورنال ذخیره شد (${tradesForPdf.count { !it.isOpen }} معاملهٔ بسته)"
-            } catch (error: Exception) {
-                _toast.value = "ذخیرهٔ PDF انجام نشد: ${error.message ?: "خطای فایل"}"
-            }
-        }
+        _pairScan.value = PairScanState(
+            statuses = statuses,
+            sweeping = sweeping,
+            checkedCount = reportsMap.size,
+            totalCount = V1Universe.allSymbols.size,
+        )
     }
 
     fun consumeToast() {
