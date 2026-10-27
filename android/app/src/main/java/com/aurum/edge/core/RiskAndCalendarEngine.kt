@@ -11,6 +11,7 @@ import java.util.Locale
 import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.round
 
 enum class AutoExitKind(val reasonFa: String) {
