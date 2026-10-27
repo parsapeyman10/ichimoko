@@ -80,8 +80,16 @@ class JournalStore(
         note: String = "",
         now: Long = System.currentTimeMillis(),
         entryInterval: com.aurum.edge.domain.Interval = com.aurum.edge.domain.Interval.M15,
+        strategyId: String = com.aurum.edge.core.BitcoinStrategyModel.BASE_ICHIMOKU.id,
+        strategyTitleFa: String = com.aurum.edge.core.BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
     ): PaperTrade {
-        val trade = calc.toPaperTrade(note = note, openedAt = now, entryInterval = entryInterval)
+        val trade = calc.toPaperTrade(
+            note = note,
+            openedAt = now,
+            entryInterval = entryInterval,
+            strategyId = strategyId,
+            strategyTitleFa = strategyTitleFa,
+        )
         persist( listOf(trade) + _trades.value )
         return trade
     }

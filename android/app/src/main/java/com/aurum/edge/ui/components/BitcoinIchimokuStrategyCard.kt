@@ -193,14 +193,17 @@ fun BitcoinIchimokuStrategyCard(
             )
 
             1 -> Live12ConditionChecklistPage(
-                report = report,
+                report = dualReports[focusedSymbol]?.reportFor(focusedInterval, selectedId) ?: report,
                 focusedSymbol = focusedSymbol,
                 focusedInterval = focusedInterval,
+                selectedStrategyId = selectedId,
+                allItems = allItems,
                 dualReport = dualReports[focusedSymbol],
                 aiChecking = aiChecking,
                 avalAiEnabled = settings.avalAiEnabled,
                 onSelectSymbol = { sym -> viewModel.selectFocusedStrategySymbol(sym) },
                 onSelectInterval = { interval -> viewModel.selectFocusedStrategyInterval(interval) },
+                onSelectStrategy = { stratId -> viewModel.activateSingleBitcoinStrategy(stratId, enableExecution = settings.autoPaperTrading) },
                 onOpenChart = onOpenChartForSymbol,
                 onExecuteSignalTrade = { evalReport ->
                     val entry = evalReport.suggestedEntry ?: return@Live12ConditionChecklistPage
@@ -215,13 +218,16 @@ fun BitcoinIchimokuStrategyCard(
                         stopLoss = sl,
                         takeProfit = tp,
                         preferredAction = evalReport.action,
+                        fixedRiskUsdOverride = if (settings.useFixedDollarRisk) settings.fixedRiskUsd else null,
                     )
                     if (calc != null) {
                         viewModel.openAutoTrackedTrade(
                             calc = calc,
-                            note = "⚡ [تایم ${evalReport.triggerInterval.label}] ${evalReport.strategyTitleFa} · ${evalReport.symbol} · ${evalReport.triggerType.titleFa}",
+                            note = "⚡ [تایم ${evalReport.triggerInterval.label}] · [${evalReport.strategyTitleFa}] · ${evalReport.symbol} · ${evalReport.triggerType.titleFa}",
                             strategyContext = evalReport.toAiStrategyContext(),
                             entryInterval = evalReport.triggerInterval,
+                            strategyId = evalReport.strategyId,
+                            strategyTitleFa = evalReport.strategyTitleFa,
                         )
                     }
                 },
@@ -230,9 +236,13 @@ fun BitcoinIchimokuStrategyCard(
             2 -> ExclusiveStrategySelectorPage(
                 allItems = allItems,
                 selectedId = selectedId,
+                runAllSimultaneously = settings.runAllStrategiesSimultaneously,
+                enabledStrategyIds = settings.enabledStrategyIds,
                 executionEnabled = executionEnabled,
                 showAddModelForm = showAddModelForm,
                 onToggleAddForm = { showAddModelForm = !showAddModelForm },
+                onToggleRunAll = viewModel::setRunAllStrategiesSimultaneously,
+                onToggleStrategyInMulti = viewModel::toggleStrategyEnabledInMultiMode,
                 onSelectAndActivate = { id ->
                     viewModel.activateSingleBitcoinStrategy(id, enableExecution = true)
                 },
@@ -419,11 +429,14 @@ private fun Live12ConditionChecklistPage(
     report: StrategyEvaluationReport?,
     focusedSymbol: String,
     focusedInterval: Interval,
+    selectedStrategyId: String,
+    allItems: List<SelectableStrategyItem>,
     dualReport: DualTimeframeSymbolReport?,
     aiChecking: Boolean,
     avalAiEnabled: Boolean,
     onSelectSymbol: (String) -> Unit,
     onSelectInterval: (Interval) -> Unit,
+    onSelectStrategy: (String) -> Unit,
     onOpenChart: ((String) -> Unit)?,
     onExecuteSignalTrade: (StrategyEvaluationReport) -> Unit,
 ) {
@@ -444,14 +457,32 @@ private fun Live12ConditionChecklistPage(
             }
         }
 
+        // نوار افقی مشاهده چک‌لیست هر یک از استراتژی‌های فعال
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            allItems.forEach { item ->
+                val repStrat = dualReport?.reportFor(focusedInterval, item.id)
+                val shortState = repStrat?.readinessShortFa() ?: ""
+                Pill(
+                    text = if (shortState.isNotBlank()) "${item.titleFa.substringBefore('(').trim()} ($shortState)" else item.titleFa.substringBefore('(').trim(),
+                    color = if (item.id == selectedStrategyId) AurumColors.Cyan else AurumColors.TextMuted,
+                    modifier = Modifier.clickable { onSelectStrategy(item.id) },
+                )
+            }
+        }
+
         // سوییچ سریع بین تایم‌فریم ورود ۱۵ دقیقه (15m) و ۵ دقیقه (5m) با نمایش وضعیت هر دو
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            val short15 = dualReport?.report15m?.readinessShortFa() ?: "..."
-            val short5 = dualReport?.report5m?.readinessShortFa() ?: "..."
+            val short15 = dualReport?.reportFor(Interval.M15, selectedStrategyId)?.readinessShortFa() ?: "..."
+            val short5 = dualReport?.reportFor(Interval.M5, selectedStrategyId)?.readinessShortFa() ?: "..."
             Pill(
                 text = "⏱ تایم ورود 15m ($short15)",
                 color = if (focusedInterval == Interval.M15) AurumColors.Gold else AurumColors.TextMuted,
@@ -605,22 +636,55 @@ private fun Live12ConditionChecklistPage(
 private fun ExclusiveStrategySelectorPage(
     allItems: List<SelectableStrategyItem>,
     selectedId: String,
+    runAllSimultaneously: Boolean,
+    enabledStrategyIds: Set<String>,
     executionEnabled: Boolean,
     showAddModelForm: Boolean,
     onToggleAddForm: () -> Unit,
+    onToggleRunAll: (Boolean) -> Unit,
+    onToggleStrategyInMulti: (String, Boolean) -> Unit,
     onSelectAndActivate: (String) -> Unit,
     onToggleExecution: (Boolean) -> Unit,
     onAddModel: (titleFa: String, summaryFa: String, baseModel: BitcoinStrategyModel) -> Unit,
     onDeleteCustom: (String) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // سوییچ اصلی اجرای هم‌زمان همه استراتژی‌ها و تفکیک در ژورنال
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
+                .border(1.dp, if (runAllSimultaneously) AurumColors.Green else AurumColors.Gold, RoundedCornerShape(10.dp))
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "⚡ فعال‌سازی هم‌زمان همه استراتژی‌ها و دسته‌بندی در ژورنال",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (runAllSimultaneously) AurumColors.Green else AurumColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "تمام استراتژی‌ها روی تایم 15m و 5m هم‌زمان رصد می‌شوند و هر معامله با نام استراتژی در ژورنال ثبت می‌گردد",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                )
+            }
+            Switch(
+                checked = runAllSimultaneously,
+                onCheckedChange = onToggleRunAll,
+            )
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "فقط ۱ استراتژی همزمان فعال است",
+                text = if (runAllSimultaneously) "همه استراتژی‌های تیک‌خورده هم‌زمان فعال‌اند" else "فقط ۱ استراتژی همزمان فعال است",
                 style = MaterialTheme.typography.labelMedium,
                 color = AurumColors.Gold,
                 fontWeight = FontWeight.Bold,
@@ -638,22 +702,30 @@ private fun ExclusiveStrategySelectorPage(
 
         allItems.forEach { item ->
             val isSelected = item.id == selectedId
-            val isRunning = isSelected && executionEnabled
+            val isEnabledInMulti = if (runAllSimultaneously) (item.id in enabledStrategyIds || enabledStrategyIds.isEmpty()) else isSelected
+            val isRunning = isEnabledInMulti && executionEnabled
             val borderColor = when {
                 isRunning -> AurumColors.Green
-                isSelected -> AurumColors.Gold
+                isEnabledInMulti -> AurumColors.Gold
                 else -> AurumColors.TextMuted.copy(alpha = 0.25f)
             }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(
-                        if (isSelected) AurumColors.SurfaceAlt else AurumColors.Surface,
+                        if (isEnabledInMulti) AurumColors.SurfaceAlt else AurumColors.Surface,
                         RoundedCornerShape(10.dp),
                     )
                     .border(1.dp, borderColor, RoundedCornerShape(10.dp))
-                    .clickable { onSelectAndActivate(item.id) }
+                    .clickable {
+                        if (runAllSimultaneously) {
+                            onToggleStrategyInMulti(item.id, !isEnabledInMulti)
+                        } else {
+                            onSelectAndActivate(item.id)
+                        }
+                    }
                     .padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -672,18 +744,18 @@ private fun ExclusiveStrategySelectorPage(
                                 .background(
                                     when {
                                         isRunning -> AurumColors.Green
-                                        isSelected -> AurumColors.Gold
+                                        isEnabledInMulti -> AurumColors.Gold
                                         else -> Color.Transparent
                                     },
                                 )
-                                .border(2.dp, if (isSelected) AurumColors.TextPrimary else AurumColors.TextMuted, CircleShape),
+                                .border(2.dp, if (isEnabledInMulti) AurumColors.TextPrimary else AurumColors.TextMuted, CircleShape),
                         )
                         Column {
                             Text(
                                 text = item.titleFa,
                                 style = MaterialTheme.typography.bodySmall,
                                 fontWeight = FontWeight.Bold,
-                                color = if (isSelected) AurumColors.Gold else AurumColors.TextPrimary,
+                                color = if (isEnabledInMulti) AurumColors.Gold else AurumColors.TextPrimary,
                             )
                             Text(
                                 text = "${item.badgeFa} · ${item.authorRefFa}",
@@ -703,21 +775,30 @@ private fun ExclusiveStrategySelectorPage(
                         }
                         Pill(
                             text = when {
-                                isRunning -> "🟢 فعال"
-                                isSelected -> "متوقف"
-                                else -> "فعال‌سازی"
+                                isRunning -> "🟢 فعال هم‌زمان"
+                                isEnabledInMulti -> "🟢 آماده رصد"
+                                else -> "غیرفعال"
                             },
                             color = when {
                                 isRunning -> AurumColors.Green
-                                isSelected -> AurumColors.Gold
+                                isEnabledInMulti -> AurumColors.Gold
                                 else -> AurumColors.TextMuted
                             },
                             modifier = Modifier.clickable {
-                                if (isRunning) onToggleExecution(false) else onSelectAndActivate(item.id)
+                                if (runAllSimultaneously) {
+                                    onToggleStrategyInMulti(item.id, !isEnabledInMulti)
+                                } else {
+                                    if (isRunning) onToggleExecution(false) else onSelectAndActivate(item.id)
+                                }
                             },
                         )
                     }
                 }
+                Text(
+                    text = item.summaryFa,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                )
             }
         }
     }

@@ -455,6 +455,69 @@ class RiskAndCalendarEngineTest {
         )
         assertEquals(SymbolPollTier.OPEN_POSITION, openTier)
         assertEquals(15_000L, openTier.tickIntervalMs)
+
+        // 5. Verify all 5 strategies evaluate simultaneously on 15m and 5m
+        assertEquals(5, dualReport.reports15mByStrategy.size)
+        assertEquals(5, dualReport.reports5mByStrategy.size)
+        BitcoinStrategyModel.entries.forEach { model ->
+            assertNotNull(dualReport.reportFor(Interval.M15, model.id))
+            assertNotNull(dualReport.reportFor(Interval.M5, model.id))
+        }
+
+        // 6. Verify $1,000 -> $100,000 fixed $5 risk rule: loss = -$5.00, win = +$5.00 * R:R, and Journal strategy categorization
+        val calcFixed5 = RiskAndCalendarEngine.calculatePosition(
+            symbolInput = "BTC/USDT",
+            accountBalance = 1_000.0,
+            riskPercent = 0.5,
+            entry = 65_000.0,
+            stopLoss = 64_500.0, // risk = 500
+            takeProfit = 66_250.0, // reward = 1250 -> R:R = 2.5
+            preferredAction = SignalAction.BUY,
+            fixedRiskUsdOverride = 5.0,
+        )!!
+        assertEquals(5.0, calcFixed5.riskBudgetUsd, 1e-4)
+        assertEquals(2.5, calcFixed5.riskRewardRatio, 1e-4)
+
+        val tradeManish = calcFixed5.toPaperTrade(
+            id = "T_MANISH",
+            openedAt = 1_760_000_000_000L,
+            interval = Interval.M15,
+            strategyId = BitcoinStrategyModel.MANISH_PATEL_MTF.id,
+            strategyTitleFa = BitcoinStrategyModel.MANISH_PATEL_MTF.titleFa,
+        )
+        val (lossPnl, lossR) = RiskAndCalendarEngine.computeExitPnlUsd(tradeManish, 64_500.0)
+        assertEquals(-5.0, lossPnl, 1e-4)
+        assertEquals(-1.0, lossR, 1e-4)
+
+        val (winPnl, winR) = RiskAndCalendarEngine.computeExitPnlUsd(tradeManish, 66_250.0)
+        assertEquals(12.5, winPnl, 1e-4) // $5 * 2.5 R:R = +$12.50
+        assertEquals(2.5, winR, 1e-4)
+
+        val closedManish = tradeManish.copy(
+            exitPrice = 66_250.0,
+            closedAt = 1_760_000_900_000L,
+            pnlUsd = winPnl,
+            rMultiple = winR,
+        )
+        val tradeHosoda = calcFixed5.toPaperTrade(
+            id = "T_HOSODA",
+            openedAt = 1_760_001_000_000L,
+            interval = Interval.M5,
+            strategyId = BitcoinStrategyModel.HOSODA_ELLIOTT_WAVE.id,
+            strategyTitleFa = BitcoinStrategyModel.HOSODA_ELLIOTT_WAVE.titleFa,
+        ).copy(
+            exitPrice = 64_500.0,
+            closedAt = 1_760_001_300_000L,
+            pnlUsd = lossPnl,
+            rMultiple = lossR,
+        )
+        val cats = RiskAndCalendarEngine.categorizeTradesByStrategy(listOf(closedManish, tradeHosoda))
+        val manishCat = cats.first { it.strategyId == BitcoinStrategyModel.MANISH_PATEL_MTF.id }
+        val hosodaCat = cats.first { it.strategyId == BitcoinStrategyModel.HOSODA_ELLIOTT_WAVE.id }
+        assertEquals(1, manishCat.winsCount)
+        assertEquals(12.5, manishCat.netPnlUsd, 1e-4)
+        assertEquals(1, hosodaCat.lossesCount)
+        assertEquals(-5.0, hosodaCat.netPnlUsd, 1e-4)
     }
 }
 

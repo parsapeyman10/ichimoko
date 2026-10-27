@@ -113,6 +113,18 @@ fun JournalRiskScreen(
     }
 
     var subPage by rememberSaveable { mutableIntStateOf(0) }
+    var selectedStrategyFilter by rememberSaveable { mutableStateOf("ALL") }
+
+    val strategyCategories = remember(trades, settings.customStrategies) {
+        RiskAndCalendarEngine.categorizeTradesByStrategy(trades, settings.customStrategies)
+    }
+
+    val filteredTrades = remember(trades, selectedStrategyFilter) {
+        if (selectedStrategyFilter == "ALL") trades else trades.filter { it.strategyId == selectedStrategyFilter }
+    }
+    val filteredOpenTrades = remember(filteredTrades) { filteredTrades.filter { it.isOpen } }
+    val filteredClosedTrades = remember(filteredTrades) { filteredTrades.filter { !it.isOpen } }
+    val filteredStats = remember(filteredTrades) { RiskAndCalendarEngine.stats(filteredTrades) }
 
     Column(
         modifier = Modifier
@@ -120,6 +132,24 @@ fun JournalRiskScreen(
             .verticalScroll(rememberScrollState())
             .padding(bottom = 18.dp),
     ) {
+        // کارت وضعیت برنامه رشد سرمایه ۱,۰۰۰$ به ۱۰۰,۰۰۰$ (هر باخت ۵ دلار · هر برد ۵ دلار × R:R)
+        RoadTo100kFixedRiskBanner(
+            settings = settings,
+            trades = trades,
+            onApply1000To100kPlan = {
+                viewModel.saveRiskAndCapitalSettings(
+                    accountBalance = 1000.0,
+                    initialCapital = 1000.0,
+                    riskPercent = 0.5,
+                    dailyLossLimitPercent = 3.0,
+                    maxDrawdownLimitPercent = 10.0,
+                    targetCapital = 100_000.0,
+                    useFixedDollarRisk = true,
+                    fixedRiskUsd = 5.0,
+                )
+            },
+        )
+
         // نوار صفحه‌بندی داخلی تب ژورنال و ریسک
         Row(
             modifier = Modifier
@@ -129,9 +159,9 @@ fun JournalRiskScreen(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             listOf(
-                0 to "📅 تقویم ماهانه (${closedTrades.size})",
+                0 to "📅 تقویم و دسته‌بندی استراتژی‌ها (${filteredClosedTrades.size})",
                 1 to "🧮 ماشین‌حساب و سرمایه",
-                2 to "📜 معاملات باز (${openTrades.size}) و گپ",
+                2 to "📜 معاملات باز (${filteredOpenTrades.size}) و گپ",
                 3 to "🤖 فیلتر AvalAI",
             ).forEach { (idx, label) ->
                 Pill(
@@ -142,12 +172,19 @@ fun JournalRiskScreen(
             }
         }
 
+        // فیلتر و دسته‌بندی ژورنال بر اساس استراتژی‌ها
+        StrategyJournalCategorizationCard(
+            categories = strategyCategories,
+            selectedStrategyFilter = selectedStrategyFilter,
+            onSelectStrategyFilter = { selectedStrategyFilter = it },
+        )
+
         when (subPage) {
             0 -> {
                 MonthlyPnlCalendarSection(
-                    trades = trades,
-                    closedTrades = closedTrades,
-                    stats = stats,
+                    trades = filteredTrades,
+                    closedTrades = filteredClosedTrades,
+                    stats = filteredStats,
                     now = now,
                     onDeleteTrade = viewModel::deleteJournalTrade,
                     onClearAll = viewModel::clearAllJournalTrades,
@@ -159,13 +196,25 @@ fun JournalRiskScreen(
                 CapitalAndRiskLimitsCard(
                     settings = settings,
                     riskLimits = riskLimits,
-                    onSaveSettings = viewModel::saveRiskAndCapitalSettings,
+                    onSaveSettings = { bal, initCap, riskPct, dailyLim, maxDd ->
+                        viewModel.saveRiskAndCapitalSettings(
+                            accountBalance = bal,
+                            initialCapital = initCap,
+                            riskPercent = riskPct,
+                            dailyLossLimitPercent = dailyLim,
+                            maxDrawdownLimitPercent = maxDd,
+                            targetCapital = settings.targetCapital,
+                            useFixedDollarRisk = settings.useFixedDollarRisk,
+                            fixedRiskUsd = settings.fixedRiskUsd,
+                        )
+                    },
                 )
                 RiskCalculatorAndAutoTradeCard(
                     activeSymbol = activeSymbol,
                     liveTick = liveTicks[activeSymbol],
                     accountBalance = settings.accountBalance,
                     riskPercent = settings.riskPercent,
+                    fixedRiskUsdOverride = if (settings.useFixedDollarRisk) settings.fixedRiskUsd else null,
                     riskLimits = riskLimits,
                     avalAiEnabled = settings.avalAiEnabled,
                     aiChecking = aiChecking,
@@ -173,18 +222,25 @@ fun JournalRiskScreen(
                     onSelectSymbol = viewModel::selectRiskSymbol,
                     onRefreshLivePrice = { onResult -> viewModel.refreshSymbolLivePrice(activeSymbol, onResult) },
                     onAskAiOnly = { calc -> viewModel.checkTradeTimingWithAi(calc) },
-                    onOpenAutoTrade = { calc, note -> viewModel.openAutoTrackedTrade(calc, note) },
+                    onOpenAutoTrade = { calc, note ->
+                        viewModel.openAutoTrackedTrade(
+                            calc = calc,
+                            note = note,
+                            strategyId = settings.selectedBitcoinStrategyId,
+                            strategyTitleFa = settings.activeBitcoinStrategyTitleFa(),
+                        )
+                    },
                     onOpenChart = { onChartSymbol(activeSymbol) },
                 )
             }
 
             2 -> {
                 AutoMonitoredOpenTradesCard(
-                    openTrades = openTrades,
+                    openTrades = filteredOpenTrades,
                     liveTicks = liveTicks,
                     lastMarks = lastMarks,
                     onRefreshAll = {
-                        openTrades.map { it.symbol }.distinct().forEach { viewModel.refreshSymbolLivePrice(it) }
+                        filteredOpenTrades.map { it.symbol }.distinct().forEach { viewModel.refreshSymbolLivePrice(it) }
                     },
                     onCloseAtPrice = viewModel::closeTradeManually,
                     onDelete = viewModel::deleteJournalTrade,
@@ -206,6 +262,198 @@ fun JournalRiskScreen(
                     onToggleEnabled = viewModel::setAvalAiEnabled,
                     onSaveConfig = { key, model, url -> viewModel.saveAvalAiConfig(key, model, url, enableAfterSave = true) },
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoadTo100kFixedRiskBanner(
+    settings: com.aurum.edge.core.AppSettings,
+    trades: List<PaperTrade>,
+    onApply1000To100kPlan: () -> Unit,
+) {
+    val startCap = settings.initialCapital.coerceAtLeast(1.0)
+    val targetCap = settings.targetCapital.coerceAtLeast(startCap + 1.0)
+    val progressRatio = ((settings.accountBalance - startCap) / (targetCap - startCap))
+        .toFloat()
+        .coerceIn(0f, 1f)
+    val totalR = trades.filter { !it.isOpen }.sumOf { it.rMultiple ?: 0.0 }
+
+    SectionCard(
+        title = "🚀 پلن رشد سرمایه: $${String.format(Locale.US, "%,.0f", startCap)} ← $${String.format(Locale.US, "%,.0f", targetCap)}",
+        subtitle = "قانون ریسک ثابت دلاری: هر باخت = -$${String.format(Locale.US, "%.2f", settings.fixedRiskUsd)} · هر برد = +$${String.format(Locale.US, "%.2f", settings.fixedRiskUsd)} × R:R",
+        trailing = {
+            Pill(
+                text = "تنظیم ۱۰۰۰$ ← ۱۰۰,۰۰۰$ ⚡",
+                color = AurumColors.Gold,
+                modifier = Modifier.clickable { onApply1000To100kPlan() },
+            )
+        },
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            StatTile(
+                label = "موجودی فعلی",
+                value = String.format(Locale.US, "$%,.2f", settings.accountBalance),
+                valueColor = AurumColors.Gold,
+                modifier = Modifier.weight(1f),
+            )
+            StatTile(
+                label = "هدف نهایی",
+                value = String.format(Locale.US, "$%,.0f", targetCap),
+                valueColor = AurumColors.Green,
+                modifier = Modifier.weight(1f),
+            )
+            StatTile(
+                label = "هر باخت / هر برد",
+                value = "-$${settings.fixedRiskUsd.toInt()} / +$${settings.fixedRiskUsd.toInt()}×R:R",
+                valueColor = AurumColors.Cyan,
+                modifier = Modifier.weight(1.2f),
+            )
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "پیشرفت تا ۱۰۰,۰۰۰ دلار: ${String.format(Locale.US, "%.2f%%", progressRatio * 100f)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "برآیند کل: ${String.format(Locale.US, "%s%.2fR", if (totalR >= 0.0) "+" else "", totalR)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (totalR >= 0.0) AurumColors.Green else AurumColors.Red,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            LinearProgressIndicator(
+                progress = { progressRatio },
+                modifier = Modifier.fillMaxWidth().height(7.dp).clip(RoundedCornerShape(4.dp)),
+                color = AurumColors.Green,
+                trackColor = AurumColors.SurfaceAlt,
+            )
+        }
+    }
+}
+
+@Composable
+private fun StrategyJournalCategorizationCard(
+    categories: List<com.aurum.edge.core.StrategyJournalCategoryStats>,
+    selectedStrategyFilter: String,
+    onSelectStrategyFilter: (String) -> Unit,
+) {
+    SectionCard(
+        title = "📂 دسته‌بندی ژورنال بر اساس استراتژی‌ها (هم‌زمان فعال)",
+        subtitle = "عملکرد و معاملات هر استراتژی به‌طور مجزا ثبت و تفکیک شده است؛ روی هر استراتژی بزنید تا ژورنال فیلتر شود",
+        trailing = {
+            Pill(
+                text = if (selectedStrategyFilter == "ALL") "نمایش همه ✓" else "نمایش همه استراتژی‌ها",
+                color = if (selectedStrategyFilter == "ALL") AurumColors.Gold else AurumColors.Cyan,
+                modifier = Modifier.clickable { onSelectStrategyFilter("ALL") },
+            )
+        },
+    ) {
+        // نوار فیلتر سریع استراتژی‌ها
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Pill(
+                text = "همه استراتژی‌ها (${categories.sumOf { it.totalCount }})",
+                color = if (selectedStrategyFilter == "ALL") AurumColors.Gold else AurumColors.TextMuted,
+                modifier = Modifier.clickable { onSelectStrategyFilter("ALL") },
+            )
+            categories.forEach { cat ->
+                val shortName = cat.strategyTitleFa.substringBefore('(').trim()
+                Pill(
+                    text = "$shortName (${cat.totalCount})",
+                    color = if (selectedStrategyFilter == cat.strategyId) AurumColors.Cyan else AurumColors.TextMuted,
+                    modifier = Modifier.clickable { onSelectStrategyFilter(cat.strategyId) },
+                )
+            }
+        }
+
+        Column(
+            modifier = Modifier.padding(top = 6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            categories.forEach { cat ->
+                val isSelected = selectedStrategyFilter == cat.strategyId
+                val pnlColor = when {
+                    cat.netPnlUsd > 0.0 -> AurumColors.Green
+                    cat.netPnlUsd < 0.0 -> AurumColors.Red
+                    else -> AurumColors.Gold
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            if (isSelected) AurumColors.SurfaceAlt else AurumColors.Surface,
+                            RoundedCornerShape(8.dp),
+                        )
+                        .border(
+                            1.dp,
+                            if (isSelected) AurumColors.Cyan else AurumColors.Line.copy(alpha = 0.5f),
+                            RoundedCornerShape(8.dp),
+                        )
+                        .clickable {
+                            onSelectStrategyFilter(if (isSelected) "ALL" else cat.strategyId)
+                        }
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = cat.strategyTitleFa,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (isSelected) AurumColors.Cyan else AurumColors.TextPrimary,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "باز: ${cat.openCount} · بسته: ${cat.closedCount} (برد: ${cat.winsCount} / باخت: ${cat.lossesCount} · وین‌ریت: ${cat.winRate.toInt()}%) · [15m: ${cat.count15m} | 5m: ${cat.count5m}]",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextSecondary,
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = String.format(
+                                Locale.US,
+                                "%s$%.2f",
+                                if (cat.netPnlUsd >= 0.0) "+" else "",
+                                cat.netPnlUsd,
+                            ),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = pnlColor,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = String.format(
+                                Locale.US,
+                                "%s%.2fR",
+                                if (cat.totalR >= 0.0) "+" else "",
+                                cat.totalR,
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = pnlColor,
+                        )
+                    }
+                }
             }
         }
     }
@@ -715,6 +963,7 @@ private fun RiskCalculatorAndAutoTradeCard(
     liveTick: PriceTick?,
     accountBalance: Double,
     riskPercent: Double,
+    fixedRiskUsdOverride: Double?,
     riskLimits: com.aurum.edge.core.RiskLimitStatus,
     avalAiEnabled: Boolean,
     aiChecking: Boolean,
@@ -749,7 +998,7 @@ private fun RiskCalculatorAndAutoTradeCard(
     val slVal = slText.replace(',', '.').trim().toDoubleOrNull()
     val tpVal = tpText.replace(',', '.').trim().toDoubleOrNull()
 
-    val calcResult = remember(activeSymbol, accountBalance, riskPercent, entryVal, slVal, tpVal, direction) {
+    val calcResult = remember(activeSymbol, accountBalance, riskPercent, fixedRiskUsdOverride, entryVal, slVal, tpVal, direction) {
         if (entryVal != null && slVal != null && tpVal != null) {
             RiskAndCalendarEngine.calculatePosition(
                 symbolInput = activeSymbol,
@@ -759,6 +1008,7 @@ private fun RiskCalculatorAndAutoTradeCard(
                 stopLoss = slVal,
                 takeProfit = tpVal,
                 preferredAction = direction,
+                fixedRiskUsdOverride = fixedRiskUsdOverride,
             )
         } else null
     }
@@ -1324,7 +1574,7 @@ private fun AutoMonitoredOpenTradesCard(
                                     color = if (isBuy) AurumColors.Green else AurumColors.Red,
                                 )
                                 Pill("تایم ورود: ${trade.interval.label}", AurumColors.Gold)
-                                Pill("رصد خودکار فعال", AurumColors.Cyan)
+                                Pill(trade.strategyTitleFa.substringBefore('(').trim(), AurumColors.Cyan)
                             }
                             Text(
                                 text = valuation?.let {
@@ -1343,7 +1593,7 @@ private fun AutoMonitoredOpenTradesCard(
                         }
 
                         Text(
-                            text = "حجم: ${String.format(Locale.US, "%.4f", trade.positionOz)} ${trade.unit} · ریسک: $${String.format(Locale.US, "%.2f", trade.riskUsd)} · R:R = 1:${String.format(Locale.US, "%.2f", trade.riskReward)}",
+                            text = "حجم: ${String.format(Locale.US, "%.4f", trade.positionOz)} ${trade.unit} · باخت در SL: -$${String.format(Locale.US, "%.2f", trade.fixedRiskUsd)} · برد در TP: +$${String.format(Locale.US, "%.2f", trade.fixedRiskUsd * trade.riskReward)} (R:R = 1:${String.format(Locale.US, "%.2f", trade.riskReward)})",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.TextSecondary,
                         )
@@ -1875,6 +2125,10 @@ private fun ClosedJournalTradeRow(
                 Pill(
                     text = "تایم ورود: ${trade.interval.label}",
                     color = AurumColors.Gold,
+                )
+                Pill(
+                    text = trade.strategyTitleFa.substringBefore('(').trim(),
+                    color = AurumColors.Cyan,
                 )
                 trade.rMultiple?.let { r ->
                     Pill(

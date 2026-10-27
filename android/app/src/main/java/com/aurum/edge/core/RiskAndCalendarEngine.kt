@@ -72,6 +72,8 @@ data class RiskCalculationResult(
         openedAt: Long = System.currentTimeMillis(),
         id: String = UUID.randomUUID().toString(),
         entryInterval: Interval = Interval.M15,
+        strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+        strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
     ): PaperTrade = PaperTrade(
         id = id,
         symbol = symbol,
@@ -92,8 +94,25 @@ data class RiskCalculationResult(
         commissionUsd = round2(commissionUsd),
         spreadCostUsd = round2(spreadCostUsd),
         initialStopLoss = stopLoss,
+        strategyId = strategyId,
+        strategyTitleFa = strategyTitleFa,
+        fixedRiskUsd = round2(riskBudgetUsd),
     )
 }
+
+data class StrategyJournalCategoryStats(
+    val strategyId: String,
+    val strategyTitleFa: String,
+    val openCount: Int,
+    val closedCount: Int,
+    val winCount: Int,
+    val lossCount: Int,
+    val winRatePercent: Double,
+    val netPnlUsd: Double,
+    val totalR: Double,
+    val count15m: Int,
+    val count5m: Int,
+)
 
 data class RiskLimitStatus(
     val accountBalance: Double,
@@ -159,6 +178,7 @@ object RiskAndCalendarEngine {
         stopLoss: Double,
         takeProfit: Double,
         preferredAction: SignalAction? = null,
+        fixedRiskUsdOverride: Double? = null,
     ): RiskCalculationResult? {
         val symbol = V1Universe.normalize(symbolInput).ifBlank { "XAU/USD" }
         if (!accountBalance.isFinite() || accountBalance <= 0.0) return null
@@ -181,7 +201,12 @@ object RiskAndCalendarEngine {
         if (inferredAction == SignalAction.BUY && !(stopLoss < entry && takeProfit > entry)) return null
         if (inferredAction == SignalAction.SELL && !(stopLoss > entry && takeProfit < entry)) return null
 
-        val riskBudgetUsd = accountBalance * (riskPercent / 100.0)
+        val riskBudgetUsd = if (fixedRiskUsdOverride != null && fixedRiskUsdOverride.isFinite() && fixedRiskUsdOverride > 0.0) {
+            fixedRiskUsdOverride
+        } else {
+            accountBalance * (riskPercent / 100.0)
+        }
+        val effectiveRiskPct = if (accountBalance > 0.0) (riskBudgetUsd / accountBalance) * 100.0 else riskPercent
         val perUnitStopUsd = PaperOrderRules.quotePnlToUsd(symbol, stopDistance, entry)
         if (!perUnitStopUsd.isFinite() || perUnitStopUsd <= 1e-9) return null
 
@@ -197,11 +222,9 @@ object RiskAndCalendarEngine {
         val commissionUsd = spec.commissionUsd(entry, positionUnits) * 2.0
         val spreadCostUsd = spec.spreadCostUsd(entry, positionUnits)
 
-        val grossProfitUsd = PaperOrderRules.quotePnlToUsd(symbol, targetDistance * positionUnits, takeProfit)
-        val grossLossUsd = PaperOrderRules.quotePnlToUsd(symbol, stopDistance * positionUnits, stopLoss)
-        val netProfitUsd = grossProfitUsd - commissionUsd - spreadCostUsd
-        val netLossUsd = grossLossUsd + commissionUsd + spreadCostUsd
         val riskReward = targetDistance / stopDistance
+        val exactProfitAtTpUsd = riskBudgetUsd * riskReward
+        val exactLossAtSlUsd = riskBudgetUsd
 
         return RiskCalculationResult(
             symbol = symbol,
@@ -210,7 +233,7 @@ object RiskAndCalendarEngine {
             stopLoss = stopLoss,
             takeProfit = takeProfit,
             accountBalance = accountBalance,
-            riskPercent = riskPercent,
+            riskPercent = round2(effectiveRiskPct),
             riskBudgetUsd = round2(riskBudgetUsd),
             stopDistance = stopDistance,
             targetDistance = targetDistance,
@@ -224,10 +247,10 @@ object RiskAndCalendarEngine {
             marginRequiredUsd = round2(marginRequiredUsd),
             commissionUsd = round2(commissionUsd),
             spreadCostUsd = round2(spreadCostUsd),
-            grossProfitAtTpUsd = round2(grossProfitUsd),
-            netProfitAtTpUsd = round2(netProfitUsd),
-            grossLossAtSlUsd = round2(grossLossUsd),
-            netLossAtSlUsd = round2(netLossUsd),
+            grossProfitAtTpUsd = round2(exactProfitAtTpUsd),
+            netProfitAtTpUsd = round2(exactProfitAtTpUsd),
+            grossLossAtSlUsd = round2(exactLossAtSlUsd),
+            netLossAtSlUsd = round2(exactLossAtSlUsd),
         )
     }
 
@@ -397,9 +420,59 @@ object RiskAndCalendarEngine {
         } else {
             trade.entry - exitPrice
         }
+        val initialStopDist = abs(trade.entry - (trade.initialStopLoss ?: trade.stopLoss))
+        if (trade.fixedRiskUsd > 0.0 && initialStopDist > 1e-9) {
+            val realizedR = diffPerUnit / initialStopDist
+            val exactPnl = round2(trade.fixedRiskUsd * realizedR)
+            return exactPnl to exactPnl
+        }
         val gross = PaperOrderRules.quotePnlToUsd(trade.symbol, diffPerUnit * trade.positionOz, exitPrice)
         val net = gross - trade.effectiveCommissionUsd - trade.effectiveSpreadCostUsd
         return gross to net
+    }
+
+    /**
+     * دسته‌بندی و آمارگیری تمام معاملات باز و بسته‌شده در ژورنال به تفکیک استراتژی.
+     */
+    fun categorizeTradesByStrategy(
+        trades: List<PaperTrade>,
+        customStrategies: List<CustomStrategySlot> = emptyList(),
+    ): List<StrategyJournalCategoryStats> {
+        val orderedStrategyDefs = buildList {
+            BitcoinStrategyModel.entries.forEach { add(it.id to it.titleFa) }
+            customStrategies.forEach { add(it.id to it.titleFa) }
+        }
+        val knownIds = orderedStrategyDefs.map { it.first }.toSet()
+        val extraDefs = trades
+            .filter { it.strategyId.isNotBlank() && it.strategyId !in knownIds }
+            .groupBy { it.strategyId }
+            .map { (id, list) -> id to (list.first().strategyTitleFa.ifBlank { id }) }
+
+        return (orderedStrategyDefs + extraDefs).map { (stratId, titleFa) ->
+            val group = trades.filter { it.strategyId == stratId }
+            val openCount = group.count { it.isOpen }
+            val closed = group.filter { !it.isOpen && it.pnlUsd != null }
+            val wins = closed.count { (it.pnlUsd ?: 0.0) > 0.0 }
+            val losses = closed.count { (it.pnlUsd ?: 0.0) <= 0.0 }
+            val winRate = if (closed.isEmpty()) 0.0 else round2(wins * 100.0 / closed.size)
+            val netPnl = round2(closed.sumOf { it.pnlUsd ?: 0.0 })
+            val totalR = round2(closed.sumOf { it.rMultiple ?: 0.0 })
+            val c15 = group.count { it.interval == Interval.M15 }
+            val c5 = group.count { it.interval == Interval.M5 }
+            StrategyJournalCategoryStats(
+                strategyId = stratId,
+                strategyTitleFa = titleFa,
+                openCount = openCount,
+                closedCount = closed.size,
+                winCount = wins,
+                lossCount = losses,
+                winRatePercent = winRate,
+                netPnlUsd = netPnl,
+                totalR = totalR,
+                count15m = c15,
+                count5m = c5,
+            )
+        }
     }
 
     fun evaluateRiskLimits(

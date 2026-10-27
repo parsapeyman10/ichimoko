@@ -140,6 +140,13 @@ class SettingsStore(context: Context) {
         val categoryStrategies = AssetClass.entries.associateWith { category ->
             CategoryStrategy.fromStored(prefs.getString("v1_strategy_${category.name}", null))
         }
+        val defaultAllIds = (BitcoinStrategyModel.entries.map { it.id } + storedCustomStrategies.map { it.id }).toSet()
+        val storedEnabledIdsRaw = prefs.getString(KEY_ENABLED_STRATEGY_IDS, null)?.trim().orEmpty()
+        val storedEnabledIds = if (storedEnabledIdsRaw.isBlank()) {
+            defaultAllIds
+        } else {
+            storedEnabledIdsRaw.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet().ifEmpty { defaultAllIds }
+        }
         return AppSettings(
         apiKey = storedApiKey?.takeIf { it.isNotBlank() }
             ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY.trim(),
@@ -152,6 +159,11 @@ class SettingsStore(context: Context) {
         accountBalance = prefs.getFloat(KEY_BALANCE, 1000f).toDouble(),
         initialCapital = prefs.getFloat(KEY_INITIAL_CAPITAL, prefs.getFloat(KEY_BALANCE, 1000f)).toDouble()
             .takeIf { it.isFinite() && it >= 10.0 } ?: 1000.0,
+        targetCapital = prefs.getFloat(KEY_TARGET_CAPITAL, 100_000f).toDouble()
+            .takeIf { it.isFinite() && it >= 100.0 } ?: 100_000.0,
+        useFixedDollarRisk = prefs.getBoolean(KEY_USE_FIXED_DOLLAR_RISK, true),
+        fixedRiskUsd = prefs.getFloat(KEY_FIXED_RISK_USD, 5.0f).toDouble()
+            .takeIf { it.isFinite() && it >= 0.5 } ?: 5.0,
         dailyLossLimitPercent = prefs.getFloat(KEY_DAILY_LOSS_LIMIT, 3.0f).toDouble()
             .takeIf { it.isFinite() }?.coerceIn(0.5, 25.0) ?: 3.0,
         maxDrawdownLimitPercent = prefs.getFloat(KEY_MAX_DRAWDOWN_LIMIT, 10.0f).toDouble()
@@ -175,6 +187,8 @@ class SettingsStore(context: Context) {
         signalProfile = profile,
         activeStrategy = storedStrategy,
         selectedBitcoinStrategyId = validStrategyId,
+        runAllStrategiesSimultaneously = prefs.getBoolean(KEY_RUN_ALL_STRATEGIES, true),
+        enabledStrategyIds = storedEnabledIds,
         baseStrategyConfig = storedBaseConfig,
         customStrategies = storedCustomStrategies,
         categoryStrategies = categoryStrategies,
@@ -291,6 +305,8 @@ class SettingsStore(context: Context) {
             interval = Interval.M5,
             riskPercent = proposed.riskPercent.takeIf { it.isFinite() }?.coerceIn(0.1, 10.0) ?: 0.5,
             initialCapital = proposed.initialCapital.takeIf { it.isFinite() && it >= 10.0 } ?: proposed.accountBalance.coerceAtLeast(10.0),
+            targetCapital = proposed.targetCapital.takeIf { it.isFinite() && it >= 100.0 } ?: 100_000.0,
+            fixedRiskUsd = proposed.fixedRiskUsd.takeIf { it.isFinite() && it >= 0.5 } ?: 5.0,
             dailyLossLimitPercent = proposed.dailyLossLimitPercent.takeIf { it.isFinite() }?.coerceIn(0.5, 25.0) ?: 3.0,
             maxDrawdownLimitPercent = proposed.maxDrawdownLimitPercent.takeIf { it.isFinite() }?.coerceIn(1.0, 50.0) ?: 10.0,
             minConfidence = proposed.minConfidence.takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
@@ -302,6 +318,9 @@ class SettingsStore(context: Context) {
             .putFloat(KEY_RISK, next.riskPercent.toFloat())
             .putFloat(KEY_BALANCE, next.accountBalance.toFloat())
             .putFloat(KEY_INITIAL_CAPITAL, next.initialCapital.toFloat())
+            .putFloat(KEY_TARGET_CAPITAL, next.targetCapital.toFloat())
+            .putBoolean(KEY_USE_FIXED_DOLLAR_RISK, next.useFixedDollarRisk)
+            .putFloat(KEY_FIXED_RISK_USD, next.fixedRiskUsd.toFloat())
             .putFloat(KEY_DAILY_LOSS_LIMIT, next.dailyLossLimitPercent.toFloat())
             .putFloat(KEY_MAX_DRAWDOWN_LIMIT, next.maxDrawdownLimitPercent.toFloat())
             .putFloat(KEY_MIN_CONF, next.minConfidence.toFloat())
@@ -325,6 +344,8 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_SIGNAL_CHIKOU, next.signalProfile.chikouConfirmation)
             .putString(KEY_ACTIVE_STRATEGY, next.activeStrategy.id)
             .putString(KEY_BTC_STRATEGY_ID, next.selectedBitcoinStrategyId)
+            .putBoolean(KEY_RUN_ALL_STRATEGIES, next.runAllStrategiesSimultaneously)
+            .putString(KEY_ENABLED_STRATEGY_IDS, next.enabledStrategyIds.joinToString(","))
             .putString(KEY_BASE_STRATEGY_CONFIG_JSON, KEY_JSON.encodeToString(BaseStrategyConfig.serializer(), next.baseStrategyConfig))
             .putString(KEY_CUSTOM_STRATEGIES_JSON, KEY_JSON.encodeToString(customStrategiesSerializer, next.customStrategies))
             .apply {
@@ -402,6 +423,11 @@ class SettingsStore(context: Context) {
         private const val KEY_SIGNAL_CHIKOU = "signal_chikou_confirmation"
         private const val KEY_ACTIVE_STRATEGY = "active_strategy"
         private const val KEY_BTC_STRATEGY_ID = "btc_exclusive_strategy_id"
+        private const val KEY_RUN_ALL_STRATEGIES = "btc_run_all_strategies_simultaneously"
+        private const val KEY_ENABLED_STRATEGY_IDS = "btc_enabled_strategy_ids_csv"
+        private const val KEY_TARGET_CAPITAL = "target_capital_usd"
+        private const val KEY_USE_FIXED_DOLLAR_RISK = "use_fixed_dollar_risk"
+        private const val KEY_FIXED_RISK_USD = "fixed_risk_usd"
         private const val KEY_BASE_STRATEGY_CONFIG_JSON = "btc_base_strategy_config_json"
         private const val KEY_CUSTOM_STRATEGIES_JSON = "btc_custom_strategies_json"
     }

@@ -94,8 +94,8 @@ android {
         // channels + 15-minute automatic-check floor. See docs/RELEASE_3_0_FA.md and
         // CHANGELOG_FA.md. A versionCode must be bumped here before a release run, because the
         // workflow only publishes explicit tags / `release: publish` commits / approved dispatch.
-        versionCode = 710
-        versionName = "3.9.01"
+        versionCode = 711
+        versionName = "3.9.02"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

@@ -423,6 +423,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                         stopLoss = sl,
                         takeProfit = tp,
                         preferredAction = armedReport.action,
+                        fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
                     )
                     val limits = RiskAndCalendarEngine.evaluateRiskLimits(
                         accountBalance = cfg.accountBalance,
@@ -436,12 +437,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     if (calc != null && limits.canOpenTrade(calc.riskBudgetUsd)) {
                         lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
                         val tfLabel = armedReport.triggerInterval.label
-                        val sniperNote = "🎯 نقطه‌زنی [تایم $tfLabel] (${armedReport.trendPhase.badgeFa} · دقت ${armedReport.sniperEntryScore.toInt()}%) · $symbol"
+                        val sniperNote = "🎯 نقطه‌زنی [تایم $tfLabel] · [${armedReport.strategyTitleFa}] · (${armedReport.trendPhase.badgeFa} · دقت ${armedReport.sniperEntryScore.toInt()}%)"
                         openAutoTrackedTrade(
                             calc = calc,
                             note = sniperNote,
                             strategyContext = armedReport.toAiStrategyContext(),
                             entryInterval = armedReport.triggerInterval,
+                            strategyId = armedReport.strategyId,
+                            strategyTitleFa = armedReport.strategyTitleFa,
                         )
                     }
                 }
@@ -479,12 +482,17 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         riskPercent: Double,
         dailyLossLimitPercent: Double,
         maxDrawdownLimitPercent: Double,
+        targetCapital: Double = settings.value.targetCapital,
+        useFixedDollarRisk: Boolean = settings.value.useFixedDollarRisk,
+        fixedRiskUsd: Double = settings.value.fixedRiskUsd,
     ) {
         if (!accountBalance.isFinite() || accountBalance < 10.0) {
             _toast.value = "موجودی حساب باید حداقل ۱۰ دلار باشد"
             return
         }
         val safeInitial = if (initialCapital.isFinite() && initialCapital >= 10.0) initialCapital else accountBalance
+        val safeTarget = if (targetCapital.isFinite() && targetCapital >= 100.0) targetCapital else 100_000.0
+        val safeFixedRisk = if (fixedRiskUsd.isFinite() && fixedRiskUsd >= 0.5) fixedRiskUsd else 5.0
         val safeRisk = riskPercent.coerceIn(0.1, 10.0)
         val safeDaily = dailyLossLimitPercent.coerceIn(0.5, 25.0)
         val safeMaxDd = maxDrawdownLimitPercent.coerceIn(1.0, 50.0)
@@ -492,12 +500,19 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             it.copy(
                 accountBalance = accountBalance,
                 initialCapital = safeInitial,
+                targetCapital = safeTarget,
+                useFixedDollarRisk = useFixedDollarRisk,
+                fixedRiskUsd = safeFixedRisk,
                 riskPercent = safeRisk,
                 dailyLossLimitPercent = safeDaily,
                 maxDrawdownLimitPercent = safeMaxDd,
             )
         }
-        _toast.value = "تنظیمات مدیریت سرمایه و ریسک ذخیره شد"
+        _toast.value = if (useFixedDollarRisk) {
+            "✅ برنامه رشد سرمایه ($${safeInitial.toInt()} ← $${safeTarget.toInt()}) با ریسک ثابت $${safeFixedRisk} در هر معامله ذخیره شد"
+        } else {
+            "تنظیمات مدیریت سرمایه و ریسک ذخیره شد"
+        }
     }
 
     fun setAvalAiEnabled(enabled: Boolean) {
@@ -589,10 +604,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         note: String = "",
         strategyContext: String = "",
         entryInterval: Interval = Interval.M15,
+        strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+        strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
     ) {
         val cfg = settings.value
         if (!cfg.avalAiEnabled) {
-            executeOpenTradeNow(calc, note, entryInterval)
+            executeOpenTradeNow(calc, note, entryInterval, strategyId, strategyTitleFa)
             return
         }
 
@@ -626,7 +643,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                             if (note.isNotBlank()) append(note.trim()).append(" · ")
                             append("🤖 تایید AI (${verdict.confidence}%): ${verdict.summaryFa}")
                         }
-                        executeOpenTradeNow(calc, combinedNote, entryInterval)
+                        executeOpenTradeNow(calc, combinedNote, entryInterval, strategyId, strategyTitleFa)
                     } else {
                         _toast.value = "🛑 هوش مصنوعی مانع ورود شد (${verdict.confidence}%): ${verdict.summaryFa}"
                     }
@@ -643,19 +660,28 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         calc: RiskCalculationResult,
         note: String,
         entryInterval: Interval = Interval.M15,
+        strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+        strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
     ) {
         val now = System.currentTimeMillis()
-        val trade = container.journalStore.openTrade(calc, note = note, now = now, entryInterval = entryInterval)
+        val trade = container.journalStore.openTrade(
+            calc = calc,
+            note = note,
+            now = now,
+            entryInterval = entryInterval,
+            strategyId = strategyId,
+            strategyTitleFa = strategyTitleFa,
+        )
         _liveTicks.value[trade.symbol]?.let { tick ->
             _lastDisplayMarks.value = OpenPositionDisplay.record(_lastDisplayMarks.value, trade, tick, now)
         }
         refreshSymbolLivePrice(trade.symbol)
         syncBackgroundServiceState()
-        val msg = "⚡ معامله ${trade.symbol} [تایم ${trade.interval.label}] (${if (trade.action == com.aurum.edge.domain.SignalAction.BUY) "خرید" else "فروش"}) باز شد · ورود: ${trade.entry} · SL: ${trade.stopLoss} · TP: ${trade.takeProfit}"
+        val msg = "⚡ معامله ${trade.symbol} [تایم ${trade.interval.label}] · [${trade.strategyTitleFa}] (${if (trade.action == com.aurum.edge.domain.SignalAction.BUY) "خرید" else "فروش"}) باز شد · ریسک: $${trade.fixedRiskUsd}"
         _toast.value = msg
         BackgroundTradingService.postTradeEventNotification(
             context = container.appContext,
-            title = "باز شدن معامله ${trade.symbol}",
+            title = "باز شدن معامله ${trade.symbol} (${trade.strategyTitleFa})",
             body = msg,
         )
     }
@@ -754,21 +780,53 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
      * استراتژی قبلی بلافاصله غیرفعال می‌شود.
      */
     fun activateSingleBitcoinStrategy(strategyId: String, enableExecution: Boolean = true) {
-        val prevTitle = settings.value.activeBitcoinStrategyTitleFa()
-        val prevId = settings.value.selectedBitcoinStrategyId
         container.settingsStore.update {
+            val nextEnabled = it.enabledStrategyIds + strategyId
             it.copy(
                 selectedBitcoinStrategyId = strategyId,
+                enabledStrategyIds = nextEnabled,
                 autoPaperTrading = if (enableExecution) true else it.autoPaperTrading,
             )
         }
-        val newTitle = settings.value.activeBitcoinStrategyTitleFa()
-        _toast.value = if (prevId != strategyId) {
-            "✅ «$newTitle» فعال شد و استراتژی قبلی («$prevTitle») غیرفعال گردید"
-        } else {
-            "✅ «$newTitle» به‌عنوان تنها استراتژی فعال روی BTC/USDT تنظیم شد"
+        val focused = V1Universe.normalize(_focusedStrategySymbol.value)
+        val focusedTf = _focusedStrategyInterval.value
+        _dualSymbolStrategyReports.value[focused]?.reportFor(focusedTf, strategyId)?.let {
+            _btcStrategyReport.value = it
         }
-        scanAndEvaluateBitcoinStrategyNow(userInitiated = true)
+        _toast.value = "✅ استراتژی منتخب برای نمایش چک‌لیست تغییر کرد (اجرای هم‌زمان استراتژی‌ها فعال است)"
+        scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
+    }
+
+    fun setRunAllStrategiesSimultaneously(enabled: Boolean) {
+        container.settingsStore.update { current ->
+            val allIds = (BitcoinStrategyModel.entries.map { it.id } + current.customStrategies.map { it.id }).toSet()
+            current.copy(
+                runAllStrategiesSimultaneously = enabled,
+                enabledStrategyIds = if (enabled && current.enabledStrategyIds.isEmpty()) allIds else current.enabledStrategyIds,
+            )
+        }
+        _toast.value = if (enabled) {
+            "✅ اجرای هم‌زمان همه استراتژی‌ها فعال شد؛ معاملات در ژورنال به تفکیک استراتژی دسته‌بندی می‌شوند"
+        } else {
+            "حالت تک‌استراتژی فعال شد"
+        }
+        scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
+    }
+
+    fun toggleStrategyEnabledInMultiMode(strategyId: String, enabled: Boolean) {
+        container.settingsStore.update { current ->
+            val updated = if (enabled) {
+                current.enabledStrategyIds + strategyId
+            } else {
+                val candidate = current.enabledStrategyIds - strategyId
+                if (candidate.isEmpty()) setOf(strategyId) else candidate
+            }
+            current.copy(
+                enabledStrategyIds = updated,
+                selectedBitcoinStrategyId = if (enabled) strategyId else current.selectedBitcoinStrategyId,
+            )
+        }
+        scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
     }
 
     fun updateBaseStrategyConfig(newConfig: BaseStrategyConfig) {
@@ -948,6 +1006,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             customIdOverride = activeCustom?.id,
             nowMillis = now,
             symbolInput = symbol,
+            runAllSimultaneously = cfg.runAllStrategiesSimultaneously,
+            enabledStrategyIds = cfg.enabledStrategyIds,
+            customStrategies = cfg.customStrategies,
         )
 
         val updatedDualMap = _dualSymbolStrategyReports.value.toMutableMap()
@@ -1090,6 +1151,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                                 stopLoss = sl,
                                 takeProfit = tp,
                                 preferredAction = report.action,
+                                fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
                             )
                             val limits = RiskAndCalendarEngine.evaluateRiskLimits(
                                 accountBalance = cfg.accountBalance,
@@ -1103,12 +1165,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                             if (calc != null && limits.canOpenTrade(calc.riskBudgetUsd)) {
                                 lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to report.triggerBarTime)
                                 val tfLabel = report.triggerInterval.label
-                                val autoNote = "⚡ خودکار [تایم $tfLabel] (${report.trendPhase.badgeFa} · امتیاز ${report.coreTrendScore.toInt()}) · $symbol · ${report.triggerType.titleFa}"
+                                val autoNote = "⚡ خودکار [تایم $tfLabel] · [${report.strategyTitleFa}] · (${report.trendPhase.badgeFa} · امتیاز ${report.coreTrendScore.toInt()})"
                                 openAutoTrackedTrade(
                                     calc = calc,
                                     note = autoNote,
                                     strategyContext = report.toAiStrategyContext(),
                                     entryInterval = report.triggerInterval,
+                                    strategyId = report.strategyId,
+                                    strategyTitleFa = report.strategyTitleFa,
                                 )
                             }
                         }

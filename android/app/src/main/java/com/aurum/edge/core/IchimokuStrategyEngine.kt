@@ -510,9 +510,22 @@ data class DualTimeframeSymbolReport(
     val symbol: String,
     val report15m: StrategyEvaluationReport,
     val report5m: StrategyEvaluationReport,
+    val reports15mByStrategy: Map<String, StrategyEvaluationReport> = mapOf(report15m.strategyId to report15m),
+    val reports5mByStrategy: Map<String, StrategyEvaluationReport> = mapOf(report5m.strategyId to report5m),
 ) {
-    fun reportFor(interval: Interval): StrategyEvaluationReport =
-        if (interval == Interval.M5) report5m else report15m
+    fun reportFor(interval: Interval, strategyId: String? = null): StrategyEvaluationReport {
+        val map = if (interval == Interval.M5) reports5mByStrategy else reports15mByStrategy
+        if (strategyId != null) {
+            map[strategyId]?.let { return it }
+        }
+        return if (interval == Interval.M5) report5m else report15m
+    }
+
+    val allReports15m: List<StrategyEvaluationReport>
+        get() = reports15mByStrategy.values.toList().ifEmpty { listOf(report15m) }
+
+    val allReports5m: List<StrategyEvaluationReport>
+        get() = reports5mByStrategy.values.toList().ifEmpty { listOf(report5m) }
 
     val primaryReport: StrategyEvaluationReport
         get() = when {
@@ -528,10 +541,14 @@ data class DualTimeframeSymbolReport(
         }
 
     val actionableReports: List<StrategyEvaluationReport>
-        get() = listOf(report15m, report5m).filter { it.isActionable }
+        get() = (allReports15m + allReports5m)
+            .filter { it.isActionable }
+            .sortedByDescending { it.coreTrendScore }
 
     val sniperArmedReports: List<StrategyEvaluationReport>
-        get() = listOf(report15m, report5m).filter { it.isActionable || it.isSniperArmedPendingRetest }
+        get() = (allReports15m + allReports5m)
+            .filter { it.isActionable || it.isSniperArmedPendingRetest }
+            .sortedByDescending { it.coreTrendScore }
 
     val combinedSummaryFa: String
         get() = "[15m: ${report15m.readinessShortFa()}] · [5m: ${report5m.readinessShortFa()}]"
@@ -1344,8 +1361,16 @@ object IchimokuStrategyEngine {
             StrategyConditionCheck(16, "۱۶. نقطه‌زنی میلی‌متری ورود (Sniper Entry Pocket)", cond16Passed, cond16Detail),
         )
 
-        val allSixteenPassed = conditions.all { it.passed }
-        val firstFifteenPassed = conditions.take(15).all { it.passed }
+        val requiredIndicesForModel: Set<Int> = when (activeModel) {
+            BitcoinStrategyModel.BASE_ICHIMOKU -> (1..16).toSet()
+            BitcoinStrategyModel.PATEL_KIJUN_PULLBACK -> setOf(1, 2, 3, 4, 6, 8, 11, 13, 14, 15, 16)
+            BitcoinStrategyModel.TUTTLE_KUMO_BREAKOUT -> setOf(1, 4, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16)
+            BitcoinStrategyModel.ELLIOTT_HOSODA_WAVE -> setOf(1, 2, 5, 6, 10, 11, 12, 13, 14, 15, 16)
+            BitcoinStrategyModel.PELOILLE_MTF_PLATEAU -> setOf(1, 2, 3, 6, 8, 9, 11, 12, 13, 14, 15, 16)
+        }
+        val modelCoreConditions = conditions.filter { it.index in requiredIndicesForModel }
+        val allSixteenPassed = modelCoreConditions.all { it.passed }
+        val firstFifteenPassed = modelCoreConditions.filter { it.index != 16 }.all { it.passed }
         val triggerFired = triggerType != StrategyTriggerType.NONE
         val passedCount = conditions.count { it.passed }
         val phaseBonus = when (trendPhase) {
@@ -1382,15 +1407,15 @@ object IchimokuStrategyEngine {
         val tfTag = "[تایم ${config.triggerInterval.label}]"
         val summaryFa = when {
             readiness == StrategyReadinessState.SIGNAL_BUY ->
-                "$tfTag 🎯 خرید نقطه‌زنی ($normalizedSymbol · ۱۶/۱۶ شرط · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
+                "$tfTag 🎯 خرید نقطه‌زنی ($normalizedSymbol · $effectiveTitle · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
             readiness == StrategyReadinessState.SIGNAL_SELL ->
-                "$tfTag 🎯 فروش نقطه‌زنی ($normalizedSymbol · ۱۶/۱۶ شرط · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
+                "$tfTag 🎯 فروش نقطه‌زنی ($normalizedSymbol · $effectiveTitle · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
             sniperArmedPendingRetest ->
-                "$tfTag 🎯 مسلح برای نقطه‌زنی ($normalizedSymbol): ۱۵ شرط تایید؛ در کمین لمس $sniperOptimal"
+                "$tfTag 🎯 مسلح برای نقطه‌زنی ($normalizedSymbol · $effectiveTitle): در کمین لمس $sniperOptimal"
             readiness == StrategyReadinessState.WATCH_SETUP ->
                 "$tfTag ⏳ $passedCount/۱۶ شرط (${trendPhase.badgeFa})؛ منتظر ماشه در ${config.triggerInterval.label}"
             readiness == StrategyReadinessState.BLOCKED -> {
-                val firstFailed = conditions.firstOrNull { !it.passed }
+                val firstFailed = modelCoreConditions.firstOrNull { !it.passed } ?: conditions.firstOrNull { !it.passed }
                 "$tfTag 🛑 $passedCount/۱۶ شرط · مانع: ${firstFailed?.titleFa ?: ""}"
             }
             else -> "$tfTag در حال دریافت کندل‌های $normalizedSymbol..."
@@ -1435,8 +1460,8 @@ object IchimokuStrategyEngine {
     }
 
     /**
-     * ارزیابی هم‌زمان تایم‌فریم‌های ورود `15m` (`4H -> 1H -> 15m`) و `5m` (`1H -> 15m -> 5m`)
-     * با اشتراک‌گذاری کندل‌های `1H` و `15m` برای جلوگیری از مصرف اضافه اینترنت.
+     * ارزیابی هم‌زمان تمام استراتژی‌های فعال روی هر دو تایم‌فریم ورود `15m` (`4H -> 1H -> 15m`) و `5m` (`1H -> 15m -> 5m`)
+     * با اشتراک‌گذاری کندل‌های `4H`/`1H`/`15m`/`5m` برای جلوگیری از مصرف اضافه اینترنت.
      */
     fun evaluateDualTimeframeStrategy(
         activeModel: BitcoinStrategyModel,
@@ -1450,6 +1475,9 @@ object IchimokuStrategyEngine {
         customIdOverride: String? = null,
         nowMillis: Long = System.currentTimeMillis(),
         symbolInput: String = BTC_SYMBOL,
+        runAllSimultaneously: Boolean = true,
+        enabledStrategyIds: Set<String> = BitcoinStrategyModel.entries.map { it.id }.toSet(),
+        customStrategies: List<CustomStrategySlot> = emptyList(),
     ): DualTimeframeSymbolReport {
         val config15m = config.copy(
             macroIntervalLabel = Interval.H4.label,
@@ -1461,34 +1489,112 @@ object IchimokuStrategyEngine {
             strategyIntervalLabel = Interval.M15.label,
             triggerIntervalLabel = Interval.M5.label,
         )
-        val rep15m = evaluateBitcoinStrategy(
-            activeModel = activeModel,
-            config = config15m,
-            macroCandles = candles4h,
-            strategyCandles = candles1h,
-            triggerCandles = candles15m,
-            livePriceOverride = livePriceOverride,
-            customTitleOverride = customTitleOverride,
-            customIdOverride = customIdOverride,
-            nowMillis = nowMillis,
-            symbolInput = symbolInput,
-        )
-        val rep5m = evaluateBitcoinStrategy(
-            activeModel = activeModel,
-            config = config5m,
-            macroCandles = candles1h,
-            strategyCandles = candles15m,
-            triggerCandles = candles5m,
-            livePriceOverride = livePriceOverride,
-            customTitleOverride = customTitleOverride,
-            customIdOverride = customIdOverride,
-            nowMillis = nowMillis,
-            symbolInput = symbolInput,
-        )
+
+        val map15m = LinkedHashMap<String, StrategyEvaluationReport>()
+        val map5m = LinkedHashMap<String, StrategyEvaluationReport>()
+
+        if (runAllSimultaneously) {
+            val activeBuiltIns = BitcoinStrategyModel.entries.filter { it.id in enabledStrategyIds }
+                .ifEmpty { BitcoinStrategyModel.entries }
+            for (model in activeBuiltIns) {
+                map15m[model.id] = evaluateBitcoinStrategy(
+                    activeModel = model,
+                    config = config15m,
+                    macroCandles = candles4h,
+                    strategyCandles = candles1h,
+                    triggerCandles = candles15m,
+                    livePriceOverride = livePriceOverride,
+                    nowMillis = nowMillis,
+                    symbolInput = symbolInput,
+                )
+                map5m[model.id] = evaluateBitcoinStrategy(
+                    activeModel = model,
+                    config = config5m,
+                    macroCandles = candles1h,
+                    strategyCandles = candles15m,
+                    triggerCandles = candles5m,
+                    livePriceOverride = livePriceOverride,
+                    nowMillis = nowMillis,
+                    symbolInput = symbolInput,
+                )
+            }
+            for (slot in customStrategies.filter { it.id in enabledStrategyIds }) {
+                val baseMod = BitcoinStrategyModel.fromId(slot.baseModelId)
+                map15m[slot.id] = evaluateBitcoinStrategy(
+                    activeModel = baseMod,
+                    config = slot.config.copy(
+                        macroIntervalLabel = Interval.H4.label,
+                        strategyIntervalLabel = Interval.H1.label,
+                        triggerIntervalLabel = Interval.M15.label,
+                    ),
+                    macroCandles = candles4h,
+                    strategyCandles = candles1h,
+                    triggerCandles = candles15m,
+                    livePriceOverride = livePriceOverride,
+                    customTitleOverride = slot.titleFa,
+                    customIdOverride = slot.id,
+                    nowMillis = nowMillis,
+                    symbolInput = symbolInput,
+                )
+                map5m[slot.id] = evaluateBitcoinStrategy(
+                    activeModel = baseMod,
+                    config = slot.config.copy(
+                        macroIntervalLabel = Interval.H1.label,
+                        strategyIntervalLabel = Interval.M15.label,
+                        triggerIntervalLabel = Interval.M5.label,
+                    ),
+                    macroCandles = candles1h,
+                    strategyCandles = candles15m,
+                    triggerCandles = candles5m,
+                    livePriceOverride = livePriceOverride,
+                    customTitleOverride = slot.titleFa,
+                    customIdOverride = slot.id,
+                    nowMillis = nowMillis,
+                    symbolInput = symbolInput,
+                )
+            }
+        }
+
+        val focusedId = customIdOverride ?: activeModel.id
+        val rep15m = map15m[focusedId]
+            ?: map15m.values.firstOrNull { it.isActionable }
+            ?: evaluateBitcoinStrategy(
+                activeModel = activeModel,
+                config = config15m,
+                macroCandles = candles4h,
+                strategyCandles = candles1h,
+                triggerCandles = candles15m,
+                livePriceOverride = livePriceOverride,
+                customTitleOverride = customTitleOverride,
+                customIdOverride = customIdOverride,
+                nowMillis = nowMillis,
+                symbolInput = symbolInput,
+            ).also { map15m[it.strategyId] = it }
+
+        val rep5m = map5m[focusedId]
+            ?: map5m.values.firstOrNull { it.isActionable }
+            ?: evaluateBitcoinStrategy(
+                activeModel = activeModel,
+                config = config5m,
+                macroCandles = candles1h,
+                strategyCandles = candles15m,
+                triggerCandles = candles5m,
+                livePriceOverride = livePriceOverride,
+                customTitleOverride = customTitleOverride,
+                customIdOverride = customIdOverride,
+                nowMillis = nowMillis,
+                symbolInput = symbolInput,
+            ).also { map5m[it.strategyId] = it }
+
+        val best15m = map15m.values.firstOrNull { it.isActionable } ?: rep15m
+        val best5m = map5m.values.firstOrNull { it.isActionable } ?: rep5m
+
         return DualTimeframeSymbolReport(
-            symbol = rep15m.symbol,
-            report15m = rep15m,
-            report5m = rep5m,
+            symbol = best15m.symbol,
+            report15m = best15m,
+            report5m = best5m,
+            reports15mByStrategy = map15m,
+            reports5mByStrategy = map5m,
         )
     }
 

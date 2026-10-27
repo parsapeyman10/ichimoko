@@ -152,6 +152,9 @@ data class PaperTrade(
     val initialStopLoss: Double? = null,
     val trailExtreme: Double? = null,
     val cryptoVenue: String = "NOBITEX",
+    val strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+    val strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
+    val fixedRiskUsd: Double = 5.0,
 ) {
     val isOpen: Boolean get() = closedAt == null
     val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }
@@ -160,7 +163,11 @@ data class PaperTrade(
     val riskPerOz: Double get() = kotlin.math.abs(entry - (initialStopLoss ?: stopLoss))
 
     val riskUsd: Double
-        get() = PaperOrderRules.quotePnlToUsd(symbol, riskPerOz * positionOz, entry)
+        get() = if (fixedRiskUsd > 0.0) {
+            fixedRiskUsd
+        } else {
+            PaperOrderRules.quotePnlToUsd(symbol, riskPerOz * positionOz, entry)
+        }
 
     val effectiveLeverage: Int
         get() = if (leverage > 0) leverage else PaperOrderRules.defaultLeverageFor(symbol)
@@ -195,6 +202,9 @@ data class AppSettings(
     val riskPercent: Double = 0.5,
     val accountBalance: Double = 1000.0,
     val initialCapital: Double = 1000.0,
+    val targetCapital: Double = 100_000.0,
+    val useFixedDollarRisk: Boolean = true,
+    val fixedRiskUsd: Double = 5.0,
     val dailyLossLimitPercent: Double = 3.0,
     val maxDrawdownLimitPercent: Double = 10.0,
     val minConfidence: Double = 85.0,
@@ -216,6 +226,8 @@ data class AppSettings(
     val signalProfile: SignalProfile = SignalProfile.BASE,
     val activeStrategy: StrategyKind = StrategyKind.ICHIMOKU_PRICE_ACTION,
     val selectedBitcoinStrategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+    val runAllStrategiesSimultaneously: Boolean = true,
+    val enabledStrategyIds: Set<String> = BitcoinStrategyModel.entries.map { it.id }.toSet(),
     val baseStrategyConfig: BaseStrategyConfig = BaseStrategyConfig(),
     val customStrategies: List<CustomStrategySlot> = emptyList(),
     val categoryStrategies: Map<AssetClass, CategoryStrategy> = AssetClass.entries.associateWith { CategoryStrategy.HYBRID },
@@ -230,7 +242,19 @@ data class AppSettings(
             ?: BitcoinStrategyModel.fromId(selectedBitcoinStrategyId)
 
     fun activeBitcoinStrategyTitleFa(): String =
-        activeCustomStrategySlot()?.titleFa ?: activeBitcoinStrategyModel().titleFa
+        if (runAllStrategiesSimultaneously) {
+            "هم‌زمان ${enabledStrategyCount()} استراتژی فعال"
+        } else {
+            activeCustomStrategySlot()?.titleFa ?: activeBitcoinStrategyModel().titleFa
+        }
+
+    fun enabledStrategyCount(): Int {
+        val allKnownIds = BitcoinStrategyModel.entries.map { it.id } + customStrategies.map { it.id }
+        return if (runAllStrategiesSimultaneously) {
+            val matched = allKnownIds.count { it in enabledStrategyIds }
+            if (matched > 0) matched else allKnownIds.size
+        } else 1
+    }
 
     fun activeBitcoinStrategyConfig(): BaseStrategyConfig =
         activeCustomStrategySlot()?.config ?: baseStrategyConfig
