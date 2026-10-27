@@ -154,7 +154,7 @@ data class PaperTrade(
     val cryptoVenue: String = "NOBITEX",
     val strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
     val strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
-    val fixedRiskUsd: Double = 5.0,
+    val fixedRiskUsd: Double = 0.0,
 ) {
     val isOpen: Boolean get() = closedAt == null
     val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }
@@ -242,10 +242,13 @@ data class AppSettings(
             ?: BitcoinStrategyModel.fromId(selectedBitcoinStrategyId)
 
     fun activeBitcoinStrategyTitleFa(): String =
+        activeCustomStrategySlot()?.titleFa ?: activeBitcoinStrategyModel().titleFa
+
+    fun activeStrategiesSummaryFa(): String =
         if (runAllStrategiesSimultaneously) {
             "هم‌زمان ${enabledStrategyCount()} استراتژی فعال"
         } else {
-            activeCustomStrategySlot()?.titleFa ?: activeBitcoinStrategyModel().titleFa
+            activeBitcoinStrategyTitleFa()
         }
 
     fun enabledStrategyCount(): Int {
