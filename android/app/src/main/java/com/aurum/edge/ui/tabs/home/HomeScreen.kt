@@ -132,7 +132,7 @@ fun HomeScreen(
                     }
                     Switch(
                         checked = settings.backgroundMonitor,
-                        onCheckedChange = { viewModel.setBackgroundMonitor(it, context) },
+                        onCheckedChange = viewModel::setBackgroundMonitor,
                     )
                 }
             }
