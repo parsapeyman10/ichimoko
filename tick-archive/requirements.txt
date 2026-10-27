@@ -1,2 +1,0 @@
-aiohttp==3.13.3
-centrifuge-python==0.6.0
