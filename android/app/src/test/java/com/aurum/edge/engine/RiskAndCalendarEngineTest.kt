@@ -370,8 +370,7 @@ class RiskAndCalendarEngineTest {
         val chartSeries = IchimokuStrategyEngine.computeChartSeries(trigBars)
         assertNotNull(chartSeries)
         assertEquals(26, chartSeries!!.futureKumo.size)
-        assertEquals(trigBars.size, chartSeries.tenkan.size)
-        assertEquals(trigBars.size, chartSeries.kijun.size)
+        assertEquals(trigBars.size, chartSeries.bars.size)
 
         // 3. Test Break-Even and Preserve Mode on an open BTC/USDT trade
         val journal = JournalStore(context, File(context.filesDir, "test_btc_preserve.json"), store)
