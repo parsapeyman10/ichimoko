@@ -94,8 +94,8 @@ android {
         // channels + 15-minute automatic-check floor. See docs/RELEASE_3_0_FA.md and
         // CHANGELOG_FA.md. A versionCode must be bumped here before a release run, because the
         // workflow only publishes explicit tags / `release: publish` commits / approved dispatch.
-        versionCode = 700
-        versionName = "3.0.0"
+        versionCode = 707
+        versionName = "3.7.0"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
@@ -190,11 +190,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    // Nobitex documents Centrifugo public trade subscriptions; use its official Android SDK
-    // for application ping/pong, reconnect and server-supported stream recovery.
-    implementation("io.github.centrifugal:centrifuge-java:0.7.0")
-    implementation("org.tukaani:xz:1.10")
-    implementation("org.jsoup:jsoup:1.18.3")
 
     // JVM unit tests for the pure engine code and read-only data validation.
     // They never run inside the APK; release assembly requires them to pass below.
