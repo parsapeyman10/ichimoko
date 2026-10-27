@@ -459,7 +459,7 @@ private fun Live12ConditionChecklistPage(
                         color = AurumColors.Green,
                     )
                     Text(
-                        text = "چرخه زمانی هوسودا: کندل ${w.barsSinceWaveStart} (عدد پایه: ${w.nearestTimeCycleNumber}${if (w.isNearTimeCycleChangeDay) " ⚠️ روز چرخش" else ""}) · S-Point: ${if (w.sPointValid) "معتبر" else "خیر"}",
+                        text = "چرخه زمانی هوسودا: کندل ${w.barsSinceWaveStart} (عدد پایه: ${w.nearestTimeCycleNumber}${if (w.isNearTimeCycleChangeDay) " ⚠️ روز چرخش" else ""}) · S-Point: ${if (w.sPointHeld) "معتبر" else "خیر"}",
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.TextSecondary,
                     )

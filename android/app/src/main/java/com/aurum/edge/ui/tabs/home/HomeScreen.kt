@@ -39,7 +39,6 @@ import com.aurum.edge.core.PriceTick
 import com.aurum.edge.data.DisplayMark
 import com.aurum.edge.data.OpenPositionDisplay
 import com.aurum.edge.domain.SignalAction
-import com.aurum.edge.ui.components.ActionButton
 import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
@@ -65,9 +64,8 @@ fun HomeScreen(
     val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
     val lastMarks by viewModel.lastDisplayMarks.collectAsStateWithLifecycle()
     val scan by viewModel.pairScan.collectAsStateWithLifecycle()
-    val activeStrategy by viewModel.activeBitcoinStrategy.collectAsStateWithLifecycle()
-    val strategyReports by viewModel.symbolStrategyReports.collectAsStateWithLifecycle()
-    val backfillStatus by viewModel.backfillStatus.collectAsStateWithLifecycle()
+    val strategyReports by viewModel.allSymbolStrategyReports.collectAsStateWithLifecycle()
+    val isBackfilling by viewModel.isBackfilling.collectAsStateWithLifecycle()
 
     val freshPrices = com.aurum.edge.data.OpenPositionQuotePolicy.prices(openTradesList, liveTicks, now)
     val frozenPrices = openTradesList.mapNotNull { trade ->
@@ -78,7 +76,7 @@ fun HomeScreen(
     val totalMarginUsed = openTradesList.sumOf { it.effectiveMarginUsd }
     val equity = displayPnl?.let { settings.accountBalance + it }
     val freeMargin = equity?.let { (it - totalMarginUsed).coerceAtLeast(0.0) }
-    val readyCount = strategyReports.values.count { it.readyToEnter }
+    val readyCount = strategyReports.values.count { it.isActionable }
 
     Column(
         Modifier
@@ -89,7 +87,7 @@ fun HomeScreen(
         // ── ۱. پنل کنترل سریع: معامله خودکار + پایش بک‌گراند ۲۴/۷ ────────────
         SectionCard(
             title = "ربات معامله‌گر و پایش بک‌گراند ۲۴/۷",
-            subtitle = "${activeStrategy.title} · اسکن ۱۵ نماد (15m) · آماده ورود: $readyCount/15",
+            subtitle = "${settings.activeBitcoinStrategyTitleFa()} · اسکن ۱۵ نماد (15m) · آماده ورود: $readyCount/15",
             trailing = {
                 Pill(
                     text = if (settings.autoPaperTrading || settings.backgroundMonitor) "بک‌گراند فعال" else "متوقف",
@@ -151,10 +149,12 @@ fun HomeScreen(
                         Pill("$lbl: ${if (closed) "بسته" else "باز"}", if (closed) AurumColors.Red else AurumColors.Green)
                     }
                 }
-                ActionButton(
-                    text = if (backfillStatus.inProgress) "در حال همگام‌سازی..." else "همگام‌سازی گپ 🔄",
+                Pill(
+                    text = if (isBackfilling) "در حال همگام‌سازی..." else "همگام‌سازی گپ 🔄",
                     color = AurumColors.Cyan,
-                    onClick = { viewModel.triggerManualGapBackfill() },
+                    modifier = Modifier.clickable(enabled = !isBackfilling) {
+                        viewModel.syncAllOpenAndActiveSymbolsGap(notifyOnSuccess = true)
+                    },
                 )
             }
         }
