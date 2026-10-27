@@ -2,6 +2,31 @@ package com.aurum.edge.data
 
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.MarketHours
+import com.aurum.edge.domain.Interval
+import com.aurum.edge.domain.SignalAction
+
+data class PairScanStatus(
+    val symbol: String,
+    val state: String,
+    val detail: String,
+    val interval: Interval? = null,
+    val lastScanAt: Long? = null,
+    val action: SignalAction? = null,
+    val assetClass: AssetClass = AssetClass.of(symbol),
+)
+
+data class PairScanState(
+    val statuses: List<PairScanStatus> = emptyList(),
+    val sweeping: Boolean = false,
+    val checkedCount: Int = 0,
+    val totalCount: Int = 0,
+)
+
+object CatalogQuotePolicy {
+    fun tickMonitored(symbol: String): Boolean = symbol in WatchCatalog.scannerSymbols &&
+        (AssetClass.of(symbol) == AssetClass.FOREX || symbol in setOf("XAU/USD", "XAG/USD", "DOW") ||
+            CryptoCatalog.isCrypto(symbol))
+}
 
 /** A missing position is not a market-off indication. Describe only measured gates. */
 object MarketEntryReason {

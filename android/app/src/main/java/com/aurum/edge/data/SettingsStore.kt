@@ -4,11 +4,15 @@ import android.content.Context
 import android.content.SharedPreferences
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import com.aurum.edge.core.AppSettings
-import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.AssetClass
+import com.aurum.edge.core.BaseStrategyConfig
+import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.CategoryStrategy
-import com.aurum.edge.core.V1Universe
+import com.aurum.edge.core.CustomStrategySlot
 import com.aurum.edge.core.SignalProfile
+import com.aurum.edge.core.V1Universe
+import com.aurum.edge.domain.Interval
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -109,11 +113,39 @@ class SettingsStore(context: Context) {
         // Retired v1_watchlist is intentionally ignored. It cannot narrow the app catalog.
         // AI/news fields are retired: stored values stay readable for old installs but nothing
         // in the app consumes them anymore (kept only so AppSettings keeps its stored shape).
-        val aiUrl = storedNewsAiUrl
+        val aiUrl = storedNewsAiUrl.ifBlank { com.aurum.edge.data.AvalAiAdvisor.DEFAULT_BASE_URL }
         val aiFormat = prefs.getString(KEY_NEWS_AI_FORMAT, "AUTO").orEmpty().ifBlank { "AUTO" }
-        val aiModel = storedNewsAiModel
+        val aiModel = storedNewsAiModel.ifBlank { com.aurum.edge.data.AvalAiAdvisor.DEFAULT_MODEL }
+        val avalAiEnabled = prefs.getBoolean(KEY_AVAL_AI_ENABLED, false)
+        val storedBtcStrategyId = prefs.getString(KEY_BTC_STRATEGY_ID, BitcoinStrategyModel.BASE_ICHIMOKU.id)
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: BitcoinStrategyModel.BASE_ICHIMOKU.id
+        val storedBaseConfig = prefs.getString(KEY_BASE_STRATEGY_CONFIG_JSON, null)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { raw -> runCatching { KEY_JSON.decodeFromString(BaseStrategyConfig.serializer(), raw) }.getOrNull() }
+            ?: BaseStrategyConfig()
+        val storedCustomStrategies = prefs.getString(KEY_CUSTOM_STRATEGIES_JSON, null)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { raw -> runCatching { KEY_JSON.decodeFromString(customStrategiesSerializer, raw) }.getOrNull() }
+            ?: emptyList()
+        val validStrategyId = if (
+            BitcoinStrategyModel.entries.any { it.id == storedBtcStrategyId } ||
+            storedCustomStrategies.any { it.id == storedBtcStrategyId }
+        ) {
+            storedBtcStrategyId
+        } else {
+            BitcoinStrategyModel.BASE_ICHIMOKU.id
+        }
         val categoryStrategies = AssetClass.entries.associateWith { category ->
             CategoryStrategy.fromStored(prefs.getString("v1_strategy_${category.name}", null))
+        }
+        val defaultAllIds = (BitcoinStrategyModel.entries.map { it.id } + storedCustomStrategies.map { it.id }).toSet()
+        val storedEnabledIdsRaw = prefs.getString(KEY_ENABLED_STRATEGY_IDS, null)?.trim().orEmpty()
+        val storedEnabledIds = if (storedEnabledIdsRaw.isBlank()) {
+            defaultAllIds
+        } else {
+            storedEnabledIdsRaw.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet().ifEmpty { defaultAllIds }
         }
         return AppSettings(
         apiKey = storedApiKey?.takeIf { it.isNotBlank() }
@@ -123,12 +155,23 @@ class SettingsStore(context: Context) {
         symbol = V1Universe.normalize(prefs.getString(KEY_SYMBOL, null) ?: "XAU/USD")
             .takeIf(V1Universe::valid) ?: "XAU/USD",
         interval = Interval.M5,
-        riskPercent = prefs.getFloat(KEY_RISK, 0.5f).toDouble().takeIf { it.isFinite() }?.coerceIn(0.1, 0.5) ?: 0.5,
-        accountBalance = prefs.getFloat(KEY_BALANCE, 1000f).toDouble(),
+        riskPercent = prefs.getFloat(KEY_RISK, 0.5f).toDouble().takeIf { it.isFinite() }?.coerceIn(0.1, 10.0) ?: 0.5,
+        accountBalance = prefs.getFloat(KEY_BALANCE, 100_000f).toDouble(),
+        initialCapital = prefs.getFloat(KEY_INITIAL_CAPITAL, prefs.getFloat(KEY_BALANCE, 100_000f)).toDouble()
+            .takeIf { it.isFinite() && it >= 10.0 } ?: 100_000.0,
+        targetCapital = prefs.getFloat(KEY_TARGET_CAPITAL, 100_000f).toDouble()
+            .takeIf { it.isFinite() && it >= 100.0 } ?: 100_000.0,
+        useFixedDollarRisk = prefs.getBoolean(KEY_USE_FIXED_DOLLAR_RISK, true),
+        fixedRiskUsd = prefs.getFloat(KEY_FIXED_RISK_USD, 5.0f).toDouble()
+            .takeIf { it.isFinite() && it >= 0.5 } ?: 5.0,
+        dailyLossLimitPercent = prefs.getFloat(KEY_DAILY_LOSS_LIMIT, 100.0f).toDouble()
+            .takeIf { it.isFinite() }?.coerceIn(0.5, 100.0) ?: 100.0,
+        maxDrawdownLimitPercent = prefs.getFloat(KEY_MAX_DRAWDOWN_LIMIT, 100.0f).toDouble()
+            .takeIf { it.isFinite() }?.coerceIn(1.0, 100.0) ?: 100.0,
         minConfidence = prefs.getFloat(KEY_MIN_CONF, 85f).toDouble().takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
         spreadPrice = prefs.getFloat(KEY_SPREAD, 0.12f).toDouble(),
         commissionPerOz = prefs.getFloat(KEY_COMMISSION, 0.035f).toDouble(),
-        backgroundMonitor = prefs.getBoolean(KEY_MONITOR, false),
+        backgroundMonitor = prefs.getBoolean(KEY_MONITOR, true),
         notifyOnSignal = prefs.getBoolean(KEY_NOTIFY, true),
         alertSoundUri = prefs.getString(KEY_ALERT_SOUND_URI, "").orEmpty(),
         alertSoundName = prefs.getString(KEY_ALERT_SOUND_NAME, "").orEmpty(),
@@ -136,12 +179,18 @@ class SettingsStore(context: Context) {
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
         autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
         autoDownloadUpdates = prefs.getBoolean(KEY_AUTO_DOWNLOAD_UPDATES, true),
+        avalAiEnabled = avalAiEnabled,
         newsAiApiKey = storedNewsAiKey,
         newsAiBaseUrl = aiUrl,
         newsAiModel = aiModel,
         newsAiFormat = aiFormat,
         signalProfile = profile,
         activeStrategy = storedStrategy,
+        selectedBitcoinStrategyId = validStrategyId,
+        runAllStrategiesSimultaneously = prefs.getBoolean(KEY_RUN_ALL_STRATEGIES, true),
+        enabledStrategyIds = storedEnabledIds,
+        baseStrategyConfig = storedBaseConfig,
+        customStrategies = storedCustomStrategies,
         categoryStrategies = categoryStrategies,
     )
     }
@@ -254,7 +303,12 @@ class SettingsStore(context: Context) {
         val next = proposed.copy(
             symbol = V1Universe.normalize(proposed.symbol).takeIf(V1Universe::valid) ?: "XAU/USD",
             interval = Interval.M5,
-            riskPercent = proposed.riskPercent.takeIf { it.isFinite() }?.coerceIn(0.1, 0.5) ?: 0.5,
+            riskPercent = proposed.riskPercent.takeIf { it.isFinite() }?.coerceIn(0.1, 10.0) ?: 0.5,
+            initialCapital = proposed.initialCapital.takeIf { it.isFinite() && it >= 10.0 } ?: proposed.accountBalance.coerceAtLeast(10.0),
+            targetCapital = proposed.targetCapital.takeIf { it.isFinite() && it >= 100.0 } ?: 100_000.0,
+            fixedRiskUsd = proposed.fixedRiskUsd.takeIf { it.isFinite() && it >= 0.5 } ?: 5.0,
+            dailyLossLimitPercent = proposed.dailyLossLimitPercent.takeIf { it.isFinite() }?.coerceIn(0.5, 25.0) ?: 3.0,
+            maxDrawdownLimitPercent = proposed.maxDrawdownLimitPercent.takeIf { it.isFinite() }?.coerceIn(1.0, 50.0) ?: 10.0,
             minConfidence = proposed.minConfidence.takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
         )
         prefs.edit()
@@ -263,6 +317,12 @@ class SettingsStore(context: Context) {
             .putString(KEY_INTERVAL, next.interval.label)
             .putFloat(KEY_RISK, next.riskPercent.toFloat())
             .putFloat(KEY_BALANCE, next.accountBalance.toFloat())
+            .putFloat(KEY_INITIAL_CAPITAL, next.initialCapital.toFloat())
+            .putFloat(KEY_TARGET_CAPITAL, next.targetCapital.toFloat())
+            .putBoolean(KEY_USE_FIXED_DOLLAR_RISK, next.useFixedDollarRisk)
+            .putFloat(KEY_FIXED_RISK_USD, next.fixedRiskUsd.toFloat())
+            .putFloat(KEY_DAILY_LOSS_LIMIT, next.dailyLossLimitPercent.toFloat())
+            .putFloat(KEY_MAX_DRAWDOWN_LIMIT, next.maxDrawdownLimitPercent.toFloat())
             .putFloat(KEY_MIN_CONF, next.minConfidence.toFloat())
             .putFloat(KEY_SPREAD, next.spreadPrice.toFloat())
             .putFloat(KEY_COMMISSION, next.commissionPerOz.toFloat())
@@ -283,6 +343,11 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_SIGNAL_COOLDOWN, next.signalProfile.cooldownFilter)
             .putBoolean(KEY_SIGNAL_CHIKOU, next.signalProfile.chikouConfirmation)
             .putString(KEY_ACTIVE_STRATEGY, next.activeStrategy.id)
+            .putString(KEY_BTC_STRATEGY_ID, next.selectedBitcoinStrategyId)
+            .putBoolean(KEY_RUN_ALL_STRATEGIES, next.runAllStrategiesSimultaneously)
+            .putString(KEY_ENABLED_STRATEGY_IDS, next.enabledStrategyIds.joinToString(","))
+            .putString(KEY_BASE_STRATEGY_CONFIG_JSON, KEY_JSON.encodeToString(BaseStrategyConfig.serializer(), next.baseStrategyConfig))
+            .putString(KEY_CUSTOM_STRATEGIES_JSON, KEY_JSON.encodeToString(customStrategiesSerializer, next.customStrategies))
             .apply {
                 AssetClass.entries.forEach { category ->
                     putString("v1_strategy_${category.name}",
@@ -292,24 +357,61 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_NEWS_PAUSE, next.pauseOnNews)
             .putBoolean(KEY_AUTO_PAPER, next.autoPaperTrading)
             .putBoolean(KEY_AUTO_DOWNLOAD_UPDATES, next.autoDownloadUpdates)
+            .putBoolean(KEY_AVAL_AI_ENABLED, next.avalAiEnabled)
+            .putString(KEY_NEWS_AI_KEY, next.newsAiApiKey.trim())
+            .putString(KEY_NEWS_AI_URL, next.newsAiBaseUrl.trim().ifBlank { com.aurum.edge.data.AvalAiAdvisor.DEFAULT_BASE_URL })
+            .putString(KEY_NEWS_AI_MODEL, next.newsAiModel.trim().ifBlank { com.aurum.edge.data.AvalAiAdvisor.DEFAULT_MODEL })
             .apply()
         _settings.value = next
     }
 
-    fun setLastSync(symbol: String, interval: Interval, at: Long) {
-        prefs.edit().putLong("last_sync_${symbol}_${interval.label}", at).apply()
+    fun setLastSync(symbol: String, interval: Interval = Interval.M5, at: Long = System.currentTimeMillis()) {
+        val norm = V1Universe.normalize(symbol)
+        prefs.edit().putLong("last_sync_${norm}_${interval.label}", at).apply()
+    }
+
+    fun getLastSync(symbol: String, interval: Interval = Interval.M5): Long? {
+        val norm = V1Universe.normalize(symbol)
+        val ts = prefs.getLong("last_sync_${norm}_${interval.label}", 0L)
+        return ts.takeIf { it > 0L }
+    }
+
+    /**
+     * مهاجرت یک‌باره موجودی حساب به ۱۰۰,۰۰۰ دلار در زمان اجرای برنامه روی دستگاه کاربر
+     */
+    fun ensureBalance100kMigrated() {
+        if (!prefs.getBoolean(KEY_BALANCE_100K_MIGRATED_V3903, false)) {
+            prefs.edit().putBoolean(KEY_BALANCE_100K_MIGRATED_V3903, true).apply()
+            val cur = read()
+            if (cur.accountBalance < 50_000.0) {
+                update {
+                    it.copy(
+                        accountBalance = 100_000.0,
+                        initialCapital = 100_000.0,
+                        dailyLossLimitPercent = 100.0,
+                        maxDrawdownLimitPercent = 100.0,
+                        useFixedDollarRisk = true,
+                        fixedRiskUsd = 5.0,
+                    )
+                }
+            }
+        }
     }
 
     companion object {
         /** Dedicated keys are a symbol→key JSON map; unknown keys are ignored, never guessed. */
         private val symbolKeySerializer = MapSerializer(String.serializer(), String.serializer())
-        private val KEY_JSON = Json { ignoreUnknownKeys = true }
+        private val customStrategiesSerializer = ListSerializer(CustomStrategySlot.serializer())
+        private val KEY_JSON = Json { ignoreUnknownKeys = true; encodeDefaults = true }
         private const val KEY_API = "td_api_key"
         private const val KEY_TD_KEYS = "td_symbol_keys_json"
         private const val KEY_SYMBOL = "symbol"
         private const val KEY_INTERVAL = "interval"
         private const val KEY_RISK = "risk_percent"
         private const val KEY_BALANCE = "balance"
+        private const val KEY_INITIAL_CAPITAL = "initial_capital"
+        private const val KEY_DAILY_LOSS_LIMIT = "daily_loss_limit_percent"
+        private const val KEY_MAX_DRAWDOWN_LIMIT = "max_drawdown_limit_percent"
         private const val KEY_MIN_CONF = "min_confidence"
         private const val KEY_SPREAD = "spread_price"
         private const val KEY_COMMISSION = "commission_per_oz"
@@ -325,6 +427,7 @@ class SettingsStore(context: Context) {
         private const val KEY_AUTO_PAPER = "auto_paper_nine_conditions"
         private const val KEY_AUTO_DOWNLOAD_UPDATES = "auto_download_updates"
         private const val KEY_AUTO_DOWNLOAD_MIGRATED = "auto_download_updates_migrated_2_0_2"
+        private const val KEY_AVAL_AI_ENABLED = "aval_ai_pretrade_enabled"
         private const val KEY_NEWS_AI_KEY = "news_ai_client_key"
         private const val KEY_NEWS_AI_URL = "news_ai_client_base_url"
         private const val KEY_NEWS_AI_MODEL = "news_ai_client_model"
@@ -341,5 +444,14 @@ class SettingsStore(context: Context) {
         private const val KEY_SIGNAL_COOLDOWN = "signal_cooldown_filter"
         private const val KEY_SIGNAL_CHIKOU = "signal_chikou_confirmation"
         private const val KEY_ACTIVE_STRATEGY = "active_strategy"
+        private const val KEY_BTC_STRATEGY_ID = "btc_exclusive_strategy_id"
+        private const val KEY_RUN_ALL_STRATEGIES = "btc_run_all_strategies_simultaneously"
+        private const val KEY_ENABLED_STRATEGY_IDS = "btc_enabled_strategy_ids_csv"
+        private const val KEY_TARGET_CAPITAL = "target_capital_usd"
+        private const val KEY_USE_FIXED_DOLLAR_RISK = "use_fixed_dollar_risk"
+        private const val KEY_FIXED_RISK_USD = "fixed_risk_usd"
+        private const val KEY_BALANCE_100K_MIGRATED_V3903 = "balance_100k_migrated_v3903"
+        private const val KEY_BASE_STRATEGY_CONFIG_JSON = "btc_base_strategy_config_json"
+        private const val KEY_CUSTOM_STRATEGIES_JSON = "btc_custom_strategies_json"
     }
 }
