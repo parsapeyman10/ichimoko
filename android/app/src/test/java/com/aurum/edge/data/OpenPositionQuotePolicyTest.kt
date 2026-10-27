@@ -1,11 +1,11 @@
 package com.aurum.edge.data
 
-import com.aurum.edge.domain.FeedMode
-import com.aurum.edge.domain.FeedStatus
 import com.aurum.edge.core.MarketState
-import com.aurum.edge.domain.Interval
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick
+import com.aurum.edge.domain.FeedMode
+import com.aurum.edge.domain.FeedStatus
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.domain.SignalAction
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -25,9 +25,9 @@ class OpenPositionQuotePolicyTest {
     )
 
     @Test fun `selected Binance display tick cannot value crypto position without ordered replay`() {
-        val btc = trade("BTC/USDT", BinanceSpotClient.VENUE)
+        val btc = trade("BTC/USDT", "BINANCE_SPOT")
         assertNull(OpenPositionQuotePolicy.selectedFallback(btc,
-            market("BTC/USDT", "${BinanceSpotClient.PROVIDER} aggTrade"), now))
+            market("BTC/USDT", "Binance Spot aggTrade"), now))
         assertNull(OpenPositionQuotePolicy.selectedFallback(trade("BTC/USDT"),
             market("BTC/USDT", "Nobitex"), now))
     }
