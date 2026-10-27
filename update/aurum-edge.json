@@ -1,13 +1,20 @@
 {
-  "appId": "com.aurum.edge",
-  "channel": "stable",
+  "applicationId": "com.aurum.edge",
   "versionCode": 709,
   "versionName": "3.9.0",
+  "tagName": "v3.9.0",
+  "commitSha": "1691866a22f3c422c4a124bf3207c2e2c8ca1081",
   "publishedAt": "2026-10-27T09:28:42Z",
+  "artifactName": "AurumEdge-v3.9.0.apk",
+  "notes": "نسخه ۳.۹.۰ (کد ۷۰۹) — موتور ۱۶ شرطی نقطه‌زنی میلی‌متری ورود (Sniper Entry Pocket) در تلاقی Tenkan-sen و ناحیه طلایی ۵۵٪ کندل تریگر، حد ضرر ساختاری فشرده و اجرای لحظه‌ای ورود روی تیک زنده.",
   "apkUrl": "https://github.com/parsapeyman10/ichimoko/releases/download/v3.9.0/AurumEdge-v3.9.0.apk",
-  "apkSizeBytes": 11235143,
   "sha256": "db3543b43b41c8052fdfe4975208396156dd3585ad8d50e0d7e619c043882496",
-  "minSupportedVersionCode": 1,
-  "changelogFa": "Aurum Edge 3.9.0 (709): موتور ۱۶ شرطی نقطه‌زنی ورود (Sniper Entry Pocket) در تعادل Tenkan-sen و ناحیه طلایی ۵۵٪ کندل تریگر، حد ضرر ساختاری فشرده و اجرای لحظه‌ای ورود روی تیک زنده.",
-  "changelogEn": "Aurum Edge 3.9.0 (709): 16-condition Sniper Entry Pocket engine at Tenkan-sen equilibrium & 55% trigger candle Golden Pocket, tighter structural stop-loss, and real-time tick sniper execution."
+  "sizeBytes": 11235143,
+  "signerSha256": "137f3f98f6c85fdd8671d1d2099b095ed82f3f91594ac9e7b1ba22c264ed4a04",
+  "minSdk": 26,
+  "targetSdk": 35,
+  "supportedAbis": [
+    "arm64-v8a",
+    "armeabi-v7a"
+  ]
 }
