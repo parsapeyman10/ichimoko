@@ -11,6 +11,7 @@ import com.aurum.edge.core.BaseStrategyConfig
 import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.CandleBackfillSummary
 import com.aurum.edge.core.CustomStrategySlot
+import com.aurum.edge.core.DualTimeframeSymbolReport
 import com.aurum.edge.core.IchimokuStrategyEngine
 import com.aurum.edge.core.MarketState
 import com.aurum.edge.core.PaperTrade
@@ -22,6 +23,7 @@ import com.aurum.edge.core.StrategyEvaluationReport
 import com.aurum.edge.core.StrategyReadinessState
 import com.aurum.edge.core.SymbolPollTier
 import com.aurum.edge.core.V1Universe
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.data.AiTradeVerdict
 import com.aurum.edge.data.AvalAiAdvisor
@@ -82,8 +84,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private val _allSymbolStrategyReports = MutableStateFlow<Map<String, StrategyEvaluationReport>>(emptyMap())
     val allSymbolStrategyReports: StateFlow<Map<String, StrategyEvaluationReport>> = _allSymbolStrategyReports.asStateFlow()
 
+    private val _dualSymbolStrategyReports = MutableStateFlow<Map<String, DualTimeframeSymbolReport>>(emptyMap())
+    val dualSymbolStrategyReports: StateFlow<Map<String, DualTimeframeSymbolReport>> = _dualSymbolStrategyReports.asStateFlow()
+
     private val _focusedStrategySymbol = MutableStateFlow(IchimokuStrategyEngine.BTC_SYMBOL)
     val focusedStrategySymbol: StateFlow<String> = _focusedStrategySymbol.asStateFlow()
+
+    private val _focusedStrategyInterval = MutableStateFlow(Interval.M15)
+    val focusedStrategyInterval: StateFlow<Interval> = _focusedStrategyInterval.asStateFlow()
 
     val bandwidthStats: StateFlow<BandwidthSyncStats> = LiveQuoteFetcher.syncStats
 
@@ -101,7 +109,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     private var updateCheckStarted = false
     private var liveMonitorJob: Job? = null
-    private var lastScannedTriggerBucket: Long = -1L
+    private var lastScanned15mBucket: Long = -1L
+    private var lastScanned5mBucket: Long = -1L
     private var lastMidBarCheckedBucket: Long = -1L
     private var lastAutoFiredBarTimeByKey: Map<String, Long> = emptyMap()
 
@@ -144,7 +153,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         BackgroundTradingService.syncServiceState(
             context = container.appContext,
             enabled = shouldRunBg,
-            title = "Aurum Edge · رادار ۱۵ نماد (15m)",
+            title = "Aurum Edge · رادار ۱۵ نماد (15m + 5m)",
             text = "${cfg.activeBitcoinStrategyTitleFa()} · پوزیشن باز: ${trades.value.count { it.isOpen }}",
         )
     }
@@ -224,29 +233,32 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     }
                 }
 
-                // ۴. زمان‌بندی بررسی ۱۵ نماد هماهنگ با بسته شدن کندل ۱۵ دقیقه (`:00`, `:15`, `:30`, `:45` + 3s) و چک‌های میان‌کندلی سریع
-                val triggerInterval = settings.value.activeBitcoinStrategyConfig().triggerInterval
-                val currentTriggerBucket = Smart15mSyncPlanner.currentCandleBucket(now, triggerInterval)
-                val quarterStepMs = (triggerInterval.millis / 4L).coerceAtLeast(60_000L)
-                val currentQuarterBucket = now / quarterStepMs
+                // ۴. رصد هم‌زمان تایم‌فریم‌های ورود 15m و 5m هماهنگ با بسته شدن کندل ۵ دقیقه و ۱۵ دقیقه (Delta Sync بدون مصرف اضافه دیتا)
+                val current15mBucket = Smart15mSyncPlanner.currentCandleBucket(now, Interval.M15)
+                val current5mBucket = Smart15mSyncPlanner.currentCandleBucket(now, Interval.M5)
+                val currentMidBucket = now / 120_000L // هر ۲ دقیقه چک میان‌کندلی نمادهای آماده ماشه
 
-                if (currentTriggerBucket > lastScannedTriggerBucket || _allSymbolStrategyReports.value.isEmpty()) {
+                if (current15mBucket > lastScanned15mBucket ||
+                    current5mBucket > lastScanned5mBucket ||
+                    _allSymbolStrategyReports.value.isEmpty()
+                ) {
                     evaluateAll15SymbolsStrategyInternal(
                         userInitiated = false,
                         fullSweep = true,
                     )
-                    lastScannedTriggerBucket = currentTriggerBucket
-                    lastMidBarCheckedBucket = currentQuarterBucket
+                    lastScanned15mBucket = current15mBucket
+                    lastScanned5mBucket = current5mBucket
+                    lastMidBarCheckedBucket = currentMidBucket
                     LiveQuoteFetcher.recordScheduled15mSweep(
                         lastSweepAt = System.currentTimeMillis(),
                         nextSweepAt = Smart15mSyncPlanner.nextTriggerBoundaryCheckMillis(
                             nowMillis = System.currentTimeMillis(),
-                            triggerInterval = triggerInterval,
+                            triggerInterval = Interval.M5,
                         ),
                     )
-                } else if (currentQuarterBucket > lastMidBarCheckedBucket) {
-                    // چک سریع میان‌کندلی (هر ۳ دقیقه و ۴۵ ثانیه) برای شکار اول روند روی نمادهای آماده ماشه و پوزیشن‌های باز
-                    lastMidBarCheckedBucket = currentQuarterBucket
+                } else if (currentMidBucket > lastMidBarCheckedBucket) {
+                    // چک سریع میان‌کندلی برای شکار اول روند روی نمادهای آماده ماشه و پوزیشن‌های باز
+                    lastMidBarCheckedBucket = currentMidBucket
                     evaluateAll15SymbolsStrategyInternal(
                         userInitiated = false,
                         fullSweep = false,
@@ -381,19 +393,21 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
 
-        // شکار لحظه‌ای نقطه‌زنی ورود (Real-Time Sniper Pocket Fill) به محض لمس محدوده بهینه توسط تیک زنده
+        // شکار لحظه‌ای نقطه‌زنی ورود (Real-Time Sniper Pocket Fill) روی هر دو تایم‌فریم 15m و 5m به محض لمس محدوده بهینه توسط تیک زنده
         val cfg = settings.value
-        val armedReport = _allSymbolStrategyReports.value[symbol]
+        val dualReport = _dualSymbolStrategyReports.value[symbol]
+        val armedCandidates = dualReport?.sniperArmedReports
+            ?.sortedByDescending { it.coreTrendScore }
+            ?: listOfNotNull(_allSymbolStrategyReports.value[symbol]).filter { it.isActionable || it.isSniperArmedPendingRetest }
+        val armedReport = armedCandidates.firstOrNull { it.isPriceInSniperWindow(tick.price) }
         if (cfg.autoPaperTrading && armedReport != null &&
-            (armedReport.isActionable || armedReport.isSniperArmedPendingRetest) &&
-            armedReport.isPriceInSniperWindow(tick.price) &&
             !com.aurum.edge.core.MarketHours.closedFor(symbol, tick.at)
         ) {
             val openAll = trades.value.filter { it.isOpen }
             val hasOpenForSym = openAll.any { V1Universe.normalize(it.symbol) == symbol }
             val assetClass = com.aurum.edge.core.AssetClass.of(symbol)
             val openInClass = openAll.count { com.aurum.edge.core.AssetClass.of(it.symbol) == assetClass }
-            val fireKey = "${armedReport.strategyId}|$symbol"
+            val fireKey = "${armedReport.strategyId}|$symbol|${armedReport.triggerInterval.label}"
             val lastFiredBar = lastAutoFiredBarTimeByKey[fireKey] ?: 0L
             if (!hasOpenForSym && openAll.size < 4 && openInClass < assetClass.maxSlots &&
                 armedReport.triggerBarTime > 0L && armedReport.triggerBarTime != lastFiredBar
@@ -421,11 +435,13 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     )
                     if (calc != null && limits.canOpenTrade(calc.riskBudgetUsd)) {
                         lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
-                        val sniperNote = "🎯 نقطه‌زنی لحظه‌ای (${armedReport.trendPhase.badgeFa} · دقت ${armedReport.sniperEntryScore.toInt()}%) · $symbol"
+                        val tfLabel = armedReport.triggerInterval.label
+                        val sniperNote = "🎯 نقطه‌زنی [تایم $tfLabel] (${armedReport.trendPhase.badgeFa} · دقت ${armedReport.sniperEntryScore.toInt()}%) · $symbol"
                         openAutoTrackedTrade(
                             calc = calc,
                             note = sniperNote,
                             strategyContext = armedReport.toAiStrategyContext(),
+                            entryInterval = armedReport.triggerInterval,
                         )
                     }
                 }
@@ -572,10 +588,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         calc: RiskCalculationResult,
         note: String = "",
         strategyContext: String = "",
+        entryInterval: Interval = Interval.M15,
     ) {
         val cfg = settings.value
         if (!cfg.avalAiEnabled) {
-            executeOpenTradeNow(calc, note)
+            executeOpenTradeNow(calc, note, entryInterval)
             return
         }
 
@@ -609,7 +626,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                             if (note.isNotBlank()) append(note.trim()).append(" · ")
                             append("🤖 تایید AI (${verdict.confidence}%): ${verdict.summaryFa}")
                         }
-                        executeOpenTradeNow(calc, combinedNote)
+                        executeOpenTradeNow(calc, combinedNote, entryInterval)
                     } else {
                         _toast.value = "🛑 هوش مصنوعی مانع ورود شد (${verdict.confidence}%): ${verdict.summaryFa}"
                     }
@@ -622,15 +639,19 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    private fun executeOpenTradeNow(calc: RiskCalculationResult, note: String) {
+    private fun executeOpenTradeNow(
+        calc: RiskCalculationResult,
+        note: String,
+        entryInterval: Interval = Interval.M15,
+    ) {
         val now = System.currentTimeMillis()
-        val trade = container.journalStore.openTrade(calc, note = note, now = now)
+        val trade = container.journalStore.openTrade(calc, note = note, now = now, entryInterval = entryInterval)
         _liveTicks.value[trade.symbol]?.let { tick ->
             _lastDisplayMarks.value = OpenPositionDisplay.record(_lastDisplayMarks.value, trade, tick, now)
         }
         refreshSymbolLivePrice(trade.symbol)
         syncBackgroundServiceState()
-        val msg = "⚡ معامله ${trade.symbol} (${if (trade.action == com.aurum.edge.domain.SignalAction.BUY) "خرید" else "فروش"}) باز شد · ورود: ${trade.entry} · SL: ${trade.stopLoss} · TP: ${trade.takeProfit}"
+        val msg = "⚡ معامله ${trade.symbol} [تایم ${trade.interval.label}] (${if (trade.action == com.aurum.edge.domain.SignalAction.BUY) "خرید" else "فروش"}) باز شد · ورود: ${trade.entry} · SL: ${trade.stopLoss} · TP: ${trade.takeProfit}"
         _toast.value = msg
         BackgroundTradingService.postTradeEventNotification(
             context = container.appContext,
@@ -820,19 +841,40 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
     }
 
-    fun selectFocusedStrategySymbol(symbolInput: String) {
+    fun selectFocusedStrategySymbol(
+        symbolInput: String,
+        intervalOverride: Interval? = null,
+    ) {
         val normalized = V1Universe.normalize(symbolInput)
         if (!V1Universe.valid(normalized)) return
         _focusedStrategySymbol.value = normalized
-        val cachedReport = _allSymbolStrategyReports.value[normalized]
-        if (cachedReport != null) {
-            _btcStrategyReport.value = cachedReport
+        if (intervalOverride != null) {
+            _focusedStrategyInterval.value = intervalOverride
+        }
+        val targetInterval = _focusedStrategyInterval.value
+        val cachedDual = _dualSymbolStrategyReports.value[normalized]
+        if (cachedDual != null) {
+            _btcStrategyReport.value = cachedDual.reportFor(targetInterval)
         } else {
-            viewModelScope.launch {
-                evaluateSingleSymbolStrategy(normalized, forceNetwork = false)?.let { rep ->
-                    _btcStrategyReport.value = rep
+            val cachedReport = _allSymbolStrategyReports.value[normalized]
+            if (cachedReport != null) {
+                _btcStrategyReport.value = cachedReport
+            } else {
+                viewModelScope.launch {
+                    evaluateSingleSymbolStrategy(normalized, forceNetwork = false)?.let { dual ->
+                        _btcStrategyReport.value = dual.reportFor(targetInterval)
+                    }
                 }
             }
+        }
+    }
+
+    fun selectFocusedStrategyInterval(interval: Interval) {
+        val safeInterval = if (interval == Interval.M5) Interval.M5 else Interval.M15
+        _focusedStrategyInterval.value = safeInterval
+        val focused = V1Universe.normalize(_focusedStrategySymbol.value)
+        _dualSymbolStrategyReports.value[focused]?.let { dual ->
+            _btcStrategyReport.value = dual.reportFor(safeInterval)
         }
     }
 
@@ -848,33 +890,42 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private suspend fun evaluateSingleSymbolStrategy(
         symbol: String,
         forceNetwork: Boolean = false,
-    ): StrategyEvaluationReport? {
+    ): DualTimeframeSymbolReport? {
         val cfg = settings.value
         val activeModel = cfg.activeBitcoinStrategyModel()
         val activeCustom = cfg.activeCustomStrategySlot()
         val stratConfig = cfg.activeBitcoinStrategyConfig()
         val now = System.currentTimeMillis()
 
-        // ابتدا 1H را می‌گیریم تا در نمادهای Yahoo کش 4H هم به‌صورت خودکار و بدون درخواست اضافه ساخته شود
-        val strategyBars = LiveQuoteFetcher.fetchTimeframeCandles(
+        // ۱. ابتدا 1H را می‌گیریم تا در نمادهای Yahoo کش 4H هم به‌صورت خودکار و بدون درخواست اضافه ساخته شود
+        val bars1h = LiveQuoteFetcher.fetchTimeframeCandles(
             symbolInput = symbol,
-            interval = stratConfig.strategyInterval,
+            interval = Interval.H1,
             limit = 110,
             nowMillis = now,
             forceNetwork = forceNetwork,
         )?.first.orEmpty()
 
-        val macroBars = LiveQuoteFetcher.fetchTimeframeCandles(
+        val bars4h = LiveQuoteFetcher.fetchTimeframeCandles(
             symbolInput = symbol,
-            interval = stratConfig.macroInterval,
+            interval = Interval.H4,
             limit = 110,
             nowMillis = now,
             forceNetwork = forceNetwork,
         )?.first.orEmpty()
 
-        val triggerBars = LiveQuoteFetcher.fetchTimeframeCandles(
+        // ۲. دریافت دلتای کندل‌های 15m و 5m (با کش هوشمند فقط ۳ کندل جدید دانلود می‌شود و بین هر دو تایم‌فریم به اشتراک گذاشته می‌شود)
+        val bars15m = LiveQuoteFetcher.fetchTimeframeCandles(
             symbolInput = symbol,
-            interval = stratConfig.triggerInterval,
+            interval = Interval.M15,
+            limit = 110,
+            nowMillis = now,
+            forceNetwork = forceNetwork,
+        )?.first.orEmpty()
+
+        val bars5m = LiveQuoteFetcher.fetchTimeframeCandles(
+            symbolInput = symbol,
+            interval = Interval.M5,
             limit = 110,
             nowMillis = now,
             forceNetwork = forceNetwork,
@@ -885,12 +936,13 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             applyIncomingTick(symbol, tick)
         }
 
-        val report = IchimokuStrategyEngine.evaluateBitcoinStrategy(
+        val dualReport = IchimokuStrategyEngine.evaluateDualTimeframeStrategy(
             activeModel = activeModel,
             config = stratConfig,
-            macroCandles = macroBars,
-            strategyCandles = strategyBars,
-            triggerCandles = triggerBars,
+            candles4h = bars4h,
+            candles1h = bars1h,
+            candles15m = bars15m,
+            candles5m = bars5m,
             livePriceOverride = liveTick?.price,
             customTitleOverride = activeCustom?.titleFa,
             customIdOverride = activeCustom?.id,
@@ -898,16 +950,20 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             symbolInput = symbol,
         )
 
+        val updatedDualMap = _dualSymbolStrategyReports.value.toMutableMap()
+        updatedDualMap[symbol] = dualReport
+        _dualSymbolStrategyReports.value = updatedDualMap
+
         val updatedMap = _allSymbolStrategyReports.value.toMutableMap()
-        updatedMap[symbol] = report
+        updatedMap[symbol] = dualReport.primaryReport
         _allSymbolStrategyReports.value = updatedMap
-        return report
+        return dualReport
     }
 
     /**
-     * بررسی هوشمند هر ۱۵ نماد داخل اپ (`V1Universe.allSymbols`) در تایم‌فریم معامله ۱۵ دقیقه (`15m`):
-     * - در مرز بسته شدن کندل ۱۵ دقیقه (`fullSweep = true`): تمام ۱۵ نماد با استفاده از کش `1H/4H` و دریافت Delta کندل `15m` بررسی می‌شوند.
-     * - در چک میان‌کندلی (`fullSweep = false`): فقط نماد منتخب، نمادهای دارای معامله باز و نمادهای آماده ماشه (`WATCH_SETUP`) بررسی می‌شوند.
+     * بررسی هوشمند هر ۱۵ نماد داخل اپ (`V1Universe.allSymbols`) هم‌زمان در دو تایم‌فریم ورود `15m` و `5m`:
+     * - با اشتراک‌گذاری کندل‌های `4H`/`1H`/`15m` و Delta Sync، هیچ دیتای تکراری دانلود نمی‌شود.
+     * - در هر سیگنال، اعلان و معامله ثبت‌شده در ژورنال، تایم‌فریم ورود (`15m` یا `5m`) صراحتاً درج می‌شود.
      */
     private suspend fun evaluateAll15SymbolsStrategyInternal(
         userInitiated: Boolean,
@@ -920,6 +976,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             val stratConfig = cfg.activeBitcoinStrategyConfig()
             val now = System.currentTimeMillis()
             val focused = V1Universe.normalize(_focusedStrategySymbol.value)
+            val focusedInterval = _focusedStrategyInterval.value
             val openTradeSymbols = trades.value.filter { it.isOpen }.map { V1Universe.normalize(it.symbol) }.toSet()
 
             // ابتدا ۵ رمزارز را در ۱ درخواست دسته‌ای آپدیت کن تا قیمت لحظه‌ای همه تازه باشد
@@ -933,20 +990,23 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 V1Universe.allSymbols
             } else {
                 V1Universe.allSymbols.filter { sym ->
+                    val dual = _dualSymbolStrategyReports.value[sym]
                     sym == focused ||
                         sym in openTradeSymbols ||
-                        _allSymbolStrategyReports.value[sym]?.readiness == StrategyReadinessState.WATCH_SETUP ||
-                        _allSymbolStrategyReports.value[sym]?.isActionable == true
+                        dual?.report15m?.readiness == StrategyReadinessState.WATCH_SETUP ||
+                        dual?.report5m?.readiness == StrategyReadinessState.WATCH_SETUP ||
+                        dual?.actionableReports?.isNotEmpty() == true
                 }
             }
 
+            val dualMap = _dualSymbolStrategyReports.value.toMutableMap()
             val reportsMap = _allSymbolStrategyReports.value.toMutableMap()
-            val newlyEvaluated = mutableListOf<StrategyEvaluationReport>()
+            val newlyEvaluatedDuals = mutableListOf<DualTimeframeSymbolReport>()
 
             // اسکن موازی (Parallel Fan-Out در دسته‌های ۵ تایی) برای تصمیم‌گیری ۴ برابر سریع‌تر
             val activeSymbolsToFetch = symbolsToEvaluate.filter { symbol ->
                 val marketClosed = com.aurum.edge.core.MarketHours.closedFor(symbol, now)
-                if (marketClosed && reportsMap[symbol] != null && !userInitiated) {
+                if (marketClosed && dualMap[symbol] != null && !userInitiated) {
                     LiveQuoteFetcher.recordSkippedClosedMarketCheck(1)
                     false
                 } else {
@@ -961,27 +1021,29 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                             evaluateSingleSymbolStrategy(symbol, forceNetwork = false)
                         }
                     }.awaitAll()
-                    batchResults.filterNotNull().forEach { report ->
-                        reportsMap[report.symbol] = report
-                        newlyEvaluated += report
-                        if (report.symbol == focused || (_btcStrategyReport.value == null && report.symbol == IchimokuStrategyEngine.BTC_SYMBOL)) {
-                            _btcStrategyReport.value = report
+                    batchResults.filterNotNull().forEach { dual ->
+                        dualMap[dual.symbol] = dual
+                        reportsMap[dual.symbol] = dual.primaryReport
+                        newlyEvaluatedDuals += dual
+                        if (dual.symbol == focused || (_btcStrategyReport.value == null && dual.symbol == IchimokuStrategyEngine.BTC_SYMBOL)) {
+                            _btcStrategyReport.value = dual.reportFor(focusedInterval)
                         }
                     }
                     updatePairScanStateFromReports(reportsMap, sweeping = true, now = now)
                 }
             }
 
-            // ۱. مدیریت پویا ۴ مرحله‌ای (Preserve Mode / Kijun Trend-Ride / Break-Even) روی معاملات باز
-            for (report in newlyEvaluated) {
-                val symbol = report.symbol
+            // ۱. مدیریت پویا ۴ مرحله‌ای (Preserve Mode / Kijun Trend-Ride / Break-Even) روی معاملات باز بر اساس تایم‌فریم ورود همان معامله
+            for (dual in newlyEvaluatedDuals) {
+                val symbol = dual.symbol
                 val openSymbolTrades = trades.value.filter {
                     it.isOpen && V1Universe.normalize(it.symbol) == symbol
                 }
                 for (openTrade in openSymbolTrades) {
+                    val matchingReport = dual.reportFor(openTrade.interval)
                     val preserveUpdate = IchimokuStrategyEngine.evaluateOpenTradeManagement(
                         trade = openTrade,
-                        report = report,
+                        report = matchingReport,
                         config = stratConfig,
                     )
                     if (preserveUpdate != null) {
@@ -990,17 +1052,17 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                             newStopLoss = preserveUpdate.newStopLoss,
                             stageNote = preserveUpdate.stageTitleFa,
                         )
-                        _toast.value = "${preserveUpdate.stageTitleFa}: استاپ ${openTrade.symbol} به ${preserveUpdate.newStopLoss} منتقل شد (${preserveUpdate.reasonFa})"
+                        _toast.value = "${preserveUpdate.stageTitleFa} [${openTrade.interval.label}]: استاپ ${openTrade.symbol} به ${preserveUpdate.newStopLoss} منتقل شد (${preserveUpdate.reasonFa})"
                     }
                 }
             }
 
-            // ۲. اولویت‌بندی لیدرهای بازار بر اساس Core-Trend Score (انتخاب قوی‌ترین روند اصلی بازار برای ورود خودکار)
+            // ۲. رصد هم‌زمان 15m و 5m برای ورود خودکار و اولویت‌بندی بر اساس Core-Trend Score
             if (cfg.autoPaperTrading) {
-                val rankedCandidates = newlyEvaluated
+                val rankedCandidates = newlyEvaluatedDuals
+                    .flatMap { it.actionableReports }
                     .filter { rep ->
-                        rep.isActionable &&
-                            !com.aurum.edge.core.MarketHours.closedFor(rep.symbol, now) &&
+                        !com.aurum.edge.core.MarketHours.closedFor(rep.symbol, now) &&
                             trades.value.none { it.isOpen && V1Universe.normalize(it.symbol) == rep.symbol }
                     }
                     .sortedByDescending { it.coreTrendScore }
@@ -1008,11 +1070,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 for (report in rankedCandidates) {
                     val symbol = report.symbol
                     val openAll = trades.value.filter { it.isOpen }
+                    val hasOpenForSym = openAll.any { V1Universe.normalize(it.symbol) == symbol }
                     val assetClass = com.aurum.edge.core.AssetClass.of(symbol)
                     val openInClass = openAll.count { com.aurum.edge.core.AssetClass.of(it.symbol) == assetClass }
-                    val fireKey = "${report.strategyId}|$symbol"
+                    val fireKey = "${report.strategyId}|$symbol|${report.triggerInterval.label}"
                     val lastFiredBar = lastAutoFiredBarTimeByKey[fireKey] ?: 0L
-                    if (openAll.size < 4 && openInClass < assetClass.maxSlots &&
+                    if (!hasOpenForSym && openAll.size < 4 && openInClass < assetClass.maxSlots &&
                         report.triggerBarTime > 0L && report.triggerBarTime != lastFiredBar
                     ) {
                         val entry = report.suggestedEntry
@@ -1039,11 +1102,13 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                             )
                             if (calc != null && limits.canOpenTrade(calc.riskBudgetUsd)) {
                                 lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to report.triggerBarTime)
-                                val autoNote = "⚡ خودکار (${report.trendPhase.badgeFa} · امتیاز ${report.coreTrendScore.toInt()}) · $symbol · ${report.triggerType.titleFa}"
+                                val tfLabel = report.triggerInterval.label
+                                val autoNote = "⚡ خودکار [تایم $tfLabel] (${report.trendPhase.badgeFa} · امتیاز ${report.coreTrendScore.toInt()}) · $symbol · ${report.triggerType.titleFa}"
                                 openAutoTrackedTrade(
                                     calc = calc,
                                     note = autoNote,
                                     strategyContext = report.toAiStrategyContext(),
+                                    entryInterval = report.triggerInterval,
                                 )
                             }
                         }
@@ -1051,15 +1116,17 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 }
             }
 
+            _dualSymbolStrategyReports.value = dualMap
             _allSymbolStrategyReports.value = reportsMap
-            reportsMap[focused]?.let { _btcStrategyReport.value = it }
+            dualMap[focused]?.let { _btcStrategyReport.value = it.reportFor(focusedInterval) }
             updatePairScanStateFromReports(reportsMap, sweeping = false, now = now)
 
             if (userInitiated) {
-                val buyCount = reportsMap.values.count { it.readiness == StrategyReadinessState.SIGNAL_BUY }
-                val sellCount = reportsMap.values.count { it.readiness == StrategyReadinessState.SIGNAL_SELL }
-                val watchCount = reportsMap.values.count { it.readiness == StrategyReadinessState.WATCH_SETUP }
-                _toast.value = "✅ هر ${reportsMap.size} نماد در تایم‌فریم ${stratConfig.triggerInterval.label} بررسی شد (سیگنال خرید: $buyCount · فروش: $sellCount · آماده ماشه: $watchCount)"
+                val buy15 = dualMap.values.count { it.report15m.readiness == StrategyReadinessState.SIGNAL_BUY }
+                val sell15 = dualMap.values.count { it.report15m.readiness == StrategyReadinessState.SIGNAL_SELL }
+                val buy5 = dualMap.values.count { it.report5m.readiness == StrategyReadinessState.SIGNAL_BUY }
+                val sell5 = dualMap.values.count { it.report5m.readiness == StrategyReadinessState.SIGNAL_SELL }
+                _toast.value = "✅ رصد هم‌زمان ۱۵ نماد — تایم 15m (خرید: $buy15 · فروش: $sell15) | تایم 5m (خرید: $buy5 · فروش: $sell5)"
             }
         } finally {
             _isScanningBtcStrategy.value = false
@@ -1071,8 +1138,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         sweeping: Boolean,
         now: Long,
     ) {
+        val dualMap = _dualSymbolStrategyReports.value
         val statuses = V1Universe.allSymbols.map { sym ->
             val rep = reportsMap[sym]
+            val dual = dualMap[sym]
             val stateCode = when (rep?.readiness) {
                 StrategyReadinessState.SIGNAL_BUY, StrategyReadinessState.SIGNAL_SELL -> "candidate"
                 StrategyReadinessState.WATCH_SETUP -> "watch"
@@ -1083,7 +1152,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             PairScanStatus(
                 symbol = sym,
                 state = stateCode,
-                detail = rep?.summaryFa ?: "در صف بررسی کندل ۱۵ دقیقه",
+                detail = dual?.combinedSummaryFa ?: rep?.summaryFa ?: "در صف بررسی هم‌زمان 15m و 5m",
                 interval = rep?.triggerInterval ?: com.aurum.edge.domain.Interval.M15,
                 lastScanAt = rep?.evaluatedAt ?: now,
                 action = rep?.action,

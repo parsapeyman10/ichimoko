@@ -42,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.BaseStrategyConfig
 import com.aurum.edge.core.BitcoinStrategyModel
+import com.aurum.edge.core.DualTimeframeSymbolReport
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.RiskAndCalendarEngine
@@ -51,6 +52,7 @@ import com.aurum.edge.core.StrategyReadinessState
 import com.aurum.edge.core.SymbolPollTier
 import com.aurum.edge.core.V1Universe
 import com.aurum.edge.data.WatchCatalog
+import com.aurum.edge.domain.Interval
 import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.ui.AurumViewModel
 import com.aurum.edge.ui.theme.AurumColors
@@ -75,14 +77,16 @@ fun BitcoinIchimokuStrategyCard(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val report by viewModel.btcStrategyReport.collectAsStateWithLifecycle()
     val allReports by viewModel.allSymbolStrategyReports.collectAsStateWithLifecycle()
+    val dualReports by viewModel.dualSymbolStrategyReports.collectAsStateWithLifecycle()
     val focusedSymbol by viewModel.focusedStrategySymbol.collectAsStateWithLifecycle()
+    val focusedInterval by viewModel.focusedStrategyInterval.collectAsStateWithLifecycle()
     val bandwidthStats by viewModel.bandwidthStats.collectAsStateWithLifecycle()
     val liveTicks by viewModel.liveTicks.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val isScanning by viewModel.isScanningBtcStrategy.collectAsStateWithLifecycle()
     val aiChecking by viewModel.aiChecking.collectAsStateWithLifecycle()
 
-    // 0 = رادار ۱۵ نماد, 1 = چک‌لیست ۱۲ شرطی, 2 = انتخاب استراتژی, 3 = تنظیمات بیس
+    // 0 = رادار ۱۵ نماد (15m+5m), 1 = چک‌لیست ۱۶ شرطی, 2 = انتخاب استراتژی, 3 = تنظیمات بیس
     var subTab by rememberSaveable { mutableIntStateOf(0) }
     var showAddModelForm by rememberSaveable { mutableStateOf(false) }
 
@@ -101,8 +105,10 @@ fun BitcoinIchimokuStrategyCard(
             delay(1_000L)
         }
     }
-    val secLeft = Smart15mSyncPlanner.secondsUntilNextBoundary(nowMs, currentConfig.triggerInterval)
-    val countdownStr = String.format(Locale.US, "%02d:%02d", secLeft / 60L, secLeft % 60L)
+    val secLeft15m = Smart15mSyncPlanner.secondsUntilNextBoundary(nowMs, Interval.M15)
+    val countdown15m = String.format(Locale.US, "%02d:%02d", secLeft15m / 60L, secLeft15m % 60L)
+    val secLeft5m = Smart15mSyncPlanner.secondsUntilNextBoundary(nowMs, Interval.M5)
+    val countdown5m = String.format(Locale.US, "%02d:%02d", secLeft5m / 60L, secLeft5m % 60L)
 
     val allItems = remember(settings.customStrategies) {
         val builtIns = BitcoinStrategyModel.entries.map { m ->
@@ -129,8 +135,8 @@ fun BitcoinIchimokuStrategyCard(
     }
 
     SectionCard(
-        title = "رادار ۱۵ نماد و استراتژی ۱۶ شرطی (نقطه‌زنی ورود)",
-        subtitle = "$activeTitle · کندل ${currentConfig.triggerIntervalLabel} بعدی: $countdownStr · کش: ${bandwidthStats.totalRequestsSaved}",
+        title = "رادار هم‌زمان 15m و 5m · استراتژی ۱۶ شرطی نقطه‌زنی",
+        subtitle = "$activeTitle · کندل 15m: $countdown15m · کندل 5m: $countdown5m · کش: ${bandwidthStats.totalRequestsSaved}",
         trailing = {
             Pill(
                 text = if (isScanning) "اسکن..." else "بازسنجی 🔄",
@@ -156,8 +162,8 @@ fun BitcoinIchimokuStrategyCard(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             listOf(
-                0 to "📡 رادار ۱۵ نماد (${allReports.size}/15)",
-                1 to "🎯 چک‌لیست ۱۶ شرطی ($focusedSymbol)",
+                0 to "📡 رادار 15m + 5m (${allReports.size}/15)",
+                1 to "🎯 چک‌لیست ۱۶ شرط ($focusedSymbol · ${focusedInterval.label})",
                 2 to "🎯 انتخاب استراتژی (${allItems.size})",
                 3 to "⚙️ تنظیمات بیس",
             ).forEach { (idx, title) ->
@@ -175,11 +181,12 @@ fun BitcoinIchimokuStrategyCard(
             0 -> All15Symbols15mRadarPage(
                 focusedSymbol = focusedSymbol,
                 allReports = allReports,
+                dualReports = dualReports,
                 liveTicks = liveTicks,
                 openSymbolSet = openSymbolSet,
                 now = nowMs,
-                onSelectSymbolForChecklist = { sym ->
-                    viewModel.selectFocusedStrategySymbol(sym)
+                onSelectSymbolForChecklist = { sym, interval ->
+                    viewModel.selectFocusedStrategySymbol(sym, intervalOverride = interval)
                     subTab = 1
                 },
                 onOpenChart = onOpenChartForSymbol,
@@ -188,9 +195,12 @@ fun BitcoinIchimokuStrategyCard(
             1 -> Live12ConditionChecklistPage(
                 report = report,
                 focusedSymbol = focusedSymbol,
+                focusedInterval = focusedInterval,
+                dualReport = dualReports[focusedSymbol],
                 aiChecking = aiChecking,
                 avalAiEnabled = settings.avalAiEnabled,
                 onSelectSymbol = { sym -> viewModel.selectFocusedStrategySymbol(sym) },
+                onSelectInterval = { interval -> viewModel.selectFocusedStrategyInterval(interval) },
                 onOpenChart = onOpenChartForSymbol,
                 onExecuteSignalTrade = { evalReport ->
                     val entry = evalReport.suggestedEntry ?: return@Live12ConditionChecklistPage
@@ -209,8 +219,9 @@ fun BitcoinIchimokuStrategyCard(
                     if (calc != null) {
                         viewModel.openAutoTrackedTrade(
                             calc = calc,
-                            note = "⚡ ${evalReport.strategyTitleFa} · ${evalReport.symbol} · ${evalReport.triggerType.titleFa}",
+                            note = "⚡ [تایم ${evalReport.triggerInterval.label}] ${evalReport.strategyTitleFa} · ${evalReport.symbol} · ${evalReport.triggerType.titleFa}",
                             strategyContext = evalReport.toAiStrategyContext(),
+                            entryInterval = evalReport.triggerInterval,
                         )
                     }
                 },
@@ -248,28 +259,35 @@ fun BitcoinIchimokuStrategyCard(
 private fun All15Symbols15mRadarPage(
     focusedSymbol: String,
     allReports: Map<String, StrategyEvaluationReport>,
+    dualReports: Map<String, DualTimeframeSymbolReport>,
     liveTicks: Map<String, PriceTick>,
     openSymbolSet: Set<String>,
     now: Long,
-    onSelectSymbolForChecklist: (String) -> Unit,
+    onSelectSymbolForChecklist: (String, Interval) -> Unit,
     onOpenChart: ((String) -> Unit)?,
 ) {
-    val buySignals = allReports.values.count { it.readiness == StrategyReadinessState.SIGNAL_BUY }
-    val sellSignals = allReports.values.count { it.readiness == StrategyReadinessState.SIGNAL_SELL }
-    val watchSetups = allReports.values.count { it.readiness == StrategyReadinessState.WATCH_SETUP }
+    val buy15 = dualReports.values.count { it.report15m.readiness == StrategyReadinessState.SIGNAL_BUY }
+    val buy5 = dualReports.values.count { it.report5m.readiness == StrategyReadinessState.SIGNAL_BUY }
+    val sell15 = dualReports.values.count { it.report15m.readiness == StrategyReadinessState.SIGNAL_SELL }
+    val sell5 = dualReports.values.count { it.report5m.readiness == StrategyReadinessState.SIGNAL_SELL }
+    val watch15 = dualReports.values.count { it.report15m.readiness == StrategyReadinessState.WATCH_SETUP }
+    val watch5 = dualReports.values.count { it.report5m.readiness == StrategyReadinessState.WATCH_SETUP }
 
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            StatTile("سیگنال خرید", buySignals.toString(), AurumColors.Green, Modifier.weight(1f))
-            StatTile("سیگنال فروش", sellSignals.toString(), AurumColors.Red, Modifier.weight(1f))
-            StatTile("آماده ماشه", watchSetups.toString(), AurumColors.Gold, Modifier.weight(1f))
+            StatTile("خرید (15m / 5m)", "$buy15 / $buy5", AurumColors.Green, Modifier.weight(1f))
+            StatTile("فروش (15m / 5m)", "$sell15 / $sell5", AurumColors.Red, Modifier.weight(1f))
+            StatTile("آماده (15m / 5m)", "$watch15 / $watch5", AurumColors.Gold, Modifier.weight(1f))
         }
 
         V1Universe.allSymbols.forEach { sym ->
-            val rep = allReports[sym]
+            val dual = dualReports[sym]
+            val rep15m = dual?.report15m ?: allReports[sym]
+            val rep5m = dual?.report5m
+            val primaryRep = dual?.primaryReport ?: rep15m
             val tick = liveTicks[sym]
             val watchInfo = WatchCatalog.find(sym)
             val isSelected = sym == focusedSymbol
@@ -279,38 +297,43 @@ private fun All15Symbols15mRadarPage(
                 symbol = sym,
                 hasOpenTrade = hasOpen,
                 isFocusedSymbol = isSelected,
-                readiness = rep?.readiness,
+                readiness = primaryRep?.readiness,
                 nowMillis = now,
             )
-            val passedCount = rep?.conditions?.count { it.passed } ?: 0
-            val totalConds = rep?.conditions?.size ?: 16
-            val displayPrice = tick?.price ?: rep?.livePrice
+            val displayPrice = tick?.price ?: primaryRep?.livePrice
 
-            val statusColor = when {
-                rep?.readiness == StrategyReadinessState.SIGNAL_BUY -> AurumColors.Green
-                rep?.readiness == StrategyReadinessState.SIGNAL_SELL -> AurumColors.Red
-                rep?.readiness == StrategyReadinessState.WATCH_SETUP -> AurumColors.Gold
+            val color15m = when {
+                rep15m?.readiness == StrategyReadinessState.SIGNAL_BUY -> AurumColors.Green
+                rep15m?.readiness == StrategyReadinessState.SIGNAL_SELL -> AurumColors.Red
+                rep15m?.readiness == StrategyReadinessState.WATCH_SETUP -> AurumColors.Gold
                 marketClosed -> AurumColors.TextMuted
                 else -> AurumColors.Cyan
             }
-
-            val statusLabel = when {
-                rep?.readiness == StrategyReadinessState.SIGNAL_BUY -> "🟢 خرید ($passedCount/$totalConds)"
-                rep?.readiness == StrategyReadinessState.SIGNAL_SELL -> "🔴 فروش ($passedCount/$totalConds)"
-                rep?.readiness == StrategyReadinessState.WATCH_SETUP -> "🟡 آماده ($passedCount/$totalConds)"
-                marketClosed -> "⏸ بسته ($passedCount/$totalConds)"
-                rep != null && rep.conditions.isNotEmpty() -> "$passedCount/$totalConds شرط"
-                else -> "⏳..."
+            val color5m = when {
+                rep5m?.readiness == StrategyReadinessState.SIGNAL_BUY -> AurumColors.Green
+                rep5m?.readiness == StrategyReadinessState.SIGNAL_SELL -> AurumColors.Red
+                rep5m?.readiness == StrategyReadinessState.WATCH_SETUP -> AurumColors.Gold
+                marketClosed -> AurumColors.TextMuted
+                else -> AurumColors.Cyan
             }
+            val borderCol = when {
+                isSelected -> AurumColors.Gold
+                primaryRep?.readiness == StrategyReadinessState.SIGNAL_BUY -> AurumColors.Green.copy(alpha = 0.5f)
+                primaryRep?.readiness == StrategyReadinessState.SIGNAL_SELL -> AurumColors.Red.copy(alpha = 0.5f)
+                else -> color15m.copy(alpha = 0.3f)
+            }
+
+            val label15m = "15m: ${rep15m?.readinessShortFa() ?: "⏳"}"
+            val label5m = "5m: ${rep5m?.readinessShortFa() ?: "⏳"}"
 
             val pollBadge = when (tier) {
                 SymbolPollTier.OPEN_POSITION -> "15s"
                 SymbolPollTier.WATCH_OR_FOCUSED -> "60s"
-                SymbolPollTier.ACTIVE_15M_RADAR -> "15m"
+                SymbolPollTier.ACTIVE_15M_RADAR -> "5m/15m"
                 SymbolPollTier.MARKET_CLOSED_PAUSED -> "بسته"
             }
 
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(
@@ -319,15 +342,21 @@ private fun All15Symbols15mRadarPage(
                     )
                     .border(
                         width = if (isSelected) 1.5.dp else 1.dp,
-                        color = if (isSelected) AurumColors.Gold else statusColor.copy(alpha = 0.3f),
+                        color = borderCol,
                         shape = RoundedCornerShape(10.dp),
                     )
-                    .clickable { onSelectSymbolForChecklist(sym) }
+                    .clickable {
+                        val bestTf = if (rep5m?.isActionable == true && rep15m?.isActionable != true) Interval.M5 else Interval.M15
+                        onSelectSymbolForChecklist(sym, bestTf)
+                    }
                     .padding(horizontal = 10.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -345,18 +374,6 @@ private fun All15Symbols15mRadarPage(
                         )
                         Pill(pollBadge, AurumColors.TextMuted)
                     }
-                    if (displayPrice != null && displayPrice > 0.0) {
-                        Text(
-                            text = "قیمت: ${formatPrice(displayPrice)}" +
-                                (rep?.let { " · ${it.trendPhase.badgeFa} · امتیاز ${it.coreTrendScore.toInt()}" } ?: ""),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = AurumColors.TextPrimary,
-                        )
-                    }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Pill(text = statusLabel, color = statusColor)
                     if (onOpenChart != null) {
                         Pill(
                             text = "چارت ↗",
@@ -364,6 +381,33 @@ private fun All15Symbols15mRadarPage(
                             modifier = Modifier.clickable { onOpenChart(sym) },
                         )
                     }
+                }
+
+                if (displayPrice != null && displayPrice > 0.0) {
+                    Text(
+                        text = "قیمت: ${formatPrice(displayPrice)}" +
+                            (primaryRep?.let { " · [${it.triggerInterval.label}] ${it.trendPhase.badgeFa} · امتیاز ${it.coreTrendScore.toInt()}" } ?: ""),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextPrimary,
+                    )
+                }
+
+                // نمایش واضح و مجزای وضعیت ورود در هر دو تایم‌فریم 15m و 5m
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Pill(
+                        text = label15m,
+                        color = color15m,
+                        modifier = Modifier.clickable { onSelectSymbolForChecklist(sym, Interval.M15) },
+                    )
+                    Pill(
+                        text = label5m,
+                        color = color5m,
+                        modifier = Modifier.clickable { onSelectSymbolForChecklist(sym, Interval.M5) },
+                    )
                 }
             }
         }
@@ -374,9 +418,12 @@ private fun All15Symbols15mRadarPage(
 private fun Live12ConditionChecklistPage(
     report: StrategyEvaluationReport?,
     focusedSymbol: String,
+    focusedInterval: Interval,
+    dualReport: DualTimeframeSymbolReport?,
     aiChecking: Boolean,
     avalAiEnabled: Boolean,
     onSelectSymbol: (String) -> Unit,
+    onSelectInterval: (Interval) -> Unit,
     onOpenChart: ((String) -> Unit)?,
     onExecuteSignalTrade: (StrategyEvaluationReport) -> Unit,
 ) {
@@ -397,9 +444,29 @@ private fun Live12ConditionChecklistPage(
             }
         }
 
+        // سوییچ سریع بین تایم‌فریم ورود ۱۵ دقیقه (15m) و ۵ دقیقه (5m) با نمایش وضعیت هر دو
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            val short15 = dualReport?.report15m?.readinessShortFa() ?: "..."
+            val short5 = dualReport?.report5m?.readinessShortFa() ?: "..."
+            Pill(
+                text = "⏱ تایم ورود 15m ($short15)",
+                color = if (focusedInterval == Interval.M15) AurumColors.Gold else AurumColors.TextMuted,
+                modifier = Modifier.clickable { onSelectInterval(Interval.M15) },
+            )
+            Pill(
+                text = "⏱ تایم ورود 5m ($short5)",
+                color = if (focusedInterval == Interval.M5) AurumColors.Gold else AurumColors.TextMuted,
+                modifier = Modifier.clickable { onSelectInterval(Interval.M5) },
+            )
+        }
+
         if (report == null) {
             Text(
-                text = "در حال محاسبه چک‌لیست ۱۲ شرطی $focusedSymbol...",
+                text = "در حال محاسبه چک‌لیست ۱۶ شرطی $focusedSymbol (${focusedInterval.label})...",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
             )
@@ -423,7 +490,7 @@ private fun Live12ConditionChecklistPage(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Pill(text = "${report.symbol} · ${report.readiness.labelFa}", color = statusColor)
+                Pill(text = "${report.symbol} · [${report.entryTimeframeBadgeFa}] · ${report.readiness.labelFa}", color = statusColor)
                 Pill(text = "$passed/$total شرط · ${String.format(Locale.US, "%.0f%%", report.confidence)}", color = AurumColors.Gold)
             }
             if (onOpenChart != null) {

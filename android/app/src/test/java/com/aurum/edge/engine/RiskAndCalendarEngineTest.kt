@@ -344,15 +344,23 @@ class RiskAndCalendarEngineTest {
         val macroBars = buildBullishPullbackSeries(Interval.H4.millis)
         val stratBars = buildBullishPullbackSeries(Interval.H1.millis)
         val trigBars = buildBullishPullbackSeries(Interval.M15.millis)
+        val trig5mBars = buildBullishPullbackSeries(Interval.M5.millis)
 
         val config = BaseStrategyConfig()
-        val report = IchimokuStrategyEngine.evaluateBitcoinStrategy(
+        val dualReport = IchimokuStrategyEngine.evaluateDualTimeframeStrategy(
             activeModel = BitcoinStrategyModel.BASE_ICHIMOKU,
             config = config,
-            macroCandles = macroBars,
-            strategyCandles = stratBars,
-            triggerCandles = trigBars,
+            candles4h = macroBars,
+            candles1h = stratBars,
+            candles15m = trigBars,
+            candles5m = trig5mBars,
         )
+        assertEquals(Interval.M15, dualReport.report15m.triggerInterval)
+        assertEquals(Interval.M5, dualReport.report5m.triggerInterval)
+        assertTrue(dualReport.report15m.summaryFa.contains("[تایم 15m]"))
+        assertTrue(dualReport.report5m.summaryFa.contains("[تایم 5m]"))
+
+        val report = dualReport.report15m
 
         assertEquals(IchimokuStrategyEngine.BTC_SYMBOL, report.symbol)
         assertEquals(16, report.conditions.size)

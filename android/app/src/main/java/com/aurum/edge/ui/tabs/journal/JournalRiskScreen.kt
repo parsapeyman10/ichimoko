@@ -1323,6 +1323,7 @@ private fun AutoMonitoredOpenTradesCard(
                                     text = if (isBuy) "خرید (BUY)" else "فروش (SELL)",
                                     color = if (isBuy) AurumColors.Green else AurumColors.Red,
                                 )
+                                Pill("تایم ورود: ${trade.interval.label}", AurumColors.Gold)
                                 Pill("رصد خودکار فعال", AurumColors.Cyan)
                             }
                             Text(
@@ -1870,6 +1871,10 @@ private fun ClosedJournalTradeRow(
                 Pill(
                     text = if (isBuy) "خرید" else "فروش",
                     color = if (isBuy) AurumColors.Green else AurumColors.Red,
+                )
+                Pill(
+                    text = "تایم ورود: ${trade.interval.label}",
+                    color = AurumColors.Gold,
                 )
                 trade.rMultiple?.let { r ->
                     Pill(

@@ -454,6 +454,22 @@ data class StrategyEvaluationReport(
     val sniperEntryScore: Double = 0.0,
     val isSniperArmedPendingRetest: Boolean = false,
 ) {
+    val entryTimeframeBadgeFa: String
+        get() = "تایم ورود: ${triggerInterval.label}"
+
+    fun readinessShortFa(): String {
+        val passed = conditions.count { it.passed }
+        val total = conditions.size.takeIf { it > 0 } ?: 16
+        return when {
+            readiness == StrategyReadinessState.SIGNAL_BUY -> "🟢 خرید ($passed/$total)"
+            readiness == StrategyReadinessState.SIGNAL_SELL -> "🔴 فروش ($passed/$total)"
+            isSniperArmedPendingRetest -> "🎯 مسلح ($passed/$total)"
+            readiness == StrategyReadinessState.WATCH_SETUP -> "🟡 آماده ($passed/$total)"
+            conditions.isNotEmpty() -> "$passed/$total"
+            else -> "..."
+        }
+    }
+
     fun isPriceInSniperWindow(price: Double): Boolean {
         val low = sniperZoneLow ?: return false
         val high = sniperZoneHigh ?: return false
@@ -465,6 +481,7 @@ data class StrategyEvaluationReport(
             suggestedEntry != null && suggestedStopLoss != null && primaryTakeProfit != null
 
     fun toAiStrategyContext(): String = buildString {
+        append("تایم‌فریم ورود: ").append(triggerInterval.label).append(" | ")
         append("استراتژی فعال: ").append(strategyTitleFa).append(" (").append(strategyId).append(") | ")
         append("نماد: ").append(symbol).append(" | ")
         append("تایم‌فریم‌ها: ").append(macroInterval.label).append("/")
@@ -484,6 +501,40 @@ data class StrategyEvaluationReport(
         append("شروط برقرار: ").append(passedCount).append("/").append(conditions.size).append(" — ")
         append(conditions.joinToString("؛ ") { "${it.titleFa}: ${if (it.passed) "تایید" else "رد"} (${it.detailFa})" })
     }
+}
+
+/**
+ * گزارش هم‌زمان دو تایم‌فریم ورود (`15m` و `5m`) برای یک نماد با اشتراک‌گذاری کندل‌های `4H`/`1H`/`15m` بدون مصرف اضافه دیتا.
+ */
+data class DualTimeframeSymbolReport(
+    val symbol: String,
+    val report15m: StrategyEvaluationReport,
+    val report5m: StrategyEvaluationReport,
+) {
+    fun reportFor(interval: Interval): StrategyEvaluationReport =
+        if (interval == Interval.M5) report5m else report15m
+
+    val primaryReport: StrategyEvaluationReport
+        get() = when {
+            report15m.isActionable && report5m.isActionable ->
+                if (report5m.coreTrendScore > report15m.coreTrendScore + 5.0) report5m else report15m
+            report15m.isActionable -> report15m
+            report5m.isActionable -> report5m
+            report15m.isSniperArmedPendingRetest -> report15m
+            report5m.isSniperArmedPendingRetest -> report5m
+            report15m.readiness == StrategyReadinessState.WATCH_SETUP -> report15m
+            report5m.readiness == StrategyReadinessState.WATCH_SETUP -> report5m
+            else -> if (report5m.coreTrendScore > report15m.coreTrendScore) report5m else report15m
+        }
+
+    val actionableReports: List<StrategyEvaluationReport>
+        get() = listOf(report15m, report5m).filter { it.isActionable }
+
+    val sniperArmedReports: List<StrategyEvaluationReport>
+        get() = listOf(report15m, report5m).filter { it.isActionable || it.isSniperArmedPendingRetest }
+
+    val combinedSummaryFa: String
+        get() = "[15m: ${report15m.readinessShortFa()}] · [5m: ${report5m.readinessShortFa()}]"
 }
 
 object IchimokuStrategyEngine {
@@ -1328,20 +1379,21 @@ object IchimokuStrategyEngine {
             }
         }
 
+        val tfTag = "[تایم ${config.triggerInterval.label}]"
         val summaryFa = when {
             readiness == StrategyReadinessState.SIGNAL_BUY ->
-                "🎯 خرید نقطه‌زنی ($normalizedSymbol · ۱۶/۱۶ شرط · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
+                "$tfTag 🎯 خرید نقطه‌زنی ($normalizedSymbol · ۱۶/۱۶ شرط · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
             readiness == StrategyReadinessState.SIGNAL_SELL ->
-                "🎯 فروش نقطه‌زنی ($normalizedSymbol · ۱۶/۱۶ شرط · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
+                "$tfTag 🎯 فروش نقطه‌زنی ($normalizedSymbol · ۱۶/۱۶ شرط · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
             sniperArmedPendingRetest ->
-                "🎯 مسلح برای نقطه‌زنی ($normalizedSymbol): ۱۵ شرط تایید؛ در کمین لمس $sniperOptimal"
+                "$tfTag 🎯 مسلح برای نقطه‌زنی ($normalizedSymbol): ۱۵ شرط تایید؛ در کمین لمس $sniperOptimal"
             readiness == StrategyReadinessState.WATCH_SETUP ->
-                "⏳ $passedCount/۱۶ شرط (${trendPhase.badgeFa})؛ منتظر ماشه در ${config.triggerInterval.label}"
+                "$tfTag ⏳ $passedCount/۱۶ شرط (${trendPhase.badgeFa})؛ منتظر ماشه در ${config.triggerInterval.label}"
             readiness == StrategyReadinessState.BLOCKED -> {
                 val firstFailed = conditions.firstOrNull { !it.passed }
-                "🛑 $passedCount/۱۶ شرط · مانع: ${firstFailed?.titleFa ?: ""}"
+                "$tfTag 🛑 $passedCount/۱۶ شرط · مانع: ${firstFailed?.titleFa ?: ""}"
             }
-            else -> "در حال دریافت کندل‌های $normalizedSymbol..."
+            else -> "$tfTag در حال دریافت کندل‌های $normalizedSymbol..."
         }
 
         return StrategyEvaluationReport(
@@ -1379,6 +1431,64 @@ object IchimokuStrategyEngine {
             sniperZoneHigh = sniperHigh,
             sniperEntryScore = sniperEntryScore,
             isSniperArmedPendingRetest = sniperArmedPendingRetest,
+        )
+    }
+
+    /**
+     * ارزیابی هم‌زمان تایم‌فریم‌های ورود `15m` (`4H -> 1H -> 15m`) و `5m` (`1H -> 15m -> 5m`)
+     * با اشتراک‌گذاری کندل‌های `1H` و `15m` برای جلوگیری از مصرف اضافه اینترنت.
+     */
+    fun evaluateDualTimeframeStrategy(
+        activeModel: BitcoinStrategyModel,
+        config: BaseStrategyConfig,
+        candles4h: List<Candle>,
+        candles1h: List<Candle>,
+        candles15m: List<Candle>,
+        candles5m: List<Candle>,
+        livePriceOverride: Double? = null,
+        customTitleOverride: String? = null,
+        customIdOverride: String? = null,
+        nowMillis: Long = System.currentTimeMillis(),
+        symbolInput: String = BTC_SYMBOL,
+    ): DualTimeframeSymbolReport {
+        val config15m = config.copy(
+            macroIntervalLabel = Interval.H4.label,
+            strategyIntervalLabel = Interval.H1.label,
+            triggerIntervalLabel = Interval.M15.label,
+        )
+        val config5m = config.copy(
+            macroIntervalLabel = Interval.H1.label,
+            strategyIntervalLabel = Interval.M15.label,
+            triggerIntervalLabel = Interval.M5.label,
+        )
+        val rep15m = evaluateBitcoinStrategy(
+            activeModel = activeModel,
+            config = config15m,
+            macroCandles = candles4h,
+            strategyCandles = candles1h,
+            triggerCandles = candles15m,
+            livePriceOverride = livePriceOverride,
+            customTitleOverride = customTitleOverride,
+            customIdOverride = customIdOverride,
+            nowMillis = nowMillis,
+            symbolInput = symbolInput,
+        )
+        val rep5m = evaluateBitcoinStrategy(
+            activeModel = activeModel,
+            config = config5m,
+            macroCandles = candles1h,
+            strategyCandles = candles15m,
+            triggerCandles = candles5m,
+            livePriceOverride = livePriceOverride,
+            customTitleOverride = customTitleOverride,
+            customIdOverride = customIdOverride,
+            nowMillis = nowMillis,
+            symbolInput = symbolInput,
+        )
+        return DualTimeframeSymbolReport(
+            symbol = rep15m.symbol,
+            report15m = rep15m,
+            report5m = rep5m,
         )
     }
 

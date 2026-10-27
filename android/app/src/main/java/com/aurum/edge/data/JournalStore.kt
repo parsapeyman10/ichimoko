@@ -79,8 +79,9 @@ class JournalStore(
         calc: RiskCalculationResult,
         note: String = "",
         now: Long = System.currentTimeMillis(),
+        entryInterval: com.aurum.edge.domain.Interval = com.aurum.edge.domain.Interval.M15,
     ): PaperTrade {
-        val trade = calc.toPaperTrade(note = note, openedAt = now)
+        val trade = calc.toPaperTrade(note = note, openedAt = now, entryInterval = entryInterval)
         persist( listOf(trade) + _trades.value )
         return trade
     }

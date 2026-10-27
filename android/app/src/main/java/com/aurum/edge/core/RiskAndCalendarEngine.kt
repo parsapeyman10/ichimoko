@@ -71,10 +71,11 @@ data class RiskCalculationResult(
         note: String = "",
         openedAt: Long = System.currentTimeMillis(),
         id: String = UUID.randomUUID().toString(),
+        entryInterval: Interval = Interval.M15,
     ): PaperTrade = PaperTrade(
         id = id,
         symbol = symbol,
-        interval = Interval.M5,
+        interval = entryInterval,
         action = action,
         entry = entry,
         stopLoss = stopLoss,
