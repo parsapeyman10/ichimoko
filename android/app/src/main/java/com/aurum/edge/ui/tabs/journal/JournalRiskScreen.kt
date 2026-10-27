@@ -124,7 +124,28 @@ fun JournalRiskScreen(
     }
     val filteredOpenTrades = remember(filteredTrades) { filteredTrades.filter { it.isOpen } }
     val filteredClosedTrades = remember(filteredTrades) { filteredTrades.filter { !it.isOpen } }
-    val filteredStats = remember(filteredTrades) { RiskAndCalendarEngine.stats(filteredTrades) }
+    val filteredStats = remember(filteredTrades, stats, selectedStrategyFilter) {
+        if (selectedStrategyFilter == "ALL") {
+            stats
+        } else {
+            val closed = filteredClosedTrades.filter { it.pnlUsd != null }
+            val wins = closed.filter { (it.pnlUsd ?: 0.0) > 0.0 }
+            val losses = closed.filter { (it.pnlUsd ?: 0.0) <= 0.0 }
+            val grossWin = wins.sumOf { it.pnlUsd ?: 0.0 }
+            val grossLoss = abs(losses.sumOf { it.pnlUsd ?: 0.0 })
+            val rMultiples = closed.mapNotNull { it.rMultiple }
+            com.aurum.edge.data.JournalStats(
+                total = closed.size,
+                open = filteredOpenTrades.size,
+                wins = wins.size,
+                losses = losses.size,
+                winRate = if (closed.isEmpty()) null else wins.size * 100.0 / closed.size,
+                profitFactor = if (grossLoss <= 0.0) null else grossWin / grossLoss,
+                netPnl = closed.sumOf { it.pnlUsd ?: 0.0 },
+                avgR = if (rMultiples.isEmpty()) null else rMultiples.average(),
+            )
+        }
+    }
 
     Column(
         modifier = Modifier

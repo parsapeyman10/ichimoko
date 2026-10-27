@@ -112,7 +112,16 @@ data class StrategyJournalCategoryStats(
     val totalR: Double,
     val count15m: Int,
     val count5m: Int,
-)
+) {
+    val totalCount: Int
+        get() = openCount + closedCount
+    val winsCount: Int
+        get() = winCount
+    val lossesCount: Int
+        get() = lossCount
+    val winRate: Double
+        get() = winRatePercent
+}
 
 data class RiskLimitStatus(
     val accountBalance: Double,

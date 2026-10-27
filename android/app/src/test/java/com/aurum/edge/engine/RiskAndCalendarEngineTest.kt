@@ -476,12 +476,12 @@ class RiskAndCalendarEngineTest {
             fixedRiskUsdOverride = 5.0,
         )!!
         assertEquals(5.0, calcFixed5.riskBudgetUsd, 1e-4)
-        assertEquals(2.5, calcFixed5.riskRewardRatio, 1e-4)
+        assertEquals(2.5, calcFixed5.riskReward, 1e-4)
 
         val tradeManish = calcFixed5.toPaperTrade(
             id = "T_MANISH",
             openedAt = 1_760_000_000_000L,
-            interval = Interval.M15,
+            entryInterval = Interval.M15,
             strategyId = BitcoinStrategyModel.MANISH_PATEL_MTF.id,
             strategyTitleFa = BitcoinStrategyModel.MANISH_PATEL_MTF.titleFa,
         )
@@ -502,7 +502,7 @@ class RiskAndCalendarEngineTest {
         val tradeHosoda = calcFixed5.toPaperTrade(
             id = "T_HOSODA",
             openedAt = 1_760_001_000_000L,
-            interval = Interval.M5,
+            entryInterval = Interval.M5,
             strategyId = BitcoinStrategyModel.HOSODA_ELLIOTT_WAVE.id,
             strategyTitleFa = BitcoinStrategyModel.HOSODA_ELLIOTT_WAVE.titleFa,
         ).copy(
