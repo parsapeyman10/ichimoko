@@ -555,7 +555,7 @@ class RiskAndCalendarEngineTest {
 
         val runnerFile = File(context.filesDir, "test_runner_1to3.json")
         runnerFile.delete()
-        val runnerJournal = JournalStore(context, runnerFile, settingsStore)
+        val runnerJournal = JournalStore(context, runnerFile, store)
         val calc3R = RiskAndCalendarEngine.calculatePosition(
             symbolInput = "BTC/USDT",
             accountBalance = 100_000.0,
