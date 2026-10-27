@@ -485,19 +485,21 @@ class RiskAndCalendarEngineTest {
             strategyId = BitcoinStrategyModel.PATEL_KIJUN_PULLBACK.id,
             strategyTitleFa = BitcoinStrategyModel.PATEL_KIJUN_PULLBACK.titleFa,
         )
-        val (lossPnl, lossR) = RiskAndCalendarEngine.computeExitPnlUsd(tradeManish, 64_500.0)
+        val (lossGross, lossPnl) = RiskAndCalendarEngine.computeExitPnlUsd(tradeManish, 64_500.0)
+        assertEquals(-5.0, lossGross, 1e-4)
         assertEquals(-5.0, lossPnl, 1e-4)
-        assertEquals(-1.0, lossR, 1e-4)
 
-        val (winPnl, winR) = RiskAndCalendarEngine.computeExitPnlUsd(tradeManish, 66_250.0)
-        assertEquals(12.5, winPnl, 1e-4) // $5 * 2.5 R:R = +$12.50
-        assertEquals(2.5, winR, 1e-4)
+        val (winGross, winPnl) = RiskAndCalendarEngine.computeExitPnlUsd(tradeManish, 66_250.0)
+        assertEquals(12.5, winGross, 1e-4) // $5 * 2.5 R:R = +$12.50
+        assertEquals(12.5, winPnl, 1e-4)
 
         val closedManish = tradeManish.copy(
             exitPrice = 66_250.0,
             closedAt = 1_760_000_900_000L,
             pnlUsd = winPnl,
         )
+        assertEquals(2.5, closedManish.rMultiple!!, 1e-4)
+
         val tradeHosoda = calcFixed5.toPaperTrade(
             id = "T_HOSODA",
             openedAt = 1_760_001_000_000L,
@@ -509,6 +511,7 @@ class RiskAndCalendarEngineTest {
             closedAt = 1_760_001_300_000L,
             pnlUsd = lossPnl,
         )
+        assertEquals(-1.0, tradeHosoda.rMultiple!!, 1e-4)
         val cats = RiskAndCalendarEngine.categorizeTradesByStrategy(listOf(closedManish, tradeHosoda))
         val manishCat = cats.first { it.strategyId == BitcoinStrategyModel.PATEL_KIJUN_PULLBACK.id }
         val hosodaCat = cats.first { it.strategyId == BitcoinStrategyModel.ELLIOTT_HOSODA_WAVE.id }
