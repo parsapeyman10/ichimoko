@@ -482,8 +482,8 @@ class RiskAndCalendarEngineTest {
             id = "T_MANISH",
             openedAt = 1_760_000_000_000L,
             entryInterval = Interval.M15,
-            strategyId = BitcoinStrategyModel.PATEL_MTF_BREAKOUT.id,
-            strategyTitleFa = BitcoinStrategyModel.PATEL_MTF_BREAKOUT.titleFa,
+            strategyId = BitcoinStrategyModel.PATEL_MTF_BREAK.id,
+            strategyTitleFa = BitcoinStrategyModel.PATEL_MTF_BREAK.titleFa,
         )
         val (lossPnl, lossR) = RiskAndCalendarEngine.computeExitPnlUsd(tradeManish, 64_500.0)
         assertEquals(-5.0, lossPnl, 1e-4)
@@ -510,7 +510,7 @@ class RiskAndCalendarEngineTest {
             pnlUsd = lossPnl,
         )
         val cats = RiskAndCalendarEngine.categorizeTradesByStrategy(listOf(closedManish, tradeHosoda))
-        val manishCat = cats.first { it.strategyId == BitcoinStrategyModel.PATEL_MTF_BREAKOUT.id }
+        val manishCat = cats.first { it.strategyId == BitcoinStrategyModel.PATEL_MTF_BREAK.id }
         val hosodaCat = cats.first { it.strategyId == BitcoinStrategyModel.ELLIOTT_HOSODA_WAVE.id }
         assertEquals(1, manishCat.winsCount)
         assertEquals(12.5, manishCat.netPnlUsd, 1e-4)
