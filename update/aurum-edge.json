@@ -1,20 +1,13 @@
 {
-  "applicationId": "com.aurum.edge",
-  "versionCode": 708,
-  "versionName": "3.8.0",
-  "tagName": "v3.8.0",
-  "commitSha": "6c0da490426fbc4b5f82b72afaeb4c9b98db3e95",
-  "publishedAt": "2026-10-27T07:42:43Z",
-  "artifactName": "AurumEdge-v3.8.0.apk",
-  "notes": "نسخه ۳.۸.۰ (کد ۷۰۸) — اسکن موازی فوق‌سریع ۱۵ نماد، چک میان‌کندلی ۳ دقیقه و ۴۵ ثانیه، چک‌لیست ۱۵ شرطی شکار اصل روند (فاز Genesis/Core، شاخص کارایی کافمن ER14 ضد رِنج، فیلتر ضد تله نقدینگی، ماشه فوران کاتانا در شروع موج) و رتبه‌بندی خودکار قوی‌ترین لیدر بازار.",
-  "apkUrl": "https://github.com/parsapeyman10/ichimoko/releases/download/v3.8.0/AurumEdge-v3.8.0.apk",
-  "sha256": "11ec7b90367e6e88983165c157ca5437a0019355e61b2db76990d1e7ac6c35ae",
-  "sizeBytes": 11235143,
-  "signerSha256": "137f3f98f6c85fdd8671d1d2099b095ed82f3f91594ac9e7b1ba22c264ed4a04",
-  "minSdk": 26,
-  "targetSdk": 35,
-  "supportedAbis": [
-    "arm64-v8a",
-    "armeabi-v7a"
-  ]
+  "appId": "com.aurum.edge",
+  "channel": "stable",
+  "versionCode": 709,
+  "versionName": "3.9.0",
+  "publishedAt": "2026-10-27T09:28:42Z",
+  "apkUrl": "https://github.com/parsapeyman10/ichimoko/releases/download/v3.9.0/AurumEdge-v3.9.0.apk",
+  "apkSizeBytes": 11235143,
+  "sha256": "db3543b43b41c8052fdfe4975208396156dd3585ad8d50e0d7e619c043882496",
+  "minSupportedVersionCode": 1,
+  "changelogFa": "Aurum Edge 3.9.0 (709): موتور ۱۶ شرطی نقطه‌زنی ورود (Sniper Entry Pocket) در تعادل Tenkan-sen و ناحیه طلایی ۵۵٪ کندل تریگر، حد ضرر ساختاری فشرده و اجرای لحظه‌ای ورود روی تیک زنده.",
+  "changelogEn": "Aurum Edge 3.9.0 (709): 16-condition Sniper Entry Pocket engine at Tenkan-sen equilibrium & 55% trigger candle Golden Pocket, tighter structural stop-loss, and real-time tick sniper execution."
 }
