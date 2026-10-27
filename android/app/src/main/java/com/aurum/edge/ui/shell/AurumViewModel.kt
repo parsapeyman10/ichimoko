@@ -115,6 +115,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private var lastAutoFiredBarTimeByKey: Map<String, Long> = emptyMap()
 
     init {
+        container.settingsStore.ensureBalance100kMigrated()
         container.appScope.launch {
             container.journalStore.trades.collect { currentTrades ->
                 _stats.value = container.journalStore.stats()
@@ -127,6 +128,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun startApp(@Suppress("UNUSED_PARAMETER") context: Context) {
+        container.settingsStore.ensureBalance100kMigrated()
         if (!updateCheckStarted) {
             updateCheckStarted = true
             checkForAppUpdate(settings.value.autoDownloadUpdates, force = false)
@@ -393,59 +395,51 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
 
-        // شکار لحظه‌ای نقطه‌زنی ورود (Real-Time Sniper Pocket Fill) روی هر دو تایم‌فریم 15m و 5m به محض لمس محدوده بهینه توسط تیک زنده
+        // شکار لحظه‌ای نقطه‌زنی ورود (Real-Time Sniper Pocket Fill) روی هر دو تایم‌فریم 15m و 5m و همه استراتژی‌های فعال (بدون محدودیت تعداد معامله و باخت متوالی)
         val cfg = settings.value
         val dualReport = _dualSymbolStrategyReports.value[symbol]
         val armedCandidates = dualReport?.sniperArmedReports
             ?.sortedByDescending { it.coreTrendScore }
             ?: listOfNotNull(_allSymbolStrategyReports.value[symbol]).filter { it.isActionable || it.isSniperArmedPendingRetest }
-        val armedReport = armedCandidates.firstOrNull { it.isPriceInSniperWindow(tick.price) }
-        if (cfg.autoPaperTrading && armedReport != null &&
-            !com.aurum.edge.core.MarketHours.closedFor(symbol, tick.at)
-        ) {
-            val openAll = trades.value.filter { it.isOpen }
-            val hasOpenForSym = openAll.any { V1Universe.normalize(it.symbol) == symbol }
-            val assetClass = com.aurum.edge.core.AssetClass.of(symbol)
-            val openInClass = openAll.count { com.aurum.edge.core.AssetClass.of(it.symbol) == assetClass }
-            val fireKey = "${armedReport.strategyId}|$symbol|${armedReport.triggerInterval.label}"
-            val lastFiredBar = lastAutoFiredBarTimeByKey[fireKey] ?: 0L
-            if (!hasOpenForSym && openAll.size < 4 && openInClass < assetClass.maxSlots &&
-                armedReport.triggerBarTime > 0L && armedReport.triggerBarTime != lastFiredBar
-            ) {
-                val sl = armedReport.suggestedStopLoss
-                val tp = armedReport.primaryTakeProfit
-                if (sl != null && tp != null) {
-                    val calc = RiskAndCalendarEngine.calculatePosition(
-                        symbolInput = symbol,
-                        accountBalance = cfg.accountBalance,
-                        riskPercent = cfg.riskPercent,
-                        entry = tick.price,
-                        stopLoss = sl,
-                        takeProfit = tp,
-                        preferredAction = armedReport.action,
-                        fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
-                    )
-                    val limits = RiskAndCalendarEngine.evaluateRiskLimits(
-                        accountBalance = cfg.accountBalance,
-                        initialCapital = cfg.initialCapital,
-                        dayOpeningEquity = dayOpeningEquity(tick.at),
-                        dailyLossLimitPercent = cfg.dailyLossLimitPercent,
-                        maxDrawdownLimitPercent = cfg.maxDrawdownLimitPercent,
-                        trades = trades.value,
-                        now = tick.at,
-                    )
-                    if (calc != null && limits.canOpenTrade(calc.riskBudgetUsd)) {
-                        lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
-                        val tfLabel = armedReport.triggerInterval.label
-                        val sniperNote = "🎯 نقطه‌زنی [تایم $tfLabel] · [${armedReport.strategyTitleFa}] · (${armedReport.trendPhase.badgeFa} · دقت ${armedReport.sniperEntryScore.toInt()}%)"
-                        openAutoTrackedTrade(
-                            calc = calc,
-                            note = sniperNote,
-                            strategyContext = armedReport.toAiStrategyContext(),
-                            entryInterval = armedReport.triggerInterval,
-                            strategyId = armedReport.strategyId,
-                            strategyTitleFa = armedReport.strategyTitleFa,
+        if (cfg.autoPaperTrading && !com.aurum.edge.core.MarketHours.closedFor(symbol, tick.at)) {
+            for (armedReport in armedCandidates.filter { it.isPriceInSniperWindow(tick.price) }) {
+                val openAll = trades.value.filter { it.isOpen }
+                val hasOpenSameStrategyTf = openAll.any {
+                    it.strategyId == armedReport.strategyId &&
+                        V1Universe.normalize(it.symbol) == symbol &&
+                        it.interval == armedReport.triggerInterval
+                }
+                val fireKey = "${armedReport.strategyId}|$symbol|${armedReport.triggerInterval.label}"
+                val lastFiredBar = lastAutoFiredBarTimeByKey[fireKey] ?: 0L
+                if (!hasOpenSameStrategyTf &&
+                    armedReport.triggerBarTime > 0L && armedReport.triggerBarTime != lastFiredBar
+                ) {
+                    val sl = armedReport.suggestedStopLoss
+                    val tp = armedReport.primaryTakeProfit
+                    if (sl != null && tp != null) {
+                        val calc = RiskAndCalendarEngine.calculatePosition(
+                            symbolInput = symbol,
+                            accountBalance = cfg.accountBalance,
+                            riskPercent = cfg.riskPercent,
+                            entry = tick.price,
+                            stopLoss = sl,
+                            takeProfit = tp,
+                            preferredAction = armedReport.action,
+                            fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
                         )
+                        if (calc != null) {
+                            lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
+                            val tfLabel = armedReport.triggerInterval.label
+                            val sniperNote = "🎯 نقطه‌زنی [تایم $tfLabel] · [${armedReport.strategyTitleFa}] · (${armedReport.trendPhase.badgeFa} · دقت ${armedReport.sniperEntryScore.toInt()}%)"
+                            openAutoTrackedTrade(
+                                calc = calc,
+                                note = sniperNote,
+                                strategyContext = armedReport.toAiStrategyContext(),
+                                entryInterval = armedReport.triggerInterval,
+                                strategyId = armedReport.strategyId,
+                                strategyTitleFa = armedReport.strategyTitleFa,
+                            )
+                        }
                     }
                 }
             }
@@ -494,8 +488,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         val safeTarget = if (targetCapital.isFinite() && targetCapital >= 100.0) targetCapital else 100_000.0
         val safeFixedRisk = if (fixedRiskUsd.isFinite() && fixedRiskUsd >= 0.5) fixedRiskUsd else 5.0
         val safeRisk = riskPercent.coerceIn(0.1, 10.0)
-        val safeDaily = dailyLossLimitPercent.coerceIn(0.5, 25.0)
-        val safeMaxDd = maxDrawdownLimitPercent.coerceIn(1.0, 50.0)
+        val safeDaily = dailyLossLimitPercent.coerceIn(0.5, 100.0)
+        val safeMaxDd = maxDrawdownLimitPercent.coerceIn(1.0, 100.0)
         container.settingsStore.update {
             it.copy(
                 accountBalance = accountBalance,
@@ -509,7 +503,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
         _toast.value = if (useFixedDollarRisk) {
-            "✅ برنامه رشد سرمایه ($${safeInitial.toInt()} ← $${safeTarget.toInt()}) با ریسک ثابت $${safeFixedRisk} در هر معامله ذخیره شد"
+            "✅ موجودی حساب ($${String.format(Locale.US, "%,.0f", accountBalance)}) با ریسک ثابت $${safeFixedRisk} در هر معامله ذخیره شد"
         } else {
             "تنظیمات مدیریت سرمایه و ریسک ذخیره شد"
         }
@@ -1101,7 +1095,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     it.isOpen && V1Universe.normalize(it.symbol) == symbol
                 }
                 for (openTrade in openSymbolTrades) {
-                    val matchingReport = dual.reportFor(openTrade.interval)
+                    val matchingReport = dual.reportFor(openTrade.interval, openTrade.strategyId)
                     val preserveUpdate = IchimokuStrategyEngine.evaluateOpenTradeManagement(
                         trade = openTrade,
                         report = matchingReport,
@@ -1118,25 +1112,26 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 }
             }
 
-            // ۲. رصد هم‌زمان 15m و 5m برای ورود خودکار و اولویت‌بندی بر اساس Core-Trend Score
+            // ۲. رصد هم‌زمان 15m و 5m برای ورود خودکار همه استراتژی‌ها (بدون محدودیت تعداد معامله و بدون محدودیت باخت‌های متوالی)
             if (cfg.autoPaperTrading) {
                 val rankedCandidates = newlyEvaluatedDuals
                     .flatMap { it.actionableReports }
                     .filter { rep ->
-                        !com.aurum.edge.core.MarketHours.closedFor(rep.symbol, now) &&
-                            trades.value.none { it.isOpen && V1Universe.normalize(it.symbol) == rep.symbol }
+                        !com.aurum.edge.core.MarketHours.closedFor(rep.symbol, now)
                     }
                     .sortedByDescending { it.coreTrendScore }
 
                 for (report in rankedCandidates) {
                     val symbol = report.symbol
                     val openAll = trades.value.filter { it.isOpen }
-                    val hasOpenForSym = openAll.any { V1Universe.normalize(it.symbol) == symbol }
-                    val assetClass = com.aurum.edge.core.AssetClass.of(symbol)
-                    val openInClass = openAll.count { com.aurum.edge.core.AssetClass.of(it.symbol) == assetClass }
+                    val hasOpenSameStrategyTf = openAll.any {
+                        it.strategyId == report.strategyId &&
+                            V1Universe.normalize(it.symbol) == symbol &&
+                            it.interval == report.triggerInterval
+                    }
                     val fireKey = "${report.strategyId}|$symbol|${report.triggerInterval.label}"
                     val lastFiredBar = lastAutoFiredBarTimeByKey[fireKey] ?: 0L
-                    if (!hasOpenForSym && openAll.size < 4 && openInClass < assetClass.maxSlots &&
+                    if (!hasOpenSameStrategyTf &&
                         report.triggerBarTime > 0L && report.triggerBarTime != lastFiredBar
                     ) {
                         val entry = report.suggestedEntry
@@ -1153,16 +1148,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                                 preferredAction = report.action,
                                 fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
                             )
-                            val limits = RiskAndCalendarEngine.evaluateRiskLimits(
-                                accountBalance = cfg.accountBalance,
-                                initialCapital = cfg.initialCapital,
-                                dayOpeningEquity = dayOpeningEquity(now),
-                                dailyLossLimitPercent = cfg.dailyLossLimitPercent,
-                                maxDrawdownLimitPercent = cfg.maxDrawdownLimitPercent,
-                                trades = trades.value,
-                                now = now,
-                            )
-                            if (calc != null && limits.canOpenTrade(calc.riskBudgetUsd)) {
+                            if (calc != null) {
                                 lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to report.triggerBarTime)
                                 val tfLabel = report.triggerInterval.label
                                 val autoNote = "⚡ خودکار [تایم $tfLabel] · [${report.strategyTitleFa}] · (${report.trendPhase.badgeFa} · امتیاز ${report.coreTrendScore.toInt()})"

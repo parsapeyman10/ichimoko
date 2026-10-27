@@ -96,6 +96,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
                             market = market,
                             onChartSymbol = ::openChartFor,
                             onJournal = { open(AurumTab.Journal) },
+                            onOpenSettings = { open(AurumTab.Settings) },
                         )
                         AurumTab.Strategy -> Column(
                             Modifier
@@ -106,6 +107,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
                             BitcoinIchimokuStrategyCard(
                                 viewModel = viewModel,
                                 onOpenChartForSymbol = ::openChartFor,
+                                onOpenSettings = { open(AurumTab.Settings) },
                             )
                         }
                         AurumTab.Chart -> ChartScreen(
@@ -115,6 +117,10 @@ fun AurumRoot(viewModel: AurumViewModel) {
                         AurumTab.Journal -> JournalRiskScreen(
                             viewModel = viewModel,
                             onChartSymbol = ::openChartFor,
+                            onOpenSettings = { open(AurumTab.Settings) },
+                        )
+                        AurumTab.Settings -> SettingsScreen(
+                            viewModel = viewModel,
                         )
                         AurumTab.Update -> UpdateScreen(viewModel)
                     }

@@ -18,10 +18,10 @@ data class PriceTick(
 }
 
 enum class AssetClass(val code: String, val label: String, val maxSlots: Int) {
-    CRYPTO("CRYPTO", "رمزارز", 2),
-    FOREX("FOREX", "جفت‌ارز فارکس", 2),
-    COMMODITY("COMMODITY", "کالا و انرژی", 2),
-    STOCK("STOCK", "سهام و شاخص", 2);
+    CRYPTO("CRYPTO", "رمزارز", 999),
+    FOREX("FOREX", "جفت‌ارز فارکس", 999),
+    COMMODITY("COMMODITY", "کالا و انرژی", 999),
+    STOCK("STOCK", "سهام و شاخص", 999);
 
     companion object {
         private val fiat = setOf(
@@ -200,13 +200,13 @@ data class AppSettings(
     val symbol: String = "XAU/USD",
     val interval: Interval = Interval.M5,
     val riskPercent: Double = 0.5,
-    val accountBalance: Double = 1000.0,
-    val initialCapital: Double = 1000.0,
+    val accountBalance: Double = 100_000.0,
+    val initialCapital: Double = 100_000.0,
     val targetCapital: Double = 100_000.0,
     val useFixedDollarRisk: Boolean = true,
     val fixedRiskUsd: Double = 5.0,
-    val dailyLossLimitPercent: Double = 3.0,
-    val maxDrawdownLimitPercent: Double = 10.0,
+    val dailyLossLimitPercent: Double = 100.0,
+    val maxDrawdownLimitPercent: Double = 100.0,
     val minConfidence: Double = 85.0,
     val spreadPrice: Double = 0.12,
     val commissionPerOz: Double = 0.035,

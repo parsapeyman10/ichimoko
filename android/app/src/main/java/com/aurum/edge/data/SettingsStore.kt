@@ -156,18 +156,18 @@ class SettingsStore(context: Context) {
             .takeIf(V1Universe::valid) ?: "XAU/USD",
         interval = Interval.M5,
         riskPercent = prefs.getFloat(KEY_RISK, 0.5f).toDouble().takeIf { it.isFinite() }?.coerceIn(0.1, 10.0) ?: 0.5,
-        accountBalance = prefs.getFloat(KEY_BALANCE, 1000f).toDouble(),
-        initialCapital = prefs.getFloat(KEY_INITIAL_CAPITAL, prefs.getFloat(KEY_BALANCE, 1000f)).toDouble()
-            .takeIf { it.isFinite() && it >= 10.0 } ?: 1000.0,
+        accountBalance = prefs.getFloat(KEY_BALANCE, 100_000f).toDouble(),
+        initialCapital = prefs.getFloat(KEY_INITIAL_CAPITAL, prefs.getFloat(KEY_BALANCE, 100_000f)).toDouble()
+            .takeIf { it.isFinite() && it >= 10.0 } ?: 100_000.0,
         targetCapital = prefs.getFloat(KEY_TARGET_CAPITAL, 100_000f).toDouble()
             .takeIf { it.isFinite() && it >= 100.0 } ?: 100_000.0,
         useFixedDollarRisk = prefs.getBoolean(KEY_USE_FIXED_DOLLAR_RISK, true),
         fixedRiskUsd = prefs.getFloat(KEY_FIXED_RISK_USD, 5.0f).toDouble()
             .takeIf { it.isFinite() && it >= 0.5 } ?: 5.0,
-        dailyLossLimitPercent = prefs.getFloat(KEY_DAILY_LOSS_LIMIT, 3.0f).toDouble()
-            .takeIf { it.isFinite() }?.coerceIn(0.5, 25.0) ?: 3.0,
-        maxDrawdownLimitPercent = prefs.getFloat(KEY_MAX_DRAWDOWN_LIMIT, 10.0f).toDouble()
-            .takeIf { it.isFinite() }?.coerceIn(1.0, 50.0) ?: 10.0,
+        dailyLossLimitPercent = prefs.getFloat(KEY_DAILY_LOSS_LIMIT, 100.0f).toDouble()
+            .takeIf { it.isFinite() }?.coerceIn(0.5, 100.0) ?: 100.0,
+        maxDrawdownLimitPercent = prefs.getFloat(KEY_MAX_DRAWDOWN_LIMIT, 100.0f).toDouble()
+            .takeIf { it.isFinite() }?.coerceIn(1.0, 100.0) ?: 100.0,
         minConfidence = prefs.getFloat(KEY_MIN_CONF, 85f).toDouble().takeIf { it.isFinite() }?.coerceIn(60.0, 95.0) ?: 85.0,
         spreadPrice = prefs.getFloat(KEY_SPREAD, 0.12f).toDouble(),
         commissionPerOz = prefs.getFloat(KEY_COMMISSION, 0.035f).toDouble(),
@@ -376,6 +376,28 @@ class SettingsStore(context: Context) {
         return ts.takeIf { it > 0L }
     }
 
+    /**
+     * مهاجرت یک‌باره موجودی حساب به ۱۰۰,۰۰۰ دلار در زمان اجرای برنامه روی دستگاه کاربر
+     */
+    fun ensureBalance100kMigrated() {
+        if (!prefs.getBoolean(KEY_BALANCE_100K_MIGRATED_V3903, false)) {
+            prefs.edit().putBoolean(KEY_BALANCE_100K_MIGRATED_V3903, true).apply()
+            val cur = read()
+            if (cur.accountBalance < 50_000.0) {
+                update {
+                    it.copy(
+                        accountBalance = 100_000.0,
+                        initialCapital = 100_000.0,
+                        dailyLossLimitPercent = 100.0,
+                        maxDrawdownLimitPercent = 100.0,
+                        useFixedDollarRisk = true,
+                        fixedRiskUsd = 5.0,
+                    )
+                }
+            }
+        }
+    }
+
     companion object {
         /** Dedicated keys are a symbol→key JSON map; unknown keys are ignored, never guessed. */
         private val symbolKeySerializer = MapSerializer(String.serializer(), String.serializer())
@@ -428,6 +450,7 @@ class SettingsStore(context: Context) {
         private const val KEY_TARGET_CAPITAL = "target_capital_usd"
         private const val KEY_USE_FIXED_DOLLAR_RISK = "use_fixed_dollar_risk"
         private const val KEY_FIXED_RISK_USD = "fixed_risk_usd"
+        private const val KEY_BALANCE_100K_MIGRATED_V3903 = "balance_100k_migrated_v3903"
         private const val KEY_BASE_STRATEGY_CONFIG_JSON = "btc_base_strategy_config_json"
         private const val KEY_CUSTOM_STRATEGIES_JSON = "btc_custom_strategies_json"
     }

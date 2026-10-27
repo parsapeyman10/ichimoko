@@ -59,7 +59,7 @@ import com.aurum.edge.ui.theme.AurumColors
 import java.util.Locale
 import kotlinx.coroutines.delay
 
-private data class SelectableStrategyItem(
+internal data class SelectableStrategyItem(
     val id: String,
     val titleFa: String,
     val badgeFa: String,
@@ -73,6 +73,7 @@ fun BitcoinIchimokuStrategyCard(
     viewModel: AurumViewModel,
     onApplySignalToCalculator: ((entry: Double, sl: Double, tp: Double, action: SignalAction) -> Unit)? = null,
     onOpenChartForSymbol: ((String) -> Unit)? = null,
+    onOpenSettings: (() -> Unit)? = null,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val report by viewModel.btcStrategyReport.collectAsStateWithLifecycle()
@@ -154,7 +155,7 @@ fun BitcoinIchimokuStrategyCard(
             )
         }
 
-        // نوار ۴ تب داخلی برای صفحه‌بندی تمیز
+        // نوار ۲ تب داخلی رادار + دکمه انتقال به صفحه تنظیمات
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -164,13 +165,18 @@ fun BitcoinIchimokuStrategyCard(
             listOf(
                 0 to "📡 رادار 15m + 5m (${allReports.size}/15)",
                 1 to "🎯 چک‌لیست ۱۶ شرط ($focusedSymbol · ${focusedInterval.label})",
-                2 to "🎯 انتخاب استراتژی (${allItems.size})",
-                3 to "⚙️ تنظیمات بیس",
             ).forEach { (idx, title) ->
                 Pill(
                     text = title,
                     color = if (subTab == idx) AurumColors.Gold else AurumColors.TextMuted,
                     modifier = Modifier.clickable { subTab = idx },
+                )
+            }
+            if (onOpenSettings != null) {
+                Pill(
+                    text = "⚙️ تنظیمات استراتژی‌ها ↗",
+                    color = AurumColors.Cyan,
+                    modifier = Modifier.clickable { onOpenSettings() },
                 )
             }
         }
@@ -192,7 +198,7 @@ fun BitcoinIchimokuStrategyCard(
                 onOpenChart = onOpenChartForSymbol,
             )
 
-            1 -> Live12ConditionChecklistPage(
+            else -> Live12ConditionChecklistPage(
                 report = dualReports[focusedSymbol]?.reportFor(focusedInterval, selectedId) ?: report,
                 focusedSymbol = focusedSymbol,
                 focusedInterval = focusedInterval,
@@ -230,35 +236,6 @@ fun BitcoinIchimokuStrategyCard(
                             strategyTitleFa = evalReport.strategyTitleFa,
                         )
                     }
-                },
-            )
-
-            2 -> ExclusiveStrategySelectorPage(
-                allItems = allItems,
-                selectedId = selectedId,
-                runAllSimultaneously = settings.runAllStrategiesSimultaneously,
-                enabledStrategyIds = settings.enabledStrategyIds,
-                executionEnabled = executionEnabled,
-                showAddModelForm = showAddModelForm,
-                onToggleAddForm = { showAddModelForm = !showAddModelForm },
-                onToggleRunAll = viewModel::setRunAllStrategiesSimultaneously,
-                onToggleStrategyInMulti = viewModel::toggleStrategyEnabledInMultiMode,
-                onSelectAndActivate = { id ->
-                    viewModel.activateSingleBitcoinStrategy(id, enableExecution = true)
-                },
-                onToggleExecution = viewModel::setAutoPaperTrading,
-                onAddModel = { title, summary, baseModel ->
-                    viewModel.addCustomStrategyModel(title, summary, baseModel, activateImmediately = true)
-                    showAddModelForm = false
-                },
-                onDeleteCustom = viewModel::deleteCustomStrategyModel,
-            )
-
-            3 -> BaseStrategyRefinementPanel(
-                config = currentConfig,
-                onSaveConfig = { updated ->
-                    viewModel.updateBaseStrategyConfig(updated)
-                    subTab = 1
                 },
             )
         }
@@ -633,7 +610,7 @@ private fun Live12ConditionChecklistPage(
 }
 
 @Composable
-private fun ExclusiveStrategySelectorPage(
+internal fun ExclusiveStrategySelectorPage(
     allItems: List<SelectableStrategyItem>,
     selectedId: String,
     runAllSimultaneously: Boolean,
@@ -863,7 +840,7 @@ private fun AddCustomStrategyModelPanel(
 }
 
 @Composable
-private fun BaseStrategyRefinementPanel(
+internal fun BaseStrategyRefinementPanel(
     config: BaseStrategyConfig,
     onSaveConfig: (BaseStrategyConfig) -> Unit,
 ) {

@@ -203,13 +203,13 @@ fun AssetClass4SlotsBanner(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "۴ پوزیشن کل · حداکثر ۲ در هر دسته",
+                "وضعیت معاملات باز به تفکیک بازار (بدون محدودیت تعداد)",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.Gold,
                 fontWeight = FontWeight.Bold,
             )
             val openCount = openTrades.size
-            Pill("$openCount از ۴ فعال", if (openCount > 0) AurumColors.Green else AurumColors.TextMuted)
+            Pill("$openCount معامله فعال", if (openCount > 0) AurumColors.Green else AurumColors.TextMuted)
         }
 
         // ۴ مستطیل به صورت گرید دو در دو
@@ -245,7 +245,7 @@ fun AssetClass4SlotsBanner(
                                     color = if (isOpen) AurumColors.Green else AurumColors.TextPrimary,
                                 )
                                 Pill(
-                                    text = "${categoryTrades.size}/۲",
+                                    text = "${categoryTrades.size} فعال",
                                     color = if (isOpen) AurumColors.Green else AurumColors.TextMuted,
                                 )
                             }
@@ -255,17 +255,23 @@ fun AssetClass4SlotsBanner(
                                     livePrices[trade.symbol] ?: lastKnownPrices[trade.symbol])
 
                                 Text(
-                                    text = "${trade.symbol} · ${if (trade.action == com.aurum.edge.domain.SignalAction.BUY) "BUY ↗" else "SELL ↘"}",
+                                    text = "${trade.symbol} [${trade.interval.label}] · ${if (trade.action == com.aurum.edge.domain.SignalAction.BUY) "BUY ↗" else "SELL ↘"}",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
                                     color = AurumColors.Gold,
                                     modifier = Modifier.clickable { onSelectSymbol(trade.symbol) },
                                 )
+                                Text(
+                                    text = "📌 ${trade.strategyTitleFa.substringBefore('(').trim()}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AurumColors.Cyan,
+                                    fontWeight = FontWeight.Bold,
+                                )
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                 ) {
-                                    Text("اهرم ${trade.effectiveLeverage}x", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
+                                    Text("ریسک: -$${trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0}", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextSecondary)
                                     Text(
                                         valuation?.let { value ->
                                             (if (value.netPnlUsd >= 0) "+$" else "-$") +
