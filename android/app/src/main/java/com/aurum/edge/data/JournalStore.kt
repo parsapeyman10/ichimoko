@@ -108,6 +108,7 @@ class JournalStore(
         tradeId: String,
         newStopLoss: Double,
         stageNote: String,
+        newTakeProfit: Double? = null,
     ): PaperTrade? {
         if (!newStopLoss.isFinite() || newStopLoss <= 0.0) return null
         val target = _trades.value.firstOrNull { it.id == tradeId && it.isOpen } ?: return null
@@ -118,9 +119,19 @@ class JournalStore(
         } else {
             "${target.note} · $stageNote"
         }
+        val effectiveTp = newTakeProfit?.takeIf { it.isFinite() && it > 0.0 } ?: target.takeProfit
+        val initSl = target.initialStopLoss ?: target.stopLoss
+        val initRiskDist = abs(target.entry - initSl)
+        val updatedRr = if (initRiskDist > 1e-8) {
+            round((abs(effectiveTp - target.entry) / initRiskDist) * 100.0) / 100.0
+        } else {
+            target.riskReward
+        }
         val modified = target.copy(
             stopLoss = newStopLoss,
-            initialStopLoss = target.initialStopLoss ?: target.stopLoss,
+            takeProfit = effectiveTp,
+            riskReward = updatedRr,
+            initialStopLoss = initSl,
             note = updatedNote,
         )
         persist(_trades.value.map { if (it.id == tradeId) modified else it })
@@ -129,8 +140,8 @@ class JournalStore(
 
     /**
      * Evaluates an incoming live market tick against all open trades for [symbolInput].
-     * Any trade whose TP or SL is reached is automatically closed, persisted, and settled
-     * against account balance.
+     * First applies the 1:3+ Institutional Trend-Runner & Profit-Lock Ratchet if the trade reaches/passes 1:3,
+     * then evaluates whether TP or SL was reached.
      */
     @Synchronized
     fun onLiveTick(symbolInput: String, tick: PriceTick): List<AutoExitEvaluation> {
@@ -140,17 +151,52 @@ class JournalStore(
             return emptyList()
         }
         val triggered = mutableListOf<AutoExitEvaluation>()
-        val updated = current.map { trade ->
-            if (!trade.isOpen || V1Universe.normalize(trade.symbol) != symbol) {
-                trade
+        var runnerModifiedAny = false
+        val updated = current.map { rawTrade ->
+            if (!rawTrade.isOpen || V1Universe.normalize(rawTrade.symbol) != symbol) {
+                rawTrade
             } else {
+                val runner = RiskAndCalendarEngine.evaluateLiveTickTrendRunner(rawTrade, tick)
+                val trade = if (runner != null) {
+                    runnerModifiedAny = true
+                    val initSl = rawTrade.initialStopLoss ?: rawTrade.stopLoss
+                    val effectiveTp = runner.newTakeProfit ?: rawTrade.takeProfit
+                    val initRiskDist = abs(rawTrade.entry - initSl)
+                    val updatedRr = if (initRiskDist > 1e-8) {
+                        round((abs(effectiveTp - rawTrade.entry) / initRiskDist) * 100.0) / 100.0
+                    } else {
+                        rawTrade.riskReward
+                    }
+                    val updatedNote = if (rawTrade.note.contains(runner.stageTitleFa)) {
+                        rawTrade.note
+                    } else if (rawTrade.note.isBlank()) {
+                        runner.stageTitleFa
+                    } else {
+                        "${rawTrade.note} · ${runner.stageTitleFa}"
+                    }
+                    rawTrade.copy(
+                        stopLoss = runner.newStopLoss,
+                        takeProfit = effectiveTp,
+                        riskReward = updatedRr,
+                        initialStopLoss = initSl,
+                        note = updatedNote,
+                    )
+                } else {
+                    rawTrade
+                }
+
                 val hit = RiskAndCalendarEngine.evaluateAutoExit(trade, tick)
                 if (hit != null) {
                     triggered += hit
+                    val effectiveReason = if (hit.kind == com.aurum.edge.core.AutoExitKind.STOP_LOSS && hit.netPnlUsd > 0.0) {
+                        "🛡️ بسته شدن با سود در حد ضرر متحرک هوشمند (${hit.kind.reasonFa})"
+                    } else {
+                        hit.kind.reasonFa
+                    }
                     trade.copy(
                         closedAt = hit.closedAt,
                         exitPrice = hit.exitPrice,
-                        exitReason = hit.kind.reasonFa,
+                        exitReason = effectiveReason,
                         pnlUsd = hit.netPnlUsd,
                     )
                 } else {
@@ -158,10 +204,12 @@ class JournalStore(
                 }
             }
         }
-        if (triggered.isNotEmpty()) {
+        if (triggered.isNotEmpty() || runnerModifiedAny) {
             persist(updated)
-            val totalDelta = triggered.sumOf { it.netPnlUsd }
-            settingsStore?.adjustBalance(totalDelta)
+            if (triggered.isNotEmpty()) {
+                val totalDelta = triggered.sumOf { it.netPnlUsd }
+                settingsStore?.adjustBalance(totalDelta)
+            }
         }
         return triggered
     }

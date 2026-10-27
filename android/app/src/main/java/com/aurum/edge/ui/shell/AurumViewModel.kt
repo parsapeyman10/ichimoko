@@ -384,9 +384,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         if (autoClosed.isNotEmpty()) {
             val first = autoClosed.first()
             val pnlStr = String.format(Locale.US, "%s$%.2f", if (first.netPnlUsd >= 0) "+" else "", first.netPnlUsd)
-            val msg = when (first.kind) {
-                AutoExitKind.TAKE_PROFIT -> "🎯 معامله ${first.symbol} با برخورد به حد سود (TP) بسته شد ($pnlStr)"
-                AutoExitKind.STOP_LOSS -> "🛑 معامله ${first.symbol} با برخورد به حد ضرر (SL) بسته شد ($pnlStr)"
+            val msg = when {
+                first.kind == AutoExitKind.TAKE_PROFIT -> "🎯 معامله ${first.symbol} با برخورد به حد سود (TP) بسته شد ($pnlStr)"
+                first.netPnlUsd > 0.0 -> "🛡️ معامله ${first.symbol} با قفل سود هوشمند در روند بسته شد ($pnlStr)"
+                else -> "🛑 معامله ${first.symbol} با برخورد به حد ضرر (SL) بسته شد ($pnlStr)"
             }
             _toast.value = msg
             BackgroundTradingService.postTradeEventNotification(
@@ -396,7 +397,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             )
         }
 
-        // شکار لحظه‌ای نقطه‌زنی ورود (Real-Time Sniper Pocket Fill) روی هر دو تایم‌فریم 15m و 5m و همه استراتژی‌های فعال (بدون محدودیت تعداد معامله و باخت متوالی)
+        // شکار لحظه‌ای نقطه‌زنی ورود (Real-Time Sniper Pocket Fill) روی هر دو تایم‌فریم 15m و 5m و همه استراتژی‌های فعال (با الزام قطعی R:R >= 1:1.5)
         val cfg = settings.value
         val dualReport = _dualSymbolStrategyReports.value[symbol]
         val armedCandidates = dualReport?.sniperArmedReports
@@ -416,22 +417,30 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     armedReport.triggerBarTime > 0L && armedReport.triggerBarTime != lastFiredBar
                 ) {
                     val sl = armedReport.suggestedStopLoss
-                    val tp = armedReport.primaryTakeProfit
-                    if (sl != null && tp != null) {
+                    val rawTp = armedReport.primaryTakeProfit
+                    if (sl != null && rawTp != null) {
+                        val enforcedTp = RiskAndCalendarEngine.enforceMinimumRiskReward(
+                            symbolInput = symbol,
+                            entryPrice = tick.price,
+                            stopLoss = sl,
+                            takeProfit = rawTp,
+                            action = armedReport.action,
+                            minRiskReward = RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD,
+                        )
                         val calc = RiskAndCalendarEngine.calculatePosition(
                             symbolInput = symbol,
                             accountBalance = cfg.accountBalance,
                             riskPercent = cfg.riskPercent,
                             entry = tick.price,
                             stopLoss = sl,
-                            takeProfit = tp,
+                            takeProfit = enforcedTp,
                             preferredAction = armedReport.action,
                             fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
                         )
-                        if (calc != null) {
+                        if (calc != null && calc.riskReward >= RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD) {
                             lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
                             val tfLabel = armedReport.triggerInterval.label
-                            val sniperNote = "🎯 نقطه‌زنی [تایم $tfLabel] · [${armedReport.strategyTitleFa}] · (${armedReport.trendPhase.badgeFa} · دقت ${armedReport.sniperEntryScore.toInt()}%)"
+                            val sniperNote = "🎯 نقطه‌زنی [تایم $tfLabel] · [${armedReport.strategyTitleFa}] · (R:R 1:${calc.riskReward} · ${armedReport.trendPhase.badgeFa})"
                             openAutoTrackedTrade(
                                 calc = calc,
                                 note = sniperNote,
@@ -865,19 +874,22 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun updateBaseStrategyConfig(newConfig: BaseStrategyConfig) {
+        val safeConfig = newConfig.copy(
+            minRiskReward = kotlin.math.max(newConfig.minRiskReward, RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD),
+        )
         container.settingsStore.update { current ->
             val customSlot = current.activeCustomStrategySlot()
             if (customSlot != null) {
                 current.copy(
                     customStrategies = current.customStrategies.map {
-                        if (it.id == customSlot.id) it.copy(config = newConfig) else it
+                        if (it.id == customSlot.id) it.copy(config = safeConfig) else it
                     }
                 )
             } else {
-                current.copy(baseStrategyConfig = newConfig)
+                current.copy(baseStrategyConfig = safeConfig)
             }
         }
-        _toast.value = "✅ تنظیمات استراتژی ذخیره شد؛ در حال بازسنجی چارت BTC/USDT..."
+        _toast.value = "✅ تنظیمات استراتژی ذخیره شد (حداقل R:R = 1:${safeConfig.minRiskReward})؛ در حال بازسنجی..."
         scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
     }
 
@@ -1129,7 +1141,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 }
             }
 
-            // ۱. مدیریت پویا ۴ مرحله‌ای (Preserve Mode / Kijun Trend-Ride / Break-Even) روی معاملات باز بر اساس تایم‌فریم ورود همان معامله
+            // ۱. مدیریت پویا ۵ مرحله‌ای (شکارچی روند بالای ۱:۳ / قفل ۱:۱.۵ / Preserve Mode / کیجون / ریسک‌فری) روی معاملات باز
             for (dual in newlyEvaluatedDuals) {
                 val symbol = dual.symbol
                 val openSymbolTrades = trades.value.filter {
@@ -1147,13 +1159,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                             tradeId = openTrade.id,
                             newStopLoss = preserveUpdate.newStopLoss,
                             stageNote = preserveUpdate.stageTitleFa,
+                            newTakeProfit = preserveUpdate.newTakeProfit,
                         )
                         _toast.value = "${preserveUpdate.stageTitleFa} [${openTrade.interval.label}]: استاپ ${openTrade.symbol} به ${preserveUpdate.newStopLoss} منتقل شد (${preserveUpdate.reasonFa})"
                     }
                 }
             }
 
-            // ۲. رصد هم‌زمان 15m و 5m برای ورود خودکار همه استراتژی‌ها (بدون محدودیت تعداد معامله و بدون محدودیت باخت‌های متوالی)
+            // ۲. رصد هم‌زمان 15m و 5m برای ورود خودکار همه استراتژی‌ها (با شرط قطعی R:R >= 1:1.5)
             if (cfg.autoPaperTrading) {
                 val rankedCandidates = newlyEvaluatedDuals
                     .flatMap { it.actionableReports }
@@ -1177,22 +1190,30 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     ) {
                         val entry = report.suggestedEntry
                         val sl = report.suggestedStopLoss
-                        val tp = report.primaryTakeProfit
-                        if (entry != null && sl != null && tp != null) {
+                        val rawTp = report.primaryTakeProfit
+                        if (entry != null && sl != null && rawTp != null) {
+                            val enforcedTp = RiskAndCalendarEngine.enforceMinimumRiskReward(
+                                symbolInput = symbol,
+                                entryPrice = entry,
+                                stopLoss = sl,
+                                takeProfit = rawTp,
+                                action = report.action,
+                                minRiskReward = RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD,
+                            )
                             val calc = RiskAndCalendarEngine.calculatePosition(
                                 symbolInput = symbol,
                                 accountBalance = cfg.accountBalance,
                                 riskPercent = cfg.riskPercent,
                                 entry = entry,
                                 stopLoss = sl,
-                                takeProfit = tp,
+                                takeProfit = enforcedTp,
                                 preferredAction = report.action,
                                 fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
                             )
-                            if (calc != null) {
+                            if (calc != null && calc.riskReward >= RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD) {
                                 lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to report.triggerBarTime)
                                 val tfLabel = report.triggerInterval.label
-                                val autoNote = "⚡ خودکار [تایم $tfLabel] · [${report.strategyTitleFa}] · (${report.trendPhase.badgeFa} · امتیاز ${report.coreTrendScore.toInt()})"
+                                val autoNote = "⚡ خودکار [تایم $tfLabel] · [${report.strategyTitleFa}] · (R:R 1:${calc.riskReward} · ${report.trendPhase.badgeFa})"
                                 openAutoTrackedTrade(
                                     calc = calc,
                                     note = autoNote,

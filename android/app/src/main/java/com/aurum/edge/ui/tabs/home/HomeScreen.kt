@@ -386,10 +386,20 @@ private fun LiveTradeGaugeCard(
             )
         }
 
+        val initStop = trade.initialStopLoss ?: trade.stopLoss
+        val oneR = abs(trade.entry - initStop)
+        val stopInProfitDist = if (isBuy) trade.stopLoss - trade.entry else trade.entry - trade.stopLoss
+        val lockedProfitR = if (oneR > 1e-8 && stopInProfitDist > 1e-8) stopInProfitDist / oneR else 0.0
+
         Text(
-            text = "📌 استراتژی: ${trade.strategyTitleFa} · تایم ورود: ${trade.interval.label}",
+            text = buildString {
+                append("📌 استراتژی: ${trade.strategyTitleFa} · تایم: ${trade.interval.label} · R:R = 1:${String.format(Locale.US, "%.2f", trade.riskReward)}")
+                if (lockedProfitR > 0.05) {
+                    append(String.format(Locale.US, " · 🛡️ قفل سود: +%.2fR", lockedProfitR))
+                }
+            },
             style = MaterialTheme.typography.labelSmall,
-            color = AurumColors.Cyan,
+            color = if (lockedProfitR >= 2.0) AurumColors.Green else AurumColors.Cyan,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,

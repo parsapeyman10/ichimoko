@@ -263,6 +263,108 @@ object RiskAndCalendarEngine {
         )
     }
 
+    const val MIN_REQUIRED_RISK_REWARD: Double = 1.5
+    const val TREND_RUNNER_THRESHOLD_R: Double = 2.85
+
+    /**
+     * تضمین می‌کند نسبت سود به ضرر (R:R) هر معامله همیشه حداقل ۱ به ۱.۵ (`1.5R`) و بالاتر باشد.
+     */
+    fun enforceMinimumRiskReward(
+        symbolInput: String,
+        entryPrice: Double,
+        stopLoss: Double,
+        takeProfit: Double,
+        action: SignalAction,
+        minRiskReward: Double = MIN_REQUIRED_RISK_REWARD,
+    ): Double {
+        val safeMinRr = max(minRiskReward, MIN_REQUIRED_RISK_REWARD)
+        val stopDist = abs(entryPrice - stopLoss)
+        if (!stopDist.isFinite() || stopDist <= 1e-8) return takeProfit
+        val currentTargetDist = abs(takeProfit - entryPrice)
+        if (currentTargetDist / stopDist >= safeMinRr - 1e-6) return takeProfit
+        val symbol = V1Universe.normalize(symbolInput)
+        val decimals = priceDecimals(symbol, entryPrice)
+        val requiredDist = stopDist * safeMinRr
+        val adjustedTp = if (action == SignalAction.BUY) {
+            entryPrice + requiredDist
+        } else {
+            max(0.00001, entryPrice - requiredDist)
+        }
+        return roundToDecimals(adjustedTp, decimals)
+    }
+
+    /**
+     * موتور لحظه‌ای شکارچی روند بالای ۱ به ۳ (`1:3+ Chandelier & Ratchet Runner`):
+     * وقتی معامله در سود است و به مرز `1:3` (`>= 2.85R`) می‌رسد یا می‌خواهد از `1:3` رد شود:
+     * ۱. حد ضرر را در بهترین نقطه (قفل حداقل `+2.25R` در `3.0R` و قفل `82%` سودهای بالاتر با حفظ فاصله تنفس `0.35R`) قرار می‌دهد تا سود هرگز از بین نرود.
+     * ۲. حد سود (`TP`) را به‌صورت پله‌ای جلو می‌برد تا معامله در `1:3` زودهنگام بسته نشود و اصل روند از دست نرود.
+     */
+    fun evaluateLiveTickTrendRunner(
+        trade: PaperTrade,
+        tick: PriceTick,
+    ): PreserveModeEvaluation? {
+        if (!trade.isOpen) return null
+        val price = tick.price
+        if (!price.isFinite() || price <= 0.0) return null
+
+        val initialStop = trade.initialStopLoss ?: trade.stopLoss
+        val oneR = abs(trade.entry - initialStop)
+        if (!oneR.isFinite() || oneR <= 1e-8) return null
+
+        val isBuy = trade.action == SignalAction.BUY
+        val profitDist = if (isBuy) price - trade.entry else trade.entry - price
+        val currentR = profitDist / oneR
+        if (currentR < TREND_RUNNER_THRESHOLD_R) return null
+
+        val decimals = priceDecimals(trade.symbol, trade.entry)
+
+        // ۱. محاسبه بهترین جایگاه حد ضرر (حفظ 75% تا 82% سود کسب‌شده + فضای تنفس 0.35R برای ادامه روند)
+        val ratchetR = 2.15 + (currentR - TREND_RUNNER_THRESHOLD_R).coerceAtLeast(0.0) * 0.82
+        val rawRatchetStop = if (isBuy) {
+            min(trade.entry + ratchetR * oneR, price - oneR * 0.35)
+        } else {
+            max(trade.entry - ratchetR * oneR, price + oneR * 0.35)
+        }
+        val candidateStop = roundToDecimals(rawRatchetStop, decimals)
+
+        val improvesStop = if (isBuy) {
+            candidateStop > trade.stopLoss + oneR * 0.05 && candidateStop < price
+        } else {
+            candidateStop < trade.stopLoss - oneR * 0.05 && candidateStop > price
+        }
+
+        // ۲. اگر قیمت در آستانه برخورد به TP یا عبور از 1:3 است، سقف TP را برای شکار ادامه روند باز کن
+        val currentTpR = abs(trade.takeProfit - trade.entry) / oneR
+        val distToTp = if (isBuy) trade.takeProfit - price else price - trade.takeProfit
+        val shouldExtendTp = currentTpR >= TREND_RUNNER_THRESHOLD_R && distToTp <= oneR * 0.65
+        val candidateTp: Double? = if (shouldExtendTp) {
+            val nextTargetR = max(currentR + 1.50, max(currentTpR + 1.20, 4.50))
+            val rawTp = if (isBuy) trade.entry + nextTargetR * oneR else max(0.00001, trade.entry - nextTargetR * oneR)
+            roundToDecimals(rawTp, decimals)
+        } else {
+            null
+        }
+
+        if (!improvesStop && candidateTp == null) return null
+        val finalStop = if (improvesStop) candidateStop else trade.stopLoss
+        val lockedR = round2(abs(finalStop - trade.entry) / oneR)
+        val tpMsg = if (candidateTp != null) " + امتداد TP به $candidateTp" else ""
+        return PreserveModeEvaluation(
+            tradeId = trade.id,
+            newStopLoss = finalStop,
+            stageTitleFa = "🚀 شکارچی روند بالای ۱:۳ (قفل سود +${lockedR}R$tpMsg)",
+            reasonFa = String.format(
+                Locale.US,
+                "عبور از ۱:۳ (%.2fR)؛ قفل حد ضرر در +%.2fR و حفظ روند%s",
+                currentR,
+                lockedR,
+                tpMsg,
+            ),
+            newTakeProfit = candidateTp,
+            lockedRMultiple = lockedR,
+        )
+    }
+
     /**
      * Suggests default SL and TP around a live entry price for quick one-tap prefill.
      */
@@ -281,7 +383,7 @@ object RiskAndCalendarEngine {
             AssetClass.CRYPTO -> 0.0100 // 1.00% on Crypto
         }
         val stopDist = max(entryPrice * defaultStopPct, VenueSpecs.minStopDistance(symbol, entryPrice) * 3.0)
-        val tpDist = stopDist * rewardRatio.coerceAtLeast(1.0)
+        val tpDist = stopDist * rewardRatio.coerceAtLeast(MIN_REQUIRED_RISK_REWARD)
         val decimals = priceDecimals(symbol, entryPrice)
         val sl = if (action == SignalAction.BUY) entryPrice - stopDist else entryPrice + stopDist
         val tp = if (action == SignalAction.BUY) entryPrice + tpDist else entryPrice - tpDist

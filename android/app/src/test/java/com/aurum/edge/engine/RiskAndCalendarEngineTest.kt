@@ -542,6 +542,49 @@ class RiskAndCalendarEngineTest {
         assertEquals(12.5, manishCat.netPnlUsd, 1e-4)
         assertEquals(1, hosodaCat.lossesCount)
         assertEquals(-5.0, hosodaCat.netPnlUsd, 1e-4)
+
+        // Verify 1:1.5 minimum R:R enforcement & 1:3+ Institutional Trend-Runner
+        val adjustedTpBuy = RiskAndCalendarEngine.enforceMinimumRiskReward(
+            symbolInput = "BTC/USDT",
+            entryPrice = 65_000.0,
+            stopLoss = 64_500.0,
+            takeProfit = 65_400.0, // only 0.8R -> must be lifted to 1.5R (65,750.0)
+            action = SignalAction.BUY,
+        )
+        assertEquals(65_750.0, adjustedTpBuy, 1e-4)
+
+        val runnerFile = File(context.filesDir, "test_runner_1to3.json")
+        runnerFile.delete()
+        val runnerJournal = JournalStore(context, runnerFile, settingsStore)
+        val calc3R = RiskAndCalendarEngine.calculatePosition(
+            symbolInput = "BTC/USDT",
+            accountBalance = 100_000.0,
+            riskPercent = 0.005,
+            entry = 65_000.0,
+            stopLoss = 64_500.0, // 1R = 500
+            takeProfit = 66_500.0, // 3R = 66,500
+            preferredAction = SignalAction.BUY,
+            fixedRiskUsdOverride = 5.0,
+        )!!
+        val opened3R = runnerJournal.openTrade(calc3R, note = "تست شکارچی روند ۱:۳")
+        // Live tick reaches 66,500 (3.0R) -> Runner locks SL above +2.25R (66,135) and extends TP to 4.7R (67,350) so trade stays open!
+        val runnerTickHits = runnerJournal.onLiveTick("BTC/USDT", PriceTick(price = 66_500.0, at = 1_760_002_000_000L))
+        assertTrue(runnerTickHits.isEmpty())
+        val updatedRunnerTrade = runnerJournal.trades.value.first { it.id == opened3R.id }
+        assertTrue(updatedRunnerTrade.isOpen)
+        assertTrue(updatedRunnerTrade.stopLoss >= 66_120.0) // >= +2.24R locked!
+        assertTrue(updatedRunnerTrade.takeProfit >= 67_200.0) // TP extended beyond 1:3!
+
+        // Now price climbs to 4.0R (67,000) -> SL ratchets higher (>= +3.09R = 66,545)
+        runnerJournal.onLiveTick("BTC/USDT", PriceTick(price = 67_000.0, at = 1_760_002_060_000L))
+        val at4R = runnerJournal.trades.value.first { it.id == opened3R.id }
+        assertTrue(at4R.stopLoss >= 66_540.0)
+
+        // When trend finally reverses to the ratcheted SL, trade closes in guaranteed big profit (> +$15 on $5 risk)
+        val exitHits = runnerJournal.onLiveTick("BTC/USDT", PriceTick(price = 66_500.0, at = 1_760_002_120_000L))
+        assertEquals(1, exitHits.size)
+        assertTrue(exitHits.first().netPnlUsd >= 15.0)
     }
 }
+
 

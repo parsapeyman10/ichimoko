@@ -416,6 +416,8 @@ data class PreserveModeEvaluation(
     val newStopLoss: Double,
     val stageTitleFa: String,
     val reasonFa: String,
+    val newTakeProfit: Double? = null,
+    val lockedRMultiple: Double = 0.0,
 )
 
 data class StrategyEvaluationReport(
@@ -998,29 +1000,34 @@ object IchimokuStrategyEngine {
         }
 
         // Apply model-specific overrides onto config if a specialized book model is selected
+        // قانون قطعی سیستم: حداقل R:R تمام استراتژی‌ها و معاملات همیشه حداقل 1:1.5 (1.5R) و بالاتر است
+        val minAllowedRr = max(config.minRiskReward, 1.5)
         val effectiveConfig = when (activeModel) {
-            BitcoinStrategyModel.BASE_ICHIMOKU -> config
+            BitcoinStrategyModel.BASE_ICHIMOKU -> config.copy(minRiskReward = minAllowedRr)
             BitcoinStrategyModel.PATEL_KIJUN_PULLBACK -> config.copy(
                 enablePullbackTrigger = true,
                 enableBreakoutTrigger = false,
                 requireChikouOpenSpace = true,
                 requireFutureKumoSlope = true,
+                minRiskReward = minAllowedRr,
             )
             BitcoinStrategyModel.TUTTLE_KUMO_BREAKOUT -> config.copy(
                 enablePullbackTrigger = false,
                 enableBreakoutTrigger = true,
                 requireChikouOpenSpace = true,
+                minRiskReward = minAllowedRr,
             )
             BitcoinStrategyModel.ELLIOTT_HOSODA_WAVE -> config.copy(
                 enablePullbackTrigger = true,
                 enableBreakoutTrigger = true,
-                minRiskReward = max(config.minRiskReward, 1.8),
+                minRiskReward = max(minAllowedRr, 1.8),
             )
             BitcoinStrategyModel.PELOILLE_MTF_PLATEAU -> config.copy(
                 requireHigherTfAlignment = true,
                 requireChikouOpenSpace = true,
                 enablePullbackTrigger = true,
                 enableBreakoutTrigger = true,
+                minRiskReward = minAllowedRr,
             )
         }
 
@@ -1201,7 +1208,8 @@ object IchimokuStrategyEngine {
         val distToSniperAtr = abs(livePrice - sniperOptimal) / trigSnap.atr14
         val sniperEntryScore = round2((100.0 - distToSniperAtr * 55.0).coerceIn(15.0, 100.0))
 
-        val technicalSl = if (isLong) {
+        val wave = computeHosodaWave(strategyCandles, candidateDirection, stratSnap)
+        val rawTechnicalSl = if (isLong) {
             val kumoKijunFloor = min(trigSnap.kijun, stratSnap.kijun.coerceAtLeast(trigSnap.kumoBottom)) - slBuffer
             val microStructureFloor = min(trigSnap.low, trigSnap.kijun) - trigSnap.atr14 * 0.18
             val tightStructuralSl = max(kumoKijunFloor, microStructureFloor)
@@ -1213,8 +1221,42 @@ object IchimokuStrategyEngine {
             round2(max(tightStructuralSl, sniperOptimal + trigSnap.atr14 * 0.45))
         }
 
-        val wave = computeHosodaWave(strategyCandles, candidateDirection, stratSnap)
-        val stopDist = abs(sniperOptimal - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.4)
+        val rawStopDist = max(
+            abs(sniperOptimal - rawTechnicalSl),
+            abs(livePrice - rawTechnicalSl),
+        ).coerceAtLeast(trigSnap.atr14 * 0.4)
+
+        val candidateTargets = if (wave != null) {
+            listOf(wave.targetV, wave.targetN, wave.targetE).sortedBy { abs(it - livePrice) }
+        } else {
+            emptyList()
+        }
+
+        // اگر موج هوسودا بخواهد از ۱:۳ (3.0R) رد شود، حد ضرر در امن‌ترین سنگر ساختاری (کف/سقف کیجون + شندلیر ATR)
+        // قرار می‌گیرد تا هم معامله با نوسان عادی استاپ نخورد (روند از دست نرود) و هم R:R بالای ۱:۳ حفظ شود.
+        val farthestWaveTarget = candidateTargets.lastOrNull()
+        val wantsToExceedOneToThree = farthestWaveTarget != null &&
+            (abs(farthestWaveTarget - sniperOptimal) / rawStopDist) >= 3.0
+        val technicalSl = if (wantsToExceedOneToThree && farthestWaveTarget != null) {
+            val waveDist = abs(farthestWaveTarget - sniperOptimal)
+            val maxAllowedStopFor3R = (waveDist / 3.0).coerceAtMost(trigSnap.atr14 * 1.45)
+            if (isLong) {
+                val deepStructuralSl = min(trigSnap.kijun, trigSnap.low) - trigSnap.atr14 * 0.32
+                val chandelierFloor = sniperOptimal - maxAllowedStopFor3R
+                round2(max(chandelierFloor, min(rawTechnicalSl, deepStructuralSl)))
+            } else {
+                val deepStructuralSl = max(trigSnap.kijun, trigSnap.high) + trigSnap.atr14 * 0.32
+                val chandelierCeiling = sniperOptimal + maxAllowedStopFor3R
+                round2(min(chandelierCeiling, max(rawTechnicalSl, deepStructuralSl)))
+            }
+        } else {
+            rawTechnicalSl
+        }
+
+        val stopDist = max(
+            abs(sniperOptimal - technicalSl),
+            abs(livePrice - technicalSl),
+        ).coerceAtLeast(trigSnap.atr14 * 0.4)
 
         // ── Check 10: Hosoda N-Wave S-Point & Kihon Suchi Time Cycle Guard ────
         val sPointOk = wave?.sPointHeld != false
@@ -1242,17 +1284,13 @@ object IchimokuStrategyEngine {
             trigSnap.volumeRatio20,
         )
 
-        val candidateTargets = if (wave != null) {
-            listOf(wave.targetV, wave.targetN, wave.targetE).sortedBy { abs(it - livePrice) }
-        } else {
-            emptyList()
-        }
+        val requiredMinRr = max(effectiveConfig.minRiskReward, 1.5)
         val rawPrimaryTp = candidateTargets.firstOrNull {
-            abs(it - livePrice) / stopDist >= effectiveConfig.minRiskReward
-        } ?: candidateTargets.lastOrNull() ?: if (isLong) {
-            livePrice + stopDist * max(effectiveConfig.minRiskReward, 2.0)
+            min(abs(it - livePrice), abs(it - sniperOptimal)) / stopDist >= requiredMinRr
+        } ?: if (isLong) {
+            max(livePrice, sniperOptimal) + stopDist * max(requiredMinRr, 2.0)
         } else {
-            (livePrice - stopDist * max(effectiveConfig.minRiskReward, 2.0)).coerceAtLeast(0.00001)
+            (min(livePrice, sniperOptimal) - stopDist * max(requiredMinRr, 2.0)).coerceAtLeast(0.00001)
         }
 
         // Check nearest HTF horizontal plateau (Karen Péloille's Flat SSB/Kijun wall)
@@ -1263,10 +1301,10 @@ object IchimokuStrategyEngine {
             allPlateaus.lastOrNull { it < livePrice - trigSnap.atr14 * 0.4 }
         }
 
-        // ── Check 12: Room to HTF Plateau & Hosoda Wave R:R >= minRiskReward ──
+        // ── Check 12: Room to HTF Plateau & Hosoda Wave R:R >= 1:1.5 (minRiskReward) ──
         val effectiveTp = if (nearestObstacle != null) {
-            val distToObstacle = abs(nearestObstacle - livePrice)
-            if (distToObstacle / stopDist >= effectiveConfig.minRiskReward) {
+            val distToObstacle = min(abs(nearestObstacle - livePrice), abs(nearestObstacle - sniperOptimal))
+            if (distToObstacle / stopDist >= requiredMinRr) {
                 if (isLong) min(rawPrimaryTp, nearestObstacle) else max(rawPrimaryTp, nearestObstacle)
             } else {
                 rawPrimaryTp
@@ -1275,15 +1313,20 @@ object IchimokuStrategyEngine {
             rawPrimaryTp
         }
 
-        val rr = round2(abs(effectiveTp - livePrice) / stopDist)
+        val rrFromLive = abs(effectiveTp - livePrice) / abs(livePrice - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.25)
+        val rrFromSniper = abs(effectiveTp - sniperOptimal) / abs(sniperOptimal - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.25)
+        val rr = round2(min(rrFromLive, rrFromSniper))
         val obstacleClear = if (nearestObstacle == null) {
             true
         } else {
-            (abs(nearestObstacle - livePrice) / stopDist) >= effectiveConfig.minRiskReward
+            (min(abs(nearestObstacle - livePrice), abs(nearestObstacle - sniperOptimal)) / stopDist) >= requiredMinRr
         }
-        val cond12Passed = rr >= effectiveConfig.minRiskReward && obstacleClear
+        val cond12Passed = rr >= requiredMinRr && obstacleClear
         val cond12Detail = buildString {
-            append(String.format(Locale.US, "R:R = 1:%.2f (حداقل 1:%.1f)", rr, effectiveConfig.minRiskReward))
+            append(String.format(Locale.US, "R:R = 1:%.2f (حداقل الزامی 1:%.1f)", rr, requiredMinRr))
+            if (rr >= 3.0) {
+                append(" · 🚀 واجد شرایط شکارچی روند بالای ۱:۳ (Chandelier Runner)")
+            }
             if (nearestObstacle != null) {
                 append(" · سطح فلت پیش‌رو: $nearestObstacle")
             }
@@ -1363,7 +1406,7 @@ object IchimokuStrategyEngine {
 
         val requiredIndicesForModel: Set<Int> = when (activeModel) {
             BitcoinStrategyModel.BASE_ICHIMOKU -> (1..16).toSet()
-            BitcoinStrategyModel.PATEL_KIJUN_PULLBACK -> setOf(1, 2, 3, 4, 6, 8, 11, 13, 14, 15, 16)
+            BitcoinStrategyModel.PATEL_KIJUN_PULLBACK -> setOf(1, 2, 3, 4, 6, 8, 11, 12, 13, 14, 15, 16)
             BitcoinStrategyModel.TUTTLE_KUMO_BREAKOUT -> setOf(1, 4, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16)
             BitcoinStrategyModel.ELLIOTT_HOSODA_WAVE -> setOf(1, 2, 5, 6, 10, 11, 12, 13, 14, 15, 16)
             BitcoinStrategyModel.PELOILLE_MTF_PLATEAU -> setOf(1, 2, 3, 6, 8, 9, 11, 12, 13, 14, 15, 16)
@@ -1709,10 +1752,13 @@ object IchimokuStrategyEngine {
     }
 
     /**
-     * مدیریت پویا و هوشمند معاملات باز بیت‌کوین (`BTC/USDT`):
-     * ۱. ریسک‌فری خودکار (Break-Even) پس از رسیدن سود به `1R`
-     * ۲. تریل استاندارد استاپ پشت `Kijun-sen`
-     * ۳. ورود به حالت حفظ سود (`Preserve Mode` منش پاتل + چرخه زمانی هوسودا) و انتقال استاپ به پشت `Tenkan-sen`
+     * مدیریت پویا ۵ مرحله‌ای معاملات باز با موتور جهانی `Chandelier ATR + Tenkan/Kijun Hybrid Ratchet`:
+     * ۱. ریسک‌فری پلاس خودکار (`Break-Even + Fee` در `1.0R`)
+     * ۲. قفل سود پایه و تریل کیجون‌سن (`1.5R`)
+     * ۳. تثبیت قطعی کف سود `1:1.5` (`+1.50R` در `2.15R`)
+     * ۴. عبور از مرز `1:3` (`>= 2.85R..3.0R+`): قرار دادن حد ضرر در نقطه طلایی (ترکیب قفل پلکانی `75%–82%` سود +
+     *    سپر نوسانگیر شندلیر `ATR` و `Tenkan-sen`) به همراه امتداد خودکار `TP` تا موج بعدی هوسودا تا هم سود قطعی شود،
+     *    هم با پولبک عادی معامله بیرون نپرد (روند از دست نرود) و هم سود هرگز از بین نرود.
      */
     fun evaluateOpenTradeManagement(
         trade: PaperTrade,
@@ -1736,15 +1782,105 @@ object IchimokuStrategyEngine {
 
         val overextendedFromKijun = stratSnap.distanceToKijunAtr >= config.maxKijunExtensionAtr
 
-        // Stage 3: Preserve Mode (profit >= 2R & overextended OR Hosoda Time Cycle with flat Tenkan)
-        if (config.enablePreserveMode && currentRMultiple >= 1.2 &&
-            ((currentRMultiple >= 2.0 && overextendedFromKijun) || nearTimeCycleAndFlatTenkan)
-        ) {
-            val tenkanBuffer = trigSnap.atr14 * 0.15
-            val candidateStop = if (isBuy) {
-                round2(trigSnap.tenkan - tenkanBuffer)
+        // ── Stage 4: World-Class Institutional 1:3+ Chandelier & Tenkan-Kijun Trend-Runner (`>= 2.85R`) ──
+        if (currentRMultiple >= 2.85) {
+            // ۱. قفل پلکانی سود (Asymptotic R-Ratchet): در 3.0R حداقل +2.27R قفل می‌شود و به ازای هر 1R بالاتر، 82% آن قفل می‌گردد
+            val ratchetR = 2.15 + (currentRMultiple - 2.85).coerceAtLeast(0.0) * 0.82
+            val ratchetStop = if (isBuy) {
+                trade.entry + ratchetR * oneRDistance
             } else {
-                round2(trigSnap.tenkan + tenkanBuffer)
+                trade.entry - ratchetR * oneRDistance
+            }
+
+            // ۲. سنگر ساختاری ایچیموکو + شندلیر ATR (در فاز گسترش روند، پشت تنکان با بافر امن؛ در فاز اشباع، تنگ‌تر)
+            val tenkanAtrBuffer = if (nearTimeCycleAndFlatTenkan || overextendedFromKijun) {
+                trigSnap.atr14 * 0.12
+            } else {
+                trigSnap.atr14 * 0.26
+            }
+            val structuralTenkanStop = if (isBuy) {
+                trigSnap.tenkan - tenkanAtrBuffer
+            } else {
+                trigSnap.tenkan + tenkanAtrBuffer
+            }
+
+            // ۳. فاصله تنفس ضد نویز (Anti-Noise Breathing Room) تا کندل‌های اصلاحی عادی روند را از دست ندهند
+            val minBreathingDist = max(trigSnap.atr14 * 0.35, oneRDistance * 0.25)
+            val rawOptimalStop = if (isBuy) {
+                val combined = max(ratchetStop, structuralTenkanStop)
+                min(combined, livePrice - minBreathingDist)
+            } else {
+                val combined = min(ratchetStop, structuralTenkanStop)
+                max(combined, livePrice + minBreathingDist)
+            }
+            val candidateStop = round2(rawOptimalStop)
+
+            // ۴. امتداد هوشمند حد سود (TP Horizon Expansion) وقتی قیمت می‌خواهد از ۱:۳ رد شود تا روند از دست نرود
+            val distToCurrentTp = if (isBuy) trade.takeProfit - livePrice else livePrice - trade.takeProfit
+            val waveTargets = listOfNotNull(report.targetN, report.targetE)
+            val nextWaveTp = if (isBuy) {
+                waveTargets.filter { it > trade.takeProfit + oneRDistance * 0.5 }.maxOrNull()
+            } else {
+                waveTargets.filter { it < trade.takeProfit - oneRDistance * 0.5 }.minOrNull()
+            }
+            val extendedTp: Double? = if (distToCurrentTp <= oneRDistance * 0.75) {
+                val projectedRunnerTp = if (isBuy) {
+                    trade.entry + max(currentRMultiple + 1.60, 4.50) * oneRDistance
+                } else {
+                    (trade.entry - max(currentRMultiple + 1.60, 4.50) * oneRDistance).coerceAtLeast(0.00001)
+                }
+                val chosenTp = if (nextWaveTp != null) {
+                    if (isBuy) max(nextWaveTp, projectedRunnerTp) else min(nextWaveTp, projectedRunnerTp)
+                } else {
+                    projectedRunnerTp
+                }
+                round2(chosenTp)
+            } else {
+                null
+            }
+
+            val improvesStop = if (isBuy) {
+                candidateStop > trade.stopLoss + trigSnap.atr14 * 0.04 && candidateStop < livePrice
+            } else {
+                candidateStop < trade.stopLoss - trigSnap.atr14 * 0.04 && candidateStop > livePrice
+            }
+            val improvesTp = extendedTp != null && (if (isBuy) extendedTp > trade.takeProfit + oneRDistance * 0.2 else extendedTp < trade.takeProfit - oneRDistance * 0.2)
+
+            if (improvesStop || improvesTp) {
+                val finalStop = if (improvesStop) candidateStop else trade.stopLoss
+                val lockedR = round2(abs(finalStop - trade.entry) / oneRDistance)
+                val tpNote = if (improvesTp && extendedTp != null) " + امتداد TP به $extendedTp" else ""
+                return PreserveModeEvaluation(
+                    tradeId = trade.id,
+                    newStopLoss = finalStop,
+                    stageTitleFa = "🚀 شکارچی روند بالای ۱:۳ (قفل سود +${lockedR}R$tpNote)",
+                    reasonFa = String.format(
+                        Locale.US,
+                        "عبور از ۱:۳ (سود فعلی %.2fR)؛ جایگذاری هوشمند استاپ در +%.2fR با تنفس شندلیر%s",
+                        currentRMultiple,
+                        lockedR,
+                        tpNote,
+                    ),
+                    newTakeProfit = if (improvesTp) extendedTp else null,
+                    lockedRMultiple = lockedR,
+                )
+            }
+        }
+
+        // ── Stage 3: Pre-3R Guaranteed 1:1.5 Floor + Preserve Mode (`2.15R .. < 2.85R`) ──
+        if (currentRMultiple >= 2.15 || (config.enablePreserveMode && currentRMultiple >= 1.5 && (overextendedFromKijun || nearTimeCycleAndFlatTenkan))) {
+            val floor15R = if (isBuy) {
+                trade.entry + oneRDistance * (if (currentRMultiple >= 2.15) 1.50 else 0.95)
+            } else {
+                trade.entry - oneRDistance * (if (currentRMultiple >= 2.15) 1.50 else 0.95)
+            }
+            val tenkanBuffer = trigSnap.atr14 * 0.18
+            val tenkanStop = if (isBuy) trigSnap.tenkan - tenkanBuffer else trigSnap.tenkan + tenkanBuffer
+            val minBreathing = max(trigSnap.atr14 * 0.30, oneRDistance * 0.25)
+            val candidateStop = if (isBuy) {
+                round2(min(max(floor15R, tenkanStop), livePrice - minBreathing))
+            } else {
+                round2(max(min(floor15R, tenkanStop), livePrice + minBreathing))
             }
             val improvesStop = if (isBuy) {
                 candidateStop > trade.stopLoss + trigSnap.atr14 * 0.05 && candidateStop < livePrice - trigSnap.atr14 * 0.1
@@ -1752,27 +1888,26 @@ object IchimokuStrategyEngine {
                 candidateStop < trade.stopLoss - trigSnap.atr14 * 0.05 && candidateStop > livePrice + trigSnap.atr14 * 0.1
             }
             if (improvesStop) {
-                val reason = if (nearTimeCycleAndFlatTenkan) {
-                    "چرخه زمانی هوسودا (${report.waveProjection?.nearestTimeCycleNumber} کندل) و فلت شدن تنکان"
-                } else {
-                    String.format(Locale.US, "سود %.1fR و اشباع فاصله از کیجون (Preserve Mode منش پاتل)", currentRMultiple)
-                }
+                val lockedR = round2(abs(candidateStop - trade.entry) / oneRDistance)
                 return PreserveModeEvaluation(
                     tradeId = trade.id,
                     newStopLoss = candidateStop,
-                    stageTitleFa = "🛡️ Preserve Mode (قفل سود پشت تنکان‌سن)",
-                    reasonFa = reason,
+                    stageTitleFa = "🛡️ قفل قطعی سود حداقل ۱:۱.۵ (+${lockedR}R)",
+                    reasonFa = String.format(Locale.US, "سود %.2fR؛ تثبیت سود +%.2fR پشت تنکان/کیجون", currentRMultiple, lockedR),
+                    lockedRMultiple = lockedR,
                 )
             }
         }
 
-        // Stage 2: Kijun-sen Trailing once profit >= 1.3R
-        if (currentRMultiple >= 1.3) {
+        // ── Stage 2: Base Profit Lock + Kijun-sen Trailing (`1.50R .. < 2.15R`) ──
+        if (currentRMultiple >= 1.50) {
             val kijunBuffer = trigSnap.atr14 * config.slBufferAtr
+            val profitFloor065R = if (isBuy) trade.entry + oneRDistance * 0.65 else trade.entry - oneRDistance * 0.65
+            val kijunStop = if (isBuy) trigSnap.kijun - kijunBuffer else trigSnap.kijun + kijunBuffer
             val candidateStop = if (isBuy) {
-                round2(trigSnap.kijun - kijunBuffer)
+                round2(min(max(profitFloor065R, kijunStop), livePrice - trigSnap.atr14 * 0.25))
             } else {
-                round2(trigSnap.kijun + kijunBuffer)
+                round2(max(min(profitFloor065R, kijunStop), livePrice + trigSnap.atr14 * 0.25))
             }
             val improvesBeyondEntry = if (isBuy) {
                 candidateStop >= trade.entry && candidateStop > trade.stopLoss + trigSnap.atr14 * 0.05 && candidateStop < livePrice
@@ -1780,30 +1915,33 @@ object IchimokuStrategyEngine {
                 candidateStop <= trade.entry && candidateStop < trade.stopLoss - trigSnap.atr14 * 0.05 && candidateStop > livePrice
             }
             if (improvesBeyondEntry) {
+                val lockedR = round2(abs(candidateStop - trade.entry) / oneRDistance)
                 return PreserveModeEvaluation(
                     tradeId = trade.id,
                     newStopLoss = candidateStop,
-                    stageTitleFa = "📈 تریل استاپ با کیجون‌سن",
-                    reasonFa = String.format(Locale.US, "سود %.1fR؛ انتقال حد ضرر پشت Kijun-sen", currentRMultiple),
+                    stageTitleFa = "📈 تریل کیجون و قفل سود (+${lockedR}R)",
+                    reasonFa = String.format(Locale.US, "عبور سود از ۱:۱.۵ (%.2fR)؛ قفل سود در +%.2fR", currentRMultiple, lockedR),
+                    lockedRMultiple = lockedR,
                 )
             }
         }
 
-        // Stage 1: Break-Even at >= 1.0R
+        // ── Stage 1: Break-Even Plus Shield (`>= 1.0R`) ──────────────────────
         if (currentRMultiple >= 1.0) {
-            val feeOffset = max(trade.entry * 0.0008, trigSnap.atr14 * 0.05)
+            val feeOffset = max(oneRDistance * 0.12, max(trade.entry * 0.0008, trigSnap.atr14 * 0.05))
             val breakEvenStop = if (isBuy) round2(trade.entry + feeOffset) else round2(trade.entry - feeOffset)
             val notYetBreakEven = if (isBuy) {
-                trade.stopLoss < trade.entry && breakEvenStop < livePrice
+                trade.stopLoss < trade.entry + feeOffset * 0.5 && breakEvenStop < livePrice
             } else {
-                trade.stopLoss > trade.entry && breakEvenStop > livePrice
+                trade.stopLoss > trade.entry - feeOffset * 0.5 && breakEvenStop > livePrice
             }
             if (notYetBreakEven) {
                 return PreserveModeEvaluation(
                     tradeId = trade.id,
                     newStopLoss = breakEvenStop,
-                    stageTitleFa = "🔒 ریسک‌فری خودکار (Break-Even در 1R)",
-                    reasonFa = "عبور سود از 1R؛ انتقال حد ضرر به نقطه ورود",
+                    stageTitleFa = "🔒 ریسک‌فری پلاس خودکار (Break-Even در 1R)",
+                    reasonFa = "عبور سود از 1R؛ انتقال حد ضرر به بالای نقطه ورود (+0.12R)",
+                    lockedRMultiple = 0.12,
                 )
             }
         }
