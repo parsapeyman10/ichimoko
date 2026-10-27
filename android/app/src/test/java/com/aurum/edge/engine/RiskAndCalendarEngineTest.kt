@@ -482,8 +482,8 @@ class RiskAndCalendarEngineTest {
             id = "T_MANISH",
             openedAt = 1_760_000_000_000L,
             entryInterval = Interval.M15,
-            strategyId = BitcoinStrategyModel.MANISH_PATEL_MTF.id,
-            strategyTitleFa = BitcoinStrategyModel.MANISH_PATEL_MTF.titleFa,
+            strategyId = BitcoinStrategyModel.PATEL_MTF_BREAKOUT.id,
+            strategyTitleFa = BitcoinStrategyModel.PATEL_MTF_BREAKOUT.titleFa,
         )
         val (lossPnl, lossR) = RiskAndCalendarEngine.computeExitPnlUsd(tradeManish, 64_500.0)
         assertEquals(-5.0, lossPnl, 1e-4)
@@ -497,23 +497,21 @@ class RiskAndCalendarEngineTest {
             exitPrice = 66_250.0,
             closedAt = 1_760_000_900_000L,
             pnlUsd = winPnl,
-            rMultiple = winR,
         )
         val tradeHosoda = calcFixed5.toPaperTrade(
             id = "T_HOSODA",
             openedAt = 1_760_001_000_000L,
             entryInterval = Interval.M5,
-            strategyId = BitcoinStrategyModel.HOSODA_ELLIOTT_WAVE.id,
-            strategyTitleFa = BitcoinStrategyModel.HOSODA_ELLIOTT_WAVE.titleFa,
+            strategyId = BitcoinStrategyModel.ELLIOTT_HOSODA_WAVE.id,
+            strategyTitleFa = BitcoinStrategyModel.ELLIOTT_HOSODA_WAVE.titleFa,
         ).copy(
             exitPrice = 64_500.0,
             closedAt = 1_760_001_300_000L,
             pnlUsd = lossPnl,
-            rMultiple = lossR,
         )
         val cats = RiskAndCalendarEngine.categorizeTradesByStrategy(listOf(closedManish, tradeHosoda))
-        val manishCat = cats.first { it.strategyId == BitcoinStrategyModel.MANISH_PATEL_MTF.id }
-        val hosodaCat = cats.first { it.strategyId == BitcoinStrategyModel.HOSODA_ELLIOTT_WAVE.id }
+        val manishCat = cats.first { it.strategyId == BitcoinStrategyModel.PATEL_MTF_BREAKOUT.id }
+        val hosodaCat = cats.first { it.strategyId == BitcoinStrategyModel.ELLIOTT_HOSODA_WAVE.id }
         assertEquals(1, manishCat.winsCount)
         assertEquals(12.5, manishCat.netPnlUsd, 1e-4)
         assertEquals(1, hosodaCat.lossesCount)
