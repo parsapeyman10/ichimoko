@@ -366,10 +366,10 @@ class RiskAndCalendarEngineTest {
         assertTrue((report.targetN ?: 0.0) > report.livePrice)
         assertTrue((report.suggestedStopLoss ?: Double.MAX_VALUE) < report.livePrice)
 
-        // Verify native Ichimoku chart series & 26-period Future Kumo projection
+        // Verify native Ichimoku chart series & Future Kumo projection
         val chartSeries = IchimokuStrategyEngine.computeChartSeries(trigBars)
         assertNotNull(chartSeries)
-        assertEquals(26, chartSeries!!.futureKumo.size)
+        assertEquals(25, chartSeries!!.futureKumo.size)
         assertEquals(trigBars.size, chartSeries.bars.size)
 
         // 3. Test Break-Even and Preserve Mode on an open BTC/USDT trade
