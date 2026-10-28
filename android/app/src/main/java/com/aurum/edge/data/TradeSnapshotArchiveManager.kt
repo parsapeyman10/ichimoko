@@ -548,8 +548,9 @@ object TradeSnapshotArchiveManager {
             658f,
             footerAccentPaint,
         )
+        val pre3Badge = record.fullPaperTrade?.preEntry3CandleCategoryFa?.takeIf { it.isNotBlank() } ?: "تثبیت ۳ کندلی قبل از ورود"
         canvas.drawText(
-            "📐 ${record.rrFormulaFa}   |   🛡️ مبنای SL: ${record.slBasisFa.take(55)}",
+            "📐 ${record.rrFormulaFa}   |   🕯️ ۳ کندل قبل: $pre3Badge   |   🛡️ مبنای SL: ${record.slBasisFa.take(40)}",
             34f,
             690f,
             footerTextPaint,

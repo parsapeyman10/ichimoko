@@ -124,6 +124,90 @@ data class Signal(
 data class PaperConditionRecord(val name: String, val status: String, val detail: String)
 
 @Serializable
+data class PreEntryCandleSlot(
+    val slotIndex: Int = 0, // -2 = کندل ۳ قبل, -1 = کندل ۲ قبل, 0 = کندل ۱ قبل (ماشه)
+    val slotTitleFa: String = "",
+    val barTime: Long = 0L,
+    val open: Double = 0.0,
+    val high: Double = 0.0,
+    val low: Double = 0.0,
+    val close: Double = 0.0,
+    val isBullish: Boolean = true,
+    val bodyPctOfRange: Int = 50,
+    val upperWickPct: Int = 25,
+    val lowerWickPct: Int = 25,
+    val rangeAtrRatio: Double = 1.0,
+    val tenkanValue: Double = 0.0,
+    val kijunValue: Double = 0.0,
+    val kumoTop: Double = 0.0,
+    val kumoBottom: Double = 0.0,
+    val priceVsTenkanFa: String = "",
+    val priceVsKijunFa: String = "",
+    val priceVsKumoFa: String = "",
+    val candleAnatomyFa: String = "",
+    val roleInSetupFa: String = "",
+)
+
+enum class PreEntry3CandleCategory(
+    val code: String,
+    val badgeFa: String,
+    val titleFa: String,
+    val descriptionFa: String,
+) {
+    PULLBACK_REJECTION_IGNITION(
+        code = "PULLBACK_REJECTION_IGNITION",
+        badgeFa = "🎯 پولبک + ریجکت شدو + شلیک",
+        titleFa = "الگوی ۳ کندلی پولبک، ریجکت شدو از تنکان/کیجون و شلیک روند",
+        descriptionFa = "کندل ۳ و ۲ قبل اصلاح به سمت خط تعادلی تنکان/کیجون داشته و با شدوی برگشتی دفاع شده و کندل ماشه در جهت روند بسته شده است.",
+    ),
+    THREE_SOLDIERS_MOMENTUM_BREAKOUT(
+        code = "THREE_SOLDIERS_MOMENTUM_BREAKOUT",
+        badgeFa = "🚀 ۳ کندل پیشروی پرقدرت",
+        titleFa = "الگوی ۳ کندلی پیشروی پلکانی هم‌جهت با بدنه قوی (3-Bar Momentum)",
+        descriptionFa = "هر ۳ کندل قبل از ورود هم‌جهت با معامله و دارای بدنه‌های متوالی در بالای/زیر تنکان و کومو هستند.",
+    ),
+    INSIDE_BAR_COMPRESSION_EXPANSION(
+        code = "INSIDE_BAR_COMPRESSION_EXPANSION",
+        badgeFa = "⚡ فشردگی و انفجار (Inside-Bar)",
+        titleFa = "الگوی ۳ کندلی فشردگی نوسان و انفجار شکست (Compression -> Expansion)",
+        descriptionFa = "کندل‌های قبل دارای رنج فشرده (Inside Bar / Doji) روی سطح ایچیموکو بوده و کندل ماشه با باز شدن دامنه نوسان، شکست را رقم زده است.",
+    ),
+    ENGULFING_REVERSAL_OFF_LEVEL(
+        code = "ENGULFING_REVERSAL_OFF_LEVEL",
+        badgeFa = "🔄 چرخش اینگلفینگ روی سطح",
+        titleFa = "الگوی ۳ کندلی چرخش و اینگلفینگ روی سطح تعادلی ایچیموکو",
+        descriptionFa = "پس از کندل اصلاحی خلاف جهت، کندل ماشه بدنه کندل قبلی را به صورت کامل پوشانده (Engulfing) و روند را بازگردانده است.",
+    ),
+    CCLAMP_EXTENDED_CHASE(
+        code = "CCLAMP_EXTENDED_CHASE",
+        badgeFa = "⚠️ کشیدگی ۳ کندلی دور از کیجون",
+        titleFa = "الگوی ۳ کندلی کشیدگی متوالی دور از کیجون (Extended Momentum Chase)",
+        descriptionFa = "۳ کندل قبل با شتاب بالا از کیجون فاصله گرفته‌اند؛ نیازمند مدیریت سریع حد ضرر روی تنکان.",
+    ),
+    CONSOLIDATION_BREAKOUT_TRIGGER(
+        code = "CONSOLIDATION_BREAKOUT_TRIGGER",
+        badgeFa = "📐 تثبیت ۲ کندلی و شکست ماشه",
+        titleFa = "الگوی ۳ کندلی تثبیت و شکست از محدوده تعادلی",
+        descriptionFa = "۲ کندل اول در تعادل نوسانی بوده و کندل سوم ماشه ورود را فعال کرده است.",
+    );
+
+    companion object {
+        fun fromCode(raw: String?): PreEntry3CandleCategory =
+            entries.firstOrNull { it.code.equals(raw?.trim(), ignoreCase = true) }
+                ?: CONSOLIDATION_BREAKOUT_TRIGGER
+    }
+}
+
+@Serializable
+data class PreEntry3CandleContext(
+    val categoryCode: String = PreEntry3CandleCategory.CONSOLIDATION_BREAKOUT_TRIGGER.code,
+    val categoryBadgeFa: String = PreEntry3CandleCategory.CONSOLIDATION_BREAKOUT_TRIGGER.badgeFa,
+    val categoryTitleFa: String = PreEntry3CandleCategory.CONSOLIDATION_BREAKOUT_TRIGGER.titleFa,
+    val summaryFa: String = "",
+    val candles: List<PreEntryCandleSlot> = emptyList(),
+)
+
+@Serializable
 data class PaperTrade(
     val id: String,
     val symbol: String,
@@ -157,6 +241,10 @@ data class PaperTrade(
     val fixedRiskUsd: Double = 0.0,
     val optimalRiskReward: Double = 0.0,
     val rrBreakdownFa: String = "",
+    val preEntry3CandleCategoryCode: String = "",
+    val preEntry3CandleCategoryFa: String = "",
+    val preEntry3CandleSummaryFa: String = "",
+    val preEntry3Candles: List<PreEntryCandleSlot> = emptyList(),
 ) {
     val isOpen: Boolean get() = closedAt == null
     val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }

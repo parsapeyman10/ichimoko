@@ -885,6 +885,43 @@ class RiskAndCalendarEngineTest {
         assertTrue(generatedNotes.all { it.exactFixInstructionFa.isNotBlank() })
         val formattedClipboard = com.aurum.edge.core.MasterIchimokuTradingAssistant.formatNotesForClipboard(generatedNotes)
         assertTrue(formattedClipboard.contains("دستور دقیق اصلاح"))
+
+        // Verify 3-Candle Pre-Entry Categorization (C-2, C-1, C0) & 35-Day CandleVault + Silent Notification Channels
+        val sampleBars = (0 until 40).map { i ->
+            val base = 2700.0 + i * 1.2
+            com.aurum.edge.domain.Candle(
+                time = 1_760_000_000_000L + i * 900_000L,
+                open = base,
+                high = base + 3.0,
+                low = base - 1.5,
+                close = base + 2.0,
+                closed = true,
+            )
+        }
+        val pre3 = IchimokuStrategyEngine.buildPreEntry3CandleContext(
+            candles = sampleBars,
+            action = SignalAction.BUY,
+            activeModel = BitcoinStrategyModel.BASE_ICHIMOKU,
+        )
+        assertEquals(3, pre3.candles.size)
+        assertEquals(-2, pre3.candles[0].slotIndex)
+        assertEquals(-1, pre3.candles[1].slotIndex)
+        assertEquals(0, pre3.candles[2].slotIndex)
+        assertTrue(pre3.categoryBadgeFa.isNotBlank())
+        assertTrue(pre3.summaryFa.contains("[۳ قبل]"))
+
+        val mergedVault = com.aurum.edge.data.PhoneStorageVaultManager.appendAndPersistCandles(
+            symbolInput = "XAU/USD",
+            interval = Interval.M15,
+            incomingCandles = sampleBars,
+            nowMillis = sampleBars.last().time,
+        )
+        assertEquals(40, mergedVault.size)
+
+        // Verify silent notification channel IDs v3
+        assertTrue(com.aurum.edge.notify.TradeAlarmKind.ENTRY.channelId.endsWith("_silent_v3"))
+        assertTrue(com.aurum.edge.notify.TradeAlarmKind.TAKE_PROFIT.channelId.endsWith("_silent_v3"))
+        assertTrue(com.aurum.edge.notify.TradeAlarmKind.STOP_LOSS.channelId.endsWith("_silent_v3"))
     }
 }
 

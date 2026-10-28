@@ -1106,6 +1106,103 @@ private fun LiveTradeGaugeCard(
                     }
                 }
 
+                // ── ۵.۵ دسته‌بندی و کالبدشکافی «۳ کندل قبل از ورود» (C-2, C-1, C0) ──
+                val pre3Context = remember(trade.id, trade.preEntry3Candles) {
+                    if (trade.preEntry3Candles.isNotEmpty()) {
+                        com.aurum.edge.core.PreEntry3CandleContext(
+                            categoryCode = trade.preEntry3CandleCategoryCode,
+                            categoryBadgeFa = trade.preEntry3CandleCategoryFa.ifBlank {
+                                com.aurum.edge.core.PreEntry3CandleCategory.fromCode(trade.preEntry3CandleCategoryCode).badgeFa
+                            },
+                            categoryTitleFa = com.aurum.edge.core.PreEntry3CandleCategory.fromCode(trade.preEntry3CandleCategoryCode).titleFa,
+                            summaryFa = trade.preEntry3CandleSummaryFa,
+                            candles = trade.preEntry3Candles,
+                        )
+                    } else {
+                        val cachedBars = com.aurum.edge.data.LiveQuoteFetcher.peekCachedCandles(trade.symbol, trade.interval)
+                        com.aurum.edge.core.IchimokuStrategyEngine.buildPreEntry3CandleContext(
+                            candles = cachedBars,
+                            action = trade.action,
+                            activeModel = com.aurum.edge.core.BitcoinStrategyModel.fromId(trade.strategyId),
+                        )
+                    }
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(AurumColors.Surface)
+                        .border(1.dp, AurumColors.Cyan.copy(alpha = 0.40f), RoundedCornerShape(12.dp))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "🕯️ دسته‌بندی ۳ کندل قبل از ورود به معامله",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = AurumColors.Cyan,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Pill(
+                            text = pre3Context.categoryBadgeFa,
+                            color = AurumColors.Gold,
+                        )
+                    }
+                    Text(
+                        text = pre3Context.categoryTitleFa,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    if (pre3Context.candles.isNotEmpty()) {
+                        pre3Context.candles.forEach { slot ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(AurumColors.SurfaceAlt)
+                                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = "${slot.slotTitleFa} · ${slot.roleInSetupFa}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (slot.isBullish) AurumColors.Green else AurumColors.Red,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                        Text(
+                                            text = "O:${formatPrice(slot.open)} C:${formatPrice(slot.close)}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = AurumColors.TextSecondary,
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "${slot.candleAnatomyFa} | ${slot.priceVsTenkanFa} · ${slot.priceVsKijunFa} · ${slot.priceVsKumoFa}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AurumColors.TextSecondary,
+                                )
+                            }
+                        }
+                    } else if (pre3Context.summaryFa.isNotBlank()) {
+                        Text(
+                            text = pre3Context.summaryFa,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextSecondary,
+                        )
+                    }
+                }
+
                 // ── ۶. بررسی زنده احتمال از دست رفتن روند در سود (Trend Loss In Profit Detector) ──
                 Column(
                     modifier = Modifier

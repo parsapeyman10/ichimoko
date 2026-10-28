@@ -445,6 +445,12 @@ fun JournalRiskScreen(
             onSelectStrategyFilter = { selectedStrategyFilter = it },
         )
 
+        // ── ۳.۵ مدیریت حافظه گوشی (شاردینگ روزانه + بک‌آپ خودکار روزانه + خزانه ۱ ماهه کندل + دسته‌بندی ۳ کندل قبل از ورود) ──
+        PhoneVaultAnd3CandleSummaryCard(
+            viewModel = viewModel,
+            trades = filteredTrades,
+        )
+
         when (subPage) {
             0 -> {
                 MonthlyPnlCalendarSection(
@@ -2329,12 +2335,252 @@ private fun ClosedJournalTradeRow(
             )
         }
 
+        if (trade.preEntry3CandleCategoryFa.isNotBlank() || trade.preEntry3Candles.isNotEmpty()) {
+            val catBadge = trade.preEntry3CandleCategoryFa.ifBlank {
+                com.aurum.edge.core.PreEntry3CandleCategory.fromCode(trade.preEntry3CandleCategoryCode).badgeFa
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(AurumColors.Surface)
+                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = "🕯️ ۳ کندل قبل از ورود: $catBadge",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                )
+                if (trade.preEntry3Candles.isNotEmpty()) {
+                    trade.preEntry3Candles.forEach { slot ->
+                        Text(
+                            text = "• ${slot.slotTitleFa}: ${slot.candleAnatomyFa} (${slot.priceVsTenkanFa} · ${slot.priceVsKumoFa})",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextSecondary,
+                        )
+                    }
+                } else if (trade.preEntry3CandleSummaryFa.isNotBlank()) {
+                    Text(
+                        text = trade.preEntry3CandleSummaryFa,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                }
+            }
+        }
+
         if (trade.note.isNotBlank()) {
             Text(
                 text = "یادداشت: ${trade.note}",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.Gold,
             )
+        }
+    }
+}
+
+@Composable
+private fun PhoneVaultAnd3CandleSummaryCard(
+    viewModel: AurumViewModel,
+    trades: List<PaperTrade>,
+) {
+    val vaultStatus by viewModel.phoneVaultStatus.collectAsStateWithLifecycle()
+    val dailyBackups by viewModel.phoneDailyBackups.collectAsStateWithLifecycle()
+
+    val threeCandleStats = remember(trades) {
+        com.aurum.edge.core.PreEntry3CandleCategory.entries.mapNotNull { cat ->
+            val matched = trades.filter {
+                val code = it.preEntry3CandleCategoryCode.ifBlank {
+                    com.aurum.edge.core.PreEntry3CandleCategory.CONSOLIDATION_BREAKOUT_TRIGGER.code
+                }
+                code == cat.code
+            }
+            if (matched.isEmpty()) return@mapNotNull null
+            val closed = matched.filter { !it.isOpen }
+            val wins = closed.count { (it.pnlUsd ?: 0.0) > 0.0 }
+            val wr = if (closed.isNotEmpty()) (wins * 100.0) / closed.size else 0.0
+            val netPnl = closed.sumOf { it.pnlUsd ?: 0.0 }
+            Triple(cat, matched.size to wr, netPnl)
+        }
+    }
+
+    SectionCard(
+        title = "💾 خزانه حافظه گوشی (بک‌آپ روزانه + کندل ۱ ماهه + دسته‌بندی ۳ کندل قبل)",
+        subtitle = "شاردینگ روزانه معاملات برای سرعت لود بالا، بک‌آپ خودکار هر روز، خزانه ۳۵ روزه کندل‌ها و آمار ۳ کندل قبل از ورود",
+        initiallyExpanded = false,
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                StatTile(
+                    label = "بک‌آپ‌های روزانه",
+                    value = "${vaultStatus.totalDailyBackups} روز",
+                    valueColor = AurumColors.Gold,
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "شاردهای معاملات",
+                    value = "${vaultStatus.totalShardedDays} پارتیشن",
+                    valueColor = AurumColors.Cyan,
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "خزانه ۱ ماهه کندل",
+                    value = "${vaultStatus.totalStoredCandlesCount}",
+                    valueColor = AurumColors.Green,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            Text(
+                text = "📂 مسیر حافظه گوشی: ${vaultStatus.vaultPathDisplay} · آخرین بک‌آپ روزانه: ${vaultStatus.latestBackupDateKey}",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextSecondary,
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = { viewModel.triggerManualDailyBackupNow() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AurumColors.Gold,
+                        contentColor = Color.Black,
+                    ),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("💾 ثبت بک‌آپ امروز در گوشی", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                }
+                OutlinedButton(
+                    onClick = { viewModel.restoreAllDataAndSnapshotsFromPhone() },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text("📂 بازخوانی از حافظه گوشی", style = MaterialTheme.typography.labelSmall, color = AurumColors.Cyan)
+                }
+            }
+
+            if (dailyBackups.isNotEmpty()) {
+                Text(
+                    text = "📅 آخرین بک‌آپ‌های خودکار روزانه در گوشی:",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                )
+                dailyBackups.take(5).forEach { bk ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(AurumColors.SurfaceAlt)
+                            .padding(horizontal = 8.dp, vertical = 5.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "📅 ${bk.dateKey} · ${bk.dayTradesCount} معامله روز (${bk.totalTradesCount} کل)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextPrimary,
+                        )
+                        val sign = if (bk.dayNetPnlUsd >= 0.0) "+" else ""
+                        Text(
+                            text = String.format(Locale.US, "%s$%.2f", sign, bk.dayNetPnlUsd),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (bk.dayNetPnlUsd >= 0.0) AurumColors.Green else AurumColors.Red,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
+
+            if (threeCandleStats.isNotEmpty()) {
+                Text(
+                    text = "🕯️ دسته‌بندی معاملات بر اساس «۳ کندل قبل از ورود» (C-2, C-1, C0):",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AurumColors.Cyan,
+                    fontWeight = FontWeight.Bold,
+                )
+                threeCandleStats.forEach { (cat, countAndWr, netPnl) ->
+                    val (cnt, wr) = countAndWr
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(AurumColors.SurfaceAlt)
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = cat.badgeFa,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.Gold,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = cat.titleFa,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextSecondary,
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "$cnt معامله · برد ${wr.toInt()}%",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextPrimary,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            val sign = if (netPnl >= 0.0) "+" else ""
+                            Text(
+                                text = String.format(Locale.US, "%s$%.2f", sign, netPnl),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (netPnl >= 0.0) AurumColors.Green else AurumColors.Red,
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (vaultStatus.mistakeLessons.isNotEmpty()) {
+                Text(
+                    text = "🔬 درس‌های استخراج‌شده از کندل‌های ۱ ماه اخیر روی معاملات ضررده:",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                )
+                vaultStatus.mistakeLessons.take(4).forEach { lesson ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(AurumColors.SurfaceAlt)
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = "${lesson.symbol} [${lesson.intervalLabel}] · ${lesson.mistakeBadgeFa}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Gold,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = lesson.mistakeExplanationFa,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextPrimary,
+                        )
+                        Text(
+                            text = "💡 ${lesson.lessonLearnedFa}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Green,
+                        )
+                    }
+                }
+            }
         }
     }
 }

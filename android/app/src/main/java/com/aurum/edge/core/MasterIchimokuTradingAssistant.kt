@@ -357,9 +357,51 @@ object MasterIchimokuTradingAssistant {
         val closed = trades.filter { !it.isOpen }
         val openTrades = trades.filter { it.isOpen }
 
-        // ۱. کالبدشکافی معاملات استاپ‌خورده سریع یا ضررده در ژورنال
+        // ۱. کالبدشکافی معاملات استاپ‌خورده سریع یا ضررده در ژورنال + بررسی خزانه ۱ ماهه کندل‌ها (CandleVault) و الگوی ۳ کندل قبل از ورود
         val losingTrades = closed.filter { (it.pnlUsd ?: 0.0) < -0.05 }
         if (losingTrades.isNotEmpty()) {
+            // ۱-الف. کالبدشکافی با خزانه ۱ ماهه کندل‌ها (آیا بعد از استاپ خوردن، قیمت به تارگت رفته است؟)
+            val vaultAnalyses = losingTrades.take(20).mapNotNull {
+                com.aurum.edge.data.PhoneStorageVaultManager.analyzeLosingTradeMistakeFromVault(it)
+            }
+            val stopHuntedToTp = vaultAnalyses.filter { it.wentToTpAfterStopOut }
+            if (stopHuntedToTp.isNotEmpty()) {
+                val recBuffer = round((currentConfig.slBufferAtr + 0.14).coerceIn(0.35, 0.68) * 100.0) / 100.0
+                val sampleSyms = stopHuntedToTp.map { "${it.symbol} (${it.intervalLabel})" }.distinct().take(4).joinToString(" · ")
+                notes += IchimokuImprovementNote(
+                    id = "fix_candle_vault_stophunt",
+                    priority = ImprovementNotePriority.CRITICAL,
+                    categoryFa = "درس از خزانه ۱ ماهه کندل‌ها: شکار شدو قبل از تارگت (Stop-Hunt -> TP)",
+                    targetStrategyId = stopHuntedToTp.first().strategyId,
+                    targetStrategyTitleFa = BitcoinStrategyModel.fromId(stopHuntedToTp.first().strategyId).titleFa,
+                    targetScopeFa = sampleSyms,
+                    problemDetectedFa = "${stopHuntedToTp.size} معامله پس از برخورد شدو به حد ضرر، در کندل‌های بعدی دقیقاً در جهت پیش‌بینی حرکت کرده و به تارگت رسیده‌اند.",
+                    ichimokuMasterReasonFa = "بازبینی تاریخچه ۱ ماه اخیر کندل‌ها نشان می‌دهد جهت تحلیل ایچیموکو کاملاً صحیح بوده، اما حد ضرر داخل دامنه نوسان شدوی پاکسازی نقدینگی (Sweeping Wick) زیر کیجون قرار گرفته است.",
+                    exactFixInstructionFa = "بافر حد ضرر (`slBufferAtr`) را به $recBuffer ATR افزایش دهید و استاپ را پشت پایین‌ترین/بالاترین شدوی ۳ کندل قبل از ورود (`C-2, C-1, C0`) قرار دهید.",
+                    suggestedSlBufferAtr = recBuffer,
+                )
+            }
+
+            // ۱-ب. تحلیل دسته‌بندی «۳ کندل قبل از ورود» در معاملات ضررده
+            val cClamp3BarLosses = losingTrades.filter {
+                it.preEntry3CandleCategoryCode == PreEntry3CandleCategory.CCLAMP_EXTENDED_CHASE.code
+            }
+            if (cClamp3BarLosses.isNotEmpty()) {
+                val recMaxExt = round((currentConfig.maxKijunExtensionAtr - 0.22).coerceIn(1.20, 1.60) * 100.0) / 100.0
+                notes += IchimokuImprovementNote(
+                    id = "fix_3candle_cclamp_chase",
+                    priority = ImprovementNotePriority.HIGH,
+                    categoryFa = "درس از دسته‌بندی ۳ کندل قبل از ورود: ممنوعیت ورود در ۳ کندل کشیده",
+                    targetStrategyId = cClamp3BarLosses.first().strategyId,
+                    targetStrategyTitleFa = BitcoinStrategyModel.fromId(cClamp3BarLosses.first().strategyId).titleFa,
+                    targetScopeFa = cClamp3BarLosses.map { it.symbol }.distinct().take(4).joinToString(", "),
+                    problemDetectedFa = "${cClamp3BarLosses.size} معامله ضررده در دسته «${PreEntry3CandleCategory.CCLAMP_EXTENDED_CHASE.badgeFa}» باز شده‌اند.",
+                    ichimokuMasterReasonFa = "وقتی هر ۳ کندل قبل از ورود (`C-2, C-1, C0`) بدون هیچ استراحت یا شدوی پولبک از کیجون دور می‌شوند، ورود روی کلوز کندل سوم دقیقاً در سقف/کف موج C-Clamp انجام می‌شود.",
+                    exactFixInstructionFa = "در شرط ماشه ورود، در صورت قرارگیری معامله در دسته `CCLAMP_EXTENDED_CHASE`، ورود مستقیم مسدود شده و سفارش در نقطه بهینه پولبک به تنکان‌سن (`sniperOptimal`) کاشته شود و `maxKijunExtensionAtr` به $recMaxExt کاهش یابد.",
+                    suggestedMaxKijunExtAtr = recMaxExt,
+                )
+            }
+
             // گروهبندی بر اساس استراتژی
             val lossesByStrategy = losingTrades.groupBy { it.strategyId.ifBlank { BitcoinStrategyModel.BASE_ICHIMOKU.id } }
             for ((stratId, stratLosses) in lossesByStrategy) {

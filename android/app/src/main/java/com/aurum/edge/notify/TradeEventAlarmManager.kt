@@ -69,22 +69,22 @@ enum class TradeAlarmKind(
     val defaultRingtoneTitle: String,
 ) {
     ENTRY(
-        channelId = "aurum_alarm_entry_silent_v2",
-        legacyChannelId = "aurum_alarm_entry_v1",
+        channelId = "aurum_alarm_entry_silent_v3",
+        legacyChannelId = "aurum_alarm_entry_silent_v2",
         channelNameFa = "آلارم ورود به معامله (Entry)",
         badgeFa = "🚀 آلارم ورود به معامله",
         defaultRingtoneTitle = "Ding-Dong",
     ),
     TAKE_PROFIT(
-        channelId = "aurum_alarm_tp_silent_v2",
-        legacyChannelId = "aurum_alarm_tp_v1",
+        channelId = "aurum_alarm_tp_silent_v3",
+        legacyChannelId = "aurum_alarm_tp_silent_v2",
         channelNameFa = "آلارم رسیدن به حد سود (TP)",
         badgeFa = "🎯 آلارم رسیدن به حد سود (TP)",
         defaultRingtoneTitle = "Red Dwarf",
     ),
     STOP_LOSS(
-        channelId = "aurum_alarm_sl_silent_v2",
-        legacyChannelId = "aurum_alarm_sl_v1",
+        channelId = "aurum_alarm_sl_silent_v3",
+        legacyChannelId = "aurum_alarm_sl_silent_v2",
         channelNameFa = "آلارم برخورد به حد ضرر (SL)",
         badgeFa = "🛑 آلارم برخورد به حد ضرر (SL)",
         defaultRingtoneTitle = "Latch",
@@ -109,15 +109,27 @@ object TradeEventAlarmManager {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
 
+        // پاکسازی کامل تمام کانال‌های قدیمی که صدای نوتیفیکیشن سیستم گوشی را پخش می‌کردند
+        listOf(
+            "aurum_trade_alert_channel",
+            "aurum_alarm_entry_v1",
+            "aurum_alarm_tp_v1",
+            "aurum_alarm_sl_v1",
+            "aurum_alarm_entry_silent_v2",
+            "aurum_alarm_tp_silent_v2",
+            "aurum_alarm_sl_silent_v2",
+        ).forEach { oldId ->
+            runCatching { nm.deleteNotificationChannel(oldId) }
+        }
+
         TradeAlarmKind.entries.forEach { kind ->
-            // حذف کانال قدیمی که صدای پیش‌فرض نوتیفیکیشن سیستم را اضافه پخش می‌کرد
             runCatching { nm.deleteNotificationChannel(kind.legacyChannelId) }
 
-            // کانال جدید کاملاً بی‌صدا است تا فقط و فقط صدای دقیق آلارم انتخابی پخش شود (بدون صدای اضافه سیستم)
+            // کانال نوتیفیکیشن کاملاً بی‌صدا (IMPORTANCE_LOW + setSound(null, null)) تا گوشی هیچ صدایی ندهد و فقط صدای اپ پخش شود
             val channel = NotificationChannel(
                 kind.channelId,
                 kind.channelNameFa,
-                NotificationManager.IMPORTANCE_HIGH,
+                NotificationManager.IMPORTANCE_LOW,
             ).apply {
                 description = kind.badgeFa
                 enableVibration(false)
@@ -449,11 +461,13 @@ object TradeEventAlarmManager {
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setSilent(true)
             .setSound(null)
             .setVibrate(null)
+            .setDefaults(0)
+            .setOnlyAlertOnce(true)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .build()

@@ -137,10 +137,20 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun startApp(@Suppress("UNUSED_PARAMETER") context: Context) {
         container.settingsStore.ensureBalance100kMigrated()
+        com.aurum.edge.data.PhoneStorageVaultManager.attachContext(container.appContext)
         com.aurum.edge.data.TradeSnapshotArchiveManager.init(container.appContext)
         com.aurum.edge.core.MasterIchimokuTradingAssistant.init(container.appContext)
         container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
+                val shardTrades = com.aurum.edge.data.PhoneStorageVaultManager.loadAllTradesFromPhoneShards(container.appContext)
+                if (shardTrades.isNotEmpty()) {
+                    container.journalStore.importTrades(shardTrades, replaceExisting = false)
+                }
+                com.aurum.edge.data.PhoneStorageVaultManager.syncTradesToShardsAndDailyBackup(
+                    context = container.appContext,
+                    trades = trades.value,
+                    forceAllShards = true,
+                )
                 com.aurum.edge.data.TradeSnapshotArchiveManager.scanAndRestoreFromPhoneStorage(
                     context = container.appContext,
                     journalStore = container.journalStore,
@@ -421,11 +431,6 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 else -> "🛑 معامله ${first.symbol} با برخورد به حد ضرر (SL) بسته شد ($pnlStr)"
             }
             _toast.value = msg
-            BackgroundTradingService.postTradeEventNotification(
-                context = container.appContext,
-                title = "بسته شدن خودکار ${first.symbol}",
-                body = msg,
-            )
         }
 
         // شکار لحظه‌ای نقطه‌زنی ورود (Real-Time Sniper Pocket Fill) روی هر دو تایم‌فریم 15m و 5m و همه استراتژی‌های فعال (با الزام قطعی R:R >= 1:1.5)
@@ -734,6 +739,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val tradeSnapshotArchiveRecords: StateFlow<List<com.aurum.edge.data.ArchivedTradeSnapshotRecord>> =
         com.aurum.edge.data.TradeSnapshotArchiveManager.records
 
+    val phoneVaultStatus: StateFlow<com.aurum.edge.data.PhoneVaultStatusSummary> =
+        com.aurum.edge.data.PhoneStorageVaultManager.vaultStatus
+
+    val phoneDailyBackups: StateFlow<List<com.aurum.edge.data.PhoneDailyBackupMeta>> =
+        com.aurum.edge.data.PhoneStorageVaultManager.dailyBackups
+
     private fun executeOpenTradeNow(
         calc: RiskCalculationResult,
         note: String,
@@ -746,6 +757,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         val matchedReport = _dualSymbolStrategyReports.value[normSym]
             ?.reportFor(entryInterval, strategyId)
         val matchedBreakdown = matchedReport?.rrBreakdown
+        val entryCandles = LiveQuoteFetcher.peekCachedCandles(normSym, entryInterval)
         val openedRaw = container.journalStore.openTrade(
             calc = calc,
             note = note,
@@ -755,6 +767,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             strategyTitleFa = strategyTitleFa,
             optimalRiskReward = matchedBreakdown?.optimalRiskReward ?: calc.riskReward,
             rrBreakdownFa = matchedBreakdown?.optimalRrReasonFa ?: "",
+            preEntryCandles = entryCandles,
         )
         val condRecords = matchedReport?.conditions?.map { c ->
             com.aurum.edge.core.PaperConditionRecord(
@@ -785,13 +798,23 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
         refreshSymbolLivePrice(trade.symbol)
         syncBackgroundServiceState()
-        val msg = "⚡ معامله ${trade.symbol} [تایم ${trade.interval.label}] · [${trade.strategyTitleFa}] (${if (trade.action == com.aurum.edge.domain.SignalAction.BUY) "خرید" else "فروش"}) باز شد · 📸 اسکرین‌شات ایچیموکو در آرشیو و گوشی ذخیره شد"
+        val msg = "⚡ معامله ${trade.symbol} [تایم ${trade.interval.label}] · [${trade.strategyTitleFa}] (${if (trade.action == com.aurum.edge.domain.SignalAction.BUY) "خرید" else "فروش"}) باز شد · ${trade.preEntry3CandleCategoryFa}"
         _toast.value = msg
-        BackgroundTradingService.postTradeEventNotification(
-            context = container.appContext,
-            title = "باز شدن معامله ${trade.symbol} (${trade.strategyTitleFa})",
-            body = msg,
-        )
+    }
+
+    fun triggerManualDailyBackupNow() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            com.aurum.edge.data.PhoneStorageVaultManager.syncTradesToShardsAndDailyBackup(
+                context = container.appContext,
+                trades = trades.value,
+                forceAllShards = true,
+            )
+            val status = com.aurum.edge.data.PhoneStorageVaultManager.refreshVaultStatus(
+                context = container.appContext,
+                allTrades = trades.value,
+            )
+            _toast.value = "💾 بک‌آپ روزانه (${status.latestBackupDateKey}) و خزانه ۱ ماهه کندل‌ها (${status.totalStoredCandlesCount} کندل) در حافظه گوشی ذخیره شد"
+        }
     }
 
     fun captureOrRefreshTradeSnapshot(trade: PaperTrade) {
@@ -814,17 +837,26 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun restoreAllDataAndSnapshotsFromPhone() {
         container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val shardTrades = com.aurum.edge.data.PhoneStorageVaultManager.loadAllTradesFromPhoneShards(container.appContext)
+            val restoredShards = if (shardTrades.isNotEmpty()) {
+                container.journalStore.importTrades(shardTrades, replaceExisting = false)
+            } else 0
             val restoredSnapshots = com.aurum.edge.data.TradeSnapshotArchiveManager.scanAndRestoreFromPhoneStorage(
                 context = container.appContext,
                 journalStore = container.journalStore,
             )
             val restoredBrain = container.neuralEngine.restoreBrainBackupFromPhoneStorage(container.appContext)
+            val vaultStat = com.aurum.edge.data.PhoneStorageVaultManager.refreshVaultStatus(
+                context = container.appContext,
+                allTrades = trades.value,
+            )
             container.neuralEngine.syncWithClosedJournalTrades(trades.value)
             _toast.value = buildString {
-                append("🔄 بازخوانی از حافظه گوشی انجام شد: ")
+                append("🔄 بازخوانی از حافظه گوشی: ")
+                append("$restoredShards معامله از شاردهای روزانه · ")
+                append("${vaultStat.totalStoredCandlesCount} کندل ۱ ماه اخیر · ")
                 append("${com.aurum.edge.data.TradeSnapshotArchiveManager.records.value.size} تصویر آرشیو")
-                if (restoredSnapshots > 0) append(" ($restoredSnapshots جدید)")
-                if (restoredBrain) append(" + حافظه شبکه عصبی بازیابی شد")
+                if (restoredBrain) append(" + شبکه عصبی")
             }
         }
     }

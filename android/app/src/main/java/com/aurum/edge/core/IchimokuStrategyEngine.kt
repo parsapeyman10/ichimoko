@@ -4008,6 +4008,177 @@ object IchimokuStrategyEngine {
         return merged
     }
 
+    /**
+     * آناتومی و دسته‌بندی ۳ کندل قبل از ورود به معامله (`C-2`, `C-1`, `C0`)
+     * تا مشخص شود هر معامله دقیقاً در چه شرایط کندلی، نسبت به تنکان/کیجون/کومو و با چه آرایش شدو و بدنه باز شده است.
+     */
+    fun buildPreEntry3CandleContext(
+        candles: List<Candle>,
+        action: SignalAction,
+        activeModel: BitcoinStrategyModel = BitcoinStrategyModel.BASE_ICHIMOKU,
+    ): PreEntry3CandleContext {
+        if (candles.isEmpty()) {
+            return PreEntry3CandleContext(
+                categoryCode = PreEntry3CandleCategory.CONSOLIDATION_BREAKOUT_TRIGGER.code,
+                categoryBadgeFa = PreEntry3CandleCategory.CONSOLIDATION_BREAKOUT_TRIGGER.badgeFa,
+                categoryTitleFa = PreEntry3CandleCategory.CONSOLIDATION_BREAKOUT_TRIGGER.titleFa,
+                summaryFa = "منتظر دریافت کندل‌های قبل از ورود",
+                candles = emptyList(),
+            )
+        }
+        val isBuy = action != SignalAction.SELL
+        val (tenkanPeriod, kijunPeriod, senkouBPeriod) = when (activeModel) {
+            BitcoinStrategyModel.DRIVE_BOOK_1_MARZBAN,
+            BitcoinStrategyModel.DRIVE_BOOK_3_CRYPTO_7_28_119,
+            -> Triple(7, 28, 119)
+            BitcoinStrategyModel.DRIVE_BOOK_2_PERSIAN_ENCYCLOPEDIA -> Triple(10, 30, 60)
+            else -> Triple(9, 26, 52)
+        }
+        val displacement = kijunPeriod
+
+        // ترجیحاً از آخرین کندل بسته‌شده (یا در صورت نبود، آخرین کندل) و ۲ کندل قبل از آن استفاده می‌کنیم
+        val closedPart = candles.filter { it.closed }
+        val pool = if (closedPart.size >= 3) closedPart else candles
+        val endIdx = pool.lastIndex
+        val startIdx = max(0, endIdx - 2)
+        val atr14 = computeAtr(pool, 14).coerceAtLeast(1e-6)
+
+        val slots = mutableListOf<PreEntryCandleSlot>()
+        for (i in startIdx..endIdx) {
+            val c = pool[i]
+            val slotOffset = i - endIdx // -2, -1, 0
+            val slotTitle = when (slotOffset) {
+                -2 -> "کندل ۳ قبل (C-2)"
+                -1 -> "کندل ۲ قبل (C-1)"
+                else -> "کندل ۱ قبل / ماشه (C0)"
+            }
+            val range = (c.high - c.low).coerceAtLeast(1e-8)
+            val body = abs(c.close - c.open)
+            val upperWick = c.high - max(c.open, c.close)
+            val lowerWick = min(c.open, c.close) - c.low
+            val bodyPct = ((body / range) * 100.0).toInt().coerceIn(0, 100)
+            val upWickPct = ((upperWick / range) * 100.0).toInt().coerceIn(0, 100)
+            val lowWickPct = ((lowerWick / range) * 100.0).toInt().coerceIn(0, 100)
+            val rangeAtr = round2(range / atr14)
+            val bullish = c.close >= c.open
+
+            val tVal = midpoint(pool, i, min(tenkanPeriod, i + 1))
+            val kVal = midpoint(pool, i, min(kijunPeriod, i + 1))
+            val pastIdx = max(0, i - displacement + 1)
+            val spanA = (midpoint(pool, pastIdx, min(tenkanPeriod, pastIdx + 1)) + midpoint(pool, pastIdx, min(kijunPeriod, pastIdx + 1))) / 2.0
+            val spanB = midpoint(pool, pastIdx, min(senkouBPeriod, pastIdx + 1))
+            val kTop = max(spanA, spanB)
+            val kBot = min(spanA, spanB)
+
+            val vsTenkan = when {
+                abs(c.close - tVal) <= atr14 * 0.15 || (c.low <= tVal && c.high >= tVal) -> "پولبک/لمس تنکان"
+                c.close > tVal -> "بالای تنکان"
+                else -> "زیر تنکان"
+            }
+            val vsKijun = when {
+                abs(c.close - kVal) <= atr14 * 0.18 || (c.low <= kVal && c.high >= kVal) -> "پولبک/لمس کیجون"
+                c.close > kVal -> "بالای کیجون"
+                else -> "زیر کیجون"
+            }
+            val vsKumo = when {
+                c.close > kTop -> "بالای کومو"
+                c.close < kBot -> "زیر کومو"
+                else -> "داخل کومو"
+            }
+
+            val dirStr = if (bullish) "🟢 صعودی" else "🔴 نزولی"
+            val anatomy = "$dirStr · بدنه $bodyPct% · شدو بالا $upWickPct% / پایین $lowWickPct% · ${rangeAtr}×ATR"
+            val role = when (slotOffset) {
+                -2 -> if ((isBuy && !bullish) || (!isBuy && bullish)) {
+                    "آغاز اصلاح به سمت تعادل ($vsTenkan)"
+                } else {
+                    "پیش‌ران روند ($vsTenkan · $vsKumo)"
+                }
+                -1 -> if (isBuy && (lowWickPct >= 30 || c.low <= tVal * 1.001)) {
+                    "تست و ریجکت شدو از حمایت ($vsTenkan / $vsKijun)"
+                } else if (!isBuy && (upWickPct >= 30 || c.high >= tVal * 0.999)) {
+                    "تست و ریجکت شدو از مقاومت ($vsTenkan / $vsKijun)"
+                } else {
+                    "تثبیت ماقبل ورود ($vsTenkan)"
+                }
+                else -> if ((isBuy && bullish && bodyPct >= 55) || (!isBuy && !bullish && bodyPct >= 55)) {
+                    "کندل ماشه پرقدرت در جهت معامله ($vsTenkan · $vsKumo)"
+                } else {
+                    "کندل تایید ورود ($vsTenkan · $vsKumo)"
+                }
+            }
+
+            slots += PreEntryCandleSlot(
+                slotIndex = slotOffset,
+                slotTitleFa = slotTitle,
+                barTime = c.time,
+                open = round2(c.open),
+                high = round2(c.high),
+                low = round2(c.low),
+                close = round2(c.close),
+                isBullish = bullish,
+                bodyPctOfRange = bodyPct,
+                upperWickPct = upWickPct,
+                lowerWickPct = lowWickPct,
+                rangeAtrRatio = rangeAtr,
+                tenkanValue = round2(tVal),
+                kijunValue = round2(kVal),
+                kumoTop = round2(kTop),
+                kumoBottom = round2(kBot),
+                priceVsTenkanFa = vsTenkan,
+                priceVsKijunFa = vsKijun,
+                priceVsKumoFa = vsKumo,
+                candleAnatomyFa = anatomy,
+                roleInSetupFa = role,
+            )
+        }
+
+        // دسته‌بندی الگوی ۳ کندلی
+        val c0 = slots.last()
+        val c1 = slots.getOrNull(slots.size - 2) ?: c0
+        val c2 = slots.getOrNull(slots.size - 3) ?: c1
+
+        val all3Aligned = slots.size == 3 && slots.all { it.isBullish == isBuy && it.bodyPctOfRange >= 45 }
+        val insideBarCompression = (c1.high <= c2.high && c1.low >= c2.low) || (c1.rangeAtrRatio <= 0.65 && c0.rangeAtrRatio >= 0.95)
+        val engulfingTrigger = (c1.isBullish != isBuy) && (c0.isBullish == isBuy) &&
+            abs(c0.close - c0.open) > abs(c1.close - c1.open) * 1.05
+        val pullbackReject = (c2.priceVsTenkanFa.contains("پولبک") || c1.priceVsTenkanFa.contains("پولبک") ||
+            c1.priceVsKijunFa.contains("پولبک") ||
+            (isBuy && c1.lowerWickPct >= 32) || (!isBuy && c1.upperWickPct >= 32)) && (c0.isBullish == isBuy)
+        val cClampChase = abs(c0.close - c0.kijunValue) > atr14 * 1.85 && all3Aligned
+
+        val category = when {
+            cClampChase -> PreEntry3CandleCategory.CCLAMP_EXTENDED_CHASE
+            pullbackReject -> PreEntry3CandleCategory.PULLBACK_REJECTION_IGNITION
+            engulfingTrigger -> PreEntry3CandleCategory.ENGULFING_REVERSAL_OFF_LEVEL
+            insideBarCompression -> PreEntry3CandleCategory.INSIDE_BAR_COMPRESSION_EXPANSION
+            all3Aligned -> PreEntry3CandleCategory.THREE_SOLDIERS_MOMENTUM_BREAKOUT
+            else -> PreEntry3CandleCategory.CONSOLIDATION_BREAKOUT_TRIGGER
+        }
+
+        val summary = buildString {
+            append("${category.badgeFa}: ")
+            slots.forEachIndexed { idx, s ->
+                if (idx > 0) append(" ⬅ ")
+                val tag = when (s.slotIndex) {
+                    -2 -> "[۳ قبل]"
+                    -1 -> "[۲ قبل]"
+                    else -> "[۱ قبل/ماشه]"
+                }
+                val dir = if (s.isBullish) "صعودی" else "نزولی"
+                append("$tag $dir(بدنه ${s.bodyPctOfRange}% · ${s.priceVsTenkanFa})")
+            }
+        }
+
+        return PreEntry3CandleContext(
+            categoryCode = category.code,
+            categoryBadgeFa = category.badgeFa,
+            categoryTitleFa = category.titleFa,
+            summaryFa = summary,
+            candles = slots,
+        )
+    }
+
     fun round2(v: Double): Double = round2Internal(v)
 }
 

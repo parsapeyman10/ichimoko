@@ -76,7 +76,9 @@ object LiveQuoteFetcher {
 
     fun peekCachedCandles(symbolInput: String, interval: Interval): List<Candle> {
         val symbol = V1Universe.normalize(symbolInput)
-        return candleCache["$symbol|${interval.label}"]?.bars.orEmpty()
+        val cached = candleCache["$symbol|${interval.label}"]?.bars.orEmpty()
+        if (cached.isNotEmpty()) return cached
+        return PhoneStorageVaultManager.loadPersistedCandles(symbol, interval)
     }
 
     /**
@@ -332,6 +334,17 @@ object LiveQuoteFetcher {
         for (attempt in attempts) {
             val res = runCatching { attempt() }.getOrNull()
             if (res != null && res.first.isNotEmpty()) {
+                val mappedInterval = when (intervalCode) {
+                    "1m" -> Interval.M1
+                    "5m" -> Interval.M5
+                    else -> Interval.M15
+                }
+                PhoneStorageVaultManager.appendAndPersistCandles(
+                    symbolInput = symbol,
+                    interval = mappedInterval,
+                    incomingCandles = res.first,
+                    nowMillis = nowMillis,
+                )
                 return@withContext res
             }
         }
@@ -339,8 +352,8 @@ object LiveQuoteFetcher {
     }
 
     /**
-     * دریافت هوشمند کندل‌های تایم‌فریم مشخص (`4H`، `1H`، `15m`) برای هر ۱۵ نماد داخل اپ (`V1Universe.allSymbols`)
-     * با کش همگام با بسته شدن کندل و دریافت فقط کندل‌های جدید (Delta Sync) جهت جلوگیری از هدررفت اینترنت.
+     * دریافت هوشمند کندل‌های تایم‌فریم مشخص (`4H`، `1H`، `15m`، `5m`) برای هر ۱۵ نماد داخل اپ (`V1Universe.allSymbols`)
+     * با کش همگام با بسته شدن کندل، خواندن تاریخچه ۱ ماه اخیر از حافظه گوشی (`CandleVault`) و دریافت فقط کندل‌های جدید (Delta Sync).
      */
     suspend fun fetchTimeframeCandles(
         symbolInput: String = "BTC/USDT",
@@ -353,7 +366,21 @@ object LiveQuoteFetcher {
         if (!V1Universe.valid(symbol)) return@withContext null
 
         val cacheKey = "$symbol|${interval.label}"
-        val cached = candleCache[cacheKey]
+        var cached = candleCache[cacheKey]
+        if (cached == null) {
+            val vaultBars = PhoneStorageVaultManager.loadPersistedCandles(symbol, interval, nowMillis)
+            if (vaultBars.size >= 35) {
+                val lastBar = vaultBars.last()
+                val vaultBucket = lastBar.time / interval.millis
+                cached = CandleCacheEntry(
+                    bars = markClosedFlags(vaultBars, interval, nowMillis),
+                    provider = "Phone CandleVault (35d)",
+                    bucket = vaultBucket,
+                    updatedAt = lastBar.time,
+                )
+                candleCache[cacheKey] = cached
+            }
+        }
         val currentBucket = Smart15mSyncPlanner.currentCandleBucket(nowMillis, interval)
         val marketClosed = MarketHours.closedFor(symbol, nowMillis)
 
@@ -371,7 +398,7 @@ object LiveQuoteFetcher {
             }
             if (!needNetwork) {
                 _syncStats.update { it.copy(cacheHits = it.cacheHits + 1) }
-                return@withContext markClosedFlags(cached.bars, interval, nowMillis) to "${cached.provider} (Cached)"
+                return@withContext markClosedFlags(cached.bars.takeLast(max(limit, 130)), interval, nowMillis) to "${cached.provider} (Cached)"
             }
         }
 
@@ -396,15 +423,18 @@ object LiveQuoteFetcher {
         }
 
         if (fetched != null && fetched.first.isNotEmpty()) {
-            val mergedRaw = if (cached != null && cached.bars.isNotEmpty()) {
-                val map = LinkedHashMap<Long, Candle>()
-                cached.bars.forEach { map[it.time] = it }
-                fetched.first.forEach { map[it.time] = it }
-                map.values.sortedBy { it.time }.takeLast(max(limit, 110))
-            } else {
-                fetched.first.sortedBy { it.time }.takeLast(max(limit, 110))
-            }
-            val marked = markClosedFlags(mergedRaw, interval, nowMillis)
+            val markedIncoming = markClosedFlags(fetched.first, interval, nowMillis)
+            val fullVaultSeries = PhoneStorageVaultManager.appendAndPersistCandles(
+                symbolInput = symbol,
+                interval = interval,
+                incomingCandles = markedIncoming,
+                nowMillis = nowMillis,
+            )
+            val marked = markClosedFlags(
+                if (fullVaultSeries.isNotEmpty()) fullVaultSeries else markedIncoming,
+                interval,
+                nowMillis,
+            )
             if (marked.size >= 35) {
                 candleCache[cacheKey] = CandleCacheEntry(
                     bars = marked,
@@ -416,13 +446,13 @@ object LiveQuoteFetcher {
                     if (isDelta) it.copy(deltaFetches = it.deltaFetches + 1)
                     else it.copy(fullFetches = it.fullFetches + 1)
                 }
-                return@withContext marked to fetched.second
+                return@withContext marked.takeLast(max(limit, 130)) to fetched.second
             }
         }
 
-        // اگر شبکه موقتاً در دسترس نبود، آخرین کش معتبر را برگردان تا دیتا از دست نرود
+        // اگر شبکه موقتاً در دسترس نبود، آخرین کش معتبر یا خزانه ۱ ماهه کندل در گوشی را برگردان
         if (cached != null && cached.bars.size >= 35) {
-            return@withContext markClosedFlags(cached.bars, interval, nowMillis) to "${cached.provider} (Fallback Cache)"
+            return@withContext markClosedFlags(cached.bars.takeLast(max(limit, 130)), interval, nowMillis) to "${cached.provider} (Fallback Cache)"
         }
         null
     }

@@ -24,6 +24,7 @@ class JournalStore(
     private val settingsStore: SettingsStore? = null,
 ) {
     private val appContext: Context = context.applicationContext
+    private val isDefaultJournalFile: Boolean = file.name == "user_journal_v1.json"
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -31,6 +32,7 @@ class JournalStore(
     private val listSerializer = ListSerializer(PaperTrade.serializer())
 
     init {
+        PhoneStorageVaultManager.attachContext(appContext)
         // Ensure legacy auto-strategy journal files stay purged
         runCatching {
             File(context.filesDir, "paper_journal.json").delete()
@@ -43,17 +45,45 @@ class JournalStore(
 
     @Synchronized
     private fun loadFromDisk(): List<PaperTrade> {
-        val candidates = listOf(file, File(file.path + ".bak"))
-        for (candidate in candidates) {
-            if (!candidate.exists()) continue
-            val parsed = runCatching {
-                json.decodeFromString(listSerializer, candidate.readText())
-            }.getOrNull()
-            if (parsed != null) {
-                return parsed.sortedByDescending { it.openedAt }
+        val localList = run {
+            val candidates = listOf(file, File(file.path + ".bak"))
+            var found: List<PaperTrade>? = null
+            for (candidate in candidates) {
+                if (!candidate.exists()) continue
+                val parsed = runCatching {
+                    json.decodeFromString(listSerializer, candidate.readText())
+                }.getOrNull()
+                if (parsed != null) {
+                    found = parsed
+                    break
+                }
+            }
+            found.orEmpty()
+        }
+
+        if (!isDefaultJournalFile) {
+            return localList.sortedByDescending { it.openedAt }
+        }
+
+        // ادغام هوشمند با شاردهای روزانه و بک‌آپ‌های خودکار روزانه در حافظه گوشی
+        val shardList = runCatching {
+            PhoneStorageVaultManager.loadAllTradesFromPhoneShards(appContext)
+        }.getOrDefault(emptyList())
+
+        if (shardList.isEmpty()) {
+            return localList.sortedByDescending { it.openedAt }
+        }
+        val merged = LinkedHashMap<String, PaperTrade>()
+        for (t in localList) {
+            merged[t.id] = t
+        }
+        for (t in shardList) {
+            val existing = merged[t.id]
+            if (existing == null || (!t.isOpen && existing.isOpen)) {
+                merged[t.id] = t
             }
         }
-        return emptyList()
+        return merged.values.sortedByDescending { it.openedAt }
     }
 
     @Synchronized
@@ -73,6 +103,11 @@ class JournalStore(
                 tmp.delete()
             }
         }
+        if (isDefaultJournalFile) {
+            runCatching {
+                PhoneStorageVaultManager.syncTradesToShardsAndDailyBackup(appContext, sorted)
+            }
+        }
     }
 
     @Synchronized
@@ -85,8 +120,20 @@ class JournalStore(
         strategyTitleFa: String = com.aurum.edge.core.BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
         optimalRiskReward: Double = 0.0,
         rrBreakdownFa: String = "",
+        preEntryCandles: List<Candle> = emptyList(),
     ): PaperTrade {
-        val trade = calc.toPaperTrade(
+        val effectiveCandles = preEntryCandles.ifEmpty {
+            LiveQuoteFetcher.peekCachedCandles(calc.symbol, entryInterval).ifEmpty {
+                PhoneStorageVaultManager.loadPersistedCandles(calc.symbol, entryInterval, now)
+            }
+        }
+        val activeModel = com.aurum.edge.core.BitcoinStrategyModel.fromId(strategyId)
+        val pre3Context = com.aurum.edge.core.IchimokuStrategyEngine.buildPreEntry3CandleContext(
+            candles = effectiveCandles,
+            action = calc.action,
+            activeModel = activeModel,
+        )
+        val rawTrade = calc.toPaperTrade(
             note = note,
             openedAt = now,
             entryInterval = entryInterval,
@@ -94,6 +141,12 @@ class JournalStore(
             strategyTitleFa = strategyTitleFa,
             optimalRiskReward = optimalRiskReward,
             rrBreakdownFa = rrBreakdownFa,
+        )
+        val trade = rawTrade.copy(
+            preEntry3CandleCategoryCode = pre3Context.categoryCode,
+            preEntry3CandleCategoryFa = pre3Context.categoryBadgeFa,
+            preEntry3CandleSummaryFa = pre3Context.summaryFa,
+            preEntry3Candles = pre3Context.candles,
         )
         persist( listOf(trade) + _trades.value )
         val cfg = settingsStore?.read()

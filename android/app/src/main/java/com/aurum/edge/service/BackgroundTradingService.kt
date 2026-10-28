@@ -132,8 +132,8 @@ class BackgroundTradingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
-        private const val CHANNEL_ONGOING = "aurum_bg_monitor_channel"
-        private const val CHANNEL_ALERTS = "aurum_trade_alert_channel"
+        private const val CHANNEL_ONGOING = "aurum_bg_monitor_silent_v3"
+        private const val CHANNEL_ALERTS = "aurum_trade_alert_silent_v3"
         private const val NOTIFICATION_ID_ONGOING = 7101
         private const val ACTION_START = "com.aurum.edge.action.START_BG"
         private const val ACTION_STOP = "com.aurum.edge.action.STOP_BG"
@@ -143,6 +143,10 @@ class BackgroundTradingService : Service() {
         fun ensureChannels(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            runCatching {
+                nm.deleteNotificationChannel("aurum_bg_monitor_channel")
+                nm.deleteNotificationChannel("aurum_trade_alert_channel")
+            }
             val ongoing = NotificationChannel(
                 CHANNEL_ONGOING,
                 "پایش بک‌گراند و معامله خودکار",
@@ -150,13 +154,17 @@ class BackgroundTradingService : Service() {
             ).apply {
                 description = "فعال نگه‌داشتن رادار ۱۵ نماد و رصد معاملات باز در پس‌زمینه"
                 setShowBadge(false)
+                enableVibration(false)
+                setSound(null, null)
             }
             val alerts = NotificationChannel(
                 CHANNEL_ALERTS,
-                "رویدادهای ورود و خروج معامله",
-                NotificationManager.IMPORTANCE_HIGH,
+                "رویدادهای ورود و خروج معامله (بی‌صدا)",
+                NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "اعلان باز شدن معامله خودکار، برخورد TP/SL و Preserve Mode"
+                description = "اعلان تصویری بدون صدای سیستم گوشی (فقط صدای آلارم اپ پخش می‌شود)"
+                enableVibration(false)
+                setSound(null, null)
             }
             nm.createNotificationChannel(ongoing)
             nm.createNotificationChannel(alerts)
@@ -205,7 +213,12 @@ class BackgroundTradingService : Service() {
                     .setContentTitle(title)
                     .setContentText(body)
                     .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setPriority(NotificationCompat.PRIORITY_LOW)
+                    .setSilent(true)
+                    .setSound(null)
+                    .setVibrate(null)
+                    .setDefaults(0)
+                    .setOnlyAlertOnce(true)
                     .setAutoCancel(true)
                     .setContentIntent(contentIntent)
                     .build()
@@ -230,6 +243,10 @@ class BackgroundTradingService : Service() {
                 .setContentText(text)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
+                .setSilent(true)
+                .setSound(null)
+                .setVibrate(null)
+                .setDefaults(0)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setContentIntent(contentIntent)
                 .build()
