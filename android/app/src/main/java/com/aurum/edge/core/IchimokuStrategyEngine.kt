@@ -4008,10 +4008,12 @@ object IchimokuStrategyEngine {
         return merged
     }
 
-    fun round2(v: Double): Double = com.aurum.edge.core.round2(v)
+    fun round2(v: Double): Double = round2Internal(v)
 }
 
-internal fun round2(v: Double): Double {
+private fun round2(v: Double): Double = round2Internal(v)
+
+private fun round2Internal(v: Double): Double {
     if (!v.isFinite()) return 0.0
     val a = abs(v)
     val factor = when {

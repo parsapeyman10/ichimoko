@@ -358,7 +358,7 @@ object MasterIchimokuTradingAssistant {
         val openTrades = trades.filter { it.isOpen }
 
         // ۱. کالبدشکافی معاملات استاپ‌خورده سریع یا ضررده در ژورنال
-        val losingTrades = closed.filter { (it.resultPnl ?: 0.0) < -0.05 }
+        val losingTrades = closed.filter { (it.pnlUsd ?: 0.0) < -0.05 }
         if (losingTrades.isNotEmpty()) {
             // گروهبندی بر اساس استراتژی
             val lossesByStrategy = losingTrades.groupBy { it.strategyId.ifBlank { BitcoinStrategyModel.BASE_ICHIMOKU.id } }

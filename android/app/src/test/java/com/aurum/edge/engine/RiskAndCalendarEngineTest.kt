@@ -874,7 +874,7 @@ class RiskAndCalendarEngineTest {
         val losingTradeSample = sampleTrade.copy(
             id = "FAST_SL_1",
             closedAt = sampleTrade.openedAt + 120_000L,
-            resultPnl = -5.0,
+            pnlUsd = -5.0,
         )
         val generatedNotes = com.aurum.edge.core.MasterIchimokuTradingAssistant.generateActionableImprovementNotes(
             trades = listOf(losingTradeSample),
