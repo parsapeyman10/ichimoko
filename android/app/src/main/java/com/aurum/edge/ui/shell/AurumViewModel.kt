@@ -1758,7 +1758,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             )
             cur.copy(baseStrategyConfig = newCfg)
         }
-        rescanFocusedStrategyNow()
+        scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
         _toast.value = "⚡ پیشنهاد اصلاحی دستیار ایچیموکو روی تنظیمات استراتژی اعمال شد"
     }
 

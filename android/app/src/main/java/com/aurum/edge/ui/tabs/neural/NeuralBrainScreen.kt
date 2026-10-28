@@ -459,7 +459,7 @@ fun NeuralBrainScreen(
                         Text("💾 ذخیره دانش شبکه در گوشی", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                     OutlinedButton(
-                        onClick = { viewModel.scanAndRestorePhoneArchiveNow() },
+                        onClick = { viewModel.restoreAllDataAndSnapshotsFromPhone() },
                         modifier = Modifier.weight(1f),
                     ) {
                         Text("📂 بازخوانی دیتا و آرشیو از گوشی", fontSize = 11.sp, color = AurumColors.Cyan)
