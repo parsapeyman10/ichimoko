@@ -23,11 +23,13 @@ object AurumColors {
     val Cyan = Color(0xFF38BDF8)
     val Purple = Color(0xFFA78BFA)
     val Bg = Color(0xFF06080C)
+    val Background = Bg
     val Surface = Color(0xFF0D1117)
     val SurfaceAlt = Color(0xFF151B24)
     val ChartBg = Color(0xFF090C10)
     val Grid = Color(0xFF161C26)
     val Line = Color(0xFF212938)
+    val Border = Line
     val TextPrimary = Color(0xFFF0F4F8)
     val TextSecondary = Color(0xFF9FB0C4)
     val TextMuted = Color(0xFF7D8DA1)
