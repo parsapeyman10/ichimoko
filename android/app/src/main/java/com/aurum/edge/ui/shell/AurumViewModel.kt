@@ -1308,11 +1308,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun triggerTestTradeAlarm(kind: com.aurum.edge.notify.TradeAlarmKind) {
         val cfg = settings.value
         com.aurum.edge.notify.TradeEventAlarmManager.triggerTestAlarm(
-            context = container.context,
+            context = container.appContext,
             kind = kind,
             customSoundUri = cfg.alertSoundUri,
         )
-        _toast.value = "🔊 تست ${kind.titleFa} پخش شد"
+        _toast.value = "🔊 تست ${kind.channelNameFa} پخش شد"
     }
 
     fun consumeToast() {
