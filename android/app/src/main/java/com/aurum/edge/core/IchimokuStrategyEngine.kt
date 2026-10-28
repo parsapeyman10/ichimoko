@@ -4028,10 +4028,8 @@ object IchimokuStrategyEngine {
         }
         val isBuy = action != SignalAction.SELL
         val (tenkanPeriod, kijunPeriod, senkouBPeriod) = when (activeModel) {
-            BitcoinStrategyModel.DRIVE_BOOK_1_MARZBAN,
-            BitcoinStrategyModel.DRIVE_BOOK_3_CRYPTO_7_28_119,
-            -> Triple(7, 28, 119)
-            BitcoinStrategyModel.DRIVE_BOOK_2_PERSIAN_ENCYCLOPEDIA -> Triple(10, 30, 60)
+            BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 -> Triple(10, 30, 60)
+            BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44 -> Triple(7, 22, 44)
             else -> Triple(9, 26, 52)
         }
         val displacement = kijunPeriod
@@ -4041,7 +4039,27 @@ object IchimokuStrategyEngine {
         val pool = if (closedPart.size >= 3) closedPart else candles
         val endIdx = pool.lastIndex
         val startIdx = max(0, endIdx - 2)
-        val atr14 = computeAtr(pool, 14).coerceAtLeast(1e-6)
+
+        fun midpointAt(bars: List<Candle>, toIdx: Int, period: Int): Double {
+            val safeTo = toIdx.coerceIn(0, bars.lastIndex)
+            val from = (safeTo - period + 1).coerceIn(0, safeTo)
+            var hh = Double.NEGATIVE_INFINITY
+            var ll = Double.POSITIVE_INFINITY
+            for (k in from..safeTo) {
+                if (bars[k].high > hh) hh = bars[k].high
+                if (bars[k].low < ll) ll = bars[k].low
+            }
+            return (hh + ll) / 2.0
+        }
+
+        val atrPeriod = min(14, pool.size - 1).coerceAtLeast(1)
+        var trSum = 0.0
+        for (k in (endIdx - atrPeriod + 1).coerceAtLeast(0)..endIdx) {
+            val cur = pool[k]
+            val prevC = pool[(k - 1).coerceAtLeast(0)].close
+            trSum += maxOf(cur.high - cur.low, abs(cur.high - prevC), abs(cur.low - prevC))
+        }
+        val atr14 = (trSum / atrPeriod).coerceAtLeast(pool[endIdx].close * 0.0005).coerceAtLeast(1e-6)
 
         val slots = mutableListOf<PreEntryCandleSlot>()
         for (i in startIdx..endIdx) {
@@ -4062,11 +4080,11 @@ object IchimokuStrategyEngine {
             val rangeAtr = round2(range / atr14)
             val bullish = c.close >= c.open
 
-            val tVal = midpoint(pool, i, min(tenkanPeriod, i + 1))
-            val kVal = midpoint(pool, i, min(kijunPeriod, i + 1))
+            val tVal = midpointAt(pool, i, min(tenkanPeriod, i + 1))
+            val kVal = midpointAt(pool, i, min(kijunPeriod, i + 1))
             val pastIdx = max(0, i - displacement + 1)
-            val spanA = (midpoint(pool, pastIdx, min(tenkanPeriod, pastIdx + 1)) + midpoint(pool, pastIdx, min(kijunPeriod, pastIdx + 1))) / 2.0
-            val spanB = midpoint(pool, pastIdx, min(senkouBPeriod, pastIdx + 1))
+            val spanA = (midpointAt(pool, pastIdx, min(tenkanPeriod, pastIdx + 1)) + midpointAt(pool, pastIdx, min(kijunPeriod, pastIdx + 1))) / 2.0
+            val spanB = midpointAt(pool, pastIdx, min(senkouBPeriod, pastIdx + 1))
             val kTop = max(spanA, spanB)
             val kBot = min(spanA, spanB)
 
