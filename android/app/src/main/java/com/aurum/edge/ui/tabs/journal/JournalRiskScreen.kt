@@ -2908,7 +2908,7 @@ private fun InteractiveTearSheetModalDialog(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                     ) {
                                         Text(
-                                            text = "${t.symbol} · ${t.action.labelFa} · تایم ${t.entryTimeframe}",
+                                            text = "${t.symbol} · ${if (t.action == SignalAction.BUY) "خرید (LONG)" else "فروش (SHORT)"} · تایم ${t.entryTimeframe}",
                                             style = MaterialTheme.typography.titleSmall,
                                             color = c,
                                             fontWeight = FontWeight.Bold,
