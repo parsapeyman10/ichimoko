@@ -223,6 +223,15 @@ data class PaperTrade(
             val risk = riskUsd
             return if (risk <= 0.0) null else pnl / risk
         }
+
+    val entryTimeframe: String
+        get() = interval.label
+
+    val venueNameFa: String
+        get() = VenueSpecs.of(symbol).venue
+
+    val estimatedRoundTripFeeUsd: Double
+        get() = totalRoundTripFeeUsd
 }
 
 data class AppSettings(

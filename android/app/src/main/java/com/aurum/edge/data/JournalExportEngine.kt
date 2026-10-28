@@ -86,7 +86,10 @@ data class EquityCurvePoint(
     val peakEquityUsd: Double,
     val drawdownUsd: Double,
     val drawdownPct: Double,
-)
+) {
+    val cumulativeEquityUsd: Double
+        get() = equityUsd
+}
 
 @Serializable
 data class StrategyTearSheetRow(
@@ -122,10 +125,14 @@ data class SymbolTearSheetRow(
     val avgR: Double,
     val totalFeesUsd: Double,
     val netPnlUsd: Double,
-)
+) {
+    val labelFa: String
+        get() = assetClassLabelFa
+}
 
 @Serializable
 data class InstitutionalTearSheetReport(
+    val schemaVersion: String = "3.9.11-institutional-tearsheet",
     val generatedAtMs: Long,
     val generatedAtFormatted: String,
     val filterTitleFa: String,
@@ -187,7 +194,25 @@ data class InstitutionalTearSheetReport(
     val symbolLeaderboard: List<SymbolTearSheetRow>,
     val equityCurve: List<EquityCurvePoint>,
     val trades: List<PaperTrade>,
-)
+) {
+    val filterScopeLabelFa: String get() = filterTitleFa
+    val initialCapital: Double get() = initialCapitalUsd
+    val currentEquity: Double get() = currentBalanceUsd
+    val totalVenueFeesUsd: Double get() = totalFeesAndSpreadUsd
+    val kellyCriterionPct: Double get() = kellyOptimalPct
+    val expectancyUsd: Double get() = expectancyUsdPerTrade
+    val expectancyR: Double get() = expectancyRPerTrade
+    val tf15mCount: Int get() = tf15mTradesCount
+    val tf15mWinRate: Double get() = tf15mWinRatePct
+    val tf15mNetPnl: Double get() = tf15mNetPnlUsd
+    val tf5mCount: Int get() = tf5mTradesCount
+    val tf5mWinRate: Double get() = tf5mWinRatePct
+    val tf5mNetPnl: Double get() = tf5mNetPnlUsd
+    val longWinRate: Double get() = longWinRatePct
+    val longNetPnl: Double get() = longNetPnlUsd
+    val shortWinRate: Double get() = shortWinRatePct
+    val shortNetPnl: Double get() = shortNetPnlUsd
+}
 
 object JournalExportEngine {
 
@@ -211,10 +236,26 @@ object JournalExportEngine {
         return runCatching { dateTimeFmt.format(Instant.ofEpochMilli(ms)) }.getOrDefault("—")
     }
 
+    fun buildInstitutionalTearSheet(
+        trades: List<PaperTrade>,
+        initialCapital: Double = 100_000.0,
+        currentBalance: Double = 100_000.0,
+        customStrategies: List<CustomStrategySlot> = emptyList(),
+        filterScopeLabelFa: String = "کل ژورنال (همه ۱۵ ترکیب استراتژی و ۱۵ نماد)",
+        nowEpochMs: Long = System.currentTimeMillis(),
+    ): InstitutionalTearSheetReport = buildInstitutionalTearSheetInternal(
+        tradesInput = trades,
+        initialCapitalUsd = initialCapital,
+        currentBalanceUsd = currentBalance,
+        customStrategies = customStrategies,
+        filterTitleFa = filterScopeLabelFa,
+        nowMillis = nowEpochMs,
+    )
+
     /**
      * محاسبه کامل کارنامه کوانت و شاخص‌های استاندارد جهانی (TradeZella / Edgewonk / QuantConnect Tear Sheet).
      */
-    fun buildInstitutionalTearSheet(
+    fun buildInstitutionalTearSheetInternal(
         tradesInput: List<PaperTrade>,
         initialCapitalUsd: Double = 100_000.0,
         currentBalanceUsd: Double = 100_000.0,
@@ -465,10 +506,11 @@ object JournalExportEngine {
             val pf = if (gl > 1e-6) gw / gl else if (gw > 0.0) 99.9 else 0.0
             val wr = if (symClosed.isNotEmpty()) (symWins.size * 100.0) / symClosed.size else 0.0
             val rList = symClosed.map { it.rMultiple ?: ((it.pnlUsd ?: 0.0) / (it.fixedRiskUsd.takeIf { r -> r > 0.0 } ?: 5.0)) }
-            val assetFa = when (AssetClass.forSymbol(sym)) {
+            val assetFa = when (AssetClass.of(sym)) {
                 AssetClass.CRYPTO -> "رمزارز (Crypto)"
                 AssetClass.FOREX -> "فارکس (Forex)"
-                AssetClass.METALS -> if (sym == "DOW") "شاخص (Index)" else "فلزات گران‌بها (Metals)"
+                AssetClass.COMMODITY -> "فلزات گران‌بها (Metals)"
+                AssetClass.STOCK -> "شاخص (Index)"
             }
             SymbolTearSheetRow(
                 symbol = sym,
@@ -613,8 +655,8 @@ object JournalExportEngine {
             val achievedR = t.rMultiple ?: (t.pnlUsd?.let { it / (t.fixedRiskUsd.takeIf { r -> r > 0.0 } ?: 5.0) })
             val feeUsd = t.totalRoundTripFeeUsd
             val grossPnl = t.pnlUsd?.let { r2(it + feeUsd) }
-            val spec = com.aurum.edge.core.VenueSpecs.forSymbol(t.symbol)
-            val assetClass = AssetClass.forSymbol(t.symbol).name
+            val spec = com.aurum.edge.core.VenueSpecs.of(t.symbol)
+            val assetClass = AssetClass.of(t.symbol).name
 
             val row = listOf(
                 (idx + 1).toString(),
@@ -634,7 +676,7 @@ object JournalExportEngine {
                 (t.initialStopLoss ?: t.stopLoss).toString(),
                 t.takeProfit.toString(),
                 t.exitPrice?.toString().orEmpty(),
-                t.quantity.toString(),
+                t.positionOz.toString(),
                 (t.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0).toString(),
                 t.riskReward.toString(),
                 t.effectiveOptimalRr.toString(),
@@ -642,7 +684,7 @@ object JournalExportEngine {
                 grossPnl?.toString().orEmpty(),
                 r3(feeUsd).toString(),
                 t.pnlUsd?.let { r2(it).toString() }.orEmpty(),
-                esc(spec.dataSourceVenue),
+                esc(spec.venue),
                 esc(t.exitReason.orEmpty()),
                 esc(t.buildRrFormulaSummaryFa()),
                 esc(t.note),
