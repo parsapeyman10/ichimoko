@@ -16,6 +16,7 @@
   7. **`TSG_QUICK_PROFIT_4STEP` (سیستم ۴ مرحله‌ای سود سریع TSG — `trading strategy.pdf`):** گام ۱ شکست کومو، گام ۲ کراس TK با تایید چیکو بالای ابر، گام ۳ ورود و گام ۴ استاپ پشت کندل شکست و خروج روی کراس معکوس.
   8. **`KOONITZ_5RULES_DMI_MACD_EMA34` (سیستم ۵ قانون ورود و ۴ قانون خروج کونیتز با `DMI/ADX + MACD + EMA34` — `Ichimoku-Charting-Technical-Analysis.pdf`):** هم‌جهتی ۵ شرط ایچیموکو با `DMI (+DI/-DI, ADX14)`، `MACD(12,26,9)` و `EMA 34` و خروج ۴ قانون در سود.
   9. **`KOONITZ_TRIPLE_SCREEN_FAST_7_22_44` (سیستم ۳ صفحه الدر-کونیتز با تنظیمات سریع `7-22-44` و `EMA 13/34/48` — `analysis andstrategy.pdf`):** هم‌جهتی ۳ تایم‌فریم با تنظیمات سریع ایچیموکو (`7, 22, 44`) و کراس میانگین‌های `EMA 13 / 34 / 48`.
+- **فایل نصبی:** [`AurumEdge-v3.9.14.apk`](https://github.com/parsapeyman10/ichimoko/releases/download/v3.9.14/AurumEdge-v3.9.14.apk) (`SHA-256: 487b65788cc6f90f2fc3fc3bb7a90fb87f2442747c00486c5a292e0553039991` · حجم `11,513,743` بایت).
 
 ---
 
