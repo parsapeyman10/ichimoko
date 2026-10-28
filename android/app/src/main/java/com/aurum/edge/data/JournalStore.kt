@@ -359,6 +359,28 @@ class JournalStore(
     }
 
     @Synchronized
+    fun importTrades(
+        imported: List<PaperTrade>,
+        replaceExisting: Boolean = false,
+    ): Int {
+        if (imported.isEmpty() && !replaceExisting) return 0
+        val cleanImported = imported.distinctBy { it.id }
+        val finalList = if (replaceExisting) {
+            cleanImported
+        } else {
+            val importedById = cleanImported.associateBy { it.id }
+            val mergedExisting = _trades.value.map { existing ->
+                importedById[existing.id] ?: existing
+            }
+            val existingIds = _trades.value.map { it.id }.toSet()
+            val brandNew = cleanImported.filterNot { it.id in existingIds }
+            brandNew + mergedExisting
+        }
+        persist(finalList)
+        return cleanImported.size
+    }
+
+    @Synchronized
     fun clear() {
         runCatching {
             if (file.exists()) file.delete()

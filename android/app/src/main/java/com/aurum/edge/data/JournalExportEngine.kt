@@ -2,6 +2,7 @@ package com.aurum.edge.data
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Canvas
@@ -11,6 +12,10 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.BitcoinStrategyModel
@@ -31,8 +36,18 @@ import kotlin.math.min
 import kotlin.math.round
 import kotlin.math.sqrt
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+
+data class SavedJournalExportFile(
+    val file: File,
+    val name: String,
+    val format: JournalExportFormat,
+    val sizeBytes: Long,
+    val modifiedAtMs: Long,
+    val modifiedAtFormatted: String,
+)
 
 enum class JournalExportFormat(
     val id: String,
@@ -1163,6 +1178,14 @@ function filterRows() {
         }
     }
 
+    fun suggestedFileName(
+        report: InstitutionalTearSheetReport,
+        format: JournalExportFormat,
+    ): String {
+        val stamp = fileStampFmt.format(Instant.ofEpochMilli(report.generatedAtMs))
+        return "AurumEdge_Journal_${format.id.uppercase(Locale.ROOT)}_$stamp.${format.extension}"
+    }
+
     /**
      * ذخیره فایل خروجی در دایرکتوری `filesDir/exports/` و بازگرداندن مسیر آن برای اشتراک‌گذاری، مشاهده یا ذخیره.
      */
@@ -1172,8 +1195,7 @@ function filterRows() {
         format: JournalExportFormat,
     ): File {
         val exportDir = File(context.filesDir, "exports").apply { mkdirs() }
-        val stamp = fileStampFmt.format(Instant.ofEpochMilli(report.generatedAtMs))
-        val fileName = "AurumEdge_Journal_${format.id.uppercase(Locale.ROOT)}_$stamp.${format.extension}"
+        val fileName = suggestedFileName(report, format)
         val outFile = File(exportDir, fileName)
         when (format) {
             JournalExportFormat.HTML_TEAR_SHEET -> {
@@ -1190,6 +1212,202 @@ function filterRows() {
             }
         }
         return outFile
+    }
+
+    /**
+     * ذخیره فوری و مستقیم در پوشه `Downloads/AurumEdge` حافظه گوشی بدون نیاز به مجوز دستی در اندروید ۱۰ به بالا.
+     */
+    fun saveDirectToDownloads(
+        context: Context,
+        report: InstitutionalTearSheetReport,
+        format: JournalExportFormat,
+    ): Result<String> = runCatching {
+        val localFile = exportToFile(context, report, format)
+        val bytes = localFile.readBytes()
+        val fileName = localFile.name
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val resolver = context.contentResolver
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, format.mimeType)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/AurumEdge")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: error("امکان ایجاد فایل در پوشه Downloads وجود ندارد")
+            resolver.openOutputStream(uri)?.use { out ->
+                out.write(bytes)
+                out.flush()
+            } ?: error("خطا در نوشتن فایل در حافظه گوشی")
+            values.clear()
+            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            "Download/AurumEdge/$fileName"
+        } else {
+            @Suppress("DEPRECATION")
+            val pubDir = File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                "AurumEdge",
+            )
+            val targetDir = if (pubDir.exists() || pubDir.mkdirs()) {
+                pubDir
+            } else {
+                File(context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "AurumEdge").apply { mkdirs() }
+            }
+            val dest = File(targetDir, fileName)
+            dest.writeBytes(bytes)
+            dest.absolutePath
+        }
+    }
+
+    /**
+     * ذخیره مستقیم فایل در پوشه انتخاب‌شده توسط کاربر از طریق پنجره انتخاب پوشه سیستم‌عامل (`Save As...` / SAF).
+     */
+    fun writeExportToUri(
+        context: Context,
+        uri: Uri,
+        report: InstitutionalTearSheetReport,
+        format: JournalExportFormat,
+    ): Result<String> = runCatching {
+        val localFile = exportToFile(context, report, format)
+        val bytes = localFile.readBytes()
+        context.contentResolver.openOutputStream(uri)?.use { out ->
+            out.write(bytes)
+            out.flush()
+        } ?: error("امکان نوشتن در مسیر انتخابی وجود ندارد")
+        localFile.name
+    }
+
+    /**
+     * فهرست تمام فایل‌های خروجی و بکاپ ذخیره‌شده در داخل اپ برای مشاهده، اشتراک‌گذاری یا بازگردانی فوری.
+     */
+    fun listSavedExportFiles(context: Context): List<SavedJournalExportFile> {
+        val exportDir = File(context.filesDir, "exports")
+        if (!exportDir.exists()) return emptyList()
+        return exportDir.listFiles()
+            ?.filter { it.isFile && it.length() > 0L }
+            ?.sortedByDescending { it.lastModified() }
+            ?.mapNotNull { f ->
+                val ext = f.extension.lowercase(Locale.ROOT)
+                val fmt = JournalExportFormat.entries.firstOrNull { it.extension == ext } ?: return@mapNotNull null
+                SavedJournalExportFile(
+                    file = f,
+                    name = f.name,
+                    format = fmt,
+                    sizeBytes = f.length(),
+                    modifiedAtMs = f.lastModified(),
+                    modifiedAtFormatted = formatTimestamp(f.lastModified()),
+                )
+            }
+            .orEmpty()
+    }
+
+    /**
+     * پارس و بازگردانی (Import / Restore) معاملات از فایل بکاپ JSON (چه فایل کامل Tear-Sheet و چه آرایه PaperTrade) یا فایل CSV اکسل.
+     */
+    fun parseBackupContent(rawText: String): Result<List<PaperTrade>> = runCatching {
+        val trimmed = rawText.removePrefix("\uFEFF").trim()
+        require(trimmed.isNotEmpty()) { "فایل یا متن بکاپ خالی است" }
+
+        if (trimmed.startsWith("{")) {
+            val report = prettyJson.decodeFromString(InstitutionalTearSheetReport.serializer(), trimmed)
+            return@runCatching report.trades
+        }
+        if (trimmed.startsWith("[")) {
+            val list = prettyJson.decodeFromString(ListSerializer(PaperTrade.serializer()), trimmed)
+            return@runCatching list
+        }
+        // Parse CSV backup (29 columns)
+        val lines = trimmed.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        require(lines.size >= 2) { "فرمت فایل بکاپ معتبر نیست (باید JSON یا CSV استاندارد Aurum Edge باشد)" }
+        val dataLines = lines.drop(1)
+        val trades = dataLines.mapNotNull { line ->
+            val cols = splitCsvLine(line)
+            if (cols.size < 18) return@mapNotNull null
+            val tradeId = cols.getOrNull(1)?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val sym = V1Universe.normalize(cols.getOrNull(2).orEmpty())
+            val dirRaw = cols.getOrNull(4).orEmpty().uppercase(Locale.ROOT)
+            val action = if (dirRaw.contains("SELL") || dirRaw.contains("SHORT")) SignalAction.SELL else SignalAction.BUY
+            val tfRaw = cols.getOrNull(5).orEmpty()
+            val interval = if (tfRaw.contains("15")) Interval.M15 else Interval.M5
+            val stratId = cols.getOrNull(6)?.takeIf { it.isNotBlank() } ?: BitcoinStrategyModel.BASE_ICHIMOKU.id
+            val stratTitle = cols.getOrNull(7)?.takeIf { it.isNotBlank() } ?: BitcoinStrategyModel.fromId(stratId).titleFa
+            val statusRaw = cols.getOrNull(8).orEmpty().uppercase(Locale.ROOT)
+            val isOpen = statusRaw == "OPEN"
+            val holdMins = cols.getOrNull(11)?.toDoubleOrNull() ?: 15.0
+            val entry = cols.getOrNull(12)?.toDoubleOrNull() ?: return@mapNotNull null
+            val sl = cols.getOrNull(13)?.toDoubleOrNull() ?: return@mapNotNull null
+            val initSl = cols.getOrNull(14)?.toDoubleOrNull() ?: sl
+            val tp = cols.getOrNull(15)?.toDoubleOrNull() ?: return@mapNotNull null
+            val exitP = cols.getOrNull(16)?.toDoubleOrNull()
+            val qty = cols.getOrNull(17)?.toDoubleOrNull() ?: 1.0
+            val fixedRisk = cols.getOrNull(18)?.toDoubleOrNull() ?: 5.0
+            val plannedRr = cols.getOrNull(19)?.toDoubleOrNull() ?: 1.5
+            val optRr = cols.getOrNull(20)?.toDoubleOrNull() ?: plannedRr
+            val netPnl = cols.getOrNull(24)?.toDoubleOrNull()
+            val exitReason = cols.getOrNull(26)?.takeIf { it.isNotBlank() }
+            val note = cols.getOrNull(28).orEmpty()
+            val now = System.currentTimeMillis()
+            PaperTrade(
+                id = tradeId,
+                symbol = sym,
+                interval = interval,
+                action = action,
+                entry = entry,
+                stopLoss = sl,
+                takeProfit = tp,
+                confidence = 90.0,
+                riskReward = plannedRr,
+                openedAt = now - (holdMins * 60_000.0).toLong(),
+                closedAt = if (isOpen) null else now,
+                exitPrice = if (isOpen) null else exitP,
+                exitReason = if (isOpen) null else exitReason,
+                pnlUsd = if (isOpen) null else netPnl,
+                positionOz = qty,
+                note = note,
+                initialStopLoss = initSl,
+                strategyId = stratId,
+                strategyTitleFa = stratTitle,
+                fixedRiskUsd = fixedRisk,
+                optimalRiskReward = optRr,
+            )
+        }
+        require(trades.isNotEmpty()) { "هیچ معامله معتبری در فایل بکاپ یافت نشد" }
+        trades
+    }
+
+    private fun splitCsvLine(line: String): List<String> {
+        val result = mutableListOf<String>()
+        val sb = StringBuilder()
+        var inQuotes = false
+        var i = 0
+        while (i < line.length) {
+            val ch = line[i]
+            when {
+                ch == '"' -> {
+                    if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+                        sb.append('"')
+                        i++
+                    } else {
+                        inQuotes = !inQuotes
+                    }
+                }
+                ch == ',' && !inQuotes -> {
+                    result.add(sb.toString())
+                    sb.setLength(0)
+                }
+                else -> sb.append(ch)
+            }
+            i++
+        }
+        result.add(sb.toString())
+        return result
+    }
+
+    fun readAndParseBackupUri(context: Context, uri: Uri): Result<List<PaperTrade>> = runCatching {
+        val text = context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+            ?: error("امکان خواندن فایل انتخابی وجود ندارد")
+        parseBackupContent(text).getOrThrow()
     }
 
     /**

@@ -1315,6 +1315,18 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         _toast.value = "🔊 تست ${kind.channelNameFa} پخش شد"
     }
 
+    private val _savedJournalFiles = MutableStateFlow<List<com.aurum.edge.data.SavedJournalExportFile>>(
+        com.aurum.edge.data.JournalExportEngine.listSavedExportFiles(container.appContext)
+    )
+    val savedJournalFiles: StateFlow<List<com.aurum.edge.data.SavedJournalExportFile>> = _savedJournalFiles.asStateFlow()
+
+    private val _lastExportStatusFa = MutableStateFlow<String?>(null)
+    val lastExportStatusFa: StateFlow<String?> = _lastExportStatusFa.asStateFlow()
+
+    fun refreshSavedJournalFiles() {
+        _savedJournalFiles.value = com.aurum.edge.data.JournalExportEngine.listSavedExportFiles(container.appContext)
+    }
+
     fun exportAndShareJournal(
         report: com.aurum.edge.data.InstitutionalTearSheetReport,
         format: com.aurum.edge.data.JournalExportFormat,
@@ -1326,6 +1338,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     report = report,
                     format = format,
                 )
+                refreshSavedJournalFiles()
                 com.aurum.edge.data.JournalExportEngine.shareExportedFile(
                     context = container.appContext,
                     file = file,
@@ -1333,7 +1346,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 ).getOrThrow()
                 file
             }.onSuccess { file ->
-                _toast.value = "📤 خروجی ${format.extension.uppercase()} آماده ارسال شد (${file.name})"
+                val msg = "📤 خروجی ${format.extension.uppercase()} آماده ارسال و ذخیره شد (${file.name})"
+                _lastExportStatusFa.value = msg
+                _toast.value = msg
             }.onFailure { err ->
                 _toast.value = "⚠️ خطا در تولید خروجی: ${err.message}"
             }
@@ -1351,6 +1366,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     report = report,
                     format = format,
                 )
+                refreshSavedJournalFiles()
                 com.aurum.edge.data.JournalExportEngine.openExportedFileExternally(
                     context = container.appContext,
                     file = file,
@@ -1361,6 +1377,134 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 exportAndShareJournal(report, format)
             }
         }
+    }
+
+    fun saveJournalDirectToDownloads(
+        report: com.aurum.edge.data.InstitutionalTearSheetReport,
+        format: com.aurum.edge.data.JournalExportFormat,
+    ) {
+        viewModelScope.launch {
+            com.aurum.edge.data.JournalExportEngine.saveDirectToDownloads(
+                context = container.appContext,
+                report = report,
+                format = format,
+            ).onSuccess { savedPath ->
+                refreshSavedJournalFiles()
+                val msg = "💾 ذخیره مستقیم در حافظه گوشی انجام شد: $savedPath"
+                _lastExportStatusFa.value = msg
+                _toast.value = msg
+            }.onFailure { err ->
+                _toast.value = "⚠️ خطا در ذخیره مستقیم در Downloads: ${err.message}"
+            }
+        }
+    }
+
+    fun saveJournalToCustomUri(
+        uri: android.net.Uri,
+        report: com.aurum.edge.data.InstitutionalTearSheetReport,
+        format: com.aurum.edge.data.JournalExportFormat,
+    ) {
+        viewModelScope.launch {
+            com.aurum.edge.data.JournalExportEngine.writeExportToUri(
+                context = container.appContext,
+                uri = uri,
+                report = report,
+                format = format,
+            ).onSuccess { fileName ->
+                refreshSavedJournalFiles()
+                val msg = "✅ فایل $fileName در پوشه انتخابی شما ذخیره شد"
+                _lastExportStatusFa.value = msg
+                _toast.value = msg
+            }.onFailure { err ->
+                _toast.value = "⚠️ خطا در ذخیره فایل در مسیر انتخابی: ${err.message}"
+            }
+        }
+    }
+
+    fun importJournalFromUri(
+        uri: android.net.Uri,
+        replaceExisting: Boolean,
+    ) {
+        viewModelScope.launch {
+            com.aurum.edge.data.JournalExportEngine.readAndParseBackupUri(
+                context = container.appContext,
+                uri = uri,
+            ).onSuccess { importedTrades ->
+                val count = container.journalStore.importTrades(
+                    imported = importedTrades,
+                    replaceExisting = replaceExisting,
+                )
+                val modeFa = if (replaceExisting) "جایگزینی کامل" else "ادغام (Merge)"
+                val msg = "✅ بازگردانی بکاپ با موفقیت انجام شد: $count معامله ($modeFa)"
+                _lastExportStatusFa.value = msg
+                _toast.value = msg
+            }.onFailure { err ->
+                _toast.value = "⚠️ خطا در بازگردانی فایل بکاپ: ${err.message}"
+            }
+        }
+    }
+
+    fun importJournalFromSavedFile(
+        saved: com.aurum.edge.data.SavedJournalExportFile,
+        replaceExisting: Boolean,
+    ) {
+        viewModelScope.launch {
+            runCatching {
+                val raw = saved.file.readText(Charsets.UTF_8)
+                val parsed = com.aurum.edge.data.JournalExportEngine.parseBackupContent(raw).getOrThrow()
+                container.journalStore.importTrades(parsed, replaceExisting = replaceExisting)
+            }.onSuccess { count ->
+                val modeFa = if (replaceExisting) "جایگزینی کامل" else "ادغام"
+                val msg = "♻️ $count معامله از فایل ${saved.name} بازگردانی شد ($modeFa)"
+                _lastExportStatusFa.value = msg
+                _toast.value = msg
+            }.onFailure { err ->
+                _toast.value = "⚠️ خطا در بازگردانی از فایل: ${err.message}"
+            }
+        }
+    }
+
+    fun importJournalFromClipboard(replaceExisting: Boolean) {
+        viewModelScope.launch {
+            runCatching {
+                val cm = container.appContext.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                val clipText = cm?.primaryClip?.getItemAt(0)?.coerceToText(container.appContext)?.toString().orEmpty()
+                val parsed = com.aurum.edge.data.JournalExportEngine.parseBackupContent(clipText).getOrThrow()
+                container.journalStore.importTrades(parsed, replaceExisting = replaceExisting)
+            }.onSuccess { count ->
+                val msg = "📋 $count معامله از کلیپ‌بورد بازگردانی شد"
+                _lastExportStatusFa.value = msg
+                _toast.value = msg
+            }.onFailure { err ->
+                _toast.value = "⚠️ خطا در بازگردانی از کلیپ‌بورد: ${err.message}"
+            }
+        }
+    }
+
+    fun openSavedJournalFile(saved: com.aurum.edge.data.SavedJournalExportFile) {
+        com.aurum.edge.data.JournalExportEngine.openExportedFileExternally(
+            context = container.appContext,
+            file = saved.file,
+            format = saved.format,
+        ).onFailure {
+            shareSavedJournalFile(saved)
+        }
+    }
+
+    fun shareSavedJournalFile(saved: com.aurum.edge.data.SavedJournalExportFile) {
+        com.aurum.edge.data.JournalExportEngine.shareExportedFile(
+            context = container.appContext,
+            file = saved.file,
+            format = saved.format,
+        ).onFailure { err ->
+            _toast.value = "⚠️ خطا در اشتراک‌گذاری فایل: ${err.message}"
+        }
+    }
+
+    fun deleteSavedJournalFile(saved: com.aurum.edge.data.SavedJournalExportFile) {
+        runCatching { saved.file.delete() }
+        refreshSavedJournalFiles()
+        _toast.value = "🗑️ فایل ${saved.name} حذف شد"
     }
 
     fun copyJournalTearSheetSummary(report: com.aurum.edge.data.InstitutionalTearSheetReport) {

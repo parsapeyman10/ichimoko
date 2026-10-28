@@ -3,6 +3,8 @@ package com.aurum.edge.ui
 import android.view.ViewGroup
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -74,6 +76,7 @@ import com.aurum.edge.data.InstitutionalTearSheetReport
 import com.aurum.edge.data.JournalExportEngine
 import com.aurum.edge.data.JournalExportFormat
 import com.aurum.edge.data.OpenPositionDisplay
+import com.aurum.edge.data.SavedJournalExportFile
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.domain.SignalAction
 import com.aurum.edge.ui.components.Pill
@@ -198,6 +201,37 @@ fun JournalRiskScreen(
     }
 
     var showInteractiveTearSheetModal by rememberSaveable { mutableStateOf(false) }
+    val savedJournalFiles by viewModel.savedJournalFiles.collectAsStateWithLifecycle()
+    val lastExportStatusFa by viewModel.lastExportStatusFa.collectAsStateWithLifecycle()
+    var pendingSaveAsFormat by remember { mutableStateOf(JournalExportFormat.HTML_TEAR_SHEET) }
+    var replaceOnImport by rememberSaveable { mutableStateOf(false) }
+
+    val saveAsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("*/*"),
+    ) { uri ->
+        if (uri != null) {
+            viewModel.saveJournalToCustomUri(
+                uri = uri,
+                report = tearSheetReport,
+                format = pendingSaveAsFormat,
+            )
+        }
+    }
+
+    val importBackupLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importJournalFromUri(
+                uri = uri,
+                replaceExisting = replaceOnImport,
+            )
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshSavedJournalFiles()
+    }
 
     if (showInteractiveTearSheetModal) {
         InteractiveTearSheetModalDialog(
@@ -295,7 +329,7 @@ fun JournalRiskScreen(
                 )
             }
 
-            // نوار دسترسی فوری به خروجی و بررسی تعاملی (Institutional Tear-Sheet Quick Bar)
+            // نوار دسترسی فوری به خروجی، ذخیره در حافظه گوشی و بازگردانی بکاپ
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -311,6 +345,35 @@ fun JournalRiskScreen(
                     text = "🔍 بررسی تعاملی گزارش کامل",
                     color = AurumColors.Gold,
                     modifier = Modifier.clickable { showInteractiveTearSheetModal = true },
+                )
+                Pill(
+                    text = "💾 ذخیره مستقیم در پوشه Downloads",
+                    color = AurumColors.Green,
+                    modifier = Modifier.clickable {
+                        viewModel.saveJournalDirectToDownloads(tearSheetReport, JournalExportFormat.HTML_TEAR_SHEET)
+                        viewModel.saveJournalDirectToDownloads(tearSheetReport, JournalExportFormat.JSON_QUANT)
+                    },
+                )
+                Pill(
+                    text = "📂 انتخاب پوشه ذخیره (Save As)",
+                    color = AurumColors.Cyan,
+                    modifier = Modifier.clickable {
+                        pendingSaveAsFormat = JournalExportFormat.HTML_TEAR_SHEET
+                        saveAsLauncher.launch(
+                            JournalExportEngine.suggestedFileName(
+                                tearSheetReport,
+                                JournalExportFormat.HTML_TEAR_SHEET,
+                            )
+                        )
+                    },
+                )
+                Pill(
+                    text = "📥 بازگردانی بکاپ ژورنال (Import)",
+                    color = AurumColors.Gold,
+                    modifier = Modifier.clickable {
+                        replaceOnImport = false
+                        importBackupLauncher.launch(arrayOf("application/json", "text/*", "*/*"))
+                    },
                 )
                 Pill(
                     text = "🌐 خروجی HTML5 تعاملی",
@@ -341,6 +404,15 @@ fun JournalRiskScreen(
                     },
                 )
             }
+
+            if (!lastExportStatusFa.isNullOrBlank()) {
+                Text(
+                    text = lastExportStatusFa.orEmpty(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Green,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
         }
 
         // ── ۲. نوار تب‌های داخلی صفحه ژورنال ────────────────────────────────
@@ -353,7 +425,7 @@ fun JournalRiskScreen(
         ) {
             listOf(
                 0 to "📅 تقویم و دسته‌بندی (${filteredClosedTrades.size})",
-                3 to "📊 خروجی و کارنامه کوانت (Tear Sheet)",
+                3 to "📊 خروجی، ذخیره و بکاپ ژورنال",
                 1 to "📜 معاملات باز (${filteredOpenTrades.size})",
                 2 to "🧮 ماشین‌حساب حجم",
             ).forEach { (idx, label) ->
@@ -388,7 +460,25 @@ fun JournalRiskScreen(
             3 -> {
                 InstitutionalQuantTearSheetSection(
                     report = tearSheetReport,
+                    savedFiles = savedJournalFiles,
+                    replaceOnImport = replaceOnImport,
+                    onToggleReplaceOnImport = { replaceOnImport = it },
                     onOpenInteractiveModal = { showInteractiveTearSheetModal = true },
+                    onSaveDirectToDownloads = { fmt -> viewModel.saveJournalDirectToDownloads(tearSheetReport, fmt) },
+                    onSaveAsCustomFolder = { fmt ->
+                        pendingSaveAsFormat = fmt
+                        saveAsLauncher.launch(JournalExportEngine.suggestedFileName(tearSheetReport, fmt))
+                    },
+                    onPickBackupFileToImport = {
+                        importBackupLauncher.launch(arrayOf("application/json", "text/*", "*/*"))
+                    },
+                    onImportFromClipboard = { viewModel.importJournalFromClipboard(replaceExisting = replaceOnImport) },
+                    onRestoreSavedFile = { saved ->
+                        viewModel.importJournalFromSavedFile(saved, replaceExisting = replaceOnImport)
+                    },
+                    onOpenSavedFile = { saved -> viewModel.openSavedJournalFile(saved) },
+                    onShareSavedFile = { saved -> viewModel.shareSavedJournalFile(saved) },
+                    onDeleteSavedFile = { saved -> viewModel.deleteSavedJournalFile(saved) },
                     onShareFormat = { fmt -> viewModel.exportAndShareJournal(tearSheetReport, fmt) },
                     onOpenFormat = { fmt -> viewModel.exportAndOpenJournal(tearSheetReport, fmt) },
                     onCopySummary = { viewModel.copyJournalTearSheetSummary(tearSheetReport) },
@@ -2240,16 +2330,27 @@ private fun ClosedJournalTradeRow(
 @Composable
 private fun InstitutionalQuantTearSheetSection(
     report: InstitutionalTearSheetReport,
+    savedFiles: List<SavedJournalExportFile>,
+    replaceOnImport: Boolean,
+    onToggleReplaceOnImport: (Boolean) -> Unit,
     onOpenInteractiveModal: () -> Unit,
+    onSaveDirectToDownloads: (JournalExportFormat) -> Unit,
+    onSaveAsCustomFolder: (JournalExportFormat) -> Unit,
+    onPickBackupFileToImport: () -> Unit,
+    onImportFromClipboard: () -> Unit,
+    onRestoreSavedFile: (SavedJournalExportFile) -> Unit,
+    onOpenSavedFile: (SavedJournalExportFile) -> Unit,
+    onShareSavedFile: (SavedJournalExportFile) -> Unit,
+    onDeleteSavedFile: (SavedJournalExportFile) -> Unit,
     onShareFormat: (JournalExportFormat) -> Unit,
     onOpenFormat: (JournalExportFormat) -> Unit,
     onCopySummary: () -> Unit,
     onOpenChart: (String) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // ── ۱. مرکز خروجی چهارگانه و پیش‌نمایش تعاملی (Export & Review Center) ──
+        // ── ۱. مرکز خروجی چهارگانه، ذخیره مستقیم در گوشی و پیش‌نمایش تعاملی ──
         SectionCard(
-            title = "📤 مرکز خروجی و کارنامه کوانت (TradeZella / Bloomberg Tear Sheet)",
+            title = "📤 مرکز خروجی، ذخیره مستقیم در گوشی و کارنامه کوانت (Tear Sheet)",
             subtitle = "دامنه گزارش: ${report.filterScopeLabelFa} · ${report.closedTradesCount} معامله بسته‌شده و ${report.openTradesCount} معامله باز",
             trailing = {
                 Pill(
@@ -2312,6 +2413,43 @@ private fun InstitutionalQuantTearSheetSection(
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.TextSecondary,
                     )
+                    // ردیف اول: ذخیره مستقیم در پوشه Downloads و انتخاب پوشه دلخواه (Save As)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            onClick = { onSaveDirectToDownloads(fmt) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AurumColors.Green.copy(alpha = 0.22f),
+                                contentColor = AurumColors.Green,
+                            ),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(
+                                text = "💾 ذخیره در پوشه Downloads",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        Button(
+                            onClick = { onSaveAsCustomFolder(fmt) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AurumColors.Gold.copy(alpha = 0.22f),
+                                contentColor = AurumColors.Gold,
+                            ),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(
+                                text = "📂 انتخاب پوشه دلخواه (Save As)",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                    // ردیف دوم: اشتراک‌گذاری و باز کردن مستقیم
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2326,7 +2464,7 @@ private fun InstitutionalQuantTearSheetSection(
                             shape = RoundedCornerShape(10.dp),
                         ) {
                             Text(
-                                text = "📤 اشتراک‌گذاری / ذخیره فایل",
+                                text = "📤 اشتراک‌گذاری فایل",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                             )
@@ -2340,6 +2478,157 @@ private fun InstitutionalQuantTearSheetSection(
                                 text = "🌐 باز کردن مستقیم",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.Gold,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── ۱.۵. مرکز پشتیبان‌گیری، بازگردانی (Import / Restore) و مدیریت فایل‌های ذخیره‌شده ──
+        SectionCard(
+            title = "📥 بازگردانی بکاپ ژورنال (Import / Restore) و مدیریت فایل‌های ذخیره‌شده",
+            subtitle = "بازگردانی معاملات از فایل JSON یا CSV ذخیره‌شده در حافظه گوشی یا کلیپ‌بورد و مدیریت تمام خروجی‌ها",
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AurumColors.Background)
+                    .border(1.dp, AurumColors.Border, RoundedCornerShape(10.dp))
+                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (replaceOnImport) "حالت بازگردانی: 🔄 جایگزینی کامل ژورنال فعلی" else "حالت بازگردانی: ➕ ادغام هوشمند با معاملات فعلی (بدون حذف)",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (replaceOnImport) AurumColors.Orange else AurumColors.Green,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "با روشن کردن کلید، معاملات فعلی پاک و فایل بکاپ جایگزین می‌شود؛ در حالت خاموش، بکاپ با معاملات فعلی ادغام می‌گردد.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                }
+                Switch(
+                    checked = replaceOnImport,
+                    onCheckedChange = onToggleReplaceOnImport,
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = onPickBackupFileToImport,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AurumColors.Cyan,
+                        contentColor = Color.Black,
+                    ),
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Text(
+                        text = "📂 انتخاب فایل بکاپ (.JSON / .CSV) از گوشی",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                OutlinedButton(
+                    onClick = onImportFromClipboard,
+                    modifier = Modifier.weight(0.75f),
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Text(
+                        text = "📋 بازگردانی از کلیپ‌بورد",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Gold,
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "🗂️ فایل‌های خروجی و بکاپ ذخیره‌شده در اپ (${savedFiles.size}):",
+                style = MaterialTheme.typography.labelMedium,
+                color = AurumColors.Gold,
+                fontWeight = FontWeight.Bold,
+            )
+
+            if (savedFiles.isEmpty()) {
+                Text(
+                    text = "هنوز فایلی ذخیره نشده است. با زدن «💾 ذخیره در پوشه Downloads» روی هر کدام از فرمت‌های بالا، فایل هم در پوشه Download/AurumEdge گوشی و هم در این فهرست ذخیره می‌شود.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                )
+            } else {
+                savedFiles.take(12).forEach { saved ->
+                    val kb = max(1L, saved.sizeBytes / 1024L)
+                    val canRestore = saved.format == JournalExportFormat.JSON_QUANT || saved.format == JournalExportFormat.CSV_EXCEL
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(AurumColors.Background)
+                            .border(1.dp, AurumColors.Border, RoundedCornerShape(10.dp))
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = saved.name,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = AurumColors.TextPrimary,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Pill(
+                                text = "${kb}KB · .${saved.format.extension.uppercase()}",
+                                color = AurumColors.Cyan,
+                            )
+                        }
+                        Text(
+                            text = "زمان ذخیره: ${saved.modifiedAtFormatted}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextSecondary,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            Pill(
+                                text = "🌐 باز کردن",
+                                color = AurumColors.Gold,
+                                modifier = Modifier.clickable { onOpenSavedFile(saved) },
+                            )
+                            Pill(
+                                text = "📤 اشتراک‌گذاری",
+                                color = AurumColors.Cyan,
+                                modifier = Modifier.clickable { onShareSavedFile(saved) },
+                            )
+                            if (canRestore) {
+                                Pill(
+                                    text = "♻️ بازگردانی این بکاپ",
+                                    color = AurumColors.Green,
+                                    modifier = Modifier.clickable { onRestoreSavedFile(saved) },
+                                )
+                            }
+                            Pill(
+                                text = "🗑️ حذف",
+                                color = AurumColors.Red,
+                                modifier = Modifier.clickable { onDeleteSavedFile(saved) },
                             )
                         }
                     }

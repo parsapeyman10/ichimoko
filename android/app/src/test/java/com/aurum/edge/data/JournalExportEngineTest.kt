@@ -155,5 +155,15 @@ class JournalExportEngineTest {
         assertTrue(html.contains("filterRows()"))
         assertTrue(html.contains("XAU/USD"))
         assertTrue(html.contains("SQN"))
+
+        // Round-trip JSON backup restore
+        val restoredFromJson = JournalExportEngine.parseBackupContent(json).getOrThrow()
+        assertEquals(4, restoredFromJson.size)
+        assertTrue(restoredFromJson.any { it.id == "t1" && it.symbol == "XAU/USD" })
+
+        // Round-trip CSV backup restore
+        val restoredFromCsv = JournalExportEngine.parseBackupContent(csv).getOrThrow()
+        assertEquals(4, restoredFromCsv.size)
+        assertTrue(restoredFromCsv.any { it.id == "t2" && it.symbol == "BTC/USDT" })
     }
 }
