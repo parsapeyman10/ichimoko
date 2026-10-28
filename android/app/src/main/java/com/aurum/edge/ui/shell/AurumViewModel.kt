@@ -109,6 +109,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val stats: StateFlow<JournalStats> = _stats.asStateFlow()
 
     val neuralState: StateFlow<NeuralLearningStateSummary> = container.neuralEngine.state
+    val neuralLearningState: StateFlow<NeuralLearningStateSummary> = container.neuralEngine.state
 
     private val _toast = MutableStateFlow<String?>(null)
     val toast: StateFlow<String?> = _toast.asStateFlow()

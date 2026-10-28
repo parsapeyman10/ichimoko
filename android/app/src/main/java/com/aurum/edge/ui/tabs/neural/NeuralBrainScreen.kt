@@ -46,7 +46,7 @@ import java.util.Locale
 fun NeuralBrainScreen(
     viewModel: AurumViewModel,
 ) {
-    val neuralState by viewModel.neuralLearningState.collectAsStateWithLifecycle()
+    val neuralState by viewModel.neuralState.collectAsStateWithLifecycle()
     val dualReports by viewModel.dualSymbolStrategyReports.collectAsStateWithLifecycle()
 
     Column(
