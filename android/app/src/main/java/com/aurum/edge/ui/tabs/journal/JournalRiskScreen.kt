@@ -1,5 +1,9 @@
 package com.aurum.edge.ui
 
+import android.view.ViewGroup
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,8 +32,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -40,11 +44,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.CandleBackfillSummary
@@ -57,6 +70,9 @@ import com.aurum.edge.core.V1Universe
 import com.aurum.edge.data.AiTradeVerdict
 import com.aurum.edge.data.AvalAiAdvisor
 import com.aurum.edge.data.DisplayMark
+import com.aurum.edge.data.InstitutionalTearSheetReport
+import com.aurum.edge.data.JournalExportEngine
+import com.aurum.edge.data.JournalExportFormat
 import com.aurum.edge.data.OpenPositionDisplay
 import com.aurum.edge.data.WatchCatalog
 import com.aurum.edge.domain.SignalAction
@@ -72,6 +88,7 @@ import java.time.YearMonth
 import java.time.ZoneId
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.max
 
 private val WEEKDAY_HEADERS_FA = listOf("ش", "ی", "د", "س", "چ", "پ", "ج")
 private val RISK_PRESETS = listOf(0.5, 1.0, 1.5, 2.0, 3.0, 5.0)
@@ -153,6 +170,45 @@ fun JournalRiskScreen(
         filteredClosedTrades.sumOf { it.rMultiple ?: 0.0 }
     }
 
+    val filterScopeLabelFa = remember(selectedStrategyFilter, strategyCategories) {
+        if (selectedStrategyFilter == "ALL") {
+            "تمام ۱۵ ترکیب استراتژی و ۱۵ نماد (15m + 5m)"
+        } else {
+            strategyCategories.firstOrNull { it.strategyId == selectedStrategyFilter }?.strategyTitleFa
+                ?: selectedStrategyFilter
+        }
+    }
+
+    val tearSheetReport = remember(
+        filteredTrades,
+        settings.initialCapital,
+        settings.accountBalance,
+        settings.customStrategies,
+        filterScopeLabelFa,
+        now,
+    ) {
+        JournalExportEngine.buildInstitutionalTearSheet(
+            trades = filteredTrades,
+            initialCapital = settings.initialCapital,
+            currentBalance = settings.accountBalance,
+            customStrategies = settings.customStrategies,
+            filterScopeLabelFa = filterScopeLabelFa,
+            nowEpochMs = now,
+        )
+    }
+
+    var showInteractiveTearSheetModal by rememberSaveable { mutableStateOf(false) }
+
+    if (showInteractiveTearSheetModal) {
+        InteractiveTearSheetModalDialog(
+            report = tearSheetReport,
+            onDismiss = { showInteractiveTearSheetModal = false },
+            onShareFormat = { fmt -> viewModel.exportAndShareJournal(tearSheetReport, fmt) },
+            onOpenFormat = { fmt -> viewModel.exportAndOpenJournal(tearSheetReport, fmt) },
+            onCopySummary = { viewModel.copyJournalTearSheetSummary(tearSheetReport) },
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -175,7 +231,7 @@ fun JournalRiskScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = if (selectedStrategyFilter == "ALL") "کارنامه کل استراتژی‌ها" else "کارنامه استراتژی انتخابی",
                         style = MaterialTheme.typography.labelSmall,
@@ -193,6 +249,11 @@ fun JournalRiskScreen(
                     Pill(
                         text = String.format(Locale.US, "%s%.2f R", if (totalR >= 0.0) "+" else "", totalR),
                         color = if (totalR >= 0.0) AurumColors.Green else AurumColors.Red,
+                    )
+                    Pill(
+                        text = "📤 خروجی و کارنامه کوانت",
+                        color = AurumColors.Cyan,
+                        modifier = Modifier.clickable { subPage = 3 },
                     )
                     if (onOpenSettings != null) {
                         Pill(
@@ -227,10 +288,57 @@ fun JournalRiskScreen(
                     modifier = Modifier.weight(1f),
                 )
                 StatTile(
-                    label = "معاملات باز",
-                    value = "${filteredOpenTrades.size}",
-                    valueColor = if (filteredOpenTrades.isNotEmpty()) AurumColors.Green else AurumColors.TextMuted,
-                    modifier = Modifier.weight(0.85f),
+                    label = "امتیاز SQN",
+                    value = tearSheetReport.sqnScore?.let { String.format(Locale.US, "%.2f", it) } ?: "—",
+                    valueColor = if ((tearSheetReport.sqnScore ?: 0.0) >= 1.6) AurumColors.Green else AurumColors.Gold,
+                    modifier = Modifier.weight(0.95f),
+                )
+            }
+
+            // نوار دسترسی فوری به خروجی و بررسی تعاملی (Institutional Tear-Sheet Quick Bar)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AurumColors.Background)
+                    .border(1.dp, AurumColors.Cyan.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Pill(
+                    text = "🔍 بررسی تعاملی گزارش کامل",
+                    color = AurumColors.Gold,
+                    modifier = Modifier.clickable { showInteractiveTearSheetModal = true },
+                )
+                Pill(
+                    text = "🌐 خروجی HTML5 تعاملی",
+                    color = AurumColors.Cyan,
+                    modifier = Modifier.clickable {
+                        viewModel.exportAndShareJournal(tearSheetReport, JournalExportFormat.HTML_TEAR_SHEET)
+                    },
+                )
+                Pill(
+                    text = "📄 خروجی PDF رسمی",
+                    color = AurumColors.Green,
+                    modifier = Modifier.clickable {
+                        viewModel.exportAndShareJournal(tearSheetReport, JournalExportFormat.PDF_REPORT)
+                    },
+                )
+                Pill(
+                    text = "📊 خروجی اکسل CSV",
+                    color = AurumColors.Gold,
+                    modifier = Modifier.clickable {
+                        viewModel.exportAndShareJournal(tearSheetReport, JournalExportFormat.CSV_EXCEL)
+                    },
+                )
+                Pill(
+                    text = "🧬 خروجی JSON کوانت",
+                    color = AurumColors.TextSecondary,
+                    modifier = Modifier.clickable {
+                        viewModel.exportAndShareJournal(tearSheetReport, JournalExportFormat.JSON_QUANT)
+                    },
                 )
             }
         }
@@ -245,6 +353,7 @@ fun JournalRiskScreen(
         ) {
             listOf(
                 0 to "📅 تقویم و دسته‌بندی (${filteredClosedTrades.size})",
+                3 to "📊 خروجی و کارنامه کوانت (Tear Sheet)",
                 1 to "📜 معاملات باز (${filteredOpenTrades.size})",
                 2 to "🧮 ماشین‌حساب حجم",
             ).forEach { (idx, label) ->
@@ -272,6 +381,17 @@ fun JournalRiskScreen(
                     now = now,
                     onDeleteTrade = viewModel::deleteJournalTrade,
                     onClearAll = viewModel::clearAllJournalTrades,
+                    onOpenChart = onChartSymbol,
+                )
+            }
+
+            3 -> {
+                InstitutionalQuantTearSheetSection(
+                    report = tearSheetReport,
+                    onOpenInteractiveModal = { showInteractiveTearSheetModal = true },
+                    onShareFormat = { fmt -> viewModel.exportAndShareJournal(tearSheetReport, fmt) },
+                    onOpenFormat = { fmt -> viewModel.exportAndOpenJournal(tearSheetReport, fmt) },
+                    onCopySummary = { viewModel.copyJournalTearSheetSummary(tearSheetReport) },
                     onOpenChart = onChartSymbol,
                 )
             }
@@ -2116,3 +2236,749 @@ private fun ClosedJournalTradeRow(
         }
     }
 }
+
+@Composable
+private fun InstitutionalQuantTearSheetSection(
+    report: InstitutionalTearSheetReport,
+    onOpenInteractiveModal: () -> Unit,
+    onShareFormat: (JournalExportFormat) -> Unit,
+    onOpenFormat: (JournalExportFormat) -> Unit,
+    onCopySummary: () -> Unit,
+    onOpenChart: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // ── ۱. مرکز خروجی چهارگانه و پیش‌نمایش تعاملی (Export & Review Center) ──
+        SectionCard(
+            title = "📤 مرکز خروجی و کارنامه کوانت (TradeZella / Bloomberg Tear Sheet)",
+            subtitle = "دامنه گزارش: ${report.filterScopeLabelFa} · ${report.closedTradesCount} معامله بسته‌شده و ${report.openTradesCount} معامله باز",
+            trailing = {
+                Pill(
+                    text = "📋 کپی خلاصه",
+                    color = AurumColors.Gold,
+                    modifier = Modifier.clickable { onCopySummary() },
+                )
+            },
+        ) {
+            // دکمه بزرگ بررسی تعاملی در داخل اپ
+            Button(
+                onClick = onOpenInteractiveModal,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = AurumColors.Gold,
+                    contentColor = Color.Black,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text(
+                    text = "🔍 باز کردن داشبورد تعاملی بررسی کامل ژورنال (جستجو، فیلتر و کارنامه کامل در داخل اپ)",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // کارت‌های ۴ فرمت خروجی استاندارد جهانی
+            JournalExportFormat.entries.forEach { fmt ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(AurumColors.Background)
+                        .border(1.dp, AurumColors.Border, RoundedCornerShape(12.dp))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = fmt.titleFa,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = AurumColors.Gold,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Pill(
+                            text = ".${fmt.extension.uppercase()}",
+                            color = AurumColors.Cyan,
+                        )
+                    }
+                    Text(
+                        text = fmt.subtitleFa,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Button(
+                            onClick = { onShareFormat(fmt) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AurumColors.Cyan.copy(alpha = 0.2f),
+                                contentColor = AurumColors.Cyan,
+                            ),
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(
+                                text = "📤 اشتراک‌گذاری / ذخیره فایل",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = { onOpenFormat(fmt) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(
+                                text = "🌐 باز کردن مستقیم",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.Gold,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── ۲. کارت امتیاز کیفیت سیستم (Van Tharp SQN + 12 شاخص کوانت) ─────────
+        SectionCard(
+            title = "🧬 شاخص‌های کوانت و ریسک نهادی (Institutional Quant Metrics)",
+            subtitle = "ارزیابی ریاضی کیفیت سیستم معاملاتی بر اساس استانداردهای صندوق‌های کوانت و Van Tharp SQN",
+            trailing = {
+                Pill(
+                    text = report.sqnGradeFa,
+                    color = if ((report.sqnScore ?: 0.0) >= 1.6) AurumColors.Green else AurumColors.Gold,
+                )
+            },
+        ) {
+            val fmt2: (Double?) -> String = { v -> v?.let { String.format(Locale.US, "%.2f", it) } ?: "—" }
+            val fmtPct: (Double?) -> String = { v -> v?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—" }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                StatTile(
+                    label = "امتیاز SQN",
+                    value = fmt2(report.sqnScore),
+                    valueColor = if ((report.sqnScore ?: 0.0) >= 1.6) AurumColors.Green else AurumColors.Gold,
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "شارپ (Sharpe)",
+                    value = fmt2(report.sharpeRatio),
+                    valueColor = AurumColors.Cyan,
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "سورتینو (Sortino)",
+                    value = fmt2(report.sortinoRatio),
+                    valueColor = AurumColors.Cyan,
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "فرمول کلی (Kelly)",
+                    value = fmtPct(report.kellyCriterionPct),
+                    valueColor = AurumColors.Gold,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                StatTile(
+                    label = "امید ریاضی ($)",
+                    value = report.expectancyUsd?.let {
+                        String.format(Locale.US, "%s$%.2f", if (it >= 0) "+" else "-", abs(it))
+                    } ?: "—",
+                    valueColor = if ((report.expectancyUsd ?: 0.0) >= 0.0) AurumColors.Green else AurumColors.Red,
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "امید ریاضی (R)",
+                    value = report.expectancyR?.let {
+                        String.format(Locale.US, "%s%.2fR", if (it >= 0) "+" else "", it)
+                    } ?: "—",
+                    valueColor = if ((report.expectancyR ?: 0.0) >= 0.0) AurumColors.Green else AurumColors.Red,
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "نسبت Payoff",
+                    value = fmt2(report.payoffRatio),
+                    valueColor = AurumColors.Gold,
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "ضریب ریکاوری",
+                    value = fmt2(report.recoveryFactor),
+                    valueColor = AurumColors.Green,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                StatTile(
+                    label = "حداکثر افت (Max DD)",
+                    value = String.format(Locale.US, "-$%.2f (%.2f%%)", report.maxDrawdownUsd, report.maxDrawdownPct),
+                    valueColor = AurumColors.Red,
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "میانگین R:R بهینه",
+                    value = report.avgOptimalRr?.let { String.format(Locale.US, "1:%.2f", it) } ?: "—",
+                    valueColor = AurumColors.Cyan,
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "کل کارمزد مرجع",
+                    value = String.format(Locale.US, "$%.2f", report.totalVenueFeesUsd),
+                    valueColor = AurumColors.TextSecondary,
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "میانگین زمان باز",
+                    value = report.avgHoldDurationMinutes?.let {
+                        String.format(Locale.US, "%.0f دقیقه", it)
+                    } ?: "—",
+                    valueColor = AurumColors.TextPrimary,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+
+        // ── ۳. منحنی رشد سرمایه و افت سرمایه (Native Equity Curve & Drawdown) ──
+        NativeEquityAndDrawdownChartCard(report = report)
+
+        // ── ۴. مقایسه تایم‌فریم 15m در برابر 5m و جهت Long در برابر Short ─────
+        SectionCard(
+            title = "⏱️ ماتریس مقایسه‌ای تایم‌فریم‌ها (15m vs 5m) و جهت معاملات (Long vs Short)",
+            subtitle = "بررسی دقیق سودآوری و نرخ برد در تایم‌فریم‌های ورود و جهت‌های خرید و فروش",
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // 15m vs 5m
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AurumColors.Background)
+                        .border(1.dp, AurumColors.Border, RoundedCornerShape(10.dp))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "تایم‌فریم ۱۵ دقیقه (15m)",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = AurumColors.Gold,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "تعداد: ${report.tf15mCount} · برد: ${report.tf15mWinRate?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                    Text(
+                        text = String.format(Locale.US, "%s$%.2f", if (report.tf15mNetPnl >= 0) "+" else "-", abs(report.tf15mNetPnl)),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (report.tf15mNetPnl >= 0) AurumColors.Green else AurumColors.Red,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AurumColors.Background)
+                        .border(1.dp, AurumColors.Border, RoundedCornerShape(10.dp))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "تایم‌فریم ۵ دقیقه (5m)",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = AurumColors.Cyan,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "تعداد: ${report.tf5mCount} · برد: ${report.tf5mWinRate?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                    Text(
+                        text = String.format(Locale.US, "%s$%.2f", if (report.tf5mNetPnl >= 0) "+" else "-", abs(report.tf5mNetPnl)),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (report.tf5mNetPnl >= 0) AurumColors.Green else AurumColors.Red,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AurumColors.Background)
+                        .border(1.dp, AurumColors.Border, RoundedCornerShape(10.dp))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "معاملات خرید (LONG)",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = AurumColors.Green,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "تعداد: ${report.longTradesCount} · برد: ${report.longWinRate?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                    Text(
+                        text = String.format(Locale.US, "%s$%.2f", if (report.longNetPnl >= 0) "+" else "-", abs(report.longNetPnl)),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (report.longNetPnl >= 0) AurumColors.Green else AurumColors.Red,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AurumColors.Background)
+                        .border(1.dp, AurumColors.Border, RoundedCornerShape(10.dp))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "معاملات فروش (SHORT)",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = AurumColors.Red,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "تعداد: ${report.shortTradesCount} · برد: ${report.shortWinRate?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—"}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                    Text(
+                        text = String.format(Locale.US, "%s$%.2f", if (report.shortNetPnl >= 0) "+" else "-", abs(report.shortNetPnl)),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (report.shortNetPnl >= 0) AurumColors.Green else AurumColors.Red,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+
+        // ── ۵. جدول رتبه‌بندی نمادهای معاملاتی در کارنامه ──────────────────────
+        SectionCard(
+            title = "🌍 تفکیک عملکرد بر اساس ۱۵ نماد بازار (Symbol Tear-Sheet Matrix)",
+            subtitle = "روی هر نماد بزنید تا چارت آن باز شود",
+        ) {
+            val activeSymbols = report.symbolLeaderboard.filter { it.closedTrades > 0 || it.openTrades > 0 }
+                .ifEmpty { report.symbolLeaderboard.take(6) }
+            activeSymbols.forEach { sym ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 3.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AurumColors.Background)
+                        .border(1.dp, AurumColors.Border, RoundedCornerShape(10.dp))
+                        .clickable { onOpenChart(sym.symbol) }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "${sym.symbol} · ${sym.labelFa}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = AurumColors.TextPrimary,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "بسته: ${sym.closedTrades} (${sym.wins}W/${sym.losses}L) · باز: ${sym.openTrades} · کارمزد: $${String.format(Locale.US, "%.2f", sym.totalFeesUsd)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextSecondary,
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = String.format(Locale.US, "%s$%.2f", if (sym.netPnlUsd >= 0) "+" else "-", abs(sym.netPnlUsd)),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = if (sym.netPnlUsd >= 0) AurumColors.Green else AurumColors.Red,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = sym.winRatePct?.let { String.format(Locale.US, "Win: %.1f%%", it) } ?: "بدون معامله",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Gold,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NativeEquityAndDrawdownChartCard(report: InstitutionalTearSheetReport) {
+    SectionCard(
+        title = "📈 منحنی رشد سرمایه و افت سرمایه (Equity Curve & Drawdown)",
+        subtitle = "روند تجمعی سرمایه از $${String.format(Locale.US, "%,.0f", report.initialCapital)} تا $${String.format(Locale.US, "%,.2f", report.currentEquity)}",
+    ) {
+        val points = report.equityCurve
+        if (points.size <= 1) {
+            Text(
+                text = "هنوز معامله بسته‌شده‌ای برای رسم منحنی رشد سرمایه ثبت نشده است. به‌محض بسته شدن اولین معامله، منحنی رشد سرمایه و Drawdown رسم می‌شود.",
+                style = MaterialTheme.typography.bodySmall,
+                color = AurumColors.TextSecondary,
+            )
+        } else {
+            val equities = points.map { it.cumulativeEquityUsd }
+            val minEq = equities.minOrNull() ?: report.initialCapital
+            val maxEq = equities.maxOrNull() ?: report.initialCapital
+            val span = (maxEq - minEq).coerceAtLeast(1.0)
+            val isNetPositive = (points.last().cumulativePnlUsd) >= 0.0
+            val lineColor = if (isNetPositive) AurumColors.Green else AurumColors.Red
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(AurumColors.Background)
+                    .border(1.dp, AurumColors.Border, RoundedCornerShape(12.dp))
+                    .padding(10.dp),
+            ) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val w = size.width
+                    val h = size.height
+                    val n = points.size
+                    val path = Path()
+                    points.forEachIndexed { idx, pt ->
+                        val x = if (n <= 1) 0f else (idx.toFloat() / (n - 1).toFloat()) * w
+                        val y = h - (((pt.cumulativeEquityUsd - minEq) / span).toFloat() * (h * 0.84f) + h * 0.08f)
+                        if (idx == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                    }
+                    // Baseline initial capital
+                    val baseY = h - (((report.initialCapital - minEq) / span).toFloat() * (h * 0.84f) + h * 0.08f)
+                    drawLine(
+                        color = Color(0xFF475569),
+                        start = Offset(0f, baseY.coerceIn(0f, h)),
+                        end = Offset(w, baseY.coerceIn(0f, h)),
+                        strokeWidth = 1.5f,
+                    )
+                    drawPath(
+                        path = path,
+                        color = lineColor,
+                        style = Stroke(width = 4f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InteractiveTearSheetModalDialog(
+    report: InstitutionalTearSheetReport,
+    onDismiss: () -> Unit,
+    onShareFormat: (JournalExportFormat) -> Unit,
+    onOpenFormat: (JournalExportFormat) -> Unit,
+    onCopySummary: () -> Unit,
+) {
+    var viewTab by rememberSaveable { mutableIntStateOf(0) } // 0 = Interactive HTML5 WebView, 1 = Native Searchable Audit Table, 2 = Raw CSV/JSON Inspector
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var outcomeFilter by rememberSaveable { mutableStateOf("ALL") } // ALL, WIN, LOSS, OPEN
+
+    val htmlContent = remember(report) {
+        JournalExportEngine.generateInteractiveHtmlTearSheet(report)
+    }
+    val csvContent = remember(report) {
+        JournalExportEngine.generateCsvContent(report)
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(AurumColors.Background)
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // Header Bar
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(AurumColors.Surface)
+                        .border(1.dp, AurumColors.Gold.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "📊 داشبورد تعاملی کارنامه کوانت (Tear-Sheet Inspector)",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = AurumColors.Gold,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "SQN: ${report.sqnScore?.let { String.format(Locale.US, "%.2f", it) } ?: "—"} (${report.sqnGradeFa}) · سود خالص: $${String.format(Locale.US, "%,.2f", report.netPnlUsd)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextSecondary,
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Pill(
+                            text = "📤 ارسال HTML",
+                            color = AurumColors.Cyan,
+                            modifier = Modifier.clickable { onShareFormat(JournalExportFormat.HTML_TEAR_SHEET) },
+                        )
+                        Pill(
+                            text = "📄 ارسال PDF",
+                            color = AurumColors.Green,
+                            modifier = Modifier.clickable { onShareFormat(JournalExportFormat.PDF_REPORT) },
+                        )
+                        Pill(
+                            text = "✖ بستن",
+                            color = AurumColors.Red,
+                            modifier = Modifier.clickable { onDismiss() },
+                        )
+                    }
+                }
+
+                // Mode Switcher
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Pill(
+                        text = "🌐 نمای تعاملی HTML5 Tear-Sheet",
+                        color = if (viewTab == 0) AurumColors.Gold else AurumColors.TextMuted,
+                        modifier = Modifier.clickable { viewTab = 0 },
+                    )
+                    Pill(
+                        text = "🔎 جدول ممیزی و فیلتر معاملات (${report.trades.size})",
+                        color = if (viewTab == 1) AurumColors.Gold else AurumColors.TextMuted,
+                        modifier = Modifier.clickable { viewTab = 1 },
+                    )
+                    Pill(
+                        text = "📊 پیش‌نمایش داده خام CSV اکسل",
+                        color = if (viewTab == 2) AurumColors.Gold else AurumColors.TextMuted,
+                        modifier = Modifier.clickable { viewTab = 2 },
+                    )
+                    Pill(
+                        text = "📋 کپی خلاصه",
+                        color = AurumColors.Cyan,
+                        modifier = Modifier.clickable { onCopySummary() },
+                    )
+                }
+
+                when (viewTab) {
+                    0 -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(1.dp, AurumColors.Border, RoundedCornerShape(12.dp)),
+                        ) {
+                            AndroidView(
+                                modifier = Modifier.fillMaxSize(),
+                                factory = { ctx ->
+                                    WebView(ctx).apply {
+                                        layoutParams = ViewGroup.LayoutParams(
+                                            ViewGroup.LayoutParams.MATCH_PARENT,
+                                            ViewGroup.LayoutParams.MATCH_PARENT,
+                                        )
+                                        settings.javaScriptEnabled = true
+                                        settings.domStorageEnabled = true
+                                        webViewClient = WebViewClient()
+                                        loadDataWithBaseURL(
+                                            "https://aurum.edge.local/",
+                                            htmlContent,
+                                            "text/html",
+                                            "UTF-8",
+                                            null,
+                                        )
+                                    }
+                                },
+                            )
+                        }
+                    }
+
+                    1 -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                label = { Text("جستجوی نماد، استراتژی، تایم‌فریم یا دلیل خروج...") },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true,
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf(
+                                    "ALL" to "همه (${report.trades.size})",
+                                    "WIN" to "بردها (${report.winsCount})",
+                                    "LOSS" to "باخت‌ها (${report.lossesCount})",
+                                    "OPEN" to "معاملات باز (${report.openTradesCount})",
+                                ).forEach { (k, label) ->
+                                    Pill(
+                                        text = label,
+                                        color = if (outcomeFilter == k) AurumColors.Gold else AurumColors.TextMuted,
+                                        modifier = Modifier.clickable { outcomeFilter = k },
+                                    )
+                                }
+                            }
+
+                            val matchingTrades = remember(report.trades, searchQuery, outcomeFilter) {
+                                report.trades.filter { t ->
+                                    val matchesOutcome = when (outcomeFilter) {
+                                        "WIN" -> !t.isOpen && (t.pnlUsd ?: 0.0) > 0.0
+                                        "LOSS" -> !t.isOpen && (t.pnlUsd ?: 0.0) <= 0.0
+                                        "OPEN" -> t.isOpen
+                                        else -> true
+                                    }
+                                    val q = searchQuery.trim().lowercase(Locale.US)
+                                    val matchesQuery = q.isEmpty() ||
+                                        t.symbol.lowercase(Locale.US).contains(q) ||
+                                        t.strategyTitleFa.lowercase(Locale.US).contains(q) ||
+                                        t.entryTimeframe.lowercase(Locale.US).contains(q) ||
+                                        (t.exitReason ?: "").lowercase(Locale.US).contains(q)
+                                    matchesOutcome && matchesQuery
+                                }
+                            }
+
+                            matchingTrades.forEach { t ->
+                                val pnl = t.pnlUsd ?: 0.0
+                                val c = if (t.isOpen) AurumColors.Cyan else if (pnl >= 0.0) AurumColors.Green else AurumColors.Red
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(AurumColors.Surface)
+                                        .border(1.dp, c.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                                        .padding(10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                    ) {
+                                        Text(
+                                            text = "${t.symbol} · ${t.action.labelFa} · تایم ${t.entryTimeframe}",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = c,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                        Text(
+                                            text = if (t.isOpen) "باز (OPEN)" else String.format(Locale.US, "%s$%.2f (%s%.2fR)", if (pnl >= 0) "+" else "-", abs(pnl), if ((t.rMultiple ?: 0.0) >= 0) "+" else "", t.rMultiple ?: 0.0),
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = c,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                    }
+                                    Text(
+                                        text = "استراتژی: ${t.strategyTitleFa}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = AurumColors.Gold,
+                                    )
+                                    Text(
+                                        text = "ورود: ${formatPrice(t.entry)} · خروج: ${t.exitPrice?.let { formatPrice(it) } ?: "—"} · SL: ${formatPrice(t.stopLoss)} · TP: ${formatPrice(t.takeProfit)} · R:R بهینه: 1:${String.format(Locale.US, "%.2f", t.optimalRiskReward)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = AurumColors.TextPrimary,
+                                    )
+                                    Text(
+                                        text = "مرجع: ${t.venueNameFa} · کارمزد: $${String.format(Locale.US, "%.2f", t.estimatedRoundTripFeeUsd)} · وضعیت: ${t.exitReason ?: "در جریان"}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = AurumColors.TextSecondary,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    else -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(AurumColors.Surface)
+                                .border(1.dp, AurumColors.Border, RoundedCornerShape(10.dp))
+                                .padding(10.dp)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "پیش‌نمایش فایل CSV استاندارد اکسل (۲۹ ستون ممیزی)",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = AurumColors.Gold,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Pill(
+                                    text = "📤 اشتراک‌گذاری فایل CSV",
+                                    color = AurumColors.Cyan,
+                                    modifier = Modifier.clickable { onShareFormat(JournalExportFormat.CSV_EXCEL) },
+                                )
+                            }
+                            Text(
+                                text = csvContent.removePrefix("\uFEFF"),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextPrimary,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

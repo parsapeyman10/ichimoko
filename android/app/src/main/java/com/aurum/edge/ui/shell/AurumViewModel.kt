@@ -1315,6 +1315,62 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         _toast.value = "🔊 تست ${kind.channelNameFa} پخش شد"
     }
 
+    fun exportAndShareJournal(
+        report: com.aurum.edge.data.InstitutionalTearSheetReport,
+        format: com.aurum.edge.data.JournalExportFormat,
+    ) {
+        viewModelScope.launch {
+            runCatching {
+                val file = com.aurum.edge.data.JournalExportEngine.exportToFile(
+                    context = container.appContext,
+                    report = report,
+                    format = format,
+                )
+                com.aurum.edge.data.JournalExportEngine.shareExportedFile(
+                    context = container.appContext,
+                    file = file,
+                    format = format,
+                ).getOrThrow()
+                file
+            }.onSuccess { file ->
+                _toast.value = "📤 خروجی ${format.extension.uppercase()} آماده ارسال شد (${file.name})"
+            }.onFailure { err ->
+                _toast.value = "⚠️ خطا در تولید خروجی: ${err.message}"
+            }
+        }
+    }
+
+    fun exportAndOpenJournal(
+        report: com.aurum.edge.data.InstitutionalTearSheetReport,
+        format: com.aurum.edge.data.JournalExportFormat,
+    ) {
+        viewModelScope.launch {
+            runCatching {
+                val file = com.aurum.edge.data.JournalExportEngine.exportToFile(
+                    context = container.appContext,
+                    report = report,
+                    format = format,
+                )
+                com.aurum.edge.data.JournalExportEngine.openExportedFileExternally(
+                    context = container.appContext,
+                    file = file,
+                    format = format,
+                ).getOrThrow()
+            }.onFailure {
+                // Fallback to share sheet if no default viewer app is installed
+                exportAndShareJournal(report, format)
+            }
+        }
+    }
+
+    fun copyJournalTearSheetSummary(report: com.aurum.edge.data.InstitutionalTearSheetReport) {
+        com.aurum.edge.data.JournalExportEngine.copyExecutiveSummaryToClipboard(
+            context = container.appContext,
+            report = report,
+        )
+        _toast.value = "📋 خلاصه کارنامه کوانت در کلیپ‌بورد کپی شد"
+    }
+
     fun consumeToast() {
         _toast.value = null
     }
