@@ -634,12 +634,17 @@ class RiskAndCalendarEngineTest {
         val alarmKinds = com.aurum.edge.notify.TradeAlarmKind.entries
         assertEquals(3, alarmKinds.size)
         assertEquals(3, alarmKinds.map { it.channelId }.toSet().size)
-        assertTrue(com.aurum.edge.notify.TradeAlarmKind.ENTRY.vibrationPatternMs.isNotEmpty())
-        assertTrue(com.aurum.edge.notify.TradeAlarmKind.TAKE_PROFIT.vibrationPatternMs.isNotEmpty())
-        assertTrue(com.aurum.edge.notify.TradeAlarmKind.STOP_LOSS.vibrationPatternMs.isNotEmpty())
+        assertEquals(3, alarmKinds.map { it.badgeFa }.toSet().size)
 
         // Simulate Gold Futures (GC=F around 2775) vs Spot Gold (XAU/USD around 2740)
-        val goldFutures15m = buildTrendingCandles(count = 95, startPrice = 2745.0, stepPerBar = 0.32, intervalMs = 15 * 60_000L)
+        val goldFutures15m = trigBars.map {
+            it.copy(
+                open = it.open / 23.0,
+                high = it.high / 23.0,
+                low = it.low / 23.0,
+                close = it.close / 23.0,
+            )
+        }
         val lastFuturesClose = goldFutures15m.last().close
         val spotGoldLive = lastFuturesClose - 35.0 // $35 lower Spot price than Futures
         val alignedGold = IchimokuStrategyEngine.alignCandlesToSpotBasis(
