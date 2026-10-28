@@ -123,6 +123,28 @@ data class NeuralCategorySummary(
     val noTradeConditionCount: Int,
 )
 
+data class NeuralFeatureInsight(
+    val index: Int,
+    val titleFa: String,
+    val attentionPercent: Double,
+    val netWeightImpact: Double,
+    val impactLabelFa: String,
+    val explanationFa: String,
+)
+
+data class NeuralRecentLesson(
+    val tradeId: String,
+    val symbol: String,
+    val categoryCode: String,
+    val strategyId: String,
+    val timeframeLabel: String,
+    val won: Boolean,
+    val achievedR: Double,
+    val conditionDescriptionFa: String,
+    val lessonLearnedFa: String,
+    val timestampMs: Long,
+)
+
 data class NeuralLearningStateSummary(
     val architectureNameFa: String = "FT-Transformer Attention + SwiGLU Residual + AdamW Online + Contextual Bandit",
     val totalLearnedTrades: Int = 0,
@@ -134,6 +156,14 @@ data class NeuralLearningStateSummary(
     val isActiveFilterEnabled: Boolean = false,
     val discoveredNoTradeClustersCount: Int = 0,
     val categoryStats: List<NeuralCategorySummary> = emptyList(),
+    val runningAccuracyPct: Double = 50.0,
+    val runningBceLoss: Double = 0.693,
+    val adamStepCount: Int = 0,
+    val featureInsights: List<NeuralFeatureInsight> = emptyList(),
+    val learnedInsightsFeedFa: List<String> = emptyList(),
+    val winningClusters: List<ConditionClusterRecord> = emptyList(),
+    val noTradeClusters: List<ConditionClusterRecord> = emptyList(),
+    val recentLessons: List<NeuralRecentLesson> = emptyList(),
 )
 
 data class NeuralSignalEvaluation(
@@ -196,6 +226,7 @@ class NeuralSelfLearningEngine(
         encodeDefaults = true
     }
 
+    private val appContext: Context? = context?.applicationContext
     private var persistedState: NeuralNetworkPersistedState = loadOrInitializeState()
     private val _stateFlow = MutableStateFlow(persistedState)
     val stateFlow: StateFlow<NeuralNetworkPersistedState> = _stateFlow.asStateFlow()
@@ -203,15 +234,41 @@ class NeuralSelfLearningEngine(
     private val _summaryFlow = MutableStateFlow(buildStateSummary(persistedState))
     val state: StateFlow<NeuralLearningStateSummary> = _summaryFlow.asStateFlow()
 
+    private fun featureTitleFa(index: Int): Pair<String, String> = when (index) {
+        0 -> "۱. رژیم دسته رمزارز (CRYPTO)" to "حساسیت و نوسان لحظه‌ای بازار کریپتو"
+        1 -> "۲. رژیم دسته طلا و نقره (COMMODITY)" to "رفتار روندهای پناهگاه امن اونس طلا و نقره"
+        2 -> "۳. رژیم دسته جفت‌ارز فارکس (FOREX)" to "تعادل و نوسانات سشن‌های فارکس"
+        3 -> "۴. رژیم دسته شاخص وال‌استریت (STOCK/DOW)" to "مومنتوم شاخص داوجونز آمریکا"
+        4 -> "۵. تایم‌فریم ورود (15m در برابر 5m)" to "مقایسه پایداری کندل ۱۵ دقیقه با سرعت ۵ دقیقه"
+        5 -> "۶. جهت معامله (خرید LONG در برابر فروش SHORT)" to "تقارن روند صعودی و نزولی در کومو"
+        6 -> "۷. ستون ایچیموکو مانش پاتل (Kijun/MTF)" to "وزن تعادل کیجون‌سن و همگرایی ۳ تایم‌فریم"
+        7 -> "۸. ستون ایچیموکو مارک تاتل (Chikou/SSB)" to "وزن رهایی چیکو اسپن و شکست فلت SSB"
+        8 -> "۹. ستون امواج و زمان هوسودا (Wave/Time)" to "وزن اهداف V/N/E و چرخه زمانی هوسودا"
+        10 -> "۱۱. کارایی روند کافمن (Efficiency Ratio ER14)" to "تفکیک روند خالص از بازار رِنج و فرسایشی"
+        11 -> "۱۲. ضخامت ابر آینده ۲۶ کندلی (Future Kumo)" to "قدرت حمایت/مقاومت ابر آینده ۲۶ کندل جلوتر"
+        12 -> "۱۳. فاصله کشیدگی از کیجون (C-Clamp Overextension)" to "تشخیص اشباع قیمت و خطر بازگشت به کیجون"
+        13 -> "۱۴. کیفیت بدنه کندل و شدوی مخالف (Wick/CLV)" to "تشخیص تله فیک‌بریک‌اوت و رد شدوی معکوس"
+        14 -> "۱۵. عدد مناسب R:R معامله (Optimal R:R)" to "نسبت پاداش به ریسک بهینه در ساختار فعلی"
+        15 -> "۱۶. دقت نقطه‌زنی ورود (Sniper Score & Phase)" to "ورود در ناحیه طلایی تنکان بدون تعقیب قیمت"
+        else -> "۱۰. ستون پلاتوهای کارن پلویل / کتاب‌های درایو" to "وزن سطوح فلت، بولینگر، فرکتال و RSI/DMI"
+    }
+
     private fun buildStateSummary(cur: NeuralNetworkPersistedState): NeuralLearningStateSummary {
         val total = cur.totalLearnedTrades
         val target = cur.warmupTargetTrades.coerceAtLeast(1)
         val warmupDone = total >= target
         val progressPct = ((total.toDouble() / target) * 100.0).coerceIn(0.0, 100.0)
-        val noTradeClusters = cur.conditionClusters.values.filter { it.isFlaggedNoTradeRegime }
+        val allClusters = cur.conditionClusters.values.toList()
+        val noTradeClusters = allClusters
+            .filter { it.isFlaggedNoTradeRegime || (it.lossCount >= 2 && it.avgR < 0.0) }
+            .sortedBy { it.avgR }
+        val winningClusters = allClusters
+            .filter { it.winCount >= 1 && it.avgR > 0.0 }
+            .sortedByDescending { it.avgR * it.totalCount }
+
         val catSummaries = AssetClass.entries.map { ac ->
             val catRec = cur.categoryStats[ac.code]
-            val catClusters = cur.conditionClusters.values.filter { it.categoryCode == ac.code }
+            val catClusters = allClusters.filter { it.categoryCode == ac.code }
             val bestCluster = catClusters.filter { it.totalCount >= 1 }.maxByOrNull { it.avgR }
             val worstNoTrade = catClusters.filter { it.isFlaggedNoTradeRegime || it.avgR < 0.0 }.minByOrNull { it.avgR }
             val catNoTradeCount = catClusters.count { it.isFlaggedNoTradeRegime }
@@ -232,6 +289,118 @@ class NeuralSelfLearningEngine(
                 noTradeConditionCount = catNoTradeCount,
             )
         }
+
+        // استخراج وزن‌های توجه (Self-Attention) و تاثیر هر یک از ۱۶ ویژگی
+        val attnSum = cur.attentionWeights.sum().coerceAtLeast(1e-6)
+        val featInsights = (0 until INPUT_DIM).map { idx ->
+            val (title, desc) = featureTitleFa(idx)
+            val rawAttn = cur.attentionWeights.getOrElse(idx) { 0.15 }
+            val attnPct = round(((rawAttn / attnSum) * 100.0) * 10.0) / 10.0
+            val netW = cur.headWinWeights.getOrElse(idx) { 0.0 }
+            val impactLabel = when {
+                netW >= 0.20 -> "🟢 تقویت‌کننده قوی احتمال برد (+${String.format(Locale.US, "%.2f", netW)})"
+                netW > 0.0 -> "🟢 اثر مثبت روی برد (+${String.format(Locale.US, "%.2f", netW)})"
+                netW <= -0.20 -> "🔴 عامل هشدار و کاهش احتمال برد (${String.format(Locale.US, "%.2f", netW)})"
+                else -> "🟡 اثر بازدارنده ملایم (${String.format(Locale.US, "%.2f", netW)})"
+            }
+            NeuralFeatureInsight(
+                index = idx + 1,
+                titleFa = title,
+                attentionPercent = attnPct,
+                netWeightImpact = round(netW * 100.0) / 100.0,
+                impactLabelFa = impactLabel,
+                explanationFa = desc,
+            )
+        }.sortedByDescending { it.attentionPercent }
+
+        // تولید گزارش تحلیلی فارسی از تمام چیزهایی که شبکه عصبی تا این لحظه فهمیده و یاد گرفته است
+        val insightsFeed = mutableListOf<String>()
+        val topAttn1 = featInsights.getOrNull(0)
+        val topAttn2 = featInsights.getOrNull(1)
+        if (topAttn1 != null && topAttn2 != null) {
+            insightsFeed += "🧠 تمرکز اصلی شبکه عصبی (FT-Attention): بیشترین وزن تصمیم‌گیری شبکه در حال حاضر روی «${topAttn1.titleFa}» (${topAttn1.attentionPercent}%) و «${topAttn2.titleFa}» (${topAttn2.attentionPercent}%) متمرکز شده است."
+        }
+        if (total == 0) {
+            insightsFeed += "📚 وضعیت پایه (دانش اولیه ۲۴ استراتژی): شبکه عصبی با دانش پایه ایچیموکو (تقویت کارایی روند ER14، ضخامت ابر آینده ۲۶ کندلی و جریمه کشیدگی C-Clamp و شدوهای فیک‌بریک‌اوت) مقداردهی شده و به محض بسته شدن اولین معامله، وزن‌ها را با الگوریتم AdamW به‌روزرسانی می‌کند."
+        } else {
+            insightsFeed += String.format(
+                Locale.US,
+                "📈 خلاصه تجربه آنلاین: شبکه تاکنون از %,d معامله واقعی در ژورنال آموزش دیده، %,d گام بهینه‌سازی AdamW انجام داده و دقت پیش‌بینی جاری آن %.1f%% (خطای BCE=%.3f) است.",
+                total,
+                cur.adamStepCount,
+                cur.runningAccuracyPct,
+                cur.runningBceLoss,
+            )
+        }
+        winningClusters.take(4).forEach { winCluster ->
+            insightsFeed += String.format(
+                Locale.US,
+                "✅ الگوی سودده کشف‌شده: در «%s» شبکه با نرخ برد %.0f%% در %d معامله، میانگین بازدهی %+.2fR را ثبت کرده و این رژیم را به‌عنوان شرایط طلایی ورود تایید می‌کند.",
+                winCluster.conditionDescriptionFa,
+                winCluster.posteriorWinProb * 100.0,
+                winCluster.totalCount,
+                winCluster.avgR,
+            )
+        }
+        noTradeClusters.take(5).forEach { badCluster ->
+            insightsFeed += String.format(
+                Locale.US,
+                "⛔ تله ضررده و شرایط ممنوعه کشف‌شده: در «%s» نرخ برد فقط %.0f%% (%d باخت از %d معامله · میانگین %+.2fR) بوده است؛ شبکه این وضعیت را به‌عنوان منطقه ممنوعه معامله (No-Trade Regime) علامت‌گذاری کرده است.",
+                badCluster.conditionDescriptionFa,
+                badCluster.posteriorWinProb * 100.0,
+                badCluster.lossCount,
+                badCluster.totalCount,
+                badCluster.avgR,
+            )
+        }
+        catSummaries.filter { it.learnedTrades > 0 }.forEach { cs ->
+            insightsFeed += String.format(
+                Locale.US,
+                "📊 نتیجه‌گیری شبکه در %s: از %d معامله تحلیل‌شده، نرخ برد %.1f%% بوده است | بهترین رژیم: %s | پرخطرترین رژیم: %s",
+                cs.categoryTitleFa,
+                cs.learnedTrades,
+                cs.winRatePercent,
+                cs.bestConditionSummaryFa,
+                cs.worstNoTradeConditionSummaryFa,
+            )
+        }
+
+        val recentLessons = cur.replayBuffer.takeLast(30).reversed().map { s ->
+            val stratTitle = BitcoinStrategyModel.fromId(s.strategyId).titleFa
+            val lessonText = if (s.won) {
+                String.format(
+                    Locale.US,
+                    "برد %+.2fR در %s [%s]: شبکه وزن‌های مرتبط با «%s» و استراتژی «%s» را تقویت کرد.",
+                    s.achievedR,
+                    s.symbol,
+                    s.timeframeLabel,
+                    s.conditionDescriptionFa,
+                    stratTitle,
+                )
+            } else {
+                String.format(
+                    Locale.US,
+                    "ضرر %+.2fR در %s [%s]: شبکه ضریب هشدار «%s» را افزایش داد تا در شرایط مشابه از تله رِنج/فیک‌بریک‌اوت پرهیز شود.",
+                    s.achievedR,
+                    s.symbol,
+                    s.timeframeLabel,
+                    s.conditionDescriptionFa,
+                )
+            }
+            NeuralRecentLesson(
+                tradeId = s.tradeId,
+                symbol = s.symbol,
+                categoryCode = s.categoryCode,
+                strategyId = s.strategyId,
+                timeframeLabel = s.timeframeLabel,
+                won = s.won,
+                achievedR = s.achievedR,
+                conditionDescriptionFa = s.conditionDescriptionFa,
+                lessonLearnedFa = lessonText,
+                timestampMs = s.timestampMs,
+            )
+        }
+
         return NeuralLearningStateSummary(
             architectureNameFa = cur.architectureName,
             totalLearnedTrades = total,
@@ -243,6 +412,14 @@ class NeuralSelfLearningEngine(
             isActiveFilterEnabled = warmupDone || cur.forceActiveBeforeWarmup,
             discoveredNoTradeClustersCount = noTradeClusters.size,
             categoryStats = catSummaries,
+            runningAccuracyPct = cur.runningAccuracyPct,
+            runningBceLoss = cur.runningBceLoss,
+            adamStepCount = cur.adamStepCount,
+            featureInsights = featInsights,
+            learnedInsightsFeedFa = insightsFeed,
+            winningClusters = winningClusters.take(15),
+            noTradeClusters = noTradeClusters.take(15),
+            recentLessons = recentLessons,
         )
     }
 
@@ -322,13 +499,109 @@ class NeuralSelfLearningEngine(
         persistedState = next
         _stateFlow.value = next
         _summaryFlow.value = buildStateSummary(next)
+        val encoded = runCatching {
+            json.encodeToString(NeuralNetworkPersistedState.serializer(), next)
+        }.getOrNull() ?: return
         val file = storageFile
         if (file != null) {
             runCatching {
                 file.parentFile?.mkdirs()
-                file.writeText(json.encodeToString(NeuralNetworkPersistedState.serializer(), next))
+                file.writeText(encoded)
             }
         }
+        appContext?.let { ctx ->
+            saveBrainBackupToPhoneStorage(ctx, encoded)
+        }
+    }
+
+    /**
+     * ذخیره خودکار حافظه کامل شبکه عصبی (`AurumNeuralBrain_Backup.json`) در حافظه گوشی (`Download/AurumEdge/Archive`)
+     * تا اپ بتواند بعداً دیتای یادگرفته‌شده خود را از روی گوشی بازخوانی کند.
+     */
+    fun saveBrainBackupToPhoneStorage(
+        context: Context,
+        encodedJsonOverride: String? = null,
+    ): Boolean {
+        return runCatching {
+            val payload = encodedJsonOverride ?: json.encodeToString(NeuralNetworkPersistedState.serializer(), persistedState)
+            val bytes = payload.toByteArray(Charsets.UTF_8)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val resolver = context.contentResolver
+                val fileName = "AurumNeuralBrain_Backup.json"
+                // حذف نسخه قبلی در صورت وجود تا فقط آخرین وضعیت ذخیره بماند
+                runCatching {
+                    resolver.delete(
+                        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                        "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+                        arrayOf(fileName),
+                    )
+                }
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, fileName)
+                    put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/json")
+                    put(
+                        android.provider.MediaStore.Downloads.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_DOWNLOADS + "/AurumEdge/Archive",
+                    )
+                    put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                if (uri != null) {
+                    resolver.openOutputStream(uri)?.use { it.write(bytes) }
+                    values.clear()
+                    values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+                    resolver.update(uri, values, null, null)
+                    return@runCatching true
+                }
+            }
+            false
+        }.getOrDefault(false)
+    }
+
+    /**
+     * بازخوانی خودکار حافظه شبکه عصبی از حافظه گوشی (`Download/AurumEdge/Archive/AurumNeuralBrain_Backup.json`).
+     */
+    @Synchronized
+    fun restoreBrainBackupFromPhoneStorage(context: Context): Boolean {
+        return runCatching {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val resolver = context.contentResolver
+                val projection = arrayOf(
+                    android.provider.MediaStore.MediaColumns._ID,
+                    android.provider.MediaStore.MediaColumns.DATE_MODIFIED,
+                )
+                val selection = "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
+                val selectionArgs = arrayOf("AurumNeuralBrain_Backup%")
+                val sortOrder = "${android.provider.MediaStore.MediaColumns.DATE_MODIFIED} DESC"
+                resolver.query(
+                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    sortOrder,
+                )?.use { cursor ->
+                    val idCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID)
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getLong(idCol)
+                        val itemUri = android.content.ContentUris.withAppendedId(
+                            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                            id,
+                        )
+                        val raw = resolver.openInputStream(itemUri)?.use { it.readBytes().toString(Charsets.UTF_8) }
+                        if (!raw.isNullOrBlank()) {
+                            val parsed = runCatching {
+                                json.decodeFromString(NeuralNetworkPersistedState.serializer(), raw)
+                            }.getOrNull()
+                            if (parsed != null && parsed.totalLearnedTrades >= persistedState.totalLearnedTrades) {
+                                persistState(parsed)
+                                return@runCatching true
+                            }
+                        }
+                    }
+                }
+            }
+            false
+        }.getOrDefault(false)
     }
 
     /**

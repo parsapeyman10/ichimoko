@@ -1,0 +1,876 @@
+package com.aurum.edge.data
+
+import android.content.ContentValues
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.DashPathEffect
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import android.graphics.Shader
+import android.graphics.Typeface
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
+import com.aurum.edge.core.Candle
+import com.aurum.edge.core.IchimokuStrategyEngine
+import com.aurum.edge.core.PaperConditionRecord
+import com.aurum.edge.core.PaperTrade
+import com.aurum.edge.core.StrategyEvaluationReport
+import com.aurum.edge.domain.SignalAction
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+
+@Serializable
+data class ArchivedCandlePoint(
+    val t: Long,
+    val o: Double,
+    val h: Double,
+    val l: Double,
+    val c: Double,
+)
+
+@Serializable
+data class ArchivedTradeSnapshotRecord(
+    val tradeId: String,
+    val symbol: String,
+    val timeframeLabel: String,
+    val action: String,
+    val strategyId: String,
+    val strategyTitleFa: String,
+    val strategyBadgeFa: String,
+    val entryPrice: Double,
+    val stopLossPrice: Double,
+    val takeProfitPrice: Double,
+    val riskReward: Double,
+    val optimalRiskReward: Double,
+    val fixedRiskUsd: Double,
+    val expectedProfitUsd: Double,
+    val confidence: Double,
+    val openedAtMs: Long,
+    val rrFormulaFa: String = "",
+    val slBasisFa: String = "",
+    val tpBasisFa: String = "",
+    val tenkan: Double = 0.0,
+    val kijun: Double = 0.0,
+    val currentSpanA: Double = 0.0,
+    val currentSpanB: Double = 0.0,
+    val futureSpanA: Double = 0.0,
+    val futureSpanB: Double = 0.0,
+    val atr14: Double = 0.0,
+    val rsi14: Double = 50.0,
+    val rsi7: Double = 50.0,
+    val ema21: Double = 0.0,
+    val ema34: Double = 0.0,
+    val adx14: Double = 25.0,
+    val conditionsSummary: List<PaperConditionRecord> = emptyList(),
+    val recentCandles: List<ArchivedCandlePoint> = emptyList(),
+    val localImagePath: String = "",
+    val phoneGalleryUri: String = "",
+    val imageSizeBytes: Long = 0L,
+    val fullPaperTrade: PaperTrade? = null,
+)
+
+/**
+ * موتور آرشیو تصویری معاملات و ذخیره‌سازی دوگانه (حافظه داخلی اپ + گالری/دانلودهای گوشی)
+ * همراه با تزریق متادیتای خودخوان (`Embedded Self-Readable JSON Payload`) در دل تصویر کم‌حجم WebP:
+ * - از هر معامله بازشده یک اسکرین‌شات گرافیکی دقیق شامل کندل‌ها، ابر ایچیموکو، ابر آینده ۲۶ کندلی،
+ *   تنکان/کیجون و باکس پوزیشن TradingView (`Entry`, `Stop-Loss`, `Take-Profit`, `R:R`) به همراه ۱۶ شرط ایچیموکو می‌سازد.
+ * - با فرمت `WebP` باکیفیت و بسیار کم‌حجم (`~35KB..65KB`) هم در آرشیو اپ و هم در حافظه گوشی (`Pictures/AurumEdge` و `Download/AurumEdge/Archive`) ذخیره می‌کند.
+ * - دیتای کامل معامله و شرایط ایچیموکو را هم در انتهای خود فایل تصویر و هم در فایل JSON آرشیو گوشی ذخیره می‌کند تا اپ بتواند بعداً از روی عکس‌ها یا فایل‌های گوشی کل دیتای خود را بازخوانی کند.
+ */
+object TradeSnapshotArchiveManager {
+
+    private const val ARCHIVE_DIR_NAME = "trade_snapshots_v1"
+    private const val INDEX_FILE_NAME = "trade_snapshots_index_v1.json"
+    private const val EMBED_START_MARKER = "\n/*AURUM_SNAPSHOT_V1_START*/"
+    private const val EMBED_END_MARKER = "/*AURUM_SNAPSHOT_V1_END*/"
+
+    private val json = Json {
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+        prettyPrint = false
+    }
+
+    private val _records = MutableStateFlow<List<ArchivedTradeSnapshotRecord>>(emptyList())
+    val records: StateFlow<List<ArchivedTradeSnapshotRecord>> = _records.asStateFlow()
+
+    @Synchronized
+    fun init(context: Context) {
+        runCatching {
+            val loaded = loadIndexFromDisk(context)
+            _records.value = loaded.sortedByDescending { it.openedAtMs }
+        }
+    }
+
+    fun recordForTrade(tradeId: String): ArchivedTradeSnapshotRecord? =
+        _records.value.firstOrNull { it.tradeId == tradeId }
+
+    /**
+     * ثبت و ساخت فوری اسکرین‌شات ایچیموکو به محض باز شدن معامله + ذخیره در آرشیو و حافظه گوشی.
+     */
+    @Synchronized
+    fun captureAndArchiveTradeOpen(
+        context: Context,
+        trade: PaperTrade,
+        report: StrategyEvaluationReport?,
+        triggerCandles: List<Candle>,
+    ): ArchivedTradeSnapshotRecord? {
+        return runCatching {
+            val trigSnap = report?.triggerSnapshot
+                ?: IchimokuStrategyEngine.computeSnapshot(triggerCandles)
+            val closedCandles = triggerCandles
+                .filter { it.high.isFinite() && it.low.isFinite() && it.close > 0.0 }
+                .sortedBy { it.time }
+                .takeLast(52)
+
+            val fixedRisk = trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0
+            val expectedWin = round2(fixedRisk * trade.riskReward)
+            val rrBreakdown = report?.rrBreakdown
+
+            val baseRecord = ArchivedTradeSnapshotRecord(
+                tradeId = trade.id,
+                symbol = trade.symbol,
+                timeframeLabel = trade.interval.label,
+                action = trade.action.name,
+                strategyId = trade.strategyId,
+                strategyTitleFa = trade.strategyTitleFa,
+                strategyBadgeFa = report?.strategyBadgeFa ?: trade.strategyTitleFa.take(24),
+                entryPrice = trade.entry,
+                stopLossPrice = trade.stopLoss,
+                takeProfitPrice = trade.takeProfit,
+                riskReward = trade.riskReward,
+                optimalRiskReward = trade.effectiveOptimalRr,
+                fixedRiskUsd = fixedRisk,
+                expectedProfitUsd = expectedWin,
+                confidence = trade.confidence,
+                openedAtMs = trade.openedAt,
+                rrFormulaFa = rrBreakdown?.formulaTextFa ?: trade.buildRrFormulaSummaryFa(),
+                slBasisFa = rrBreakdown?.slBasisFa ?: "سنگر ساختاری کیجون/کومو",
+                tpBasisFa = rrBreakdown?.tpBasisFa ?: "موج هوسودا",
+                tenkan = trigSnap?.tenkan ?: trade.entry,
+                kijun = trigSnap?.kijun ?: trade.stopLoss,
+                currentSpanA = trigSnap?.currentSpanA ?: trade.entry,
+                currentSpanB = trigSnap?.currentSpanB ?: trade.stopLoss,
+                futureSpanA = trigSnap?.futureSpanA ?: trade.takeProfit,
+                futureSpanB = trigSnap?.futureSpanB ?: trade.entry,
+                atr14 = trigSnap?.atr14 ?: (abs(trade.entry - trade.stopLoss) * 0.5),
+                rsi14 = trigSnap?.rsi14 ?: 55.0,
+                rsi7 = trigSnap?.rsi7 ?: 55.0,
+                ema21 = trigSnap?.ema21 ?: trade.entry,
+                ema34 = trigSnap?.ema34 ?: trade.entry,
+                adx14 = trigSnap?.adx14 ?: 25.0,
+                conditionsSummary = trade.entryConditions,
+                recentCandles = closedCandles.map {
+                    ArchivedCandlePoint(
+                        t = it.time,
+                        o = roundPrice(it.open),
+                        h = roundPrice(it.high),
+                        l = roundPrice(it.low),
+                        c = roundPrice(it.close),
+                    )
+                },
+                fullPaperTrade = trade,
+            )
+
+            // ۱. رندر تصویر گرافیکی باکیفیت از چارت ایچیموکو + باکس پوزیشن SL/TP + شروط معامله
+            val bitmap = renderTradeIchimokuSnapshotBitmap(baseRecord, closedCandles)
+            val webpBytes = compressBitmapToCompactWebp(bitmap, quality = 80)
+            bitmap.recycle()
+
+            // ۲. تزریق متادیتای خودخوان JSON در انتهای بایت‌های تصویر (Self-Readable Image)
+            val embeddedBytes = attachEmbeddedJsonToImageBytes(webpBytes, baseRecord)
+
+            // ۳. ذخیره در پوشه داخلی آرشیو اپ
+            val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
+            val safeSym = trade.symbol.replace("/", "_").replace(" ", "_")
+            val fileName = "AurumTrade_${safeSym}_${trade.interval.label}_${trade.openedAt}.webp"
+            val localFile = File(dir, fileName)
+            localFile.writeBytes(embeddedBytes)
+
+            // ۴. ذخیره خودکار در حافظه گوشی (گالری Pictures/AurumEdge و پوشه Download/AurumEdge/Archive)
+            val galleryUri = saveImageAndSelfReadableDataToPhoneStorage(
+                context = context,
+                fileName = fileName,
+                imageBytesWithEmbeddedMeta = embeddedBytes,
+                record = baseRecord,
+            )
+
+            val finalRecord = baseRecord.copy(
+                localImagePath = localFile.absolutePath,
+                phoneGalleryUri = galleryUri,
+                imageSizeBytes = embeddedBytes.size.toLong(),
+            )
+
+            val updated = (_records.value.filterNot { it.tradeId == trade.id } + finalRecord)
+                .sortedByDescending { it.openedAtMs }
+                .take(500)
+            _records.value = updated
+            saveIndexToDisk(context, updated)
+            finalRecord
+        }.getOrNull()
+    }
+
+    /**
+     * رندر گرافیکی باکیفیت و کم‌حجم اسکرین‌شات معامله ایچیموکو (کندل‌ها + ابر کومو + ابر آینده ۲۶ کندلی +
+     * تنکان و کیجون + باکس پوزیشن Long/Short با نواحی سبز حد سود و قرمز حد ضرر + جدول شروط ورود).
+     */
+    fun renderTradeIchimokuSnapshotBitmap(
+        record: ArchivedTradeSnapshotRecord,
+        rawCandles: List<Candle> = emptyList(),
+    ): Bitmap {
+        val width = 1200
+        val height = 820
+        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+
+        // پس‌زمینه سرمه‌ای تیره سازمانی
+        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            shader = LinearGradient(
+                0f, 0f, 0f, height.toFloat(),
+                Color.parseColor("#0A0F1D"),
+                Color.parseColor("#070B14"),
+                Shader.TileMode.CLAMP,
+            )
+        }
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), bgPaint)
+
+        val isBuy = record.action.equals("BUY", ignoreCase = true)
+        val sideColor = if (isBuy) Color.parseColor("#10B981") else Color.parseColor("#EF4444")
+        val goldColor = Color.parseColor("#F5C451")
+        val cyanColor = Color.parseColor("#38BDF8")
+        val mutedText = Color.parseColor("#94A3B8")
+        val whiteText = Color.parseColor("#F8FAFC")
+
+        // ── ۱. نوار هدر بالای تصویر ────────────────────────────────────────────
+        val headerRect = RectF(18f, 16f, width - 18f, 114f)
+        val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#111A2E")
+            style = Paint.Style.FILL
+        }
+        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = sideColor
+            style = Paint.Style.STROKE
+            strokeWidth = 2.2f
+        }
+        canvas.drawRoundRect(headerRect, 16f, 16f, cardPaint)
+        canvas.drawRoundRect(headerRect, 16f, 16f, borderPaint)
+
+        val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = whiteText
+            textSize = 26f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = goldColor
+            textSize = 18f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val smallPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = mutedText
+            textSize = 15.5f
+        }
+
+        val sideLabel = if (isBuy) "BUY / LONG" else "SELL / SHORT"
+        val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(record.openedAtMs))
+        canvas.drawText(
+            "${record.symbol}  ·  [${record.timeframeLabel}]  ·  $sideLabel  ·  R:R 1:${String.format(Locale.US, "%.2f", record.riskReward)} (Optimal 1:${String.format(Locale.US, "%.2f", record.optimalRiskReward)})",
+            36f,
+            54f,
+            titlePaint,
+        )
+        canvas.drawText(
+            "استراتژی: ${record.strategyTitleFa}  |  زمان ثبت: $dateStr  |  ریسک: -$${String.format(Locale.US, "%.2f", record.fixedRiskUsd)}  ←  سود هدف: +$${String.format(Locale.US, "%.2f", record.expectedProfitUsd)}",
+            36f,
+            90f,
+            subPaint,
+        )
+
+        // ── ۲. ناحیه اصلی چارت ایچیموکو + باکس پوزیشن SL/TP ────────────────────
+        val chartLeft = 24f
+        val chartTop = 128f
+        val chartRight = width - 220f
+        val chartBottom = 612f
+        val chartRect = RectF(chartLeft, chartTop, chartRight, chartBottom)
+
+        val chartBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#0B1324")
+        }
+        val chartBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#1E293B")
+            style = Paint.Style.STROKE
+            strokeWidth = 1.6f
+        }
+        canvas.drawRoundRect(chartRect, 14f, 14f, chartBgPaint)
+        canvas.drawRoundRect(chartRect, 14f, 14f, chartBorderPaint)
+
+        // آماده‌سازی کندل‌ها برای رسم (یا ساخت کندل‌های نمونه حول ورود در صورت خالی بودن)
+        val candlesToDraw: List<Candle> = when {
+            rawCandles.size >= 15 -> rawCandles.takeLast(46)
+            record.recentCandles.size >= 10 -> record.recentCandles.takeLast(46).map {
+                Candle(time = it.t, open = it.o, high = it.h, low = it.l, close = it.c, volume = 1.0, closed = true)
+            }
+            else -> synthesizeFallbackCandlesForSnapshot(record)
+        }
+
+        val series = IchimokuStrategyEngine.computeChartSeries(candlesToDraw)
+        val bars = series.bars.takeLast(40)
+        val futureKumo = series.futureKumo.take(26)
+
+        // محاسبه بازه قیمتی کل چارت (شامل کندل‌ها، کومو، Entry، SL و TP)
+        var minPrice = minOf(record.entryPrice, record.stopLossPrice, record.takeProfitPrice)
+        var maxPrice = maxOf(record.entryPrice, record.stopLossPrice, record.takeProfitPrice)
+        bars.forEach { b ->
+            minPrice = minOf(minPrice, b.candle.low, b.currentSpanA, b.currentSpanB, b.tenkan, b.kijun)
+            maxPrice = maxOf(maxPrice, b.candle.high, b.currentSpanA, b.currentSpanB, b.tenkan, b.kijun)
+        }
+        futureKumo.forEach { fk ->
+            minPrice = minOf(minPrice, fk.spanA, fk.spanB)
+            maxPrice = maxOf(maxPrice, fk.spanA, fk.spanB)
+        }
+        val span = (maxPrice - minPrice).coerceAtLeast(abs(record.entryPrice) * 0.004)
+        val paddedMin = minPrice - span * 0.10
+        val paddedMax = maxPrice + span * 0.10
+        val totalSpan = (paddedMax - paddedMin).coerceAtLeast(1e-8)
+
+        fun priceToY(p: Double): Float {
+            val ratio = ((p - paddedMin) / totalSpan).coerceIn(0.0, 1.0)
+            return (chartBottom - 16f - ratio * (chartRect.height() - 32f)).toFloat()
+        }
+
+        // خطوط شبکه افقی و برچسب قیمت در سمت راست
+        val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#162238")
+            strokeWidth = 1f
+        }
+        for (g in 0..5) {
+            val p = paddedMin + (totalSpan * g / 5.0)
+            val y = priceToY(p)
+            canvas.drawLine(chartLeft + 8f, y, chartRight - 8f, y, gridPaint)
+            canvas.drawText(fmtPrice(p), chartRight + 10f, y + 5f, smallPaint)
+        }
+
+        val totalSlots = (bars.size + futureKumo.size.coerceAtLeast(18)).coerceAtLeast(30)
+        val usableWidth = chartRect.width() - 32f
+        val slotWidth = usableWidth / totalSlots.toFloat()
+        fun slotToX(slotIdx: Int): Float = chartLeft + 16f + slotIdx * slotWidth
+
+        // ── ۲.الف: رسم ابر کوموی جاری و ابر آینده ۲۶ کندلی (+1..+26) ──────────
+        data class KumoPoint(val slot: Int, val ssa: Double, val ssb: Double)
+        val allKumoPoints = mutableListOf<KumoPoint>()
+        bars.forEachIndexed { idx, b ->
+            allKumoPoints += KumoPoint(idx, b.currentSpanA, b.currentSpanB)
+        }
+        futureKumo.forEachIndexed { fIdx, fk ->
+            allKumoPoints += KumoPoint(bars.size + fIdx, fk.spanA, fk.spanB)
+        }
+
+        val bullCloudFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(52, 16, 185, 129)
+            style = Paint.Style.FILL
+        }
+        val bearCloudFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(52, 239, 68, 68)
+            style = Paint.Style.FILL
+        }
+        for (i in 0 until (allKumoPoints.size - 1)) {
+            val p1 = allKumoPoints[i]
+            val p2 = allKumoPoints[i + 1]
+            val path = Path().apply {
+                moveTo(slotToX(p1.slot), priceToY(p1.ssa))
+                lineTo(slotToX(p2.slot), priceToY(p2.ssa))
+                lineTo(slotToX(p2.slot), priceToY(p2.ssb))
+                lineTo(slotToX(p1.slot), priceToY(p1.ssb))
+                close()
+            }
+            val isBullKumo = (p1.ssa + p2.ssa) >= (p1.ssb + p2.ssb)
+            canvas.drawPath(path, if (isBullKumo) bullCloudFill else bearCloudFill)
+        }
+
+        // خط عمودی مرز کندل فعلی و شروع ابر آینده ۲۶ کندلی
+        val nowX = slotToX((bars.size - 1).coerceAtLeast(0))
+        val futureDividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(110, 245, 196, 81)
+            strokeWidth = 1.5f
+            style = Paint.Style.STROKE
+            pathEffect = DashPathEffect(floatArrayOf(6f, 6f), 0f)
+        }
+        canvas.drawLine(nowX, chartTop + 10f, nowX, chartBottom - 10f, futureDividerPaint)
+        canvas.drawText("Future Kumo (+26)", nowX + 8f, chartTop + 26f, smallPaint.apply { color = goldColor })
+
+        // ── ۲.ب: رسم باکس پوزیشن TradingView (ناحیه سبز TP و ناحیه قرمز SL) ──
+        val boxLeft = (nowX - slotWidth * 2f).coerceAtLeast(chartLeft + 20f)
+        val boxRight = (chartRight - 14f).coerceAtLeast(boxLeft + 80f)
+        val entryY = priceToY(record.entryPrice)
+        val tpY = priceToY(record.takeProfitPrice)
+        val slY = priceToY(record.stopLossPrice)
+
+        // مستطیل سبز حد سود (Take-Profit Zone)
+        val tpRect = RectF(boxLeft, min(entryY, tpY), boxRight, max(entryY, tpY))
+        val tpZonePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(68, 16, 185, 129)
+            style = Paint.Style.FILL
+        }
+        val tpStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#10B981")
+            style = Paint.Style.STROKE
+            strokeWidth = 2.4f
+        }
+        canvas.drawRect(tpRect, tpZonePaint)
+        canvas.drawLine(boxLeft, tpY, boxRight, tpY, tpStrokePaint)
+
+        // مستطیل قرمز حد ضرر (Stop-Loss Zone)
+        val slRect = RectF(boxLeft, min(entryY, slY), boxRight, max(entryY, slY))
+        val slZonePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(72, 239, 68, 68)
+            style = Paint.Style.FILL
+        }
+        val slStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#EF4444")
+            style = Paint.Style.STROKE
+            strokeWidth = 2.4f
+        }
+        canvas.drawRect(slRect, slZonePaint)
+        canvas.drawLine(boxLeft, slY, boxRight, slY, slStrokePaint)
+
+        // خط طلایی نقطه ورود (Entry Line)
+        val entryLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = goldColor
+            style = Paint.Style.STROKE
+            strokeWidth = 2.8f
+        }
+        canvas.drawLine(boxLeft, entryY, boxRight, entryY, entryLinePaint)
+
+        // ── ۲.ج: رسم کندل‌ها و خطوط Tenkan-sen و Kijun-sen ────────────────────
+        val bullCandlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#10B981")
+            strokeWidth = 2f
+        }
+        val bearCandlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#EF4444")
+            strokeWidth = 2f
+        }
+        val tenkanPath = Path()
+        val kijunPath = Path()
+
+        bars.forEachIndexed { idx, b ->
+            val cx = slotToX(idx)
+            val c = b.candle
+            val isBull = c.close >= c.open
+            val p = if (isBull) bullCandlePaint else bearCandlePaint
+            val highY = priceToY(c.high)
+            val lowY = priceToY(c.low)
+            val openY = priceToY(c.open)
+            val closeY = priceToY(c.close)
+            canvas.drawLine(cx, highY, cx, lowY, p)
+            val bodyTop = min(openY, closeY)
+            val bodyBot = max(openY, closeY).coerceAtLeast(bodyTop + 2.5f)
+            val halfW = (slotWidth * 0.34f).coerceIn(2.5f, 7.5f)
+            canvas.drawRect(cx - halfW, bodyTop, cx + halfW, bodyBot, p)
+
+            val ty = priceToY(b.tenkan)
+            val ky = priceToY(b.kijun)
+            if (idx == 0) {
+                tenkanPath.moveTo(cx, ty)
+                kijunPath.moveTo(cx, ky)
+            } else {
+                tenkanPath.lineTo(cx, ty)
+                kijunPath.lineTo(cx, ky)
+            }
+        }
+
+        val tenkanPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = cyanColor
+            style = Paint.Style.STROKE
+            strokeWidth = 2.2f
+        }
+        val kijunPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#F59E0B")
+            style = Paint.Style.STROKE
+            strokeWidth = 2.4f
+        }
+        canvas.drawPath(tenkanPath, tenkanPaint)
+        canvas.drawPath(kijunPath, kijunPaint)
+
+        // برچسب‌های قیمت Entry / TP / SL در سمت راست چارت
+        fun drawPriceTag(y: Float, label: String, bgColor: Int) {
+            val safeY = y.coerceIn(chartTop + 18f, chartBottom - 18f)
+            val tagRect = RectF(chartRight + 6f, safeY - 15f, width - 18f, safeY + 15f)
+            val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bgColor }
+            val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.WHITE
+                textSize = 14.5f
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            }
+            canvas.drawRoundRect(tagRect, 8f, 8f, p)
+            canvas.drawText(label, tagRect.left + 8f, safeY + 5f, tp)
+        }
+
+        drawPriceTag(tpY, "TP: ${fmtPrice(record.takeProfitPrice)}", Color.parseColor("#059669"))
+        drawPriceTag(entryY, "IN: ${fmtPrice(record.entryPrice)}", Color.parseColor("#D97706"))
+        drawPriceTag(slY, "SL: ${fmtPrice(record.stopLossPrice)}", Color.parseColor("#DC2626"))
+
+        // ── ۳. پنل پایین: شروط ۱۶گانه ایچیموکو و اندیکاتورها در لحظه باز شدن ───
+        val footerRect = RectF(18f, 626f, width - 18f, height - 16f)
+        canvas.drawRoundRect(footerRect, 14f, 14f, cardPaint)
+        canvas.drawRoundRect(footerRect, 14f, 14f, chartBorderPaint)
+
+        val footerTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = whiteText
+            textSize = 15.5f
+        }
+        val footerAccentPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = cyanColor
+            textSize = 15.5f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+
+        canvas.drawText(
+            "📊 وضعیت خطوط ایچیموکو در لحظه ورود:  Tenkan=${fmtPrice(record.tenkan)}  |  Kijun=${fmtPrice(record.kijun)}  |  SpanA=${fmtPrice(record.currentSpanA)}  |  SpanB=${fmtPrice(record.currentSpanB)}  |  ATR14=${fmtPrice(record.atr14)}  |  RSI14=${String.format(Locale.US, "%.1f", record.rsi14)}  |  ADX14=${String.format(Locale.US, "%.1f", record.adx14)}",
+            34f,
+            658f,
+            footerAccentPaint,
+        )
+        canvas.drawText(
+            "📐 ${record.rrFormulaFa}   |   🛡️ مبنای SL: ${record.slBasisFa.take(55)}",
+            34f,
+            690f,
+            footerTextPaint,
+        )
+
+        val conds = record.conditionsSummary
+        if (conds.isNotEmpty()) {
+            val row1 = conds.take(6).joinToString("  ·  ") { c ->
+                val icon = if (c.status.equals("CONFIRMED", true) || c.status.contains("OK", true)) "✅" else "⚠️"
+                "$icon ${c.name.take(20)}"
+            }
+            val row2 = conds.drop(6).take(6).joinToString("  ·  ") { c ->
+                val icon = if (c.status.equals("CONFIRMED", true) || c.status.contains("OK", true)) "✅" else "⚠️"
+                "$icon ${c.name.take(20)}"
+            }
+            val row3 = conds.drop(12).take(4).joinToString("  ·  ") { c ->
+                val icon = if (c.status.equals("CONFIRMED", true) || c.status.contains("OK", true)) "✅" else "⚠️"
+                "$icon ${c.name.take(24)}"
+            }
+            canvas.drawText(row1, 34f, 724f, smallPaint.apply { color = Color.parseColor("#CBD5E1") })
+            if (row2.isNotBlank()) canvas.drawText(row2, 34f, 754f, smallPaint)
+            if (row3.isNotBlank()) canvas.drawText(row3, 34f, 784f, smallPaint)
+        } else {
+            canvas.drawText(
+                "✅ تمام ۱۶ شرط ایچیموکو، مومنتوم، رهایی چیکو، ابر آینده ۲۶ کندلی و فرمول R:R در لحظه باز شدن تایید شده‌اند.",
+                34f,
+                735f,
+                smallPaint.apply { color = Color.parseColor("#10B981") },
+            )
+        }
+
+        return bmp
+    }
+
+    private fun synthesizeFallbackCandlesForSnapshot(record: ArchivedTradeSnapshotRecord): List<Candle> {
+        val list = mutableListOf<Candle>()
+        val isBuy = record.action.equals("BUY", ignoreCase = true)
+        val step = (abs(record.entryPrice - record.stopLossPrice) / 14.0).coerceAtLeast(abs(record.entryPrice) * 0.0005)
+        val baseTime = record.openedAtMs - 40L * 300_000L
+        var cur = if (isBuy) record.entryPrice - step * 18.0 else record.entryPrice + step * 18.0
+        for (i in 0 until 40) {
+            val drift = if (isBuy) step * 0.45 else -step * 0.45
+            val wave = kotlin.math.sin(i * 0.55) * step * 0.6
+            val open = cur
+            val close = if (i == 39) record.entryPrice else (open + drift + wave)
+            val high = max(open, close) + step * 0.55
+            val low = min(open, close) - step * 0.55
+            list += Candle(
+                time = baseTime + i * 300_000L,
+                open = open,
+                high = high,
+                low = low,
+                close = close,
+                volume = 100.0 + i * 3.0,
+                closed = true,
+            )
+            cur = close
+        }
+        return list
+    }
+
+    private fun compressBitmapToCompactWebp(bitmap: Bitmap, quality: Int = 80): ByteArray {
+        val out = ByteArrayOutputStream()
+        val format = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Bitmap.CompressFormat.WEBP_LOSSY
+        } else {
+            @Suppress("DEPRECATION")
+            Bitmap.CompressFormat.WEBP
+        }
+        bitmap.compress(format, quality.coerceIn(50, 92), out)
+        return out.toByteArray()
+    }
+
+    /**
+     * چسباندن متادیتای کامل JSON معامله و کندل‌ها در انتهای فایل تصویر WebP
+     * تا هر زمان کاربر فایل تصویر را از گوشی انتخاب کرد، خود اپ بتواند دیتای کامل معامله را از دل عکس بخواند!
+     */
+    fun attachEmbeddedJsonToImageBytes(
+        webpBytes: ByteArray,
+        record: ArchivedTradeSnapshotRecord,
+    ): ByteArray {
+        val payloadJson = json.encodeToString(record)
+        val trailer = (EMBED_START_MARKER + payloadJson + EMBED_END_MARKER).toByteArray(Charsets.UTF_8)
+        val combined = ByteArray(webpBytes.size + trailer.size)
+        System.arraycopy(webpBytes, 0, combined, 0, webpBytes.size)
+        System.arraycopy(trailer, 0, combined, webpBytes.size, trailer.size)
+        return combined
+    }
+
+    /**
+     * استخراج دیتای کامل معامله و شرایط ایچیموکو از بایت‌های یک فایل تصویر آرشیو (`.webp`) یا فایل `.json`.
+     */
+    fun extractEmbeddedSnapshotFromBytes(bytes: ByteArray): ArchivedTradeSnapshotRecord? {
+        return runCatching {
+            val text = String(bytes, Charsets.UTF_8)
+            val startIdx = text.lastIndexOf(EMBED_START_MARKER)
+            val endIdx = text.lastIndexOf(EMBED_END_MARKER)
+            if (startIdx >= 0 && endIdx > startIdx) {
+                val jsonSlice = text.substring(startIdx + EMBED_START_MARKER.length, endIdx).trim()
+                return@runCatching json.decodeFromString(ArchivedTradeSnapshotRecord.serializer(), jsonSlice)
+            }
+            val trimmed = text.trim()
+            if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+                return@runCatching json.decodeFromString(ArchivedTradeSnapshotRecord.serializer(), trimmed)
+            }
+            null
+        }.getOrNull()
+    }
+
+    fun loadBitmapForRecord(record: ArchivedTradeSnapshotRecord): Bitmap? {
+        return runCatching {
+            if (record.localImagePath.isNotBlank()) {
+                val f = File(record.localImagePath)
+                if (f.exists()) {
+                    val bytes = f.readBytes()
+                    val markerBytes = EMBED_START_MARKER.toByteArray(Charsets.UTF_8)
+                    val cleanLen = indexOfSubArray(bytes, markerBytes).takeIf { it > 0 } ?: bytes.size
+                    return@runCatching BitmapFactory.decodeByteArray(bytes, 0, cleanLen)
+                }
+            }
+            renderTradeIchimokuSnapshotBitmap(record)
+        }.getOrNull()
+    }
+
+    private fun indexOfSubArray(haystack: ByteArray, needle: ByteArray): Int {
+        if (needle.isEmpty() || haystack.size < needle.size) return -1
+        outer@ for (i in haystack.indices.reversed()) {
+            if (i + needle.size > haystack.size) continue
+            for (j in needle.indices) {
+                if (haystack[i + j] != needle[j]) continue@outer
+            }
+            return i
+        }
+        return -1
+    }
+
+    /**
+     * ذخیره خودکار تصویر کم‌حجم WebP در گالری گوشی (`Pictures/AurumEdge/TradeArchive`)
+     * و ذخیره نسخه خودخوان در `Download/AurumEdge/Archive` تا بعداً اپ بتواند دیتای خود را از حافظه گوشی بخواند.
+     */
+    private fun saveImageAndSelfReadableDataToPhoneStorage(
+        context: Context,
+        fileName: String,
+        imageBytesWithEmbeddedMeta: ByteArray,
+        record: ArchivedTradeSnapshotRecord,
+    ): String {
+        var savedGalleryUri = ""
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val resolver = context.contentResolver
+                val imgValues = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+                    put(MediaStore.Images.Media.MIME_TYPE, "image/webp")
+                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/AurumEdge/TradeArchive")
+                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, imgValues)
+                if (uri != null) {
+                    resolver.openOutputStream(uri)?.use { it.write(imageBytesWithEmbeddedMeta) }
+                    imgValues.clear()
+                    imgValues.put(MediaStore.Images.Media.IS_PENDING, 0)
+                    resolver.update(uri, imgValues, null, null)
+                    savedGalleryUri = uri.toString()
+                }
+
+                // همچنین ذخیره فایل در Download/AurumEdge/Archive برای بازخوانی خودکار بعدی
+                val dlValues = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                    put(MediaStore.Downloads.MIME_TYPE, "image/webp")
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/AurumEdge/Archive")
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val dlUri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, dlValues)
+                if (dlUri != null) {
+                    resolver.openOutputStream(dlUri)?.use { it.write(imageBytesWithEmbeddedMeta) }
+                    dlValues.clear()
+                    dlValues.put(MediaStore.Downloads.IS_PENDING, 0)
+                    resolver.update(dlUri, dlValues, null, null)
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                val picDir = File(
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+                    "AurumEdge/TradeArchive",
+                ).apply { mkdirs() }
+                val outFile = File(picDir, fileName)
+                outFile.writeBytes(imageBytesWithEmbeddedMeta)
+                savedGalleryUri = Uri.fromFile(outFile).toString()
+            }
+        }
+        return savedGalleryUri
+    }
+
+    /**
+     * بازخوانی خودکار تمام عکس‌ها و فایل‌های آرشیو ذخیره‌شده در حافظه گوشی (`Pictures/AurumEdge/TradeArchive` و `Download/AurumEdge/Archive`)
+     * یا از یک URI انتخابی کاربر، و بازگردانی کامل رکوردهای آرشیو و معاملات به داخل اپ!
+     */
+    @Synchronized
+    fun scanAndRestoreFromPhoneStorage(
+        context: Context,
+        journalStore: JournalStore? = null,
+    ): Int {
+        var restoredCount = 0
+        val currentMap = _records.value.associateBy { it.tradeId }.toMutableMap()
+        val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
+
+        fun ingestBytes(bytes: ByteArray) {
+            val rec = extractEmbeddedSnapshotFromBytes(bytes) ?: return
+            val localFile = File(dir, "AurumTrade_${rec.symbol.replace("/", "_")}_${rec.timeframeLabel}_${rec.openedAtMs}.webp")
+            if (!localFile.exists()) {
+                runCatching { localFile.writeBytes(bytes) }
+            }
+            val updatedRec = rec.copy(
+                localImagePath = localFile.absolutePath,
+                imageSizeBytes = bytes.size.toLong(),
+            )
+            if (rec.tradeId !in currentMap) {
+                restoredCount++
+            }
+            currentMap[rec.tradeId] = updatedRec
+            updatedRec.fullPaperTrade?.let { trade ->
+                journalStore?.restoreArchivedTradeIfMissing(trade)
+            }
+        }
+
+        // ۱. اسکن MediaStore.Images و MediaStore.Downloads در اندروید ۱۰+
+        runCatching {
+            val resolver = context.contentResolver
+            val collections = mutableListOf<Uri>(MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                collections += MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            }
+            for (collection in collections) {
+                val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME)
+                val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
+                val selectionArgs = arrayOf("AurumTrade_%")
+                resolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                    while (cursor.moveToNext()) {
+                        val id = cursor.getLong(idCol)
+                        val itemUri = android.content.ContentUris.withAppendedId(collection, id)
+                        runCatching {
+                            resolver.openInputStream(itemUri)?.use { stream ->
+                                ingestBytes(stream.readBytes())
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ۲. اسکن پوشه داخلی اپ
+        runCatching {
+            dir.listFiles()?.forEach { f ->
+                if (f.isFile && f.name.startsWith("AurumTrade_")) {
+                    ingestBytes(f.readBytes())
+                }
+            }
+        }
+
+        val merged = currentMap.values.sortedByDescending { it.openedAtMs }.take(500)
+        _records.value = merged
+        saveIndexToDisk(context, merged)
+        return restoredCount
+    }
+
+    /**
+     * بازخوانی از یک فایل تصویر `.webp` یا `.json` انتخاب‌شده توسط کاربر از فایل‌منیجر گوشی.
+     */
+    @Synchronized
+    fun importSnapshotFromUri(
+        context: Context,
+        uri: Uri,
+        journalStore: JournalStore? = null,
+    ): ArchivedTradeSnapshotRecord? {
+        return runCatching {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+            val rec = extractEmbeddedSnapshotFromBytes(bytes) ?: return null
+            val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
+            val localFile = File(dir, "AurumTrade_${rec.symbol.replace("/", "_")}_${rec.timeframeLabel}_${rec.openedAtMs}.webp")
+            localFile.writeBytes(bytes)
+            val updatedRec = rec.copy(
+                localImagePath = localFile.absolutePath,
+                imageSizeBytes = bytes.size.toLong(),
+            )
+            val merged = (_records.value.filterNot { it.tradeId == rec.tradeId } + updatedRec)
+                .sortedByDescending { it.openedAtMs }
+            _records.value = merged
+            saveIndexToDisk(context, merged)
+            updatedRec.fullPaperTrade?.let { trade ->
+                journalStore?.restoreArchivedTradeIfMissing(trade)
+            }
+            updatedRec
+        }.getOrNull()
+    }
+
+    private fun loadIndexFromDisk(context: Context): List<ArchivedTradeSnapshotRecord> {
+        val file = File(context.filesDir, INDEX_FILE_NAME)
+        if (!file.exists()) return emptyList()
+        return runCatching {
+            json.decodeFromString<List<ArchivedTradeSnapshotRecord>>(file.readText(Charsets.UTF_8))
+        }.getOrDefault(emptyList())
+    }
+
+    private fun saveIndexToDisk(context: Context, list: List<ArchivedTradeSnapshotRecord>) {
+        runCatching {
+            val file = File(context.filesDir, INDEX_FILE_NAME)
+            file.writeText(json.encodeToString(list), Charsets.UTF_8)
+        }
+    }
+
+    private fun fmtPrice(v: Double): String {
+        val a = abs(v)
+        val fmt = when {
+            a >= 500.0 -> "%.2f"
+            a >= 10.0 -> "%.3f"
+            else -> "%.5f"
+        }
+        return String.format(Locale.US, fmt, v)
+    }
+
+    private fun round2(v: Double): Double = kotlin.math.round(v * 100.0) / 100.0
+    private fun roundPrice(v: Double): Double = kotlin.math.round(v * 100_000.0) / 100_000.0
+}

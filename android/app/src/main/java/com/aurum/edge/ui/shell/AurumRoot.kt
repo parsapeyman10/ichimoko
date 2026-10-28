@@ -126,6 +126,9 @@ fun AurumRoot(viewModel: AurumViewModel) {
                             onChartSymbol = ::openChartFor,
                             onOpenSettings = { open(AurumTab.Settings) },
                         )
+                        AurumTab.Neural -> NeuralBrainScreen(
+                            viewModel = viewModel,
+                        )
                         AurumTab.Settings -> SettingsScreen(
                             viewModel = viewModel,
                         )

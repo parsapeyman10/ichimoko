@@ -425,6 +425,7 @@ fun JournalRiskScreen(
         ) {
             listOf(
                 0 to "📅 تقویم و دسته‌بندی (${filteredClosedTrades.size})",
+                4 to "📸 آرشیو تصویری معاملات",
                 3 to "📊 خروجی، ذخیره و بکاپ ژورنال",
                 1 to "📜 معاملات باز (${filteredOpenTrades.size})",
                 2 to "🧮 ماشین‌حساب حجم",
@@ -454,6 +455,17 @@ fun JournalRiskScreen(
                     onDeleteTrade = viewModel::deleteJournalTrade,
                     onClearAll = viewModel::clearAllJournalTrades,
                     onOpenChart = onChartSymbol,
+                )
+                com.aurum.edge.ui.components.TradeSnapshotArchiveGallerySection(
+                    viewModel = viewModel,
+                    initiallyExpanded = false,
+                )
+            }
+
+            4 -> {
+                com.aurum.edge.ui.components.TradeSnapshotArchiveGallerySection(
+                    viewModel = viewModel,
+                    initiallyExpanded = true,
                 )
             }
 

@@ -136,6 +136,29 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun startApp(@Suppress("UNUSED_PARAMETER") context: Context) {
         container.settingsStore.ensureBalance100kMigrated()
+        com.aurum.edge.data.TradeSnapshotArchiveManager.init(container.appContext)
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                com.aurum.edge.data.TradeSnapshotArchiveManager.scanAndRestoreFromPhoneStorage(
+                    context = container.appContext,
+                    journalStore = container.journalStore,
+                )
+                container.neuralEngine.restoreBrainBackupFromPhoneStorage(container.appContext)
+                // ساخت تصویر آرشیو برای معاملاتی که از قبل باز یا بسته شده‌اند ولی هنوز تصویر ندارند
+                val existingIds = com.aurum.edge.data.TradeSnapshotArchiveManager.records.value.map { it.tradeId }.toSet()
+                trades.value.take(30).filterNot { it.id in existingIds }.forEach { tr ->
+                    val sym = V1Universe.normalize(tr.symbol)
+                    val rep = _dualSymbolStrategyReports.value[sym]?.reportFor(tr.interval, tr.strategyId)
+                    val candles = LiveQuoteFetcher.peekCachedCandles(sym, tr.interval)
+                    com.aurum.edge.data.TradeSnapshotArchiveManager.captureAndArchiveTradeOpen(
+                        context = container.appContext,
+                        trade = tr,
+                        report = rep,
+                        triggerCandles = candles,
+                    )
+                }
+            }
+        }
         if (!updateCheckStarted) {
             updateCheckStarted = true
             checkForAppUpdate(settings.value.autoDownloadUpdates, force = false)
@@ -706,6 +729,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    val tradeSnapshotArchiveRecords: StateFlow<List<com.aurum.edge.data.ArchivedTradeSnapshotRecord>> =
+        com.aurum.edge.data.TradeSnapshotArchiveManager.records
+
     private fun executeOpenTradeNow(
         calc: RiskCalculationResult,
         note: String,
@@ -715,10 +741,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     ) {
         val now = System.currentTimeMillis()
         val normSym = V1Universe.normalize(calc.symbol)
-        val matchedBreakdown = _dualSymbolStrategyReports.value[normSym]
+        val matchedReport = _dualSymbolStrategyReports.value[normSym]
             ?.reportFor(entryInterval, strategyId)
-            ?.rrBreakdown
-        val trade = container.journalStore.openTrade(
+        val matchedBreakdown = matchedReport?.rrBreakdown
+        val openedRaw = container.journalStore.openTrade(
             calc = calc,
             note = note,
             now = now,
@@ -728,18 +754,104 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             optimalRiskReward = matchedBreakdown?.optimalRiskReward ?: calc.riskReward,
             rrBreakdownFa = matchedBreakdown?.optimalRrReasonFa ?: "",
         )
+        val condRecords = matchedReport?.conditions?.map { c ->
+            com.aurum.edge.core.PaperConditionRecord(
+                name = c.titleFa,
+                status = if (c.passed) "CONFIRMED" else "BLOCKED",
+                detail = c.detailFa,
+            )
+        }.orEmpty()
+        val trade = if (condRecords.isNotEmpty()) {
+            val enriched = openedRaw.copy(entryConditions = condRecords)
+            container.journalStore.addTrade(enriched)
+            enriched
+        } else {
+            openedRaw
+        }
         _liveTicks.value[trade.symbol]?.let { tick ->
             _lastDisplayMarks.value = OpenPositionDisplay.record(_lastDisplayMarks.value, trade, tick, now)
         }
+        // ثبت فوری اسکرین‌شات ایچیموکو (کندل + کومو + آینده ۲۶ کندلی + باکس SL/TP + شروط ۱۶گانه) در آرشیو اپ و حافظه گوشی
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val cachedCandles = LiveQuoteFetcher.peekCachedCandles(normSym, entryInterval)
+            com.aurum.edge.data.TradeSnapshotArchiveManager.captureAndArchiveTradeOpen(
+                context = container.appContext,
+                trade = trade,
+                report = matchedReport,
+                triggerCandles = cachedCandles,
+            )
+        }
         refreshSymbolLivePrice(trade.symbol)
         syncBackgroundServiceState()
-        val msg = "⚡ معامله ${trade.symbol} [تایم ${trade.interval.label}] · [${trade.strategyTitleFa}] (${if (trade.action == com.aurum.edge.domain.SignalAction.BUY) "خرید" else "فروش"}) باز شد · ریسک: $${trade.fixedRiskUsd}"
+        val msg = "⚡ معامله ${trade.symbol} [تایم ${trade.interval.label}] · [${trade.strategyTitleFa}] (${if (trade.action == com.aurum.edge.domain.SignalAction.BUY) "خرید" else "فروش"}) باز شد · 📸 اسکرین‌شات ایچیموکو در آرشیو و گوشی ذخیره شد"
         _toast.value = msg
         BackgroundTradingService.postTradeEventNotification(
             context = container.appContext,
             title = "باز شدن معامله ${trade.symbol} (${trade.strategyTitleFa})",
             body = msg,
         )
+    }
+
+    fun captureOrRefreshTradeSnapshot(trade: PaperTrade) {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val sym = V1Universe.normalize(trade.symbol)
+            val rep = _dualSymbolStrategyReports.value[sym]?.reportFor(trade.interval, trade.strategyId)
+            val candles = LiveQuoteFetcher.peekCachedCandles(sym, trade.interval)
+            val rec = com.aurum.edge.data.TradeSnapshotArchiveManager.captureAndArchiveTradeOpen(
+                context = container.appContext,
+                trade = trade,
+                report = rep,
+                triggerCandles = candles,
+            )
+            if (rec != null) {
+                val kb = (rec.imageSizeBytes / 1024L).coerceAtLeast(1L)
+                _toast.value = "📸 تصویر ایچیموکو معامله ${trade.symbol} (${kb}KB WebP) در آرشیو و حافظه گوشی ذخیره شد"
+            }
+        }
+    }
+
+    fun restoreAllDataAndSnapshotsFromPhone() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val restoredSnapshots = com.aurum.edge.data.TradeSnapshotArchiveManager.scanAndRestoreFromPhoneStorage(
+                context = container.appContext,
+                journalStore = container.journalStore,
+            )
+            val restoredBrain = container.neuralEngine.restoreBrainBackupFromPhoneStorage(container.appContext)
+            container.neuralEngine.syncWithClosedJournalTrades(trades.value)
+            _toast.value = buildString {
+                append("🔄 بازخوانی از حافظه گوشی انجام شد: ")
+                append("${com.aurum.edge.data.TradeSnapshotArchiveManager.records.value.size} تصویر آرشیو")
+                if (restoredSnapshots > 0) append(" ($restoredSnapshots جدید)")
+                if (restoredBrain) append(" + حافظه شبکه عصبی بازیابی شد")
+            }
+        }
+    }
+
+    fun importSnapshotFromPhoneUri(uri: android.net.Uri) {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val rec = com.aurum.edge.data.TradeSnapshotArchiveManager.importSnapshotFromUri(
+                context = container.appContext,
+                uri = uri,
+                journalStore = container.journalStore,
+            )
+            if (rec != null) {
+                container.neuralEngine.syncWithClosedJournalTrades(trades.value)
+                _toast.value = "✅ تصویر و دیتای کامل معامله ${rec.symbol} (${rec.strategyTitleFa}) از گوشی بازیابی شد"
+            } else {
+                _toast.value = "⚠️ فایل انتخابی حاوی متادیتای آرشیو Aurum Edge نبود"
+            }
+        }
+    }
+
+    fun backupNeuralBrainToPhoneNow() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val ok = container.neuralEngine.saveBrainBackupToPhoneStorage(container.appContext)
+            _toast.value = if (ok) {
+                "💾 حافظه کامل شبکه عصبی در Download/AurumEdge/Archive/AurumNeuralBrain_Backup.json ذخیره شد"
+            } else {
+                "💾 حافظه شبکه عصبی در حافظه داخلی اپ همگام‌سازی شد"
+            }
+        }
     }
 
     fun closeTradeManually(

@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -40,6 +41,7 @@ enum class AurumTab(val label: String, val icon: ImageVector) {
     Strategy("رادار", Icons.Filled.TrackChanges),
     Chart("چارت", Icons.Filled.ShowChart),
     Journal("ژورنال", Icons.Filled.ReceiptLong),
+    Neural("هوش عصبی", Icons.Filled.Psychology),
     Settings("تنظیمات", Icons.Filled.Settings),
     Update("آپدیت", Icons.Filled.Refresh),
 }
@@ -49,6 +51,7 @@ internal val primaryTabs = listOf(
     AurumTab.Strategy,
     AurumTab.Chart,
     AurumTab.Journal,
+    AurumTab.Neural,
     AurumTab.Settings,
     AurumTab.Update,
 )

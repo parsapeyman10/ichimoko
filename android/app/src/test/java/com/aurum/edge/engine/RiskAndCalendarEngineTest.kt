@@ -779,6 +779,68 @@ class RiskAndCalendarEngineTest {
         )
         assertTrue(evalWhenActive.isBlockingTradeNow)
         assertFalse(evalWhenActive.shouldAllowTrade)
+
+        // Verify Neural Brain explainability fields (learnedInsightsFeedFa, featureInsights, recentLessons)
+        val brainSummary = neuralEngine.state.value
+        assertEquals(16, brainSummary.featureInsights.size)
+        assertTrue(brainSummary.learnedInsightsFeedFa.isNotEmpty())
+        assertEquals(6, brainSummary.recentLessons.size)
+        assertTrue(brainSummary.noTradeClusters.isNotEmpty())
+
+        // Verify TradeSnapshotArchiveManager self-readable embedded image payload round-trip & default alarm ringtone settings
+        val defaultSettings = com.aurum.edge.core.AppSettings()
+        assertEquals("CUSTOM_ONLY", defaultSettings.alarmTonePreset)
+        assertEquals("Ding-Dong", defaultSettings.entryAlarmSoundName)
+        assertEquals("Red Dwarf", defaultSettings.tpAlarmSoundName)
+        assertEquals("Latch", defaultSettings.slAlarmSoundName)
+
+        val sampleTrade = com.aurum.edge.core.PaperTrade(
+            id = "SNAP_TEST_1",
+            symbol = "XAU/USD",
+            action = SignalAction.BUY,
+            interval = Interval.M15,
+            entry = 2_745.0,
+            stopLoss = 2_738.0,
+            takeProfit = 2_762.5,
+            riskReward = 2.5,
+            confidence = 91.0,
+            openedAt = 1_760_200_000_000L,
+            fixedRiskUsd = 5.0,
+            strategyId = BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL.id,
+            strategyTitleFa = BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL.titleFa,
+        )
+        val sampleArchiveRecord = com.aurum.edge.data.ArchivedTradeSnapshotRecord(
+            tradeId = sampleTrade.id,
+            symbol = sampleTrade.symbol,
+            timeframeLabel = sampleTrade.interval.label,
+            action = sampleTrade.action.name,
+            strategyId = sampleTrade.strategyId,
+            strategyTitleFa = sampleTrade.strategyTitleFa,
+            strategyBadgeFa = "Foka 15m",
+            entryPrice = sampleTrade.entry,
+            stopLossPrice = sampleTrade.stopLoss,
+            takeProfitPrice = sampleTrade.takeProfit,
+            riskReward = sampleTrade.riskReward,
+            optimalRiskReward = 3.0,
+            fixedRiskUsd = 5.0,
+            expectedProfitUsd = 12.5,
+            confidence = 91.0,
+            openedAtMs = sampleTrade.openedAt,
+            fullPaperTrade = sampleTrade,
+        )
+        val fakeWebpHeader = byteArrayOf(0x52, 0x49, 0x46, 0x46, 0x10, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50)
+        val combinedBytes = com.aurum.edge.data.TradeSnapshotArchiveManager.attachEmbeddedJsonToImageBytes(
+            webpBytes = fakeWebpHeader,
+            record = sampleArchiveRecord,
+        )
+        val decodedRecord = com.aurum.edge.data.TradeSnapshotArchiveManager.extractEmbeddedSnapshotFromBytes(combinedBytes)
+        assertNotNull(decodedRecord)
+        assertEquals("SNAP_TEST_1", decodedRecord!!.tradeId)
+        assertEquals("XAU/USD", decodedRecord.symbol)
+        assertEquals(2_745.0, decodedRecord.entryPrice, 1e-4)
+        assertEquals(2_738.0, decodedRecord.stopLossPrice, 1e-4)
+        assertEquals(2_762.5, decodedRecord.takeProfitPrice, 1e-4)
+        assertNotNull(decodedRecord.fullPaperTrade)
     }
 }
 

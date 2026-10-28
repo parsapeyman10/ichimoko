@@ -402,9 +402,9 @@ fun SettingsScreen(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         listOf(
-                            Triple(TradeAlarmKind.ENTRY, "🚀 صدای ورود به معامله", settings.entryAlarmSoundName.ifBlank { settings.alertSoundName.ifBlank { "ملودی استاندارد ورود" } }),
-                            Triple(TradeAlarmKind.TAKE_PROFIT, "🎯 صدای حد سود (TP)", settings.tpAlarmSoundName.ifBlank { settings.alertSoundName.ifBlank { "ملودی استاندارد حد سود" } }),
-                            Triple(TradeAlarmKind.STOP_LOSS, "🛑 صدای حد ضرر (SL)", settings.slAlarmSoundName.ifBlank { settings.alertSoundName.ifBlank { "ملودی استاندارد حد ضرر" } }),
+                            Triple(TradeAlarmKind.ENTRY, "🚀 صدای ورود به معامله", settings.entryAlarmSoundName.ifBlank { "Ding-Dong" }),
+                            Triple(TradeAlarmKind.TAKE_PROFIT, "🎯 صدای حد سود (TP)", settings.tpAlarmSoundName.ifBlank { "Red Dwarf" }),
+                            Triple(TradeAlarmKind.STOP_LOSS, "🛑 صدای حد ضرر (SL)", settings.slAlarmSoundName.ifBlank { "Latch" }),
                         ).forEach { (kind, labelFa, activeNameFa) ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -424,7 +424,9 @@ fun SettingsScreen(
                                     Pill(
                                         text = "پیش‌فرض",
                                         color = AurumColors.TextMuted,
-                                        modifier = Modifier.clickable { viewModel.setCustomAlarmSoundForKind(kind, "", "") },
+                                        modifier = Modifier.clickable {
+                                            viewModel.setCustomAlarmSoundForKind(kind, "", kind.defaultRingtoneTitle)
+                                        },
                                     )
                                 }
                             }
@@ -473,8 +475,9 @@ fun SettingsScreen(
 
                 // ۲. انتخاب و فعال‌سازی هم‌زمان استراتژی‌ها
                 SectionCard(
-                    title = "🎯 مدیریت و فعال‌سازی هم‌زمان استراتژی‌ها",
-                    subtitle = "هر ۵ استراتژی ایچیموکو و استراتژی‌های سفارشی را هم‌زمان روی تایم‌فریم‌های 15m و 5m فعال نگه دارید",
+                    title = "🎯 مدیریت و فعال‌سازی هم‌زمان ۲۴ استراتژی ایچیموکو",
+                    subtitle = "هر ۲۴ استراتژی ایچیموکو (۱۵ ترکیب ۴ کتاب + ۹ کتاب درایو) را هم‌زمان روی تایم‌فریم‌های 15m و 5m فعال نگه دارید",
+                    initiallyExpanded = false,
                 ) {
                     ExclusiveStrategySelectorPage(
                         allItems = allItems,

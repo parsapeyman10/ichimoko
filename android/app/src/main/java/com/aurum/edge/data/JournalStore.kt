@@ -111,6 +111,13 @@ class JournalStore(
         persist(listOf(trade) + _trades.value.filterNot { it.id == trade.id })
     }
 
+    @Synchronized
+    fun restoreArchivedTradeIfMissing(trade: PaperTrade): Boolean {
+        if (_trades.value.any { it.id == trade.id }) return false
+        persist(listOf(trade) + _trades.value)
+        return true
+    }
+
     /**
      * به‌روزرسانی خودکار حد ضرر (Break-Even در `1R`، تریل با `Kijun-sen` یا `Preserve Mode` پشت `Tenkan-sen`)
      * روی معاملات باز بیت‌کوین.

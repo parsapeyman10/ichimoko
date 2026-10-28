@@ -727,6 +727,7 @@ internal fun ExclusiveStrategySelectorPage(
         }
 
         allItems.forEach { item ->
+            var descExpanded by rememberSaveable(item.id) { mutableStateOf(false) }
             val isSelected = item.id == selectedId
             val isEnabledInMulti = if (runAllSimultaneously) (item.id in enabledStrategyIds || enabledStrategyIds.isEmpty()) else isSelected
             val isRunning = isEnabledInMulti && executionEnabled
@@ -791,7 +792,12 @@ internal fun ExclusiveStrategySelectorPage(
                         }
                     }
 
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Pill(
+                            text = if (descExpanded) "▲" else "▼ توضیح",
+                            color = AurumColors.Cyan,
+                            modifier = Modifier.clickable { descExpanded = !descExpanded },
+                        )
                         if (item.isCustom) {
                             Pill(
                                 text = "حذف",
@@ -820,11 +826,13 @@ internal fun ExclusiveStrategySelectorPage(
                         )
                     }
                 }
-                Text(
-                    text = item.summaryFa,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.TextSecondary,
-                )
+                if (descExpanded) {
+                    Text(
+                        text = item.summaryFa,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                }
             }
         }
     }

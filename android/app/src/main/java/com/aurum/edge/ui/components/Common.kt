@@ -1,5 +1,6 @@
 package com.aurum.edge.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,6 +18,10 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -24,6 +29,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.aurum.edge.core.ConfluenceItem
 import com.aurum.edge.core.ConfluenceStatus
 import com.aurum.edge.core.LiveTradeValuation
@@ -85,8 +91,11 @@ fun SectionCard(
     subtitle: String? = null,
     trailing: @Composable (() -> Unit)? = null,
     modifier: Modifier = Modifier,
+    collapsible: Boolean = true,
+    initiallyExpanded: Boolean = true,
     content: @Composable () -> Unit,
 ) {
+    var expanded by rememberSaveable(title) { mutableStateOf(initiallyExpanded) }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -99,6 +108,13 @@ fun SectionCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(AurumColors.SurfaceAlt.copy(alpha = 0.55f))
+                .then(
+                    if (collapsible) {
+                        Modifier.clickable { expanded = !expanded }
+                    } else {
+                        Modifier
+                    },
+                )
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -135,10 +151,34 @@ fun SectionCard(
                     }
                 }
             }
-            trailing?.invoke()
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                trailing?.invoke()
+                if (collapsible) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(AurumColors.Bg.copy(alpha = 0.7f))
+                            .border(0.8.dp, AurumColors.Gold.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                            .clickable { expanded = !expanded }
+                            .padding(horizontal = 7.dp, vertical = 3.dp),
+                    ) {
+                        Text(
+                            text = if (expanded) "▲ بستن" else "▼ باز کردن",
+                            color = AurumColors.Gold,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
         }
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-            content()
+        AnimatedVisibility(visible = !collapsible || expanded) {
+            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                content()
+            }
         }
     }
 }

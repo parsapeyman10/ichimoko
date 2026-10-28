@@ -182,14 +182,14 @@ class SettingsStore(context: Context) {
         alertSoundUri = prefs.getString(KEY_ALERT_SOUND_URI, "").orEmpty(),
         alertSoundName = prefs.getString(KEY_ALERT_SOUND_NAME, "").orEmpty(),
         alarmVolumePercent = prefs.getInt(KEY_ALARM_VOLUME_PCT, 90).coerceIn(0, 100),
-        alarmTonePreset = prefs.getString(KEY_ALARM_TONE_PRESET, "INSTITUTIONAL").orEmpty().ifBlank { "INSTITUTIONAL" },
+        alarmTonePreset = prefs.getString(KEY_ALARM_TONE_PRESET, "CUSTOM_ONLY").orEmpty().ifBlank { "CUSTOM_ONLY" },
         alarmVibrationEnabled = prefs.getBoolean(KEY_ALARM_VIBRATION_ENABLED, true),
         entryAlarmSoundUri = prefs.getString(KEY_ENTRY_ALARM_SOUND_URI, "").orEmpty(),
-        entryAlarmSoundName = prefs.getString(KEY_ENTRY_ALARM_SOUND_NAME, "").orEmpty(),
+        entryAlarmSoundName = prefs.getString(KEY_ENTRY_ALARM_SOUND_NAME, "Ding-Dong").orEmpty().ifBlank { "Ding-Dong" },
         tpAlarmSoundUri = prefs.getString(KEY_TP_ALARM_SOUND_URI, "").orEmpty(),
-        tpAlarmSoundName = prefs.getString(KEY_TP_ALARM_SOUND_NAME, "").orEmpty(),
+        tpAlarmSoundName = prefs.getString(KEY_TP_ALARM_SOUND_NAME, "Red Dwarf").orEmpty().ifBlank { "Red Dwarf" },
         slAlarmSoundUri = prefs.getString(KEY_SL_ALARM_SOUND_URI, "").orEmpty(),
-        slAlarmSoundName = prefs.getString(KEY_SL_ALARM_SOUND_NAME, "").orEmpty(),
+        slAlarmSoundName = prefs.getString(KEY_SL_ALARM_SOUND_NAME, "Latch").orEmpty().ifBlank { "Latch" },
         maxLeverageCap = prefs.getInt(KEY_MAX_LEVERAGE_CAP, 10).coerceIn(1, 10),
         newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty().trim(),
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
@@ -347,14 +347,14 @@ class SettingsStore(context: Context) {
             .putString(KEY_ALERT_SOUND_URI, next.alertSoundUri)
             .putString(KEY_ALERT_SOUND_NAME, next.alertSoundName)
             .putInt(KEY_ALARM_VOLUME_PCT, next.alarmVolumePercent.coerceIn(0, 100))
-            .putString(KEY_ALARM_TONE_PRESET, next.alarmTonePreset.ifBlank { "INSTITUTIONAL" })
+            .putString(KEY_ALARM_TONE_PRESET, next.alarmTonePreset.ifBlank { "CUSTOM_ONLY" })
             .putBoolean(KEY_ALARM_VIBRATION_ENABLED, next.alarmVibrationEnabled)
             .putString(KEY_ENTRY_ALARM_SOUND_URI, next.entryAlarmSoundUri)
-            .putString(KEY_ENTRY_ALARM_SOUND_NAME, next.entryAlarmSoundName)
+            .putString(KEY_ENTRY_ALARM_SOUND_NAME, next.entryAlarmSoundName.ifBlank { "Ding-Dong" })
             .putString(KEY_TP_ALARM_SOUND_URI, next.tpAlarmSoundUri)
-            .putString(KEY_TP_ALARM_SOUND_NAME, next.tpAlarmSoundName)
+            .putString(KEY_TP_ALARM_SOUND_NAME, next.tpAlarmSoundName.ifBlank { "Red Dwarf" })
             .putString(KEY_SL_ALARM_SOUND_URI, next.slAlarmSoundUri)
-            .putString(KEY_SL_ALARM_SOUND_NAME, next.slAlarmSoundName)
+            .putString(KEY_SL_ALARM_SOUND_NAME, next.slAlarmSoundName.ifBlank { "Latch" })
             .putInt(KEY_MAX_LEVERAGE_CAP, next.maxLeverageCap.coerceIn(1, 10))
             .putString(KEY_NEWS_URL, next.newsBaseUrl.trim())
             .putString(KEY_SIGNAL_PROFILE, next.signalProfile.persistName())
@@ -409,15 +409,19 @@ class SettingsStore(context: Context) {
         val cur = read()
         val needsBalanceUpgrade = !prefs.getBoolean(KEY_BALANCE_100K_MIGRATED_V3903, false) && cur.accountBalance < 50_000.0
         val needsKeyPreload = cur.newsAiApiKey.isBlank()
-        val all15StrategyIds = (BitcoinStrategyModel.entries.map { it.id } + cur.customStrategies.map { it.id }).toSet()
+        val all24StrategyIds = (BitcoinStrategyModel.entries.map { it.id } + cur.customStrategies.map { it.id }).toSet()
         val needsAll15StrategiesMigration = !prefs.getBoolean(KEY_ALL_15_COMBOS_MIGRATED_V3908, false)
+        val needsCleanAlarmMigration = !prefs.getBoolean(KEY_CLEAN_ALARM_V3915, false)
         if (!prefs.getBoolean(KEY_BALANCE_100K_MIGRATED_V3903, false)) {
             prefs.edit().putBoolean(KEY_BALANCE_100K_MIGRATED_V3903, true).apply()
         }
         if (needsAll15StrategiesMigration) {
             prefs.edit().putBoolean(KEY_ALL_15_COMBOS_MIGRATED_V3908, true).apply()
         }
-        if (needsBalanceUpgrade || needsKeyPreload || needsAll15StrategiesMigration) {
+        if (needsCleanAlarmMigration) {
+            prefs.edit().putBoolean(KEY_CLEAN_ALARM_V3915, true).apply()
+        }
+        if (needsBalanceUpgrade || needsKeyPreload || needsAll15StrategiesMigration || needsCleanAlarmMigration) {
             update {
                 it.copy(
                     accountBalance = if (needsBalanceUpgrade) 100_000.0 else it.accountBalance,
@@ -426,8 +430,12 @@ class SettingsStore(context: Context) {
                     maxDrawdownLimitPercent = 100.0,
                     useFixedDollarRisk = true,
                     fixedRiskUsd = 5.0,
+                    alarmTonePreset = if (needsCleanAlarmMigration) "CUSTOM_ONLY" else it.alarmTonePreset,
+                    entryAlarmSoundName = it.entryAlarmSoundName.ifBlank { "Ding-Dong" },
+                    tpAlarmSoundName = it.tpAlarmSoundName.ifBlank { "Red Dwarf" },
+                    slAlarmSoundName = it.slAlarmSoundName.ifBlank { "Latch" },
                     newsAiApiKey = if (it.newsAiApiKey.isBlank()) com.aurum.edge.data.AvalAiAdvisor.PRECONFIGURED_USER_KEY else it.newsAiApiKey,
-                    enabledStrategyIds = if (it.runAllStrategiesSimultaneously) (it.enabledStrategyIds + all15StrategyIds) else it.enabledStrategyIds,
+                    enabledStrategyIds = if (it.runAllStrategiesSimultaneously) (it.enabledStrategyIds + all24StrategyIds) else it.enabledStrategyIds,
                 )
             }
         }
@@ -438,6 +446,7 @@ class SettingsStore(context: Context) {
         private val symbolKeySerializer = MapSerializer(String.serializer(), String.serializer())
         private val customStrategiesSerializer = ListSerializer(CustomStrategySlot.serializer())
         private val KEY_JSON = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        private const val KEY_CLEAN_ALARM_V3915 = "clean_alarm_migrated_v3915"
         private const val KEY_API = "td_api_key"
         private const val KEY_TD_KEYS = "td_symbol_keys_json"
         private const val KEY_SYMBOL = "symbol"

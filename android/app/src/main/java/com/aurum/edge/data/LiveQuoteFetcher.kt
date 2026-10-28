@@ -74,6 +74,11 @@ object LiveQuoteFetcher {
         }
     }
 
+    fun peekCachedCandles(symbolInput: String, interval: Interval): List<Candle> {
+        val symbol = V1Universe.normalize(symbolInput)
+        return candleCache["$symbol|${interval.label}"]?.bars.orEmpty()
+    }
+
     /**
      * به‌روزرسانی کندل در حال تشکیل در کش حافظه با استفاده از تیک قیمت زنده بدون نیاز به دانلود مجدد تاریخچه کندل.
      */
