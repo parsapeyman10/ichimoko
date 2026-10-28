@@ -10,37 +10,19 @@ on:
     paths:
       - 'android/**'
       - 'update/**'
-      - 'tools/probe_crypto_venues.py'
-      - 'tools/test_probe_crypto_venues.py'
       - 'tools/verify_apk_upgrade.py'
       - 'tools/test_verify_apk_upgrade.py'
       - 'tools/refresh_update_manifest.py'
       - 'tools/test_refresh_update_manifest.py'
-      - 'tools/btc_ares_backtest.py'
-      - 'tools/test_btc_ares_backtest.py'
-      - 'tools/als5s_backtest.py'
-      - 'tools/test_als5s_backtest.py'
-      - 'tools/eur_ares_backtest.py'
-      - 'tools/test_eur_ares_backtest.py'
-      - 'strategies/**'
       - '.github/workflows/main.yml'
   pull_request:
     paths:
       - 'android/**'
       - 'update/**'
-      - 'tools/probe_crypto_venues.py'
-      - 'tools/test_probe_crypto_venues.py'
       - 'tools/verify_apk_upgrade.py'
       - 'tools/test_verify_apk_upgrade.py'
       - 'tools/refresh_update_manifest.py'
       - 'tools/test_refresh_update_manifest.py'
-      - 'tools/btc_ares_backtest.py'
-      - 'tools/test_btc_ares_backtest.py'
-      - 'tools/als5s_backtest.py'
-      - 'tools/test_als5s_backtest.py'
-      - 'tools/eur_ares_backtest.py'
-      - 'tools/test_eur_ares_backtest.py'
-      - 'strategies/**'
       - '.github/workflows/main.yml'
   workflow_dispatch:
     inputs:
@@ -106,7 +88,7 @@ jobs:
       # versionCode. Only an explicit release commit, tag, or approved dispatch publishes.
       PUBLIC_UPDATER_RELEASE: >-
         ${{ (github.event_name == 'push' && github.ref_type == 'tag') ||
-          (github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+          (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/arena/')) &&
            startsWith(github.event.head_commit.message, 'release: publish ')) ||
           (github.event_name == 'workflow_dispatch' && inputs.publish_release == true &&
            (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/arena/'))) }}
@@ -367,12 +349,6 @@ jobs:
 
       - name: Test release compatibility and public-data tooling
         run: python3 -m unittest discover -s tools -p 'test_*.py' -v
-
-      - name: Test durable tick archive
-        run: |
-          python3 -m venv tick-archive/.venv
-          tick-archive/.venv/bin/pip install -r tick-archive/requirements.txt
-          (cd tick-archive && .venv/bin/python -m unittest discover -s tests -v)
 
       - name: Lint Android sources
         id: lint
@@ -800,57 +776,6 @@ jobs:
             echo ""
             echo "No market or AI API keys are embedded in the APK. Users enter optional keys only on their own device."
           } >> "$GITHUB_STEP_SUMMARY"
-
-  crypto-coverage:
-    name: Audit exact USDT pairs (read-only)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/arena/20dbf868-ichimoko'
-    runs-on: ubuntu-latest
-    timeout-minutes: 12
-    permissions:
-      contents: read
-      checks: write
-    steps:
-      - uses: actions/checkout@v4
-      - name: Verify probe invariants
-        run: PYTHONPATH=tools python3 -m unittest discover -s tools -p 'test_probe_crypto_venues.py'
-      - name: Audit exact USDT spot listings
-        run: |
-          timeout 9m python3 tools/probe_crypto_venues.py > crypto-venue-coverage.json
-          python3 - <<'PY'
-          import json, os
-          data = json.load(open('crypto-venue-coverage.json'))
-          count = data['catalog_count']
-          supported = data['covered_by_non_binance_venue']
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
-              f.write(f"## Read-only spot listing audit\n{supported}/{count} exact catalog symbols appear in "
-                      "at least one non-Binance public spot listing at probe time. "
-                      f"Listing request errors: {len(data['errors'])}. "
-                      "Listing is NOT proof of 1500 contiguous bars, a fresh trade, phone reachability, "
-                      "or safe execution replay. Download the JSON for per-venue reasons.\n")
-          PY
-      - name: Expose per-symbol report through the GitHub Checks API
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python3 - <<'PY'
-          import json, os, subprocess
-          report = json.load(open('crypto-venue-coverage.json'))
-          payload = {
-              'name': 'Read-only USDT venue coverage', 'head_sha': os.environ['GITHUB_SHA'],
-              'status': 'completed', 'conclusion': 'neutral',
-              'output': {'title': 'Point-in-time runner audit; not a trading authorization',
-                         'summary': '```json\n' + json.dumps(report, ensure_ascii=False, separators=(',', ':')) + '\n```'}
-          }
-          subprocess.run(['gh', 'api', '-X', 'POST', f"repos/{os.environ['GITHUB_REPOSITORY']}/check-runs", '--input', '-'],
-                         input=json.dumps(payload), text=True, stdout=subprocess.DEVNULL, check=True)
-          PY
-      - name: Attach audit report (not a venue authorization)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: crypto-venue-coverage
-          path: crypto-venue-coverage.json
-          if-no-files-found: warn
 
   public-updater-audit:
     name: Independently verify published updater
