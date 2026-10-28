@@ -367,6 +367,316 @@ enum class BitcoinStrategyModel(
 }
 
 /**
+ * شناسنامه فنی و دفترچه قوانین کامل هر یک از ۹ استراتژی کتاب‌های PDF گوگل درایو (و ۱۵ ترکیب پایه).
+ */
+data class DriveBookPlaybookSpec(
+    val strategyId: String,
+    val bookFileTitle: String,
+    val authorAndEdition: String,
+    val ichimokuSettingsFa: String,
+    val auxiliaryIndicatorsFa: String,
+    val entryChecklistStepsFa: List<String>,
+    val stopLossFormulaFa: String,
+    val takeProfitAndExitRulesFa: String,
+    val specialEdgeAdvantageFa: String,
+)
+
+fun BitcoinStrategyModel.driveBookPlaybook(): DriveBookPlaybookSpec = when (this) {
+    BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = "Ichimoku & Bollinger Bands Strategy.pdf (TuAnh)",
+        authorAndEdition = "TuAnh — ترکیبی ایچیموکو، باند بولینگر و مومنتوم RSI",
+        ichimokuSettingsFa = "ایچیموکوی استاندارد (9, 26, 52) با تمرکز بر ابر کوموی نازک و کراس TK",
+        auxiliaryIndicatorsFa = "Bollinger Bands (20, Dev=2) + EMA(89) + SMA(200) + RSI(14, Level=50)",
+        entryChecklistStepsFa = listOf(
+            "۱. تشخیص فشردگی باند بولینگر (BB Squeeze) همراه با ابر کوموی نازک یا حرکت روی لبه باند (Band Walk)",
+            "۲. شکست و کلوز کامل کندل تصمیم (Marubozu / بدنه قوی) بیرون ابر کومو و در سمت درست باند میانی BB(20)",
+            "۳. تایید فیلتر روند با قرارگیری بالای/زیر EMA(89) و بررسی موقعیت SMA(200)",
+            "۴. عبور و تثبیت RSI(14) بالای ۵۰ در خرید و زیر ۵۰ در فروش + آزادی Chikou Span",
+        ),
+        stopLossFormulaFa = "پشت کندل شکست ماروبوزو + سنگر ترکیبی باند میانی BB(20) و Kijun-Sen(26) + بافر امن ATR",
+        takeProfitAndExitRulesFa = "ریسک‌فری در ۱:۱ (1R)؛ اگر معامله خلاف جهت SMA(200) باز شده باشد هدف اول روی SMA(200) است، در غیر این صورت اهداف موجی ۱:۲ تا ۱:۵ (2.5R–3.5R)",
+        specialEdgeAdvantageFa = "ترکیب فشردگی نوسان بولینگر با شکست کومو، فوران‌های انفجاری بازار را در همان کندل اول شکار می‌کند.",
+    )
+
+    BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = "15minstrategy.pdf — My 15min per day Ichimoku Strategy",
+        authorAndEdition = "Marcin P. Foka / Vince Vora (TradingTools.net Complete Guide)",
+        ichimokuSettingsFa = "فقط ابر کومو (Senkou A & B) + خط Kijun-Sen (26) — خطوط Tenkan و Chikou در قالب کتاب حذف شده‌اند",
+        auxiliaryIndicatorsFa = "EMA(21) جهت شیب روند + RSI(7) با خط مرکزی 50 + Bill Williams 5-Bar Fractals",
+        entryChecklistStepsFa = listOf(
+            "۱. کلوز کامل قیمت و EMA(21) در بالای ابر کومو (خرید) یا زیر ابر کومو (فروش)",
+            "۲. شیب واضح EMA(21) و غیرفلت بودن Kijun-Sen(26) در جهت روند اصلی",
+            "۳. صبر برای پولبک موقت درون‌روزی که در آن RSI(7) به سمت خط ۵۰ اصلاح کرده و مجدداً از ۵۰ در جهت روند پرش کند",
+            "۴. ثبت کندل تایید در نزدیکی EMA(21)/Kijun(26) با وجود فرکتال ۵ کندلی معتبر بیل ویلیامز",
+        ),
+        stopLossFormulaFa = "پشت آخرین فرکتال ۵ کندلی بیل ویلیامز (Down Fractal در خرید / Up Fractal در فروش) + پشت Kijun(26)",
+        takeProfitAndExitRulesFa = "ریسک‌فری خودکار در ۱:۱ (1R) و هدف سود قطعی روی ۱:۳ (3.0R = ۳ برابر فاصله استاپ فرکتال)",
+        specialEdgeAdvantageFa = "حذف شلوغی چارت (حذف تنکان و چیکو) و ورود دقیق در پایان پولبک با پرش RSI(7) از خط ۵۰ و استاپ فرکتال.",
+    )
+
+    BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = "Ichimoku Kinko Hyo Strategy.pdf (Keenbase Cross System)",
+        authorAndEdition = "Keenbase Trading Lab — سیستم مکانیکی کراس نهادی",
+        ichimokuSettingsFa = "تنظیمات نهادی مدرن (Tenkan = 10, Kijun = 30, Senkou Span B = 60, Displacement = 30)",
+        auxiliaryIndicatorsFa = "ATR(14) جهت محاسبه مکانیکی فاصله حد ضرر (0.40 × ATR14)",
+        entryChecklistStepsFa = listOf(
+            "۱. محاسبه خطوط ایچیموکو با پریودهای نهادی (10, 30, 60) به‌جای (9, 26, 52)",
+            "۲. کراس و چیدمان صعودی/نزولی Tenkan(10) و Kijun(30) با شیب فعال",
+            "۳. کلوز کامل کندل سیگنال بیرون هر دو خط Senkou Span A(10/30) و Senkou Span B(60)",
+            "۴. تایید آزادی Chikou و عدم فاصله بیش از حد از Kijun(30)",
+        ),
+        stopLossFormulaFa = "فرمول مکانیکی کتاب: Kijun(30) − 0.40 × ATR(14) در خرید و Kijun(30) + 0.40 × ATR(14) در فروش",
+        takeProfitAndExitRulesFa = "حد سود مکانیکی ثابت ۱:۳ (3.0R) همراه با تریلینگ روی Kijun(30) پس از عبور از 2R",
+        specialEdgeAdvantageFa = "تنظیمات (10, 30, 60) با بازارهای ۲۴ ساعته مدرن هماهنگ‌تر است و حدود ۳۰٪ سیگنال‌های کاذب کراس ۹/۲۶ را فیلتر می‌کند.",
+    )
+
+    BitcoinStrategyModel.MUKHERJEE_RELATIVE_TK_RSI_KELLEY -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = "Advanced Ichimoku Trading Made Easy.pdf",
+        authorAndEdition = "Indrajit Mukherjee — کراس نسبی، طوفان کامل ۵ سیگناله و فرمول کلی (Kelly)",
+        ichimokuSettingsFa = "ایچیموکوی ۵ سیگناله (TK Cross, Kijun Cross, Kumo Breakout, Senkou Cross, Chikou Cross)",
+        auxiliaryIndicatorsFa = "Kelly Criterion Win-Rate Counter (62%..76%) + Japanese Candlesticks (Checkmate/Engulfing) + RSI(14)",
+        entryChecklistStepsFa = listOf(
+            "۱. ارزیابی قدرت نسبی کراس TK نسبت به ابر کومو (کراس بالای ابر در خرید / زیر ابر در فروش)",
+            "۲. شمارش ۵ سیگنال هم‌زمان ایچیموکو (طوفان کامل: حداقل ۳ تا ۵ سیگنال با احتمال برد ۶۲٪ تا ۷۶٪ طبق فرمول کلی)",
+            "۳. تایید الگوی شمعی ژاپنی (Engulfing / Checkmate / PinBar) روی خط Kijun-Sen یا Tenkan-Sen",
+            "۴. تایید مومنتوم RSI(14) بالای/زیر ۵۰ بدون افت ۱۰ واحدی از قله اخیر",
+        ),
+        stopLossFormulaFa = "پشت الگوی کندل‌استیک ژاپنی و خط تعادل Kijun-Sen(26) + بافر ATR",
+        takeProfitAndExitRulesFa = "اهداف موجی هوسودا (حداقل 2.35R) + تکنیک خروج مخفی موکرجی در صورت افت ۱۰ تا ۱۲ واحدی RSI(14) از قله و کلوز پشت تنکان",
+        specialEdgeAdvantageFa = "تلفیق ریاضیات معیار کلی (Kelly Criterion) با الگوهای کندل‌استیک ژاپنی و خروج هوشمند قبل از برگشت کامل روند.",
+    )
+
+    BitcoinStrategyModel.MUKHERJEE_CLOUDS_CHIKOU_FILTER -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = "Profit Making With Ichimoku Clouds.pdf",
+        authorAndEdition = "Indrajit Mukherjee — خط ماشه تنکان، شیب کیجون ضد رِنج و فیلتر نهایی چیکو",
+        ichimokuSettingsFa = "ایچیموکوی (9, 26, 52) با تفکیک ۳ نقش: Tenkan (Trigger)، Kijun (Anti-Range) و Chikou (Final Filter)",
+        auxiliaryIndicatorsFa = "شیب نرمال‌شده Kijun-Sen به ATR + بررسی سه‌بعدی Chikou نسبت به قیمت و ابر ۲۶ دوره قبل",
+        entryChecklistStepsFa = listOf(
+            "۱. استقرار قیمت بیرون ابر کومو در هر دو تایم‌فریم استراتژی و ورود",
+            "۲. فیلتر ضد رِنج (Anti-Whipsaw): خط Kijun-Sen نباید فلت باشد و باید شیب هم‌جهت داشته باشد",
+            "۳. ماشه ورود روی خط Tenkan-Sen (کلوز کندل بالای/زیر تنکان در پایان اصلاح)",
+            "۴. فیلتر نهایی Chikou Span: عبور کامل چیکو از قیمت و ابر کوموی ۲۶ دوره قبل",
+        ),
+        stopLossFormulaFa = "پشت خط Kijun-Sen(26) و لبه ابر کومو + بافر امن ساختار",
+        takeProfitAndExitRulesFa = "هدف سود موجی حداقل ۱:۲.۲۰ (2.20R) و قفل سود روی خط ماشه Tenkan-Sen در حرکت‌های شتاب‌دار",
+        specialEdgeAdvantageFa = "حذف کامل معاملات فرسایشی بازار رِنج با قانون آهنربای کیجون فلت و تایید قطعی فیلتر نهایی چیکو.",
+    )
+
+    BitcoinStrategyModel.HOWTOTRADE_KEY_LEVEL_BREAK_PULLBACK -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = "Ichimoku-Trading-Strategy-PDF.pdf (HowToTrade)",
+        authorAndEdition = "HowToTrade Academy — دو استراتژی پولبک به سطح کلیدی و شکست کانال کومو",
+        ichimokuSettingsFa = "ایچیموکوی (9, 26, 52) + استخراج سطوح کلیدی S/R از فلت‌های Senkou Span B و Kijun",
+        auxiliaryIndicatorsFa = "Key Horizontal S/R Levels + Full Kumo Channel (Span A & B) + Future Kumo Twist",
+        entryChecklistStepsFa = listOf(
+            "۱. ستاپ اول (پولبک): هم‌پوشانی لبه ابر کومو و کیجون با سطح کلیدی افقی S/R و واکنش برگشتی قیمت",
+            "۲. ستاپ دوم (شکست کانال): عبور و کلوز کامل قیمت از هر دو خط کانال کومو (Senkou A و B) همراه با ری‌تست لبه ابر",
+            "۳. تایید پیچش ابر آینده (Future Kumo Twist: Senkou A crossing Senkou B) در جهت معامله",
+            "۴. هم‌جهتی Tenkan/Kijun و آزادی Chikou Span",
+        ),
+        stopLossFormulaFa = "پشت سطح کلیدی S/R و لبه مخالف کانال کومو (Senkou Span B) + بافر ATR",
+        takeProfitAndExitRulesFa = "نسبت R:R حداقل ۱:۲.۴۰ (2.40R) روی هدف موج N/E هوسودا قبل از دیوار فلت تایم بالاتر",
+        specialEdgeAdvantageFa = "هم‌افزایی پرایس‌اکشن کلاسیک (سطوح کلیدی حمایت و مقاومت) با هندسه کانال کومو.",
+    )
+
+    BitcoinStrategyModel.TSG_QUICK_PROFIT_4STEP -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = "trading strategy.pdf — Quick Profit Ichimoku Strategy",
+        authorAndEdition = "Trading Strategy Guides (TSG Research Team)",
+        ichimokuSettingsFa = "ایچیموکوی ۴ گامی (Conversion Line 9, Base Line 26, Cloud 52, Chikou 26)",
+        auxiliaryIndicatorsFa = "فیلتر فاصله کراس TK از ابر کومو + موقعیت Chikou نسبت به ابر ۲۶ کندل قبل",
+        entryChecklistStepsFa = listOf(
+            "۱. گام اول: شکست و کلوز قطعی کندل قیمت بیرون ابر کومو",
+            "۲. گام دوم: کراس خط Conversion (تنکان) و Base (کیجون) در جهت شکست با فاصله استاندارد از ابر",
+            "۳. تایید مکمل گام دوم: قرارگیری خط Chikou Span بیرون ابر کوموی ۲۶ دوره قبل",
+            "۴. گام سوم: ورود در کندل تایید پس از کراس یا پولبک به خط Conversion/Base",
+        ),
+        stopLossFormulaFa = "گام چهارم TSG: پشت کف/سقف کندل شکست کومو و خط Base Line (کیجون)",
+        takeProfitAndExitRulesFa = "هدف سود حداقل ۱:۲.۲۵ (2.25R) و خروج تضمینی در سود به محض کراس معکوس Conversion و Base",
+        specialEdgeAdvantageFa = "فرآیند ۴ گامی کاملاً مکانیکی با فیلتر قرارگیری چیکو بیرون ابر ۲۶ دوره قبل برای سودهای سریع و کم‌ریسک.",
+    )
+
+    BitcoinStrategyModel.KOONITZ_5RULES_DMI_MACD_EMA34 -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = "Ichimoku Charting and Technical Analysis (2nd Ed).pdf",
+        authorAndEdition = "Charles G. Koonitz — ۵ قانون طلایی ایچیموکو + همگرایی اندیکاتورهای غربی",
+        ichimokuSettingsFa = "ایچیموکوی (9, 26, 52) با قانون عبور چیکو از درون ابر کومو و ۴ قانون خروج کونیتز",
+        auxiliaryIndicatorsFa = "Welles Wilder DMI/ADX(14) (+DI/-DI, ADX≥20) + MACD(12,26,9) + EMA(34) + RSI(14)",
+        entryChecklistStepsFa = listOf(
+            "۱. قانون ۱ و ۲ کونیتز: قیمت در سمت درست خط Base (کیجون) دارای شیب موافق و کاملاً بیرون ابر کومو",
+            "۲. قانون ۳ و ۴ کونیتز: ابر آینده ۲۶ دوره جلوتر هم‌رنگ روند + عبور Chikou Span از ابر ۲۶ دوره قبل به فضای باز",
+            "۳. قانون ۵ الف کونیتز: تایید DMI (+DI بالای -DI در خرید / برعکس در فروش) با قدرت روند ADX(14) ≥ 20",
+            "۴. قانون ۵ ب و ج کونیتز: تایید هیستوگرام/خط MACD(12,26,9) و قرارگیری قیمت در سمت درست EMA(34)",
+        ),
+        stopLossFormulaFa = "سنگر دوگانه کونیتز: پشت هر دو خط Base Line (کیجون ۲۶) و میانگین نمایی EMA(34) + بافر ATR",
+        takeProfitAndExitRulesFa = "هدف سود ۱:۲.۴۵ (2.45R) + سیستم ۴ قانون خروج کونیتز (شکست هم‌زمان کیجون و EMA34 با برگشت MACD/DMI)",
+        specialEdgeAdvantageFa = "ترکیب ۵ قانون اصیل ایچیموکو با فیلتر قدرت روند ADX/DMI و EMA(34) که ورود در بازارهای بی‌رمق را به صفر می‌رساند.",
+    )
+
+    BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44 -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = "Ichimoku Analysis and Strategies.pdf",
+        authorAndEdition = "Charles G. Koonitz — تکنیک صفحه سه‌گانه (Triple Screen) و تنظیمات سریع (7, 22, 44)",
+        ichimokuSettingsFa = "ایچیموکوی سریع ۵ روز کاری (Tenkan = 7, Kijun = 22, Senkou Span B = 44, Displacement = 22)",
+        auxiliaryIndicatorsFa = "EMA Ribbon (EMA 13, EMA 34, EMA 48) در نسبت تایم‌فریم 1:4:16 + MACD / DMI",
+        entryChecklistStepsFa = listOf(
+            "۱. صفحه اول (تایم کلان): هم‌جهتی کومو و آرایش ریبون EMA(13 > 34 > 48 در خرید / معکوس در فروش)",
+            "۲. صفحه دوم (تایم استراتژی): استقرار قیمت بیرون ابر سریع (7, 22, 44) و تایید کراس EMA(13/34)",
+            "۳. صفحه سوم (تایم ورود): کراس و برتری سریع Tenkan(7) و Kijun(22) بالای/زیر کوموی ۴۴ دوره‌ای",
+            "۴. تایید مومنتوم صفحه سوم با MACD/DMI و آزادی Chikou برای ورود ۱۰٪ تا ۲۰٪ سریع‌تر از جمعیت بازار",
+        ),
+        stopLossFormulaFa = "پشت خط Kijun(22) سریع و میانگین نمایی EMA(34) + بافر امن ATR",
+        takeProfitAndExitRulesFa = "هدف سود ۱:۲.۳۵ (2.35R) تا ۱:۳.۲۰ با قفل سود پلکانی روی Tenkan(7) و EMA(13)",
+        specialEdgeAdvantageFa = "پریودهای سریع (7, 22, 44) همراه با ریبون EMA(13/34/48) چرخش روندها را قبل از معامله‌گران کلاسیک شکار می‌کند.",
+    )
+
+    else -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = authorRefFa,
+        authorAndEdition = "$badgeFa — $authorRefFa",
+        ichimokuSettingsFa = "ایچیموکوی چندتایم‌فریمی (9, 26, 52) با همگرایی ۳ تایم‌فریم (4H / 1H / 15m-5m)",
+        auxiliaryIndicatorsFa = buildList {
+            if (hasPatel) add("تعادل کیجون و Preserve Mode پاتل")
+            if (hasTuttle) add("شکست سقف چیکو و کومو تاتل")
+            if (hasHosoda) add("امواج N/V/E و چرخه زمان هوسودا")
+            if (hasPeloille) add("پلاتوهای فلت MTF و کاتانا پلویل")
+        }.joinToString(" + "),
+        entryChecklistStepsFa = listOf(
+            "۱. هم‌جهتی رژیم کومو در ۳ تایم‌فریم و چیدمان ۵ خط سانیاکو",
+            "۲. آزادی سه‌بعدی Chikou Span و عبور از سقف/کف ساختاری",
+            "۳. رعایت قانون کش لاستیکی کیجون (نبود C-Clamp) و عبور از جاذبه فلت SSB",
+            "۴. تایید هندسه موج N هوسودا و شلیک ماشه در ناحیه اسنایپر",
+        ),
+        stopLossFormulaFa = "سنگر ساختاری Kijun-Sen / لبه Kumo / نقطه S موج هوسودا + بافر ضد استاپ‌هانت",
+        takeProfitAndExitRulesFa = "اهداف موجی V/N/E هوسودا با حداقل R:R ≥ 1:1.5 و شکارچی روند بالای 1:3",
+        specialEdgeAdvantageFa = summaryFa,
+    )
+}
+
+fun BitcoinStrategyModel.formatLiveBookTelemetryFa(
+    trigSnap: IchimokuBarSnapshot?,
+    stratSnap: IchimokuBarSnapshot? = trigSnap,
+    isLong: Boolean = true,
+): String {
+    if (trigSnap == null) return "در حال دریافت کندل‌ها برای محاسبه اندیکاتورهای اختصاصی کتاب..."
+    return when (this) {
+        BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE -> String.format(
+            Locale.US,
+            "BB(20,2): [%s .. %s .. %s] (فشردگی=%s) · EMA89=%s · SMA200=%s · RSI(14)=%.1f · کندل ماروبوزو=%s",
+            IchimokuStrategyEngine.round2(trigSnap.bbLower20).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.bbMiddle20).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.bbUpper20).toString(),
+            if (trigSnap.isBollingerSqueeze) "بله ✅" else "عادی",
+            IchimokuStrategyEngine.round2(trigSnap.ema89).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.sma200).toString(),
+            trigSnap.rsi14,
+            if ((isLong && trigSnap.isMarubozuBreakoutBull) || (!isLong && trigSnap.isMarubozuBreakoutBear)) "تایید ✅" else "در انتظار",
+        )
+
+        BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL -> String.format(
+            Locale.US,
+            "EMA(21)=%s (شیب=%+.2f ATR) · Kijun(26)=%s · RSI(7)=%.1f (پرش ۵۰=%s) · استاپ فرکتال ۵ کندلی=%s",
+            IchimokuStrategyEngine.round2(trigSnap.ema21).toString(),
+            trigSnap.ema21SlopeAtrPerBar,
+            IchimokuStrategyEngine.round2(trigSnap.kijun).toString(),
+            trigSnap.rsi7,
+            if ((isLong && trigSnap.rsi7Bullish50Bounce) || (!isLong && trigSnap.rsi7Bearish50Bounce)) "تایید ✅" else "در انتظار",
+            IchimokuStrategyEngine.round2(if (isLong) trigSnap.lastDownFractalLow else trigSnap.lastUpFractalHigh).toString(),
+        )
+
+        BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 -> String.format(
+            Locale.US,
+            "Tenkan(10)=%s · Kijun(30)=%s · Kumo(60)=[%s .. %s] · استاپ مکانیکی (Kijun30±0.4ATR)=%s",
+            IchimokuStrategyEngine.round2(trigSnap.tenkan10).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.kijun30).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.kumoBottom103060).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.kumoTop103060).toString(),
+            IchimokuStrategyEngine.round2(
+                if (isLong) trigSnap.kijun30 - trigSnap.atr14 * 0.40 else trigSnap.kijun30 + trigSnap.atr14 * 0.40
+            ).toString(),
+        )
+
+        BitcoinStrategyModel.MUKHERJEE_RELATIVE_TK_RSI_KELLEY -> String.format(
+            Locale.US,
+            "طوفان کامل موکرجی: %d/5 سیگنال (احتمال برد کلی=%d%%) · الگوی شمعی=%s · RSI(14)=%.1f (افت از قله=%.1f)",
+            trigSnap.kellySignalCount,
+            trigSnap.kellyWinProbabilityPercent,
+            if ((isLong && trigSnap.hasBullishCandlestickPattern) || (!isLong && trigSnap.hasBearishCandlestickPattern)) "تایید ✅" else "خیر",
+            trigSnap.rsi14,
+            if (isLong) trigSnap.rsiPeakDropLong else trigSnap.rsiTroughRiseShort,
+        )
+
+        BitcoinStrategyModel.MUKHERJEE_CLOUDS_CHIKOU_FILTER -> String.format(
+            Locale.US,
+            "خط ماشه Tenkan=%s · شیب Kijun=%+.2f ATR (%s) · فیلتر نهایی Chikou=%s (بالای/زیر ابر ۲۶=%s)",
+            IchimokuStrategyEngine.round2(trigSnap.tenkan).toString(),
+            trigSnap.kijunSlopeAtrPerBar,
+            if (trigSnap.isKijunFlat) "فلت/رِنج ⚠️" else "رونددار ✅",
+            if ((isLong && trigSnap.chikouBullishOpenSpace) || (!isLong && trigSnap.chikouBearishOpenSpace)) "آزاد ✅" else "درگیر",
+            if ((isLong && trigSnap.chikouAboveCloud26) || (!isLong && trigSnap.chikouBelowCloud26)) "بله ✅" else "خیر",
+        )
+
+        BitcoinStrategyModel.HOWTOTRADE_KEY_LEVEL_BREAK_PULLBACK -> String.format(
+            Locale.US,
+            "کانال کومو=[%s .. %s] · سطوح کلیدی S/R فلت=%d سطح · ابر آینده=%s · کیجون=%s",
+            IchimokuStrategyEngine.round2(trigSnap.kumoBottom).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.kumoTop).toString(),
+            ((stratSnap?.flatEquilibriumLevels?.size ?: 0) + trigSnap.flatEquilibriumLevels.size),
+            if (trigSnap.isFutureKumoBullish) "صعودی (Twist+)" else "نزولی (Twist-)",
+            IchimokuStrategyEngine.round2(trigSnap.kijun).toString(),
+        )
+
+        BitcoinStrategyModel.TSG_QUICK_PROFIT_4STEP -> String.format(
+            Locale.US,
+            "گام ۱ (کلوز بیرون کومو)=%s · گام ۲ (کراس TK)=%s · چیکو بیرون ابر ۲۶=%s · فاصله TK از کومو=%.2f ATR",
+            if ((isLong && trigSnap.isPriceAboveKumo) || (!isLong && trigSnap.isPriceBelowKumo)) "تایید ✅" else "خیر",
+            if ((isLong && trigSnap.tenkan >= trigSnap.kijun) || (!isLong && trigSnap.tenkan <= trigSnap.kijun)) "تایید ✅" else "خیر",
+            if ((isLong && trigSnap.chikouAboveCloud26) || (!isLong && trigSnap.chikouBelowCloud26)) "تایید ✅" else "خیر",
+            abs(trigSnap.tenkan - (if (isLong) trigSnap.kumoTop else trigSnap.kumoBottom)) / trigSnap.atr14.coerceAtLeast(1e-8),
+        )
+
+        BitcoinStrategyModel.KOONITZ_5RULES_DMI_MACD_EMA34 -> String.format(
+            Locale.US,
+            "ADX(14)=%.1f (+DI=%.1f / -DI=%.1f) · MACD Hist=%+.3f · EMA(34)=%s · Kijun=%s · چیکو بیرون کومو=%s",
+            trigSnap.adx14,
+            trigSnap.plusDi14,
+            trigSnap.minusDi14,
+            trigSnap.macdHistogram,
+            IchimokuStrategyEngine.round2(trigSnap.ema34).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.kijun).toString(),
+            if ((isLong && trigSnap.chikouAboveCloud26) || (!isLong && trigSnap.chikouBelowCloud26)) "بله ✅" else "خیر",
+        )
+
+        BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44 -> String.format(
+            Locale.US,
+            "ایچیموکوی سریع: Tenkan(7)=%s · Kijun(22)=%s · Kumo(44)=[%s..%s] · ریبون EMA(13/34/48)=%s / %s / %s",
+            IchimokuStrategyEngine.round2(trigSnap.tenkan7).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.kijun22).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.kumoBottom72244).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.kumoTop72244).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.ema13).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.ema34).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.ema48).toString(),
+        )
+
+        else -> String.format(
+            Locale.US,
+            "Tenkan(9)=%s · Kijun(26)=%s · Kumo=[%s .. %s] · ER14=%.0f%%",
+            IchimokuStrategyEngine.round2(trigSnap.tenkan).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.kijun).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.kumoBottom).toString(),
+            IchimokuStrategyEngine.round2(trigSnap.kumoTop).toString(),
+            trigSnap.efficiencyRatio14 * 100.0,
+        )
+    }
+}
+
+/**
  * پارامترهای قابل تنظیم و ترمیم برای «استراتژی بیس» (Base Strategy) و مدل‌های مشتق‌شده.
  */
 @Serializable
@@ -1758,15 +2068,51 @@ object IchimokuStrategyEngine {
 
         val livePrice = livePriceOverride?.takeIf { it.isFinite() && it > 0.0 } ?: trigSnap.close
 
-        // Determine candidate bias from Strategy Timeframe (1H) + Macro Timeframe (4H)
-        val bullishBias = stratSnap.isPriceAboveKumo ||
-            (macroSnap?.isPriceAboveKumo == true && trigSnap.isPriceAboveKumo)
-        val bearishBias = stratSnap.isPriceBelowKumo ||
-            (macroSnap?.isPriceBelowKumo == true && trigSnap.isPriceBelowKumo)
+        // Determine candidate bias from Strategy Timeframe (1H) + Macro Timeframe (4H) + Book-Specific Settings
+        val bullishBias = when (activeModel) {
+            BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 ->
+                stratSnap.close > stratSnap.kumoTop103060 ||
+                    (trigSnap.close > trigSnap.kumoTop103060 && trigSnap.tenkan10 >= trigSnap.kijun30)
+            BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44 ->
+                stratSnap.close > stratSnap.kumoTop72244 ||
+                    (trigSnap.close > trigSnap.kumoTop72244 && trigSnap.tenkan7 >= trigSnap.kijun22 && trigSnap.ema13 >= trigSnap.ema34)
+            BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL ->
+                (stratSnap.isPriceAboveKumo && trigSnap.isPriceAboveKumo) ||
+                    (trigSnap.isPriceAboveKumo && trigSnap.close >= trigSnap.ema21 && trigSnap.ema21SlopeAtrPerBar >= 0.0)
+            BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE ->
+                (stratSnap.isPriceAboveKumo && trigSnap.close >= trigSnap.bbMiddle20) ||
+                    (trigSnap.isPriceAboveKumo && trigSnap.close >= trigSnap.ema89 && trigSnap.rsi14 >= 50.0)
+            else ->
+                stratSnap.isPriceAboveKumo ||
+                    (macroSnap?.isPriceAboveKumo == true && trigSnap.isPriceAboveKumo)
+        }
+        val bearishBias = when (activeModel) {
+            BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 ->
+                stratSnap.close < stratSnap.kumoBottom103060 ||
+                    (trigSnap.close < trigSnap.kumoBottom103060 && trigSnap.tenkan10 <= trigSnap.kijun30)
+            BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44 ->
+                stratSnap.close < stratSnap.kumoBottom72244 ||
+                    (trigSnap.close < trigSnap.kumoBottom72244 && trigSnap.tenkan7 <= trigSnap.kijun22 && trigSnap.ema13 <= trigSnap.ema34)
+            BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL ->
+                (stratSnap.isPriceBelowKumo && trigSnap.isPriceBelowKumo) ||
+                    (trigSnap.isPriceBelowKumo && trigSnap.close <= trigSnap.ema21 && trigSnap.ema21SlopeAtrPerBar <= 0.0)
+            BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE ->
+                (stratSnap.isPriceBelowKumo && trigSnap.close <= trigSnap.bbMiddle20) ||
+                    (trigSnap.isPriceBelowKumo && trigSnap.close <= trigSnap.ema89 && trigSnap.rsi14 <= 50.0)
+            else ->
+                stratSnap.isPriceBelowKumo ||
+                    (macroSnap?.isPriceBelowKumo == true && trigSnap.isPriceBelowKumo)
+        }
 
         val candidateDirection = when {
             bullishBias && !bearishBias -> SignalAction.BUY
             bearishBias && !bullishBias -> SignalAction.SELL
+            activeModel == BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 ->
+                if (trigSnap.tenkan10 >= trigSnap.kijun30) SignalAction.BUY else SignalAction.SELL
+            activeModel == BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44 ->
+                if (trigSnap.tenkan7 >= trigSnap.kijun22) SignalAction.BUY else SignalAction.SELL
+            activeModel == BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL ->
+                if (trigSnap.close >= trigSnap.ema21) SignalAction.BUY else SignalAction.SELL
             stratSnap.tenkan >= stratSnap.kijun -> SignalAction.BUY
             else -> SignalAction.SELL
         }
@@ -1898,7 +2244,7 @@ object IchimokuStrategyEngine {
             "بدون تله جاذبه SSB فلت (${if (trigSnap.isKatanaEquilibrium) "هم‌پوشانی کاتانا" else "تفکیک استاندارد TK"})"
         }
 
-        // ── Detect Trigger on 15m (Pullback / Breakout / 3-Candle Sanyaku) ────
+        // ── Detect Trigger on 15m/5m (Pullback / Breakout / 3-Candle Sanyaku / 9 Drive PDF Books) ────
         val closedTriggerBars = alignedTriggerCandles.filter { it.closed }.ifEmpty { alignedTriggerCandles }
         val triggerType = detectEntryTrigger(
             direction = candidateDirection,
@@ -1906,6 +2252,7 @@ object IchimokuStrategyEngine {
             trigSnap = trigSnap,
             stratSnap = stratSnap,
             config = effectiveConfig,
+            activeModel = activeModel,
         )
 
         // ── Compute Sniper Entry Zone & Tight Structural SL ───────────────────
@@ -1915,20 +2262,26 @@ object IchimokuStrategyEngine {
         } else {
             trigSnap.high - (trigSnap.high - trigSnap.low) * 0.55
         }
+        val activeTenkanRef = when (activeModel) {
+            BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 -> trigSnap.tenkan10
+            BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44 -> trigSnap.tenkan7
+            BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL -> trigSnap.ema21
+            else -> trigSnap.tenkan
+        }
         val sniperOptimal = if (isLong) {
-            round2(max(trigSnap.tenkan, min(livePrice, candleGoldenPocket)))
+            round2(max(activeTenkanRef, min(livePrice, candleGoldenPocket)))
         } else {
-            round2(min(trigSnap.tenkan, max(livePrice, candleGoldenPocket)))
+            round2(min(activeTenkanRef, max(livePrice, candleGoldenPocket)))
         }
         val sniperLow = if (isLong) {
-            round2(min(trigSnap.tenkan, sniperOptimal) - trigSnap.atr14 * 0.12)
+            round2(min(activeTenkanRef, sniperOptimal) - trigSnap.atr14 * 0.12)
         } else {
             round2(min(sniperOptimal, livePrice) - trigSnap.atr14 * 0.35)
         }
         val sniperHigh = if (isLong) {
             round2(max(sniperOptimal, livePrice) + trigSnap.atr14 * 0.35)
         } else {
-            round2(max(trigSnap.tenkan, sniperOptimal) + trigSnap.atr14 * 0.12)
+            round2(max(activeTenkanRef, sniperOptimal) + trigSnap.atr14 * 0.12)
         }
         val distToSniperAtr = abs(livePrice - sniperOptimal) / trigSnap.atr14
         val sniperEntryScore = round2((100.0 - distToSniperAtr * 55.0).coerceIn(15.0, 100.0))
@@ -1945,12 +2298,21 @@ object IchimokuStrategyEngine {
         val safeAnchorShort = max(sniperOptimal, livePrice)
 
         val rawTechnicalSl = when (activeModel) {
+            BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE -> {
+                if (isLong) {
+                    val tuAnhFloor = min(min(trigSnap.low, trigSnap.bbMiddle20), trigSnap.kijun) - slBuffer
+                    round2(min(tuAnhFloor, safeAnchorLong - minSafeStopDist))
+                } else {
+                    val tuAnhCeiling = max(max(trigSnap.high, trigSnap.bbMiddle20), trigSnap.kijun) + slBuffer
+                    round2(max(tuAnhCeiling, safeAnchorShort + minSafeStopDist))
+                }
+            }
             BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL -> {
                 if (isLong) {
-                    val fractalFloor = min(trigSnap.lastDownFractalLow, trigSnap.low) - trigSnap.atr14 * 0.18
+                    val fractalFloor = min(trigSnap.lastDownFractalLow, min(trigSnap.low, trigSnap.kijun)) - trigSnap.atr14 * 0.18
                     round2(min(fractalFloor, safeAnchorLong - minSafeStopDist))
                 } else {
-                    val fractalCeiling = max(trigSnap.lastUpFractalHigh, trigSnap.high) + trigSnap.atr14 * 0.18
+                    val fractalCeiling = max(trigSnap.lastUpFractalHigh, max(trigSnap.high, trigSnap.kijun)) + trigSnap.atr14 * 0.18
                     round2(max(fractalCeiling, safeAnchorShort + minSafeStopDist))
                 }
             }
@@ -1963,14 +2325,50 @@ object IchimokuStrategyEngine {
                     round2(max(keenbaseStop, safeAnchorShort + minSafeStopDist))
                 }
             }
-            BitcoinStrategyModel.KOONITZ_5RULES_DMI_MACD_EMA34,
-            BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44 -> {
+            BitcoinStrategyModel.MUKHERJEE_RELATIVE_TK_RSI_KELLEY,
+            BitcoinStrategyModel.MUKHERJEE_CLOUDS_CHIKOU_FILTER -> {
+                if (isLong) {
+                    val mukherjeeFloor = min(trigSnap.kijun, trigSnap.low) - slBuffer
+                    round2(min(mukherjeeFloor, safeAnchorLong - minSafeStopDist))
+                } else {
+                    val mukherjeeCeiling = max(trigSnap.kijun, trigSnap.high) + slBuffer
+                    round2(max(mukherjeeCeiling, safeAnchorShort + minSafeStopDist))
+                }
+            }
+            BitcoinStrategyModel.HOWTOTRADE_KEY_LEVEL_BREAK_PULLBACK -> {
+                if (isLong) {
+                    val httFloor = min(trigSnap.kumoBottom, trigSnap.kijun) - slBuffer
+                    round2(min(httFloor, safeAnchorLong - minSafeStopDist))
+                } else {
+                    val httCeiling = max(trigSnap.kumoTop, trigSnap.kijun) + slBuffer
+                    round2(max(httCeiling, safeAnchorShort + minSafeStopDist))
+                }
+            }
+            BitcoinStrategyModel.TSG_QUICK_PROFIT_4STEP -> {
+                if (isLong) {
+                    val tsgFloor = min(trigSnap.low, trigSnap.kijun) - slBuffer
+                    round2(min(tsgFloor, safeAnchorLong - minSafeStopDist))
+                } else {
+                    val tsgCeiling = max(trigSnap.high, trigSnap.kijun) + slBuffer
+                    round2(max(tsgCeiling, safeAnchorShort + minSafeStopDist))
+                }
+            }
+            BitcoinStrategyModel.KOONITZ_5RULES_DMI_MACD_EMA34 -> {
                 if (isLong) {
                     val koonitzFloor = min(min(trigSnap.kijun, trigSnap.ema34), trigSnap.low) - slBuffer
                     round2(min(koonitzFloor, safeAnchorLong - minSafeStopDist))
                 } else {
                     val koonitzCeiling = max(max(trigSnap.kijun, trigSnap.ema34), trigSnap.high) + slBuffer
                     round2(max(koonitzCeiling, safeAnchorShort + minSafeStopDist))
+                }
+            }
+            BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44 -> {
+                if (isLong) {
+                    val koonitzFastFloor = min(min(trigSnap.kijun22, trigSnap.ema34), trigSnap.low) - slBuffer
+                    round2(min(koonitzFastFloor, safeAnchorLong - minSafeStopDist))
+                } else {
+                    val koonitzFastCeiling = max(max(trigSnap.kijun22, trigSnap.ema34), trigSnap.high) + slBuffer
+                    round2(max(koonitzFastCeiling, safeAnchorShort + minSafeStopDist))
                 }
             }
             else -> {
@@ -2378,7 +2776,7 @@ object IchimokuStrategyEngine {
         val cond15Detail = "${trendPhase.badgeFa} · کندل $waveBars موج · فاصله کیجون: ${String.format(Locale.US, "%.2f", extAtr)} ATR"
 
         // ── Check 16: Sniper Entry Precision & Anti-Chase Pocket ──────────────
-        val distFromTenkanAtr = trigSnap.distanceToTenkan / trigSnap.atr14
+        val distFromTenkanAtr = abs(trigSnap.close - activeTenkanRef) / trigSnap.atr14.coerceAtLeast(1e-8)
         val cond16Passed = distToSniperAtr <= 0.65 && distFromTenkanAtr <= 1.15
         val cond16Detail = String.format(
             Locale.US,
@@ -2389,7 +2787,7 @@ object IchimokuStrategyEngine {
             sniperEntryScore,
         )
 
-        val conditions = listOf(
+        val baseSixteenConditions = listOf(
             StrategyConditionCheck(1, "۱. رژیم کوموی ۳ تایم‌فریم (${config.macroInterval.label}/${config.strategyInterval.label}/${config.triggerInterval.label})", cond1Passed, cond1Detail),
             StrategyConditionCheck(2, "۲. چیدمان ۵ خط سانیاکو (Sanyaku Order)", sanyakuOk, cond2Detail),
             StrategyConditionCheck(3, "۳. کراس و شیب پویا Tenkan / Kijun", tkAligned, cond3Detail),
@@ -2407,6 +2805,46 @@ object IchimokuStrategyEngine {
             StrategyConditionCheck(15, "۱۵. شکار اصل روند (فاز Genesis/Core و عدم اشباع)", cond15Passed, cond15Detail),
             StrategyConditionCheck(16, "۱۶. نقطه‌زنی میلی‌متری ورود (Sniper Entry Pocket)", cond16Passed, cond16Detail),
         )
+
+        val conditions = if (activeModel.isDrivePdfStrategy) {
+            buildDriveBookConditions(
+                model = activeModel,
+                isLong = isLong,
+                config = effectiveConfig,
+                macroSnap = macroSnap,
+                stratSnap = stratSnap,
+                trigSnap = trigSnap,
+                wave = wave,
+                rr = rr,
+                selectedWaveLabel = selectedWaveLabel,
+                rewardDistSniper = rewardDistSniper,
+                riskDistSniper = riskDistSniper,
+                cond1Passed = cond1Passed,
+                cond1Detail = cond1Detail,
+                cond4Detail = cond4Detail,
+                cond5Passed = futureThicknessOk,
+                cond5Detail = cond5Detail,
+                cond6Passed = chikouOk,
+                cond6Detail = cond6Detail,
+                cond7Passed = chikouPeakClear,
+                cond8Passed = notOverextended,
+                cond9Passed = flatSsbGravityCleared,
+                cond10Passed = cond10Passed,
+                cond10Detail = cond10Detail,
+                cond12Passed = cond12Passed,
+                cond12Detail = cond12Detail,
+                cond13Passed = cond13Passed,
+                cond13Detail = cond13Detail,
+                cond14Passed = cond14Passed,
+                cond14Detail = cond14Detail,
+                cond15Passed = cond15Passed,
+                cond15Detail = cond15Detail,
+                cond16Passed = cond16Passed,
+                cond16Detail = cond16Detail,
+            )
+        } else {
+            baseSixteenConditions
+        }
 
         // ارتقای دقت تمام ۵ مدل استراتژی: تمام ۱۶ شرط ساختاری، مومنتوم، چیکو، هوسودا و نقطه‌زنی برای همه مدل‌ها الزامی است
         val requiredIndicesForModel: Set<Int> = (1..16).toSet()
@@ -2643,7 +3081,322 @@ object IchimokuStrategyEngine {
     }
 
     /**
-     * تشخیص ۴ ماشه ورود برای شکار اصل روند از لحظه تولد (`EARLY_KATANA_GENESIS`) تا قلب موج (`PULLBACK / BREAKOUT / SANYAKU`).
+     * ساخت چک‌لیست اختصاصی ۱۶ شرطی برای هر یک از ۹ کتاب PDF گوگل درایو طبق قوانین خط‌به‌خط هر کتاب.
+     */
+    private fun buildDriveBookConditions(
+        model: BitcoinStrategyModel,
+        isLong: Boolean,
+        config: BaseStrategyConfig,
+        macroSnap: IchimokuBarSnapshot?,
+        stratSnap: IchimokuBarSnapshot,
+        trigSnap: IchimokuBarSnapshot,
+        wave: HosodaWaveProjection?,
+        rr: Double,
+        selectedWaveLabel: String,
+        rewardDistSniper: Double,
+        riskDistSniper: Double,
+        cond1Passed: Boolean,
+        cond1Detail: String,
+        cond4Detail: String,
+        cond5Passed: Boolean,
+        cond5Detail: String,
+        cond6Passed: Boolean,
+        cond6Detail: String,
+        cond7Passed: Boolean,
+        cond8Passed: Boolean,
+        cond9Passed: Boolean,
+        cond10Passed: Boolean,
+        cond10Detail: String,
+        cond12Passed: Boolean,
+        cond12Detail: String,
+        cond13Passed: Boolean,
+        cond13Detail: String,
+        cond14Passed: Boolean,
+        cond14Detail: String,
+        cond15Passed: Boolean,
+        cond15Detail: String,
+        cond16Passed: Boolean,
+        cond16Detail: String,
+    ): List<StrategyConditionCheck> {
+        val dirCandle = if (isLong) trigSnap.close >= trigSnap.open else trigSnap.close <= trigSnap.open
+        return when (model) {
+            BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE -> {
+                val c1 = if (isLong) stratSnap.isPriceAboveKumo && trigSnap.isPriceAboveKumo else stratSnap.isPriceBelowKumo && trigSnap.isPriceBelowKumo
+                val c2 = trigSnap.isBollingerSqueeze || (if (isLong) trigSnap.close >= trigSnap.bbMiddle20 else trigSnap.close <= trigSnap.bbMiddle20)
+                val c3 = if (isLong) trigSnap.isMarubozuBreakoutBull && trigSnap.close >= trigSnap.bbMiddle20 else trigSnap.isMarubozuBreakoutBear && trigSnap.close <= trigSnap.bbMiddle20
+                val c4 = if (isLong) trigSnap.close >= trigSnap.ema89 - trigSnap.atr14 * 0.15 else trigSnap.close <= trigSnap.ema89 + trigSnap.atr14 * 0.15
+                val c5 = if (isLong) trigSnap.rsi14 >= 50.0 else trigSnap.rsi14 <= 50.0
+                val c6 = if (isLong) trigSnap.tenkan >= trigSnap.kijun - trigSnap.atr14 * 0.05 else trigSnap.tenkan <= trigSnap.kijun + trigSnap.atr14 * 0.05
+                val c7 = if (isLong) trigSnap.isFutureKumoBullish else trigSnap.isFutureKumoBearish
+                val c8 = cond6Passed
+                val c9 = cond8Passed
+                val c10 = dirCandle && trigSnap.volumeRatio20 >= 0.55
+                listOf(
+                    StrategyConditionCheck(1, "۱. کلوز قیمت بیرون ابر کومو در تایم استراتژی و ورود (TuAnh Rule 1)", c1, cond1Detail),
+                    StrategyConditionCheck(2, "۲. فشردگی باند بولینگر (BB 20,2 Squeeze) یا حرکت روی باند", c2, String.format(Locale.US, "پهنای BB=%.2f%% · باند میانی=%s · Squeeze=%s", trigSnap.bbBandwidthRatio * 100.0, round2(trigSnap.bbMiddle20).toString(), if (trigSnap.isBollingerSqueeze) "فعال ✅" else "عادی")),
+                    StrategyConditionCheck(3, "۳. کندل شکست ماروبوزو/تصمیم بیرون باند میانی BB(20)", c3, String.format(Locale.US, "بدنه=%.0f%% · CLV=%.0f%% · عبور از BB20=%s", trigSnap.candleBodyRatio * 100.0, trigSnap.closeLocationValue * 100.0, if (c3) "تایید ✅" else "در انتظار")),
+                    StrategyConditionCheck(4, "۴. فیلتر روند EMA(89) و موقعیت هدف نسبت به SMA(200)", c4, String.format(Locale.US, "قیمت=%s · EMA(89)=%s · SMA(200)=%s", round2(trigSnap.close).toString(), round2(trigSnap.ema89).toString(), round2(trigSnap.sma200).toString())),
+                    StrategyConditionCheck(5, "۵. تثبیت مومنتوم RSI(14) بالای ۵۰ در خرید / زیر ۵۰ در فروش", c5, String.format(Locale.US, "RSI(14)=%.1f (قبلی=%.1f · خط معیار=50.0)", trigSnap.rsi14, trigSnap.prevRsi14)),
+                    StrategyConditionCheck(6, "۶. هم‌جهتی Tenkan(9) و Kijun(26) با انفجار بولینگر", c6, String.format(Locale.US, "Tenkan=%s · Kijun=%s", round2(trigSnap.tenkan).toString(), round2(trigSnap.kijun).toString())),
+                    StrategyConditionCheck(7, "۷. جهت و رنگ ابر آینده (Future Kumo 26) هم‌سو با شکست باند", c7, cond4Detail),
+                    StrategyConditionCheck(8, "۸. آزادی Chikou Span در ۲۶ دوره قبل از کندل و ابر", c8, cond6Detail),
+                    StrategyConditionCheck(9, "۹. عدم کشیدگی افراطی از باند میانی BB(20) و Kijun", c9, String.format(Locale.US, "فاصله از کیجون=%.2f ATR", stratSnap.distanceToKijunAtr)),
+                    StrategyConditionCheck(10, "۱۰. تایید حجم کندل شکست (Volume) و ساختار موج هوسودا", c10 && cond10Passed, String.format(Locale.US, "حجم=%.2fx · %s", trigSnap.volumeRatio20, cond10Detail)),
+                    StrategyConditionCheck(11, "۱۱. عبور از سقف/کف ساختاری و بافر فلت SSB", cond7Passed && cond9Passed, "شکست سقف چیکو و عبور از جاذبه فلت"),
+                    StrategyConditionCheck(12, "۱۲. فرمول R:R کتاب TuAnh (ریسک‌فری ۱:۱ و هدف MA200 یا ۱:۲ تا ۱:۵)", cond12Passed, cond12Detail),
+                    StrategyConditionCheck(13, "۱۳. کارایی جهت‌دار روند (ER14) و خروج از رِنج", cond13Passed, cond13Detail),
+                    StrategyConditionCheck(14, "۱۴. محافظ ضد شدوی معکوس در لبه باند بولینگر", cond14Passed, cond14Detail),
+                    StrategyConditionCheck(15, "۱۵. فاز فوران فشردگی بولینگر (Genesis/Core)", cond15Passed, cond15Detail),
+                    StrategyConditionCheck(16, "۱۶. نقطه‌زنی ورود روی شکست ماروبوزو یا پولبک به BB20/EMA89", cond16Passed, cond16Detail),
+                )
+            }
+
+            BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL -> {
+                val c1 = if (isLong) stratSnap.isPriceAboveKumo && trigSnap.isPriceAboveKumo else stratSnap.isPriceBelowKumo && trigSnap.isPriceBelowKumo
+                val c2 = if (isLong) trigSnap.close >= trigSnap.ema21 - trigSnap.atr14 * 0.12 && trigSnap.ema21 >= trigSnap.kumoBottom else trigSnap.close <= trigSnap.ema21 + trigSnap.atr14 * 0.12 && trigSnap.ema21 <= trigSnap.kumoTop
+                val c3 = if (isLong) trigSnap.ema21SlopeAtrPerBar >= -0.01 && stratSnap.ema21 >= stratSnap.kijun - stratSnap.atr14 * 0.25 else trigSnap.ema21SlopeAtrPerBar <= 0.01 && stratSnap.ema21 <= stratSnap.kijun + stratSnap.atr14 * 0.25
+                val c4 = if (isLong) trigSnap.close >= trigSnap.kijun - trigSnap.atr14 * 0.10 && trigSnap.kijunSlopeAtrPerBar >= -0.02 else trigSnap.close <= trigSnap.kijun + trigSnap.atr14 * 0.10 && trigSnap.kijunSlopeAtrPerBar <= 0.02
+                val c5 = if (isLong) trigSnap.isFutureKumoBullish else trigSnap.isFutureKumoBearish
+                val c7 = if (isLong) trigSnap.rsi7Bullish50Bounce || (trigSnap.rsi7 >= 50.0 && trigSnap.prevRsi7 <= 54.0) else trigSnap.rsi7Bearish50Bounce || (trigSnap.rsi7 <= 50.0 && trigSnap.prevRsi7 >= 46.0)
+                val c8 = if (isLong) trigSnap.rsi7 in 48.0..80.0 else trigSnap.rsi7 in 20.0..52.0
+                val fractalPrice = if (isLong) trigSnap.lastDownFractalLow else trigSnap.lastUpFractalHigh
+                val c9 = if (isLong) fractalPrice < trigSnap.close && fractalPrice > 0.0 else fractalPrice > trigSnap.close
+                val distEmaAtr = abs(trigSnap.close - trigSnap.ema21) / trigSnap.atr14.coerceAtLeast(1e-8)
+                val c10 = distEmaAtr <= 1.65 && cond8Passed
+                listOf(
+                    StrategyConditionCheck(1, "۱. کلوز کامل قیمت بیرون ابر کومو در 1H و تایم ورود (15min Guide Rule 1)", c1, cond1Detail),
+                    StrategyConditionCheck(2, "۲. قرارگیری قیمت و EMA(21) در سمت درست ابر کومو (بدون نیاز به تنکان/چیکو)", c2, String.format(Locale.US, "قیمت=%s · EMA(21)=%s · لبه کومو=%s", round2(trigSnap.close).toString(), round2(trigSnap.ema21).toString(), round2(if (isLong) trigSnap.kumoTop else trigSnap.kumoBottom).toString())),
+                    StrategyConditionCheck(3, "۳. شیب موافق میانگین نمایی EMA(21) در جهت روند اصلی", c3, String.format(Locale.US, "شیب EMA(21)=%+.2f ATR/bar", trigSnap.ema21SlopeAtrPerBar)),
+                    StrategyConditionCheck(4, "۴. حمایت/مقاومت خط Kijun-Sen(26) و شیب غیرمخالف کیجون", c4, String.format(Locale.US, "Kijun(26)=%s · شیب کیجون=%+.2f ATR", round2(trigSnap.kijun).toString(), trigSnap.kijunSlopeAtrPerBar)),
+                    StrategyConditionCheck(5, "۵. هم‌رنگی و حمایت ابر آینده (Future Kumo 26)", c5, cond4Detail),
+                    StrategyConditionCheck(6, "۶. ضخامت استاندارد ابر کومو به‌عنوان سپر روند", cond5Passed, cond5Detail),
+                    StrategyConditionCheck(7, "۷. اصلاح و پرش RSI(7) از خط مرکزی ۵۰ در جهت روند (RSI-7 50 Bounce)", c7, String.format(Locale.US, "RSI(7) فعلی=%.1f · RSI(7) قبلی=%.1f · پرش از ۵۰=%s", trigSnap.rsi7, trigSnap.prevRsi7, if (c7) "تایید ✅" else "در انتظار")),
+                    StrategyConditionCheck(8, "۸. قرارگیری RSI(7) در پنجره امن مومنتوم (عدم اشباع افراطی)", c8, String.format(Locale.US, "RSI(7)=%.1f (پنجره امن: %s)", trigSnap.rsi7, if (isLong) "48..80" else "20..52")),
+                    StrategyConditionCheck(9, "۹. ثبت فرکتال ۵ کندلی معتبر بیل ویلیامز برای سنگر حد ضرر", c9, String.format(Locale.US, "آخرین فرکتال ۵ کندلی=%s", round2(fractalPrice).toString())),
+                    StrategyConditionCheck(10, "۱۰. فاصله بهینه قیمت از EMA(21) و Kijun(26) پس از پولبک", c10, String.format(Locale.US, "فاصله از EMA(21)=%.2f ATR · فاصله از کیجون=%.2f ATR", distEmaAtr, stratSnap.distanceToKijunAtr)),
+                    StrategyConditionCheck(11, "۱۱. کندل تایید بازگشت روند با کلوز در جهت EMA(21)", dirCandle, String.format(Locale.US, "بدنه=%.0f%% · CLV=%.0f%%", trigSnap.candleBodyRatio * 100.0, trigSnap.closeLocationValue * 100.0)),
+                    StrategyConditionCheck(12, "۱۲. فرمول R:R = 1:3.0 کتاب فکا (ریسک‌فری در 1R و هدف 3R فرکتال)", cond12Passed, cond12Detail),
+                    StrategyConditionCheck(13, "۱۳. کارایی جهت‌دار روند (ER14) و نبود بازار رِنج", cond13Passed, cond13Detail),
+                    StrategyConditionCheck(14, "۱۴. نبود شدوی تله نقدینگی خلاف جهت پرش RSI(7)", cond14Passed, cond14Detail),
+                    StrategyConditionCheck(15, "۱۵. فاز ادامه روند پس از پایان پولبک (Core/Genesis)", cond15Passed, cond15Detail),
+                    StrategyConditionCheck(16, "۱۶. نقطه‌زنی ورود نزدیک EMA(21) در کندل پرش RSI(7)", cond16Passed, cond16Detail),
+                )
+            }
+
+            BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 -> {
+                val c1 = if (isLong) trigSnap.close > trigSnap.kumoTop103060 && stratSnap.close > stratSnap.kumoTop103060 else trigSnap.close < trigSnap.kumoBottom103060 && stratSnap.close < stratSnap.kumoBottom103060
+                val c2 = if (isLong) trigSnap.tenkan10 >= trigSnap.kijun30 && stratSnap.tenkan10 >= stratSnap.kijun30 - stratSnap.atr14 * 0.08 else trigSnap.tenkan10 <= trigSnap.kijun30 && stratSnap.tenkan10 <= stratSnap.kijun30 + stratSnap.atr14 * 0.08
+                val c3 = if (isLong) trigSnap.tenkanSlopeAtrPerBar >= -0.04 && trigSnap.kijunSlopeAtrPerBar >= -0.02 else trigSnap.tenkanSlopeAtrPerBar <= 0.04 && trigSnap.kijunSlopeAtrPerBar <= 0.02
+                val c4 = if (isLong) trigSnap.tenkan10 >= trigSnap.kumoBottom103060 && trigSnap.kijun30 >= trigSnap.kumoBottom103060 - trigSnap.atr14 * 0.15 else trigSnap.tenkan10 <= trigSnap.kumoTop103060 && trigSnap.kijun30 <= trigSnap.kumoTop103060 + trigSnap.atr14 * 0.15
+                val c5 = if (isLong) trigSnap.senkouA103060 >= trigSnap.senkouB60 - trigSnap.atr14 * 0.15 || trigSnap.isFutureKumoBullish else trigSnap.senkouA103060 <= trigSnap.senkouB60 + trigSnap.atr14 * 0.15 || trigSnap.isFutureKumoBearish
+                val kumo60ThickAtr = abs(trigSnap.senkouA103060 - trigSnap.senkouB60) / trigSnap.atr14.coerceAtLeast(1e-8)
+                val c6 = kumo60ThickAtr >= 0.04 && cond5Passed
+                val distKijun30Atr = abs(trigSnap.close - trigSnap.kijun30) / trigSnap.atr14.coerceAtLeast(1e-8)
+                val c8 = distKijun30Atr <= config.maxKijunExtensionAtr
+                val keenSl = if (isLong) trigSnap.kijun30 - trigSnap.atr14 * 0.40 else trigSnap.kijun30 + trigSnap.atr14 * 0.40
+                listOf(
+                    StrategyConditionCheck(1, "۱. کلوز کامل کندل بیرون هر دو خط Senkou A(10/30) و Senkou B(60)", c1, String.format(Locale.US, "کلوز=%s · ابر (10,30,60)=[%s .. %s]", round2(trigSnap.close).toString(), round2(trigSnap.kumoBottom103060).toString(), round2(trigSnap.kumoTop103060).toString())),
+                    StrategyConditionCheck(2, "۲. کراس و چیدمان نهادی Tenkan(10) و Kijun(30)", c2, String.format(Locale.US, "Tenkan(10)=%s · Kijun(30)=%s", round2(trigSnap.tenkan10).toString(), round2(trigSnap.kijun30).toString())),
+                    StrategyConditionCheck(3, "۳. شیب فعال خطوط Tenkan(10) و Kijun(30)", c3, String.format(Locale.US, "شیب تنکان=%+.2f ATR · شیب کیجون=%+.2f ATR", trigSnap.tenkanSlopeAtrPerBar, trigSnap.kijunSlopeAtrPerBar)),
+                    StrategyConditionCheck(4, "۴. استقرار خطوط Tenkan(10) و Kijun(30) بیرون ناحیه مخالف کوموی ۶۰", c4, String.format(Locale.US, "TK(10/30)=%s/%s در برابر کومو ۶۰", round2(trigSnap.tenkan10).toString(), round2(trigSnap.kijun30).toString())),
+                    StrategyConditionCheck(5, "۵. هم‌سویی Senkou Span A(10/30) و Senkou Span B(60) و ابر آینده", c5, String.format(Locale.US, "SpanA(10/30)=%s · SpanB(60)=%s", round2(trigSnap.senkouA103060).toString(), round2(trigSnap.senkouB60).toString())),
+                    StrategyConditionCheck(6, "۶. ضخامت و پایداری ابر ۶۰ دوره‌ای (Senkou B 60)", c6, String.format(Locale.US, "ضخامت کوموی ۶۰=%.2f ATR", kumo60ThickAtr)),
+                    StrategyConditionCheck(7, "۷. رهایی خط Chikou در فضای باز و عبور از سقف/کف", cond6Passed && cond7Passed, cond6Detail),
+                    StrategyConditionCheck(8, "۸. فاصله استاندارد قیمت از Kijun(30) (کنترل اندازه استاپ مکانیکی)", c8, String.format(Locale.US, "فاصله از Kijun(30)=%.2f ATR · استاپ مکانیکی=%s", distKijun30Atr, round2(keenSl).toString())),
+                    StrategyConditionCheck(9, "۹. عبور از جاذبه فلت Senkou B(60)", cond9Passed, "مسیر باز از فلت ۶۰ دوره‌ای"),
+                    StrategyConditionCheck(10, "۱۰. هندسه موج هوسودا هم‌سو با کراس مکانیکی (10,30,60)", cond10Passed, cond10Detail),
+                    StrategyConditionCheck(11, "۱۱. کلوز قدرتمند کندل سیگنال بیرون ابر ۶۰ دوره‌ای", dirCandle && trigSnap.candleBodyRatio >= 0.20, String.format(Locale.US, "بدنه=%.0f%% · CLV=%.0f%%", trigSnap.candleBodyRatio * 100.0, trigSnap.closeLocationValue * 100.0)),
+                    StrategyConditionCheck(12, "۱۲. فرمول مکانیکی Keenbase: استاپ Kijun(30)±0.4ATR و تارگت قطعی 3R", cond12Passed, cond12Detail),
+                    StrategyConditionCheck(13, "۱۳. کارایی جهت‌دار روند (ER14) و فیلتر بازار رِنج", cond13Passed, cond13Detail),
+                    StrategyConditionCheck(14, "۱۴. نبود شدوی معکوس سنگین روی کندل کراس 10/30", cond14Passed, cond14Detail),
+                    StrategyConditionCheck(15, "۱۵. فاز آغاز یا قلب موج کراس 10/30/60", cond15Passed, cond15Detail),
+                    StrategyConditionCheck(16, "۱۶. نقطه‌زنی ورود روی Tenkan(10) / Kijun(30)", cond16Passed, cond16Detail),
+                )
+            }
+
+            BitcoinStrategyModel.MUKHERJEE_RELATIVE_TK_RSI_KELLEY -> {
+                val c1 = if (isLong) trigSnap.tenkan >= trigSnap.kijun && trigSnap.kijun >= trigSnap.kumoBottom else trigSnap.tenkan <= trigSnap.kijun && trigSnap.kijun <= trigSnap.kumoTop
+                val c2 = if (isLong) trigSnap.close > trigSnap.kijun else trigSnap.close < trigSnap.kijun
+                val c3 = cond1Passed
+                val c4 = if (isLong) trigSnap.isFutureKumoBullish else trigSnap.isFutureKumoBearish
+                val c5 = cond6Passed
+                val c6 = trigSnap.kellySignalCount >= 3 && trigSnap.kellyWinProbabilityPercent >= 62
+                val c7 = if (isLong) trigSnap.hasBullishCandlestickPattern else trigSnap.hasBearishCandlestickPattern
+                val c8 = if (isLong) trigSnap.rsi14 >= 50.0 && trigSnap.rsiPeakDropLong < 10.5 else trigSnap.rsi14 <= 50.0 && trigSnap.rsiTroughRiseShort < 12.0
+                val c9 = !trigSnap.isKijunFlat || !stratSnap.isKijunFlat
+                listOf(
+                    StrategyConditionCheck(1, "۱. قدرت نسبی کراس Tenkan/Kijun نسبت به ابر کومو (قانون موکرجی)", c1, String.format(Locale.US, "TK=%s/%s در سمت قوی کومو", round2(trigSnap.tenkan).toString(), round2(trigSnap.kijun).toString())),
+                    StrategyConditionCheck(2, "۲. سیگنال Kijun-Sen Cross و تثبیت قیمت بالای/زیر کیجون", c2, String.format(Locale.US, "کلوز=%s در برابر Kijun=%s", round2(trigSnap.close).toString(), round2(trigSnap.kijun).toString())),
+                    StrategyConditionCheck(3, "۳. سیگنال Kumo Breakout در تایم استراتژی و ورود", c3, cond1Detail),
+                    StrategyConditionCheck(4, "۴. سیگنال Senkou Span Cross در ابر آینده (۲۶ کندل جلوتر)", c4, cond4Detail),
+                    StrategyConditionCheck(5, "۵. سیگنال Chikou Span Cross در فضای باز ۲۶ دوره قبل", c5, cond6Detail),
+                    StrategyConditionCheck(6, "۶. حد نصاب طوفان کامل و معیار کلی (Kelly Criterion ≥ 62%)", c6, String.format(Locale.US, "تعداد سیگنال‌های هم‌زمان: %d/5 · احتمال برد کلی: %d%%", trigSnap.kellySignalCount, trigSnap.kellyWinProbabilityPercent)),
+                    StrategyConditionCheck(7, "۷. الگوی کندل‌استیک ژاپنی تاییدکننده (Checkmate / Engulfing / PinBar)", c7, if (c7) "الگوی شمعی ژاپنی روی تعادل تایید شد ✅" else "در انتظار الگوی کندلی تایید"),
+                    StrategyConditionCheck(8, "۸. مومنتوم RSI(14) بالای/زیر ۵۰ بدون افت ۱۰ واحدی از قله (فیلتر موکرجی)", c8, String.format(Locale.US, "RSI(14)=%.1f · انحراف از قله/کف اخیر=%.1f واحد", trigSnap.rsi14, if (isLong) trigSnap.rsiPeakDropLong else trigSnap.rsiTroughRiseShort)),
+                    StrategyConditionCheck(9, "۹. شیب فعال Kijun-Sen و نبود کشیدگی C-Clamp", c9 && cond8Passed, String.format(Locale.US, "فاصله از کیجون=%.2f ATR · شیب کیجون=%+.2f", stratSnap.distanceToKijunAtr, trigSnap.kijunSlopeAtrPerBar)),
+                    StrategyConditionCheck(10, "۱۰. هندسه موج N هوسودا هم‌سو با طوفان کامل موکرجی", cond10Passed, cond10Detail),
+                    StrategyConditionCheck(11, "۱۱. تایید حجم معاملات در کندل شمعی ژاپنی", trigSnap.volumeRatio20 >= 0.60, String.format(Locale.US, "نسبت حجم به میانگین ۲۰=%.2fx", trigSnap.volumeRatio20)),
+                    StrategyConditionCheck(12, "۱۲. نسبت R:R بهینه (≥ 1:2.35) منطبق با فرمول کلی", cond12Passed, cond12Detail),
+                    StrategyConditionCheck(13, "۱۳. کارایی جهت‌دار روند (ER14) و فیلتر نویز", cond13Passed, cond13Detail),
+                    StrategyConditionCheck(14, "۱۴. رد شدوی معکوس و تایید کلوز کندل", cond14Passed, cond14Detail),
+                    StrategyConditionCheck(15, "۱۵. فاز گسترش روند و سلامت قله RSI(14)", cond15Passed, cond15Detail),
+                    StrategyConditionCheck(16, "۱۶. نقطه‌زنی ورود روی کندل تایید ژاپنی نزدیک Tenkan/Kijun", cond16Passed, cond16Detail),
+                )
+            }
+
+            BitcoinStrategyModel.MUKHERJEE_CLOUDS_CHIKOU_FILTER -> {
+                val c1 = cond1Passed
+                val c2 = if (isLong) trigSnap.close >= trigSnap.tenkan && trigSnap.tenkanSlopeAtrPerBar >= -0.02 else trigSnap.close <= trigSnap.tenkan && trigSnap.tenkanSlopeAtrPerBar <= 0.02
+                val c3 = !trigSnap.isKijunFlat && if (isLong) trigSnap.kijunSlopeAtrPerBar >= -0.01 else trigSnap.kijunSlopeAtrPerBar <= 0.01
+                val c4 = cond6Passed
+                val c5 = if (isLong) trigSnap.chikouAboveCloud26 else trigSnap.chikouBelowCloud26
+                val c6 = if (isLong) trigSnap.sanyakuBullishOrder else trigSnap.sanyakuBearishOrder
+                val c7 = if (isLong) trigSnap.isFutureKumoBullish else trigSnap.isFutureKumoBearish
+                listOf(
+                    StrategyConditionCheck(1, "۱. استقرار قیمت بیرون ابر کومو در هر دو تایم‌فریم (Mukherjee Dual Cloud)", c1, cond1Detail),
+                    StrategyConditionCheck(2, "۲. خط ماشه Tenkan-Sen (Trigger Line): کلوز و شیب فعال تنکان", c2, String.format(Locale.US, "Tenkan=%s · شیب تنکان=%+.2f ATR/bar", round2(trigSnap.tenkan).toString(), trigSnap.tenkanSlopeAtrPerBar)),
+                    StrategyConditionCheck(3, "۳. فیلتر ضد رِنج Kijun-Sen: غیرفلت بودن کیجون (حذف تله آهنربای رِنج)", c3, String.format(Locale.US, "Kijun=%s · شیب کیجون=%+.2f ATR · وضعیت=%s", round2(trigSnap.kijun).toString(), trigSnap.kijunSlopeAtrPerBar, if (trigSnap.isKijunFlat) "فلت/رِنج ⚠️" else "رونددار ✅")),
+                    StrategyConditionCheck(4, "۴. فیلتر نهایی Chikou Span (The Filter): عبور از قیمت ۲۶ دوره قبل", c4, cond6Detail),
+                    StrategyConditionCheck(5, "۵. عبور Chikou Span از ابر کوموی ۲۶ دوره قبل", c5, if (c5) "چیکو کاملاً بیرون ابر ۲۶ کندل قبل ✅" else "چیکو هنوز درگیر ابر ۲۶ کندل قبل است"),
+                    StrategyConditionCheck(6, "۶. چیدمان کامل Price / Tenkan / Kijun / Kumo", c6, String.format(Locale.US, "قیمت=%s · تنکان=%s · کیجون=%s", round2(trigSnap.close).toString(), round2(trigSnap.tenkan).toString(), round2(trigSnap.kijun).toString())),
+                    StrategyConditionCheck(7, "۷. جهت و شیب ابر آینده هم‌راستا با خط ماشه تنکان", c7, cond4Detail),
+                    StrategyConditionCheck(8, "۸. ضخامت کافی ابر آینده و ایمنی از پیچش", cond5Passed, cond5Detail),
+                    StrategyConditionCheck(9, "۹. قانون آهنربای کیجون: عدم کشیدگی بیش از حد قیمت از کیجون", cond8Passed, String.format(Locale.US, "فاصله از کیجون=%.2f ATR", stratSnap.distanceToKijunAtr)),
+                    StrategyConditionCheck(10, "۱۰. هندسه موج هوسودا در جهت خط ماشه تنکان", cond10Passed, cond10Detail),
+                    StrategyConditionCheck(11, "۱۱. قدرت بدنه کندل ماشه روی Tenkan-Sen و تایید حجم", dirCandle && trigSnap.volumeRatio20 >= 0.60, String.format(Locale.US, "بدنه=%.0f%% · حجم=%.2fx", trigSnap.candleBodyRatio * 100.0, trigSnap.volumeRatio20)),
+                    StrategyConditionCheck(12, "۱۲. نسبت R:R ≥ 1:2.20 با سنگر حد ضرر پشت Kijun-Sen", cond12Passed, cond12Detail),
+                    StrategyConditionCheck(13, "۱۳. کارایی روند (ER14) و نبود نوسان فرسایشی", cond13Passed, cond13Detail),
+                    StrategyConditionCheck(14, "۱۴. نبود شدوی تله در برخورد با خط ماشه Tenkan-Sen", cond14Passed, cond14Detail),
+                    StrategyConditionCheck(15, "۱۵. فاز روند فعال پس از خروج کیجون از حالت فلت", cond15Passed, cond15Detail),
+                    StrategyConditionCheck(16, "۱۶. نقطه‌زنی ورود روی خط ماشه Tenkan-Sen", cond16Passed, cond16Detail),
+                )
+            }
+
+            BitcoinStrategyModel.HOWTOTRADE_KEY_LEVEL_BREAK_PULLBACK -> {
+                val c1 = cond1Passed
+                val keyLevels = (stratSnap.flatEquilibriumLevels + trigSnap.flatEquilibriumLevels).distinct()
+                val hasSupportiveKeyLevel = if (isLong) {
+                    keyLevels.any { it <= trigSnap.close + trigSnap.atr14 * 0.25 } || trigSnap.isPriceAboveKumo
+                } else {
+                    keyLevels.any { it >= trigSnap.close - trigSnap.atr14 * 0.25 } || trigSnap.isPriceBelowKumo
+                }
+                val c3 = if (isLong) trigSnap.close > trigSnap.kumoTop && trigSnap.tenkan >= trigSnap.kijun else trigSnap.close < trigSnap.kumoBottom && trigSnap.tenkan <= trigSnap.kijun
+                val c4 = if (isLong) trigSnap.isFutureKumoBullish && stratSnap.isFutureKumoBullish else trigSnap.isFutureKumoBearish && stratSnap.isFutureKumoBearish
+                listOf(
+                    StrategyConditionCheck(1, "۱. شکست کامل کانال کومو (عبور از هر دو خط Senkou A و B)", c1, cond1Detail),
+                    StrategyConditionCheck(2, "۲. هم‌پوشانی لبه کومو/کیجون با سطح کلیدی افقی S/R (HowToTrade Setup 1)", hasSupportiveKeyLevel, String.format(Locale.US, "سطوح کلیدی شناسایی‌شده=%d سطح · لبه کومو=%s", keyLevels.size, round2(if (isLong) trigSnap.kumoTop else trigSnap.kumoBottom).toString())),
+                    StrategyConditionCheck(3, "۳. تثبیت بالای/زیر کانال کومو همراه با هم‌جهتی Tenkan و Kijun (Setup 2)", c3, String.format(Locale.US, "Tenkan=%s · Kijun=%s · کلوز=%s", round2(trigSnap.tenkan).toString(), round2(trigSnap.kijun).toString(), round2(trigSnap.close).toString())),
+                    StrategyConditionCheck(4, "۴. تایید پیچش ابر آینده (Future Kumo Twist: کراس Senkou A و B)", c4, cond4Detail),
+                    StrategyConditionCheck(5, "۵. ضخامت و استحکام کانال کوموی آینده", cond5Passed, cond5Detail),
+                    StrategyConditionCheck(6, "۶. آزادی خط Chikou Span در ۲۶ دوره قبل", cond6Passed, cond6Detail),
+                    StrategyConditionCheck(7, "۷. شکست سقف/کف ساختاری چیکو در جهت شکست کانال", cond7Passed, "عبور از مقاومت/حمایت چیکو"),
+                    StrategyConditionCheck(8, "۸. عدم کشیدگی بیش از حد از سطح کلیدی کومو/کیجون", cond8Passed, String.format(Locale.US, "فاصله از کیجون=%.2f ATR", stratSnap.distanceToKijunAtr)),
+                    StrategyConditionCheck(9, "۹. عبور ایمن از جاذبه فلت SSB", cond9Passed, "بافر امن بالای/زیر فلت SSB"),
+                    StrategyConditionCheck(10, "۱۰. ساختار موج N/V/E هوسودا از مبدا سطح کلیدی شکسته شده", cond10Passed, cond10Detail),
+                    StrategyConditionCheck(11, "۱۱. کندل تایید پرایس‌اکشن روی ری‌تست لبه کومو/کیجون با حجم مناسب", dirCandle && trigSnap.volumeRatio20 >= 0.60, String.format(Locale.US, "بدنه=%.0f%% · حجم=%.2fx", trigSnap.candleBodyRatio * 100.0, trigSnap.volumeRatio20)),
+                    StrategyConditionCheck(12, "۱۲. نسبت R:R ≥ 1:2.40 با حد ضرر پشت کانال کومو و سطح کلیدی", cond12Passed, cond12Detail),
+                    StrategyConditionCheck(13, "۱۳. کارایی جهت‌دار روند (ER14) پس از خروج از کانال کومو", cond13Passed, cond13Detail),
+                    StrategyConditionCheck(14, "۱۴. نبود شدوی بازگشتی به درون کانال کومو", cond14Passed, cond14Detail),
+                    StrategyConditionCheck(15, "۱۵. فاز آغاز یا گسترش موج پس از شکست کانال", cond15Passed, cond15Detail),
+                    StrategyConditionCheck(16, "۱۶. نقطه‌زنی ورود روی ری‌تست سطح کلیدی کومو/کیجون", cond16Passed, cond16Detail),
+                )
+            }
+
+            BitcoinStrategyModel.TSG_QUICK_PROFIT_4STEP -> {
+                val step1 = if (isLong) trigSnap.isPriceAboveKumo && stratSnap.isPriceAboveKumo else trigSnap.isPriceBelowKumo && stratSnap.isPriceBelowKumo
+                val step2a = if (isLong) trigSnap.tenkan >= trigSnap.kijun else trigSnap.tenkan <= trigSnap.kijun
+                val step2b = if (isLong) trigSnap.chikouAboveCloud26 && trigSnap.chikouBullishOpenSpace else trigSnap.chikouBelowCloud26 && trigSnap.chikouBearishOpenSpace
+                val tkCloudDistAtr = abs(trigSnap.tenkan - (if (isLong) trigSnap.kumoTop else trigSnap.kumoBottom)) / trigSnap.atr14.coerceAtLeast(1e-8)
+                val step2c = tkCloudDistAtr <= 2.40
+                val step3 = dirCandle && trigSnap.candleBodyRatio >= 0.22
+                listOf(
+                    StrategyConditionCheck(1, "۱. گام اول TSG: شکست و کلوز قطعی کندل بیرون ابر کومو", step1, cond1Detail),
+                    StrategyConditionCheck(2, "۲. گام دوم الف TSG: کراس و برتری Conversion Line (تنکان) بر Base Line (کیجون)", step2a, String.format(Locale.US, "Conversion(9)=%s · Base(26)=%s", round2(trigSnap.tenkan).toString(), round2(trigSnap.kijun).toString())),
+                    StrategyConditionCheck(3, "۳. گام دوم ب TSG: قرارگیری Chikou Span بیرون ابر کوموی ۲۶ دوره قبل", step2b, if (step2b) "چیکو بالای/زیر ابر ۲۶ دوره قبل و آزاد ✅" else "چیکو درگیر ابر ۲۶ دوره قبل"),
+                    StrategyConditionCheck(4, "۴. قانون فاصله TSG: عدم فاصله افراطی کراس TK از ابر کومو", step2c, String.format(Locale.US, "فاصله تنکان از لبه کومو=%.2f ATR", tkCloudDistAtr)),
+                    StrategyConditionCheck(5, "۵. گام سوم TSG: کندل تایید ورود در جهت کراس Conversion/Base", step3, String.format(Locale.US, "بدنه کندل=%.0f%% · CLV=%.0f%%", trigSnap.candleBodyRatio * 100.0, trigSnap.closeLocationValue * 100.0)),
+                    StrategyConditionCheck(6, "۶. هم‌جهتی تایم‌فریم بالاتر (1H/4H) با شکست ۴ گامی TSG", cond1Passed, cond1Detail),
+                    StrategyConditionCheck(7, "۷. جهت و رنگ ابر آینده (Future Kumo 26) هم‌سو با گام ۱ و ۲", if (isLong) trigSnap.isFutureKumoBullish else trigSnap.isFutureKumoBearish, cond4Detail),
+                    StrategyConditionCheck(8, "۸. ضخامت کافی ابر آینده و ایمنی از پیچش", cond5Passed, cond5Detail),
+                    StrategyConditionCheck(9, "۹. عدم کشیدگی افراطی از Base Line (کیجون) در لحظه گام ۳", cond8Passed, String.format(Locale.US, "فاصله از Base Line=%.2f ATR", stratSnap.distanceToKijunAtr)),
+                    StrategyConditionCheck(10, "۱۰. تطابق گام ۴ با اهداف موجی هوسودا (V/N/E)", cond10Passed, cond10Detail),
+                    StrategyConditionCheck(11, "۱۱. عبور از سقف/کف چیکو و بافر فلت SSB", cond7Passed && cond9Passed, "مسیر باز چیکو و فلت SSB"),
+                    StrategyConditionCheck(12, "۱۲. گام چهارم TSG: استاپ پشت کندل شکست/کیجون و نسبت R:R ≥ 1:2.25", cond12Passed, cond12Detail),
+                    StrategyConditionCheck(13, "۱۳. کارایی روند (ER14) و نبود بازار رِنج در زمان کراس TK", cond13Passed, cond13Detail),
+                    StrategyConditionCheck(14, "۱۴. نبود شدوی معکوس سنگین خلاف جهت گام ۳", cond14Passed, cond14Detail),
+                    StrategyConditionCheck(15, "۱۵. فاز موج تازه نفس پس از شکست کومو (Genesis/Core)", cond15Passed, cond15Detail),
+                    StrategyConditionCheck(16, "۱۶. نقطه‌زنی ورود گام ۳ روی سطح بهینه Conversion/Base", cond16Passed, cond16Detail),
+                )
+            }
+
+            BitcoinStrategyModel.KOONITZ_5RULES_DMI_MACD_EMA34 -> {
+                val r1 = if (isLong) trigSnap.close > trigSnap.kijun && trigSnap.kijunSlopeAtrPerBar >= -0.02 else trigSnap.close < trigSnap.kijun && trigSnap.kijunSlopeAtrPerBar <= 0.02
+                val r2 = cond1Passed
+                val r3 = if (isLong) trigSnap.isFutureKumoBullish && stratSnap.isFutureKumoBullish else trigSnap.isFutureKumoBearish && stratSnap.isFutureKumoBearish
+                val r4 = if (isLong) trigSnap.chikouAboveCloud26 && trigSnap.chikouBullishOpenSpace else trigSnap.chikouBelowCloud26 && trigSnap.chikouBearishOpenSpace
+                val r5Dmi = if (isLong) trigSnap.isDmiBullish else trigSnap.isDmiBearish
+                val r5Macd = if (isLong) trigSnap.isMacdBullish else trigSnap.isMacdBearish
+                val r5Ema34 = if (isLong) trigSnap.close >= trigSnap.ema34 - trigSnap.atr14 * 0.10 else trigSnap.close <= trigSnap.ema34 + trigSnap.atr14 * 0.10
+                val tkEma34Ok = if (isLong) trigSnap.tenkan >= trigSnap.kijun - trigSnap.atr14 * 0.05 else trigSnap.tenkan <= trigSnap.kijun + trigSnap.atr14 * 0.05
+                val rsiOk = if (isLong) trigSnap.rsi14 in 48.0..78.0 else trigSnap.rsi14 in 22.0..52.0
+                listOf(
+                    StrategyConditionCheck(1, "۱. قانون ۱ کونیتز: قیمت در سمت درست خط Base (کیجون) دارای شیب موافق", r1, String.format(Locale.US, "کلوز=%s · Kijun=%s (شیب=%+.2f ATR)", round2(trigSnap.close).toString(), round2(trigSnap.kijun).toString(), trigSnap.kijunSlopeAtrPerBar)),
+                    StrategyConditionCheck(2, "۲. قانون ۲ کونیتز: استقرار کامل قیمت بیرون ابر کوموی فعلی", r2, cond1Detail),
+                    StrategyConditionCheck(3, "۳. قانون ۳ کونیتز: هم‌رنگی و شیب موافق ابر آینده (Future Kumo 26)", r3, cond4Detail),
+                    StrategyConditionCheck(4, "۴. قانون ۴ کونیتز: عبور Chikou Span از درون ابر ۲۶ دوره قبل به فضای باز", r4, if (r4) "چیکو از کوموی ۲۶ دوره قبل عبور کرده و آزاد است ✅" else "چیکو درگیر ابر/کندل ۲۶ دوره قبل"),
+                    StrategyConditionCheck(5, "۵. قانون ۵ الف کونیتز (DMI/ADX): برتری +DI/-DI همراه با ADX(14) ≥ 20", r5Dmi || r5Macd, String.format(Locale.US, "ADX(14)=%.1f · +DI=%.1f · -DI=%.1f", trigSnap.adx14, trigSnap.plusDi14, trigSnap.minusDi14)),
+                    StrategyConditionCheck(6, "۶. قانون ۵ ب کونیتز (MACD 12,26,9): تایید خط MACD و هیستوگرام", r5Macd || r5Dmi, String.format(Locale.US, "MACD=%.3f · Signal=%.3f · Hist=%+.3f", trigSnap.macdLine, trigSnap.macdSignal, trigSnap.macdHistogram)),
+                    StrategyConditionCheck(7, "۷. قانون ۵ ج کونیتز (EMA 34): حمایت/مقاومت پویا میانگین نمایی ۳۴", r5Ema34, String.format(Locale.US, "قیمت=%s · EMA(34)=%s", round2(trigSnap.close).toString(), round2(trigSnap.ema34).toString())),
+                    StrategyConditionCheck(8, "۸. چیدمان هم‌جهت Tenkan-Sen و Kijun-Sen بالای/زیر EMA(34)", tkEma34Ok, String.format(Locale.US, "Tenkan=%s · Kijun=%s · EMA34=%s", round2(trigSnap.tenkan).toString(), round2(trigSnap.kijun).toString(), round2(trigSnap.ema34).toString())),
+                    StrategyConditionCheck(9, "۹. عدم اشباع افراطی از کیجون و EMA(34) (فیلتر تعادل کونیتز)", cond8Passed, String.format(Locale.US, "فاصله از کیجون=%.2f ATR", stratSnap.distanceToKijunAtr)),
+                    StrategyConditionCheck(10, "۱۰. قرارگیری RSI(14) در ناحیه مومنتوم سالم و ساختار موج هوسودا", rsiOk && cond10Passed, String.format(Locale.US, "RSI(14)=%.1f · %s", trigSnap.rsi14, cond10Detail)),
+                    StrategyConditionCheck(11, "۱۱. ضخامت کافی ابر آینده و عبور از جاذبه فلت SSB", cond5Passed && cond9Passed, cond5Detail),
+                    StrategyConditionCheck(12, "۱۲. نسبت R:R ≥ 1:2.45 با سنگر دوگانه Kijun + EMA(34)", cond12Passed, cond12Detail),
+                    StrategyConditionCheck(13, "۱۳. کارایی روند (ER14) و قدرت روند DMI/ADX", cond13Passed, cond13Detail),
+                    StrategyConditionCheck(14, "۱۴. کندل ورود معتبر با کلوز قوی و بدون شدوی معکوس", cond14Passed && dirCandle, cond14Detail),
+                    StrategyConditionCheck(15, "۱۵. عدم فعال بودن ۴ قانون خروج کونیتز در لحظه ورود", cond15Passed, cond15Detail),
+                    StrategyConditionCheck(16, "۱۶. نقطه‌زنی ورود روی همگرایی Tenkan / Kijun / EMA(34)", cond16Passed, cond16Detail),
+                )
+            }
+
+            BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44 -> {
+                val s1Macro = if (macroSnap == null) true else if (isLong) !macroSnap.isPriceBelowKumo && macroSnap.ema13 >= macroSnap.ema48 - macroSnap.atr14 * 0.25 else !macroSnap.isPriceAboveKumo && macroSnap.ema13 <= macroSnap.ema48 + macroSnap.atr14 * 0.25
+                val s2Strat = if (isLong) stratSnap.close > stratSnap.kumoTop72244 && stratSnap.ema13 >= stratSnap.ema34 - stratSnap.atr14 * 0.10 else stratSnap.close < stratSnap.kumoBottom72244 && stratSnap.ema13 <= stratSnap.ema34 + stratSnap.atr14 * 0.10
+                val s3TrigCloud = if (isLong) trigSnap.close > trigSnap.kumoTop72244 else trigSnap.close < trigSnap.kumoBottom72244
+                val s4FastTk = if (isLong) trigSnap.tenkan7 >= trigSnap.kijun22 else trigSnap.tenkan7 <= trigSnap.kijun22
+                val s5RibbonTrig = if (isLong) trigSnap.ema13 >= trigSnap.ema34 && trigSnap.ema34 >= trigSnap.ema48 - trigSnap.atr14 * 0.12 else trigSnap.ema13 <= trigSnap.ema34 && trigSnap.ema34 <= trigSnap.ema48 + trigSnap.atr14 * 0.12
+                val s6RibbonStrat = if (isLong) stratSnap.ema13 >= stratSnap.ema34 - stratSnap.atr14 * 0.08 else stratSnap.ema13 <= stratSnap.ema34 + stratSnap.atr14 * 0.08
+                val s7FutureFast = if (isLong) trigSnap.senkouA72244 >= trigSnap.senkouB44 - trigSnap.atr14 * 0.10 || trigSnap.isFutureKumoBullish else trigSnap.senkouA72244 <= trigSnap.senkouB44 + trigSnap.atr14 * 0.10 || trigSnap.isFutureKumoBearish
+                val s9Osc = if (isLong) trigSnap.isMacdBullish || trigSnap.isDmiBullish else trigSnap.isMacdBearish || trigSnap.isDmiBearish
+                val distKijun22Atr = abs(trigSnap.close - trigSnap.kijun22) / trigSnap.atr14.coerceAtLeast(1e-8)
+                val s10NotExt = distKijun22Atr <= config.maxKijunExtensionAtr && cond8Passed
+                listOf(
+                    StrategyConditionCheck(1, "۱. صفحه اول کونیتز (${config.macroInterval.label}): هم‌جهتی کومو و ریبون EMA(13/34/48)", s1Macro, String.format(Locale.US, "تایم کلان ${config.macroInterval.label}: هم‌سو با روند اصلی")),
+                    StrategyConditionCheck(2, "۲. صفحه دوم کونیتز (${config.strategyInterval.label}): قیمت بیرون ابر سریع (7, 22, 44)", s2Strat, String.format(Locale.US, "کلوز ${config.strategyInterval.label}=%s · ابر سریع ۴۴=[%s..%s]", round2(stratSnap.close).toString(), round2(stratSnap.kumoBottom72244).toString(), round2(stratSnap.kumoTop72244).toString())),
+                    StrategyConditionCheck(3, "۳. صفحه سوم کونیتز (${config.triggerInterval.label}): کلوز قیمت بیرون ابر سریع (7, 22, 44)", s3TrigCloud, String.format(Locale.US, "کلوز=%s · ابر سریع (7,22,44)=[%s .. %s]", round2(trigSnap.close).toString(), round2(trigSnap.kumoBottom72244).toString(), round2(trigSnap.kumoTop72244).toString())),
+                    StrategyConditionCheck(4, "۴. کراس و برتری سریع Tenkan(7) و Kijun(22) (شکار زودهنگام روند)", s4FastTk, String.format(Locale.US, "Tenkan(7)=%s · Kijun(22)=%s", round2(trigSnap.tenkan7).toString(), round2(trigSnap.kijun22).toString())),
+                    StrategyConditionCheck(5, "۵. آرایش ریبون نمایی کونیتز: EMA(13) / EMA(34) / EMA(48) در تایم ورود", s5RibbonTrig, String.format(Locale.US, "EMA13=%s · EMA34=%s · EMA48=%s", round2(trigSnap.ema13).toString(), round2(trigSnap.ema34).toString(), round2(trigSnap.ema48).toString())),
+                    StrategyConditionCheck(6, "۶. تایید کراس EMA(13/34) در تایم استراتژی (${config.strategyInterval.label})", s6RibbonStrat, String.format(Locale.US, "EMA13(${config.strategyInterval.label})=%s · EMA34=%s", round2(stratSnap.ema13).toString(), round2(stratSnap.ema34).toString())),
+                    StrategyConditionCheck(7, "۷. جهت و ضخامت کوموی سریع ۴۴ دوره‌ای و ابر آینده", s7FutureFast && cond5Passed, String.format(Locale.US, "SpanA(7/22)=%s · SpanB(44)=%s", round2(trigSnap.senkouA72244).toString(), round2(trigSnap.senkouB44).toString())),
+                    StrategyConditionCheck(8, "۸. آزادی خط Chikou در فضای باز و عبور از ابر دوره قبل", cond6Passed, cond6Detail),
+                    StrategyConditionCheck(9, "۹. تایید نوسان‌نمای مومنتوم صفحه سوم (MACD / DMI)", s9Osc, String.format(Locale.US, "MACD Hist=%+.3f · ADX=%.1f", trigSnap.macdHistogram, trigSnap.adx14)),
+                    StrategyConditionCheck(10, "۱۰. فاصله استاندارد قیمت از Kijun(22) و EMA(34)", s10NotExt, String.format(Locale.US, "فاصله از Kijun(22)=%.2f ATR", distKijun22Atr)),
+                    StrategyConditionCheck(11, "۱۱. هندسه موج هوسودا هم‌سو با سیستم سریع 7-22-44", cond10Passed, cond10Detail),
+                    StrategyConditionCheck(12, "۱۲. نسبت R:R ≥ 1:2.35 با حد ضرر پشت Kijun(22) و EMA(34)", cond12Passed, cond12Detail),
+                    StrategyConditionCheck(13, "۱۳. کارایی جهت‌دار روند (ER14) و فیلتر بازار رِنج", cond13Passed, cond13Detail),
+                    StrategyConditionCheck(14, "۱۴. کندل شلیک صفحه سوم با بدنه قوی و شدوی مخالف کم", cond14Passed && dirCandle, cond14Detail),
+                    StrategyConditionCheck(15, "۱۵. فاز تولد یا گسترش موج (Genesis/Core) در تنظیمات 7-22-44", cond15Passed, cond15Detail),
+                    StrategyConditionCheck(16, "۱۶. نقطه‌زنی ورود روی Tenkan(7) / Kijun(22) / EMA(13)", cond16Passed, cond16Detail),
+                )
+            }
+
+            else -> emptyList()
+        }
+    }
+
+    /**
+     * تشخیص ۴ ماشه ورود برای شکار اصل روند از لحظه تولد (`EARLY_KATANA_GENESIS`) تا قلب موج (`PULLBACK / BREAKOUT / SANYAKU`)
+     * + ماشه‌های اختصاصی هر یک از ۹ کتاب PDF گوگل درایو.
      */
     private fun detectEntryTrigger(
         direction: SignalAction,
@@ -2651,6 +3404,7 @@ object IchimokuStrategyEngine {
         trigSnap: IchimokuBarSnapshot,
         stratSnap: IchimokuBarSnapshot,
         config: BaseStrategyConfig,
+        activeModel: BitcoinStrategyModel = BitcoinStrategyModel.BASE_ICHIMOKU,
     ): StrategyTriggerType {
         if (bars.size < 5) return StrategyTriggerType.NONE
         val cur = bars.last()
@@ -2663,6 +3417,89 @@ object IchimokuStrategyEngine {
             trigSnap.atr14 * config.breakoutBufferAtr
         } else {
             trigSnap.atr14 * 0.03
+        }
+
+        // ── ماشه‌های اختصاصی ۹ کتاب PDF گوگل درایو ────────────────────────────
+        when (activeModel) {
+            BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE -> {
+                if (isLong && cur.close > cur.open && cur.close > trigSnap.kumoTop) {
+                    if (trigSnap.isBollingerSqueeze && trigSnap.isMarubozuBreakoutBull && trigSnap.rsi14 >= 50.0) {
+                        return StrategyTriggerType.EARLY_KATANA_GENESIS
+                    }
+                    val touchedMidOrEma = listOf(prev1, prev2, cur).any { b ->
+                        b.low <= max(trigSnap.bbMiddle20, trigSnap.kijun) + trigSnap.atr14 * 0.35
+                    }
+                    if (touchedMidOrEma && cur.close >= trigSnap.bbMiddle20 && trigSnap.rsi14 >= 50.0) {
+                        return StrategyTriggerType.PULLBACK_BOUNCE
+                    }
+                } else if (!isLong && cur.close < cur.open && cur.close < trigSnap.kumoBottom) {
+                    if (trigSnap.isBollingerSqueeze && trigSnap.isMarubozuBreakoutBear && trigSnap.rsi14 <= 50.0) {
+                        return StrategyTriggerType.EARLY_KATANA_GENESIS
+                    }
+                    val touchedMidOrEma = listOf(prev1, prev2, cur).any { b ->
+                        b.high >= min(trigSnap.bbMiddle20, trigSnap.kijun) - trigSnap.atr14 * 0.35
+                    }
+                    if (touchedMidOrEma && cur.close <= trigSnap.bbMiddle20 && trigSnap.rsi14 <= 50.0) {
+                        return StrategyTriggerType.PULLBACK_BOUNCE
+                    }
+                }
+            }
+
+            BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL -> {
+                if (isLong && cur.close > cur.open && cur.close > trigSnap.kumoTop && cur.close >= trigSnap.ema21 - trigSnap.atr14 * 0.10) {
+                    if (trigSnap.rsi7Bullish50Bounce || (trigSnap.rsi7 >= 50.0 && trigSnap.prevRsi7 <= 54.0)) {
+                        return StrategyTriggerType.PULLBACK_BOUNCE
+                    }
+                } else if (!isLong && cur.close < cur.open && cur.close < trigSnap.kumoBottom && cur.close <= trigSnap.ema21 + trigSnap.atr14 * 0.10) {
+                    if (trigSnap.rsi7Bearish50Bounce || (trigSnap.rsi7 <= 50.0 && trigSnap.prevRsi7 >= 46.0)) {
+                        return StrategyTriggerType.PULLBACK_BOUNCE
+                    }
+                }
+            }
+
+            BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 -> {
+                if (isLong && cur.close > cur.open && cur.close > trigSnap.kumoTop103060 && trigSnap.tenkan10 >= trigSnap.kijun30) {
+                    val touched1030 = listOf(prev1, prev2, prev3, cur).any { b ->
+                        b.low <= max(trigSnap.tenkan10, trigSnap.kijun30) + trigSnap.atr14 * 0.35
+                    }
+                    if (touched1030 && cur.close >= trigSnap.tenkan10) {
+                        return StrategyTriggerType.PULLBACK_BOUNCE
+                    }
+                    if (prev1.close <= trigSnap.kumoTop103060 || prev2.close <= trigSnap.kumoTop103060) {
+                        return StrategyTriggerType.VALIDATED_BREAKOUT
+                    }
+                } else if (!isLong && cur.close < cur.open && cur.close < trigSnap.kumoBottom103060 && trigSnap.tenkan10 <= trigSnap.kijun30) {
+                    val touched1030 = listOf(prev1, prev2, prev3, cur).any { b ->
+                        b.high >= min(trigSnap.tenkan10, trigSnap.kijun30) - trigSnap.atr14 * 0.35
+                    }
+                    if (touched1030 && cur.close <= trigSnap.tenkan10) {
+                        return StrategyTriggerType.PULLBACK_BOUNCE
+                    }
+                    if (prev1.close >= trigSnap.kumoBottom103060 || prev2.close >= trigSnap.kumoBottom103060) {
+                        return StrategyTriggerType.VALIDATED_BREAKOUT
+                    }
+                }
+            }
+
+            BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44 -> {
+                if (isLong && cur.close > cur.open && cur.close > trigSnap.kumoTop72244 && trigSnap.tenkan7 >= trigSnap.kijun22) {
+                    val touchedFast = listOf(prev1, prev2, prev3, cur).any { b ->
+                        b.low <= max(trigSnap.tenkan7, max(trigSnap.kijun22, trigSnap.ema13)) + trigSnap.atr14 * 0.35
+                    }
+                    if (touchedFast && cur.close >= trigSnap.tenkan7) {
+                        return StrategyTriggerType.EARLY_KATANA_GENESIS
+                    }
+                } else if (!isLong && cur.close < cur.open && cur.close < trigSnap.kumoBottom72244 && trigSnap.tenkan7 <= trigSnap.kijun22) {
+                    val touchedFast = listOf(prev1, prev2, prev3, cur).any { b ->
+                        b.high >= min(trigSnap.tenkan7, min(trigSnap.kijun22, trigSnap.ema13)) - trigSnap.atr14 * 0.35
+                    }
+                    if (touchedFast && cur.close <= trigSnap.tenkan7) {
+                        return StrategyTriggerType.EARLY_KATANA_GENESIS
+                    }
+                }
+            }
+
+            else -> Unit
         }
 
         if (isLong) {

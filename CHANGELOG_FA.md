@@ -4,6 +4,20 @@
 
 ---
 
+## ۳.۹.۱۶ — کد ۷۲۵ · **منتشرشده** (۲۰۲۶-۱۰-۲۸)
+
+- **تکمیل ۱۰۰٪ موتور، ماشه‌های ورود، فرمول SL/TP، چک‌لیست ۱۶ شرطی اختصاصی و شناسنامه کامل هر ۹ استراتژی کتاب‌های PDF گوگل درایو (`IchimokuStrategyEngine` و `DriveBookPlaybookSpec`):**
+  - هر یک از ۹ استراتژی درایو (`TuAnh BB Squeeze + EMA89/SMA200`، `Foka 15m EMA21 + RSI7 50-Bounce + Bill Williams Fractal`، `Keenbase 10-30-60 Mechanical Cross`، `Mukherjee Relative TK + Kelly Criterion + Japanese Candlesticks`، `Mukherjee Tenkan Trigger + Anti-Range Kijun Slope + Chikou Final Filter`، `HowToTrade Key Level S/R + Kumo Channel Breakout`، `TSG 4-Step Quick Profit`، `Koonitz 5 Golden Rules + DMI/ADX + MACD + EMA34` و `Koonitz Triple Screen + Fast 7-22-44 + EMA 13/34/48`) اکنون دارای **۱۶ شرط اختصاصی منطبق با متن کتاب**، **ماشه ورود مستقل کتاب (`detectEntryTrigger`)**، **نقطه ورود اسنایپر و حد ضرر/حد سود اختصاصی**، **تله‌متری زنده اندیکاتورهای کتاب روی چارت** و **کارت کامل قوانین و فرمول‌های کتاب** در تب رادار و انتخاب استراتژی است.
+- **بازطراحی سیستم هوش عصبی کاملاً متناسب با ترید واقعی (`NeuralSelfLearningEngine` و `NeuralBrainScreen`):**
+  - اضافه شدن **ماتریس برتری ترید ۲۴ استراتژی (`Strategy × Timeframe × Symbol Edge Matrix`)** با محاسبه نرخ برد، `Profit Factor`، امید ریاضی هر ترید (`E[R]`)، بهترین تایم‌فریم (`15m` یا `5m`)، بهترین نماد و امتیاز لبه ترید (`Edge Score 0..100`) با قابلیت فیلتر بین ۹ کتاب درایو و ۱۵ ترکیب پایه.
+  - اضافه شدن **کالبدشکافی تریدی علل تارگت و استاپ (`Trade Outcome Forensics`)**: استخراج ۴ عامل اصلی معاملات برنده (`TP Drivers`)، ۴ علت اصلی استاپ خوردن (`SL Forensics`) و ۳ قانون عملیاتی ترید در لحظه.
+  - اضافه شدن **هوش سشن‌های معاملاتی (`Session Trading Intelligence`)** به تفکیک هم‌پوشانی لندن-نیویورک، سشن لندن، سشن نیویورک و سشن آسیا.
+- **دستیار ترید با بهترین متود ایچیموکو جهان + سیستم تولید «نکات قابل اصلاح برای دفعات بعد» (`MasterIchimokuTradingAssistant`):**
+  - تحلیل لحظه‌ای هر ۱۵ نماد در `15m` و `5m` بر اساس **۴ ستون اصیل گوایچی هوسودا** (تعادل ۵ خط `Kinko Hyo`، امواج `Hado Ron: I/V/N/P/Y/S`، چرخه زمان `Kihon Suchi: 9/17/26/33/42` و روز تغییر `Henka-bi`، و اهداف چهارگانه `Keisanchi: NT/V/N/E`) به همراه سنتز پاتل، پلویل و ۹ کتاب درایو و ارائه برنامه عملیاتی ۵ گامی ترید.
+  - **موتور عیب‌یاب و تولیدکننده نکات قابل اصلاح بعدی (`IchimokuImprovementNote`)**: شناسایی خودکار علل استاپ‌های سریع، کشیدگی `C-Clamp` و گلوگاه‌های ۱۶ شرط در استراتژی‌ها و ارائه **دستور دقیق فنی برای اصلاح بعدی** با قابلیت **پین کردن، کپی یک‌کلیکی برای اصلاح در نسخه‌های بعدی، ذخیره در حافظه گوشی (`Download/AurumEdge/Archive/Ichimoku_Assistant_FixNotes.txt`) و اعمال خودکار پیشنهاد روی تنظیمات استراتژی**.
+
+---
+
 ## ۳.۹.۱۵ — کد ۷۲۴ · **منتشرشده** (۲۰۲۶-۱۰-۲۸)
 
 - **تنظیم دقیق صدای آلارم‌ها طبق تصویر ارسالی و حذف کامل صداهای اضافی (`TradeEventAlarmManager`):**

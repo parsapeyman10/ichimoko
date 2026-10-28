@@ -43,6 +43,8 @@ import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.BaseStrategyConfig
 import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.DualTimeframeSymbolReport
+import com.aurum.edge.core.driveBookPlaybook
+import com.aurum.edge.core.formatLiveBookTelemetryFa
 import com.aurum.edge.core.MarketHours
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.RiskAndCalendarEngine
@@ -491,6 +493,18 @@ private fun Live12ConditionChecklistPage(
 
         val passed = report.conditions.count { it.passed }
         val total = report.conditions.size
+        val activeBuiltInModel = BitcoinStrategyModel.fromId(report.strategyId)
+        val playbook = activeBuiltInModel.driveBookPlaybook()
+        val isLongBias = report.action == SignalAction.BUY ||
+            (report.action == SignalAction.NO_TRADE && (report.strategySnapshot?.close ?: 0.0) >= (report.strategySnapshot?.kijun ?: 0.0))
+        val liveBookTelemetry = activeBuiltInModel.formatLiveBookTelemetryFa(
+            trigSnap = report.triggerSnapshot,
+            stratSnap = report.strategySnapshot,
+            isLong = isLongBias,
+        )
+        var showBookSpecDetails by rememberSaveable(report.strategyId) {
+            mutableStateOf(activeBuiltInModel.isDrivePdfStrategy)
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -506,6 +520,81 @@ private fun Live12ConditionChecklistPage(
                     text = "چارت ${report.symbol} ↗",
                     color = AurumColors.Cyan,
                     modifier = Modifier.clickable { onOpenChart(report.symbol) },
+                )
+            }
+        }
+
+        // ── کارت شناسنامه کامل استراتژی کتاب و تله‌متری زنده اندیکاتورهای اختصاصی ──
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
+                .border(
+                    1.dp,
+                    if (activeBuiltInModel.isDrivePdfStrategy) AurumColors.Cyan.copy(alpha = 0.5f) else AurumColors.Gold.copy(alpha = 0.35f),
+                    RoundedCornerShape(10.dp),
+                )
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showBookSpecDetails = !showBookSpecDetails },
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "📘 ${report.strategyTitleFa}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (activeBuiltInModel.isDrivePdfStrategy) AurumColors.Cyan else AurumColors.Gold,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "📊 تله‌متری زنده کتاب: $liveBookTelemetry",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextPrimary,
+                    )
+                }
+                Pill(
+                    text = if (showBookSpecDetails) "▲ بستن قوانین" else "▼ قوانین کتاب",
+                    color = AurumColors.Gold,
+                )
+            }
+            if (showBookSpecDetails) {
+                Text(
+                    text = "📄 منبع: ${playbook.bookFileTitle} (${playbook.authorAndEdition})",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "⚙️ تنظیمات ایچیموکو: ${playbook.ichimokuSettingsFa}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                )
+                Text(
+                    text = "📈 اندیکاتورهای مکمل: ${playbook.auxiliaryIndicatorsFa}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Cyan,
+                )
+                playbook.entryChecklistStepsFa.forEach { step ->
+                    Text(
+                        text = "• $step",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextPrimary,
+                    )
+                }
+                Text(
+                    text = "🛡️ فرمول حد ضرر (SL): ${playbook.stopLossFormulaFa}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Red,
+                )
+                Text(
+                    text = "🎯 فرمول حد سود (TP) و خروج: ${playbook.takeProfitAndExitRulesFa}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Green,
                 )
             }
         }
@@ -827,11 +916,54 @@ internal fun ExclusiveStrategySelectorPage(
                     }
                 }
                 if (descExpanded) {
-                    Text(
-                        text = item.summaryFa,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.TextSecondary,
-                    )
+                    val modelSpec = BitcoinStrategyModel.fromId(item.id).driveBookPlaybook()
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(AurumColors.Background.copy(alpha = 0.65f))
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = item.summaryFa,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextPrimary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "📄 منبع: ${modelSpec.bookFileTitle}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Gold,
+                        )
+                        Text(
+                            text = "⚙️ تنظیمات ایچیموکو: ${modelSpec.ichimokuSettingsFa}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Cyan,
+                        )
+                        Text(
+                            text = "📊 اندیکاتورهای مکمل: ${modelSpec.auxiliaryIndicatorsFa}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextSecondary,
+                        )
+                        modelSpec.entryChecklistStepsFa.forEach { step ->
+                            Text(
+                                text = "• $step",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextPrimary,
+                            )
+                        }
+                        Text(
+                            text = "🛡️ حد ضرر (SL): ${modelSpec.stopLossFormulaFa}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Red,
+                        )
+                        Text(
+                            text = "🎯 حد سود و خروج (TP): ${modelSpec.takeProfitAndExitRulesFa}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Green,
+                        )
+                    }
                 }
             }
         }

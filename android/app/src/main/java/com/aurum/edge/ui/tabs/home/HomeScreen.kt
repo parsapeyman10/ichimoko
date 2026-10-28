@@ -525,6 +525,100 @@ private fun LiveMetalsCryptoForexRadarCard(
                 }
             }
         }
+
+        // ── ۴. دستیار ترید با بهترین متود ایچیموکو جهان + نکات قابل اصلاح بعدی (کشویی) ──
+        val homeAssistantCoaching = remember(market.symbol, dualReports) {
+            com.aurum.edge.core.MasterIchimokuTradingAssistant.analyzeSymbolWithMasterMethod(
+                symbol = V1Universe.normalize(market.symbol),
+                dualReport = dualReports[V1Universe.normalize(market.symbol)],
+            )
+        }
+        val homeImprovementNotes = remember(tradesState, dualReports, settings.baseStrategyConfig) {
+            com.aurum.edge.core.MasterIchimokuTradingAssistant.generateActionableImprovementNotes(
+                trades = tradesState,
+                dualReports = dualReports,
+                currentConfig = settings.baseStrategyConfig,
+            )
+        }
+        SectionCard(
+            title = "🧭 دستیار استاد ایچیموکو + نکات قابل اصلاح بعدی (${homeImprovementNotes.size})",
+            subtitle = "تحلیل ۴ ستون هوسودا روی نماد فعال (${market.symbol}) و لیست نکات فنی برای بهبود استراتژی‌ها",
+            initiallyExpanded = false,
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                homeAssistantCoaching?.let { c ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(AurumColors.SurfaceAlt)
+                            .padding(9.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "${c.symbol} [${c.timeframeLabel}] · ${c.masterGradeFa}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AurumColors.Gold,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Pill(text = "${c.worldClassIchimokuScore}/100", color = AurumColors.Cyan)
+                        }
+                        Text(text = "🌊 ${c.hosodaWaveTypeFa}", style = MaterialTheme.typography.labelSmall, color = AurumColors.TextPrimary)
+                        Text(text = "⏳ ${c.hosodaTimeCycleStatusFa}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold)
+                        Text(text = "🎯 ${c.keisanchiTargetsSummaryFa}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Green)
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "🛠️ نکات قابل اصلاح برای ارتقای بعدی:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = AurumColors.Gold,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Pill(
+                        text = "📋 کپی همه نکات",
+                        color = AurumColors.Cyan,
+                        modifier = Modifier.clickable { viewModel.copyAssistantImprovementNotes(homeImprovementNotes) },
+                    )
+                }
+                homeImprovementNotes.take(4).forEach { note ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(AurumColors.SurfaceAlt)
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Text(
+                            text = "${note.priority.badgeFa} · ${note.categoryFa}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Gold,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = note.problemDetectedFa,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextPrimary,
+                        )
+                        Text(
+                            text = "🛠️ اصلاح: ${note.exactFixInstructionFa}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Green,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 

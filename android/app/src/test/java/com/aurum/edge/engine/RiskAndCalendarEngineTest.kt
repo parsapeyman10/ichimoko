@@ -12,6 +12,7 @@ import com.aurum.edge.core.Smart15mSyncPlanner
 import com.aurum.edge.core.StrategyReadinessState
 import com.aurum.edge.core.SymbolPollTier
 import com.aurum.edge.core.V1Universe
+import com.aurum.edge.core.driveBookPlaybook
 import com.aurum.edge.data.AvalAiAdvisor
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.SettingsStore
@@ -841,6 +842,49 @@ class RiskAndCalendarEngineTest {
         assertEquals(2_738.0, decodedRecord.stopLossPrice, 1e-4)
         assertEquals(2_762.5, decodedRecord.takeProfitPrice, 1e-4)
         assertNotNull(decodedRecord.fullPaperTrade)
+
+        // Verify all 9 Drive PDF strategies have complete DriveBookPlaybookSpec + live telemetry + dedicated 16 conditions
+        BitcoinStrategyModel.drivePdfStrategies.forEach { driveModel ->
+            val spec = driveModel.driveBookPlaybook()
+            assertTrue(spec.bookFileTitle.isNotBlank())
+            assertTrue(spec.ichimokuSettingsFa.isNotBlank())
+            assertTrue(spec.auxiliaryIndicatorsFa.isNotBlank())
+            assertEquals(4, spec.entryChecklistStepsFa.size)
+            assertTrue(spec.stopLossFormulaFa.isNotBlank())
+            assertTrue(spec.takeProfitAndExitRulesFa.isNotBlank())
+
+            val driveRep = IchimokuStrategyEngine.evaluateBitcoinStrategy(
+                activeModel = driveModel,
+                config = BaseStrategyConfig(),
+                macroCandles = emptyList(),
+                strategyCandles = emptyList(),
+                triggerCandles = emptyList(),
+            )
+            assertNotNull(driveRep)
+        }
+
+        // Verify Trading-Focused Neural Engine analytics & MasterIchimokuTradingAssistant improvement notes
+        val summaryAfter = engine.state.value
+        assertEquals(24, summaryAfter.strategyEdgeMatrix.size)
+        assertEquals(4, summaryAfter.sessionEdges.size)
+        assertTrue(summaryAfter.tradeForensics.topWinDriversFa.isNotEmpty())
+        assertTrue(summaryAfter.tradeForensics.topLossCausesFa.isNotEmpty())
+        assertTrue(summaryAfter.tradeForensics.actionableTradingRulesFa.isNotEmpty())
+
+        val losingTradeSample = sampleTrade.copy(
+            id = "FAST_SL_1",
+            closedAt = sampleTrade.openedAt + 120_000L,
+            resultPnl = -5.0,
+        )
+        val generatedNotes = com.aurum.edge.core.MasterIchimokuTradingAssistant.generateActionableImprovementNotes(
+            trades = listOf(losingTradeSample),
+            dualReports = emptyMap(),
+            currentConfig = BaseStrategyConfig(),
+        )
+        assertTrue(generatedNotes.isNotEmpty())
+        assertTrue(generatedNotes.all { it.exactFixInstructionFa.isNotBlank() })
+        val formattedClipboard = com.aurum.edge.core.MasterIchimokuTradingAssistant.formatNotesForClipboard(generatedNotes)
+        assertTrue(formattedClipboard.contains("دستور دقیق اصلاح"))
     }
 }
 

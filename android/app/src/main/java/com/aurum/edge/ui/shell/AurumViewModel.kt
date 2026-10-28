@@ -138,6 +138,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun startApp(@Suppress("UNUSED_PARAMETER") context: Context) {
         container.settingsStore.ensureBalance100kMigrated()
         com.aurum.edge.data.TradeSnapshotArchiveManager.init(container.appContext)
+        com.aurum.edge.core.MasterIchimokuTradingAssistant.init(container.appContext)
         container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
                 com.aurum.edge.data.TradeSnapshotArchiveManager.scanAndRestoreFromPhoneStorage(
@@ -1724,6 +1725,41 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             report = report,
         )
         _toast.value = "📋 خلاصه کارنامه کوانت در کلیپ‌بورد کپی شد"
+    }
+
+    fun togglePinAssistantImprovementNote(note: com.aurum.edge.core.IchimokuImprovementNote) {
+        val pinned = com.aurum.edge.core.MasterIchimokuTradingAssistant.pinOrToggleImprovementNote(
+            context = container.appContext,
+            note = note,
+        )
+        _toast.value = if (pinned) {
+            "📌 نکته اصلاحی در لیست ارتقای بعدی و حافظه گوشی ذخیره شد"
+        } else {
+            "نکته از لیست پین‌شده‌ها برداشته شد"
+        }
+    }
+
+    fun copyAssistantImprovementNotes(notes: List<com.aurum.edge.core.IchimokuImprovementNote>) {
+        val text = com.aurum.edge.core.MasterIchimokuTradingAssistant.formatNotesForClipboard(notes)
+        val cm = container.appContext.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+        cm?.setPrimaryClip(android.content.ClipData.newPlainText("Ichimoku Fix Notes", text))
+        com.aurum.edge.core.MasterIchimokuTradingAssistant.saveAllGeneratedNotesToPhone(container.appContext, notes)
+        _toast.value = "📋 تمام نکات اصلاحی دستیار ایچیموکو کپی و در حافظه گوشی ذخیره شد"
+    }
+
+    fun applyAssistantNoteConfigPatch(note: com.aurum.edge.core.IchimokuImprovementNote) {
+        container.settingsStore.update { cur ->
+            val oldCfg = cur.baseStrategyConfig
+            val newCfg = oldCfg.copy(
+                slBufferAtr = note.suggestedSlBufferAtr ?: oldCfg.slBufferAtr,
+                maxKijunExtensionAtr = note.suggestedMaxKijunExtAtr ?: oldCfg.maxKijunExtensionAtr,
+                breakoutBufferAtr = note.suggestedBreakoutBufferAtr ?: oldCfg.breakoutBufferAtr,
+                minRiskReward = note.suggestedMinRr ?: oldCfg.minRiskReward,
+            )
+            cur.copy(baseStrategyConfig = newCfg)
+        }
+        rescanFocusedStrategyNow()
+        _toast.value = "⚡ پیشنهاد اصلاحی دستیار ایچیموکو روی تنظیمات استراتژی اعمال شد"
     }
 
     fun consumeToast() {
