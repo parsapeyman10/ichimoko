@@ -17,7 +17,7 @@
   - افزودن مسیرهای بدون فیلتر `Yahoo Finance` (`BTC-USD`, `ETH-USD`, `SOL-USD`, `BNB-USD`, `XRP-USD`)، `KuCoin` و `Coinbase` به همراه مدارقطع‌کن هوشمند (`Host Circuit-Breaker`) برای رمزارزها تا در صورت فیلتر بودن صرافی‌ها، کندل‌ها و قیمت لحظه‌ای کریپتو بدون وقفه دریافت شوند.
   - هم‌ترازسازی خودکار پایه قیمتی کندل‌های فیوچرز طلا (`GC=F`) و نقره (`SI=F`) با قیمت لحظه‌ای اسپات (`XAU/USD` و `XAG/USD`) در `IchimokuStrategyEngine.alignCandlesToSpotBasis` تا اختلاف ۲۵ تا ۴۵ دلاری فیوچرز و اسپات باعث رد شدن کاذب شرط فاصله اسنایپر نشود.
   - افزودن تابلوی «رادار زنده طلا، نقره، کریپتو و فارکس (15m + 5m)» در صفحه خانه با دسته‌بندی مجزا.
-- **فایل نصبی:** [`AurumEdge-v3.9.09.apk`](https://github.com/parsapeyman10/ichimoko/releases/download/v3.9.09/AurumEdge-v3.9.09.apk).
+- **فایل نصبی:** [`AurumEdge-v3.9.09.apk`](https://github.com/parsapeyman10/ichimoko/releases/download/v3.9.09/AurumEdge-v3.9.09.apk) (`SHA-256: c88aed676dd2821d26d4a0ec66c4adc55f18329c17721de12a04d1dcf7d24a5f` · حجم `11,349,835` بایت).
 
 ---
 
