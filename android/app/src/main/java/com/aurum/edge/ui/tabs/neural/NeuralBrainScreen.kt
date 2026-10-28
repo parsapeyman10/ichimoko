@@ -919,8 +919,8 @@ fun NeuralBrainScreen(
                     val dual = dualReports[sym]
                     val rep15 = dual?.report15m
                     val rep5 = dual?.report5m
-                    val eval15 = rep15?.let { viewModel.evaluateSignalWithNeuralNet(it) }
-                    val eval5 = rep5?.let { viewModel.evaluateSignalWithNeuralNet(it) }
+                    val eval15 = rep15?.let { viewModel.evaluateReportWithNeuralEngine(it) }
+                    val eval5 = rep5?.let { viewModel.evaluateReportWithNeuralEngine(it) }
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
