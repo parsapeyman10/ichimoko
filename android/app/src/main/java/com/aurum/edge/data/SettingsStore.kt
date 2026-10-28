@@ -142,10 +142,16 @@ class SettingsStore(context: Context) {
         }
         val defaultAllIds = (BitcoinStrategyModel.entries.map { it.id } + storedCustomStrategies.map { it.id }).toSet()
         val storedEnabledIdsRaw = prefs.getString(KEY_ENABLED_STRATEGY_IDS, null)?.trim().orEmpty()
-        val storedEnabledIds = if (storedEnabledIdsRaw.isBlank()) {
+        val runAllSim = prefs.getBoolean(KEY_RUN_ALL_STRATEGIES, true)
+        val rawParsedEnabledIds = if (storedEnabledIdsRaw.isBlank()) {
             defaultAllIds
         } else {
             storedEnabledIdsRaw.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet().ifEmpty { defaultAllIds }
+        }
+        val storedEnabledIds = if (runAllSim && rawParsedEnabledIds.size >= 15) {
+            rawParsedEnabledIds + BitcoinStrategyModel.drivePdfStrategyIds
+        } else {
+            rawParsedEnabledIds
         }
         return AppSettings(
         apiKey = storedApiKey?.takeIf { it.isNotBlank() }

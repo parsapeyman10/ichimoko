@@ -8,6 +8,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.round
+import kotlin.math.sqrt
 import kotlinx.serialization.Serializable
 
 /**
@@ -213,20 +214,153 @@ enum class BitcoinStrategyModel(
         hasHosoda = true,
         hasPeloille = true,
         baseOptimalRr = 2.40,
+    ),
+
+    // ── ۵. استراتژی‌های استخراج‌شده خط‌به‌خط از ۹ کتاب PDF گوگل درایو (Drive PDF Books 1..9) ──
+    TUANH_BOLLINGER_SQUEEZE(
+        id = "TUANH_BOLLINGER_SQUEEZE",
+        titleFa = "کتاب درایو ۱ (TuAnh): فشردگی بولینگر (BB 20,2 Squeeze) + کومو + EMA89/MA200 + RSI(50)",
+        badgeFa = "درایو ۱ · بولینگر+ایچیموکو (TuAnh)",
+        authorRefFa = "TuAnh (Ichimoku & Bollinger Bands Strategy)",
+        summaryFa = "شناسایی فشردگی باند بولینگر (Squeeze) و ابر نازک کومو، فیلتر روند با EMA89 و MA200، تایید RSI(14) بالای/زیر ۵۰ و ورود روی شکست کندل قوی Marubozu با ریسک‌فری ۱:۱ و تارگت ۱:۲ تا ۱:۵.",
+        hasPatel = true,
+        hasTuttle = true,
+        hasHosoda = false,
+        hasPeloille = false,
+        baseOptimalRr = 2.50,
+    ),
+    FOKA_15MIN_EMA21_RSI7_FRACTAL(
+        id = "FOKA_15MIN_EMA21_RSI7_FRACTAL",
+        titleFa = "کتاب درایو ۲ (15min/Day): کومو + شیب EMA21 و کیجون + پرش RSI(7) از خط ۵۰ + استاپ فرکتال",
+        badgeFa = "درایو ۲ · 15min/Day (EMA21+RSI7)",
+        authorRefFa = "Marcin P. Foka / Vince Vora (15minstrategy.pdf)",
+        summaryFa = "قیمت بیرون ابر کومو + شیب واضح EMA(21) و کیجون غیرفلت + اصلاح و پرش RSI(7) از مرز ۵۰ در جهت روند + حد ضرر روی آخرین فرکتال ۵ کندلی بیل ویلیامز و هدف ۳R (۱:۳).",
+        hasPatel = true,
+        hasTuttle = false,
+        hasHosoda = false,
+        hasPeloille = true,
+        baseOptimalRr = 3.00,
+    ),
+    KEENBASE_CROSS_10_30_60(
+        id = "KEENBASE_CROSS_10_30_60",
+        titleFa = "کتاب درایو ۳ (Keenbase): سیستم کراس مکانیکی (10,30,60) + استاپ Kijun±0.4ATR + تارگت 3R",
+        badgeFa = "درایو ۳ · کراس مکانیکی 10/30/60",
+        authorRefFa = "Keenbase Trading Lab (Ichimoku Cross System)",
+        summaryFa = "تنظیمات نهادی ایچیموکو (Tenkan=10, Kijun=30, Senkou B=60): کراس تنکان ۱۰ و کیجون ۳۰ با کلوز کندل سیگنال بیرون هر دو خط Senkou A و B، استاپ دقیق روی Kijun±0.4×ATR(14) و تارگت ثابت 3R.",
+        hasPatel = false,
+        hasTuttle = true,
+        hasHosoda = true,
+        hasPeloille = false,
+        baseOptimalRr = 3.00,
+    ),
+    MUKHERJEE_RELATIVE_TK_RSI_KELLEY(
+        id = "MUKHERJEE_RELATIVE_TK_RSI_KELLEY",
+        titleFa = "کتاب درایو ۴ (Mukherjee Adv): کراس نسبی TK/Kijun + طوفان کامل + خروج RSI و معیار کلی",
+        badgeFa = "درایو ۴ · کراس نسبی + RSI و کلی",
+        authorRefFa = "Indrajit Mukherjee (Advanced Ichimoku Trading Made Easy)",
+        summaryFa = "کراس نسبی Tenkan/Kijun و Kijun-Sen Cross (طوفان کامل ۴-۵ سیگناله با احتمال برد ۶۹٪ تا ۷۶٪ معیار کلی)، الگوهای کندل‌استیک ژاپنی (Checkmate/Engulfing) و خروج مخفی در افت ۱۰٪ یا ضعف قله RSI.",
+        hasPatel = true,
+        hasTuttle = true,
+        hasHosoda = false,
+        hasPeloille = true,
+        baseOptimalRr = 2.35,
+    ),
+    MUKHERJEE_CLOUDS_CHIKOU_FILTER(
+        id = "MUKHERJEE_CLOUDS_CHIKOU_FILTER",
+        titleFa = "کتاب درایو ۵ (Mukherjee Clouds): خط ماشه تنکان + شیب کیجون ضد رِنج + فیلتر نهایی چیکو",
+        badgeFa = "درایو ۵ · فیلتر چیکو و شیب کیجون",
+        authorRefFa = "Indrajit Mukherjee (Profit Making With Ichimoku Clouds)",
+        summaryFa = "استفاده از Tenkan-Sen به‌عنوان Trigger Line، فیلتر آهنربای کیجون فلت برای حذف نوسانات رِنج (Whipsaw) و تایید نهایی Chikou Span (The Filter) با مقایسه قیمت ۲۶ دوره قبل.",
+        hasPatel = true,
+        hasTuttle = true,
+        hasHosoda = false,
+        hasPeloille = false,
+        baseOptimalRr = 2.20,
+    ),
+    HOWTOTRADE_KEY_LEVEL_BREAK_PULLBACK(
+        id = "HOWTOTRADE_KEY_LEVEL_BREAK_PULLBACK",
+        titleFa = "کتاب درایو ۶ (HowToTrade): شکست کانال کومو و پولبک به سطوح کلیدی + کراس Senkou",
+        badgeFa = "درایو ۶ · شکست-پولبک کومو (HowToTrade)",
+        authorRefFa = "HowToTrade (Ichimoku Cloud Trading Strategy PDF)",
+        summaryFa = "ترکیب ۲ متود HowToTrade: ۱) پولبک به سطوح کلیدی S/R منطبق بر لبه کومو در روند اصلی و ۲) شکست کامل کانال کومو (عبور از هر دو خط Senkou A و B) همراه با تست مجدد لبه کومو و تایید Kumo Twist.",
+        hasPatel = true,
+        hasTuttle = true,
+        hasHosoda = false,
+        hasPeloille = true,
+        baseOptimalRr = 2.40,
+    ),
+    TSG_QUICK_PROFIT_4STEP(
+        id = "TSG_QUICK_PROFIT_4STEP",
+        titleFa = "کتاب درایو ۷ (TSG Quick Profit): ۴ گام شکست و کلوز بیرون کومو + کراس TK + استاپ کندل شکست",
+        badgeFa = "درایو ۷ · سود سریع ۴ گامی (TSG)",
+        authorRefFa = "Trading Strategy Guides (trading strategy.pdf)",
+        summaryFa = "استراتژی ۴ گامی سود سریع: ۱) شکست و کلوز کندل بیرون ابر کومو، ۲) کراس Conversion/Base با فاصله مناسب از ابر و آزادی چیکو، ۳) ورود در کندل بعدی، ۴) استاپ پشت کندل شکست و خروج با کراس معکوس TK.",
+        hasPatel = true,
+        hasTuttle = true,
+        hasHosoda = true,
+        hasPeloille = false,
+        baseOptimalRr = 2.25,
+    ),
+    KOONITZ_5RULES_DMI_MACD_EMA34(
+        id = "KOONITZ_5RULES_DMI_MACD_EMA34",
+        titleFa = "کتاب درایو ۸ (Koonitz 2nd Ed): ۵ قانون طلایی ایچیموکو + عبور چیکو از کومو + DMI/ADX(24) و MACD",
+        badgeFa = "درایو ۸ · ۵ قانون کونیتز (DMI/MACD)",
+        authorRefFa = "Charles G. Koonitz (Ichimoku Charting & Technical Analysis)",
+        summaryFa = "۵ قانون خرید/فروش کونیتز: ۱) قیمت در سمت درست کیجون صعودی/نزولی، ۲) قیمت بیرون کومو، ۳) ابر آینده هم‌رنگ، ۴) عبور چیکو از کومو در فضای بکر، ۵) تایید DMI (+DI/-DI با ADX≥24) یا MACD و EMA34.",
+        hasPatel = true,
+        hasTuttle = true,
+        hasHosoda = true,
+        hasPeloille = true,
+        baseOptimalRr = 2.45,
+    ),
+    KOONITZ_TRIPLE_SCREEN_FAST_7_22_44(
+        id = "KOONITZ_TRIPLE_SCREEN_FAST_7_22_44",
+        titleFa = "کتاب درایو ۹ (Koonitz Triple Screen): صفحه سه‌گانه EMA13/34/48 + تنظیمات سریع (7,22,44)",
+        badgeFa = "درایو ۹ · صفحه سه‌گانه 7-22-44 (کونیتز)",
+        authorRefFa = "Charles G. Koonitz (Ichimoku Analysis & Strategies)",
+        summaryFa = "تکنیک صفحه سه‌گانه (Triple Screen 1:4:16) با کراس EMA13/EMA34/EMA48 و تنظیمات سریع ۵ روزه ایچیموکو (7-22-44) برای شکار زودهنگام چرخش روندها ۱۰٪ سریع‌تر از جمعیت بازار.",
+        hasPatel = true,
+        hasTuttle = true,
+        hasHosoda = true,
+        hasPeloille = true,
+        baseOptimalRr = 2.35,
     );
+
+    val isDrivePdfStrategy: Boolean
+        get() = this in setOf(
+            TUANH_BOLLINGER_SQUEEZE,
+            FOKA_15MIN_EMA21_RSI7_FRACTAL,
+            KEENBASE_CROSS_10_30_60,
+            MUKHERJEE_RELATIVE_TK_RSI_KELLEY,
+            MUKHERJEE_CLOUDS_CHIKOU_FILTER,
+            HOWTOTRADE_KEY_LEVEL_BREAK_PULLBACK,
+            TSG_QUICK_PROFIT_4STEP,
+            KOONITZ_5RULES_DMI_MACD_EMA34,
+            KOONITZ_TRIPLE_SCREEN_FAST_7_22_44,
+        )
 
     val combinationCount: Int
         get() = listOf(hasPatel, hasTuttle, hasHosoda, hasPeloille).count { it }
 
     val combinationCategoryFa: String
-        get() = when (combinationCount) {
-            1 -> "تک‌استراتژی (۱گانه)"
-            2 -> "ترکیب دوتایی (۲گانه)"
-            3 -> "ترکیب سه‌تایی (۳گانه)"
-            else -> "ترکیب کامل چهارگانه (۴گانه)"
+        get() = if (isDrivePdfStrategy) {
+            "کتاب‌های PDF گوگل درایو (۹ استراتژی)"
+        } else {
+            when (combinationCount) {
+                1 -> "تک‌استراتژی (۱گانه)"
+                2 -> "ترکیب دوتایی (۲گانه)"
+                3 -> "ترکیب سه‌تایی (۳گانه)"
+                else -> "ترکیب کامل چهارگانه (۴گانه)"
+            }
         }
 
     companion object {
+        val drivePdfStrategies: List<BitcoinStrategyModel>
+            get() = entries.filter { it.isDrivePdfStrategy }
+
+        val drivePdfStrategyIds: Set<String>
+            get() = drivePdfStrategies.map { it.id }.toSet()
+
         fun fromId(raw: String?): BitcoinStrategyModel =
             entries.firstOrNull { it.id.equals(raw?.trim(), ignoreCase = true) } ?: BASE_ICHIMOKU
     }
@@ -274,7 +408,7 @@ data class CustomStrategySlot(
 )
 
 /**
- * خروجی محاسبه دقیق ۵ خط ایچیموکو + ATR روی یک تایم‌فریم مشخص.
+ * خروجی محاسبه دقیق ۵ خط ایچیموکو + اندیکاتورهای ۹ کتاب PDF گوگل درایو روی یک تایم‌فریم مشخص.
  */
 data class IchimokuBarSnapshot(
     val time: Long,
@@ -316,6 +450,51 @@ data class IchimokuBarSnapshot(
     val upperWickRatio: Double = 0.1,
     val lowerWickRatio: Double = 0.1,
     val recentKatanaRelease: Boolean = false,
+    // ── اندیکاتورهای استخراج‌شده از ۹ کتاب PDF گوگل درایو ──
+    val bbMiddle20: Double = close,
+    val bbUpper20: Double = close + atr14 * 2.0,
+    val bbLower20: Double = close - atr14 * 2.0,
+    val bbBandwidthRatio: Double = 0.02,
+    val isBollingerSqueeze: Boolean = true,
+    val isMarubozuBreakoutBull: Boolean = close >= open,
+    val isMarubozuBreakoutBear: Boolean = close <= open,
+    val ema13: Double = tenkan,
+    val ema21: Double = kijun,
+    val ema34: Double = kijun,
+    val ema48: Double = currentSpanA,
+    val ema89: Double = currentSpanB,
+    val sma200: Double = currentSpanB,
+    val ema21SlopeAtrPerBar: Double = kijunSlopeAtrPerBar,
+    val rsi14: Double = if (close >= kijun) 58.0 else 42.0,
+    val prevRsi14: Double = if (close >= kijun) 55.0 else 45.0,
+    val recentPeakRsi14: Double = 60.0,
+    val recentTroughRsi14: Double = 40.0,
+    val rsi7: Double = if (close >= kijun) 57.0 else 43.0,
+    val prevRsi7: Double = 50.0,
+    val rsi7Bullish50Bounce: Boolean = close >= kijun,
+    val rsi7Bearish50Bounce: Boolean = close <= kijun,
+    val lastDownFractalLow: Double = min(low, kijun - atr14 * 0.5),
+    val lastUpFractalHigh: Double = max(high, kijun + atr14 * 0.5),
+    val tenkan10: Double = tenkan,
+    val kijun30: Double = kijun,
+    val senkouA103060: Double = currentSpanA,
+    val senkouB60: Double = currentSpanB,
+    val tenkan7: Double = tenkan,
+    val kijun22: Double = kijun,
+    val senkouA72244: Double = currentSpanA,
+    val senkouB44: Double = currentSpanB,
+    val macdLine: Double = tenkan - kijun,
+    val macdSignal: Double = (tenkan - kijun) * 0.8,
+    val macdHistogram: Double = (tenkan - kijun) * 0.2,
+    val plusDi14: Double = if (close >= kijun) 28.0 else 16.0,
+    val minusDi14: Double = if (close >= kijun) 16.0 else 28.0,
+    val adx14: Double = 27.0,
+    val chikouAboveCloud26: Boolean = chikouBullishOpenSpace,
+    val chikouBelowCloud26: Boolean = chikouBearishOpenSpace,
+    val hasBullishCandlestickPattern: Boolean = close >= open,
+    val hasBearishCandlestickPattern: Boolean = close <= open,
+    val kellySignalCount: Int = 4,
+    val kellyWinProbabilityPercent: Int = 69,
 ) {
     val kumoTop: Double get() = max(currentSpanA, currentSpanB)
     val kumoBottom: Double get() = min(currentSpanA, currentSpanB)
@@ -336,6 +515,14 @@ data class IchimokuBarSnapshot(
         get() = close > kumoTop && tenkan >= kijun - atr14 * 0.05 && kijun >= kumoBottom - atr14 * 0.10
     val sanyakuBearishOrder: Boolean
         get() = close < kumoBottom && tenkan <= kijun + atr14 * 0.05 && kijun <= kumoTop + atr14 * 0.10
+    val kumoTop103060: Double get() = max(senkouA103060, senkouB60)
+    val kumoBottom103060: Double get() = min(senkouA103060, senkouB60)
+    val kumoTop72244: Double get() = max(senkouA72244, senkouB44)
+    val kumoBottom72244: Double get() = min(senkouA72244, senkouB44)
+    val isMacdBullish: Boolean get() = macdLine >= macdSignal - abs(macdSignal) * 0.02
+    val isMacdBearish: Boolean get() = macdLine <= macdSignal + abs(macdSignal) * 0.02
+    val isDmiBullish: Boolean get() = plusDi14 >= minusDi14 - 1.0 && adx14 >= 20.0
+    val isDmiBearish: Boolean get() = minusDi14 >= plusDi14 - 1.0 && adx14 >= 20.0
 }
 
 data class IchimokuChartBarOverlay(
@@ -943,6 +1130,222 @@ object IchimokuStrategyEngine {
             abs(tenkanAt(prev3Idx) - kijunAt(prev3Idx)) <= atr14 * 0.18
         val katanaRelease = compressedRecently && abs(tenkan - kijun) >= abs(prevTenkan - prevKijun) && bodyRatio >= 0.32
 
+        // ── ۱. بولینگر باند (20, 2.0) و فشردگی Squeeze (کتاب درایو ۱ — TuAnh و کتاب ۴ — Mukherjee) ──
+        fun bbAt(idx: Int): Triple<Double, Double, Double> {
+            val start = (idx - 19).coerceAtLeast(0)
+            val slice = closedBars.subList(start, idx + 1)
+            val mean = slice.map { it.close }.average()
+            var varianceSum = 0.0
+            for (b in slice) {
+                val d = b.close - mean
+                varianceSum += d * d
+            }
+            val std = sqrt(varianceSum / slice.size.coerceAtLeast(1))
+            return Triple(mean, mean + 2.0 * std, mean - 2.0 * std)
+        }
+        val (bbMid20, bbUp20, bbLow20) = bbAt(lastIdx)
+        val bbWidthNow = (bbUp20 - bbLow20) / bbMid20.coerceAtLeast(1e-8)
+        var bwSum20 = 0.0
+        var bwCount20 = 0
+        var minRecentBw = bbWidthNow
+        for (i in (lastIdx - 19).coerceAtLeast(0)..lastIdx) {
+            val (m, u, l) = bbAt(i)
+            val bw = (u - l) / m.coerceAtLeast(1e-8)
+            bwSum20 += bw
+            bwCount20++
+            if (i >= (lastIdx - 4).coerceAtLeast(0) && bw < minRecentBw) {
+                minRecentBw = bw
+            }
+        }
+        val avgBw20 = if (bwCount20 > 0) bwSum20 / bwCount20 else bbWidthNow
+        val isBbSqueeze = minRecentBw <= avgBw20 * 1.12 || (bbUp20 - bbLow20) <= atr14 * 5.0
+        val marubozuBull = cur.close > cur.open && bodyRatio >= 0.42 && upperWick <= 0.32
+        val marubozuBear = cur.close < cur.open && bodyRatio >= 0.42 && lowerWick <= 0.32
+
+        // ── ۲. میانگین‌های متحرک EMA 13, 21, 34, 48, 89 و SMA 200 (کتاب‌های ۱، ۲، ۸ و ۹) ──
+        fun computeEmaSeries(period: Int): DoubleArray {
+            val out = DoubleArray(closedBars.size)
+            val k = 2.0 / (period + 1.0)
+            out[0] = closedBars[0].close
+            for (i in 1..lastIdx) {
+                out[i] = closedBars[i].close * k + out[i - 1] * (1.0 - k)
+            }
+            return out
+        }
+        val ema12Arr = computeEmaSeries(12)
+        val ema13Arr = computeEmaSeries(13)
+        val ema21Arr = computeEmaSeries(21)
+        val ema26Arr = computeEmaSeries(26)
+        val ema34Arr = computeEmaSeries(34)
+        val ema48Arr = computeEmaSeries(48)
+        val ema89Arr = computeEmaSeries(89)
+        val ema13 = ema13Arr[lastIdx]
+        val ema21 = ema21Arr[lastIdx]
+        val ema34 = ema34Arr[lastIdx]
+        val ema48 = ema48Arr[lastIdx]
+        val ema89 = ema89Arr[lastIdx]
+        val sma200Start = (lastIdx - 199).coerceAtLeast(0)
+        val sma200 = closedBars.subList(sma200Start, lastIdx + 1).map { it.close }.average()
+        val ema21SlopeAtr = (ema21 - ema21Arr[(lastIdx - 3).coerceAtLeast(0)]) / (3.0 * atr14)
+
+        // ── ۳. محاسبه RSI(14) و RSI(7) سریع + پرش از خط ۵۰ و قله/دره RSI (کتاب‌های ۱، ۲ و ۴) ──
+        fun computeRsiSeries(period: Int): DoubleArray {
+            val out = DoubleArray(closedBars.size) { 50.0 }
+            if (closedBars.size < 2) return out
+            var avgGain = 0.0
+            var avgLoss = 0.0
+            val initEnd = min(period, lastIdx)
+            for (i in 1..initEnd) {
+                val diff = closedBars[i].close - closedBars[i - 1].close
+                if (diff > 0) avgGain += diff else avgLoss -= diff
+            }
+            avgGain /= initEnd.toDouble()
+            avgLoss /= initEnd.toDouble()
+            fun toRsi(g: Double, l: Double): Double = when {
+                l <= 1e-12 && g <= 1e-12 -> 50.0
+                l <= 1e-12 -> 99.0
+                else -> 100.0 - (100.0 / (1.0 + (g / l)))
+            }
+            out[initEnd] = toRsi(avgGain, avgLoss)
+            for (i in (initEnd + 1)..lastIdx) {
+                val diff = closedBars[i].close - closedBars[i - 1].close
+                val g = if (diff > 0) diff else 0.0
+                val l = if (diff < 0) -diff else 0.0
+                avgGain = (avgGain * (period - 1) + g) / period.toDouble()
+                avgLoss = (avgLoss * (period - 1) + l) / period.toDouble()
+                out[i] = toRsi(avgGain, avgLoss)
+            }
+            return out
+        }
+        val rsi14Arr = computeRsiSeries(14)
+        val rsi7Arr = computeRsiSeries(7)
+        val rsi14 = rsi14Arr[lastIdx]
+        val prevRsi14 = rsi14Arr[prevIdx]
+        var peakRsi14 = rsi14
+        var troughRsi14 = rsi14
+        for (i in (lastIdx - 8).coerceAtLeast(0) until lastIdx) {
+            if (rsi14Arr[i] > peakRsi14) peakRsi14 = rsi14Arr[i]
+            if (rsi14Arr[i] < troughRsi14) troughRsi14 = rsi14Arr[i]
+        }
+        val rsi7 = rsi7Arr[lastIdx]
+        val prevRsi7 = rsi7Arr[prevIdx]
+        var minRsi7Recent = rsi7
+        var maxRsi7Recent = rsi7
+        for (i in (lastIdx - 4).coerceAtLeast(0)..prevIdx) {
+            if (rsi7Arr[i] < minRsi7Recent) minRsi7Recent = rsi7Arr[i]
+            if (rsi7Arr[i] > maxRsi7Recent) maxRsi7Recent = rsi7Arr[i]
+        }
+        val rsi7BullBounce = rsi7 >= 50.0 && (rsi7 >= prevRsi7 - 1.5 || minRsi7Recent <= 58.0)
+        val rsi7BearBounce = rsi7 <= 50.0 && (rsi7 <= prevRsi7 + 1.5 || maxRsi7Recent >= 42.0)
+
+        // ── ۴. فرکتال‌های ۵ کندلی بیل ویلیامز (کتاب درایو ۲ — 15minstrategy.pdf) ──
+        var downFractal = closedBars.subList((lastIdx - 8).coerceAtLeast(0), lastIdx + 1).minOf { it.low }
+        var upFractal = closedBars.subList((lastIdx - 8).coerceAtLeast(0), lastIdx + 1).maxOf { it.high }
+        for (i in (lastIdx - 2) downTo max(2, lastIdx - 28)) {
+            val cBar = closedBars[i]
+            if (cBar.low <= closedBars[i - 1].low && cBar.low <= closedBars[i - 2].low &&
+                cBar.low <= closedBars[i + 1].low && cBar.low <= closedBars[i + 2].low
+            ) {
+                downFractal = cBar.low
+                break
+            }
+        }
+        for (i in (lastIdx - 2) downTo max(2, lastIdx - 28)) {
+            val cBar = closedBars[i]
+            if (cBar.high >= closedBars[i - 1].high && cBar.high >= closedBars[i - 2].high &&
+                cBar.high >= closedBars[i + 1].high && cBar.high >= closedBars[i + 2].high
+            ) {
+                upFractal = cBar.high
+                break
+            }
+        }
+
+        // ── ۵. تنظیمات ایچیموکو (10,30,60) کتاب Keenbase و تنظیمات سریع (7,22,44) کتاب Koonitz ──
+        val tenkan10 = midpoint(lastIdx - 9, lastIdx)
+        val kijun30 = midpoint(lastIdx - 29, lastIdx)
+        val src30 = (lastIdx - 29).coerceAtLeast(0)
+        val senkouA103060 = (midpoint(src30 - 9, src30) + midpoint(src30 - 29, src30)) / 2.0
+        val senkouB60 = midpoint(src30 - 59, src30)
+
+        val tenkan7 = midpoint(lastIdx - 6, lastIdx)
+        val kijun22 = midpoint(lastIdx - 21, lastIdx)
+        val src22 = (lastIdx - 21).coerceAtLeast(0)
+        val senkouA72244 = (midpoint(src22 - 6, src22) + midpoint(src22 - 21, src22)) / 2.0
+        val senkouB44 = midpoint(src22 - 43, src22)
+
+        // ── ۶. اندیکاتورهای MACD (12, 26, 9) و DMI/ADX (14) (کتاب‌های ۸ و ۹ — Charles G. Koonitz) ──
+        val macdSeries = DoubleArray(closedBars.size) { idx -> ema12Arr[idx] - ema26Arr[idx] }
+        val macdSigArr = DoubleArray(closedBars.size)
+        val kMacd = 2.0 / 10.0
+        macdSigArr[0] = macdSeries[0]
+        for (i in 1..lastIdx) {
+            macdSigArr[i] = macdSeries[i] * kMacd + macdSigArr[i - 1] * (1.0 - kMacd)
+        }
+        val macdLine = macdSeries[lastIdx]
+        val macdSignal = macdSigArr[lastIdx]
+        val macdHist = macdLine - macdSignal
+
+        var plusDmSum = 0.0
+        var minusDmSum = 0.0
+        var trDmSum = 0.0
+        val dmiLookback = min(14, lastIdx).coerceAtLeast(1)
+        val dxList = mutableListOf<Double>()
+        for (i in (lastIdx - min(27, lastIdx) + 1)..lastIdx) {
+            val cBar = closedBars[i]
+            val pBar = closedBars[(i - 1).coerceAtLeast(0)]
+            val upMove = cBar.high - pBar.high
+            val downMove = pBar.low - cBar.low
+            val pDm = if (upMove > downMove && upMove > 0.0) upMove else 0.0
+            val mDm = if (downMove > upMove && downMove > 0.0) downMove else 0.0
+            val trVal = maxOf(cBar.high - cBar.low, abs(cBar.high - pBar.close), abs(cBar.low - pBar.close))
+            if (i > lastIdx - dmiLookback) {
+                plusDmSum += pDm
+                minusDmSum += mDm
+                trDmSum += trVal
+            }
+            val denom = trVal.coerceAtLeast(1e-8)
+            val pDiBar = (pDm / denom) * 100.0
+            val mDiBar = (mDm / denom) * 100.0
+            val diSum = (pDiBar + mDiBar).coerceAtLeast(1e-8)
+            dxList += (abs(pDiBar - mDiBar) / diSum) * 100.0
+        }
+        val safeTrDm = trDmSum.coerceAtLeast(1e-8)
+        val plusDi14 = (plusDmSum / safeTrDm) * 100.0
+        val minusDi14 = (minusDmSum / safeTrDm) * 100.0
+        val rawAdx = if (dxList.isNotEmpty()) dxList.takeLast(14).average() else 25.0
+        val adx14 = max(rawAdx, er14 * 45.0)
+
+        // ── ۷. عبور چیکو از کومو، الگوهای کندل‌استیک ژاپنی و امتیاز معیار کلی (کتاب‌های ۴، ۵، ۶، ۷ و ۸) ──
+        val kumoTopAtChikou = max(currentSpanAAt(chikouIdx), currentSpanBAt(chikouIdx))
+        val kumoBotAtChikou = min(currentSpanAAt(chikouIdx), currentSpanBAt(chikouIdx))
+        val chikouAboveCloud26 = closeNow > kumoTopAtChikou
+        val chikouBelowCloud26 = closeNow < kumoBotAtChikou
+
+        val bullishEngulfing = cur.close > cur.open && b1.close <= b1.open && cur.close >= b1.open && cur.open <= b1.close
+        val piercingPattern = cur.close > cur.open && b1.close < b1.open && cur.close >= (b1.open + b1.close) / 2.0
+        val morningStarOrHammer = (cur.close > cur.open && lowerWick >= 0.35 && upperWick <= 0.25) || bullImpulse3
+        val hasBullCandlePattern = bullishEngulfing || piercingPattern || morningStarOrHammer || (cur.close > cur.open && clv >= 0.55)
+
+        val bearishEngulfing = cur.close < cur.open && b1.close >= b1.open && cur.close <= b1.open && cur.open >= b1.close
+        val darkCloudCover = cur.close < cur.open && b1.close > b1.open && cur.close <= (b1.open + b1.close) / 2.0
+        val eveningStarOrShooting = (cur.close < cur.open && upperWick >= 0.35 && lowerWick <= 0.25) || bearImpulse3
+        val hasBearCandlePattern = bearishEngulfing || darkCloudCover || eveningStarOrShooting || (cur.close < cur.open && clv <= 0.45)
+
+        val isBullMode = closeNow >= kijun
+        var kellySignals = 0
+        if (if (isBullMode) tenkan >= kijun else tenkan <= kijun) kellySignals++
+        if (if (isBullMode) closeNow > kijun else closeNow < kijun) kellySignals++
+        if (if (isBullMode) closeNow > max(currentSpanA, currentSpanB) else closeNow < min(currentSpanA, currentSpanB)) kellySignals += 2
+        if (if (isBullMode) futureSpanA > futureSpanB else futureSpanA < futureSpanB) kellySignals++
+        val clampedKellySignals = kellySignals.coerceIn(1, 5)
+        val kellyWinProb = when (clampedKellySignals) {
+            1 -> 48
+            2 -> 57
+            3 -> 62
+            4 -> 69
+            else -> 76
+        }
+
         return IchimokuBarSnapshot(
             time = cur.time,
             open = cur.open,
@@ -983,6 +1386,50 @@ object IchimokuStrategyEngine {
             upperWickRatio = round2(upperWick),
             lowerWickRatio = round2(lowerWick),
             recentKatanaRelease = katanaRelease,
+            bbMiddle20 = round2(bbMid20),
+            bbUpper20 = round2(bbUp20),
+            bbLower20 = round2(bbLow20),
+            bbBandwidthRatio = round2(bbWidthNow),
+            isBollingerSqueeze = isBbSqueeze,
+            isMarubozuBreakoutBull = marubozuBull,
+            isMarubozuBreakoutBear = marubozuBear,
+            ema13 = round2(ema13),
+            ema21 = round2(ema21),
+            ema34 = round2(ema34),
+            ema48 = round2(ema48),
+            ema89 = round2(ema89),
+            sma200 = round2(sma200),
+            ema21SlopeAtrPerBar = round2(ema21SlopeAtr),
+            rsi14 = round2(rsi14),
+            prevRsi14 = round2(prevRsi14),
+            recentPeakRsi14 = round2(peakRsi14),
+            recentTroughRsi14 = round2(troughRsi14),
+            rsi7 = round2(rsi7),
+            prevRsi7 = round2(prevRsi7),
+            rsi7Bullish50Bounce = rsi7BullBounce,
+            rsi7Bearish50Bounce = rsi7BearBounce,
+            lastDownFractalLow = round2(downFractal),
+            lastUpFractalHigh = round2(upFractal),
+            tenkan10 = round2(tenkan10),
+            kijun30 = round2(kijun30),
+            senkouA103060 = round2(senkouA103060),
+            senkouB60 = round2(senkouB60),
+            tenkan7 = round2(tenkan7),
+            kijun22 = round2(kijun22),
+            senkouA72244 = round2(senkouA72244),
+            senkouB44 = round2(senkouB44),
+            macdLine = round2(macdLine),
+            macdSignal = round2(macdSignal),
+            macdHistogram = round2(macdHist),
+            plusDi14 = round2(plusDi14),
+            minusDi14 = round2(minusDi14),
+            adx14 = round2(adx14),
+            chikouAboveCloud26 = chikouAboveCloud26,
+            chikouBelowCloud26 = chikouBelowCloud26,
+            hasBullishCandlestickPattern = hasBullCandlePattern,
+            hasBearishCandlestickPattern = hasBearCandlePattern,
+            kellySignalCount = clampedKellySignals,
+            kellyWinProbabilityPercent = kellyWinProb,
         )
     }
 
@@ -1495,16 +1942,48 @@ object IchimokuStrategyEngine {
         val safeAnchorLong = min(sniperOptimal, livePrice)
         val safeAnchorShort = max(sniperOptimal, livePrice)
 
-        val rawTechnicalSl = if (isLong) {
-            val kumoKijunFloor = min(trigSnap.kijun, stratSnap.kijun.coerceAtLeast(trigSnap.kumoBottom)) - slBuffer
-            val microStructureFloor = min(trigSnap.low, trigSnap.kijun) - trigSnap.atr14 * 0.25
-            val tightStructuralSl = min(kumoKijunFloor, microStructureFloor)
-            round2(min(tightStructuralSl, safeAnchorLong - minSafeStopDist))
-        } else {
-            val kumoKijunCeiling = max(trigSnap.kijun, stratSnap.kijun.coerceAtMost(trigSnap.kumoTop)) + slBuffer
-            val microStructureCeiling = max(trigSnap.high, trigSnap.kijun) + trigSnap.atr14 * 0.25
-            val tightStructuralSl = max(kumoKijunCeiling, microStructureCeiling)
-            round2(max(tightStructuralSl, safeAnchorShort + minSafeStopDist))
+        val rawTechnicalSl = when (activeModel) {
+            BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL -> {
+                if (isLong) {
+                    val fractalFloor = min(trigSnap.lastDownFractalLow, trigSnap.low) - trigSnap.atr14 * 0.18
+                    round2(min(fractalFloor, safeAnchorLong - minSafeStopDist))
+                } else {
+                    val fractalCeiling = max(trigSnap.lastUpFractalHigh, trigSnap.high) + trigSnap.atr14 * 0.18
+                    round2(max(fractalCeiling, safeAnchorShort + minSafeStopDist))
+                }
+            }
+            BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 -> {
+                if (isLong) {
+                    val keenbaseStop = trigSnap.kijun30 - trigSnap.atr14 * 0.40
+                    round2(min(keenbaseStop, safeAnchorLong - minSafeStopDist))
+                } else {
+                    val keenbaseStop = trigSnap.kijun30 + trigSnap.atr14 * 0.40
+                    round2(max(keenbaseStop, safeAnchorShort + minSafeStopDist))
+                }
+            }
+            BitcoinStrategyModel.KOONITZ_5RULES_DMI_MACD_EMA34,
+            BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44 -> {
+                if (isLong) {
+                    val koonitzFloor = min(min(trigSnap.kijun, trigSnap.ema34), trigSnap.low) - slBuffer
+                    round2(min(koonitzFloor, safeAnchorLong - minSafeStopDist))
+                } else {
+                    val koonitzCeiling = max(max(trigSnap.kijun, trigSnap.ema34), trigSnap.high) + slBuffer
+                    round2(max(koonitzCeiling, safeAnchorShort + minSafeStopDist))
+                }
+            }
+            else -> {
+                if (isLong) {
+                    val kumoKijunFloor = min(trigSnap.kijun, stratSnap.kijun.coerceAtLeast(trigSnap.kumoBottom)) - slBuffer
+                    val microStructureFloor = min(trigSnap.low, trigSnap.kijun) - trigSnap.atr14 * 0.25
+                    val tightStructuralSl = min(kumoKijunFloor, microStructureFloor)
+                    round2(min(tightStructuralSl, safeAnchorLong - minSafeStopDist))
+                } else {
+                    val kumoKijunCeiling = max(trigSnap.kijun, stratSnap.kijun.coerceAtMost(trigSnap.kumoTop)) + slBuffer
+                    val microStructureCeiling = max(trigSnap.high, trigSnap.kijun) + trigSnap.atr14 * 0.25
+                    val tightStructuralSl = max(kumoKijunCeiling, microStructureCeiling)
+                    round2(max(tightStructuralSl, safeAnchorShort + minSafeStopDist))
+                }
+            }
         }
 
         val rawStopDist = max(
@@ -1557,20 +2036,105 @@ object IchimokuStrategyEngine {
             "در حال تکمیل ساختار موج هوسودا"
         }
 
-        // ── Check 11: Price Action Candle Body, Close Location & Volume Momentum ──
+        // ── Check 11: Price Action Candle Body, Close Location, Volume Momentum & Drive PDF Book Rules ──
         val directionalCandleOk = if (isLong) {
             trigSnap.close > trigSnap.open && trigSnap.closeLocationValue >= 0.45 && trigSnap.candleBodyRatio >= 0.22
         } else {
             trigSnap.close < trigSnap.open && trigSnap.closeLocationValue <= 0.55 && trigSnap.candleBodyRatio >= 0.22
         }
         val volumeMomentumOk = trigSnap.volumeRatio20 >= 0.60
-        val cond11Passed = directionalCandleOk && volumeMomentumOk
+        val driveBookRuleOk = when (activeModel) {
+            BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE ->
+                trigSnap.isBollingerSqueeze && if (isLong) {
+                    trigSnap.close >= trigSnap.ema89 && trigSnap.rsi14 >= 50.0 && trigSnap.isMarubozuBreakoutBull
+                } else {
+                    trigSnap.close <= trigSnap.ema89 && trigSnap.rsi14 <= 50.0 && trigSnap.isMarubozuBreakoutBear
+                }
+            BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL ->
+                if (isLong) {
+                    trigSnap.close > trigSnap.kumoTop && trigSnap.ema21SlopeAtrPerBar > -0.01 && trigSnap.rsi7Bullish50Bounce
+                } else {
+                    trigSnap.close < trigSnap.kumoBottom && trigSnap.ema21SlopeAtrPerBar < 0.01 && trigSnap.rsi7Bearish50Bounce
+                }
+            BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 ->
+                if (isLong) {
+                    trigSnap.tenkan10 >= trigSnap.kijun30 && trigSnap.close > trigSnap.kumoTop103060
+                } else {
+                    trigSnap.tenkan10 <= trigSnap.kijun30 && trigSnap.close < trigSnap.kumoBottom103060
+                }
+            BitcoinStrategyModel.MUKHERJEE_RELATIVE_TK_RSI_KELLEY ->
+                trigSnap.kellySignalCount >= 3 && if (isLong) {
+                    trigSnap.tenkan >= trigSnap.kijun && trigSnap.rsi14 >= 50.0 && trigSnap.hasBullishCandlestickPattern
+                } else {
+                    trigSnap.tenkan <= trigSnap.kijun && trigSnap.rsi14 <= 50.0 && trigSnap.hasBearishCandlestickPattern
+                }
+            BitcoinStrategyModel.MUKHERJEE_CLOUDS_CHIKOU_FILTER ->
+                !trigSnap.isKijunFlat && if (isLong) {
+                    trigSnap.chikouBullishOpenSpace && trigSnap.kijunSlopeAtrPerBar >= -0.01
+                } else {
+                    trigSnap.chikouBearishOpenSpace && trigSnap.kijunSlopeAtrPerBar <= 0.01
+                }
+            BitcoinStrategyModel.HOWTOTRADE_KEY_LEVEL_BREAK_PULLBACK ->
+                if (isLong) {
+                    trigSnap.close > trigSnap.kumoTop && trigSnap.isFutureKumoBullish
+                } else {
+                    trigSnap.close < trigSnap.kumoBottom && trigSnap.isFutureKumoBearish
+                }
+            BitcoinStrategyModel.TSG_QUICK_PROFIT_4STEP ->
+                if (isLong) {
+                    trigSnap.close > trigSnap.kumoTop && trigSnap.tenkan >= trigSnap.kijun && trigSnap.chikouAboveCloud26
+                } else {
+                    trigSnap.close < trigSnap.kumoBottom && trigSnap.tenkan <= trigSnap.kijun && trigSnap.chikouBelowCloud26
+                }
+            BitcoinStrategyModel.KOONITZ_5RULES_DMI_MACD_EMA34 ->
+                if (isLong) {
+                    trigSnap.close > trigSnap.kijun && trigSnap.close > trigSnap.kumoTop &&
+                        trigSnap.chikouAboveCloud26 && (trigSnap.isDmiBullish || trigSnap.isMacdBullish) &&
+                        trigSnap.close >= trigSnap.ema34
+                } else {
+                    trigSnap.close < trigSnap.kijun && trigSnap.close < trigSnap.kumoBottom &&
+                        trigSnap.chikouBelowCloud26 && (trigSnap.isDmiBearish || trigSnap.isMacdBearish) &&
+                        trigSnap.close <= trigSnap.ema34
+                }
+            BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44 ->
+                if (isLong) {
+                    trigSnap.tenkan7 >= trigSnap.kijun22 && trigSnap.close > trigSnap.kumoTop72244 &&
+                        trigSnap.ema13 >= trigSnap.ema34 && stratSnap.ema13 >= stratSnap.ema34
+                } else {
+                    trigSnap.tenkan7 <= trigSnap.kijun22 && trigSnap.close < trigSnap.kumoBottom72244 &&
+                        trigSnap.ema13 <= trigSnap.ema34 && stratSnap.ema13 <= stratSnap.ema34
+                }
+            else -> true
+        }
+        val cond11Passed = directionalCandleOk && volumeMomentumOk && driveBookRuleOk
+        val driveBookExtraDetail = when (activeModel) {
+            BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE ->
+                String.format(Locale.US, " · BB Squeeze=%s · EMA89=%s · RSI14=%.1f", if (trigSnap.isBollingerSqueeze) "OK" else "No", trigSnap.ema89.toString(), trigSnap.rsi14)
+            BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL ->
+                String.format(Locale.US, " · EMA21=%s · RSI7=%.1f · FractalSL=%s", trigSnap.ema21.toString(), trigSnap.rsi7, (if (isLong) trigSnap.lastDownFractalLow else trigSnap.lastUpFractalHigh).toString())
+            BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 ->
+                String.format(Locale.US, " · TK(10/30)=%s/%s · Kumo60=%s", trigSnap.tenkan10.toString(), trigSnap.kijun30.toString(), (if (isLong) trigSnap.kumoTop103060 else trigSnap.kumoBottom103060).toString())
+            BitcoinStrategyModel.MUKHERJEE_RELATIVE_TK_RSI_KELLEY ->
+                String.format(Locale.US, " · Kelly=%d سیگنال (%d%%) · RSI14=%.1f", trigSnap.kellySignalCount, trigSnap.kellyWinProbabilityPercent, trigSnap.rsi14)
+            BitcoinStrategyModel.MUKHERJEE_CLOUDS_CHIKOU_FILTER ->
+                String.format(Locale.US, " · شیب کیجون=%+.2f ATR · فیلتر چیکو=%s", trigSnap.kijunSlopeAtrPerBar, if (trigSnap.chikouBullishOpenSpace || trigSnap.chikouBearishOpenSpace) "آزاد" else "مسدود")
+            BitcoinStrategyModel.HOWTOTRADE_KEY_LEVEL_BREAK_PULLBACK ->
+                String.format(Locale.US, " · S/R Kumo=%s · ابر آینده=%s", (if (isLong) trigSnap.kumoTop else trigSnap.kumoBottom).toString(), if (trigSnap.isFutureKumoBullish) "صعودی" else "نزولی")
+            BitcoinStrategyModel.TSG_QUICK_PROFIT_4STEP ->
+                String.format(Locale.US, " · گام ۱-۴ TSG · چیکو بالای کومو=%s", if (trigSnap.chikouAboveCloud26 || trigSnap.chikouBelowCloud26) "تایید" else "خیر")
+            BitcoinStrategyModel.KOONITZ_5RULES_DMI_MACD_EMA34 ->
+                String.format(Locale.US, " · ADX14=%.1f (+DI=%.0f/-DI=%.0f) · MACD=%+.2f · EMA34=%s", trigSnap.adx14, trigSnap.plusDi14, trigSnap.minusDi14, trigSnap.macdHistogram, trigSnap.ema34.toString())
+            BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44 ->
+                String.format(Locale.US, " · Fast(7/22/44)=%s/%s · EMA(13/34/48)=%s/%s/%s", trigSnap.tenkan7.toString(), trigSnap.kijun22.toString(), trigSnap.ema13.toString(), trigSnap.ema34.toString(), trigSnap.ema48.toString())
+            else -> ""
+        }
         val cond11Detail = String.format(
             Locale.US,
-            "بدنه کندل: %.0f%% · CLV: %.0f%% · حجم به میانگین ۲۰: %.2fx",
+            "بدنه کندل: %.0f%% · CLV: %.0f%% · حجم به میانگین ۲۰: %.2fx%s",
             trigSnap.candleBodyRatio * 100.0,
             trigSnap.closeLocationValue * 100.0,
             trigSnap.volumeRatio20,
+            driveBookExtraDetail,
         )
 
         val requiredMinRr = max(effectiveConfig.minRiskReward, 1.5)
@@ -1619,15 +2183,49 @@ object IchimokuStrategyEngine {
             emptyList()
         }
 
-        // انتخاب هدف قیمتی از بین امواج هوسودا که حداقل 1:1.5 بوده و به «عدد مناسب R:R» نزدیک‌ترین هم‌خوانی را دارد
+        // انتخاب هدف قیمتی از بین امواج هوسودا یا اهداف اختصاصی ۹ کتاب درایو (مثل 3R سیستم Keenbase و Foka و بررسی MA200 کتاب TuAnh)
         val validWaveCandidates = labeledWaveTargets.filter { (_, targetPrice) ->
             val inRightDirection = if (isLong) targetPrice > max(livePrice, sniperOptimal) else targetPrice < min(livePrice, sniperOptimal)
             val minDistFromEntries = min(abs(targetPrice - livePrice), abs(targetPrice - sniperOptimal))
             inRightDirection && (minDistFromEntries / stopDist) >= requiredMinRr
         }
-        val chosenWavePair: Pair<String, Double>? = validWaveCandidates.minByOrNull { (_, targetPrice) ->
-            val targetRr = abs(targetPrice - sniperOptimal) / stopDist
-            abs(targetRr - computedOptimalRr)
+        val chosenWavePair: Pair<String, Double>? = when (activeModel) {
+            BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 -> {
+                val fixed3RPrice = if (isLong) {
+                    max(livePrice, sniperOptimal) + stopDist * max(3.0, computedOptimalRr)
+                } else {
+                    (min(livePrice, sniperOptimal) - stopDist * max(3.0, computedOptimalRr)).coerceAtLeast(0.00001)
+                }
+                "هدف ۳R سیستم Keenbase (10-30-60)" to fixed3RPrice
+            }
+            BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL -> {
+                val fixed3RPrice = if (isLong) {
+                    max(livePrice, sniperOptimal) + stopDist * max(3.0, computedOptimalRr)
+                } else {
+                    (min(livePrice, sniperOptimal) - stopDist * max(3.0, computedOptimalRr)).coerceAtLeast(0.00001)
+                }
+                "هدف ۳R سیستم ۱۵ دقیقه‌ای فکا (Fractal/RSI7)" to fixed3RPrice
+            }
+            BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE -> {
+                // قانون کتاب TuAnh: اگر سیگنال خرید زیر MA200 است و MA200 در فاصله حداقل 1.5R بالای ورود قرار دارد، MA200 هدف اول است
+                val ma200Dist = abs(trigSnap.sma200 - sniperOptimal)
+                val ma200MilestoneValid = (isLong && trigSnap.sma200 > max(livePrice, sniperOptimal) && ma200Dist / stopDist >= requiredMinRr) ||
+                    (!isLong && trigSnap.sma200 < min(livePrice, sniperOptimal) && ma200Dist / stopDist >= requiredMinRr)
+                if (ma200MilestoneValid && ma200Dist / stopDist <= 3.5) {
+                    "هدف مقاومت/حمایت MA200 کتاب TuAnh" to trigSnap.sma200
+                } else {
+                    validWaveCandidates.minByOrNull { (_, targetPrice) ->
+                        val targetRr = abs(targetPrice - sniperOptimal) / stopDist
+                        abs(targetRr - computedOptimalRr)
+                    }
+                }
+            }
+            else -> {
+                validWaveCandidates.minByOrNull { (_, targetPrice) ->
+                    val targetRr = abs(targetPrice - sniperOptimal) / stopDist
+                    abs(targetRr - computedOptimalRr)
+                }
+            }
         }
 
         val rawPrimaryTp = chosenWavePair?.second ?: if (isLong) {
@@ -1681,12 +2279,27 @@ object IchimokuStrategyEngine {
         val rewardDistSniper = round2(abs(effectiveTp - sniperOptimal))
         val riskDistSniper = round2(abs(sniperOptimal - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.25))
         val slBasisTextFa = buildString {
-            val pillars = mutableListOf<String>()
-            if (activeModel.hasPatel) pillars += "تعادل کیجون پاتل (${round2(trigSnap.kijun)})"
-            if (activeModel.hasTuttle) pillars += "لبه کومو تاتل (${round2(if (isLong) trigSnap.kumoBottom else trigSnap.kumoTop)})"
-            if (activeModel.hasHosoda) pillars += "نقطه S موج هوسودا (${round2(wave?.pointC ?: trigSnap.kijun)})"
-            if (activeModel.hasPeloille) pillars += "پلاتوی فلت کارن پلویل"
-            append(pillars.joinToString(" + ").ifEmpty { "سنگر ساختاری کیجون/کومو" })
+            when (activeModel) {
+                BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL ->
+                    append("فرکتال ۵ کندلی بیل ویلیامز (${round2(if (isLong) trigSnap.lastDownFractalLow else trigSnap.lastUpFractalHigh)}) + پشت کیجون")
+                BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 ->
+                    append("Kijun(30)=${round2(trigSnap.kijun30)} ± 0.4×ATR14 سیستم Keenbase")
+                BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE ->
+                    append("زیر/بالای کندل شکست ماروبوزو + فشردگی بولینگر باند (${round2(trigSnap.bbMiddle20)})")
+                BitcoinStrategyModel.TSG_QUICK_PROFIT_4STEP ->
+                    append("زیر/بالای کندل شکست کومو (گام ۴ سیستم TSG) + کیجون (${round2(trigSnap.kijun)})")
+                BitcoinStrategyModel.KOONITZ_5RULES_DMI_MACD_EMA34,
+                BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44 ->
+                    append("سنگر ترکیبی Base Line (${round2(trigSnap.kijun)}) + EMA34 (${round2(trigSnap.ema34)}) کونیتز")
+                else -> {
+                    val pillars = mutableListOf<String>()
+                    if (activeModel.hasPatel) pillars += "تعادل کیجون پاتل (${round2(trigSnap.kijun)})"
+                    if (activeModel.hasTuttle) pillars += "لبه کومو تاتل (${round2(if (isLong) trigSnap.kumoBottom else trigSnap.kumoTop)})"
+                    if (activeModel.hasHosoda) pillars += "نقطه S موج هوسودا (${round2(wave?.pointC ?: trigSnap.kijun)})"
+                    if (activeModel.hasPeloille) pillars += "پلاتوی فلت کارن پلویل"
+                    append(pillars.joinToString(" + ").ifEmpty { "سنگر ساختاری کیجون/کومو" })
+                }
+            }
             append(String.format(Locale.US, " + بافر %.2f ATR", slBuffer))
         }
         val tpBasisTextFa = buildString {
@@ -2239,6 +2852,37 @@ object IchimokuStrategyEngine {
             }
             if (momentumCollapsed && inProfit && currentR >= 0.55) {
                 fatalProfitTriggers += "قفل شدن چیکو و سقوط کارایی روند به ${(trigSnap.efficiencyRatio14 * 100).toInt()}%"
+            }
+
+            // ۵. تکنیک خروج محرمانه RSI موکرجی (کتاب درایو ۴ — comic 3): افت بیش از ۱۰ واحد از قله RSI یا شکست قله همراه با کلوز پشت تنکان
+            val mukherjeeRsiFailure = if (isBuy) {
+                trigSnap.rsiPeakDropLong >= 11.5 && closedBeyondTenkan && oppositeCandle
+            } else {
+                trigSnap.rsiTroughRiseShort >= 14.0 && closedBeyondTenkan && oppositeCandle
+            }
+            if (isBuy && trigSnap.rsiPeakDropLong >= 9.0) {
+                warnings += String.format(Locale.US, "افت RSI از قله اخیر (%.1f واحد — قانون موکرجی)", trigSnap.rsiPeakDropLong)
+            } else if (!isBuy && trigSnap.rsiTroughRiseShort >= 10.0) {
+                warnings += String.format(Locale.US, "برگشت RSI از کف اخیر (%.1f واحد — قانون موکرجی)", trigSnap.rsiTroughRiseShort)
+            }
+            if (mukherjeeRsiFailure && inProfit && currentR >= 0.70) {
+                fatalProfitTriggers += String.format(
+                    Locale.US,
+                    "سیگنال خروج RSI موکرجی (انحراف %.1f واحد از اکسترمم RSI با کلوز پشت تنکان)",
+                    if (isBuy) trigSnap.rsiPeakDropLong else trigSnap.rsiTroughRiseShort,
+                )
+            }
+
+            // ۶. سیستم ۴ قانون خروج کونیتز (کتاب‌های ۸ و ۹): شکست هم‌زمان کیجون و EMA34 همراه با برگشت MACD/DMI
+            val koonitz4RuleExit = if (isBuy) {
+                trigSnap.close < trigSnap.ema34 && trigSnap.close < trigSnap.kijun &&
+                    (trigSnap.isMacdBearish || trigSnap.isDmiBearish)
+            } else {
+                trigSnap.close > trigSnap.ema34 && trigSnap.close > trigSnap.kijun &&
+                    (trigSnap.isMacdBullish || trigSnap.isDmiBullish)
+            }
+            if (koonitz4RuleExit && inProfit && currentR >= 0.50) {
+                fatalProfitTriggers += "تکمیل ۴ قانون خروج کونیتز (شکست هم‌زمان کیجون و EMA34 با چرخش MACD/DMI)"
             }
         }
 
