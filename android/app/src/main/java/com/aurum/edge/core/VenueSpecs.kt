@@ -137,13 +137,13 @@ object VenueSpecs {
         "IC Markets Raw Spread (EU, 1:30) — EUR/USD ≈ 0.1 pip + $3.50/lot/side; XAU/USD ≈ $0.05–0.12/oz + $3.50/lot/side"
     private const val ESMA_CAPS = "ESMA retail leverage caps (permanent since 1 Aug 2018)"
 
-    val FX_MAJOR = "IC Markets Raw Spread · ESMA 30:1"
-    val GOLD = "LMAX/IC Markets XAUUSD · ESMA 20:1"
-    val COMMODITY = "NYMEX/ICE contract ticks · ESMA 10:1"
-    val CRYPTO_SPOT = "کاغذی USDT (قیمت نوبیتکس؛ مدل هزینهٔ مرجع Binance VIP0، نه کارمزد نوبیتکس)"
-    val US_STOCK = "NYSE/Nasdaq (IBKR Lite, $0) · ESMA 5:1"
+    val FX_MAJOR = "IC Markets Raw Spread · Leverage 10:1"
+    val GOLD = "LMAX/IC Markets XAUUSD · Leverage 10:1"
+    val COMMODITY = "NYMEX/ICE contract ticks · Leverage 10:1"
+    val CRYPTO_SPOT = "کاغذی USDT (مرجع Binance/KuCoin · اهرم ایمن ≤ ۱۰)"
+    val US_STOCK = "NYSE/Nasdaq (IBKR Lite, $0) · Leverage 10:1"
 
-    /** Spec مرجعِ همان نماد، با اعداد واقعی بازار. */
+    /** Spec مرجعِ همان نماد، با اعداد واقعی بازار و اهرم ایمن حداکثر ۱۰ (≤ 10x). */
     fun of(symbol: String): VenueSpec = when (AssetClass.of(symbol)) {
         AssetClass.CRYPTO -> {
             val clean = symbol.trim().uppercase()
@@ -153,14 +153,15 @@ object VenueSpecs {
                 clean.startsWith("SOL") -> Triple(0.01, 0.001, 0.01)
                 else -> Triple(0.1, 0.01, 0.0001)
             }
+            val safeCryptoLev = if (clean.startsWith("BTC") || clean.startsWith("ETH")) 5 else 3
             VenueSpec(
                 venue = CRYPTO_SPOT,
-                leverageCap = 2,
+                leverageCap = safeCryptoLev,
                 tickSize = tick,
                 commissionBpsPerSide = 10.0,
                 spreadBps = 1.0,
-                source = "Nobitex USDT public trade prices; paper cost benchmark: Binance Spot VIP0 0.10%/side + 1bp spread, NOT a verified Nobitex fee ($ESMA_CAPS)",
-                dataProviderFa = "Binance Spot VIP0 / Kraken (کارمزد ۰.۱۰٪ در هر سمت + اسپرد ۱ bps)",
+                source = "USDT spot prices; paper cost benchmark: Binance Spot VIP0 0.10%/side + 1bp spread ($ESMA_CAPS)",
+                dataProviderFa = "Binance / KuCoin USDT (کارمزد ۰.۱۰٪ در هر سمت + اسپرد ۱ bps · اهرم ایمن ${safeCryptoLev}x)",
                 makerFeeBps = 10.0,
                 takerFeeBps = 10.0,
                 minOrderQuantity = minQty,
@@ -172,12 +173,12 @@ object VenueSpecs {
 
         AssetClass.STOCK -> VenueSpec(
             venue = US_STOCK,
-            leverageCap = 5,
+            leverageCap = 10,
             tickSize = 0.01,
             commissionBpsPerSide = 0.0,
             spreadPrice = 0.01,
             source = "US equities: $0 commission (IBKR Lite), 1-cent tick, SEC fee $27.80 per $1M on sells ($ESMA_CAPS)",
-            dataProviderFa = "NYSE/Nasdaq · Yahoo/IBKR (کمیسیون $0.00 + اسپرد ۰.۰۱ دلار)",
+            dataProviderFa = "NYSE/Nasdaq · Yahoo/IBKR (کمیسیون $0.00 + اسپرد ۰.۰۱ دلار · اهرم ۱۰x)",
             minOrderQuantity = 0.01,
             quantityStep = 0.01,
             minNotionalUsd = 1.0,
@@ -189,8 +190,8 @@ object VenueSpecs {
             val jpyQuote = clean.endsWith("JPY")
             val major = isMajorPair(clean)
             VenueSpec(
-                venue = if (major) FX_MAJOR else "IC Markets Raw Spread · ESMA 20:1 (non-major)",
-                leverageCap = if (major) 30 else 20,
+                venue = if (major) FX_MAJOR else "IC Markets Raw Spread · Leverage 10:1",
+                leverageCap = 10,
                 tickSize = if (jpyQuote) 0.001 else 0.00001,
                 // ۳٫۵۰ دلار برای هر لات = ۱۰۰٬۰۰۰ واحد → ۰٫۰۰۰۰۳۵ دلار برای هر واحد، در هر سمت.
                 commissionPerUnit = 0.000035,
@@ -202,7 +203,7 @@ object VenueSpecs {
                     else -> 0.00002
                 },
                 source = "$IC_MARKETS · $ESMA_CAPS",
-                dataProviderFa = "Swissquote / IC Markets Raw ECN (کمیسیون $3.50/لات در هر سمت + اسپرد خام ECN)",
+                dataProviderFa = "Swissquote / IC Markets Raw ECN (کمیسیون $3.50/لات در هر سمت + اسپرد خام ECN · اهرم ۱۰x)",
                 minOrderQuantity = 1_000.0, // 0.01 lot
                 quantityStep = 100.0,
                 minNotionalUsd = 10.0,
@@ -213,12 +214,12 @@ object VenueSpecs {
         AssetClass.COMMODITY -> when {
             symbol.uppercase().startsWith("XAU") || symbol.uppercase() == "GOLD" -> VenueSpec(
                 venue = GOLD,
-                leverageCap = 20,
+                leverageCap = 10,
                 tickSize = 0.01,
                 commissionPerUnit = 0.035,
                 spreadPrice = 0.12,
                 source = "$IC_MARKETS · gold 1 lot = 100 oz · $ESMA_CAPS",
-                dataProviderFa = "Swissquote / LMAX / IC Markets XAUUSD (۱ لات = ۱۰۰ اونس · کمیسیون $3.50/لات در هر سمت + اسپرد $0.12/oz)",
+                dataProviderFa = "Swissquote / LMAX / IC Markets XAUUSD (۱ لات = ۱۰۰ اونس · کمیسیون $3.50/لات در هر سمت + اسپرد $0.12/oz · اهرم ۱۰x)",
                 minOrderQuantity = 0.01,
                 quantityStep = 0.01,
                 minNotionalUsd = 10.0,

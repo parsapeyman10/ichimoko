@@ -14,6 +14,9 @@ import com.aurum.edge.core.CustomStrategySlot
 import com.aurum.edge.core.DualTimeframeSymbolReport
 import com.aurum.edge.core.IchimokuStrategyEngine
 import com.aurum.edge.core.MarketState
+import com.aurum.edge.core.NeuralLearningStateSummary
+import com.aurum.edge.core.NeuralSelfLearningEngine
+import com.aurum.edge.core.NeuralSignalEvaluation
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.RiskAndCalendarEngine
@@ -105,6 +108,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private val _stats = MutableStateFlow(container.journalStore.stats())
     val stats: StateFlow<JournalStats> = _stats.asStateFlow()
 
+    val neuralState: StateFlow<NeuralLearningStateSummary> = container.neuralEngine.state
+
     private val _toast = MutableStateFlow<String?>(null)
     val toast: StateFlow<String?> = _toast.asStateFlow()
 
@@ -121,6 +126,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             container.journalStore.trades.collect { currentTrades ->
                 _stats.value = container.journalStore.stats()
                 _lastDisplayMarks.value = OpenPositionDisplay.onlyOpen(_lastDisplayMarks.value, currentTrades)
+                container.neuralEngine.syncWithClosedJournalTrades(currentTrades)
                 syncBackgroundServiceState()
             }
         }
@@ -1210,24 +1216,51 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     if (!hasOpenSameStrategyTf &&
                         report.triggerBarTime > 0L && report.triggerBarTime != lastFiredBar
                     ) {
-                        val entry = report.suggestedEntry
-                        val sl = report.suggestedStopLoss
+                        val neuralEval = container.neuralEngine.evaluateReport(report)
+                        if (!neuralEval.shouldAllowTrade) {
+                            lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to report.triggerBarTime)
+                            _toast.value = "🧠 شبکه عصبی خودآموز ورود ${report.symbol} (${report.triggerInterval.label}) را مسدود کرد: ${neuralEval.noTradeWarningFa ?: neuralEval.summaryFa}"
+                            continue
+                        }
+
+                        val rawEntry = report.suggestedEntry
+                        val rawSl = report.suggestedStopLoss
                         val rawTp = report.primaryTakeProfit
-                        if (entry != null && sl != null && rawTp != null) {
+                        if (rawEntry != null && rawSl != null && rawTp != null) {
+                            // لنگر انداختن نقطهٔ ورود، حد ضرر و حد سود به قیمت لحظه‌ای اجرا (جلوگیری از استاپ فوری در ارزهای کریپتو)
+                            val liveTickPrice = _liveTicks.value[symbol]?.price?.takeIf { it.isFinite() && it > 0.0 }
+                            val executionEntry = liveTickPrice
+                                ?: report.livePrice?.takeIf { it.isFinite() && it > 0.0 }
+                                ?: rawEntry
+                            val entryDelta = executionEntry - rawEntry
+                            val shiftedSl = rawSl + entryDelta
+                            val shiftedTp = rawTp + entryDelta
+                            val desiredRr = (report.optimalRiskReward ?: RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD)
+                                .coerceAtLeast(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD)
+                            val (safeSl, safeTp) = RiskAndCalendarEngine.sanitizeEntryStopAndTarget(
+                                symbolInput = symbol,
+                                action = report.action,
+                                liveEntryPrice = executionEntry,
+                                candidateStopLoss = shiftedSl,
+                                candidateTakeProfit = shiftedTp,
+                                desiredRiskReward = desiredRr,
+                                trigAtr14 = report.triggerSnapshot?.atr14 ?: 0.0,
+                                triggerInterval = report.triggerInterval,
+                            )
                             val enforcedTp = RiskAndCalendarEngine.enforceMinimumRiskReward(
                                 symbolInput = symbol,
-                                entryPrice = entry,
-                                stopLoss = sl,
-                                takeProfit = rawTp,
+                                entryPrice = executionEntry,
+                                stopLoss = safeSl,
+                                takeProfit = safeTp,
                                 action = report.action,
-                                minRiskReward = RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD,
+                                minRiskReward = desiredRr,
                             )
                             val calc = RiskAndCalendarEngine.calculatePosition(
                                 symbolInput = symbol,
                                 accountBalance = cfg.accountBalance,
                                 riskPercent = cfg.riskPercent,
-                                entry = entry,
-                                stopLoss = sl,
+                                entry = executionEntry,
+                                stopLoss = safeSl,
                                 takeProfit = enforcedTp,
                                 preferredAction = report.action,
                                 fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
@@ -1235,7 +1268,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                             if (calc != null && calc.riskReward >= RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD) {
                                 lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to report.triggerBarTime)
                                 val tfLabel = report.triggerInterval.label
-                                val autoNote = "⚡ خودکار [تایم $tfLabel] · [${report.strategyTitleFa}] · (R:R 1:${calc.riskReward} · ${report.trendPhase.badgeFa})"
+                                val winProbPct = (neuralEval.predictedWinProb * 100.0).toInt()
+                                val autoNote = "⚡ خودکار [تایم $tfLabel] · [${report.strategyTitleFa}] · (R:R 1:${calc.riskReward} · ${report.trendPhase.badgeFa}) · [NN:${neuralEval.conditionKey} · Win:${winProbPct}%]"
                                 openAutoTrackedTrade(
                                     calc = calc,
                                     note = autoNote,
@@ -1303,6 +1337,70 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun setNotifyOnSignal(enabled: Boolean) {
         container.settingsStore.update { it.copy(notifyOnSignal = enabled) }
         _toast.value = if (enabled) "🔔 آلارم‌های سه‌گانه (ورود، حد سود، حد ضرر) فعال شدند" else "🔕 آلارم‌های صوتی معامله غیرفعال شدند"
+    }
+
+    fun setAlarmVolumePercent(percent: Int) {
+        val safePct = percent.coerceIn(0, 100)
+        container.settingsStore.update { it.copy(alarmVolumePercent = safePct) }
+    }
+
+    fun setAlarmTonePreset(presetId: String) {
+        val preset = com.aurum.edge.notify.AlarmTonePreset.fromId(presetId)
+        container.settingsStore.update { it.copy(alarmTonePreset = preset.id) }
+        _toast.value = "🎼 الگوی صدای آلارم: ${preset.titleFa}"
+    }
+
+    fun setAlarmVibrationEnabled(enabled: Boolean) {
+        container.settingsStore.update { it.copy(alarmVibrationEnabled = enabled) }
+        _toast.value = if (enabled) "📳 ویبره اختصاصی آلارم‌ها فعال شد" else "📴 ویبره آلارم‌ها غیرفعال شد"
+    }
+
+    fun setCustomAlarmSoundForKind(
+        kind: com.aurum.edge.notify.TradeAlarmKind?,
+        uri: String,
+        name: String,
+    ) {
+        val cleanUri = uri.trim()
+        val cleanName = name.trim()
+        container.settingsStore.update { cur ->
+            when (kind) {
+                com.aurum.edge.notify.TradeAlarmKind.ENTRY ->
+                    cur.copy(entryAlarmSoundUri = cleanUri, entryAlarmSoundName = cleanName)
+                com.aurum.edge.notify.TradeAlarmKind.TAKE_PROFIT ->
+                    cur.copy(tpAlarmSoundUri = cleanUri, tpAlarmSoundName = cleanName)
+                com.aurum.edge.notify.TradeAlarmKind.STOP_LOSS ->
+                    cur.copy(slAlarmSoundUri = cleanUri, slAlarmSoundName = cleanName)
+                null ->
+                    cur.copy(
+                        alertSoundUri = cleanUri,
+                        alertSoundName = cleanName,
+                        entryAlarmSoundUri = cleanUri,
+                        entryAlarmSoundName = cleanName,
+                        tpAlarmSoundUri = cleanUri,
+                        tpAlarmSoundName = cleanName,
+                        slAlarmSoundUri = cleanUri,
+                        slAlarmSoundName = cleanName,
+                    )
+            }
+        }
+        val label = kind?.channelNameFa ?: "هر ۳ آلارم"
+        _toast.value = if (cleanUri.isBlank()) {
+            "🔔 صدای $label به ملودی استاندارد بازنشانی شد"
+        } else {
+            "🎵 صدای اختصاصی $label ذخیره شد: ${cleanName.ifBlank { "زنگ انتخابی" }}"
+        }
+    }
+
+    fun evaluateReportWithNeuralEngine(report: StrategyEvaluationReport): NeuralSignalEvaluation =
+        container.neuralEngine.evaluateReport(report)
+
+    fun setNeuralForceActiveBeforeWarmup(enabled: Boolean) {
+        container.neuralEngine.setForceActiveBeforeWarmup(enabled)
+        _toast.value = if (enabled) {
+            "🧠 فیلتر شبکه عصبی خودآموز پیش از ۱۰,۰۰۰ معامله نیز فعال شد"
+        } else {
+            "🧠 شبکه عصبی تا تکمیل ۱۰,۰۰۰ معامله در حالت یادگیری خالص (بدون بلاک) قرار گرفت"
+        }
     }
 
     fun triggerTestTradeAlarm(kind: com.aurum.edge.notify.TradeAlarmKind) {

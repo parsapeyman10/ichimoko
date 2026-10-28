@@ -175,6 +175,16 @@ class SettingsStore(context: Context) {
         notifyOnSignal = prefs.getBoolean(KEY_NOTIFY, true),
         alertSoundUri = prefs.getString(KEY_ALERT_SOUND_URI, "").orEmpty(),
         alertSoundName = prefs.getString(KEY_ALERT_SOUND_NAME, "").orEmpty(),
+        alarmVolumePercent = prefs.getInt(KEY_ALARM_VOLUME_PCT, 90).coerceIn(0, 100),
+        alarmTonePreset = prefs.getString(KEY_ALARM_TONE_PRESET, "INSTITUTIONAL").orEmpty().ifBlank { "INSTITUTIONAL" },
+        alarmVibrationEnabled = prefs.getBoolean(KEY_ALARM_VIBRATION_ENABLED, true),
+        entryAlarmSoundUri = prefs.getString(KEY_ENTRY_ALARM_SOUND_URI, "").orEmpty(),
+        entryAlarmSoundName = prefs.getString(KEY_ENTRY_ALARM_SOUND_NAME, "").orEmpty(),
+        tpAlarmSoundUri = prefs.getString(KEY_TP_ALARM_SOUND_URI, "").orEmpty(),
+        tpAlarmSoundName = prefs.getString(KEY_TP_ALARM_SOUND_NAME, "").orEmpty(),
+        slAlarmSoundUri = prefs.getString(KEY_SL_ALARM_SOUND_URI, "").orEmpty(),
+        slAlarmSoundName = prefs.getString(KEY_SL_ALARM_SOUND_NAME, "").orEmpty(),
+        maxLeverageCap = prefs.getInt(KEY_MAX_LEVERAGE_CAP, 10).coerceIn(1, 10),
         newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty().trim(),
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
         autoPaperTrading = prefs.getBoolean(KEY_AUTO_PAPER, false),
@@ -330,6 +340,16 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_NOTIFY, next.notifyOnSignal)
             .putString(KEY_ALERT_SOUND_URI, next.alertSoundUri)
             .putString(KEY_ALERT_SOUND_NAME, next.alertSoundName)
+            .putInt(KEY_ALARM_VOLUME_PCT, next.alarmVolumePercent.coerceIn(0, 100))
+            .putString(KEY_ALARM_TONE_PRESET, next.alarmTonePreset.ifBlank { "INSTITUTIONAL" })
+            .putBoolean(KEY_ALARM_VIBRATION_ENABLED, next.alarmVibrationEnabled)
+            .putString(KEY_ENTRY_ALARM_SOUND_URI, next.entryAlarmSoundUri)
+            .putString(KEY_ENTRY_ALARM_SOUND_NAME, next.entryAlarmSoundName)
+            .putString(KEY_TP_ALARM_SOUND_URI, next.tpAlarmSoundUri)
+            .putString(KEY_TP_ALARM_SOUND_NAME, next.tpAlarmSoundName)
+            .putString(KEY_SL_ALARM_SOUND_URI, next.slAlarmSoundUri)
+            .putString(KEY_SL_ALARM_SOUND_NAME, next.slAlarmSoundName)
+            .putInt(KEY_MAX_LEVERAGE_CAP, next.maxLeverageCap.coerceIn(1, 10))
             .putString(KEY_NEWS_URL, next.newsBaseUrl.trim())
             .putString(KEY_SIGNAL_PROFILE, next.signalProfile.persistName())
             .putBoolean(KEY_SIGNAL_MOMENTUM_VOLUME, next.signalProfile.momentumVolume)
@@ -428,6 +448,16 @@ class SettingsStore(context: Context) {
         private const val KEY_NOTIFY = "notify_signal"
         private const val KEY_ALERT_SOUND_URI = "verified_alert_sound_uri"
         private const val KEY_ALERT_SOUND_NAME = "verified_alert_sound_name"
+        private const val KEY_ALARM_VOLUME_PCT = "alarm_volume_pct_v3913"
+        private const val KEY_ALARM_TONE_PRESET = "alarm_tone_preset_v3913"
+        private const val KEY_ALARM_VIBRATION_ENABLED = "alarm_vibration_enabled_v3913"
+        private const val KEY_ENTRY_ALARM_SOUND_URI = "entry_alarm_sound_uri_v3913"
+        private const val KEY_ENTRY_ALARM_SOUND_NAME = "entry_alarm_sound_name_v3913"
+        private const val KEY_TP_ALARM_SOUND_URI = "tp_alarm_sound_uri_v3913"
+        private const val KEY_TP_ALARM_SOUND_NAME = "tp_alarm_sound_name_v3913"
+        private const val KEY_SL_ALARM_SOUND_URI = "sl_alarm_sound_uri_v3913"
+        private const val KEY_SL_ALARM_SOUND_NAME = "sl_alarm_sound_name_v3913"
+        private const val KEY_MAX_LEVERAGE_CAP = "max_leverage_cap_v3913"
         private const val KEY_NEWS_URL = "news_base_url"
         private const val KEY_TICK_ARCHIVE_URL = "tick_archive_url"
         private const val KEY_TICK_ARCHIVE_TOKEN = "tick_archive_token"

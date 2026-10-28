@@ -653,7 +653,116 @@ class RiskAndCalendarEngineTest {
             liveSpotPrice = spotGoldLive,
         )
         assertEquals(spotGoldLive, alignedGold.last().close, 1e-4)
+
+        // 8. Verify Leverage <= 10 Across All 15 Symbols & Crypto Safe Stop-Loss Floor
+        for (sym in V1Universe.allSymbols) {
+            val specLev = com.aurum.edge.core.VenueSpecs.of(sym).leverageCap
+            val orderLev = com.aurum.edge.core.PaperOrderRules.defaultLeverageFor(sym)
+            assertTrue("Leverage cap for $sym must be <= 10 (was $specLev)", specLev in 1..10)
+            assertTrue("Default leverage for $sym must be <= 10 (was $orderLev)", orderLev in 1..10)
+        }
+        val btcSafeStop = IchimokuStrategyEngine.minSafeStructuralStopDistance(
+            symbol = "BTC/USDT",
+            referencePrice = 90_000.0,
+            trigAtr14 = 180.0,
+            stratAtr14 = 350.0,
+            triggerInterval = Interval.M5,
+        )
+        assertTrue("BTC 5m safe stop floor must be >= 0.55% ($495)", btcSafeStop >= 495.0 - 1e-4)
+        val (sanitizedSl, sanitizedTp) = RiskAndCalendarEngine.sanitizeEntryStopAndTarget(
+            symbolInput = "BTC/USDT",
+            action = SignalAction.BUY,
+            liveEntryPrice = 90_000.0,
+            candidateStopLoss = 89_920.0, // too tight ($80) -> must be pushed below 89,505
+            candidateTakeProfit = 90_500.0,
+            desiredRiskReward = 2.0,
+            trigAtr14 = 180.0,
+            triggerInterval = Interval.M5,
+        )
+        assertTrue(sanitizedSl <= 90_000.0 - btcSafeStop + 1e-2)
+        assertTrue((sanitizedTp - 90_000.0) / (90_000.0 - sanitizedSl) >= 1.99)
+
+        // 9. Verify Alarm Sound & Volume Customization Persistence
+        store.update {
+            it.copy(
+                alarmVolumePercent = 75,
+                alarmTonePreset = com.aurum.edge.notify.AlarmTonePreset.SOFT_CHIME.id,
+                alarmVibrationEnabled = false,
+                entryAlarmSoundUri = "content://media/internal/audio/media/11",
+                entryAlarmSoundName = "Crystal Entry",
+            )
+        }
+        val rereadSettings = store.read()
+        assertEquals(75, rereadSettings.alarmVolumePercent)
+        assertEquals("SOFT_CHIME", rereadSettings.alarmTonePreset)
+        assertFalse(rereadSettings.alarmVibrationEnabled)
+        assertEquals("Crystal Entry", rereadSettings.entryAlarmSoundName)
+
+        // 10. Verify Self-Learning Neural Network Engine (FT-Transformer + SwiGLU + AdamW Online + 10,000 Warmup)
+        val neuralFile = File(context.filesDir, "test_neural_self_learning.json")
+        neuralFile.delete()
+        val neuralEngine = com.aurum.edge.core.NeuralSelfLearningEngine(context, neuralFile)
+        assertEquals(10_000, com.aurum.edge.core.NeuralSelfLearningEngine.WARMUP_TARGET_TRADES)
+        assertEquals(0, neuralEngine.state.value.totalLearnedTrades)
+        assertFalse(neuralEngine.state.value.isWarmupCompleted)
+
+        // Train 6 losing trades on a weak crypto condition and 6 winning trades on a strong gold condition
+        val badCryptoFeatures = doubleArrayOf(
+            1.0, 0.0, 0.0, 0.0, // CRYPTO
+            0.0, 1.0,           // 5m, BUY
+            1.0, 0.0, 0.0, 0.0, // BASE_ICHIMOKU
+            0.18, 0.25, 0.85,   // low ER, thin kumo, overextended from Kijun
+            0.65, 0.30, 0.62,   // high adverse wick
+        )
+        for (i in 1..6) {
+            val closedLoss = com.aurum.edge.core.PaperTrade(
+                id = "nn_loss_$i",
+                symbol = "BTC/USDT",
+                action = SignalAction.BUY,
+                interval = Interval.M5,
+                entry = 90_000.0,
+                stopLoss = 89_400.0,
+                takeProfit = 91_200.0,
+                riskReward = 2.0,
+                confidence = 68.0,
+                openedAt = 1_760_100_000_000L + i * 60_000L,
+                closedAt = 1_760_100_030_000L + i * 60_000L,
+                exitPrice = 89_400.0,
+                pnlUsd = -5.0,
+                fixedRiskUsd = 5.0,
+                strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+                note = "[NN:CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED]",
+            )
+            neuralEngine.recordCompletedTrade(
+                trade = closedLoss,
+                featuresOverride = badCryptoFeatures,
+                conditionKeyOverride = "CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED",
+            )
+        }
+        assertEquals(6, neuralEngine.state.value.totalLearnedTrades)
+        assertTrue("Must detect high-risk no-trade cluster after repeated losses", neuralEngine.state.value.discoveredNoTradeClustersCount >= 1)
+
+        // Before 10,000 trades (with forceActiveBeforeWarmup = false), it must NOT block trades even when no-trade condition is detected
+        val evalDuringWarmup = neuralEngine.evaluateFeatures(
+            symbol = "BTC/USDT",
+            features = badCryptoFeatures,
+            conditionKey = "CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED",
+        )
+        assertTrue(evalDuringWarmup.isNoTradeCondition)
+        assertFalse(evalDuringWarmup.isBlockingTradeNow)
+        assertTrue(evalDuringWarmup.shouldAllowTrade)
+
+        // When forceActiveBeforeWarmup is enabled (or after 10,000 trades), it actively blocks the no-trade condition
+        neuralEngine.setForceActiveBeforeWarmup(true)
+        val evalWhenActive = neuralEngine.evaluateFeatures(
+            symbol = "BTC/USDT",
+            features = badCryptoFeatures,
+            conditionKey = "CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED",
+        )
+        assertTrue(evalWhenActive.isBlockingTradeNow)
+        assertFalse(evalWhenActive.shouldAllowTrade)
     }
 }
+
 
 

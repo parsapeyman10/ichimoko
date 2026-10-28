@@ -1,9 +1,11 @@
 package com.aurum.edge.core
 
 object PaperOrderRules {
+    const val MAX_ALLOWED_LEVERAGE: Int = 10
     private val USD_CROSS_QUOTES = setOf("JPY", "CHF", "CAD")
 
-    fun defaultLeverageFor(symbol: String): Int = VenueSpecs.of(symbol).leverageCap
+    fun defaultLeverageFor(symbol: String): Int =
+        VenueSpecs.of(symbol).leverageCap.coerceIn(1, MAX_ALLOWED_LEVERAGE)
 
     fun paperable(symbol: String): Boolean {
         val s = symbol.trim().uppercase(java.util.Locale.ROOT)

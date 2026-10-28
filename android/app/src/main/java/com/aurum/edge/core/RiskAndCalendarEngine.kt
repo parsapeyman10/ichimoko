@@ -236,7 +236,7 @@ object RiskAndCalendarEngine {
         val (standardLots, lotDesc) = computeStandardLots(symbol, positionUnits, unitLabel)
 
         val spec = VenueSpecs.of(symbol)
-        val leverage = PaperOrderRules.defaultLeverageFor(symbol).coerceAtLeast(1)
+        val leverage = PaperOrderRules.defaultLeverageFor(symbol).coerceIn(1, 10)
         val notionalUsd = PaperOrderRules.quotePnlToUsd(symbol, positionUnits * entry, entry)
         val marginRequiredUsd = notionalUsd / leverage
         val commissionUsd = spec.commissionUsd(entry, positionUnits) * 2.0
@@ -302,6 +302,68 @@ object RiskAndCalendarEngine {
             max(0.00001, entryPrice - requiredDist)
         }
         return roundToDecimals(adjustedTp, decimals)
+    }
+
+    /**
+     * همگام‌سازی و ایمن‌سازی نهایی نقطهٔ ورود، حد ضرر و حد سود با قیمت لحظه‌ای اجرا (Live Execution Anchor):
+     * تضمین می‌کند در لحظهٔ باز شدن معامله (به‌ویژه در ارزهای کریپتو)، حد ضرر دقیقاً در سمت درستِ قیمت ورود واقعی قرار گیرد
+     * و حداقل فاصلهٔ ایمن ساختاری (`minSafeStructuralStopDistance`) را داشته باشد تا معامله بلافاصله در چند ثانیه اول استاپ نخورد.
+     */
+    fun sanitizeEntryStopAndTarget(
+        symbolInput: String,
+        action: SignalAction,
+        liveEntryPrice: Double,
+        candidateStopLoss: Double,
+        candidateTakeProfit: Double,
+        desiredRiskReward: Double = MIN_REQUIRED_RISK_REWARD,
+        trigAtr14: Double = 0.0,
+        triggerInterval: com.aurum.edge.domain.Interval = com.aurum.edge.domain.Interval.M5,
+    ): Pair<Double, Double> {
+        val symbol = V1Universe.normalize(symbolInput)
+        val decimals = priceDecimals(symbol, liveEntryPrice)
+        val minSafeDist = IchimokuStrategyEngine.minSafeStructuralStopDistance(
+            symbol = symbol,
+            referencePrice = liveEntryPrice,
+            trigAtr14 = trigAtr14,
+            stratAtr14 = trigAtr14,
+            triggerInterval = triggerInterval,
+        )
+        val safeStop = if (action == SignalAction.BUY) {
+            val rawSl = if (candidateStopLoss.isFinite() && candidateStopLoss > 0.0 && candidateStopLoss < liveEntryPrice) {
+                candidateStopLoss
+            } else {
+                liveEntryPrice - minSafeDist
+            }
+            roundToDecimals(min(rawSl, liveEntryPrice - minSafeDist).coerceAtLeast(0.00001), decimals)
+        } else {
+            val rawSl = if (candidateStopLoss.isFinite() && candidateStopLoss > liveEntryPrice) {
+                candidateStopLoss
+            } else {
+                liveEntryPrice + minSafeDist
+            }
+            roundToDecimals(max(rawSl, liveEntryPrice + minSafeDist), decimals)
+        }
+
+        val stopDist = abs(liveEntryPrice - safeStop).coerceAtLeast(minSafeDist)
+        val safeRr = max(desiredRiskReward, MIN_REQUIRED_RISK_REWARD)
+        val safeTp = if (action == SignalAction.BUY) {
+            val minTp = liveEntryPrice + stopDist * safeRr
+            val rawTp = if (candidateTakeProfit.isFinite() && candidateTakeProfit > liveEntryPrice) {
+                max(candidateTakeProfit, minTp)
+            } else {
+                minTp
+            }
+            roundToDecimals(rawTp, decimals)
+        } else {
+            val maxTp = max(0.00001, liveEntryPrice - stopDist * safeRr)
+            val rawTp = if (candidateTakeProfit.isFinite() && candidateTakeProfit > 0.0 && candidateTakeProfit < liveEntryPrice) {
+                min(candidateTakeProfit, maxTp)
+            } else {
+                maxTp
+            }
+            roundToDecimals(rawTp, decimals)
+        }
+        return safeStop to safeTp
     }
 
     /**
@@ -406,15 +468,28 @@ object RiskAndCalendarEngine {
         val price = tick.price
         if (!price.isFinite() || price <= 0.0) return null
 
+        // محافظ ضد نویز ۱۰ ثانیه اول پس از ورود در کریپتو (جلوگیری از فعال شدن استاپ بر اثر تیک معوق/اختلاف بیسیس صرافی)
+        val tradeAgeMs = tick.at - trade.openedAt
+        val stopDist = abs(trade.entry - trade.stopLoss)
+        val earlyCryptoSpikeBuffer = if (
+            AssetClass.of(trade.symbol) == AssetClass.CRYPTO &&
+            tradeAgeMs in 0L..9_999L &&
+            stopDist > 0.0
+        ) {
+            stopDist * 0.15
+        } else {
+            0.0
+        }
+
         val hitKind: AutoExitKind? = when (trade.action) {
             SignalAction.BUY -> when {
                 price >= trade.takeProfit -> AutoExitKind.TAKE_PROFIT
-                price <= trade.stopLoss -> AutoExitKind.STOP_LOSS
+                price <= trade.stopLoss - earlyCryptoSpikeBuffer -> AutoExitKind.STOP_LOSS
                 else -> null
             }
             SignalAction.SELL -> when {
                 price <= trade.takeProfit -> AutoExitKind.TAKE_PROFIT
-                price >= trade.stopLoss -> AutoExitKind.STOP_LOSS
+                price >= trade.stopLoss + earlyCryptoSpikeBuffer -> AutoExitKind.STOP_LOSS
                 else -> null
             }
             SignalAction.NO_TRADE -> null
@@ -447,7 +522,8 @@ object RiskAndCalendarEngine {
         if (!trade.isOpen || candles.isEmpty()) return null
         val ordered = candles
             .filter {
-                it.time >= trade.openedAt - 60_000L &&
+                // Only inspect candles whose bar opened STRICTLY AFTER the trade opened so pre-entry wicks never stop out a new trade
+                it.time > trade.openedAt &&
                     it.high.isFinite() && it.low.isFinite() &&
                     it.high > 0.0 && it.low > 0.0 && it.high >= it.low
             }

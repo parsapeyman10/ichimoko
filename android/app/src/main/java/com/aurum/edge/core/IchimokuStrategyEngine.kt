@@ -1171,13 +1171,8 @@ object IchimokuStrategyEngine {
         }
         val basisDelta = liveSpotPrice - referenceClose
         val relDiff = abs(basisDelta) / referenceClose
-        val sample = candles.takeLast(14)
-        val avgRange = if (sample.isNotEmpty()) {
-            sample.sumOf { (it.high - it.low).coerceAtLeast(0.0) } / sample.size
-        } else {
-            referenceClose * 0.001
-        }
-        if (abs(basisDelta) <= max(avgRange * 1.15, referenceClose * 0.0008) || relDiff > 0.12) {
+        // Align any basis discrepancy larger than 0.03% (3 bps) up to 12% so USD/USDT or Futures/Spot basis never skews SL/Entry
+        if (abs(basisDelta) <= referenceClose * 0.0003 || relDiff > 0.12) {
             return candles
         }
         return candles.map { bar ->
@@ -1186,6 +1181,57 @@ object IchimokuStrategyEngine {
             val l = (bar.low + basisDelta).coerceIn(0.00001, h)
             val c = (bar.close + basisDelta).coerceIn(l, h)
             bar.copy(open = o, high = h, low = l, close = c)
+        }
+    }
+
+    /**
+     * حداقل فاصلهٔ ایمن ساختاری حد ضرر (Anti-Premature Stop-Out Floor):
+     * در ارزهای کریپتو (به‌خصوص تایم‌فریم ۵ و ۱۵ دقیقه)، نوسانات لحظه‌ای و اسپرد/بیسیس بین صرافی‌ها
+     * می‌تواند استاپ‌های خیلی نزدیک را در چند ثانیه اول فعال کند. این تابع تضمین می‌کند حد ضرر حداقل به اندازهٔ
+     * ساختار کیجون/کومو + ضریب امن ATR14 و کف درصدی ایمن از هم نقطهٔ ورود اسنایپر و هم قیمت لحظه‌ای فاصله داشته باشد.
+     */
+    fun minSafeStructuralStopDistance(
+        symbol: String,
+        referencePrice: Double,
+        trigAtr14: Double,
+        stratAtr14: Double = trigAtr14,
+        triggerInterval: Interval = Interval.M5,
+    ): Double {
+        val norm = V1Universe.normalize(symbol)
+        val safePrice = if (referencePrice.isFinite() && referencePrice > 0.0) referencePrice else 1.0
+        val safeTrigAtr = if (trigAtr14.isFinite() && trigAtr14 > 0.0) trigAtr14 else safePrice * 0.003
+        val safeStratAtr = if (stratAtr14.isFinite() && stratAtr14 > 0.0) stratAtr14 else safeTrigAtr
+        val venueMin = VenueSpecs.minStopDistance(norm, safePrice)
+
+        return when (AssetClass.of(norm)) {
+            AssetClass.CRYPTO -> {
+                val isMajorCrypto = norm.startsWith("BTC") || norm.startsWith("ETH")
+                val pctFloor = when {
+                    isMajorCrypto && triggerInterval == Interval.M5 -> safePrice * 0.0055 // 0.55% (~$500 on $90k BTC)
+                    isMajorCrypto -> safePrice * 0.0065 // 0.65% on 15m BTC/ETH
+                    triggerInterval == Interval.M5 -> safePrice * 0.0075 // 0.75% on 5m SOL/BNB/XRP
+                    else -> safePrice * 0.0085 // 0.85% on 15m SOL/BNB/XRP
+                }
+                val atrFloor = if (isMajorCrypto) {
+                    max(safeTrigAtr * 1.45, safeStratAtr * 0.55)
+                } else {
+                    max(safeTrigAtr * 1.55, safeStratAtr * 0.60)
+                }
+                max(venueMin * 4.0, max(pctFloor, atrFloor))
+            }
+
+            AssetClass.COMMODITY -> {
+                val pctFloor = if (norm.startsWith("XAG")) safePrice * 0.0035 else safePrice * 0.0020
+                max(venueMin * 3.0, max(pctFloor, max(safeTrigAtr * 0.85, safeStratAtr * 0.35)))
+            }
+
+            AssetClass.STOCK -> {
+                max(venueMin * 3.0, max(safePrice * 0.0018, max(safeTrigAtr * 0.80, safeStratAtr * 0.32)))
+            }
+
+            AssetClass.FOREX -> {
+                max(venueMin * 3.0, max(safePrice * 0.0008, max(safeTrigAtr * 0.75, safeStratAtr * 0.30)))
+            }
         }
     }
 
@@ -1439,22 +1485,32 @@ object IchimokuStrategyEngine {
         val sniperEntryScore = round2((100.0 - distToSniperAtr * 55.0).coerceIn(15.0, 100.0))
 
         val wave = computeHosodaWave(alignedStrategyCandles, candidateDirection, stratSnap)
+        val minSafeStopDist = minSafeStructuralStopDistance(
+            symbol = normalizedSymbol,
+            referencePrice = livePrice,
+            trigAtr14 = trigSnap.atr14,
+            stratAtr14 = stratSnap.atr14,
+            triggerInterval = effectiveConfig.triggerInterval,
+        )
+        val safeAnchorLong = min(sniperOptimal, livePrice)
+        val safeAnchorShort = max(sniperOptimal, livePrice)
+
         val rawTechnicalSl = if (isLong) {
             val kumoKijunFloor = min(trigSnap.kijun, stratSnap.kijun.coerceAtLeast(trigSnap.kumoBottom)) - slBuffer
-            val microStructureFloor = min(trigSnap.low, trigSnap.kijun) - trigSnap.atr14 * 0.18
-            val tightStructuralSl = max(kumoKijunFloor, microStructureFloor)
-            round2(min(tightStructuralSl, sniperOptimal - trigSnap.atr14 * 0.45))
+            val microStructureFloor = min(trigSnap.low, trigSnap.kijun) - trigSnap.atr14 * 0.25
+            val tightStructuralSl = min(kumoKijunFloor, microStructureFloor)
+            round2(min(tightStructuralSl, safeAnchorLong - minSafeStopDist))
         } else {
             val kumoKijunCeiling = max(trigSnap.kijun, stratSnap.kijun.coerceAtMost(trigSnap.kumoTop)) + slBuffer
-            val microStructureCeiling = max(trigSnap.high, trigSnap.kijun) + trigSnap.atr14 * 0.18
-            val tightStructuralSl = min(kumoKijunCeiling, microStructureCeiling)
-            round2(max(tightStructuralSl, sniperOptimal + trigSnap.atr14 * 0.45))
+            val microStructureCeiling = max(trigSnap.high, trigSnap.kijun) + trigSnap.atr14 * 0.25
+            val tightStructuralSl = max(kumoKijunCeiling, microStructureCeiling)
+            round2(max(tightStructuralSl, safeAnchorShort + minSafeStopDist))
         }
 
         val rawStopDist = max(
             abs(sniperOptimal - rawTechnicalSl),
             abs(livePrice - rawTechnicalSl),
-        ).coerceAtLeast(trigSnap.atr14 * 0.4)
+        ).coerceAtLeast(minSafeStopDist)
 
         val candidateTargets = if (wave != null) {
             listOf(wave.targetV, wave.targetN, wave.targetE).sortedBy { abs(it - livePrice) }
@@ -1464,20 +1520,23 @@ object IchimokuStrategyEngine {
 
         // اگر موج هوسودا بخواهد از ۱:۳ (3.0R) رد شود، حد ضرر در امن‌ترین سنگر ساختاری (کف/سقف کیجون + شندلیر ATR)
         // قرار می‌گیرد تا هم معامله با نوسان عادی استاپ نخورد (روند از دست نرود) و هم R:R بالای ۱:۳ حفظ شود.
+        // در هر حالت فاصلهٔ حد ضرر از هر دو قیمت اسنایپر و قیمت لحظه‌ای کمتر از minSafeStopDist نمی‌شود.
         val farthestWaveTarget = candidateTargets.lastOrNull()
         val wantsToExceedOneToThree = farthestWaveTarget != null &&
             (abs(farthestWaveTarget - sniperOptimal) / rawStopDist) >= 3.0
         val technicalSl = if (wantsToExceedOneToThree && farthestWaveTarget != null) {
             val waveDist = abs(farthestWaveTarget - sniperOptimal)
-            val maxAllowedStopFor3R = (waveDist / 3.0).coerceAtMost(trigSnap.atr14 * 1.45)
+            val maxAllowedStopFor3R = (waveDist / 3.0)
+                .coerceAtLeast(minSafeStopDist)
+                .coerceAtMost(max(minSafeStopDist * 1.35, trigSnap.atr14 * 1.85))
             if (isLong) {
-                val deepStructuralSl = min(trigSnap.kijun, trigSnap.low) - trigSnap.atr14 * 0.32
-                val chandelierFloor = sniperOptimal - maxAllowedStopFor3R
-                round2(max(chandelierFloor, min(rawTechnicalSl, deepStructuralSl)))
+                val deepStructuralSl = min(trigSnap.kijun, trigSnap.low) - trigSnap.atr14 * 0.35
+                val chandelierFloor = safeAnchorLong - maxAllowedStopFor3R
+                round2(min(safeAnchorLong - minSafeStopDist, max(chandelierFloor, min(rawTechnicalSl, deepStructuralSl))))
             } else {
-                val deepStructuralSl = max(trigSnap.kijun, trigSnap.high) + trigSnap.atr14 * 0.32
-                val chandelierCeiling = sniperOptimal + maxAllowedStopFor3R
-                round2(min(chandelierCeiling, max(rawTechnicalSl, deepStructuralSl)))
+                val deepStructuralSl = max(trigSnap.kijun, trigSnap.high) + trigSnap.atr14 * 0.35
+                val chandelierCeiling = safeAnchorShort + maxAllowedStopFor3R
+                round2(max(safeAnchorShort + minSafeStopDist, min(chandelierCeiling, max(rawTechnicalSl, deepStructuralSl))))
             }
         } else {
             rawTechnicalSl
@@ -1486,7 +1545,7 @@ object IchimokuStrategyEngine {
         val stopDist = max(
             abs(sniperOptimal - technicalSl),
             abs(livePrice - technicalSl),
-        ).coerceAtLeast(trigSnap.atr14 * 0.4)
+        ).coerceAtLeast(minSafeStopDist)
 
         // ── Check 10: Hosoda N-Wave S-Point & Kihon Suchi Time Cycle Guard ────
         val sPointOk = wave?.sPointHeld != false

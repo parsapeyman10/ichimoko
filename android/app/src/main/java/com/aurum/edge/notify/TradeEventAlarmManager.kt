@@ -24,6 +24,43 @@ import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 
+enum class AlarmTonePreset(
+    val id: String,
+    val titleFa: String,
+    val subtitleFa: String,
+) {
+    INSTITUTIONAL(
+        id = "INSTITUTIONAL",
+        titleFa = "🎼 ملودی سازمانی استاندارد (پیش‌فرض)",
+        subtitleFa = "۳ نت صعودی برای ورود، ۴ نت پیروزی برای حد سود، ۲ بوق بم برای حد ضرر",
+    ),
+    SOFT_CHIME(
+        id = "SOFT_CHIME",
+        titleFa = "🔔 زنگ ملایم و آرام (Soft Chime)",
+        subtitleFa = "ملودی کوتاه و لطیف بدون ایجاد شوک صوتی",
+    ),
+    SHARP_RADAR(
+        id = "SHARP_RADAR",
+        titleFa = "📡 پالس راداری پرقدرت (High-Alert Radar)",
+        subtitleFa = "پالس‌های تند و بلند برای محیط‌های شلوغ",
+    ),
+    CUSTOM_ONLY(
+        id = "CUSTOM_ONLY",
+        titleFa = "🎵 فقط زنگ یا فایل صوتی انتخابی گوشی",
+        subtitleFa = "پخش مستقیم زنگ انتخابی بدون بوق سینت‌سایزر",
+    ),
+    VIBRATE_ONLY(
+        id = "VIBRATE_ONLY",
+        titleFa = "📳 فقط ویبره و نوتیفیکیشن (بی‌صدا)",
+        subtitleFa = "قطع کامل صدای آلارم و اکتفا به الگوی ویبره اختصاصی",
+    );
+
+    companion object {
+        fun fromId(raw: String?): AlarmTonePreset =
+            entries.firstOrNull { it.id.equals(raw?.trim(), ignoreCase = true) } ?: INSTITUTIONAL
+    }
+}
+
 enum class TradeAlarmKind(
     val channelId: String,
     val channelNameFa: String,
@@ -181,9 +218,25 @@ object TradeEventAlarmManager {
         customSoundUri: String,
     ) {
         runCatching {
+            val prefs = context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE)
+            val volumePct = prefs.getInt("alarm_volume_pct_v3913", 90).coerceIn(0, 100)
+            val preset = AlarmTonePreset.fromId(prefs.getString("alarm_tone_preset_v3913", "INSTITUTIONAL"))
+            val vibrateEnabled = prefs.getBoolean("alarm_vibration_enabled_v3913", true)
+            val perKindUri = when (kind) {
+                TradeAlarmKind.ENTRY -> prefs.getString("entry_alarm_sound_uri_v3913", "").orEmpty()
+                TradeAlarmKind.TAKE_PROFIT -> prefs.getString("tp_alarm_sound_uri_v3913", "").orEmpty()
+                TradeAlarmKind.STOP_LOSS -> prefs.getString("sl_alarm_sound_uri_v3913", "").orEmpty()
+            }.ifBlank {
+                customSoundUri.ifBlank { prefs.getString("verified_alert_sound_uri", "").orEmpty() }
+            }
+
             ensureChannels(context)
-            playDistinctToneSequence(context, kind, customSoundUri)
-            vibratePattern(context, kind)
+            if (preset != AlarmTonePreset.VIBRATE_ONLY && volumePct > 0) {
+                playDistinctToneSequence(context, kind, perKindUri, volumePct, preset)
+            }
+            if (vibrateEnabled) {
+                vibratePattern(context, kind)
+            }
             postHeadsUpNotification(context, kind, title, body)
         }
     }
@@ -192,34 +245,82 @@ object TradeEventAlarmManager {
         context: Context,
         kind: TradeAlarmKind,
         customSoundUri: String,
+        volumePercent: Int = 90,
+        preset: AlarmTonePreset = AlarmTonePreset.INSTITUTIONAL,
     ) {
-        // ۱. پخش الگوی صوتی متمایز برای هر یک از ۳ حالت (ورود / حد سود / حد ضرر)
-        runCatching {
-            val toneGen = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 95)
-            when (kind) {
-                TradeAlarmKind.ENTRY -> {
-                    // ۳ نت صعودی تند برای ورود به معامله
-                    toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 130)
-                    mainHandler.postDelayed({ runCatching { toneGen.startTone(ToneGenerator.TONE_PROP_ACK, 180) } }, 160L)
-                    mainHandler.postDelayed({ runCatching { toneGen.release() } }, 450L)
-                }
-                TradeAlarmKind.TAKE_PROFIT -> {
-                    // ۴ نت شاد و پیروزمندانه برای رسیدن به حد سود (TP)
-                    toneGen.startTone(ToneGenerator.TONE_PROP_ACK, 150)
-                    mainHandler.postDelayed({ runCatching { toneGen.startTone(ToneGenerator.TONE_CDMA_MED_SLS, 220) } }, 180L)
-                    mainHandler.postDelayed({ runCatching { toneGen.startTone(ToneGenerator.TONE_SUP_CONFIRM, 260) } }, 430L)
-                    mainHandler.postDelayed({ runCatching { toneGen.release() } }, 800L)
-                }
-                TradeAlarmKind.STOP_LOSS -> {
-                    // ۲ بوق هشدار بم برای برخورد به حد ضرر (SL)
-                    toneGen.startTone(ToneGenerator.TONE_PROP_NACK, 240)
-                    mainHandler.postDelayed({ runCatching { toneGen.startTone(ToneGenerator.TONE_CDMA_ABBR_ALERT, 280) } }, 280L)
-                    mainHandler.postDelayed({ runCatching { toneGen.release() } }, 700L)
+        val safeVol = volumePercent.coerceIn(5, 100)
+        // ۱. پخش الگوی صوتی متمایز برای هر یک از ۳ حالت (ورود / حد سود / حد ضرر) بر اساس پروفایل انتخابی کاربر
+        if (preset != AlarmTonePreset.CUSTOM_ONLY) {
+            runCatching {
+                val toneGen = ToneGenerator(AudioManager.STREAM_NOTIFICATION, safeVol)
+                when (preset) {
+                    AlarmTonePreset.SOFT_CHIME -> {
+                        when (kind) {
+                            TradeAlarmKind.ENTRY -> {
+                                toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 90)
+                                mainHandler.postDelayed({ runCatching { toneGen.release() } }, 220L)
+                            }
+                            TradeAlarmKind.TAKE_PROFIT -> {
+                                toneGen.startTone(ToneGenerator.TONE_PROP_ACK, 120)
+                                mainHandler.postDelayed({ runCatching { toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 140) } }, 150L)
+                                mainHandler.postDelayed({ runCatching { toneGen.release() } }, 400L)
+                            }
+                            TradeAlarmKind.STOP_LOSS -> {
+                                toneGen.startTone(ToneGenerator.TONE_PROP_NACK, 170)
+                                mainHandler.postDelayed({ runCatching { toneGen.release() } }, 320L)
+                            }
+                        }
+                    }
+
+                    AlarmTonePreset.SHARP_RADAR -> {
+                        when (kind) {
+                            TradeAlarmKind.ENTRY -> {
+                                toneGen.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 220)
+                                mainHandler.postDelayed({ runCatching { toneGen.startTone(ToneGenerator.TONE_PROP_ACK, 220) } }, 250L)
+                                mainHandler.postDelayed({ runCatching { toneGen.release() } }, 600L)
+                            }
+                            TradeAlarmKind.TAKE_PROFIT -> {
+                                toneGen.startTone(ToneGenerator.TONE_SUP_CONFIRM, 220)
+                                mainHandler.postDelayed({ runCatching { toneGen.startTone(ToneGenerator.TONE_CDMA_MED_SLS, 260) } }, 240L)
+                                mainHandler.postDelayed({ runCatching { toneGen.startTone(ToneGenerator.TONE_PROP_ACK, 280) } }, 520L)
+                                mainHandler.postDelayed({ runCatching { toneGen.release() } }, 900L)
+                            }
+                            TradeAlarmKind.STOP_LOSS -> {
+                                toneGen.startTone(ToneGenerator.TONE_CDMA_ABBR_ALERT, 260)
+                                mainHandler.postDelayed({ runCatching { toneGen.startTone(ToneGenerator.TONE_PROP_NACK, 300) } }, 290L)
+                                mainHandler.postDelayed({ runCatching { toneGen.release() } }, 720L)
+                            }
+                        }
+                    }
+
+                    else -> {
+                        when (kind) {
+                            TradeAlarmKind.ENTRY -> {
+                                // ۳ نت صعودی تند برای ورود به معامله
+                                toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 130)
+                                mainHandler.postDelayed({ runCatching { toneGen.startTone(ToneGenerator.TONE_PROP_ACK, 180) } }, 160L)
+                                mainHandler.postDelayed({ runCatching { toneGen.release() } }, 450L)
+                            }
+                            TradeAlarmKind.TAKE_PROFIT -> {
+                                // ۴ نت شاد و پیروزمندانه برای رسیدن به حد سود (TP)
+                                toneGen.startTone(ToneGenerator.TONE_PROP_ACK, 150)
+                                mainHandler.postDelayed({ runCatching { toneGen.startTone(ToneGenerator.TONE_CDMA_MED_SLS, 220) } }, 180L)
+                                mainHandler.postDelayed({ runCatching { toneGen.startTone(ToneGenerator.TONE_SUP_CONFIRM, 260) } }, 430L)
+                                mainHandler.postDelayed({ runCatching { toneGen.release() } }, 800L)
+                            }
+                            TradeAlarmKind.STOP_LOSS -> {
+                                // ۲ بوق هشدار بم برای برخورد به حد ضرر (SL)
+                                toneGen.startTone(ToneGenerator.TONE_PROP_NACK, 240)
+                                mainHandler.postDelayed({ runCatching { toneGen.startTone(ToneGenerator.TONE_CDMA_ABBR_ALERT, 280) } }, 280L)
+                                mainHandler.postDelayed({ runCatching { toneGen.release() } }, 700L)
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // ۲. اگر کاربر زنگ اختصاصی انتخاب کرده یا سیستم اجازه دهد، صدای نوتیفیکیشن را هم پخش کن
+        // ۲. اگر کاربر زنگ اختصاصی انتخاب کرده یا سیستم اجازه دهد، صدای نوتیفیکیشن را هم با ولوم تنظیم‌شده پخش کن
         runCatching {
             val uri = if (customSoundUri.isNotBlank()) {
                 Uri.parse(customSoundUri)
@@ -228,6 +329,9 @@ object TradeEventAlarmManager {
             }
             if (uri != null) {
                 val ringtone = RingtoneManager.getRingtone(context.applicationContext, uri)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && ringtone != null) {
+                    ringtone.volume = (safeVol / 100f).coerceIn(0.05f, 1.0f)
+                }
                 ringtone?.play()
             }
         }

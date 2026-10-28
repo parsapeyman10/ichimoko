@@ -220,13 +220,13 @@ object LiveQuoteFetcher {
             "BTC/USDT", "ETH/USDT", "SOL/USDT", "BNB/USDT", "XRP/USDT" -> {
                 val base = symbol.substringBefore('/')
                 listOf(
-                    { fetchYahooChart("$base-USD") },
-                    { fetchKucoinTicker("$base-USDT") },
-                    { fetchCoinbaseSpot("$base-USD") },
                     { fetchBinanceTicker("${base}USDT") },
+                    { fetchKucoinTicker("$base-USDT") },
                     { fetchOkxTicker("$base-USDT") },
                     { fetchGateTicker("${base}_USDT") },
                     { fetchMexcTicker("${base}USDT") },
+                    { fetchCoinbaseSpot("$base-USD") },
+                    { fetchYahooChart("$base-USD") },
                 )
             }
             else -> emptyList()

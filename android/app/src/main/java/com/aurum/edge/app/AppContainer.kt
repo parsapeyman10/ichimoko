@@ -2,6 +2,7 @@ package com.aurum.edge.app
 
 import android.content.Context
 import com.aurum.edge.core.MarketState
+import com.aurum.edge.core.NeuralSelfLearningEngine
 import com.aurum.edge.data.AppNetwork
 import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.data.JournalStore
@@ -37,6 +38,7 @@ class AppContainer(context: Context) {
 
     val settingsStore = SettingsStore(appContext)
     val journalStore = JournalStore(appContext, settingsStore = settingsStore)
+    val neuralEngine = NeuralSelfLearningEngine(appContext)
     val updater = AppUpdateRepository(appContext)
 
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)

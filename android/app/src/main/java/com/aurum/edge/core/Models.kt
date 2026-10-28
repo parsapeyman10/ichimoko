@@ -145,7 +145,7 @@ data class PaperTrade(
     val autoOpened: Boolean = false,
     val signalBarTime: Long? = null,
     val entryConditions: List<PaperConditionRecord> = emptyList(),
-    val leverage: Int = 20,
+    val leverage: Int = 10,
     val marginUsd: Double = 0.0,
     val commissionUsd: Double = 0.0,
     val spreadCostUsd: Double = 0.0,
@@ -201,7 +201,7 @@ data class PaperTrade(
         }
 
     val effectiveLeverage: Int
-        get() = if (leverage > 0) leverage else PaperOrderRules.defaultLeverageFor(symbol)
+        get() = (if (leverage > 0) leverage else PaperOrderRules.defaultLeverageFor(symbol)).coerceIn(1, 10)
 
     val notionalValueUsd: Double
         get() = PaperOrderRules.quotePnlToUsd(symbol, positionOz * entry, entry)
@@ -254,6 +254,16 @@ data class AppSettings(
     val notifyOnSignal: Boolean = true,
     val alertSoundUri: String = "",
     val alertSoundName: String = "",
+    val alarmVolumePercent: Int = 90,
+    val alarmTonePreset: String = "INSTITUTIONAL",
+    val alarmVibrationEnabled: Boolean = true,
+    val entryAlarmSoundUri: String = "",
+    val entryAlarmSoundName: String = "",
+    val tpAlarmSoundUri: String = "",
+    val tpAlarmSoundName: String = "",
+    val slAlarmSoundUri: String = "",
+    val slAlarmSoundName: String = "",
+    val maxLeverageCap: Int = 10,
     val newsBaseUrl: String = "",
     val pauseOnNews: Boolean = false,
     val autoPaperTrading: Boolean = false,

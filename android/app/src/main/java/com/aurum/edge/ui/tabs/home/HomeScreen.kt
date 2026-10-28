@@ -84,6 +84,7 @@ fun HomeScreen(
     val scan by viewModel.pairScan.collectAsStateWithLifecycle()
     val strategyReports by viewModel.allSymbolStrategyReports.collectAsStateWithLifecycle()
     val dualReports by viewModel.dualSymbolStrategyReports.collectAsStateWithLifecycle()
+    val neuralState by viewModel.neuralState.collectAsStateWithLifecycle()
 
     val freshPrices = com.aurum.edge.data.OpenPositionQuotePolicy.prices(openTradesList, liveTicks, now)
     val frozenPrices = openTradesList.mapNotNull { trade ->
@@ -244,7 +245,7 @@ fun HomeScreen(
                 }
             }
 
-            // نوار ۳ آلارم صوتی مجزا (ورود، حد سود TP، حد ضرر SL) با قابلیت تست سریع
+            // نوار ۳ آلارم صوتی مجزا (ورود، حد سود TP، حد ضرر SL) با نمایش ولوم و قابلیت تست سریع
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -256,10 +257,11 @@ fun HomeScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = if (settings.notifyOnSignal) "🔔 ۳ آلارم فعال:" else "🔕 آلارم خاموش:",
+                    text = if (settings.notifyOnSignal) "🔔 صدا (${settings.alarmVolumePercent}%):" else "🔕 آلارم خاموش:",
                     style = MaterialTheme.typography.labelSmall,
                     color = if (settings.notifyOnSignal) AurumColors.Gold else AurumColors.TextMuted,
                     fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable { onOpenSettings() },
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Pill(
@@ -278,6 +280,41 @@ fun HomeScreen(
                         modifier = Modifier.clickable { viewModel.triggerTestTradeAlarm(TradeAlarmKind.STOP_LOSS) },
                     )
                 }
+            }
+
+            // نوار وضعیت شبکه عصبی خودآموز (FT-Transformer + SwiGLU · 10,000 Trades) و اهرم ایمن ≤ 10x
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AurumColors.SurfaceAlt.copy(alpha = 0.7f))
+                    .clickable { onOpenSettings() }
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "🧠 شبکه عصبی خودآموز (FT-Attention + SwiGLU): ${neuralState.totalLearnedTrades}/10,000 معامله",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Cyan,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = if (neuralState.isActiveFilterEnabled) {
+                            "🛡️ فیلتر شرایط ممنوعه فعال (${neuralState.discoveredNoTradeClustersCount} الگو) · اهرم ایمن ≤ 10x"
+                        } else {
+                            "🎓 فاز یادگیری در هر ۴ دسته تا ۱۰,۰۰۰ معامله (${neuralState.discoveredNoTradeClustersCount} الگوی ممنوعه شناسایی شد) · اهرم ≤ 10x"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                }
+                Pill(
+                    text = "اهرم ≤ 10x",
+                    color = AurumColors.Gold,
+                )
             }
         }
 
