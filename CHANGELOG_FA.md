@@ -15,6 +15,7 @@
   - یکپارچه‌سازی تیک لحظه‌ای رمزارزها روی مرجع `USDT` (`Binance / KuCoin / OKX / Gate`) برای حذف پرش قیمتی بین کندل `USD` و تیک `USDT`.
   - لنگر انداختن قیمت ورود، حد ضرر و حد سود به قیمت لحظه‌ای اجرا (`sanitizeEntryStopAndTarget`) و اعمال کف فاصله ساختاری ایمن حد ضرر در کریپتو (`minSafeStructuralStopDistance`: حداقل `0.55%–0.85%` یا `1.45x–1.55x ATR14` بیرون از کیجون/کومو) به همراه محافظ ضد نویز ۱۰ ثانیه اول و فیلتر کندل‌های پیش از ورود (`it.time > trade.openedAt`).
   - تنظیم اهرم تمامی ۱۵ نماد روی مقادیر ایمن `≤ 10x` (`5x` برای `BTC/ETH`، `3x` برای `SOL/BNB/XRP` و `10x` برای طلا، نقره، فارکس و داوجونز).
+- **فایل نصبی:** [`AurumEdge-v3.9.13.apk`](https://github.com/parsapeyman10/ichimoko/releases/download/v3.9.13/AurumEdge-v3.9.13.apk) (`SHA-256: 05d3b5fbcc76376e63f153f07ea792fd30226c5982703c60c4faa23f9bfdf8e3` · حجم `11,497,359` بایت).
 
 ---
 
