@@ -24,5 +24,9 @@ class TradingViewEmbedTest {
         listOf("BAD&symbol=OTHER","</script>","NASDAQ:AAPL").forEach { assertNull(TradingViewEmbed.html(it)) }
         assertTrue(TradingViewEmbed.html("BINANCE:ETHUSDT")!!.contains("BINANCE:ETHUSDT"))
         assertFalse(TradingViewEmbed.html("BINANCE:ETHUSDT")!!.contains("OANDA:XAUUSD"))
+
+        val html15 = TradingViewEmbed.htmlForInterval("BINANCE:BTCUSDT", "15")!!
+        assertTrue(html15.contains("https://s3.tradingview.com/tv.js"))
+        assertTrue(html15.contains("STD;Ichimoku%1Cloud"))
     }
 }

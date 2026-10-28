@@ -102,7 +102,7 @@ fun ChartScreen(
     val liveTicks = viewModel?.liveTicks?.collectAsStateWithLifecycle()?.value.orEmpty()
     val lastMarks = viewModel?.lastDisplayMarks?.collectAsStateWithLifecycle()?.value.orEmpty()
 
-    var useTradingViewWeb by rememberSaveable { mutableStateOf(false) }
+    var useTradingViewWeb by rememberSaveable { mutableStateOf(true) }
     var selectedTfLabel by rememberSaveable { mutableStateOf("15m") }
     var showPicker by remember { mutableStateOf(false) }
     var reloadCount by remember { mutableIntStateOf(0) }
@@ -179,7 +179,7 @@ fun ChartScreen(
         ?: candles.lastOrNull()?.close
 
     Column(Modifier.fillMaxSize().background(AurumColors.Bg)) {
-        // ── ۱. نوار ابزار فشرده بالای چارت (نماد، تایم‌فریم، سوییچ چارت بومی / TradingView) ──
+        // ── ۱. نوار ابزار فشرده بالای چارت (نماد، تایم‌فریم، سوییچ ویجت رسمی TradingView / چارت ایچیموکو + ابر آینده) ──
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -200,9 +200,8 @@ fun ChartScreen(
                 listOf("5m", "15m", "1H", "4H").forEach { tf ->
                     Pill(
                         text = tf,
-                        color = if (selectedTfLabel == tf && !useTradingViewWeb) AurumColors.Cyan else AurumColors.TextMuted,
+                        color = if (selectedTfLabel == tf) AurumColors.Cyan else AurumColors.TextMuted,
                         modifier = Modifier.clickable {
-                            useTradingViewWeb = false
                             selectedTfLabel = tf
                         },
                     )
@@ -214,9 +213,14 @@ fun ChartScreen(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 Pill(
-                    text = if (useTradingViewWeb) "چارت ایچیموکو ⚡" else "TradingView 🌐",
-                    color = if (useTradingViewWeb) AurumColors.Green else AurumColors.TextSecondary,
-                    modifier = Modifier.clickable { useTradingViewWeb = !useTradingViewWeb },
+                    text = "🌐 ویجت رسمی TV",
+                    color = if (useTradingViewWeb) AurumColors.Gold else AurumColors.TextMuted,
+                    modifier = Modifier.clickable { useTradingViewWeb = true },
+                )
+                Pill(
+                    text = "☁️ ایچیموکو (+26 آینده)",
+                    color = if (!useTradingViewWeb) AurumColors.Green else AurumColors.TextMuted,
+                    modifier = Modifier.clickable { useTradingViewWeb = false },
                 )
                 Pill(
                     text = "↻",
@@ -326,7 +330,7 @@ fun ChartScreen(
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = AurumColors.Gold)
         }
 
-        // ── ۵. نمایش چارت با ابزار پوزیشن تریدینگ‌ویو (حد سود سبز + خط ورود + حد ضرر قرمز) ──
+        // ── ۵. نمایش چارت (ویجت رسمی TradingView با اندیکاتور ایچیموکو یا چارت تخصصی ایچیموکو + ابر آینده ۲۶ کندلی) ──
         if (!useTradingViewWeb) {
             NativeIchimokuCanvasChart(
                 symbol = appSymbol,
@@ -345,86 +349,92 @@ fun ChartScreen(
                 modifier = Modifier.fillMaxWidth().weight(1f),
             )
         } else {
-            val webHtml = remember(appSymbol, tvTicker, selectedTfLabel, candles, activePositionTrade, livePriceForSymbol) {
-                buildReliableTradingViewWebHtml(
-                    appSymbol = appSymbol,
-                    tvTicker = tvTicker,
-                    timeframeLabel = selectedTfLabel,
-                    series = chartSeries,
-                    activeTrade = activePositionTrade,
-                    livePrice = livePriceForSymbol,
-                )
+            val tvIntervalCode = remember(selectedTfLabel) {
+                when (selectedTfLabel) {
+                    "5m" -> "5"
+                    "15m" -> "15"
+                    "1H" -> "60"
+                    "4H" -> "240"
+                    else -> "15"
+                }
             }
-            key(appSymbol, selectedTfLabel, reloadCount) {
-                AndroidView(
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    factory = { context ->
-                        WebView(context).apply {
-                            layoutParams = ViewGroup.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                            )
-                            setBackgroundColor(AndroidColor.rgb(19, 23, 34))
-                            isVerticalScrollBarEnabled = false
-                            isHorizontalScrollBarEnabled = false
-                            settings.apply {
-                                javaScriptEnabled = true
-                                domStorageEnabled = true
-                                databaseEnabled = true
-                                loadsImagesAutomatically = true
-                                javaScriptCanOpenWindowsAutomatically = true
-                                loadWithOverviewMode = true
-                                useWideViewPort = true
-                                setSupportZoom(false)
-                                builtInZoomControls = false
-                                displayZoomControls = false
-                                cacheMode = WebSettings.LOAD_DEFAULT
-                                mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                                allowFileAccess = false
-                                allowContentAccess = false
-                                userAgentString = MOBILE_USER_AGENT
-                                textZoom = 100
-                            }
-                            setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                            CookieManager.getInstance().setAcceptCookie(true)
-                            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-                            webChromeClient = WebChromeClient()
-                            webViewClient = object : WebViewClient() {
-                                override fun onReceivedHttpError(
-                                    view: WebView?,
-                                    request: android.webkit.WebResourceRequest?,
-                                    errorResponse: android.webkit.WebResourceResponse?,
-                                ) {
-                                    // Never show a 403 error page; keep the embedded TradingView Pro engine active
-                                    if (request?.isForMainFrame == true) {
-                                        view?.evaluateJavascript("if(window.switchMode) switchMode('pro');", null)
-                                    }
+            val officialHtml = remember(tvTicker, tvIntervalCode) {
+                TradingViewEmbed.htmlForInterval(
+                    symbol = tvTicker,
+                    intervalCode = tvIntervalCode,
+                    tenkan = 9,
+                    kijun = 26,
+                    spanB = 52,
+                ) ?: TradingViewEmbed.html(tvTicker)
+            }
+            if (!route.ready) {
+                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                    Text(
+                        "شبکهٔ گوشی آماده نیست؛ اینترنت یا VPN سیستم را بررسی کنید",
+                        modifier = Modifier.padding(20.dp),
+                        color = AurumColors.Gold,
+                    )
+                }
+            } else if (officialHtml == null) {
+                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                    Text(
+                        "نماد TradingView معتبر نیست؛ چارت نماد دیگری جایگزین نمی‌شود",
+                        modifier = Modifier.padding(20.dp),
+                        color = AurumColors.Gold,
+                    )
+                }
+            } else {
+                key(tvTicker, tvIntervalCode, reloadCount, route.revision) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        factory = { context ->
+                            WebView(context).apply {
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                )
+                                setBackgroundColor(AndroidColor.rgb(11, 14, 19))
+                                isVerticalScrollBarEnabled = false
+                                isHorizontalScrollBarEnabled = false
+                                settings.apply {
+                                    javaScriptEnabled = true
+                                    domStorageEnabled = true
+                                    databaseEnabled = true
+                                    loadsImagesAutomatically = true
+                                    javaScriptCanOpenWindowsAutomatically = true
+                                    loadWithOverviewMode = true
+                                    useWideViewPort = true
+                                    setSupportZoom(false)
+                                    builtInZoomControls = false
+                                    displayZoomControls = false
+                                    cacheMode = WebSettings.LOAD_DEFAULT
+                                    mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                                    allowFileAccess = false
+                                    allowContentAccess = false
+                                    userAgentString = MOBILE_USER_AGENT
+                                    textZoom = 100
                                 }
+                                setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                                CookieManager.getInstance().setAcceptCookie(true)
+                                CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                                webChromeClient = WebChromeClient()
+                                webViewClient = WebViewClient()
+                                loadDataWithBaseURL(
+                                    "https://s3.tradingview.com",
+                                    officialHtml,
+                                    "text/html",
+                                    "UTF-8",
+                                    "https://s3.tradingview.com",
+                                )
                             }
-                            loadDataWithBaseURL(
-                                "https://app.aurum-edge.local/",
-                                webHtml,
-                                "text/html",
-                                "UTF-8",
-                                null,
-                            )
-                        }
-                    },
-                    update = { webView ->
-                        webView.loadDataWithBaseURL(
-                            "https://app.aurum-edge.local/",
-                            webHtml,
-                            "text/html",
-                            "UTF-8",
-                            null,
-                        )
-                    },
-                    onReset = null,
-                    onRelease = { webView ->
-                        webView.stopLoading()
-                        webView.destroy()
-                    },
-                )
+                        },
+                        onReset = null,
+                        onRelease = { webView ->
+                            webView.stopLoading()
+                            webView.destroy()
+                        },
+                    )
+                }
             }
         }
 
@@ -503,10 +513,12 @@ private fun NativeIchimokuCanvasChart(
     val bars = series.bars
     val futureKumo = series.futureKumo
 
-    var visibleBarsCount by rememberSaveable { mutableIntStateOf(52) }
+    var focusFutureKumo by rememberSaveable { mutableStateOf(true) }
+    var visibleBarsCount by rememberSaveable { mutableIntStateOf(34) }
     var panOffsetBars by rememberSaveable(symbol, timeframe) { mutableFloatStateOf(0f) }
     var fitTradeTpSl by rememberSaveable(symbol) { mutableStateOf(true) }
     var inspectedIndex by remember(bars) { mutableStateOf<Int?>(bars.lastIndex.takeIf { it >= 0 }) }
+    var inspectedFutureStep by remember(bars) { mutableStateOf<Int?>(null) }
 
     Column(modifier = modifier.background(AurumColors.ChartBg)) {
         if (bars.isEmpty()) {
@@ -519,7 +531,52 @@ private fun NativeIchimokuCanvasChart(
         val inspectIdx = (inspectedIndex ?: bars.lastIndex).coerceIn(0, bars.lastIndex)
         val sel = bars[inspectIdx]
 
-        // ── نوار اطلاعات کندل، ۵ خط ایچیموکو و کنترل‌های زوم / فیت پوزیشن تریدینگ‌ویو ──
+        // محاسبه ابر آینده ۲۶ کندلی (حتی اگر کاربر چارت را به عقب اسکرول کرده باشد)
+        val endIdx = (bars.lastIndex - panOffsetBars.roundToInt()).coerceIn(10, bars.lastIndex)
+        val startIdx = (endIdx - visibleBarsCount + 1).coerceAtLeast(0)
+        val visibleSlice = bars.subList(startIdx, endIdx + 1)
+
+        val activeFutureKumo = remember(bars, futureKumo, endIdx) {
+            if (endIdx == bars.lastIndex && futureKumo.isNotEmpty()) {
+                futureKumo
+            } else {
+                // اگر چارت روی کندل قبلی پان شده، ۲۶ دوره ابر آینده همان کندل را استخراج کن
+                val disp = 25
+                val list = mutableListOf<com.aurum.edge.core.FutureKumoPoint>()
+                for (step in 1..26) {
+                    val targetIdx = endIdx + step
+                    if (targetIdx <= bars.lastIndex) {
+                        val b = bars[targetIdx]
+                        list += com.aurum.edge.core.FutureKumoPoint(stepAhead = step, spanA = b.currentSpanA, spanB = b.currentSpanB)
+                    } else {
+                        val fkIdx = targetIdx - bars.lastIndex - 1
+                        val fk = futureKumo.getOrNull(fkIdx) ?: futureKumo.lastOrNull()
+                        if (fk != null) {
+                            list += com.aurum.edge.core.FutureKumoPoint(stepAhead = step, spanA = fk.spanA, spanB = fk.spanB)
+                        }
+                    }
+                }
+                list
+            }
+        }
+
+        val futureTip = activeFutureKumo.lastOrNull()
+        val futureBullish = futureTip != null && futureTip.spanA >= futureTip.spanB
+        val futureTwistStep = remember(activeFutureKumo, visibleSlice) {
+            var prevDiff = visibleSlice.lastOrNull()?.let { it.currentSpanA - it.currentSpanB } ?: 0.0
+            var twistAt: Int? = null
+            for (fk in activeFutureKumo) {
+                val curDiff = fk.spanA - fk.spanB
+                if ((prevDiff > 0.0 && curDiff < 0.0) || (prevDiff < 0.0 && curDiff > 0.0)) {
+                    twistAt = fk.stepAhead
+                    break
+                }
+                prevDiff = curDiff
+            }
+            twistAt
+        }
+
+        // ── نوار اطلاعات کندل، ۵ خط ایچیموکو، وضعیت ابر آینده (+26) و کنترل‌های زوم ──
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -542,6 +599,15 @@ private fun NativeIchimokuCanvasChart(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Pill(
+                        text = if (focusFutureKumo) "☁️ ابر آینده (+26) ✓" else "☁️ ابر آینده (+26)",
+                        color = if (focusFutureKumo) AurumColors.Gold else AurumColors.Cyan,
+                        modifier = Modifier.clickable {
+                            focusFutureKumo = !focusFutureKumo
+                            visibleBarsCount = if (focusFutureKumo) 32 else 54
+                            panOffsetBars = 0f
+                        },
+                    )
                     if (activeTrade != null) {
                         Pill(
                             text = if (fitTradeTpSl) "📐 فیت TP/SL ✓" else "📐 فیت TP/SL",
@@ -557,12 +623,12 @@ private fun NativeIchimokuCanvasChart(
                     Pill(
                         text = "➕",
                         color = AurumColors.Cyan,
-                        modifier = Modifier.clickable { visibleBarsCount = (visibleBarsCount - 12).coerceAtLeast(24) },
+                        modifier = Modifier.clickable { visibleBarsCount = (visibleBarsCount - 10).coerceAtLeast(18) },
                     )
                     Pill(
                         text = "➖",
                         color = AurumColors.Cyan,
-                        modifier = Modifier.clickable { visibleBarsCount = (visibleBarsCount + 12).coerceAtMost(100) },
+                        modifier = Modifier.clickable { visibleBarsCount = (visibleBarsCount + 10).coerceAtMost(95) },
                     )
                     Pill(
                         text = "⏭",
@@ -570,6 +636,7 @@ private fun NativeIchimokuCanvasChart(
                         modifier = Modifier.clickable {
                             panOffsetBars = 0f
                             inspectedIndex = bars.lastIndex
+                            inspectedFutureStep = null
                         },
                     )
                 }
@@ -594,14 +661,43 @@ private fun NativeIchimokuCanvasChart(
                 Text("SSA: ${formatPrice(sel.currentSpanA)}", style = MaterialTheme.typography.labelSmall, color = Color(0xFF66BB6A))
                 Text("SSB: ${formatPrice(sel.currentSpanB)}", style = MaterialTheme.typography.labelSmall, color = Color(0xFFEF5350))
             }
+
+            // نوار اختصاصی اطلاعات «ابر آینده ۲۶ کندل جلوتر (Future Kumo +26)»
+            if (futureTip != null) {
+                val inspectedFk = inspectedFutureStep?.let { step ->
+                    activeFutureKumo.firstOrNull { it.stepAhead == step }
+                } ?: futureTip
+                val stepLabel = inspectedFutureStep?.let { "+$it کندل جلوتر" } ?: "+26 کندل آینده"
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFF0E1724))
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "☁️ ابر آینده ($stepLabel): ${if (inspectedFk.spanA >= inspectedFk.spanB) "🟢 صعودی" else "🔴 نزولی"}${futureTwistStep?.let { " · ⚡ پیچش در +$it" } ?: ""}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (inspectedFk.spanA >= inspectedFk.spanB) AurumColors.Green else AurumColors.Red,
+                    )
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Text(
+                            text = "SSA: ${formatPrice(inspectedFk.spanA)} | SSB: ${formatPrice(inspectedFk.spanB)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = AurumColors.Gold,
+                        )
+                    }
+                }
+            }
         }
 
-        // ── بوم گرافیکی کندل‌ها (در جهت LTR استاندارد چارت‌های مالی) + ابزار پوزیشن تریدینگ‌ویو ──
-        val futureSpaceBars = 18
-        val totalSlots = visibleBarsCount + futureSpaceBars
-        val endIdx = (bars.lastIndex - panOffsetBars.roundToInt()).coerceIn(10, bars.lastIndex)
-        val startIdx = (endIdx - visibleBarsCount + 1).coerceAtLeast(0)
-        val visibleSlice = bars.subList(startIdx, endIdx + 1)
+        // ── بوم گرافیکی کندل‌ها + کل ۲۶ کندل ابر آینده (Future Kumo +26) + ابزار پوزیشن تریدینگ‌ویو ──
+        val futureSpaceBars = if (focusFutureKumo) 30 else 27
+        val totalSlots = visibleSlice.size + futureSpaceBars
 
         var minP = Double.POSITIVE_INFINITY
         var maxP = Double.NEGATIVE_INFINITY
@@ -609,11 +705,9 @@ private fun NativeIchimokuCanvasChart(
             minP = minOf(minP, b.candle.low, b.tenkan, b.kijun, b.currentSpanA, b.currentSpanB)
             maxP = maxOf(maxP, b.candle.high, b.tenkan, b.kijun, b.currentSpanA, b.currentSpanB)
         }
-        if (endIdx == bars.lastIndex) {
-            futureKumo.take(futureSpaceBars).forEach { fk ->
-                minP = minOf(minP, fk.spanA, fk.spanB)
-                maxP = maxOf(maxP, fk.spanA, fk.spanB)
-            }
+        activeFutureKumo.forEach { fk ->
+            minP = minOf(minP, fk.spanA, fk.spanB)
+            maxP = maxOf(maxP, fk.spanA, fk.spanB)
         }
         // اگر نماد پوزیشن باز دارد و گزینه «فیت TP/SL» روشن است، کل مستطیل حد سود و حد ضرر در کادر چارت جا می‌شود
         if (fitTradeTpSl && activeTrade != null) {
@@ -630,7 +724,7 @@ private fun NativeIchimokuCanvasChart(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .pointerInput(bars.size, visibleBarsCount) {
+                    .pointerInput(bars.size, visibleBarsCount, focusFutureKumo) {
                         detectDragGestures { change, dragAmount ->
                             change.consume()
                             val slotW = size.width.toFloat() / totalSlots.toFloat().coerceAtLeast(1f)
@@ -644,6 +738,12 @@ private fun NativeIchimokuCanvasChart(
                             val tappedSlot = (offset.x / slotW).toInt()
                             if (tappedSlot in visibleSlice.indices) {
                                 inspectedIndex = startIdx + tappedSlot
+                                inspectedFutureStep = null
+                            } else {
+                                val fStep = tappedSlot - visibleSlice.lastIndex
+                                if (fStep in 1..26) {
+                                    inspectedFutureStep = fStep
+                                }
                             }
                         }
                     },
@@ -691,7 +791,7 @@ private fun NativeIchimokuCanvasChart(
                     val x1 = xOfSlot(i)
                     val x2 = xOfSlot(i + 1)
                     val isBullCloud = (cur.currentSpanA + nxt.currentSpanA) >= (cur.currentSpanB + nxt.currentSpanB)
-                    val cloudFill = if (isBullCloud) Color(0x33089981) else Color(0x33F23645)
+                    val cloudFill = if (isBullCloud) Color(0x38089981) else Color(0x38F23645)
                     val path = Path().apply {
                         moveTo(x1, yOf(cur.currentSpanA))
                         lineTo(x2, yOf(nxt.currentSpanA))
@@ -700,21 +800,50 @@ private fun NativeIchimokuCanvasChart(
                         close()
                     }
                     drawPath(path, color = cloudFill)
-                    drawLine(Color(0x99089981), Offset(x1, yOf(cur.currentSpanA)), Offset(x2, yOf(nxt.currentSpanA)), 1.4f)
-                    drawLine(Color(0x99F23645), Offset(x1, yOf(cur.currentSpanB)), Offset(x2, yOf(nxt.currentSpanB)), 1.4f)
+                    drawLine(Color(0xAA089981), Offset(x1, yOf(cur.currentSpanA)), Offset(x2, yOf(nxt.currentSpanA)), 1.6f)
+                    drawLine(Color(0xAAF23645), Offset(x1, yOf(cur.currentSpanB)), Offset(x2, yOf(nxt.currentSpanB)), 1.6f)
                 }
 
-                // ۳. رسم ابر آینده (Future Kumo Cloud — ۲۶ دوره جلوتر در سمت راست آخرین کندل)
-                if (endIdx == bars.lastIndex && futureKumo.isNotEmpty() && visibleSlice.isNotEmpty()) {
+                // ۳. ═══ رسم کامل و پروضوح ابر آینده (Future Kumo Cloud — تمام ۲۶ دوره جلوتر در سمت راست) ═══
+                if (activeFutureKumo.isNotEmpty() && visibleSlice.isNotEmpty()) {
                     val baseSlot = visibleSlice.lastIndex
-                    val fkSlice = futureKumo.take(futureSpaceBars)
+                    val dividerX = xOfSlot(baseSlot) + slotW * 0.5f
+
+                    // الف) هایلایت پس‌زمینه منطقه ۲۶ کندل آینده و خط جداکننده «اکنون | ابر آینده (+26)»
+                    drawRect(
+                        color = Color(0x161E3A5F),
+                        topLeft = Offset(dividerX, 0f),
+                        size = Size((w - dividerX).coerceAtLeast(0f), h),
+                    )
+                    drawLine(
+                        color = Color(0x99F3C65F),
+                        start = Offset(dividerX, 0f),
+                        end = Offset(dividerX, h),
+                        strokeWidth = 1.6f,
+                        pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 6f), 0f),
+                    )
+
+                    val futureHeaderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = AndroidColor.argb(225, 243, 198, 95)
+                        textSize = 21f
+                        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                    }
+                    drawContext.canvas.nativeCanvas.drawText(
+                        "Future Kumo (+26) ☁️",
+                        (dividerX + 8f).coerceAtMost(w - 180f),
+                        26f,
+                        futureHeaderPaint,
+                    )
+
+                    // ب) رسم چندضلعی‌ها، هاشور عمودی کلاسیک ایچیموکو و خطوط ضخیم SSA / SSB آینده
                     var prevX = xOfSlot(baseSlot)
                     var prevA = visibleSlice.last().currentSpanA
                     var prevB = visibleSlice.last().currentSpanB
-                    fkSlice.forEachIndexed { fIdx, fk ->
+                    activeFutureKumo.forEachIndexed { fIdx, fk ->
                         val nextX = xOfSlot(baseSlot + fIdx + 1)
                         val isBull = (prevA + fk.spanA) >= (prevB + fk.spanB)
-                        val fill = if (isBull) Color(0x24089981) else Color(0x24F23645)
+                        val fill = if (isBull) Color(0x55089981) else Color(0x55F23645)
+                        val hatchColor = if (isBull) Color(0x8800E676) else Color(0x88FF5252)
                         val path = Path().apply {
                             moveTo(prevX, yOf(prevA))
                             lineTo(nextX, yOf(fk.spanA))
@@ -723,11 +852,66 @@ private fun NativeIchimokuCanvasChart(
                             close()
                         }
                         drawPath(path, color = fill)
-                        drawLine(Color(0x88089981), Offset(prevX, yOf(prevA)), Offset(nextX, yOf(fk.spanA)), 1.3f)
-                        drawLine(Color(0x88F23645), Offset(prevX, yOf(prevB)), Offset(nextX, yOf(fk.spanB)), 1.3f)
+                        // خطوط هاشور عمودی سبک ایچیموکو ژاپنی برای تفکیک واضح ابر آینده
+                        drawLine(
+                            color = hatchColor,
+                            start = Offset(nextX, yOf(fk.spanA)),
+                            end = Offset(nextX, yOf(fk.spanB)),
+                            strokeWidth = 1.2f,
+                        )
+                        // خطوط مرزی پررنگ Senkou Span A (سبز) و Senkou Span B (قرمز) در آینده
+                        drawLine(Color(0xFF00E676), Offset(prevX, yOf(prevA)), Offset(nextX, yOf(fk.spanA)), 2.5f)
+                        drawLine(Color(0xFFFF5252), Offset(prevX, yOf(prevB)), Offset(nextX, yOf(fk.spanB)), 2.5f)
+
+                        // ج) علامت‌گذاری نقطه پیچش ابر آینده (Kumo Twist)
+                        val wasBull = prevA >= prevB
+                        val nowBull = fk.spanA >= fk.spanB
+                        if (fIdx > 0 && wasBull != nowBull) {
+                            val twistY = yOf((fk.spanA + fk.spanB) / 2.0)
+                            drawCircle(Color(0xFFFFD54F), radius = 6.5f, center = Offset(nextX, twistY))
+                            drawCircle(Color(0xFF090C10), radius = 3.0f, center = Offset(nextX, twistY))
+                        }
+
                         prevX = nextX
                         prevA = fk.spanA
                         prevB = fk.spanB
+                    }
+
+                    // د) برچسب قیمت نوک ابر آینده در +26 کندل جلوتر (SSA+26 و SSB+26)
+                    val lastFk = activeFutureKumo.last()
+                    val tipX = xOfSlot(baseSlot + activeFutureKumo.size)
+                    val tipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = AndroidColor.WHITE
+                        textSize = 20f
+                        typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                    }
+                    val tipBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+
+                    fun drawFutureTipTag(label: String, priceVal: Double, bgInt: Int) {
+                        val y = yOf(priceVal).coerceIn(18f, h - 18f)
+                        val txt = "$label: ${formatPriceFor(symbol, priceVal)}"
+                        val tw = tipPaint.measureText(txt)
+                        val left = (w - tw - 18f).coerceAtLeast(dividerX + 4f)
+                        val rect = RectF(left, y - 13f, left + tw + 12f, y + 13f)
+                        tipBgPaint.color = bgInt
+                        drawContext.canvas.nativeCanvas.drawRoundRect(rect, 6f, 6f, tipBgPaint)
+                        drawContext.canvas.nativeCanvas.drawText(txt, left + 6f, y + 6f, tipPaint)
+                    }
+
+                    drawCircle(Color(0xFF00E676), radius = 4.5f, center = Offset(tipX.coerceAtMost(w - 6f), yOf(lastFk.spanA)))
+                    drawCircle(Color(0xFFFF5252), radius = 4.5f, center = Offset(tipX.coerceAtMost(w - 6f), yOf(lastFk.spanB)))
+                    drawFutureTipTag("SSA+26", lastFk.spanA, AndroidColor.argb(220, 8, 153, 129))
+                    drawFutureTipTag("SSB+26", lastFk.spanB, AndroidColor.argb(220, 242, 54, 69))
+
+                    // اگر کاربر روی یکی از کندل‌های ابر آینده (+1..+26) کلیک کرده باشد، خط نشانگر آینده را رسم کن
+                    inspectedFutureStep?.let { fStep ->
+                        val fk = activeFutureKumo.firstOrNull { it.stepAhead == fStep }
+                        if (fk != null) {
+                            val fx = xOfSlot(baseSlot + fStep)
+                            val fy = yOf((fk.spanA + fk.spanB) / 2.0)
+                            drawLine(Color(0xAAFFD54F), Offset(fx, 0f), Offset(fx, h), strokeWidth = 1.5f, pathEffect = dashGrid)
+                            drawCircle(Color(0xFFFFD54F), radius = 5.5f, center = Offset(fx, fy), style = Stroke(width = 2.2f))
+                        }
                     }
                 }
 
@@ -951,469 +1135,8 @@ private fun NativeIchimokuCanvasChart(
     }
 }
 
-private fun resolveEmbedUnrestrictedTvTicker(appSymbol: String, fallbackTicker: String): String =
-    when (V1Universe.normalize(appSymbol)) {
-        "XAU/USD" -> "FX_IDC:XAUUSD"
-        "XAG/USD" -> "FX_IDC:XAGUSD"
-        "DOW" -> "FOREXCOM:DJI"
-        "EUR/USD" -> "FX:EURUSD"
-        "GBP/USD" -> "FX:GBPUSD"
-        "USD/JPY" -> "FX:USDJPY"
-        "EUR/JPY" -> "FX:EURJPY"
-        "GBP/JPY" -> "FX:GBPJPY"
-        "AUD/USD" -> "FX:AUDUSD"
-        "USD/CHF" -> "FX:USDCHF"
-        "BTC/USDT" -> "BINANCE:BTCUSDT"
-        "ETH/USDT" -> "BINANCE:ETHUSDT"
-        "SOL/USDT" -> "BINANCE:SOLUSDT"
-        "BNB/USDT" -> "BINANCE:BNBUSDT"
-        "XRP/USDT" -> "BINANCE:XRPUSDT"
-        else -> fallbackTicker
-    }
-
-private fun buildReliableTradingViewWebHtml(
-    appSymbol: String,
-    tvTicker: String,
-    timeframeLabel: String,
-    series: IchimokuChartSeries,
-    activeTrade: PaperTrade?,
-    livePrice: Double?,
-): String {
-    val embedSymbol = resolveEmbedUnrestrictedTvTicker(appSymbol, tvTicker)
-    val tvInterval = when (timeframeLabel) {
-        "5m" -> "5"
-        "15m" -> "15"
-        "1H" -> "60"
-        "4H" -> "240"
-        else -> "15"
-    }
-    val barsJson = series.bars.takeLast(90).joinToString(",") { b ->
-        val c = b.candle
-        """{"t":${c.time},"o":${c.open},"h":${c.high},"l":${c.low},"c":${c.close},"v":${c.volume},"tk":${b.tenkan},"kj":${b.kijun},"sa":${b.currentSpanA},"sb":${b.currentSpanB}}"""
-    }
-    val tradeJson = if (activeTrade != null) {
-        val isBuy = activeTrade.action == SignalAction.BUY
-        val risk = if (activeTrade.fixedRiskUsd > 0.0) activeTrade.fixedRiskUsd else 5.0
-        """{"side":"${if (isBuy) "LONG" else "SHORT"}","entry":${activeTrade.entry},"sl":${activeTrade.stopLoss},"tp":${activeTrade.takeProfit},"rr":${activeTrade.riskReward},"risk":$risk,"tf":"${activeTrade.interval.label}"}"""
-    } else {
-        "null"
-    }
-    val liveVal = livePrice ?: series.bars.lastOrNull()?.candle?.close ?: 0.0
-    val binanceStreamPair = appSymbol.replace("/", "").lowercase(Locale.US)
-    val isCryptoSymbol = appSymbol.endsWith("/USDT")
-
-    return """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="referrer" content="no-referrer">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
-  html, body { width: 100%; height: 100%; background: #131722; color: #d1d4dc; font-family: -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, Ubuntu, sans-serif; overflow: hidden; }
-  #tv_header { height: 36px; background: #1e222d; border-bottom: 1px solid #2a2e39; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; font-size: 11px; }
-  #tv_subbar { height: 26px; background: #171b26; border-bottom: 1px solid #2a2e39; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; font-size: 10.5px; color: #9ca3af; }
-  .tv-pill { background: #2a2e39; color: #d1d4dc; padding: 3px 7px; border-radius: 4px; font-weight: 600; cursor: pointer; border: 1px solid #363a45; font-size: 10.5px; }
-  .tv-pill.active { background: #2962ff; color: #fff; border-color: #2962ff; }
-  #wrap { position: relative; width: 100%; height: calc(100% - 62px); }
-  canvas { width: 100%; height: 100%; display: block; }
-</style>
-</head>
-<body>
-<div id="tv_header">
-  <div style="display:flex;align-items:center;gap:6px;">
-    <span style="color:#f3c65f;font-weight:700;">TradingView Pro</span>
-    <span>$appSymbol</span>
-    <span style="color:#38bdf8;font-weight:700;">$timeframeLabel</span>
-    <span id="ws_status" style="color:#089981;font-size:10px;">● Live</span>
-  </div>
-  <div style="display:flex;align-items:center;gap:4px;">
-    <button id="btn_canvas" class="tv-pill active" onclick="switchMode('canvas')">ایچیموکو + TP/SL</button>
-    <button id="btn_pro" class="tv-pill" onclick="switchMode('pro')">وب‌ویجت Pro (RSI+EMA+Vol)</button>
-    <button id="btn_ha" class="tv-pill" onclick="toggleHeikin()">HA</button>
-  </div>
-</div>
-<div id="tv_subbar">
-  <div id="ohlc_bar">O: — · H: — · L: — · C: —</div>
-  <div id="ind_bar" style="color:#f3c65f;">TK / KJ / Kumo / RSI(14)</div>
-</div>
-<div id="wrap">
-  <canvas id="tvCanvas"></canvas>
-</div>
-<script>
-const BARS = [$barsJson];
-const TRADE = $tradeJson;
-let LIVE_PRICE = $liveVal;
-const EMBED_SYMBOL = "$embedSymbol";
-const TV_INTERVAL = "$tvInterval";
-const IS_CRYPTO = $isCryptoSymbol;
-const STREAM_PAIR = "$binanceStreamPair";
-
-let currentMode = 'canvas';
-let useHeikinAshi = false;
-let viewCount = 54;
-let panBars = 0;
-let dragStartX = null;
-let dragStartPan = 0;
-let crossX = null;
-let crossY = null;
-
-function switchMode(mode) {
-  currentMode = mode;
-  document.getElementById('btn_canvas').classList.toggle('active', mode === 'canvas');
-  document.getElementById('btn_pro').classList.toggle('active', mode === 'pro');
-  drawChart();
-}
-
-function toggleHeikin() {
-  useHeikinAshi = !useHeikinAshi;
-  document.getElementById('btn_ha').classList.toggle('active', useHeikinAshi);
-  drawChart();
-}
-
-// Connect live Binance WebSocket stream for real-time sub-second candle updates (Zero 403!)
-if (IS_CRYPTO && window.WebSocket) {
-  try {
-    const ws = new WebSocket("wss://stream.binance.com:9443/ws/" + STREAM_PAIR + "@MiniTicker");
-    ws.onmessage = (ev) => {
-      try {
-        const d = JSON.parse(ev.data);
-        const p = parseFloat(d.c);
-        if (p > 0 && BARS.length > 0) {
-          LIVE_PRICE = p;
-          const last = BARS[BARS.length - 1];
-          last.c = p;
-          if (p > last.h) last.h = p;
-          if (p < last.l) last.l = p;
-          document.getElementById('ws_status').textContent = '● Live ' + fmt(p);
-          drawChart();
-        }
-      } catch (_) {}
-    };
-  } catch (_) {}
-}
-
-const canvas = document.getElementById('tvCanvas');
-const ctx = canvas.getContext('2d');
-
-function fmt(p) {
-  if (!p && p !== 0) return '';
-  const a = Math.abs(p);
-  const d = a >= 100 ? 2 : (a >= 10 ? 3 : (a >= 1 ? 4 : 5));
-  return Number(p).toFixed(d);
-}
-
-function computeRsi14(arr) {
-  const res = new Array(arr.length).fill(50);
-  if (arr.length < 2) return res;
-  let avgGain = 0, avgLoss = 0;
-  const period = Math.min(14, arr.length - 1);
-  for (let i = 1; i <= period; i++) {
-    const chg = arr[i].c - arr[i - 1].c;
-    if (chg >= 0) avgGain += chg; else avgLoss -= chg;
-  }
-  avgGain /= period;
-  avgLoss /= period;
-  for (let i = period; i < arr.length; i++) {
-    if (i > period) {
-      const chg = arr[i].c - arr[i - 1].c;
-      avgGain = (avgGain * (period - 1) + (chg > 0 ? chg : 0)) / period;
-      avgLoss = (avgLoss * (period - 1) + (chg < 0 ? -chg : 0)) / period;
-    }
-    const rs = avgLoss <= 1e-9 ? 100 : avgGain / avgLoss;
-    res[i] = 100 - (100 / (1 + rs));
-  }
-  return res;
-}
-
-function computeEma(arr, period) {
-  const k = 2 / (period + 1);
-  const out = [];
-  let ema = arr[0] ? arr[0].c : 0;
-  for (let i = 0; i < arr.length; i++) {
-    ema = arr[i].c * k + ema * (1 - k);
-    out.push(ema);
-  }
-  return out;
-}
-
-function drawChart() {
-  const dpr = window.devicePixelRatio || 1;
-  const w = canvas.clientWidth;
-  const h = canvas.clientHeight;
-  if (w <= 0 || h <= 0) return;
-  canvas.width = w * dpr;
-  canvas.height = h * dpr;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-  ctx.fillStyle = '#131722';
-  ctx.fillRect(0, 0, w, h);
-
-  if (!BARS.length) {
-    ctx.fillStyle = '#d1d4dc';
-    ctx.font = '14px sans-serif';
-    ctx.fillText('در حال دریافت کندل‌های ' + EMBED_SYMBOL + '...', 24, h / 2);
-    return;
-  }
-
-  const rsiAll = computeRsi14(BARS);
-  const ema20All = computeEma(BARS, 20);
-  const ema50All = computeEma(BARS, 50);
-
-  const rightAxisW = 68;
-  const chartW = w - rightAxisW;
-  const mainH = currentMode === 'pro' ? Math.floor(h * 0.72) : h;
-  const oscTop = mainH;
-  const oscH = h - mainH;
-
-  const endIdx = Math.max(10, Math.min(BARS.length - 1, BARS.length - 1 - Math.round(panBars)));
-  const startIdx = Math.max(0, endIdx - viewCount + 1);
-  const slice = BARS.slice(startIdx, endIdx + 1);
-  const rsiSlice = rsiAll.slice(startIdx, endIdx + 1);
-  const ema20Slice = ema20All.slice(startIdx, endIdx + 1);
-  const ema50Slice = ema50All.slice(startIdx, endIdx + 1);
-
-  const totalSlots = viewCount + 8;
-  const slotW = chartW / totalSlots;
-
-  let minP = Infinity, maxP = -Infinity, maxVol = 1;
-  slice.forEach((b, idx) => {
-    minP = Math.min(minP, b.l, b.tk, b.kj, b.sa, b.sb, ema20Slice[idx], ema50Slice[idx]);
-    maxP = Math.max(maxP, b.h, b.tk, b.kj, b.sa, b.sb, ema20Slice[idx], ema50Slice[idx]);
-    if ((b.v || 0) > maxVol) maxVol = b.v;
-  });
-  if (TRADE) {
-    minP = Math.min(minP, TRADE.entry, TRADE.sl, TRADE.tp);
-    maxP = Math.max(maxP, TRADE.entry, TRADE.sl, TRADE.tp);
-  }
-  const span = Math.max(1e-6, maxP - minP);
-  const padMin = minP - span * 0.10;
-  const padMax = maxP + span * 0.10;
-  const padRange = Math.max(1e-6, padMax - padMin);
-
-  const yOf = p => mainH - ((p - padMin) / padRange) * mainH;
-  const xOf = i => (i + 0.5) * slotW;
-
-  // Update header OHLC bar
-  const inspectIdx = crossX !== null
-    ? Math.max(0, Math.min(slice.length - 1, Math.floor(crossX / slotW)))
-    : slice.length - 1;
-  const sb = slice[inspectIdx] || slice[slice.length - 1];
-  const sRsi = rsiSlice[inspectIdx] || 50;
-  document.getElementById('ohlc_bar').textContent =
-    'O: ' + fmt(sb.o) + ' · H: ' + fmt(sb.h) + ' · L: ' + fmt(sb.l) + ' · C: ' + fmt(sb.c);
-  document.getElementById('ind_bar').textContent =
-    'TK: ' + fmt(sb.tk) + ' · KJ: ' + fmt(sb.kj) + ' · RSI(14): ' + sRsi.toFixed(1);
-
-  // Grid & Right Price Axis
-  ctx.strokeStyle = '#1f2937';
-  ctx.lineWidth = 1;
-  ctx.font = '10.5px sans-serif';
-  ctx.fillStyle = '#9ca3af';
-  for (let g = 1; g <= 5; g++) {
-    const gy = (mainH / 6) * g;
-    const gp = padMax - (g / 6) * padRange;
-    ctx.beginPath();
-    ctx.moveTo(0, gy);
-    ctx.lineTo(chartW, gy);
-    ctx.stroke();
-    ctx.fillText(fmt(gp), chartW + 5, gy + 4);
-  }
-  ctx.strokeStyle = '#2a2e39';
-  ctx.beginPath();
-  ctx.moveTo(chartW, 0);
-  ctx.lineTo(chartW, h);
-  ctx.stroke();
-
-  // Volume Histogram at bottom of main pane
-  const volMaxH = mainH * 0.18;
-  slice.forEach((b, i) => {
-    const vh = ((b.v || 1) / maxVol) * volMaxH;
-    ctx.fillStyle = b.c >= b.o ? 'rgba(8,153,129,0.22)' : 'rgba(242,54,69,0.22)';
-    ctx.fillRect(xOf(i) - slotW * 0.3, mainH - vh, slotW * 0.6, vh);
-  });
-
-  // Kumo Cloud
-  for (let i = 0; i < slice.length - 1; i++) {
-    const c1 = slice[i], c2 = slice[i + 1];
-    const x1 = xOf(i), x2 = xOf(i + 1);
-    ctx.fillStyle = (c1.sa + c2.sa >= c1.sb + c2.sb) ? 'rgba(8,153,129,0.18)' : 'rgba(242,54,69,0.18)';
-    ctx.beginPath();
-    ctx.moveTo(x1, yOf(c1.sa));
-    ctx.lineTo(x2, yOf(c2.sa));
-    ctx.lineTo(x2, yOf(c2.sb));
-    ctx.lineTo(x1, yOf(c1.sb));
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  // TradingView Long/Short Position Tool (TP Green Box + SL Red Box)
-  if (TRADE) {
-    const ey = yOf(TRADE.entry);
-    const tpy = yOf(TRADE.tp);
-    const sly = yOf(TRADE.sl);
-    const bx = chartW * 0.25;
-    const bw = chartW - bx - 4;
-
-    const tpTop = Math.min(ey, tpy), tpH = Math.max(3, Math.abs(tpy - ey));
-    ctx.fillStyle = 'rgba(8,153,129,0.26)';
-    ctx.fillRect(bx, tpTop, bw, tpH);
-    ctx.strokeStyle = '#089981';
-    ctx.lineWidth = 1.6;
-    ctx.strokeRect(bx, tpTop, bw, tpH);
-
-    const slTop = Math.min(ey, sly), slH = Math.max(3, Math.abs(sly - ey));
-    ctx.fillStyle = 'rgba(242,54,69,0.26)';
-    ctx.fillRect(bx, slTop, bw, slH);
-    ctx.strokeStyle = '#f23645';
-    ctx.lineWidth = 1.6;
-    ctx.strokeRect(bx, slTop, bw, slH);
-
-    ctx.strokeStyle = '#f3c65f';
-    ctx.lineWidth = 2.4;
-    ctx.beginPath();
-    ctx.moveTo(bx, ey);
-    ctx.lineTo(chartW, ey);
-    ctx.stroke();
-
-    const drawTag = (y, txt, bg) => {
-      ctx.fillStyle = bg;
-      ctx.fillRect(chartW, Math.max(0, Math.min(mainH - 18, y - 9)), rightAxisW, 18);
-      ctx.fillStyle = '#fff';
-      ctx.font = 'bold 10px sans-serif';
-      ctx.fillText(txt, chartW + 4, Math.max(12, Math.min(mainH - 5, y + 4)));
-    };
-    drawTag(tpy, fmt(TRADE.tp), '#089981');
-    drawTag(ey, fmt(TRADE.entry), '#d97706');
-    drawTag(sly, fmt(TRADE.sl), '#f23645');
-  }
-
-  // Candlesticks or Heikin-Ashi
-  const bw = Math.max(2.5, slotW * 0.66);
-  let prevHaO = slice[0].o, prevHaC = slice[0].c;
-  slice.forEach((b, i) => {
-    const cx = xOf(i);
-    let o = b.o, h = b.h, l = b.l, c = b.c;
-    if (useHeikinAshi) {
-      c = (b.o + b.h + b.l + b.c) / 4;
-      o = i === 0 ? (b.o + b.c) / 2 : (prevHaO + prevHaC) / 2;
-      h = Math.max(b.h, o, c);
-      l = Math.min(b.l, o, c);
-      prevHaO = o;
-      prevHaC = c;
-    }
-    const bull = c >= o;
-    ctx.strokeStyle = bull ? '#089981' : '#f23645';
-    ctx.fillStyle = bull ? '#089981' : '#f23645';
-    ctx.lineWidth = 1.3;
-    ctx.beginPath();
-    ctx.moveTo(cx, yOf(h));
-    ctx.lineTo(cx, yOf(l));
-    ctx.stroke();
-    const top = Math.min(yOf(o), yOf(c));
-    const bh = Math.max(2, Math.abs(yOf(c) - yOf(o)));
-    ctx.fillRect(cx - bw / 2, top, bw, bh);
-  });
-
-  // Tenkan & Kijun + EMA 20/50 in Pro Mode
-  const drawLineSeries = (vals, color, width) => {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width || 1.6;
-    ctx.beginPath();
-    vals.forEach((v, i) => {
-      if (i === 0) ctx.moveTo(xOf(i), yOf(v));
-      else ctx.lineTo(xOf(i), yOf(v));
-    });
-    ctx.stroke();
-  };
-  drawLineSeries(slice.map(b => b.tk), '#2962ff', 1.8);
-  drawLineSeries(slice.map(b => b.kj), '#ff9800', 1.8);
-  if (currentMode === 'pro') {
-    drawLineSeries(ema20Slice, '#a855f7', 1.4);
-    drawLineSeries(ema50Slice, '#ec4899', 1.4);
-  }
-
-  // Sub-pane RSI(14) in Pro Mode
-  if (currentMode === 'pro' && oscH > 24) {
-    ctx.strokeStyle = '#2a2e39';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(0, oscTop);
-    ctx.lineTo(w, oscTop);
-    ctx.stroke();
-
-    const yRsi = r => oscTop + oscH - ((r / 100) * (oscH - 8)) - 4;
-    // 70 / 30 bands
-    ctx.fillStyle = 'rgba(56,189,248,0.07)';
-    ctx.fillRect(0, yRsi(70), chartW, yRsi(30) - yRsi(70));
-    ctx.strokeStyle = 'rgba(156,163,175,0.35)';
-    ctx.setLineDash([4, 4]);
-    [70, 50, 30].forEach(lvl => {
-      ctx.beginPath();
-      ctx.moveTo(0, yRsi(lvl));
-      ctx.lineTo(chartW, yRsi(lvl));
-      ctx.stroke();
-      ctx.fillStyle = '#9ca3af';
-      ctx.fillText(String(lvl), chartW + 6, yRsi(lvl) + 3);
-    });
-    ctx.setLineDash([]);
-
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 1.8;
-    ctx.beginPath();
-    rsiSlice.forEach((r, i) => {
-      if (i === 0) ctx.moveTo(xOf(i), yRsi(r));
-      else ctx.lineTo(xOf(i), yRsi(r));
-    });
-    ctx.stroke();
-    ctx.fillStyle = '#38bdf8';
-    ctx.font = 'bold 10px sans-serif';
-    ctx.fillText('RSI(14): ' + (rsiSlice[rsiSlice.length - 1] || 50).toFixed(1), 8, oscTop + 14);
-  }
-
-  // Interactive Crosshair
-  if (crossX !== null && crossY !== null && crossX < chartW) {
-    ctx.strokeStyle = 'rgba(209,212,220,0.45)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(crossX, 0);
-    ctx.lineTo(crossX, h);
-    ctx.moveTo(0, crossY);
-    ctx.lineTo(chartW, crossY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-}
-
-canvas.addEventListener('pointerdown', e => {
-  dragStartX = e.clientX;
-  dragStartPan = panBars;
-  const r = canvas.getBoundingClientRect();
-  crossX = e.clientX - r.left;
-  crossY = e.clientY - r.top;
-  drawChart();
-});
-canvas.addEventListener('pointermove', e => {
-  const r = canvas.getBoundingClientRect();
-  crossX = e.clientX - r.left;
-  crossY = e.clientY - r.top;
-  if (dragStartX !== null) {
-    const dx = e.clientX - dragStartX;
-    const slotW = (canvas.clientWidth - 68) / (viewCount + 8);
-    panBars = Math.max(0, Math.min(BARS.length - 15, dragStartPan + dx / Math.max(4, slotW)));
-  }
-  drawChart();
-});
-window.addEventListener('pointerup', () => { dragStartX = null; });
-window.addEventListener('resize', drawChart);
-setTimeout(drawChart, 30);
-</script>
-</body>
-</html>"""
-}
-
 private const val MOBILE_USER_AGENT =
     "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) " +
         "Chrome/128.0.0.0 Mobile Safari/537.36"
+
 
