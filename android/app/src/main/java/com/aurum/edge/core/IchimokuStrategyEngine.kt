@@ -523,6 +523,8 @@ data class IchimokuBarSnapshot(
     val isMacdBearish: Boolean get() = macdLine <= macdSignal + abs(macdSignal) * 0.02
     val isDmiBullish: Boolean get() = plusDi14 >= minusDi14 - 1.0 && adx14 >= 20.0
     val isDmiBearish: Boolean get() = minusDi14 >= plusDi14 - 1.0 && adx14 >= 20.0
+    val rsiPeakDropLong: Double get() = (recentPeakRsi14 - rsi14).coerceAtLeast(0.0)
+    val rsiTroughRiseShort: Double get() = (rsi14 - recentTroughRsi14).coerceAtLeast(0.0)
 }
 
 data class IchimokuChartBarOverlay(
