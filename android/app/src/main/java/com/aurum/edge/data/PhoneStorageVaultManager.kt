@@ -339,7 +339,7 @@ object PhoneStorageVaultManager {
         Interval.M30 -> 1_680
         Interval.H1 -> 840      // ۳۵ روز کامل کندل ۱ ساعته (۳۵ × ۲۴)
         Interval.H4 -> 240      // ۴۰ روز کندل ۴ ساعته
-        Interval.D1 -> 90
+        else -> 1_000
     }
 
     private fun candleFileName(symbol: String, interval: Interval): String {
