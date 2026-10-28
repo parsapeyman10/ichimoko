@@ -1163,8 +1163,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     if (preserveUpdate != null) {
                         if (preserveUpdate.shouldCloseImmediatelyInProfit) {
                             val exitP = preserveUpdate.closePrice ?: matchingReport.livePrice
-                            container.journalStore.closeTrade(
-                                id = openTrade.id,
+                            container.journalStore.closeTradeAtPrice(
+                                tradeId = openTrade.id,
                                 exitPrice = exitP,
                                 reason = preserveUpdate.reasonFa,
                                 now = now,
