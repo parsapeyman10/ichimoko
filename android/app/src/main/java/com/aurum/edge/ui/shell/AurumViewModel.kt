@@ -157,18 +157,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 )
                 container.neuralEngine.restoreBrainBackupFromPhoneStorage(container.appContext)
                 // ساخت تصویر آرشیو برای معاملاتی که از قبل باز یا بسته شده‌اند ولی هنوز تصویر ندارند
-                val existingIds = com.aurum.edge.data.TradeSnapshotArchiveManager.records.value.map { it.tradeId }.toSet()
-                trades.value.take(30).filterNot { it.id in existingIds }.forEach { tr ->
-                    val sym = V1Universe.normalize(tr.symbol)
-                    val rep = _dualSymbolStrategyReports.value[sym]?.reportFor(tr.interval, tr.strategyId)
-                    val candles = LiveQuoteFetcher.peekCachedCandles(sym, tr.interval)
-                    com.aurum.edge.data.TradeSnapshotArchiveManager.captureAndArchiveTradeOpen(
-                        context = container.appContext,
-                        trade = tr,
-                        report = rep,
-                        triggerCandles = candles,
-                    )
-                }
+                com.aurum.edge.data.TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(
+                    context = container.appContext,
+                    trades = trades.value,
+                )
             }
         }
         if (!updateCheckStarted) {
@@ -1315,7 +1307,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 }
             }
 
-            // ۱. مدیریت پویا ۵ مرحله‌ای (شکارچی روند بالای ۱:۳ / قفل ۱:۱.۵ / Preserve Mode / کیجون / ریسک‌فری) روی معاملات باز
+            // ۱. مدیریت معاملات باز با حد ضرر کاملاً ثابت (غیرپله‌ای) و حفظ R:R اولیه (بستن فقط در هدف اولیه یا برگشت قطعی روند در سود)
             for (dual in newlyEvaluatedDuals) {
                 val symbol = dual.symbol
                 val openSymbolTrades = trades.value.filter {
@@ -1328,25 +1320,15 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                         report = matchingReport,
                         config = stratConfig,
                     )
-                    if (preserveUpdate != null) {
-                        if (preserveUpdate.shouldCloseImmediatelyInProfit) {
-                            val exitP = preserveUpdate.closePrice ?: matchingReport.livePrice
-                            container.journalStore.closeTradeAtPrice(
-                                tradeId = openTrade.id,
-                                exitPrice = exitP,
-                                reason = preserveUpdate.reasonFa,
-                                now = now,
-                            )
-                            _toast.value = "${preserveUpdate.stageTitleFa}: معامله ${openTrade.symbol} در قیمت $exitP با سود بسته شد (${preserveUpdate.reasonFa})"
-                        } else {
-                            container.journalStore.updateTradeStopLoss(
-                                tradeId = openTrade.id,
-                                newStopLoss = preserveUpdate.newStopLoss,
-                                stageNote = preserveUpdate.stageTitleFa,
-                                newTakeProfit = preserveUpdate.newTakeProfit,
-                            )
-                            _toast.value = "${preserveUpdate.stageTitleFa} [${openTrade.interval.label}]: استاپ ${openTrade.symbol} به ${preserveUpdate.newStopLoss} منتقل شد (${preserveUpdate.reasonFa})"
-                        }
+                    if (preserveUpdate != null && preserveUpdate.shouldCloseImmediatelyInProfit) {
+                        val exitP = preserveUpdate.closePrice ?: matchingReport.livePrice
+                        container.journalStore.closeTradeAtPrice(
+                            tradeId = openTrade.id,
+                            exitPrice = exitP,
+                            reason = preserveUpdate.reasonFa,
+                            now = now,
+                        )
+                        _toast.value = "${preserveUpdate.stageTitleFa}: معامله ${openTrade.symbol} در قیمت $exitP با سود بسته شد (${preserveUpdate.reasonFa})"
                     }
                 }
             }
@@ -1691,6 +1673,51 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshSavedJournalFiles() {
         _savedJournalFiles.value = com.aurum.edge.data.JournalExportEngine.listSavedExportFiles(container.appContext)
+    }
+
+    fun recordAllTradesWithArchiveSnapshotsAndExportPdf() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val allTrades = trades.value
+                val snapshots = com.aurum.edge.data.TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(
+                    context = container.appContext,
+                    trades = allTrades,
+                )
+                val cfg = settings.value
+                val report = com.aurum.edge.data.JournalExportEngine.buildInstitutionalTearSheet(
+                    trades = allTrades,
+                    initialCapital = cfg.initialCapital,
+                    currentBalance = cfg.accountBalance,
+                    customStrategies = cfg.customStrategies,
+                )
+                val pdfFile = com.aurum.edge.data.JournalExportEngine.exportToFile(
+                    context = container.appContext,
+                    report = report,
+                    format = com.aurum.edge.data.JournalExportFormat.PDF_REPORT,
+                )
+                val downloadsPath = com.aurum.edge.data.JournalExportEngine.saveDirectToDownloads(
+                    context = container.appContext,
+                    report = report,
+                    format = com.aurum.edge.data.JournalExportFormat.PDF_REPORT,
+                ).getOrNull()
+                Triple(pdfFile, snapshots.size, downloadsPath)
+            }.onSuccess { (pdfFile, snapCount, downloadsPath) ->
+                refreshSavedJournalFiles()
+                val dlNote = downloadsPath?.let { " و در $it" }.orEmpty()
+                val msg = "✅ اسکرین‌شات آرشیو تمام معاملات ($snapCount تصویر) ثبت و فایل PDF (${pdfFile.name}) ساخته$dlNote ذخیره شد"
+                _lastExportStatusFa.value = msg
+                _toast.value = msg
+                runCatching {
+                    com.aurum.edge.data.JournalExportEngine.shareExportedFile(
+                        context = container.appContext,
+                        file = pdfFile,
+                        format = com.aurum.edge.data.JournalExportFormat.PDF_REPORT,
+                    )
+                }
+            }.onFailure { err ->
+                _toast.value = "⚠️ خطا در ثبت اسکرین‌شات آرشیو و ساخت PDF: ${err.message}"
+            }
+        }
     }
 
     fun exportAndShareJournal(

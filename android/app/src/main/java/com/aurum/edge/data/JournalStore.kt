@@ -67,17 +67,27 @@ class JournalStore(
         return list.map { t ->
             val assigned = numberedById[t.id] ?: t.tradeNumber
             val isLegacyDrive = t.strategyId.trim() in BitcoinStrategyModel.legacyIndividualDriveIds
+            val fixedSl = t.initialStopLoss ?: t.stopLoss
+            val needsFixedSlReset = t.stopLoss != fixedSl || t.initialStopLoss == null
             when {
-                isLegacyDrive && t.tradeNumber != assigned -> t.copy(
+                isLegacyDrive && (t.tradeNumber != assigned || needsFixedSlReset) -> t.copy(
                     tradeNumber = assigned,
+                    stopLoss = fixedSl,
+                    initialStopLoss = fixedSl,
                     strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
                     strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
                 )
                 isLegacyDrive -> t.copy(
+                    stopLoss = fixedSl,
+                    initialStopLoss = fixedSl,
                     strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
                     strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
                 )
-                t.tradeNumber != assigned -> t.copy(tradeNumber = assigned)
+                t.tradeNumber != assigned || needsFixedSlReset -> t.copy(
+                    tradeNumber = assigned,
+                    stopLoss = fixedSl,
+                    initialStopLoss = fixedSl,
+                )
                 else -> t
             }
         }.sortedByDescending { it.openedAt }
@@ -191,7 +201,7 @@ class JournalStore(
             preEntry3Candles = pre3Context.candles,
         )
         persist( listOf(trade) + _trades.value )
-        if (isDefaultJournalFile && effectiveCandles.isNotEmpty()) {
+        if (isDefaultJournalFile) {
             runCatching {
                 TradeSnapshotArchiveManager.captureAndArchiveTradeOpen(
                     context = appContext,
@@ -224,8 +234,7 @@ class JournalStore(
     }
 
     /**
-     * به‌روزرسانی خودکار حد ضرر (Break-Even در `1R`، تریل با `Kijun-sen` یا `Preserve Mode` پشت `Tenkan-sen`)
-     * روی معاملات باز بیت‌کوین.
+     * قفل حد ضرر ساختاری ثابت (غیرپله‌ای) و حفظ R:R اولیه معامله (`stopLoss = initialStopLoss ?: stopLoss`).
      */
     @Synchronized
     fun updateTradeStopLoss(
@@ -243,19 +252,12 @@ class JournalStore(
         } else {
             "${target.note} · $stageNote"
         }
-        val effectiveTp = newTakeProfit?.takeIf { it.isFinite() && it > 0.0 } ?: target.takeProfit
-        val initSl = target.initialStopLoss ?: target.stopLoss
-        val initRiskDist = abs(target.entry - initSl)
-        val updatedRr = if (initRiskDist > 1e-8) {
-            round((abs(effectiveTp - target.entry) / initRiskDist) * 100.0) / 100.0
-        } else {
-            target.riskReward
-        }
+        val fixedInitSl = target.initialStopLoss ?: target.stopLoss
         val modified = target.copy(
-            stopLoss = newStopLoss,
-            takeProfit = effectiveTp,
-            riskReward = updatedRr,
-            initialStopLoss = initSl,
+            stopLoss = fixedInitSl,
+            takeProfit = target.takeProfit,
+            riskReward = target.riskReward,
+            initialStopLoss = fixedInitSl,
             note = updatedNote,
         )
         persist(_trades.value.map { if (it.id == tradeId) modified else it })

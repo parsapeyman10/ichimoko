@@ -65,8 +65,8 @@ enum class JournalExportFormat(
     ),
     PDF_REPORT(
         id = "pdf",
-        titleFa = "📄 کارنامه رسمی چندصفحه‌ای PDF (Institutional Tear Sheet)",
-        subtitleFa = "فایل PDF استاندارد با نمودار Equity، شاخص‌های کوانت (SQN/Sharpe/Sortino) و ریز معاملات",
+        titleFa = "📄 کارنامه رسمی چندصفحه‌ای PDF با اسکرین‌شات آرشیو تمام معاملات",
+        subtitleFa = "فایل PDF کامل شامل نمودار Equity، جدول معاملات با حد ضرر ثابت و اسکرین‌شات گرافیکی چارت ایچیموکو برای تک‌تک معاملات",
         extension = "pdf",
         mimeType = "application/pdf",
     ),
@@ -991,9 +991,19 @@ function filterRows() {
     }
 
     /**
-     * تولید فایل PDF رسمی چندصفحه‌ای با گرافیک برداری (PdfDocument) شامل کارنامه کوانت، منحنی سرمایه و جدول معاملات.
+     * تولید فایل PDF رسمی چندصفحه‌ای با گرافیک برداری (PdfDocument) شامل کارنامه کوانت، منحنی سرمایه،
+     * جدول کامل معاملات با حد ضرر ثابت و صفحات اسکرین‌شات آرشیو تصویری ایچیموکو برای تمام معاملات.
      */
-    fun writePdfTearSheet(report: InstitutionalTearSheetReport, outputFile: File) {
+    fun writePdfTearSheet(
+        report: InstitutionalTearSheetReport,
+        outputFile: File,
+        context: Context? = null,
+    ) {
+        if (context != null && report.trades.isNotEmpty()) {
+            runCatching {
+                TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(context, report.trades)
+            }
+        }
         val doc = PdfDocument()
         try {
             val pageW = 842 // A4 Landscape width in points
@@ -1042,9 +1052,9 @@ function filterRows() {
 
             // Header Banner
             c1.drawRoundRect(RectF(24f, 20f, pageW - 24f, 68f), 10f, 10f, cardPaint)
-            c1.drawText("AURUM EDGE — INSTITUTIONAL QUANT TEAR SHEET & JOURNAL AUDIT", 38f, 42f, titlePaint)
+            c1.drawText("AURUM EDGE — INSTITUTIONAL QUANT TEAR SHEET & VISUAL SNAPSHOT ARCHIVE", 38f, 42f, titlePaint)
             c1.drawText(
-                "Generated: ${report.generatedAtFormatted}  |  Balance: $${String.format(Locale.US, "%,.2f", report.currentBalanceUsd)}  |  SQN: ${String.format(Locale.US, "%.2f", report.sqnScore)} (${report.sqnGradeFa})",
+                "Generated: ${report.generatedAtFormatted}  |  Balance: $${String.format(Locale.US, "%,.2f", report.currentBalanceUsd)}  |  Policy: Fixed Non-Stepped SL & Locked Initial R:R",
                 38f,
                 58f,
                 subPaint,
@@ -1128,12 +1138,13 @@ function filterRows() {
 
             // ── Subsequent Pages: Trade-by-Trade Audit Log (24 trades per page) ──
             val chunks = report.trades.chunked(24).ifEmpty { listOf(emptyList()) }
+            var currentPageNumber = 2
             chunks.forEachIndexed { pageIdx, batch ->
-                val pInfo = PdfDocument.PageInfo.Builder(pageW, pageH, pageIdx + 2).create()
+                val pInfo = PdfDocument.PageInfo.Builder(pageW, pageH, currentPageNumber++).create()
                 val page = doc.startPage(pInfo)
                 val c = page.canvas
                 c.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
-                c.drawText("Trade-by-Trade Institutional Audit Log — Page ${pageIdx + 2} of ${chunks.size + 1}", 24f, 32f, titlePaint)
+                c.drawText("Trade-by-Trade Institutional Audit Log (Fixed Non-Stepped SL) — Table ${pageIdx + 1} of ${chunks.size}", 24f, 32f, titlePaint)
 
                 var y = 56f
                 c.drawText("#", 24f, y, headerCellPaint)
@@ -1141,30 +1152,101 @@ function filterRows() {
                 c.drawText("Side / TF", 125f, y, headerCellPaint)
                 c.drawText("Strategy ID", 195f, y, headerCellPaint)
                 c.drawText("Entry", 345f, y, headerCellPaint)
-                c.drawText("SL", 415f, y, headerCellPaint)
+                c.drawText("Fixed SL", 415f, y, headerCellPaint)
                 c.drawText("TP", 485f, y, headerCellPaint)
                 c.drawText("Exit", 555f, y, headerCellPaint)
-                c.drawText("Opt R:R", 625f, y, headerCellPaint)
+                c.drawText("Init R:R", 625f, y, headerCellPaint)
                 c.drawText("Fee ($)", 680f, y, headerCellPaint)
                 c.drawText("Net PnL ($)", 738f, y, headerCellPaint)
                 y += 18f
 
-                batch.forEachIndexed { rowIdx, t ->
-                    val globalIdx = pageIdx * 24 + rowIdx + 1
+                batch.forEach { t ->
                     val side = if (t.action == SignalAction.BUY) "BUY" else "SELL"
+                    val fixedSl = t.initialStopLoss ?: t.stopLoss
                     val pnlText = if (t.isOpen) "OPEN" else String.format(Locale.US, "%+.2f$", t.pnlUsd ?: 0.0)
-                    c.drawText("$globalIdx", 24f, y, cellPaint)
+                    c.drawText("#${t.displayTradeNumber}", 24f, y, cellPaint)
                     c.drawText(t.symbol, 52f, y, cellPaint)
                     c.drawText("$side ${t.interval.label}", 125f, y, cellPaint)
                     c.drawText(t.strategyId.take(22), 195f, y, cellPaint)
                     c.drawText("${t.entry}", 345f, y, cellPaint)
-                    c.drawText("${t.stopLoss}", 415f, y, cellPaint)
+                    c.drawText("$fixedSl", 415f, y, cellPaint)
                     c.drawText("${t.takeProfit}", 485f, y, cellPaint)
                     c.drawText(t.exitPrice?.toString() ?: "—", 555f, y, cellPaint)
-                    c.drawText(String.format(Locale.US, "1:%.2f", t.effectiveOptimalRr), 625f, y, cellPaint)
+                    c.drawText(String.format(Locale.US, "1:%.2f", t.riskReward), 625f, y, cellPaint)
                     c.drawText(String.format(Locale.US, "$%.3f", t.totalRoundTripFeeUsd), 680f, y, cellPaint)
                     c.drawText(pnlText, 738f, y, cellPaint)
                     y += 19f
+                }
+                doc.finishPage(page)
+            }
+
+            // ── Visual Archive Screenshot Pages: Ichimoku Chart Snapshot for Every Trade ──
+            val sortedTradesForSnapshots = report.trades.sortedBy { it.displayTradeNumber }
+            val snapshotRecords = sortedTradesForSnapshots.flatMap { t ->
+                val existing = TradeSnapshotArchiveManager.recordsForTrade(t.id)
+                if (existing.isNotEmpty()) {
+                    existing
+                } else {
+                    buildList {
+                        add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(t, isClosePhase = false))
+                        if (!t.isOpen) {
+                            add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(t, isClosePhase = true))
+                        }
+                    }
+                }
+            }
+            val snapChunks = snapshotRecords.chunked(2)
+            snapChunks.forEachIndexed { idx, pair ->
+                val pInfo = PdfDocument.PageInfo.Builder(pageW, pageH, currentPageNumber++).create()
+                val page = doc.startPage(pInfo)
+                val c = page.canvas
+                c.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
+                c.drawText(
+                    "Visual Ichimoku Archive Screenshots — Sheet ${idx + 1} of ${snapChunks.size} (${snapshotRecords.size} Total Snapshots)",
+                    24f,
+                    28f,
+                    titlePaint,
+                )
+                pair.forEachIndexed { slotIdx, rec ->
+                    val slotLeft = if (slotIdx == 0) 20f else 426f
+                    val slotRight = if (slotIdx == 0) 416f else 822f
+                    val cardRect = RectF(slotLeft, 40f, slotRight, pageH - 18f)
+                    c.drawRoundRect(cardRect, 10f, 10f, cardPaint)
+                    c.drawRoundRect(cardRect, 10f, 10f, borderPaint)
+
+                    val phaseTag = if (rec.isCloseSnapshot) "CLOSE" else "OPEN"
+                    val pnlTag = if (rec.isCloseSnapshot && rec.realizedPnlUsd != null) {
+                        String.format(Locale.US, " | PnL: %+.2f$ (%+.2fR)", rec.realizedPnlUsd, rec.realizedRMultiple ?: 0.0)
+                    } else {
+                        String.format(Locale.US, " | Risk: -$%.2f -> Target: +$%.2f", rec.fixedRiskUsd, rec.expectedProfitUsd)
+                    }
+                    c.drawText(
+                        "Trade #${rec.displayTradeNumber} [$phaseTag] · ${rec.symbol} (${rec.timeframeLabel}) · ${rec.action}",
+                        slotLeft + 10f,
+                        58f,
+                        headerCellPaint,
+                    )
+                    c.drawText(
+                        "Entry: ${rec.entryPrice} | Fixed SL: ${rec.stopLossPrice} | TP: ${rec.takeProfitPrice} | R:R 1:${String.format(Locale.US, "%.2f", rec.riskReward)}$pnlTag",
+                        slotLeft + 10f,
+                        73f,
+                        cellPaint,
+                    )
+                    c.drawText(
+                        "Strategy: ${rec.strategyTitleFa} (${rec.strategyId})",
+                        slotLeft + 10f,
+                        87f,
+                        subPaint,
+                    )
+
+                    val bmp = runCatching {
+                        TradeSnapshotArchiveManager.loadOrRenderSnapshotBitmap(rec)
+                    }.getOrNull()
+                    if (bmp != null) {
+                        val dstRect = RectF(slotLeft + 8f, 96f, slotRight - 8f, pageH - 26f)
+                        c.drawBitmap(bmp, null, dstRect, null)
+                        bmp.recycle()
+                    }
                 }
                 doc.finishPage(page)
             }
@@ -1202,7 +1284,7 @@ function filterRows() {
                 outFile.writeText(generateInteractiveHtmlTearSheet(report), Charsets.UTF_8)
             }
             JournalExportFormat.PDF_REPORT -> {
-                writePdfTearSheet(report, outFile)
+                writePdfTearSheet(report, outFile, context)
             }
             JournalExportFormat.CSV_EXCEL -> {
                 outFile.writeText(generateCsvContent(report), Charsets.UTF_8)

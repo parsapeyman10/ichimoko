@@ -2284,35 +2284,9 @@ object IchimokuStrategyEngine {
             abs(livePrice - rawTechnicalSl),
         ).coerceAtLeast(minSafeStopDist)
 
-        val candidateTargets = if (wave != null) {
-            listOf(wave.targetV, wave.targetN, wave.targetE).sortedBy { abs(it - livePrice) }
-        } else {
-            emptyList()
-        }
-
-        // اگر موج هوسودا بخواهد از ۱:۳ (3.0R) رد شود، حد ضرر در امن‌ترین سنگر ساختاری (کف/سقف کیجون + شندلیر ATR)
-        // قرار می‌گیرد تا هم معامله با نوسان عادی استاپ نخورد (روند از دست نرود) و هم R:R بالای ۱:۳ حفظ شود.
-        // در هر حالت فاصلهٔ حد ضرر از هر دو قیمت اسنایپر و قیمت لحظه‌ای کمتر از minSafeStopDist نمی‌شود.
-        val farthestWaveTarget = candidateTargets.lastOrNull()
-        val wantsToExceedOneToThree = farthestWaveTarget != null &&
-            (abs(farthestWaveTarget - sniperOptimal) / rawStopDist) >= 3.0
-        val technicalSl = if (wantsToExceedOneToThree && farthestWaveTarget != null) {
-            val waveDist = abs(farthestWaveTarget - sniperOptimal)
-            val maxAllowedStopFor3R = (waveDist / 3.0)
-                .coerceAtLeast(minSafeStopDist)
-                .coerceAtMost(max(minSafeStopDist * 1.35, trigSnap.atr14 * 1.85))
-            if (isLong) {
-                val deepStructuralSl = min(trigSnap.kijun, trigSnap.low) - trigSnap.atr14 * 0.35
-                val chandelierFloor = safeAnchorLong - maxAllowedStopFor3R
-                round2(min(safeAnchorLong - minSafeStopDist, max(chandelierFloor, min(rawTechnicalSl, deepStructuralSl))))
-            } else {
-                val deepStructuralSl = max(trigSnap.kijun, trigSnap.high) + trigSnap.atr14 * 0.35
-                val chandelierCeiling = safeAnchorShort + maxAllowedStopFor3R
-                round2(max(safeAnchorShort + minSafeStopDist, min(chandelierCeiling, max(rawTechnicalSl, deepStructuralSl))))
-            }
-        } else {
-            rawTechnicalSl
-        }
+        // حد ضرر ساختاری (Kijun / Senkou B / 5-Bar Fractal + ATR Buffer) کاملاً ثابت و غیرپله‌ای است
+        // و حتی زمانی که R:R اولیه بیشتر از ۱:۳ باشد، حد ضرر اولیه بدون تغییر و ثابت باقی می‌ماند.
+        val technicalSl = rawTechnicalSl
 
         val stopDist = max(
             abs(sniperOptimal - technicalSl),
@@ -2505,7 +2479,9 @@ object IchimokuStrategyEngine {
             append(" + کارایی ER=${(erStrat * 100).toInt()}%")
             append(" ← هدف: $selectedWaveLabel")
             if (rr >= 3.0) {
-                append(" · 🚀 مجهز به شکارچی روند بالای ۱:۳")
+                append(" · 🔒 حد ضرر کاملاً ثابت و غیرپله‌ای با حفظ R:R اولیه بالای ۱:۳")
+            } else {
+                append(" · 🔒 حد ضرر کاملاً ثابت و غیرپله‌ای")
             }
             append(")")
         }
@@ -2528,9 +2504,7 @@ object IchimokuStrategyEngine {
         val cond12Detail = buildString {
             append(String.format(Locale.US, "عدد مناسب R:R = 1:%.2f (%s)", rr, selectedWaveLabel))
             append(" · فرمول: $rewardDistSniper ÷ $riskDistSniper")
-            if (rr >= 3.0) {
-                append(" · 🚀 شکارچی روند بالای ۱:۳ فعال")
-            }
+            append(" · 🔒 حد ضرر ثابت (غیرپله‌ای)")
         }
 
         // ── Check 13: Directional Efficiency Ratio (Kaufman ER) & Anti-Chop Filter ──
@@ -3354,15 +3328,11 @@ object IchimokuStrategyEngine {
     }
 
     /**
-     * مدیریت پویا ۵ مرحله‌ای معاملات باز با موتور جهانی `Chandelier ATR + Tenkan/Kijun Hybrid Ratchet`
-     * + تشخیص لحظه‌ای از دست رفتن روند در سود (`shouldCloseImmediatelyInProfit`):
-     * ۰. اگر معامله در سود است و روند ایچیموکو از دست برود (شکست کیجون / تخلیه C-Clamp / چرخه زمانی هوسودا / قفل چیکو)،
-     *    معامله همان‌جا در سود بسته می‌شود تا سود از بین نرود.
-     * ۱. قفل زودهنگام سود در `0.65R` و ریسک‌فری پلاس خودکار (`Break-Even + Fee` در `1.0R`)
-     * ۲. قفل سود پایه و تریل کیجون‌سن (`1.5R`)
-     * ۳. تثبیت قطعی کف سود `1:1.5` (`+1.50R` در `2.15R`)
-     * ۴. عبور از مرز `1:3` (`>= 2.85R..3.0R+`): قرار دادن حد ضرر در نقطه طلایی (ترکیب قفل پلکانی `75%–82%` سود +
-     *    سپر نوسانگیر شندلیر `ATR` و `Tenkan-sen`) به همراه امتداد خودکار `TP` تا موج بعدی هوسودا.
+     * موتور مدیریت معاملات باز با معماری «حد ضرر ساختاری کاملاً ثابت (غیرپله‌ای) + حفظ R:R اولیه + خروج هوشمند در اتمام روند»:
+     * - حد ضرر (`stopLoss`) تحت هیچ شرایطی به‌صورت پله‌ای (`Break-Even` یا تریل پلکانی) جابجا نمی‌شود و تا پایان معامله
+     *   دقیقاً روی همان حد ضرر ساختاری اولیه (`initialStopLoss ?: stopLoss`) ثابت می‌ماند.
+     * - نسبت `R:R` و حد سود (`takeProfit`) دقیقاً همان مقدار اولیه زمان باز شدن معامله باقی می‌ماند و حتی اگر `R:R > 3.0` باشد،
+     *   حد ضرر ثابت مانده و معامله تا هدف اولیه خود (`takeProfit`) یا تشخیص قطعی برگشت روند ادامه می‌یابد.
      */
     fun evaluateOpenTradeManagement(
         trade: PaperTrade,
@@ -3371,23 +3341,22 @@ object IchimokuStrategyEngine {
     ): PreserveModeEvaluation? {
         if (!trade.isOpen || V1Universe.normalize(trade.symbol) != V1Universe.normalize(report.symbol)) return null
         val trigSnap = report.triggerSnapshot ?: return null
-        val stratSnap = report.strategySnapshot ?: trigSnap
         val livePrice = report.livePrice.takeIf { it > 0.0 } ?: return null
 
-        val initialStop = trade.initialStopLoss ?: trade.stopLoss
-        val oneRDistance = abs(trade.entry - initialStop).coerceAtLeast(trigSnap.atr14 * 0.4)
+        val fixedStopLoss = round2(trade.initialStopLoss ?: trade.stopLoss)
+        val oneRDistance = abs(trade.entry - fixedStopLoss).coerceAtLeast(trigSnap.atr14 * 0.4)
         val isBuy = trade.action == SignalAction.BUY
 
         val currentProfitDist = if (isBuy) livePrice - trade.entry else trade.entry - livePrice
         val currentRMultiple = currentProfitDist / oneRDistance
 
-        // ── Stage 0: تشخیص از دست رفتن روند در سود و بستن فوری در همان نقطه سود ──
+        // ── ۱. تشخیص از دست رفتن قطعی روند ایچیموکو در سود و بستن مستقیم در سود (بدون جابجایی پله‌ای حد ضرر) ──
         val trendHealth = evaluateTrendHealthAndProfitExit(trade, report, livePrice)
         if (trendHealth.shouldExitNowInProfit && currentRMultiple > 0.35) {
             return PreserveModeEvaluation(
                 tradeId = trade.id,
-                newStopLoss = round2(livePrice),
-                stageTitleFa = "⚡ خروج هوشمند در سود (اتمام روند در +${round2(currentRMultiple)}R)",
+                newStopLoss = fixedStopLoss,
+                stageTitleFa = "⚡ خروج هوشمند در سود (اتمام روند در +${round2(currentRMultiple)}R با حد ضرر ثابت)",
                 reasonFa = trendHealth.exitTriggerReasonFa,
                 lockedRMultiple = round2(currentRMultiple),
                 shouldCloseImmediatelyInProfit = true,
@@ -3395,126 +3364,25 @@ object IchimokuStrategyEngine {
             )
         }
 
-        val nearTimeCycleAndFlatTenkan = report.waveProjection?.isNearTimeCycleChangeDay == true &&
-            (trigSnap.isTenkanFlat || stratSnap.isTenkanFlat)
-
-        val overextendedFromKijun = stratSnap.distanceToKijunAtr >= config.maxKijunExtensionAtr
-
-        // ── Stage 4: بستن کامل و قطعی معامله در رسیدن به ۳R (۱:۳) یا TP بدون ادامه تریل استاپ ──
+        // ── ۲. بستن کامل و قطعی معامله در رسیدن به حد سود اولیه (یا سقف ۳R برای معاملات با R:R اولیه ≤ ۳) با حفظ حد ضرر ثابت ──
         val reachedTp = if (isBuy) livePrice >= trade.takeProfit else livePrice <= trade.takeProfit
-        if (currentRMultiple >= 3.0 || reachedTp) {
+        val reached3RCeilingForStandardTrade = trade.riskReward <= 3.0001 && currentRMultiple >= 3.0
+        if (reachedTp || reached3RCeilingForStandardTrade) {
+            val exitTargetPrice = if (reachedTp) round2(trade.takeProfit) else round2(livePrice)
             return PreserveModeEvaluation(
                 tradeId = trade.id,
-                newStopLoss = round2(livePrice),
-                stageTitleFa = "🎯 اتمام و بستن کامل معامله در هدف ۳R (+${round2(currentRMultiple)}R)",
+                newStopLoss = fixedStopLoss,
+                stageTitleFa = "🎯 اتمام و بستن کامل معامله در هدف R:R اولیه (+${round2(currentRMultiple)}R · حد ضرر ثابت)",
                 reasonFa = String.format(
                     Locale.US,
-                    "رسیدن به سقف ۱:۳ (%.2fR)؛ بستن کامل معامله و تسویه سود بدون ادامه تریل استاپ",
+                    "رسیدن به هدف تعیین‌شده (%.2fR · R:R اولیه 1:%.2f) با حد ضرر کاملاً ثابت و غیرپله‌ای",
                     currentRMultiple,
+                    trade.riskReward,
                 ),
                 lockedRMultiple = round2(currentRMultiple),
                 shouldCloseImmediatelyInProfit = true,
-                closePrice = round2(livePrice),
+                closePrice = exitTargetPrice,
             )
-        }
-
-        // ── Stage 3: Pre-3R Guaranteed 1:1.5 Floor + Preserve Mode (`2.15R .. < 2.85R`) ──
-        if (currentRMultiple >= 2.15 || (config.enablePreserveMode && currentRMultiple >= 1.5 && (overextendedFromKijun || nearTimeCycleAndFlatTenkan))) {
-            val floor15R = if (isBuy) {
-                trade.entry + oneRDistance * (if (currentRMultiple >= 2.15) 1.50 else 0.95)
-            } else {
-                trade.entry - oneRDistance * (if (currentRMultiple >= 2.15) 1.50 else 0.95)
-            }
-            val tenkanBuffer = trigSnap.atr14 * 0.18
-            val tenkanStop = if (isBuy) trigSnap.tenkan - tenkanBuffer else trigSnap.tenkan + tenkanBuffer
-            val minBreathing = max(trigSnap.atr14 * 0.30, oneRDistance * 0.25)
-            val candidateStop = if (isBuy) {
-                round2(min(max(floor15R, tenkanStop), livePrice - minBreathing))
-            } else {
-                round2(max(min(floor15R, tenkanStop), livePrice + minBreathing))
-            }
-            val improvesStop = if (isBuy) {
-                candidateStop > trade.stopLoss + trigSnap.atr14 * 0.05 && candidateStop < livePrice - trigSnap.atr14 * 0.1
-            } else {
-                candidateStop < trade.stopLoss - trigSnap.atr14 * 0.05 && candidateStop > livePrice + trigSnap.atr14 * 0.1
-            }
-            if (improvesStop) {
-                val lockedR = round2(abs(candidateStop - trade.entry) / oneRDistance)
-                return PreserveModeEvaluation(
-                    tradeId = trade.id,
-                    newStopLoss = candidateStop,
-                    stageTitleFa = "🛡️ قفل قطعی سود حداقل ۱:۱.۵ (+${lockedR}R)",
-                    reasonFa = String.format(Locale.US, "سود %.2fR؛ تثبیت سود +%.2fR پشت تنکان/کیجون", currentRMultiple, lockedR),
-                    lockedRMultiple = lockedR,
-                )
-            }
-        }
-
-        // ── Stage 2: Base Profit Lock + Kijun-sen Trailing (`1.50R .. < 2.15R`) ──
-        if (currentRMultiple >= 1.50) {
-            val kijunBuffer = trigSnap.atr14 * config.slBufferAtr
-            val profitFloor065R = if (isBuy) trade.entry + oneRDistance * 0.65 else trade.entry - oneRDistance * 0.65
-            val kijunStop = if (isBuy) trigSnap.kijun - kijunBuffer else trigSnap.kijun + kijunBuffer
-            val candidateStop = if (isBuy) {
-                round2(min(max(profitFloor065R, kijunStop), livePrice - trigSnap.atr14 * 0.25))
-            } else {
-                round2(max(min(profitFloor065R, kijunStop), livePrice + trigSnap.atr14 * 0.25))
-            }
-            val improvesBeyondEntry = if (isBuy) {
-                candidateStop >= trade.entry && candidateStop > trade.stopLoss + trigSnap.atr14 * 0.05 && candidateStop < livePrice
-            } else {
-                candidateStop <= trade.entry && candidateStop < trade.stopLoss - trigSnap.atr14 * 0.05 && candidateStop > livePrice
-            }
-            if (improvesBeyondEntry) {
-                val lockedR = round2(abs(candidateStop - trade.entry) / oneRDistance)
-                return PreserveModeEvaluation(
-                    tradeId = trade.id,
-                    newStopLoss = candidateStop,
-                    stageTitleFa = "📈 تریل کیجون و قفل سود (+${lockedR}R)",
-                    reasonFa = String.format(Locale.US, "عبور سود از ۱:۱.۵ (%.2fR)؛ قفل سود در +%.2fR", currentRMultiple, lockedR),
-                    lockedRMultiple = lockedR,
-                )
-            }
-        }
-
-        // ── Stage 1: Break-Even Plus Shield (`>= 1.0R`) ──────────────────────
-        if (currentRMultiple >= 1.0) {
-            val feeOffset = max(oneRDistance * 0.12, max(trade.entry * 0.0008, trigSnap.atr14 * 0.05))
-            val breakEvenStop = if (isBuy) round2(trade.entry + feeOffset) else round2(trade.entry - feeOffset)
-            val notYetBreakEven = if (isBuy) {
-                trade.stopLoss < trade.entry + feeOffset * 0.5 && breakEvenStop < livePrice
-            } else {
-                trade.stopLoss > trade.entry - feeOffset * 0.5 && breakEvenStop > livePrice
-            }
-            if (notYetBreakEven) {
-                return PreserveModeEvaluation(
-                    tradeId = trade.id,
-                    newStopLoss = breakEvenStop,
-                    stageTitleFa = "🔒 ریسک‌فری پلاس خودکار (Break-Even در 1R)",
-                    reasonFa = "عبور سود از 1R؛ انتقال حد ضرر به بالای نقطه ورود (+0.12R)",
-                    lockedRMultiple = 0.12,
-                )
-            }
-        }
-
-        // ── Stage 0.5: Early Profit Shield (`>= 0.65R` when momentum cools) ──
-        if (currentRMultiple >= 0.65 && trendHealth.activeWarningSignalsFa.isNotEmpty()) {
-            val earlyLockOffset = max(oneRDistance * 0.22, trade.entry * 0.0015)
-            val earlyProfitStop = if (isBuy) round2(trade.entry + earlyLockOffset) else round2(trade.entry - earlyLockOffset)
-            val improvesEarly = if (isBuy) {
-                trade.stopLoss < earlyProfitStop - trigSnap.atr14 * 0.03 && earlyProfitStop < livePrice - trigSnap.atr14 * 0.10
-            } else {
-                trade.stopLoss > earlyProfitStop + trigSnap.atr14 * 0.03 && earlyProfitStop > livePrice + trigSnap.atr14 * 0.10
-            }
-            if (improvesEarly) {
-                return PreserveModeEvaluation(
-                    tradeId = trade.id,
-                    newStopLoss = earlyProfitStop,
-                    stageTitleFa = "🛡️ قفل زودهنگام سود در کاهش مومنتوم (+0.22R)",
-                    reasonFa = "تشخیص کاهش شتاب روند در سود (${trendHealth.activeWarningSignalsFa.first()})؛ قفل سود در +0.22R",
-                    lockedRMultiple = 0.22,
-                )
-            }
         }
 
         return null

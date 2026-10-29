@@ -407,8 +407,9 @@ object RiskAndCalendarEngine {
         if (!price.isFinite() || price <= 0.0) return null
 
         // محافظ ضد نویز ۱۰ ثانیه اول پس از ورود در کریپتو (جلوگیری از فعال شدن استاپ بر اثر تیک معوق/اختلاف بیسیس صرافی)
+        val fixedStopLoss = trade.initialStopLoss ?: trade.stopLoss
         val tradeAgeMs = tick.at - trade.openedAt
-        val stopDist = abs(trade.entry - trade.stopLoss)
+        val stopDist = abs(trade.entry - fixedStopLoss)
         val earlyCryptoSpikeBuffer = if (
             AssetClass.of(trade.symbol) == AssetClass.CRYPTO &&
             tradeAgeMs in 0L..9_999L &&
@@ -419,30 +420,34 @@ object RiskAndCalendarEngine {
             0.0
         }
 
-        val initialStop = trade.initialStopLoss ?: trade.stopLoss
-        val oneR = abs(trade.entry - initialStop)
+        val oneR = abs(trade.entry - fixedStopLoss)
         val decimals = priceDecimals(trade.symbol, trade.entry)
-        val effectiveTp = when (trade.action) {
-            SignalAction.BUY -> {
-                val cap3R = if (oneR > 1e-8) roundToDecimals(trade.entry + 3.0 * oneR, decimals) else trade.takeProfit
-                min(trade.takeProfit, cap3R)
+        val effectiveTp = if (trade.riskReward > 3.0001) {
+            // اگر R:R اولیه معامله بیشتر از ۳ باشد، دقیقاً همان TP و R:R اولیه حفظ شده و حد ضرر ثابت می‌ماند
+            trade.takeProfit
+        } else {
+            when (trade.action) {
+                SignalAction.BUY -> {
+                    val cap3R = if (oneR > 1e-8) roundToDecimals(trade.entry + 3.0 * oneR, decimals) else trade.takeProfit
+                    min(trade.takeProfit, cap3R)
+                }
+                SignalAction.SELL -> {
+                    val cap3R = if (oneR > 1e-8) roundToDecimals(max(0.00001, trade.entry - 3.0 * oneR), decimals) else trade.takeProfit
+                    max(trade.takeProfit, cap3R)
+                }
+                SignalAction.NO_TRADE -> trade.takeProfit
             }
-            SignalAction.SELL -> {
-                val cap3R = if (oneR > 1e-8) roundToDecimals(max(0.00001, trade.entry - 3.0 * oneR), decimals) else trade.takeProfit
-                max(trade.takeProfit, cap3R)
-            }
-            SignalAction.NO_TRADE -> trade.takeProfit
         }
 
         val hitKind: AutoExitKind? = when (trade.action) {
             SignalAction.BUY -> when {
                 price >= effectiveTp -> AutoExitKind.TAKE_PROFIT
-                price <= trade.stopLoss - earlyCryptoSpikeBuffer -> AutoExitKind.STOP_LOSS
+                price <= fixedStopLoss - earlyCryptoSpikeBuffer -> AutoExitKind.STOP_LOSS
                 else -> null
             }
             SignalAction.SELL -> when {
                 price <= effectiveTp -> AutoExitKind.TAKE_PROFIT
-                price >= trade.stopLoss + earlyCryptoSpikeBuffer -> AutoExitKind.STOP_LOSS
+                price >= fixedStopLoss + earlyCryptoSpikeBuffer -> AutoExitKind.STOP_LOSS
                 else -> null
             }
             SignalAction.NO_TRADE -> null
@@ -451,7 +456,7 @@ object RiskAndCalendarEngine {
         val kind = hitKind ?: return null
         val exitPrice = when (kind) {
             AutoExitKind.TAKE_PROFIT -> effectiveTp
-            AutoExitKind.STOP_LOSS -> trade.stopLoss
+            AutoExitKind.STOP_LOSS -> fixedStopLoss
         }
         val (gross, net) = computeExitPnlUsd(trade, exitPrice)
         return AutoExitEvaluation(
@@ -468,7 +473,7 @@ object RiskAndCalendarEngine {
 
     /**
      * Chronologically replays historical OHLC candles (e.g. from an offline gap of 6–24 hours)
-     * against an open trade's SL and TP. If any candle's High/Low crossed TP (or 3R ceiling) or SL after the trade
+     * against an open trade's fixed SL and initial TP. If any candle's High/Low crossed TP or fixed SL after the trade
      * was opened, returns the exact exit evaluation at that candle's timestamp.
      */
     fun evaluateCandleWindow(trade: PaperTrade, candles: List<Candle>): AutoExitEvaluation? {
@@ -482,29 +487,33 @@ object RiskAndCalendarEngine {
             }
             .sortedBy { it.time }
 
-        val initialStop = trade.initialStopLoss ?: trade.stopLoss
-        val oneR = abs(trade.entry - initialStop)
+        val fixedStopLoss = trade.initialStopLoss ?: trade.stopLoss
+        val oneR = abs(trade.entry - fixedStopLoss)
         val decimals = priceDecimals(trade.symbol, trade.entry)
-        val effectiveTp = when (trade.action) {
-            SignalAction.BUY -> {
-                val cap3R = if (oneR > 1e-8) roundToDecimals(trade.entry + 3.0 * oneR, decimals) else trade.takeProfit
-                min(trade.takeProfit, cap3R)
+        val effectiveTp = if (trade.riskReward > 3.0001) {
+            trade.takeProfit
+        } else {
+            when (trade.action) {
+                SignalAction.BUY -> {
+                    val cap3R = if (oneR > 1e-8) roundToDecimals(trade.entry + 3.0 * oneR, decimals) else trade.takeProfit
+                    min(trade.takeProfit, cap3R)
+                }
+                SignalAction.SELL -> {
+                    val cap3R = if (oneR > 1e-8) roundToDecimals(max(0.00001, trade.entry - 3.0 * oneR), decimals) else trade.takeProfit
+                    max(trade.takeProfit, cap3R)
+                }
+                SignalAction.NO_TRADE -> trade.takeProfit
             }
-            SignalAction.SELL -> {
-                val cap3R = if (oneR > 1e-8) roundToDecimals(max(0.00001, trade.entry - 3.0 * oneR), decimals) else trade.takeProfit
-                max(trade.takeProfit, cap3R)
-            }
-            SignalAction.NO_TRADE -> trade.takeProfit
         }
 
         for (bar in ordered) {
             val hitKind: AutoExitKind? = when (trade.action) {
                 SignalAction.BUY -> {
-                    val slHit = bar.low <= trade.stopLoss
+                    val slHit = bar.low <= fixedStopLoss
                     val tpHit = bar.high >= effectiveTp
                     when {
                         slHit && tpHit -> {
-                            if (abs(bar.open - trade.stopLoss) <= abs(effectiveTp - bar.open)) {
+                            if (abs(bar.open - fixedStopLoss) <= abs(effectiveTp - bar.open)) {
                                 AutoExitKind.STOP_LOSS
                             } else {
                                 AutoExitKind.TAKE_PROFIT
@@ -516,11 +525,11 @@ object RiskAndCalendarEngine {
                     }
                 }
                 SignalAction.SELL -> {
-                    val slHit = bar.high >= trade.stopLoss
+                    val slHit = bar.high >= fixedStopLoss
                     val tpHit = bar.low <= effectiveTp
                     when {
                         slHit && tpHit -> {
-                            if (abs(trade.stopLoss - bar.open) <= abs(bar.open - effectiveTp)) {
+                            if (abs(fixedStopLoss - bar.open) <= abs(bar.open - effectiveTp)) {
                                 AutoExitKind.STOP_LOSS
                             } else {
                                 AutoExitKind.TAKE_PROFIT
@@ -537,7 +546,7 @@ object RiskAndCalendarEngine {
             if (hitKind != null) {
                 val exitPrice = when (hitKind) {
                     AutoExitKind.TAKE_PROFIT -> effectiveTp
-                    AutoExitKind.STOP_LOSS -> trade.stopLoss
+                    AutoExitKind.STOP_LOSS -> fixedStopLoss
                 }
                 val (gross, net) = computeExitPnlUsd(trade, exitPrice)
                 return AutoExitEvaluation(

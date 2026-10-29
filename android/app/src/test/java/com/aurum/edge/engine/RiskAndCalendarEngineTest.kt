@@ -420,13 +420,27 @@ class RiskAndCalendarEngineTest {
             preferredAction = SignalAction.BUY,
         )!!
         val opened = journal.openTrade(calc, note = "تست استراتژی بیس")
+        // Verify fixed non-stepped Stop-Loss even when initial R:R = 4.0 (> 3.0) and price is at +3.2R (71,200)
+        val midEval = IchimokuStrategyEngine.evaluateOpenTradeManagement(
+            trade = opened,
+            report = report.copy(livePrice = 71_200.0), // +3.2R while initial TP is 72,000 (4.0R)
+            config = config,
+        )
+        assertTrue(midEval == null || midEval.newStopLoss == opened.stopLoss)
+        val updatedAttempt = journal.updateTradeStopLoss(opened.id, 70_000.0, "تست عدم جابجایی پله‌ای")
+        assertNotNull(updatedAttempt)
+        assertEquals(67_000.0, updatedAttempt!!.stopLoss, 1e-4)
+        assertEquals(4.0, updatedAttempt.riskReward, 1e-4)
+
         val preserveEval = IchimokuStrategyEngine.evaluateOpenTradeManagement(
             trade = opened,
-            report = report.copy(livePrice = 71_200.0), // > 3R profit
+            report = report.copy(livePrice = 72_000.0), // Reaches initial 4.0R TP
             config = config,
         )
         assertNotNull(preserveEval)
-        assertTrue(preserveEval!!.newStopLoss > opened.entry)
+        assertTrue(preserveEval!!.shouldCloseImmediatelyInProfit)
+        assertEquals(67_000.0, preserveEval.newStopLoss, 1e-4)
+        assertEquals(72_000.0, preserveEval.closePrice ?: 0.0, 1e-4)
 
         // 4. Verify all 15 symbols in V1Universe are supported on 15m timeframe + Smart15mSyncPlanner
         assertEquals(15, V1Universe.allSymbols.size)
@@ -997,6 +1011,39 @@ class RiskAndCalendarEngineTest {
         val driveEffectiveCfg = appliedCfg.resolveForStrategy(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
         assertEquals(2.10, driveEffectiveCfg.minRiskReward, 1e-4)
         assertEquals(1.55, driveEffectiveCfg.maxKijunExtensionAtr, 1e-4)
+
+        // Verify v3.9.24 features:
+        // 1. All trades are recorded with OPEN and CLOSE archive screenshots
+        val closedForArchive = sampleTrade.copy(
+            id = "PDF_ARCH_1",
+            tradeNumber = 21,
+            stopLoss = 2_738.0,
+            initialStopLoss = 2_738.0,
+            takeProfit = 2_766.0,
+            riskReward = 4.0, // > 3.0 initial R:R preserved with fixed SL
+            closedAt = sampleTrade.openedAt + 1_800_000L,
+            exitPrice = 2_766.0,
+            pnlUsd = 20.0,
+        )
+        val ensuredSnaps = com.aurum.edge.data.TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(
+            context = context,
+            trades = listOf(sampleTrade, closedForArchive),
+        )
+        assertTrue(ensuredSnaps.any { it.tradeId == "PDF_ARCH_1" && !it.isCloseSnapshot })
+        assertTrue(ensuredSnaps.any { it.tradeId == "PDF_ARCH_1" && it.isCloseSnapshot })
+
+        // 2. Full PDF export embeds visual Ichimoku archive screenshots for all trades
+        val tearSheetForPdf = com.aurum.edge.data.JournalExportEngine.buildInstitutionalTearSheet(
+            trades = listOf(sampleTrade, closedForArchive),
+            initialCapital = 100_000.0,
+            currentBalance = 100_020.0,
+        )
+        val pdfFile = com.aurum.edge.data.JournalExportEngine.exportToFile(
+            context = context,
+            report = tearSheetForPdf,
+            format = com.aurum.edge.data.JournalExportFormat.PDF_REPORT,
+        )
+        assertTrue(pdfFile.exists() && pdfFile.length() > 1_000L)
     }
 }
 

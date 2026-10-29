@@ -346,6 +346,11 @@ fun JournalRiskScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Pill(
+                    text = "📸📄 ثبت تمام معاملات با اسکرین‌شات آرشیو + خروجی PDF",
+                    color = AurumColors.Green,
+                    modifier = Modifier.clickable { viewModel.recordAllTradesWithArchiveSnapshotsAndExportPdf() },
+                )
+                Pill(
                     text = "🔍 بررسی تعاملی گزارش کامل",
                     color = AurumColors.Gold,
                     modifier = Modifier.clickable { showInteractiveTearSheetModal = true },

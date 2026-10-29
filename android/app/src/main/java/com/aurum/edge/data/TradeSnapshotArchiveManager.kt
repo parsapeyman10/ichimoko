@@ -156,6 +156,111 @@ object TradeSnapshotArchiveManager {
     fun recordsForTrade(tradeId: String): List<ArchivedTradeSnapshotRecord> =
         _records.value.filter { it.tradeId == tradeId }.sortedBy { if (it.isCloseSnapshot) 1 else 0 }
 
+    /**
+     * تضمین ثبت و ساخت اسکرین‌شات آرشیو تصویری (`OPEN` و در صورت بسته بودن `CLOSE`) برای تمام معاملات موجود در ژورنال.
+     */
+    @Synchronized
+    fun ensureAllTradesHaveArchiveSnapshots(
+        context: Context,
+        trades: List<PaperTrade>,
+    ): List<ArchivedTradeSnapshotRecord> {
+        if (_records.value.isEmpty()) {
+            init(context)
+        }
+        for (trade in trades.sortedBy { it.openedAt }) {
+            val hasOpen = _records.value.any {
+                it.tradeId == trade.id && !it.isCloseSnapshot &&
+                    it.localImagePath.isNotBlank() && File(it.localImagePath).exists()
+            }
+            if (!hasOpen) {
+                captureAndArchiveTradeOpen(
+                    context = context,
+                    trade = trade,
+                    report = null,
+                    triggerCandles = emptyList(),
+                )
+            }
+            if (!trade.isOpen) {
+                val hasClose = _records.value.any {
+                    it.tradeId == trade.id && it.isCloseSnapshot &&
+                        it.localImagePath.isNotBlank() && File(it.localImagePath).exists()
+                }
+                if (!hasClose) {
+                    captureAndArchiveTradeClose(
+                        context = context,
+                        closedTrade = trade,
+                        closeCandles = emptyList(),
+                    )
+                }
+            }
+        }
+        return _records.value
+    }
+
+    fun buildSyntheticSnapshotRecordForTrade(
+        trade: PaperTrade,
+        isClosePhase: Boolean = !trade.isOpen,
+    ): ArchivedTradeSnapshotRecord {
+        val fixedSl = trade.initialStopLoss ?: trade.stopLoss
+        val fixedRisk = trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0
+        val expectedWin = round2(fixedRisk * trade.riskReward)
+        val closeAt = trade.closedAt ?: (trade.openedAt + 900_000L)
+        val exitP = trade.exitPrice ?: trade.takeProfit
+        val closeCatFa = if (isClosePhase) classifyCloseConditionFa(trade) else ""
+        val realizedPnl = trade.pnlUsd ?: 0.0
+        val realizedR = trade.rMultiple ?: (realizedPnl / fixedRisk.coerceAtLeast(0.5))
+        return ArchivedTradeSnapshotRecord(
+            tradeId = trade.id,
+            tradeNumber = trade.displayTradeNumber,
+            snapshotPhase = if (isClosePhase) "CLOSE" else "OPEN",
+            snapshotTimestampMs = if (isClosePhase) closeAt else trade.openedAt,
+            symbol = trade.symbol,
+            timeframeLabel = trade.interval.label,
+            action = trade.action.name,
+            strategyId = trade.strategyId,
+            strategyTitleFa = trade.strategyTitleFa,
+            strategyBadgeFa = trade.strategyTitleFa.take(24),
+            entryPrice = trade.entry,
+            stopLossPrice = fixedSl,
+            takeProfitPrice = trade.takeProfit,
+            riskReward = trade.riskReward,
+            optimalRiskReward = trade.effectiveOptimalRr,
+            fixedRiskUsd = fixedRisk,
+            expectedProfitUsd = expectedWin,
+            confidence = trade.confidence,
+            openedAtMs = trade.openedAt,
+            exitPrice = if (isClosePhase) exitP else null,
+            exitAtMs = if (isClosePhase) closeAt else null,
+            exitReasonFa = if (isClosePhase) (trade.exitReason ?: closeCatFa) else "",
+            realizedPnlUsd = if (isClosePhase) round2(realizedPnl) else null,
+            realizedRMultiple = if (isClosePhase) round2(realizedR) else null,
+            closeConditionCategoryFa = closeCatFa,
+            rrFormulaFa = trade.buildRrFormulaSummaryFa(),
+            slBasisFa = "سنگر ساختاری ثابت (غیرپله‌ای)",
+            tpBasisFa = "موج هوسودا (R:R اولیه ثابت)",
+            tenkan = trade.entry,
+            kijun = fixedSl,
+            currentSpanA = trade.entry,
+            currentSpanB = fixedSl,
+            futureSpanA = trade.takeProfit,
+            futureSpanB = trade.entry,
+            atr14 = abs(trade.entry - fixedSl) * 0.5,
+            conditionsSummary = trade.entryConditions,
+            fullPaperTrade = trade,
+        )
+    }
+
+    fun loadOrRenderSnapshotBitmap(record: ArchivedTradeSnapshotRecord): Bitmap {
+        if (record.localImagePath.isNotBlank()) {
+            val f = File(record.localImagePath)
+            if (f.exists()) {
+                val decoded = runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull()
+                if (decoded != null) return decoded
+            }
+        }
+        return renderTradeIchimokuSnapshotBitmap(record)
+    }
+
     private fun classifyCloseConditionFa(trade: PaperTrade): String {
         val reason = trade.exitReason.orEmpty()
         val pnl = trade.pnlUsd ?: 0.0

@@ -119,6 +119,20 @@ fun TradeSnapshotArchiveGallerySection(
                         Text("📂 انتخاب فایل عکس/دیتا از گوشی", fontSize = 11.sp, color = AurumColors.Gold)
                     }
                 }
+                Button(
+                    onClick = { viewModel.recordAllTradesWithArchiveSnapshotsAndExportPdf() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AurumColors.Gold,
+                        contentColor = Color.Black,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = "📸📄 ثبت اسکرین‌شات آرشیو تمام معاملات + خروجی فوری PDF",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
             }
 
             if (records.isEmpty()) {
