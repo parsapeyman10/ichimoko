@@ -1255,9 +1255,79 @@ function filterRows() {
             FileOutputStream(outputFile).use { out ->
                 doc.writeTo(out)
             }
+        } catch (_: Throwable) {
+            writePortablePdfFallback(report, outputFile)
         } finally {
-            doc.close()
+            runCatching { doc.close() }
         }
+    }
+
+    private fun writePortablePdfFallback(
+        report: InstitutionalTearSheetReport,
+        outputFile: File,
+    ) {
+        outputFile.parentFile?.mkdirs()
+        val lines = mutableListOf<String>()
+        lines += "AURUM EDGE v3.9.24 - INSTITUTIONAL TEAR SHEET & VISUAL ARCHIVE PDF"
+        lines += "Generated: ${dateFmt.format(Instant.ofEpochMilli(report.generatedAtMs))} | Policy: Fixed Non-Stepped SL | Preserved Initial R:R"
+        lines += String.format(
+            Locale.US,
+            "Balance: $%,.2f | Net PnL: %s$%,.2f | Win Rate: %.1f%% (%dW/%dL) | PF: %.2f | SQN: %.2f",
+            report.currentBalance,
+            if (report.netPnlUsd >= 0) "+" else "-",
+            abs(report.netPnlUsd),
+            report.winRatePct,
+            report.winsCount,
+            report.lossesCount,
+            report.profitFactor,
+            report.sqnScore,
+        )
+        lines += "----------------------------------------------------------------------------------------"
+        val tradeIds = report.trades.map { it.id }.toSet()
+        val snapshots = TradeSnapshotArchiveManager.records.value.filter { it.tradeId in tradeIds }
+        report.trades.forEachIndexed { idx, t ->
+            val fixedSl = t.initialStopLoss ?: t.stopLoss
+            val openSnap = snapshots.firstOrNull { it.tradeId == t.id && !it.isCloseSnapshot }
+            val closeSnap = snapshots.firstOrNull { it.tradeId == t.id && it.isCloseSnapshot }
+            lines += String.format(
+                Locale.US,
+                "#%d | %s (%s) | %s | Entry: %s | Fixed SL: %s | TP: %s | Init R:R: 1:%.2f | PnL: %s | Archive: OPEN=%s CLOSE=%s",
+                t.tradeNumber.takeIf { it > 0 } ?: (idx + 1),
+                t.symbol,
+                t.interval.label,
+                t.action.name,
+                fmtPrice(t.entry),
+                fmtPrice(fixedSl),
+                fmtPrice(t.takeProfit),
+                t.riskReward,
+                t.pnlUsd?.let { String.format(Locale.US, "%s$%.2f", if (it >= 0) "+" else "-", abs(it)) } ?: "OPEN",
+                openSnap?.localFilePath?.substringAfterLast('/') ?: "GENERATED",
+                closeSnap?.localFilePath?.substringAfterLast('/') ?: if (t.isOpen) "PENDING" else "GENERATED",
+            )
+        }
+        val streamContent = buildString {
+            append("BT\n/F1 10 Tf\n36 550 Td\n14 TL\n")
+            lines.take(36).forEach { line ->
+                val escaped = line
+                    .replace("\\", "\\\\")
+                    .replace("(", "\\(")
+                    .replace(")", "\\)")
+                append("($escaped) Tj T*\n")
+            }
+            append("ET\n")
+        }
+        val pdfText = buildString {
+            append("%PDF-1.4\n")
+            append("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n")
+            append("2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n")
+            append("3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj\n")
+            append("4 0 obj << /Length ${streamContent.toByteArray(Charsets.US_ASCII).size} >>\nstream\n")
+            append(streamContent)
+            append("endstream\nendobj\n")
+            append("5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n")
+            append("trailer << /Root 1 0 R >>\n%%EOF\n")
+        }
+        outputFile.writeText(pdfText, Charsets.US_ASCII)
     }
 
     fun suggestedFileName(
