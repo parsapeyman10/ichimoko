@@ -432,6 +432,23 @@ data class BaseStrategyConfig(
     val macroInterval: Interval get() = Interval.fromLabel(macroIntervalLabel)
     val strategyInterval: Interval get() = Interval.fromLabel(strategyIntervalLabel)
     val triggerInterval: Interval get() = Interval.fromLabel(triggerIntervalLabel)
+
+    fun resolveForStrategy(strategyId: String): BaseStrategyConfig {
+        val normId = BitcoinStrategyModel.normalizeStrategyId(strategyId)
+        val ov = perStrategyOverrides[normId] ?: perStrategyOverrides[strategyId] ?: return this
+        return copy(
+            minRiskReward = max(1.5, ov.minRiskReward),
+            maxKijunExtensionAtr = ov.maxKijunExtensionAtr.coerceIn(1.25, 2.40),
+            slBufferAtr = ov.slBufferAtr.coerceIn(0.15, 0.50),
+            breakoutBufferAtr = ov.breakoutBufferAtr.coerceIn(0.08, 0.35),
+            minEfficiencyRatio = ov.minEfficiencyRatio.coerceIn(0.14, 0.42),
+            minVolumeRatio20 = ov.minVolumeRatio20.coerceIn(0.45, 1.10),
+            maxAdverseWickRatio = ov.maxAdverseWickRatio.coerceIn(0.28, 0.58),
+            minFutureKumoThicknessAtr = ov.minFutureKumoThicknessAtr.coerceIn(0.02, 0.16),
+            minSniperDistanceAtr = ov.minSniperDistanceAtr.coerceIn(0.35, 1.05),
+            minDriveBooksConsensus = ov.minDriveBooksConsensus.coerceIn(4, 9),
+        )
+    }
 }
 
 /**
