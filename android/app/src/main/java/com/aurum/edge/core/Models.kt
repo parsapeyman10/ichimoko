@@ -276,7 +276,7 @@ data class PaperTrade(
         val optStr = String.format(java.util.Locale.US, "%.2f", effectiveOptimalRr)
         val model = BitcoinStrategyModel.fromId(strategyId)
         val modelHint = "${model.badgeFa} (${model.combinationCategoryFa} · پایه 1:${String.format(java.util.Locale.US, "%.2f", model.baseOptimalRr)})"
-        val runnerHint = if (riskReward >= 3.0) " · 🚀 مجهز به شکارچی روند بالای ۱:۳" else ""
+        val runnerHint = if (riskReward >= 3.0) " · 🎯 بستن کامل معامله در سقف ۱:۳ (۳R)" else ""
         return "عدد مناسب R:R این معامله: 1:$optStr — بر اساس $modelHint$runnerHint"
     }
 

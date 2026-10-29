@@ -630,24 +630,14 @@ class RiskAndCalendarEngineTest {
             preferredAction = SignalAction.BUY,
             fixedRiskUsdOverride = 5.0,
         )!!
-        val opened3R = runnerJournal.openTrade(calc3R, note = "تست شکارچی روند ۱:۳")
-        // Live tick reaches 66,500 (3.0R) -> Runner locks SL above +2.25R (66,135) and extends TP to 4.7R (67,350) so trade stays open!
+        val opened3R = runnerJournal.openTrade(calc3R, note = "تست بستن کامل در هدف ۱:۳")
+        // Live tick reaches 66,500 (3.0R) -> Trade immediately closes at TP (no SL raising or TP extension past 3R)
         val runnerTickHits = runnerJournal.onLiveTick("BTC/USDT", PriceTick(price = 66_500.0, at = 1_760_002_000_000L))
-        assertTrue(runnerTickHits.isEmpty())
+        assertEquals(1, runnerTickHits.size)
+        assertEquals(com.aurum.edge.core.AutoExitKind.TAKE_PROFIT, runnerTickHits.first().kind)
+        assertTrue(runnerTickHits.first().netPnlUsd >= 14.5)
         val updatedRunnerTrade = runnerJournal.trades.value.first { it.id == opened3R.id }
-        assertTrue(updatedRunnerTrade.isOpen)
-        assertTrue(updatedRunnerTrade.stopLoss >= 66_120.0) // >= +2.24R locked!
-        assertTrue(updatedRunnerTrade.takeProfit >= 67_200.0) // TP extended beyond 1:3!
-
-        // Now price climbs to 4.0R (67,000) -> SL ratchets higher (>= +3.09R = 66,545)
-        runnerJournal.onLiveTick("BTC/USDT", PriceTick(price = 67_000.0, at = 1_760_002_060_000L))
-        val at4R = runnerJournal.trades.value.first { it.id == opened3R.id }
-        assertTrue(at4R.stopLoss >= 66_540.0)
-
-        // When trend finally reverses to the ratcheted SL, trade closes in guaranteed big profit (> +$15 on $5 risk)
-        val exitHits = runnerJournal.onLiveTick("BTC/USDT", PriceTick(price = 66_500.0, at = 1_760_002_120_000L))
-        assertEquals(1, exitHits.size)
-        assertTrue(exitHits.first().netPnlUsd >= 15.0)
+        assertTrue(!updatedRunnerTrade.isOpen)
 
         // 7. Verify 3 distinct trade alarms (Entry, Take-Profit, Stop-Loss) & Gold/Silver Spot-Futures basis alignment
         val alarmKinds = com.aurum.edge.notify.TradeAlarmKind.entries

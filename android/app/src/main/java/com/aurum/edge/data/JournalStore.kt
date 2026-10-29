@@ -250,8 +250,7 @@ class JournalStore(
 
     /**
      * Evaluates an incoming live market tick against all open trades for [symbolInput].
-     * First applies the 1:3+ Institutional Trend-Runner & Profit-Lock Ratchet if the trade reaches/passes 1:3,
-     * then evaluates whether TP or SL was reached.
+     * Closes the trade immediately when TP (or 3R ceiling) or SL is reached.
      */
     @Synchronized
     fun onLiveTick(symbolInput: String, tick: PriceTick): List<AutoExitEvaluation> {
@@ -262,40 +261,10 @@ class JournalStore(
         }
         val triggered = mutableListOf<AutoExitEvaluation>()
         val closedTradesForAlarm = mutableListOf<Pair<PaperTrade, Boolean>>()
-        var runnerModifiedAny = false
-        val updated = current.map { rawTrade ->
-            if (!rawTrade.isOpen || V1Universe.normalize(rawTrade.symbol) != symbol) {
-                rawTrade
+        val updated = current.map { trade ->
+            if (!trade.isOpen || V1Universe.normalize(trade.symbol) != symbol) {
+                trade
             } else {
-                val runner = RiskAndCalendarEngine.evaluateLiveTickTrendRunner(rawTrade, tick)
-                val trade = if (runner != null) {
-                    runnerModifiedAny = true
-                    val initSl = rawTrade.initialStopLoss ?: rawTrade.stopLoss
-                    val effectiveTp = runner.newTakeProfit ?: rawTrade.takeProfit
-                    val initRiskDist = abs(rawTrade.entry - initSl)
-                    val updatedRr = if (initRiskDist > 1e-8) {
-                        round((abs(effectiveTp - rawTrade.entry) / initRiskDist) * 100.0) / 100.0
-                    } else {
-                        rawTrade.riskReward
-                    }
-                    val updatedNote = if (rawTrade.note.contains(runner.stageTitleFa)) {
-                        rawTrade.note
-                    } else if (rawTrade.note.isBlank()) {
-                        runner.stageTitleFa
-                    } else {
-                        "${rawTrade.note} · ${runner.stageTitleFa}"
-                    }
-                    rawTrade.copy(
-                        stopLoss = runner.newStopLoss,
-                        takeProfit = effectiveTp,
-                        riskReward = updatedRr,
-                        initialStopLoss = initSl,
-                        note = updatedNote,
-                    )
-                } else {
-                    rawTrade
-                }
-
                 val hit = RiskAndCalendarEngine.evaluateAutoExit(trade, tick)
                 if (hit != null) {
                     triggered += hit
@@ -318,38 +287,36 @@ class JournalStore(
                 }
             }
         }
-        if (triggered.isNotEmpty() || runnerModifiedAny) {
+        if (triggered.isNotEmpty()) {
             persist(updated)
-            if (triggered.isNotEmpty()) {
-                val totalDelta = triggered.sumOf { it.netPnlUsd }
-                settingsStore?.adjustBalance(totalDelta)
-                val cfg = settingsStore?.read()
-                val alarmEnabled = cfg?.notifyOnSignal != false
-                val soundUri = cfg?.alertSoundUri.orEmpty()
-                closedTradesForAlarm.forEach { (closedTrade, isProfit) ->
-                    if (isDefaultJournalFile) {
-                        runCatching {
-                            TradeSnapshotArchiveManager.captureAndArchiveTradeClose(
-                                context = appContext,
-                                closedTrade = closedTrade,
-                            )
-                        }
-                    }
-                    if (isProfit) {
-                        com.aurum.edge.notify.TradeEventAlarmManager.triggerTakeProfitAlarm(
+            val totalDelta = triggered.sumOf { it.netPnlUsd }
+            settingsStore?.adjustBalance(totalDelta)
+            val cfg = settingsStore?.read()
+            val alarmEnabled = cfg?.notifyOnSignal != false
+            val soundUri = cfg?.alertSoundUri.orEmpty()
+            closedTradesForAlarm.forEach { (closedTrade, isProfit) ->
+                if (isDefaultJournalFile) {
+                    runCatching {
+                        TradeSnapshotArchiveManager.captureAndArchiveTradeClose(
                             context = appContext,
-                            trade = closedTrade,
-                            enabled = alarmEnabled,
-                            customSoundUri = soundUri,
-                        )
-                    } else {
-                        com.aurum.edge.notify.TradeEventAlarmManager.triggerStopLossAlarm(
-                            context = appContext,
-                            trade = closedTrade,
-                            enabled = alarmEnabled,
-                            customSoundUri = soundUri,
+                            closedTrade = closedTrade,
                         )
                     }
+                }
+                if (isProfit) {
+                    com.aurum.edge.notify.TradeEventAlarmManager.triggerTakeProfitAlarm(
+                        context = appContext,
+                        trade = closedTrade,
+                        enabled = alarmEnabled,
+                        customSoundUri = soundUri,
+                    )
+                } else {
+                    com.aurum.edge.notify.TradeEventAlarmManager.triggerStopLossAlarm(
+                        context = appContext,
+                        trade = closedTrade,
+                        enabled = alarmEnabled,
+                        customSoundUri = soundUri,
+                    )
                 }
             }
         }

@@ -4265,89 +4265,22 @@ object IchimokuStrategyEngine {
 
         val overextendedFromKijun = stratSnap.distanceToKijunAtr >= config.maxKijunExtensionAtr
 
-        // ── Stage 4: World-Class Institutional 1:3+ Chandelier & Tenkan-Kijun Trend-Runner (`>= 2.85R`) ──
-        if (currentRMultiple >= 2.85) {
-            // ۱. قفل پلکانی سود (Asymptotic R-Ratchet): در 3.0R حداقل +2.27R قفل می‌شود و به ازای هر 1R بالاتر، 82% آن قفل می‌گردد
-            val ratchetR = 2.15 + (currentRMultiple - 2.85).coerceAtLeast(0.0) * 0.82
-            val ratchetStop = if (isBuy) {
-                trade.entry + ratchetR * oneRDistance
-            } else {
-                trade.entry - ratchetR * oneRDistance
-            }
-
-            // ۲. سنگر ساختاری ایچیموکو + شندلیر ATR (در فاز گسترش روند، پشت تنکان با بافر امن؛ در فاز اشباع، تنگ‌تر)
-            val tenkanAtrBuffer = if (nearTimeCycleAndFlatTenkan || overextendedFromKijun) {
-                trigSnap.atr14 * 0.12
-            } else {
-                trigSnap.atr14 * 0.26
-            }
-            val structuralTenkanStop = if (isBuy) {
-                trigSnap.tenkan - tenkanAtrBuffer
-            } else {
-                trigSnap.tenkan + tenkanAtrBuffer
-            }
-
-            // ۳. فاصله تنفس ضد نویز (Anti-Noise Breathing Room) تا کندل‌های اصلاحی عادی روند را از دست ندهند
-            val minBreathingDist = max(trigSnap.atr14 * 0.35, oneRDistance * 0.25)
-            val rawOptimalStop = if (isBuy) {
-                val combined = max(ratchetStop, structuralTenkanStop)
-                min(combined, livePrice - minBreathingDist)
-            } else {
-                val combined = min(ratchetStop, structuralTenkanStop)
-                max(combined, livePrice + minBreathingDist)
-            }
-            val candidateStop = round2(rawOptimalStop)
-
-            // ۴. امتداد هوشمند حد سود (TP Horizon Expansion) وقتی قیمت می‌خواهد از ۱:۳ رد شود تا روند از دست نرود
-            val distToCurrentTp = if (isBuy) trade.takeProfit - livePrice else livePrice - trade.takeProfit
-            val waveTargets = listOfNotNull(report.targetN, report.targetE)
-            val nextWaveTp = if (isBuy) {
-                waveTargets.filter { it > trade.takeProfit + oneRDistance * 0.5 }.maxOrNull()
-            } else {
-                waveTargets.filter { it < trade.takeProfit - oneRDistance * 0.5 }.minOrNull()
-            }
-            val extendedTp: Double? = if (distToCurrentTp <= oneRDistance * 0.75) {
-                val projectedRunnerTp = if (isBuy) {
-                    trade.entry + max(currentRMultiple + 1.60, 4.50) * oneRDistance
-                } else {
-                    (trade.entry - max(currentRMultiple + 1.60, 4.50) * oneRDistance).coerceAtLeast(0.00001)
-                }
-                val chosenTp = if (nextWaveTp != null) {
-                    if (isBuy) max(nextWaveTp, projectedRunnerTp) else min(nextWaveTp, projectedRunnerTp)
-                } else {
-                    projectedRunnerTp
-                }
-                round2(chosenTp)
-            } else {
-                null
-            }
-
-            val improvesStop = if (isBuy) {
-                candidateStop > trade.stopLoss + trigSnap.atr14 * 0.04 && candidateStop < livePrice
-            } else {
-                candidateStop < trade.stopLoss - trigSnap.atr14 * 0.04 && candidateStop > livePrice
-            }
-            val improvesTp = extendedTp != null && (if (isBuy) extendedTp > trade.takeProfit + oneRDistance * 0.2 else extendedTp < trade.takeProfit - oneRDistance * 0.2)
-
-            if (improvesStop || improvesTp) {
-                val finalStop = if (improvesStop) candidateStop else trade.stopLoss
-                val lockedR = round2(abs(finalStop - trade.entry) / oneRDistance)
-                val tpNote = if (improvesTp && extendedTp != null) " + امتداد TP به $extendedTp" else ""
-                return PreserveModeEvaluation(
-                    tradeId = trade.id,
-                    newStopLoss = finalStop,
-                    stageTitleFa = "🚀 شکارچی روند بالای ۱:۳ (قفل سود +${lockedR}R$tpNote)",
-                    reasonFa = String.format(
-                        Locale.US,
-                        "عبور از ۱:۳ (سود فعلی %.2fR)؛ جایگذاری هوشمند استاپ در +%.2fR با تنفس شندلیر%s",
-                        currentRMultiple,
-                        lockedR,
-                        tpNote,
-                    ),
-                    newTakeProfit = if (improvesTp) extendedTp else null,
-                    lockedRMultiple = lockedR,
-                )
-            }
+        // ── Stage 4: بستن کامل و قطعی معامله در رسیدن به ۳R (۱:۳) یا TP بدون ادامه تریل استاپ ──
+        val reachedTp = if (isBuy) livePrice >= trade.takeProfit else livePrice <= trade.takeProfit
+        if (currentRMultiple >= 3.0 || reachedTp) {
+            return PreserveModeEvaluation(
+                tradeId = trade.id,
+                newStopLoss = round2(livePrice),
+                stageTitleFa = "🎯 اتمام و بستن کامل معامله در هدف ۳R (+${round2(currentRMultiple)}R)",
+                reasonFa = String.format(
+                    Locale.US,
+                    "رسیدن به سقف ۱:۳ (%.2fR)؛ بستن کامل معامله و تسویه سود بدون ادامه تریل استاپ",
+                    currentRMultiple,
+                ),
+                lockedRMultiple = round2(currentRMultiple),
+                shouldCloseImmediatelyInProfit = true,
+                closePrice = round2(livePrice),
+            )
         }
 
         // ── Stage 3: Pre-3R Guaranteed 1:1.5 Floor + Preserve Mode (`2.15R .. < 2.85R`) ──
