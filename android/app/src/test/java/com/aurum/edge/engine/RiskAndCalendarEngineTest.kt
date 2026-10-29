@@ -994,7 +994,7 @@ class RiskAndCalendarEngineTest {
 
         val appliedCfg = neuralEngineV3919.applyAutoTunedParametersToConfig(BaseStrategyConfig())
         assertEquals(16, appliedCfg.perStrategyOverrides.size)
-        val driveEffectiveCfg = appliedCfg.forStrategy(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
+        val driveEffectiveCfg = appliedCfg.resolveForStrategy(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
         assertEquals(2.10, driveEffectiveCfg.minRiskReward, 1e-4)
         assertEquals(1.55, driveEffectiveCfg.maxKijunExtensionAtr, 1e-4)
     }
