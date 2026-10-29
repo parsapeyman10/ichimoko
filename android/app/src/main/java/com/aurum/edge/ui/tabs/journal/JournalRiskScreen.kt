@@ -2122,12 +2122,24 @@ private fun MonthlyPnlCalendarSection(
             }
         }
 
-        // نوار هوشمند «فقط معاملات روز آخر» (پیش‌فرض سریع) + فراخوانی روزهای قبلی در صورت نیاز
-        val displayedTrades = remember(calendar, effectiveSelectedDay) {
+        // نوار هوشمند «فقط معاملات روز آخر» (پیش‌فرض سریع) + تفکیک فوری معاملات سودده و ضررده
+        var outcomeFilter by rememberSaveable { mutableIntStateOf(0) } // 0 = همه, 1 = فقط سودده, 2 = فقط ضررده
+        val rawDayTrades = remember(calendar, effectiveSelectedDay) {
             if (effectiveSelectedDay in 1..calendar.daysInMonth) {
                 calendar.days[effectiveSelectedDay - 1].trades
             } else {
                 calendar.days.flatMap { it.trades }.sortedByDescending { it.closedAt ?: 0L }
+            }
+        }
+        val winningDayTrades = remember(rawDayTrades) { rawDayTrades.filter { (it.pnlUsd ?: 0.0) > 0.0 } }
+        val losingDayTrades = remember(rawDayTrades) { rawDayTrades.filter { (it.pnlUsd ?: 0.0) <= 0.0 } }
+        val winningDaySumUsd = remember(winningDayTrades) { winningDayTrades.sumOf { it.pnlUsd ?: 0.0 } }
+        val losingDaySumUsd = remember(losingDayTrades) { losingDayTrades.sumOf { it.pnlUsd ?: 0.0 } }
+        val displayedTrades = remember(rawDayTrades, winningDayTrades, losingDayTrades, outcomeFilter) {
+            when (outcomeFilter) {
+                1 -> winningDayTrades
+                2 -> losingDayTrades
+                else -> rawDayTrades
             }
         }
 
@@ -2158,15 +2170,15 @@ private fun MonthlyPnlCalendarSection(
                     Text(
                         text = when {
                             selectedDayOfMonth == -1 -> "⚡ حالت سریع: نمایش معاملات روز آخر (روز $effectiveSelectedDay ${calendar.monthTitleFa})"
-                            effectiveSelectedDay > 0 -> "📅 معاملات روز $effectiveSelectedDay ${calendar.monthTitleFa} (${displayedTrades.size} معامله)"
-                            else -> "📂 کل معاملات ماه ${calendar.monthTitleFa} (${displayedTrades.size} معامله)"
+                            effectiveSelectedDay > 0 -> "📅 معاملات روز $effectiveSelectedDay ${calendar.monthTitleFa} (${rawDayTrades.size} معامله)"
+                            else -> "📂 کل معاملات ماه ${calendar.monthTitleFa} (${rawDayTrades.size} معامله)"
                         },
                         style = MaterialTheme.typography.titleSmall,
                         color = AurumColors.Gold,
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = "برای سبک و سریع ماندن ژورنال، به‌صورت پیش‌فرض فقط معاملات روز آخر بارگذاری می‌شود؛ سایر روزها را با یک کلیک فراخوانی کنید.",
+                        text = "معاملات سودده با کادر سبز زمردی (✅ سودده) و معاملات ضررده با کادر قرمز یاقوتی (❌ ضررده) در یک نگاه مشخص شده‌اند.",
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.TextSecondary,
                     )
@@ -2178,6 +2190,108 @@ private fun MonthlyPnlCalendarSection(
                         modifier = Modifier.clickable { onClearAll() },
                     )
                 }
+            }
+
+            // ── تابلو تفکیک فوری سودده در برابر ضررده (High-Contrast Win vs Loss Scoreboard) ──
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AurumColors.Green.copy(alpha = 0.14f))
+                        .border(
+                            width = if (outcomeFilter == 1) 2.dp else 1.dp,
+                            color = AurumColors.Green.copy(alpha = if (outcomeFilter == 1) 0.95f else 0.55f),
+                            shape = RoundedCornerShape(10.dp),
+                        )
+                        .clickable {
+                            outcomeFilter = if (outcomeFilter == 1) 0 else 1
+                            visibleTradesCap = 20
+                        }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = "✅ معاملات سودده (WIN)",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = AurumColors.Green,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = String.format(Locale.US, "%d معامله · +$%.2f", winningDayTrades.size, winningDaySumUsd),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = AurumColors.TextPrimary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AurumColors.Red.copy(alpha = 0.14f))
+                        .border(
+                            width = if (outcomeFilter == 2) 2.dp else 1.dp,
+                            color = AurumColors.Red.copy(alpha = if (outcomeFilter == 2) 0.95f else 0.55f),
+                            shape = RoundedCornerShape(10.dp),
+                        )
+                        .clickable {
+                            outcomeFilter = if (outcomeFilter == 2) 0 else 2
+                            visibleTradesCap = 20
+                        }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = "❌ معاملات ضررده (LOSS)",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = AurumColors.Red,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = String.format(Locale.US, "%d معامله · %s$%.2f", losingDayTrades.size, if (losingDaySumUsd < 0) "-" else "", abs(losingDaySumUsd)),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = AurumColors.TextPrimary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+
+            // نوار فیلتر سریع وضعیت معامله (همه / فقط سودده / فقط ضررده)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Pill(
+                    text = "📊 همه معاملات (${rawDayTrades.size})",
+                    color = if (outcomeFilter == 0) AurumColors.Gold else AurumColors.TextMuted,
+                    modifier = Modifier.clickable {
+                        outcomeFilter = 0
+                        visibleTradesCap = 20
+                    },
+                )
+                Pill(
+                    text = "✅ فقط سودده‌ها (${winningDayTrades.size})",
+                    color = if (outcomeFilter == 1) AurumColors.Green else AurumColors.TextMuted,
+                    modifier = Modifier.clickable {
+                        outcomeFilter = 1
+                        visibleTradesCap = 20
+                    },
+                )
+                Pill(
+                    text = "❌ فقط ضررده‌ها (${losingDayTrades.size})",
+                    color = if (outcomeFilter == 2) AurumColors.Red else AurumColors.TextMuted,
+                    modifier = Modifier.clickable {
+                        outcomeFilter = 2
+                        visibleTradesCap = 20
+                    },
+                )
             }
 
             Row(
@@ -2354,17 +2468,33 @@ private fun ClosedJournalTradeRow(
     var detailsExpanded by rememberSaveable("closed_row_${trade.id}") { mutableStateOf(false) }
     val pnl = trade.pnlUsd ?: 0.0
     val isWin = pnl > 0.0
+    val isLoss = pnl < 0.0
     val isBuy = trade.action == SignalAction.BUY
-    val color = if (isWin) AurumColors.Green else if (pnl < 0.0) AurumColors.Red else AurumColors.Gold
+    val color = when {
+        isWin -> AurumColors.Green
+        isLoss -> AurumColors.Red
+        else -> AurumColors.Gold
+    }
+    val cardBgColor = when {
+        isWin -> AurumColors.Green.copy(alpha = 0.13f)
+        isLoss -> AurumColors.Red.copy(alpha = 0.13f)
+        else -> AurumColors.SurfaceAlt
+    }
+    val outcomeBadgeText = when {
+        isWin -> "✅ سودده (WIN)"
+        isLoss -> "❌ ضررده (LOSS)"
+        else -> "⚖️ سر‌به‌سر"
+    }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
-            .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(11.dp))
+            .background(cardBgColor)
+            .border(1.6.dp, color.copy(alpha = 0.85f), RoundedCornerShape(11.dp))
             .clickable { detailsExpanded = !detailsExpanded }
             .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2372,10 +2502,14 @@ private fun ClosedJournalTradeRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f),
             ) {
+                Pill(
+                    text = outcomeBadgeText,
+                    color = color,
+                )
                 Pill(
                     text = trade.displayTradeNumberBadgeFa,
                     color = AurumColors.Gold,
@@ -2383,35 +2517,36 @@ private fun ClosedJournalTradeRow(
                 Text(
                     text = trade.symbol,
                     style = MaterialTheme.typography.titleSmall,
-                    color = AurumColors.Gold,
+                    color = AurumColors.TextPrimary,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.clickable { onOpenChart() },
                 )
                 Pill(
-                    text = if (isBuy) "خرید" else "فروش",
-                    color = if (isBuy) AurumColors.Green else AurumColors.Red,
-                )
-                Pill(
-                    text = trade.interval.label,
+                    text = "${if (isBuy) "خرید" else "فروش"} · ${trade.interval.label}",
                     color = AurumColors.Cyan,
                 )
-                trade.rMultiple?.let { r ->
-                    Pill(
-                        text = String.format(Locale.US, "%s%.2fR", if (r >= 0) "+" else "", r),
-                        color = color,
-                    )
-                }
             }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = String.format(Locale.US, "%s$%.2f", if (pnl >= 0) "+" else "", pnl),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = color,
-                    fontWeight = FontWeight.Bold,
-                )
+                val rText = trade.rMultiple?.let { r ->
+                    String.format(Locale.US, " (%s%.2fR)", if (r >= 0) "+" else "", r)
+                }.orEmpty()
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(color.copy(alpha = 0.22f))
+                        .border(1.dp, color.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        text = String.format(Locale.US, "%s$%.2f%s", if (pnl >= 0) "+" else "", pnl, rText),
+                        style = MaterialTheme.typography.titleSmall,
+                        color = color,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
                 Pill(
                     text = if (detailsExpanded) "▲" else "▼",
                     color = AurumColors.TextSecondary,
@@ -2420,9 +2555,9 @@ private fun ClosedJournalTradeRow(
         }
 
         Text(
-            text = "${trade.strategyTitleFa.substringBefore('(').trim()} · ${trade.exitReason ?: "بسته‌شده"} · ${formatDateTime(trade.closedAt ?: trade.openedAt)}",
+            text = "${if (isWin) "🎯 نتیجه: سود" else if (isLoss) "🛑 نتیجه: ضرر" else "نتیجه: سر‌به‌سر"} · ورود: ${formatPrice(trade.entry)} ← خروج: ${trade.exitPrice?.let { formatPrice(it) } ?: "—"} · ${trade.strategyTitleFa.substringBefore('(').trim()} · ${formatDateTime(trade.closedAt ?: trade.openedAt)}",
             style = MaterialTheme.typography.labelSmall,
-            color = AurumColors.TextSecondary,
+            color = AurumColors.TextPrimary,
         )
 
         if (detailsExpanded) {

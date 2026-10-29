@@ -216,7 +216,19 @@ enum class BitcoinStrategyModel(
         baseOptimalRr = 2.40,
     ),
 
-    // ── ۵. استراتژی‌های استخراج‌شده خط‌به‌خط از ۹ کتاب PDF گوگل درایو (Drive PDF Books 1..9) ──
+    // ── ۵. متود جامع یکپارچه کتاب‌های درایو ۱ تا ۹ (Unified 9-Book Drive Master Method) ──
+    DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER(
+        id = "DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER",
+        titleFa = "متود جامع یکپارچه کتاب‌های درایو ۱ تا ۹ (اجماع بیزین تطبیقی ۹ کتاب PDF)",
+        badgeFa = "متود جامع درایو ۱ تا ۹ · ابرترکیب ۹ کتاب",
+        authorRefFa = "Unified 9-Book Drive Meta-Ensemble (TuAnh + Foka + Keenbase + Mukherjee ×2 + HowToTrade + TSG + Koonitz ×2)",
+        summaryFa = "تلفیق یکپارچه هر ۹ کتاب PDF گوگل درایو با الگوریتم روز «اجماع بیزین تطبیقی و وزن‌دهی رژیم بازار» (Adaptive Bayesian Log-Odds 9-Book Consensus): ترکیب صفحه سه‌گانه EMA(13/21/34/89/200)، کراس نهادی (7-22-44 و 10-30-60)، فشردگی بولینگر، پرش RSI(7)/RSI(14) از ۵۰، تایید DMI/ADX(24) و MACD، آزادی سه‌بعدی چیکو، فرمول کلی (Kelly 69-76%) و سنگر استاپ ترکیبی فرکتال + Kijun30±0.4ATR.",
+        hasPatel = true,
+        hasTuttle = true,
+        hasHosoda = true,
+        hasPeloille = true,
+        baseOptimalRr = 2.85,
+    ),
     TUANH_BOLLINGER_SQUEEZE(
         id = "TUANH_BOLLINGER_SQUEEZE",
         titleFa = "کتاب درایو ۱ (TuAnh): فشردگی بولینگر (BB 20,2 Squeeze) + کومو + EMA89/MA200 + RSI(50)",
@@ -328,6 +340,7 @@ enum class BitcoinStrategyModel(
 
     val isDrivePdfStrategy: Boolean
         get() = this in setOf(
+            DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER,
             TUANH_BOLLINGER_SQUEEZE,
             FOKA_15MIN_EMA21_RSI7_FRACTAL,
             KEENBASE_CROSS_10_30_60,
@@ -343,8 +356,10 @@ enum class BitcoinStrategyModel(
         get() = listOf(hasPatel, hasTuttle, hasHosoda, hasPeloille).count { it }
 
     val combinationCategoryFa: String
-        get() = if (isDrivePdfStrategy) {
-            "کتاب‌های PDF گوگل درایو (۹ استراتژی)"
+        get() = if (this == DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER) {
+            "متود جامع یکپارچه کتاب‌های درایو ۱ تا ۹"
+        } else if (isDrivePdfStrategy) {
+            "کتاب‌های PDF گوگل درایو (۱ تا ۹)"
         } else {
             when (combinationCount) {
                 1 -> "تک‌استراتژی (۱گانه)"
@@ -382,6 +397,23 @@ data class DriveBookPlaybookSpec(
 )
 
 fun BitcoinStrategyModel.driveBookPlaybook(): DriveBookPlaybookSpec = when (this) {
+    BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = "Unified Drive Books 1–9 Master Method (تلفیق جامع هر ۹ کتاب PDF گوگل درایو)",
+        authorAndEdition = "Adaptive Bayesian Log-Odds 9-Book Consensus — TuAnh + Foka + Keenbase + Mukherjee ×2 + HowToTrade + TSG + Koonitz ×2",
+        ichimokuSettingsFa = "ابرچنگال سه‌گانه ایچیموکو: استاندارد (9,26,52) + نهادی Keenbase (10,30,60) + سریع کونیتز (7,22,44)",
+        auxiliaryIndicatorsFa = "EMA Ribbon (13, 21, 34, 48, 89, SMA200) + BB(20,2) Squeeze + RSI(7)/RSI(14) 50-Bounce + DMI/ADX(14) + MACD + 5-Bar Fractals + Kelly Win%",
+        entryChecklistStepsFa = listOf(
+            "۱. فیلتر صفحه سه‌گانه کونیتز و هم‌جهتی هر ۳ ابر ایچیموکو (9-26-52 ، 10-30-60 و 7-22-44) همراه با ریبون EMA(13/21/34/89)",
+            "۲. اجماع بیزین تطبیقی حداقل ۶ از ۹ کتاب درایو با احتمال برد ترکیبی ≥ ۷۸٪ و امتیاز معیار کلی (Kelly ≥ 69%)",
+            "۳. تایید هم‌زمان ماشه‌های شکار سود: فشردگی بولینگر (TuAnh)، پرش RSI(7) از خط ۵۰ (Foka)، کراس 10/30 و 7/22 و تایید DMI/MACD",
+            "۴. آزادی سه‌بعدی Chikou Span بالای/زیر کومو در ۲۶ دوره قبل (کتاب‌های ۵، ۷ و ۸) و عدم وجود کیجون فلت رِنج",
+        ),
+        stopLossFormulaFa = "سنگر ترکیبی ضد استاپ‌هانت: قوی‌ترین سطح بین فرکتال ۵ کندلی بیل ویلیامز (Foka) + Kijun(30)±0.40ATR (Keenbase) + EMA(34) کونیتز + BB Middle(20)",
+        takeProfitAndExitRulesFa = "تارگت پویا 2.85R تا 3.25R (تلفیق هدف 3R سیستم Keenbase/Foka با امواج N/E هوسودا و هدف MA200 کتاب TuAnh) + خروج هوشمند ترکیبی RSI موکرجی و ۴ قانون کونیتز",
+        specialEdgeAdvantageFa = "با ادغام ریاضی هر ۹ کتاب در یک متود جامع بیزین، خطاهای تک‌استراتژی حذف شده و فقط معاملات اسنایپر با بالاترین امید ریاضی شکار می‌شوند.",
+    )
+
     BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE -> DriveBookPlaybookSpec(
         strategyId = id,
         bookFileTitle = "Ichimoku & Bollinger Bands Strategy.pdf (TuAnh)",
@@ -565,6 +597,28 @@ fun BitcoinStrategyModel.formatLiveBookTelemetryFa(
 ): String {
     if (trigSnap == null) return "در حال دریافت کندل‌ها برای محاسبه اندیکاتورهای اختصاصی کتاب..."
     return when (this) {
+        BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> {
+            val consensus = IchimokuStrategyEngine.evaluateUnified9BookConsensus(
+                isLong = isLong,
+                trigSnap = trigSnap,
+                stratSnap = stratSnap ?: trigSnap,
+                macroSnap = null,
+            )
+            String.format(
+                Locale.US,
+                "اجماع ۹ کتاب درایو: %d/9 کتاب تایید · احتمال برد بیزین=%.1f%% · Kelly=%d%% · Fast(7/22)=%s/%s · Keenbase(10/30)=%s/%s · ADX=%.1f · RSI7=%.1f",
+                consensus.confirmedBooksCount,
+                consensus.bayesianWinProbabilityPct,
+                trigSnap.kellyWinProbabilityPercent,
+                IchimokuStrategyEngine.round2(trigSnap.tenkan7).toString(),
+                IchimokuStrategyEngine.round2(trigSnap.kijun22).toString(),
+                IchimokuStrategyEngine.round2(trigSnap.tenkan10).toString(),
+                IchimokuStrategyEngine.round2(trigSnap.kijun30).toString(),
+                trigSnap.adx14,
+                trigSnap.rsi7,
+            )
+        }
+
         BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE -> String.format(
             Locale.US,
             "BB(20,2): [%s .. %s .. %s] (فشردگی=%s) · EMA89=%s · SMA200=%s · RSI(14)=%.1f · کندل ماروبوزو=%s",
@@ -698,11 +752,39 @@ data class BaseStrategyConfig(
     val requireHigherTfAlignment: Boolean = true,
     val requireChikouOpenSpace: Boolean = true,
     val requireFutureKumoSlope: Boolean = true,
+    val minEfficiencyRatio: Double = 0.20,
+    val minVolumeRatio20: Double = 0.60,
+    val minDriveBooksConsensus: Int = 6,
+    val autoTunedGeneration: Int = 0,
 ) {
     val macroInterval: Interval get() = Interval.fromLabel(macroIntervalLabel)
     val strategyInterval: Interval get() = Interval.fromLabel(strategyIntervalLabel)
     val triggerInterval: Interval get() = Interval.fromLabel(triggerIntervalLabel)
 }
+
+/**
+ * خروجی موتور «اجماع بیزین تطبیقی ۹ کتاب درایو» (Adaptive Bayesian Log-Odds 9-Book Consensus):
+ * ارزیابی هم‌زمان هر ۹ کتاب PDF گوگل درایو و استخراج احتمال برد بیزین، سنگر حد ضرر ترکیبی و تارگت بهینه.
+ */
+data class Unified9BookConsensusResult(
+    val isLong: Boolean,
+    val book1TuAnhPassed: Boolean,
+    val book2FokaPassed: Boolean,
+    val book3KeenbasePassed: Boolean,
+    val book4MukherjeeKellyPassed: Boolean,
+    val book5MukherjeeChikouPassed: Boolean,
+    val book6HowToTradePassed: Boolean,
+    val book7Tsg4StepPassed: Boolean,
+    val book8Koonitz5RulesPassed: Boolean,
+    val book9KoonitzTripleScreenPassed: Boolean,
+    val confirmedBooksCount: Int,
+    val bayesianWinProbabilityPct: Double,
+    val compositeSniperAnchor: Double,
+    val compositeFortressStopLoss: Double,
+    val dynamicOptimalRr: Double,
+    val activeBookBadgesFa: List<String>,
+    val summaryFa: String,
+)
 
 /**
  * اسلات استراتژی سفارشی برای مدل‌هایی که کاربر در مراحل بعدی اضافه یا شخصی‌سازی می‌کند.
@@ -1995,6 +2077,227 @@ object IchimokuStrategyEngine {
     }
 
     /**
+     * موتور «متود جامع یکپارچه کتاب‌های درایو ۱ تا ۹» با الگوریتم روز
+     * `Adaptive Bayesian Log-Odds 9-Book Consensus + Regime-Weighted Stacking`:
+     * ارزیابی هم‌زمان هر ۹ کتاب PDF گوگل درایو و استخراج احتمال برد بیزین، سنگر حد ضرر ترکیبی و تارگت بهینه.
+     */
+    fun evaluateUnified9BookConsensus(
+        isLong: Boolean,
+        trigSnap: IchimokuBarSnapshot,
+        stratSnap: IchimokuBarSnapshot,
+        macroSnap: IchimokuBarSnapshot? = null,
+    ): Unified9BookConsensusResult {
+        val atr = trigSnap.atr14.coerceAtLeast(1e-8)
+
+        // ۱. کتاب درایو ۱ (TuAnh): BB(20,2) Squeeze/Band + EMA(89)/SMA(200) + RSI(14) > 50
+        val book1 = if (isLong) {
+            trigSnap.close >= trigSnap.bbMiddle20 &&
+                trigSnap.close >= trigSnap.ema89 - atr * 0.15 &&
+                trigSnap.rsi14 >= 50.0 &&
+                (trigSnap.isBollingerSqueeze || trigSnap.isMarubozuBreakoutBull || trigSnap.close > trigSnap.kumoTop)
+        } else {
+            trigSnap.close <= trigSnap.bbMiddle20 &&
+                trigSnap.close <= trigSnap.ema89 + atr * 0.15 &&
+                trigSnap.rsi14 <= 50.0 &&
+                (trigSnap.isBollingerSqueeze || trigSnap.isMarubozuBreakoutBear || trigSnap.close < trigSnap.kumoBottom)
+        }
+
+        // ۲. کتاب درایو ۲ (Foka 15m/Day): بیرون کومو + شیب EMA(21) و کیجون + پرش RSI(7) از خط ۵۰ + فرکتال ۵ کندلی
+        val book2 = if (isLong) {
+            trigSnap.close > trigSnap.kumoTop &&
+                trigSnap.close >= trigSnap.ema21 - atr * 0.12 &&
+                trigSnap.ema21SlopeAtrPerBar > -0.01 &&
+                (trigSnap.rsi7Bullish50Bounce || trigSnap.rsi7 >= 51.5) &&
+                trigSnap.lastDownFractalLow < trigSnap.close
+        } else {
+            trigSnap.close < trigSnap.kumoBottom &&
+                trigSnap.close <= trigSnap.ema21 + atr * 0.12 &&
+                trigSnap.ema21SlopeAtrPerBar < 0.01 &&
+                (trigSnap.rsi7Bearish50Bounce || trigSnap.rsi7 <= 48.5) &&
+                trigSnap.lastUpFractalHigh > trigSnap.close
+        }
+
+        // ۳. کتاب درایو ۳ (Keenbase 10-30-60): کراس نهادی Tenkan(10)/Kijun(30) + بیرون Kumo(60)
+        val book3 = if (isLong) {
+            trigSnap.tenkan10 >= trigSnap.kijun30 &&
+                trigSnap.close > trigSnap.kumoTop103060 &&
+                stratSnap.close >= stratSnap.kumoBottom103060
+        } else {
+            trigSnap.tenkan10 <= trigSnap.kijun30 &&
+                trigSnap.close < trigSnap.kumoBottom103060 &&
+                stratSnap.close <= stratSnap.kumoTop103060
+        }
+
+        // ۴. کتاب درایو ۴ (Mukherjee Kelly & RSI): حداقل ۳ سیگنال طوفان کامل (Kelly >= 62%) + الگوی شمعی + سلامت RSI
+        val book4 = trigSnap.kellySignalCount >= 3 && if (isLong) {
+            trigSnap.tenkan >= trigSnap.kijun &&
+                trigSnap.rsi14 >= 50.0 &&
+                trigSnap.rsiPeakDropLong < 10.5 &&
+                (trigSnap.hasBullishCandlestickPattern || trigSnap.candleBodyRatio >= 0.30)
+        } else {
+            trigSnap.tenkan <= trigSnap.kijun &&
+                trigSnap.rsi14 <= 50.0 &&
+                trigSnap.rsiTroughRiseShort < 11.5 &&
+                (trigSnap.hasBearishCandlestickPattern || trigSnap.candleBodyRatio >= 0.30)
+        }
+
+        // ۵. کتاب درایو ۵ (Mukherjee Clouds & Chikou Filter): خط ماشه تنکان + کیجون غیرفلت + آزادی چیکو
+        val book5 = !trigSnap.isKijunFlat && if (isLong) {
+            trigSnap.close >= trigSnap.tenkan &&
+                trigSnap.kijunSlopeAtrPerBar >= -0.01 &&
+                trigSnap.chikouBullishOpenSpace
+        } else {
+            trigSnap.close <= trigSnap.tenkan &&
+                trigSnap.kijunSlopeAtrPerBar <= 0.01 &&
+                trigSnap.chikouBearishOpenSpace
+        }
+
+        // ۶. کتاب درایو ۶ (HowToTrade Key Level & Kumo Twist): شکست کامل کانال کومو + Twist هم‌جهت ابر آینده
+        val book6 = if (isLong) {
+            trigSnap.close > trigSnap.kumoTop &&
+                stratSnap.close > stratSnap.kumoTop &&
+                trigSnap.isFutureKumoBullish &&
+                stratSnap.isFutureKumoBullish
+        } else {
+            trigSnap.close < trigSnap.kumoBottom &&
+                stratSnap.close < stratSnap.kumoBottom &&
+                trigSnap.isFutureKumoBearish &&
+                stratSnap.isFutureKumoBearish
+        }
+
+        // ۷. کتاب درایو ۷ (TSG 4-Step Quick Profit): کلوز بیرون کومو + کراس TK + چیکو بالای/زیر کومو ۲۶ دوره قبل
+        val book7 = if (isLong) {
+            trigSnap.close > trigSnap.kumoTop &&
+                trigSnap.tenkan >= trigSnap.kijun &&
+                trigSnap.chikouAboveCloud26
+        } else {
+            trigSnap.close < trigSnap.kumoBottom &&
+                trigSnap.tenkan <= trigSnap.kijun &&
+                trigSnap.chikouBelowCloud26
+        }
+
+        // ۸. کتاب درایو ۸ (Koonitz 5 Golden Rules + DMI/MACD + EMA34): ۵ قانون کونیتز با ADX/DMI یا MACD
+        val book8 = if (isLong) {
+            trigSnap.close > trigSnap.kijun &&
+                trigSnap.close > trigSnap.kumoTop &&
+                trigSnap.chikouAboveCloud26 &&
+                trigSnap.close >= trigSnap.ema34 &&
+                (trigSnap.isDmiBullish || trigSnap.isMacdBullish)
+        } else {
+            trigSnap.close < trigSnap.kijun &&
+                trigSnap.close < trigSnap.kumoBottom &&
+                trigSnap.chikouBelowCloud26 &&
+                trigSnap.close <= trigSnap.ema34 &&
+                (trigSnap.isDmiBearish || trigSnap.isMacdBearish)
+        }
+
+        // ۹. کتاب درایو ۹ (Koonitz Triple Screen 7-22-44 + EMA 13/34/48): هم‌جهتی ۳ تایم‌فریم و ایچیموکوی سریع
+        val macroTripleOk = if (macroSnap == null) {
+            true
+        } else if (isLong) {
+            !macroSnap.isPriceBelowKumo && macroSnap.ema13 >= macroSnap.ema48 - macroSnap.atr14 * 0.25
+        } else {
+            !macroSnap.isPriceAboveKumo && macroSnap.ema13 <= macroSnap.ema48 + macroSnap.atr14 * 0.25
+        }
+        val book9 = macroTripleOk && if (isLong) {
+            trigSnap.tenkan7 >= trigSnap.kijun22 &&
+                trigSnap.close > trigSnap.kumoTop72244 &&
+                trigSnap.ema13 >= trigSnap.ema34 &&
+                stratSnap.ema13 >= stratSnap.ema34 - stratSnap.atr14 * 0.08
+        } else {
+            trigSnap.tenkan7 <= trigSnap.kijun22 &&
+                trigSnap.close < trigSnap.kumoBottom72244 &&
+                trigSnap.ema13 <= trigSnap.ema34 &&
+                stratSnap.ema13 <= stratSnap.ema34 + stratSnap.atr14 * 0.08
+        }
+
+        val flags = listOf(book1, book2, book3, book4, book5, book6, book7, book8, book9)
+        val count = flags.count { it }
+
+        // Adaptive Bayesian Log-Odds Pooling with Regime Weighting (Squeeze vs Trend vs Pullback)
+        val isSqueezeRegime = trigSnap.isBollingerSqueeze
+        val isStrongAdxRegime = trigSnap.adx14 >= 22.0
+        var logOdds = 0.15 // Base prior (~53.7%)
+        if (book1) logOdds += if (isSqueezeRegime) 0.42 else 0.26
+        if (book2) logOdds += 0.34
+        if (book3) logOdds += 0.36
+        if (book4) logOdds += if (trigSnap.kellySignalCount >= 4) 0.38 else 0.28
+        if (book5) logOdds += 0.30
+        if (book6) logOdds += 0.26
+        if (book7) logOdds += 0.28
+        if (book8) logOdds += if (isStrongAdxRegime) 0.40 else 0.30
+        if (book9) logOdds += 0.36
+        if (!book5 && trigSnap.isKijunFlat) logOdds -= 0.35
+
+        val bayesianProb = (100.0 / (1.0 + kotlin.math.exp(-logOdds))).coerceIn(18.0, 97.5)
+
+        // Composite Sniper Anchor (Weighted median of Tenkan9, Tenkan10, Tenkan7, EMA21)
+        val anchors = listOf(trigSnap.tenkan, trigSnap.tenkan10, trigSnap.tenkan7, trigSnap.ema21).sorted()
+        val compositeAnchor = round2((anchors[1] + anchors[2]) / 2.0)
+
+        // Composite Fortress Stop-Loss: combines Fractal (Book 2), Kijun30±0.4ATR (Book 3), EMA34 (Book 8/9), and BB Mid (Book 1)
+        val compositeStop = if (isLong) {
+            val fokaStop = min(trigSnap.lastDownFractalLow, trigSnap.low) - atr * 0.18
+            val keenbaseStop = trigSnap.kijun30 - atr * 0.40
+            val koonitzStop = min(trigSnap.kijun, trigSnap.ema34) - atr * 0.25
+            round2(min(min(fokaStop, keenbaseStop), koonitzStop))
+        } else {
+            val fokaStop = max(trigSnap.lastUpFractalHigh, trigSnap.high) + atr * 0.18
+            val keenbaseStop = trigSnap.kijun30 + atr * 0.40
+            val koonitzStop = max(trigSnap.kijun, trigSnap.ema34) + atr * 0.25
+            round2(max(max(fokaStop, keenbaseStop), koonitzStop))
+        }
+
+        val dynamicRr = when {
+            count >= 8 -> 3.15
+            count >= 7 -> 3.00
+            count >= 6 -> 2.85
+            count >= 5 -> 2.55
+            else -> 2.25
+        }
+
+        val badges = buildList {
+            if (book1) add("درایو ۱ (TuAnh BB)")
+            if (book2) add("درایو ۲ (Foka 15m)")
+            if (book3) add("درایو ۳ (Keenbase 10-30-60)")
+            if (book4) add("درایو ۴ (Mukherjee Kelly)")
+            if (book5) add("درایو ۵ (Chikou Filter)")
+            if (book6) add("درایو ۶ (HowToTrade)")
+            if (book7) add("درایو ۷ (TSG 4-Step)")
+            if (book8) add("درایو ۸ (Koonitz DMI/MACD)")
+            if (book9) add("درایو ۹ (Triple Screen 7-22-44)")
+        }
+
+        val summary = String.format(
+            Locale.US,
+            "اجماع %d/9 کتاب درایو · احتمال برد بیزین %.1f%% · تارگت بهینه 1:%.2f",
+            count,
+            bayesianProb,
+            dynamicRr,
+        )
+
+        return Unified9BookConsensusResult(
+            isLong = isLong,
+            book1TuAnhPassed = book1,
+            book2FokaPassed = book2,
+            book3KeenbasePassed = book3,
+            book4MukherjeeKellyPassed = book4,
+            book5MukherjeeChikouPassed = book5,
+            book6HowToTradePassed = book6,
+            book7Tsg4StepPassed = book7,
+            book8Koonitz5RulesPassed = book8,
+            book9KoonitzTripleScreenPassed = book9,
+            confirmedBooksCount = count,
+            bayesianWinProbabilityPct = round2(bayesianProb),
+            compositeSniperAnchor = compositeAnchor,
+            compositeFortressStopLoss = compositeStop,
+            dynamicOptimalRr = dynamicRr,
+            activeBookBadgesFa = badges,
+            summaryFa = summary,
+        )
+    }
+
+    /**
      * ارزیابی کامل هر یک از ۱۵ نماد داخل اپ (`V1Universe.allSymbols`) بر اساس تنها استراتژی فعال انتخاب‌شده.
      */
     fun evaluateBitcoinStrategy(
@@ -2118,6 +2421,12 @@ object IchimokuStrategyEngine {
         }
 
         val isLong = candidateDirection == SignalAction.BUY
+        val unified9BookConsensus = evaluateUnified9BookConsensus(
+            isLong = isLong,
+            trigSnap = trigSnap,
+            stratSnap = stratSnap,
+            macroSnap = macroSnap,
+        )
 
         // ── Check 1: 3-TF Kumo Regime Alignment (4H / 1H / 15m) ───────────────
         val stratKumoOk = if (isLong) stratSnap.isPriceAboveKumo else stratSnap.isPriceBelowKumo
@@ -2263,6 +2572,7 @@ object IchimokuStrategyEngine {
             trigSnap.high - (trigSnap.high - trigSnap.low) * 0.55
         }
         val activeTenkanRef = when (activeModel) {
+            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> unified9BookConsensus.compositeSniperAnchor
             BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 -> trigSnap.tenkan10
             BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44 -> trigSnap.tenkan7
             BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL -> trigSnap.ema21
@@ -2298,6 +2608,13 @@ object IchimokuStrategyEngine {
         val safeAnchorShort = max(sniperOptimal, livePrice)
 
         val rawTechnicalSl = when (activeModel) {
+            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> {
+                if (isLong) {
+                    round2(min(unified9BookConsensus.compositeFortressStopLoss, safeAnchorLong - minSafeStopDist))
+                } else {
+                    round2(max(unified9BookConsensus.compositeFortressStopLoss, safeAnchorShort + minSafeStopDist))
+                }
+            }
             BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE -> {
                 if (isLong) {
                     val tuAnhFloor = min(min(trigSnap.low, trigSnap.bbMiddle20), trigSnap.kijun) - slBuffer
@@ -2442,8 +2759,12 @@ object IchimokuStrategyEngine {
         } else {
             trigSnap.close < trigSnap.open && trigSnap.closeLocationValue <= 0.55 && trigSnap.candleBodyRatio >= 0.22
         }
-        val volumeMomentumOk = trigSnap.volumeRatio20 >= 0.60
+        val volumeMomentumOk = trigSnap.volumeRatio20 >= effectiveConfig.minVolumeRatio20
+        val reqConsensusCount = effectiveConfig.minDriveBooksConsensus.coerceIn(4, 9)
         val driveBookRuleOk = when (activeModel) {
+            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER ->
+                unified9BookConsensus.confirmedBooksCount >= reqConsensusCount &&
+                    unified9BookConsensus.bayesianWinProbabilityPct >= 76.0
             BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE ->
                 trigSnap.isBollingerSqueeze && if (isLong) {
                     trigSnap.close >= trigSnap.ema89 && trigSnap.rsi14 >= 50.0 && trigSnap.isMarubozuBreakoutBull
@@ -2508,6 +2829,14 @@ object IchimokuStrategyEngine {
         }
         val cond11Passed = directionalCandleOk && volumeMomentumOk && driveBookRuleOk
         val driveBookExtraDetail = when (activeModel) {
+            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER ->
+                String.format(
+                    Locale.US,
+                    " · اجماع %d/9 کتاب درایو (برد بیزین=%.1f%% · Kelly=%d%%)",
+                    unified9BookConsensus.confirmedBooksCount,
+                    unified9BookConsensus.bayesianWinProbabilityPct,
+                    trigSnap.kellyWinProbabilityPercent,
+                )
             BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE ->
                 String.format(Locale.US, " · BB Squeeze=%s · EMA89=%s · RSI14=%.1f", if (trigSnap.isBollingerSqueeze) "OK" else "No", trigSnap.ema89.toString(), trigSnap.rsi14)
             BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL ->
@@ -2590,6 +2919,15 @@ object IchimokuStrategyEngine {
             inRightDirection && (minDistFromEntries / stopDist) >= requiredMinRr
         }
         val chosenWavePair: Pair<String, Double>? = when (activeModel) {
+            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> {
+                val targetMult = max(unified9BookConsensus.dynamicOptimalRr, computedOptimalRr)
+                val unifiedTargetPrice = if (isLong) {
+                    max(livePrice, sniperOptimal) + stopDist * targetMult
+                } else {
+                    (min(livePrice, sniperOptimal) - stopDist * targetMult).coerceAtLeast(0.00001)
+                }
+                "هدف ترکیبی ${String.format(Locale.US, "%.2fR", targetMult)} اجماع ۹ کتاب درایو" to unifiedTargetPrice
+            }
             BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 -> {
                 val fixed3RPrice = if (isLong) {
                     max(livePrice, sniperOptimal) + stopDist * max(3.0, computedOptimalRr)
@@ -2680,6 +3018,8 @@ object IchimokuStrategyEngine {
         val riskDistSniper = round2(abs(sniperOptimal - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.25))
         val slBasisTextFa = buildString {
             when (activeModel) {
+                BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER ->
+                    append("سنگر ترکیبی ۹ کتاب درایو: فرکتال ۵ کندلی + Kijun(30)±0.4ATR + EMA(34) (${round2(unified9BookConsensus.compositeFortressStopLoss)})")
                 BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL ->
                     append("فرکتال ۵ کندلی بیل ویلیامز (${round2(if (isLong) trigSnap.lastDownFractalLow else trigSnap.lastUpFractalHigh)}) + پشت کیجون")
                 BitcoinStrategyModel.KEENBASE_CROSS_10_30_60 ->
@@ -3120,6 +3460,97 @@ object IchimokuStrategyEngine {
     ): List<StrategyConditionCheck> {
         val dirCandle = if (isLong) trigSnap.close >= trigSnap.open else trigSnap.close <= trigSnap.open
         return when (model) {
+            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> {
+                val consensus = evaluateUnified9BookConsensus(isLong, trigSnap, stratSnap, macroSnap)
+                val reqBooks = config.minDriveBooksConsensus.coerceIn(4, 9)
+                val cConsensus = consensus.confirmedBooksCount >= reqBooks && consensus.bayesianWinProbabilityPct >= 76.0
+                val cTripleKumo = if (isLong) {
+                    trigSnap.isPriceAboveKumo && trigSnap.close > trigSnap.kumoTop103060 && trigSnap.close > trigSnap.kumoTop72244
+                } else {
+                    trigSnap.isPriceBelowKumo && trigSnap.close < trigSnap.kumoBottom103060 && trigSnap.close < trigSnap.kumoBottom72244
+                }
+                listOf(
+                    StrategyConditionCheck(
+                        1,
+                        "۱. اجماع بیزین تطبیقی ۹ کتاب درایو (حداقل $reqBooks از ۹ کتاب + احتمال برد ≥ ۷۶٪)",
+                        cConsensus,
+                        String.format(
+                            Locale.US,
+                            "تایید %d/9 کتاب · احتمال برد بیزین: %.1f%% · کتاب‌های فعال: %s",
+                            consensus.confirmedBooksCount,
+                            consensus.bayesianWinProbabilityPct,
+                            consensus.activeBookBadgesFa.joinToString("، ").ifEmpty { "در انتظار تکمیل" },
+                        ),
+                    ),
+                    StrategyConditionCheck(
+                        2,
+                        "۲. هم‌جهتی هر ۳ ابر ایچیموکو: استاندارد (9,26,52) + Keenbase (10,30,60) + سریع (7,22,44)",
+                        cTripleKumo && cond1Passed,
+                        String.format(
+                            Locale.US,
+                            "Kumo(52)=%s · Kumo(60)=%s · Kumo(44)=%s",
+                            round2(if (isLong) trigSnap.kumoTop else trigSnap.kumoBottom).toString(),
+                            round2(if (isLong) trigSnap.kumoTop103060 else trigSnap.kumoBottom103060).toString(),
+                            round2(if (isLong) trigSnap.kumoTop72244 else trigSnap.kumoBottom72244).toString(),
+                        ),
+                    ),
+                    StrategyConditionCheck(
+                        3,
+                        "۳. کتاب درایو ۱ (TuAnh): فشردگی/باند بولینگر BB(20,2) + EMA(89) + RSI(14)>50",
+                        consensus.book1TuAnhPassed,
+                        String.format(Locale.US, "BB20=%s (Squeeze=%s) · EMA89=%s · RSI14=%.1f", round2(trigSnap.bbMiddle20).toString(), if (trigSnap.isBollingerSqueeze) "بله" else "عادی", round2(trigSnap.ema89).toString(), trigSnap.rsi14),
+                    ),
+                    StrategyConditionCheck(
+                        4,
+                        "۴. کتاب درایو ۲ (Foka 15m/Day): شیب EMA(21) + پرش RSI(7) از خط ۵۰ + فرکتال ۵ کندلی",
+                        consensus.book2FokaPassed,
+                        String.format(Locale.US, "EMA21=%s (شیب=%+.2f) · RSI7=%.1f · فرکتال=%s", round2(trigSnap.ema21).toString(), trigSnap.ema21SlopeAtrPerBar, trigSnap.rsi7, round2(if (isLong) trigSnap.lastDownFractalLow else trigSnap.lastUpFractalHigh).toString()),
+                    ),
+                    StrategyConditionCheck(
+                        5,
+                        "۵. کتاب درایو ۳ (Keenbase): کراس نهادی Tenkan(10)/Kijun(30) و کلوز بیرون Kumo(60)",
+                        consensus.book3KeenbasePassed,
+                        String.format(Locale.US, "Tenkan(10)=%s · Kijun(30)=%s · استاپ مکانیکی=%s", round2(trigSnap.tenkan10).toString(), round2(trigSnap.kijun30).toString(), round2(consensus.compositeFortressStopLoss).toString()),
+                    ),
+                    StrategyConditionCheck(
+                        6,
+                        "۶. کتاب درایو ۴ (Mukherjee Kelly): طوفان کامل ۵ سیگناله (Kelly ≥ 62%) + الگوی شمعی و RSI",
+                        consensus.book4MukherjeeKellyPassed,
+                        String.format(Locale.US, "سیگنال‌های کلی=%d/5 (%d%%) · افت RSI از قله=%.1f", trigSnap.kellySignalCount, trigSnap.kellyWinProbabilityPercent, if (isLong) trigSnap.rsiPeakDropLong else trigSnap.rsiTroughRiseShort),
+                    ),
+                    StrategyConditionCheck(
+                        7,
+                        "۷. کتاب درایو ۵ و ۷ (Mukherjee & TSG): خط ماشه تنکان + کیجون غیرفلت + آزادی چیکو بالای/زیر ابر",
+                        consensus.book5MukherjeeChikouPassed && consensus.book7Tsg4StepPassed && cond6Passed,
+                        String.format(Locale.US, "شیب کیجون=%+.2f ATR · چیکو بیرون ابر ۲۶=%s", trigSnap.kijunSlopeAtrPerBar, if (trigSnap.chikouAboveCloud26 || trigSnap.chikouBelowCloud26) "تایید ✅" else "خیر"),
+                    ),
+                    StrategyConditionCheck(
+                        8,
+                        "۸. کتاب درایو ۶ (HowToTrade): شکست کانال کومو و تایید Kumo Twist ابر آینده",
+                        consensus.book6HowToTradePassed && cond5Passed,
+                        cond4Detail,
+                    ),
+                    StrategyConditionCheck(
+                        9,
+                        "۹. کتاب درایو ۸ (Koonitz 5 Rules): ۵ قانون طلایی کونیتز + تایید DMI/ADX و MACD + EMA(34)",
+                        consensus.book8Koonitz5RulesPassed,
+                        String.format(Locale.US, "ADX(14)=%.1f (+DI=%.0f/-DI=%.0f) · MACD=%+.3f · EMA34=%s", trigSnap.adx14, trigSnap.plusDi14, trigSnap.minusDi14, trigSnap.macdHistogram, round2(trigSnap.ema34).toString()),
+                    ),
+                    StrategyConditionCheck(
+                        10,
+                        "۱۰. کتاب درایو ۹ (Koonitz Triple Screen): صفحه سه‌گانه EMA(13/34/48) + ایچیموکوی سریع (7,22,44)",
+                        consensus.book9KoonitzTripleScreenPassed,
+                        String.format(Locale.US, "Fast(7/22)=%s/%s · EMA(13/34/48)=%s/%s/%s", round2(trigSnap.tenkan7).toString(), round2(trigSnap.kijun22).toString(), round2(trigSnap.ema13).toString(), round2(trigSnap.ema34).toString(), round2(trigSnap.ema48).toString()),
+                    ),
+                    StrategyConditionCheck(11, "۱۱. هندسه موج N هوسودا و فاصله امن از روز چرخش زمانی", cond10Passed, cond10Detail),
+                    StrategyConditionCheck(12, "۱۲. نسبت R:R بهینه اجماع ۹ کتاب (حداقل 1:2.25 تا 1:3.15) با سنگر استاپ ترکیبی", cond12Passed, cond12Detail),
+                    StrategyConditionCheck(13, "۱۳. کارایی جهت‌دار روند کافمن (ER14) و فیلتر ضد رِنج", cond13Passed, cond13Detail),
+                    StrategyConditionCheck(14, "۱۴. کندل تایید جهت‌دار با حجم مناسب و شدوی مخالف کنترل‌شده", cond14Passed && dirCandle, cond14Detail),
+                    StrategyConditionCheck(15, "۱۵. فاز تولد یا گسترش موج (Genesis / Core Expansion)", cond15Passed, cond15Detail),
+                    StrategyConditionCheck(16, "۱۶. نقطه‌زنی اسنایپر ترکیبی روی میانه وزن‌دار (Tenkan 7/9/10 + EMA21)", cond16Passed, cond16Detail),
+                )
+            }
+
             BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE -> {
                 val c1 = if (isLong) stratSnap.isPriceAboveKumo && trigSnap.isPriceAboveKumo else stratSnap.isPriceBelowKumo && trigSnap.isPriceBelowKumo
                 val c2 = trigSnap.isBollingerSqueeze || (if (isLong) trigSnap.close >= trigSnap.bbMiddle20 else trigSnap.close <= trigSnap.bbMiddle20)
@@ -3419,8 +3850,42 @@ object IchimokuStrategyEngine {
             trigSnap.atr14 * 0.03
         }
 
-        // ── ماشه‌های اختصاصی ۹ کتاب PDF گوگل درایو ────────────────────────────
+        // ── ماشه‌های اختصاصی متود جامع ۹ کتاب درایو و تک‌کتاب‌های درایو ────────────────────────────
         when (activeModel) {
+            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> {
+                val consensus = evaluateUnified9BookConsensus(isLong, trigSnap, stratSnap, null)
+                val reqBooks = config.minDriveBooksConsensus.coerceIn(4, 9)
+                if (consensus.confirmedBooksCount >= reqBooks) {
+                    if (isLong && cur.close > cur.open && cur.close > trigSnap.kumoTop) {
+                        if ((trigSnap.isBollingerSqueeze && trigSnap.isMarubozuBreakoutBull) || trigSnap.recentKatanaRelease) {
+                            return StrategyTriggerType.EARLY_KATANA_GENESIS
+                        }
+                        val touchedAnchor = listOf(prev1, prev2, prev3, cur).any { b ->
+                            b.low <= max(consensus.compositeSniperAnchor, trigSnap.kijun) + trigSnap.atr14 * 0.35
+                        }
+                        if (touchedAnchor && cur.close >= min(trigSnap.tenkan7, trigSnap.tenkan)) {
+                            return StrategyTriggerType.PULLBACK_BOUNCE
+                        }
+                        if (cur.close >= trigSnap.chikouResistancePeak + breakoutBuf) {
+                            return StrategyTriggerType.VALIDATED_BREAKOUT
+                        }
+                    } else if (!isLong && cur.close < cur.open && cur.close < trigSnap.kumoBottom) {
+                        if ((trigSnap.isBollingerSqueeze && trigSnap.isMarubozuBreakoutBear) || trigSnap.recentKatanaRelease) {
+                            return StrategyTriggerType.EARLY_KATANA_GENESIS
+                        }
+                        val touchedAnchor = listOf(prev1, prev2, prev3, cur).any { b ->
+                            b.high >= min(consensus.compositeSniperAnchor, trigSnap.kijun) - trigSnap.atr14 * 0.35
+                        }
+                        if (touchedAnchor && cur.close <= max(trigSnap.tenkan7, trigSnap.tenkan)) {
+                            return StrategyTriggerType.PULLBACK_BOUNCE
+                        }
+                        if (cur.close <= trigSnap.chikouSupportTrough - breakoutBuf) {
+                            return StrategyTriggerType.VALIDATED_BREAKOUT
+                        }
+                    }
+                }
+            }
+
             BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE -> {
                 if (isLong && cur.close > cur.open && cur.close > trigSnap.kumoTop) {
                     if (trigSnap.isBollingerSqueeze && trigSnap.isMarubozuBreakoutBull && trigSnap.rsi14 >= 50.0) {

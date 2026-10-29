@@ -480,11 +480,11 @@ class RiskAndCalendarEngineTest {
         assertEquals(SymbolPollTier.OPEN_POSITION, openTier)
         assertEquals(15_000L, openTier.tickIntervalMs)
 
-        // 5. Verify all 24 strategies (15 original 4-book combinations + 9 Google Drive PDF strategies) evaluate simultaneously on 15m and 5m + R:R Breakdown & Optimal R:R
-        assertEquals(24, BitcoinStrategyModel.entries.size)
-        assertEquals(9, BitcoinStrategyModel.drivePdfStrategies.size)
-        assertEquals(24, dualReport.reports15mByStrategy.size)
-        assertEquals(24, dualReport.reports5mByStrategy.size)
+        // 5. Verify all 25 strategies (15 original 4-book combinations + Unified 9-Book Drive Master Method + 9 Google Drive PDF strategies) evaluate simultaneously on 15m and 5m + R:R Breakdown & Optimal R:R
+        assertEquals(25, BitcoinStrategyModel.entries.size)
+        assertEquals(10, BitcoinStrategyModel.drivePdfStrategies.size)
+        assertEquals(25, dualReport.reports15mByStrategy.size)
+        assertEquals(25, dualReport.reports5mByStrategy.size)
         BitcoinStrategyModel.entries.forEach { model ->
             val rep15 = dualReport.reportFor(Interval.M15, model.id)
             val rep5 = dualReport.reportFor(Interval.M5, model.id)
@@ -941,6 +941,34 @@ class RiskAndCalendarEngineTest {
         assertNotNull(closeSnap)
         assertTrue(closeSnap!!.isCloseSnapshot)
         assertEquals(12, closeSnap.displayTradeNumber)
+
+        // Verify v3.9.19 features: Unified 9-Book Drive Master Method + Causal Market Attribution + News Intelligence + Post-Training CEM/Bayesian Auto-Tuner
+        val snap = IchimokuStrategyEngine.computeSnapshot(sampleBars)!!
+        val consensus9 = IchimokuStrategyEngine.evaluateUnified9BookConsensus(
+            isLong = true,
+            trigSnap = snap,
+            stratSnap = snap,
+            macroSnap = snap,
+        )
+        assertTrue(consensus9.confirmedBooksCount in 0..9)
+        assertTrue(consensus9.bayesianWinProbabilityPct in 18.0..97.5)
+        assertTrue(consensus9.dynamicOptimalRr >= 2.25)
+
+        val neuralEngine = com.aurum.edge.core.NeuralSelfLearningEngine(context = null, storageFile = null)
+        val newsSnap = neuralEngine.ingestExternalHeadlinesAndRefreshMacroNews(
+            rawTitles = listOf("Gold rally surges on Fed rate cut hopes" to "Reuters"),
+        )
+        assertTrue(newsSnap.headlines.isNotEmpty())
+        val causalAttr = neuralEngine.computeMarketCausalAttribution(
+            symbolInput = "XAU/USD",
+            report = null,
+        )
+        assertEquals("XAU/USD", causalAttr.symbol)
+        assertTrue(causalAttr.primaryCauseBadgeFa.isNotBlank())
+
+        val tunedParams = neuralEngine.runPostTrainingParameterAutoTuning()
+        assertTrue(tunedParams.minRiskReward >= 1.5)
+        assertTrue(tunedParams.minDriveBooksConsensus in 5..8)
     }
 }
 

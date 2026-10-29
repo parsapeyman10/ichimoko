@@ -468,7 +468,297 @@ fun NeuralBrainScreen(
             }
         }
 
-        // ── ۱-ب. کالبدشکافی تریدی علل تارگت و استاپ (Trade Outcome Forensics) ──
+        // ── ۱-الف. درک زنده وضعیت هر بازار و تشخیص علت وقوع حرکت فعلی (Causal Market Attribution) ──
+        SectionCard(
+            title = "🌍 درک زنده وضعیت هر بازار و علت حرکت فعلی (Causal Market Attribution)",
+            subtitle = "تشخیص لحظه‌ای این‌که در طلا، نقره، کریپتو، فارکس و داوجونز چه اتفاقی در جریان است و علت آن مربوط به چیست",
+            initiallyExpanded = false,
+        ) {
+            val focusedReport = dualReports[assistantSymbol]?.primaryReport
+            val liveAttr = remember(assistantSymbol, focusedReport, neuralState.liveMarketAttributions) {
+                neuralState.liveMarketAttributions.firstOrNull { it.symbol == assistantSymbol }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    V1Universe.allSymbols.forEach { sym ->
+                        Pill(
+                            text = sym,
+                            color = if (sym == assistantSymbol) AurumColors.Gold else AurumColors.TextMuted,
+                            modifier = Modifier.clickable { assistantSymbol = sym },
+                        )
+                    }
+                }
+
+                val attributionsToShow = if (neuralState.liveMarketAttributions.isNotEmpty()) {
+                    neuralState.liveMarketAttributions
+                } else {
+                    emptyList()
+                }
+
+                if (attributionsToShow.isEmpty()) {
+                    Text(
+                        text = "در حال دریافت کندل‌ها برای استخراج علیت بازار؛ دکمه اسکن یا به‌روزرسانی اخبار را بزنید.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AurumColors.TextMuted,
+                    )
+                } else {
+                    val orderedList = attributionsToShow.sortedByDescending { it.symbol == assistantSymbol }
+                    orderedList.forEach { attr ->
+                        val isSelected = attr.symbol == assistantSymbol
+                        val borderColor = if (isSelected) AurumColors.Gold else AurumColors.Cyan.copy(alpha = 0.35f)
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(AurumColors.SurfaceAlt)
+                                .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Pill(
+                                    text = "${attr.symbol} [${attr.timeframeLabel}] · ${attr.categoryTitleFa}",
+                                    color = AurumColors.Gold,
+                                )
+                                Pill(
+                                    text = "اطمینان علیت: ${String.format(Locale.US, "%.1f%%", attr.causalConfidencePct)}",
+                                    color = AurumColors.Green,
+                                )
+                            }
+                            Text(
+                                text = "🔍 علت اصلی اتفاق فعلی: ${attr.primaryCauseBadgeFa}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AurumColors.Cyan,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = "📊 وضعیت فعلی بازار: ${attr.marketRegimeStateFa}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextPrimary,
+                            )
+                            Text(
+                                text = "📌 چه اتفاقی در حال رخ دادن است: ${attr.whatIsHappeningFa}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextPrimary,
+                            )
+                            Text(
+                                text = "🧠 این اتفاق مربوط به چیه: ${attr.whyItIsHappeningFa}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.Gold,
+                            )
+                            Text(
+                                text = "📰 اثر اخبار روی این بازار: ${attr.newsImpactSummaryFa}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextSecondary,
+                            )
+                            Text(
+                                text = "📚 متود جامع ۹ کتاب درایو: ${attr.unified9BookSummaryFa}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.Green,
+                            )
+                            Text(
+                                text = "🎯 دستور تاکتیکی شبکه عصبی: ${attr.recommendedTacticalActionFa}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.Cyan,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── ۱-ب. هوش خبری کلان و تقویم اقتصادی متصل به شبکه عصبی (Live Macro & News Intelligence) ──
+        SectionCard(
+            title = "📰 هوش خبری کلان و تقویم اقتصادی متصل به شبکه عصبی",
+            subtitle = "پایش شوک‌های خبری نرخ بهره، تورم (CPI)، اشتغال (NFP)، تقاضای پناهگاه امن طلا و جریان ETF کریپتو",
+            initiallyExpanded = false,
+        ) {
+            val news = neuralState.latestNewsSnapshot
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Pill(
+                        text = if (news.isHighImpactNewsWindow) "⚠️ پنجره خبر مهم فعال" else "✅ وضعیت خبری پایدار",
+                        color = if (news.isHighImpactNewsWindow) AurumColors.Red else AurumColors.Green,
+                    )
+                    Pill(
+                        text = "شدت شوک خبری: ${(news.shockIntensity * 100).toInt()}%",
+                        color = AurumColors.Gold,
+                    )
+                }
+                Text(
+                    text = news.activeMacroCatalystFa,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = AurumColors.TextPrimary,
+                    fontWeight = FontWeight.Bold,
+                )
+                news.categoryNewsSummaryFa.values.forEach { catSum ->
+                    Text(
+                        text = "• $catSum",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                }
+                news.headlines.forEach { h ->
+                    val sentColor = when {
+                        h.sentimentScore >= 0.10 -> AurumColors.Green
+                        h.sentimentScore <= -0.10 -> AurumColors.Red
+                        else -> AurumColors.Gold
+                    }
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(AurumColors.SurfaceAlt)
+                            .border(0.8.dp, sentColor.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                            .padding(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Pill(text = "${h.source} · ${h.impactLevel}", color = sentColor)
+                            Pill(text = h.causeTagFa, color = AurumColors.Cyan)
+                        }
+                        Text(
+                            text = h.title,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextPrimary,
+                        )
+                    }
+                }
+                Button(
+                    onClick = { viewModel.refreshNeuralMacroNewsNow() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AurumColors.Cyan,
+                        contentColor = Color.Black,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("🔄 به‌روزرسانی اخبار و علیت بازار", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+
+        // ── ۱-پ. فاز تیونینگ خودکار پارامترها پس از آموزش (Post-Training Parameter Auto-Tuning Phase) ──
+        SectionCard(
+            title = "🎛️ مرحله تیونینگ خودکار پارامترها پس از آموزش (CEM + Bayesian Auto-Tuner)",
+            subtitle = "کالیبراسیون خودکار پارامترهای استراتژی و گیت شبکه عصبی در پایان هر سیکل آموزشی برای شکار دقیق‌ترین معاملات سودده",
+            initiallyExpanded = false,
+        ) {
+            val tuned = neuralState.autoTunedParameters
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill(
+                    text = neuralState.currentTrainingPhaseBadgeFa,
+                    color = AurumColors.Gold,
+                )
+                Text(
+                    text = "🔬 متود تیونینگ روز: ${tuned.methodBadgeFa} (نسل #${tuned.tuningGeneration})",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = AurumColors.Cyan,
+                    fontWeight = FontWeight.Bold,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    StatTile(
+                        label = "حداقل R:R تیون‌شده",
+                        value = String.format(Locale.US, "1:%.2f", tuned.minRiskReward),
+                        valueColor = AurumColors.Green,
+                        modifier = Modifier.weight(1f),
+                    )
+                    StatTile(
+                        label = "سقف کشیدگی کیجون",
+                        value = String.format(Locale.US, "%.2f ATR", tuned.maxKijunExtensionAtr),
+                        valueColor = AurumColors.Gold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    StatTile(
+                        label = "اجماع ۹ کتاب درایو",
+                        value = "${tuned.minDriveBooksConsensus}/9 کتاب",
+                        valueColor = AurumColors.Cyan,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    StatTile(
+                        label = "بافر امن استاپ",
+                        value = String.format(Locale.US, "%.2f ATR", tuned.slBufferAtr),
+                        valueColor = AurumColors.Gold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    StatTile(
+                        label = "نرخ برد مورد انتظار",
+                        value = String.format(Locale.US, "%.1f%%", tuned.expectedWinRatePct),
+                        valueColor = AurumColors.Green,
+                        modifier = Modifier.weight(1f),
+                    )
+                    StatTile(
+                        label = "کاهش خطای ورود",
+                        value = String.format(Locale.US, "-%.1f%%", tuned.falsePositiveReductionPct),
+                        valueColor = AurumColors.Cyan,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(AurumColors.SurfaceAlt)
+                        .border(0.8.dp, AurumColors.Gold.copy(alpha = 0.4f), RoundedCornerShape(9.dp))
+                        .padding(9.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = "📐 گزارش کالیبراسیون پارامترها توسط شبکه عصبی:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = AurumColors.Gold,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    tuned.parameterChangeLogFa.forEach { line ->
+                        Text(
+                            text = line,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextPrimary,
+                        )
+                    }
+                }
+                Button(
+                    onClick = { viewModel.runNeuralParameterAutoTuningNow() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AurumColors.Green,
+                        contentColor = Color.Black,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = "🎛️ اجرای تیونینگ خودکار پارامترها و اعمال روی موتور ترید",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+
+        // ── ۱-ت. کالبدشکافی تریدی علل تارگت و استاپ (Trade Outcome Forensics) ──
         SectionCard(
             title = "🔬 کالبدشکافی تریدی علل تارگت (TP) و استاپ (SL) توسط هوش عصبی",
             subtitle = "تحلیل آماری عوامل اصلی موفقیت معاملات، دلایل اصلی استاپ خوردن و قوانین طلایی استخراج‌شده برای ترید",

@@ -1236,6 +1236,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         val updatedMap = _allSymbolStrategyReports.value.toMutableMap()
         updatedMap[symbol] = dualReport.primaryReport
         _allSymbolStrategyReports.value = updatedMap
+        runCatching {
+            container.neuralEngine.updateLiveMarketCausalAttribution(dualReport.primaryReport)
+        }
         return dualReport
     }
 
@@ -1573,6 +1576,26 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             "🧠 فیلتر شبکه عصبی خودآموز پیش از ۱۰,۰۰۰ معامله نیز فعال شد"
         } else {
             "🧠 شبکه عصبی تا تکمیل ۱۰,۰۰۰ معامله در حالت یادگیری خالص (بدون بلاک) قرار گرفت"
+        }
+    }
+
+    fun runNeuralParameterAutoTuningNow() {
+        viewModelScope.launch {
+            val baseCfg = settings.value.baseStrategyConfig
+            val tuned = container.neuralEngine.runPostTrainingParameterAutoTuning(baseCfg)
+            val updatedCfg = container.neuralEngine.applyAutoTunedParametersToConfig(baseCfg)
+            container.settingsStore.update { cur ->
+                cur.copy(baseStrategyConfig = updatedCfg)
+            }
+            _toast.value = "🎛️ تیونینگ خودکار پارامترها (نسل #${tuned.tuningGeneration} · CEM + Bayesian) اعمال شد: R:R≥1:${tuned.minRiskReward} · اجماع درایو=${tuned.minDriveBooksConsensus}/9 کتاب"
+            scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
+        }
+    }
+
+    fun refreshNeuralMacroNewsNow() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val snap = container.neuralEngine.ingestExternalHeadlinesAndRefreshMacroNews()
+            _toast.value = "📰 هوش خبری و علیت بازار شبکه عصبی به‌روزرسانی شد (${snap.headlines.size} رویداد کلان فعال)"
         }
     }
 
