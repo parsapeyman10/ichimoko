@@ -943,30 +943,30 @@ class RiskAndCalendarEngineTest {
         assertEquals(12, closeSnap.displayTradeNumber)
 
         // Verify v3.9.19 features: Unified 9-Book Drive Master Method + Causal Market Attribution + News Intelligence + Post-Training CEM/Bayesian Auto-Tuner
-        val snap = IchimokuStrategyEngine.computeSnapshot(sampleBars)!!
+        val snapV3919 = IchimokuStrategyEngine.computeSnapshot(sampleBars)!!
         val consensus9 = IchimokuStrategyEngine.evaluateUnified9BookConsensus(
             isLong = true,
-            trigSnap = snap,
-            stratSnap = snap,
-            macroSnap = snap,
+            trigSnap = snapV3919,
+            stratSnap = snapV3919,
+            macroSnap = snapV3919,
         )
         assertTrue(consensus9.confirmedBooksCount in 0..9)
         assertTrue(consensus9.bayesianWinProbabilityPct in 18.0..97.5)
         assertTrue(consensus9.dynamicOptimalRr >= 2.25)
 
-        val neuralEngine = com.aurum.edge.core.NeuralSelfLearningEngine(context = null, storageFile = null)
-        val newsSnap = neuralEngine.ingestExternalHeadlinesAndRefreshMacroNews(
+        val neuralEngineV3919 = com.aurum.edge.core.NeuralSelfLearningEngine(context = null, storageFile = null)
+        val newsSnap = neuralEngineV3919.ingestExternalHeadlinesAndRefreshMacroNews(
             rawTitles = listOf("Gold rally surges on Fed rate cut hopes" to "Reuters"),
         )
         assertTrue(newsSnap.headlines.isNotEmpty())
-        val causalAttr = neuralEngine.computeMarketCausalAttribution(
+        val causalAttr = neuralEngineV3919.computeMarketCausalAttribution(
             symbolInput = "XAU/USD",
             report = null,
         )
         assertEquals("XAU/USD", causalAttr.symbol)
         assertTrue(causalAttr.primaryCauseBadgeFa.isNotBlank())
 
-        val tunedParams = neuralEngine.runPostTrainingParameterAutoTuning()
+        val tunedParams = neuralEngineV3919.runPostTrainingParameterAutoTuning()
         assertTrue(tunedParams.minRiskReward >= 1.5)
         assertTrue(tunedParams.minDriveBooksConsensus in 5..8)
     }
