@@ -1269,11 +1269,11 @@ function filterRows() {
         outputFile.parentFile?.mkdirs()
         val lines = mutableListOf<String>()
         lines += "AURUM EDGE v3.9.24 - INSTITUTIONAL TEAR SHEET & VISUAL ARCHIVE PDF"
-        lines += "Generated: ${dateFmt.format(Instant.ofEpochMilli(report.generatedAtMs))} | Policy: Fixed Non-Stepped SL | Preserved Initial R:R"
+        lines += "Generated: ${report.generatedAtFormatted} | Policy: Fixed Non-Stepped SL | Preserved Initial R:R"
         lines += String.format(
             Locale.US,
             "Balance: $%,.2f | Net PnL: %s$%,.2f | Win Rate: %.1f%% (%dW/%dL) | PF: %.2f | SQN: %.2f",
-            report.currentBalance,
+            report.currentBalanceUsd,
             if (report.netPnlUsd >= 0) "+" else "-",
             abs(report.netPnlUsd),
             report.winRatePct,
@@ -1291,18 +1291,18 @@ function filterRows() {
             val closeSnap = snapshots.firstOrNull { it.tradeId == t.id && it.isCloseSnapshot }
             lines += String.format(
                 Locale.US,
-                "#%d | %s (%s) | %s | Entry: %s | Fixed SL: %s | TP: %s | Init R:R: 1:%.2f | PnL: %s | Archive: OPEN=%s CLOSE=%s",
+                "#%d | %s (%s) | %s | Entry: %.2f | Fixed SL: %.2f | TP: %.2f | Init R:R: 1:%.2f | PnL: %s | Archive: OPEN=%s CLOSE=%s",
                 t.tradeNumber.takeIf { it > 0 } ?: (idx + 1),
                 t.symbol,
                 t.interval.label,
                 t.action.name,
-                fmtPrice(t.entry),
-                fmtPrice(fixedSl),
-                fmtPrice(t.takeProfit),
+                t.entry,
+                fixedSl,
+                t.takeProfit,
                 t.riskReward,
                 t.pnlUsd?.let { String.format(Locale.US, "%s$%.2f", if (it >= 0) "+" else "-", abs(it)) } ?: "OPEN",
-                openSnap?.localFilePath?.substringAfterLast('/') ?: "GENERATED",
-                closeSnap?.localFilePath?.substringAfterLast('/') ?: if (t.isOpen) "PENDING" else "GENERATED",
+                openSnap?.internalWebpPath?.substringAfterLast('/') ?: "GENERATED",
+                closeSnap?.internalWebpPath?.substringAfterLast('/') ?: if (t.isOpen) "PENDING" else "GENERATED",
             )
         }
         val streamContent = buildString {
