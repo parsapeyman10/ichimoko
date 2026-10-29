@@ -785,7 +785,7 @@ private fun LiveTradeGaugeCard(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        // ── ۱. هدر تمیز کارت: نماد، جهت و تایم‌فریم در راست | سود دلاری و ضریب R لحظه‌ای در چپ ──
+        // ── ۱. هدر دو ردیفی تمیز و خوانا بدون شکستگی عمودی حروف ──
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -794,68 +794,76 @@ private fun LiveTradeGaugeCard(
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f),
             ) {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Text(
+                        text = trade.symbol,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = AurumColors.Gold,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
                 Pill(
-                    text = trade.displayTradeNumberBadgeFa,
-                    color = AurumColors.Gold,
-                )
-                Text(
-                    text = trade.symbol,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = AurumColors.Gold,
-                )
-                Pill(
-                    text = if (isBuy) "🟢 خرید LONG" else "🔴 فروش SHORT",
+                    text = if (isBuy) "🟢 خرید · ${trade.interval.label}" else "🔴 فروش · ${trade.interval.label}",
                     color = if (isBuy) AurumColors.Green else AurumColors.Red,
-                )
-                Pill(
-                    text = "⏱ ${trade.interval.label}",
-                    color = AurumColors.Cyan,
                 )
             }
 
-            Column(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(statusColor.copy(alpha = 0.14f))
-                    .border(1.dp, statusColor.copy(alpha = 0.50f), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-                horizontalAlignment = Alignment.End,
-            ) {
-                Text(
-                    text = valuation?.let {
-                        val sign = if (it.netPnlUsd >= 0) "+" else "-"
-                        "$sign$${String.format(Locale.US, "%.2f", abs(it.netPnlUsd))}"
-                    } ?: "—",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = statusColor,
-                )
-                Text(
-                    text = String.format(
-                        Locale.US,
-                        "%s%.2fR",
-                        if (currentLiveR >= 0.0) "+" else "",
-                        currentLiveR,
-                    ),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = statusColor,
-                    fontWeight = FontWeight.SemiBold,
-                )
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(statusColor.copy(alpha = 0.16f))
+                        .border(1.2.dp, statusColor.copy(alpha = 0.70f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = valuation?.let {
+                            val sign = if (it.netPnlUsd >= 0) "+" else "-"
+                            "$sign$${String.format(Locale.US, "%.2f", abs(it.netPnlUsd))}"
+                        } ?: "—",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = statusColor,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                    Text(
+                        text = String.format(
+                            Locale.US,
+                            "(%s%.2fR)",
+                            if (currentLiveR >= 0.0) "+" else "",
+                            currentLiveR,
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = statusColor,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
             }
         }
 
-        // ── ۲. نوار نام استراتژی و دکمه باز کردن چارت ──
+        // ── ۲. نوار شماره معامله، نام استراتژی و دکمه باز کردن چارت ──
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(10.dp))
                 .background(AurumColors.Surface)
                 .padding(horizontal = 10.dp, vertical = 7.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Pill(
+                text = trade.displayTradeNumberBadgeFa,
+                color = AurumColors.Gold,
+            )
             Text(
                 text = "🎯 ${trade.strategyTitleFa}",
                 style = MaterialTheme.typography.labelMedium,
@@ -866,10 +874,12 @@ private fun LiveTradeGaugeCard(
                 modifier = Modifier.weight(1f),
             )
             Text(
-                text = "📊 چارت زنده ↗",
+                text = "📊 چارت ↗",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.Gold,
                 fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                softWrap = false,
             )
         }
 
@@ -879,19 +889,19 @@ private fun LiveTradeGaugeCard(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             OpenTradeMetricBox(
-                label = "نقطه ورود (Entry)",
+                label = "نقطه ورود",
                 value = formatPrice(entry),
                 valueColor = AurumColors.Gold,
                 modifier = Modifier.weight(1f),
             )
             OpenTradeMetricBox(
-                label = "قیمت زنده (Live)",
+                label = "قیمت زنده",
                 value = valuation?.let { formatPrice(it.price) } ?: "...",
                 valueColor = statusColor,
                 modifier = Modifier.weight(1f),
             )
             OpenTradeMetricBox(
-                label = if (lockedProfitR > 0.05) "🛡️ قفل سود (+${String.format(Locale.US, "%.1f", lockedProfitR)}R)" else "حد ضرر (SL)",
+                label = if (lockedProfitR > 0.05) "🛡️ قفل +${String.format(Locale.US, "%.1f", lockedProfitR)}R" else "حد ضرر (SL)",
                 value = formatPrice(stop),
                 valueColor = if (lockedProfitR > 0.05) AurumColors.Green else AurumColors.Red,
                 modifier = Modifier.weight(1f),
@@ -1023,27 +1033,27 @@ private fun LiveTradeGaugeCard(
                 .border(1.dp, AurumColors.Gold.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
                 .clickable { localDrawerOpen = !localDrawerOpen }
                 .padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                 Pill(
                     text = "R:R 1:${String.format(Locale.US, "%.2f", trade.effectiveOptimalRr)}",
                     color = AurumColors.Gold,
                 )
-                Pill(
-                    text = "${trendHealth.state.badgeFa} (${trendHealth.continuationScorePercent}%)",
-                    color = trendColor,
-                )
             }
             Text(
-                text = if (isDrawerOpen) "▲ بستن جزئیات کشویی" else "▼ جزئیات کشویی معامله",
+                text = "${trendHealth.state.badgeFa} (${trendHealth.continuationScorePercent}%)",
                 style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.Cyan,
+                color = trendColor,
                 fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Pill(
+                text = if (isDrawerOpen) "▲ بستن جزئیات" else "▼ جزئیات معامله",
+                color = AurumColors.Cyan,
             )
         }
 

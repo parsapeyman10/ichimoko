@@ -277,7 +277,7 @@ fun TradingViewPositionBox(
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        // ۱. هدر ابزار پوزیشن تریدینگ‌ویو (نوع پوزیشن، نماد، تایم‌فریم، استراتژی و R:R)
+        // ۱. هدر ابزار پوزیشن تریدینگ‌ویو (نوع پوزیشن، نماد، تایم‌فریم و سود لحظه‌ای بدون ازدحام)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -292,32 +292,37 @@ fun TradingViewPositionBox(
                     color = if (isBuy) tvGreen else tvRed,
                 )
                 Pill(
-                    text = "${trade.symbol} · ${trade.interval.label}",
+                    text = "\u200E${trade.symbol} · ${trade.interval.label}",
                     color = AurumColors.Gold,
-                )
-                Pill(
-                    text = "R:R 1:${String.format(Locale.US, "%.2f", rr)}",
-                    color = AurumColors.Cyan,
                 )
             }
             if (livePnlUsd != null) {
                 val pnlColor = if (livePnlUsd >= 0.0) tvGreen else tvRed
                 val sign = if (livePnlUsd >= 0.0) "+" else "-"
                 Pill(
-                    text = "${sign}$${String.format(Locale.US, "%.2f", abs(livePnlUsd))} (${String.format(Locale.US, "%s%.2fR", if ((liveR ?: 0.0) >= 0.0) "+" else "", liveR ?: 0.0)})",
+                    text = "\u200E${sign}$${String.format(Locale.US, "%.2f", abs(livePnlUsd))} (${String.format(Locale.US, "%s%.2fR", if ((liveR ?: 0.0) >= 0.0) "+" else "", liveR ?: 0.0)})",
                     color = pnlColor,
+                )
+            } else {
+                Pill(
+                    text = "\u200ER:R 1:${String.format(Locale.US, "%.2f", rr)}",
+                    color = AurumColors.Cyan,
                 )
             }
         }
 
-        // ردیف نام استراتژی و دکمه چارت
+        // ردیف نام استراتژی، R:R و دکمه چارت
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            Pill(
+                text = "\u200ER:R 1:${String.format(Locale.US, "%.2f", rr)}",
+                color = AurumColors.Cyan,
+            )
             Text(
-                text = "🎯 استراتژی: ${trade.strategyTitleFa}",
+                text = "🎯 ${trade.strategyTitleFa}",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.Cyan,
                 fontWeight = FontWeight.Bold,
@@ -327,10 +332,12 @@ fun TradingViewPositionBox(
             )
             if (onOpenChart != null) {
                 Text(
-                    text = "📈 مشاهده روی چارت تریدینگ‌ویو ↗",
+                    text = "📈 چارت ↗",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.Gold,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
                 )
             }
         }

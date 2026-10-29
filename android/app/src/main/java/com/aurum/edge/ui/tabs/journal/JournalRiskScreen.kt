@@ -632,28 +632,34 @@ private fun StrategyJournalCategorizationCard(
                             color = AurumColors.TextSecondary,
                         )
                     }
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = String.format(
-                                Locale.US,
-                                "%s$%.2f",
-                                if (cat.netPnlUsd >= 0.0) "+" else "",
-                                cat.netPnlUsd,
-                            ),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = pnlColor,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = String.format(
-                                Locale.US,
-                                "%s%.2fR",
-                                if (cat.totalR >= 0.0) "+" else "",
-                                cat.totalR,
-                            ),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = pnlColor,
-                        )
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = String.format(
+                                    Locale.US,
+                                    "%s$%.2f",
+                                    if (cat.netPnlUsd >= 0.0) "+" else "-",
+                                    abs(cat.netPnlUsd),
+                                ),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = pnlColor,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                            Text(
+                                text = String.format(
+                                    Locale.US,
+                                    "%s%.2fR",
+                                    if (cat.totalR >= 0.0) "+" else "",
+                                    cat.totalR,
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = pnlColor,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
                     }
                 }
             }
@@ -2212,20 +2218,40 @@ private fun MonthlyPnlCalendarSection(
                             visibleTradesCap = 20
                         }
                         .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
                         text = "✅ معاملات سودده (WIN)",
                         style = MaterialTheme.typography.labelMedium,
                         color = AurumColors.Green,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
                     )
-                    Text(
-                        text = String.format(Locale.US, "%d معامله · +$%.2f", winningDayTrades.size, winningDaySumUsd),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = AurumColors.TextPrimary,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "${winningDayTrades.size} معامله",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = AurumColors.TextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            Text(
+                                text = String.format(Locale.US, "+$%.2f", winningDaySumUsd),
+                                style = MaterialTheme.typography.titleSmall,
+                                color = AurumColors.Green,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                    }
                 }
 
                 Column(
@@ -2243,20 +2269,40 @@ private fun MonthlyPnlCalendarSection(
                             visibleTradesCap = 20
                         }
                         .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
                         text = "❌ معاملات ضررده (LOSS)",
                         style = MaterialTheme.typography.labelMedium,
                         color = AurumColors.Red,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
                     )
-                    Text(
-                        text = String.format(Locale.US, "%d معامله · %s$%.2f", losingDayTrades.size, if (losingDaySumUsd < 0) "-" else "", abs(losingDaySumUsd)),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = AurumColors.TextPrimary,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "${losingDayTrades.size} معامله",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = AurumColors.TextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            Text(
+                                text = String.format(Locale.US, "%s$%.2f", if (losingDaySumUsd < 0) "-" else "", abs(losingDaySumUsd)),
+                                style = MaterialTheme.typography.titleSmall,
+                                color = AurumColors.Red,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                    }
                 }
             }
 
@@ -2489,22 +2535,22 @@ private fun ClosedJournalTradeRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(11.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(cardBgColor)
-            .border(1.6.dp, color.copy(alpha = 0.85f), RoundedCornerShape(11.dp))
+            .border(1.6.dp, color.copy(alpha = 0.85f), RoundedCornerShape(12.dp))
             .clickable { detailsExpanded = !detailsExpanded }
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(5.dp),
+            .padding(11.dp),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
+        // ── ردیف ۱: نشان وضعیت سود/ضرر و شماره معامله در راست | مبلغ سود/ضرر و ضریب R در چپ (بدون شکستگی حروف) ──
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f),
             ) {
                 Pill(
                     text = outcomeBadgeText,
@@ -2514,17 +2560,6 @@ private fun ClosedJournalTradeRow(
                     text = trade.displayTradeNumberBadgeFa,
                     color = AurumColors.Gold,
                 )
-                Text(
-                    text = trade.symbol,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = AurumColors.TextPrimary,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable { onOpenChart() },
-                )
-                Pill(
-                    text = "${if (isBuy) "خرید" else "فروش"} · ${trade.interval.label}",
-                    color = AurumColors.Cyan,
-                )
             }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -2533,19 +2568,29 @@ private fun ClosedJournalTradeRow(
                 val rText = trade.rMultiple?.let { r ->
                     String.format(Locale.US, " (%s%.2fR)", if (r >= 0) "+" else "", r)
                 }.orEmpty()
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(color.copy(alpha = 0.22f))
-                        .border(1.dp, color.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                ) {
-                    Text(
-                        text = String.format(Locale.US, "%s$%.2f%s", if (pnl >= 0) "+" else "", pnl, rText),
-                        style = MaterialTheme.typography.titleSmall,
-                        color = color,
-                        fontWeight = FontWeight.Bold,
-                    )
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(color.copy(alpha = 0.22f))
+                            .border(1.dp, color.copy(alpha = 0.85f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 9.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            text = String.format(
+                                Locale.US,
+                                "%s$%.2f%s",
+                                if (pnl >= 0) "+" else "-",
+                                abs(pnl),
+                                rText,
+                            ),
+                            style = MaterialTheme.typography.titleSmall,
+                            color = color,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
                 }
                 Pill(
                     text = if (detailsExpanded) "▲" else "▼",
@@ -2554,11 +2599,67 @@ private fun ClosedJournalTradeRow(
             }
         }
 
-        Text(
-            text = "${if (isWin) "🎯 نتیجه: سود" else if (isLoss) "🛑 نتیجه: ضرر" else "نتیجه: سر‌به‌سر"} · ورود: ${formatPrice(trade.entry)} ← خروج: ${trade.exitPrice?.let { formatPrice(it) } ?: "—"} · ${trade.strategyTitleFa.substringBefore('(').trim()} · ${formatDateTime(trade.closedAt ?: trade.openedAt)}",
-            style = MaterialTheme.typography.labelSmall,
-            color = AurumColors.TextPrimary,
-        )
+        // ── ردیف ۲: نماد (کاملاً افقی و خوانا)، جهت و تایم‌فریم در راست | نام استراتژی در چپ ──
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Text(
+                    text = trade.symbol,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.clickable { onOpenChart() },
+                )
+            }
+            Pill(
+                text = "${if (isBuy) "🟢 خرید" else "🔴 فروش"} · ${trade.interval.label}",
+                color = if (isBuy) AurumColors.Green else AurumColors.Red,
+            )
+            Text(
+                text = "🎯 ${trade.strategyTitleFa.substringBefore('(').trim()}",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.Cyan,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.End,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        // ── ردیف ۳: نوار قیمت ورود به خروج و زمان بسته شدن معامله ──
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(AurumColors.Surface.copy(alpha = 0.72f))
+                .padding(horizontal = 9.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "ورود: \u200E${formatPrice(trade.entry)}  ←  خروج: \u200E${trade.exitPrice?.let { formatPrice(it) } ?: "—"}",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextPrimary,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
+            )
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Text(
+                    text = formatDateTime(trade.closedAt ?: trade.openedAt),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            }
+        }
 
         if (detailsExpanded) {
             Text(
