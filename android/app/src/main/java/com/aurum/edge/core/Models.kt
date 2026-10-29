@@ -245,7 +245,12 @@ data class PaperTrade(
     val preEntry3CandleCategoryFa: String = "",
     val preEntry3CandleSummaryFa: String = "",
     val preEntry3Candles: List<PreEntryCandleSlot> = emptyList(),
+    val tradeNumber: Int = 0,
 ) {
+    val displayTradeNumber: Int
+        get() = if (tradeNumber > 0) tradeNumber else ((kotlin.math.abs(id.hashCode()) % 9000) + 1)
+    val displayTradeNumberBadgeFa: String
+        get() = "معامله #$displayTradeNumber"
     val isOpen: Boolean get() = closedAt == null
     val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }
     val assetClass: AssetClass get() = AssetClass.of(symbol)
@@ -347,10 +352,14 @@ data class AppSettings(
     val alarmVibrationEnabled: Boolean = true,
     val entryAlarmSoundUri: String = "",
     val entryAlarmSoundName: String = "Ding-Dong",
+    val entryAlarmEnabled: Boolean = true,
     val tpAlarmSoundUri: String = "",
     val tpAlarmSoundName: String = "Red Dwarf",
+    val tpAlarmEnabled: Boolean = true,
     val slAlarmSoundUri: String = "",
     val slAlarmSoundName: String = "Latch",
+    val slAlarmEnabled: Boolean = true,
+    val showSettingsDescriptions: Boolean = true,
     val maxLeverageCap: Int = 10,
     val newsBaseUrl: String = "",
     val pauseOnNews: Boolean = false,

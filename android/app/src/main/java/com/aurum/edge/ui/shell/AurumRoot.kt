@@ -131,6 +131,7 @@ fun AurumRoot(viewModel: AurumViewModel) {
                         )
                         AurumTab.Settings -> SettingsScreen(
                             viewModel = viewModel,
+                            onOpenNeuralBrain = { open(AurumTab.Neural) },
                         )
                         AurumTab.Update -> UpdateScreen(viewModel)
                     }

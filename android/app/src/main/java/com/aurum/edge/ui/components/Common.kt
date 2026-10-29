@@ -92,10 +92,10 @@ fun SectionCard(
     trailing: @Composable (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     collapsible: Boolean = true,
-    initiallyExpanded: Boolean = true,
+    initiallyExpanded: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    var expanded by rememberSaveable(title) { mutableStateOf(initiallyExpanded) }
+    var expanded by rememberSaveable(title) { mutableStateOf(false) }
     Column(
         modifier = modifier
             .fillMaxWidth()

@@ -117,8 +117,9 @@ fun JournalRiskScreen(
 
     val openTrades = remember(trades) { trades.filter { it.isOpen } }
     val closedTrades = remember(trades) { trades.filter { !it.isOpen } }
+    val minuteBucket = now / 60_000L
 
-    val riskLimits = remember(settings, trades, now) {
+    val riskLimits = remember(settings, trades.size, openTrades.size, minuteBucket) {
         RiskAndCalendarEngine.evaluateRiskLimits(
             accountBalance = settings.accountBalance,
             initialCapital = settings.initialCapital,
@@ -137,7 +138,7 @@ fun JournalRiskScreen(
     var subPage by rememberSaveable { mutableIntStateOf(0) }
     var selectedStrategyFilter by rememberSaveable { mutableStateOf("ALL") }
 
-    val strategyCategories = remember(trades, settings.customStrategies) {
+    val strategyCategories = remember(trades.size, trades.firstOrNull()?.id, trades.firstOrNull()?.closedAt, settings.customStrategies) {
         RiskAndCalendarEngine.categorizeTradesByStrategy(trades, settings.customStrategies)
     }
 
@@ -175,20 +176,22 @@ fun JournalRiskScreen(
 
     val filterScopeLabelFa = remember(selectedStrategyFilter, strategyCategories) {
         if (selectedStrategyFilter == "ALL") {
-            "تمام ۱۵ ترکیب استراتژی و ۱۵ نماد (15m + 5m)"
+            "تمام ۲۴ استراتژی و ۱۵ نماد (15m + 5m)"
         } else {
             strategyCategories.firstOrNull { it.strategyId == selectedStrategyFilter }?.strategyTitleFa
                 ?: selectedStrategyFilter
         }
     }
 
+    // محاسبه TearSheet فقط با تغییر واقعی لیست معاملات (بدون بازمحاسبه هر ۱ ثانیه با تیک ساعت!)
     val tearSheetReport = remember(
-        filteredTrades,
+        filteredTrades.size,
+        filteredTrades.firstOrNull()?.id,
+        filteredTrades.firstOrNull()?.closedAt,
         settings.initialCapital,
         settings.accountBalance,
         settings.customStrategies,
         filterScopeLabelFa,
-        now,
     ) {
         JournalExportEngine.buildInstitutionalTearSheet(
             trades = filteredTrades,
@@ -196,7 +199,7 @@ fun JournalRiskScreen(
             currentBalance = settings.accountBalance,
             customStrategies = settings.customStrategies,
             filterScopeLabelFa = filterScopeLabelFa,
-            nowEpochMs = now,
+            nowEpochMs = System.currentTimeMillis(),
         )
     }
 
@@ -471,7 +474,7 @@ fun JournalRiskScreen(
             4 -> {
                 com.aurum.edge.ui.components.TradeSnapshotArchiveGallerySection(
                     viewModel = viewModel,
-                    initiallyExpanded = true,
+                    initiallyExpanded = false,
                 )
             }
 
@@ -1871,19 +1874,42 @@ private fun MonthlyPnlCalendarSection(
     onClearAll: () -> Unit,
     onOpenChart: (String) -> Unit,
 ) {
-    val currentYm = remember(now) {
-        YearMonth.from(Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()))
+    val hourBucket = now / 3_600_000L
+    val latestTradeInstant = remember(closedTrades.firstOrNull()?.id, closedTrades.firstOrNull()?.closedAt, hourBucket) {
+        val latestMs = closedTrades.maxOfOrNull { it.closedAt ?: it.openedAt } ?: now
+        Instant.ofEpochMilli(latestMs).atZone(ZoneId.systemDefault())
+    }
+    val currentYm = remember(latestTradeInstant) {
+        YearMonth.from(latestTradeInstant)
     }
     var selectedYear by rememberSaveable { mutableIntStateOf(currentYm.year) }
     var selectedMonth by rememberSaveable { mutableIntStateOf(currentYm.monthValue) }
-    var selectedDayOfMonth by rememberSaveable { mutableIntStateOf(0) } // 0 = show all month trades
+    // -1 = حالت پیش‌فرض سریع: فقط معاملات روز آخر (Latest Active Day Only)
+    //  0 = نمایش کل معاملات ماه (به درخواست کاربر)
+    // 1..31 = نمایش روز انتخاب‌شده از تقویم
+    var selectedDayOfMonth by rememberSaveable { mutableIntStateOf(-1) }
+    var visibleTradesCap by rememberSaveable(selectedYear, selectedMonth, selectedDayOfMonth) {
+        mutableIntStateOf(20)
+    }
 
-    val calendar = remember(selectedYear, selectedMonth, trades) {
+    val calendar = remember(selectedYear, selectedMonth, trades.size, trades.firstOrNull()?.id, trades.firstOrNull()?.closedAt) {
         RiskAndCalendarEngine.buildMonthlyCalendar(
             year = selectedYear,
             month = selectedMonth,
             trades = trades,
         )
+    }
+
+    val activeTradingDaysInMonth = remember(calendar) {
+        calendar.days.filter { it.closedTradesCount > 0 }.map { it.dayOfMonth }.sorted()
+    }
+    val latestActiveDayInMonth = remember(activeTradingDaysInMonth, latestTradeInstant) {
+        activeTradingDaysInMonth.lastOrNull() ?: latestTradeInstant.dayOfMonth.coerceIn(1, calendar.daysInMonth)
+    }
+    val effectiveSelectedDay = when {
+        selectedDayOfMonth == -1 -> latestActiveDayInMonth
+        selectedDayOfMonth in 1..calendar.daysInMonth -> selectedDayOfMonth
+        else -> 0 // کل ماه
     }
 
     SectionCard(
@@ -2046,10 +2072,10 @@ private fun MonthlyPnlCalendarSection(
                         } else {
                             CalendarDayCell(
                                 summary = daySummary,
-                                isSelected = selectedDayOfMonth == daySummary.dayOfMonth,
+                                isSelected = effectiveSelectedDay == daySummary.dayOfMonth,
                                 modifier = Modifier.weight(1f),
                                 onClick = {
-                                    selectedDayOfMonth = if (selectedDayOfMonth == daySummary.dayOfMonth) 0
+                                    selectedDayOfMonth = if (effectiveSelectedDay == daySummary.dayOfMonth) 0
                                     else daySummary.dayOfMonth
                                 },
                             )
@@ -2096,71 +2122,148 @@ private fun MonthlyPnlCalendarSection(
             }
         }
 
-        // Filtered closed trades list (either selected day or all month's trades)
-        val displayedTrades = remember(calendar, selectedDayOfMonth, closedTrades) {
-            if (selectedDayOfMonth in 1..calendar.daysInMonth) {
-                calendar.days[selectedDayOfMonth - 1].trades
+        // نوار هوشمند «فقط معاملات روز آخر» (پیش‌فرض سریع) + فراخوانی روزهای قبلی در صورت نیاز
+        val displayedTrades = remember(calendar, effectiveSelectedDay) {
+            if (effectiveSelectedDay in 1..calendar.daysInMonth) {
+                calendar.days[effectiveSelectedDay - 1].trades
             } else {
                 calendar.days.flatMap { it.trades }.sortedByDescending { it.closedAt ?: 0L }
             }
         }
 
-        Row(
+        val currentActiveIdx = activeTradingDaysInMonth.indexOf(effectiveSelectedDay)
+        val prevTradingDay = if (currentActiveIdx > 0) activeTradingDaysInMonth[currentActiveIdx - 1]
+        else if (effectiveSelectedDay == 0 && activeTradingDaysInMonth.isNotEmpty()) activeTradingDaysInMonth.last()
+        else null
+        val nextTradingDay = if (currentActiveIdx >= 0 && currentActiveIdx < activeTradingDaysInMonth.lastIndex) {
+            activeTradingDaysInMonth[currentActiveIdx + 1]
+        } else null
+
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(top = 10.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(AurumColors.SurfaceAlt)
+                .border(1.dp, AurumColors.Gold.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(
-                text = if (selectedDayOfMonth > 0) {
-                    "معاملات روز $selectedDayOfMonth ${calendar.monthTitleFa} (${displayedTrades.size})"
-                } else {
-                    "معاملات بسته‌شده در ${calendar.monthTitleFa} (${displayedTrades.size})"
-                },
-                style = MaterialTheme.typography.titleSmall,
-                color = AurumColors.TextPrimary,
-                fontWeight = FontWeight.Bold,
-            )
-            if (selectedDayOfMonth > 0) {
-                Text(
-                    text = "نمایش کل ماه",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.Cyan,
-                    modifier = Modifier.clickable { selectedDayOfMonth = 0 },
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = when {
+                            selectedDayOfMonth == -1 -> "⚡ حالت سریع: نمایش معاملات روز آخر (روز $effectiveSelectedDay ${calendar.monthTitleFa})"
+                            effectiveSelectedDay > 0 -> "📅 معاملات روز $effectiveSelectedDay ${calendar.monthTitleFa} (${displayedTrades.size} معامله)"
+                            else -> "📂 کل معاملات ماه ${calendar.monthTitleFa} (${displayedTrades.size} معامله)"
+                        },
+                        style = MaterialTheme.typography.titleSmall,
+                        color = AurumColors.Gold,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "برای سبک و سریع ماندن ژورنال، به‌صورت پیش‌فرض فقط معاملات روز آخر بارگذاری می‌شود؛ سایر روزها را با یک کلیک فراخوانی کنید.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                }
+                if (closedTrades.isNotEmpty()) {
+                    Pill(
+                        text = "پاک کردن تاریخچه",
+                        color = AurumColors.Red,
+                        modifier = Modifier.clickable { onClearAll() },
+                    )
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Pill(
+                    text = "📌 فقط روز آخر ($latestActiveDayInMonth ${calendar.monthTitleFa})",
+                    color = if (selectedDayOfMonth == -1 || effectiveSelectedDay == latestActiveDayInMonth) AurumColors.Gold else AurumColors.TextMuted,
+                    modifier = Modifier.clickable {
+                        selectedDayOfMonth = -1
+                        visibleTradesCap = 20
+                    },
                 )
-            } else if (closedTrades.isNotEmpty()) {
-                Text(
-                    text = "پاک کردن کل تاریخچه",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.Red,
-                    modifier = Modifier.clickable { onClearAll() },
+                if (prevTradingDay != null) {
+                    Pill(
+                        text = "⏮ روز معاملاتی قبل (روز $prevTradingDay)",
+                        color = AurumColors.Cyan,
+                        modifier = Modifier.clickable {
+                            selectedDayOfMonth = prevTradingDay
+                            visibleTradesCap = 20
+                        },
+                    )
+                }
+                if (nextTradingDay != null) {
+                    Pill(
+                        text = "⏭ روز معاملاتی بعد (روز $nextTradingDay)",
+                        color = AurumColors.Cyan,
+                        modifier = Modifier.clickable {
+                            selectedDayOfMonth = nextTradingDay
+                            visibleTradesCap = 20
+                        },
+                    )
+                }
+                Pill(
+                    text = if (effectiveSelectedDay == 0) "📂 کل ماه فعال است (${calendar.totalClosedTrades})" else "📂 بارگذاری بقیه روزهای ماه (${calendar.totalClosedTrades})",
+                    color = if (effectiveSelectedDay == 0) AurumColors.Green else AurumColors.TextMuted,
+                    modifier = Modifier.clickable {
+                        selectedDayOfMonth = if (effectiveSelectedDay == 0) -1 else 0
+                        visibleTradesCap = 20
+                    },
                 )
             }
         }
 
         if (displayedTrades.isEmpty()) {
             Text(
-                text = if (selectedDayOfMonth > 0) {
-                    "در این روز هیچ معاملهٔ بسته‌شده‌ای ثبت نشده است."
+                text = if (effectiveSelectedDay > 0) {
+                    "در روز $effectiveSelectedDay ${calendar.monthTitleFa} معاملهٔ بسته‌شده‌ای ثبت نشده است؛ برای دیدن روزهای قبلی روی «بارگذاری بقیه روزهای ماه» یا روزهای تقویم بزنید."
                 } else {
                     "در این ماه هنوز معاملهٔ بسته‌شده‌ای ثبت نشده است."
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 4.dp),
+                modifier = Modifier.padding(top = 6.dp),
             )
         } else {
+            val pagedTrades = remember(displayedTrades, visibleTradesCap) {
+                displayedTrades.take(visibleTradesCap)
+            }
             Column(
                 modifier = Modifier.padding(top = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                displayedTrades.forEach { trade ->
+                pagedTrades.forEach { trade ->
                     ClosedJournalTradeRow(
                         trade = trade,
                         onDelete = { onDeleteTrade(trade.id) },
                         onOpenChart = { onOpenChart(trade.symbol) },
                     )
+                }
+                if (displayedTrades.size > visibleTradesCap) {
+                    val remaining = displayedTrades.size - visibleTradesCap
+                    OutlinedButton(
+                        onClick = { visibleTradesCap += 25 },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = "▼ بارگذاری ۲۵ معامله دیگر از این بخش ($remaining معامله باقی‌مانده)",
+                            color = AurumColors.Gold,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                 }
             }
         }
@@ -2248,6 +2351,7 @@ private fun ClosedJournalTradeRow(
     onDelete: () -> Unit,
     onOpenChart: () -> Unit,
 ) {
+    var detailsExpanded by rememberSaveable("closed_row_${trade.id}") { mutableStateOf(false) }
     val pnl = trade.pnlUsd ?: 0.0
     val isWin = pnl > 0.0
     val isBuy = trade.action == SignalAction.BUY
@@ -2258,6 +2362,7 @@ private fun ClosedJournalTradeRow(
             .fillMaxWidth()
             .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
             .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+            .clickable { detailsExpanded = !detailsExpanded }
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -2269,7 +2374,12 @@ private fun ClosedJournalTradeRow(
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f),
             ) {
+                Pill(
+                    text = trade.displayTradeNumberBadgeFa,
+                    color = AurumColors.Gold,
+                )
                 Text(
                     text = trade.symbol,
                     style = MaterialTheme.typography.titleSmall,
@@ -2282,11 +2392,7 @@ private fun ClosedJournalTradeRow(
                     color = if (isBuy) AurumColors.Green else AurumColors.Red,
                 )
                 Pill(
-                    text = "تایم ورود: ${trade.interval.label}",
-                    color = AurumColors.Gold,
-                )
-                Pill(
-                    text = trade.strategyTitleFa.substringBefore('(').trim(),
+                    text = trade.interval.label,
                     color = AurumColors.Cyan,
                 )
                 trade.rMultiple?.let { r ->
@@ -2296,87 +2402,102 @@ private fun ClosedJournalTradeRow(
                     )
                 }
             }
-            Text(
-                text = String.format(Locale.US, "%s$%.2f", if (pnl >= 0) "+" else "", pnl),
-                style = MaterialTheme.typography.titleSmall,
-                color = color,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-
-        Text(
-            text = "ورود: ${formatPrice(trade.entry)} · خروج: ${trade.exitPrice?.let { formatPrice(it) } ?: "—"} · SL: ${formatPrice(trade.stopLoss)} · TP: ${formatPrice(trade.takeProfit)}",
-            style = MaterialTheme.typography.labelSmall,
-            color = AurumColors.TextPrimary,
-        )
-
-        Text(
-            text = "📐 ${trade.buildRrFormulaSummaryFa()} · ${trade.buildOptimalRrReasonFa()}",
-            style = MaterialTheme.typography.labelSmall,
-            color = AurumColors.Cyan,
-        )
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "${trade.exitReason ?: "بسته‌شده"} · ${formatDateTime(trade.closedAt ?: trade.openedAt)}",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextSecondary,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                text = "حذف",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.Red,
-                modifier = Modifier.clickable { onDelete() },
-            )
-        }
-
-        if (trade.preEntry3CandleCategoryFa.isNotBlank() || trade.preEntry3Candles.isNotEmpty()) {
-            val catBadge = trade.preEntry3CandleCategoryFa.ifBlank {
-                com.aurum.edge.core.PreEntry3CandleCategory.fromCode(trade.preEntry3CandleCategoryCode).badgeFa
-            }
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(AurumColors.Surface)
-                    .padding(horizontal = 8.dp, vertical = 5.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = "🕯️ ۳ کندل قبل از ورود: $catBadge",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.Gold,
+                    text = String.format(Locale.US, "%s$%.2f", if (pnl >= 0) "+" else "", pnl),
+                    style = MaterialTheme.typography.titleSmall,
+                    color = color,
                     fontWeight = FontWeight.Bold,
                 )
-                if (trade.preEntry3Candles.isNotEmpty()) {
-                    trade.preEntry3Candles.forEach { slot ->
+                Pill(
+                    text = if (detailsExpanded) "▲" else "▼",
+                    color = AurumColors.TextSecondary,
+                )
+            }
+        }
+
+        Text(
+            text = "${trade.strategyTitleFa.substringBefore('(').trim()} · ${trade.exitReason ?: "بسته‌شده"} · ${formatDateTime(trade.closedAt ?: trade.openedAt)}",
+            style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.TextSecondary,
+        )
+
+        if (detailsExpanded) {
+            Text(
+                text = "ورود: ${formatPrice(trade.entry)} · خروج: ${trade.exitPrice?.let { formatPrice(it) } ?: "—"} · SL: ${formatPrice(trade.stopLoss)} · TP: ${formatPrice(trade.takeProfit)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextPrimary,
+            )
+
+            Text(
+                text = "📐 ${trade.buildRrFormulaSummaryFa()} · ${trade.buildOptimalRrReasonFa()}",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.Cyan,
+            )
+
+            if (trade.preEntry3CandleCategoryFa.isNotBlank() || trade.preEntry3Candles.isNotEmpty()) {
+                val catBadge = trade.preEntry3CandleCategoryFa.ifBlank {
+                    com.aurum.edge.core.PreEntry3CandleCategory.fromCode(trade.preEntry3CandleCategoryCode).badgeFa
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(AurumColors.Surface)
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = "🕯️ ۳ کندل قبل از ورود: $catBadge",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Gold,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    if (trade.preEntry3Candles.isNotEmpty()) {
+                        trade.preEntry3Candles.forEach { slot ->
+                            Text(
+                                text = "• ${slot.slotTitleFa}: ${slot.candleAnatomyFa} (${slot.priceVsTenkanFa} · ${slot.priceVsKumoFa})",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextSecondary,
+                            )
+                        }
+                    } else if (trade.preEntry3CandleSummaryFa.isNotBlank()) {
                         Text(
-                            text = "• ${slot.slotTitleFa}: ${slot.candleAnatomyFa} (${slot.priceVsTenkanFa} · ${slot.priceVsKumoFa})",
+                            text = trade.preEntry3CandleSummaryFa,
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.TextSecondary,
                         )
                     }
-                } else if (trade.preEntry3CandleSummaryFa.isNotBlank()) {
-                    Text(
-                        text = trade.preEntry3CandleSummaryFa,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.TextSecondary,
-                    )
                 }
             }
-        }
 
-        if (trade.note.isNotBlank()) {
-            Text(
-                text = "یادداشت: ${trade.note}",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.Gold,
-            )
+            if (trade.note.isNotBlank()) {
+                Text(
+                    text = "یادداشت: ${trade.note}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Gold,
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Pill(
+                    text = "📈 مشاهده چارت نماد",
+                    color = AurumColors.Cyan,
+                    modifier = Modifier.clickable { onOpenChart() },
+                )
+                Pill(
+                    text = "🗑️ حذف معامله",
+                    color = AurumColors.Red,
+                    modifier = Modifier.clickable { onDelete() },
+                )
+            }
         }
     }
 }

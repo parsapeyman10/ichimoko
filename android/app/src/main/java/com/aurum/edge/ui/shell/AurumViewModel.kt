@@ -822,15 +822,23 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             val sym = V1Universe.normalize(trade.symbol)
             val rep = _dualSymbolStrategyReports.value[sym]?.reportFor(trade.interval, trade.strategyId)
             val candles = LiveQuoteFetcher.peekCachedCandles(sym, trade.interval)
-            val rec = com.aurum.edge.data.TradeSnapshotArchiveManager.captureAndArchiveTradeOpen(
+            val openRec = com.aurum.edge.data.TradeSnapshotArchiveManager.captureAndArchiveTradeOpen(
                 context = container.appContext,
                 trade = trade,
                 report = rep,
                 triggerCandles = candles,
             )
-            if (rec != null) {
-                val kb = (rec.imageSizeBytes / 1024L).coerceAtLeast(1L)
-                _toast.value = "📸 تصویر ایچیموکو معامله ${trade.symbol} (${kb}KB WebP) در آرشیو و حافظه گوشی ذخیره شد"
+            val closeRec = if (!trade.isOpen) {
+                com.aurum.edge.data.TradeSnapshotArchiveManager.captureAndArchiveTradeClose(
+                    context = container.appContext,
+                    closedTrade = trade,
+                    closeCandles = candles,
+                )
+            } else null
+            val activeRec = closeRec ?: openRec
+            if (activeRec != null) {
+                val kb = (activeRec.imageSizeBytes / 1024L).coerceAtLeast(1L)
+                _toast.value = "📸 تصویر چارت معامله #${trade.displayTradeNumber} (${trade.symbol} · ${kb}KB WebP) در آرشیو و حافظه گوشی ذخیره شد"
             }
         }
     }
@@ -1499,6 +1507,25 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun setAlarmVibrationEnabled(enabled: Boolean) {
         container.settingsStore.update { it.copy(alarmVibrationEnabled = enabled) }
         _toast.value = if (enabled) "📳 ویبره اختصاصی آلارم‌ها فعال شد" else "📴 ویبره آلارم‌ها غیرفعال شد"
+    }
+
+    fun setAlarmStageEnabled(
+        kind: com.aurum.edge.notify.TradeAlarmKind,
+        enabled: Boolean,
+    ) {
+        container.settingsStore.update { cur ->
+            when (kind) {
+                com.aurum.edge.notify.TradeAlarmKind.ENTRY -> cur.copy(entryAlarmEnabled = enabled)
+                com.aurum.edge.notify.TradeAlarmKind.TAKE_PROFIT -> cur.copy(tpAlarmEnabled = enabled)
+                com.aurum.edge.notify.TradeAlarmKind.STOP_LOSS -> cur.copy(slAlarmEnabled = enabled)
+            }
+        }
+        val stateFa = if (enabled) "روشن" else "خاموش"
+        _toast.value = "⏰ آلارم ${kind.channelNameFa}: $stateFa (۱ اعلان + ۱ صدا)"
+    }
+
+    fun setShowSettingsDescriptions(show: Boolean) {
+        container.settingsStore.update { it.copy(showSettingsDescriptions = show) }
     }
 
     fun setCustomAlarmSoundForKind(

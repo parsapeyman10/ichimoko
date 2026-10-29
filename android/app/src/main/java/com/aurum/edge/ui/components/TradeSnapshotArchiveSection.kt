@@ -56,7 +56,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun TradeSnapshotArchiveGallerySection(
     viewModel: AurumViewModel,
-    initiallyExpanded: Boolean = true,
+    initiallyExpanded: Boolean = false,
 ) {
     val records by viewModel.tradeSnapshotArchiveRecords.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
@@ -72,8 +72,8 @@ fun TradeSnapshotArchiveGallerySection(
     }
 
     SectionCard(
-        title = "📸 آرشیو تصویری معاملات ایچیموکو (${records.size} اسکرین‌شات کم‌حجم WebP)",
-        subtitle = "ذخیره خودکار چارت ایچیموکو + باکس حد ضرر و حد سود (SL/TP) + ۱۶ شرط ورود در گالری و پوشه Download گوشی (خودخوان)",
+        title = "📸 آرشیو تصویری معاملات — باز شدن و بسته شدن (${records.size} اسکرین‌شات WebP)",
+        subtitle = "ذخیره خودکار عکس چارت در لحظه باز شدن و بسته شدن معامله با هر شرایطی + درج شماره معامله (#N) روی تصویر",
         initiallyExpanded = initiallyExpanded,
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -183,10 +183,10 @@ fun ArchivedSnapshotItemCard(
     record: ArchivedTradeSnapshotRecord,
     onOpenViewer: () -> Unit,
 ) {
-    var expanded by rememberSaveable(record.tradeId) { mutableStateOf(false) }
-    var imageBitmap by remember(record.tradeId, record.localImagePath) { mutableStateOf<ImageBitmap?>(null) }
+    var expanded by rememberSaveable("${record.tradeId}_${record.snapshotPhase}") { mutableStateOf(false) }
+    var imageBitmap by remember(record.tradeId, record.snapshotPhase, record.localImagePath) { mutableStateOf<ImageBitmap?>(null) }
 
-    LaunchedEffect(record.tradeId, record.localImagePath) {
+    LaunchedEffect(record.tradeId, record.snapshotPhase, record.localImagePath) {
         withContext(Dispatchers.IO) {
             val bmp = TradeSnapshotArchiveManager.loadBitmapForRecord(record)
             if (bmp != null) {
@@ -221,7 +221,15 @@ fun ArchivedSnapshotItemCard(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Pill(
-                        text = if (isBuy) "🟢 خرید LONG" else "🔴 فروش SHORT",
+                        text = "معامله #${record.displayTradeNumber}",
+                        color = AurumColors.Gold,
+                    )
+                    Pill(
+                        text = if (record.isCloseSnapshot) "🏁 بسته شدن (${record.closeConditionCategoryFa.ifBlank { "CLOSE" }})" else "📸 باز شدن (OPEN)",
+                        color = if (record.isCloseSnapshot) AurumColors.Cyan else AurumColors.Green,
+                    )
+                    Pill(
+                        text = if (isBuy) "🟢 LONG" else "🔴 SHORT",
                         color = sideColor,
                     )
                     Text(
@@ -230,14 +238,15 @@ fun ArchivedSnapshotItemCard(
                         color = AurumColors.TextPrimary,
                         fontWeight = FontWeight.Bold,
                     )
-                    Pill(
-                        text = "R:R 1:${String.format(Locale.US, "%.2f", record.riskReward)}",
-                        color = AurumColors.Gold,
-                    )
                 }
                 Spacer(Modifier.height(3.dp))
+                val closeInfo = if (record.isCloseSnapshot && record.realizedPnlUsd != null) {
+                    val p = record.realizedPnlUsd
+                    val s = if (p >= 0.0) "+" else "-"
+                    " · نتیجه: ${s}$${String.format(Locale.US, "%.2f", kotlin.math.abs(p))}"
+                } else ""
                 Text(
-                    text = "🎯 ${record.strategyTitleFa} · ${formatDateTime(record.openedAtMs)} · حجم تصویر: ${sizeKb}KB WebP",
+                    text = "🎯 ${record.strategyTitleFa}$closeInfo · ${formatDateTime(record.effectiveTimestampMs)} · حجم: ${sizeKb}KB WebP",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextSecondary,
                     maxLines = 1,

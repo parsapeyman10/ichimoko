@@ -186,10 +186,14 @@ class SettingsStore(context: Context) {
         alarmVibrationEnabled = prefs.getBoolean(KEY_ALARM_VIBRATION_ENABLED, true),
         entryAlarmSoundUri = prefs.getString(KEY_ENTRY_ALARM_SOUND_URI, "").orEmpty(),
         entryAlarmSoundName = prefs.getString(KEY_ENTRY_ALARM_SOUND_NAME, "Ding-Dong").orEmpty().ifBlank { "Ding-Dong" },
+        entryAlarmEnabled = prefs.getBoolean("entry_alarm_enabled_v3918", true),
         tpAlarmSoundUri = prefs.getString(KEY_TP_ALARM_SOUND_URI, "").orEmpty(),
         tpAlarmSoundName = prefs.getString(KEY_TP_ALARM_SOUND_NAME, "Red Dwarf").orEmpty().ifBlank { "Red Dwarf" },
+        tpAlarmEnabled = prefs.getBoolean("tp_alarm_enabled_v3918", true),
         slAlarmSoundUri = prefs.getString(KEY_SL_ALARM_SOUND_URI, "").orEmpty(),
         slAlarmSoundName = prefs.getString(KEY_SL_ALARM_SOUND_NAME, "Latch").orEmpty().ifBlank { "Latch" },
+        slAlarmEnabled = prefs.getBoolean("sl_alarm_enabled_v3918", true),
+        showSettingsDescriptions = prefs.getBoolean("show_settings_descriptions_v3918", true),
         maxLeverageCap = prefs.getInt(KEY_MAX_LEVERAGE_CAP, 10).coerceIn(1, 10),
         newsBaseUrl = prefs.getString(KEY_NEWS_URL, "").orEmpty().trim(),
         pauseOnNews = prefs.getBoolean(KEY_NEWS_PAUSE, false),
@@ -351,10 +355,14 @@ class SettingsStore(context: Context) {
             .putBoolean(KEY_ALARM_VIBRATION_ENABLED, next.alarmVibrationEnabled)
             .putString(KEY_ENTRY_ALARM_SOUND_URI, next.entryAlarmSoundUri)
             .putString(KEY_ENTRY_ALARM_SOUND_NAME, next.entryAlarmSoundName.ifBlank { "Ding-Dong" })
+            .putBoolean("entry_alarm_enabled_v3918", next.entryAlarmEnabled)
             .putString(KEY_TP_ALARM_SOUND_URI, next.tpAlarmSoundUri)
             .putString(KEY_TP_ALARM_SOUND_NAME, next.tpAlarmSoundName.ifBlank { "Red Dwarf" })
+            .putBoolean("tp_alarm_enabled_v3918", next.tpAlarmEnabled)
             .putString(KEY_SL_ALARM_SOUND_URI, next.slAlarmSoundUri)
             .putString(KEY_SL_ALARM_SOUND_NAME, next.slAlarmSoundName.ifBlank { "Latch" })
+            .putBoolean("sl_alarm_enabled_v3918", next.slAlarmEnabled)
+            .putBoolean("show_settings_descriptions_v3918", next.showSettingsDescriptions)
             .putInt(KEY_MAX_LEVERAGE_CAP, next.maxLeverageCap.coerceIn(1, 10))
             .putString(KEY_NEWS_URL, next.newsBaseUrl.trim())
             .putString(KEY_SIGNAL_PROFILE, next.signalProfile.persistName())

@@ -922,6 +922,25 @@ class RiskAndCalendarEngineTest {
         assertTrue(com.aurum.edge.notify.TradeAlarmKind.ENTRY.channelId.endsWith("_silent_v3"))
         assertTrue(com.aurum.edge.notify.TradeAlarmKind.TAKE_PROFIT.channelId.endsWith("_silent_v3"))
         assertTrue(com.aurum.edge.notify.TradeAlarmKind.STOP_LOSS.channelId.endsWith("_silent_v3"))
+
+        // Verify v3.9.18 features: Trade Number (#N), OPEN & CLOSE snapshot records, and Phone-Alarm stage settings
+        assertEquals(7, sampleTrade.copy(tradeNumber = 7).displayTradeNumber)
+        assertEquals("معامله #7", sampleTrade.copy(tradeNumber = 7).displayTradeNumberBadgeFa)
+
+        val defaultAppSettings = com.aurum.edge.core.AppSettings()
+        assertTrue(defaultAppSettings.entryAlarmEnabled)
+        assertTrue(defaultAppSettings.tpAlarmEnabled)
+        assertTrue(defaultAppSettings.slAlarmEnabled)
+        assertTrue(defaultAppSettings.showSettingsDescriptions)
+
+        val closeSnap = com.aurum.edge.data.TradeSnapshotArchiveManager.captureAndArchiveTradeClose(
+            context = context,
+            closedTrade = sampleTrade.copy(tradeNumber = 12, exitPrice = 69500.0, pnlUsd = 10.0),
+            closeCandles = sampleBars,
+        )
+        assertNotNull(closeSnap)
+        assertTrue(closeSnap!!.isCloseSnapshot)
+        assertEquals(12, closeSnap.displayTradeNumber)
     }
 }
 

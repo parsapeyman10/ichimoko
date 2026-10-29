@@ -104,6 +104,7 @@ object TradeEventAlarmManager {
     @Volatile
     private var activeRingtone: Ringtone? = null
     private val resolvedTitleUriCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val firedTradeStageLocks = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -183,8 +184,10 @@ object TradeEventAlarmManager {
         customSoundUri: String = "",
     ) {
         if (!enabled) return
+        val lockKey = "${trade.id}|ENTRY"
+        if (firedTradeStageLocks.putIfAbsent(lockKey, System.currentTimeMillis()) != null) return
         val sideFa = if (trade.action == SignalAction.BUY) "خرید LONG" else "فروش SHORT"
-        val title = "🚀 ورود به معامله: ${trade.symbol} ($sideFa · ${trade.interval.label})"
+        val title = "🚀 معامله #${trade.displayTradeNumber} · ورود: ${trade.symbol} ($sideFa · ${trade.interval.label})"
         val body = String.format(
             Locale.US,
             "ورود: %s · حد ضرر: %s · حد سود: %s · R:R = 1:%.2f · %s",
@@ -194,7 +197,7 @@ object TradeEventAlarmManager {
             trade.riskReward,
             trade.strategyTitleFa,
         )
-        fireAlarm(context, TradeAlarmKind.ENTRY, title, body, customSoundUri)
+        fireAlarm(context, TradeAlarmKind.ENTRY, title, body, customSoundUri, isTest = false)
     }
 
     fun triggerTakeProfitAlarm(
@@ -204,25 +207,29 @@ object TradeEventAlarmManager {
         customSoundUri: String = "",
     ) {
         if (!enabled) return
+        val lockKey = "${trade.id}|EXIT"
+        if (firedTradeStageLocks.putIfAbsent(lockKey, System.currentTimeMillis()) != null) return
         val pnl = trade.pnlUsd ?: ((trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0) * trade.riskReward)
         val rMult = trade.rMultiple ?: trade.riskReward
         val title = String.format(
             Locale.US,
-            "🎯 برخورد به حد سود (TP): %s (+$%.2f · +%.2fR)",
+            "🎯 معامله #%d · رسیدن به پروفیت تارگت: %s (+$%.2f · +%.2fR)",
+            trade.displayTradeNumber,
             trade.symbol,
             abs(pnl),
             abs(rMult),
         )
         val body = String.format(
             Locale.US,
-            "معامله %s [%s] در قیمت %s با سود +$%.2f بسته شد · %s",
+            "معامله #%d (%s · %s) در قیمت %s با سود +$%.2f بسته شد · %s",
+            trade.displayTradeNumber,
             trade.symbol,
             trade.interval.label,
             fmtPrice(trade.exitPrice ?: trade.takeProfit),
             abs(pnl),
-            trade.exitReason ?: "رسیدن به حد سود (TP)",
+            trade.exitReason ?: "رسیدن به پروفیت تارگت (TP)",
         )
-        fireAlarm(context, TradeAlarmKind.TAKE_PROFIT, title, body, customSoundUri)
+        fireAlarm(context, TradeAlarmKind.TAKE_PROFIT, title, body, customSoundUri, isTest = false)
     }
 
     fun triggerStopLossAlarm(
@@ -232,22 +239,26 @@ object TradeEventAlarmManager {
         customSoundUri: String = "",
     ) {
         if (!enabled) return
+        val lockKey = "${trade.id}|EXIT"
+        if (firedTradeStageLocks.putIfAbsent(lockKey, System.currentTimeMillis()) != null) return
         val pnl = trade.pnlUsd ?: -(trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0)
         val title = String.format(
             Locale.US,
-            "🛑 برخورد به حد ضرر (SL): %s (-$%.2f)",
+            "🛑 معامله #%d · خروج معامله (SL): %s (-$%.2f)",
+            trade.displayTradeNumber,
             trade.symbol,
             abs(pnl),
         )
         val body = String.format(
             Locale.US,
-            "معامله %s [%s] در قیمت %s بسته شد · %s",
+            "معامله #%d (%s · %s) در قیمت %s بسته شد · %s",
+            trade.displayTradeNumber,
             trade.symbol,
             trade.interval.label,
             fmtPrice(trade.exitPrice ?: trade.stopLoss),
-            trade.exitReason ?: "برخورد به حد ضرر (SL)",
+            trade.exitReason ?: "خروج / برخورد به حد ضرر (SL)",
         )
-        fireAlarm(context, TradeAlarmKind.STOP_LOSS, title, body, customSoundUri)
+        fireAlarm(context, TradeAlarmKind.STOP_LOSS, title, body, customSoundUri, isTest = false)
     }
 
     fun triggerTestAlarm(
@@ -257,16 +268,16 @@ object TradeEventAlarmManager {
     ) {
         val (title, body) = when (kind) {
             TradeAlarmKind.ENTRY ->
-                "🚀 [تست آلارم ورود — Ding-Dong] XAU/USD (خرید LONG · 15m)" to
-                    "تست صدای ورود به معامله · ورود: 2745.00 · SL: 2738.00 · TP: 2762.50 (R:R 1:2.50)"
+                "🚀 [تست آلارم ورود] معامله #101 · XAU/USD (خرید LONG · 15m)" to
+                    "تست تک‌اعلان و تک‌صدای ورود به معامله · ورود: 2745.00 · SL: 2738.00 · TP: 2762.50"
             TradeAlarmKind.TAKE_PROFIT ->
-                "🎯 [تست آلارم حد سود TP — Red Dwarf] BTC/USDT (+$12.50 · +2.50R)" to
-                    "تست صدای رسیدن به حد سود (TP) · سود قطعی +$12.50 به موجودی اضافه شد."
+                "🎯 [تست آلارم پروفیت تارگت] معامله #101 · BTC/USDT (+$12.50 · +2.50R)" to
+                    "تست تک‌اعلان و تک‌صدای رسیدن به پروفیت تارگت (TP) · سود +$12.50"
             TradeAlarmKind.STOP_LOSS ->
-                "🛑 [تست آلارم حد ضرر SL — Latch] EUR/USD (-$5.00)" to
-                    "تست صدای برخورد به حد ضرر (SL) · ریسک کنترل‌شده -$5.00."
+                "🛑 [تست آلارم خروج] معامله #101 · EUR/USD (-$5.00)" to
+                    "تست تک‌اعلان و تک‌صدای خروج / برخورد به حد ضرر (SL)"
         }
-        fireAlarm(context, kind, title, body, customSoundUri)
+        fireAlarm(context, kind, title, body, customSoundUri, isTest = true)
     }
 
     private fun fireAlarm(
@@ -275,11 +286,18 @@ object TradeEventAlarmManager {
         title: String,
         body: String,
         customSoundUri: String,
+        isTest: Boolean = false,
     ) {
         runCatching {
             val prefs = context.getSharedPreferences("aurum_settings", Context.MODE_PRIVATE)
+            val stageEnabled = when (kind) {
+                TradeAlarmKind.ENTRY -> prefs.getBoolean("entry_alarm_enabled_v3918", true)
+                TradeAlarmKind.TAKE_PROFIT -> prefs.getBoolean("tp_alarm_enabled_v3918", true)
+                TradeAlarmKind.STOP_LOSS -> prefs.getBoolean("sl_alarm_enabled_v3918", true)
+            }
+            if (!isTest && !stageEnabled) return
+
             val volumePct = prefs.getInt("alarm_volume_pct_v3913", 90).coerceIn(0, 100)
-            val preset = AlarmTonePreset.fromId(prefs.getString("alarm_tone_preset_v3913", "CUSTOM_ONLY"))
             val vibrateEnabled = prefs.getBoolean("alarm_vibration_enabled_v3913", true)
 
             val savedUri = when (kind) {
@@ -310,110 +328,46 @@ object TradeEventAlarmManager {
             }
 
             ensureChannels(context)
-            if (preset != AlarmTonePreset.VIBRATE_ONLY && volumePct > 0) {
-                playSingleCleanAlarmSound(context, kind, effectiveUri, volumePct, preset)
+            // دقیقاً ۱ اعلان بی‌صدا در نوار اعلان + ۱ پخش تمیز صدای نوت انتخابی همان مرحله
+            postHeadsUpNotification(context, kind, title, body)
+            if (volumePct > 0) {
+                playSingleCleanAlarmSound(context, effectiveUri, volumePct)
             }
             if (vibrateEnabled) {
                 vibratePattern(context, kind)
             }
-            postHeadsUpNotification(context, kind, title, body)
         }
     }
 
     /**
-     * پخش تمیز و تک‌صدایی آلارم:
-     * - اگر زنگ گوشی (`Ding-Dong`, `Red Dwarf`, `Latch` یا هر زنگ انتخابی) موجود است یا حالت `CUSTOM_ONLY` فعال است،
-     *   فقط همان زنگ گوشی پخش می‌شود و هیچ بوق اضافه‌ای از `ToneGenerator` پخش نمی‌گردد.
-     * - قبل از پخش صدای جدید، هر صدای در حال پخش قبلی متوقف می‌شود تا هم‌پوشانی صوتی رخ ندهد.
+     * پخش تک‌صدای اختصاصی اپ درست مانند ساعت/آلارم گوشی:
+     * فقط زنگ انتخابی همان مرحله (`Ding-Dong`, `Red Dwarf`, `Latch` یا هر نوت انتخابی کاربر) پخش می‌شود
+     * و هیچ بوق اضافه یا صدای دوم سیستم پخش نمی‌گردد.
      */
     private fun playSingleCleanAlarmSound(
         context: Context,
-        kind: TradeAlarmKind,
         customSoundUri: String,
         volumePercent: Int = 90,
-        preset: AlarmTonePreset = AlarmTonePreset.CUSTOM_ONLY,
     ) {
         val safeVol = volumePercent.coerceIn(5, 100)
         runCatching { activeRingtone?.stop() }
 
-        val shouldPlayRingtoneOnly = preset == AlarmTonePreset.CUSTOM_ONLY || customSoundUri.isNotBlank()
-        if (shouldPlayRingtoneOnly) {
-            var playedRingtone = false
-            runCatching {
-                val uri = if (customSoundUri.isNotBlank()) {
-                    Uri.parse(customSoundUri)
-                } else {
-                    RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-                }
-                if (uri != null) {
-                    val ringtone = RingtoneManager.getRingtone(context.applicationContext, uri)
-                    if (ringtone != null) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                            ringtone.isLooping = false
-                            ringtone.volume = (safeVol / 100f).coerceIn(0.05f, 1.0f)
-                        }
-                        activeRingtone = ringtone
-                        ringtone.play()
-                        playedRingtone = true
-                    }
-                }
-            }
-            if (playedRingtone) return
-        }
-
-        // فقط در صورتی که کاربر صراحتاً پروفایل سینت‌سایزر را بدون زنگ انتخابی خواسته باشد:
         runCatching {
-            val toneGen = ToneGenerator(AudioManager.STREAM_NOTIFICATION, safeVol)
-            when (preset) {
-                AlarmTonePreset.SOFT_CHIME -> {
-                    when (kind) {
-                        TradeAlarmKind.ENTRY -> {
-                            toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
-                            mainHandler.postDelayed({ runCatching { toneGen.release() } }, 220L)
-                        }
-                        TradeAlarmKind.TAKE_PROFIT -> {
-                            toneGen.startTone(ToneGenerator.TONE_PROP_ACK, 130)
-                            mainHandler.postDelayed({ runCatching { toneGen.release() } }, 280L)
-                        }
-                        TradeAlarmKind.STOP_LOSS -> {
-                            toneGen.startTone(ToneGenerator.TONE_PROP_NACK, 170)
-                            mainHandler.postDelayed({ runCatching { toneGen.release() } }, 320L)
-                        }
+            val uri = if (customSoundUri.isNotBlank()) {
+                Uri.parse(customSoundUri)
+            } else {
+                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            }
+            if (uri != null) {
+                val ringtone = RingtoneManager.getRingtone(context.applicationContext, uri)
+                if (ringtone != null) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        ringtone.isLooping = false
+                        ringtone.volume = (safeVol / 100f).coerceIn(0.05f, 1.0f)
                     }
-                }
-
-                AlarmTonePreset.SHARP_RADAR -> {
-                    when (kind) {
-                        TradeAlarmKind.ENTRY -> {
-                            toneGen.startTone(ToneGenerator.TONE_CDMA_ALERT_CALL_GUARD, 200)
-                            mainHandler.postDelayed({ runCatching { toneGen.release() } }, 350L)
-                        }
-                        TradeAlarmKind.TAKE_PROFIT -> {
-                            toneGen.startTone(ToneGenerator.TONE_SUP_CONFIRM, 220)
-                            mainHandler.postDelayed({ runCatching { toneGen.release() } }, 380L)
-                        }
-                        TradeAlarmKind.STOP_LOSS -> {
-                            toneGen.startTone(ToneGenerator.TONE_CDMA_ABBR_ALERT, 250)
-                            mainHandler.postDelayed({ runCatching { toneGen.release() } }, 400L)
-                        }
-                    }
-                }
-
-                else -> {
-                    when (kind) {
-                        TradeAlarmKind.ENTRY -> {
-                            toneGen.startTone(ToneGenerator.TONE_PROP_ACK, 160)
-                            mainHandler.postDelayed({ runCatching { toneGen.release() } }, 300L)
-                        }
-                        TradeAlarmKind.TAKE_PROFIT -> {
-                            toneGen.startTone(ToneGenerator.TONE_SUP_CONFIRM, 200)
-                            mainHandler.postDelayed({ runCatching { toneGen.release() } }, 350L)
-                        }
-                        TradeAlarmKind.STOP_LOSS -> {
-                            toneGen.startTone(ToneGenerator.TONE_PROP_NACK, 220)
-                            mainHandler.postDelayed({ runCatching { toneGen.release() } }, 380L)
-                        }
-                    }
+                    activeRingtone = ringtone
+                    ringtone.play()
                 }
             }
         }
@@ -472,7 +426,8 @@ object TradeEventAlarmManager {
             .setContentIntent(pendingIntent)
             .build()
 
-        nm.notify(notificationIdSeq.incrementAndGet(), notification)
+        val fixedStageNotificationId = 4101 + kind.ordinal
+        nm.notify(fixedStageNotificationId, notification)
     }
 
     private fun fmtPrice(v: Double): String {

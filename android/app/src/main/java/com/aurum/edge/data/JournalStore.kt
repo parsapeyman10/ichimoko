@@ -43,6 +43,32 @@ class JournalStore(
     private val _trades = MutableStateFlow(loadFromDisk())
     val trades: StateFlow<List<PaperTrade>> = _trades.asStateFlow()
 
+    private fun ensureSequentialTradeNumbers(list: List<PaperTrade>): List<PaperTrade> {
+        if (list.isEmpty()) return list
+        val ascending = list.sortedWith(compareBy<PaperTrade> { it.openedAt }.thenBy { it.id })
+        var maxAssigned = ascending.maxOfOrNull { it.tradeNumber } ?: 0
+        val numberedById = HashMap<String, Int>(ascending.size)
+        if (maxAssigned <= 0) {
+            ascending.forEachIndexed { idx, t ->
+                numberedById[t.id] = idx + 1
+            }
+        } else {
+            ascending.forEachIndexed { idx, t ->
+                if (t.tradeNumber > 0) {
+                    numberedById[t.id] = t.tradeNumber
+                    if (t.tradeNumber > maxAssigned) maxAssigned = t.tradeNumber
+                } else {
+                    maxAssigned = maxOf(maxAssigned + 1, idx + 1)
+                    numberedById[t.id] = maxAssigned
+                }
+            }
+        }
+        return list.map { t ->
+            val assigned = numberedById[t.id] ?: t.tradeNumber
+            if (t.tradeNumber == assigned) t else t.copy(tradeNumber = assigned)
+        }.sortedByDescending { it.openedAt }
+    }
+
     @Synchronized
     private fun loadFromDisk(): List<PaperTrade> {
         val localList = run {
@@ -62,7 +88,7 @@ class JournalStore(
         }
 
         if (!isDefaultJournalFile) {
-            return localList.sortedByDescending { it.openedAt }
+            return ensureSequentialTradeNumbers(localList)
         }
 
         // ادغام هوشمند با شاردهای روزانه و بک‌آپ‌های خودکار روزانه در حافظه گوشی
@@ -71,7 +97,7 @@ class JournalStore(
         }.getOrDefault(emptyList())
 
         if (shardList.isEmpty()) {
-            return localList.sortedByDescending { it.openedAt }
+            return ensureSequentialTradeNumbers(localList)
         }
         val merged = LinkedHashMap<String, PaperTrade>()
         for (t in localList) {
@@ -83,12 +109,12 @@ class JournalStore(
                 merged[t.id] = t
             }
         }
-        return merged.values.sortedByDescending { it.openedAt }
+        return ensureSequentialTradeNumbers(merged.values.toList())
     }
 
     @Synchronized
     private fun persist(list: List<PaperTrade>) {
-        val sorted = list.sortedByDescending { it.openedAt }
+        val sorted = ensureSequentialTradeNumbers(list)
         _trades.value = sorted
         runCatching {
             file.parentFile?.mkdirs()
@@ -133,6 +159,7 @@ class JournalStore(
             action = calc.action,
             activeModel = activeModel,
         )
+        val nextTradeNum = (_trades.value.maxOfOrNull { it.tradeNumber } ?: _trades.value.size) + 1
         val rawTrade = calc.toPaperTrade(
             note = note,
             openedAt = now,
@@ -143,12 +170,23 @@ class JournalStore(
             rrBreakdownFa = rrBreakdownFa,
         )
         val trade = rawTrade.copy(
+            tradeNumber = nextTradeNum,
             preEntry3CandleCategoryCode = pre3Context.categoryCode,
             preEntry3CandleCategoryFa = pre3Context.categoryBadgeFa,
             preEntry3CandleSummaryFa = pre3Context.summaryFa,
             preEntry3Candles = pre3Context.candles,
         )
         persist( listOf(trade) + _trades.value )
+        if (isDefaultJournalFile && effectiveCandles.isNotEmpty()) {
+            runCatching {
+                TradeSnapshotArchiveManager.captureAndArchiveTradeOpen(
+                    context = appContext,
+                    trade = trade,
+                    report = null,
+                    triggerCandles = effectiveCandles,
+                )
+            }
+        }
         val cfg = settingsStore?.read()
         com.aurum.edge.notify.TradeEventAlarmManager.triggerEntryAlarm(
             context = appContext,
@@ -289,6 +327,14 @@ class JournalStore(
                 val alarmEnabled = cfg?.notifyOnSignal != false
                 val soundUri = cfg?.alertSoundUri.orEmpty()
                 closedTradesForAlarm.forEach { (closedTrade, isProfit) ->
+                    if (isDefaultJournalFile) {
+                        runCatching {
+                            TradeSnapshotArchiveManager.captureAndArchiveTradeClose(
+                                context = appContext,
+                                closedTrade = closedTrade,
+                            )
+                        }
+                    }
                     if (isProfit) {
                         com.aurum.edge.notify.TradeEventAlarmManager.triggerTakeProfitAlarm(
                             context = appContext,
@@ -353,6 +399,15 @@ class JournalStore(
             val alarmEnabled = cfg?.notifyOnSignal != false
             val soundUri = cfg?.alertSoundUri.orEmpty()
             closedTradesForAlarm.forEach { (closedTrade, isProfit) ->
+                if (isDefaultJournalFile) {
+                    runCatching {
+                        TradeSnapshotArchiveManager.captureAndArchiveTradeClose(
+                            context = appContext,
+                            closedTrade = closedTrade,
+                            closeCandles = candles,
+                        )
+                    }
+                }
                 if (isProfit) {
                     com.aurum.edge.notify.TradeEventAlarmManager.triggerTakeProfitAlarm(
                         context = appContext,
@@ -392,6 +447,14 @@ class JournalStore(
         )
         persist(_trades.value.map { if (it.id == tradeId) closed else it })
         settingsStore?.adjustBalance(roundedNet)
+        if (isDefaultJournalFile) {
+            runCatching {
+                TradeSnapshotArchiveManager.captureAndArchiveTradeClose(
+                    context = appContext,
+                    closedTrade = closed,
+                )
+            }
+        }
         val cfg = settingsStore?.read()
         val alarmEnabled = cfg?.notifyOnSignal != false
         val soundUri = cfg?.alertSoundUri.orEmpty()

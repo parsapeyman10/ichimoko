@@ -93,7 +93,7 @@ fun NeuralBrainScreen(
         SectionCard(
             title = "🧭 دستیار ترید با بهترین متود ایچیموکو جهان (هوسودا + پاتل + ۹ کتاب درایو)",
             subtitle = "تحلیل ۴ ستون اصیل گوایچی هوسودا (تعادل، امواج I/V/N/P/S، چرخه زمان 9/17/26/33 و اهداف V/N/E/NT) + تله‌متری زنده ۹ کتاب درایو",
-            initiallyExpanded = true,
+            initiallyExpanded = false,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 // انتخاب نماد و تایم‌فریم دستیار
@@ -248,7 +248,7 @@ fun NeuralBrainScreen(
         SectionCard(
             title = "🛠️ نکات قابل اصلاح و ارتقاء بعدی از نگاه دستیار ایچیموکو (${improvementNotes.size} نکته)",
             subtitle = "عیب‌یابی خودکار معاملات، استاپ‌ها و گلوگاه‌های ۲۴ استراتژی به همراه دستور دقیق اصلاح برای آپدیت‌های بعدی یا اعمال فوری",
-            initiallyExpanded = true,
+            initiallyExpanded = false,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
@@ -358,7 +358,7 @@ fun NeuralBrainScreen(
         SectionCard(
             title = "🧠 مغز شبکه عصبی ترید (FT-Attention + SwiGLU + AdamW)",
             subtitle = "سیستم هوش عصبی اختصاصی ترید ایچیموکو: یادگیری الگوهای سودده، تله‌های استاپ‌هانت، بهترین استراتژی هر نماد و سشن‌های طلایی",
-            initiallyExpanded = true,
+            initiallyExpanded = false,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
@@ -472,7 +472,7 @@ fun NeuralBrainScreen(
         SectionCard(
             title = "🔬 کالبدشکافی تریدی علل تارگت (TP) و استاپ (SL) توسط هوش عصبی",
             subtitle = "تحلیل آماری عوامل اصلی موفقیت معاملات، دلایل اصلی استاپ خوردن و قوانین طلایی استخراج‌شده برای ترید",
-            initiallyExpanded = true,
+            initiallyExpanded = false,
         ) {
             val tf = neuralState.tradeForensics
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -546,7 +546,7 @@ fun NeuralBrainScreen(
         SectionCard(
             title = "🏆 ماتریس برتری ترید ۲۴ استراتژی (نرخ برد، Profit Factor و امید ریاضی E[R])",
             subtitle = "رتبه‌بندی تریدی تمام ۱۵ ترکیب ایچیموکو و ۹ کتاب PDF گوگل درایو بر اساس بازدهی واقعی و امتیاز لبه ترید",
-            initiallyExpanded = true,
+            initiallyExpanded = false,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
@@ -689,7 +689,7 @@ fun NeuralBrainScreen(
         SectionCard(
             title = "💡 خلاصه آموخته‌ها و برداشت‌های شبکه عصبی به زبان ساده",
             subtitle = "توضیح کامل قواعدی که هوش عصبی از رفتار کندل‌ها، ایچیموکو و نتایج معاملات استخراج کرده است",
-            initiallyExpanded = true,
+            initiallyExpanded = false,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 neuralState.learnedInsightsFeedFa.forEach { insight ->

@@ -463,7 +463,7 @@ private fun LiveMetalsCryptoForexRadarCard(
 ) {
     val isScanning by viewModel.isScanningBtcStrategy.collectAsStateWithLifecycle()
     var selectedCategory by rememberSaveable { mutableIntStateOf(0) }
-    var radarExpanded by rememberSaveable { mutableStateOf(true) }
+    var radarExpanded by rememberSaveable("radar_closed_default_v3918") { mutableStateOf(false) }
 
     val symbolsInCategory = remember(selectedCategory) {
         when (selectedCategory) {
@@ -795,6 +795,10 @@ private fun LiveTradeGaugeCard(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                Pill(
+                    text = trade.displayTradeNumberBadgeFa,
+                    color = AurumColors.Gold,
+                )
                 Text(
                     text = trade.symbol,
                     style = MaterialTheme.typography.titleMedium,

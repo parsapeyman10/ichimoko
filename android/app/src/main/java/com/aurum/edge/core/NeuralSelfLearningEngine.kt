@@ -808,6 +808,65 @@ class NeuralSelfLearningEngine(
     }
 
     /**
+     * استخراج کامل بردار ۱۶ ویژگی و امضای شرایط برای معاملات بسته‌شده با ترکیب تمام متدهای اصلی:
+     * ۱. ۴ ستون اصیل هوسودا (تعادل کومو/کیجون/چیکو، امواج I/V/N/P/S، چرخه زمان 9/17/26/33، اهداف V/N/E/NT)
+     * ۲. هر ۲۴ استراتژی (۱۵ ترکیب ۴ کتاب + ۹ کتاب PDF درایو)
+     * ۳. دسته‌بندی ۳ کندل قبل از ورود (`PRE3_*` و کیفیت بدنه/شدوی ۳ کندل قبل)
+     * ۴. بازسازی دقیق اسنپ‌شات ایچیموکو در لحظه ورود از خزانه کندل ۱ ماهه (`PhoneStorageVaultManager`)
+     */
+    fun extractConditionFeaturesForClosedTrade(
+        trade: PaperTrade,
+        report: StrategyEvaluationReport? = null,
+    ): Triple<List<Double>, String, String> {
+        val vaultCandles = if (report?.triggerSnapshot == null) {
+            runCatching {
+                com.aurum.edge.data.PhoneStorageVaultManager.loadPersistedCandles(
+                    trade.symbol,
+                    trade.interval,
+                    trade.openedAt,
+                ).filter { it.time <= trade.openedAt }
+            }.getOrDefault(emptyList())
+        } else emptyList()
+
+        val reconstructedSnap = report?.triggerSnapshot
+            ?: if (vaultCandles.size >= 26) IchimokuStrategyEngine.computeSnapshot(vaultCandles) else null
+
+        val pre3Code = trade.preEntry3CandleCategoryCode.ifBlank {
+            if (vaultCandles.size >= 4) {
+                IchimokuStrategyEngine.buildPreEntry3CandleContext(
+                    candles = vaultCandles,
+                    action = trade.action,
+                    activeModel = BitcoinStrategyModel.fromId(trade.strategyId),
+                ).categoryCode
+            } else ""
+        }
+
+        val pre3Bonus = when {
+            pre3Code.contains("MOMENTUM_LADDER", true) || pre3Code.contains("KIJUN_SPRING", true) -> 0.25
+            pre3Code.contains("KUMO_SQUEEZE", true) || pre3Code.contains("ENGULFING", true) -> 0.20
+            pre3Code.contains("CHOP_DOJI", true) || pre3Code.contains("CLIMAX_EXHAUSTION", true) -> -0.35
+            else -> 0.0
+        }
+
+        val (baseFeatures, baseKey, baseDescFa) = extractConditionFeatures(
+            symbolInput = trade.symbol,
+            action = trade.action,
+            interval = trade.interval,
+            strategyId = trade.strategyId,
+            optimalRr = trade.effectiveOptimalRr,
+            confidence = trade.confidence,
+            report = report,
+            snapshotOverride = reconstructedSnap,
+            preEntry3Bonus = pre3Bonus,
+            preEntry3Code = pre3Code,
+        )
+
+        val pre3Badge = trade.preEntry3CandleCategoryFa.takeIf { it.isNotBlank() }
+        val finalDesc = if (pre3Badge != null) "$baseDescFa · ۳ کندل قبل: $pre3Badge" else baseDescFa
+        return Triple(baseFeatures, baseKey, finalDesc)
+    }
+
+    /**
      * استخراج بردار ۱۶ ویژگی نرمال‌شده `[-1, +1]` و امضای شرایط بازار (`conditionSignatureKey`) از معامله یا گزارش استراتژی.
      */
     fun extractConditionFeatures(
@@ -818,12 +877,15 @@ class NeuralSelfLearningEngine(
         optimalRr: Double,
         confidence: Double,
         report: StrategyEvaluationReport? = null,
+        snapshotOverride: IchimokuSnapshot? = null,
+        preEntry3Bonus: Double = 0.0,
+        preEntry3Code: String = "",
     ): Triple<List<Double>, String, String> {
         val symbol = V1Universe.normalize(symbolInput)
         val assetClass = AssetClass.of(symbol)
         val model = BitcoinStrategyModel.fromId(strategyId)
-        val trigSnap = report?.triggerSnapshot
-        val stratSnap = report?.strategySnapshot
+        val trigSnap = report?.triggerSnapshot ?: snapshotOverride
+        val stratSnap = report?.strategySnapshot ?: trigSnap
 
         val f0 = if (assetClass == AssetClass.CRYPTO) 1.0 else -1.0
         val f1 = if (assetClass == AssetClass.COMMODITY) 1.0 else -1.0
@@ -831,10 +893,10 @@ class NeuralSelfLearningEngine(
         val f3 = if (assetClass == AssetClass.STOCK) 1.0 else -1.0
         val f4 = if (interval == Interval.M15) 1.0 else -1.0
         val f5 = if (action == SignalAction.BUY) 1.0 else -1.0
-        val f6 = if (model.hasPatel) 1.0 else -1.0
-        val f7 = if (model.hasTuttle) 1.0 else -1.0
-        val f8 = if (model.hasHosoda) 1.0 else -1.0
-        val f9 = if (model.hasPeloille) 1.0 else -1.0
+        val f6 = if (model.hasPatel || model == BitcoinStrategyModel.DRIVE_PDF_4_MTF_H4_15M_ICHIMOKU) 1.0 else -1.0
+        val f7 = if (model.hasTuttle || model == BitcoinStrategyModel.DRIVE_PDF_1_BOLLINGER_KUMO_BREAKOUT || model == BitcoinStrategyModel.DRIVE_PDF_8_KUNITZ_6LINE_PROFESSIONAL) 1.0 else -1.0
+        val f8 = if (model.hasHosoda || model == BitcoinStrategyModel.DRIVE_PDF_7_ICHIMOKU_8_STRATEGIES_ENCYCLOPEDIA || model == BitcoinStrategyModel.DRIVE_PDF_9_FAST_7_22_44_TREND_RIDER) 1.0 else -1.0
+        val f9 = if (model.hasPeloille || model.isDrivePdfStrategy) 1.0 else -1.0
 
         val er14 = ((trigSnap?.efficiencyRatio14 ?: stratSnap?.efficiencyRatio14 ?: 0.42) * 2.0 - 1.0).coerceIn(-1.0, 1.0)
         val kumoAtr = if (trigSnap != null && trigSnap.atr14 > 0.0) {
@@ -849,12 +911,12 @@ class NeuralSelfLearningEngine(
         }
         val adverseWick = if (trigSnap != null) {
             val w = if (action == SignalAction.BUY) trigSnap.upperWickRatio else trigSnap.lowerWickRatio
-            ((w - 0.25) * 2.5).coerceIn(-1.0, 1.0)
+            (((w - 0.25) * 2.5) - preEntry3Bonus * 0.5).coerceIn(-1.0, 1.0)
         } else {
-            -0.15
+            (-0.15 - preEntry3Bonus * 0.5).coerceIn(-1.0, 1.0)
         }
         val rrNorm = (((optimalRr.coerceAtLeast(1.5)) - 2.0) / 1.5).coerceIn(-1.0, 1.0)
-        val confNorm = ((confidence - 80.0) / 20.0).coerceIn(-1.0, 1.0)
+        val confNorm = (((confidence - 80.0) / 20.0) + preEntry3Bonus).coerceIn(-1.0, 1.0)
 
         val features = listOf(
             f0, f1, f2, f3,
@@ -871,7 +933,8 @@ class NeuralSelfLearningEngine(
         }
         val extBand = if (distKijunAtr > 0.35) "OVEREXTENDED_KIJUN" else "EQUILIBRIUM_OK"
         val wickBand = if (adverseWick > 0.30) "HEAVY_ADVERSE_WICK" else "CLEAN_CANDLE"
-        val signatureKey = "${assetClass.code}|${interval.label}|$phaseTag|$erBand|$extBand|$wickBand|books${model.combinationCount}"
+        val pre3Short = preEntry3Code.takeIf { it.isNotBlank() }?.let { "|$it" }.orEmpty()
+        val signatureKey = "${assetClass.code}|${interval.label}|$phaseTag|$erBand|$extBand|$wickBand|books${model.combinationCount}$pre3Short"
 
         val descFa = buildString {
             append("${categoryTitleFa(assetClass)} · تایم ${interval.label}")
@@ -1164,13 +1227,8 @@ class NeuralSelfLearningEngine(
         val achievedR = (trade.rMultiple ?: (pnl / (trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0))).coerceIn(-1.5, 4.5)
         val assetClass = AssetClass.of(trade.symbol)
 
-        val (extractedFeatures, extractedKey, condDescFa) = extractConditionFeatures(
-            symbolInput = trade.symbol,
-            action = trade.action,
-            interval = trade.interval,
-            strategyId = trade.strategyId,
-            optimalRr = trade.effectiveOptimalRr,
-            confidence = trade.confidence,
+        val (extractedFeatures, extractedKey, condDescFa) = extractConditionFeaturesForClosedTrade(
+            trade = trade,
             report = report,
         )
         val noteConditionKey = Regex("""\[NN:([^\s\]]+)""")
@@ -1182,6 +1240,18 @@ class NeuralSelfLearningEngine(
         val features = featuresOverride?.toList() ?: extractedFeatures
         val sigKey = conditionKeyOverride?.takeIf { it.isNotBlank() } ?: noteConditionKey ?: extractedKey
 
+        // تحلیل خطای پس از خروج از روی کندل‌های ذخیره‌شده ۱ ماهه در حافظه گوشی (Mistake Forensics Feedback)
+        val vaultMistake = if (!won) {
+            runCatching {
+                com.aurum.edge.data.PhoneStorageVaultManager.analyzeLosingTradeMistakeFromVault(trade)
+            }.getOrNull()
+        } else null
+        val enrichedCondDescFa = if (vaultMistake != null && vaultMistake.lessonLearnedFa.isNotBlank()) {
+            "$condDescFa · [عیب‌یابی کندلی: ${vaultMistake.mistakeBadgeFa}]"
+        } else {
+            condDescFa
+        }
+
         val sample = ReplayExperienceSample(
             tradeId = trade.id,
             categoryCode = assetClass.code,
@@ -1190,21 +1260,37 @@ class NeuralSelfLearningEngine(
             timeframeLabel = trade.interval.label,
             features = features,
             conditionKey = sigKey,
-            conditionDescriptionFa = condDescFa,
+            conditionDescriptionFa = enrichedCondDescFa,
             won = won,
             achievedR = achievedR,
             timestampMs = trade.closedAt ?: System.currentTimeMillis(),
         )
 
-        // 1. Run AdamW step on current trade + mini-batch of 3 random/recent replay samples
-        var nextState = applyAdamWStep(persistedState, sample)
+        // ۱. گام AdamW + Focal-Huber روی معامله فعلی (با ضریب تقویت خطا برای استاپ‌های تحلیل‌شده در خزانه کندل)
+        val primaryStepWeight = when {
+            !won && vaultMistake != null -> 1.35 // وزن آموزشی بیشتر برای یادگیری سریع‌تر از اشتباهات کندلی
+            won && achievedR >= 2.2 -> 1.20 // تقویت الگوهای اسنایپر بالای 2.2R
+            else -> 1.0
+        }
+        var nextState = applyAdamWStep(persistedState, sample, lrScale = primaryStepWeight)
         val updatedBuffer = (listOf(sample) + nextState.replayBuffer.filterNot { it.tradeId == sample.tradeId })
             .take(MAX_REPLAY_BUFFER)
 
+        // ۲. Prioritized Experience Replay (PER): انتخاب هوشمند ۴ نمونه با بیشترین خطای پیش‌بینی (TD-Error) + تنوع استراتژی/دسته
         if (updatedBuffer.size >= 4) {
-            val replayIndices = listOf(1, updatedBuffer.size / 2, updatedBuffer.size - 1).distinct()
-            for (idx in replayIndices) {
-                nextState = applyAdamWStep(nextState, updatedBuffer[idx], lrScale = 0.45)
+            val candidates = updatedBuffer.drop(1)
+            val prioritizedBatch = candidates
+                .map { s ->
+                    val (pw, pr) = forwardPass(s.features, nextState)
+                    val targetW = if (s.won) 1.0 else 0.0
+                    val tdErr = abs(pw - targetW) + 0.35 * abs(pr - s.achievedR)
+                    s to tdErr
+                }
+                .sortedByDescending { it.second }
+                .take(4)
+                .map { it.first }
+            for (replaySample in prioritizedBatch) {
+                nextState = applyAdamWStep(nextState, replaySample, lrScale = 0.50)
             }
         }
 
@@ -1283,8 +1369,14 @@ class NeuralSelfLearningEngine(
         val targetWin = if (sample.won) 1.0 else 0.0
         val targetR = sample.achievedR.coerceIn(-1.5, 4.5)
 
-        val errWin = predWin - targetWin // dL_bce / dLogit
-        val errR = (predR - targetR).coerceIn(-2.5, 2.5) * 0.35 // Huber-clipped R gradient
+        // Focal-modulated BCE gradient so hard false-positives (stop-loss hits) receive stronger correction
+        val pt = if (sample.won) predWin else (1.0 - predWin)
+        val focalWeight = (0.65 + 0.70 * Math.pow((1.0 - pt.coerceIn(0.01, 0.99)), 1.2)).coerceIn(0.65, 1.35)
+        val errWin = (predWin - targetWin) * focalWeight
+        // Smooth Huber gradient for R-Multiple regression
+        val rawDiffR = predR - targetR
+        val huberGradR = if (abs(rawDiffR) <= 1.2) rawDiffR else 1.2 * (if (rawDiffR > 0) 1.0 else -1.0)
+        val errR = huberGradR * 0.38
 
         val step = cur.adamStepCount + 1
         // Cosine-annealed learning rate with floor

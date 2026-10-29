@@ -50,6 +50,9 @@ data class ArchivedCandlePoint(
 @Serializable
 data class ArchivedTradeSnapshotRecord(
     val tradeId: String,
+    val tradeNumber: Int = 0,
+    val snapshotPhase: String = "OPEN", // "OPEN" or "CLOSE"
+    val snapshotTimestampMs: Long = 0L,
     val symbol: String,
     val timeframeLabel: String,
     val action: String,
@@ -65,6 +68,12 @@ data class ArchivedTradeSnapshotRecord(
     val expectedProfitUsd: Double,
     val confidence: Double,
     val openedAtMs: Long,
+    val exitPrice: Double? = null,
+    val exitAtMs: Long? = null,
+    val exitReasonFa: String = "",
+    val realizedPnlUsd: Double? = null,
+    val realizedRMultiple: Double? = null,
+    val closeConditionCategoryFa: String = "",
     val rrFormulaFa: String = "",
     val slBasisFa: String = "",
     val tpBasisFa: String = "",
@@ -86,7 +95,27 @@ data class ArchivedTradeSnapshotRecord(
     val phoneGalleryUri: String = "",
     val imageSizeBytes: Long = 0L,
     val fullPaperTrade: PaperTrade? = null,
-)
+) {
+    val displayTradeNumber: Int
+        get() = when {
+            tradeNumber > 0 -> tradeNumber
+            fullPaperTrade != null && fullPaperTrade.tradeNumber > 0 -> fullPaperTrade.tradeNumber
+            else -> fullPaperTrade?.displayTradeNumber ?: (kotlin.math.abs(tradeId.hashCode()) % 9000 + 1000)
+        }
+
+    val isCloseSnapshot: Boolean
+        get() = snapshotPhase.equals("CLOSE", ignoreCase = true)
+
+    val effectiveTimestampMs: Long
+        get() = if (snapshotTimestampMs > 0L) snapshotTimestampMs else (exitAtMs ?: openedAtMs)
+
+    val phaseBadgeFa: String
+        get() = if (isCloseSnapshot) {
+            "🏁 لحظه بسته شدن (${closeConditionCategoryFa.ifBlank { "CLOSE" }})"
+        } else {
+            "📸 لحظه باز شدن (OPEN)"
+        }
+}
 
 /**
  * موتور آرشیو تصویری معاملات و ذخیره‌سازی دوگانه (حافظه داخلی اپ + گالری/دانلودهای گوشی)
@@ -116,15 +145,39 @@ object TradeSnapshotArchiveManager {
     fun init(context: Context) {
         runCatching {
             val loaded = loadIndexFromDisk(context)
-            _records.value = loaded.sortedByDescending { it.openedAtMs }
+            _records.value = loaded.sortedByDescending { it.effectiveTimestampMs }
         }
     }
 
     fun recordForTrade(tradeId: String): ArchivedTradeSnapshotRecord? =
-        _records.value.firstOrNull { it.tradeId == tradeId }
+        _records.value.firstOrNull { it.tradeId == tradeId && it.isCloseSnapshot }
+            ?: _records.value.firstOrNull { it.tradeId == tradeId }
+
+    fun recordsForTrade(tradeId: String): List<ArchivedTradeSnapshotRecord> =
+        _records.value.filter { it.tradeId == tradeId }.sortedBy { if (it.isCloseSnapshot) 1 else 0 }
+
+    private fun classifyCloseConditionFa(trade: PaperTrade): String {
+        val reason = trade.exitReason.orEmpty()
+        val pnl = trade.pnlUsd ?: 0.0
+        return when {
+            reason.contains("حد سود", ignoreCase = true) || reason.contains("TP", ignoreCase = true) ->
+                "حد سود (TP)"
+            reason.contains("متحرک", ignoreCase = true) || reason.contains("قفل سود", ignoreCase = true) ||
+                reason.contains("Trailing", ignoreCase = true) || (reason.contains("SL", ignoreCase = true) && pnl > 0.0) ->
+                "قفل سود / استاپ متحرک"
+            reason.contains("روند", ignoreCase = true) && pnl > 0.0 ->
+                "خروج هوشمند در سود (ضعف روند)"
+            reason.contains("قطعی", ignoreCase = true) || reason.contains("Backfill", ignoreCase = true) ->
+                if (pnl >= 0.0) "TP بازیابی آفلاین" else "SL بازیابی آفلاین"
+            reason.contains("دستی", ignoreCase = true) || reason.contains("لحظه", ignoreCase = true) ->
+                if (pnl >= 0.0) "بستن دستی در سود" else "بستن دستی در ضرر"
+            pnl > 0.0 -> "بسته شدن در سود"
+            else -> "برخورد به حد ضرر (SL)"
+        }
+    }
 
     /**
-     * ثبت و ساخت فوری اسکرین‌شات ایچیموکو به محض باز شدن معامله + ذخیره در آرشیو و حافظه گوشی.
+     * ثبت و ساخت فوری اسکرین‌شات ایچیموکو به محض باز شدن معامله + نوشتن شماره معامله روی چارت + ذخیره در آرشیو و حافظه گوشی.
      */
     @Synchronized
     fun captureAndArchiveTradeOpen(
@@ -134,9 +187,14 @@ object TradeSnapshotArchiveManager {
         triggerCandles: List<Candle>,
     ): ArchivedTradeSnapshotRecord? {
         return runCatching {
+            val effectiveCandles = triggerCandles.ifEmpty {
+                LiveQuoteFetcher.peekCachedCandles(trade.symbol, trade.interval).ifEmpty {
+                    PhoneStorageVaultManager.loadPersistedCandles(trade.symbol, trade.interval, trade.openedAt)
+                }
+            }
             val trigSnap = report?.triggerSnapshot
-                ?: IchimokuStrategyEngine.computeSnapshot(triggerCandles)
-            val closedCandles = triggerCandles
+                ?: IchimokuStrategyEngine.computeSnapshot(effectiveCandles)
+            val closedCandles = effectiveCandles
                 .filter { it.high.isFinite() && it.low.isFinite() && it.close > 0.0 }
                 .sortedBy { it.time }
                 .takeLast(52)
@@ -144,9 +202,13 @@ object TradeSnapshotArchiveManager {
             val fixedRisk = trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0
             val expectedWin = round2(fixedRisk * trade.riskReward)
             val rrBreakdown = report?.rrBreakdown
+            val tNum = trade.displayTradeNumber
 
             val baseRecord = ArchivedTradeSnapshotRecord(
                 tradeId = trade.id,
+                tradeNumber = tNum,
+                snapshotPhase = "OPEN",
+                snapshotTimestampMs = trade.openedAt,
                 symbol = trade.symbol,
                 timeframeLabel = trade.interval.label,
                 action = trade.action.name,
@@ -190,7 +252,7 @@ object TradeSnapshotArchiveManager {
                 fullPaperTrade = trade,
             )
 
-            // ۱. رندر تصویر گرافیکی باکیفیت از چارت ایچیموکو + باکس پوزیشن SL/TP + شروط معامله
+            // ۱. رندر تصویر گرافیکی باکیفیت از چارت ایچیموکو + شماره معامله + باکس پوزیشن SL/TP + شروط معامله
             val bitmap = renderTradeIchimokuSnapshotBitmap(baseRecord, closedCandles)
             val webpBytes = compressBitmapToCompactWebp(bitmap, quality = 80)
             bitmap.recycle()
@@ -201,7 +263,7 @@ object TradeSnapshotArchiveManager {
             // ۳. ذخیره در پوشه داخلی آرشیو اپ
             val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
             val safeSym = trade.symbol.replace("/", "_").replace(" ", "_")
-            val fileName = "AurumTrade_${safeSym}_${trade.interval.label}_${trade.openedAt}.webp"
+            val fileName = "AurumTrade_No${tNum}_OPEN_${safeSym}_${trade.interval.label}_${trade.openedAt}.webp"
             val localFile = File(dir, fileName)
             localFile.writeBytes(embeddedBytes)
 
@@ -219,12 +281,166 @@ object TradeSnapshotArchiveManager {
                 imageSizeBytes = embeddedBytes.size.toLong(),
             )
 
-            val updated = (_records.value.filterNot { it.tradeId == trade.id } + finalRecord)
-                .sortedByDescending { it.openedAtMs }
-                .take(500)
+            val updated = (_records.value.filterNot { it.tradeId == trade.id && !it.isCloseSnapshot } + finalRecord)
+                .sortedByDescending { it.effectiveTimestampMs }
+                .take(800)
             _records.value = updated
             saveIndexToDisk(context, updated)
             finalRecord
+        }.getOrNull()
+    }
+
+    /**
+     * ثبت و ساخت فوری اسکرین‌شات ایچیموکو در لحظه بسته شدن معامله با هر شرایطی (TP، SL، قفل سود متحرک، ضعف روند، دستی یا بازیابی آفلاین)
+     * همراه با درج شماره معامله (`معامله #N`)، خط قیمت خروج و نتیجه قطعی روی تصویر.
+     */
+    @Synchronized
+    fun captureAndArchiveTradeClose(
+        context: Context,
+        closedTrade: PaperTrade,
+        closeCandles: List<Candle> = emptyList(),
+    ): ArchivedTradeSnapshotRecord? {
+        return runCatching {
+            if (_records.value.isEmpty()) {
+                init(context)
+            }
+            val openSnap = _records.value.firstOrNull { it.tradeId == closedTrade.id && !it.isCloseSnapshot }
+            val closeAt = closedTrade.closedAt ?: System.currentTimeMillis()
+            val exitP = closedTrade.exitPrice ?: closedTrade.takeProfit
+
+            val vaultOrLiveCandles = closeCandles.ifEmpty {
+                LiveQuoteFetcher.peekCachedCandles(closedTrade.symbol, closedTrade.interval).ifEmpty {
+                    PhoneStorageVaultManager.loadPersistedCandles(closedTrade.symbol, closedTrade.interval, closeAt)
+                }
+            }
+            val rawClosedCandles: List<Candle> = when {
+                vaultOrLiveCandles.size >= 15 -> {
+                    val base = vaultOrLiveCandles
+                        .filter { it.high.isFinite() && it.low.isFinite() && it.close > 0.0 }
+                        .sortedBy { it.time }
+                        .takeLast(51)
+                    val lastC = base.lastOrNull()
+                    if (lastC != null && abs(lastC.close - exitP) > 1e-8) {
+                        base.dropLast(1) + lastC.copy(
+                            high = max(lastC.high, exitP),
+                            low = min(lastC.low, exitP),
+                            close = exitP,
+                        )
+                    } else {
+                        base
+                    }
+                }
+                openSnap != null && openSnap.recentCandles.isNotEmpty() -> {
+                    val fromOpen = openSnap.recentCandles.map {
+                        Candle(time = it.t, open = it.o, high = it.h, low = it.l, close = it.c, volume = 1.0, closed = true)
+                    }
+                    val prevClose = fromOpen.last().close
+                    (fromOpen + Candle(
+                        time = closeAt,
+                        open = prevClose,
+                        high = max(prevClose, exitP),
+                        low = min(prevClose, exitP),
+                        close = exitP,
+                        volume = 1.0,
+                        closed = true,
+                    )).takeLast(52)
+                }
+                else -> emptyList()
+            }
+
+            val trigSnap = IchimokuStrategyEngine.computeSnapshot(rawClosedCandles)
+            val fixedRisk = closedTrade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0
+            val expectedWin = round2(fixedRisk * closedTrade.riskReward)
+            val realizedPnl = closedTrade.pnlUsd ?: 0.0
+            val realizedR = closedTrade.rMultiple ?: (realizedPnl / fixedRisk.coerceAtLeast(0.5))
+            val tNum = closedTrade.displayTradeNumber
+            val closeCatFa = classifyCloseConditionFa(closedTrade)
+
+            val closeRecord = ArchivedTradeSnapshotRecord(
+                tradeId = closedTrade.id,
+                tradeNumber = tNum,
+                snapshotPhase = "CLOSE",
+                snapshotTimestampMs = closeAt,
+                symbol = closedTrade.symbol,
+                timeframeLabel = closedTrade.interval.label,
+                action = closedTrade.action.name,
+                strategyId = closedTrade.strategyId,
+                strategyTitleFa = closedTrade.strategyTitleFa,
+                strategyBadgeFa = openSnap?.strategyBadgeFa ?: closedTrade.strategyTitleFa.take(24),
+                entryPrice = closedTrade.entry,
+                stopLossPrice = closedTrade.stopLoss,
+                takeProfitPrice = closedTrade.takeProfit,
+                riskReward = closedTrade.riskReward,
+                optimalRiskReward = closedTrade.effectiveOptimalRr,
+                fixedRiskUsd = fixedRisk,
+                expectedProfitUsd = expectedWin,
+                confidence = closedTrade.confidence,
+                openedAtMs = closedTrade.openedAt,
+                exitPrice = exitP,
+                exitAtMs = closeAt,
+                exitReasonFa = closedTrade.exitReason ?: closeCatFa,
+                realizedPnlUsd = round2(realizedPnl),
+                realizedRMultiple = round2(realizedR),
+                closeConditionCategoryFa = closeCatFa,
+                rrFormulaFa = openSnap?.rrFormulaFa ?: closedTrade.buildRrFormulaSummaryFa(),
+                slBasisFa = openSnap?.slBasisFa ?: "سنگر ساختاری کیجون/کومو",
+                tpBasisFa = openSnap?.tpBasisFa ?: "موج هوسودا",
+                tenkan = trigSnap?.tenkan ?: openSnap?.tenkan ?: exitP,
+                kijun = trigSnap?.kijun ?: openSnap?.kijun ?: closedTrade.stopLoss,
+                currentSpanA = trigSnap?.currentSpanA ?: openSnap?.currentSpanA ?: closedTrade.entry,
+                currentSpanB = trigSnap?.currentSpanB ?: openSnap?.currentSpanB ?: closedTrade.stopLoss,
+                futureSpanA = trigSnap?.futureSpanA ?: openSnap?.futureSpanA ?: closedTrade.takeProfit,
+                futureSpanB = trigSnap?.futureSpanB ?: openSnap?.futureSpanB ?: closedTrade.entry,
+                atr14 = trigSnap?.atr14 ?: openSnap?.atr14 ?: (abs(closedTrade.entry - closedTrade.stopLoss) * 0.5),
+                rsi14 = trigSnap?.rsi14 ?: openSnap?.rsi14 ?: 50.0,
+                rsi7 = trigSnap?.rsi7 ?: openSnap?.rsi7 ?: 50.0,
+                ema21 = trigSnap?.ema21 ?: openSnap?.ema21 ?: exitP,
+                ema34 = trigSnap?.ema34 ?: openSnap?.ema34 ?: exitP,
+                adx14 = trigSnap?.adx14 ?: openSnap?.adx14 ?: 25.0,
+                conditionsSummary = closedTrade.entryConditions.ifEmpty { openSnap?.conditionsSummary.orEmpty() },
+                recentCandles = rawClosedCandles.map {
+                    ArchivedCandlePoint(
+                        t = it.time,
+                        o = roundPrice(it.open),
+                        h = roundPrice(it.high),
+                        l = roundPrice(it.low),
+                        c = roundPrice(it.close),
+                    )
+                },
+                fullPaperTrade = closedTrade,
+            )
+
+            val bitmap = renderTradeIchimokuSnapshotBitmap(closeRecord, rawClosedCandles)
+            val webpBytes = compressBitmapToCompactWebp(bitmap, quality = 80)
+            bitmap.recycle()
+
+            val embeddedBytes = attachEmbeddedJsonToImageBytes(webpBytes, closeRecord)
+
+            val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
+            val safeSym = closedTrade.symbol.replace("/", "_").replace(" ", "_")
+            val fileName = "AurumTrade_No${tNum}_CLOSE_${safeSym}_${closedTrade.interval.label}_${closeAt}.webp"
+            val localFile = File(dir, fileName)
+            localFile.writeBytes(embeddedBytes)
+
+            val galleryUri = saveImageAndSelfReadableDataToPhoneStorage(
+                context = context,
+                fileName = fileName,
+                imageBytesWithEmbeddedMeta = embeddedBytes,
+                record = closeRecord,
+            )
+
+            val finalCloseRecord = closeRecord.copy(
+                localImagePath = localFile.absolutePath,
+                phoneGalleryUri = galleryUri,
+                imageSizeBytes = embeddedBytes.size.toLong(),
+            )
+
+            val updated = (_records.value.filterNot { it.tradeId == closedTrade.id && it.isCloseSnapshot } + finalCloseRecord)
+                .sortedByDescending { it.effectiveTimestampMs }
+                .take(800)
+            _records.value = updated
+            saveIndexToDisk(context, updated)
+            finalCloseRecord
         }.getOrNull()
     }
 
@@ -289,19 +505,65 @@ object TradeSnapshotArchiveManager {
         }
 
         val sideLabel = if (isBuy) "BUY / LONG" else "SELL / SHORT"
-        val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(record.openedAtMs))
+        val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(record.effectiveTimestampMs))
+        val tNum = record.displayTradeNumber
+        val phaseTitle = if (record.isCloseSnapshot) {
+            "🏁 بسته شدن (${record.closeConditionCategoryFa.ifBlank { "CLOSE" }})"
+        } else {
+            "📸 باز شدن (OPEN)"
+        }
         canvas.drawText(
-            "${record.symbol}  ·  [${record.timeframeLabel}]  ·  $sideLabel  ·  R:R 1:${String.format(Locale.US, "%.2f", record.riskReward)} (Optimal 1:${String.format(Locale.US, "%.2f", record.optimalRiskReward)})",
+            "معامله #$tNum  ·  $phaseTitle  ·  ${record.symbol} [${record.timeframeLabel}]  ·  $sideLabel  ·  R:R 1:${String.format(Locale.US, "%.2f", record.riskReward)}",
             36f,
             54f,
             titlePaint,
         )
+        val pnlSummaryText = if (record.isCloseSnapshot && record.realizedPnlUsd != null) {
+            val pnl = record.realizedPnlUsd
+            val rMult = record.realizedRMultiple ?: 0.0
+            val sign = if (pnl >= 0.0) "+" else "-"
+            "نتیجه نهایی: ${sign}$${String.format(Locale.US, "%.2f", abs(pnl))} (${sign}${String.format(Locale.US, "%.2f", abs(rMult))}R)  |  خروج: ${fmtPrice(record.exitPrice ?: record.entryPrice)}  |  علت: ${record.exitReasonFa.take(36)}"
+        } else {
+            "ریسک: -$${String.format(Locale.US, "%.2f", record.fixedRiskUsd)}  ←  سود هدف: +$${String.format(Locale.US, "%.2f", record.expectedProfitUsd)} (Optimal 1:${String.format(Locale.US, "%.2f", record.optimalRiskReward)})"
+        }
         canvas.drawText(
-            "استراتژی: ${record.strategyTitleFa}  |  زمان ثبت: $dateStr  |  ریسک: -$${String.format(Locale.US, "%.2f", record.fixedRiskUsd)}  ←  سود هدف: +$${String.format(Locale.US, "%.2f", record.expectedProfitUsd)}",
+            "استراتژی: ${record.strategyTitleFa}  |  زمان: $dateStr  |  $pnlSummaryText",
             36f,
             90f,
             subPaint,
         )
+
+        // بج بزرگ و خوانای شماره معامله در گوشه راست هدر
+        val numBadgeRect = RectF(width - 250f, 26f, width - 32f, 102f)
+        val numBadgePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = if (record.isCloseSnapshot) {
+                if ((record.realizedPnlUsd ?: 0.0) >= 0.0) Color.parseColor("#065F46") else Color.parseColor("#7F1D1D")
+            } else {
+                Color.parseColor("#1E3A8A")
+            }
+            style = Paint.Style.FILL
+        }
+        val numBadgeBorder = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = goldColor
+            style = Paint.Style.STROKE
+            strokeWidth = 2.4f
+        }
+        canvas.drawRoundRect(numBadgeRect, 14f, 14f, numBadgePaint)
+        canvas.drawRoundRect(numBadgeRect, 14f, 14f, numBadgeBorder)
+        val numBigPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = goldColor
+            textSize = 27f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        val numSubPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = whiteText
+            textSize = 15f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        canvas.drawText("معامله #$tNum", numBadgeRect.centerX(), 62f, numBigPaint)
+        canvas.drawText(if (record.isCloseSnapshot) "بسته شدن (CLOSE)" else "باز شدن (OPEN)", numBadgeRect.centerX(), 88f, numSubPaint)
 
         // ── ۲. ناحیه اصلی چارت ایچیموکو + باکس پوزیشن SL/TP ────────────────────
         val chartLeft = 24f
@@ -334,9 +596,13 @@ object TradeSnapshotArchiveManager {
         val bars = series.bars.takeLast(40)
         val futureKumo = series.futureKumo.take(26)
 
-        // محاسبه بازه قیمتی کل چارت (شامل کندل‌ها، کومو، Entry، SL و TP)
+        // محاسبه بازه قیمتی کل چارت (شامل کندل‌ها، کومو، Entry، SL، TP و Exit)
         var minPrice = minOf(record.entryPrice, record.stopLossPrice, record.takeProfitPrice)
         var maxPrice = maxOf(record.entryPrice, record.stopLossPrice, record.takeProfitPrice)
+        record.exitPrice?.takeIf { it.isFinite() && it > 0.0 }?.let { ex ->
+            minPrice = minOf(minPrice, ex)
+            maxPrice = maxOf(maxPrice, ex)
+        }
         bars.forEach { b ->
             minPrice = minOf(minPrice, b.candle.low, b.currentSpanA, b.currentSpanB, b.tenkan, b.kijun)
             maxPrice = maxOf(maxPrice, b.candle.high, b.currentSpanA, b.currentSpanB, b.tenkan, b.kijun)
@@ -526,6 +792,43 @@ object TradeSnapshotArchiveManager {
         drawPriceTag(tpY, "TP: ${fmtPrice(record.takeProfitPrice)}", Color.parseColor("#059669"))
         drawPriceTag(entryY, "IN: ${fmtPrice(record.entryPrice)}", Color.parseColor("#D97706"))
         drawPriceTag(slY, "SL: ${fmtPrice(record.stopLossPrice)}", Color.parseColor("#DC2626"))
+
+        // اگر اسکرین‌شات مربوط به لحظه بسته شدن معامله (CLOSE) است، خط قیمت خروج و برچسب OUT را هم رسم کن
+        record.exitPrice?.takeIf { record.isCloseSnapshot && it.isFinite() && it > 0.0 }?.let { exPrice ->
+            val exitY = priceToY(exPrice)
+            val isWinClose = (record.realizedPnlUsd ?: 0.0) >= 0.0
+            val exitColor = if (isWinClose) Color.parseColor("#22D3EE") else Color.parseColor("#FB7185")
+            val exitLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = exitColor
+                style = Paint.Style.STROKE
+                strokeWidth = 3.0f
+                pathEffect = DashPathEffect(floatArrayOf(10f, 5f), 0f)
+            }
+            canvas.drawLine(boxLeft, exitY, boxRight, exitY, exitLinePaint)
+            canvas.drawCircle(nowX, exitY, 7f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = exitColor })
+            drawPriceTag(exitY, "OUT: ${fmtPrice(exPrice)}", if (isWinClose) Color.parseColor("#0E7490") else Color.parseColor("#BE123C"))
+        }
+
+        // بج واترمارک شماره معامله مستقیماً روی بوم چارت (گوشه بالا چپ چارت)
+        val chartBadgeRect = RectF(chartLeft + 14f, chartTop + 14f, chartLeft + 340f, chartTop + 58f)
+        val chartBadgeBg = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(215, 15, 23, 42)
+            style = Paint.Style.FILL
+        }
+        val chartBadgeStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = goldColor
+            style = Paint.Style.STROKE
+            strokeWidth = 1.8f
+        }
+        canvas.drawRoundRect(chartBadgeRect, 10f, 10f, chartBadgeBg)
+        canvas.drawRoundRect(chartBadgeRect, 10f, 10f, chartBadgeStroke)
+        val chartBadgeText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = goldColor
+            textSize = 18.5f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        }
+        val phaseShort = if (record.isCloseSnapshot) "🏁 CLOSE (${record.closeConditionCategoryFa.take(16)})" else "📸 OPEN (ورود)"
+        canvas.drawText("معامله #$tNum  ·  $phaseShort", chartBadgeRect.left + 14f, chartBadgeRect.top + 29f, chartBadgeText)
 
         // ── ۳. پنل پایین: شروط ۱۶گانه ایچیموکو و اندیکاتورها در لحظه باز شدن ───
         val footerRect = RectF(18f, 626f, width - 18f, height - 16f)
@@ -754,12 +1057,13 @@ object TradeSnapshotArchiveManager {
         journalStore: JournalStore? = null,
     ): Int {
         var restoredCount = 0
-        val currentMap = _records.value.associateBy { it.tradeId }.toMutableMap()
+        val currentMap = _records.value.associateBy { "${it.tradeId}_${it.snapshotPhase}" }.toMutableMap()
         val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
 
         fun ingestBytes(bytes: ByteArray) {
             val rec = extractEmbeddedSnapshotFromBytes(bytes) ?: return
-            val localFile = File(dir, "AurumTrade_${rec.symbol.replace("/", "_")}_${rec.timeframeLabel}_${rec.openedAtMs}.webp")
+            val key = "${rec.tradeId}_${rec.snapshotPhase}"
+            val localFile = File(dir, "AurumTrade_No${rec.displayTradeNumber}_${rec.snapshotPhase}_${rec.symbol.replace("/", "_")}_${rec.timeframeLabel}_${rec.effectiveTimestampMs}.webp")
             if (!localFile.exists()) {
                 runCatching { localFile.writeBytes(bytes) }
             }
@@ -767,10 +1071,10 @@ object TradeSnapshotArchiveManager {
                 localImagePath = localFile.absolutePath,
                 imageSizeBytes = bytes.size.toLong(),
             )
-            if (rec.tradeId !in currentMap) {
+            if (key !in currentMap) {
                 restoredCount++
             }
-            currentMap[rec.tradeId] = updatedRec
+            currentMap[key] = updatedRec
             updatedRec.fullPaperTrade?.let { trade ->
                 journalStore?.restoreArchivedTradeIfMissing(trade)
             }
@@ -830,14 +1134,14 @@ object TradeSnapshotArchiveManager {
             val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
             val rec = extractEmbeddedSnapshotFromBytes(bytes) ?: return null
             val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
-            val localFile = File(dir, "AurumTrade_${rec.symbol.replace("/", "_")}_${rec.timeframeLabel}_${rec.openedAtMs}.webp")
+            val localFile = File(dir, "AurumTrade_No${rec.displayTradeNumber}_${rec.snapshotPhase}_${rec.symbol.replace("/", "_")}_${rec.timeframeLabel}_${rec.effectiveTimestampMs}.webp")
             localFile.writeBytes(bytes)
             val updatedRec = rec.copy(
                 localImagePath = localFile.absolutePath,
                 imageSizeBytes = bytes.size.toLong(),
             )
-            val merged = (_records.value.filterNot { it.tradeId == rec.tradeId } + updatedRec)
-                .sortedByDescending { it.openedAtMs }
+            val merged = (_records.value.filterNot { it.tradeId == rec.tradeId && it.snapshotPhase == rec.snapshotPhase } + updatedRec)
+                .sortedByDescending { it.effectiveTimestampMs }
             _records.value = merged
             saveIndexToDisk(context, merged)
             updatedRec.fullPaperTrade?.let { trade ->
