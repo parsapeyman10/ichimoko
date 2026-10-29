@@ -877,7 +877,7 @@ class NeuralSelfLearningEngine(
         optimalRr: Double,
         confidence: Double,
         report: StrategyEvaluationReport? = null,
-        snapshotOverride: IchimokuSnapshot? = null,
+        snapshotOverride: IchimokuBarSnapshot? = null,
         preEntry3Bonus: Double = 0.0,
         preEntry3Code: String = "",
     ): Triple<List<Double>, String, String> {
@@ -893,9 +893,9 @@ class NeuralSelfLearningEngine(
         val f3 = if (assetClass == AssetClass.STOCK) 1.0 else -1.0
         val f4 = if (interval == Interval.M15) 1.0 else -1.0
         val f5 = if (action == SignalAction.BUY) 1.0 else -1.0
-        val f6 = if (model.hasPatel || model == BitcoinStrategyModel.DRIVE_PDF_4_MTF_H4_15M_ICHIMOKU) 1.0 else -1.0
-        val f7 = if (model.hasTuttle || model == BitcoinStrategyModel.DRIVE_PDF_1_BOLLINGER_KUMO_BREAKOUT || model == BitcoinStrategyModel.DRIVE_PDF_8_KUNITZ_6LINE_PROFESSIONAL) 1.0 else -1.0
-        val f8 = if (model.hasHosoda || model == BitcoinStrategyModel.DRIVE_PDF_7_ICHIMOKU_8_STRATEGIES_ENCYCLOPEDIA || model == BitcoinStrategyModel.DRIVE_PDF_9_FAST_7_22_44_TREND_RIDER) 1.0 else -1.0
+        val f6 = if (model.hasPatel) 1.0 else -1.0
+        val f7 = if (model.hasTuttle) 1.0 else -1.0
+        val f8 = if (model.hasHosoda) 1.0 else -1.0
         val f9 = if (model.hasPeloille || model.isDrivePdfStrategy) 1.0 else -1.0
 
         val er14 = ((trigSnap?.efficiencyRatio14 ?: stratSnap?.efficiencyRatio14 ?: 0.42) * 2.0 - 1.0).coerceIn(-1.0, 1.0)
