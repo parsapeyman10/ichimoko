@@ -245,7 +245,7 @@ object MasterIchimokuTradingAssistant {
             "در حال تکمیل نقاط A-B-C برای ترسیم اهداف چهارگانه V/N/E/NT هوسودا"
         }
 
-        // ۴. اجماع ۲۴ استراتژی (۱۵ ترکیب + ۹ کتاب درایو) در 15m و 5m
+        // ۴. اجماع ۱۶ استراتژی (۱۵ ترکیب + درایو جامع) در 15m و 5m
         val reports15 = dualReport?.reports15mByStrategy?.values ?: emptyList()
         val reports5 = dualReport?.reports5mByStrategy?.values ?: emptyList()
         val actionable15 = reports15.count { it.isActionable }
@@ -254,7 +254,7 @@ object MasterIchimokuTradingAssistant {
         val driveReady5 = reports5.count { BitcoinStrategyModel.fromId(it.strategyId).isDrivePdfStrategy && (it.isActionable || it.conditions.count { c -> c.passed } >= 13) }
 
         val multiStrategyAgreementSummaryFa =
-            "اجماع ۲۴ استراتژی: در 15m (${actionable15} سیگنال فعال، $driveReady15 کتاب درایو آماده) · در 5m (${actionable5} سیگنال فعال، $driveReady5 کتاب درایو آماده)"
+            "اجماع ۱۶ استراتژی: در 15m (${actionable15} سیگنال فعال، درایو جامع: ${if (driveReady15 > 0) "آماده ✅" else "در انتظار"}) · در 5m (${actionable5} سیگنال فعال، درایو جامع: ${if (driveReady5 > 0) "آماده ✅" else "در انتظار"})"
 
         // ۵. محاسبه امتیاز جامع بهترین متود ایچیموکو جهان (0..100)
         val passedRatio = if (rep.conditions.isNotEmpty()) {
@@ -312,12 +312,14 @@ object MasterIchimokuTradingAssistant {
             pitfalls += "بدون تله ساختاری فعال؛ هر ۵ خط ایچیموکو، چیکو و شیب کیجون در تعادل رونددار قرار دارند."
         }
 
+        val unifiedConsensus = IchimokuStrategyEngine.evaluateUnified9BookConsensus(isLong, trigSnap, stratSnap, macroSnap)
         val driveBooksTelemetryFa = listOf(
-            "📘 درایو ۱ (TuAnh BB+EMA89): " + BitcoinStrategyModel.TUANH_BOLLINGER_SQUEEZE.formatLiveBookTelemetryFa(trigSnap, stratSnap, isLong),
-            "📗 درایو ۲ (15m EMA21+RSI7+Fractal): " + BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL.formatLiveBookTelemetryFa(trigSnap, stratSnap, isLong),
-            "📙 درایو ۳ (Keenbase 10,30,60): " + BitcoinStrategyModel.KEENBASE_CROSS_10_30_60.formatLiveBookTelemetryFa(trigSnap, stratSnap, isLong),
-            "📕 درایو ۴ (Mukherjee Kelly ${trigSnap.kellyWinProbabilityPercent}%): " + BitcoinStrategyModel.MUKHERJEE_RELATIVE_TK_RSI_KELLEY.formatLiveBookTelemetryFa(trigSnap, stratSnap, isLong),
-            "📓 درایو ۸ و ۹ (Koonitz DMI/MACD & Fast 7,22,44): " + BitcoinStrategyModel.KOONITZ_TRIPLE_SCREEN_FAST_7_22_44.formatLiveBookTelemetryFa(trigSnap, stratSnap, isLong),
+            "🏆 درایو جامع (Unified 9-Book Consensus): " + BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.formatLiveBookTelemetryFa(trigSnap, stratSnap, isLong),
+            "📘 کتاب ۱ (TuAnh BB+EMA89): ${if (unifiedConsensus.book1TuAnhPassed) "✅ تایید" else "⏳"} · BB Squeeze=${if (trigSnap.isBollingerSqueeze) "بله" else "خیر"} · RSI14=${String.format(Locale.US, "%.1f", trigSnap.rsi14)}",
+            "📗 کتاب ۲ (15m EMA21+RSI7+Fractal): ${if (unifiedConsensus.book2FokaPassed) "✅ تایید" else "⏳"} · EMA21=${IchimokuStrategyEngine.round2(trigSnap.ema21)} · RSI7=${String.format(Locale.US, "%.1f", trigSnap.rsi7)}",
+            "📙 کتاب ۳ (Keenbase 10,30,60): ${if (unifiedConsensus.book3KeenbasePassed) "✅ تایید" else "⏳"} · TK(10/30)=${IchimokuStrategyEngine.round2(trigSnap.tenkan10)}/${IchimokuStrategyEngine.round2(trigSnap.kijun30)}",
+            "📕 کتاب ۴ تا ۷ (Mukherjee Kelly ${trigSnap.kellyWinProbabilityPercent}% + TSG): ${if (unifiedConsensus.book4MukherjeeKellyPassed && unifiedConsensus.book7Tsg4StepPassed) "✅ تایید" else "⏳"}",
+            "📓 کتاب ۸ و ۹ (Koonitz DMI/MACD & Fast 7,22,44): ${if (unifiedConsensus.book8Koonitz5RulesPassed && unifiedConsensus.book9KoonitzTripleScreenPassed) "✅ تایید" else "⏳"} · ADX=${String.format(Locale.US, "%.1f", trigSnap.adx14)}",
         )
 
         val masterVerdictFa = buildString {
@@ -517,7 +519,7 @@ object MasterIchimokuTradingAssistant {
                             priority = ImprovementNotePriority.OPTIMIZATION,
                             categoryFa = "کالیبراسیون گلوگاه «$condTitle»",
                             targetStrategyId = "ALL_STRATEGIES",
-                            targetStrategyTitleFa = "رادار ۲۴ استراتژی (15m/5m)",
+                            targetStrategyTitleFa = "رادار ۱۶ استراتژی (15m/5m)",
                             targetScopeFa = "${topBottleneck.value} ستاپ در آستانه سیگنال",
                             problemDetectedFa = "شرط «$condTitle» در ${topBottleneck.value} ستاپ با آمادگی بالا (۱۳ تا ۱۵ شرط پاس‌شده) تنها مانع ورود بوده است.",
                             ichimokuMasterReasonFa = "تنظیم وزن این شرط بر اساس رژیم نوسان نماد (کریپتو در برابر فارکس/طلا) می‌تواند دقت شکار روند را بدون افزایش ریسک بالا ببرد.",
@@ -528,17 +530,17 @@ object MasterIchimokuTradingAssistant {
             }
         }
 
-        // ۳. نکات تخصصی ارتقای ۹ استراتژی کتاب‌های درایو بر اساس وضعیت فعلی بازار
+        // ۳. نکات تخصصی ارتقای استراتژی درایو جامع بر اساس وضعیت فعلی بازار
         notes += IchimokuImprovementNote(
             id = "drive_books_mtf_Adaptive_sizing",
             priority = ImprovementNotePriority.HIGH,
-            categoryFa = "ارتقای ۹ استراتژی درایو (همگرایی کومو + معیار کلی موکرجی)",
-            targetStrategyId = "MUKHERJEE_RELATIVE_TK_RSI_KELLEY",
-            targetStrategyTitleFa = "۹ استراتژی کتاب‌های PDF گوگل درایو (Drive 1..9)",
+            categoryFa = "ارتقای استراتژی درایو جامع (همگرایی کومو + معیار کلی موکرجی)",
+            targetStrategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
+            targetStrategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
             targetScopeFa = "تمام ۱۵ نماد در تایم‌فریم‌های 15m و 5m",
-            problemDetectedFa = "تفاوت رفتار استراتژی‌های تنظیمات سریع درایو ۹ (7,22,44) و نهادی درایو ۳ (10,30,60) در ساعات کم‌حجم آسیا نسبت به هم‌پوشانی لندن-نیویورک.",
-            ichimokuMasterReasonFa = "طبق کتاب چارلز کونیتز و موکرجی، تنظیمات سریع (7,22,44) در سشن لندن/نیویورک ۱۰٪ سریع‌تر روند را شکار می‌کند اما در ساعات کم‌نوسان تنظیمات نهادی (10,30,60) و استاپ فرکتال فکا (درایو ۲) خطای بسیار کمتری دارند.",
-            exactFixInstructionFa = "برای بهینه‌سازی بعدی: در سشن آسیا اولویت امتیازدهی به درایو ۲ (Fractal/RSI7) و درایو ۳ (10,30,60) داده شود و در سشن لندن/نیویورک وزن درایو ۱ (BB Squeeze) و درایو ۹ (7,22,44) افزایش یابد.",
+            problemDetectedFa = "تفاوت رفتار مؤلفه‌های سریع (7,22,44) و نهادی (10,30,60) درون استراتژی درایو جامع در ساعات کم‌حجم آسیا نسبت به هم‌پوشانی لندن-نیویورک.",
+            ichimokuMasterReasonFa = "طبق کتاب چارلز کونیتز و موکرجی، تنظیمات سریع (7,22,44) در سشن لندن/نیویورک ۱۰٪ سریع‌تر روند را شکار می‌کند اما در ساعات کم‌نوسان تنظیمات نهادی (10,30,60) و استاپ فرکتال فکا خطای بسیار کمتری دارند.",
+            exactFixInstructionFa = "برای بهینه‌سازی بعدی: در سشن آسیا اولویت وزن‌دهی در درایو جامع به Fractal/RSI7 و (10,30,60) داده شود و در سشن لندن/نیویورک وزن BB Squeeze و (7,22,44) افزایش یابد.",
         )
 
         // ۴. بررسی معاملات باز فعلی و ارائه نکته محافظت از سود

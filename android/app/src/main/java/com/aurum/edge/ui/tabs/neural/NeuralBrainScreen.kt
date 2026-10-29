@@ -832,10 +832,10 @@ fun NeuralBrainScreen(
             }
         }
 
-        // ── ۱-ج. ماتریس برتری ترید به تفکیک ۲۴ استراتژی (۹ کتاب درایو + ۱۵ ترکیب پایه) ──
+        // ── ۱-ج. ماتریس برتری ترید به تفکیک ۱۶ استراتژی (درایو جامع + ۱۵ ترکیب پایه) ──
         SectionCard(
-            title = "🏆 ماتریس برتری ترید ۲۴ استراتژی (نرخ برد، Profit Factor و امید ریاضی E[R])",
-            subtitle = "رتبه‌بندی تریدی تمام ۱۵ ترکیب ایچیموکو و ۹ کتاب PDF گوگل درایو بر اساس بازدهی واقعی و امتیاز لبه ترید",
+            title = "🏆 ماتریس برتری ترید ۱۶ استراتژی (نرخ برد، Profit Factor و امید ریاضی E[R])",
+            subtitle = "رتبه‌بندی تریدی تمام ۱۵ ترکیب ایچیموکو و استراتژی درایو جامع بر اساس بازدهی واقعی و امتیاز لبه ترید",
             initiallyExpanded = false,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -844,12 +844,12 @@ fun NeuralBrainScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Pill(
-                        text = "همه (۲۴)",
+                        text = "همه (۱۶)",
                         color = if (matrixFilter == 0) AurumColors.Gold else AurumColors.TextMuted,
                         modifier = Modifier.clickable { matrixFilter = 0 },
                     )
                     Pill(
-                        text = "📚 ۹ کتاب درایو",
+                        text = "📚 درایو جامع",
                         color = if (matrixFilter == 1) AurumColors.Cyan else AurumColors.TextMuted,
                         modifier = Modifier.clickable { matrixFilter = 1 },
                     )

@@ -480,11 +480,16 @@ class RiskAndCalendarEngineTest {
         assertEquals(SymbolPollTier.OPEN_POSITION, openTier)
         assertEquals(15_000L, openTier.tickIntervalMs)
 
-        // 5. Verify all 25 strategies (15 original 4-book combinations + Unified 9-Book Drive Master Method + 9 Google Drive PDF strategies) evaluate simultaneously on 15m and 5m + R:R Breakdown & Optimal R:R
-        assertEquals(25, BitcoinStrategyModel.entries.size)
-        assertEquals(10, BitcoinStrategyModel.drivePdfStrategies.size)
-        assertEquals(25, dualReport.reports15mByStrategy.size)
-        assertEquals(25, dualReport.reports5mByStrategy.size)
+        // 5. Verify all 16 strategies (15 original 4-book combinations + ONLY Unified 9-Book Drive Master Method; individual Drive 1..9 strategies removed) evaluate simultaneously on 15m and 5m + R:R Breakdown & Optimal R:R
+        assertEquals(16, BitcoinStrategyModel.entries.size)
+        assertEquals(1, BitcoinStrategyModel.drivePdfStrategies.size)
+        assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER, BitcoinStrategyModel.drivePdfStrategies.single())
+        assertEquals(16, dualReport.reports15mByStrategy.size)
+        assertEquals(16, dualReport.reports5mByStrategy.size)
+        BitcoinStrategyModel.legacyIndividualDriveIds.forEach { legacyId ->
+            assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER, BitcoinStrategyModel.fromId(legacyId))
+            assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id, BitcoinStrategyModel.normalizeStrategyId(legacyId))
+        }
         BitcoinStrategyModel.entries.forEach { model ->
             val rep15 = dualReport.reportFor(Interval.M15, model.id)
             val rep5 = dualReport.reportFor(Interval.M5, model.id)
@@ -498,7 +503,7 @@ class RiskAndCalendarEngineTest {
             assertTrue(rep15.rrBreakdown!!.optimalRrReasonFa.contains("عدد مناسب"))
         }
 
-        // Verify all 9 Google Drive PDF strategy indicators (BB Squeeze, EMA 21/34/89, RSI 7/14, Bill Williams Fractals, 10-30-60 & 7-22-44 presets, MACD, DMI/ADX, Kelly WinProb)
+        // Verify all 9 Google Drive PDF strategy indicators feeding the Unified Drive Master Method (BB Squeeze, EMA 21/34/89, RSI 7/14, Bill Williams Fractals, 10-30-60 & 7-22-44 presets, MACD, DMI/ADX, Kelly WinProb)
         val snap = report.triggerSnapshot!!
         assertTrue(snap.bbUpper20 > snap.bbLower20)
         assertTrue(snap.ema21 > 0.0 && snap.ema34 > 0.0 && snap.ema89 > 0.0 && snap.sma200 > 0.0)
@@ -508,12 +513,8 @@ class RiskAndCalendarEngineTest {
         assertTrue(snap.tenkan7 > 0.0 && snap.kijun22 > 0.0 && snap.senkouB44 > 0.0)
         assertTrue(snap.adx14 > 0.0 && snap.kellySignalCount in 1..5 && snap.kellyWinProbabilityPercent in 48..76)
 
-        val fokaRep = dualReport.reportFor(Interval.M15, BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL.id)!!
-        assertTrue(fokaRep.rrBreakdown!!.slBasisFa.contains("فرکتال"))
-        val keenbaseRep = dualReport.reportFor(Interval.M15, BitcoinStrategyModel.KEENBASE_CROSS_10_30_60.id)!!
-        assertTrue(keenbaseRep.rrBreakdown!!.slBasisFa.contains("Keenbase"))
-        val koonitzRep = dualReport.reportFor(Interval.M15, BitcoinStrategyModel.KOONITZ_5RULES_DMI_MACD_EMA34.id)!!
-        assertTrue(koonitzRep.rrBreakdown!!.slBasisFa.contains("EMA34"))
+        val unifiedDriveRep = dualReport.reportFor(Interval.M15, BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)!!
+        assertTrue(unifiedDriveRep.rrBreakdown!!.slBasisFa.contains("۹ کتاب درایو"))
 
         // Verify Trend Loss In Profit Detector (when an open trade in profit loses its trend, close immediately in profit)
         val tradeInProfitAt63k = calc.copy(
@@ -797,8 +798,8 @@ class RiskAndCalendarEngineTest {
             confidence = 91.0,
             openedAt = 1_760_200_000_000L,
             fixedRiskUsd = 5.0,
-            strategyId = BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL.id,
-            strategyTitleFa = BitcoinStrategyModel.FOKA_15MIN_EMA21_RSI7_FRACTAL.titleFa,
+            strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
+            strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
         )
         val sampleArchiveRecord = com.aurum.edge.data.ArchivedTradeSnapshotRecord(
             tradeId = sampleTrade.id,

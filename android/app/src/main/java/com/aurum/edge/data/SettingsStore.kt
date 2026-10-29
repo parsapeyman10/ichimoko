@@ -129,13 +129,18 @@ class SettingsStore(context: Context) {
             ?.takeIf { it.isNotBlank() }
             ?.let { raw -> runCatching { KEY_JSON.decodeFromString(customStrategiesSerializer, raw) }.getOrNull() }
             ?: emptyList()
-        val validStrategyId = if (
-            BitcoinStrategyModel.entries.any { it.id == storedBtcStrategyId } ||
-            storedCustomStrategies.any { it.id == storedBtcStrategyId }
-        ) {
-            storedBtcStrategyId
+        val normalizedStoredBtcId = if (storedBtcStrategyId in BitcoinStrategyModel.legacyIndividualDriveIds) {
+            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id
         } else {
-            BitcoinStrategyModel.BASE_ICHIMOKU.id
+            storedBtcStrategyId
+        }
+        val validStrategyId = if (
+            BitcoinStrategyModel.entries.any { it.id == normalizedStoredBtcId } ||
+            storedCustomStrategies.any { it.id == normalizedStoredBtcId }
+        ) {
+            normalizedStoredBtcId
+        } else {
+            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id
         }
         val categoryStrategies = AssetClass.entries.associateWith { category ->
             CategoryStrategy.fromStored(prefs.getString("v1_strategy_${category.name}", null))
@@ -146,7 +151,20 @@ class SettingsStore(context: Context) {
         val rawParsedEnabledIds = if (storedEnabledIdsRaw.isBlank()) {
             defaultAllIds
         } else {
-            storedEnabledIdsRaw.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet().ifEmpty { defaultAllIds }
+            val cleaned = storedEnabledIdsRaw
+                .split(',')
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .map { id ->
+                    if (id in BitcoinStrategyModel.legacyIndividualDriveIds) {
+                        BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id
+                    } else {
+                        id
+                    }
+                }
+                .filter { id -> id in defaultAllIds }
+                .toSet()
+            cleaned.ifEmpty { defaultAllIds }
         }
         val storedEnabledIds = if (runAllSim && rawParsedEnabledIds.size >= 15) {
             rawParsedEnabledIds + BitcoinStrategyModel.drivePdfStrategyIds

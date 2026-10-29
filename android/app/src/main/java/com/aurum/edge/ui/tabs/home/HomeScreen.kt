@@ -476,7 +476,7 @@ private fun LiveMetalsCryptoForexRadarCard(
 
     SectionCard(
         title = "🥇 رادار زنده طلا، نقره، کریپتو و فارکس (15m + 5m)",
-        subtitle = "قیمت اسپات هم‌تراز، وضعیت ۲۴ استراتژی ایچیموکو (۱۵ ترکیب + ۹ کتاب درایو) و اسکن فوری تمام بازارها",
+        subtitle = "قیمت اسپات هم‌تراز، وضعیت ۱۶ استراتژی ایچیموکو (۱۵ ترکیب + درایو جامع) و اسکن فوری تمام بازارها",
         trailing = {
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                 Pill(

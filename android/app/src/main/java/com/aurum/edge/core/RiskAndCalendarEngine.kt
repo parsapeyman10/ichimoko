@@ -604,18 +604,28 @@ object RiskAndCalendarEngine {
         trades: List<PaperTrade>,
         customStrategies: List<CustomStrategySlot> = emptyList(),
     ): List<StrategyJournalCategoryStats> {
+        val normalizedTrades = trades.map { trade ->
+            if (trade.strategyId.trim() in BitcoinStrategyModel.legacyIndividualDriveIds) {
+                trade.copy(
+                    strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
+                    strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
+                )
+            } else {
+                trade
+            }
+        }
         val orderedStrategyDefs = buildList {
             BitcoinStrategyModel.entries.forEach { add(it.id to it.titleFa) }
             customStrategies.forEach { add(it.id to it.titleFa) }
         }
         val knownIds = orderedStrategyDefs.map { it.first }.toSet()
-        val extraDefs = trades
+        val extraDefs = normalizedTrades
             .filter { it.strategyId.isNotBlank() && it.strategyId !in knownIds }
             .groupBy { it.strategyId }
             .map { (id, list) -> id to (list.first().strategyTitleFa.ifBlank { id }) }
 
         return (orderedStrategyDefs + extraDefs).map { (stratId, titleFa) ->
-            val group = trades.filter { it.strategyId == stratId }
+            val group = normalizedTrades.filter { it.strategyId == stratId }
             val openCount = group.count { it.isOpen }
             val closed = group.filter { !it.isOpen && it.pnlUsd != null }
             val wins = closed.count { (it.pnlUsd ?: 0.0) > 0.0 }

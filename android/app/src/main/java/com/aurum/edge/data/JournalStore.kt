@@ -2,6 +2,7 @@ package com.aurum.edge.data
 
 import android.content.Context
 import com.aurum.edge.core.AutoExitEvaluation
+import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.RiskAndCalendarEngine
@@ -65,7 +66,20 @@ class JournalStore(
         }
         return list.map { t ->
             val assigned = numberedById[t.id] ?: t.tradeNumber
-            if (t.tradeNumber == assigned) t else t.copy(tradeNumber = assigned)
+            val isLegacyDrive = t.strategyId.trim() in BitcoinStrategyModel.legacyIndividualDriveIds
+            when {
+                isLegacyDrive && t.tradeNumber != assigned -> t.copy(
+                    tradeNumber = assigned,
+                    strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
+                    strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
+                )
+                isLegacyDrive -> t.copy(
+                    strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
+                    strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
+                )
+                t.tradeNumber != assigned -> t.copy(tradeNumber = assigned)
+                else -> t
+            }
         }.sortedByDescending { it.openedAt }
     }
 
