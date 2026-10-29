@@ -1587,7 +1587,79 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             container.settingsStore.update { cur ->
                 cur.copy(baseStrategyConfig = updatedCfg)
             }
-            _toast.value = "🎛️ تیونینگ خودکار پارامترها (نسل #${tuned.tuningGeneration} · CEM + Bayesian) اعمال شد: R:R≥1:${tuned.minRiskReward} · اجماع درایو=${tuned.minDriveBooksConsensus}/9 کتاب"
+            _toast.value = "🎛️ تیونینگ خودکار پارامترها و ۱۶ ویژگی هر ۱۶ استراتژی (نسل #${tuned.tuningGeneration} · CEM + Bayesian) اعمال شد"
+            scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
+        }
+    }
+
+    fun runSingleStrategyAutoTuningNow(strategyId: String) {
+        viewModelScope.launch {
+            val baseCfg = settings.value.baseStrategyConfig
+            val prof = container.neuralEngine.runAutoTuningForSingleStrategy(strategyId, baseCfg)
+            val updatedCfg = container.neuralEngine.applyAutoTunedParametersToConfig(baseCfg)
+            container.settingsStore.update { cur ->
+                cur.copy(baseStrategyConfig = updatedCfg)
+            }
+            _toast.value = "🎯 تیونینگ هوشمند اختصاصی «${prof.strategyBadgeFa}» (نسل #${prof.tuningGeneration}) روی تمام ۱۶ ویژگی و پارامترها اعمال شد"
+            scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
+        }
+    }
+
+    fun tuneStrategyFeatureNow(
+        strategyId: String,
+        featureIndex: Int,
+        tuningMultiplier: Double? = null,
+        learnedWeight: Double? = null,
+        minThresholdNorm: Double? = null,
+    ) {
+        viewModelScope.launch {
+            val prof = container.neuralEngine.tuneStrategyFeature(
+                strategyId = strategyId,
+                featureIndex = featureIndex,
+                tuningMultiplier = tuningMultiplier,
+                learnedWeight = learnedWeight,
+                minThresholdNorm = minThresholdNorm,
+            )
+            val updatedCfg = container.neuralEngine.applyAutoTunedParametersToConfig(settings.value.baseStrategyConfig)
+            container.settingsStore.update { cur ->
+                cur.copy(baseStrategyConfig = updatedCfg)
+            }
+            val featTitle = prof.featureTunings.getOrNull(featureIndex)?.featureTitleFa ?: "ویژگی #${featureIndex + 1}"
+            _toast.value = "⚙️ ویژگی «$featTitle» در استراتژی «${prof.strategyBadgeFa}» تیون و ذخیره شد"
+            scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
+        }
+    }
+
+    fun tuneStrategyParametersNow(
+        strategyId: String,
+        minRiskReward: Double? = null,
+        maxKijunExtensionAtr: Double? = null,
+        slBufferAtr: Double? = null,
+        minEfficiencyRatio: Double? = null,
+        maxAdverseWickRatio: Double? = null,
+        minFutureKumoThicknessAtr: Double? = null,
+        minSniperDistanceAtr: Double? = null,
+        minDriveBooksConsensus: Int? = null,
+        neuralWinProbGatePct: Double? = null,
+    ) {
+        viewModelScope.launch {
+            val prof = container.neuralEngine.tuneStrategyParameters(
+                strategyId = strategyId,
+                minRiskReward = minRiskReward,
+                maxKijunExtensionAtr = maxKijunExtensionAtr,
+                slBufferAtr = slBufferAtr,
+                minEfficiencyRatio = minEfficiencyRatio,
+                maxAdverseWickRatio = maxAdverseWickRatio,
+                minFutureKumoThicknessAtr = minFutureKumoThicknessAtr,
+                minSniperDistanceAtr = minSniperDistanceAtr,
+                minDriveBooksConsensus = minDriveBooksConsensus,
+                neuralWinProbGatePct = neuralWinProbGatePct,
+            )
+            val updatedCfg = container.neuralEngine.applyAutoTunedParametersToConfig(settings.value.baseStrategyConfig)
+            container.settingsStore.update { cur ->
+                cur.copy(baseStrategyConfig = updatedCfg)
+            }
+            _toast.value = "🎛️ پارامترهای اختصاصی استراتژی «${prof.strategyBadgeFa}» (نسل #${prof.tuningGeneration}) ذخیره و اعمال شد"
             scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
         }
     }

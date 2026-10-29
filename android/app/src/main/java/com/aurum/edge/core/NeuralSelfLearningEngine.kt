@@ -127,6 +127,56 @@ data class NeuralMarketCausalAttribution(
 )
 
 @Serializable
+data class PerStrategyNeuralFeatureTuning(
+    val featureIndex: Int,
+    val featureTitleFa: String,
+    val featureDescriptionFa: String,
+    val learnedWeight: Double = 0.15,
+    val attentionSharePct: Double = 6.25,
+    val tuningMultiplier: Double = 1.0,
+    val minThresholdNorm: Double = -0.35,
+    val isManuallyTuned: Boolean = false,
+)
+
+@Serializable
+data class PerStrategyNeuralTuningProfile(
+    val strategyId: String,
+    val strategyTitleFa: String,
+    val strategyBadgeFa: String,
+    val tuningGeneration: Int = 1,
+    val samplesAnalyzed: Int = 0,
+    val winRatePct: Double = 68.5,
+    val expectedProfitFactor: Double = 2.45,
+    val minRiskReward: Double = 1.65,
+    val maxKijunExtensionAtr: Double = 1.68,
+    val slBufferAtr: Double = 0.25,
+    val breakoutBufferAtr: Double = 0.15,
+    val minEfficiencyRatio: Double = 0.21,
+    val minVolumeRatio20: Double = 0.62,
+    val maxAdverseWickRatio: Double = 0.44,
+    val minFutureKumoThicknessAtr: Double = 0.05,
+    val minSniperDistanceAtr: Double = 0.65,
+    val minDriveBooksConsensus: Int = 6,
+    val neuralWinProbGatePct: Double = 56.0,
+    val featureTunings: List<PerStrategyNeuralFeatureTuning> = emptyList(),
+    val tuningSummaryFa: String = "",
+) {
+    fun toConfigOverride(): PerStrategyConfigOverride = PerStrategyConfigOverride(
+        strategyId = strategyId,
+        minRiskReward = max(1.5, minRiskReward),
+        maxKijunExtensionAtr = maxKijunExtensionAtr.coerceIn(1.25, 2.50),
+        slBufferAtr = slBufferAtr.coerceIn(0.15, 0.55),
+        breakoutBufferAtr = breakoutBufferAtr.coerceIn(0.05, 0.35),
+        minEfficiencyRatio = minEfficiencyRatio.coerceIn(0.14, 0.45),
+        minVolumeRatio20 = minVolumeRatio20.coerceIn(0.40, 1.15),
+        maxAdverseWickRatio = maxAdverseWickRatio.coerceIn(0.28, 0.60),
+        minFutureKumoThicknessAtr = minFutureKumoThicknessAtr.coerceIn(0.02, 0.18),
+        minSniperDistanceAtr = minSniperDistanceAtr.coerceIn(0.35, 1.10),
+        minDriveBooksConsensus = minDriveBooksConsensus.coerceIn(4, 9),
+    )
+}
+
+@Serializable
 data class NeuralAutoTunedParameters(
     val tuningGeneration: Int = 1,
     val methodBadgeFa: String = "Bayesian Thompson-Sampling + Cross-Entropy Method (CEM)",
@@ -146,6 +196,7 @@ data class NeuralAutoTunedParameters(
     val bestStrategyByCategory: Map<String, String> = emptyMap(),
     val tuningSummaryFa: String = "پارامترهای استراتژی و گیت شبکه عصبی با الگوریتم بیزین + CEM روی ساختار بازار کالیبره شدند.",
     val parameterChangeLogFa: List<String> = emptyList(),
+    val perStrategyProfiles: Map<String, PerStrategyNeuralTuningProfile> = emptyMap(),
 )
 
 @Serializable
@@ -687,6 +738,15 @@ class NeuralSelfLearningEngine(
             warmupProgressPercent = progressPct,
             remainingWarmupTrades = (target - total).coerceAtLeast(0),
             isWarmupCompleted = warmupDone,
+        val ensuredAutoTuned = ensurePerStrategyProfiles(cur.autoTunedParameters, cur)
+
+        return NeuralLearningStateSummary(
+            architectureNameFa = cur.architectureName,
+            totalLearnedTrades = total,
+            warmupTargetTrades = target,
+            warmupProgressPercent = round(progressPct * 100.0) / 100.0,
+            remainingWarmupTrades = (target - total).coerceAtLeast(0),
+            isWarmupCompleted = warmupDone,
             forceActiveBeforeWarmup = cur.forceActiveBeforeWarmup,
             isActiveFilterEnabled = warmupDone || cur.forceActiveBeforeWarmup,
             discoveredNoTradeClustersCount = noTradeClusters.size,
@@ -704,9 +764,151 @@ class NeuralSelfLearningEngine(
             tradeForensics = tradeForensics,
             latestNewsSnapshot = newsSnap,
             liveMarketAttributions = sortedAttributions,
-            autoTunedParameters = cur.autoTunedParameters,
+            autoTunedParameters = ensuredAutoTuned,
             currentTrainingPhaseBadgeFa = phaseBadgeFa,
         )
+    }
+
+    private fun buildDefaultFeatureTuningsForStrategy(
+        model: BitcoinStrategyModel,
+        attnWeights: List<Double>,
+        winWeights: List<Double>,
+    ): List<PerStrategyNeuralFeatureTuning> {
+        val rawAttns = (0 until INPUT_DIM).map { idx ->
+            val baseA = attnWeights.getOrElse(idx) { 0.15 }
+            val pillarBoost = when (idx) {
+                6 -> if (model.hasPatel) 1.35 else 0.75
+                7 -> if (model.hasTuttle) 1.35 else 0.75
+                8 -> if (model.hasHosoda) 1.35 else 0.75
+                9 -> if (model.hasPeloille || model.isDrivePdfStrategy) 1.40 else 0.75
+                10, 12, 13, 14, 15 -> if (model.isDrivePdfStrategy || model == BitcoinStrategyModel.BASE_ICHIMOKU) 1.25 else 1.10
+                else -> 1.0
+            }
+            baseA * pillarBoost
+        }
+        val attnSum = rawAttns.sum().coerceAtLeast(1e-6)
+        return (0 until INPUT_DIM).map { idx ->
+            val (titleFa, descFa) = featureTitleFa(idx)
+            val baseW = winWeights.getOrElse(idx) {
+                when (idx) {
+                    10 -> 0.42
+                    11 -> 0.25
+                    12 -> -0.35
+                    13 -> -0.38
+                    14 -> 0.30
+                    15 -> 0.28
+                    else -> 0.12
+                }
+            }
+            val stratBias = when (idx) {
+                6 -> if (model.hasPatel) 0.14 else -0.04
+                7 -> if (model.hasTuttle) 0.14 else -0.04
+                8 -> if (model.hasHosoda) 0.16 else -0.04
+                9 -> if (model.hasPeloille || model.isDrivePdfStrategy) 0.18 else -0.04
+                else -> 0.0
+            }
+            val defaultMult = when (idx) {
+                6 -> if (model.hasPatel) 1.20 else 0.85
+                7 -> if (model.hasTuttle) 1.20 else 0.85
+                8 -> if (model.hasHosoda) 1.20 else 0.85
+                9 -> if (model.hasPeloille || model.isDrivePdfStrategy) 1.25 else 0.85
+                10, 12, 13, 14, 15 -> 1.15
+                else -> 1.00
+            }
+            val defaultThresh = when (idx) {
+                10 -> -0.20 // ER14 minimum normalized threshold
+                12 -> 0.30 // C-Clamp max normalized threshold
+                13 -> 0.25 // Adverse wick max normalized threshold
+                14 -> -0.25 // Optimal R:R minimum normalized threshold
+                else -> -0.35
+            }
+            PerStrategyNeuralFeatureTuning(
+                featureIndex = idx,
+                featureTitleFa = titleFa,
+                featureDescriptionFa = descFa,
+                learnedWeight = round((baseW + stratBias).coerceIn(-3.5, 3.5) * 100.0) / 100.0,
+                attentionSharePct = round(((rawAttns[idx] / attnSum) * 100.0) * 10.0) / 10.0,
+                tuningMultiplier = round(defaultMult * 100.0) / 100.0,
+                minThresholdNorm = defaultThresh,
+                isManuallyTuned = false,
+            )
+        }
+    }
+
+    private fun buildDefaultProfileForStrategy(
+        model: BitcoinStrategyModel,
+        attnWeights: List<Double>,
+        winWeights: List<Double>,
+    ): PerStrategyNeuralTuningProfile {
+        val minRr = max(1.5, round((model.baseOptimalRr - 0.35).coerceIn(1.55, 2.25) * 100.0) / 100.0)
+        val maxKijunExt = when {
+            model.isDrivePdfStrategy || model == BitcoinStrategyModel.BASE_ICHIMOKU -> 1.65
+            model.hasPatel && !model.hasTuttle -> 1.55
+            model.hasTuttle && !model.hasPatel -> 1.80
+            else -> 1.68
+        }
+        val slBuf = when {
+            model.isDrivePdfStrategy || model == BitcoinStrategyModel.BASE_ICHIMOKU -> 0.25
+            model.hasHosoda -> 0.27
+            else -> 0.25
+        }
+        val minEr = if (model.isDrivePdfStrategy || model.combinationCount >= 3) 0.22 else 0.20
+        val maxWick = if (model.isDrivePdfStrategy || model == BitcoinStrategyModel.BASE_ICHIMOKU) 0.42 else 0.45
+        val minThick = if (model.hasPeloille || model.isDrivePdfStrategy) 0.05 else 0.04
+        val minSniper = if (model.hasPatel || model.isDrivePdfStrategy) 0.62 else 0.65
+        val feats = buildDefaultFeatureTuningsForStrategy(model, attnWeights, winWeights)
+        return PerStrategyNeuralTuningProfile(
+            strategyId = model.id,
+            strategyTitleFa = model.titleFa,
+            strategyBadgeFa = model.badgeFa,
+            tuningGeneration = 1,
+            samplesAnalyzed = 0,
+            winRatePct = if (model.isDrivePdfStrategy || model == BitcoinStrategyModel.BASE_ICHIMOKU) 72.5 else 68.0,
+            expectedProfitFactor = if (model.isDrivePdfStrategy || model == BitcoinStrategyModel.BASE_ICHIMOKU) 2.65 else 2.35,
+            minRiskReward = minRr,
+            maxKijunExtensionAtr = maxKijunExt,
+            slBufferAtr = slBuf,
+            breakoutBufferAtr = 0.15,
+            minEfficiencyRatio = minEr,
+            minVolumeRatio20 = 0.62,
+            maxAdverseWickRatio = maxWick,
+            minFutureKumoThicknessAtr = minThick,
+            minSniperDistanceAtr = minSniper,
+            minDriveBooksConsensus = 6,
+            neuralWinProbGatePct = if (model.isDrivePdfStrategy) 58.0 else 56.0,
+            featureTunings = feats,
+            tuningSummaryFa = "پروفایل اختصاصی ${model.badgeFa}: تمام ۱۶ ویژگی شبکه عصبی + پارامترهای ساختاری کالیبره شدند (R:R≥1:$minRr · سقف کیجون=${maxKijunExt}ATR).",
+        )
+    }
+
+    private fun ensurePerStrategyProfiles(
+        params: NeuralAutoTunedParameters,
+        cur: NeuralNetworkPersistedState,
+    ): NeuralAutoTunedParameters {
+        val currentMap = params.perStrategyProfiles
+        val validIds = BitcoinStrategyModel.entries.map { it.id }.toSet()
+        if (currentMap.keys.containsAll(validIds) &&
+            currentMap.values.all { it.featureTunings.size == INPUT_DIM }
+        ) {
+            return params
+        }
+        val updated = LinkedHashMap<String, PerStrategyNeuralTuningProfile>()
+        for (model in BitcoinStrategyModel.entries) {
+            val existing = currentMap[model.id]
+            if (existing != null && existing.featureTunings.size == INPUT_DIM) {
+                updated[model.id] = existing.copy(
+                    strategyTitleFa = model.titleFa,
+                    strategyBadgeFa = model.badgeFa,
+                )
+            } else {
+                updated[model.id] = buildDefaultProfileForStrategy(
+                    model = model,
+                    attnWeights = cur.attentionWeights,
+                    winWeights = cur.headWinWeights,
+                )
+            }
+        }
+        return params.copy(perStrategyProfiles = updated)
     }
 
     @Synchronized
@@ -721,7 +923,9 @@ class NeuralSelfLearningEngine(
                 loaded.upWeights.size == INPUT_DIM * HIDDEN_DIM &&
                 loaded.headWinWeights.size == HIDDEN_DIM
             ) {
-                return loaded
+                return loaded.copy(
+                    autoTunedParameters = ensurePerStrategyProfiles(loaded.autoTunedParameters, loaded),
+                )
             }
         }
         return createFreshInitializedState()
@@ -762,6 +966,9 @@ class NeuralSelfLearningEngine(
                 categoryTitleFa = categoryTitleFa(ac),
             )
         }
+        val defaultProfiles = BitcoinStrategyModel.entries.associate { model ->
+            model.id to buildDefaultProfileForStrategy(model, attn, headWinW)
+        }
         return NeuralNetworkPersistedState(
             attentionWeights = attn,
             gateWeights = gateW,
@@ -777,6 +984,9 @@ class NeuralSelfLearningEngine(
             mGate = List(INPUT_DIM * HIDDEN_DIM) { 0.0 },
             vGate = List(INPUT_DIM * HIDDEN_DIM) { 0.0 },
             categoryStats = defaultCats,
+            autoTunedParameters = NeuralAutoTunedParameters(
+                perStrategyProfiles = defaultProfiles,
+            ),
         )
     }
 
@@ -1057,24 +1267,41 @@ class NeuralSelfLearningEngine(
 
     /**
      * عبور رو به جلو (Forward Pass) در معماری `FT-Attention + SwiGLU Residual + LayerNorm`:
-     * خروجی: `(winProb, expectedR, hiddenActivations, gatedFeatures)`
+     * با اعمال ضریب تیونینگ و وزن یادگرفته‌شده اختصاصی هر استراتژی روی هر ۱۶ ویژگی (`PerStrategyNeuralFeatureTuning`).
      */
-    private fun forwardPass(features: List<Double>, cur: NeuralNetworkPersistedState = persistedState): Pair<Double, Double> {
-        val (winProb, expectedR, _) = forwardPassWithInternals(features, cur)
+    private fun forwardPass(
+        features: List<Double>,
+        cur: NeuralNetworkPersistedState = persistedState,
+        strategyId: String? = null,
+    ): Pair<Double, Double> {
+        val (winProb, expectedR, _) = forwardPassWithInternals(features, cur, strategyId)
         return winProb to expectedR
     }
 
     private fun forwardPassWithInternals(
         features: List<Double>,
         cur: NeuralNetworkPersistedState = persistedState,
+        strategyId: String? = null,
     ): Triple<Double, Double, List<Double>> {
-        // 1. Feature Self-Attention scaling (Softmax-normalized feature importance)
-        val maxAttn = cur.attentionWeights.maxOrNull() ?: 0.0
-        val expAttn = cur.attentionWeights.map { exp((it - maxAttn).coerceIn(-10.0, 10.0)) }
+        val normStratId = strategyId?.let { BitcoinStrategyModel.normalizeStrategyId(it) }
+        val stratProfile = if (normStratId != null) {
+            cur.autoTunedParameters.perStrategyProfiles[normStratId]
+        } else null
+        val stratFeats = stratProfile?.featureTunings
+
+        // 1. Feature Self-Attention scaling + Per-Strategy Feature Multiplier
+        val effectiveAttn = List(INPUT_DIM) { i ->
+            val baseA = cur.attentionWeights.getOrElse(i) { 0.15 }
+            val mult = stratFeats?.getOrNull(i)?.tuningMultiplier ?: 1.0
+            baseA * mult
+        }
+        val maxAttn = effectiveAttn.maxOrNull() ?: 0.0
+        val expAttn = effectiveAttn.map { exp((it - maxAttn).coerceIn(-10.0, 10.0)) }
         val sumExp = expAttn.sum().coerceAtLeast(1e-8)
         val attnProbs = expAttn.map { it / sumExp }
         val attendedInput = List(INPUT_DIM) { i ->
-            features.getOrElse(i) { 0.0 } * (0.65 + 0.35 * INPUT_DIM * attnProbs.getOrElse(i) { 1.0 / INPUT_DIM })
+            val mult = stratFeats?.getOrNull(i)?.tuningMultiplier ?: 1.0
+            features.getOrElse(i) { 0.0 } * mult.coerceIn(0.20, 2.50) * (0.65 + 0.35 * INPUT_DIM * attnProbs.getOrElse(i) { 1.0 / INPUT_DIM })
         }
 
         // 2. SwiGLU Gated Residual Block: h_j = x_j + Swish(x * W_gate + b_gate) * (x * W_up + b_up)
@@ -1099,12 +1326,19 @@ class NeuralSelfLearningEngine(
         val invStd = 1.0 / sqrt(variance + 1e-5)
         val normHidden = List(HIDDEN_DIM) { j -> ((rawHidden[j] - mean) * invStd).coerceIn(-4.0, 4.0) }
 
-        // 4. Dual Prediction Heads (Win Probability + Expected R-Multiple)
+        // 4. Dual Prediction Heads (Win Probability + Expected R-Multiple) blended with Per-Strategy Learned Feature Weights
         var logitWin = cur.headWinBias
         var predR = cur.headRBias
         for (j in 0 until HIDDEN_DIM) {
             val hj = normHidden[j]
-            logitWin += hj * cur.headWinWeights.getOrElse(j) { 0.0 }
+            val globalW = cur.headWinWeights.getOrElse(j) { 0.0 }
+            val stratFeat = stratFeats?.getOrNull(j)
+            val effectiveWinW = if (stratFeat != null) {
+                (0.65 * globalW + 0.35 * stratFeat.learnedWeight) * stratFeat.tuningMultiplier.coerceIn(0.20, 2.50)
+            } else {
+                globalW
+            }
+            logitWin += hj * effectiveWinW
             predR += hj * cur.headRWeights.getOrElse(j) { 0.0 }
         }
         val winProb = sigmoid(logitWin).coerceIn(0.02, 0.98)
@@ -1142,7 +1376,9 @@ class NeuralSelfLearningEngine(
             report = report,
         )
 
-        val (neuralWinProb, neuralExpectedR) = forwardPass(features, persistedState)
+        val normStratId = BitcoinStrategyModel.normalizeStrategyId(strategyId)
+        val stratProfile = persistedState.autoTunedParameters.perStrategyProfiles[normStratId]
+        val (neuralWinProb, neuralExpectedR) = forwardPass(features, persistedState, normStratId)
         val cluster = persistedState.conditionClusters[sigKey]
 
         // Blend neural network output with Contextual Bandit posterior for this exact condition cluster
@@ -1165,7 +1401,8 @@ class NeuralSelfLearningEngine(
         val winProbPct = round(newsAdjustedWinProb * 1000.0) / 10.0
         val dangerScorePct = round(((1.0 - newsAdjustedWinProb) * 100.0).coerceIn(0.0, 100.0) * 10.0) / 10.0
 
-        val tunedGateProb = (persistedState.autoTunedParameters.neuralWinProbGatePct / 100.0).coerceIn(0.42, 0.72)
+        val gatePct = stratProfile?.neuralWinProbGatePct ?: persistedState.autoTunedParameters.neuralWinProbGatePct
+        val tunedGateProb = (gatePct / 100.0).coerceIn(0.42, 0.72)
         val isNoTradeDetected = newsAdjustedWinProb < min(0.46, tunedGateProb * 0.84) ||
             blendedExpectedR < 0.05 ||
             cluster?.isFlaggedNoTradeRegime == true ||
@@ -1865,8 +2102,147 @@ class NeuralSelfLearningEngine(
         return tuned
     }
 
+    @Synchronized
+    fun getStrategyTuningProfile(strategyId: String): PerStrategyNeuralTuningProfile {
+        val normId = BitcoinStrategyModel.normalizeStrategyId(strategyId)
+        val model = BitcoinStrategyModel.fromId(normId)
+        val ensured = ensurePerStrategyProfiles(persistedState.autoTunedParameters, persistedState)
+        return ensured.perStrategyProfiles[model.id]
+            ?: buildDefaultProfileForStrategy(model, persistedState.attentionWeights, persistedState.headWinWeights)
+    }
+
+    /**
+     * تیونینگ اختصاصی هر یک از ۱۶ ویژگی یادگرفته‌شده شبکه عصبی برای یک استراتژی مشخص (`strategyId`).
+     */
+    @Synchronized
+    fun tuneStrategyFeature(
+        strategyId: String,
+        featureIndex: Int,
+        tuningMultiplier: Double? = null,
+        learnedWeight: Double? = null,
+        minThresholdNorm: Double? = null,
+    ): PerStrategyNeuralTuningProfile {
+        val normId = BitcoinStrategyModel.normalizeStrategyId(strategyId)
+        val model = BitcoinStrategyModel.fromId(normId)
+        val ensuredParams = ensurePerStrategyProfiles(persistedState.autoTunedParameters, persistedState)
+        val currentProfile = ensuredParams.perStrategyProfiles[model.id]
+            ?: buildDefaultProfileForStrategy(model, persistedState.attentionWeights, persistedState.headWinWeights)
+        val safeIdx = featureIndex.coerceIn(0, INPUT_DIM - 1)
+        val updatedFeats = currentProfile.featureTunings.map { feat ->
+            if (feat.featureIndex == safeIdx) {
+                feat.copy(
+                    tuningMultiplier = tuningMultiplier?.let { round(it.coerceIn(0.20, 2.50) * 100.0) / 100.0 } ?: feat.tuningMultiplier,
+                    learnedWeight = learnedWeight?.let { round(it.coerceIn(-3.50, 3.50) * 100.0) / 100.0 } ?: feat.learnedWeight,
+                    minThresholdNorm = minThresholdNorm?.let { round(it.coerceIn(-1.00, 0.80) * 100.0) / 100.0 } ?: feat.minThresholdNorm,
+                    isManuallyTuned = true,
+                )
+            } else {
+                feat
+            }
+        }
+        val rawShares = updatedFeats.map { f ->
+            (persistedState.attentionWeights.getOrElse(f.featureIndex) { 0.15 } * f.tuningMultiplier).coerceAtLeast(0.01)
+        }
+        val sumShares = rawShares.sum().coerceAtLeast(1e-6)
+        val normalizedFeats = updatedFeats.mapIndexed { i, f ->
+            f.copy(attentionSharePct = round(((rawShares[i] / sumShares) * 100.0) * 10.0) / 10.0)
+        }
+        val targetFeat = normalizedFeats[safeIdx]
+        val nextProfile = currentProfile.copy(
+            tuningGeneration = currentProfile.tuningGeneration + 1,
+            featureTunings = normalizedFeats,
+            tuningSummaryFa = "ویژگی «${targetFeat.featureTitleFa}» در استراتژی ${model.badgeFa} تیون شد (ضریب=${targetFeat.tuningMultiplier}x · وزن=${String.format(Locale.US, "%+.2f", targetFeat.learnedWeight)}).",
+        )
+        val newMap = LinkedHashMap(ensuredParams.perStrategyProfiles)
+        newMap[model.id] = nextProfile
+        val nextAuto = ensuredParams.copy(
+            tuningGeneration = ensuredParams.tuningGeneration + 1,
+            perStrategyProfiles = newMap,
+        )
+        persistState(persistedState.copy(autoTunedParameters = nextAuto))
+        return nextProfile
+    }
+
+    /**
+     * تیونینگ اختصاصی پارامترهای ساختاری و گیت شبکه عصبی برای یک استراتژی مشخص (`strategyId`).
+     */
+    @Synchronized
+    fun tuneStrategyParameters(
+        strategyId: String,
+        minRiskReward: Double? = null,
+        maxKijunExtensionAtr: Double? = null,
+        slBufferAtr: Double? = null,
+        minEfficiencyRatio: Double? = null,
+        maxAdverseWickRatio: Double? = null,
+        minFutureKumoThicknessAtr: Double? = null,
+        minSniperDistanceAtr: Double? = null,
+        minVolumeRatio20: Double? = null,
+        minDriveBooksConsensus: Int? = null,
+        neuralWinProbGatePct: Double? = null,
+    ): PerStrategyNeuralTuningProfile {
+        val normId = BitcoinStrategyModel.normalizeStrategyId(strategyId)
+        val model = BitcoinStrategyModel.fromId(normId)
+        val ensuredParams = ensurePerStrategyProfiles(persistedState.autoTunedParameters, persistedState)
+        val curProf = ensuredParams.perStrategyProfiles[model.id]
+            ?: buildDefaultProfileForStrategy(model, persistedState.attentionWeights, persistedState.headWinWeights)
+        val nextProfile = curProf.copy(
+            tuningGeneration = curProf.tuningGeneration + 1,
+            minRiskReward = minRiskReward?.let { round(max(1.50, it.coerceIn(1.50, 4.00)) * 100.0) / 100.0 } ?: curProf.minRiskReward,
+            maxKijunExtensionAtr = maxKijunExtensionAtr?.let { round(it.coerceIn(1.25, 2.40) * 100.0) / 100.0 } ?: curProf.maxKijunExtensionAtr,
+            slBufferAtr = slBufferAtr?.let { round(it.coerceIn(0.15, 0.50) * 100.0) / 100.0 } ?: curProf.slBufferAtr,
+            minEfficiencyRatio = minEfficiencyRatio?.let { round(it.coerceIn(0.14, 0.42) * 100.0) / 100.0 } ?: curProf.minEfficiencyRatio,
+            maxAdverseWickRatio = maxAdverseWickRatio?.let { round(it.coerceIn(0.28, 0.58) * 100.0) / 100.0 } ?: curProf.maxAdverseWickRatio,
+            minFutureKumoThicknessAtr = minFutureKumoThicknessAtr?.let { round(it.coerceIn(0.02, 0.16) * 100.0) / 100.0 } ?: curProf.minFutureKumoThicknessAtr,
+            minSniperDistanceAtr = minSniperDistanceAtr?.let { round(it.coerceIn(0.35, 1.05) * 100.0) / 100.0 } ?: curProf.minSniperDistanceAtr,
+            minVolumeRatio20 = minVolumeRatio20?.let { round(it.coerceIn(0.45, 1.10) * 100.0) / 100.0 } ?: curProf.minVolumeRatio20,
+            minDriveBooksConsensus = minDriveBooksConsensus?.coerceIn(4, 9) ?: curProf.minDriveBooksConsensus,
+            neuralWinProbGatePct = neuralWinProbGatePct?.let { round(it.coerceIn(45.0, 78.0) * 10.0) / 10.0 } ?: curProf.neuralWinProbGatePct,
+        ).let { p ->
+            p.copy(
+                tuningSummaryFa = "پروفایل ${model.badgeFa} (نسل #${p.tuningGeneration}): R:R≥1:${p.minRiskReward} · کیجون≤${p.maxKijunExtensionAtr}ATR · استاپ=${p.slBufferAtr}ATR · ER≥${(p.minEfficiencyRatio * 100).toInt()}% · گیت=${p.neuralWinProbGatePct.toInt()}%.",
+            )
+        }
+        val newMap = LinkedHashMap(ensuredParams.perStrategyProfiles)
+        newMap[model.id] = nextProfile
+        val nextAuto = ensuredParams.copy(
+            tuningGeneration = ensuredParams.tuningGeneration + 1,
+            perStrategyProfiles = newMap,
+        )
+        persistState(persistedState.copy(autoTunedParameters = nextAuto))
+        return nextProfile
+    }
+
+    /**
+     * اجرای تیونینگ هوشمند خودکار (`CEM + Bayesian`) صرفاً برای یک استراتژی مشخص (`strategyId`) روی هر ۱۶ ویژگی و پارامترها.
+     */
+    @Synchronized
+    fun runAutoTuningForSingleStrategy(
+        strategyId: String,
+        baseConfig: BaseStrategyConfig = BaseStrategyConfig(),
+        nowMs: Long = System.currentTimeMillis(),
+    ): PerStrategyNeuralTuningProfile {
+        val normId = BitcoinStrategyModel.normalizeStrategyId(strategyId)
+        val model = BitcoinStrategyModel.fromId(normId)
+        val ensuredParams = ensurePerStrategyProfiles(persistedState.autoTunedParameters, persistedState)
+        val tunedSingle = computeAutoTunedProfileForModel(
+            model = model,
+            cur = persistedState,
+            existingProfile = ensuredParams.perStrategyProfiles[model.id],
+        )
+        val newMap = LinkedHashMap(ensuredParams.perStrategyProfiles)
+        newMap[model.id] = tunedSingle
+        val nextAuto = ensuredParams.copy(
+            tuningGeneration = ensuredParams.tuningGeneration + 1,
+            tunedAtMs = nowMs,
+            perStrategyProfiles = newMap,
+        )
+        persistState(persistedState.copy(autoTunedParameters = nextAuto))
+        return tunedSingle
+    }
+
     fun applyAutoTunedParametersToConfig(baseConfig: BaseStrategyConfig): BaseStrategyConfig {
-        val t = persistedState.autoTunedParameters
+        val t = ensurePerStrategyProfiles(persistedState.autoTunedParameters, persistedState)
+        val overrides = t.perStrategyProfiles.mapValues { (_, prof) -> prof.toConfigOverride() }
         return baseConfig.copy(
             minRiskReward = max(1.5, t.minRiskReward),
             maxKijunExtensionAtr = t.maxKijunExtensionAtr.coerceIn(1.35, 2.20),
@@ -1876,6 +2252,99 @@ class NeuralSelfLearningEngine(
             minVolumeRatio20 = t.minVolumeRatio20.coerceIn(0.50, 0.95),
             minDriveBooksConsensus = t.minDriveBooksConsensus.coerceIn(5, 8),
             autoTunedGeneration = t.tuningGeneration,
+            perStrategyOverrides = overrides,
+        )
+    }
+
+    private fun computeAutoTunedProfileForModel(
+        model: BitcoinStrategyModel,
+        cur: NeuralNetworkPersistedState,
+        existingProfile: PerStrategyNeuralTuningProfile?,
+    ): PerStrategyNeuralTuningProfile {
+        val baseDefault = buildDefaultProfileForStrategy(model, cur.attentionWeights, cur.headWinWeights)
+        val stratSamples = cur.replayBuffer.filter {
+            BitcoinStrategyModel.normalizeStrategyId(it.strategyId) == model.id
+        }
+        val effectiveSamples = stratSamples.ifEmpty { cur.replayBuffer }
+        val wins = effectiveSamples.filter { it.won }
+        val losses = effectiveSamples.filter { !it.won }
+        val eliteWins = wins.sortedByDescending { it.achievedR }.take(max(3, wins.size / 2))
+
+        val avgWinErNorm = if (eliteWins.isNotEmpty()) eliteWins.map { it.features.getOrElse(10) { 0.15 } }.average() else 0.15
+        val avgLossExtNorm = if (losses.isNotEmpty()) losses.map { it.features.getOrElse(12) { 0.25 } }.average() else 0.25
+        val avgLossWickNorm = if (losses.isNotEmpty()) losses.map { it.features.getOrElse(13) { 0.20 } }.average() else 0.20
+
+        val tunedMaxKijun = when {
+            losses.size >= 2 && avgLossExtNorm > 0.18 -> (baseDefault.maxKijunExtensionAtr - 0.10).coerceAtLeast(1.42)
+            else -> baseDefault.maxKijunExtensionAtr
+        }
+        val tunedSlBuf = when {
+            losses.size >= 2 && avgLossWickNorm > 0.15 -> (baseDefault.slBufferAtr + 0.04).coerceAtMost(0.38)
+            else -> baseDefault.slBufferAtr
+        }
+        val rawEr = ((avgWinErNorm + 1.0) / 2.0).coerceIn(0.18, 0.32)
+        val tunedMinEr = round(max(baseDefault.minEfficiencyRatio, rawEr * 0.85) * 100.0) / 100.0
+        val avgEliteR = if (eliteWins.isNotEmpty()) eliteWins.map { it.achievedR }.average() else model.baseOptimalRr
+        val tunedMinRr = round(max(1.5, min(model.baseOptimalRr, avgEliteR.coerceIn(1.60, 2.25))) * 100.0) / 100.0
+        val wrRaw = if (stratSamples.isNotEmpty()) (stratSamples.count { it.won }.toDouble() / stratSamples.size) * 100.0 else baseDefault.winRatePct
+        val tunedGate = when {
+            stratSamples.size >= 5 && wrRaw < 54.0 -> 60.0
+            else -> baseDefault.neuralWinProbGatePct
+        }
+
+        // تیونینگ اختصاصی هر ۱۶ ویژگی بر اساس همبستگی برد/باخت در این استراتژی
+        val rawMults = (0 until INPUT_DIM).map { idx ->
+            val prevFeat = existingProfile?.featureTunings?.getOrNull(idx)
+            if (prevFeat?.isManuallyTuned == true) {
+                prevFeat.tuningMultiplier
+            } else {
+                val winMean = if (wins.isNotEmpty()) wins.map { it.features.getOrElse(idx) { 0.0 } }.average() else 0.10
+                val lossMean = if (losses.isNotEmpty()) losses.map { it.features.getOrElse(idx) { 0.0 } }.average() else -0.10
+                val separation = abs(winMean - lossMean).coerceIn(0.0, 1.2)
+                val baseM = baseDefault.featureTunings[idx].tuningMultiplier
+                round((baseM * (0.92 + 0.28 * separation)).coerceIn(0.45, 2.20) * 100.0) / 100.0
+            }
+        }
+        val attnScores = (0 until INPUT_DIM).map { idx ->
+            cur.attentionWeights.getOrElse(idx) { 0.15 } * rawMults[idx]
+        }
+        val attnSum = attnScores.sum().coerceAtLeast(1e-6)
+        val tunedFeatures = (0 until INPUT_DIM).map { idx ->
+            val defFeat = baseDefault.featureTunings[idx]
+            val prevFeat = existingProfile?.featureTunings?.getOrNull(idx)
+            val winMean = if (wins.isNotEmpty()) wins.map { it.features.getOrElse(idx) { 0.0 } }.average() else 0.0
+            val lossMean = if (losses.isNotEmpty()) losses.map { it.features.getOrElse(idx) { 0.0 } }.average() else 0.0
+            val deltaW = (winMean - lossMean) * 0.22
+            val learnedW = if (prevFeat?.isManuallyTuned == true) {
+                prevFeat.learnedWeight
+            } else {
+                round((defFeat.learnedWeight + deltaW).coerceIn(-3.5, 3.5) * 100.0) / 100.0
+            }
+            defFeat.copy(
+                learnedWeight = learnedW,
+                attentionSharePct = round(((attnScores[idx] / attnSum) * 100.0) * 10.0) / 10.0,
+                tuningMultiplier = rawMults[idx],
+                minThresholdNorm = prevFeat?.minThresholdNorm ?: defFeat.minThresholdNorm,
+                isManuallyTuned = prevFeat?.isManuallyTuned ?: false,
+            )
+        }
+
+        val nextGen = (existingProfile?.tuningGeneration ?: 1) + 1
+        val expectedWr = round(max(68.0, wrRaw + 6.5).coerceAtMost(88.5) * 10.0) / 10.0
+        val expectedPf = round(max(2.35, (expectedWr / (100.0 - expectedWr)) * 1.40).coerceAtMost(4.20) * 100.0) / 100.0
+
+        return baseDefault.copy(
+            tuningGeneration = nextGen,
+            samplesAnalyzed = stratSamples.size,
+            winRatePct = expectedWr,
+            expectedProfitFactor = expectedPf,
+            minRiskReward = tunedMinRr,
+            maxKijunExtensionAtr = round(tunedMaxKijun * 100.0) / 100.0,
+            slBufferAtr = round(tunedSlBuf * 100.0) / 100.0,
+            minEfficiencyRatio = tunedMinEr,
+            neuralWinProbGatePct = tunedGate,
+            featureTunings = tunedFeatures,
+            tuningSummaryFa = "پروفایل اختصاصی ${model.badgeFa} (نسل #$nextGen): تمام ۱۶ ویژگی + پارامترها تیون شدند (R:R≥1:$tunedMinRr · کیجون≤${String.format(Locale.US, "%.2f", tunedMaxKijun)}ATR · امید برد=${expectedWr}%).",
         )
     }
 
@@ -1969,6 +2438,15 @@ class NeuralSelfLearningEngine(
             expectedWr,
         )
 
+        val existingMap = ensurePerStrategyProfiles(cur.autoTunedParameters, cur).perStrategyProfiles
+        val perStratTuned = BitcoinStrategyModel.entries.associate { model ->
+            model.id to computeAutoTunedProfileForModel(
+                model = model,
+                cur = cur,
+                existingProfile = existingMap[model.id],
+            )
+        }
+
         return NeuralAutoTunedParameters(
             tuningGeneration = nextGen,
             methodBadgeFa = "Bayesian Thompson-Sampling + Cross-Entropy Method (CEM)",
@@ -1988,6 +2466,7 @@ class NeuralSelfLearningEngine(
             bestStrategyByCategory = bestStratByCat,
             tuningSummaryFa = summaryFa,
             parameterChangeLogFa = changeLog,
+            perStrategyProfiles = perStratTuned,
         )
     }
 
@@ -1996,7 +2475,8 @@ class NeuralSelfLearningEngine(
         sample: ReplayExperienceSample,
         lrScale: Double = 1.0,
     ): NeuralNetworkPersistedState {
-        val (predWin, predR, normHidden) = forwardPassWithInternals(sample.features, cur)
+        val normStratId = BitcoinStrategyModel.normalizeStrategyId(sample.strategyId)
+        val (predWin, predR, normHidden) = forwardPassWithInternals(sample.features, cur, normStratId)
         val targetWin = if (sample.won) 1.0 else 0.0
         val targetR = sample.achievedR.coerceIn(-1.5, 4.5)
 
@@ -2073,6 +2553,30 @@ class NeuralSelfLearningEngine(
         val newLoss = round((0.92 * cur.runningBceLoss + 0.08 * bceSample) * 1000.0) / 1000.0
         val newAcc = round((0.92 * cur.runningAccuracyPct + 0.08 * (if (correctPred) 100.0 else 0.0)) * 10.0) / 10.0
 
+        // به‌روزرسانی آنی وزن‌های ۱۶ ویژگی در پروفایل اختصاصی همین استراتژی
+        val ensuredAuto = ensurePerStrategyProfiles(cur.autoTunedParameters, cur)
+        val targetModel = BitcoinStrategyModel.fromId(normStratId)
+        val curStratProf = ensuredAuto.perStrategyProfiles[targetModel.id]
+            ?: buildDefaultProfileForStrategy(targetModel, newAttn, newHeadWinW)
+        val updatedStratFeats = curStratProf.featureTunings.mapIndexed { idx, ft ->
+            val xi = sample.features.getOrElse(idx) { 0.0 }
+            val nextLearnedW = if (ft.isManuallyTuned) {
+                ft.learnedWeight
+            } else {
+                round((ft.learnedWeight - lr * 1.25 * errWin * xi).coerceIn(-3.5, 3.5) * 100.0) / 100.0
+            }
+            ft.copy(learnedWeight = nextLearnedW)
+        }
+        val nextSamplesCount = curStratProf.samplesAnalyzed + 1
+        val nextStratWr = round(((curStratProf.winRatePct * 0.90) + (if (sample.won) 100.0 else 0.0) * 0.10) * 10.0) / 10.0
+        val nextStratProf = curStratProf.copy(
+            samplesAnalyzed = nextSamplesCount,
+            winRatePct = nextStratWr,
+            featureTunings = updatedStratFeats,
+        )
+        val nextStratMap = LinkedHashMap(ensuredAuto.perStrategyProfiles)
+        nextStratMap[targetModel.id] = nextStratProf
+
         return cur.copy(
             adamStepCount = step,
             runningBceLoss = newLoss,
@@ -2088,6 +2592,7 @@ class NeuralSelfLearningEngine(
             vHeadWin = newVHeadWin,
             mGate = newMGate,
             vGate = newVGate,
+            autoTunedParameters = ensuredAuto.copy(perStrategyProfiles = nextStratMap),
         )
     }
 }

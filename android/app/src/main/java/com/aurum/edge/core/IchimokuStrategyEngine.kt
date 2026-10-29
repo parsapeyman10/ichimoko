@@ -219,15 +219,15 @@ enum class BitcoinStrategyModel(
     // ── ۵. متود جامع یکپارچه کتاب‌های درایو (Unified Drive Master Method — تنها استراتژی جامع درایو) ──
     DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER(
         id = "DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER",
-        titleFa = "متود جامع یکپارچه درایو (تلفیق بیزین تطبیقی هر ۹ کتاب PDF گوگل درایو)",
-        badgeFa = "متود جامع درایو · ابرترکیب ۹ کتاب",
-        authorRefFa = "Unified 9-Book Drive Meta-Ensemble (TuAnh + Foka + Keenbase + Mukherjee ×2 + HowToTrade + TSG + Koonitz ×2)",
-        summaryFa = "تلفیق یکپارچه هر ۹ کتاب PDF گوگل درایو با الگوریتم روز «اجماع بیزین تطبیقی و وزن‌دهی رژیم بازار» (Adaptive Bayesian Log-Odds 9-Book Consensus): ترکیب صفحه سه‌گانه EMA(13/21/34/89/200)، کراس نهادی (7-22-44 و 10-30-60)، فشردگی بولینگر، پرش RSI(7)/RSI(14) از ۵۰، تایید DMI/ADX(24) و MACD، آزادی سه‌بعدی چیکو، فرمول کلی (Kelly 69-76%) و سنگر استاپ ترکیبی فرکتال + Kijun30±0.4ATR.",
+        titleFa = "متود جامع یکپارچه درایو (معماری روز ۴ ستون نهادی + بیس جامع ایچیموکو)",
+        badgeFa = "متود جامع درایو · نسل جدید",
+        authorRefFa = "World-Class Regime-Gated Ichimoku & 9-Book Quantitative Synthesis (Hosoda + Patel + Tuttle + Péloille + 9 Drive Books)",
+        summaryFa = "نسخه ارتقایافته و سودده بر پایه متود روز جهان: ادغام کامل ۱۶ گارد ساختاری «جامع بیس» (فیلتر ضد C-Clamp، عبور از سقف چیکو، جاذبه فلت SSB و کارایی کافمن ER14) با ۴ ستون آلفای کتاب‌های درایو (هم‌فازی ۳ ابر 7-22-44 / 9-26-52 / 10-30-60، ریبون نهادی EMA 13/21/34/89، ماشه تطبیقی رژیم بازار شامل فوران بولینگر در فاز Genesis یا پولبک EMA21/RSI7 در فاز Core، و تایید DMI/ADX + MACD + Kelly) همراه با متود R:R و حد ضرر دقیقاً منطبق بر «جامع بیس» روی امواج V/N/E/NT هوسودا.",
         hasPatel = true,
         hasTuttle = true,
         hasHosoda = true,
         hasPeloille = true,
-        baseOptimalRr = 2.85,
+        baseOptimalRr = 2.25,
     );
 
     val isDrivePdfStrategy: Boolean
@@ -381,6 +381,24 @@ fun BitcoinStrategyModel.formatLiveBookTelemetryFa(
 }
 
 /**
+ * اوررایدهای اختصاصی تیونینگ شبکه عصبی برای هر یک از ۱۶ استراتژی به صورت مجزا.
+ */
+@Serializable
+data class PerStrategyConfigOverride(
+    val strategyId: String,
+    val minRiskReward: Double = 1.65,
+    val maxKijunExtensionAtr: Double = 1.75,
+    val slBufferAtr: Double = 0.25,
+    val breakoutBufferAtr: Double = 0.15,
+    val minEfficiencyRatio: Double = 0.20,
+    val minVolumeRatio20: Double = 0.60,
+    val maxAdverseWickRatio: Double = 0.45,
+    val minFutureKumoThicknessAtr: Double = 0.05,
+    val minSniperDistanceAtr: Double = 0.65,
+    val minDriveBooksConsensus: Int = 6,
+)
+
+/**
  * پارامترهای قابل تنظیم و ترمیم برای «استراتژی بیس» (Base Strategy) و مدل‌های مشتق‌شده.
  */
 @Serializable
@@ -404,8 +422,12 @@ data class BaseStrategyConfig(
     val requireFutureKumoSlope: Boolean = true,
     val minEfficiencyRatio: Double = 0.20,
     val minVolumeRatio20: Double = 0.60,
+    val maxAdverseWickRatio: Double = 0.45,
+    val minFutureKumoThicknessAtr: Double = 0.05,
+    val minSniperDistanceAtr: Double = 0.65,
     val minDriveBooksConsensus: Int = 6,
     val autoTunedGeneration: Int = 0,
+    val perStrategyOverrides: Map<String, PerStrategyConfigOverride> = emptyMap(),
 ) {
     val macroInterval: Interval get() = Interval.fromLabel(macroIntervalLabel)
     val strategyInterval: Interval get() = Interval.fromLabel(strategyIntervalLabel)
@@ -2007,9 +2029,11 @@ object IchimokuStrategyEngine {
             )
         }
 
-        // Apply model-specific overrides onto config for all 15 strategy combinations (2^4 - 1 = 15)
+        // Apply model-specific & per-strategy neural-tuned overrides onto config for all 16 strategies
         // قانون قطعی سیستم: حداقل R:R تمام استراتژی‌ها و معاملات همیشه حداقل 1:1.5 (1.5R) و بالاتر است
-        val minAllowedRr = max(config.minRiskReward, 1.5)
+        val stratOverride = config.perStrategyOverrides[activeModel.id]
+        val baseMinRr = stratOverride?.minRiskReward ?: config.minRiskReward
+        val minAllowedRr = max(baseMinRr, 1.5)
         val effectiveConfig = config.copy(
             enablePullbackTrigger = activeModel.hasPatel || activeModel.hasHosoda || activeModel.hasPeloille || !activeModel.hasTuttle,
             enableBreakoutTrigger = activeModel.hasTuttle || activeModel.hasHosoda || activeModel.hasPeloille || !activeModel.hasPatel,
@@ -2017,6 +2041,15 @@ object IchimokuStrategyEngine {
             requireChikouOpenSpace = activeModel.hasTuttle || activeModel.hasPeloille || activeModel.combinationCount >= 2 || config.requireChikouOpenSpace,
             requireFutureKumoSlope = activeModel.hasPatel || activeModel.hasTuttle || activeModel.combinationCount >= 2 || config.requireFutureKumoSlope,
             minRiskReward = if (activeModel.hasHosoda && activeModel.combinationCount == 1) max(minAllowedRr, 1.8) else minAllowedRr,
+            maxKijunExtensionAtr = (stratOverride?.maxKijunExtensionAtr ?: config.maxKijunExtensionAtr).coerceIn(1.25, 2.50),
+            slBufferAtr = (stratOverride?.slBufferAtr ?: config.slBufferAtr).coerceIn(0.15, 0.55),
+            breakoutBufferAtr = (stratOverride?.breakoutBufferAtr ?: config.breakoutBufferAtr).coerceIn(0.05, 0.35),
+            minEfficiencyRatio = (stratOverride?.minEfficiencyRatio ?: config.minEfficiencyRatio).coerceIn(0.14, 0.45),
+            minVolumeRatio20 = (stratOverride?.minVolumeRatio20 ?: config.minVolumeRatio20).coerceIn(0.40, 1.15),
+            maxAdverseWickRatio = (stratOverride?.maxAdverseWickRatio ?: config.maxAdverseWickRatio).coerceIn(0.28, 0.60),
+            minFutureKumoThicknessAtr = (stratOverride?.minFutureKumoThicknessAtr ?: config.minFutureKumoThicknessAtr).coerceIn(0.02, 0.18),
+            minSniperDistanceAtr = (stratOverride?.minSniperDistanceAtr ?: config.minSniperDistanceAtr).coerceIn(0.35, 1.10),
+            minDriveBooksConsensus = (stratOverride?.minDriveBooksConsensus ?: config.minDriveBooksConsensus).coerceIn(4, 9),
         )
 
         val livePrice = livePriceOverride?.takeIf { it.isFinite() && it > 0.0 } ?: trigSnap.close
@@ -2104,7 +2137,9 @@ object IchimokuStrategyEngine {
         val cond4Detail = "Future SSA=${stratSnap.futureSpanA} vs SSB=${stratSnap.futureSpanB} (${if (stratSnap.isFutureKumoBullish) "صعودی" else "نزولی"})"
 
         // ── Check 5: Future Kumo Thickness & Twist Immunity (الیوت + پلویل) ────
-        val futureThicknessOk = stratSnap.futureKumoThicknessAtr >= 0.05 && trigSnap.futureKumoThicknessAtr >= 0.04
+        val minThickStrat = effectiveConfig.minFutureKumoThicknessAtr
+        val minThickTrig = (minThickStrat * 0.80).coerceAtLeast(0.02)
+        val futureThicknessOk = stratSnap.futureKumoThicknessAtr >= minThickStrat && trigSnap.futureKumoThicknessAtr >= minThickTrig
         val cond5Detail = String.format(
             Locale.US,
             "ضخامت ابر آینده: %.2f ATR (${config.strategyInterval.label}) · %.2f ATR (${config.triggerInterval.label})",
@@ -2178,17 +2213,14 @@ object IchimokuStrategyEngine {
             activeModel = activeModel,
         )
 
-        // ── Compute Sniper Entry Zone & Tight Structural SL ───────────────────
+        // ── Compute Sniper Entry Zone & Tight Structural SL (متود یکپارچه با جامع بیس) ──
         val slBuffer = trigSnap.atr14 * effectiveConfig.slBufferAtr
         val candleGoldenPocket = if (isLong) {
             trigSnap.low + (trigSnap.high - trigSnap.low) * 0.55
         } else {
             trigSnap.high - (trigSnap.high - trigSnap.low) * 0.55
         }
-        val activeTenkanRef = when (activeModel) {
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> unified9BookConsensus.compositeSniperAnchor
-            else -> trigSnap.tenkan
-        }
+        val activeTenkanRef = trigSnap.tenkan
         val sniperOptimal = if (isLong) {
             round2(max(activeTenkanRef, min(livePrice, candleGoldenPocket)))
         } else {
@@ -2218,27 +2250,16 @@ object IchimokuStrategyEngine {
         val safeAnchorLong = min(sniperOptimal, livePrice)
         val safeAnchorShort = max(sniperOptimal, livePrice)
 
-        val rawTechnicalSl = when (activeModel) {
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> {
-                if (isLong) {
-                    round2(min(unified9BookConsensus.compositeFortressStopLoss, safeAnchorLong - minSafeStopDist))
-                } else {
-                    round2(max(unified9BookConsensus.compositeFortressStopLoss, safeAnchorShort + minSafeStopDist))
-                }
-            }
-            else -> {
-                if (isLong) {
-                    val kumoKijunFloor = min(trigSnap.kijun, stratSnap.kijun.coerceAtLeast(trigSnap.kumoBottom)) - slBuffer
-                    val microStructureFloor = min(trigSnap.low, trigSnap.kijun) - trigSnap.atr14 * 0.25
-                    val tightStructuralSl = min(kumoKijunFloor, microStructureFloor)
-                    round2(min(tightStructuralSl, safeAnchorLong - minSafeStopDist))
-                } else {
-                    val kumoKijunCeiling = max(trigSnap.kijun, stratSnap.kijun.coerceAtMost(trigSnap.kumoTop)) + slBuffer
-                    val microStructureCeiling = max(trigSnap.high, trigSnap.kijun) + trigSnap.atr14 * 0.25
-                    val tightStructuralSl = max(kumoKijunCeiling, microStructureCeiling)
-                    round2(max(tightStructuralSl, safeAnchorShort + minSafeStopDist))
-                }
-            }
+        val rawTechnicalSl = if (isLong) {
+            val kumoKijunFloor = min(trigSnap.kijun, stratSnap.kijun.coerceAtLeast(trigSnap.kumoBottom)) - slBuffer
+            val microStructureFloor = min(trigSnap.low, trigSnap.kijun) - trigSnap.atr14 * 0.25
+            val tightStructuralSl = min(kumoKijunFloor, microStructureFloor)
+            round2(min(tightStructuralSl, safeAnchorLong - minSafeStopDist))
+        } else {
+            val kumoKijunCeiling = max(trigSnap.kijun, stratSnap.kijun.coerceAtMost(trigSnap.kumoTop)) + slBuffer
+            val microStructureCeiling = max(trigSnap.high, trigSnap.kijun) + trigSnap.atr14 * 0.25
+            val tightStructuralSl = max(kumoKijunCeiling, microStructureCeiling)
+            round2(max(tightStructuralSl, safeAnchorShort + minSafeStopDist))
         }
 
         val rawStopDist = max(
@@ -2331,14 +2352,15 @@ object IchimokuStrategyEngine {
         // Check 13 & 15 early inputs so Optimal R:R (عدد مناسب R:R) can adapt to Trend Phase & Efficiency
         val erStrat = stratSnap.efficiencyRatio14
         val erTrig = trigSnap.efficiencyRatio14
+        val minErReq = effectiveConfig.minEfficiencyRatio
         val dualFlatChop = stratSnap.isKijunFlat && stratSnap.isCurrentSpanBFlat &&
-            trigSnap.isKijunFlat && trigSnap.isCurrentSpanBFlat && erStrat < 0.20
+            trigSnap.isKijunFlat && trigSnap.isCurrentSpanBFlat && erStrat < minErReq
         val htfKijunCounterTrap = if (isLong) {
             trigSnap.close > trigSnap.kijun && stratSnap.close < stratSnap.kijun - stratSnap.atr14 * 0.25
         } else {
             trigSnap.close < trigSnap.kijun && stratSnap.close > stratSnap.kijun + stratSnap.atr14 * 0.25
         }
-        val cond13Passed = (erStrat >= 0.20 || erTrig >= 0.22) && !dualFlatChop && !htfKijunCounterTrap
+        val cond13Passed = (erStrat >= minErReq || erTrig >= (minErReq + 0.02)) && !dualFlatChop && !htfKijunCounterTrap
 
         val waveBars = wave?.barsSinceWaveStart ?: 12
         val trendPhase = when {
@@ -2348,7 +2370,7 @@ object IchimokuStrategyEngine {
             else -> TrendPhase.CORE_EXPANSION
         }
 
-        // ── محاسبه «عدد مناسب R:R» (Optimal R:R) متناسب با مدل استراتژی (تمام ۱۵ ترکیب)، فاز روند و کارایی بازار ──
+        // ── محاسبه «عدد مناسب R:R» (Optimal R:R) یکپارچه برای جامع بیس و جامع درایو و تمام ۱۶ استراتژی ──
         val modelBaseOptimalRr = activeModel.baseOptimalRr
         val phaseRrBonus = when (trendPhase) {
             TrendPhase.GENESIS -> 0.30
@@ -2372,28 +2394,15 @@ object IchimokuStrategyEngine {
             emptyList()
         }
 
-        // انتخاب هدف قیمتی از بین امواج هوسودا یا اهداف اختصاصی ۹ کتاب درایو (مثل 3R سیستم Keenbase و Foka و بررسی MA200 کتاب TuAnh)
+        // انتخاب هدف قیمتی دقیقاً به روش «جامع بیس» از بین امواج هوسودا (NT, V, N, E)
         val validWaveCandidates = labeledWaveTargets.filter { (_, targetPrice) ->
             val inRightDirection = if (isLong) targetPrice > max(livePrice, sniperOptimal) else targetPrice < min(livePrice, sniperOptimal)
             val minDistFromEntries = min(abs(targetPrice - livePrice), abs(targetPrice - sniperOptimal))
             inRightDirection && (minDistFromEntries / stopDist) >= requiredMinRr
         }
-        val chosenWavePair: Pair<String, Double>? = when (activeModel) {
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> {
-                val targetMult = max(unified9BookConsensus.dynamicOptimalRr, computedOptimalRr)
-                val unifiedTargetPrice = if (isLong) {
-                    max(livePrice, sniperOptimal) + stopDist * targetMult
-                } else {
-                    (min(livePrice, sniperOptimal) - stopDist * targetMult).coerceAtLeast(0.00001)
-                }
-                "هدف ترکیبی ${String.format(Locale.US, "%.2fR", targetMult)} اجماع ۹ کتاب درایو" to unifiedTargetPrice
-            }
-            else -> {
-                validWaveCandidates.minByOrNull { (_, targetPrice) ->
-                    val targetRr = abs(targetPrice - sniperOptimal) / stopDist
-                    abs(targetRr - computedOptimalRr)
-                }
-            }
+        val chosenWavePair: Pair<String, Double>? = validWaveCandidates.minByOrNull { (_, targetPrice) ->
+            val targetRr = abs(targetPrice - sniperOptimal) / stopDist
+            abs(targetRr - computedOptimalRr)
         }
 
         val rawPrimaryTp = chosenWavePair?.second ?: if (isLong) {
@@ -2447,18 +2456,15 @@ object IchimokuStrategyEngine {
         val rewardDistSniper = round2(abs(effectiveTp - sniperOptimal))
         val riskDistSniper = round2(abs(sniperOptimal - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.25))
         val slBasisTextFa = buildString {
-            when (activeModel) {
-                BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER ->
-                    append("سنگر ترکیبی ۹ کتاب درایو: فرکتال ۵ کندلی + Kijun(30)±0.4ATR + EMA(34) (${round2(unified9BookConsensus.compositeFortressStopLoss)})")
-                else -> {
-                    val pillars = mutableListOf<String>()
-                    if (activeModel.hasPatel) pillars += "تعادل کیجون پاتل (${round2(trigSnap.kijun)})"
-                    if (activeModel.hasTuttle) pillars += "لبه کومو تاتل (${round2(if (isLong) trigSnap.kumoBottom else trigSnap.kumoTop)})"
-                    if (activeModel.hasHosoda) pillars += "نقطه S موج هوسودا (${round2(wave?.pointC ?: trigSnap.kijun)})"
-                    if (activeModel.hasPeloille) pillars += "پلاتوی فلت کارن پلویل"
-                    append(pillars.joinToString(" + ").ifEmpty { "سنگر ساختاری کیجون/کومو" })
-                }
+            val pillars = mutableListOf<String>()
+            if (activeModel.hasPatel) pillars += "تعادل کیجون پاتل (${round2(trigSnap.kijun)})"
+            if (activeModel.hasTuttle) pillars += "لبه کومو تاتل (${round2(if (isLong) trigSnap.kumoBottom else trigSnap.kumoTop)})"
+            if (activeModel.hasHosoda) pillars += "نقطه S موج هوسودا (${round2(wave?.pointC ?: trigSnap.kijun)})"
+            if (activeModel.hasPeloille) pillars += "پلاتوی فلت کارن پلویل"
+            if (activeModel == BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER) {
+                pillars += "۹ کتاب درایو (هم‌تراز جامع بیس)"
             }
+            append(pillars.joinToString(" + ").ifEmpty { "سنگر ساختاری کیجون/کومو" })
             append(String.format(Locale.US, " + بافر %.2f ATR", slBuffer))
         }
         val tpBasisTextFa = buildString {
@@ -2522,11 +2528,13 @@ object IchimokuStrategyEngine {
         // ── Check 14: Anti-Fakeout Wick Guard & Liquidity Sweep Filter ────────
         val adverseWick = if (isLong) trigSnap.upperWickRatio else trigSnap.lowerWickRatio
         val favorableTail = if (isLong) trigSnap.lowerWickRatio else trigSnap.upperWickRatio
-        val cond14Passed = adverseWick <= 0.45 && (trigSnap.candleBodyRatio >= 0.22 || favorableTail >= 0.25)
+        val maxWickAllowed = effectiveConfig.maxAdverseWickRatio
+        val cond14Passed = adverseWick <= maxWickAllowed && (trigSnap.candleBodyRatio >= 0.22 || favorableTail >= 0.25)
         val cond14Detail = String.format(
             Locale.US,
-            "شدوی مخالف: %.0f%% (سقف مجاز ۴۵%%) · شدوی تایید: %.0f%%",
+            "شدوی مخالف: %.0f%% (سقف مجاز %.0f%%) · شدوی تایید: %.0f%%",
             adverseWick * 100.0,
+            maxWickAllowed * 100.0,
             favorableTail * 100.0,
         )
 
@@ -2536,7 +2544,8 @@ object IchimokuStrategyEngine {
 
         // ── Check 16: Sniper Entry Precision & Anti-Chase Pocket ──────────────
         val distFromTenkanAtr = abs(trigSnap.close - activeTenkanRef) / trigSnap.atr14.coerceAtLeast(1e-8)
-        val cond16Passed = distToSniperAtr <= 0.65 && distFromTenkanAtr <= 1.15
+        val maxSniperDist = effectiveConfig.minSniperDistanceAtr
+        val cond16Passed = distToSniperAtr <= maxSniperDist && distFromTenkanAtr <= (maxSniperDist + 0.50)
         val cond16Detail = String.format(
             Locale.US,
             "ورود بهینه: %s · بازه نقطه‌زنی: [%s .. %s] · دقت نقطه‌زنی: %.0f%%",
@@ -2888,85 +2897,123 @@ object IchimokuStrategyEngine {
                 } else {
                     trigSnap.isPriceBelowKumo && trigSnap.close < trigSnap.kumoBottom103060 && trigSnap.close < trigSnap.kumoBottom72244
                 }
+                val cSanyakuAndRibbon = if (isLong) {
+                    stratSnap.sanyakuBullishOrder && trigSnap.sanyakuBullishOrder &&
+                        trigSnap.close >= trigSnap.ema21 - trigSnap.atr14 * 0.15 &&
+                        trigSnap.close >= trigSnap.ema34 - trigSnap.atr14 * 0.20
+                } else {
+                    stratSnap.sanyakuBearishOrder && trigSnap.sanyakuBearishOrder &&
+                        trigSnap.close <= trigSnap.ema21 + trigSnap.atr14 * 0.15 &&
+                        trigSnap.close <= trigSnap.ema34 + trigSnap.atr14 * 0.20
+                }
+                val cMultiSpeedTk = !trigSnap.isKijunFlat && consensus.book3KeenbasePassed && consensus.book9KoonitzTripleScreenPassed
+                val cRegimeTriggerOrPullback = consensus.book1TuAnhPassed || consensus.book2FokaPassed
+                val cRsiNotExhausted = if (isLong) {
+                    trigSnap.rsi14 in 48.0..76.0 && trigSnap.rsiPeakDropLong < 10.5
+                } else {
+                    trigSnap.rsi14 in 24.0..52.0 && trigSnap.rsiTroughRiseShort < 11.5
+                }
                 listOf(
                     StrategyConditionCheck(
                         1,
-                        "۱. اجماع بیزین تطبیقی ۹ کتاب درایو (حداقل $reqBooks از ۹ کتاب + احتمال برد ≥ ۷۶٪)",
-                        cConsensus,
+                        "۱. رژیم کوموی ۳ تایم‌فریم + هم‌فازی هر ۳ ابر (9,26,52 + 10,30,60 + 7,22,44)",
+                        cond1Passed && cTripleKumo,
                         String.format(
                             Locale.US,
-                            "تایید %d/9 کتاب · احتمال برد بیزین: %.1f%% · کتاب‌های فعال: %s",
-                            consensus.confirmedBooksCount,
-                            consensus.bayesianWinProbabilityPct,
-                            consensus.activeBookBadgesFa.joinToString("، ").ifEmpty { "در انتظار تکمیل" },
-                        ),
-                    ),
-                    StrategyConditionCheck(
-                        2,
-                        "۲. هم‌جهتی هر ۳ ابر ایچیموکو: استاندارد (9,26,52) + Keenbase (10,30,60) + سریع (7,22,44)",
-                        cTripleKumo && cond1Passed,
-                        String.format(
-                            Locale.US,
-                            "Kumo(52)=%s · Kumo(60)=%s · Kumo(44)=%s",
+                            "%s · Kumo(52)=%s · Kumo(60)=%s · Kumo(44)=%s",
+                            cond1Detail,
                             round2(if (isLong) trigSnap.kumoTop else trigSnap.kumoBottom).toString(),
                             round2(if (isLong) trigSnap.kumoTop103060 else trigSnap.kumoBottom103060).toString(),
                             round2(if (isLong) trigSnap.kumoTop72244 else trigSnap.kumoBottom72244).toString(),
                         ),
                     ),
                     StrategyConditionCheck(
+                        2,
+                        "۲. چیدمان ۵ خط سانیاکو (Sanyaku) + حمایت ریبون نهایی EMA(21/34/89)",
+                        cSanyakuAndRibbon,
+                        String.format(
+                            Locale.US,
+                            "Tenkan=%s · Kijun=%s · EMA21=%s · EMA34=%s",
+                            round2(trigSnap.tenkan).toString(),
+                            round2(trigSnap.kijun).toString(),
+                            round2(trigSnap.ema21).toString(),
+                            round2(trigSnap.ema34).toString(),
+                        ),
+                    ),
+                    StrategyConditionCheck(
                         3,
-                        "۳. کتاب درایو ۱ (TuAnh): فشردگی/باند بولینگر BB(20,2) + EMA(89) + RSI(14)>50",
-                        consensus.book1TuAnhPassed,
-                        String.format(Locale.US, "BB20=%s (Squeeze=%s) · EMA89=%s · RSI14=%.1f", round2(trigSnap.bbMiddle20).toString(), if (trigSnap.isBollingerSqueeze) "بله" else "عادی", round2(trigSnap.ema89).toString(), trigSnap.rsi14),
+                        "۳. کراس و شیب فعال ۳ سرعته Tenkan/Kijun (7/22, 9/26, 10/30) و کیجون غیرفلت",
+                        cMultiSpeedTk,
+                        String.format(
+                            Locale.US,
+                            "TK(7/22)=%s/%s · TK(10/30)=%s/%s · شیب کیجون=%+.2f ATR",
+                            round2(trigSnap.tenkan7).toString(),
+                            round2(trigSnap.kijun22).toString(),
+                            round2(trigSnap.tenkan10).toString(),
+                            round2(trigSnap.kijun30).toString(),
+                            trigSnap.kijunSlopeAtrPerBar,
+                        ),
                     ),
                     StrategyConditionCheck(
                         4,
-                        "۴. کتاب درایو ۲ (Foka 15m/Day): شیب EMA(21) + پرش RSI(7) از خط ۵۰ + فرکتال ۵ کندلی",
-                        consensus.book2FokaPassed,
-                        String.format(Locale.US, "EMA21=%s (شیب=%+.2f) · RSI7=%.1f · فرکتال=%s", round2(trigSnap.ema21).toString(), trigSnap.ema21SlopeAtrPerBar, trigSnap.rsi7, round2(if (isLong) trigSnap.lastDownFractalLow else trigSnap.lastUpFractalHigh).toString()),
-                    ),
-                    StrategyConditionCheck(
-                        5,
-                        "۵. کتاب درایو ۳ (Keenbase): کراس نهادی Tenkan(10)/Kijun(30) و کلوز بیرون Kumo(60)",
-                        consensus.book3KeenbasePassed,
-                        String.format(Locale.US, "Tenkan(10)=%s · Kijun(30)=%s · استاپ مکانیکی=%s", round2(trigSnap.tenkan10).toString(), round2(trigSnap.kijun30).toString(), round2(consensus.compositeFortressStopLoss).toString()),
-                    ),
-                    StrategyConditionCheck(
-                        6,
-                        "۶. کتاب درایو ۴ (Mukherjee Kelly): طوفان کامل ۵ سیگناله (Kelly ≥ 62%) + الگوی شمعی و RSI",
-                        consensus.book4MukherjeeKellyPassed,
-                        String.format(Locale.US, "سیگنال‌های کلی=%d/5 (%d%%) · افت RSI از قله=%.1f", trigSnap.kellySignalCount, trigSnap.kellyWinProbabilityPercent, if (isLong) trigSnap.rsiPeakDropLong else trigSnap.rsiTroughRiseShort),
-                    ),
-                    StrategyConditionCheck(
-                        7,
-                        "۷. کتاب درایو ۵ و ۷ (Mukherjee & TSG): خط ماشه تنکان + کیجون غیرفلت + آزادی چیکو بالای/زیر ابر",
-                        consensus.book5MukherjeeChikouPassed && consensus.book7Tsg4StepPassed && cond6Passed,
-                        String.format(Locale.US, "شیب کیجون=%+.2f ATR · چیکو بیرون ابر ۲۶=%s", trigSnap.kijunSlopeAtrPerBar, if (trigSnap.chikouAboveCloud26 || trigSnap.chikouBelowCloud26) "تایید ✅" else "خیر"),
-                    ),
-                    StrategyConditionCheck(
-                        8,
-                        "۸. کتاب درایو ۶ (HowToTrade): شکست کانال کومو و تایید Kumo Twist ابر آینده",
-                        consensus.book6HowToTradePassed && cond5Passed,
+                        "۴. جهت و شیب ابر آینده (۲۶ کندل جلوتر) + تایید Kumo Twist (کتاب ۶)",
+                        consensus.book6HowToTradePassed,
                         cond4Detail,
                     ),
                     StrategyConditionCheck(
+                        5,
+                        "۵. ضخامت ابر آینده و ایمنی از پیچش (الیوت + پلویل + Keenbase 60)",
+                        cond5Passed,
+                        cond5Detail,
+                    ),
+                    StrategyConditionCheck(
+                        6,
+                        "۶. رهایی سه‌بعدی Chikou Span بیرون کندل‌ها و ابر ۲۶ دوره قبل (کتاب ۵ و ۷)",
+                        cond6Passed && consensus.book5MukherjeeChikouPassed && consensus.book7Tsg4StepPassed,
+                        cond6Detail,
+                    ),
+                    StrategyConditionCheck(
+                        7,
+                        "۷. شکست سقف/کف ساختاری چیکو اسپن (فیلتر مارک تاتل — ضد معامله در مقاومت)",
+                        cond7Passed,
+                        if (isLong) "عبور کلوز از سقف ساختاری چیکو (${round2(trigSnap.chikouResistancePeak)})" else "عبور کلوز از کف ساختاری چیکو (${round2(trigSnap.chikouSupportTrough)})",
+                    ),
+                    StrategyConditionCheck(
+                        8,
+                        "۸. قانون کش لاستیکی کیجون، نبود C-Clamp و سلامت قله RSI (ضد ورود در اشباع)",
+                        cond8Passed && cRsiNotExhausted,
+                        String.format(Locale.US, "فاصله کیجون=%.2f ATR · RSI14=%.1f (افت قله=%.1f)", stratSnap.distanceToKijunAtr, trigSnap.rsi14, if (isLong) trigSnap.rsiPeakDropLong else trigSnap.rsiTroughRiseShort),
+                    ),
+                    StrategyConditionCheck(
                         9,
-                        "۹. کتاب درایو ۸ (Koonitz 5 Rules): ۵ قانون طلایی کونیتز + تایید DMI/ADX و MACD + EMA(34)",
-                        consensus.book8Koonitz5RulesPassed,
-                        String.format(Locale.US, "ADX(14)=%.1f (+DI=%.0f/-DI=%.0f) · MACD=%+.3f · EMA34=%s", trigSnap.adx14, trigSnap.plusDi14, trigSnap.minusDi14, trigSnap.macdHistogram, round2(trigSnap.ema34).toString()),
+                        "۹. فیلتر جاذبه فلت SSB، تعادل کاتانا و عبور امن از دیوار افقی",
+                        cond9Passed,
+                        "عبور ایمن از جاذبه فلت Senkou Span B",
                     ),
                     StrategyConditionCheck(
                         10,
-                        "۱۰. کتاب درایو ۹ (Koonitz Triple Screen): صفحه سه‌گانه EMA(13/34/48) + ایچیموکوی سریع (7,22,44)",
-                        consensus.book9KoonitzTripleScreenPassed,
-                        String.format(Locale.US, "Fast(7/22)=%s/%s · EMA(13/34/48)=%s/%s/%s", round2(trigSnap.tenkan7).toString(), round2(trigSnap.kijun22).toString(), round2(trigSnap.ema13).toString(), round2(trigSnap.ema34).toString(), round2(trigSnap.ema48).toString()),
+                        "۱۰. هندسه موج N هوسودا، نقطه S، چرخه زمانی و فرکتال ۵ کندلی بیل ویلیامز",
+                        cond10Passed,
+                        "$cond10Detail · فرکتال=${round2(if (isLong) trigSnap.lastDownFractalLow else trigSnap.lastUpFractalHigh)}",
                     ),
-                    StrategyConditionCheck(11, "۱۱. هندسه موج N هوسودا و فاصله امن از روز چرخش زمانی", cond10Passed, cond10Detail),
-                    StrategyConditionCheck(12, "۱۲. نسبت R:R بهینه اجماع ۹ کتاب (حداقل 1:2.25 تا 1:3.15) با سنگر استاپ ترکیبی", cond12Passed, cond12Detail),
+                    StrategyConditionCheck(
+                        11,
+                        "۱۱. ماشه تطبیقی رژیم بازار (فوران بولینگر TuAnh یا پولبک EMA21/RSI7 فکا) + تایید DMI/MACD و Kelly (اجماع ≥ $reqBooks/9)",
+                        cRegimeTriggerOrPullback && consensus.book8Koonitz5RulesPassed && consensus.book4MukherjeeKellyPassed && cConsensus && dirCandle,
+                        String.format(
+                            Locale.US,
+                            "اجماع %d/9 کتاب (برد بیزین=%.1f%% · Kelly=%d%% · ADX=%.1f)",
+                            consensus.confirmedBooksCount,
+                            consensus.bayesianWinProbabilityPct,
+                            trigSnap.kellyWinProbabilityPercent,
+                            trigSnap.adx14,
+                        ),
+                    ),
+                    StrategyConditionCheck(12, "۱۲. فرمول و عدد مناسب R:R منطبق بر «جامع بیس» (حداقل ۱:۱.۵ روی امواج هوسودا)", cond12Passed, cond12Detail),
                     StrategyConditionCheck(13, "۱۳. کارایی جهت‌دار روند کافمن (ER14) و فیلتر ضد رِنج", cond13Passed, cond13Detail),
-                    StrategyConditionCheck(14, "۱۴. کندل تایید جهت‌دار با حجم مناسب و شدوی مخالف کنترل‌شده", cond14Passed && dirCandle, cond14Detail),
-                    StrategyConditionCheck(15, "۱۵. فاز تولد یا گسترش موج (Genesis / Core Expansion)", cond15Passed, cond15Detail),
-                    StrategyConditionCheck(16, "۱۶. نقطه‌زنی اسنایپر ترکیبی روی میانه وزن‌دار (Tenkan 7/9/10 + EMA21)", cond16Passed, cond16Detail),
+                    StrategyConditionCheck(14, "۱۴. فیلتر ضد فیک‌بریک‌اوت، الگوی شمعی تایید و رد شدوی معکوس", cond14Passed && dirCandle, cond14Detail),
+                    StrategyConditionCheck(15, "۱۵. شکار اصل روند (فاز Genesis / Core Expansion و عدم اشباع)", cond15Passed, cond15Detail),
+                    StrategyConditionCheck(16, "۱۶. نقطه‌زنی میلی‌متری ورود اسنایپر (هم‌تراز جامع بیس)", cond16Passed, cond16Detail),
                 )
             }
 

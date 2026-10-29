@@ -959,6 +959,44 @@ class RiskAndCalendarEngineTest {
         val tunedParams = neuralEngineV3919.runPostTrainingParameterAutoTuning()
         assertTrue(tunedParams.minRiskReward >= 1.5)
         assertTrue(tunedParams.minDriveBooksConsensus in 5..8)
+
+        // Verify v3.9.23 features:
+        // 1. Unified Drive R:R method is identical to Base Ichimoku (baseOptimalRr = 2.25, same structural SL/TP & R:R formula)
+        assertEquals(
+            BitcoinStrategyModel.BASE_ICHIMOKU.baseOptimalRr,
+            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.baseOptimalRr,
+            1e-6,
+        )
+        // 2. All 16 learned neural features (0..15) are tunable specifically per strategy across all 16 strategies
+        assertEquals(16, tunedParams.perStrategyProfiles.size)
+        BitcoinStrategyModel.entries.forEach { stratModel ->
+            val prof = tunedParams.perStrategyProfiles[stratModel.id]
+            assertNotNull("Missing profile for ${stratModel.id}", prof)
+            assertEquals(16, prof!!.featureTunings.size)
+        }
+        val tunedFeatProfile = neuralEngineV3919.tuneStrategyFeature(
+            strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
+            featureIndex = 10,
+            tuningMultiplier = 1.65,
+            learnedWeight = 0.88,
+        )
+        assertEquals(1.65, tunedFeatProfile.featureTunings[10].tuningMultiplier, 1e-4)
+        assertEquals(0.88, tunedFeatProfile.featureTunings[10].learnedWeight, 1e-4)
+        assertTrue(tunedFeatProfile.featureTunings[10].isManuallyTuned)
+
+        val tunedStratParams = neuralEngineV3919.tuneStrategyParameters(
+            strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
+            minRiskReward = 2.10,
+            maxKijunExtensionAtr = 1.55,
+        )
+        assertEquals(2.10, tunedStratParams.minRiskReward, 1e-4)
+        assertEquals(1.55, tunedStratParams.maxKijunExtensionAtr, 1e-4)
+
+        val appliedCfg = neuralEngineV3919.applyAutoTunedParametersToConfig(BaseStrategyConfig())
+        assertEquals(16, appliedCfg.perStrategyOverrides.size)
+        val driveEffectiveCfg = appliedCfg.forStrategy(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
+        assertEquals(2.10, driveEffectiveCfg.minRiskReward, 1e-4)
+        assertEquals(1.55, driveEffectiveCfg.maxKijunExtensionAtr, 1e-4)
     }
 }
 

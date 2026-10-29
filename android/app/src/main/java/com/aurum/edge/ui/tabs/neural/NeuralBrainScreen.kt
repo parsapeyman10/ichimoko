@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.ImprovementNotePriority
 import com.aurum.edge.core.MasterIchimokuTradingAssistant
 import com.aurum.edge.core.V1Universe
@@ -750,10 +751,380 @@ fun NeuralBrainScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = "🎛️ اجرای تیونینگ خودکار پارامترها و اعمال روی موتور ترید",
+                        text = "🎛️ اجرای تیونینگ خودکار پارامترها و ۱۶ ویژگی برای تمام ۱۶ استراتژی",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                     )
+                }
+            }
+        }
+
+        // ── ۱-پ-۲. تیونینگ اختصاصی تمام ۱۶ ویژگی یادگرفته‌شده شبکه عصبی به تفکیک هر استراتژی ──
+        SectionCard(
+            title = "🧬 تیونینگ اختصاصی تمام ۱۶ ویژگی شبکه عصبی برای هر استراتژی",
+            subtitle = "تنظیم مستقل وزن، ضریب اهمیت و آستانه هر ۱۶ ویژگی یادگرفته‌شده شبکه عصبی + پارامترهای ساختاری مختص هر یک از ۱۶ استراتژی",
+            initiallyExpanded = false,
+        ) {
+            var selectedStratId by rememberSaveable {
+                mutableStateOf(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
+            }
+            var showParamsDrawer by rememberSaveable { mutableStateOf(false) }
+            var showFeaturesDrawer by rememberSaveable { mutableStateOf(false) }
+
+            val allStrategies = BitcoinStrategyModel.entries
+            val selectedModel = BitcoinStrategyModel.fromId(selectedStratId)
+            val stratProfile = neuralState.autoTunedParameters.perStrategyProfiles[selectedModel.id]
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "انتخاب استراتژی جهت مشاهده و تیونینگ اختصاصی ۱۶ ویژگی شبکه عصبی:",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    allStrategies.forEach { model ->
+                        val isSel = model.id == selectedModel.id
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSel) AurumColors.Gold else AurumColors.SurfaceAlt)
+                                .border(
+                                    0.8.dp,
+                                    if (isSel) AurumColors.Gold else AurumColors.Border,
+                                    RoundedCornerShape(8.dp),
+                                )
+                                .clickable { selectedStratId = model.id }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        ) {
+                            Text(
+                                text = model.badgeFa,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSel) Color.Black else AurumColors.TextPrimary,
+                            )
+                        }
+                    }
+                }
+
+                if (stratProfile != null) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(AurumColors.SurfaceAlt)
+                            .border(0.8.dp, AurumColors.Cyan.copy(alpha = 0.45f), RoundedCornerShape(9.dp))
+                            .padding(9.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Pill(text = stratProfile.strategyBadgeFa, color = AurumColors.Gold)
+                            Pill(
+                                text = "نسل تیونینگ #${stratProfile.tuningGeneration} · ${stratProfile.featureTunings.size} ویژگی فعال",
+                                color = AurumColors.Cyan,
+                            )
+                        }
+                        Text(
+                            text = stratProfile.strategyTitleFa,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = AurumColors.TextPrimary,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = stratProfile.tuningSummaryFa,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Green,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            StatTile(
+                                label = "حداقل R:R استراتژی",
+                                value = String.format(Locale.US, "1:%.2f", stratProfile.minRiskReward),
+                                valueColor = AurumColors.Green,
+                                modifier = Modifier.weight(1f),
+                            )
+                            StatTile(
+                                label = "سقف کیجون",
+                                value = String.format(Locale.US, "%.2f ATR", stratProfile.maxKijunExtensionAtr),
+                                valueColor = AurumColors.Gold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            StatTile(
+                                label = "گیت برد عصبی",
+                                value = String.format(Locale.US, "%.0f%%", stratProfile.neuralWinProbGatePct),
+                                valueColor = AurumColors.Cyan,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        Button(
+                            onClick = { viewModel.runSingleStrategyAutoTuningNow(selectedModel.id) },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = AurumColors.Gold,
+                                contentColor = Color.Black,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                text = "⚡ تیونینگ خودکار اختصاصی «${selectedModel.badgeFa}» (هر ۱۶ ویژگی + پارامترها)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+
+                    // کشویی ۱: تیونینگ پارامترهای ساختاری اختصاصی همین استراتژی (پیش‌فرض بسته)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(AurumColors.SurfaceAlt)
+                            .border(0.8.dp, AurumColors.Gold.copy(alpha = 0.35f), RoundedCornerShape(9.dp))
+                            .padding(9.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showParamsDrawer = !showParamsDrawer },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "🛠️ تیونینگ پارامترهای ساختاری اختصاصی «${selectedModel.badgeFa}»",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = AurumColors.Gold,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = if (showParamsDrawer) "▲ بستن" else "▼ باز کردن",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.Cyan,
+                            )
+                        }
+                        if (showParamsDrawer) {
+                            PerStrategyParamTuneRow(
+                                labelFa = "حداقل R:R مجاز (قانون پایه ≥ 1:1.5)",
+                                valueText = String.format(Locale.US, "1:%.2f", stratProfile.minRiskReward),
+                                onMinus = {
+                                    viewModel.tuneStrategyParametersNow(
+                                        strategyId = selectedModel.id,
+                                        minRiskReward = (stratProfile.minRiskReward - 0.10).coerceAtLeast(1.50),
+                                    )
+                                },
+                                onPlus = {
+                                    viewModel.tuneStrategyParametersNow(
+                                        strategyId = selectedModel.id,
+                                        minRiskReward = (stratProfile.minRiskReward + 0.10).coerceAtMost(3.00),
+                                    )
+                                },
+                            )
+                            PerStrategyParamTuneRow(
+                                labelFa = "سقف فاصله مجاز از کیجون (ضد C-Clamp)",
+                                valueText = String.format(Locale.US, "%.2f ATR", stratProfile.maxKijunExtensionAtr),
+                                onMinus = {
+                                    viewModel.tuneStrategyParametersNow(
+                                        strategyId = selectedModel.id,
+                                        maxKijunExtensionAtr = (stratProfile.maxKijunExtensionAtr - 0.05).coerceAtLeast(1.30),
+                                    )
+                                },
+                                onPlus = {
+                                    viewModel.tuneStrategyParametersNow(
+                                        strategyId = selectedModel.id,
+                                        maxKijunExtensionAtr = (stratProfile.maxKijunExtensionAtr + 0.05).coerceAtMost(2.30),
+                                    )
+                                },
+                            )
+                            PerStrategyParamTuneRow(
+                                labelFa = "بافر امن حد ضرر ساختاری (SL Buffer)",
+                                valueText = String.format(Locale.US, "%.2f ATR", stratProfile.slBufferAtr),
+                                onMinus = {
+                                    viewModel.tuneStrategyParametersNow(
+                                        strategyId = selectedModel.id,
+                                        slBufferAtr = (stratProfile.slBufferAtr - 0.02).coerceAtLeast(0.16),
+                                    )
+                                },
+                                onPlus = {
+                                    viewModel.tuneStrategyParametersNow(
+                                        strategyId = selectedModel.id,
+                                        slBufferAtr = (stratProfile.slBufferAtr + 0.02).coerceAtMost(0.45),
+                                    )
+                                },
+                            )
+                            PerStrategyParamTuneRow(
+                                labelFa = "حداقل کارایی روند کافمن (ER14)",
+                                valueText = String.format(Locale.US, "%.0f%%", stratProfile.minEfficiencyRatio * 100.0),
+                                onMinus = {
+                                    viewModel.tuneStrategyParametersNow(
+                                        strategyId = selectedModel.id,
+                                        minEfficiencyRatio = (stratProfile.minEfficiencyRatio - 0.02).coerceAtLeast(0.15),
+                                    )
+                                },
+                                onPlus = {
+                                    viewModel.tuneStrategyParametersNow(
+                                        strategyId = selectedModel.id,
+                                        minEfficiencyRatio = (stratProfile.minEfficiencyRatio + 0.02).coerceAtMost(0.40),
+                                    )
+                                },
+                            )
+                            PerStrategyParamTuneRow(
+                                labelFa = "حداکثر نسبت شدوی مخالف کندل ورود",
+                                valueText = String.format(Locale.US, "%.0f%%", stratProfile.maxAdverseWickRatio * 100.0),
+                                onMinus = {
+                                    viewModel.tuneStrategyParametersNow(
+                                        strategyId = selectedModel.id,
+                                        maxAdverseWickRatio = (stratProfile.maxAdverseWickRatio - 0.03).coerceAtLeast(0.28),
+                                    )
+                                },
+                                onPlus = {
+                                    viewModel.tuneStrategyParametersNow(
+                                        strategyId = selectedModel.id,
+                                        maxAdverseWickRatio = (stratProfile.maxAdverseWickRatio + 0.03).coerceAtMost(0.55),
+                                    )
+                                },
+                            )
+                            PerStrategyParamTuneRow(
+                                labelFa = "گیت احتمال برد شبکه عصبی برای این استراتژی",
+                                valueText = String.format(Locale.US, "%.0f%%", stratProfile.neuralWinProbGatePct),
+                                onMinus = {
+                                    viewModel.tuneStrategyParametersNow(
+                                        strategyId = selectedModel.id,
+                                        neuralWinProbGatePct = (stratProfile.neuralWinProbGatePct - 2.0).coerceAtLeast(45.0),
+                                    )
+                                },
+                                onPlus = {
+                                    viewModel.tuneStrategyParametersNow(
+                                        strategyId = selectedModel.id,
+                                        neuralWinProbGatePct = (stratProfile.neuralWinProbGatePct + 2.0).coerceAtMost(75.0),
+                                    )
+                                },
+                            )
+                        }
+                    }
+
+                    // کشویی ۲: تیونینگ تک‌تک ۱۶ ویژگی یادگرفته‌شده شبکه عصبی مختص همین استراتژی (پیش‌فرض بسته)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(9.dp))
+                            .background(AurumColors.SurfaceAlt)
+                            .border(0.8.dp, AurumColors.Green.copy(alpha = 0.35f), RoundedCornerShape(9.dp))
+                            .padding(9.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showFeaturesDrawer = !showFeaturesDrawer },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "🧠 تیونینگ تک‌تک ۱۶ ویژگی یادگرفته‌شده در «${selectedModel.badgeFa}»",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = AurumColors.Green,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = if (showFeaturesDrawer) "▲ بستن" else "▼ باز کردن (۱۶ ویژگی)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.Cyan,
+                            )
+                        }
+                        if (showFeaturesDrawer) {
+                            stratProfile.featureTunings.forEach { feat ->
+                                var expandedFeat by rememberSaveable(selectedModel.id, feat.featureIndex) {
+                                    mutableStateOf(false)
+                                }
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(AurumColors.Bg)
+                                        .border(
+                                            0.8.dp,
+                                            if (feat.isManuallyTuned) AurumColors.Gold.copy(alpha = 0.6f) else AurumColors.Border,
+                                            RoundedCornerShape(8.dp),
+                                        )
+                                        .padding(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { expandedFeat = !expandedFeat },
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = "#${feat.featureIndex + 1} ${feat.featureTitleFa}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = AurumColors.TextPrimary,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        Pill(
+                                            text = "ضریب ${String.format(Locale.US, "%.2fx", feat.tuningMultiplier)} · وزن ${String.format(Locale.US, "%+.2f", feat.learnedWeight)}",
+                                            color = if (feat.learnedWeight >= 0.0) AurumColors.Green else AurumColors.Gold,
+                                        )
+                                    }
+                                    if (expandedFeat) {
+                                        Text(
+                                            text = feat.featureDescriptionFa,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = AurumColors.TextSecondary,
+                                        )
+                                        PerStrategyParamTuneRow(
+                                            labelFa = "ضریب تاثیر ویژگی در ${selectedModel.badgeFa}",
+                                            valueText = String.format(Locale.US, "%.2fx (توجه %.1f%%)", feat.tuningMultiplier, feat.attentionSharePct),
+                                            onMinus = {
+                                                viewModel.tuneStrategyFeatureNow(
+                                                    strategyId = selectedModel.id,
+                                                    featureIndex = feat.featureIndex,
+                                                    tuningMultiplier = (feat.tuningMultiplier - 0.10).coerceAtLeast(0.20),
+                                                )
+                                            },
+                                            onPlus = {
+                                                viewModel.tuneStrategyFeatureNow(
+                                                    strategyId = selectedModel.id,
+                                                    featureIndex = feat.featureIndex,
+                                                    tuningMultiplier = (feat.tuningMultiplier + 0.10).coerceAtMost(2.50),
+                                                )
+                                            },
+                                        )
+                                        PerStrategyParamTuneRow(
+                                            labelFa = "وزن یادگرفته‌شده شبکه عصبی (Learned Weight)",
+                                            valueText = String.format(Locale.US, "%+.2f", feat.learnedWeight),
+                                            onMinus = {
+                                                viewModel.tuneStrategyFeatureNow(
+                                                    strategyId = selectedModel.id,
+                                                    featureIndex = feat.featureIndex,
+                                                    learnedWeight = (feat.learnedWeight - 0.08).coerceAtLeast(-3.50),
+                                                )
+                                            },
+                                            onPlus = {
+                                                viewModel.tuneStrategyFeatureNow(
+                                                    strategyId = selectedModel.id,
+                                                    featureIndex = feat.featureIndex,
+                                                    learnedWeight = (feat.learnedWeight + 0.08).coerceAtMost(3.50),
+                                                )
+                                            },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1318,3 +1689,60 @@ fun NeuralBrainScreen(
         )
     }
 }
+
+@Composable
+private fun PerStrategyParamTuneRow(
+    labelFa: String,
+    valueText: String,
+    onMinus: () -> Unit,
+    onPlus: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(7.dp))
+            .background(AurumColors.Bg)
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = labelFa,
+            style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.TextPrimary,
+            modifier = Modifier.weight(1f),
+        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(AurumColors.SurfaceAlt)
+                    .border(0.8.dp, AurumColors.Border, RoundedCornerShape(6.dp))
+                    .clickable { onMinus() }
+                    .padding(horizontal = 9.dp, vertical = 3.dp),
+            ) {
+                Text(text = "−", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AurumColors.Gold)
+            }
+            Text(
+                text = valueText,
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.Cyan,
+                fontWeight = FontWeight.Bold,
+            )
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(AurumColors.SurfaceAlt)
+                    .border(0.8.dp, AurumColors.Border, RoundedCornerShape(6.dp))
+                    .clickable { onPlus() }
+                    .padding(horizontal = 9.dp, vertical = 3.dp),
+            ) {
+                Text(text = "+", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AurumColors.Green)
+            }
+        }
+    }
+}
+
