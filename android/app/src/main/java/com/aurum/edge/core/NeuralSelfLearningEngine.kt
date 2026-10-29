@@ -731,13 +731,6 @@ class NeuralSelfLearningEngine(
         val sortedAttributions = cur.liveMarketAttributions.values
             .sortedWith(compareBy<NeuralMarketCausalAttribution> { it.categoryCode }.thenBy { it.symbol })
 
-        return NeuralLearningStateSummary(
-            architectureNameFa = cur.architectureName,
-            totalLearnedTrades = total,
-            warmupTargetTrades = target,
-            warmupProgressPercent = progressPct,
-            remainingWarmupTrades = (target - total).coerceAtLeast(0),
-            isWarmupCompleted = warmupDone,
         val ensuredAutoTuned = ensurePerStrategyProfiles(cur.autoTunedParameters, cur)
 
         return NeuralLearningStateSummary(
