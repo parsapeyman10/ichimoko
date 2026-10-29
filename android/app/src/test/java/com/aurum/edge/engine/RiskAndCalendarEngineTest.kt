@@ -865,7 +865,7 @@ class RiskAndCalendarEngineTest {
 
         // Verify Trading-Focused Neural Engine analytics & MasterIchimokuTradingAssistant improvement notes
         val summaryAfter = neuralEngine.state.value
-        assertEquals(24, summaryAfter.strategyEdgeMatrix.size)
+        assertEquals(25, summaryAfter.strategyEdgeMatrix.size)
         assertEquals(4, summaryAfter.sessionEdges.size)
         assertTrue(summaryAfter.tradeForensics.topWinDriversFa.isNotEmpty())
         assertTrue(summaryAfter.tradeForensics.topLossCausesFa.isNotEmpty())
