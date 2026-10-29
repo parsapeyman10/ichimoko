@@ -1301,8 +1301,8 @@ function filterRows() {
                 t.takeProfit,
                 t.riskReward,
                 t.pnlUsd?.let { String.format(Locale.US, "%s$%.2f", if (it >= 0) "+" else "-", abs(it)) } ?: "OPEN",
-                openSnap?.internalWebpPath?.substringAfterLast('/') ?: "GENERATED",
-                closeSnap?.internalWebpPath?.substringAfterLast('/') ?: if (t.isOpen) "PENDING" else "GENERATED",
+                openSnap?.localImagePath?.substringAfterLast('/') ?: "GENERATED",
+                closeSnap?.localImagePath?.substringAfterLast('/') ?: if (t.isOpen) "PENDING" else "GENERATED",
             )
         }
         val streamContent = buildString {
