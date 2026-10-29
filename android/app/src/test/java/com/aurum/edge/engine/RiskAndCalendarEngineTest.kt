@@ -943,12 +943,11 @@ class RiskAndCalendarEngineTest {
         assertEquals(12, closeSnap.displayTradeNumber)
 
         // Verify v3.9.19 features: Unified 9-Book Drive Master Method + Causal Market Attribution + News Intelligence + Post-Training CEM/Bayesian Auto-Tuner
-        val snapV3919 = IchimokuStrategyEngine.computeSnapshot(sampleBars)!!
         val consensus9 = IchimokuStrategyEngine.evaluateUnified9BookConsensus(
             isLong = true,
-            trigSnap = snapV3919,
-            stratSnap = snapV3919,
-            macroSnap = snapV3919,
+            trigSnap = snap,
+            stratSnap = snap,
+            macroSnap = snap,
         )
         assertTrue(consensus9.confirmedBooksCount in 0..9)
         assertTrue(consensus9.bayesianWinProbabilityPct in 18.0..97.5)
