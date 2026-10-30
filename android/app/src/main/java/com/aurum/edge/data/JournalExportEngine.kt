@@ -1498,7 +1498,7 @@ function filterRows() {
             }
         }
         val mergedSnapshots = (tradeFallbackRecs + allArchiveRecs)
-            .distinctBy { it.snapshotId }
+            .distinctBy { "${it.tradeId}_${it.snapshotPhase}" }
             .sortedWith(compareBy<ArchivedTradeSnapshotRecord> { it.displayTradeNumber }.thenBy { it.isCloseSnapshot })
 
         val doc = PdfDocument()
@@ -1581,7 +1581,7 @@ function filterRows() {
                             textPaint,
                         )
                         c.drawText(
-                            "Strategy: ${rec.strategyTitleFa} (${rec.strategyId}) | Pre-3C: ${rec.preEntry3CandleCategoryFa}",
+                            "Strategy: ${rec.strategyTitleFa} (${rec.strategyId}) | Badge: ${rec.strategyBadgeFa}",
                             slotLeft + 10f,
                             83f,
                             subPaint,
@@ -1603,7 +1603,7 @@ function filterRows() {
 
             FileOutputStream(outFile).use { out -> doc.writeTo(out) }
         } catch (_: Throwable) {
-            val dummyReport = buildInstitutionalTearSheet(trades, nowMs = nowMs)
+            val dummyReport = buildInstitutionalTearSheet(trades)
             writePortablePdfFallback(dummyReport, outFile)
         } finally {
             runCatching { doc.close() }
@@ -1823,7 +1823,7 @@ function filterRows() {
                 c3.drawText("AvalAI Key Active & Ready (Single Question: Should I trade right now with these conditions or not? -> Yes/No).", 26f, y3, mutedPaint)
                 y3 += 18f
             } else {
-                val dec = if (lastAiVerdict.shouldEnter) "YES (APPROVED)" else "NO (BLOCKED)"
+                val dec = if (lastAiVerdict.approved) "YES (APPROVED)" else "NO (BLOCKED)"
                 c3.drawText(
                     "${formatTimestamp(lastAiVerdict.checkedAt)} | ${lastAiVerdict.symbol} | ${lastAiVerdict.action} | $dec | Summary: ${lastAiVerdict.summaryFa.take(48)}",
                     26f,
@@ -1905,7 +1905,7 @@ function filterRows() {
                 fs.tStat,
             )
         }
-        lines += "Live Symbols Attributed: ${neuralSummary.liveMarketAttributions.size} | Last AI Verdict: ${lastAiVerdict?.shouldEnter ?: "READY"} | Total Journal Trades: ${trades.size}"
+        lines += "Live Symbols Attributed: ${neuralSummary.liveMarketAttributions.size} | Last AI Verdict: ${lastAiVerdict?.approved ?: "READY"} | Total Journal Trades: ${trades.size}"
         val streamContent = buildString {
             append("BT\n/F1 9 Tf\n32 555 Td\n13 TL\n")
             lines.take(40).forEach { line ->
