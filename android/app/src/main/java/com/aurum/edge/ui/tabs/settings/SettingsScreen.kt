@@ -644,8 +644,18 @@ fun NeuralDirectNavigationCard(
                         fontWeight = FontWeight.Bold,
                     )
                     Pill(
-                        text = "${neuralState.totalLearnedTrades}/10,000",
-                        color = if (neuralState.isActiveFilterEnabled) AurumColors.Green else AurumColors.Cyan,
+                        text = String.format(
+                            java.util.Locale.US,
+                            "%,d/%,d · %s",
+                            neuralState.totalLearnedTrades,
+                            neuralState.warmupTargetTrades,
+                            when {
+                                neuralState.isGateActive -> "گیت فعال"
+                                neuralState.volumeConditionMet -> "منتظر اجازهٔ شما"
+                                else -> "در حال یادگیری"
+                            },
+                        ),
+                        color = if (neuralState.isGateActive) AurumColors.Green else AurumColors.Cyan,
                     )
                 }
                 Pill(

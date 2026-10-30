@@ -94,6 +94,14 @@ android {
         // channels + 15-minute automatic-check floor. See docs/RELEASE_3_0_FA.md and
         // CHANGELOG_FA.md. A versionCode must be bumped here before a release run, because the
         // workflow only publishes explicit tags / `release: publish` commits / approved dispatch.
+        // 3.9.27 (code 736) ships the neural learning ledger: the self-learning brain now counts
+        // every closed trade exactly once (a stable per-trade fingerprint instead of an ever-growing
+        // counter), repairs the inflated legacy number without losing a single learned weight, and
+        // activates its execution gate only when BOTH conditions hold — 10,000 learned trades AND the
+        // user's explicit switch. Every correction the brain makes is written to a Persian knowledge
+        // changelog and exported with a checksummed "knowledge bundle" (JSON + FA manifest) so the next
+        // app version can read, restore and audit what the previous one learned.
+        // See docs/NEURAL_LEARNING_LEDGER_FA.md.
         // 3.9.26 (code 735) is the trade-plan guard release: stop-loss, take-profit and leverage are
         // no longer produced by arbitrary anchors. Every plan (strategy report, auto entry, sniper
         // fill and the manual calculator) passes one engine — TradePlanGuard — that keeps 1R inside
@@ -102,8 +110,8 @@ android {
         // stays at least 2.5R away. See docs/TRADE_PLAN_GUARD_FA.md. The same guard is surfaced in
         // the UI (settings audit panel, position card and journal) so an off-corridor plan is visible
         // before it is taken, not only after it fails.
-        versionCode = 735
-        versionName = "3.9.26"
+        versionCode = 736
+        versionName = "3.9.27"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

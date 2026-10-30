@@ -1569,12 +1569,56 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun evaluateReportWithNeuralEngine(report: StrategyEvaluationReport): NeuralSignalEvaluation =
         container.neuralEngine.evaluateReport(report)
 
-    fun setNeuralForceActiveBeforeWarmup(enabled: Boolean) {
-        container.neuralEngine.setForceActiveBeforeWarmup(enabled)
-        _toast.value = if (enabled) {
-            "🧠 فیلتر شبکه عصبی خودآموز پیش از ۱۰,۰۰۰ معامله نیز فعال شد"
-        } else {
-            "🧠 شبکه عصبی تا تکمیل ۱۰,۰۰۰ معامله در حالت یادگیری خالص (بدون بلاک) قرار گرفت"
+    /**
+     * شرط دوم فعال‌سازی گیت شبکهٔ عصبی: تصمیم صریح کاربر.
+     * شرط اول همیشه «۱۰,۰۰۰ معاملهٔ یادگیری‌شده» است و با این کلید دور زده نمی‌شود.
+     */
+    fun setNeuralGateUserActivation(enabled: Boolean) {
+        container.neuralEngine.setGateUserActivation(enabled)
+        val st = container.neuralEngine.state.value
+        _toast.value = when {
+            st.isGateActive ->
+                "🧠🟢 گیت شبکه عصبی فعال شد (هر دو شرط کامل): ورود در شرایط پرخطر مسدود می‌شود"
+            enabled ->
+                "🧠 شرط ۲ ثبت شد · گیت پس از رسیدن به ${st.warmupTargetTrades} معاملهٔ یادگیری‌شده " +
+                    "خودکار وارد مدار می‌شود (اکنون ${st.totalLearnedTrades}/${st.warmupTargetTrades})"
+            else ->
+                "🧠 گیت شبکه عصبی غیرفعال شد؛ شبکه فقط یاد می‌گیرد و هشدار می‌دهد"
+        }
+    }
+
+    fun setNeuralForceActiveBeforeWarmup(enabled: Boolean) = setNeuralGateUserActivation(enabled)
+
+    /** بازبینی دستی دفتر یادگیری و تطبیق عدد یادگیری با معامله‌های واقعی ژورنال. */
+    fun auditNeuralLearningLedgerNow() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val reconciliation = container.neuralEngine.auditLearningLedger(trades.value)
+            _toast.value = reconciliation.summaryFa
+        }
+    }
+
+    /** ذخیرهٔ بستهٔ دانش شبکه (JSON) + منیفست فارسی در Download/AurumEdge/Archive. */
+    fun exportNeuralKnowledgeBundleNow() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val files = container.neuralEngine.exportKnowledgeBundleToPhoneStorage(
+                context = container.appContext,
+                appVersionName = com.aurum.edge.BuildConfig.VERSION_NAME,
+                appVersionCode = com.aurum.edge.BuildConfig.VERSION_CODE,
+            )
+            _toast.value = if (files != null) {
+                "🧾 بستهٔ دانش ذخیره شد: $files (پوشهٔ Download/AurumEdge/Archive)"
+            } else {
+                "🧾 بستهٔ دانش در حافظهٔ داخلی اپ آماده شد؛ برای ذخیره در پوشهٔ دانلود دسترسی لازم است"
+            }
+        }
+    }
+
+    /** بازخوانی جدیدترین بستهٔ دانش از Download/AurumEdge/Archive با ادغام ایمن. */
+    fun restoreNeuralKnowledgeBundleFromPhoneNow() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val result = container.neuralEngine.restoreKnowledgeBundleFromPhoneStorage(container.appContext)
+            _toast.value = result?.summaryFa
+                ?: "📥 هیچ بستهٔ دانش (AurumNeuralKnowledge) در Download/AurumEdge/Archive پیدا نشد"
         }
     }
 
