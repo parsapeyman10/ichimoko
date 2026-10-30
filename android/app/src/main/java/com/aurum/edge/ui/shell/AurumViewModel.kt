@@ -1648,8 +1648,95 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshNeuralMacroNewsNow() {
         container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val snap = container.neuralEngine.ingestExternalHeadlinesAndRefreshMacroNews()
-            _toast.value = "📰 هوش خبری و علیت بازار شبکه عصبی به‌روزرسانی شد (${snap.headlines.size} رویداد کلان فعال)"
+            runCatching {
+                container.neuralEngine.ingestExternalHeadlinesAndRefreshMacroNews()
+            }.onSuccess { snap ->
+                _toast.value = "📰 هوش خبری و علیت بازار شبکه عصبی به‌روزرسانی شد (${snap.headlines.size} رویداد کلان فعال)"
+            }
+        }
+    }
+
+    fun runNeuralParameterRegressionNow(
+        strategyId: String = "ALL",
+        ridgeLambda: Double = 0.25,
+        huberDelta: Double = 1.35,
+    ) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val baseCfg = settings.value.baseStrategyConfig
+                val report = container.neuralEngine.runParameterRegression(
+                    strategyId = strategyId,
+                    ridgeLambda = ridgeLambda,
+                    huberDelta = huberDelta,
+                    baseConfig = baseCfg,
+                )
+                val updatedCfg = container.neuralEngine.applyAutoTunedParametersToConfig(baseCfg)
+                container.settingsStore.update { cur ->
+                    cur.copy(baseStrategyConfig = updatedCfg)
+                }
+                report
+            }.onSuccess { report ->
+                _toast.value = "📐 رگرسیون ماتریسی پارامترها (${report.strategyTitleFa} · R²=${String.format(Locale.US, "%.2f", report.rSquared)}) با موفقیت کالیبره و اعمال شد"
+                scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
+            }.onFailure { err ->
+                _toast.value = "⚠️ خطا در اجرای رگرسیون پارامترها: ${err.message}"
+            }
+        }
+    }
+
+    fun exportFullAiAndNeuralDataPdf(shareAfterExport: Boolean = true) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                com.aurum.edge.data.JournalExportEngine.exportFullAiAndNeuralReportPdf(
+                    context = container.appContext,
+                    neuralSummary = neuralState.value,
+                    lastAiVerdict = _lastAiVerdict.value,
+                    trades = trades.value,
+                ).getOrThrow()
+            }.onSuccess { (pdfFile, savedPath) ->
+                refreshSavedJournalFiles()
+                val msg = "🧠 فایل PDF کامل تمام دیتاهای هوش مصنوعی و رگرسیون ساخته و در $savedPath ذخیره شد"
+                _lastExportStatusFa.value = msg
+                _toast.value = msg
+                if (shareAfterExport) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        com.aurum.edge.data.JournalExportEngine.shareExportedFile(
+                            context = container.appContext,
+                            file = pdfFile,
+                            format = com.aurum.edge.data.JournalExportFormat.PDF_REPORT,
+                        )
+                    }
+                }
+            }.onFailure { err ->
+                _toast.value = "⚠️ خطا در تولید PDF هوش مصنوعی: ${err.message}"
+            }
+        }
+    }
+
+    fun exportArchiveScreenshotsPdfNow(shareAfterExport: Boolean = true) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                com.aurum.edge.data.JournalExportEngine.exportArchiveScreenshotsPdf(
+                    context = container.appContext,
+                    trades = trades.value,
+                ).getOrThrow()
+            }.onSuccess { (pdfFile, savedPath) ->
+                refreshSavedJournalFiles()
+                val msg = "📸 خروجی PDF آرشیو اسکرین‌شات تمام معاملات ساخته و در $savedPath ذخیره شد"
+                _lastExportStatusFa.value = msg
+                _toast.value = msg
+                if (shareAfterExport) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        com.aurum.edge.data.JournalExportEngine.shareExportedFile(
+                            context = container.appContext,
+                            file = pdfFile,
+                            format = com.aurum.edge.data.JournalExportFormat.PDF_REPORT,
+                        )
+                    }
+                }
+            }.onFailure { err ->
+                _toast.value = "⚠️ خطا در تولید خروجی آرشیو اسکرین‌شات: ${err.message}"
+            }
         }
     }
 
@@ -1682,6 +1769,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 val snapshots = com.aurum.edge.data.TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(
                     context = container.appContext,
                     trades = allTrades,
+                    maxTrades = 120,
+                    saveToPhoneGallery = false,
                 )
                 val cfg = settings.value
                 val report = com.aurum.edge.data.JournalExportEngine.buildInstitutionalTearSheet(
@@ -1707,12 +1796,14 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 val msg = "✅ اسکرین‌شات آرشیو تمام معاملات ($snapCount تصویر) ثبت و فایل PDF (${pdfFile.name}) ساخته$dlNote ذخیره شد"
                 _lastExportStatusFa.value = msg
                 _toast.value = msg
-                runCatching {
-                    com.aurum.edge.data.JournalExportEngine.shareExportedFile(
-                        context = container.appContext,
-                        file = pdfFile,
-                        format = com.aurum.edge.data.JournalExportFormat.PDF_REPORT,
-                    )
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    runCatching {
+                        com.aurum.edge.data.JournalExportEngine.shareExportedFile(
+                            context = container.appContext,
+                            file = pdfFile,
+                            format = com.aurum.edge.data.JournalExportFormat.PDF_REPORT,
+                        )
+                    }
                 }
             }.onFailure { err ->
                 _toast.value = "⚠️ خطا در ثبت اسکرین‌شات آرشیو و ساخت PDF: ${err.message}"
@@ -1724,22 +1815,30 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         report: com.aurum.edge.data.InstitutionalTearSheetReport,
         format: com.aurum.edge.data.JournalExportFormat,
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
                 val file = com.aurum.edge.data.JournalExportEngine.exportToFile(
                     context = container.appContext,
                     report = report,
                     format = format,
                 )
-                refreshSavedJournalFiles()
-                com.aurum.edge.data.JournalExportEngine.shareExportedFile(
+                com.aurum.edge.data.JournalExportEngine.saveBytesToPhoneStorage(
                     context = container.appContext,
-                    file = file,
-                    format = format,
-                ).getOrThrow()
+                    fileName = file.name,
+                    mimeType = format.mimeType,
+                    bytes = file.readBytes(),
+                )
+                refreshSavedJournalFiles()
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    com.aurum.edge.data.JournalExportEngine.shareExportedFile(
+                        context = container.appContext,
+                        file = file,
+                        format = format,
+                    ).getOrThrow()
+                }
                 file
             }.onSuccess { file ->
-                val msg = "📤 خروجی ${format.extension.uppercase()} آماده ارسال و ذخیره شد (${file.name})"
+                val msg = "📤 خروجی ${format.extension.uppercase()} در Download/AurumEdge ذخیره و آماده ارسال شد (${file.name})"
                 _lastExportStatusFa.value = msg
                 _toast.value = msg
             }.onFailure { err ->
@@ -1752,19 +1851,27 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         report: com.aurum.edge.data.InstitutionalTearSheetReport,
         format: com.aurum.edge.data.JournalExportFormat,
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
                 val file = com.aurum.edge.data.JournalExportEngine.exportToFile(
                     context = container.appContext,
                     report = report,
                     format = format,
                 )
-                refreshSavedJournalFiles()
-                com.aurum.edge.data.JournalExportEngine.openExportedFileExternally(
+                com.aurum.edge.data.JournalExportEngine.saveBytesToPhoneStorage(
                     context = container.appContext,
-                    file = file,
-                    format = format,
-                ).getOrThrow()
+                    fileName = file.name,
+                    mimeType = format.mimeType,
+                    bytes = file.readBytes(),
+                )
+                refreshSavedJournalFiles()
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    com.aurum.edge.data.JournalExportEngine.openExportedFileExternally(
+                        context = container.appContext,
+                        file = file,
+                        format = format,
+                    ).getOrThrow()
+                }
             }.onFailure {
                 // Fallback to share sheet if no default viewer app is installed
                 exportAndShareJournal(report, format)
@@ -1776,7 +1883,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         report: com.aurum.edge.data.InstitutionalTearSheetReport,
         format: com.aurum.edge.data.JournalExportFormat,
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             com.aurum.edge.data.JournalExportEngine.saveDirectToDownloads(
                 context = container.appContext,
                 report = report,

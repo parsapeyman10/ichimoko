@@ -90,6 +90,410 @@ fun NeuralBrainScreen(
             .padding(bottom = 18.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
+        // ── نوار خروجی فوری PDF تمام دیتاهای هوش مصنوعی و رگرسیون پارامترها ──
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(AurumColors.SurfaceAlt)
+                .border(1.dp, AurumColors.Gold.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "📄 مرکز خروجی PDF کامل هوش مصنوعی و آرشیو اسکرین‌شات",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                )
+                Pill(
+                    text = "R:R قفل در [1:1.50 .. 1:3.00]",
+                    color = AurumColors.Green,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = { viewModel.exportFullAiAndNeuralDataPdf(shareAfterExport = true) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AurumColors.Gold,
+                        contentColor = Color.Black,
+                    ),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = "🧠📄 خروجی PDF کامل تمام دیتاهای هوش مصنوعی",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Button(
+                    onClick = { viewModel.exportArchiveScreenshotsPdfNow(shareAfterExport = true) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AurumColors.Cyan,
+                        contentColor = Color.Black,
+                    ),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = "📸📄 خروجی PDF آرشیو اسکرین‌شات‌ها",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+
+        // ── پنل رگرسیون ماتریسی پارامترها با بهترین متود روز دنیا (Ridge L2 + Huber Robust IRLS + Walk-Forward CV) ──
+        SectionCard(
+            title = "📐 پنل رگرسیون ماتریسی پارامترها (بهترین متود روز دنیا: Ridge L2 + Huber IRLS)",
+            subtitle = "رگرسیون هم‌زمان ۱۰ پارامتر ساختاری، دالان طلایی حد ضرر [0.80..2.10 ATR]، شیب ۱۶ ویژگی و قفل R:R در [1.5..3.0]",
+            initiallyExpanded = false,
+        ) {
+            val regReport = neuralState.autoTunedParameters.latestRegressionReport
+            var regStrategyId by rememberSaveable { mutableStateOf("ALL") }
+            var selectedLambda by rememberSaveable { mutableStateOf(0.25) }
+            var selectedHuberDelta by rememberSaveable { mutableStateOf(1.35) }
+            var showRegParamsTable by rememberSaveable { mutableStateOf(false) }
+            var showRegSlopesTable by rememberSaveable { mutableStateOf(false) }
+            var showSlAuditDrawer by rememberSaveable { mutableStateOf(false) }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "۱. انتخاب استراتژی هدف برای رگرسیون ماتریسی:",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    val isAllSel = regStrategyId == "ALL"
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(if (isAllSel) AurumColors.Gold else AurumColors.SurfaceAlt)
+                            .border(1.dp, if (isAllSel) AurumColors.Gold else AurumColors.Border, RoundedCornerShape(8.dp))
+                            .clickable { regStrategyId = "ALL" }
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                    ) {
+                        Text(
+                            text = "🌐 تمام ۱۶ استراتژی (جامع)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isAllSel) Color.Black else AurumColors.TextPrimary,
+                        )
+                    }
+                    BitcoinStrategyModel.entries.forEach { model ->
+                        val isSel = regStrategyId == model.id
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSel) AurumColors.Gold else AurumColors.SurfaceAlt)
+                                .border(1.dp, if (isSel) AurumColors.Gold else AurumColors.Border, RoundedCornerShape(8.dp))
+                                .clickable { regStrategyId = model.id }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        ) {
+                            Text(
+                                text = model.badgeFa,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSel) Color.Black else AurumColors.TextPrimary,
+                            )
+                        }
+                    }
+                }
+
+                // تنظیم ابرپارامترهای رگرسیون Ridge L2 و Huber IRLS
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "ضریب منظم‌سازی Ridge L2 (λ):",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                    listOf(0.10, 0.25, 0.50).forEach { lam ->
+                        Pill(
+                            text = "λ=$lam",
+                            color = if (kotlin.math.abs(selectedLambda - lam) < 0.01) AurumColors.Cyan else AurumColors.TextMuted,
+                            modifier = Modifier.clickable { selectedLambda = lam },
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        text = "آستانه مقاوم Huber (δ):",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                    listOf(1.00, 1.35, 1.75).forEach { del ->
+                        Pill(
+                            text = "δ=$del",
+                            color = if (kotlin.math.abs(selectedHuberDelta - del) < 0.01) AurumColors.Gold else AurumColors.TextMuted,
+                            modifier = Modifier.clickable { selectedHuberDelta = del },
+                        )
+                    }
+                }
+
+                // کارت شاخص‌های آماری رگرسیون
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AurumColors.SurfaceAlt)
+                        .border(1.dp, AurumColors.Cyan.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Pill(text = regReport.regressionMethodFa, color = AurumColors.Cyan)
+                        Pill(text = "R² = ${String.format(Locale.US, "%.2f", regReport.rSquared)}", color = AurumColors.Green)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        StatTile(
+                            label = "ضریب تعیین (Adj R²)",
+                            value = String.format(Locale.US, "%.2f", regReport.adjustedRSquared),
+                            valueColor = AurumColors.Green,
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatTile(
+                            label = "خطای Walk-Forward RMSE",
+                            value = String.format(Locale.US, "%.2fR", regReport.walkForwardRmse),
+                            valueColor = AurumColors.Cyan,
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatTile(
+                            label = "ارتقای نرخ برد و R",
+                            value = "+${regReport.expectedWinRateLiftPct}% | +${regReport.expectedRLiftPerTrade}R",
+                            valueColor = AurumColors.Gold,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    Text(
+                        text = "🛡️ ${regReport.optimalStopLossCorridorFa}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Green,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "🎯 ${regReport.optimalRrCorridorFa}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Gold,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Button(
+                        onClick = {
+                            viewModel.runNeuralParameterRegressionNow(
+                                strategyId = regStrategyId,
+                                ridgeLambda = selectedLambda,
+                                huberDelta = selectedHuberDelta,
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AurumColors.Gold,
+                            contentColor = Color.Black,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = "🚀 اجرای رگرسیون ماتریسی پارامترها (Ridge L2 + Huber IRLS) و اعمال فوری",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+
+                // کشویی ۱: جدول ۱۰ پارامتر رگرسیون‌شده و بازه اطمینان ۹۵٪ (پیش‌فرض بسته)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(AurumColors.SurfaceAlt)
+                        .border(0.8.dp, AurumColors.Gold.copy(alpha = 0.4f), RoundedCornerShape(9.dp))
+                        .padding(9.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showRegParamsTable = !showRegParamsTable },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "📊 جدول ۱۰ پارامتر رگرسیون‌شده ساختاری، حد ضرر و R:R (${regReport.parameterRows.size} پارامتر)",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = AurumColors.Gold,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = if (showRegParamsTable) "▲ بستن" else "▼ باز کردن",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Cyan,
+                        )
+                    }
+                    if (showRegParamsTable) {
+                        regReport.parameterRows.forEach { row ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(AurumColors.Bg)
+                                    .border(0.8.dp, AurumColors.Border, RoundedCornerShape(8.dp))
+                                    .padding(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(3.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = row.paramTitleFa,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = AurumColors.TextPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Pill(
+                                        text = "رگرسیون: ${row.regressedValue} ${row.unitLabel}",
+                                        color = AurumColors.Green,
+                                    )
+                                }
+                                Text(
+                                    text = "مقدار قبلی: ${row.priorValue} ← رگرسیون‌شده: ${row.regressedValue} · شیب β=${String.format(Locale.US, "%+.2f", row.slopeBeta)} · آماره t=${String.format(Locale.US, "%+.2f", row.tStat)} · بازه ۹۵٪: ${row.confidenceIntervalLabel}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AurumColors.Cyan,
+                                )
+                                Text(
+                                    text = row.impactVerdictFa,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AurumColors.TextSecondary,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // کشویی ۲: شیب رگرسیونی تک‌تک ۱۶ ویژگی ورودی شبکه عصبی (پیش‌فرض بسته)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(AurumColors.SurfaceAlt)
+                        .border(0.8.dp, AurumColors.Cyan.copy(alpha = 0.4f), RoundedCornerShape(9.dp))
+                        .padding(9.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showRegSlopesTable = !showRegSlopesTable },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "🧬 شیب رگرسیونی ۱۶ ویژگی ورودی (Huber β_R & Ridge β_Win)",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = AurumColors.Cyan,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = if (showRegSlopesTable) "▲ بستن" else "▼ باز کردن (۱۶ ویژگی)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Gold,
+                        )
+                    }
+                    if (showRegSlopesTable) {
+                        regReport.featureSlopes.forEach { fs ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(AurumColors.Bg)
+                                    .padding(horizontal = 8.dp, vertical = 5.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "#${fs.featureIndex + 1} ${fs.featureTitleFa}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AurumColors.TextPrimary,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    text = "β_R=${String.format(Locale.US, "%+.2f", fs.huberBetaR)} · β_W=${String.format(Locale.US, "%+.2f", fs.ridgeBetaWin)} · سهم=${String.format(Locale.US, "%.1f%%", fs.importancePct)} · t=${String.format(Locale.US, "%+.1f", fs.tStat)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (fs.huberBetaR >= 0.0) AurumColors.Green else AurumColors.Gold,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // کشویی ۳: کالبدشکافی مهندسی محل قرارگیری حد ضرر (چرا قبلی‌ها بی‌فایده بودند و متود ۵ سنگری جدید چطور کار می‌کند)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(AurumColors.SurfaceAlt)
+                        .border(0.8.dp, AurumColors.Green.copy(alpha = 0.4f), RoundedCornerShape(9.dp))
+                        .padding(9.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { showSlAuditDrawer = !showSlAuditDrawer },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "🛡️ کالبدشکافی مهندسی حد ضرر (چرا قبلی‌ها بی‌فایده بودند + متود ۵ سنگری روز دنیا)",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = AurumColors.Green,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = if (showSlAuditDrawer) "▲ بستن" else "▼ باز کردن",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Cyan,
+                        )
+                    }
+                    if (showSlAuditDrawer) {
+                        regReport.regressionDiagnosticNotesFa.forEach { note ->
+                            Text(
+                                text = note,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextPrimary,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         // ── ۰. دستیار ترید با بهترین متود ایچیموکو جهان (گوایچی هوسودا + ۹ کتاب درایو) ──────
         SectionCard(
             title = "🧭 دستیار ترید با بهترین متود ایچیموکو جهان (هوسودا + پاتل + ۹ کتاب درایو)",

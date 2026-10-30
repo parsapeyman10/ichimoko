@@ -346,7 +346,17 @@ fun JournalRiskScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Pill(
-                    text = "📸📄 ثبت تمام معاملات با اسکرین‌شات آرشیو + خروجی PDF",
+                    text = "📸📄 خروجی PDF آرشیو اسکرین‌شات‌ها",
+                    color = AurumColors.Gold,
+                    modifier = Modifier.clickable { viewModel.exportArchiveScreenshotsPdfNow(shareAfterExport = true) },
+                )
+                Pill(
+                    text = "🧠📄 خروجی PDF کامل هوش مصنوعی + رگرسیون",
+                    color = AurumColors.Cyan,
+                    modifier = Modifier.clickable { viewModel.exportFullAiAndNeuralDataPdf(shareAfterExport = true) },
+                )
+                Pill(
+                    text = "📊📄 ثبت تمام معاملات با اسکرین‌شات آرشیو + خروجی PDF",
                     color = AurumColors.Green,
                     modifier = Modifier.clickable { viewModel.recordAllTradesWithArchiveSnapshotsAndExportPdf() },
                 )

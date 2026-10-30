@@ -119,23 +119,71 @@ fun TradeSnapshotArchiveGallerySection(
                         Text("📂 انتخاب فایل عکس/دیتا از گوشی", fontSize = 11.sp, color = AurumColors.Gold)
                     }
                 }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = { viewModel.exportArchiveScreenshotsPdfNow(shareAfterExport = true) },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AurumColors.Gold,
+                            contentColor = Color.Black,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(
+                            text = "📸📄 خروجی PDF آرشیو اسکرین‌شات‌ها",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    Button(
+                        onClick = { viewModel.recordAllTradesWithArchiveSnapshotsAndExportPdf() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AurumColors.Green,
+                            contentColor = Color.Black,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(
+                            text = "📊📄 خروجی PDF جامع ژورنال + تصاویر",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
                 Button(
-                    onClick = { viewModel.recordAllTradesWithArchiveSnapshotsAndExportPdf() },
+                    onClick = { viewModel.exportFullAiAndNeuralDataPdf(shareAfterExport = true) },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = AurumColors.Gold,
+                        containerColor = AurumColors.Cyan,
                         contentColor = Color.Black,
                     ),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = "📸📄 ثبت اسکرین‌شات آرشیو تمام معاملات + خروجی فوری PDF",
+                        text = "🧠📄 خروجی PDF کامل تمام دیتاهای هوش مصنوعی + رگرسیون پارامترها",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                     )
                 }
             }
 
-            if (records.isEmpty()) {
+            val effectiveRecords = remember(records, trades) {
+                if (records.isNotEmpty()) {
+                    records
+                } else {
+                    trades.sortedBy { it.displayTradeNumber }.flatMap { t ->
+                        buildList {
+                            add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(t, isClosePhase = false))
+                            if (!t.isOpen) {
+                                add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(t, isClosePhase = true))
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (effectiveRecords.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -147,34 +195,27 @@ fun TradeSnapshotArchiveGallerySection(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = "هنوز اسکرین‌شاتی در آرشیو ثبت نشده است؛ به محض باز شدن اولین معامله، تصویر ایچیموکو + SL/TP آن به‌صورت خودکار اینجا و در گالری گوشی ذخیره می‌شود.",
+                            text = "هنوز اسکرین‌شاتی در آرشیو ثبت نشده است؛ با زدن دکمه «خروجی PDF آرشیو اسکرین‌شات‌ها» در بالا یا باز شدن معامله جدید، تصویر چارت ایچیموکو + SL/TP ساخته و در Download/AurumEdge ذخیره می‌شود.",
                             style = MaterialTheme.typography.bodySmall,
                             color = AurumColors.TextSecondary,
                         )
-                        if (trades.isNotEmpty()) {
-                            OutlinedButton(
-                                onClick = { trades.take(15).forEach { viewModel.captureOrRefreshTradeSnapshot(it) } },
-                            ) {
-                                Text("📸 ساخت فوری اسکرین‌شات برای ${trades.size.coerceAtMost(15)} معامله موجود", color = AurumColors.Gold, fontSize = 11.sp)
-                            }
-                        }
                     }
                 }
             } else {
-                val visibleList = if (showAllItems) records else records.take(6)
+                val visibleList = if (showAllItems) effectiveRecords else effectiveRecords.take(6)
                 visibleList.forEach { rec ->
                     ArchivedSnapshotItemCard(
                         record = rec,
                         onOpenViewer = { selectedRecord = rec },
                     )
                 }
-                if (records.size > 6) {
+                if (effectiveRecords.size > 6) {
                     OutlinedButton(
                         onClick = { showAllItems = !showAllItems },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
-                            text = if (showAllItems) "▲ نمایش کمتر (۶ مورد آخر)" else "▼ نمایش همه ${records.size} اسکرین‌شات آرشیو",
+                            text = if (showAllItems) "▲ نمایش کمتر (۶ مورد آخر)" else "▼ نمایش همه ${effectiveRecords.size} اسکرین‌شات آرشیو",
                             color = AurumColors.Gold,
                             fontSize = 12.sp,
                         )

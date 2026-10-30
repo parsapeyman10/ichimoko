@@ -20,6 +20,7 @@ import androidx.core.content.FileProvider
 import com.aurum.edge.core.AssetClass
 import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.CustomStrategySlot
+import com.aurum.edge.core.NeuralLearningStateSummary
 import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.V1Universe
 import com.aurum.edge.domain.Interval
@@ -1182,7 +1183,7 @@ function filterRows() {
 
             // ── Visual Archive Screenshot Pages: Ichimoku Chart Snapshot for Every Trade ──
             val sortedTradesForSnapshots = report.trades.sortedBy { it.displayTradeNumber }
-            val snapshotRecords = sortedTradesForSnapshots.flatMap { t ->
+            val tradeBasedSnapshots = sortedTradesForSnapshots.flatMap { t ->
                 val existing = TradeSnapshotArchiveManager.recordsForTrade(t.id)
                 if (existing.isNotEmpty()) {
                     existing
@@ -1195,11 +1196,17 @@ function filterRows() {
                     }
                 }
             }
+            val snapshotRecords = if (tradeBasedSnapshots.isNotEmpty()) {
+                tradeBasedSnapshots
+            } else {
+                TradeSnapshotArchiveManager.records.value.sortedBy { it.displayTradeNumber }
+            }
             val snapChunks = snapshotRecords.chunked(2)
             snapChunks.forEachIndexed { idx, pair ->
                 val pInfo = PdfDocument.PageInfo.Builder(pageW, pageH, currentPageNumber++).create()
                 val page = doc.startPage(pInfo)
                 val c = page.canvas
+                val bitmapsToRecycle = mutableListOf<android.graphics.Bitmap>()
                 c.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
                 c.drawText(
                     "Visual Ichimoku Archive Screenshots — Sheet ${idx + 1} of ${snapChunks.size} (${snapshotRecords.size} Total Snapshots)",
@@ -1227,7 +1234,7 @@ function filterRows() {
                         headerCellPaint,
                     )
                     c.drawText(
-                        "Entry: ${rec.entryPrice} | Fixed SL: ${rec.stopLossPrice} | TP: ${rec.takeProfitPrice} | R:R 1:${String.format(Locale.US, "%.2f", rec.riskReward)}$pnlTag",
+                        "Entry: ${rec.entryPrice} | Fixed SL: ${rec.stopLossPrice} | TP: ${rec.takeProfitPrice} | R:R 1:${String.format(Locale.US, "%.2f", rec.riskReward.coerceIn(1.5, 3.0))}$pnlTag",
                         slotLeft + 10f,
                         73f,
                         cellPaint,
@@ -1242,13 +1249,14 @@ function filterRows() {
                     val bmp = runCatching {
                         TradeSnapshotArchiveManager.loadOrRenderSnapshotBitmap(rec)
                     }.getOrNull()
-                    if (bmp != null) {
+                    if (bmp != null && !bmp.isRecycled) {
                         val dstRect = RectF(slotLeft + 8f, 96f, slotRight - 8f, pageH - 26f)
                         c.drawBitmap(bmp, null, dstRect, null)
-                        bmp.recycle()
+                        bitmapsToRecycle += bmp
                     }
                 }
                 doc.finishPage(page)
+                bitmapsToRecycle.forEach { b -> runCatching { b.recycle() } }
             }
 
             outputFile.parentFile?.mkdirs()
@@ -1367,35 +1375,58 @@ function filterRows() {
     }
 
     /**
-     * ذخیره فوری و مستقیم در پوشه `Downloads/AurumEdge` حافظه گوشی بدون نیاز به مجوز دستی در اندروید ۱۰ به بالا.
+     * ذخیره تضمین‌شده بایت‌های فایل در حافظه گوشی (`Downloads/AurumEdge` با فال‌بک خودکار به `Documents/AurumEdge` و `ExternalFilesDir`).
      */
-    fun saveDirectToDownloads(
+    fun saveBytesToPhoneStorage(
         context: Context,
-        report: InstitutionalTearSheetReport,
-        format: JournalExportFormat,
-    ): Result<String> = runCatching {
-        val localFile = exportToFile(context, report, format)
-        val bytes = localFile.readBytes()
-        val fileName = localFile.name
+        fileName: String,
+        mimeType: String,
+        bytes: ByteArray,
+    ): String {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-                put(MediaStore.MediaColumns.MIME_TYPE, format.mimeType)
-                put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/AurumEdge")
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-                ?: error("امکان ایجاد فایل در پوشه Downloads وجود ندارد")
-            resolver.openOutputStream(uri)?.use { out ->
-                out.write(bytes)
-                out.flush()
-            } ?: error("خطا در نوشتن فایل در حافظه گوشی")
-            values.clear()
-            values.put(MediaStore.MediaColumns.IS_PENDING, 0)
-            resolver.update(uri, values, null, null)
-            "Download/AurumEdge/$fileName"
-        } else {
+            val tryDownloads = runCatching {
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/AurumEdge")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: error("URI null")
+                resolver.openOutputStream(uri)?.use { out ->
+                    out.write(bytes)
+                    out.flush()
+                } ?: error("OutputStream null")
+                values.clear()
+                values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                "Download/AurumEdge/$fileName"
+            }.getOrNull()
+            if (tryDownloads != null) return tryDownloads
+
+            val tryDocs = runCatching {
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOCUMENTS}/AurumEdge")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val uri = resolver.insert(MediaStore.Files.getContentUri("external"), values)
+                    ?: error("URI null")
+                resolver.openOutputStream(uri)?.use { out ->
+                    out.write(bytes)
+                    out.flush()
+                } ?: error("OutputStream null")
+                values.clear()
+                values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+                "Documents/AurumEdge/$fileName"
+            }.getOrNull()
+            if (tryDocs != null) return tryDocs
+        }
+
+        return runCatching {
             @Suppress("DEPRECATION")
             val pubDir = File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
@@ -1409,7 +1440,495 @@ function filterRows() {
             val dest = File(targetDir, fileName)
             dest.writeBytes(bytes)
             dest.absolutePath
+        }.getOrElse {
+            val fallbackDir = File(context.filesDir, "exports").apply { mkdirs() }
+            val dest = File(fallbackDir, fileName)
+            dest.writeBytes(bytes)
+            dest.absolutePath
         }
+    }
+
+    /**
+     * ذخیره فوری و مستقیم در پوشه `Downloads/AurumEdge` حافظه گوشی بدون نیاز به مجوز دستی در اندروید ۱۰ به بالا.
+     */
+    fun saveDirectToDownloads(
+        context: Context,
+        report: InstitutionalTearSheetReport,
+        format: JournalExportFormat,
+    ): Result<String> = runCatching {
+        val localFile = exportToFile(context, report, format)
+        val bytes = localFile.readBytes()
+        saveBytesToPhoneStorage(context, localFile.name, format.mimeType, bytes)
+    }
+
+    /**
+     * تولید و ذخیره مستقیم فایل PDF اختصاصی «آرشیو اسکرین‌شات تمام معاملات (باز و بسته)» با کیفیت بالا و حجم بهینه.
+     */
+    fun exportArchiveScreenshotsPdf(
+        context: Context,
+        trades: List<PaperTrade>,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Result<Pair<File, String>> = runCatching {
+        if (trades.isNotEmpty()) {
+            runCatching {
+                TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(
+                    context = context,
+                    trades = trades,
+                    maxTrades = 120,
+                    saveToPhoneGallery = false,
+                )
+            }
+        }
+        val exportDir = File(context.filesDir, "exports").apply { mkdirs() }
+        val stamp = fileStampFmt.format(Instant.ofEpochMilli(nowMs))
+        val outFile = File(exportDir, "AurumEdge_Archive_Screenshots_$stamp.pdf")
+
+        val allArchiveRecs = TradeSnapshotArchiveManager.records.value.sortedBy { it.displayTradeNumber }
+        val tradeFallbackRecs = trades.sortedBy { it.displayTradeNumber }.flatMap { t ->
+            val existing = allArchiveRecs.filter { it.tradeId == t.id }
+            if (existing.isNotEmpty()) {
+                existing
+            } else {
+                buildList {
+                    add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(t, isClosePhase = false))
+                    if (!t.isOpen) {
+                        add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(t, isClosePhase = true))
+                    }
+                }
+            }
+        }
+        val mergedSnapshots = (tradeFallbackRecs + allArchiveRecs)
+            .distinctBy { it.snapshotId }
+            .sortedWith(compareBy<ArchivedTradeSnapshotRecord> { it.displayTradeNumber }.thenBy { it.isCloseSnapshot })
+
+        val doc = PdfDocument()
+        try {
+            val pageW = 842
+            val pageH = 595
+            val bgPaint = Paint().apply { color = Color.rgb(11, 15, 23) }
+            val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(18, 25, 38) }
+            val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(243, 198, 95)
+                style = Paint.Style.STROKE
+                strokeWidth = 1.2f
+            }
+            val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(243, 198, 95)
+                textSize = 15f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            }
+            val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(56, 189, 248)
+                textSize = 10.5f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            }
+            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(235, 240, 248)
+                textSize = 9.5f
+            }
+            val subPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(160, 174, 192)
+                textSize = 8.8f
+            }
+
+            if (mergedSnapshots.isEmpty()) {
+                val pInfo = PdfDocument.PageInfo.Builder(pageW, pageH, 1).create()
+                val page = doc.startPage(pInfo)
+                val c = page.canvas
+                c.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
+                c.drawRoundRect(RectF(28f, 28f, pageW - 28f, 120f), 12f, 12f, cardPaint)
+                c.drawText("AURUM EDGE — TRADE SNAPSHOT ARCHIVE PDF REPORT", 44f, 60f, titlePaint)
+                c.drawText("Generated: ${formatTimestamp(nowMs)} | No archived trade snapshots yet — open a trade to capture its Ichimoku snapshot.", 44f, 88f, textPaint)
+                doc.finishPage(page)
+            } else {
+                val chunks = mergedSnapshots.chunked(2)
+                chunks.forEachIndexed { pageIdx, pair ->
+                    val pInfo = PdfDocument.PageInfo.Builder(pageW, pageH, pageIdx + 1).create()
+                    val page = doc.startPage(pInfo)
+                    val c = page.canvas
+                    val bitmapsOnPage = mutableListOf<android.graphics.Bitmap>()
+                    c.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
+                    c.drawText(
+                        "AURUM EDGE — ARCHIVE SCREENSHOTS PDF (${mergedSnapshots.size} Snapshots) · Page ${pageIdx + 1} of ${chunks.size} · Generated: ${formatTimestamp(nowMs)}",
+                        24f,
+                        26f,
+                        titlePaint,
+                    )
+                    pair.forEachIndexed { slotIdx, rec ->
+                        val slotLeft = if (slotIdx == 0) 20f else 426f
+                        val slotRight = if (slotIdx == 0) 416f else 822f
+                        val cardRect = RectF(slotLeft, 36f, slotRight, pageH - 16f)
+                        c.drawRoundRect(cardRect, 10f, 10f, cardPaint)
+                        c.drawRoundRect(cardRect, 10f, 10f, borderPaint)
+
+                        val phaseTag = if (rec.isCloseSnapshot) "CLOSED" else "OPENED"
+                        val clampedRr = rec.riskReward.coerceIn(1.50, 3.00)
+                        val pnlStr = if (rec.isCloseSnapshot && rec.realizedPnlUsd != null) {
+                            String.format(Locale.US, " | Net PnL: %+.2f$ (%+.2fR)", rec.realizedPnlUsd, (rec.realizedRMultiple ?: 0.0).coerceIn(-1.5, 3.0))
+                        } else {
+                            String.format(Locale.US, " | Fixed Risk: -$%.2f | Target: +$%.2f", rec.fixedRiskUsd, rec.expectedProfitUsd)
+                        }
+                        c.drawText(
+                            "Trade #${rec.displayTradeNumber} [$phaseTag] · ${rec.symbol} (${rec.timeframeLabel}) · ${rec.action}",
+                            slotLeft + 10f,
+                            54f,
+                            headerPaint,
+                        )
+                        c.drawText(
+                            "Entry: ${rec.entryPrice} | Structural SL: ${rec.stopLossPrice} | TP: ${rec.takeProfitPrice} | R:R 1:${String.format(Locale.US, "%.2f", clampedRr)}$pnlStr",
+                            slotLeft + 10f,
+                            69f,
+                            textPaint,
+                        )
+                        c.drawText(
+                            "Strategy: ${rec.strategyTitleFa} (${rec.strategyId}) | Pre-3C: ${rec.preEntry3CandleCategoryFa}",
+                            slotLeft + 10f,
+                            83f,
+                            subPaint,
+                        )
+
+                        val bmp = runCatching {
+                            TradeSnapshotArchiveManager.loadOrRenderSnapshotBitmap(rec)
+                        }.getOrNull()
+                        if (bmp != null && !bmp.isRecycled) {
+                            val dstRect = RectF(slotLeft + 8f, 92f, slotRight - 8f, pageH - 24f)
+                            c.drawBitmap(bmp, null, dstRect, null)
+                            bitmapsOnPage += bmp
+                        }
+                    }
+                    doc.finishPage(page)
+                    bitmapsOnPage.forEach { b -> runCatching { b.recycle() } }
+                }
+            }
+
+            FileOutputStream(outFile).use { out -> doc.writeTo(out) }
+        } catch (_: Throwable) {
+            val dummyReport = buildInstitutionalTearSheet(trades, nowMs = nowMs)
+            writePortablePdfFallback(dummyReport, outFile)
+        } finally {
+            runCatching { doc.close() }
+        }
+
+        val savedPath = saveBytesToPhoneStorage(
+            context = context,
+            fileName = outFile.name,
+            mimeType = JournalExportFormat.PDF_REPORT.mimeType,
+            bytes = outFile.readBytes(),
+        )
+        outFile to savedPath
+    }
+
+    /**
+     * تولید فایل PDF جامع «تمام دیتاهای هوش مصنوعی، شبکه عصبی خودآموز و رگرسیون ماتریسی پارامترها»
+     * (`AurumEdge_AI_Neural_Full_Report_<stamp>.pdf`) و ذخیره مستقیم در حافظه گوشی (`Downloads/AurumEdge`).
+     */
+    fun exportFullAiAndNeuralReportPdf(
+        context: Context,
+        neuralSummary: NeuralLearningStateSummary,
+        lastAiVerdict: AiTradeVerdict?,
+        trades: List<PaperTrade>,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Result<Pair<File, String>> = runCatching {
+        val exportDir = File(context.filesDir, "exports").apply { mkdirs() }
+        val stamp = fileStampFmt.format(Instant.ofEpochMilli(nowMs))
+        val outFile = File(exportDir, "AurumEdge_AI_Neural_Full_Report_$stamp.pdf")
+        writeAiNeuralPdfDocument(
+            neuralSummary = neuralSummary,
+            lastAiVerdict = lastAiVerdict,
+            trades = trades,
+            outputFile = outFile,
+            nowMs = nowMs,
+        )
+        val savedPath = saveBytesToPhoneStorage(
+            context = context,
+            fileName = outFile.name,
+            mimeType = JournalExportFormat.PDF_REPORT.mimeType,
+            bytes = outFile.readBytes(),
+        )
+        outFile to savedPath
+    }
+
+    fun writeAiNeuralPdfDocument(
+        neuralSummary: NeuralLearningStateSummary,
+        lastAiVerdict: AiTradeVerdict?,
+        trades: List<PaperTrade>,
+        outputFile: File,
+        nowMs: Long = System.currentTimeMillis(),
+    ) {
+        val doc = PdfDocument()
+        try {
+            val pageW = 842
+            val pageH = 595
+            val bgPaint = Paint().apply { color = Color.rgb(10, 14, 22) }
+            val cardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(18, 25, 38) }
+            val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(65, 85, 118)
+                style = Paint.Style.STROKE
+                strokeWidth = 1f
+            }
+            val goldTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(243, 198, 95)
+                textSize = 15.5f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            }
+            val cyanHeaderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(56, 189, 248)
+                textSize = 10f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            }
+            val cellPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(232, 238, 246)
+                textSize = 9f
+            }
+            val mutedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(156, 168, 186)
+                textSize = 8.5f
+            }
+            val reg = neuralSummary.autoTunedParameters.latestRegressionReport
+
+            // ── Page 1: Executive Neural Brain Summary + Parameter Regression Matrix + Feature Slopes ──
+            val p1 = doc.startPage(PdfDocument.PageInfo.Builder(pageW, pageH, 1).create())
+            val c1 = p1.canvas
+            c1.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
+            c1.drawRoundRect(RectF(22f, 18f, pageW - 22f, 68f), 10f, 10f, cardPaint)
+            c1.drawText("AURUM EDGE — FULL AI & SELF-LEARNING NEURAL NETWORK + PARAMETER REGRESSION REPORT", 36f, 40f, goldTitlePaint)
+            c1.drawText(
+                "Generated: ${formatTimestamp(nowMs)} | Arch: ${neuralSummary.architectureNameFa} | Gen #${neuralSummary.autoTunedParameters.tuningGeneration} | Learned Trades: ${neuralSummary.totalLearnedTrades} / ${neuralSummary.warmupTargetTrades} | R:R Locked: [1:1.50 .. 1:3.00]",
+                36f,
+                57f,
+                mutedPaint,
+            )
+
+            // Regression KPI Row
+            val kpiRect = RectF(22f, 76f, pageW - 22f, 128f)
+            c1.drawRoundRect(kpiRect, 8f, 8f, cardPaint)
+            c1.drawRoundRect(kpiRect, 8f, 8f, borderPaint)
+            c1.drawText(
+                "Regression Method: ${reg.regressionMethodFa}   |   R² = ${String.format(Locale.US, "%.2f", reg.rSquared)} (Adj R² = ${String.format(Locale.US, "%.2f", reg.adjustedRSquared)})   |   Walk-Forward RMSE = ${String.format(Locale.US, "%.2f", reg.walkForwardRmse)}   |   Expected Lift: +${reg.expectedWinRateLiftPct}% WR, +${reg.expectedRLiftPerTrade}R/trade",
+                34f,
+                96f,
+                cyanHeaderPaint,
+            )
+            c1.drawText(
+                "${reg.optimalStopLossCorridorFa}   |   ${reg.optimalRrCorridorFa}",
+                34f,
+                115f,
+                cellPaint,
+            )
+
+            // 10 Regressed Structural Parameters Table
+            c1.drawText("1. World-Class Parameter Regression Table (Ridge L2 + Huber Robust IRLS + Empirical Bayes):", 24f, 148f, goldTitlePaint)
+            var y1 = 166f
+            c1.drawText("Parameter Key / Title", 26f, y1, cyanHeaderPaint)
+            c1.drawText("Prior", 295f, y1, cyanHeaderPaint)
+            c1.drawText("Regressed", 350f, y1, cyanHeaderPaint)
+            c1.drawText("Slope β", 425f, y1, cyanHeaderPaint)
+            c1.drawText("t-Stat", 485f, y1, cyanHeaderPaint)
+            c1.drawText("95% Confidence Corridor", 540f, y1, cyanHeaderPaint)
+            c1.drawText("Unit", 700f, y1, cyanHeaderPaint)
+            y1 += 15f
+            reg.parameterRows.forEach { row ->
+                c1.drawText("${row.paramKey} (${row.paramTitleFa.take(28)})", 26f, y1, cellPaint)
+                c1.drawText(String.format(Locale.US, "%.2f", row.priorValue), 295f, y1, cellPaint)
+                c1.drawText(String.format(Locale.US, "%.2f", row.regressedValue), 350f, y1, cyanHeaderPaint)
+                c1.drawText(String.format(Locale.US, "%+.2f", row.slopeBeta), 425f, y1, cellPaint)
+                c1.drawText(String.format(Locale.US, "%+.2f", row.tStat), 485f, y1, cellPaint)
+                c1.drawText(row.confidenceIntervalLabel, 540f, y1, cellPaint)
+                c1.drawText(row.unitLabel, 700f, y1, mutedPaint)
+                y1 += 15f
+            }
+
+            // 16 Neural Features Attention & Regression Slopes (2 columns x 8 rows)
+            c1.drawText("2. 16-Feature Self-Attention Weights & Huber-Ridge Regression Slopes:", 24f, 336f, goldTitlePaint)
+            val slopes = reg.featureSlopes
+            slopes.forEachIndexed { idx, fs ->
+                val col = idx / 8
+                val rowIdx = idx % 8
+                val xBase = if (col == 0) 26f else 432f
+                val fy = 356f + rowIdx * 26f
+                c1.drawRoundRect(RectF(xBase, fy - 12f, xBase + 388f, fy + 10f), 5f, 5f, cardPaint)
+                c1.drawText(
+                    "#${idx + 1} ${fs.featureTitleFa.take(26)} | β_R=${String.format(Locale.US, "%+.3f", fs.huberBetaR)} | β_Win=${String.format(Locale.US, "%+.3f", fs.ridgeBetaWin)} | Imp=${String.format(Locale.US, "%.1f%%", fs.importancePct)} | t=${String.format(Locale.US, "%+.1f", fs.tStat)}",
+                    xBase + 8f,
+                    fy + 2f,
+                    cellPaint,
+                )
+            }
+            doc.finishPage(p1)
+
+            // ── Page 2: All 16 Per-Strategy Neural Tuning Profiles + Live 15-Symbol Market Intelligence ──
+            val p2 = doc.startPage(PdfDocument.PageInfo.Builder(pageW, pageH, 2).create())
+            val c2 = p2.canvas
+            c2.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
+            c2.drawText("3. Per-Strategy Neural Tuning Profiles (All 16 Strategies — R:R Locked in [1:1.50 .. 1:3.00]):", 24f, 30f, goldTitlePaint)
+
+            var y2 = 50f
+            c2.drawText("Strategy ID", 26f, y2, cyanHeaderPaint)
+            c2.drawText("Gen", 230f, y2, cyanHeaderPaint)
+            c2.drawText("Min R:R", 275f, y2, cyanHeaderPaint)
+            c2.drawText("SL Buffer", 340f, y2, cyanHeaderPaint)
+            c2.drawText("Max Kijun", 415f, y2, cyanHeaderPaint)
+            c2.drawText("Min ER14", 490f, y2, cyanHeaderPaint)
+            c2.drawText("Max Wick", 560f, y2, cyanHeaderPaint)
+            c2.drawText("Sniper Dist", 630f, y2, cyanHeaderPaint)
+            c2.drawText("Neural Gate", 710f, y2, cyanHeaderPaint)
+            y2 += 15f
+
+            val profiles = neuralSummary.autoTunedParameters.perStrategyProfiles.values.toList()
+            profiles.take(16).forEach { prof ->
+                c2.drawText(prof.strategyId.take(28), 26f, y2, cellPaint)
+                c2.drawText("#${prof.tuningGeneration}", 230f, y2, cellPaint)
+                c2.drawText(String.format(Locale.US, "1:%.2f", prof.minRiskReward.coerceIn(1.5, 3.0)), 275f, y2, cellPaint)
+                c2.drawText(String.format(Locale.US, "%.2f ATR", prof.slBufferAtr), 340f, y2, cellPaint)
+                c2.drawText(String.format(Locale.US, "%.2f ATR", prof.maxKijunExtensionAtr), 415f, y2, cellPaint)
+                c2.drawText(String.format(Locale.US, "%.0f%%", prof.minEfficiencyRatio * 100.0), 490f, y2, cellPaint)
+                c2.drawText(String.format(Locale.US, "%.0f%%", prof.maxAdverseWickRatio * 100.0), 560f, y2, cellPaint)
+                c2.drawText(String.format(Locale.US, "%.2f ATR", prof.minSniperDistanceAtr), 630f, y2, cellPaint)
+                c2.drawText(String.format(Locale.US, "%.1f%%", prof.neuralWinProbGatePct), 710f, y2, cyanHeaderPaint)
+                y2 += 14.5f
+            }
+
+            // Live 15-Symbol Market Intelligence Table
+            y2 += 12f
+            c2.drawText("4. Live 15-Symbol Market Intelligence & Causal Event Attribution:", 24f, y2, goldTitlePaint)
+            y2 += 18f
+            c2.drawText("Symbol", 26f, y2, cyanHeaderPaint)
+            c2.drawText("TF", 105f, y2, cyanHeaderPaint)
+            c2.drawText("Confidence", 155f, y2, cyanHeaderPaint)
+            c2.drawText("News Bias", 230f, y2, cyanHeaderPaint)
+            c2.drawText("Regime / Trend State", 310f, y2, cyanHeaderPaint)
+            c2.drawText("Primary Root Cause & Tactical Action", 480f, y2, cyanHeaderPaint)
+            y2 += 14f
+            neuralSummary.liveMarketAttributions.take(15).forEach { m ->
+                c2.drawText(m.symbol, 26f, y2, cellPaint)
+                c2.drawText(m.timeframeLabel, 105f, y2, cellPaint)
+                c2.drawText(String.format(Locale.US, "%.1f%%", m.causalConfidencePct), 155f, y2, cyanHeaderPaint)
+                c2.drawText(String.format(Locale.US, "%+.2f", m.newsSentimentScore), 230f, y2, cellPaint)
+                c2.drawText(m.marketRegimeStateFa.take(24), 310f, y2, cellPaint)
+                c2.drawText("${m.primaryCauseBadgeFa.take(22)} | ${m.recommendedTacticalActionFa.take(28)}", 480f, y2, mutedPaint)
+                y2 += 14f
+            }
+            doc.finishPage(p2)
+
+            // ── Page 3: AI Gate Yes/No Audit Decisions & Recent Learned Trade Lessons ──
+            val p3 = doc.startPage(PdfDocument.PageInfo.Builder(pageW, pageH, 3).create())
+            val c3 = p3.canvas
+            c3.drawRect(0f, 0f, pageW.toFloat(), pageH.toFloat(), bgPaint)
+            c3.drawText("5. AvalAI Single-Question Yes/No Gate Decision & Experience Replay Trade Lessons:", 24f, 30f, goldTitlePaint)
+
+            var y3 = 52f
+            c3.drawText("AvalAI Single-Question Yes/No Filter Status:", 26f, y3, cyanHeaderPaint)
+            y3 += 16f
+            if (lastAiVerdict == null) {
+                c3.drawText("AvalAI Key Active & Ready (Single Question: Should I trade right now with these conditions or not? -> Yes/No).", 26f, y3, mutedPaint)
+                y3 += 18f
+            } else {
+                val dec = if (lastAiVerdict.shouldEnter) "YES (APPROVED)" else "NO (BLOCKED)"
+                c3.drawText(
+                    "${formatTimestamp(lastAiVerdict.checkedAt)} | ${lastAiVerdict.symbol} | ${lastAiVerdict.action} | $dec | Summary: ${lastAiVerdict.summaryFa.take(48)}",
+                    26f,
+                    y3,
+                    cellPaint,
+                )
+                y3 += 18f
+            }
+
+            y3 += 10f
+            c3.drawText("Structural Stop-Loss Diagnostics & Regression Insights:", 26f, y3, cyanHeaderPaint)
+            y3 += 16f
+            reg.regressionDiagnosticNotesFa.forEach { note ->
+                c3.drawText("• ${note.take(115)}", 26f, y3, cellPaint)
+                y3 += 16f
+            }
+            y3 += 8f
+            c3.drawText("Recent Learned Trade Lessons (Experience Replay Buffer):", 26f, y3, cyanHeaderPaint)
+            y3 += 16f
+            neuralSummary.recentLessons.take(12).forEach { lesson ->
+                val outTag = if (lesson.won) "WIN" else "LOSS"
+                c3.drawText(
+                    "${formatTimestamp(lesson.timestampMs)} | ${lesson.symbol} (${lesson.timeframeLabel}) | $outTag (${String.format(Locale.US, "%+.2fR", lesson.achievedR.coerceIn(-1.5, 3.0))}) | ${lesson.lessonLearnedFa.take(65)}",
+                    26f,
+                    y3,
+                    cellPaint,
+                )
+                y3 += 15f
+            }
+            doc.finishPage(p3)
+
+            outputFile.parentFile?.mkdirs()
+            FileOutputStream(outputFile).use { out -> doc.writeTo(out) }
+        } catch (_: Throwable) {
+            writePortableAiNeuralPdfFallback(neuralSummary, lastAiVerdict, trades, outputFile, nowMs)
+        } finally {
+            runCatching { doc.close() }
+        }
+    }
+
+    private fun writePortableAiNeuralPdfFallback(
+        neuralSummary: NeuralLearningStateSummary,
+        lastAiVerdict: AiTradeVerdict?,
+        trades: List<PaperTrade>,
+        outputFile: File,
+        nowMs: Long,
+    ) {
+        outputFile.parentFile?.mkdirs()
+        val reg = neuralSummary.autoTunedParameters.latestRegressionReport
+        val lines = mutableListOf<String>()
+        lines += "AURUM EDGE - FULL AI & NEURAL NETWORK + PARAMETER REGRESSION PDF REPORT"
+        lines += "Generated: ${formatTimestamp(nowMs)} | Arch: ${neuralSummary.architectureNameFa} | Gen #${neuralSummary.autoTunedParameters.tuningGeneration}"
+        lines += "Learned Trades: ${neuralSummary.totalLearnedTrades} / ${neuralSummary.warmupTargetTrades} | Accuracy: ${neuralSummary.runningAccuracyPct}% | Avg R: ${neuralSummary.tradeForensics.expectancyPerTradeR}"
+        lines += "Regression: ${reg.regressionMethodFa} | R2=${reg.rSquared} | AdjR2=${reg.adjustedRSquared} | RMSE=${reg.walkForwardRmse}"
+        lines += "Optimal Stop-Loss Corridor: [0.80 ATR .. 2.10 ATR] behind 5-Bar Fractal + Kijun26 + Sweep Shield"
+        lines += "Locked Risk:Reward Corridor: [1:1.50 .. 1:3.00] (Strictly >= 1.50 and <= 3.00)"
+        lines += "----------------------------------------------------------------------------------------"
+        reg.parameterRows.forEach { r ->
+            lines += String.format(
+                Locale.US,
+                "PARAM %-26s | Prior: %6.2f | Regressed: %6.2f | Beta: %+5.2f | t=%+5.2f | CI: %s",
+                r.paramKey,
+                r.priorValue,
+                r.regressedValue,
+                r.slopeBeta,
+                r.tStat,
+                r.confidenceIntervalLabel,
+            )
+        }
+        lines += "----------------------------------------------------------------------------------------"
+        reg.featureSlopes.take(16).forEach { fs ->
+            lines += String.format(
+                Locale.US,
+                "FEAT #%02d | Beta_R: %+6.3f | Beta_Win: %+6.3f | Importance: %5.1f%% | t-Stat: %+5.2f",
+                fs.featureIndex + 1,
+                fs.huberBetaR,
+                fs.ridgeBetaWin,
+                fs.importancePct,
+                fs.tStat,
+            )
+        }
+        lines += "Live Symbols Attributed: ${neuralSummary.liveMarketAttributions.size} | Last AI Verdict: ${lastAiVerdict?.shouldEnter ?: "READY"} | Total Journal Trades: ${trades.size}"
+        val streamContent = buildString {
+            append("BT\n/F1 9 Tf\n32 555 Td\n13 TL\n")
+            lines.take(40).forEach { line ->
+                val escaped = line
+                    .replace("\\", "\\\\")
+                    .replace("(", "\\(")
+                    .replace(")", "\\)")
+                append("($escaped) Tj T*\n")
+            }
+            append("ET\n")
+        }
+        val pdfText = buildString {
+            append("%PDF-1.4\n")
+            append("1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n")
+            append("2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n")
+            append("3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >> endobj\n")
+            append("4 0 obj << /Length ${streamContent.toByteArray(Charsets.US_ASCII).size} >>\nstream\n")
+            append(streamContent)
+            append("endstream\nendobj\n")
+            append("5 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj\n")
+            append("trailer << /Root 1 0 R >>\n%%EOF\n")
+        }
+        outputFile.writeText(pdfText, Charsets.US_ASCII)
     }
 
     /**

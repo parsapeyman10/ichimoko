@@ -157,42 +157,82 @@ object TradeSnapshotArchiveManager {
         _records.value.filter { it.tradeId == tradeId }.sortedBy { if (it.isCloseSnapshot) 1 else 0 }
 
     /**
-     * تضمین ثبت و ساخت اسکرین‌شات آرشیو تصویری (`OPEN` و در صورت بسته بودن `CLOSE`) برای تمام معاملات موجود در ژورنال.
+     * تضمین ثبت و ساخت اسکرین‌شات آرشیو تصویری (`OPEN` و در صورت بسته بودن `CLOSE`) برای معاملات موجود در ژورنال
+     * بدون قفل طولانی‌مدت MediaStore و با ذخیره یکپارچه ایندکس در پایان حلقه.
      */
     @Synchronized
     fun ensureAllTradesHaveArchiveSnapshots(
         context: Context,
         trades: List<PaperTrade>,
+        maxTrades: Int = 120,
+        saveToPhoneGallery: Boolean = false,
     ): List<ArchivedTradeSnapshotRecord> {
         if (_records.value.isEmpty()) {
             init(context)
         }
-        for (trade in trades.sortedBy { it.openedAt }) {
-            val hasOpen = _records.value.any {
-                it.tradeId == trade.id && !it.isCloseSnapshot &&
-                    it.localImagePath.isNotBlank() && File(it.localImagePath).exists()
-            }
-            if (!hasOpen) {
-                captureAndArchiveTradeOpen(
-                    context = context,
-                    trade = trade,
-                    report = null,
-                    triggerCandles = emptyList(),
-                )
+        if (trades.isEmpty()) return _records.value
+        val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
+        val currentMap = _records.value.associateBy { "${it.tradeId}_${it.snapshotPhase}" }.toMutableMap()
+        var modified = false
+
+        val targetTrades = trades.sortedByDescending { it.openedAt }.take(maxTrades).reversed()
+        for (trade in targetTrades) {
+            val openKey = "${trade.id}_OPEN"
+            val existingOpen = currentMap[openKey]
+            if (existingOpen == null || existingOpen.localImagePath.isBlank() || !File(existingOpen.localImagePath).exists()) {
+                runCatching {
+                    val rec = buildSyntheticSnapshotRecordForTrade(trade, isClosePhase = false)
+                    val bmp = renderTradeIchimokuSnapshotBitmap(rec)
+                    val webpBytes = compressBitmapToCompactWebp(bmp, quality = 78)
+                    bmp.recycle()
+                    val embedded = attachEmbeddedJsonToImageBytes(webpBytes, rec)
+                    val safeSym = trade.symbol.replace("/", "_").replace(" ", "_")
+                    val fileName = "AurumTrade_No${rec.displayTradeNumber}_OPEN_${safeSym}_${trade.interval.label}_${trade.openedAt}.webp"
+                    val localFile = File(dir, fileName)
+                    localFile.writeBytes(embedded)
+                    val galleryUri = if (saveToPhoneGallery) {
+                        saveImageAndSelfReadableDataToPhoneStorage(context, fileName, embedded, rec)
+                    } else ""
+                    currentMap[openKey] = rec.copy(
+                        localImagePath = localFile.absolutePath,
+                        phoneGalleryUri = galleryUri,
+                        imageSizeBytes = embedded.size.toLong(),
+                    )
+                    modified = true
+                }
             }
             if (!trade.isOpen) {
-                val hasClose = _records.value.any {
-                    it.tradeId == trade.id && it.isCloseSnapshot &&
-                        it.localImagePath.isNotBlank() && File(it.localImagePath).exists()
-                }
-                if (!hasClose) {
-                    captureAndArchiveTradeClose(
-                        context = context,
-                        closedTrade = trade,
-                        closeCandles = emptyList(),
-                    )
+                val closeKey = "${trade.id}_CLOSE"
+                val existingClose = currentMap[closeKey]
+                if (existingClose == null || existingClose.localImagePath.isBlank() || !File(existingClose.localImagePath).exists()) {
+                    runCatching {
+                        val rec = buildSyntheticSnapshotRecordForTrade(trade, isClosePhase = true)
+                        val bmp = renderTradeIchimokuSnapshotBitmap(rec)
+                        val webpBytes = compressBitmapToCompactWebp(bmp, quality = 78)
+                        bmp.recycle()
+                        val embedded = attachEmbeddedJsonToImageBytes(webpBytes, rec)
+                        val safeSym = trade.symbol.replace("/", "_").replace(" ", "_")
+                        val closeAt = trade.closedAt ?: (trade.openedAt + 900_000L)
+                        val fileName = "AurumTrade_No${rec.displayTradeNumber}_CLOSE_${safeSym}_${trade.interval.label}_$closeAt.webp"
+                        val localFile = File(dir, fileName)
+                        localFile.writeBytes(embedded)
+                        val galleryUri = if (saveToPhoneGallery) {
+                            saveImageAndSelfReadableDataToPhoneStorage(context, fileName, embedded, rec)
+                        } else ""
+                        currentMap[closeKey] = rec.copy(
+                            localImagePath = localFile.absolutePath,
+                            phoneGalleryUri = galleryUri,
+                            imageSizeBytes = embedded.size.toLong(),
+                        )
+                        modified = true
+                    }
                 }
             }
+        }
+        if (modified) {
+            val updated = currentMap.values.sortedByDescending { it.effectiveTimestampMs }.take(800)
+            _records.value = updated
+            saveIndexToDisk(context, updated)
         }
         return _records.value
     }
@@ -251,14 +291,21 @@ object TradeSnapshotArchiveManager {
     }
 
     fun loadOrRenderSnapshotBitmap(record: ArchivedTradeSnapshotRecord): Bitmap {
-        if (record.localImagePath.isNotBlank()) {
+        val raw = if (record.localImagePath.isNotBlank()) {
             val f = File(record.localImagePath)
             if (f.exists()) {
-                val decoded = runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull()
-                if (decoded != null) return decoded
-            }
+                runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull()
+            } else null
+        } else null
+        val source = raw ?: renderTradeIchimokuSnapshotBitmap(record)
+        if (source.width <= 800 && source.height <= 560) return source
+        val scaled = runCatching {
+            Bitmap.createScaledBitmap(source, 760, 520, true)
+        }.getOrElse { source }
+        if (scaled !== source) {
+            runCatching { source.recycle() }
         }
-        return renderTradeIchimokuSnapshotBitmap(record)
+        return scaled
     }
 
     private fun classifyCloseConditionFa(trade: PaperTrade): String {
@@ -1156,80 +1203,84 @@ object TradeSnapshotArchiveManager {
      * بازخوانی خودکار تمام عکس‌ها و فایل‌های آرشیو ذخیره‌شده در حافظه گوشی (`Pictures/AurumEdge/TradeArchive` و `Download/AurumEdge/Archive`)
      * یا از یک URI انتخابی کاربر، و بازگردانی کامل رکوردهای آرشیو و معاملات به داخل اپ!
      */
-    @Synchronized
     fun scanAndRestoreFromPhoneStorage(
         context: Context,
         journalStore: JournalStore? = null,
     ): Int {
         var restoredCount = 0
-        val currentMap = _records.value.associateBy { "${it.tradeId}_${it.snapshotPhase}" }.toMutableMap()
-        val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
+        val restoredTrades = mutableListOf<PaperTrade>()
+        synchronized(this) {
+            val currentMap = _records.value.associateBy { "${it.tradeId}_${it.snapshotPhase}" }.toMutableMap()
+            val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
 
-        fun ingestBytes(bytes: ByteArray) {
-            val rec = extractEmbeddedSnapshotFromBytes(bytes) ?: return
-            val key = "${rec.tradeId}_${rec.snapshotPhase}"
-            val localFile = File(dir, "AurumTrade_No${rec.displayTradeNumber}_${rec.snapshotPhase}_${rec.symbol.replace("/", "_")}_${rec.timeframeLabel}_${rec.effectiveTimestampMs}.webp")
-            if (!localFile.exists()) {
-                runCatching { localFile.writeBytes(bytes) }
+            fun ingestBytes(bytes: ByteArray) {
+                val rec = extractEmbeddedSnapshotFromBytes(bytes) ?: return
+                val key = "${rec.tradeId}_${rec.snapshotPhase}"
+                val localFile = File(dir, "AurumTrade_No${rec.displayTradeNumber}_${rec.snapshotPhase}_${rec.symbol.replace("/", "_")}_${rec.timeframeLabel}_${rec.effectiveTimestampMs}.webp")
+                if (!localFile.exists()) {
+                    runCatching { localFile.writeBytes(bytes) }
+                }
+                val updatedRec = rec.copy(
+                    localImagePath = localFile.absolutePath,
+                    imageSizeBytes = bytes.size.toLong(),
+                )
+                if (key !in currentMap) {
+                    restoredCount++
+                }
+                currentMap[key] = updatedRec
+                updatedRec.fullPaperTrade?.let { trade ->
+                    restoredTrades += trade
+                }
             }
-            val updatedRec = rec.copy(
-                localImagePath = localFile.absolutePath,
-                imageSizeBytes = bytes.size.toLong(),
-            )
-            if (key !in currentMap) {
-                restoredCount++
-            }
-            currentMap[key] = updatedRec
-            updatedRec.fullPaperTrade?.let { trade ->
-                journalStore?.restoreArchivedTradeIfMissing(trade)
-            }
-        }
 
-        // ۱. اسکن MediaStore.Images و MediaStore.Downloads در اندروید ۱۰+
-        runCatching {
-            val resolver = context.contentResolver
-            val collections = mutableListOf<Uri>(MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                collections += MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            }
-            for (collection in collections) {
-                val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME)
-                val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
-                val selectionArgs = arrayOf("AurumTrade_%")
-                resolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
-                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
-                    while (cursor.moveToNext()) {
-                        val id = cursor.getLong(idCol)
-                        val itemUri = android.content.ContentUris.withAppendedId(collection, id)
-                        runCatching {
-                            resolver.openInputStream(itemUri)?.use { stream ->
-                                ingestBytes(stream.readBytes())
+            // ۱. اسکن MediaStore.Images و MediaStore.Downloads در اندروید ۱۰+
+            runCatching {
+                val resolver = context.contentResolver
+                val collections = mutableListOf<Uri>(MediaStore.Images.Media.EXTERNAL_CONTENT_URI)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    collections += MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                }
+                for (collection in collections) {
+                    val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME)
+                    val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
+                    val selectionArgs = arrayOf("AurumTrade_%")
+                    resolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+                        val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                        while (cursor.moveToNext()) {
+                            val id = cursor.getLong(idCol)
+                            val itemUri = android.content.ContentUris.withAppendedId(collection, id)
+                            runCatching {
+                                resolver.openInputStream(itemUri)?.use { stream ->
+                                    ingestBytes(stream.readBytes())
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        // ۲. اسکن پوشه داخلی اپ
-        runCatching {
-            dir.listFiles()?.forEach { f ->
-                if (f.isFile && f.name.startsWith("AurumTrade_")) {
-                    ingestBytes(f.readBytes())
+            // ۲. اسکن پوشه داخلی اپ
+            runCatching {
+                dir.listFiles()?.forEach { f ->
+                    if (f.isFile && f.name.startsWith("AurumTrade_")) {
+                        ingestBytes(f.readBytes())
+                    }
                 }
             }
-        }
 
-        val merged = currentMap.values.sortedByDescending { it.openedAtMs }.take(500)
-        _records.value = merged
-        saveIndexToDisk(context, merged)
+            val merged = currentMap.values.sortedByDescending { it.openedAtMs }.take(500)
+            _records.value = merged
+            saveIndexToDisk(context, merged)
+        }
+        restoredTrades.forEach { trade ->
+            runCatching { journalStore?.restoreArchivedTradeIfMissing(trade) }
+        }
         return restoredCount
     }
 
     /**
      * بازخوانی از یک فایل تصویر `.webp` یا `.json` انتخاب‌شده توسط کاربر از فایل‌منیجر گوشی.
      */
-    @Synchronized
     fun importSnapshotFromUri(
         context: Context,
         uri: Uri,
@@ -1238,19 +1289,22 @@ object TradeSnapshotArchiveManager {
         return runCatching {
             val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
             val rec = extractEmbeddedSnapshotFromBytes(bytes) ?: return null
-            val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
-            val localFile = File(dir, "AurumTrade_No${rec.displayTradeNumber}_${rec.snapshotPhase}_${rec.symbol.replace("/", "_")}_${rec.timeframeLabel}_${rec.effectiveTimestampMs}.webp")
-            localFile.writeBytes(bytes)
-            val updatedRec = rec.copy(
-                localImagePath = localFile.absolutePath,
-                imageSizeBytes = bytes.size.toLong(),
-            )
-            val merged = (_records.value.filterNot { it.tradeId == rec.tradeId && it.snapshotPhase == rec.snapshotPhase } + updatedRec)
-                .sortedByDescending { it.effectiveTimestampMs }
-            _records.value = merged
-            saveIndexToDisk(context, merged)
+            val updatedRec = synchronized(this) {
+                val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
+                val localFile = File(dir, "AurumTrade_No${rec.displayTradeNumber}_${rec.snapshotPhase}_${rec.symbol.replace("/", "_")}_${rec.timeframeLabel}_${rec.effectiveTimestampMs}.webp")
+                localFile.writeBytes(bytes)
+                val nextRec = rec.copy(
+                    localImagePath = localFile.absolutePath,
+                    imageSizeBytes = bytes.size.toLong(),
+                )
+                val merged = (_records.value.filterNot { it.tradeId == rec.tradeId && it.snapshotPhase == rec.snapshotPhase } + nextRec)
+                    .sortedByDescending { it.effectiveTimestampMs }
+                _records.value = merged
+                saveIndexToDisk(context, merged)
+                nextRec
+            }
             updatedRec.fullPaperTrade?.let { trade ->
-                journalStore?.restoreArchivedTradeIfMissing(trade)
+                runCatching { journalStore?.restoreArchivedTradeIfMissing(trade) }
             }
             updatedRec
         }.getOrNull()

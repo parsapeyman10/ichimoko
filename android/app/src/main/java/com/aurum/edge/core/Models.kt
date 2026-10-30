@@ -258,7 +258,7 @@ data class PaperTrade(
     val riskPerOz: Double get() = kotlin.math.abs(entry - (initialStopLoss ?: stopLoss))
     val rewardPerOz: Double get() = kotlin.math.abs(takeProfit - entry)
     val effectiveOptimalRr: Double
-        get() = if (optimalRiskReward >= 1.5) optimalRiskReward else riskReward.coerceAtLeast(1.5)
+        get() = if (optimalRiskReward >= 1.5) optimalRiskReward.coerceIn(1.5, 3.0) else riskReward.coerceIn(1.5, 3.0)
 
     fun buildRrFormulaSummaryFa(): String {
         val initSl = initialStopLoss ?: stopLoss
@@ -267,7 +267,7 @@ data class PaperTrade(
         val fmt = if (entry >= 500.0) "%.2f" else if (entry >= 10.0) "%.3f" else "%.5f"
         val rStr = String.format(java.util.Locale.US, fmt, riskDist)
         val tpStr = String.format(java.util.Locale.US, fmt, rewardDist)
-        val rrStr = String.format(java.util.Locale.US, "%.2f", riskReward)
+        val rrStr = String.format(java.util.Locale.US, "%.2f", riskReward.coerceIn(1.5, 3.0))
         return "فرمول R:R = پاداش (|TP−Entry| = $tpStr) ÷ ریسک ۱R (|Entry−SL| = $rStr) = 1:$rrStr"
     }
 
@@ -275,13 +275,8 @@ data class PaperTrade(
         if (rrBreakdownFa.isNotBlank()) return rrBreakdownFa
         val optStr = String.format(java.util.Locale.US, "%.2f", effectiveOptimalRr)
         val model = BitcoinStrategyModel.fromId(strategyId)
-        val modelHint = "${model.badgeFa} (${model.combinationCategoryFa} · پایه 1:${String.format(java.util.Locale.US, "%.2f", model.baseOptimalRr)})"
-        val runnerHint = if (riskReward > 3.0) {
-            " · 🔒 حد ضرر کاملاً ثابت و غیرپله‌ای با حفظ R:R اولیه بالای ۱:۳"
-        } else {
-            " · 🔒 حد ضرر کاملاً ثابت و غیرپله‌ای"
-        }
-        return "عدد مناسب R:R این معامله: 1:$optStr — بر اساس $modelHint$runnerHint"
+        val modelHint = "${model.badgeFa} (${model.combinationCategoryFa} · پایه 1:${String.format(java.util.Locale.US, "%.2f", model.baseOptimalRr.coerceIn(1.5, 3.0))})"
+        return "عدد مناسب R:R این معامله: 1:$optStr (در بازه قفل‌شده ۱.۵ تا ۳.۰) — بر اساس $modelHint · 🔒 حد ضرر ساختاری کاملاً ثابت و غیرپله‌ای"
     }
 
     val totalRoundTripFeeUsd: Double

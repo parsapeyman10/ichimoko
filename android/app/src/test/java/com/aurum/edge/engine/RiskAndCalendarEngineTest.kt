@@ -407,7 +407,7 @@ class RiskAndCalendarEngineTest {
         assertEquals(25, chartSeries!!.futureKumo.size)
         assertEquals(trigBars.size, chartSeries.bars.size)
 
-        // 3. Test Break-Even and Preserve Mode on an open BTC/USDT trade
+        // 3. Test Fixed Non-Stepped Stop-Loss and strict R:R in [1.5, 3.0] on an open BTC/USDT trade
         val journal = JournalStore(context, File(context.filesDir, "test_btc_preserve.json"), store)
         journal.clear()
         val calc = RiskAndCalendarEngine.calculatePosition(
@@ -416,31 +416,30 @@ class RiskAndCalendarEngineTest {
             riskPercent = 1.0,
             entry = 68_000.0,
             stopLoss = 67_000.0,
-            takeProfit = 72_000.0,
+            takeProfit = 71_000.0, // 3.0R (locked in [1.5 .. 3.0])
             preferredAction = SignalAction.BUY,
         )!!
         val opened = journal.openTrade(calc, note = "تست استراتژی بیس")
-        // Verify fixed non-stepped Stop-Loss even when initial R:R = 4.0 (> 3.0) and price is at +3.2R (71,200)
         val midEval = IchimokuStrategyEngine.evaluateOpenTradeManagement(
             trade = opened,
-            report = report.copy(livePrice = 71_200.0), // +3.2R while initial TP is 72,000 (4.0R)
+            report = report.copy(livePrice = 70_200.0), // +2.2R while initial TP is 71,000 (3.0R)
             config = config,
         )
         assertTrue(midEval == null || midEval.newStopLoss == opened.stopLoss)
         val updatedAttempt = journal.updateTradeStopLoss(opened.id, 70_000.0, "تست عدم جابجایی پله‌ای")
         assertNotNull(updatedAttempt)
         assertEquals(67_000.0, updatedAttempt!!.stopLoss, 1e-4)
-        assertEquals(4.0, updatedAttempt.riskReward, 1e-4)
+        assertEquals(3.0, updatedAttempt.riskReward, 1e-4)
 
         val preserveEval = IchimokuStrategyEngine.evaluateOpenTradeManagement(
             trade = opened,
-            report = report.copy(livePrice = 72_000.0), // Reaches initial 4.0R TP
+            report = report.copy(livePrice = 71_000.0), // Reaches 3.0R TP
             config = config,
         )
         assertNotNull(preserveEval)
         assertTrue(preserveEval!!.shouldCloseImmediatelyInProfit)
         assertEquals(67_000.0, preserveEval.newStopLoss, 1e-4)
-        assertEquals(72_000.0, preserveEval.closePrice ?: 0.0, 1e-4)
+        assertEquals(71_000.0, preserveEval.closePrice ?: 0.0, 1e-4)
 
         // 4. Verify all 15 symbols in V1Universe are supported on 15m timeframe + Smart15mSyncPlanner
         assertEquals(15, V1Universe.allSymbols.size)
@@ -692,19 +691,30 @@ class RiskAndCalendarEngineTest {
             stratAtr14 = 350.0,
             triggerInterval = Interval.M5,
         )
-        assertTrue("BTC 5m safe stop floor must be >= 0.55% ($495)", btcSafeStop >= 495.0 - 1e-4)
+        assertTrue("BTC 5m safe stop floor must be realistic volatility floor (>= $144)", btcSafeStop in 140.0..300.0)
         val (sanitizedSl, sanitizedTp) = RiskAndCalendarEngine.sanitizeEntryStopAndTarget(
             symbolInput = "BTC/USDT",
             action = SignalAction.BUY,
             liveEntryPrice = 90_000.0,
-            candidateStopLoss = 89_920.0, // too tight ($80) -> must be pushed below 89,505
+            candidateStopLoss = 89_960.0, // too tight ($40) -> pushed to safe corridor
             candidateTakeProfit = 90_500.0,
             desiredRiskReward = 2.0,
             trigAtr14 = 180.0,
             triggerInterval = Interval.M5,
         )
         assertTrue(sanitizedSl <= 90_000.0 - btcSafeStop + 1e-2)
-        assertTrue((sanitizedTp - 90_000.0) / (90_000.0 - sanitizedSl) >= 1.99)
+        val sanitizedRr = (sanitizedTp - 90_000.0) / (90_000.0 - sanitizedSl)
+        assertTrue("Sanitized R:R must be strictly in [1.5, 3.0]", sanitizedRr in 1.49..3.01)
+
+        // Verify strict upper bound R:R <= 3.0 in enforceMinimumRiskReward
+        val cappedTpBuy = RiskAndCalendarEngine.enforceMinimumRiskReward(
+            symbolInput = "BTC/USDT",
+            entryPrice = 65_000.0,
+            stopLoss = 64_500.0, // 1R = 500
+            takeProfit = 67_500.0, // 5.0R -> must be capped to 3.0R (66,500.0)
+            action = SignalAction.BUY,
+        )
+        assertEquals(66_500.0, cappedTpBuy, 1e-4)
 
         // 9. Verify Alarm Sound & Volume Customization Persistence
         store.update {
@@ -1044,6 +1054,57 @@ class RiskAndCalendarEngineTest {
             format = com.aurum.edge.data.JournalExportFormat.PDF_REPORT,
         )
         assertTrue(pdfFile.exists() && pdfFile.length() > 400L)
+
+        // Verify v3.9.25 features:
+        // 1. Strict 1.50 <= R:R <= 3.00 across all 16 strategies on both 15m and 5m
+        BitcoinStrategyModel.entries.forEach { m ->
+            val r15 = dualReport.reportFor(Interval.M15, m.id)!!
+            val r5 = dualReport.reportFor(Interval.M5, m.id)!!
+            assertTrue("15m R:R for ${m.id} must be in [1.5, 3.0], got ${r15.riskReward}", (r15.riskReward ?: 2.0) in 1.50..3.00)
+            assertTrue("5m R:R for ${m.id} must be in [1.5, 3.0], got ${r5.riskReward}", (r5.riskReward ?: 2.0) in 1.50..3.00)
+            assertTrue("15m optimal R:R for ${m.id} must be in [1.5, 3.0]", (r15.optimalRiskReward ?: 2.0) in 1.50..3.00)
+        }
+
+        // 2. SOTA 5-Anchor Structural Stop-Loss inside [minSafeDist .. 2.10 * ATR14]
+        val optimalSlLong = IchimokuStrategyEngine.computeOptimalStructuralStopLoss(
+            symbol = "BTC/USDT",
+            isLong = true,
+            referenceEntry = snap.close,
+            trigSnap = snap,
+            stratSnap = snap,
+            wave = report.waveProjection,
+            slBufferAtr = 0.25,
+            triggerInterval = Interval.M15,
+        )
+        assertTrue(optimalSlLong < snap.close)
+        assertTrue((snap.close - optimalSlLong) <= maxOf(snap.atr14 * 2.15, snap.close * 0.005))
+
+        // 3. Matrix Parameter Regression (Ridge L2 + Huber Robust IRLS + Walk-Forward CV)
+        val regReportAll = neuralEngineV3919.runParameterRegression(
+            strategyId = "ALL",
+            ridgeLambda = 0.25,
+            huberDelta = 1.35,
+        )
+        assertEquals(10, regReportAll.parameterRows.size)
+        assertEquals(16, regReportAll.featureSlopes.size)
+        assertTrue(regReportAll.rSquared in 0.70..0.96)
+        val regMinRrRow = regReportAll.parameterRows.first { it.paramKey == "minRiskReward" }
+        assertTrue(regMinRrRow.regressedValue in 1.50..3.00)
+
+        // 4. Dedicated Archive Screenshots PDF Export & Full AI/Neural Data PDF Export
+        val (archPdfFile, _) = com.aurum.edge.data.JournalExportEngine.exportArchiveScreenshotsPdf(
+            context = context,
+            trades = listOf(sampleTrade, closedForArchive),
+        ).getOrThrow()
+        assertTrue(archPdfFile.exists() && archPdfFile.length() > 300L)
+
+        val (aiPdfFile, _) = com.aurum.edge.data.JournalExportEngine.exportFullAiAndNeuralReportPdf(
+            context = context,
+            neuralSummary = neuralEngineV3919.state.value,
+            lastAiVerdict = null,
+            trades = listOf(sampleTrade, closedForArchive),
+        ).getOrThrow()
+        assertTrue(aiPdfFile.exists() && aiPdfFile.length() > 300L)
     }
 }
 

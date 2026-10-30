@@ -68,18 +68,29 @@ class JournalStore(
             val assigned = numberedById[t.id] ?: t.tradeNumber
             val isLegacyDrive = t.strategyId.trim() in BitcoinStrategyModel.legacyIndividualDriveIds
             val fixedSl = t.initialStopLoss ?: t.stopLoss
-            val needsFixedSlReset = t.stopLoss != fixedSl || t.initialStopLoss == null
+            val clampedRr = if (t.riskReward.isFinite()) t.riskReward.coerceIn(1.50, 3.00) else 2.00
+            val clampedOptRr = if (t.optimalRiskReward > 0.0 && t.optimalRiskReward.isFinite()) {
+                t.optimalRiskReward.coerceIn(1.50, 3.00)
+            } else {
+                t.optimalRiskReward
+            }
+            val needsFixedSlReset = t.stopLoss != fixedSl || t.initialStopLoss == null ||
+                t.riskReward != clampedRr || t.optimalRiskReward != clampedOptRr
             when {
                 isLegacyDrive && (t.tradeNumber != assigned || needsFixedSlReset) -> t.copy(
                     tradeNumber = assigned,
                     stopLoss = fixedSl,
                     initialStopLoss = fixedSl,
+                    riskReward = clampedRr,
+                    optimalRiskReward = clampedOptRr,
                     strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
                     strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
                 )
                 isLegacyDrive -> t.copy(
                     stopLoss = fixedSl,
                     initialStopLoss = fixedSl,
+                    riskReward = clampedRr,
+                    optimalRiskReward = clampedOptRr,
                     strategyId = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id,
                     strategyTitleFa = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.titleFa,
                 )
@@ -87,6 +98,8 @@ class JournalStore(
                     tradeNumber = assigned,
                     stopLoss = fixedSl,
                     initialStopLoss = fixedSl,
+                    riskReward = clampedRr,
+                    optimalRiskReward = clampedOptRr,
                 )
                 else -> t
             }

@@ -100,8 +100,8 @@ class BackgroundTradingService : Service() {
     }
 
     private fun startForegroundSafe(title: String, text: String) {
-        runCatching {
-            val notification = buildOngoingNotification(this, title, text)
+        val notification = runCatching { buildOngoingNotification(this, title, text) }.getOrNull() ?: return
+        val started = runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
                     NOTIFICATION_ID_ONGOING,
@@ -111,6 +111,15 @@ class BackgroundTradingService : Service() {
             } else {
                 startForeground(NOTIFICATION_ID_ONGOING, notification)
             }
+            true
+        }.getOrElse {
+            runCatching {
+                startForeground(NOTIFICATION_ID_ONGOING, notification)
+                true
+            }.getOrDefault(false)
+        }
+        if (!started) {
+            runCatching { stopSelf() }
         }
     }
 
@@ -184,13 +193,15 @@ class BackgroundTradingService : Service() {
                     putExtra(EXTRA_TEXT, text)
                 }
                 if (enabled) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        appCtx.startForegroundService(intent)
-                    } else {
+                    runCatching {
                         appCtx.startService(intent)
+                    }.onFailure {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            runCatching { appCtx.startForegroundService(intent) }
+                        }
                     }
                 } else {
-                    appCtx.stopService(intent)
+                    runCatching { appCtx.stopService(intent) }
                 }
             }
         }

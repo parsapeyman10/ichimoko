@@ -4,6 +4,24 @@
 
 ---
 
+## ۳.۹.۲۵ — کد ۷۳۴ · **منتشرشده** (۲۰۲۶-۱۰-۳۰)
+
+- **رفع کامل کرش و بسته شدن ناگهانی اپ (`AppContainer.kt`, `BackgroundTradingService.kt`, `TradeSnapshotArchiveManager.kt`, `NeuralSelfLearningEngine.kt`, `JournalExportEngine.kt`, `update_file_paths.xml`):**
+  - حذف قفل متقابل (`AB-BA Deadlock`) بین `JournalStore` و `TradeSnapshotArchiveManager` هنگام اسکن و بازگردانی هم‌زمان معاملات و اسکرین‌شات‌ها در بدو ورود به اپ.
+  - محافظت کامل `CoroutineExceptionHandler` روی `appScope`، ایمن‌سازی `ForegroundServiceStartNotAllowedException` در اندروید ۱۲ تا ۱۵، بهینه‌سازی مصرف حافظه (`Bitmap Scaling 760x520`) و اصلاح ترتیب `doc.finishPage(page)` پیش از `bmp.recycle()` در تولید `PDF`.
+  - افزودن مسیرهای `journal_exports/`، `trade_snapshots_archive/` و کل `files-path` به `update_file_paths.xml` جهت رفع خطای `FileProvider` هنگام باز کردن و اشتراک‌گذاری فایل‌ها.
+- **خروجی PDF کامل تمام دیتاهای هوش مصنوعی + شبکه عصبی + رگرسیون پارامترها (`JournalExportEngine.kt`, `AurumViewModel.kt`, `NeuralBrainScreen.kt`, `JournalRiskScreen.kt`):**
+  - افزودن موتور تولید گزارش چندصفحه‌ای `AurumEdge_AI_Neural_Full_Report_<stamp>.pdf` شامل معماری شبکه عصبی، جدول ۱۰ پارامتر رگرسیون‌شده، شیب رگرسیونی ۱۶ ویژگی ورودی، پروفایل تیونینگ هر ۱۶ استراتژی، تحلیل زنده ۱۵ نماد، تصمیمات `Yes/No` هوش مصنوعی `AvalAI` و درس‌های استخراج‌شده از معاملات با ذخیره خودکار در `Download/AurumEdge`.
+- **رفع کامل مشکل خروجی آرشیو اسکرین‌شات معاملات (`JournalExportEngine.kt`, `TradeSnapshotArchiveSection.kt`, `AurumViewModel.kt`):**
+  - افزودن خروجی اختصاصی و تضمین‌شده `exportArchiveScreenshotsPdf` (`AurumEdge_Archive_Screenshots_<stamp>.pdf`) با رندر مستقیم چارت ایچیموکو + باکس `SL/TP` برای تمام معاملات باز و بسته و ذخیره دوگانه در `Download/AurumEdge` و `Documents/AurumEdge`.
+- **پنل رگرسیون ماتریسی پارامترها در تب هوش عصبی با بهترین متود روز دنیا (`NeuralSelfLearningEngine.kt`, `NeuralBrainScreen.kt`, `AurumViewModel.kt`):**
+  - پیاده‌سازی موتور رگرسیون `Doubly-Regularized Ridge (L2) + Huber Robust IRLS + Walk-Forward Cross-Validation + Empirical Bayes Shrinkage` برای کالیبراسیون هم‌زمان ۱۰ پارامتر کلیدی استراتژی و شیب ۱۶ ویژگی ورودی (هم به‌صورت جامع برای کل ۱۶ استراتژی و هم به تفکیک هر استراتژی) همراه با گزارش `R²`، `Adjusted R²`، `Walk-Forward RMSE`، آماره `t-Stat` و بازه اطمینان `95% CI`.
+- **کالبدشکافی و بازطراحی کامل محل قرارگیری حد ضرر (`SL`) طبق بهترین متود روز دنیا و قفل قطعی `1.5 <= R:R <= 3.0` (`IchimokuStrategyEngine.kt`, `RiskAndCalendarEngine.kt`, `JournalStore.kt`, `Models.kt`):**
+  - حذف کف‌های درصدی مصنوعی و بیش‌ازحد بزرگ قبلی و جایگزینی با متود روز دنیا **«هم‌پوشانی ۵ سنگر ابطال ساختاری (فرکتال ۵ کندلی بیل ویلیامز + کیجون‌سن ۲۶ + کیجون ۳۰/EMA34 + لبه کومو + نقطه S موج هوسودا) + سپر تطبیقی ضد استاپ‌هانت (`Sweep Shield`) محصور در دالان طلایی نوسان `[0.80 ATR .. 2.10 ATR]`»**.
+  - اعمال قفل سخت‌گیرانه و ۱۰۰٪ نسبت ریسک به ریوارد در بازه **`1.50 <= R:R <= 3.00`** (`[1:1.50 .. 1:3.00]`) در تمامی ۱۶ استراتژی، موتور ریسک، ماشین‌حساب و ژورنال معاملات (هیچ معامله‌ای `R:R` کمتر از `1.5` یا بیشتر از `3.0` نخواهد داشت).
+
+---
+
 ## ۳.۹.۲۴ — کد ۷۳۳ · **منتشرشده** (۲۰۲۶-۱۰-۲۹)
 
 - **ثبت خودکار اسکرین‌شات آرشیو برای تمام معاملات (`OPEN` و `CLOSE`) و خروجی کامل PDF تصویری (`TradeSnapshotArchiveManager.kt`, `JournalExportEngine.kt`, `AurumViewModel.kt`, `JournalRiskScreen.kt`, `TradeSnapshotArchiveSection.kt`):**

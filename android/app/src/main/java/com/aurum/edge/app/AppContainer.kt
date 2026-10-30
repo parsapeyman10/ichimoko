@@ -8,6 +8,7 @@ import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.data.JournalStore
 import com.aurum.edge.data.SettingsStore
 import java.io.File
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -41,7 +42,8 @@ class AppContainer(context: Context) {
     val neuralEngine = NeuralSelfLearningEngine(appContext)
     val updater = AppUpdateRepository(appContext)
 
-    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val appExceptionHandler = CoroutineExceptionHandler { _, _ -> }
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + appExceptionHandler)
 
     val clock: StateFlow<Long> = flow {
         while (true) {

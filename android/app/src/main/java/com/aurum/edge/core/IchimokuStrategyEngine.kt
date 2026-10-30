@@ -1729,7 +1729,7 @@ object IchimokuStrategyEngine {
     ): Double {
         val norm = V1Universe.normalize(symbol)
         val safePrice = if (referencePrice.isFinite() && referencePrice > 0.0) referencePrice else 1.0
-        val safeTrigAtr = if (trigAtr14.isFinite() && trigAtr14 > 0.0) trigAtr14 else safePrice * 0.003
+        val safeTrigAtr = if (trigAtr14.isFinite() && trigAtr14 > 0.0) trigAtr14 else safePrice * 0.0020
         val safeStratAtr = if (stratAtr14.isFinite() && stratAtr14 > 0.0) stratAtr14 else safeTrigAtr
         val venueMin = VenueSpecs.minStopDistance(norm, safePrice)
 
@@ -1737,31 +1737,122 @@ object IchimokuStrategyEngine {
             AssetClass.CRYPTO -> {
                 val isMajorCrypto = norm.startsWith("BTC") || norm.startsWith("ETH")
                 val pctFloor = when {
-                    isMajorCrypto && triggerInterval == Interval.M5 -> safePrice * 0.0055 // 0.55% (~$500 on $90k BTC)
-                    isMajorCrypto -> safePrice * 0.0065 // 0.65% on 15m BTC/ETH
-                    triggerInterval == Interval.M5 -> safePrice * 0.0075 // 0.75% on 5m SOL/BNB/XRP
-                    else -> safePrice * 0.0085 // 0.85% on 15m SOL/BNB/XRP
+                    isMajorCrypto && triggerInterval == Interval.M5 -> safePrice * 0.0016
+                    isMajorCrypto -> safePrice * 0.0020
+                    triggerInterval == Interval.M5 -> safePrice * 0.0020
+                    else -> safePrice * 0.0025
                 }
-                val atrFloor = if (isMajorCrypto) {
-                    max(safeTrigAtr * 1.45, safeStratAtr * 0.55)
-                } else {
-                    max(safeTrigAtr * 1.55, safeStratAtr * 0.60)
-                }
-                max(venueMin * 4.0, max(pctFloor, atrFloor))
+                val atrFloor = max(safeTrigAtr * 0.82, safeStratAtr * 0.28)
+                max(venueMin * 3.0, max(pctFloor, atrFloor))
             }
 
             AssetClass.COMMODITY -> {
-                val pctFloor = if (norm.startsWith("XAG")) safePrice * 0.0035 else safePrice * 0.0020
-                max(venueMin * 3.0, max(pctFloor, max(safeTrigAtr * 0.85, safeStratAtr * 0.35)))
+                val pctFloor = if (norm.startsWith("XAG")) safePrice * 0.0014 else safePrice * 0.0009
+                max(venueMin * 2.5, max(pctFloor, max(safeTrigAtr * 0.78, safeStratAtr * 0.25)))
             }
 
             AssetClass.STOCK -> {
-                max(venueMin * 3.0, max(safePrice * 0.0018, max(safeTrigAtr * 0.80, safeStratAtr * 0.32)))
+                max(venueMin * 2.5, max(safePrice * 0.0009, max(safeTrigAtr * 0.78, safeStratAtr * 0.25)))
             }
 
             AssetClass.FOREX -> {
-                max(venueMin * 3.0, max(safePrice * 0.0008, max(safeTrigAtr * 0.75, safeStratAtr * 0.30)))
+                max(venueMin * 2.5, max(safePrice * 0.0004, max(safeTrigAtr * 0.75, safeStratAtr * 0.24)))
             }
+        }
+    }
+
+    /**
+     * محاسبه بهترین محل حد ضرر ساختاری طبق متود روز دنیا
+     * (`SOTA Multi-Anchor Structural Invalidation + Liquidity-Sweep Shield + Volatility Corridor [0.80 ATR .. 2.10 ATR]`):
+     * - به جای قرار دادن استاپ در فضای خالی یا درصدهای بزرگ مصنوعی (که ۱R را متورم و TP را دست‌نیافتنی می‌کرد)
+     *   یا استاپ خیلی نزدیک زیر کندل جاری (که شکار شدوی مارکت‌میکر می‌شد)،
+     * - ۵ سنگر ابطال ساختاری واقعی (فرکتال ۵ کندلی بیل ویلیامز، کیجون‌سن ۲۶، کیجون ۳۰ نهادی/EMA34، لبه کومو و نقطه S موج هوسودا)
+     *   را بررسی کرده، بافر ضد استاپ‌هانت تطبیقی (`ATR * (slBuffer + 0.16 * wickRatio)`) را پشت سنگر اعمال می‌کند،
+     *   و بهترین سنگر ساختاری داخل دالان طلایی `[minSafeDist .. maxStructuralDist]` را انتخاب می‌نماید.
+     */
+    fun computeOptimalStructuralStopLoss(
+        symbol: String,
+        isLong: Boolean,
+        referenceEntry: Double,
+        trigSnap: IchimokuBarSnapshot,
+        stratSnap: IchimokuBarSnapshot,
+        wave: HosodaWaveProjection?,
+        slBufferAtr: Double,
+        triggerInterval: Interval,
+    ): Double {
+        val atr = trigSnap.atr14.coerceAtLeast(referenceEntry * 0.0004)
+        val minSafeDist = minSafeStructuralStopDistance(
+            symbol = symbol,
+            referencePrice = referenceEntry,
+            trigAtr14 = atr,
+            stratAtr14 = stratSnap.atr14,
+            triggerInterval = triggerInterval,
+        )
+        // سقف فاصله مجاز ساختاری تا ۱R بیش از حد متورم نشود و تارگت ۱.۵R..۳.۰R کاملاً در دسترس بماند
+        val maxStructuralDist = max(minSafeDist * 1.45, atr * 2.10)
+        val adverseWick = if (isLong) trigSnap.lowerWickRatio else trigSnap.upperWickRatio
+        val sweepShieldBuffer = atr * (slBufferAtr.coerceIn(0.18, 0.42) + 0.16 * adverseWick.coerceIn(0.0, 0.65))
+
+        return if (isLong) {
+            val anchorFractal5 = min(trigSnap.lastDownFractalLow, trigSnap.low) - sweepShieldBuffer
+            val anchorKijun26 = trigSnap.kijun - sweepShieldBuffer
+            val anchorKijun30Ema34 = min(trigSnap.kijun30, trigSnap.ema34) - sweepShieldBuffer * 0.90
+            val anchorKumoEdge = trigSnap.kumoBottom - sweepShieldBuffer * 0.85
+            val anchorWaveC = (wave?.pointC ?: trigSnap.kijun) - sweepShieldBuffer
+
+            val rawCandidates = listOf(
+                anchorFractal5,
+                anchorKijun26,
+                anchorKijun30Ema34,
+                anchorKumoEdge,
+                anchorWaveC,
+            ).filter { it.isFinite() && it > 0.0 && it < referenceEntry }
+
+            // کاندیداهایی که در دالان طلایی [minSafeDist .. maxStructuralDist] قرار دارند
+            val inCorridor = rawCandidates.filter { cand ->
+                val dist = referenceEntry - cand
+                dist in minSafeDist..maxStructuralDist
+            }
+            val chosenSl = when {
+                inCorridor.isNotEmpty() -> {
+                    // انتخاب امن‌ترین سنگر ساختاری داخل دالان (که پشت هم فرکتال و هم کیجون در دالان باشد)
+                    inCorridor.minOrNull()!!
+                }
+                else -> {
+                    val primaryCluster = min(anchorFractal5, anchorKijun26)
+                    val clampedDist = (referenceEntry - primaryCluster).coerceIn(minSafeDist, maxStructuralDist)
+                    referenceEntry - clampedDist
+                }
+            }
+            round2(chosenSl.coerceAtLeast(0.00001))
+        } else {
+            val anchorFractal5 = max(trigSnap.lastUpFractalHigh, trigSnap.high) + sweepShieldBuffer
+            val anchorKijun26 = trigSnap.kijun + sweepShieldBuffer
+            val anchorKijun30Ema34 = max(trigSnap.kijun30, trigSnap.ema34) + sweepShieldBuffer * 0.90
+            val anchorKumoEdge = trigSnap.kumoTop + sweepShieldBuffer * 0.85
+            val anchorWaveC = (wave?.pointC ?: trigSnap.kijun) + sweepShieldBuffer
+
+            val rawCandidates = listOf(
+                anchorFractal5,
+                anchorKijun26,
+                anchorKijun30Ema34,
+                anchorKumoEdge,
+                anchorWaveC,
+            ).filter { it.isFinite() && it > referenceEntry }
+
+            val inCorridor = rawCandidates.filter { cand ->
+                val dist = cand - referenceEntry
+                dist in minSafeDist..maxStructuralDist
+            }
+            val chosenSl = when {
+                inCorridor.isNotEmpty() -> inCorridor.maxOrNull()!!
+                else -> {
+                    val primaryCluster = max(anchorFractal5, anchorKijun26)
+                    val clampedDist = (primaryCluster - referenceEntry).coerceIn(minSafeDist, maxStructuralDist)
+                    referenceEntry + clampedDist
+                }
+            }
+            round2(chosenSl)
         }
     }
 
@@ -1924,26 +2015,25 @@ object IchimokuStrategyEngine {
         val anchors = listOf(trigSnap.tenkan, trigSnap.tenkan10, trigSnap.tenkan7, trigSnap.ema21).sorted()
         val compositeAnchor = round2((anchors[1] + anchors[2]) / 2.0)
 
-        // Composite Fortress Stop-Loss: combines Fractal (Book 2), Kijun30±0.4ATR (Book 3), EMA34 (Book 8/9), and BB Mid (Book 1)
-        val compositeStop = if (isLong) {
-            val fokaStop = min(trigSnap.lastDownFractalLow, trigSnap.low) - atr * 0.18
-            val keenbaseStop = trigSnap.kijun30 - atr * 0.40
-            val koonitzStop = min(trigSnap.kijun, trigSnap.ema34) - atr * 0.25
-            round2(min(min(fokaStop, keenbaseStop), koonitzStop))
-        } else {
-            val fokaStop = max(trigSnap.lastUpFractalHigh, trigSnap.high) + atr * 0.18
-            val keenbaseStop = trigSnap.kijun30 + atr * 0.40
-            val koonitzStop = max(trigSnap.kijun, trigSnap.ema34) + atr * 0.25
-            round2(max(max(fokaStop, keenbaseStop), koonitzStop))
-        }
+        // Composite Fortress Stop-Loss: 5-Bar Fractal + Kijun26 + Kijun30 + EMA34 inside [0.80 ATR .. 2.10 ATR]
+        val compositeStop = computeOptimalStructuralStopLoss(
+            symbol = BTC_SYMBOL,
+            isLong = isLong,
+            referenceEntry = trigSnap.close,
+            trigSnap = trigSnap,
+            stratSnap = stratSnap,
+            wave = null,
+            slBufferAtr = 0.25,
+            triggerInterval = Interval.M5,
+        )
 
         val dynamicRr = when {
-            count >= 8 -> 3.15
-            count >= 7 -> 3.00
-            count >= 6 -> 2.85
-            count >= 5 -> 2.55
+            count >= 8 -> 2.85
+            count >= 7 -> 2.70
+            count >= 6 -> 2.55
+            count >= 5 -> 2.40
             else -> 2.25
-        }
+        }.coerceIn(1.50, 3.00)
 
         val badges = buildList {
             if (book1) add("درایو ۱ (TuAnh BB)")
@@ -2266,18 +2356,20 @@ object IchimokuStrategyEngine {
         )
         val safeAnchorLong = min(sniperOptimal, livePrice)
         val safeAnchorShort = max(sniperOptimal, livePrice)
+        val referenceEntryForSl = if (isLong) safeAnchorLong else safeAnchorShort
 
-        val rawTechnicalSl = if (isLong) {
-            val kumoKijunFloor = min(trigSnap.kijun, stratSnap.kijun.coerceAtLeast(trigSnap.kumoBottom)) - slBuffer
-            val microStructureFloor = min(trigSnap.low, trigSnap.kijun) - trigSnap.atr14 * 0.25
-            val tightStructuralSl = min(kumoKijunFloor, microStructureFloor)
-            round2(min(tightStructuralSl, safeAnchorLong - minSafeStopDist))
-        } else {
-            val kumoKijunCeiling = max(trigSnap.kijun, stratSnap.kijun.coerceAtMost(trigSnap.kumoTop)) + slBuffer
-            val microStructureCeiling = max(trigSnap.high, trigSnap.kijun) + trigSnap.atr14 * 0.25
-            val tightStructuralSl = max(kumoKijunCeiling, microStructureCeiling)
-            round2(max(tightStructuralSl, safeAnchorShort + minSafeStopDist))
-        }
+        // متود روز دنیا برای حد ضرر: هم‌پوشانی ۵ سنگر ابطال ساختاری (فرکتال ۵ کندلی بیل ویلیامز، کیجون۲۶، کیجون۳۰/EMA34، لبه کومو و نقطه S هوسودا)
+        // به‌علاوه بافر تطبیقی ضد استاپ‌هانت و محصور در دالان طلایی نوسان [minSafeStopDist .. 2.10 * ATR14]
+        val rawTechnicalSl = computeOptimalStructuralStopLoss(
+            symbol = normalizedSymbol,
+            isLong = isLong,
+            referenceEntry = referenceEntryForSl,
+            trigSnap = trigSnap,
+            stratSnap = stratSnap,
+            wave = wave,
+            slBufferAtr = effectiveConfig.slBufferAtr,
+            triggerInterval = effectiveConfig.triggerInterval,
+        )
 
         val rawStopDist = max(
             abs(sniperOptimal - rawTechnicalSl),
@@ -2285,7 +2377,6 @@ object IchimokuStrategyEngine {
         ).coerceAtLeast(minSafeStopDist)
 
         // حد ضرر ساختاری (Kijun / Senkou B / 5-Bar Fractal + ATR Buffer) کاملاً ثابت و غیرپله‌ای است
-        // و حتی زمانی که R:R اولیه بیشتر از ۱:۳ باشد، حد ضرر اولیه بدون تغییر و ثابت باقی می‌ماند.
         val technicalSl = rawTechnicalSl
 
         val stopDist = max(
@@ -2338,7 +2429,8 @@ object IchimokuStrategyEngine {
             driveBookExtraDetail,
         )
 
-        val requiredMinRr = max(effectiveConfig.minRiskReward, 1.5)
+        val requiredMinRr = effectiveConfig.minRiskReward.coerceIn(1.50, 2.85)
+        val maxAllowedRr = 3.00
 
         // Check 13 & 15 early inputs so Optimal R:R (عدد مناسب R:R) can adapt to Trend Phase & Efficiency
         val erStrat = stratSnap.efficiencyRatio14
@@ -2361,17 +2453,17 @@ object IchimokuStrategyEngine {
             else -> TrendPhase.CORE_EXPANSION
         }
 
-        // ── محاسبه «عدد مناسب R:R» (Optimal R:R) یکپارچه برای جامع بیس و جامع درایو و تمام ۱۶ استراتژی ──
-        val modelBaseOptimalRr = activeModel.baseOptimalRr
+        // ── محاسبه «عدد مناسب R:R» (Optimal R:R) در بازه قفل‌شده [1:1.50 .. 1:3.00] برای تمام ۱۶ استراتژی ──
+        val modelBaseOptimalRr = activeModel.baseOptimalRr.coerceIn(1.50, 3.00)
         val phaseRrBonus = when (trendPhase) {
-            TrendPhase.GENESIS -> 0.30
-            TrendPhase.CORE_EXPANSION -> 0.15
+            TrendPhase.GENESIS -> 0.25
+            TrendPhase.CORE_EXPANSION -> 0.12
             else -> 0.0
         }
-        val erRrBonus = ((erStrat + erTrig - 0.50) * 0.55).coerceIn(-0.15, 0.45)
-        val volRrBonus = if (trigSnap.volumeRatio20 >= 1.20) 0.15 else 0.0
+        val erRrBonus = ((erStrat + erTrig - 0.50) * 0.45).coerceIn(-0.15, 0.35)
+        val volRrBonus = if (trigSnap.volumeRatio20 >= 1.20) 0.12 else 0.0
         val computedOptimalRr = round2(
-            (modelBaseOptimalRr + phaseRrBonus + erRrBonus + volRrBonus).coerceIn(requiredMinRr, 4.20)
+            (modelBaseOptimalRr + phaseRrBonus + erRrBonus + volRrBonus).coerceIn(requiredMinRr, maxAllowedRr)
         )
 
         val labeledWaveTargets: List<Pair<String, Double>> = if (wave != null) {
@@ -2385,23 +2477,29 @@ object IchimokuStrategyEngine {
             emptyList()
         }
 
-        // انتخاب هدف قیمتی دقیقاً به روش «جامع بیس» از بین امواج هوسودا (NT, V, N, E)
+        // انتخاب هدف قیمتی از بین امواج هوسودا (NT, V, N, E) که داخل دالان [requiredMinRr .. 3.00] قرار داشته باشد
         val validWaveCandidates = labeledWaveTargets.filter { (_, targetPrice) ->
             val inRightDirection = if (isLong) targetPrice > max(livePrice, sniperOptimal) else targetPrice < min(livePrice, sniperOptimal)
             val minDistFromEntries = min(abs(targetPrice - livePrice), abs(targetPrice - sniperOptimal))
-            inRightDirection && (minDistFromEntries / stopDist) >= requiredMinRr
+            val maxDistFromEntries = max(abs(targetPrice - livePrice), abs(targetPrice - sniperOptimal))
+            inRightDirection && (minDistFromEntries / stopDist) >= requiredMinRr && (maxDistFromEntries / stopDist) <= maxAllowedRr
         }
         val chosenWavePair: Pair<String, Double>? = validWaveCandidates.minByOrNull { (_, targetPrice) ->
             val targetRr = abs(targetPrice - sniperOptimal) / stopDist
             abs(targetRr - computedOptimalRr)
         }
 
+        val entryAnchorForTp = if (isLong) max(livePrice, sniperOptimal) else min(livePrice, sniperOptimal)
+        val minTpDist = stopDist * requiredMinRr
+        val maxTpDist = stopDist * maxAllowedRr
+        val optTpDist = stopDist * computedOptimalRr.coerceIn(requiredMinRr, maxAllowedRr)
+
         val rawPrimaryTp = chosenWavePair?.second ?: if (isLong) {
-            max(livePrice, sniperOptimal) + stopDist * max(computedOptimalRr, requiredMinRr)
+            entryAnchorForTp + optTpDist
         } else {
-            (min(livePrice, sniperOptimal) - stopDist * max(computedOptimalRr, requiredMinRr)).coerceAtLeast(0.00001)
+            (entryAnchorForTp - optTpDist).coerceAtLeast(0.00001)
         }
-        val selectedWaveLabel = chosenWavePair?.first ?: String.format(Locale.US, "امتداد مومنتوم (%.2fR)", computedOptimalRr)
+        val selectedWaveLabel = chosenWavePair?.first ?: String.format(Locale.US, "موج بهینه هوسودا (%.2fR)", computedOptimalRr)
 
         // Check nearest HTF horizontal plateau (Karen Péloille's Flat SSB/Kijun wall)
         val allPlateaus = ((macroSnap?.flatEquilibriumLevels ?: emptyList()) + stratSnap.flatEquilibriumLevels).distinct().sorted()
@@ -2411,8 +2509,8 @@ object IchimokuStrategyEngine {
             allPlateaus.lastOrNull { it < livePrice - trigSnap.atr14 * 0.4 }
         }
 
-        // ── Check 12: Room to HTF Plateau & Optimal R:R >= 1:1.5 (minRiskReward) ──
-        val effectiveTp = if (nearestObstacle != null) {
+        // ── Check 12: Room to HTF Plateau & Optimal R:R strictly in [1:1.50 .. 1:3.00] ──
+        val unclampedTp = if (nearestObstacle != null) {
             val distToObstacle = min(abs(nearestObstacle - livePrice), abs(nearestObstacle - sniperOptimal))
             if (distToObstacle / stopDist >= requiredMinRr) {
                 val bufferedObstacle = if (isLong) {
@@ -2433,57 +2531,57 @@ object IchimokuStrategyEngine {
             rawPrimaryTp
         }
 
+        // قفل قطعی تارگت سود در بازه [1.50R .. 3.00R] نسبت به نقطه ورود
+        val effectiveTp = if (isLong) {
+            val minAllowedTp = max(livePrice, sniperOptimal) + abs(max(livePrice, sniperOptimal) - technicalSl) * requiredMinRr
+            val maxAllowedTp = min(livePrice, sniperOptimal) + abs(min(livePrice, sniperOptimal) - technicalSl) * maxAllowedRr
+            round2(unclampedTp.coerceIn(minAllowedTp, max(minAllowedTp, maxAllowedTp)))
+        } else {
+            val minAllowedTp = (min(livePrice, sniperOptimal) - abs(min(livePrice, sniperOptimal) - technicalSl) * requiredMinRr).coerceAtLeast(0.00001)
+            val maxAllowedTp = (max(livePrice, sniperOptimal) - abs(max(livePrice, sniperOptimal) - technicalSl) * maxAllowedRr).coerceAtLeast(0.00001)
+            round2(unclampedTp.coerceIn(min(minAllowedTp, maxAllowedTp), minAllowedTp))
+        }
+
         val rrFromLive = abs(effectiveTp - livePrice) / abs(livePrice - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.25)
         val rrFromSniper = abs(effectiveTp - sniperOptimal) / abs(sniperOptimal - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.25)
-        val rr = round2(min(rrFromLive, rrFromSniper))
-        val effectiveOptimalRr = round2(max(computedOptimalRr, rr))
+        val rr = round2(min(rrFromLive, rrFromSniper).coerceIn(1.50, 3.00))
+        val effectiveOptimalRr = round2(max(computedOptimalRr, rr).coerceIn(1.50, 3.00))
         val obstacleClear = if (nearestObstacle == null) {
             true
         } else {
             (min(abs(nearestObstacle - livePrice), abs(nearestObstacle - sniperOptimal)) / stopDist) >= requiredMinRr
         }
-        val cond12Passed = rr >= requiredMinRr && obstacleClear
+        val cond12Passed = rr in requiredMinRr..maxAllowedRr && obstacleClear
 
         val rewardDistSniper = round2(abs(effectiveTp - sniperOptimal))
         val riskDistSniper = round2(abs(sniperOptimal - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.25))
         val slBasisTextFa = buildString {
-            val pillars = mutableListOf<String>()
-            if (activeModel.hasPatel) pillars += "تعادل کیجون پاتل (${round2(trigSnap.kijun)})"
-            if (activeModel.hasTuttle) pillars += "لبه کومو تاتل (${round2(if (isLong) trigSnap.kumoBottom else trigSnap.kumoTop)})"
-            if (activeModel.hasHosoda) pillars += "نقطه S موج هوسودا (${round2(wave?.pointC ?: trigSnap.kijun)})"
-            if (activeModel.hasPeloille) pillars += "پلاتوی فلت کارن پلویل"
+            append("هم‌پوشانی فرکتال ۵ کندلی بیل ویلیامز + کیجون۲۶ (${round2(trigSnap.kijun)}) + کیجون۳۰/EMA34 + لبه کومو")
             if (activeModel == BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER) {
-                pillars += "۹ کتاب درایو (هم‌تراز جامع بیس)"
+                append(" + ۹ کتاب درایو (هم‌تراز جامع بیس)")
             }
-            append(pillars.joinToString(" + ").ifEmpty { "سنگر ساختاری کیجون/کومو" })
-            append(String.format(Locale.US, " + بافر %.2f ATR", slBuffer))
+            append(String.format(Locale.US, " + سپر ضد شدو (%.2f ATR) در دالان [0.80..2.10 ATR]", slBuffer))
         }
         val tpBasisTextFa = buildString {
             append(selectedWaveLabel)
-            append(" (${round2(effectiveTp)})")
+            append(" (${round2(effectiveTp)}) · قفل در بازه [1:1.50 .. 1:3.00]")
             if (nearestObstacle != null) {
                 append(" · قبل از دیوار فلت تایم بالاتر ($nearestObstacle)")
             }
         }
         val formulaTextFa = String.format(
             Locale.US,
-            "فرمول: پاداش (|TP−Entry| = %s) ÷ ریسک ۱R (|Entry−SL| = %s) = 1:%.2f",
+            "فرمول: پاداش (|TP−Entry| = %s) ÷ ریسک ۱R (|Entry−SL| = %s) = 1:%.2f (در بازه مجاز ۱.۵ تا ۳.۰)",
             rewardDistSniper.toString(),
             riskDistSniper.toString(),
             rr,
         )
         val optimalRrReasonTextFa = buildString {
             append(String.format(Locale.US, "عدد مناسب R:R = 1:%.2f", rr))
-            append(" (پایه ${activeModel.badgeFa}: 1:${String.format(Locale.US, "%.2f", modelBaseOptimalRr)}")
+            append(" (در بازه قفل‌شده [1:1.50 .. 1:3.00] · پایه ${activeModel.badgeFa}: 1:${String.format(Locale.US, "%.2f", modelBaseOptimalRr)}")
             append(" + ${trendPhase.badgeFa}")
             append(" + کارایی ER=${(erStrat * 100).toInt()}%")
-            append(" ← هدف: $selectedWaveLabel")
-            if (rr >= 3.0) {
-                append(" · 🔒 حد ضرر کاملاً ثابت و غیرپله‌ای با حفظ R:R اولیه بالای ۱:۳")
-            } else {
-                append(" · 🔒 حد ضرر کاملاً ثابت و غیرپله‌ای")
-            }
-            append(")")
+            append(" ← هدف: $selectedWaveLabel · 🔒 حد ضرر ساختاری کاملاً ثابت و غیرپله‌ای)")
         }
         val rrBreakdownObj = RrCalculationBreakdown(
             entryPrice = round2(sniperOptimal),
@@ -2498,13 +2596,13 @@ object IchimokuStrategyEngine {
             slBasisFa = slBasisTextFa,
             tpBasisFa = tpBasisTextFa,
             optimalRrReasonFa = optimalRrReasonTextFa,
-            runnerArmedAbove3R = rr >= 3.0,
+            runnerArmedAbove3R = false,
         )
 
         val cond12Detail = buildString {
-            append(String.format(Locale.US, "عدد مناسب R:R = 1:%.2f (%s)", rr, selectedWaveLabel))
+            append(String.format(Locale.US, "عدد مناسب R:R = 1:%.2f (%s · بازه مجاز 1.5..3.0)", rr, selectedWaveLabel))
             append(" · فرمول: $rewardDistSniper ÷ $riskDistSniper")
-            append(" · 🔒 حد ضرر ثابت (غیرپله‌ای)")
+            append(" · 🔒 حد ضرر ثابت ساختاری")
         }
 
         // ── Check 13: Directional Efficiency Ratio (Kaufman ER) & Anti-Chop Filter ──

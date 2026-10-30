@@ -92,7 +92,7 @@ data class RiskCalculationResult(
         stopLoss = stopLoss,
         takeProfit = takeProfit,
         confidence = 100.0,
-        riskReward = round2(riskReward),
+        riskReward = round2(riskReward.coerceIn(1.50, 3.00)),
         openedAt = openedAt,
         positionOz = positionUnits,
         note = note.trim(),
@@ -106,7 +106,7 @@ data class RiskCalculationResult(
         strategyId = strategyId,
         strategyTitleFa = strategyTitleFa,
         fixedRiskUsd = round2(riskBudgetUsd),
-        optimalRiskReward = if (optimalRiskReward >= 1.5) round2(optimalRiskReward) else round2(riskReward.coerceAtLeast(1.5)),
+        optimalRiskReward = if (optimalRiskReward >= 1.5) round2(optimalRiskReward.coerceIn(1.50, 3.00)) else round2(riskReward.coerceIn(1.50, 3.00)),
         rrBreakdownFa = rrBreakdownFa,
     )
 }
@@ -275,10 +275,11 @@ object RiskAndCalendarEngine {
     }
 
     const val MIN_REQUIRED_RISK_REWARD: Double = 1.5
+    const val MAX_ALLOWED_RISK_REWARD: Double = 3.0
     const val TREND_RUNNER_THRESHOLD_R: Double = 2.85
 
     /**
-     * تضمین می‌کند نسبت سود به ضرر (R:R) هر معامله همیشه حداقل ۱ به ۱.۵ (`1.5R`) و بالاتر باشد.
+     * تضمین می‌کند نسبت سود به ضرر (R:R) هر معامله همیشه دقیقاً در بازه قفل‌شده `1:1.5` تا `1:3.0` (`1.5 <= R:R <= 3.0`) باشد.
      */
     fun enforceMinimumRiskReward(
         symbolInput: String,
@@ -287,15 +288,22 @@ object RiskAndCalendarEngine {
         takeProfit: Double,
         action: SignalAction,
         minRiskReward: Double = MIN_REQUIRED_RISK_REWARD,
+        maxRiskReward: Double = MAX_ALLOWED_RISK_REWARD,
     ): Double {
-        val safeMinRr = max(minRiskReward, MIN_REQUIRED_RISK_REWARD)
+        val safeMinRr = minRiskReward.coerceIn(MIN_REQUIRED_RISK_REWARD, MAX_ALLOWED_RISK_REWARD)
+        val safeMaxRr = max(safeMinRr, maxRiskReward.coerceIn(MIN_REQUIRED_RISK_REWARD, MAX_ALLOWED_RISK_REWARD))
         val stopDist = abs(entryPrice - stopLoss)
         if (!stopDist.isFinite() || stopDist <= 1e-8) return takeProfit
         val currentTargetDist = abs(takeProfit - entryPrice)
-        if (currentTargetDist / stopDist >= safeMinRr - 1e-6) return takeProfit
+        val currentRr = currentTargetDist / stopDist
         val symbol = V1Universe.normalize(symbolInput)
         val decimals = priceDecimals(symbol, entryPrice)
-        val requiredDist = stopDist * safeMinRr
+        val isCorrectDirection = if (action == SignalAction.BUY) takeProfit > entryPrice else takeProfit < entryPrice
+        if (isCorrectDirection && currentRr in (safeMinRr - 1e-6)..(safeMaxRr + 1e-6)) {
+            return roundToDecimals(takeProfit, decimals)
+        }
+        val clampedRr = currentRr.coerceIn(safeMinRr, safeMaxRr)
+        val requiredDist = stopDist * clampedRr
         val adjustedTp = if (action == SignalAction.BUY) {
             entryPrice + requiredDist
         } else {
@@ -306,8 +314,9 @@ object RiskAndCalendarEngine {
 
     /**
      * همگام‌سازی و ایمن‌سازی نهایی نقطهٔ ورود، حد ضرر و حد سود با قیمت لحظه‌ای اجرا (Live Execution Anchor):
-     * تضمین می‌کند در لحظهٔ باز شدن معامله (به‌ویژه در ارزهای کریپتو)، حد ضرر دقیقاً در سمت درستِ قیمت ورود واقعی قرار گیرد
-     * و حداقل فاصلهٔ ایمن ساختاری (`minSafeStructuralStopDistance`) را داشته باشد تا معامله بلافاصله در چند ثانیه اول استاپ نخورد.
+     * تضمین می‌کند در لحظهٔ باز شدن معامله:
+     * ۱) حد ضرر دقیقاً در سمت درستِ قیمت ورود واقعی و داخل دالان طلایی نوسان `[minSafeDist .. maxSafeDist]` قرار گیرد.
+     * ۲) نسبت ریسک به ریوارد (`R:R`) قاطعانه در بازه `1.50 <= R:R <= 3.00` قرار داشته باشد.
      */
     fun sanitizeEntryStopAndTarget(
         symbolInput: String,
@@ -328,40 +337,47 @@ object RiskAndCalendarEngine {
             stratAtr14 = trigAtr14,
             triggerInterval = triggerInterval,
         )
-        val safeStop = if (action == SignalAction.BUY) {
-            val rawSl = if (candidateStopLoss.isFinite() && candidateStopLoss > 0.0 && candidateStopLoss < liveEntryPrice) {
-                candidateStopLoss
-            } else {
-                liveEntryPrice - minSafeDist
-            }
-            roundToDecimals(min(rawSl, liveEntryPrice - minSafeDist).coerceAtLeast(0.00001), decimals)
+        val maxSafeDist = if (trigAtr14.isFinite() && trigAtr14 > 0.0) {
+            max(minSafeDist * 1.45, trigAtr14 * 2.15)
         } else {
-            val rawSl = if (candidateStopLoss.isFinite() && candidateStopLoss > liveEntryPrice) {
-                candidateStopLoss
+            max(minSafeDist * 1.50, liveEntryPrice * 0.025)
+        }
+        val safeStop = if (action == SignalAction.BUY) {
+            val rawDist = if (candidateStopLoss.isFinite() && candidateStopLoss > 0.0 && candidateStopLoss < liveEntryPrice) {
+                (liveEntryPrice - candidateStopLoss).coerceIn(minSafeDist, maxSafeDist)
             } else {
-                liveEntryPrice + minSafeDist
+                minSafeDist
             }
-            roundToDecimals(max(rawSl, liveEntryPrice + minSafeDist), decimals)
+            roundToDecimals((liveEntryPrice - rawDist).coerceAtLeast(0.00001), decimals)
+        } else {
+            val rawDist = if (candidateStopLoss.isFinite() && candidateStopLoss > liveEntryPrice) {
+                (candidateStopLoss - liveEntryPrice).coerceIn(minSafeDist, maxSafeDist)
+            } else {
+                minSafeDist
+            }
+            roundToDecimals(liveEntryPrice + rawDist, decimals)
         }
 
         val stopDist = abs(liveEntryPrice - safeStop).coerceAtLeast(minSafeDist)
-        val safeRr = max(desiredRiskReward, MIN_REQUIRED_RISK_REWARD)
+        val safeMinRr = desiredRiskReward.coerceIn(MIN_REQUIRED_RISK_REWARD, MAX_ALLOWED_RISK_REWARD)
+        val minTpDist = stopDist * MIN_REQUIRED_RISK_REWARD
+        val maxTpDist = stopDist * MAX_ALLOWED_RISK_REWARD
+        val desiredTpDist = stopDist * safeMinRr
+
         val safeTp = if (action == SignalAction.BUY) {
-            val minTp = liveEntryPrice + stopDist * safeRr
-            val rawTp = if (candidateTakeProfit.isFinite() && candidateTakeProfit > liveEntryPrice) {
-                max(candidateTakeProfit, minTp)
+            val rawDist = if (candidateTakeProfit.isFinite() && candidateTakeProfit > liveEntryPrice) {
+                (candidateTakeProfit - liveEntryPrice).coerceIn(minTpDist, maxTpDist)
             } else {
-                minTp
+                desiredTpDist.coerceIn(minTpDist, maxTpDist)
             }
-            roundToDecimals(rawTp, decimals)
+            roundToDecimals(liveEntryPrice + rawDist, decimals)
         } else {
-            val maxTp = max(0.00001, liveEntryPrice - stopDist * safeRr)
-            val rawTp = if (candidateTakeProfit.isFinite() && candidateTakeProfit > 0.0 && candidateTakeProfit < liveEntryPrice) {
-                min(candidateTakeProfit, maxTp)
+            val rawDist = if (candidateTakeProfit.isFinite() && candidateTakeProfit > 0.0 && candidateTakeProfit < liveEntryPrice) {
+                (liveEntryPrice - candidateTakeProfit).coerceIn(minTpDist, maxTpDist)
             } else {
-                maxTp
+                desiredTpDist.coerceIn(minTpDist, maxTpDist)
             }
-            roundToDecimals(rawTp, decimals)
+            roundToDecimals(max(0.00001, liveEntryPrice - rawDist), decimals)
         }
         return safeStop to safeTp
     }
@@ -422,21 +438,22 @@ object RiskAndCalendarEngine {
 
         val oneR = abs(trade.entry - fixedStopLoss)
         val decimals = priceDecimals(trade.symbol, trade.entry)
-        val effectiveTp = if (trade.riskReward > 3.0001) {
-            // اگر R:R اولیه معامله بیشتر از ۳ باشد، دقیقاً همان TP و R:R اولیه حفظ شده و حد ضرر ثابت می‌ماند
-            trade.takeProfit
-        } else {
-            when (trade.action) {
-                SignalAction.BUY -> {
-                    val cap3R = if (oneR > 1e-8) roundToDecimals(trade.entry + 3.0 * oneR, decimals) else trade.takeProfit
-                    min(trade.takeProfit, cap3R)
-                }
-                SignalAction.SELL -> {
-                    val cap3R = if (oneR > 1e-8) roundToDecimals(max(0.00001, trade.entry - 3.0 * oneR), decimals) else trade.takeProfit
-                    max(trade.takeProfit, cap3R)
-                }
-                SignalAction.NO_TRADE -> trade.takeProfit
+        val effectiveTp = when (trade.action) {
+            SignalAction.BUY -> {
+                if (oneR > 1e-8) {
+                    val min15R = roundToDecimals(trade.entry + 1.5 * oneR, decimals)
+                    val cap3R = roundToDecimals(trade.entry + 3.0 * oneR, decimals)
+                    trade.takeProfit.coerceIn(min15R, max(min15R, cap3R))
+                } else trade.takeProfit
             }
+            SignalAction.SELL -> {
+                if (oneR > 1e-8) {
+                    val min15R = roundToDecimals(max(0.00001, trade.entry - 1.5 * oneR), decimals)
+                    val cap3R = roundToDecimals(max(0.00001, trade.entry - 3.0 * oneR), decimals)
+                    trade.takeProfit.coerceIn(min(cap3R, min15R), min15R)
+                } else trade.takeProfit
+            }
+            SignalAction.NO_TRADE -> trade.takeProfit
         }
 
         val hitKind: AutoExitKind? = when (trade.action) {
@@ -490,20 +507,22 @@ object RiskAndCalendarEngine {
         val fixedStopLoss = trade.initialStopLoss ?: trade.stopLoss
         val oneR = abs(trade.entry - fixedStopLoss)
         val decimals = priceDecimals(trade.symbol, trade.entry)
-        val effectiveTp = if (trade.riskReward > 3.0001) {
-            trade.takeProfit
-        } else {
-            when (trade.action) {
-                SignalAction.BUY -> {
-                    val cap3R = if (oneR > 1e-8) roundToDecimals(trade.entry + 3.0 * oneR, decimals) else trade.takeProfit
-                    min(trade.takeProfit, cap3R)
-                }
-                SignalAction.SELL -> {
-                    val cap3R = if (oneR > 1e-8) roundToDecimals(max(0.00001, trade.entry - 3.0 * oneR), decimals) else trade.takeProfit
-                    max(trade.takeProfit, cap3R)
-                }
-                SignalAction.NO_TRADE -> trade.takeProfit
+        val effectiveTp = when (trade.action) {
+            SignalAction.BUY -> {
+                if (oneR > 1e-8) {
+                    val min15R = roundToDecimals(trade.entry + 1.5 * oneR, decimals)
+                    val cap3R = roundToDecimals(trade.entry + 3.0 * oneR, decimals)
+                    trade.takeProfit.coerceIn(min15R, max(min15R, cap3R))
+                } else trade.takeProfit
             }
+            SignalAction.SELL -> {
+                if (oneR > 1e-8) {
+                    val min15R = roundToDecimals(max(0.00001, trade.entry - 1.5 * oneR), decimals)
+                    val cap3R = roundToDecimals(max(0.00001, trade.entry - 3.0 * oneR), decimals)
+                    trade.takeProfit.coerceIn(min(cap3R, min15R), min15R)
+                } else trade.takeProfit
+            }
+            SignalAction.NO_TRADE -> trade.takeProfit
         }
 
         for (bar in ordered) {
