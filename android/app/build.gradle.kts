@@ -101,7 +101,9 @@ android {
         // user's explicit switch. Every correction the brain makes is written to a Persian knowledge
         // changelog and exported with a checksummed "knowledge bundle" (JSON + FA manifest) so the next
         // app version can read, restore and audit what the previous one learned.
-        // See docs/NEURAL_LEARNING_LEDGER_FA.md.
+        // See docs/NEURAL_LEARNING_LEDGER_FA.md. The ledger is authoritative for the gate: reaching
+        // 10,000 learned trades never activates the block by itself — the user's own switch must be on
+        // as well, and switching it off deactivates the gate immediately.
         // 3.9.26 (code 735) is the trade-plan guard release: stop-loss, take-profit and leverage are
         // no longer produced by arbitrary anchors. Every plan (strategy report, auto entry, sniper
         // fill and the manual calculator) passes one engine — TradePlanGuard — that keeps 1R inside
