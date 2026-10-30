@@ -61,7 +61,7 @@ fun TradeSnapshotArchiveGallerySection(
     val records by viewModel.tradeSnapshotArchiveRecords.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     var selectedRecord by remember { mutableStateOf<ArchivedTradeSnapshotRecord?>(null) }
-    var showAllItems by rememberSaveable { mutableStateOf(false) }
+    var visibleCount by rememberSaveable { mutableStateOf(6) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -169,18 +169,16 @@ fun TradeSnapshotArchiveGallerySection(
             }
 
             val effectiveRecords = remember(records, trades) {
-                if (records.isNotEmpty()) {
-                    records
-                } else {
-                    trades.sortedBy { it.displayTradeNumber }.flatMap { t ->
-                        buildList {
-                            add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(t, isClosePhase = false))
-                            if (!t.isOpen) {
-                                add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(t, isClosePhase = true))
-                            }
-                        }
+                val existing = records.associateBy { "${it.tradeId}_${it.snapshotPhase}" }
+                val missing = trades.flatMap { trade ->
+                    buildList {
+                        if (existing["${trade.id}_OPEN"] == null)
+                            add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(trade, isClosePhase = false))
+                        if (!trade.isOpen && existing["${trade.id}_CLOSE"] == null)
+                            add(TradeSnapshotArchiveManager.buildSyntheticSnapshotRecordForTrade(trade, isClosePhase = true))
                     }
                 }
+                (records + missing).sortedByDescending { it.effectiveTimestampMs }
             }
 
             if (effectiveRecords.isEmpty()) {
@@ -202,20 +200,20 @@ fun TradeSnapshotArchiveGallerySection(
                     }
                 }
             } else {
-                val visibleList = if (showAllItems) effectiveRecords else effectiveRecords.take(6)
+                val visibleList = effectiveRecords.take(visibleCount)
                 visibleList.forEach { rec ->
                     ArchivedSnapshotItemCard(
                         record = rec,
                         onOpenViewer = { selectedRecord = rec },
                     )
                 }
-                if (effectiveRecords.size > 6) {
+                if (effectiveRecords.size > visibleCount) {
                     OutlinedButton(
-                        onClick = { showAllItems = !showAllItems },
+                        onClick = { visibleCount += 12 },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text(
-                            text = if (showAllItems) "▲ نمایش کمتر (۶ مورد آخر)" else "▼ نمایش همه ${effectiveRecords.size} اسکرین‌شات آرشیو",
+                            text = "▼ نمایش ۱۲ مورد دیگر از ${effectiveRecords.size} تصویر",
                             color = AurumColors.Gold,
                             fontSize = 12.sp,
                         )
@@ -241,13 +239,11 @@ fun ArchivedSnapshotItemCard(
     var expanded by rememberSaveable("${record.tradeId}_${record.snapshotPhase}") { mutableStateOf(false) }
     var imageBitmap by remember(record.tradeId, record.snapshotPhase, record.localImagePath) { mutableStateOf<ImageBitmap?>(null) }
 
-    LaunchedEffect(record.tradeId, record.snapshotPhase, record.localImagePath) {
-        withContext(Dispatchers.IO) {
-            val bmp = TradeSnapshotArchiveManager.loadBitmapForRecord(record)
-            if (bmp != null) {
-                imageBitmap = bmp.asImageBitmap()
-            }
-        }
+    LaunchedEffect(record.tradeId, record.snapshotPhase, record.localImagePath, expanded) {
+        if (expanded) {
+            val bmp = withContext(Dispatchers.IO) { TradeSnapshotArchiveManager.loadBitmapForRecord(record) }
+            imageBitmap = bmp?.asImageBitmap()
+        } else imageBitmap = null
     }
 
     val isBuy = record.action.equals("BUY", ignoreCase = true)
@@ -382,15 +378,11 @@ fun TradeSnapshotViewerDialog(
     record: ArchivedTradeSnapshotRecord,
     onDismiss: () -> Unit,
 ) {
-    var imageBitmap by remember(record.tradeId) { mutableStateOf<ImageBitmap?>(null) }
+    var imageBitmap by remember(record.tradeId, record.snapshotPhase) { mutableStateOf<ImageBitmap?>(null) }
 
-    LaunchedEffect(record.tradeId) {
-        withContext(Dispatchers.IO) {
-            val bmp = TradeSnapshotArchiveManager.loadBitmapForRecord(record)
-            if (bmp != null) {
-                imageBitmap = bmp.asImageBitmap()
-            }
-        }
+    LaunchedEffect(record.tradeId, record.snapshotPhase, record.localImagePath) {
+        val bmp = withContext(Dispatchers.IO) { TradeSnapshotArchiveManager.loadBitmapForRecord(record) }
+        imageBitmap = bmp?.asImageBitmap()
     }
 
     Dialog(
@@ -454,7 +446,7 @@ fun TradeSnapshotViewerDialog(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
-                    text = "📊 مقادیر دقیق خطوط ایچیموکو و اندیکاتورها در لحظه باز شدن معامله:",
+                    text = if (record.indicatorsAvailable) "📊 اندیکاتورهای ثبت‌شده در این مرحله:" else "⚠️ اندیکاتورهای این مرحله ثبت نشده‌اند؛ مقادیر تخمینی هستند:",
                     style = MaterialTheme.typography.labelMedium,
                     color = AurumColors.Cyan,
                     fontWeight = FontWeight.Bold,
@@ -479,6 +471,29 @@ fun TradeSnapshotViewerDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = AurumColors.TextSecondary,
                 )
+            }
+
+            Column(
+                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+                    .background(AurumColors.SurfaceAlt).padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Text("جزئیات ${if (record.isCloseSnapshot) "بسته شدن" else "باز شدن"} · #${record.displayTradeNumber}", color = AurumColors.Gold, fontWeight = FontWeight.Bold)
+                Text("شناسه: ${record.tradeId} · ${record.symbol} · ${record.timeframeLabel} · ${record.action}", color = AurumColors.TextPrimary)
+                Text("استراتژی: ${record.strategyTitleFa} (${record.strategyId})", color = AurumColors.TextPrimary)
+                Text("ورود: ${formatPriceFor(record.symbol, record.entryPrice)} · SL: ${formatPriceFor(record.symbol, record.stopLossPrice)} · TP: ${formatPriceFor(record.symbol, record.takeProfitPrice)}", color = AurumColors.TextPrimary)
+                Text("زمان ورود: ${formatDateTime(record.openedAtMs)}" + (record.exitAtMs?.let { " · خروج: ${formatDateTime(it)}" } ?: ""), color = AurumColors.TextSecondary)
+                if (record.isCloseSnapshot) Text("قیمت خروج: ${record.exitPrice?.let { formatPriceFor(record.symbol, it) } ?: "ثبت نشده"} · دلیل: ${record.exitReasonFa.ifBlank { "ثبت نشده" }} · سود/زیان: ${record.realizedPnlUsd ?: "ثبت نشده"} USD · R: ${record.realizedRMultiple ?: "ثبت نشده"}", color = AurumColors.TextPrimary)
+                Text("R:R: ${record.riskReward} · بهینه: ${record.optimalRiskReward} · ریسک: ${record.fixedRiskUsd} USD · سود هدف: ${record.expectedProfitUsd} USD · اطمینان: ${record.confidence}", color = AurumColors.TextSecondary)
+                if (record.candleSourceNote.isNotBlank()) Text(record.candleSourceNote, color = AurumColors.Cyan)
+                record.fullPaperTrade?.let { trade ->
+                    Text("حجم: ${trade.positionOz} ${trade.unit} · اهرم: ${trade.leverage} · مارجین: ${trade.marginUsd} USD · کارمزد: ${trade.commissionUsd} USD · اسپرد: ${trade.spreadCostUsd} USD · بازار: ${trade.cryptoVenue}", color = AurumColors.TextSecondary)
+                    if (trade.preEntry3CandleSummaryFa.isNotBlank()) Text("۳ کندل پیش از ورود: ${trade.preEntry3CandleSummaryFa}", color = AurumColors.TextSecondary)
+                    trade.preEntry3Candles.forEach { candle ->
+                        Text("${candle.slotTitleFa} · ${formatDateTime(candle.barTime)} · O ${candle.open} H ${candle.high} L ${candle.low} C ${candle.close} · ${candle.candleAnatomyFa} · ${candle.roleInSetupFa}", color = AurumColors.TextSecondary)
+                    }
+                    if (trade.note.isNotBlank()) Text("یادداشت: ${trade.note}", color = AurumColors.TextSecondary)
+                }
             }
 
             if (record.conditionsSummary.isNotEmpty()) {

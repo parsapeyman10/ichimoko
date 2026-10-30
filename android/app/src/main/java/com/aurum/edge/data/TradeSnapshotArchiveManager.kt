@@ -17,6 +17,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import com.aurum.edge.core.compressArchiveCandles
 import com.aurum.edge.core.IchimokuStrategyEngine
 import com.aurum.edge.core.PaperConditionRecord
 import com.aurum.edge.core.PaperTrade
@@ -95,6 +96,8 @@ data class ArchivedTradeSnapshotRecord(
     val phoneGalleryUri: String = "",
     val imageSizeBytes: Long = 0L,
     val fullPaperTrade: PaperTrade? = null,
+    val candleSourceNote: String = "",
+    val indicatorsAvailable: Boolean = false,
 ) {
     val displayTradeNumber: Int
         get() = when {
@@ -230,7 +233,7 @@ object TradeSnapshotArchiveManager {
             }
         }
         if (modified) {
-            val updated = currentMap.values.sortedByDescending { it.effectiveTimestampMs }.take(800)
+            val updated = currentMap.values.sortedByDescending { it.effectiveTimestampMs }
             _records.value = updated
             saveIndexToDisk(context, updated)
         }
@@ -269,7 +272,7 @@ object TradeSnapshotArchiveManager {
             expectedProfitUsd = expectedWin,
             confidence = trade.confidence,
             openedAtMs = trade.openedAt,
-            exitPrice = if (isClosePhase) exitP else null,
+            exitPrice = if (isClosePhase) trade.exitPrice else null,
             exitAtMs = if (isClosePhase) closeAt else null,
             exitReasonFa = if (isClosePhase) (trade.exitReason ?: closeCatFa) else "",
             realizedPnlUsd = if (isClosePhase) round2(realizedPnl) else null,
@@ -287,6 +290,8 @@ object TradeSnapshotArchiveManager {
             atr14 = abs(trade.entry - fixedSl) * 0.5,
             conditionsSummary = trade.entryConditions,
             fullPaperTrade = trade,
+            candleSourceNote = "تصویر بازسازی‌شده؛ کندل و اندیکاتور ثبت نشده",
+            indicatorsAvailable = false,
         )
     }
 
@@ -392,6 +397,8 @@ object TradeSnapshotArchiveManager {
                 ema34 = trigSnap?.ema34 ?: trade.entry,
                 adx14 = trigSnap?.adx14 ?: 25.0,
                 conditionsSummary = trade.entryConditions,
+                indicatorsAvailable = trigSnap != null,
+                candleSourceNote = if (closedCandles.isEmpty()) "کندل ثبت‌شده موجود نیست" else "کندل‌های ثبت‌شده در زمان ورود",
                 recentCandles = closedCandles.map {
                     ArchivedCandlePoint(
                         t = it.time,
@@ -435,7 +442,6 @@ object TradeSnapshotArchiveManager {
 
             val updated = (_records.value.filterNot { it.tradeId == trade.id && !it.isCloseSnapshot } + finalRecord)
                 .sortedByDescending { it.effectiveTimestampMs }
-                .take(800)
             _records.value = updated
             saveIndexToDisk(context, updated)
             finalRecord
@@ -460,47 +466,29 @@ object TradeSnapshotArchiveManager {
             val closeAt = closedTrade.closedAt ?: System.currentTimeMillis()
             val exitP = closedTrade.exitPrice ?: closedTrade.takeProfit
 
-            val vaultOrLiveCandles = closeCandles.ifEmpty {
-                LiveQuoteFetcher.peekCachedCandles(closedTrade.symbol, closedTrade.interval).ifEmpty {
-                    PhoneStorageVaultManager.loadPersistedCandles(closedTrade.symbol, closedTrade.interval, closeAt)
-                }
+            // Combine the preserved entry context with the vault and live data. Never invent
+            // an exit candle or rewrite a market candle to match the execution price.
+            val entryCandles = openSnap?.recentCandles.orEmpty().map {
+                Candle(time = it.t, open = it.o, high = it.h, low = it.l, close = it.c)
             }
-            val rawClosedCandles: List<Candle> = when {
-                vaultOrLiveCandles.size >= 15 -> {
-                    val base = vaultOrLiveCandles
-                        .filter { it.high.isFinite() && it.low.isFinite() && it.close > 0.0 }
-                        .sortedBy { it.time }
-                        .takeLast(51)
-                    val lastC = base.lastOrNull()
-                    if (lastC != null && abs(lastC.close - exitP) > 1e-8) {
-                        base.dropLast(1) + lastC.copy(
-                            high = max(lastC.high, exitP),
-                            low = min(lastC.low, exitP),
-                            close = exitP,
-                        )
-                    } else {
-                        base
-                    }
-                }
-                openSnap != null && openSnap.recentCandles.isNotEmpty() -> {
-                    val fromOpen = openSnap.recentCandles.map {
-                        Candle(time = it.t, open = it.o, high = it.h, low = it.l, close = it.c, volume = 1.0, closed = true)
-                    }
-                    val prevClose = fromOpen.last().close
-                    (fromOpen + Candle(
-                        time = closeAt,
-                        open = prevClose,
-                        high = max(prevClose, exitP),
-                        low = min(prevClose, exitP),
-                        close = exitP,
-                        volume = 1.0,
-                        closed = true,
-                    )).takeLast(52)
-                }
-                else -> emptyList()
+            val vaultCandles = PhoneStorageVaultManager.loadPersistedCandles(
+                closedTrade.symbol, closedTrade.interval, closeAt,
+            )
+            val liveCandles = closeCandles.ifEmpty {
+                LiveQuoteFetcher.peekCachedCandles(closedTrade.symbol, closedTrade.interval)
             }
+            val periodMs = closedTrade.interval.minutes * 60_000L
+            val rawClosedCandles = (entryCandles + vaultCandles + liveCandles)
+                .filter { it.time <= closeAt && it.time >= closedTrade.openedAt - 52 * periodMs }
+                .filter { it.open.isFinite() && it.high.isFinite() && it.low.isFinite() && it.close.isFinite() && it.close > 0.0 && it.high >= it.low }
+                .associateBy { it.time }.values.sortedBy { it.time }
+            val missingEntry = rawClosedCandles.none { it.time <= closedTrade.openedAt && it.time + periodMs > closedTrade.openedAt }
+            val missingExit = rawClosedCandles.none { it.time <= closeAt && it.time + periodMs > closeAt }
+            val hasGaps = rawClosedCandles.zipWithNext().any { (a, b) -> b.time - a.time > periodMs * 2 }
+            val sourceNote = if (missingEntry || missingExit || hasGaps) "داده کندل ناقص است؛ فاصله‌ها بازسازی نشده‌اند" else "کندل‌های ثبت‌شده؛ نمایش تجمیعی OHLC"
+            val compactCandles = compressArchiveCandles(rawClosedCandles, 160)
 
-            val trigSnap = IchimokuStrategyEngine.computeSnapshot(rawClosedCandles)
+            val trigSnap = if (!missingExit && !hasGaps) IchimokuStrategyEngine.computeSnapshot(rawClosedCandles) else null
             val fixedRisk = closedTrade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0
             val expectedWin = round2(fixedRisk * closedTrade.riskReward)
             val realizedPnl = closedTrade.pnlUsd ?: 0.0
@@ -528,7 +516,7 @@ object TradeSnapshotArchiveManager {
                 expectedProfitUsd = expectedWin,
                 confidence = closedTrade.confidence,
                 openedAtMs = closedTrade.openedAt,
-                exitPrice = exitP,
+                exitPrice = closedTrade.exitPrice,
                 exitAtMs = closeAt,
                 exitReasonFa = closedTrade.exitReason ?: closeCatFa,
                 realizedPnlUsd = round2(realizedPnl),
@@ -550,7 +538,9 @@ object TradeSnapshotArchiveManager {
                 ema34 = trigSnap?.ema34 ?: openSnap?.ema34 ?: exitP,
                 adx14 = trigSnap?.adx14 ?: openSnap?.adx14 ?: 25.0,
                 conditionsSummary = closedTrade.entryConditions.ifEmpty { openSnap?.conditionsSummary.orEmpty() },
-                recentCandles = rawClosedCandles.map {
+                candleSourceNote = sourceNote,
+                indicatorsAvailable = trigSnap != null,
+                recentCandles = compactCandles.map {
                     ArchivedCandlePoint(
                         t = it.time,
                         o = roundPrice(it.open),
@@ -562,7 +552,7 @@ object TradeSnapshotArchiveManager {
                 fullPaperTrade = closedTrade,
             )
 
-            val bitmap = renderTradeIchimokuSnapshotBitmap(closeRecord, rawClosedCandles)
+            val bitmap = renderTradeIchimokuSnapshotBitmap(closeRecord, compactCandles)
             val webpBytes = compressBitmapToCompactWebp(bitmap, quality = 80)
             bitmap.recycle()
 
@@ -589,7 +579,6 @@ object TradeSnapshotArchiveManager {
 
             val updated = (_records.value.filterNot { it.tradeId == closedTrade.id && it.isCloseSnapshot } + finalCloseRecord)
                 .sortedByDescending { it.effectiveTimestampMs }
-                .take(800)
             _records.value = updated
             saveIndexToDisk(context, updated)
             finalCloseRecord
@@ -735,17 +724,18 @@ object TradeSnapshotArchiveManager {
         canvas.drawRoundRect(chartRect, 14f, 14f, chartBgPaint)
         canvas.drawRoundRect(chartRect, 14f, 14f, chartBorderPaint)
 
-        // آماده‌سازی کندل‌ها برای رسم (یا ساخت کندل‌های نمونه حول ورود در صورت خالی بودن)
+        // Only draw recorded candles; missing history is never synthesized.
         val candlesToDraw: List<Candle> = when {
-            rawCandles.size >= 15 -> rawCandles.takeLast(46)
-            record.recentCandles.size >= 10 -> record.recentCandles.takeLast(46).map {
+            rawCandles.isNotEmpty() -> if (record.isCloseSnapshot) rawCandles else rawCandles.takeLast(46)
+            record.recentCandles.isNotEmpty() -> (if (record.isCloseSnapshot) record.recentCandles else record.recentCandles.takeLast(46)).map {
                 Candle(time = it.t, open = it.o, high = it.h, low = it.l, close = it.c, volume = 1.0, closed = true)
             }
-            else -> synthesizeFallbackCandlesForSnapshot(record)
+            else -> emptyList()
         }
 
-        val series = IchimokuStrategyEngine.computeChartSeries(candlesToDraw)
-        val bars = series.bars.takeLast(40)
+        val displayCandles = if (record.isCloseSnapshot) compressArchiveCandles(candlesToDraw, 80) else candlesToDraw
+        val series = IchimokuStrategyEngine.computeChartSeries(displayCandles)
+        val bars = if (record.isCloseSnapshot) series.bars else series.bars.takeLast(40)
         val futureKumo = series.futureKumo.take(26)
 
         // محاسبه بازه قیمتی کل چارت (شامل کندل‌ها، کومو، Entry، SL، TP و Exit)
@@ -755,11 +745,11 @@ object TradeSnapshotArchiveManager {
             minPrice = minOf(minPrice, ex)
             maxPrice = maxOf(maxPrice, ex)
         }
-        bars.forEach { b ->
+        if (!record.isCloseSnapshot) bars.forEach { b ->
             minPrice = minOf(minPrice, b.candle.low, b.currentSpanA, b.currentSpanB, b.tenkan, b.kijun)
             maxPrice = maxOf(maxPrice, b.candle.high, b.currentSpanA, b.currentSpanB, b.tenkan, b.kijun)
         }
-        futureKumo.forEach { fk ->
+        if (!record.isCloseSnapshot) futureKumo.forEach { fk ->
             minPrice = minOf(minPrice, fk.spanA, fk.spanB)
             maxPrice = maxOf(maxPrice, fk.spanA, fk.spanB)
         }
@@ -834,7 +824,8 @@ object TradeSnapshotArchiveManager {
         canvas.drawText("Future Kumo (+26)", nowX + 8f, chartTop + 26f, smallPaint.apply { color = goldColor })
 
         // ── ۲.ب: رسم باکس پوزیشن TradingView (ناحیه سبز TP و ناحیه قرمز SL) ──
-        val boxLeft = (nowX - slotWidth * 2f).coerceAtLeast(chartLeft + 20f)
+        val entryIndex = bars.indexOfLast { it.candle.time <= record.openedAtMs }.coerceAtLeast(0)
+        val boxLeft = (if (record.isCloseSnapshot) slotToX(entryIndex) else nowX - slotWidth * 2f).coerceAtLeast(chartLeft + 20f)
         val boxRight = (chartRight - 14f).coerceAtLeast(boxLeft + 80f)
         val entryY = priceToY(record.entryPrice)
         val tpY = priceToY(record.takeProfitPrice)
@@ -961,6 +952,15 @@ object TradeSnapshotArchiveManager {
             drawPriceTag(exitY, "OUT: ${fmtPrice(exPrice)}", if (isWinClose) Color.parseColor("#0E7490") else Color.parseColor("#BE123C"))
         }
 
+        if (record.isCloseSnapshot) {
+            canvas.drawText("IN", slotToX(entryIndex), chartBottom - 8f, smallPaint.apply { color = goldColor })
+            canvas.drawText("OUT", nowX - 25f, chartBottom - 8f, smallPaint.apply { color = cyanColor })
+            canvas.drawText("Aggregated OHLC / approximate indicators; gaps possible; prices clipped", chartLeft + 12f, chartBottom - 28f, smallPaint)
+            canvas.drawText(SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(record.openedAtMs)), boxLeft, chartBottom - 45f, smallPaint)
+            record.exitAtMs?.let { canvas.drawText(SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(it)), (nowX - 130f).coerceAtLeast(boxLeft), chartBottom - 60f, smallPaint) }
+        }
+        if (bars.isEmpty()) canvas.drawText("NO RECORDED CANDLES", chartLeft + 30f, chartTop + 95f, smallPaint)
+
         // بج واترمارک شماره معامله مستقیماً روی بوم چارت (گوشه بالا چپ چارت)
         val chartBadgeRect = RectF(chartLeft + 14f, chartTop + 14f, chartLeft + 340f, chartTop + 58f)
         val chartBadgeBg = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -998,12 +998,12 @@ object TradeSnapshotArchiveManager {
         }
 
         canvas.drawText(
-            "📊 وضعیت خطوط ایچیموکو در لحظه ورود:  Tenkan=${fmtPrice(record.tenkan)}  |  Kijun=${fmtPrice(record.kijun)}  |  SpanA=${fmtPrice(record.currentSpanA)}  |  SpanB=${fmtPrice(record.currentSpanB)}  |  ATR14=${fmtPrice(record.atr14)}  |  RSI14=${String.format(Locale.US, "%.1f", record.rsi14)}  |  ADX14=${String.format(Locale.US, "%.1f", record.adx14)}",
+            "📊 ${if (record.indicatorsAvailable) "اندیکاتورهای مرحله" else "اندیکاتور ناموجود/تخمینی"}:  Tenkan=${fmtPrice(record.tenkan)}  |  Kijun=${fmtPrice(record.kijun)}  |  SpanA=${fmtPrice(record.currentSpanA)}  |  SpanB=${fmtPrice(record.currentSpanB)}  |  ATR14=${fmtPrice(record.atr14)}  |  RSI14=${String.format(Locale.US, "%.1f", record.rsi14)}  |  ADX14=${String.format(Locale.US, "%.1f", record.adx14)}",
             34f,
             658f,
             footerAccentPaint,
         )
-        val pre3Badge = record.fullPaperTrade?.preEntry3CandleCategoryFa?.takeIf { it.isNotBlank() } ?: "تثبیت ۳ کندلی قبل از ورود"
+        val pre3Badge = record.fullPaperTrade?.preEntry3CandleCategoryFa?.takeIf { it.isNotBlank() } ?: "ثبت نشده"
         canvas.drawText(
             "📐 ${record.rrFormulaFa}   |   🕯️ ۳ کندل قبل: $pre3Badge   |   🛡️ مبنای SL: ${record.slBasisFa.take(40)}",
             34f,
@@ -1030,7 +1030,7 @@ object TradeSnapshotArchiveManager {
             if (row3.isNotBlank()) canvas.drawText(row3, 34f, 784f, smallPaint)
         } else {
             canvas.drawText(
-                "✅ تمام ۱۶ شرط ایچیموکو، مومنتوم، رهایی چیکو، ابر آینده ۲۶ کندلی و فرمول R:R در لحظه باز شدن تایید شده‌اند.",
+                "اطلاعات شروط ثبت نشده است",
                 34f,
                 735f,
                 smallPaint.apply { color = Color.parseColor("#10B981") },
@@ -1038,33 +1038,6 @@ object TradeSnapshotArchiveManager {
         }
 
         return bmp
-    }
-
-    private fun synthesizeFallbackCandlesForSnapshot(record: ArchivedTradeSnapshotRecord): List<Candle> {
-        val list = mutableListOf<Candle>()
-        val isBuy = record.action.equals("BUY", ignoreCase = true)
-        val step = (abs(record.entryPrice - record.stopLossPrice) / 14.0).coerceAtLeast(abs(record.entryPrice) * 0.0005)
-        val baseTime = record.openedAtMs - 40L * 300_000L
-        var cur = if (isBuy) record.entryPrice - step * 18.0 else record.entryPrice + step * 18.0
-        for (i in 0 until 40) {
-            val drift = if (isBuy) step * 0.45 else -step * 0.45
-            val wave = kotlin.math.sin(i * 0.55) * step * 0.6
-            val open = cur
-            val close = if (i == 39) record.entryPrice else (open + drift + wave)
-            val high = max(open, close) + step * 0.55
-            val low = min(open, close) - step * 0.55
-            list += Candle(
-                time = baseTime + i * 300_000L,
-                open = open,
-                high = high,
-                low = low,
-                close = close,
-                volume = 100.0 + i * 3.0,
-                closed = true,
-            )
-            cur = close
-        }
-        return list
     }
 
     private fun compressBitmapToCompactWebp(bitmap: Bitmap, quality: Int = 80): ByteArray {
