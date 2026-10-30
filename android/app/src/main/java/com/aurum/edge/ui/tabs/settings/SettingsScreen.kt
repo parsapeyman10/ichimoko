@@ -1,306 +1,912 @@
 package com.aurum.edge.ui
 
-import android.Manifest
+import android.app.Activity
 import android.content.Intent
+import android.media.RingtoneManager
 import android.net.Uri
-import android.provider.Settings
-import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.core.content.ContextCompat
-import com.aurum.edge.BuildConfig
-import com.aurum.edge.core.AppSettings
-import com.aurum.edge.data.WatchCatalog
-import com.aurum.edge.service.SignalMonitorService
-import com.aurum.edge.notify.Notifier
+import com.aurum.edge.core.BitcoinStrategyModel
+import com.aurum.edge.core.NeuralLearningStateSummary
+import com.aurum.edge.core.RiskAndCalendarEngine
+import com.aurum.edge.notify.TradeAlarmKind
+import com.aurum.edge.ui.components.BaseStrategyRefinementPanel
+import com.aurum.edge.ui.components.ExclusiveStrategySelectorPage
+import com.aurum.edge.ui.components.Pill
 import com.aurum.edge.ui.components.SectionCard
-import com.aurum.edge.ui.components.formatDateTime
+import com.aurum.edge.ui.components.SelectableStrategyItem
+import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.theme.AurumColors
+import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.roundToInt
+
+private val FIXED_RISK_USD_PRESETS = listOf(5.0, 10.0, 25.0, 50.0, 100.0)
 
 @Composable
-fun SettingsScreen(viewModel: AurumViewModel, settings: AppSettings) {
+fun SettingsScreen(
+    viewModel: AurumViewModel,
+    onOpenNeuralBrain: () -> Unit = {},
+) {
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val trades by viewModel.trades.collectAsStateWithLifecycle()
+    val now by viewModel.clock.collectAsStateWithLifecycle()
+    val aiChecking by viewModel.aiChecking.collectAsStateWithLifecycle()
+    val lastAiVerdict by viewModel.lastAiVerdict.collectAsStateWithLifecycle()
+    val activeSymbol by viewModel.activeRiskSymbol.collectAsStateWithLifecycle()
+    val backfillSummaries by viewModel.backfillSummaries.collectAsStateWithLifecycle()
+    val isBackfilling by viewModel.isBackfilling.collectAsStateWithLifecycle()
+    val neuralState by viewModel.neuralState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val monitorRunning by SignalMonitorService.running.collectAsStateWithLifecycle()
-    var balance by remember { mutableStateOf(settings.accountBalance.toString()) }
-    var risk by remember { mutableStateOf(settings.riskPercent.toString()) }
-    var minConfidence by remember { mutableStateOf(settings.minConfidence.toString()) }
-    var spread by remember { mutableStateOf(settings.spreadPrice.toString()) }
-    var commission by remember { mutableStateOf(settings.commissionPerOz.toString()) }
-    var confirmAuto by remember { mutableStateOf(false) }
-    var autoAfterPermission by remember { mutableStateOf(false) }
 
-    val soundPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) viewModel.selectAlertSound(context, uri)
-    }
+    var subTab by rememberSaveable { mutableIntStateOf(0) }
+    var showAddModelForm by rememberSaveable { mutableStateOf(false) }
+    var pendingRingtoneTarget by remember { mutableStateOf<TradeAlarmKind?>(null) }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        val started = granted && SignalMonitorService.start(context)
-        viewModel.setMonitorFlag(started)
-        if (autoAfterPermission) viewModel.setAutoPaperTrading(started)
-        autoAfterPermission = false
-    }
-    val testPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        viewModel.reportNotificationTest(granted && Notifier.notifyTest(context, settings.alertSoundUri))
-    }
+    val showDesc = settings.showSettingsDescriptions
+    fun descOrNull(text: String): String? = if (showDesc) text else null
 
-    fun startMonitorIfAllowed(alsoEnableAuto: Boolean = false) {
-        autoAfterPermission = alsoEnableAuto
-        val needsPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        if (needsPermission) permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        else {
-            val started = SignalMonitorService.start(context)
-            viewModel.setMonitorFlag(started)
-            if (alsoEnableAuto) viewModel.setAutoPaperTrading(started)
-            autoAfterPermission = false
+    val ringtoneLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val data = result.data
+            val pickedUri: Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                data?.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI, Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                data?.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            }
+            if (pickedUri != null) {
+                val ringtoneTitle = runCatching {
+                    RingtoneManager.getRingtone(context, pickedUri)?.getTitle(context)
+                }.getOrNull().orEmpty().ifBlank { pickedUri.lastPathSegment ?: "زنگ انتخابی" }
+                viewModel.setCustomAlarmSoundForKind(
+                    kind = pendingRingtoneTarget,
+                    uri = pickedUri.toString(),
+                    name = ringtoneTitle,
+                )
+            } else {
+                viewModel.setCustomAlarmSoundForKind(
+                    kind = pendingRingtoneTarget,
+                    uri = "",
+                    name = "",
+                )
+            }
         }
+    }
+
+    fun launchRingtonePickerFor(kind: TradeAlarmKind?) {
+        pendingRingtoneTarget = kind
+        val currentUriStr = when (kind) {
+            TradeAlarmKind.ENTRY -> settings.entryAlarmSoundUri
+            TradeAlarmKind.TAKE_PROFIT -> settings.tpAlarmSoundUri
+            TradeAlarmKind.STOP_LOSS -> settings.slAlarmSoundUri
+            null -> settings.alertSoundUri
+        }
+        val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+            putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION or RingtoneManager.TYPE_ALARM)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+            putExtra(
+                RingtoneManager.EXTRA_RINGTONE_TITLE,
+                kind?.let { "انتخاب نوت آلارم ${it.channelNameFa}" } ?: "انتخاب نوت آلارم",
+            )
+            if (currentUriStr.isNotBlank()) {
+                runCatching { Uri.parse(currentUriStr) }.getOrNull()?.let {
+                    putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, it)
+                }
+            }
+        }
+        runCatching { ringtoneLauncher.launch(intent) }
+    }
+
+    val riskLimits = remember(settings, trades, now) {
+        RiskAndCalendarEngine.evaluateRiskLimits(
+            accountBalance = settings.accountBalance,
+            initialCapital = settings.initialCapital,
+            dayOpeningEquity = viewModel.dayOpeningEquity(now),
+            dailyLossLimitPercent = settings.dailyLossLimitPercent,
+            maxDrawdownLimitPercent = settings.maxDrawdownLimitPercent,
+            trades = trades,
+            now = now,
+        )
+    }
+
+    val allItems = remember(settings.customStrategies) {
+        val builtIns = BitcoinStrategyModel.entries.map { m ->
+            SelectableStrategyItem(
+                id = m.id,
+                titleFa = m.titleFa,
+                badgeFa = m.badgeFa,
+                authorRefFa = m.authorRefFa,
+                summaryFa = m.summaryFa,
+                isCustom = false,
+            )
+        }
+        val customs = settings.customStrategies.map { c ->
+            SelectableStrategyItem(
+                id = c.id,
+                titleFa = c.titleFa,
+                badgeFa = c.badgeFa,
+                authorRefFa = BitcoinStrategyModel.fromId(c.baseModelId).badgeFa,
+                summaryFa = c.summaryFa,
+                isCustom = true,
+            )
+        }
+        builtIns + customs
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(bottom = 12.dp),
+            .padding(bottom = 18.dp),
     ) {
-        SectionCard("اتصال اینترنت / VPN گوشی", "بدون پروکسی داخلی و کتابخانهٔ حجیم") {
-            TextButton(onClick = { com.aurum.edge.data.AppNetwork.refreshSystemNetwork(force = true) }) {
-                Text("بازبینی اتصال پس از تغییر VPN")
+        // نوار بالای تنظیمات: ۴ بخش + دکمه کمرنگ مخفی/غیرمخفی کردن نوشته‌های توضیحی (پیش‌فرض: غیرمخفی)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                listOf(
+                    0 to "⚡ ربات، صدا و استراتژی‌ها",
+                    1 to "💰 موجودی و ریسک ($5)",
+                    2 to "🛠️ پارامترهای ایچیموکو",
+                    3 to "🤖 هوش مصنوعی و دیتا",
+                ).forEach { (idx, title) ->
+                    Pill(
+                        text = title,
+                        color = if (subTab == idx) AurumColors.Gold else AurumColors.TextMuted,
+                        modifier = Modifier.clickable { subTab = idx },
+                    )
+                }
             }
-            Text("Tor و Snowflake از برنامه حذف شده‌اند. درخواست‌ها از مسیر شبکهٔ انتخاب‌شدهٔ اندروید ارسال می‌شوند.",
-                style = MaterialTheme.typography.bodySmall)
-            Text("برای استفاده از Windscribe، برنامهٔ رسمی آن را جداگانه روی گوشی وصل کنید. " +
-                "در Split Tunneling مطمئن شوید Aurum Edge از VPN مستثنا نشده است. " +
-                "هیچ حساب، رمز یا کلید Windscribe در این برنامه دریافت نمی‌شود.",
-                style = MaterialTheme.typography.bodySmall)
-            Text("با قطع VPN ممکن است اندروید از اینترنت مستقیم استفاده کند؛ اگر این را نمی‌خواهید، " +
-                "در صورت پشتیبانی، Always-on VPN و مسدودکردن اتصال بدون VPN را در تنظیمات اندروید فعال کنید. " +
-                "اتصال VPN تضمین دسترسی همهٔ منابع داده نیست.",
-                style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.width(6.dp))
+            // آپشن کمرنگ مخفی / غیرمخفی کردن نوشته‌های توضیحی تنظیمات (پیش‌فرض: غیرمخفی)
+            Box(
+                modifier = Modifier
+                    .alpha(if (showDesc) 0.72f else 0.48f)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(AurumColors.SurfaceAlt)
+                    .border(0.8.dp, AurumColors.Line, RoundedCornerShape(999.dp))
+                    .clickable { viewModel.setShowSettingsDescriptions(!showDesc) }
+                    .padding(horizontal = 9.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    text = if (showDesc) "👁 توضیحات: آشکار" else "🙈 توضیحات: مخفی",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (showDesc) AurumColors.TextSecondary else AurumColors.TextMuted,
+                    fontSize = 10.sp,
+                )
+            }
         }
 
-        SectionCard("حالت هر بازار · روندگیر / رنج‌گیر / ترکیبی", "اعمال روی تمام ${settings.activeSymbols.size} نماد برنامه") {
-            Text("تنظیم هر دسته روی همهٔ نمادهای همان دسته اعمال می‌شود؛ اسکن و اعلان به فهرست دستی محدود نیستند. " +
-                "فعال‌بودن نماد مجوز معامله نیست؛ دادهٔ تازه و قفل‌های ریسک لازم‌اند.",
-                style = MaterialTheme.typography.bodySmall)
-            com.aurum.edge.core.AssetClass.entries.filter { it != com.aurum.edge.core.AssetClass.STOCK }.forEach { category ->
-                Text(category.label, style = MaterialTheme.typography.bodySmall)
-                if (category == com.aurum.edge.core.AssetClass.CRYPTO)
-                    Text("فشردگی ← انفجار · 5m · 9/26/52 + 103 (ثابت)",
-                        style = MaterialTheme.typography.bodySmall, color = AurumColors.Gold)
-                else Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    com.aurum.edge.core.CategoryStrategy.entries.forEach { mode ->
-                        FilterChip(selected = settings.categoryStrategies[category] == mode,
-                            onClick = { viewModel.setCategoryStrategy(category, mode) },
-                            label = { Text(mode.label) })
+        when (subTab) {
+            0 -> {
+                // ۱. تنظیمات ربات معامله‌گر خودکار و پایش بک‌گراند ۲۴/۷
+                SectionCard(
+                    title = "🤖 تنظیمات ربات معامله‌گر و پایش بک‌گراند ۲۴/۷",
+                    subtitle = descOrNull("محدودیت تعداد معاملات هم‌زمان و محدودیت باخت متوالی کاملاً برداشته شده است تا همه استراتژی‌ها با حداکثر سرعت تست شوند"),
+                    initiallyExpanded = false,
+                    trailing = {
+                        Pill(
+                            text = if (settings.autoPaperTrading) "🟢 فعال" else "متوقف",
+                            color = if (settings.autoPaperTrading) AurumColors.Green else AurumColors.TextMuted,
+                        )
+                    },
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(AurumColors.SurfaceAlt, RoundedCornerShape(12.dp))
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column {
+                                Text("معامله خودکار", color = AurumColors.TextPrimary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                AnimatedVisibility(visible = showDesc) {
+                                    Text(
+                                        text = if (settings.autoPaperTrading) "ورود خودکار روشن" else "خاموش",
+                                        color = (if (settings.autoPaperTrading) AurumColors.Green else AurumColors.TextMuted).copy(alpha = 0.78f),
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
+                                }
+                            }
+                            Switch(
+                                checked = settings.autoPaperTrading,
+                                onCheckedChange = viewModel::setAutoPaperTrading,
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(AurumColors.SurfaceAlt, RoundedCornerShape(12.dp))
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column {
+                                Text("پایش بک‌گراند", color = AurumColors.TextPrimary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                AnimatedVisibility(visible = showDesc) {
+                                    Text(
+                                        text = if (settings.backgroundMonitor) "سرویس ۲۴/۷ روشن" else "خاموش",
+                                        color = (if (settings.backgroundMonitor) AurumColors.Cyan else AurumColors.TextMuted).copy(alpha = 0.78f),
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
+                                }
+                            }
+                            Switch(
+                                checked = settings.backgroundMonitor,
+                                onCheckedChange = viewModel::setBackgroundMonitor,
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Pill("✅ بدون سقف تعداد معامله باز", AurumColors.Green)
+                        Pill("✅ اهرم ایمن ≤ 10x در همه نمادها", AurumColors.Gold)
+                    }
+                }
+
+                // ۱.۳ کارت انتقال مستقیم به صفحه اختصاصی شبکه عصبی خودآموز
+                NeuralDirectNavigationCard(
+                    neuralState = neuralState,
+                    showDescriptions = showDesc,
+                    onOpenNeuralBrain = onOpenNeuralBrain,
+                )
+
+                // ۱.۵ تنظیمات صدا دقیقاً به سبک آلارم گوشی (Phone Clock Alarm UI) — ۱ اعلان و ۱ صدا برای هر مرحله
+                PhoneStyleTradeAlarmsCard(
+                    settings = settings,
+                    showDescriptions = showDesc,
+                    onToggleMaster = viewModel::setNotifyOnSignal,
+                    onToggleStage = viewModel::setAlarmStageEnabled,
+                    onPickNoteForStage = ::launchRingtonePickerFor,
+                    onResetDefaultNote = { kind ->
+                        viewModel.setCustomAlarmSoundForKind(kind, "", kind.defaultRingtoneTitle)
+                    },
+                    onTestStage = viewModel::triggerTestTradeAlarm,
+                    onVolumeChange = viewModel::setAlarmVolumePercent,
+                    onVibrationChange = viewModel::setAlarmVibrationEnabled,
+                )
+
+                // ۲. انتخاب و فعال‌سازی هم‌زمان استراتژی‌ها
+                SectionCard(
+                    title = "🎯 مدیریت و فعال‌سازی هم‌زمان ۱۶ استراتژی ایچیموکو",
+                    subtitle = descOrNull("هر ۱۶ استراتژی ایچیموکو (۱۵ ترکیب ۴ کتاب + استراتژی درایو جامع) را هم‌زمان روی تایم‌فریم‌های 15m و 5m فعال نگه دارید"),
+                    initiallyExpanded = false,
+                ) {
+                    ExclusiveStrategySelectorPage(
+                        allItems = allItems,
+                        selectedId = settings.selectedBitcoinStrategyId,
+                        runAllSimultaneously = settings.runAllStrategiesSimultaneously,
+                        enabledStrategyIds = settings.enabledStrategyIds,
+                        executionEnabled = settings.autoPaperTrading,
+                        showAddModelForm = showAddModelForm,
+                        onToggleAddForm = { showAddModelForm = !showAddModelForm },
+                        onToggleRunAll = viewModel::setRunAllStrategiesSimultaneously,
+                        onToggleStrategyInMulti = viewModel::toggleStrategyEnabledInMultiMode,
+                        onSelectAndActivate = { id ->
+                            viewModel.activateSingleBitcoinStrategy(id, enableExecution = true)
+                        },
+                        onToggleExecution = viewModel::setAutoPaperTrading,
+                        onAddModel = { title, summary, baseModel ->
+                            viewModel.addCustomStrategyModel(title, summary, baseModel, activateImmediately = true)
+                            showAddModelForm = false
+                        },
+                        onDeleteCustom = viewModel::deleteCustomStrategyModel,
+                    )
+                }
+            }
+
+            1 -> {
+                // تنظیمات موجودی ۱۰۰,۰۰۰ دلار و ریسک ثابت ۵ دلار در هر معامله
+                SectionCard(
+                    title = "💰 تنظیمات موجودی (۱۰۰,۰۰۰$) و ریسک ثابت دلاری (۵$)",
+                    subtitle = descOrNull("هر باخت = -$${String.format(Locale.US, "%.2f", settings.fixedRiskUsd)} · هر برد = +$${String.format(Locale.US, "%.2f", settings.fixedRiskUsd)} × R:R"),
+                    initiallyExpanded = false,
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        StatTile(
+                            label = "موجودی فعلی حساب",
+                            value = String.format(Locale.US, "$%,.2f", settings.accountBalance),
+                            valueColor = AurumColors.Gold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        StatTile(
+                            label = "ریسک ثابت هر معامله",
+                            value = "-$${settings.fixedRiskUsd.toInt()} باخت / +$${settings.fixedRiskUsd.toInt()}×R:R برد",
+                            valueColor = AurumColors.Cyan,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+
+                    AnimatedVisibility(visible = showDesc) {
+                        Text(
+                            text = "انتخاب سریع مبلغ ریسک ثابت (ضرر در SL) برای هر معامله:",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextSecondary.copy(alpha = 0.78f),
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        FIXED_RISK_USD_PRESETS.forEach { usd ->
+                            val selected = settings.useFixedDollarRisk && abs(settings.fixedRiskUsd - usd) < 0.01
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (selected) AurumColors.Gold.copy(alpha = 0.22f) else AurumColors.SurfaceAlt)
+                                    .border(1.dp, if (selected) AurumColors.Gold else AurumColors.Line, RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        viewModel.saveRiskAndCapitalSettings(
+                                            accountBalance = settings.accountBalance,
+                                            initialCapital = settings.initialCapital,
+                                            riskPercent = settings.riskPercent,
+                                            dailyLossLimitPercent = 100.0,
+                                            maxDrawdownLimitPercent = 100.0,
+                                            targetCapital = settings.targetCapital,
+                                            useFixedDollarRisk = true,
+                                            fixedRiskUsd = usd,
+                                        )
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                            ) {
+                                Text(
+                                    text = "$${usd.toInt()} در هر معامله",
+                                    color = if (selected) AurumColors.Gold else AurumColors.TextPrimary,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                )
+                            }
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            viewModel.saveRiskAndCapitalSettings(
+                                accountBalance = 100_000.0,
+                                initialCapital = 100_000.0,
+                                riskPercent = 0.5,
+                                dailyLossLimitPercent = 100.0,
+                                maxDrawdownLimitPercent = 100.0,
+                                targetCapital = 100_000.0,
+                                useFixedDollarRisk = true,
+                                fixedRiskUsd = 5.0,
+                            )
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AurumColors.Gold,
+                            contentColor = Color.Black,
+                        ),
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    ) {
+                        Text(
+                            text = "⚡ تنظیم فوری موجودی روی ۱۰۰,۰۰۰ دلار + هر باخت ۵ دلار",
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+
+                CapitalAndRiskLimitsCard(
+                    settings = settings,
+                    riskLimits = riskLimits,
+                    onSaveSettings = { bal, initCap, riskPct, dailyLim, maxDd ->
+                        viewModel.saveRiskAndCapitalSettings(
+                            accountBalance = bal,
+                            initialCapital = initCap,
+                            riskPercent = riskPct,
+                            dailyLossLimitPercent = dailyLim,
+                            maxDrawdownLimitPercent = maxDd,
+                            targetCapital = settings.targetCapital,
+                            useFixedDollarRisk = settings.useFixedDollarRisk,
+                            fixedRiskUsd = settings.fixedRiskUsd,
+                        )
+                    },
+                )
+            }
+
+            2 -> {
+                SectionCard(
+                    title = "🛠️ کالیبراسیون پارامترهای استراتژی ایچیموکو",
+                    subtitle = descOrNull("تنظیم حداقل R:R، ضریب کشیدگی کیجون (ATR)، فیلترهای چیکو و کومو و حالت حفظ سود"),
+                    initiallyExpanded = false,
+                ) {
+                    BaseStrategyRefinementPanel(
+                        config = settings.activeBitcoinStrategyConfig(),
+                        onSaveConfig = { updated ->
+                            viewModel.updateBaseStrategyConfig(updated)
+                        },
+                    )
+                }
+            }
+
+            3 -> {
+                NeuralDirectNavigationCard(
+                    neuralState = neuralState,
+                    showDescriptions = showDesc,
+                    onOpenNeuralBrain = onOpenNeuralBrain,
+                )
+                AvalAiPreTradeGateCard(
+                    settings = settings,
+                    aiChecking = aiChecking,
+                    lastVerdict = lastAiVerdict,
+                    onToggleEnabled = viewModel::setAvalAiEnabled,
+                    onSaveConfig = { key, model, url -> viewModel.saveAvalAiConfig(key, model, url, enableAfterSave = true) },
+                    onTestYesNo = viewModel::testAvalAiYesNoQuestion,
+                )
+                OfflineGapBackfillCard(
+                    activeSymbol = activeSymbol,
+                    summary = backfillSummaries[activeSymbol],
+                    isBackfilling = isBackfilling,
+                    onSyncGap = { hours -> viewModel.syncAllOpenAndActiveSymbolsGap(hoursOverride = hours, notifyOnSuccess = true) },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * کارت انتقال مستقیم از تنظیمات به صفحه اختصاصی «شبکه عصبی خودآموز» (`NeuralBrainScreen`)
+ */
+@Composable
+fun NeuralDirectNavigationCard(
+    neuralState: NeuralLearningStateSummary,
+    showDescriptions: Boolean,
+    onOpenNeuralBrain: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.horizontalGradient(
+                    colors = listOf(
+                        AurumColors.Surface,
+                        AurumColors.SurfaceAlt,
+                    ),
+                ),
+            )
+            .border(1.2.dp, AurumColors.Cyan.copy(alpha = 0.55f), RoundedCornerShape(16.dp))
+            .clickable { onOpenNeuralBrain() }
+            .padding(14.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "🧠 شبکه عصبی خودآموز و دستیار ترید",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = AurumColors.Gold,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Pill(
+                        text = "${neuralState.totalLearnedTrades}/10,000",
+                        color = if (neuralState.isActiveFilterEnabled) AurumColors.Green else AurumColors.Cyan,
+                    )
+                }
+                Pill(
+                    text = "ورود به صفحه شبکه عصبی ↗",
+                    color = AurumColors.Gold,
+                    modifier = Modifier.clickable { onOpenNeuralBrain() },
+                )
+            }
+            AnimatedVisibility(visible = showDescriptions) {
+                Text(
+                    text = "شبکه عصبی صفحه اختصاصی خود را دارد؛ برای مشاهده آموخته‌ها، کالبدشکافی معاملات، ماتریس ۲۴ استراتژی و تنظیمات کامل مغز عصبی ضربه بزنید.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary.copy(alpha = 0.72f),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * بخش تنظیمات صدا دقیقاً به سبک ساعت و آلارم گوشی (`Phone Clock Alarm Style`):
+ * - گرافیک مدرن، دینامیک و کاملاً منظم بدون هیچ شلوغی اضافه
+ * - دقیقاً ۱ اعلان و ۱ صدا برای ورود (`ENTRY`)
+ * - دقیقاً ۱ اعلان و ۱ صدا برای رسیدن به پروفیت تارگت (`TAKE_PROFIT`)
+ * - دقیقاً ۱ اعلان و ۱ صدا برای خروج / حد ضرر (`STOP_LOSS`)
+ */
+@Composable
+private fun PhoneStyleTradeAlarmsCard(
+    settings: com.aurum.edge.core.AppSettings,
+    showDescriptions: Boolean,
+    onToggleMaster: (Boolean) -> Unit,
+    onToggleStage: (TradeAlarmKind, Boolean) -> Unit,
+    onPickNoteForStage: (TradeAlarmKind) -> Unit,
+    onResetDefaultNote: (TradeAlarmKind) -> Unit,
+    onTestStage: (TradeAlarmKind) -> Unit,
+    onVolumeChange: (Int) -> Unit,
+    onVibrationChange: (Boolean) -> Unit,
+) {
+    val activeCount = listOf(
+        settings.entryAlarmEnabled,
+        settings.tpAlarmEnabled,
+        settings.slAlarmEnabled,
+    ).count { it }
+
+    SectionCard(
+        title = "⏰ آلارم‌های مراحل معامله (مدل آلارم گوشی · ۱ اعلان + ۱ صدا)",
+        subtitle = if (showDescriptions) {
+            "دقیقاً ۱ اعلان و ۱ صدای نوت انتخابی برای ورود، ۱ اعلان و ۱ صدا برای پروفیت تارگت و ۱ اعلان و ۱ صدا برای خروج"
+        } else null,
+        initiallyExpanded = false,
+        trailing = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Pill(
+                    text = if (settings.notifyOnSignal) "$activeCount/3 روشن" else "خاموش",
+                    color = if (settings.notifyOnSignal && activeCount > 0) AurumColors.Green else AurumColors.TextMuted,
+                )
+                Switch(
+                    checked = settings.notifyOnSignal,
+                    onCheckedChange = onToggleMaster,
+                )
+            }
+        },
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            // کارت ۱: آلارم ورود به معامله (Entry)
+            PhoneAlarmStageItemCard(
+                stageNumber = "01",
+                stageTitleFa = "ورود به معامله (Trade Entry)",
+                stageSubtitleFa = "پخش دقیقاً ۱ اعلان + ۱ نوت در لحظه باز شدن پوزیشن جدید",
+                activeNoteName = settings.entryAlarmSoundName.ifBlank { "Ding-Dong" },
+                defaultNoteName = "Ding-Dong",
+                accentColor = AurumColors.Cyan,
+                enabled = settings.notifyOnSignal && settings.entryAlarmEnabled,
+                showDescriptions = showDescriptions,
+                onToggleEnabled = { onToggleStage(TradeAlarmKind.ENTRY, it) },
+                onPickRingtone = { onPickNoteForStage(TradeAlarmKind.ENTRY) },
+                onResetDefault = { onResetDefaultNote(TradeAlarmKind.ENTRY) },
+                onPreviewAlarm = { onTestStage(TradeAlarmKind.ENTRY) },
+            )
+
+            // کارت ۲: آلارم رسیدن به پروفیت تارگت (Profit Target)
+            PhoneAlarmStageItemCard(
+                stageNumber = "02",
+                stageTitleFa = "رسیدن به پروفیت تارگت (Profit Target)",
+                stageSubtitleFa = "پخش دقیقاً ۱ اعلان + ۱ نوت در لحظه ثبت سود و رسیدن به تارگت (TP)",
+                activeNoteName = settings.tpAlarmSoundName.ifBlank { "Red Dwarf" },
+                defaultNoteName = "Red Dwarf",
+                accentColor = AurumColors.Green,
+                enabled = settings.notifyOnSignal && settings.tpAlarmEnabled,
+                showDescriptions = showDescriptions,
+                onToggleEnabled = { onToggleStage(TradeAlarmKind.TAKE_PROFIT, it) },
+                onPickRingtone = { onPickNoteForStage(TradeAlarmKind.TAKE_PROFIT) },
+                onResetDefault = { onResetDefaultNote(TradeAlarmKind.TAKE_PROFIT) },
+                onPreviewAlarm = { onTestStage(TradeAlarmKind.TAKE_PROFIT) },
+            )
+
+            // کارت ۳: آلارم خروج معامله / حد ضرر (Exit / Stop-Loss)
+            PhoneAlarmStageItemCard(
+                stageNumber = "03",
+                stageTitleFa = "خروج از معامله (Exit / Stop-Loss)",
+                stageSubtitleFa = "پخش دقیقاً ۱ اعلان + ۱ نوت در لحظه بسته شدن در حد ضرر (SL)",
+                activeNoteName = settings.slAlarmSoundName.ifBlank { "Latch" },
+                defaultNoteName = "Latch",
+                accentColor = AurumColors.Red,
+                enabled = settings.notifyOnSignal && settings.slAlarmEnabled,
+                showDescriptions = showDescriptions,
+                onToggleEnabled = { onToggleStage(TradeAlarmKind.STOP_LOSS, it) },
+                onPickRingtone = { onPickNoteForStage(TradeAlarmKind.STOP_LOSS) },
+                onResetDefault = { onResetDefaultNote(TradeAlarmKind.STOP_LOSS) },
+                onPreviewAlarm = { onTestStage(TradeAlarmKind.STOP_LOSS) },
+            )
+
+            // پنل یکپارچه بلندی صدای زنگ و ویبره آلارم گوشی
+            val volPct = settings.alarmVolumePercent.coerceIn(0, 100)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(AurumColors.SurfaceAlt)
+                    .border(1.dp, AurumColors.Line, RoundedCornerShape(14.dp))
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "🔊 بلندی صدای آلارم: $volPct%",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = AurumColors.Gold,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            text = "📳 ویبره هم‌زمان",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextSecondary,
+                        )
+                        Switch(
+                            checked = settings.alarmVibrationEnabled,
+                            onCheckedChange = onVibrationChange,
+                        )
+                    }
+                }
+
+                Slider(
+                    value = volPct.toFloat(),
+                    onValueChange = { onVolumeChange(it.roundToInt()) },
+                    valueRange = 0f..100f,
+                    steps = 19,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    listOf(25, 50, 75, 90, 100).forEach { pct ->
+                        val selected = volPct == pct
+                        Pill(
+                            text = "🔊 $pct%",
+                            color = if (selected) AurumColors.Gold else AurumColors.TextMuted,
+                            modifier = Modifier.clickable { onVolumeChange(pct) },
+                        )
                     }
                 }
             }
         }
+    }
+}
 
-        SectionCard(
-            title = "مدیریت سرمایه",
-            subtitle = "محاسبه حجم بر پایه ریسک واقعی همان حساب",
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = balance,
-                    onValueChange = { balance = it },
-                    label = { Text("موجودی $") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                )
-                OutlinedTextField(
-                    value = risk,
-                    onValueChange = { risk = it },
-                    label = { Text("ریسک هر معامله % (حداکثر ۰٫۵)") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            OutlinedTextField(
-                value = minConfidence,
-                onValueChange = { minConfidence = it },
-                label = { Text("حداقل امتیاز ورود (۶۰ تا ۹۵)") },
-                singleLine = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
+@Composable
+private fun PhoneAlarmStageItemCard(
+    stageNumber: String,
+    stageTitleFa: String,
+    stageSubtitleFa: String,
+    activeNoteName: String,
+    defaultNoteName: String,
+    accentColor: Color,
+    enabled: Boolean,
+    showDescriptions: Boolean,
+    onToggleEnabled: (Boolean) -> Unit,
+    onPickRingtone: () -> Unit,
+    onResetDefault: () -> Unit,
+    onPreviewAlarm: () -> Unit,
+) {
+    val cardAlpha = if (enabled) 1f else 0.62f
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(cardAlpha)
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.horizontalGradient(
+                    colors = listOf(
+                        accentColor.copy(alpha = if (enabled) 0.14f else 0.04f),
+                        AurumColors.SurfaceAlt,
+                    ),
+                ),
             )
+            .border(
+                width = if (enabled) 1.3.dp else 0.8.dp,
+                color = if (enabled) accentColor.copy(alpha = 0.65f) else AurumColors.Line,
+                shape = RoundedCornerShape(16.dp),
+            )
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // ردیف بالا: شماره کلاک آلارم + عنوان مرحله + سوییچ روشن/خاموش آلارم گوشی
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f),
             ) {
-                OutlinedTextField(
-                    value = spread,
-                    onValueChange = { spread = it },
-                    label = { Text("اسپرد طلا ($)") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                )
-                OutlinedTextField(
-                    value = commission,
-                    onValueChange = { commission = it },
-                    label = { Text("کمیسیون/انس ($)") },
-                    singleLine = true,
-                    modifier = Modifier.weight(1f),
-                )
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(accentColor.copy(alpha = 0.20f))
+                        .border(1.dp, accentColor, CircleShape)
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = stageNumber,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = accentColor,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = stageTitleFa,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = AurumColors.TextPrimary,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Pill(
+                            text = "🎵 نوت: $activeNoteName",
+                            color = accentColor,
+                            modifier = Modifier.clickable { onPickRingtone() },
+                        )
+                        Pill(
+                            text = "۱ اعلان + ۱ صدا",
+                            color = AurumColors.Gold,
+                        )
+                    }
+                }
             }
-            Button(
-                onClick = {
-                    balance.toDoubleOrNull()?.let(viewModel::saveBalance)
-                    risk.toDoubleOrNull()?.let(viewModel::saveRiskPercent)
-                    minConfidence.toDoubleOrNull()?.let(viewModel::saveMinConfidence)
-                    spread.toDoubleOrNull()?.let(viewModel::saveSpread)
-                    commission.toDoubleOrNull()?.let(viewModel::saveCommission)
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 10.dp),
-            ) { Text("ذخیره تنظیمات ریسک") }
+            Switch(
+                checked = enabled,
+                onCheckedChange = onToggleEnabled,
+                colors = SwitchDefaults.colors(
+                    checkedThumbColor = accentColor,
+                    checkedTrackColor = accentColor.copy(alpha = 0.32f),
+                ),
+            )
         }
 
-        SectionCard(
-            title = "پایش پس‌زمینه",
-            subtitle = "اعلان فقط وقتی سیگنال واقعی و تاییدشده تولید شود",
+        AnimatedVisibility(visible = showDescriptions) {
+            Text(
+                text = stageSubtitleFa,
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextSecondary.copy(alpha = 0.72f),
+            )
+        }
+
+        // نوار دکمه‌های انتخاب نوت از گوشی، پخش تست و بازگشت به نوت پیش‌فرض
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+            Box(
+                modifier = Modifier
+                    .weight(1.2f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AurumColors.Bg)
+                    .border(1.dp, accentColor.copy(alpha = 0.55f), RoundedCornerShape(10.dp))
+                    .clickable { onPickRingtone() }
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("پایش زنده در پس‌زمینه", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
+                Text(
+                    text = "🎵 انتخاب نوت از گوشی",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accentColor,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .weight(0.9f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(accentColor.copy(alpha = 0.18f))
+                    .border(1.dp, accentColor, RoundedCornerShape(10.dp))
+                    .clickable { onPreviewAlarm() }
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "▶ تست آلارم",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accentColor,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            if (!activeNoteName.equals(defaultNoteName, ignoreCase = true)) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(AurumColors.Bg)
+                        .border(1.dp, AurumColors.Line, RoundedCornerShape(10.dp))
+                        .clickable { onResetDefault() }
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
                     Text(
-                        "وضعیت: ${if (monitorRunning) "فعال" else if (settings.backgroundMonitor) "در انتظار شروع" else "خاموش"}",
+                        text = "پیش‌فرض ($defaultNoteName)",
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.TextMuted,
                     )
                 }
-                Switch(
-                    checked = settings.backgroundMonitor,
-                    onCheckedChange = { enabled ->
-                        if (enabled) startMonitorIfAllowed()
-                        else {
-                            SignalMonitorService.stop(context)
-                            viewModel.setMonitorFlag(false)
-                        }
-                    },
-                )
             }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("هشدار کاندیدای چهارلایهٔ کاغذی", style = MaterialTheme.typography.bodySmall, color = AurumColors.TextPrimary)
-                }
-                Switch(
-                    checked = settings.notifyOnSignal,
-                    onCheckedChange = viewModel::setNotifyOnSignal,
-                )
-            }
-            OutlinedButton(onClick = { runCatching {
-                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                    Uri.parse("package:${context.packageName}")))
-            } }, modifier = Modifier.fillMaxWidth()) { Text("تنظیم باتری/اعلان این برنامه در گوشی") }
-            Text("صدای هشدار: ${settings.alertSoundName.ifBlank { "اعلان پیش‌فرض گوشی" }}",
-                modifier = Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall,
-                color = AurumColors.Gold)
-            OutlinedButton(onClick = { soundPicker.launch(arrayOf("audio/*")) },
-                modifier = Modifier.fillMaxWidth()) { Text("انتخاب فایل صوتی از گوشی") }
-            if (settings.alertSoundUri.isNotBlank()) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { viewModel.testAlertSound(context) }, modifier = Modifier.weight(1f)) {
-                        Text("پخش آزمون")
-                    }
-                    OutlinedButton(onClick = viewModel::resetAlertSound, modifier = Modifier.weight(1f)) {
-                        Text("صدای پیش‌فرض")
-                    }
-                }
-            }
-            OutlinedButton(onClick = {
-                val permissionMissing = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-                if (permissionMissing) testPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                else viewModel.reportNotificationTest(Notifier.notifyTest(context, settings.alertSoundUri))
-            }, modifier = Modifier.fillMaxWidth()) { Text("آزمون اعلان واقعی گوشی · بدون معامله") }
-            OutlinedButton(onClick = {
-                val channelId = if (settings.alertSoundUri.isBlank()) Notifier.CHANNEL_VERIFIED_DEFAULT
-                    else Notifier.CHANNEL_VERIFIED_FILE
-                Notifier.ensureChannels(context)
-                runCatching { context.startActivity(Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
-                    putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
-                    putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
-                }) }
-            }, modifier = Modifier.fillMaxWidth()) { Text("تنظیمات اعلان‌های اندروید") }
         }
-
-        SectionCard("ورود خودکار کاغذی · بدون سفارش واقعی", "بدون فرم دستی؛ بدون بروکر، بدون سفارش واقعی") {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("ورود خودکار کاغذی",
-                    modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
-                    color = AurumColors.TextPrimary)
-                Switch(checked = settings.autoPaperTrading, onCheckedChange = { enabled ->
-                    if (enabled) confirmAuto = true else viewModel.setAutoPaperTrading(false)
-                })
-            }
-            val autoStatus by viewModel.autoPaperStatus.collectAsStateWithLifecycle()
-            Text(if (settings.autoPaperTrading) autoStatus else "خاموش؛ خطوط روی چارت معامله نیستند.",
-                style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold,
-                modifier = Modifier.padding(top = 6.dp))
-        }
-
     }
-    if (confirmAuto) {
-        AlertDialog(onDismissRequest = { confirmAuto = false },
-            title = { Text("ورود خودکار فقط کاغذی") },
-            text = { Text("فقط معاملهٔ کاغذی؛ سفارش واقعی ارسال نمی‌شود. فعال شود؟") },
-            confirmButton = { TextButton(onClick = {
-                confirmAuto = false
-                viewModel.setAutoPaperTrading(true)
-            }) { Text("فعال‌کردن کاغذی") } },
-            dismissButton = { TextButton(onClick = { confirmAuto = false }) { Text("انصراف") } })
-    }
-
 }

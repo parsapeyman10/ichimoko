@@ -1,89 +1,133 @@
 package com.aurum.edge.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ShowChart
-import androidx.compose.material.icons.filled.ViewList
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material.icons.filled.TrackChanges
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.aurum.edge.ui.theme.AurumColors
 
 enum class AurumTab(val label: String, val icon: ImageVector) {
     Home("خانه", Icons.Filled.Home),
+    Strategy("رادار", Icons.Filled.TrackChanges),
     Chart("چارت", Icons.Filled.ShowChart),
-    Signal("معامله", Icons.Filled.Bolt),
-    Watch("دیده‌بان", Icons.Filled.ViewList),
-    Journal("ژورنال", Icons.Filled.Bookmarks),
-    Update("بروزرسانی", Icons.Filled.Refresh),
+    Journal("ژورنال", Icons.Filled.ReceiptLong),
+    Neural("هوش عصبی", Icons.Filled.Psychology),
     Settings("تنظیمات", Icons.Filled.Settings),
-    Api("APIها", Icons.Filled.Settings),
+    Update("آپدیت", Icons.Filled.Refresh),
 }
 
 internal val primaryTabs = listOf(
-    AurumTab.Home, AurumTab.Chart, AurumTab.Signal, AurumTab.Watch, AurumTab.Journal,
-)
-
-internal val moreTabs = listOf(
-    AurumTab.Update, AurumTab.Settings, AurumTab.Api,
+    AurumTab.Home,
+    AurumTab.Strategy,
+    AurumTab.Chart,
+    AurumTab.Journal,
+    AurumTab.Neural,
+    AurumTab.Settings,
+    AurumTab.Update,
 )
 
 @Composable
-internal fun AurumBottomBar(selected: AurumTab, onSelect: (AurumTab) -> Unit, onMore: () -> Unit) {
-    NavigationBar(containerColor = AurumColors.Surface) {
+internal fun AurumBottomBar(
+    selected: AurumTab,
+    openTradeCount: Int = 0,
+    onSelect: (AurumTab) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(AurumColors.Surface)
+            .border(0.5.dp, AurumColors.Line)
+            .navigationBarsPadding()
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         primaryTabs.forEach { entry ->
-            NavigationBarItem(
-                selected = selected == entry,
-                onClick = { onSelect(entry) },
-                icon = { Icon(entry.icon, contentDescription = entry.label, modifier = Modifier.size(20.dp)) },
-                label = { Text(entry.label, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
-                alwaysShowLabel = true,
-            )
-        }
-        NavigationBarItem(
-            selected = selected in moreTabs,
-            onClick = onMore,
-            icon = { Icon(Icons.Filled.MoreHoriz, contentDescription = "بخش‌های دیگر", modifier = Modifier.size(20.dp)) },
-            label = { Text("بیشتر", style = MaterialTheme.typography.labelSmall) },
-            alwaysShowLabel = true,
-        )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-internal fun MoreTabsSheet(onDismiss: () -> Unit, onOpen: (AurumTab) -> Unit) {
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = AurumColors.Surface) {
-        Text(
-            "بخش‌های دیگر",
-            style = MaterialTheme.typography.titleMedium,
-            color = AurumColors.TextPrimary,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-        )
-        moreTabs.forEach { destination ->
-            ListItem(
-                headlineContent = { Text(destination.label) },
-                leadingContent = { Icon(destination.icon, contentDescription = null) },
-                modifier = Modifier.fillMaxWidth().clickable { onOpen(destination) },
-            )
+            val isSelected = selected == entry
+            val showBadge = openTradeCount > 0 && (entry == AurumTab.Chart || entry == AurumTab.Home)
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(
+                        if (isSelected) AurumColors.Gold.copy(alpha = 0.16f) else Color.Transparent,
+                    )
+                    .border(
+                        width = if (isSelected) 1.dp else 0.dp,
+                        color = if (isSelected) AurumColors.Gold.copy(alpha = 0.55f) else Color.Transparent,
+                        shape = RoundedCornerShape(12.dp),
+                    )
+                    .clickable { onSelect(entry) }
+                    .padding(vertical = 6.dp, horizontal = 2.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Box(contentAlignment = Alignment.TopEnd) {
+                    Icon(
+                        imageVector = entry.icon,
+                        contentDescription = entry.label,
+                        tint = if (isSelected) AurumColors.Gold else AurumColors.TextMuted,
+                        modifier = Modifier.size(19.dp),
+                    )
+                    if (showBadge) {
+                        Box(
+                            modifier = Modifier
+                                .padding(start = 10.dp)
+                                .size(13.dp)
+                                .clip(CircleShape)
+                                .background(AurumColors.Green),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = openTradeCount.coerceAtMost(99).toString(),
+                                color = Color.Black,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = entry.label,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                    color = if (isSelected) AurumColors.Gold else AurumColors.TextSecondary,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

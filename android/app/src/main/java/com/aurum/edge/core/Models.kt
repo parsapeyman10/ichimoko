@@ -1,38 +1,37 @@
 package com.aurum.edge.core
 
-import com.aurum.edge.domain.Candle
-import com.aurum.edge.domain.FeedMode
-import com.aurum.edge.domain.FeedStatus
 import com.aurum.edge.domain.Interval
 import com.aurum.edge.domain.SignalAction
 import kotlinx.serialization.Serializable
 
-/**
- * Real market data contracts.
- *
- * Rule of this app: every price that reaches the UI originates from a real provider
- * (Twelve Data REST/WebSocket, labelled live fallback ticks) or from a local cache of previously received real prices.
- * There is no generator, no random walk, no seeded simulation anywhere in this module.
- */
-data class PriceTick(val price: Double, val at: Long, val bid: Double? = null, val ask: Double? = null,
-                     val isTradeTick: Boolean = true, val provider: String? = null, val sourceNote: String? = null, val sourceConfirmations: Int = 0) {
+data class PriceTick(
+    val price: Double,
+    val at: Long,
+    val bid: Double? = null,
+    val ask: Double? = null,
+    val isTradeTick: Boolean = true,
+    val provider: String? = null,
+    val sourceNote: String? = null,
+    val sourceConfirmations: Int = 0,
+) {
     val spread: Double? get() = if (bid != null && ask != null && ask >= bid) ask - bid else null
 }
 
-
 enum class AssetClass(val code: String, val label: String, val maxSlots: Int) {
-    CRYPTO("CRYPTO", "رمزارز", 2),
-    FOREX("FOREX", "جفت‌ارز فارکس", 2),
-    COMMODITY("COMMODITY", "کالا و انرژی", 2),
-    STOCK("STOCK", "سهام و شاخص", 2);
+    CRYPTO("CRYPTO", "رمزارز", 999),
+    FOREX("FOREX", "جفت‌ارز فارکس", 999),
+    COMMODITY("COMMODITY", "کالا و انرژی", 999),
+    STOCK("STOCK", "سهام و شاخص", 999);
 
     companion object {
-        // Provider-independent identity; do not mistake a slashless EURUSD for a stock.
-        // Known currencies are explicit; arbitrary six-letter strings are not assumed FX.
-        private val fiat = setOf("USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD",
-            "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "TRY", "ZAR", "MXN", "SGD", "HKD")
-        private val equities = setOf("AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "GOOGL", "META",
-            "AMD", "NFLX", "INTC", "NASDAQ", "SP500", "DOW", "US30", "DJI", "^DJI", "DJIA", "DAX", "FTSE", "NIKKEI")
+        private val fiat = setOf(
+            "USD", "EUR", "GBP", "JPY", "CHF", "CAD", "AUD", "NZD",
+            "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "TRY", "ZAR", "MXN", "SGD", "HKD",
+        )
+        private val equities = setOf(
+            "AAPL", "NVDA", "TSLA", "MSFT", "AMZN", "GOOGL", "META",
+            "AMD", "NFLX", "INTC", "NASDAQ", "SP500", "DOW", "US30", "DJI", "^DJI", "DJIA", "DAX", "FTSE", "NIKKEI",
+        )
 
         fun of(symbol: String): AssetClass {
             val s = symbol.trim().uppercase(java.util.Locale.ROOT)
@@ -53,8 +52,6 @@ enum class AssetClass(val code: String, val label: String, val maxSlots: Int) {
 
                 s in equities || (!s.contains("/") && s.length in 1..5) -> STOCK
 
-                // Historical unknown symbols retain their previous risk bucket; a feed must
-                // still validate the actual instrument before a trade can be considered.
                 else -> FOREX
             }
         }
@@ -65,25 +62,18 @@ enum class StrategyKind(val id: String, val label: String, val description: Stri
     ICHIMOKU_PRICE_ACTION(
         "ICHIMOKU_PRICE_ACTION",
         "ایچیموکو + پرایس اکشن",
-        "موتور واحد V1: EMA/ایچیموکو + RSI/MACD + واکنش حمایت/مقاومت + هفت تایم‌فریم M1 تا D1",
+        "چارت ایچیموکو",
     );
 
     companion object {
-        // Older persisted choices are migrated to the only V1 engine; none is offered as
-        // a separate executable strategy. The real selectable modes are CategoryStrategy.
         fun fromId(raw: String?): StrategyKind? = when (raw?.trim()?.uppercase(java.util.Locale.ROOT)) {
             null, "", "ICHIMOKU_PRICE_ACTION", "ICHIMOKU", "SUPER_PLUS", "ICT_SMC",
             "EMA_VWAP", "VOLUME_BREAKOUT", "MEAN_REVERSION" -> ICHIMOKU_PRICE_ACTION
-            else -> null // unknown historical IDs must not be advertised as implemented
+            else -> null
         }
     }
 }
 
-/**
- * Legacy profile record kept for persisted settings and old journal compatibility.
- * These options are NOT V1 signal switches; the live engine uses four scored layers,
- * seven independent frames and the per-category TREND/RANGE/HYBRID mode only.
- */
 data class SignalProfile(
     val momentumVolume: Boolean = false,
     val flatSpanB: Boolean = false,
@@ -94,57 +84,12 @@ data class SignalProfile(
     val riskyTimingFilter: Boolean = false,
     val structureRiskFilter: Boolean = false,
     val cooldownFilter: Boolean = false,
-    /** The standard Chikou confirmation can be explicitly disabled for profile experiments. */
     val chikouConfirmation: Boolean = true,
 ) {
-    val title: String get() = activeLabels().joinToString(" + ")
-
-    fun activeLabels(): List<String> = buildList {
-        add("پایه")
-        if (momentumVolume) add("مومنتوم/حجم")
-        if (flatSpanB) add("تختی SpanB52")
-        if (rangeChopFilter) add("ضد رنج")
-        if (higherTimeframeFilter) add("تایم بالاتر")
-        if (fakeBreakoutFilter) add("ضد فیک‌بریک")
-        if (dynamicSpreadFilter) add("اسپرد پویا")
-        if (riskyTimingFilter) add("زمان خطرناک")
-        if (structureRiskFilter) add("ریسک ساختار")
-        if (cooldownFilter) add("کول‌داون")
-        if (!chikouConfirmation) add("بدون تایید چیکو")
-    }
-
-    fun persistName(): String = buildList {
-        if (momentumVolume) add("MOMENTUM_VOLUME")
-        if (flatSpanB) add("FLAT_SPAN_B")
-        if (rangeChopFilter) add("RANGE_CHOP_FILTER")
-        if (higherTimeframeFilter) add("HIGHER_TIMEFRAME_FILTER")
-        if (fakeBreakoutFilter) add("FAKE_BREAKOUT_FILTER")
-        if (dynamicSpreadFilter) add("DYNAMIC_SPREAD_FILTER")
-        if (riskyTimingFilter) add("RISKY_TIMING_FILTER")
-        if (structureRiskFilter) add("STRUCTURE_RISK_FILTER")
-        if (cooldownFilter) add("COOLDOWN_FILTER")
-        if (!chikouConfirmation) add("CHIKOU_OFF")
-    }.ifEmpty { listOf("BASE") }.joinToString(",")
+    fun persistName(): String = "BASE"
 
     companion object {
         val BASE = SignalProfile()
-
-        /** Migrates the previous single-choice enum value, and also accepts comma lists. */
-        fun fromName(raw: String?): SignalProfile {
-            val parts = raw.orEmpty().split(',', '|', '+').map { it.trim().uppercase() }.toSet()
-            return SignalProfile(
-                momentumVolume = "MOMENTUM_VOLUME" in parts,
-                flatSpanB = "FLAT_SPAN_B" in parts,
-                rangeChopFilter = "RANGE_CHOP_FILTER" in parts,
-                higherTimeframeFilter = "HIGHER_TIMEFRAME_FILTER" in parts,
-                fakeBreakoutFilter = "FAKE_BREAKOUT_FILTER" in parts,
-                dynamicSpreadFilter = "DYNAMIC_SPREAD_FILTER" in parts,
-                riskyTimingFilter = "RISKY_TIMING_FILTER" in parts,
-                structureRiskFilter = "STRUCTURE_RISK_FILTER" in parts,
-                cooldownFilter = "COOLDOWN_FILTER" in parts,
-                chikouConfirmation = "CHIKOU_OFF" !in parts,
-            )
-        }
     }
 }
 
@@ -155,112 +100,8 @@ data class ConfluenceItem(
     val ok: Boolean,
     val detail: String,
     val status: ConfluenceStatus = if (ok) ConfluenceStatus.CONFIRMED else ConfluenceStatus.CONFLICT,
-    /** Optional per-condition contribution/health shown in the UI as a percent out of 100. */
     val scorePercent: Int? = null,
 )
-
-/** Closed-bar entry evidence carried through news review to the final journal guard. */
-data class IchimokuEntryEvidence(
-    val side: SignalAction,
-    val barTime: Long,
-    val crossTime: Long,
-    val interval: Interval,
-    val compressedBars: Int,
-) {
-    fun matches(signal: Signal): Boolean = signal.action == side && signal.barTime == barTime &&
-        signal.interval == interval && compressedBars in 3..5 &&
-        crossTime <= barTime && barTime - crossTime in 0L..interval.millis &&
-        crossTime > 0L
-}
-
-/** Measured closed-bar proof of the crypto-only compression/breakout engine.
- * It is ephemeral signal evidence, NOT a fill or a claim about future prices.
- */
-data class CryptoBreakoutEvidence(
-    val side: SignalAction,
-    val barTime: Long,
-    val breakoutTime: Long,
-    val compressionStart: Long,
-    val atr: Double,
-    val points: Int,
-    val pattern: String,
-) {
-    fun matches(signal: Signal): Boolean = signal.action == side &&
-        signal.interval == Interval.M5 && barTime == signal.barTime && barTime > 0L &&
-        breakoutTime in (barTime - Interval.M5.millis)..barTime &&
-        breakoutTime - compressionStart == 20L * Interval.M5.millis &&
-        atr.isFinite() && atr > 0.0 && points in 16..26 &&
-        pattern in setOf("FLAG", "BASE", "WEDGE") &&
-        signal.entry?.isFinite() == true && signal.entry > 0 &&
-        signal.stopLoss?.isFinite() == true && signal.takeProfit?.isFinite() == true &&
-        signal.stopLoss > 0 && signal.takeProfit > 0 &&
-        (if (side == SignalAction.BUY) signal.stopLoss < signal.entry &&
-            signal.takeProfit >= signal.entry + 3 * (signal.entry - signal.stopLoss)
-         else side == SignalAction.SELL && signal.stopLoss > signal.entry &&
-            signal.takeProfit <= signal.entry - 3 * (signal.stopLoss - signal.entry))
-}
-
-/**
- * ALS-5 — Adaptive Liquidity & Structure Trading System opportunity & state-machine record for XAU/USD.
- * Captures both incomplete candidate setups (WAIT) and fully confirmed entries (BUY / SELL).
- */
-@Serializable
-data class Als5OpportunityRecord(
-    val strategyName: String = "ALS-5",
-    val state: String, // BUY | SELL | WAIT | NO_TRADE
-    val setupType: String, // ENGINE_A_TREND | ENGINE_B_SWEEP | ENGINE_C_RANGE | NONE
-    val direction: SignalAction,
-    val structuralLevel: Double?,
-    val regime: String, // BULLISH_TREND | BEARISH_TREND | RANGE | UNCERTAIN_HIGH_VOL
-    val satisfiedConditions: List<String>,
-    val missingConditions: List<String>,
-    val invalidationLevel: Double?,
-    val candidateEntry: Double?,
-    val estimatedStopLoss: Double?,
-    val estimatedTakeProfit: Double?,
-    val rewardToRisk: Double?,
-    val candidateSinceBarTime: Long? = null,
-    val expirationBarsRemaining: Int,
-    val scoreOutOf10: Int,
-    val structureScore: Int, // 0..2
-    val setupLevelScore: Int, // 0..2
-    val confirmationScore: Int, // 0..2
-    val rrScore: Int, // 0..2
-    val executionScore: Int, // 0..2
-    val positionLots: Double = 0.0,
-    val positionOz: Double = 0.0,
-    val exitModel: String = "FIXED_RR",
-    val setupKey: String = "",
-    val barTime: Long = 0L,
-) {
-    fun matches(signal: Signal): Boolean {
-        val entry = candidateEntry ?: return false
-        val stop = estimatedStopLoss ?: return false
-        val target = estimatedTakeProfit ?: return false
-        val rr = rewardToRisk ?: return false
-        return strategyName == "ALS-5" &&
-            state == direction.name && state in setOf("BUY", "SELL") &&
-            setupType in setOf("ENGINE_A_TREND", "ENGINE_B_SWEEP", "ENGINE_C_RANGE") &&
-            regime in setOf("BULLISH_TREND", "BEARISH_TREND", "RANGE") &&
-            signal.action == direction && signal.interval == Interval.M5 &&
-            barTime == signal.barTime && barTime > 0L &&
-            scoreOutOf10 in 8..10 &&
-            listOf(structureScore, setupLevelScore, confirmationScore, rrScore, executionScore)
-                .all { it in 0..2 } &&
-            structureScore + setupLevelScore + confirmationScore + rrScore + executionScore == scoreOutOf10 &&
-            rr.isFinite() && rr >= 1.5 &&
-            entry.isFinite() && entry > 0.0 &&
-            stop.isFinite() && stop > 0.0 &&
-            target.isFinite() && target > 0.0 &&
-            signal.entry?.let { kotlin.math.abs(it - entry) < 1e-8 } == true &&
-            signal.stopLoss?.let { kotlin.math.abs(it - stop) < 1e-8 } == true &&
-            signal.takeProfit?.let { kotlin.math.abs(it - target) < 1e-8 } == true &&
-            signal.riskReward?.let { kotlin.math.abs(it - rr) < 1e-8 } == true &&
-            positionLots.isFinite() && positionLots > 0.0 &&
-            positionOz.isFinite() && positionOz > 0.0 &&
-            !setupKey.isBlank()
-    }
-}
 
 data class Signal(
     val action: SignalAction,
@@ -275,133 +116,96 @@ data class Signal(
     val interval: Interval = Interval.M5,
     val barTime: Long = 0L,
     val evaluatedAt: Long = System.currentTimeMillis(),
-    val ichimokuEntry: IchimokuEntryEvidence? = null,
-    val cryptoBreakout: CryptoBreakoutEvidence? = null,
-    val als5Opportunity: Als5OpportunityRecord? = null,
-    /** BTC-ARES per-engine record; present for BTC/USDT only, including NO_TRADE. */
-    val btcAres: BtcAresRecord? = null,
-    /** ALS-5S per-engine record for silver; present for XAG/USD only, including NO_TRADE. */
-    val als5s: XagAresRecord? = null,
-    /** EUR-ARES per-engine record for EUR/USD; present for that one pair, including NO_TRADE. */
-    val eurAres: EurAresRecord? = null,
 ) {
     val isActionable: Boolean get() = action != SignalAction.NO_TRADE
 }
 
-/** Connection truth for the UI. OFFLINE is a first-class state — never replaced by invented data. */
-
-
+@Serializable
+data class PaperConditionRecord(val name: String, val status: String, val detail: String)
 
 @Serializable
-data class PaperNewsEvidence(
-    val id: String,
-    val source: String,
-    val headline: String,
-    val url: String,
-    val publishedAt: Long,
+data class PreEntryCandleSlot(
+    val slotIndex: Int = 0, // -2 = کندل ۳ قبل, -1 = کندل ۲ قبل, 0 = کندل ۱ قبل (ماشه)
+    val slotTitleFa: String = "",
+    val barTime: Long = 0L,
+    val open: Double = 0.0,
+    val high: Double = 0.0,
+    val low: Double = 0.0,
+    val close: Double = 0.0,
+    val isBullish: Boolean = true,
+    val bodyPctOfRange: Int = 50,
+    val upperWickPct: Int = 25,
+    val lowerWickPct: Int = 25,
+    val rangeAtrRatio: Double = 1.0,
+    val tenkanValue: Double = 0.0,
+    val kijunValue: Double = 0.0,
+    val kumoTop: Double = 0.0,
+    val kumoBottom: Double = 0.0,
+    val priceVsTenkanFa: String = "",
+    val priceVsKijunFa: String = "",
+    val priceVsKumoFa: String = "",
+    val candleAnatomyFa: String = "",
+    val roleInSetupFa: String = "",
 )
 
-@Serializable
-data class PaperNewsRecord(
-    val model: String,
-    val direction: String,
-    val confidence: Double,
-    val checkedAt: Long,
-    val evidence: List<PaperNewsEvidence>,
-    /** Calendar is a schedule only; retain its verified receipt time, never invent an article. */
-    val calendarSource: String? = null,
-    val calendarCheckedAt: Long? = null,
-)
-
-@Serializable
-data class PaperAiReview(
-    /** WORTHY | RISKY | NOT_WORTHY */
-    val verdict: String,
-    val confidence: Int,
-    val summary: String,
-    val reasons: List<String>,
-    val cautions: List<String>,
-    val model: String,
-    val checkedAt: Long,
-)
-
-/**
- * Companion AI's opinion about an ALREADY OPEN paper position ("continue or not").
- *
- * Advisory ONLY by design: the app closes a position exclusively when a real price touches its
- * stop or target ([com.aurum.edge.data.JournalStore.settle] / `settleTick`). This record never
- * edits, closes or re-prices a trade — it is attached as a note and may raise one research
- * notification so the user can decide. [lastPrice]/[unrealizedUsd] are the REAL numbers the model
- * was shown, kept next to the verdict so the note stays auditable later.
- */
-@Serializable
-data class PaperHoldReview(
-    /** HOLD | WATCH | DO_NOT_CONTINUE */
-    val verdict: String,
-    val confidence: Int,
-    val summary: String,
-    val reasons: List<String>,
-    val cautions: List<String>,
-    val lastPrice: Double? = null,
-    val unrealizedUsd: Double? = null,
-    val model: String,
-    val checkedAt: Long,
-)
-
-/** Snapshot of an OHLC approximation at the moment a PAPER opportunity/entry was checked. */
-@Serializable
-data class IctPriceActionRecord(
-    val model: String = "OHLC_RANGE_ICT_V1",
-    val symbol: String,
-    val interval: Interval,
-    val barTime: Long,
-    val action: SignalAction,
-    val feedProvider: String,
-    val checkedAt: Long,
-    val nyDate: String,
-    val nySession: String,
-    val nyTime: String,
-    val support: Double,
-    val resistance: Double,
-    val atr: Double,
-    val supportTouches: Int,
-    val resistanceTouches: Int,
-    val levelsConfirmedAt: Long,
-    val sweepAt: Long,
-    val mssAt: Long,
-    val fvgAt: Long,
-    val fvgLow: Double,
-    val fvgHigh: Double,
-    val orderBlockLow: Double?,
-    val orderBlockHigh: Double?,
-    val retestAt: Long,
-    val quote: Double,
-    val stop: Double,
-    val target: Double,
-    val stopBoundary: Double,
-    val opposingLevel: Double,
-    val rewardRisk: Double,
+enum class PreEntry3CandleCategory(
+    val code: String,
+    val badgeFa: String,
+    val titleFa: String,
+    val descriptionFa: String,
 ) {
-    fun matches(signal: Signal, marketSymbol: String, marketPrice: Double): Boolean {
-        val risk = if (action == SignalAction.BUY) quote - stop else stop - quote
-        val reward = if (action == SignalAction.BUY) target - quote else quote - target
-        return model == "OHLC_RANGE_ICT_V1" && symbol == marketSymbol &&
-            action != SignalAction.NO_TRADE && action == signal.action &&
-            interval == signal.interval && barTime == signal.barTime &&
-            quote == marketPrice && stop == signal.stopLoss && target == signal.takeProfit &&
-            feedProvider.isNotBlank() && checkedAt > barTime && nyDate.isNotBlank() &&
-            nySession in setOf("LONDON", "NEW_YORK") && nyTime.isNotBlank() &&
-            support > 0.0 && resistance > support && atr.isFinite() && atr > 0.0 &&
-            supportTouches >= 2 && resistanceTouches >= 2 &&
-            levelsConfirmedAt > 0L && levelsConfirmedAt <= sweepAt &&
-            sweepAt < mssAt && mssAt < fvgAt &&
-            fvgAt < retestAt && retestAt == barTime && fvgLow.isFinite() && fvgHigh > fvgLow &&
-            risk > 0.0 && reward / risk >= 1.5 && reward / risk <= 5.0 &&
-            rewardRisk.isFinite() && kotlin.math.abs(reward / risk - rewardRisk) < 1e-6 &&
-            (if (action == SignalAction.BUY) stop <= stopBoundary && target <= opposingLevel
-             else stop >= stopBoundary && target >= opposingLevel)
+    PULLBACK_REJECTION_IGNITION(
+        code = "PULLBACK_REJECTION_IGNITION",
+        badgeFa = "🎯 پولبک + ریجکت شدو + شلیک",
+        titleFa = "الگوی ۳ کندلی پولبک، ریجکت شدو از تنکان/کیجون و شلیک روند",
+        descriptionFa = "کندل ۳ و ۲ قبل اصلاح به سمت خط تعادلی تنکان/کیجون داشته و با شدوی برگشتی دفاع شده و کندل ماشه در جهت روند بسته شده است.",
+    ),
+    THREE_SOLDIERS_MOMENTUM_BREAKOUT(
+        code = "THREE_SOLDIERS_MOMENTUM_BREAKOUT",
+        badgeFa = "🚀 ۳ کندل پیشروی پرقدرت",
+        titleFa = "الگوی ۳ کندلی پیشروی پلکانی هم‌جهت با بدنه قوی (3-Bar Momentum)",
+        descriptionFa = "هر ۳ کندل قبل از ورود هم‌جهت با معامله و دارای بدنه‌های متوالی در بالای/زیر تنکان و کومو هستند.",
+    ),
+    INSIDE_BAR_COMPRESSION_EXPANSION(
+        code = "INSIDE_BAR_COMPRESSION_EXPANSION",
+        badgeFa = "⚡ فشردگی و انفجار (Inside-Bar)",
+        titleFa = "الگوی ۳ کندلی فشردگی نوسان و انفجار شکست (Compression -> Expansion)",
+        descriptionFa = "کندل‌های قبل دارای رنج فشرده (Inside Bar / Doji) روی سطح ایچیموکو بوده و کندل ماشه با باز شدن دامنه نوسان، شکست را رقم زده است.",
+    ),
+    ENGULFING_REVERSAL_OFF_LEVEL(
+        code = "ENGULFING_REVERSAL_OFF_LEVEL",
+        badgeFa = "🔄 چرخش اینگلفینگ روی سطح",
+        titleFa = "الگوی ۳ کندلی چرخش و اینگلفینگ روی سطح تعادلی ایچیموکو",
+        descriptionFa = "پس از کندل اصلاحی خلاف جهت، کندل ماشه بدنه کندل قبلی را به صورت کامل پوشانده (Engulfing) و روند را بازگردانده است.",
+    ),
+    CCLAMP_EXTENDED_CHASE(
+        code = "CCLAMP_EXTENDED_CHASE",
+        badgeFa = "⚠️ کشیدگی ۳ کندلی دور از کیجون",
+        titleFa = "الگوی ۳ کندلی کشیدگی متوالی دور از کیجون (Extended Momentum Chase)",
+        descriptionFa = "۳ کندل قبل با شتاب بالا از کیجون فاصله گرفته‌اند؛ نیازمند مدیریت سریع حد ضرر روی تنکان.",
+    ),
+    CONSOLIDATION_BREAKOUT_TRIGGER(
+        code = "CONSOLIDATION_BREAKOUT_TRIGGER",
+        badgeFa = "📐 تثبیت ۲ کندلی و شکست ماشه",
+        titleFa = "الگوی ۳ کندلی تثبیت و شکست از محدوده تعادلی",
+        descriptionFa = "۲ کندل اول در تعادل نوسانی بوده و کندل سوم ماشه ورود را فعال کرده است.",
+    );
+
+    companion object {
+        fun fromCode(raw: String?): PreEntry3CandleCategory =
+            entries.firstOrNull { it.code.equals(raw?.trim(), ignoreCase = true) }
+                ?: CONSOLIDATION_BREAKOUT_TRIGGER
     }
 }
+
+@Serializable
+data class PreEntry3CandleContext(
+    val categoryCode: String = PreEntry3CandleCategory.CONSOLIDATION_BREAKOUT_TRIGGER.code,
+    val categoryBadgeFa: String = PreEntry3CandleCategory.CONSOLIDATION_BREAKOUT_TRIGGER.badgeFa,
+    val categoryTitleFa: String = PreEntry3CandleCategory.CONSOLIDATION_BREAKOUT_TRIGGER.titleFa,
+    val summaryFa: String = "",
+    val candles: List<PreEntryCandleSlot> = emptyList(),
+)
 
 @Serializable
 data class PaperTrade(
@@ -419,74 +223,77 @@ data class PaperTrade(
     val exitPrice: Double? = null,
     val exitReason: String? = null,
     val pnlUsd: Double? = null,
-    /** Historical JSON field name; quantity is in [unit], not necessarily troy ounces. */
     val positionOz: Double = 1.0,
-    val note: String = "paper روی قیمت واقعی",
-    /** Empty for older journal records; infer from the symbol on read. */
+    val note: String = "",
     val positionUnit: String = "",
-    /** What the multi-timeframe engine said on the phone when this paper trade was opened. */
-    val mtf: MtfSnapshotRecord? = null,
-    /** Defaults keep older journal JSON readable. Auto is always PAPER, never a broker fill. */
     val autoOpened: Boolean = false,
     val signalBarTime: Long? = null,
-    /** Stable ALS-5 structure key prevents a repeat entry from the same setup after a close. */
-    val als5SetupKey: String? = null,
-    /** Same idea for BTC-ARES: symbol + engine + level + bar, so engines cannot share a key. */
-    val btcAresSetupKey: String? = null,
-    /** Silver ALS-5S setup key: engine + setup type + level + bar, namespaced away from gold. */
-    val als5sSetupKey: String? = null,
-    /** EUR-ARES setup key: symbol + engine + level + bar, namespaced away from every other pair. */
-    val eurAresSetupKey: String? = null,
-    val newsEvidence: PaperNewsRecord? = null,
-    /** Companion AI's post-open educational review; never a gate and never financial advice. */
-    val aiReview: PaperAiReview? = null,
-    /** Latest AI opinion about keeping this OPEN position; advisory note only, never closes it. */
-    val holdReview: PaperHoldReview? = null,
-    /** Snapshot at the moment the paper position was actually saved; never recompute on read. */
     val entryConditions: List<PaperConditionRecord> = emptyList(),
-    /** Null on older/manual records; never infer a historical ICT verdict on read. */
-    val priceAction: IctPriceActionRecord? = null,
-    val leverage: Int = 20,
+    val leverage: Int = 10,
     val marginUsd: Double = 0.0,
     val commissionUsd: Double = 0.0,
     val spreadCostUsd: Double = 0.0,
-    /**
-     * «روند کلی بازار» در همان لحظهٔ ورود: روندِ تایم‌فریم مرجعِ خودِ نماد + خوانشِ عرض بازار/
-     * دلار/جوّ ریسک + اینکه این ورود هم‌جهت بود یا خلاف جهت. یک عکسِ ثبت‌شده است و هرگز
-     * بعد از ورود دوباره محاسبه نمی‌شود. برای رکوردهای قدیمی‌تر null است.
-     */
-    val marketTrend: MarketTrendRecord? = null,
-    /** Non-null on V1 records; old positions retain their historic fixed-target exit. */
     val initialStopLoss: Double? = null,
     val trailExtreme: Double? = null,
-    /** First observed/unverifiable gap in the executed-trade feed after paper entry. */
-    val tickCoverageGapAt: Long? = null,
-    /** Opt-in market-only archive is fixed at entry; older positions stay on direct feed. */
-    val usesTickArchive: Boolean = false,
-    /** Durable local archive cursor; never a venue trade ID. */
-    val tickArchiveSeq: Long = 0L,
-    /** Legacy records remain Nobitex. Never reinterpret an existing entry on a new venue. */
     val cryptoVenue: String = "NOBITEX",
-    /** Last Binance Spot aggregate ID atomically settled/checked with trailing and balance. */
-    val binanceAggId: Long = -1L,
-    /** Only NEW crypto compression positions have this ATR; legacy trails stay unchanged. */
-    val cryptoEntryAtr: Double? = null,
-    val cryptoLastClosedBarAt: Long? = null,
-    val cryptoExitPendingAt: Long? = null,
-    val cryptoExitReason: String? = null,
+    val strategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+    val strategyTitleFa: String = BitcoinStrategyModel.BASE_ICHIMOKU.titleFa,
+    val fixedRiskUsd: Double = 0.0,
+    val optimalRiskReward: Double = 0.0,
+    val rrBreakdownFa: String = "",
+    val preEntry3CandleCategoryCode: String = "",
+    val preEntry3CandleCategoryFa: String = "",
+    val preEntry3CandleSummaryFa: String = "",
+    val preEntry3Candles: List<PreEntryCandleSlot> = emptyList(),
+    val tradeNumber: Int = 0,
 ) {
+    val displayTradeNumber: Int
+        get() = if (tradeNumber > 0) tradeNumber else ((kotlin.math.abs(id.hashCode()) % 9000) + 1)
+    val displayTradeNumberBadgeFa: String
+        get() = "معامله #$displayTradeNumber"
     val isOpen: Boolean get() = closedAt == null
     val unit: String get() = positionUnit.ifBlank { PaperOrderRules.unitFor(symbol) }
     val assetClass: AssetClass get() = AssetClass.of(symbol)
 
     val riskPerOz: Double get() = kotlin.math.abs(entry - (initialStopLoss ?: stopLoss))
+    val rewardPerOz: Double get() = kotlin.math.abs(takeProfit - entry)
+    val effectiveOptimalRr: Double
+        get() = if (optimalRiskReward >= 1.5) optimalRiskReward.coerceIn(1.5, 3.0) else riskReward.coerceIn(1.5, 3.0)
 
-    /** Risk in QUOTE currency per unit; convert to USD before comparing with the budget. */
+    fun buildRrFormulaSummaryFa(): String {
+        val initSl = initialStopLoss ?: stopLoss
+        val riskDist = kotlin.math.abs(entry - initSl)
+        val rewardDist = kotlin.math.abs(takeProfit - entry)
+        val fmt = if (entry >= 500.0) "%.2f" else if (entry >= 10.0) "%.3f" else "%.5f"
+        val rStr = String.format(java.util.Locale.US, fmt, riskDist)
+        val tpStr = String.format(java.util.Locale.US, fmt, rewardDist)
+        val rrStr = String.format(java.util.Locale.US, "%.2f", riskReward.coerceIn(1.5, 3.0))
+        return "فرمول R:R = پاداش (|TP−Entry| = $tpStr) ÷ ریسک ۱R (|Entry−SL| = $rStr) = 1:$rrStr"
+    }
+
+    fun buildOptimalRrReasonFa(): String {
+        if (rrBreakdownFa.isNotBlank()) return rrBreakdownFa
+        val optStr = String.format(java.util.Locale.US, "%.2f", effectiveOptimalRr)
+        val model = BitcoinStrategyModel.fromId(strategyId)
+        val modelHint = "${model.badgeFa} (${model.combinationCategoryFa} · پایه 1:${String.format(java.util.Locale.US, "%.2f", model.baseOptimalRr.coerceIn(1.5, 3.0))})"
+        return "عدد مناسب R:R این معامله: 1:$optStr (در بازه قفل‌شده ۱.۵ تا ۳.۰) — بر اساس $modelHint · 🔒 حد ضرر ساختاری کاملاً ثابت و غیرپله‌ای"
+    }
+
+    val totalRoundTripFeeUsd: Double
+        get() = effectiveCommissionUsd + effectiveSpreadCostUsd
+
+    fun buildVenueRulesAndFeesSummaryFa(): String =
+        VenueSpecs.of(symbol).buildRulesSummaryFa(entry, positionOz)
+
     val riskUsd: Double
-        get() = PaperOrderRules.quotePnlToUsd(symbol, riskPerOz * positionOz, entry)
+        get() = if (fixedRiskUsd > 0.0) {
+            fixedRiskUsd
+        } else {
+            PaperOrderRules.quotePnlToUsd(symbol, riskPerOz * positionOz, entry)
+        }
 
     val effectiveLeverage: Int
-        get() = if (leverage > 0) leverage else PaperOrderRules.defaultLeverageFor(symbol)
+        get() = (if (leverage > 0) leverage else PaperOrderRules.defaultLeverageFor(symbol)).coerceIn(1, 10)
 
     val notionalValueUsd: Double
         get() = PaperOrderRules.quotePnlToUsd(symbol, positionOz * entry, entry)
@@ -494,14 +301,13 @@ data class PaperTrade(
     val effectiveMarginUsd: Double
         get() = if (marginUsd > 0.0) marginUsd else (notionalValueUsd / effectiveLeverage)
 
-    /** Legacy records (saved before the venue model) are re-costed with the SAME real venue specs. */
     val effectiveCommissionUsd: Double
         get() = if (commissionUsd > 0.0) commissionUsd
-                else VenueSpecs.of(symbol).commissionUsd(entry, positionOz) * 2.0
+        else VenueSpecs.of(symbol).commissionUsd(entry, positionOz) * 2.0
 
     val effectiveSpreadCostUsd: Double
         get() = if (spreadCostUsd > 0.0) spreadCostUsd
-                else VenueSpecs.of(symbol).spreadCostUsd(entry, positionOz)
+        else VenueSpecs.of(symbol).spreadCostUsd(entry, positionOz)
 
     val rMultiple: Double?
         get() {
@@ -509,252 +315,109 @@ data class PaperTrade(
             val risk = riskUsd
             return if (risk <= 0.0) null else pnl / risk
         }
-}
 
-@Serializable
-data class PaperConditionRecord(val name: String, val status: String, val detail: String) {
-    companion object {
-        fun from(item: ConfluenceItem) = PaperConditionRecord(item.name, item.status.name, item.detail)
-    }
-}
+    val entryTimeframe: String
+        get() = interval.label
 
-/** An eligible alert is NOT a trade. Stored separately from paper positions and their statistics. */
-@Serializable
-data class PaperOpportunity(
-    val key: String,
-    val symbol: String,
-    val interval: Interval,
-    val action: SignalAction,
-    val signalBarTime: Long,
-    val priceAtAlert: Double,
-    val stopLoss: Double,
-    val takeProfit: Double,
-    val alertedAt: Long,
-    val conditions: List<PaperConditionRecord>,
-    val mtf: MtfSnapshotRecord,
-    val newsEvidence: PaperNewsRecord? = null,
-    val paperTradeId: String? = null,
-    /** Null only for a candidate written before the new ICT gate. */
-    val priceAction: IctPriceActionRecord? = null,
-) {
-    companion object {
-        fun from(signal: Signal, symbol: String, price: Double, mtf: MtfSnapshotRecord,
-                 ict: IctPriceActionRecord? = null,
-                 now: Long = System.currentTimeMillis()): PaperOpportunity {
-            val technicalConditions = TechnicalEvidence.items(signal)
-            require(PaperOrderRules.paperable(symbol) && signal.isActionable && signal.barTime > 0 &&
-                TechnicalEvidence.confirmed(signal) &&
-                price.isFinite() && price > 0 && signal.stopLoss != null && signal.takeProfit != null &&
-                mtf.frames.isNotEmpty() && mtf.barTime == signal.barTime && mtf.baseInterval == signal.interval.label &&
-                (ict == null || ict.matches(signal, symbol, price))) {
-                "فرصت فنی معتبر نیست"
-            }
-            return PaperOpportunity(
-                key = "$symbol|${signal.interval.label}|${signal.barTime}|${signal.action}",
-                symbol = symbol, interval = signal.interval, action = signal.action,
-                signalBarTime = signal.barTime, priceAtAlert = price,
-                stopLoss = signal.stopLoss, takeProfit = signal.takeProfit,
-                alertedAt = now, conditions = technicalConditions.map(PaperConditionRecord::from),
-                mtf = mtf, newsEvidence = null, priceAction = ict,
-            )
-        }
-    }
-}
+    val venueNameFa: String
+        get() = VenueSpecs.of(symbol).venue
 
-/**
- * «روند کلی بازار» — عکسِ اندازه‌گیری‌شدهٔ لحظهٔ ورود.
- *
- * هر فیلد اینجا یک عددِ اندازه‌گیری‌شده از کندل‌های بستهٔ واقعی است (نه پیش‌بینی):
- * جهتِ روندِ تایم‌فریم مرجعِ همان نماد، قدرتِ آن، جهتِ کلی بازار از عرضِ همهٔ نمادهای جهانِ برنامه،
- * جهت دلار از شش جفت اصلی، جوّ ریسک‌پذیری، و جایگاه این ورود نسبت به همهٔ این‌ها.
- */
-@Serializable
-data class SymbolTrendRecord(
-    val direction: String,
-    val strength: Int,
-    val intervalLabel: String,
-    val higherLabel: String? = null,
-    val efficiencyRatio: Double? = null,
-    val conflict: Boolean = false,
-    val closedBars: Int = 0,
-    val higherBars: Int = 0,
-    val detailFa: String = "",
-) {
-    companion object {
-        fun from(trend: com.aurum.edge.core.SymbolTrend): SymbolTrendRecord = SymbolTrendRecord(
-            direction = trend.direction.name,
-            strength = trend.strength,
-            intervalLabel = trend.intervalLabel,
-            higherLabel = trend.higherLabel,
-            efficiencyRatio = trend.efficiencyRatio,
-            conflict = trend.conflict,
-            closedBars = trend.closedBars,
-            higherBars = trend.higherBars,
-            detailFa = trend.detailFa,
-        )
-    }
-}
-
-@Serializable
-data class MarketTrendRecord(
-    /** جهت کلی بازار از عرضِ نمادهای پویش‌شده. */
-    val bias: String,
-    val strength: Int = 0,
-    /** جهت دلار از شش جفت اصلی. */
-    val dollarBias: String = "UNKNOWN",
-    /** RISK_ON | RISK_OFF | MIXED | UNKNOWN */
-    val riskTone: String = "UNKNOWN",
-    val breadthUp: Int = 0,
-    val breadthDown: Int = 0,
-    val breadthFlat: Int = 0,
-    val measured: Int = 0,
-    /** WITH | AGAINST | NEUTRAL | UNKNOWN — جایگاه همین معامله نسبت به روند. */
-    val alignment: String = "UNKNOWN",
-    /** روندِ خودِ این نماد؛ برای رکوردهای قدیمی null. */
-    val symbol: SymbolTrendRecord? = null,
-    val noteFa: String = "",
-    val computedAt: Long = 0L,
-) {
-    val aligned: Boolean get() = alignment == "WITH"
-    val against: Boolean get() = alignment == "AGAINST"
-
-    companion object {
-        fun from(context: com.aurum.edge.core.TrendContext): MarketTrendRecord {
-            val overall = context.overall
-            return MarketTrendRecord(
-                bias = overall?.bias?.name ?: "UNKNOWN",
-                strength = overall?.strength ?: 0,
-                dollarBias = overall?.dollarBias?.name ?: "UNKNOWN",
-                riskTone = overall?.riskTone?.name ?: "UNKNOWN",
-                breadthUp = overall?.breadthUp ?: 0,
-                breadthDown = overall?.breadthDown ?: 0,
-                breadthFlat = overall?.breadthFlat ?: 0,
-                measured = overall?.measured ?: 0,
-                alignment = context.alignment.name,
-                symbol = context.symbol?.let { SymbolTrendRecord.from(it) },
-                noteFa = context.noteFa,
-                computedAt = overall?.computedAt ?: System.currentTimeMillis(),
-            )
-        }
-    }
-}
-
-@Serializable
-data class MtfFrameRecord(
-    val interval: String,
-    val bias: String,
-    val strength: Int,
-    val detail: String,
-    val weight: Double,
-)
-
-@Serializable
-data class MtfSnapshotRecord(
-    val baseInterval: String,
-    val bias: String,
-    val alignment: Double,
-    val buyCount: Int,
-    val sellCount: Int,
-    val neutralCount: Int,
-    val veto: Boolean,
-    val advisory: String,
-    val barTime: Long,
-    val frames: List<MtfFrameRecord> = emptyList(),
-    val skippedFrames: List<String> = emptyList(),
-) {
-    companion object {
-        fun from(snapshot: com.aurum.edge.engine.MtfAnalyzer.Snapshot): MtfSnapshotRecord = MtfSnapshotRecord(
-            baseInterval = snapshot.baseInterval.label,
-            bias = snapshot.bias.name,
-            alignment = snapshot.alignment,
-            buyCount = snapshot.buyCount,
-            sellCount = snapshot.sellCount,
-            neutralCount = snapshot.neutralCount,
-            veto = snapshot.veto,
-            advisory = snapshot.advisory,
-            barTime = snapshot.barTime,
-            frames = snapshot.frames.map {
-                MtfFrameRecord(
-                    interval = it.interval.label,
-                    bias = it.bias.name,
-                    strength = it.strength,
-                    detail = it.detail,
-                    weight = it.weight,
-                )
-            },
-            skippedFrames = snapshot.skippedFrames,
-        )
-    }
+    val estimatedRoundTripFeeUsd: Double
+        get() = totalRoundTripFeeUsd
 }
 
 data class AppSettings(
     val apiKey: String = "",
-    /**
-     * Optional dedicated Twelve Data key per catalog symbol (e.g. one free key per instrument).
-     * The free plan meters each key separately (credits/minute and /day), so a symbol with its
-     * own key cannot be starved by the others. A symbol without an entry falls back to [apiKey].
-     * Keys are read-only market-data credentials; they are never logged or shown after saving.
-     */
     val twelveDataKeys: Map<String, String> = emptyMap(),
     val symbol: String = "XAU/USD",
     val interval: Interval = Interval.M5,
     val riskPercent: Double = 0.5,
-    val accountBalance: Double = 1000.0,
+    val accountBalance: Double = 100_000.0,
+    val initialCapital: Double = 100_000.0,
+    val targetCapital: Double = 100_000.0,
+    val useFixedDollarRisk: Boolean = true,
+    val fixedRiskUsd: Double = 5.0,
+    val dailyLossLimitPercent: Double = 100.0,
+    val maxDrawdownLimitPercent: Double = 100.0,
     val minConfidence: Double = 85.0,
-    /** Cost assumptions in USD. They must match your broker; every report states them. */
-    // Defaults are the REAL reference costs of the most liquid gold venue pair we quote:
-    // IC Markets Raw Spread (EU): XAU/USD ≈ $0.12/oz spread + $3.50 per 100 oz lot/side = $0.035/oz.
     val spreadPrice: Double = 0.12,
     val commissionPerOz: Double = 0.035,
-    val backgroundMonitor: Boolean = false,
+    val backgroundMonitor: Boolean = true,
     val notifyOnSignal: Boolean = true,
-    /** Persistable SAF content Uri; blank uses the device's system notification tone. */
     val alertSoundUri: String = "",
     val alertSoundName: String = "",
-    /** Optional HTTPS URL of this project's backend (licensed Persian news). */
+    val alarmVolumePercent: Int = 90,
+    val alarmTonePreset: String = "CUSTOM_ONLY",
+    val alarmVibrationEnabled: Boolean = true,
+    val entryAlarmSoundUri: String = "",
+    val entryAlarmSoundName: String = "Ding-Dong",
+    val entryAlarmEnabled: Boolean = true,
+    val tpAlarmSoundUri: String = "",
+    val tpAlarmSoundName: String = "Red Dwarf",
+    val tpAlarmEnabled: Boolean = true,
+    val slAlarmSoundUri: String = "",
+    val slAlarmSoundName: String = "Latch",
+    val slAlarmEnabled: Boolean = true,
+    val showSettingsDescriptions: Boolean = true,
+    val maxLeverageCap: Int = 10,
     val newsBaseUrl: String = "",
-    /** Applies to NEW paper entries; real orders remain disabled independently. */
     val pauseOnNews: Boolean = false,
-    /** Automatic orders here are local paper records, never broker orders. */
     val autoPaperTrading: Boolean = false,
-    /** Check for a public APK when the app starts and download it when one is available. */
     val autoDownloadUpdates: Boolean = true,
-    /**
-     * OPTIONAL alternative to [newsBaseUrl] for the Forex ninth-condition AI gate: instead of your
-     * own backend server, the phone calls this endpoint DIRECTLY with your own key - either the
-     * native Gemini, Anthropic (Claude) Messages API or an OpenAI-compatible service (see [newsAiFormat]). Used only if [newsBaseUrl] is blank. The SAME publisher-rights/consent responsibility
-     * applies to whoever holds this key; headline/excerpt text goes straight to this host from
-     * the phone. The key stays in app-private preferences, not in the distributable APK.
-     */
+    val avalAiEnabled: Boolean = false,
     val newsAiApiKey: String = "",
-    val newsAiBaseUrl: String = "",
-    val newsAiModel: String = "",
-    /**
-     * Wire format: GEMINI (native Google REST), AUTO (exact native Google endpoint,
-     * Anthropic host, otherwise OpenAI-compatible),
-     * ANTHROPIC (Messages API on ANY host, e.g. a relay) or OPENAI (chat/completions on any
-     * host). Explicit beats guessing for proxy keys with non-standard prefixes.
-     */
+    val newsAiBaseUrl: String = "https://api.avalai.ir/v1",
+    val newsAiModel: String = "gpt-4o-mini",
     val newsAiFormat: String = "AUTO",
     val signalProfile: SignalProfile = SignalProfile.BASE,
     val activeStrategy: StrategyKind = StrategyKind.ICHIMOKU_PRICE_ACTION,
+    val selectedBitcoinStrategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+    val runAllStrategiesSimultaneously: Boolean = true,
+    val enabledStrategyIds: Set<String> = BitcoinStrategyModel.entries.map { it.id }.toSet(),
+    val baseStrategyConfig: BaseStrategyConfig = BaseStrategyConfig(),
+    val customStrategies: List<CustomStrategySlot> = emptyList(),
     val categoryStrategies: Map<AssetClass, CategoryStrategy> = AssetClass.entries.associateWith { CategoryStrategy.HYBRID },
 ) {
-    /** Any read-only Twelve Data credential exists (global or per symbol). */
     val hasKey: Boolean get() = apiKey.isNotBlank() || twelveDataKeys.values.any { it.isNotBlank() }
 
-    /** The key actually used for this symbol: its dedicated key first, then the global one. */
+    fun activeCustomStrategySlot(): CustomStrategySlot? =
+        customStrategies.firstOrNull { it.id == selectedBitcoinStrategyId }
+
+    fun activeBitcoinStrategyModel(): BitcoinStrategyModel =
+        activeCustomStrategySlot()?.let { BitcoinStrategyModel.fromId(it.baseModelId) }
+            ?: BitcoinStrategyModel.fromId(selectedBitcoinStrategyId)
+
+    fun activeBitcoinStrategyTitleFa(): String =
+        activeCustomStrategySlot()?.titleFa ?: activeBitcoinStrategyModel().titleFa
+
+    fun activeStrategiesSummaryFa(): String =
+        if (runAllStrategiesSimultaneously) {
+            "هم‌زمان ${enabledStrategyCount()} استراتژی فعال"
+        } else {
+            activeBitcoinStrategyTitleFa()
+        }
+
+    fun enabledStrategyCount(): Int {
+        val allKnownIds = BitcoinStrategyModel.entries.map { it.id } + customStrategies.map { it.id }
+        return if (runAllStrategiesSimultaneously) {
+            val matched = allKnownIds.count { it in enabledStrategyIds }
+            if (matched > 0) matched else allKnownIds.size
+        } else 1
+    }
+
+    fun activeBitcoinStrategyConfig(): BaseStrategyConfig =
+        activeCustomStrategySlot()?.config ?: baseStrategyConfig
+
     fun apiKeyFor(symbol: String): String =
         twelveDataKeys[V1Universe.normalize(symbol)]?.takeIf { it.isNotBlank() } ?: apiKey
 
     fun hasKeyFor(symbol: String): Boolean = apiKeyFor(symbol).isNotBlank()
 
-    /** Symbols that have their own key; used to explain the quota split in the UI. */
     fun dedicatedKeySymbols(): List<String> =
         twelveDataKeys.filterValues { it.isNotBlank() }.keys.sorted()
-    val hasClientNewsAi: Boolean get() = newsAiApiKey.isNotBlank() && newsAiBaseUrl.isNotBlank() && newsAiModel.isNotBlank()
-    /** Full app catalog, never a hidden user-entered subset. Legacy preferences are ignored. */
+
     val activeSymbols: List<String> get() = com.aurum.edge.data.WatchCatalog.scannerSymbols
-    fun strategyFor(symbol: String): CategoryStrategy = categoryStrategies[AssetClass.of(symbol)] ?: CategoryStrategy.HYBRID
-    val newsAiFormatNormalized: String get() = if (newsAiFormat in setOf("ANTHROPIC", "OPENAI", "GEMINI")) newsAiFormat else "AUTO"
+
+    fun strategyFor(symbol: String): CategoryStrategy =
+        categoryStrategies[AssetClass.of(symbol)] ?: CategoryStrategy.HYBRID
 }

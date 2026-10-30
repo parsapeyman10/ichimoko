@@ -19,8 +19,13 @@ object LiveTradeValuation {
         val price = freshPrice?.takeIf { it.isFinite() && it > 0.0 } ?: return null
         val pnlPerUnit = if (trade.action == SignalAction.BUY) price - trade.entry
             else trade.entry - price
-        val gross = PaperOrderRules.quotePnlToUsd(trade.symbol, pnlPerUnit * trade.positionOz, price)
-        val net = gross - trade.effectiveCommissionUsd - trade.effectiveSpreadCostUsd
+        val initialStopDist = abs(trade.entry - (trade.initialStopLoss ?: trade.stopLoss))
+        val net = if (trade.fixedRiskUsd > 0.0 && initialStopDist > 1e-9) {
+            trade.fixedRiskUsd * (pnlPerUnit / initialStopDist)
+        } else {
+            val gross = PaperOrderRules.quotePnlToUsd(trade.symbol, pnlPerUnit * trade.positionOz, price)
+            gross - trade.effectiveCommissionUsd - trade.effectiveSpreadCostUsd
+        }
         if (!net.isFinite()) return null
         val range = abs(trade.takeProfit - trade.stopLoss).coerceAtLeast(0.000001)
         val progress = (if (trade.action == SignalAction.BUY)

@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <cache-path name="aurum_updates" path="updates/" />
+    <cache-path name="aurum_exports" path="exports/" />
+    <cache-path name="aurum_cache_all" path="." />
+    <files-path name="aurum_files_exports" path="exports/" />
+    <files-path name="aurum_journal_exports" path="journal_exports/" />
+    <files-path name="aurum_trade_snapshots" path="trade_snapshots_archive/" />
+    <files-path name="aurum_files_all" path="." />
+    <external-files-path name="aurum_external_files" path="." />
 </paths>
