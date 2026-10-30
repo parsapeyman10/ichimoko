@@ -99,7 +99,9 @@ android {
         // fill and the manual calculator) passes one engine — TradePlanGuard — that keeps 1R inside
         // the volatility corridor of the entry timeframe, keeps the target reachable, re-anchors
         // stale plans (or rejects them) and derives leverage from the stop distance so liquidation
-        // stays at least 2.5R away. See docs/TRADE_PLAN_GUARD_FA.md.
+        // stays at least 2.5R away. See docs/TRADE_PLAN_GUARD_FA.md. The same guard is surfaced in
+        // the UI (settings audit panel, position card and journal) so an off-corridor plan is visible
+        // before it is taken, not only after it fails.
         versionCode = 735
         versionName = "3.9.26"
         resourceConfigurations += listOf("en", "fa")
