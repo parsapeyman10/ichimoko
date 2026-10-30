@@ -624,6 +624,14 @@ private fun Live12ConditionChecklistPage(
                         fontWeight = FontWeight.Bold,
                     )
                 }
+                if (report.planGuardNoteFa.isNotBlank()) {
+                    Text(
+                        text = "🛡️ ${report.planGuardNoteFa} · اهرم متناسب: ${report.planRecommendedLeverage}x",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (report.planVerdictFa.startsWith("✅")) AurumColors.Green else AurumColors.Orange,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
                 report.waveProjection?.let { w ->
                     Text(
                         text = "TP1(V): ${formatPrice(w.targetV)} · TP2(N): ${formatPrice(w.targetN)} · TP3(E): ${formatPrice(w.targetE)} · NT: ${formatPrice(w.targetNT)}",

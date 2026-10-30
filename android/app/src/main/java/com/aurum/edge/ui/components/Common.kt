@@ -498,6 +498,15 @@ fun TradingViewPositionBox(
                 )
             }
         }
+
+        // ۴. اهرم متناسب و قیمت لیکوییدیشن (پلن ضد لیکوییدیشن: لیکوییدیشن حداقل ۲.۵R دورتر از حد ضرر)
+        Text(
+            text = "🔐 اهرم ${trade.effectiveLeverage}x · لیکوییدیشن ${formatPriceFor(trade.symbol, trade.effectiveLiquidationPrice)}" +
+                " (${String.format(Locale.US, "%.1f", trade.liquidationBufferR)}R دورتر از حد ضرر)" +
+                " · ۱R = ${String.format(Locale.US, "%.2f%%", trade.stopPctOfPrice * 100.0)} قیمت",
+            style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.TextSecondary,
+        )
     }
 }
 

@@ -86,6 +86,7 @@ import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.TradingViewPositionBox
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
+import com.aurum.edge.ui.components.formatPriceFor
 import com.aurum.edge.ui.theme.AurumColors
 import java.time.Instant
 import java.time.YearMonth
@@ -1249,6 +1250,21 @@ private fun RiskCalculatorAndAutoTradeCard(
                 takeProfit = tpVal,
                 preferredAction = direction,
                 fixedRiskUsdOverride = fixedRiskUsdOverride,
+                triggerInterval = com.aurum.edge.domain.Interval.M15,
+            )
+        } else null
+    }
+
+    // داوری پلن دستی: آیا حد ضرر متناسب با نوسان ۱۵ دقیقه است و حد سود در دسترس؟
+    val planAudit = remember(activeSymbol, entryVal, slVal, tpVal, direction) {
+        if (entryVal != null && slVal != null && tpVal != null) {
+            RiskAndCalendarEngine.auditTradePlan(
+                symbolInput = activeSymbol,
+                action = direction,
+                entry = entryVal,
+                stopLoss = slVal,
+                takeProfit = tpVal,
+                triggerInterval = com.aurum.edge.domain.Interval.M15,
             )
         } else null
     }
@@ -1565,6 +1581,29 @@ private fun RiskCalculatorAndAutoTradeCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextSecondary,
                 )
+
+                Text(
+                    text = "🔐 لیکوییدیشن: ${formatPriceFor(calcResult.symbol, calcResult.liquidationPrice)}" +
+                        " (${String.format(Locale.US, "%.1f", calcResult.liquidationBufferR)}R دورتر از حد ضرر)" +
+                        " · ۱R = ${String.format(Locale.US, "%.2f%%", calcResult.stopPctOfPrice * 100.0)} قیمت" +
+                        " · ${calcResult.leverageReasonFa}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.SemiBold,
+                )
+
+                if (planAudit != null) {
+                    Text(
+                        text = "${planAudit.verdict.badgeFa} اعتبارسنجی پلن: ${planAudit.lineFa()}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = when (planAudit.verdict) {
+                            com.aurum.edge.core.TradePlanVerdict.VALID -> AurumColors.Green
+                            com.aurum.edge.core.TradePlanVerdict.ADJUSTED -> AurumColors.Orange
+                            com.aurum.edge.core.TradePlanVerdict.REJECTED -> AurumColors.Red
+                        },
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
 
                 Text(
                     text = "🏦 ${calcResult.buildVenueRulesSummaryFa()}",

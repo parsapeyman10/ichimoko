@@ -25,6 +25,7 @@ import com.aurum.edge.core.Smart15mSyncPlanner
 import com.aurum.edge.core.StrategyEvaluationReport
 import com.aurum.edge.core.StrategyReadinessState
 import com.aurum.edge.core.SymbolPollTier
+import com.aurum.edge.core.TradePlanGuard
 import com.aurum.edge.core.V1Universe
 import com.aurum.edge.domain.Interval
 import com.aurum.edge.domain.SignalAction
@@ -120,6 +121,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private var lastScanned5mBucket: Long = -1L
     private var lastMidBarCheckedBucket: Long = -1L
     private var lastAutoFiredBarTimeByKey: Map<String, Long> = emptyMap()
+    /** پلن‌های کهنه/نامعتبری که یک بار به کاربر گزارش شده‌اند تا پیام تکراری ساخته نشود. */
+    private val rejectedPlanKeys = mutableSetOf<String>()
 
     init {
         container.settingsStore.ensureBalance100kMigrated()
@@ -447,23 +450,35 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     val sl = armedReport.suggestedStopLoss
                     val rawTp = armedReport.primaryTakeProfit
                     if (sl != null && rawTp != null) {
-                        val enforcedTp = RiskAndCalendarEngine.enforceMinimumRiskReward(
-                            symbolInput = symbol,
-                            entryPrice = tick.price,
-                            stopLoss = sl,
-                            takeProfit = rawTp,
+                        // لنگر انداختن پلن گزارش روی قیمت لحظه‌ای + کهنگی‌سنجی + دالان نوسان تایم‌فریم
+                        val guarded = TradePlanGuard.rebaseToLive(
+                            symbol = symbol,
                             action = armedReport.action,
-                            minRiskReward = RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD,
+                            liveEntryPrice = tick.price,
+                            planAnchorEntry = armedReport.suggestedEntry ?: armedReport.livePrice,
+                            planStopLoss = sl,
+                            planTakeProfit = rawTp,
+                            referenceAtr = armedReport.triggerSnapshot?.atr14 ?: 0.0,
+                            triggerInterval = armedReport.triggerInterval,
+                            strategyAtr = armedReport.strategySnapshot?.atr14 ?: 0.0,
+                            desiredRiskReward = (armedReport.optimalRiskReward ?: RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD)
+                                .coerceAtLeast(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD),
                         )
+                        if (!guarded.isUsable) {
+                            lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
+                            continue
+                        }
                         val calc = RiskAndCalendarEngine.calculatePosition(
                             symbolInput = symbol,
                             accountBalance = cfg.accountBalance,
                             riskPercent = cfg.riskPercent,
                             entry = tick.price,
-                            stopLoss = sl,
-                            takeProfit = enforcedTp,
+                            stopLoss = guarded.stopLoss,
+                            takeProfit = guarded.takeProfit,
                             preferredAction = armedReport.action,
                             fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
+                            triggerInterval = armedReport.triggerInterval,
+                            referenceAtr14 = armedReport.triggerSnapshot?.atr14 ?: 0.0,
                         )
                         if (calc != null && calc.riskReward >= RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD) {
                             lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
@@ -1366,43 +1381,45 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                         val rawSl = report.suggestedStopLoss
                         val rawTp = report.primaryTakeProfit
                         if (rawEntry != null && rawSl != null && rawTp != null) {
-                            // لنگر انداختن نقطهٔ ورود، حد ضرر و حد سود به قیمت لحظه‌ای اجرا (جلوگیری از استاپ فوری در ارزهای کریپتو)
+                            // لنگر انداختن نقطهٔ ورود، حد ضرر و حد سود به قیمت لحظه‌ای اجرا + دالان نوسان تایم‌فریم
                             val liveTickPrice = _liveTicks.value[symbol]?.price?.takeIf { it.isFinite() && it > 0.0 }
                             val executionEntry = liveTickPrice
                                 ?: report.livePrice?.takeIf { it.isFinite() && it > 0.0 }
                                 ?: rawEntry
-                            val entryDelta = executionEntry - rawEntry
-                            val shiftedSl = rawSl + entryDelta
-                            val shiftedTp = rawTp + entryDelta
                             val desiredRr = (report.optimalRiskReward ?: RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD)
                                 .coerceAtLeast(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD)
-                            val (safeSl, safeTp) = RiskAndCalendarEngine.sanitizeEntryStopAndTarget(
-                                symbolInput = symbol,
+                            val guarded = TradePlanGuard.rebaseToLive(
+                                symbol = symbol,
                                 action = report.action,
                                 liveEntryPrice = executionEntry,
-                                candidateStopLoss = shiftedSl,
-                                candidateTakeProfit = shiftedTp,
-                                desiredRiskReward = desiredRr,
-                                trigAtr14 = report.triggerSnapshot?.atr14 ?: 0.0,
+                                planAnchorEntry = rawEntry,
+                                planStopLoss = rawSl,
+                                planTakeProfit = rawTp,
+                                referenceAtr = report.triggerSnapshot?.atr14 ?: 0.0,
                                 triggerInterval = report.triggerInterval,
+                                strategyAtr = report.strategySnapshot?.atr14 ?: 0.0,
+                                desiredRiskReward = desiredRr,
                             )
-                            val enforcedTp = RiskAndCalendarEngine.enforceMinimumRiskReward(
-                                symbolInput = symbol,
-                                entryPrice = executionEntry,
-                                stopLoss = safeSl,
-                                takeProfit = safeTp,
-                                action = report.action,
-                                minRiskReward = desiredRr,
-                            )
+                            if (!guarded.isUsable) {
+                                // پلن کهنه/غیرمعتبر است: با اعداد قدیمی معامله باز نمی‌شود و پیام تکراری هم ساخته نمی‌شود
+                                val rejectKey = "$fireKey|${report.triggerBarTime}"
+                                if (rejectedPlanKeys.add(rejectKey)) {
+                                    _toast.value = "🛡️ ورود ${report.symbol} (${report.triggerInterval.label}) انجام نشد: " +
+                                        (guarded.reasonsFa.firstOrNull() ?: "پلن نامعتبر")
+                                }
+                                continue
+                            }
                             val calc = RiskAndCalendarEngine.calculatePosition(
                                 symbolInput = symbol,
                                 accountBalance = cfg.accountBalance,
                                 riskPercent = cfg.riskPercent,
                                 entry = executionEntry,
-                                stopLoss = safeSl,
-                                takeProfit = enforcedTp,
+                                stopLoss = guarded.stopLoss,
+                                takeProfit = guarded.takeProfit,
                                 preferredAction = report.action,
                                 fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
+                                triggerInterval = report.triggerInterval,
+                                referenceAtr14 = report.triggerSnapshot?.atr14 ?: 0.0,
                             )
                             if (calc != null && calc.riskReward >= RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD) {
                                 lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to report.triggerBarTime)

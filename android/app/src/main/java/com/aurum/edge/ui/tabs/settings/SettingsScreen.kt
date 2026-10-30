@@ -54,6 +54,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.NeuralLearningStateSummary
 import com.aurum.edge.core.RiskAndCalendarEngine
+import com.aurum.edge.core.TradePlanGuard
+import com.aurum.edge.core.TradePlanVerdict
 import com.aurum.edge.notify.TradeAlarmKind
 import com.aurum.edge.ui.components.BaseStrategyRefinementPanel
 import com.aurum.edge.ui.components.ExclusiveStrategySelectorPage
@@ -156,6 +158,12 @@ fun SettingsScreen(
             trades = trades,
             now = now,
         )
+    }
+
+    // داوری پلن SL/TP/اهرم همهٔ نمادهای تحت رصد (کدام نماد سالم است و کدام از دالان نوسان بیرون زده)
+    val symbolStrategyReports by viewModel.allSymbolStrategyReports.collectAsStateWithLifecycle()
+    val symbolPlanAudits = remember(symbolStrategyReports) {
+        TradePlanGuard.auditReports(symbolStrategyReports.values)
     }
 
     val allItems = remember(settings.customStrategies) {
@@ -475,6 +483,82 @@ fun SettingsScreen(
                         )
                     },
                 )
+
+                // داوری خودکار پلن حد ضرر / حد سود / اهرم برای همهٔ نمادها
+                SectionCard(
+                    title = "🛡️ داوری پلن حد ضرر · حد سود · اهرم (SL/TP/Leverage)",
+                    subtitle = descOrNull("بررسی می‌کند ۱R هر نماد متناسب با نوسان همان تایم‌فریم باشد، هدف قابل‌دسترس باشد و اهرم لیکوییدیشن را از حد ضرر دور نگه دارد"),
+                    initiallyExpanded = false,
+                    trailing = {
+                        val validCount = symbolPlanAudits.count { it.verdict == TradePlanVerdict.VALID }
+                        Pill(
+                            text = if (symbolPlanAudits.isEmpty()) "در انتظار اسکن" else "$validCount/${symbolPlanAudits.size} سالم",
+                            color = if (symbolPlanAudits.isEmpty()) {
+                                AurumColors.TextMuted
+                            } else if (validCount == symbolPlanAudits.size) {
+                                AurumColors.Green
+                            } else {
+                                AurumColors.Orange
+                            },
+                        )
+                    },
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        val validCount = symbolPlanAudits.count { it.verdict == TradePlanVerdict.VALID }
+                        val adjustedCount = symbolPlanAudits.count { it.verdict == TradePlanVerdict.ADJUSTED }
+                        val rejectedCount = symbolPlanAudits.count { it.verdict == TradePlanVerdict.REJECTED }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            StatTile(
+                                label = "✅ سالم",
+                                value = validCount.toString(),
+                                valueColor = AurumColors.Green,
+                                modifier = Modifier.weight(1f),
+                            )
+                            StatTile(
+                                label = "⚠️ نیازمند اصلاح",
+                                value = adjustedCount.toString(),
+                                valueColor = AurumColors.Orange,
+                                modifier = Modifier.weight(1f),
+                            )
+                            StatTile(
+                                label = "⛔ نامعتبر",
+                                value = rejectedCount.toString(),
+                                valueColor = AurumColors.Red,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        if (symbolPlanAudits.isEmpty()) {
+                            Text(
+                                text = "هنوز گزارش استراتژی نمادها محاسبه نشده است؛ پس از یک بار رصد/chart باز شدن، فهرست اینجا پر می‌شود.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextSecondary,
+                            )
+                        } else {
+                            symbolPlanAudits.forEach { audit ->
+                                Text(
+                                    text = "${audit.verdict.badgeFa} ${audit.lineFa()}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = when (audit.verdict) {
+                                        TradePlanVerdict.VALID -> AurumColors.Green
+                                        TradePlanVerdict.ADJUSTED -> AurumColors.Orange
+                                        TradePlanVerdict.REJECTED -> AurumColors.Red
+                                    },
+                                )
+                            }
+                            Text(
+                                text = "دالان نمونه · " + TradePlanGuard.boundsFor("BTC/USDT", com.aurum.edge.domain.Interval.M15).describeFa(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextMuted,
+                            )
+                        }
+                    }
+                }
             }
 
             2 -> {

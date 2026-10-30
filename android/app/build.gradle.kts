@@ -94,8 +94,14 @@ android {
         // channels + 15-minute automatic-check floor. See docs/RELEASE_3_0_FA.md and
         // CHANGELOG_FA.md. A versionCode must be bumped here before a release run, because the
         // workflow only publishes explicit tags / `release: publish` commits / approved dispatch.
-        versionCode = 734
-        versionName = "3.9.25"
+        // 3.9.26 (code 735) is the trade-plan guard release: stop-loss, take-profit and leverage are
+        // no longer produced by arbitrary anchors. Every plan (strategy report, auto entry, sniper
+        // fill and the manual calculator) passes one engine — TradePlanGuard — that keeps 1R inside
+        // the volatility corridor of the entry timeframe, keeps the target reachable, re-anchors
+        // stale plans (or rejects them) and derives leverage from the stop distance so liquidation
+        // stays at least 2.5R away. See docs/TRADE_PLAN_GUARD_FA.md.
+        versionCode = 735
+        versionName = "3.9.26"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
