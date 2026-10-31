@@ -152,6 +152,20 @@ fun NeuralBrainScreen(
             }
         }
 
+        // ── پنل «زمان‌بندی سشن و خروج هوشمند» — یادگیری چقدر زودتر بستن ──────────────
+        SectionCard(
+            title = "🕒 زمان‌بندی سشن و یادگیری زمان خروج (چقدر زودتر ببندیم؟)",
+            subtitle = "باندیت چندبازویی ε-greedy روی گزینه‌های ۰ تا ۴۵ دقیقه؛ پاداش = دلار نجات‌یافته نسبت به نگه‌داشتن پوزیشن تا بازگشایی بازار",
+            initiallyExpanded = false,
+        ) {
+            val sessionEstimates by viewModel.sessionExitEstimates.collectAsStateWithLifecycle()
+            val sessionNote by viewModel.sessionExitLearningNote.collectAsStateWithLifecycle()
+            com.aurum.edge.ui.components.SessionExitPanel(
+                estimates = sessionEstimates,
+                lastLearningNote = sessionNote,
+            )
+        }
+
         // ── پنل رگرسیون ماتریسی پارامترها با بهترین متود روز دنیا (Ridge L2 + Huber Robust IRLS + Walk-Forward CV) ──
         SectionCard(
             title = "📐 پنل رگرسیون ماتریسی پارامترها (بهترین متود روز دنیا: Ridge L2 + Huber IRLS)",

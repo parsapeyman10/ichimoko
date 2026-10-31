@@ -1,5 +1,6 @@
 package com.aurum.edge.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -18,14 +20,19 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aurum.edge.core.TradingPerformanceAnalytics
 import com.aurum.edge.ui.theme.AurumColors
@@ -34,16 +41,16 @@ import kotlin.math.abs
 import kotlin.math.max
 
 /**
- * «کارنامهٔ کلی» بازطراحی‌شدهٔ ژورنال.
+ * «کارنامهٔ کلی» ژورنال — طراحی جمع‌وجور و تب‌بندی‌شده (نسخهٔ ۳.۹.۲۹).
  *
- * طراحی بر پایهٔ چهار پرسش تصمیم‌ساز است، نه فهرست بلند اعداد:
- * ۱. **آیا سیستم سودده است؟** (خالص، امید ریاضی، پرافیت‌فاکتور، verdict سلامت)
- * ۲. **ریسک چقدر است؟** (حداکثر افت سرمایه، فاکتور بازیابی، بدترین معامله، توالی باخت)
- * ۳. **کجا پول درمی‌آید؟** (تفکیک دستهٔ بازار / نماد / تایم‌فریم / جهت)
- * ۴. **کیفیت خروج‌ها چگونه است؟** (توزیع R و نسبت پرداخت)
+ * چرا بازنویسی شد: نسخهٔ قبلی همهٔ اعداد را پشت سر هم در یک ستون بلند می‌ریخت؛ روی گوشی،
+ * برچسب‌های فارسی در ردیف‌های چهارستونی می‌شکستند، دو سرصفحهٔ تکراری وجود داشت و صفحه
+ * «به‌هم‌ریخته» می‌شد. اکنون:
  *
- * همهٔ متن‌ها فارسی و همهٔ اعداد از [TradingPerformanceAnalytics] می‌آید تا UI هیچ
- * محاسبهٔ موازی و متناقضی نداشته باشد.
+ *  - سرصفحهٔ واحد (سود خالص + حکم سلامت + دامنهٔ فیلتر)؛
+ *  - ردیف چهار شاخص کلیدی در **شبکهٔ ۲×۲** که در عرض گوشی نمی‌شکند؛
+ *  - بقیهٔ تحلیل‌ها در چهار تب کوتاه: خلاصه · ریسک · تفکیک · توزیع R؛
+ *  - هر عدد کارنامه از یک موتور خالص (`TradingPerformanceAnalytics`) می‌آید.
  */
 @Composable
 fun JournalPerformanceDashboard(
@@ -52,11 +59,13 @@ fun JournalPerformanceDashboard(
     onOpenExport: () -> Unit = {},
     onOpenArchive: () -> Unit = {},
 ) {
+    var tab by rememberSaveable { mutableStateOf(0) }
     val verdictColor = when (report.healthColorKey) {
         "GOOD" -> AurumColors.Green
         "BAD" -> AurumColors.Red
         else -> AurumColors.Gold
     }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -64,10 +73,10 @@ fun JournalPerformanceDashboard(
             .clip(RoundedCornerShape(16.dp))
             .background(AurumColors.Surface)
             .border(1.dp, AurumColors.Gold.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // ── ۱) سرصفحه و حکم سلامت ──
+        // ── سرصفحه ────────────────────────────────────────────────────────────
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -75,9 +84,11 @@ fun JournalPerformanceDashboard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "کارنامهٔ کلی (تحلیل کمّی)",
+                    text = "کارنامهٔ کلی",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = String.format(
@@ -89,39 +100,30 @@ fun JournalPerformanceDashboard(
                     style = MaterialTheme.typography.titleLarge,
                     color = if (report.netPnlUsd >= 0.0) AurumColors.Green else AurumColors.Red,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
                 )
                 Text(
                     text = scopeLabelFa,
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
             Column(horizontalAlignment = Alignment.End) {
                 Pill(text = report.healthVerdictFa, color = verdictColor)
+                Spacer(Modifier.height(3.dp))
                 Text(
                     text = "${report.closedTrades} بسته · ${report.openTrades} باز",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
+                    maxLines = 1,
                 )
             }
         }
 
-        if (report.headlineFa.isNotBlank()) {
-            Text(
-                text = report.headlineFa,
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextSecondary,
-            )
-        }
-
-        // ── ۲) منحنی سرمایه ──
-        EquityCurveStrip(report = report)
-
-        // ── ۳) عدد‌های تصمیم‌ساز ──
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
+        // ── شبکهٔ ۲×۲ شاخص‌های کلیدی ─────────────────────────────────────────
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             StatTile(
                 label = "مجموع R",
                 value = String.format(Locale.US, "%+.2f R", report.totalR),
@@ -129,135 +131,112 @@ fun JournalPerformanceDashboard(
                 modifier = Modifier.weight(1f),
             )
             StatTile(
-                label = "میانگین R",
-                value = String.format(Locale.US, "%+.2f", report.avgRPerTrade),
-                valueColor = if (report.avgRPerTrade >= 0.0) AurumColors.Green else AurumColors.Red,
+                label = "نرخ برد",
+                value = String.format(Locale.US, "%.1f%%", report.winRatePct),
+                valueColor = AurumColors.Cyan,
                 modifier = Modifier.weight(1f),
             )
-            StatTile(
-                label = "امید ریاضی",
-                value = String.format(Locale.US, "%+.2f$", report.expectancyUsdPerTrade),
-                valueColor = if (report.expectancyUsdPerTrade >= 0.0) AurumColors.Green else AurumColors.Red,
-                modifier = Modifier.weight(1f),
-            )
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             StatTile(
                 label = "پرافیت فاکتور",
                 value = report.profitFactor?.let { String.format(Locale.US, "%.2f", it) } ?: "—",
                 valueColor = if ((report.profitFactor ?: 0.0) >= 1.2) AurumColors.Green else AurumColors.Gold,
                 modifier = Modifier.weight(1f),
             )
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            StatTile(
-                label = "نرخ برد",
-                value = String.format(Locale.US, "%.1f%%", report.winRatePct),
-                valueColor = AurumColors.Cyan,
-                modifier = Modifier.weight(1f),
-            )
-            StatTile(
-                label = "پرداخت/ریسک",
-                value = report.payoffRatio?.let { String.format(Locale.US, "1 : %.2f", it) } ?: "—",
-                valueColor = AurumColors.Purple,
-                modifier = Modifier.weight(1f),
-            )
             StatTile(
                 label = "حداکثر افت",
                 value = String.format(Locale.US, "-%.1f%%", report.maxDrawdownPctOfPeak),
-                valueColor = AurumColors.Red,
-                modifier = Modifier.weight(1f),
-            )
-            StatTile(
-                label = "فاکتور بازیابی",
-                value = report.recoveryFactor?.let { String.format(Locale.US, "%.2f", it) } ?: "—",
-                valueColor = if ((report.recoveryFactor ?: 0.0) >= 1.0) AurumColors.Green else AurumColors.Gold,
+                valueColor = if (report.maxDrawdownPctOfPeak > 12.0) AurumColors.Red else AurumColors.Orange,
                 modifier = Modifier.weight(1f),
             )
         }
 
+        // ── تب‌های تحلیل ──────────────────────────────────────────────────────
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            StatTile(
-                label = "بهترین معامله",
-                value = String.format(Locale.US, "%+.2f$ (%+.2fR)", report.bestTradeUsd, report.bestTradeR),
-                valueColor = AurumColors.Green,
-                modifier = Modifier.weight(1.35f),
-            )
-            StatTile(
-                label = "بدترین معامله",
-                value = String.format(Locale.US, "%+.2f$ (%+.2fR)", report.worstTradeUsd, report.worstTradeR),
-                valueColor = AurumColors.Red,
-                modifier = Modifier.weight(1.35f),
-            )
-            StatTile(
-                label = "توالی فعلی",
-                value = when {
-                    report.currentStreak > 0 -> "${report.currentStreak} برد پیاپی"
-                    report.currentStreak < 0 -> "${-report.currentStreak} باخت پیاپی"
-                    else -> "—"
-                },
-                valueColor = if (report.currentStreak >= 0) AurumColors.Green else AurumColors.Red,
-                modifier = Modifier.weight(1.3f),
-            )
+            listOf(
+                0 to "📈 خلاصه",
+                1 to "🛡️ ریسک",
+                2 to "🧩 تفکیک",
+                3 to "📊 توزیع R",
+            ).forEach { (idx, label) ->
+                Pill(
+                    text = label,
+                    color = if (tab == idx) AurumColors.Gold else AurumColors.TextMuted,
+                    modifier = Modifier.clickable { tab = idx },
+                )
+            }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            StatTile(
-                label = "۷ روز اخیر",
-                value = String.format(Locale.US, "%+.2f$", report.last7DaysPnlUsd),
-                valueColor = if (report.last7DaysPnlUsd >= 0.0) AurumColors.Green else AurumColors.Red,
-                modifier = Modifier.weight(1f),
-            )
-            StatTile(
-                label = "۳۰ روز اخیر",
-                value = String.format(Locale.US, "%+.2f$", report.last30DaysPnlUsd),
-                valueColor = if (report.last30DaysPnlUsd >= 0.0) AurumColors.Green else AurumColors.Red,
-                modifier = Modifier.weight(1f),
-            )
-            StatTile(
-                label = "میانگین نگه‌داری",
-                value = formatHoldFa(report.avgHoldMinutes),
-                valueColor = AurumColors.TextPrimary,
-                modifier = Modifier.weight(1f),
-            )
-            StatTile(
-                label = "بیشترین باخت پیاپی",
-                value = "${report.maxConsecutiveLosses}",
-                valueColor = AurumColors.Orange,
-                modifier = Modifier.weight(1f),
-            )
+        AnimatedVisibility(visible = tab == 0) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                EquityCurveStrip(report)
+                MetricPair(
+                    "امید ریاضی هر معامله" to String.format(Locale.US, "%+.2f$", report.expectancyUsdPerTrade),
+                    "پرداخت/ریسک" to (report.payoffRatio?.let { String.format(Locale.US, "1 : %.2f", it) } ?: "—"),
+                )
+                MetricPair(
+                    "۷ روز اخیر" to String.format(Locale.US, "%+.2f$", report.last7DaysPnlUsd),
+                    "۳۰ روز اخیر" to String.format(Locale.US, "%+.2f$", report.last30DaysPnlUsd),
+                )
+                if (report.headlineFa.isNotBlank()) {
+                    Text(
+                        text = report.headlineFa,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                }
+            }
         }
 
-        // ── ۴) توزیع R ──
-        RDistributionBar(report = report.rDistribution)
+        AnimatedVisibility(visible = tab == 1) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                MetricPair(
+                    "حداکثر افت (دلار)" to String.format(Locale.US, "-%,.2f$", report.maxDrawdownUsd),
+                    "حداکثر افت (درصد)" to String.format(Locale.US, "-%.1f%%", report.maxDrawdownPctOfPeak),
+                )
+                MetricPair(
+                    "فاکتور بازیابی" to (report.recoveryFactor?.let { String.format(Locale.US, "%.2f", it) } ?: "—"),
+                    "میانگین نگه‌داری" to formatHoldFa(report.avgHoldMinutes),
+                )
+                MetricPair(
+                    "بهترین معامله" to String.format(Locale.US, "%+.2f$ (%+.2fR)", report.bestTradeUsd, report.bestTradeR),
+                    "بدترین معامله" to String.format(Locale.US, "%+.2f$ (%+.2fR)", report.worstTradeUsd, report.worstTradeR),
+                )
+                MetricPair(
+                    "بیشترین برد پیاپی" to "${report.maxConsecutiveWins}",
+                    "بیشترین باخت پیاپی" to "${report.maxConsecutiveLosses}",
+                )
+                MetricPair(
+                    "توالی فعلی" to when {
+                        report.currentStreak > 0 -> "${report.currentStreak} برد پیاپی"
+                        report.currentStreak < 0 -> "${-report.currentStreak} باخت پیاپی"
+                        else -> "—"
+                    },
+                    "میانگین R" to String.format(Locale.US, "%+.2f", report.avgRPerTrade),
+                )
+            }
+        }
 
-        // ── ۵) کجا پول درمی‌آید؟ ──
-        GroupTable(
-            titleFa = "بر اساس دستهٔ بازار",
-            rows = report.byAssetClass,
-        )
-        GroupTable(
-            titleFa = "بر اساس نماد (۶ نماد برتر)",
-            rows = report.bySymbol.take(6),
-        )
-        GroupTable(
-            titleFa = "بر اساس تایم‌فریم",
-            rows = report.byTimeframe,
-        )
-        GroupTable(
-            titleFa = "بر اساس جهت معامله",
-            rows = report.byDirection,
-        )
+        AnimatedVisibility(visible = tab == 2) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                GroupTable("دستهٔ بازار", report.byAssetClass)
+                GroupTable("نماد (۶ مورد برتر)", report.bySymbol.take(6))
+                GroupTable("تایم‌فریم", report.byTimeframe, compact = true)
+                GroupTable("جهت معامله", report.byDirection, compact = true)
+            }
+        }
 
-        // ── ۶) دسترسی سریع ──
+        AnimatedVisibility(visible = tab == 3) {
+            RDistributionBar(report.rDistribution)
+        }
+
+        // ── میان‌برهای پایین کارت ─────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -270,7 +249,7 @@ fun JournalPerformanceDashboard(
                 modifier = Modifier.clickable { onOpenExport() },
             )
             Pill(
-                text = "📸 آرشیو تصویری معاملات",
+                text = "📸 آرشیو تصویری",
                 color = AurumColors.Gold,
                 modifier = Modifier.clickable { onOpenArchive() },
             )
@@ -278,7 +257,32 @@ fun JournalPerformanceDashboard(
     }
 }
 
-/** منحنی سرمایهٔ کوچک با سایهٔ افت سرمایه. */
+/** دو عدد کنار هم در یک ردیف؛ برای جلوگیری از شکستن متن، هر سلول ۵۰٪ عرض دارد. */
+@Composable
+private fun MetricPair(left: Pair<String, String>, right: Pair<String, String>) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        StatTile(
+            label = left.first,
+            value = left.second,
+            valueColor = valueColorFor(left.second),
+            modifier = Modifier.weight(1f),
+        )
+        StatTile(
+            label = right.first,
+            value = right.second,
+            valueColor = valueColorFor(right.second),
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+private fun valueColorFor(value: String): androidx.compose.ui.graphics.Color = when {
+    value.startsWith("-") && value.any { it.isDigit() } -> AurumColors.Red
+    value.startsWith("+") -> AurumColors.Green
+    else -> AurumColors.TextPrimary
+}
+
+/** منحنی سرمایهٔ فشرده با خط سربه‌سر. */
 @Composable
 private fun EquityCurveStrip(report: TradingPerformanceAnalytics.PerformanceReport) {
     val points = report.equityCurve
@@ -294,21 +298,22 @@ private fun EquityCurveStrip(report: TradingPerformanceAnalytics.PerformanceRepo
     val maxV = points.maxOf { it.cumulativePnlUsd }
     val span = max(maxV - minV, 1e-6)
     val lineColor = if (points.last().cumulativePnlUsd >= 0.0) AurumColors.Green else AurumColors.Red
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text(
-            text = "منحنی سرمایه (بر پایهٔ سود/زیان انباشته)",
+            text = "منحنی سرمایه",
             style = MaterialTheme.typography.labelSmall,
             color = AurumColors.TextMuted,
+            maxLines = 1,
         )
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(78.dp)
+                .height(72.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(AurumColors.ChartBg)
                 .border(1.dp, AurumColors.Grid, RoundedCornerShape(10.dp)),
         ) {
-            Canvas(modifier = Modifier.fillMaxWidth().height(78.dp).padding(6.dp)) {
+            Canvas(modifier = Modifier.fillMaxWidth().height(72.dp).padding(6.dp)) {
                 val w = size.width
                 val h = size.height
                 val stepX = w / (points.size - 1).toFloat()
@@ -319,7 +324,6 @@ private fun EquityCurveStrip(report: TradingPerformanceAnalytics.PerformanceRepo
                     val y = yOf(p.cumulativePnlUsd)
                     if (idx == 0) path.moveTo(x, y) else path.lineTo(x, y)
                 }
-                // خط صفر (سربه‌سر)
                 if (0.0 in minV..maxV) {
                     val zeroY = yOf(0.0)
                     drawLine(
@@ -330,11 +334,10 @@ private fun EquityCurveStrip(report: TradingPerformanceAnalytics.PerformanceRepo
                     )
                 }
                 drawPath(path = path, color = lineColor, style = Stroke(width = 2.2f))
-                val last = points.last()
                 drawCircle(
                     color = lineColor,
                     radius = 3.2f,
-                    center = Offset(w, yOf(last.cumulativePnlUsd)),
+                    center = Offset(w, yOf(points.last().cumulativePnlUsd)),
                 )
             }
         }
@@ -343,19 +346,16 @@ private fun EquityCurveStrip(report: TradingPerformanceAnalytics.PerformanceRepo
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
-                text = String.format(Locale.US, "کمترین: %+,.2f$", minV),
+                text = String.format(Locale.US, "کمترین %+,.0f$", minV),
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
+                maxLines = 1,
             )
             Text(
-                text = String.format(Locale.US, "افت حداکثر: -%s$", formatNumberFa(report.maxDrawdownUsd)),
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.Red,
-            )
-            Text(
-                text = String.format(Locale.US, "بیشترین: %+,.2f$", maxV),
+                text = String.format(Locale.US, "بیشترین %+,.0f$", maxV),
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
+                maxLines = 1,
             )
         }
     }
@@ -364,13 +364,20 @@ private fun EquityCurveStrip(report: TradingPerformanceAnalytics.PerformanceRepo
 /** هیستوگرام افقی توزیع R. */
 @Composable
 private fun RDistributionBar(report: TradingPerformanceAnalytics.RDistribution) {
-    val total = report.counts.sum()
-    if (total <= 0) return
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    if (report.counts.sum() <= 0) {
         Text(
-            text = "توزیع نتیجهٔ معاملات بر حسب R (کیفیت ورود/خروج)",
+            text = "برای نمایش توزیع R باید معاملهٔ بسته‌شده وجود داشته باشد.",
             style = MaterialTheme.typography.labelSmall,
             color = AurumColors.TextMuted,
+        )
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = "توزیع نتیجه بر حسب R",
+            style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.Gold,
+            fontWeight = FontWeight.Bold,
         )
         report.bucketsFa.forEachIndexed { idx, label ->
             val count = report.counts.getOrElse(idx) { 0 }
@@ -392,7 +399,8 @@ private fun RDistributionBar(report: TradingPerformanceAnalytics.RDistribution) 
                     text = label,
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextSecondary,
-                    modifier = Modifier.width(52.dp),
+                    maxLines = 1,
+                    modifier = Modifier.width(56.dp),
                 )
                 Box(
                     modifier = Modifier
@@ -413,130 +421,95 @@ private fun RDistributionBar(report: TradingPerformanceAnalytics.RDistribution) 
                     text = "$count",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextPrimary,
-                    modifier = Modifier.width(24.dp),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.width(22.dp),
                 )
             }
         }
     }
 }
 
-/** جدول کوچک عملکرد یک گروه (دسته/نماد/تایم‌فریم/جهت). */
+/** جدول فشردهٔ عملکرد یک گروه؛ در حالت compact فقط نام/تعداد/R/سود نمایش داده می‌شود. */
 @Composable
 private fun GroupTable(
     titleFa: String,
     rows: List<TradingPerformanceAnalytics.GroupPerformance>,
+    compact: Boolean = false,
 ) {
-    if (rows.isEmpty()) return
+    if (rows.isEmpty()) {
+        Text(
+            text = "$titleFa: داده‌ای برای تفکیک نیست.",
+            style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.TextMuted,
+        )
+        return
+    }
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Text(
             text = titleFa,
             style = MaterialTheme.typography.labelSmall,
             color = AurumColors.Gold,
             fontWeight = FontWeight.Bold,
+            maxLines = 1,
         )
-        Row(modifier = Modifier.fillMaxWidth()) {
-            Text(
-                text = "گروه",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.weight(1.5f),
-            )
-            Text(
-                text = "معامله",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.weight(0.6f),
-            )
-            Text(
-                text = "برد",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.weight(0.6f),
-            )
-            Text(
-                text = "PF",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.weight(0.6f),
-            )
-            Text(
-                text = "R",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.weight(0.7f),
-            )
-            Text(
-                text = "سود/زیان",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-                modifier = Modifier.weight(1.1f),
-            )
-        }
         rows.forEach { row ->
-            val pnlColor = if (row.netPnlUsd >= 0.0) AurumColors.Green else AurumColors.Red
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(7.dp))
                     .background(AurumColors.SurfaceAlt.copy(alpha = 0.55f))
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                    .padding(horizontal = 6.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(
                     text = row.labelFa,
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextPrimary,
-                    modifier = Modifier.weight(1.5f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1.4f),
                 )
                 Text(
                     text = "${row.trades}",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextSecondary,
-                    modifier = Modifier.weight(0.6f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.width(26.dp),
                 )
-                Text(
-                    text = String.format(Locale.US, "%.0f%%", row.winRatePct),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.Cyan,
-                    modifier = Modifier.weight(0.6f),
-                )
-                Text(
-                    text = row.profitFactor?.let { String.format(Locale.US, "%.2f", it) } ?: "—",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.TextSecondary,
-                    modifier = Modifier.weight(0.6f),
-                )
+                if (!compact) {
+                    Text(
+                        text = String.format(Locale.US, "%.0f%%", row.winRatePct),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Cyan,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.width(34.dp),
+                    )
+                }
                 Text(
                     text = String.format(Locale.US, "%+.2f", row.totalR),
                     style = MaterialTheme.typography.labelSmall,
                     color = if (row.totalR >= 0.0) AurumColors.Green else AurumColors.Red,
-                    modifier = Modifier.weight(0.7f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.width(46.dp),
                 )
                 Text(
-                    text = String.format(Locale.US, "%+,.2f$", row.netPnlUsd),
+                    text = String.format(Locale.US, "%+,.1f$", row.netPnlUsd),
                     style = MaterialTheme.typography.labelSmall,
-                    color = pnlColor,
+                    color = if (row.netPnlUsd >= 0.0) AurumColors.Green else AurumColors.Red,
                     fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1.1f),
+                    textAlign = TextAlign.End,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f),
                 )
             }
         }
     }
 }
 
-private fun formatNumberFa(value: Double): String =
-    String.format(Locale.US, "%,.2f", abs(value))
-
 private fun formatHoldFa(minutes: Double): String = when {
     minutes <= 0.0 -> "—"
     minutes < 60.0 -> String.format(Locale.US, "%.0f دقیقه", minutes)
     minutes < 60.0 * 24 -> String.format(Locale.US, "%.1f ساعت", minutes / 60.0)
     else -> String.format(Locale.US, "%.1f روز", minutes / (60.0 * 24))
-}
-
-/** رنگ‌ها را از تم می‌گیرد تا اگر تم روشن اضافه شد، کارنامه هماهنگ بماند. */
-internal fun verdictColorOf(key: String): Color = when (key) {
-    "GOOD" -> AurumColors.Green
-    "BAD" -> AurumColors.Red
-    else -> AurumColors.Gold
 }

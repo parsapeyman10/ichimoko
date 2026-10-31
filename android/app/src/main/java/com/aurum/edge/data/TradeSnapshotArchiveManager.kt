@@ -173,11 +173,49 @@ object TradeSnapshotArchiveManager {
      * تضمین ثبت و ساخت اسکرین‌شات آرشیو تصویری (`OPEN` و در صورت بسته بودن `CLOSE`) برای معاملات موجود در ژورنال
      * بدون قفل طولانی‌مدت MediaStore و با ذخیره یکپارچه ایندکس در پایان حلقه.
      */
+    /**
+     * قفل رندر: ساخت تصویر برای هر معامله یک `Bitmap` چند مگابایتی می‌خواهد. اگر چند رندر
+     * هم‌زمان اجرا شود (گالری + ثبت خودکار + خروجی PDF)، heap روی گوشی‌های کم‌حافظه پر می‌شود و
+     * برنامه با `OutOfMemoryError` کرش می‌کند. این قفل، رندرها را پشت سر هم اجرا می‌کند.
+     */
+    private val renderLock = Any()
+
+    /**
+     * پاک‌سازی بودجه‌ای آرشیو (Memory/Storage budget).
+     *
+     * بودجه از حافظهٔ واقعی دستگاه گرفته می‌شود (`AppResourceGovernor`) و قدیمی‌ترین رکوردها
+     * (هم فایل تصویر و هم ردیف ایندکس) حذف می‌شوند تا آرشیو بی‌پایان رشد نکند و برنامه سنگین نشود.
+     */
+    @Synchronized
+    fun pruneToBudget(context: Context): Int {
+        if (_records.value.isEmpty()) init(context)
+        val budget = com.aurum.edge.core.AppResourceGovernor.current()
+        val ordered = _records.value.sortedByDescending { it.effectiveTimestampMs }
+        val keep = com.aurum.edge.core.AppResourceGovernor.recordsToKeep(
+            recordSizesBytes = ordered.map { it.imageSizeBytes.coerceAtLeast(1L) },
+            budget = budget,
+        )
+        if (keep >= ordered.size) return 0
+        val keepIds = ordered.take(keep).map { "${it.tradeId}_${it.snapshotPhase}" }.toSet()
+        val pruned = _records.value.filter { "${it.tradeId}_${it.snapshotPhase}" !in keepIds }
+        if (pruned.isEmpty()) return 0
+        pruned.forEach { rec ->
+            rec.localImagePath.takeIf { it.isNotBlank() }?.let { path ->
+                runCatching { File(path).delete() }
+            }
+        }
+        val kept = _records.value.filter { "${it.tradeId}_${it.snapshotPhase}" in keepIds }
+            .sortedByDescending { it.effectiveTimestampMs }
+        _records.value = kept
+        saveIndexToDisk(context, kept)
+        return pruned.size
+    }
+
     @Synchronized
     fun ensureAllTradesHaveArchiveSnapshots(
         context: Context,
         trades: List<PaperTrade>,
-        maxTrades: Int = 120,
+        maxTrades: Int = com.aurum.edge.core.AppResourceGovernor.current().maxArchiveRecords,
         saveToPhoneGallery: Boolean = false,
     ): List<ArchivedTradeSnapshotRecord> {
         if (_records.value.isEmpty()) {
@@ -209,7 +247,7 @@ object TradeSnapshotArchiveManager {
             if (existingOpen == null || existingOpen.localImagePath.isBlank() || !File(existingOpen.localImagePath).exists()) {
                 runCatching {
                     val rec = buildSyntheticSnapshotRecordForTrade(trade, isClosePhase = false)
-                    val bmp = renderTradeIchimokuSnapshotBitmap(rec)
+                    val bmp = synchronized(renderLock) { renderTradeIchimokuSnapshotBitmap(rec) }
                     val webpBytes = compressBitmapToCompactWebp(bmp, quality = 78)
                     bmp.recycle()
                     val embedded = attachEmbeddedJsonToImageBytes(webpBytes, rec)
@@ -234,7 +272,7 @@ object TradeSnapshotArchiveManager {
                 if (existingClose == null || existingClose.localImagePath.isBlank() || !File(existingClose.localImagePath).exists()) {
                     runCatching {
                         val rec = buildSyntheticSnapshotRecordForTrade(trade, isClosePhase = true)
-                        val bmp = renderTradeIchimokuSnapshotBitmap(rec)
+                        val bmp = synchronized(renderLock) { renderTradeIchimokuSnapshotBitmap(rec) }
                         val webpBytes = compressBitmapToCompactWebp(bmp, quality = 78)
                         bmp.recycle()
                         val embedded = attachEmbeddedJsonToImageBytes(webpBytes, rec)

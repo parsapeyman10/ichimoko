@@ -94,6 +94,17 @@ android {
         // channels + 15-minute automatic-check floor. See docs/RELEASE_3_0_FA.md and
         // CHANGELOG_FA.md. A versionCode must be bumped here before a release run, because the
         // workflow only publishes explicit tags / `release: publish` commits / approved dispatch.
+        // 3.9.29 (code 738) corrects the session policy and adds the timing learner. 3.9.28 closed a
+        // position as soon as its market was shut, using the last stale price; that trade could never
+        // have been executed. The engine now (a) never closes on a closed market, (b) exits inside the
+        // pre-close window while the market is still live, and (c) exits a carried-over position at the
+        // first valid tick after the reopen. How early that window starts is learned per asset class by
+        // an epsilon-greedy multi-armed bandit with a lower-confidence-bound guard, rewarded by the real
+        // dollars a pre-close exit saved versus holding to the reopen (SessionExitPlanner,
+        // SessionExitLearning, SessionExitLearningStore). The release also ships the stability pack:
+        // coalesced UI publishing (250 ms), a memory-aware resource governor for the snapshot archive,
+        // serialized bitmap rendering and a compact tabbed journal scorecard. See
+        // docs/SESSION_TIMING_LEARNING_FA.md and docs/APP_PERFORMANCE_BUDGET_FA.md.
         // 3.9.28 (code 737) is the trading-hygiene + scorecard release: no trade may open on a
         // symbol whose session is closed (the DOW case), any open position left on a closed market
         // is flattened at its last valid price, and stale/open plans (the BNB 5m 1R = 5.66% case)
@@ -124,8 +135,8 @@ android {
         // stays at least 2.5R away. See docs/TRADE_PLAN_GUARD_FA.md. The same guard is surfaced in
         // the UI (settings audit panel, position card and journal) so an off-corridor plan is visible
         // before it is taken, not only after it fails.
-        versionCode = 737
-        versionName = "3.9.28"
+        versionCode = 738
+        versionName = "3.9.29"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
