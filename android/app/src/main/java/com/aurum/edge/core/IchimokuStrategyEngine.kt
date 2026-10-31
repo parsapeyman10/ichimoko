@@ -434,6 +434,12 @@ data class BaseStrategyConfig(
     val neoWaveMinConfidencePct: Double = NeoWaveEngine.MIN_CONFIDENCE_PCT,
     /** دامنهٔ زیگزاگ مونوویو بر حسب ATR. */
     val neoWaveAmplitudeAtr: Double = NeoWaveEngine.DEFAULT_AMPLITUDE_ATR,
+    /** مسیر ورود رمزارز بر پایهٔ نئوویو (الگوی کامل و تأییدشده = ماشهٔ ورود). */
+    val neoWaveCryptoEntryEnabled: Boolean = true,
+    /** حداقل قواعد پاس‌شده برای ورود کریپتو (سخت‌گیرانه‌تر از آستانهٔ وتو). */
+    val neoWaveCryptoMinRulesPassed: Int = 8,
+    /** حداقل اطمینان شمارش برای ورود کریپتو. */
+    val neoWaveCryptoMinConfidencePct: Double = 65.0,
     val autoTunedGeneration: Int = 0,
     val perStrategyOverrides: Map<String, PerStrategyConfigOverride> = emptyMap(),
 ) {
@@ -958,6 +964,10 @@ data class StrategyEvaluationReport(
     val neoWaveBadgeFa: String = "",
     /** آیا نئوویو این ورود را وتو کرده است. */
     val neoWaveVeto: Boolean = false,
+    /** آیا این ورود از «مسیر ورود رمزارز بر پایهٔ نئوویو» آمده است. */
+    val cryptoNeoWaveEntry: Boolean = false,
+    /** توضیح فارسی مسیر ورود (برای نمایش در چک‌لیست و ژورنال). */
+    val entryPathFa: String = "",
 ) {
     val entryTimeframeBadgeFa: String
         get() = "تایم ورود: ${triggerInterval.label}"
@@ -1005,6 +1015,7 @@ data class StrategyEvaluationReport(
         val passedCount = conditions.count { it.passed }
         append("شروط برقرار: ").append(passedCount).append("/").append(conditions.size).append(" — ")
         append(conditions.joinToString("؛ ") { "${it.titleFa}: ${if (it.passed) "تایید" else "رد"} (${it.detailFa})" })
+        if (entryPathFa.isNotBlank()) append(" | مسیر ورود: ").append(entryPathFa)
     }
 }
 
@@ -2820,7 +2831,7 @@ object IchimokuStrategyEngine {
 
         val sniperArmedPendingRetest = firstFifteenPassed && triggerFired && !cond16Passed
 
-        val readiness = when {
+        val baseReadiness = when {
             neoWaveGate.veto -> StrategyReadinessState.BLOCKED
             allSixteenPassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY
             allSixteenPassed && triggerFired && !isLong -> StrategyReadinessState.SIGNAL_SELL
@@ -2828,8 +2839,35 @@ object IchimokuStrategyEngine {
             else -> StrategyReadinessState.BLOCKED
         }
 
+        // ── مسیر ورود رمزارز بر پایهٔ نئوویو ─────────────────────────────────
+        // شرط عمومی (هر ۱۶ شرط هم‌زمان) در رمزارز می‌تواند روزها برقرار نشود. در این مسیر
+        // الگوی کامل، تأییدشده و هم‌جهتِ نئوویو ماشهٔ ورود است؛ کنترل‌های ریسک دست‌نخورده‌اند
+        // (R:R ≥ ۱.۵، پلن معتبر، بدون وتو، بدون بازار بسته).
+        val isCryptoClass = AssetClass.of(normalizedSymbol) == AssetClass.CRYPTO
+        val cryptoEntryDecision = NeoWaveEngine.cryptoEntryDecision(
+            enabled = neoWaveOn && effectiveConfig.neoWaveCryptoEntryEnabled && !neoWaveGate.veto,
+            isCrypto = isCryptoClass,
+            verdict = neoWaveVerdict,
+            isLong = isLong,
+            minRulesPassed = effectiveConfig.neoWaveCryptoMinRulesPassed,
+            minConfidencePct = effectiveConfig.neoWaveCryptoMinConfidencePct,
+            riskReward = rr,
+            hasValidPlan = finalStopLoss != null && finalTakeProfit != null && sniperOptimal != null &&
+                rr >= 1.5,
+        )
+        val cryptoNeoWaveEntry = cryptoEntryDecision.eligible &&
+            baseReadiness != StrategyReadinessState.SIGNAL_BUY &&
+            baseReadiness != StrategyReadinessState.SIGNAL_SELL
+        val readiness = when {
+            cryptoNeoWaveEntry && isLong -> StrategyReadinessState.SIGNAL_BUY
+            cryptoNeoWaveEntry -> StrategyReadinessState.SIGNAL_SELL
+            else -> baseReadiness
+        }
+
         val finalAction = if (neoWaveGate.veto) {
             SignalAction.NO_TRADE
+        } else if (cryptoNeoWaveEntry) {
+            if (isLong) SignalAction.BUY else SignalAction.SELL
         } else {
             when (readiness) {
                 StrategyReadinessState.SIGNAL_BUY -> SignalAction.BUY
@@ -2862,10 +2900,19 @@ object IchimokuStrategyEngine {
             !neoWaveOn || neoWaveGate.noteFa.isBlank() -> ""
             else -> " · ${neoWaveGate.noteFa}"
         }
-        val summaryFa = if (neoWaveGate.veto) {
-            "$tfTag ⛔ ورود وتو شد · $normalizedSymbol · $effectiveTitle · ${neoWaveGate.noteFa}"
-        } else {
-            baseSummaryFa + neoWaveSuffix
+        val summaryFa = when {
+            neoWaveGate.veto ->
+                "$tfTag ⛔ ورود وتو شد · $normalizedSymbol · $effectiveTitle · ${neoWaveGate.noteFa}"
+            cryptoNeoWaveEntry ->
+                "$tfTag 🌊 ورود رمزارز بر پایهٔ نئوویو · $normalizedSymbol · $effectiveTitle · " +
+                    "${cryptoEntryDecision.reasonFa} · R:R ۱:${round2(rr)}"
+            else -> baseSummaryFa + neoWaveSuffix
+        }
+        val entryPathFa = when {
+            cryptoNeoWaveEntry -> "🌊 مسیر نئوویو (کریپتو): ${cryptoEntryDecision.reasonFa}"
+            neoWaveOn && isCryptoClass && neoWaveVerdict != null ->
+                "🌊 کریپتو: ${cryptoEntryDecision.reasonFa}"
+            else -> ""
         }
 
         // شرایط نئوویو فقط برای نمایش به چک‌لیست اضافه می‌شوند (در محاسبهٔ امتیاز دخالت ندارند).
@@ -2926,6 +2973,8 @@ object IchimokuStrategyEngine {
             planGuardNoteFa = guardedPlan.summaryFa(),
             neoWaveBadgeFa = if (neoWaveOn) neoWaveGate.noteFa else "",
             neoWaveVeto = neoWaveGate.veto,
+            cryptoNeoWaveEntry = cryptoNeoWaveEntry,
+            entryPathFa = entryPathFa,
         )
     }
 

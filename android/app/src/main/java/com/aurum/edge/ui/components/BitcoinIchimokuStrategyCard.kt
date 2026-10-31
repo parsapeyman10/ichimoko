@@ -244,6 +244,12 @@ fun BitcoinIchimokuStrategyCard(
 
         // ── لایهٔ اختیاری نئوویو (NeoWave) ─────────────────────────────────────
         val focusedReportForNeoWave = dualReports[focusedSymbol]?.reportFor(focusedInterval, selectedId) ?: report
+        // شمارش زندهٔ رمزارزهایی که مسیر ورود نئوویو برایشان باز است (تشخیص «خشکسالی سیگنال»).
+        val cryptoReports = dualReports.values
+            .filter { AssetClass.of(it.symbol) == AssetClass.CRYPTO }
+            .flatMap { it.reports15mByStrategy.values + it.reports5mByStrategy.values }
+        val cryptoReadyCount = cryptoReports.count { it.cryptoNeoWaveEntry }
+        val cryptoTotalCount = cryptoReports.map { it.symbol }.distinct().size
         NeoWaveOptionCard(
             enabled = settings.baseStrategyConfig.neoWaveEnabled,
             minRulesPassed = settings.baseStrategyConfig.neoWaveMinRulesPassed,
@@ -257,6 +263,26 @@ fun BitcoinIchimokuStrategyCard(
             },
             onConfidenceChange = { pct ->
                 viewModel.updateBaseStrategyConfig(settings.baseStrategyConfig.copy(neoWaveMinConfidencePct = pct))
+            },
+            cryptoEntryEnabled = settings.baseStrategyConfig.neoWaveCryptoEntryEnabled,
+            cryptoMinRulesPassed = settings.baseStrategyConfig.neoWaveCryptoMinRulesPassed,
+            cryptoMinConfidencePct = settings.baseStrategyConfig.neoWaveCryptoMinConfidencePct,
+            cryptoReadyCount = cryptoReadyCount,
+            cryptoTotalCount = cryptoTotalCount,
+            onCryptoEntryToggle = { on ->
+                viewModel.updateBaseStrategyConfig(
+                    settings.baseStrategyConfig.copy(neoWaveCryptoEntryEnabled = on),
+                )
+            },
+            onCryptoRulesChange = { rules ->
+                viewModel.updateBaseStrategyConfig(
+                    settings.baseStrategyConfig.copy(neoWaveCryptoMinRulesPassed = rules),
+                )
+            },
+            onCryptoConfidenceChange = { pct ->
+                viewModel.updateBaseStrategyConfig(
+                    settings.baseStrategyConfig.copy(neoWaveCryptoMinConfidencePct = pct),
+                )
             },
         )
     }

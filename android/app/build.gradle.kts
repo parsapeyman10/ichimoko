@@ -160,8 +160,16 @@ android {
         // stays at least 2.5R away. See docs/TRADE_PLAN_GUARD_FA.md. The same guard is surfaced in
         // the UI (settings audit panel, position card and journal) so an off-corridor plan is visible
         // before it is taken, not only after it fails.
-        versionCode = 740
-        versionName = "3.9.31"
+        // 3.9.32 (code 741) revisits *when* a crypto trade may open. The generic gate still needs
+        // all 16 structural conditions, which on 24/7 crypto can stay unfulfilled for days (the
+        // "no signals for a day" report). While the NeoWave layer is ON, a complete + confirmed +
+        // direction-aligned NeoWave count is itself the crypto entry trigger — with the same
+        // TradePlanGuard risk controls (R:R >= 1.5, valid stop/target, leverage from stop distance)
+        // and no veto. The switch `neoWaveCryptoEntryEnabled` (ON by default) can turn the path off
+        // at any moment; then crypto behaves exactly like 3.9.31 again. The NeoWave layer itself is
+        // unchanged and still OFF by default, so a fresh install stays byte-identical in behaviour.
+        versionCode = 741
+        versionName = "3.9.32"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

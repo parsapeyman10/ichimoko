@@ -991,6 +991,89 @@ object NeoWaveEngine {
     // ────────────────────────────────────────────────────────────────────────
 
     /**
+     * تصمیم **مسیر ورود کریپتو بر پایهٔ نئوویو**.
+     *
+     * چرا این مسیر وجود دارد؟ شرط ورود عمومی موتور، عبور **هم‌زمان هر ۱۶ شرط** است؛ در رمزارز
+     * (که نوسان و نویز بالاست) این شرط می‌تواند روزها برقرار نشود و «خشکسالی معاملاتی» بسازد.
+     * در این مسیر، الگوی نئوویوی **کامل، تأییدشده و هم‌جهت** خودش ماشهٔ ورود است — با همان
+     * کنترل‌های ریسک (R:R ≥ ۱.۵، پلن معتبر، بدون وتو).
+     *
+     * @property eligible آیا ورود کریپتو مجاز است.
+     * @property reasonFa دلیل فارسی (برای نمایش در پنل و ژورنال).
+     */
+    data class CryptoEntryDecision(
+        val eligible: Boolean,
+        val reasonFa: String,
+    ) {
+        companion object {
+            val DISABLED = CryptoEntryDecision(false, "مسیر ورود کریپتو بر پایهٔ نئوویو خاموش است.")
+        }
+    }
+
+    /**
+     * تصمیم‌گیری مسیر ورود کریپتو.
+     *
+     * @param enabled آیا مسیر ورود کریپتو در تنظیمات روشن است.
+     * @param isCrypto آیا نماد رمزارز است.
+     * @param verdict شمارش نئوویو (می‌تواند null باشد).
+     * @param isLong جهت درخواستی ورود.
+     * @param minRulesPassed حداقل قواعد پاس‌شده برای این مسیر.
+     * @param minConfidencePct حداقل اطمینان برای این مسیر.
+     * @param riskReward نسبت R:R پلن (باید ≥ ۱.۵ باشد).
+     * @param hasValidPlan آیا حد سود/ضرر و نقطهٔ ورود معتبرند.
+     */
+    fun cryptoEntryDecision(
+        enabled: Boolean,
+        isCrypto: Boolean,
+        verdict: NeoWaveVerdict?,
+        isLong: Boolean,
+        minRulesPassed: Int,
+        minConfidencePct: Double,
+        riskReward: Double?,
+        hasValidPlan: Boolean,
+    ): CryptoEntryDecision {
+        if (!enabled) return CryptoEntryDecision.DISABLED
+        if (!isCrypto) return CryptoEntryDecision(false, "این مسیر فقط برای رمزارز فعال است.")
+        if (verdict == null || !verdict.isUsable) {
+            return CryptoEntryDecision(false, "شمارش نئوویو برای این نماد معتبر نیست.")
+        }
+        if (!verdict.isComplete) {
+            return CryptoEntryDecision(false, "الگوی نئوویو هنوز کامل نشده است.")
+        }
+        if (!verdict.isConfirmed) {
+            return CryptoEntryDecision(false, "تأیید پس‌ساختاری نئوویو هنوز رخ نداده است.")
+        }
+        if (!verdict.isAlignedWith(isLong)) {
+            return CryptoEntryDecision(false, "جهت الگوی نئوویو مخالف این ورود است.")
+        }
+        // آستانه نباید از تعداد کل قواعد همان الگو سخت‌گیرانه‌تر شود؛ وگرنه الگوی کوچک اما
+        // کاملاً سالم (مثلاً فلت با ۶ قاعده) بی‌دلیل رد می‌شود. کف نسبی ۷۵٪ هم اعمال می‌شود.
+        val total = verdict.rulesTotal.coerceAtLeast(1)
+        val required = minRulesPassed.coerceIn(1, 12).coerceAtMost(total)
+        val requiredByRatio = kotlin.math.ceil(total * 0.75).toInt()
+        if (verdict.rulesPassed < required || verdict.rulesPassed < requiredByRatio) {
+            return CryptoEntryDecision(
+                false,
+                "قواعد کافی پاس نشده (${verdict.rulesPassed}/${verdict.rulesTotal} · نیاز: $required).",
+            )
+        }
+        if (verdict.confidencePct < minConfidencePct.coerceIn(35.0, 95.0)) {
+            return CryptoEntryDecision(
+                false,
+                "اطمینان شمارش کافی نیست (${verdict.confidencePct.toInt()}%).",
+            )
+        }
+        if (!hasValidPlan || riskReward == null || riskReward < 1.5) {
+            return CryptoEntryDecision(false, "پلن معاملاتی معتبر با R:R ≥ ۱.۵ موجود نیست.")
+        }
+        return CryptoEntryDecision(
+            true,
+            "الگوی ${verdict.pattern.badgeFa} ${verdict.structureLabelFa} تأییدشده و هم‌جهت · " +
+                "${verdict.rulesPassed}/${verdict.rulesTotal} قاعده · اطمینان ${verdict.confidencePct.toInt()}%",
+        )
+    }
+
+    /**
      * داوری نئوویو روی یک ورود.
      *
      * جدول تصمیم:
@@ -1060,7 +1143,7 @@ object NeoWaveEngine {
                 enabled = true,
                 veto = false,
                 confidenceDelta = 3.0,
-                noteFa = "🌊 نئوویو: ${verdict.badgeFa} در حال تکمیل، هم‌جهت با $dirFa",
+                noteFa = "${verdict.badgeFa} · در حال تکمیل، هم‌جهت با $dirFa",
                 verdict = verdict,
             )
 
@@ -1068,7 +1151,7 @@ object NeoWaveEngine {
                 enabled = true,
                 veto = false,
                 confidenceDelta = -4.0,
-                noteFa = "🌊 نئوویو: ${verdict.badgeFa} در حال تکمیل، مخالف $dirFa",
+                noteFa = "${verdict.badgeFa} · در حال تکمیل، مخالف $dirFa",
                 verdict = verdict,
             )
         }
