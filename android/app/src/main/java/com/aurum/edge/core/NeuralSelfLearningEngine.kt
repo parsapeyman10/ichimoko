@@ -1681,6 +1681,38 @@ class NeuralSelfLearningEngine(
                 newlyLearned++
             }
         }
+        // تضمین نهایی «عدد یادگیری = تعداد معامله‌های واقعی»: اگر شمارنده از تعداد معامله‌های یکتای
+        // ژورنال بیشتر باشد (باقی‌ماندهٔ باگ نسخه‌های قبل یا پشتیبان قدیمی)، دفتر از ژورنال بازسازی
+        // می‌شود. وزن‌ها، خوشه‌های شرط و پارامترهای تیون‌شده دست‌نخورده می‌مانند.
+        var rebuiltFromJournal = false
+        var rebuiltRemoved = 0
+        val tolerance = max(3, distinctJournal.size / 50)
+        if (!backfillMode && distinctJournal.isNotEmpty() &&
+            persistedState.totalLearnedTrades > distinctJournal.size + tolerance
+        ) {
+            val before = persistedState.totalLearnedTrades
+            val rebuiltLedger = distinctJournal.map { trade ->
+                val pnl = trade.pnlUsd ?: 0.0
+                val rMultiple = trade.rMultiple
+                    ?: (pnl / (trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0))
+                NeuralLearningLedger.LearnedStamp(
+                    fingerprint = NeuralLearningLedger.tradeFingerprint(trade.id, trade.closedAt),
+                    tradeId = trade.id,
+                    categoryCode = AssetClass.of(trade.symbol).code,
+                    won = pnl > 0.0,
+                    achievedR = round(rMultiple.coerceIn(-1.5, 4.5) * 100.0) / 100.0,
+                    learnedAtMs = trade.closedAt ?: trade.openedAt,
+                )
+            }.sortedByDescending { it.learnedAtMs }
+            rebuiltRemoved = (before - rebuiltLedger.size).coerceAtLeast(0)
+            persistedState = persistedState.copy(
+                learnedLedger = rebuiltLedger,
+                learnedLedgerPrunedCount = 0,
+                totalLearnedTrades = rebuiltLedger.size,
+                duplicatesRepairedCount = maxOf(persistedState.duplicatesRepairedCount, rebuiltRemoved),
+            )
+            rebuiltFromJournal = true
+        }
         val reconciliation = NeuralLearningLedger.reconcile(
             journalClosedTrades = validClosed.size,
             distinctJournalTrades = distinctJournal.size,
@@ -1691,7 +1723,21 @@ class NeuralSelfLearningEngine(
         )
         val nowMs = System.currentTimeMillis()
         var log = persistedState.knowledgeChangeLog
-        if (backfillMode) {
+        if (rebuiltFromJournal) {
+            log = NeuralLearningLedger.appendChange(
+                log,
+                NeuralLearningLedger.KnowledgeChangeEntry(
+                    id = NeuralLearningLedger.shortId("REBUILD", nowMs, "${reconciliation.learnedTotal}"),
+                    atMs = nowMs,
+                    kindCode = "LEDGER_REBUILT_FROM_JOURNAL",
+                    titleFa = "بازسازی دفتر یادگیری از ژورنال",
+                    detailFa = "شمارندهٔ یادگیری از تعداد معامله‌های واقعی ژورنال بیشتر بود؛ " +
+                        "$rebuiltRemoved یادگیری مازاد حذف و عدد روی ${reconciliation.learnedTotal} " +
+                        "معاملهٔ یکتا تنظیم شد. وزن‌ها و خوشه‌های آموخته‌شده حفظ شدند.",
+                    learnedCountAtChange = reconciliation.learnedTotal,
+                ),
+            )
+        } else if (backfillMode) {
             log = NeuralLearningLedger.appendChange(
                 log,
                 NeuralLearningLedger.KnowledgeChangeEntry(

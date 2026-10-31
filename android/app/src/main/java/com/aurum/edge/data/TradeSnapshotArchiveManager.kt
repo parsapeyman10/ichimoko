@@ -148,7 +148,17 @@ object TradeSnapshotArchiveManager {
     fun init(context: Context) {
         runCatching {
             val loaded = loadIndexFromDisk(context)
-            _records.value = loaded.sortedByDescending { it.effectiveTimestampMs }
+            // رکوردهای «شبح» (تصویری که فایلش پاک شده و نسخهٔ گالری هم ندارد) در گالری
+            // نمایش داده نمی‌شوند؛ این رکوردها همان چیزی بودند که آرشیو را خراب نشان می‌دادند.
+            val healthy = loaded.filter { rec ->
+                val local = rec.localImagePath
+                val hasLocalImage = local.isNotBlank() && File(local).exists()
+                hasLocalImage || rec.phoneGalleryUri.isNotBlank()
+            }
+            _records.value = healthy.sortedByDescending { it.effectiveTimestampMs }
+            if (healthy.size != loaded.size) {
+                saveIndexToDisk(context, _records.value)
+            }
         }
     }
 
@@ -177,6 +187,20 @@ object TradeSnapshotArchiveManager {
         val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
         val currentMap = _records.value.associateBy { "${it.tradeId}_${it.snapshotPhase}" }.toMutableMap()
         var modified = false
+        // رکوردهای معاملاتی که دیگر در ژورنال نیستند (حذف‌شده) از آرشیو هم پاک می‌شوند تا
+        // گالری تصویری هرگز رکورد بی‌معامله (phantom) نشان ندهد.
+        val liveTradeIds = trades.map { it.id }.toSet()
+        val phantomKeys = currentMap.keys.filter { key -> key.substringBeforeLast('_') !in liveTradeIds }
+        if (phantomKeys.isNotEmpty()) {
+            phantomKeys.forEach { key ->
+                currentMap.remove(key)?.let { rec ->
+                    rec.localImagePath.takeIf { it.isNotBlank() }?.let { path ->
+                        runCatching { File(path).delete() }
+                    }
+                }
+            }
+            modified = true
+        }
 
         val targetTrades = trades.sortedByDescending { it.openedAt }.take(maxTrades).reversed()
         for (trade in targetTrades) {
@@ -244,6 +268,22 @@ object TradeSnapshotArchiveManager {
         trade: PaperTrade,
         isClosePhase: Boolean = !trade.isOpen,
     ): ArchivedTradeSnapshotRecord {
+        // ── کندل واقعی، نه ساختگی ──────────────────────────────────────────────
+        // تصویر آرشیو فقط وقتی «درست» است که با کندل واقعی همان نماد/تایم‌فریم در همان لحظه
+        // رسم شود. منبع: کش زندهٔ اپ و سپس خزانهٔ ۱ ماههٔ گوشی (`LiveQuoteFetcher` خودش
+        // fallback می‌زند). اگر هیچ کندلی موجود نباشد، تصویر بازسازی‌شده با برچسب صریح
+        // «تخمینی» ثبت می‌شود تا با تصویر واقعی اشتباه گرفته نشود.
+        val cutOffMs = if (isClosePhase) (trade.closedAt ?: trade.openedAt) else trade.openedAt
+        val recordedCandles = runCatching {
+            LiveQuoteFetcher.peekCachedCandles(trade.symbol, trade.interval)
+                .filter { it.time <= cutOffMs }
+                .takeLast(90)
+        }.getOrDefault(emptyList())
+        val recordedSnapshot = if (recordedCandles.size >= 26) {
+            runCatching { IchimokuStrategyEngine.computeSnapshot(recordedCandles) }.getOrNull()
+        } else {
+            null
+        }
         val fixedSl = trade.initialStopLoss ?: trade.stopLoss
         val fixedRisk = trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0
         val expectedWin = round2(fixedRisk * trade.riskReward)
@@ -281,17 +321,24 @@ object TradeSnapshotArchiveManager {
             rrFormulaFa = trade.buildRrFormulaSummaryFa(),
             slBasisFa = "سنگر ساختاری ثابت (غیرپله‌ای)",
             tpBasisFa = "موج هوسودا (R:R اولیه ثابت)",
-            tenkan = trade.entry,
-            kijun = fixedSl,
-            currentSpanA = trade.entry,
-            currentSpanB = fixedSl,
-            futureSpanA = trade.takeProfit,
-            futureSpanB = trade.entry,
-            atr14 = abs(trade.entry - fixedSl) * 0.5,
+            tenkan = recordedSnapshot?.tenkan ?: trade.entry,
+            kijun = recordedSnapshot?.kijun ?: fixedSl,
+            currentSpanA = recordedSnapshot?.currentSpanA ?: trade.entry,
+            currentSpanB = recordedSnapshot?.currentSpanB ?: fixedSl,
+            futureSpanA = recordedSnapshot?.futureSpanA ?: trade.takeProfit,
+            futureSpanB = recordedSnapshot?.futureSpanB ?: trade.entry,
+            atr14 = recordedSnapshot?.atr14 ?: (abs(trade.entry - fixedSl) * 0.5),
             conditionsSummary = trade.entryConditions,
             fullPaperTrade = trade,
-            candleSourceNote = "تصویر بازسازی‌شده؛ کندل و اندیکاتور ثبت نشده",
-            indicatorsAvailable = false,
+            recentCandles = recordedCandles.map { c ->
+                ArchivedCandlePoint(t = c.time, o = c.open, h = c.high, l = c.low, c = c.close)
+            },
+            candleSourceNote = if (recordedCandles.isNotEmpty()) {
+                "کندل واقعی ثبت‌شده (${recordedCandles.size} کندل تا لحظهٔ ${if (isClosePhase) "بسته شدن" else "ورود"})"
+            } else {
+                "تصویر بازسازی‌شده؛ کندل و اندیکاتور ثبت نشده"
+            },
+            indicatorsAvailable = recordedSnapshot != null,
         )
     }
 

@@ -771,6 +771,102 @@ object TradePlanGuard {
         return if (isLong) referenceEntry - clampedDistance else referenceEntry + clampedDistance
     }
 
+    // ─────────────────── بازبینی و اصلاح پلن پوزیشن‌های بازِ قدیمی ───────────────────
+
+    /**
+     * نتیجهٔ بازبینی پلن ذخیره‌شدهٔ یک پوزیشن باز (معامله‌ای که با اعداد نسخه‌های قدیمی ثبت شده است).
+     */
+    data class StoredPlanReview(
+        val needsRepair: Boolean,
+        val guarded: GuardedTradePlan,
+        val previousStopPct: Double,
+        val previousTargetPct: Double,
+        val previousRiskReward: Double,
+        val reasonFa: String,
+    )
+
+    /**
+     * بازبینی پلن ذخیره‌شدهٔ یک پوزیشن باز با همان دالان نوسان موتور جدید.
+     *
+     * پوزیشن‌هایی که با نسخه‌های قبلِ این موتور باز شده‌اند (نمونهٔ واقعی: `BNB/USDT 5m`
+     * با `۱R = 5.66%` و `TP = 14.13%`) پلن‌شان بیرون دالان نوسان تایم‌فریم است؛ این تابع پلن
+     * ساختاری همان معامله را دوباره داخل دالان می‌آورد، جهت و R:R را حفظ می‌کند و در صورت
+     * نیاز متن فارسی دلیل اصلاح را برمی‌گرداند.
+     */
+    fun reviewStoredPlan(
+        symbol: String,
+        action: SignalAction,
+        entryPrice: Double,
+        stopLoss: Double,
+        takeProfit: Double,
+        triggerInterval: Interval,
+        referenceAtr14: Double = 0.0,
+        strategyAtr: Double = 0.0,
+    ): StoredPlanReview {
+        val normalized = V1Universe.normalize(symbol).ifBlank { symbol }
+        val prevStopPct = if (entryPrice > 0.0 && stopLoss.isFinite()) abs(entryPrice - stopLoss) / entryPrice else 0.0
+        val prevTargetPct = if (entryPrice > 0.0 && takeProfit.isFinite()) abs(takeProfit - entryPrice) / entryPrice else 0.0
+        val prevRr = if (prevStopPct > 1e-9) prevTargetPct / prevStopPct else MIN_RR
+        val desiredRr = if (prevRr.isFinite()) prevRr.coerceIn(MIN_RR, MAX_RR) else MIN_RR
+        val guarded = sanitizePlan(
+            symbol = normalized,
+            action = action,
+            entryPrice = entryPrice,
+            candidateStopLoss = stopLoss,
+            candidateTakeProfit = takeProfit,
+            desiredRiskReward = desiredRr,
+            referenceAtr = referenceAtr14,
+            triggerInterval = triggerInterval,
+            strategyAtr = strategyAtr,
+        )
+        if (!guarded.isUsable) {
+            return StoredPlanReview(
+                needsRepair = false,
+                guarded = guarded,
+                previousStopPct = prevStopPct,
+                previousTargetPct = prevTargetPct,
+                previousRiskReward = prevRr,
+                reasonFa = "پلن ذخیره‌شده قابل بازسازی نیست؛ داوری دستی لازم است",
+            )
+        }
+        val bounds = boundsFor(normalized, triggerInterval)
+        // آستانهٔ معنادار: تغییر کمتر از ۱۵٪ کف دالان یا ۰.۰۵٪ قیمت، اصلاح محسوب نمی‌شود.
+        val tolerancePct = max(bounds.minStopPct * 0.15, 0.0005)
+        val stopDeltaPct = abs(guarded.stopLoss - stopLoss) / entryPrice.coerceAtLeast(1e-9)
+        val targetDeltaPct = abs(guarded.takeProfit - takeProfit) / entryPrice.coerceAtLeast(1e-9)
+        val needsRepair = stopDeltaPct > tolerancePct || targetDeltaPct > tolerancePct
+        val reasonFa = if (!needsRepair) {
+            String.format(
+                Locale.US,
+                "پلن ذخیره‌شده داخل دالان %s است (۱R %.2f%% · هدف %.2f%% · R:R 1:%.2f)",
+                triggerInterval.label,
+                prevStopPct * 100.0,
+                prevTargetPct * 100.0,
+                prevRr,
+            )
+        } else {
+            String.format(
+                Locale.US,
+                "اصلاح پلن قدیمی به دالان %s: ۱R از %.2f%% به %.2f%% و هدف از %.2f%% به %.2f%% " +
+                    "(R:R ثابت 1:%.2f)",
+                triggerInterval.label,
+                prevStopPct * 100.0,
+                guarded.stopPct * 100.0,
+                prevTargetPct * 100.0,
+                guarded.targetPct * 100.0,
+                guarded.riskReward,
+            )
+        }
+        return StoredPlanReview(
+            needsRepair = needsRepair,
+            guarded = guarded,
+            previousStopPct = prevStopPct,
+            previousTargetPct = prevTargetPct,
+            previousRiskReward = prevRr,
+            reasonFa = reasonFa,
+        )
+    }
+
     /** گرد کردن قیمت روی تیک واقعی همان نماد. */
     fun roundToTick(symbol: String, price: Double): Double {
         if (!price.isFinite()) return price

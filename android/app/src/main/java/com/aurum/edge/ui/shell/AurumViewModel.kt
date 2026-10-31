@@ -197,11 +197,89 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         )
     }
 
+    /** پوزیشن‌هایی که پلن‌شان یک‌بار اصلاح شده و پوزیشن‌هایی که پایان سشن برایشان پردازش شده است. */
+    private val repairedPlanTradeIds = mutableSetOf<String>()
+    private val sessionFlattenTradeIds = mutableSetOf<String>()
+
+    /**
+     * «بهداشت خودکار پوزیشن‌ها» — دو مسئلهٔ واقعی که کاربر گزارش کرد:
+     *
+     * ۱. **پوزیشن باز در بازار بسته** (نمونه: معاملهٔ DOW در حالی که سشن سهام بسته است): نگه‌داشتن
+     *    پوزیشن روی نمادی که بازارش بسته شده ریسک گپ شبانه/آخر هفته دارد؛ بنابراین با آخرین قیمت
+     *    معتبر همان نماد بسته می‌شود و دلیل فارسی در ژورنال ثبت می‌گردد.
+     * ۲. **پلن قدیمی و متورم** (نمونه: `BNB/USDT 5m` با `۱R = 5.66%`): پلن ذخیره‌شدهٔ پوزیشن با
+     *    موتور `TradePlanGuard` بازبینی و در صورت خروج از دالان نوسان تایم‌فریم اصلاح می‌شود.
+     */
+    private fun maintainTradingHygiene(now: Long) {
+        val openTrades = trades.value.filter { it.isOpen }
+        if (openTrades.isEmpty()) {
+            repairedPlanTradeIds.clear()
+            sessionFlattenTradeIds.clear()
+            return
+        }
+        for (trade in openTrades) {
+            val symbol = V1Universe.normalize(trade.symbol)
+            val lastPrice = _liveTicks.value[symbol]?.price?.takeIf { it.isFinite() && it > 0.0 }
+            if (com.aurum.edge.core.MarketHours.closedFor(symbol, now)) {
+                if (trade.id in sessionFlattenTradeIds) continue
+                if (lastPrice == null) continue
+                val closed = container.journalStore.closeTradeAtPrice(
+                    tradeId = trade.id,
+                    exitPrice = lastPrice,
+                    reason = "⏱️ بستن خودکار در پایان سشن $symbol (بازار بسته شد)",
+                    now = now,
+                )
+                if (closed != null) {
+                    sessionFlattenTradeIds.add(trade.id)
+                    _toast.value = String.format(
+                        Locale.US,
+                        "⏱️ معاملهٔ #%d %s چون بازارش بسته شد بسته گردید (خروج %,.2f · P/L %+.2f$)",
+                        closed.displayTradeNumber,
+                        symbol,
+                        lastPrice,
+                        closed.pnlUsd ?: 0.0,
+                    )
+                }
+                continue
+            }
+            if (trade.id in repairedPlanTradeIds) continue
+            val report = _allSymbolStrategyReports.value[symbol]
+                ?.takeIf { it.triggerInterval == trade.interval }
+            val atr = report?.triggerSnapshot?.atr14 ?: 0.0
+            val review = TradePlanGuard.reviewStoredPlan(
+                symbol = symbol,
+                action = trade.action,
+                entryPrice = trade.entry,
+                stopLoss = trade.initialStopLoss ?: trade.stopLoss,
+                takeProfit = trade.takeProfit,
+                triggerInterval = trade.interval,
+                referenceAtr14 = atr,
+                strategyAtr = report?.strategySnapshot?.atr14 ?: atr,
+            )
+            if (!review.needsRepair) {
+                repairedPlanTradeIds.add(trade.id)
+                continue
+            }
+            val repaired = container.journalStore.repairOpenTradePlan(
+                tradeId = trade.id,
+                newStopLoss = review.guarded.stopLoss,
+                newTakeProfit = review.guarded.takeProfit,
+                reasonFa = "🛡️ ${review.reasonFa}",
+            )
+            if (repaired != null) {
+                repairedPlanTradeIds.add(trade.id)
+                _toast.value = "🛡️ پلن معاملهٔ #${repaired.displayTradeNumber} $symbol (${trade.interval.label}) اصلاح شد — ${review.reasonFa}"
+            }
+        }
+    }
+
     private fun startLiveMonitor() {
         if (liveMonitorJob?.isActive == true) return
         liveMonitorJob = container.appScope.launch {
             while (isActive) {
                 val now = System.currentTimeMillis()
+                // بهداشت پوزیشن‌ها: بستن پوزیشن بازارِ بسته + اصلاح پلن‌های متورم قدیمی
+                runCatching { maintainTradingHygiene(now) }
                 val openSymbolSet = trades.value
                     .filter { it.isOpen }
                     .map { V1Universe.normalize(it.symbol) }
@@ -761,13 +839,25 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     ) {
         val now = System.currentTimeMillis()
         val normSym = V1Universe.normalize(calc.symbol)
+        // ورود روی نمادی که بازارش بسته است ممنوع می‌شود: قیمت‌ها کهنه‌اند و گپ بازگشایی سشن
+        // می‌تواند حد ضرر را بدون امکان خروج رد کند (گزارش کاربر: معاملهٔ DOW در بازار بسته).
+        if (com.aurum.edge.core.MarketHours.closedFor(normSym, now)) {
+            _toast.value = "⛔ بازار ${calc.symbol} بسته است — " +
+                com.aurum.edge.core.MarketHours.sessionBadgeFa(normSym, now) +
+                " · معامله باز نشد"
+            return
+        }
+        val sessionWarningFa = if (com.aurum.edge.core.MarketHours.isNearClose(normSym, now)) {
+            "⏳ " + com.aurum.edge.core.MarketHours.sessionBadgeFa(normSym, now)
+        } else ""
+        val effectiveNote = if (sessionWarningFa.isBlank()) note else "$note · $sessionWarningFa".trim(' ', '·')
         val matchedReport = _dualSymbolStrategyReports.value[normSym]
             ?.reportFor(entryInterval, strategyId)
         val matchedBreakdown = matchedReport?.rrBreakdown
         val entryCandles = LiveQuoteFetcher.peekCachedCandles(normSym, entryInterval)
         val openedRaw = container.journalStore.openTrade(
             calc = calc,
-            note = note,
+            note = effectiveNote,
             now = now,
             entryInterval = entryInterval,
             strategyId = strategyId,

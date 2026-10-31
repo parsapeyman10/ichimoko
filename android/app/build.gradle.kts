@@ -94,6 +94,16 @@ android {
         // channels + 15-minute automatic-check floor. See docs/RELEASE_3_0_FA.md and
         // CHANGELOG_FA.md. A versionCode must be bumped here before a release run, because the
         // workflow only publishes explicit tags / `release: publish` commits / approved dispatch.
+        // 3.9.28 (code 737) is the trading-hygiene + scorecard release: no trade may open on a
+        // symbol whose session is closed (the DOW case), any open position left on a closed market
+        // is flattened at its last valid price, and stale/open plans (the BNB 5m 1R = 5.66% case)
+        // are re-anchored into the volatility corridor of their own timeframe by TradePlanGuard
+        // without changing direction or R:R. The snapshot archive stops showing phantom records and
+        // renders reconstructed charts from real recorded candles, the learned-trade counter is
+        // rebuilt from the journal whenever it drifts, and the journal's "کارنامه کلی" is redesigned
+        // around one pure analytics engine (equity curve, drawdown, expectancy, R distribution and
+        // per-class/symbol/timeframe/direction breakdowns). See docs/TRADING_HYGIENE_FA.md and
+        // docs/PERFORMANCE_SCORECARD_FA.md.
         // 3.9.27 (code 736) ships the neural learning ledger: the self-learning brain now counts
         // every closed trade exactly once (a stable per-trade fingerprint instead of an ever-growing
         // counter), repairs the inflated legacy number without losing a single learned weight, and
@@ -112,8 +122,8 @@ android {
         // stays at least 2.5R away. See docs/TRADE_PLAN_GUARD_FA.md. The same guard is surfaced in
         // the UI (settings audit panel, position card and journal) so an off-corridor plan is visible
         // before it is taken, not only after it fails.
-        versionCode = 736
-        versionName = "3.9.27"
+        versionCode = 737
+        versionName = "3.9.28"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

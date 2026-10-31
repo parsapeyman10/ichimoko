@@ -205,6 +205,22 @@ fun JournalRiskScreen(
         )
     }
 
+    // ── کارنامهٔ کمّی (منبع واحد اعداد کارنامه) ──────────────────────────────
+    // همهٔ شاخص‌های کارنامه از یک موتور خالص می‌آید تا UI هیچ محاسبهٔ موازی و متناقضی نداشته باشد.
+    val performanceReport = remember(
+        filteredTrades.size,
+        filteredTrades.firstOrNull()?.id,
+        filteredTrades.firstOrNull()?.closedAt,
+        settings.initialCapital,
+        selectedStrategyFilter,
+    ) {
+        com.aurum.edge.core.TradingPerformanceAnalytics.analyze(
+            trades = filteredTrades,
+            nowMs = System.currentTimeMillis(),
+            startingBalanceUsd = settings.initialCapital,
+        )
+    }
+
     var showInteractiveTearSheetModal by rememberSaveable { mutableStateOf(false) }
     val savedJournalFiles by viewModel.savedJournalFiles.collectAsStateWithLifecycle()
     val lastExportStatusFa by viewModel.lastExportStatusFa.collectAsStateWithLifecycle()
@@ -254,7 +270,15 @@ fun JournalRiskScreen(
             .verticalScroll(rememberScrollState())
             .padding(bottom = 18.dp),
     ) {
-        // ── ۱. هدر مدرن کارنامه کلی ژورنال معاملاتی (Executive Journal Summary) ──
+        // ── ۱. کارنامهٔ کلی بازطراحی‌شده (تحلیل کمّی: منحنی سرمایه، ریسک، تفکیک گروه‌ها) ──
+        com.aurum.edge.ui.components.JournalPerformanceDashboard(
+            report = performanceReport,
+            scopeLabelFa = filterScopeLabelFa,
+            onOpenExport = { subPage = 3 },
+            onOpenArchive = { subPage = 4 },
+        )
+
+        // ── ۲. نوار خلاصه و خروجی‌های کارنامه (دسترسی سریع به PDF/CSV/بکاپ) ──
         Column(
             modifier = Modifier
                 .fillMaxWidth()
