@@ -115,8 +115,10 @@ android {
         // The switch lives in the strategy card (BaseStrategyConfig.neoWaveEnabled) and defaults to
         // OFF; when it is off no NeoWave maths runs and the engine output is bit-identical to 3.9.29
         // (covered by a regression test). Thresholds are user-tunable (min rules, min confidence).
-        // See docs/NEOWAVE_OPTION_FA.md. Publish stamp: 3.9.30 / code 739, released from the
-        // arena/f97d4078-ichimoko branch with the pinned updater signing key.
+        // See docs/NEOWAVE_OPTION_FA.md. Publish stamp: 3.9.31 / code 740 (rule-complete Neely model:
+        // retracement rules 1-7, structure labels, 12-rule impulse audit, strict-overlap triangles,
+        // post-constructive confirmation), released from the arena/f97d4078-ichimoko branch with the
+        // pinned updater signing key.
         // 3.9.29 (code 738) corrects the session policy and adds the timing learner. 3.9.28 closed a
         // position as soon as its market was shut, using the last stale price; that trade could never
         // have been executed. The engine now (a) never closes on a closed market, (b) exits inside the
