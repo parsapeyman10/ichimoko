@@ -426,6 +426,14 @@ data class BaseStrategyConfig(
     val minFutureKumoThicknessAtr: Double = 0.05,
     val minSniperDistanceAtr: Double = 0.65,
     val minDriveBooksConsensus: Int = 6,
+    /** لایهٔ اختیاری نئوویو (NeoWave). پیش‌فرض خاموش ⇒ خروجی موتور بدون تغییر. */
+    val neoWaveEnabled: Boolean = false,
+    /** حداقل قواعد نیلی که باید پاس شود تا شمارش «معتبر» شمرده شود. */
+    val neoWaveMinRulesPassed: Int = NeoWaveEngine.MIN_RULE_PASS,
+    /** حداقل درصد اطمینان برای اینکه نئوویو اجازهٔ وتو داشته باشد. */
+    val neoWaveMinConfidencePct: Double = NeoWaveEngine.MIN_CONFIDENCE_PCT,
+    /** دامنهٔ زیگزاگ مونوویو بر حسب ATR. */
+    val neoWaveAmplitudeAtr: Double = NeoWaveEngine.DEFAULT_AMPLITUDE_ATR,
     val autoTunedGeneration: Int = 0,
     val perStrategyOverrides: Map<String, PerStrategyConfigOverride> = emptyMap(),
 ) {
@@ -946,6 +954,10 @@ data class StrategyEvaluationReport(
     val planVerdictFa: String = "",
     /** خلاصهٔ فارسی داوری پلن (دلیل اصلاح حد ضرر، حد سود و اهرم). */
     val planGuardNoteFa: String = "",
+    /** نشان لایهٔ نئوویو (خالی = لایه خاموش است). */
+    val neoWaveBadgeFa: String = "",
+    /** آیا نئوویو این ورود را وتو کرده است. */
+    val neoWaveVeto: Boolean = false,
 ) {
     val entryTimeframeBadgeFa: String
         get() = "تایم ورود: ${triggerInterval.label}"
@@ -2773,27 +2785,65 @@ object IchimokuStrategyEngine {
         val confidence = round2(((passedCount.toDouble() / conditions.size.toDouble()) * 84.0 + if (triggerFired) 16.0 else 0.0).coerceIn(0.0, 100.0))
         val coreTrendScore = round2((confidence * 0.74 + phaseBonus + erBonus + rrBonus + sniperBonus).coerceIn(0.0, 100.0))
 
+        // ── لایهٔ اختیاری نئوویو (NeoWave Gate) ────────────────────────────────
+        // قانون صفر-اثر: وقتی `neoWaveEnabled = false` باشد هیچ محاسبه‌ای انجام نمی‌شود و
+        // خروجی این تابع بیت‌به‌بیت مثل نسخهٔ قبل از نئوویو می‌ماند.
+        val neoWaveOn = effectiveConfig.neoWaveEnabled
+        val neoWaveVerdict = if (neoWaveOn) {
+            NeoWaveEngine.analyze(
+                candles = alignedStrategyCandles,
+                amplitudeAtr = effectiveConfig.neoWaveAmplitudeAtr,
+            )
+        } else {
+            null
+        }
+        val neoWaveGate = if (neoWaveOn) {
+            NeoWaveEngine.gate(
+                verdict = neoWaveVerdict,
+                isLong = isLong,
+                minRulesPassed = effectiveConfig.neoWaveMinRulesPassed,
+                minConfidencePct = effectiveConfig.neoWaveMinConfidencePct,
+            )
+        } else {
+            NeoWaveEngine.NeoWaveGate.OFF
+        }
+        val gatedConfidence = if (neoWaveOn) {
+            round2((confidence + neoWaveGate.confidenceDelta).coerceIn(0.0, 100.0))
+        } else {
+            confidence
+        }
+        val gatedTrendScore = if (neoWaveOn) {
+            round2((coreTrendScore + neoWaveGate.confidenceDelta * 0.5).coerceIn(0.0, 100.0))
+        } else {
+            coreTrendScore
+        }
+
         val sniperArmedPendingRetest = firstFifteenPassed && triggerFired && !cond16Passed
 
         val readiness = when {
+            neoWaveGate.veto -> StrategyReadinessState.BLOCKED
             allSixteenPassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY
             allSixteenPassed && triggerFired && !isLong -> StrategyReadinessState.SIGNAL_SELL
             sniperArmedPendingRetest || passedCount >= 11 -> StrategyReadinessState.WATCH_SETUP
             else -> StrategyReadinessState.BLOCKED
         }
 
-        val finalAction = when (readiness) {
-            StrategyReadinessState.SIGNAL_BUY -> SignalAction.BUY
-            StrategyReadinessState.SIGNAL_SELL -> SignalAction.SELL
-            else -> if (sniperArmedPendingRetest) {
-                if (isLong) SignalAction.BUY else SignalAction.SELL
-            } else {
-                SignalAction.NO_TRADE
+        val finalAction = if (neoWaveGate.veto) {
+            SignalAction.NO_TRADE
+        } else {
+            when (readiness) {
+                StrategyReadinessState.SIGNAL_BUY -> SignalAction.BUY
+                StrategyReadinessState.SIGNAL_SELL -> SignalAction.SELL
+                else -> if (sniperArmedPendingRetest) {
+                    if (isLong) SignalAction.BUY else SignalAction.SELL
+                } else {
+                    SignalAction.NO_TRADE
+                }
             }
         }
 
         val tfTag = "[تایم ${config.triggerInterval.label}]"
-        val summaryFa = when {
+        val baseSummaryFa = when {
             readiness == StrategyReadinessState.SIGNAL_BUY ->
                 "$tfTag 🎯 خرید نقطه‌زنی ($normalizedSymbol · $effectiveTitle · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
             readiness == StrategyReadinessState.SIGNAL_SELL ->
@@ -2808,6 +2858,29 @@ object IchimokuStrategyEngine {
             }
             else -> "$tfTag در حال دریافت کندل‌های $normalizedSymbol..."
         }
+        val neoWaveSuffix = when {
+            !neoWaveOn || neoWaveGate.noteFa.isBlank() -> ""
+            else -> " · ${neoWaveGate.noteFa}"
+        }
+        val summaryFa = if (neoWaveGate.veto) {
+            "$tfTag ⛔ ورود وتو شد · $normalizedSymbol · $effectiveTitle · ${neoWaveGate.noteFa}"
+        } else {
+            baseSummaryFa + neoWaveSuffix
+        }
+
+        // شرایط نئوویو فقط برای نمایش به چک‌لیست اضافه می‌شوند (در محاسبهٔ امتیاز دخالت ندارند).
+        val displayConditions = if (neoWaveOn && neoWaveVerdict != null) {
+            conditions + neoWaveVerdict.rules.map { rule ->
+                StrategyConditionCheck(
+                    index = 16 + rule.index,
+                    titleFa = "🌊 نئوویو ${rule.index}. ${rule.titleFa}",
+                    passed = rule.passed,
+                    detailFa = rule.detailFa,
+                )
+            }
+        } else {
+            conditions
+        }
 
         return StrategyEvaluationReport(
             symbol = normalizedSymbol,
@@ -2820,7 +2893,7 @@ object IchimokuStrategyEngine {
             readiness = readiness,
             action = finalAction,
             triggerType = triggerType,
-            confidence = confidence,
+            confidence = gatedConfidence,
             livePrice = round2(livePrice),
             suggestedEntry = sniperOptimal,
             suggestedStopLoss = finalStopLoss,
@@ -2833,12 +2906,12 @@ object IchimokuStrategyEngine {
             strategySnapshot = stratSnap,
             triggerSnapshot = trigSnap,
             waveProjection = wave,
-            conditions = conditions,
+            conditions = displayConditions,
             summaryFa = summaryFa,
             triggerBarTime = trigSnap.time,
             evaluatedAt = nowMillis,
             trendPhase = trendPhase,
-            coreTrendScore = coreTrendScore,
+            coreTrendScore = gatedTrendScore,
             sniperOptimalEntry = sniperOptimal,
             sniperZoneLow = sniperLow,
             sniperZoneHigh = sniperHigh,
@@ -2851,6 +2924,8 @@ object IchimokuStrategyEngine {
             planRecommendedLeverage = guardedPlan.recommendedLeverage,
             planVerdictFa = guardedPlan.verdict.badgeFa,
             planGuardNoteFa = guardedPlan.summaryFa(),
+            neoWaveBadgeFa = if (neoWaveOn) neoWaveGate.noteFa else "",
+            neoWaveVeto = neoWaveGate.veto,
         )
     }
 

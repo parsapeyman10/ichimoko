@@ -241,6 +241,24 @@ fun BitcoinIchimokuStrategyCard(
                 },
             )
         }
+
+        // ── لایهٔ اختیاری نئوویو (NeoWave) ─────────────────────────────────────
+        val focusedReportForNeoWave = dualReports[focusedSymbol]?.reportFor(focusedInterval, selectedId) ?: report
+        NeoWaveOptionCard(
+            enabled = settings.baseStrategyConfig.neoWaveEnabled,
+            minRulesPassed = settings.baseStrategyConfig.neoWaveMinRulesPassed,
+            minConfidencePct = settings.baseStrategyConfig.neoWaveMinConfidencePct,
+            statusBadge = focusedReportForNeoWave?.neoWaveBadgeFa.orEmpty(),
+            onToggle = { on ->
+                viewModel.updateBaseStrategyConfig(settings.baseStrategyConfig.copy(neoWaveEnabled = on))
+            },
+            onRulesChange = { rules ->
+                viewModel.updateBaseStrategyConfig(settings.baseStrategyConfig.copy(neoWaveMinRulesPassed = rules))
+            },
+            onConfidenceChange = { pct ->
+                viewModel.updateBaseStrategyConfig(settings.baseStrategyConfig.copy(neoWaveMinConfidencePct = pct))
+            },
+        )
     }
 }
 
