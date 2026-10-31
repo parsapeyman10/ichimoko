@@ -9,29 +9,23 @@ import kotlin.math.round
 import kotlin.math.sign
 
 /**
- * موتور **نئوویو (NeoWave — گلن نیلی)** به‌صورت یک «لایهٔ تأیید» اختیاری.
+ * موتور **نئوویو (NeoWave — گلن نیلی، Mastering Elliott Wave)** به‌صورت یک «لایهٔ تأیید» اختیاری.
  *
- * ## چرا لایهٔ تأیید و نه استراتژی مستقل؟
- * موتور اصلی (`IchimokuStrategyEngine`) برای هر ۱۶ مدل، تمام ۱۶ شرط ساختاری را الزامی می‌داند
- * (`requiredIndicesForModel = (1..16)`). بنابراین افزودن مدل هفدهم عملاً یک نسخهٔ دیگر از همان
- * معامله می‌سازد. نئوویو در این معماری یک **داور** است: امتیاز ورودهای موجود را تقویت یا وتو می‌کند.
- *
- * ## آنچه محاسبه می‌شود
- * ۱. تجزیهٔ قیمت به **مونوویو** با زیگزاگ ATR-تطبیقی (پیوت‌های فراکتالی + فیلتر دامنه).
- * ۲. طبقه‌بندی ساختار: Impulse پنج‌موجی، Impulse در حال گسترش، ZigZag، Flat، Triangle،
- *    Diametric هفت‌موجی، Symmetrical نه‌موجی و Extracting Triangle.
- * ۳. حسابرسی قواعد نیلی (بازگشت قیمتی، محدودیت زمانی، موج سوم کوتاه‌ترین نباشد،
- *    عدم همپوشانی موج ۴ با موج ۱، تناوب موج ۲ و ۴، کانال ۰-۲، هدف فیبوناچی).
- * ۴. جهت مورد انتظار موج بعدی + هدف پروجکشن + **قیمت ابطال** ساختار.
- *
- * ## صداقت مهندسی
- * این یک داور **قاعده‌محور** است، نه تحلیلگر ذهنیِ حرفه‌ای. قواعد مکانیکیِ منتشرشدهٔ نیلی پیاده
- * شده‌اند و خروجی همیشه با «درصد اطمینان = نسبت قواعد پاس‌شده» همراه است تا کاربر بداند
- * شمارش چقدر محکم است. هیچ ادعای قطعیت نمی‌شود.
+ * ## ساختار پیاده‌سازی (بر اساس متد منتشرشدهٔ نیلی)
+ * ۱. **مونوویو** با زیگزاگ ATR-تطبیقی؛ سپس **قواعد نسبت طول موج‌ها** (Retracement Rules 1..7)
+ *    که بر پایهٔ نسبت `m2/m1` و موقعیت `m0` تعیین می‌کنند موج بعدی چه رفتاری باید داشته باشد.
+ * ۲. **برچسب ساختاری** (`:5`، `:F3`، `:c3`، `:L3`، `:L5`، `:s5`) که نشان می‌دهد موج در
+ *    کجای ساختار قرار دارد؛ این برچسب‌ها همان چیزی هستند که «لیست ساختاری» impulse را می‌سازند
+ *    (`:5 – :F3 – :5 – :F3 – :L5`).
+ * ۳. **الگوها:** Impulse (۱۲ قاعده)، ZigZag، Flat، Triangle (همگرا/واگرا/خنثی)،
+ *    Diametric ۷موجی، Symmetrical ۹موجی و Extracting Triangle.
+ * ۴. **قواعد سخت (Hard Rules):** شکستنشان الگو را کاملاً رد می‌کند (مثل موج ۴ روی موج ۱).
+ * ۵. **تأیید پس‌ساختاری (Post-Constructive / Self-Confirmation):** متد نیلی می‌گوید شمارش تا
+ *    وقتی که حرکت بعدی آن را تأیید نکند معتبر نیست؛ این لایه همان بررسی را انجام می‌دهد.
  *
  * ## قانون خنثی‌بودن (Zero-Effect Contract)
  * وقتی `BaseStrategyConfig.neoWaveEnabled == false` باشد (پیش‌فرض)، هیچ‌کدام از این توابع فراخوانی
- * نمی‌شوند و خروجی موتور استراتژی بیت‌به‌بیت مثل نسخهٔ قبل از نئوویو می‌ماند.
+ * نمی‌شوند و خروجی موتور استراتژی بیت‌به‌بیت مثل نسخهٔ ۳.۹.۲۹ می‌ماند.
  */
 object NeoWaveEngine {
 
@@ -41,23 +35,26 @@ object NeoWaveEngine {
     /** حداکثر کندلی که برای شمارش خوانده می‌شود (کنترل بودجهٔ پردازش). */
     const val MAX_BARS: Int = 240
 
-    /** دامنهٔ پیش‌فرض زیگزاگ بر حسب ATR (کوچک‌تر = شمارش ریزتر و پرنویز‌تر). */
+    /** دامنهٔ پیش‌فرض زیگزاگ بر حسب ATR. */
     const val DEFAULT_AMPLITUDE_ATR: Double = 0.55
 
-    /** حداقل قواعد پاس‌شده برای اینکه شمارش «معتبر» شمرده شود. */
+    /** حداقل قواعد پاس‌شده برای «شمارش معتبر» (آستانهٔ پیش‌فرض گیت). */
     const val MIN_RULE_PASS: Int = 6
 
     /** حداقل اطمینان برای اینکه نئوویو اجازهٔ وتو داشته باشد. */
     const val MIN_CONFIDENCE_PCT: Double = 55.0
 
-    /** نسبت حداقل اطمینان برای پذیرش یک الگو به‌عنوان نامزد. */
+    /** حداقل نسبت اعتبار برای پذیرش یک الگو به‌عنوان نامزد. */
     private const val CANDIDATE_MIN_RATIO: Double = 0.60
+
+    /** ضریب گسترش نیلی (امواج جهت‌دار). */
+    private const val EXTENSION_RATIO: Double = 1.618
 
     // ────────────────────────────────────────────────────────────────────────
     // مدل‌های داده
     // ────────────────────────────────────────────────────────────────────────
 
-    /** الگوهای قابل تشخیص نئوویو (زیرمجموعهٔ مکانیکیِ قابل پیاده‌سازی). */
+    /** الگوهای نئوویو (زیرمجموعهٔ مکانیکی و قابل‌سنجش). */
     enum class NeoWavePattern(
         val titleFa: String,
         val canonicalWaves: Int,
@@ -66,9 +63,11 @@ object NeoWaveEngine {
     ) {
         IMPULSE("موجانگیزهٔ ۵ موجی (Impulse)", 5, false, "۵موجی"),
         IMPULSE_IN_PROGRESS("موجانگیزهٔ در حال گسترش (موج ۳/۵)", 3, false, "در گسترش"),
-        ZIGZAG("زیگزاگ اصلاحی ۳ موجی", 3, true, "زیگزاگ"),
-        FLAT("فلت اصلاحی ۳ موجی", 3, true, "فلت"),
-        TRIANGLE("مثلث همگرای ۵ موجی", 5, true, "مثلث"),
+        ZIGZAG("زیگزاگ اصلاحی ۵-۳-۵", 3, true, "زیگزاگ"),
+        FLAT("فلت اصلاحی ۳-۳-۵", 3, true, "فلت"),
+        TRIANGLE("مثلث همگرا ۵ موجی", 5, true, "مثلث همگرا"),
+        EXPANDING_TRIANGLE("مثلث واگرا ۵ موجی", 5, true, "مثلث واگرا"),
+        NEUTRAL_TRIANGLE("مثلث خنثی ۵ موجی", 5, true, "مثلث خنثی"),
         EXTRACTING_TRIANGLE("مثلث استخراجی ۵ موجی", 5, true, "استخراجی"),
         DIAMETRIC("دیامتریک ۷ موجی (Neely)", 7, true, "دیامتریک"),
         SYMMETRICAL("سیمتریکال ۹ موجی (Neely)", 9, true, "سیمتریکال"),
@@ -83,13 +82,30 @@ object NeoWaveEngine {
         val isHigh: Boolean,
     )
 
-    /** یک قاعدهٔ نیلی با نتیجهٔ حسابرسی. */
+    /**
+     * یک قاعدهٔ نیلی با نتیجهٔ حسابرسی.
+     * @property weight وزن قاعده در امتیاز اطمینان (قواعد سخت وزن بالاتر دارند).
+     * @property isHard قاعدهٔ سخت؛ شکستن آن کل الگو را باطل می‌کند.
+     */
     data class NeoWaveRule(
         val index: Int,
         val titleFa: String,
         val passed: Boolean,
         val detailFa: String,
+        val weight: Double = 1.0,
+        val isHard: Boolean = false,
     )
+
+    /** قواعد نسبت طول موج‌ها (Retracement Rules 1..7) بر پایهٔ m2/m1. */
+    enum class RetracementRule(val number: Int, val titleFa: String, val expectationFa: String) {
+        R1(1, "m2 کمتر از ۳۸.۲٪ m1", "موج بعدی باید هم در قیمت و هم در زمان از m1 بزرگ‌تر باشد (روند قوی)"),
+        R2(2, "m2 بین ۳۸.۲ تا ۶۱.۸٪ m1", "موج بعدی باید از نظر قیمت و زمان مشابه m1 باشد (اصلاح سالم)"),
+        R3(3, "m2 نزدیک ۶۱.۸٪ m1", "مرز اصلاح سالم؛ موج بعدی باید دست‌کم ۶۱.۸٪ m1 باشد"),
+        R4(4, "m2 بین ۶۱.۸ تا ۱۰۰٪ m1", "اصلاح عمیق؛ انتظار ساختار پیچیده‌تر و تناوب با موج قبلی"),
+        R5(5, "m2 بین ۱۰۰ تا ۱۶۱.۸٪ m1", "m1 احتمالاً اصلاحی بوده؛ موج بعدی می‌تواند تا ۶۱.۸٪ m2 باشد"),
+        R6(6, "m2 بین ۱۶۱.۸ تا ۲۶۱.۸٪ m1", "ساختار اصلاحی مرکب؛ ادامهٔ موج نیازمند تأیید پس‌ساختاری است"),
+        R7(7, "m2 بیش از ۲۶۱.۸٪ m1", "m1 تقریباً بی‌اعتبار است؛ شمارش باید از نو انجام شود"),
+    }
 
     /** خروجی کامل شمارش نئوویو برای یک نماد/تایم‌فریم. */
     data class NeoWaveVerdict(
@@ -107,10 +123,22 @@ object NeoWaveEngine {
         val structureHeight: Double,
         val badgeFa: String,
         val summaryFa: String,
+        /** برچسب ساختاری نیلی برای موج جاری. */
+        val structureLabelFa: String = "",
+        /** شمارهٔ قاعدهٔ نسبت طول موج‌ها (۱ تا ۷). */
+        val retracementRule: Int = 0,
+        /** انتظار رفتاری موج بعدی طبق جدول نیلی. */
+        val retracementExpectationFa: String = "",
+        /** تأیید پس‌ساختاری: آیا حرکت بعد از الگو، شمارش را تأیید کرده است. */
+        val isConfirmed: Boolean = false,
+        /** توضیح فارسی وضعیت تأیید پس‌ساختاری. */
+        val postConstructiveFa: String = "",
+        /** آیا یکی از قواعد سخت نقض شده است (شمارش باطل). */
+        val hardBreach: Boolean = false,
     ) {
         val rulesTotal: Int get() = rules.size
         val isUsable: Boolean
-            get() = pattern != NeoWavePattern.UNKNOWN && rulesTotal > 0
+            get() = pattern != NeoWavePattern.UNKNOWN && rulesTotal > 0 && !hardBreach
 
         fun isAlignedWith(isLong: Boolean): Boolean = when (expectedDirection) {
             SignalAction.BUY -> isLong
@@ -174,7 +202,7 @@ object NeoWaveEngine {
 
     /**
      * استخراج پیوت‌های سوئینگ با پنجرهٔ فراکتالی و فیلتر دامنهٔ ATR.
-     * مراحل: پیدا کردن اکسترمم محلی → ادغام اکسترمم‌های هم‌نوع متوالی → حذف حرکات کوچک‌تر از آستانه.
+     * مراحل: اکسترمم محلی → ادغام هم‌نوع‌ها → حذف حرکات کوچک → تکمیل ساختار از نقطهٔ صفر.
      */
     fun pivots(
         candles: List<Candle>,
@@ -209,7 +237,7 @@ object NeoWaveEngine {
         if (raw.isEmpty()) return emptyList()
         raw.sortBy { it.index }
 
-        // ۱) ادغام اکسترمم‌های هم‌نوع متوالی (بالاترین سقف / پایین‌ترین کف).
+        // ۱) ادغام اکسترمم‌های هم‌نوع متوالی.
         val merged = ArrayList<NeoWavePivot>()
         for (p in raw) {
             val last = merged.lastOrNull()
@@ -221,7 +249,7 @@ object NeoWaveEngine {
             }
         }
 
-        // ۲) حذف حرکات کوچک‌تر از آستانه + حفظ تناوب سقف/کف.
+        // ۲) حذف حرکات کوچک‌تر از آستانه.
         val cleaned = ArrayList<NeoWavePivot>()
         for (p in merged) {
             val last = cleaned.lastOrNull()
@@ -230,17 +258,17 @@ object NeoWaveEngine {
                 continue
             }
             if (abs(p.price - last.price) < threshold) {
-                // حرکت بی‌معنا: اکسترمم قوی‌تر را نگه می‌داریم.
                 when {
                     p.isHigh && last.isHigh -> if (p.price > last.price) cleaned[cleaned.lastIndex] = p
                     !p.isHigh && !last.isHigh -> if (p.price < last.price) cleaned[cleaned.lastIndex] = p
-                    else -> Unit // سقف/کف متناوب اما بی‌دامنه: هر دو را رد می‌کنیم
+                    else -> Unit
                 }
             } else {
                 cleaned.add(p)
             }
         }
-        // ۳) بعد از پاک‌سازی ممکن است دو پیوت هم‌نوع پشت‌سرهم بمانند؛ دوباره ادغام می‌کنیم.
+
+        // ۳) ادغام دوبارهٔ هم‌نوع‌های پشت‌سرهم.
         val finalPivots = ArrayList<NeoWavePivot>()
         for (p in cleaned) {
             val last = finalPivots.lastOrNull()
@@ -252,8 +280,7 @@ object NeoWaveEngine {
             }
         }
 
-        // ۴) تکمیل ساختار در ابتدا: پنجرهٔ فراکتالی نمی‌تواند پیوتِ نخستین کندل‌ها را ببیند،
-        // بنابراین اکسترمم مخالف قبل از اولین پیوت را اضافه می‌کنیم تا شمارش موج از نقطهٔ صفر شروع شود.
+        // ۴) تکمیل ساختار در ابتدا: اکسترمم مخالفِ پیش از اولین پیوت.
         if (finalPivots.isNotEmpty()) {
             val first = finalPivots.first()
             val prefixEnd = first.index - 1
@@ -268,10 +295,7 @@ object NeoWaveEngine {
                     }
                 }
                 if (abs(price - first.price) >= threshold) {
-                    finalPivots.add(
-                        0,
-                        NeoWavePivot(idx, bars[idx].time, price, !first.isHigh),
-                    )
+                    finalPivots.add(0, NeoWavePivot(idx, bars[idx].time, price, !first.isHigh))
                 }
             }
         }
@@ -279,7 +303,7 @@ object NeoWaveEngine {
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    // شمارش و طبقه‌بندی
+    // مونوویو و قواعد نسبت طول
     // ────────────────────────────────────────────────────────────────────────
 
     /** یک مونوویو: حرکت بین دو پیوت متوالی. */
@@ -298,13 +322,10 @@ object NeoWaveEngine {
             val a = pivots[i - 1]
             val b = pivots[i]
             val len = abs(b.price - a.price)
+            if (len <= 0.0) continue
             val bars = (b.index - a.index).coerceAtLeast(1)
-            val dir = when {
-                b.price > a.price -> 1
-                b.price < a.price -> -1
-                else -> 0
-            }
-            if (len > 0.0) out.add(Mono(a, b, len, bars, dir))
+            val dir = if (b.price > a.price) 1 else -1
+            out.add(Mono(a, b, len, bars, dir))
         }
         return out
     }
@@ -314,7 +335,42 @@ object NeoWaveEngine {
 
     private fun round2(v: Double): Double = round(v * 100.0) / 100.0
 
-    /** یک نامزد الگو قبل از انتخاب نهایی. */
+    /** تعیین قاعدهٔ نسبت طول موج‌ها (۱ تا ۷) از نسبت m2/m1 نیلی. */
+    fun retracementRuleOf(ratio: Double): RetracementRule = when {
+        ratio < 0.382 -> RetracementRule.R1
+        ratio < 0.618 -> RetracementRule.R2
+        ratio < 0.66 -> RetracementRule.R3
+        ratio < 1.0 -> RetracementRule.R4
+        ratio < 1.618 -> RetracementRule.R5
+        ratio <= 2.618 -> RetracementRule.R6
+        else -> RetracementRule.R7
+    }
+
+    /**
+     * برچسب ساختاری نیلی برای موج جاری.
+     *
+     * `:5` موج انگیزهٔ ادامه‌دار · `:L5` موج انگیزهٔ پایانی · `:F3` سه‌موجی نخست ·
+     * `:c3` سه‌موجی میانی · `:L3` سه‌موجی پایانی · `:s5` پنج‌موجی کوتاه/ضعیف.
+     */
+    private fun structureLabel(
+        pattern: NeoWavePattern,
+        rule: RetracementRule,
+        isComplete: Boolean,
+    ): String = when (pattern) {
+        NeoWavePattern.IMPULSE -> if (isComplete) ":L5" else ":5"
+        NeoWavePattern.IMPULSE_IN_PROGRESS -> ":5"
+        NeoWavePattern.ZIGZAG, NeoWavePattern.FLAT ->
+            if (isComplete) ":L3" else if (rule.number >= 4) ":F3" else ":c3"
+        NeoWavePattern.TRIANGLE, NeoWavePattern.EXPANDING_TRIANGLE,
+        NeoWavePattern.NEUTRAL_TRIANGLE, NeoWavePattern.EXTRACTING_TRIANGLE,
+        NeoWavePattern.DIAMETRIC, NeoWavePattern.SYMMETRICAL -> if (isComplete) ":L3" else ":c3"
+        NeoWavePattern.UNKNOWN -> "—"
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // نامزدهای الگو
+    // ────────────────────────────────────────────────────────────────────────
+
     private data class Candidate(
         val pattern: NeoWavePattern,
         val rules: List<NeoWaveRule>,
@@ -324,24 +380,23 @@ object NeoWaveEngine {
         val target: Double?,
         val height: Double,
         val priority: Int,
-        /** ۰ = ساختار به آخرین پیوت ختم می‌شود؛ ۱ و ۲ = یک/دو پیوت عقب‌تر. */
         val recency: Int,
+        val rule: RetracementRule,
     ) {
         val passed: Int get() = rules.count { it.passed }
-        val ratio: Double get() = if (rules.isEmpty()) 0.0 else passed.toDouble() / rules.size
+        val hardBreach: Boolean get() = rules.any { it.isHard && !it.passed }
+        val ratio: Double
+            get() {
+                if (rules.isEmpty()) return 0.0
+                val total = rules.sumOf { it.weight }
+                val got = rules.filter { it.passed }.sumOf { it.weight }
+                return if (total <= 0.0) 0.0 else got / total
+            }
     }
 
-    /**
-     * پنجره‌ای از مونوویوها که به پیوت `end` ختم می‌شود.
-     *
-     * چرا پنجره و نه همیشه «آخرین n مونوویو»؟ چون پیوت فقط پس از یک برگشتِ تأییدشده ساخته می‌شود؛
-     * بنابراین درست وقتی موج ۵ تمام می‌شود، یک مونوویوی جدید (شروع اصلاح) هم شکل گرفته است.
-     * بررسی دو پنجرهٔ عقب‌تر اجازه می‌دهد الگوی تازه‌تمام‌شده هم دیده شود.
-     */
     private fun window(monos: List<Mono>, end: Int, count: Int): List<Mono>? =
         if (end - count < 0 || end > monos.size) null else monos.subList(end - count, end)
 
-    /** جهت روندِ قبل از ساختار (موج بزرگ‌تر). برای الگوهای اصلاحی، جهت بازگشت = همین. */
     private fun priorDirection(monos: List<Mono>, end: Int, count: Int): Int {
         val start = end - count
         return if (start - 1 >= 0) monos[start - 1].dir else 0
@@ -352,6 +407,31 @@ object NeoWaveEngine {
         val dir = if (prior != 0) prior else -fallback
         return if (dir > 0) SignalAction.BUY else SignalAction.SELL
     }
+
+    private fun rule(
+        index: Int,
+        title: String,
+        passed: Boolean,
+        detail: String,
+        weight: Double = 1.0,
+        isHard: Boolean = false,
+    ) = NeoWaveRule(index, title, passed, detail, weight, isHard)
+
+    private fun pct(v: Double): String = "${(v * 100.0).toInt()}٪"
+
+    private fun num(v: Double): String = ((round(v * 100.0) / 100.0)).toString()
+
+    private fun symmetryRatio(a: Int, b: Int): Double = symmetryRatio(a.toDouble(), b.toDouble())
+
+    private fun symmetryRatio(a: Double, b: Double): Double {
+        val hi = max(a, b)
+        val lo = min(a, b)
+        return if (lo <= 0.0) 99.0 else hi / lo
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // تحلیل کامل
+    // ────────────────────────────────────────────────────────────────────────
 
     /**
      * تحلیل کامل نئوویو روی یک سری کندل.
@@ -378,34 +458,47 @@ object NeoWaveEngine {
             classifyFlat(monos, end, recency)?.let { candidates.add(it) }
             classifyTriangle(monos, end, recency)?.let { candidates.add(it) }
             classifyDiametric(monos, end, recency)?.let { candidates.add(it) }
+            classifySymmetrical(monos, end, recency)?.let { candidates.add(it) }
         }
 
         val best = candidates
-            .filter { it.passed >= 3 && it.ratio >= CANDIDATE_MIN_RATIO }
+            .filter { !it.hardBreach && it.passed >= 3 && it.ratio >= CANDIDATE_MIN_RATIO }
             .maxWithOrNull(
                 compareBy<Candidate> { -it.recency }
                     .thenBy { it.priority }
                     .thenBy { it.ratio },
             ) ?: return null
 
+        // لگ زنده: از آخرین پیوت تا قیمت فعلی (برای تأیید پس‌ساختاری).
+        val lastPivot = pivots.last()
+        val livePrice = bars.last().close
+        val liveDir = sign(livePrice - lastPivot.price).toInt()
+        val liveLength = abs(livePrice - lastPivot.price)
+
+        val confirmation = postConstructiveCheck(best, monos, liveDir, liveLength, bars.size - lastPivot.index)
         var confidence = best.ratio * 100.0
         if (!best.isComplete) confidence -= 8.0
+        if (!confirmation.confirmed) confidence -= 10.0
         confidence = round2(confidence.coerceIn(0.0, 100.0))
 
+        val label = structureLabel(best.pattern, best.rule, best.isComplete)
         val dirFa = when (best.expectedDirection) {
             SignalAction.BUY -> "صعودی"
             SignalAction.SELL -> "نزولی"
             SignalAction.NO_TRADE -> "بی‌جهت"
         }
-        val badge = "🌊 نئوویو: ${best.pattern.badgeFa} · ${best.passed}/${best.rules.size} قاعده · انتظار $dirFa"
+        val badge = "🌊 نئوویو: ${best.pattern.badgeFa} $label · ${best.passed}/${best.rules.size} قاعده" +
+            (if (confirmation.confirmed) " · تأییدشده" else " · بدون تأیید") + " · انتظار $dirFa"
         val summary = buildString {
-            append("${best.pattern.titleFa}؛ ")
-            append("${best.passed} از ${best.rules.size} قاعدهٔ نیلی پاس شد (اطمینان ${confidence.toInt()}%)؛ ")
+            append("${best.pattern.titleFa} با برچسب $label و ${monos.size} مونوویو؛ ")
+            append("${best.passed} از ${best.rules.size} قاعدهٔ نیلی (اطمینان ${confidence.toInt()}%)؛ ")
+            append("قاعدهٔ نسبت ${best.rule.number}: ${best.rule.titleFa} ⇒ ${best.rule.expectationFa}؛ ")
             append("جهت مورد انتظار موج بعدی: $dirFa")
             best.target?.let { append(" · هدف پروجکشن ${round2(it)}") }
             best.invalidation?.let { append(" · ابطال ساختار ${round2(it)}") }
-            if (!best.isComplete) append(" · ساختار هنوز کامل نشده")
+            if (!confirmation.confirmed) append(" · ${confirmation.noteFa}")
         }
+
         return NeoWaveVerdict(
             pattern = best.pattern,
             expectedDirection = best.expectedDirection,
@@ -419,10 +512,60 @@ object NeoWaveEngine {
             structureHeight = round2(best.height),
             badgeFa = badge,
             summaryFa = summary,
+            structureLabelFa = label,
+            retracementRule = best.rule.number,
+            retracementExpectationFa = best.rule.expectationFa,
+            isConfirmed = confirmation.confirmed,
+            postConstructiveFa = confirmation.noteFa,
+            hardBreach = best.hardBreach,
         )
     }
 
-    /** موج‌انگیزهٔ ۵ موجی کامل. */
+    /** نتیجهٔ بررسی پس‌ساختاری. */
+    private data class Confirmation(val confirmed: Boolean, val noteFa: String)
+
+    /**
+     * **تأیید پس‌ساختاری (Post-Constructive Rule)** — همان بخشی که متد نیلی اعتبار شمارش را
+     * مشروط به حرکت بعدی می‌کند:
+     * - الگوی کامل‌شده باید با یک لگ زنده در جهت انتظار، حداقل ۲۳.۶٪ ارتفاع الگو را طی کند.
+     * - اگر قیمت هنوز در جهت خود الگو (فراتر از نقطهٔ پایانی) پیش رفته باشد، الگو هنوز کامل نیست.
+     */
+    private fun postConstructiveCheck(
+        best: Candidate,
+        monos: List<Mono>,
+        liveDir: Int,
+        liveLength: Double,
+        liveBars: Int,
+    ): Confirmation {
+        if (!best.isComplete || best.height <= 0.0) {
+            return Confirmation(false, "ساختار هنوز کامل نشده است.")
+        }
+        val expectDir = when (best.expectedDirection) {
+            SignalAction.BUY -> 1
+            SignalAction.SELL -> -1
+            SignalAction.NO_TRADE -> 0
+        }
+        if (expectDir == 0) return Confirmation(false, "جهت مورد انتظار مشخص نیست.")
+        val minMove = best.height * 0.236
+        if (liveDir == expectDir && liveLength >= minMove) {
+            return Confirmation(true, "حرکت پس از الگو (${num(liveLength)}) جهت مورد انتظار را تأیید کرد.")
+        }
+        if (liveDir != expectDir && liveDir != 0 && liveBars <= 3) {
+            return Confirmation(false, "حرکت پس از الگو هنوز شروع نشده؛ تأیید ناقص است.")
+        }
+        if (liveDir == -expectDir) {
+            return Confirmation(
+                false,
+                "حرکت پس از الگو خلاف جهت مورد انتظار است؛ شمارش در خطر ابطال قرار دارد.",
+            )
+        }
+        return Confirmation(false, "جهش تأییدی به اندازهٔ ۲۳.۶٪ ارتفاع الگو رخ نداده است.")
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // الگوی ۱: موج‌انگیزهٔ ۵ موجی — ۱۲ قاعدهٔ نیلی
+    // ────────────────────────────────────────────────────────────────────────
+
     private fun classifyImpulseComplete(monos: List<Mono>, end: Int, recency: Int): Candidate? {
         val m = window(monos, end, 5) ?: return null
         val d = m[0].dir
@@ -431,43 +574,77 @@ object NeoWaveEngine {
 
         val r2 = retraceRatio(m[1], m[0])
         val r4 = retraceRatio(m[3], m[2])
+        val drivers = listOf(m[0].lens, m[2].lens, m[4].lens)
+        val maxDriver = drivers.max()
+        val extended = drivers.count { it >= maxDriver * EXTENSION_RATIO }
+        val shortestIdx = drivers.indexOf(drivers.min())
         val rules = ArrayList<NeoWaveRule>()
 
-        rules.add(rule(1, "بازگشت موج ۲ حداکثر ۶۱.۸٪ موج ۱", r2 <= 0.618, "بازگشت موج ۲ = ${pct(r2)}"))
-        rules.add(rule(2, "موج ۲ کل موج ۱ را اصلاح نمی‌کند", r2 < 0.995, "نسبت اصلاح = ${pct(r2)}"))
         rules.add(
-            rule(3, "موج ۳ کوتاه‌ترین موج درایو نیست", m[2].lens >= min(m[0].lens, m[4].lens) * 0.95,
-                "موج۳=${num(m[2].lens)} · موج۱=${num(m[0].lens)} · موج۵=${num(m[4].lens)}"),
-        )
-        val nonOverlap = if (d > 0) m[3].to.price > m[0].to.price else m[3].to.price < m[0].to.price
-        rules.add(
-            rule(4, "موج ۴ با محدودهٔ قیمتی موج ۱ هم‌پوشانی ندارد", nonOverlap,
-                "پایان موج۴=${num(m[3].to.price)} · پایان موج۱=${num(m[0].to.price)}"),
+            rule(1, "بازگشت موج ۲ حداکثر ۶۱.۸٪ موج ۱ (قاعدهٔ سخت)", r2 <= 0.618,
+                "بازگشت موج ۲ = ${pct(r2)}", weight = 2.0, isHard = true),
         )
         rules.add(
-            rule(5, "محدودیت زمانی موج ۲ (≤ ۱.۶۱۸ × زمان موج ۱)", m[1].bars <= m[0].bars * 1.618,
-                "زمان موج۲=${m[1].bars} · موج۱=${m[0].bars}"),
+            rule(2, "موج ۴ وارد قلمرو قیمتی موج ۱ نمی‌شود", if (d > 0) m[3].to.price > m[0].to.price else m[3].to.price < m[0].to.price,
+                "پایان موج۴=${num(m[3].to.price)} · پایان موج۱=${num(m[0].to.price)}", weight = 2.0, isHard = true),
+        )
+        rules.add(
+            rule(3, "موج ۴ وارد قلمرو موج ۲ نمی‌شود",
+                if (d > 0) m[3].to.price > m[1].to.price else m[3].to.price < m[1].to.price,
+                "پایان موج۴=${num(m[3].to.price)} · پایان موج۲=${num(m[1].to.price)}", weight = 1.5),
+        )
+        rules.add(
+            rule(4, "موج ۳ کوتاه‌ترین موج جهت‌دار نیست (قاعدهٔ سخت)", shortestIdx != 1,
+                "موج۱=${num(m[0].lens)} · موج۳=${num(m[2].lens)} · موج۵=${num(m[4].lens)}",
+                weight = 2.0, isHard = true),
+        )
+        rules.add(
+            rule(5, "دست‌کم یک موج جهت‌دار ۱.۶۱۸ برابر بزرگ‌ترین موج دیگر است", extended >= 1,
+                "بزرگ‌ترین=${num(maxDriver)} · تعداد موج گسترش‌یافته=$extended", weight = 1.5),
+        )
+        // تابع‌بودن (subdivision): موج گسترش‌یافته باید بلندترین و طولانی‌ترین زمان را هم داشته باشد.
+        val extIdx = drivers.indexOf(maxDriver)
+        val extMono = listOf(m[0], m[2], m[4])[extIdx]
+        val extTimes = listOf(m[0].bars, m[2].bars, m[4].bars)
+        rules.add(
+            rule(6, "موج گسترش‌یافته تابع (subdivided) است: هم بلندترین و هم زمان‌برترین",
+                extTimes[extIdx] >= extTimes.max() * 0.9,
+                "زمان موج گسترش‌یافته=${extMono.bars} · بیشترین زمان=${extTimes.max()}", weight = 1.2),
+        )
+        rules.add(
+            rule(7, "موج اصلاحی ۲ زمان بیشتری از موج ۱ گرفته است",
+                m[1].bars >= m[0].bars || r2 <= 0.618,
+                "زمان موج۲=${m[1].bars} · موج۱=${m[0].bars} · عمق=${pct(r2)}"),
         )
         val timeRatio = if (min(m[1].bars, m[3].bars) == 0) 99.0
         else max(m[1].bars, m[3].bars).toDouble() / min(m[1].bars, m[3].bars).toDouble()
         rules.add(
-            rule(6, "تناوب موج ۲ و موج ۴ (عمق یا زمان)", abs(r2 - r4) >= 0.15 || timeRatio >= 1.6,
+            rule(8, "تناوب موج ۲ و ۴ (عمق یا زمان)",
+                abs(r2 - r4) >= 0.15 || timeRatio >= 1.6,
                 "عمق۲=${pct(r2)} · عمق۴=${pct(r4)} · نسبت زمان=${num(timeRatio)}"),
         )
         val projRatio = m[4].lens / m[0].lens
         rules.add(
-            rule(7, "هدف موج ۵ در دامنهٔ فیبوناچی (۰.۳۸۲ تا ۲.۶۱۸ موج ۱)", projRatio in 0.382..2.618,
-                "موج۵/موج۱ = ${num(projRatio)}"),
+            rule(9, "پروجکشن موج ۵ در دامنهٔ ۳۸.۲ تا ۱۶۱.۸٪ موج ۱",
+                projRatio in 0.382..1.618, "موج۵/موج۱ = ${num(projRatio)}"),
         )
         rules.add(
-            rule(8, "شکست کانال ۰-۲ توسط موج ۳ (گسترش سالم)",
+            rule(10, "شکست کانال ۰-۲ توسط موج ۳",
                 if (d > 0) m[2].to.price > m[0].to.price else m[2].to.price < m[0].to.price,
                 "پایان موج۳=${num(m[2].to.price)} · پایان موج۱=${num(m[0].to.price)}"),
         )
+        rules.add(
+            rule(11, "قاعدهٔ نقاط تماس: حداکثر ۴ نقطه از ۶ نقطه روی کانال",
+                channelTouchPoints(m, d) <= 4, "نقاط روی کانال = ${channelTouchPoints(m, d)}"),
+        )
+        rules.add(
+            rule(12, "موج ۳ زمان بیشتری از موج ۱ گرفته است", m[2].bars >= m[0].bars * 0.9,
+                "زمان موج۳=${m[2].bars} · موج۱=${m[0].bars}"),
+        )
 
+        val rule = retracementRuleOf(r2)
         val height = abs(m[2].to.price - m[0].from.price)
         val target = m[4].to.price - (if (d > 0) 1.0 else -1.0) * height * 0.382
-        // پایان موج ۵ ⇒ موج بعدی اصلاحی و خلاف جهت درایو است.
         return Candidate(
             pattern = NeoWavePattern.IMPULSE,
             rules = rules,
@@ -478,7 +655,25 @@ object NeoWaveEngine {
             height = height,
             priority = 50,
             recency = recency,
+            rule = rule,
         )
+    }
+
+    /** شمارش نقاط تماس با کانال ۱-۳ (قاعدهٔ نقاط تماس نیلی). */
+    private fun channelTouchPoints(m: List<Mono>, d: Int): Int {
+        val p1 = m[0].from.price
+        val p2 = m[0].to.price
+        val p3 = m[2].to.price
+        if (p2 == p1) return 6
+        val slope = (p3 - p1) / 4.0 // کانال ۰-۲ در مختصات پیوت
+        var touches = 0
+        val points = listOf(m[0].from.price to 0, m[0].to.price to 1, m[1].to.price to 2, m[2].to.price to 3, m[3].to.price to 4, m[4].to.price to 5)
+        points.forEach { (price, idx) ->
+            val channel = p1 + slope * idx
+            val tolerance = abs(p3 - p1) * 0.05
+            if (abs(price - channel) <= tolerance) touches++
+        }
+        return touches
     }
 
     /** موج‌انگیزهٔ در حال گسترش: سه مونوویو با موج ۳ کشیده. */
@@ -494,10 +689,12 @@ object NeoWaveEngine {
         if (r2 > 0.786) return null
 
         val rules = listOf(
-            rule(1, "بازگشت موج ۲ کمتر از ۶۱.۸٪ موج ۱", r2 <= 0.618, "بازگشت = ${pct(r2)}"),
-            rule(2, "موج ۳ از موج ۱ کشیده‌تر است", extension >= 1.0, "موج۳/موج۱ = ${num(extension)}"),
-            rule(3, "محدودیت زمانی موج ۲", m[1].bars <= m[0].bars * 1.618,
-                "زمان موج۲=${m[1].bars} · موج۱=${m[0].bars}"),
+            rule(1, "بازگشت موج ۲ کمتر از ۶۱.۸٪ موج ۱", r2 <= 0.618, "بازگشت = ${pct(r2)}",
+                weight = 2.0, isHard = r2 > 0.786),
+            rule(2, "موج ۳ از موج ۱ کشیده‌تر است", extension >= 1.0, "موج۳/موج۱ = ${num(extension)}",
+                weight = 1.5),
+            rule(3, "موج ۳ زمان بیشتری از موج ۲ گرفته است", m[2].bars >= m[1].bars,
+                "زمان موج۳=${m[2].bars} · موج۲=${m[1].bars}"),
             rule(4, "شکست سقف/کف موج ۱ توسط موج ۳",
                 if (d > 0) m[2].to.price > m[0].to.price else m[2].to.price < m[0].to.price,
                 "پایان موج۳=${num(m[2].to.price)}"),
@@ -515,10 +712,14 @@ object NeoWaveEngine {
             height = height,
             priority = 40,
             recency = recency,
+            rule = retracementRuleOf(r2),
         )
     }
 
-    /** زیگزاگ اصلاحی سه‌موجی. */
+    // ────────────────────────────────────────────────────────────────────────
+    // الگوی ۲: زیگزاگ ۵-۳-۵
+    // ────────────────────────────────────────────────────────────────────────
+
     private fun classifyZigZag(monos: List<Mono>, end: Int, recency: Int): Candidate? {
         val m = window(monos, end, 3) ?: return null
         val d = m[0].dir
@@ -530,13 +731,19 @@ object NeoWaveEngine {
         val beyond = if (d > 0) m[2].to.price > m[0].to.price else m[2].to.price < m[0].to.price
         val cRatio = m[2].lens / m[0].lens
         val rules = listOf(
-            rule(1, "بازگشت موج b در دامنهٔ ۳۸.۲ تا ۷۹.۱٪ موج a", r2 in 0.382..0.791, "بازگشت = ${pct(r2)}"),
-            rule(2, "موج c فراتر از انتهای موج a می‌رود", beyond,
-                "پایان c=${num(m[2].to.price)} · پایان a=${num(m[0].to.price)}"),
-            rule(3, "نسبت موج c به موج a در دامنهٔ ۰.۶۱۸ تا ۱.۶۱۸", cRatio in 0.618..1.618, "c/a = ${num(cRatio)}"),
-            rule(4, "محدودیت زمانی موج b", m[1].bars <= m[0].bars * 1.618, "زمان b=${m[1].bars} · a=${m[0].bars}"),
-            rule(5, "موج b زمان کمتری از موج c گرفته است", m[1].bars <= m[2].bars * 1.5,
-                "زمان b=${m[1].bars} · c=${m[2].bars}"),
+            rule(1, "بازگشت موج b در دامنهٔ ۳۳ تا ۶۱.۸٪ موج a (قاعدهٔ سخت)",
+                r2 in 0.33..0.618, "بازگشت = ${pct(r2)}", weight = 2.0, isHard = r2 > 0.886),
+            rule(2, "موج c فراتر از انتهای موج a می‌رود (قاعدهٔ سخت)", beyond,
+                "پایان c=${num(m[2].to.price)} · پایان a=${num(m[0].to.price)}", weight = 2.0, isHard = true),
+            rule(3, "موج c دست‌کم ۶۱.۸٪ موج a است", cRatio >= 0.618, "c/a = ${num(cRatio)}", weight = 1.5),
+            rule(4, "موج b زمان مساوی یا بیشتری از موج a گرفته است", m[1].bars >= m[0].bars,
+                "زمان b=${m[1].bars} · a=${m[0].bars}", weight = 1.5),
+            rule(5, "تناوب a و b (قیمت یا زمان)",
+                abs(m[1].lens - m[0].lens) / m[0].lens >= 0.2 || symmetryRatio(m[0].bars, m[1].bars) >= 1.6,
+                "قیمت a=${num(m[0].lens)} · b=${num(m[1].lens)} · زمان a=${m[0].bars} · b=${m[1].bars}"),
+            rule(6, "موج c دامنهٔ متفاوتی از موج a دارد",
+                symmetryRatio(m[0].lens, m[2].lens) >= 1.05 || symmetryRatio(m[0].bars, m[2].bars) >= 1.2,
+                "c/a قیمتی = ${num(cRatio)} · زمان a=${m[0].bars} · c=${m[2].bars}"),
         )
         val height = abs(m[2].to.price - m[1].from.price)
         val expected = expectedAfterCorrection(monos, end, 3, fallback = d)
@@ -552,29 +759,38 @@ object NeoWaveEngine {
             height = height,
             priority = 30,
             recency = recency,
+            rule = retracementRuleOf(r2),
         )
     }
 
-    /** فلت اصلاحی: موج b تقریباً کل موج a را برمی‌گرداند و c هم‌اندازهٔ a است. */
+    // ────────────────────────────────────────────────────────────────────────
+    // الگوی ۳: فلت ۳-۳-۵
+    // ────────────────────────────────────────────────────────────────────────
+
     private fun classifyFlat(monos: List<Mono>, end: Int, recency: Int): Candidate? {
         val m = window(monos, end, 3) ?: return null
         val d = m[0].dir
         if (d == 0 || m[1].dir != -d || m[2].dir != d) return null
         if (m[0].lens <= 0.0) return null
         val r2 = retraceRatio(m[1], m[0])
-        if (r2 < 0.70 || r2 > 1.382) return null
+        if (r2 < 0.618 || r2 > 1.382) return null
         val cRatio = m[2].lens / m[0].lens
-        // در فلت، موج c نزدیک «پایان موج a» تمام می‌شود (نه نزدیک شروع آن).
-        val closeToEndOfA = abs(m[2].to.price - m[0].to.price) <= m[0].lens * 0.35
+        val closeToEndOfA = abs(m[2].to.price - m[0].to.price) <= m[0].lens * 0.382
 
         val rules = listOf(
-            rule(1, "بازگشت موج b حداقل ۷۹.۱٪ موج a", r2 >= 0.791, "بازگشت = ${pct(r2)}"),
-            rule(2, "موج b از ۱۳۸٪ موج a فراتر نمی‌رود", r2 <= 1.382, "نسبت = ${num(r2)}"),
-            rule(3, "موج c هم‌اندازهٔ موج a (۰.۷ تا ۱.۳)", cRatio in 0.70..1.30, "c/a = ${num(cRatio)}"),
-            rule(4, "پایان موج c نزدیک پایان موج a (فلت منظم)", closeToEndOfA,
+            rule(1, "بازگشت موج b دست‌کم ۶۱.۸٪ موج a (قاعدهٔ سخت)", r2 >= 0.618,
+                "بازگشت = ${pct(r2)}", weight = 2.0, isHard = true),
+            rule(2, "موج b از ۱۳۸.۲٪ موج a فراتر نمی‌رود", r2 <= 1.382,
+                "نسبت = ${num(r2)}", weight = 1.5),
+            rule(3, "موج c دست‌کم ۳۸.۲٪ موج a است", cRatio >= 0.382,
+                "c/a = ${num(cRatio)}", weight = 1.5),
+            rule(4, "موج b زمان مساوی یا بیشتری از موج a گرفته است", m[1].bars >= m[0].bars,
+                "زمان b=${m[1].bars} · a=${m[0].bars}", weight = 1.5),
+            rule(5, "پایان موج c نزدیک پایان موج a (فلت منظم)", closeToEndOfA,
                 "فاصله = ${num(abs(m[2].to.price - m[0].to.price))}"),
-            rule(5, "محدودیت زمانی موج b", m[1].bars <= m[0].bars * 2.618,
-                "زمان b=${m[1].bars} · a=${m[0].bars}"),
+            rule(6, "تناوب b و c (قیمت یا زمان)",
+                symmetryRatio(m[1].lens, m[2].lens) >= 1.1 || symmetryRatio(m[1].bars, m[2].bars) >= 1.3,
+                "قیمت b=${num(m[1].lens)} · c=${num(m[2].lens)}"),
         )
         val height = abs(m[1].to.price - m[0].from.price)
         val expected = expectedAfterCorrection(monos, end, 3, fallback = d)
@@ -590,45 +806,98 @@ object NeoWaveEngine {
             height = height,
             priority = 28,
             recency = recency,
+            rule = retracementRuleOf(r2),
         )
     }
 
-    /** مثلث همگرا (۵ مونوویو با دامنهٔ نزولی) یا مثلث استخراجی (دامنهٔ صعودی). */
+    // ────────────────────────────────────────────────────────────────────────
+    // الگوی ۴: مثلث‌ها (همگرا / واگرا / خنثی / استخراجی)
+    // ────────────────────────────────────────────────────────────────────────
+
     private fun classifyTriangle(monos: List<Mono>, end: Int, recency: Int): Candidate? {
         val m = window(monos, end, 5) ?: return null
-        val contracting = m[0].lens > m[2].lens && m[2].lens > m[4].lens && m[1].lens > m[3].lens
-        val extracting = m[0].lens < m[2].lens && m[2].lens < m[4].lens && m[1].lens < m[3].lens
-        if (!contracting && !extracting) return null
-        val ratio = if (m[0].lens <= 0.0) 0.0 else m[4].lens / m[0].lens
+        val a = m[0].lens
+        val b = m[1].lens
+        val c = m[2].lens
+        val dLeg = m[3].lens
+        val e = m[4].lens
+        if (a <= 0.0) return null
+
+        val contracting = c < a * 0.95 && dLeg < b * 0.95 && e < c
+        val expanding = c > a * 1.05 && dLeg > b * 1.05 && e > c
+        val neutral = !contracting && !expanding && abs(c - a) / a <= 0.15
+        val extracting = c > a && e < c && dLeg < b
+        if (!contracting && !expanding && !neutral && !extracting) return null
+
+        val pattern = when {
+            contracting -> NeoWavePattern.TRIANGLE
+            expanding -> NeoWavePattern.EXPANDING_TRIANGLE
+            neutral -> NeoWavePattern.NEUTRAL_TRIANGLE
+            else -> NeoWavePattern.EXTRACTING_TRIANGLE
+        }
+        val ratioCE = if (a <= 0.0) 0.0 else e / a
+        // قاعدهٔ ساختاری سخت: مثلث یک ساختار «جانبی» است؛ جابه‌جایی خالص نباید بزرگ باشد.
+        val maxLeg = maxOf(a, b, c, dLeg, e)
+        val totalPath = a + b + c + dLeg + e
+        val netMove = abs(m[4].to.price - m[0].from.price)
+        // ملاک ساختاری مثلث: هم‌پوشانی متوالی — پایان هر موج داخل گسترهٔ موج قبلی می‌افتد.
+        fun span(i: Int): Pair<Double, Double> {
+            val lo = min(m[i].from.price, m[i].to.price)
+            val hi = max(m[i].from.price, m[i].to.price)
+            return lo to hi
+        }
+        fun insidePrevious(i: Int): Boolean {
+            val (lo, hi) = span(i - 1)
+            return m[i].to.price in lo..hi
+        }
+        val overlaps = (1..4).count { insidePrevious(it) }
+        val isLateral = overlaps == 4
+        val lowEfficiency = totalPath > 0.0 && netMove <= totalPath * 0.30
+        val insideFirstLeg = m[4].to.price >= min(m[0].from.price, m[0].to.price) - a * 0.25 &&
+            m[4].to.price <= max(m[0].from.price, m[0].to.price) + a * 0.25
+        if (!isLateral || !insideFirstLeg) return null
         val rules = listOf(
-            rule(1, "توالی دامنه‌ها یکنواخت است", contracting || extracting, if (contracting) "همگرا" else "واگرا"),
-            rule(2, "نسبت آخرین موج به اولین موج در دامنهٔ ۰.۲ تا ۰.۹", ratio in 0.20..0.90, "نسبت = ${num(ratio)}"),
-            rule(3, "موج‌های زوج کوچک‌تر/بزرگ‌تر از موج‌های فرد هستند",
-                if (contracting) m[1].lens > m[3].lens else m[1].lens < m[3].lens,
-                "موج۲=${num(m[1].lens)} · موج۴=${num(m[3].lens)}"),
-            rule(4, "داخل دامنهٔ موج ۱ باقی مانده است",
-                m[4].to.price >= min(m[0].from.price, m[0].to.price) - m[0].lens * 0.25 &&
-                    m[4].to.price <= max(m[0].from.price, m[0].to.price) + m[0].lens * 0.25,
-                "پایان موج۵=${num(m[4].to.price)}"),
-            rule(5, "تقارن زمانی نسبی", m[0].bars + m[2].bars + m[4].bars > 0, "زمان‌ها محاسبه شد"),
+            rule(1, "توالی دامنه‌ها با نوع مثلث سازگار است",
+                contracting || expanding || neutral || extracting,
+                if (contracting) "همگرا" else if (expanding) "واگرا" else if (neutral) "خنثی" else "استخراجی",
+                weight = 2.0, isHard = true),
+            rule(2, "هم‌پوشانی متوالی کامل: هر موج داخل گسترهٔ موج قبلی تمام می‌شود", isLateral,
+                "هم‌پوشانی=$overlaps/4", weight = 2.0, isHard = true),
+            rule(3, "بازدهی مسیر کم است (ساختار جانبی)",
+                lowEfficiency,
+                "جابه‌جایی=${num(netMove)} · کل مسیر=${num(totalPath)} · بلندترین=${num(maxLeg)}",
+                weight = 1.2),
+            rule(4, "نسبت موج E به موج A در دامنهٔ ۳۸.۲ تا ۱۳۸.۲٪",
+                ratioCE in 0.382..1.382, "E/A = ${num(ratioCE)}", weight = 1.5),
+            rule(5, "موج C دست‌کم ۶۱.۸٪ موج A است", c / a >= 0.618, "C/A = ${num(c / a)}", weight = 1.5),
+            rule(6, "طول موج D با موج B نسبت معنادار دارد",
+                symmetryRatio(b, dLeg) <= 2.618, "B/D = ${num(symmetryRatio(b, dLeg))}"),
+            rule(7, "قاعدهٔ تقارن: نسبت موج E به D از ۱۶۱.۸٪ فراتر نمی‌رود",
+                symmetryRatio(dLeg, e) <= 1.618, "D/E = ${num(symmetryRatio(dLeg, e))}"),
+            rule(8, "پایان موج E داخل دامنهٔ موج A باقی مانده است", insideFirstLeg,
+                "پایان موج E=${num(m[4].to.price)}", weight = 1.5, isHard = true),
         )
         val height = abs(m[0].to.price - m[0].from.price)
         val expected = expectedAfterCorrection(monos, end, 5, fallback = m[4].dir)
         val target = m[4].to.price + (if (expected == SignalAction.BUY) 1.0 else -1.0) * height * 0.618
         return Candidate(
-            pattern = if (contracting) NeoWavePattern.TRIANGLE else NeoWavePattern.EXTRACTING_TRIANGLE,
+            pattern = pattern,
             rules = rules,
             expectedDirection = expected,
             isComplete = true,
             invalidation = m[4].to.price,
             target = target,
             height = height,
-            priority = 35,
+            priority = if (pattern == NeoWavePattern.TRIANGLE) 35 else 33,
             recency = recency,
+            rule = retracementRuleOf(b / a),
         )
     }
 
-    /** دیامتریک هفت‌موجی نیلی: موج چهارم بزرگ‌ترین و تقارن زمانی حول آن. */
+    // ────────────────────────────────────────────────────────────────────────
+    // الگوی ۵: دیامتریک ۷ موجی
+    // ────────────────────────────────────────────────────────────────────────
+
     private fun classifyDiametric(monos: List<Mono>, end: Int, recency: Int): Candidate? {
         val m = window(monos, end, 7) ?: return null
         val lens = m.map { it.lens }
@@ -636,19 +905,25 @@ object NeoWaveEngine {
         if (center <= 0.0) return null
         if (lens.indexOf(lens.max()) != 3) return null
 
-        val timeSymmetry1 = symmetryRatio(m[2].bars, m[4].bars)
-        val timeSymmetry2 = symmetryRatio(m[1].bars, m[5].bars)
-        val timeSymmetry3 = symmetryRatio(m[0].bars, m[6].bars)
-        val priceSymmetry = symmetryRatio(m[1].lens, m[5].lens)
+        val timeRatios = m.map { it.bars }.sorted()
+        val medianTime = timeRatios[timeRatios.size / 2].toDouble().coerceAtLeast(1.0)
+        val similarTime = m.count { it.bars <= medianTime * 1.5 }
 
         val rules = listOf(
-            rule(1, "هفت مونوویو با تناوب کامل", m.size == 7, "${m.size} مونوویو"),
+            rule(1, "هفت مونوویو با تناوب کامل", m.size == 7, "${m.size} مونوویو",
+                weight = 1.5, isHard = true),
             rule(2, "موج میانی (چهارم) بزرگ‌ترین موج است", lens.indexOf(lens.max()) == 3,
-                "بزرگ‌ترین موج = ${lens.indexOf(lens.max()) + 1}"),
-            rule(3, "تقارن زمانی موج ۳ و ۵", timeSymmetry1 <= 1.75, "نسبت = ${num(timeSymmetry1)}"),
-            rule(4, "تقارن زمانی موج ۲ و ۶", timeSymmetry2 <= 1.75, "نسبت = ${num(timeSymmetry2)}"),
-            rule(5, "تقارن زمانی موج ۱ و ۷", timeSymmetry3 <= 2.00, "نسبت = ${num(timeSymmetry3)}"),
-            rule(6, "تقارن قیمتی موج ۲ و ۶", priceSymmetry <= 1.80, "نسبت = ${num(priceSymmetry)}"),
+                "بزرگ‌ترین موج = ${lens.indexOf(lens.max()) + 1}", weight = 2.0, isHard = true),
+            rule(3, "تقارن زمانی موج ۳ و ۵", symmetryRatio(m[2].bars, m[4].bars) <= 1.75,
+                "نسبت = ${num(symmetryRatio(m[2].bars, m[4].bars))}"),
+            rule(4, "تقارن زمانی موج ۲ و ۶", symmetryRatio(m[1].bars, m[5].bars) <= 1.75,
+                "نسبت = ${num(symmetryRatio(m[1].bars, m[5].bars))}"),
+            rule(5, "تقارن زمانی موج ۱ و ۷", symmetryRatio(m[0].bars, m[6].bars) <= 2.00,
+                "نسبت = ${num(symmetryRatio(m[0].bars, m[6].bars))}"),
+            rule(6, "تقارن قیمتی موج ۲ و ۶", symmetryRatio(m[1].lens, m[5].lens) <= 1.80,
+                "نسبت = ${num(symmetryRatio(m[1].lens, m[5].lens))}"),
+            rule(7, "پنج موج هم‌زمان و دو موج به‌مراتب بلندتر/کوتاه‌تر", similarTime >= 5,
+                "تعداد موج با زمان مشابه = $similarTime", weight = 1.5),
         )
         val height = lens.sum()
         val expected = expectedAfterCorrection(monos, end, 7, fallback = m[6].dir)
@@ -663,37 +938,68 @@ object NeoWaveEngine {
             height = height,
             priority = 60,
             recency = recency,
+            rule = retracementRuleOf(m[1].lens / m[0].lens),
         )
     }
 
-    private fun symmetryRatio(a: Int, b: Int): Double = symmetryRatio(a.toDouble(), b.toDouble())
+    // ────────────────────────────────────────────────────────────────────────
+    // الگوی ۶: سیمتریکال ۹ موجی
+    // ────────────────────────────────────────────────────────────────────────
 
-    private fun symmetryRatio(a: Double, b: Double): Double {
-        val hi = max(a, b)
-        val lo = min(a, b)
-        return if (lo <= 0.0) 99.0 else hi / lo
+    private fun classifySymmetrical(monos: List<Mono>, end: Int, recency: Int): Candidate? {
+        val m = window(monos, end, 9) ?: return null
+        val lens = m.map { it.lens }
+        val center = lens[4]
+        if (center <= 0.0) return null
+        if (lens.indexOf(lens.max()) != 4) return null
+
+        val rules = listOf(
+            rule(1, "نُه مونوویو با تناوب کامل", m.size == 9, "${m.size} مونوویو",
+                weight = 1.5, isHard = true),
+            rule(2, "موج میانی (پنجم) بلندترین موج است", lens.indexOf(lens.max()) == 4,
+                "بلندترین موج = ${lens.indexOf(lens.max()) + 1}", weight = 2.0, isHard = true),
+            rule(3, "تقارن زمانی موج ۴ و ۶", symmetryRatio(m[3].bars, m[5].bars) <= 1.75,
+                "نسبت = ${num(symmetryRatio(m[3].bars, m[5].bars))}"),
+            rule(4, "تقارن زمانی موج ۳ و ۷", symmetryRatio(m[2].bars, m[6].bars) <= 1.75,
+                "نسبت = ${num(symmetryRatio(m[2].bars, m[6].bars))}"),
+            rule(5, "تقارن زمانی موج ۲ و ۸", symmetryRatio(m[1].bars, m[7].bars) <= 1.75,
+                "نسبت = ${num(symmetryRatio(m[1].bars, m[7].bars))}"),
+            rule(6, "تقارن زمانی موج ۱ و ۹", symmetryRatio(m[0].bars, m[8].bars) <= 2.00,
+                "نسبت = ${num(symmetryRatio(m[0].bars, m[8].bars))}"),
+            rule(7, "تقارن قیمتی موج ۲ و ۸", symmetryRatio(m[1].lens, m[7].lens) <= 1.80,
+                "نسبت = ${num(symmetryRatio(m[1].lens, m[7].lens))}", weight = 1.5),
+        )
+        val height = lens.sum()
+        val expected = expectedAfterCorrection(monos, end, 9, fallback = m[8].dir)
+        val target = m[8].to.price + (if (expected == SignalAction.BUY) 1.0 else -1.0) * center * 0.618
+        return Candidate(
+            pattern = NeoWavePattern.SYMMETRICAL,
+            rules = rules,
+            expectedDirection = expected,
+            isComplete = true,
+            invalidation = m[8].to.price,
+            target = target,
+            height = height,
+            priority = 65,
+            recency = recency,
+            rule = retracementRuleOf(m[1].lens / m[0].lens),
+        )
     }
 
-    private fun rule(index: Int, title: String, passed: Boolean, detail: String) =
-        NeoWaveRule(index, title, passed, detail)
-
-    private fun pct(v: Double): String = "${(v * 100.0).toInt()}٪"
-
-    private fun num(v: Double): String = ((round(v * 100.0) / 100.0)).toString()
     // ────────────────────────────────────────────────────────────────────────
     // داوری (Gate)
     // ────────────────────────────────────────────────────────────────────────
 
     /**
-     * داوری نئوویو روی یک ورود مشخص.
+     * داوری نئوویو روی یک ورود.
      *
      * جدول تصمیم:
-     * - خاموش یا بدون ساختار معتبر → خنثی (بدون تغییر).
-     * - الگوی کامل، هم‌جهت، قواعد کافی → تقویت اطمینان (+۸).
-     * - الگوی کامل، هم‌جهت، قواعد ناکافی → تقویت ملایم (+۲).
-     * - الگوی کامل، مخالف جهت، قواعد و اطمینان کافی → **وتو**.
-     * - الگوی کامل، مخالف جهت، قواعد ناکافی → تضعیف (−۳).
-     * - الگوی در حال تکمیل، هم‌جهت → تقویت ملایم (+۳)؛ مخالف → تضعیف (−۴)، بدون وتو.
+     * - خاموش یا بدون ساختار معتبر → خنثی.
+     * - الگوی کامل، هم‌جهت، تأییدشده و قواعد کافی → تقویت اطمینان (+۸).
+     * - الگوی کامل، هم‌جهت، قواعد ناکافی یا بدون تأیید → تقویت ملایم (+۲).
+     * - الگوی کامل، مخالف، **تأییدشده** و قواعد/اطمینان کافی → **وتو**.
+     * - الگوی کامل، مخالف، بدون تأیید پس‌ساختاری → تضعیف (−۳)؛ بدون وتو.
+     * - الگوی در حال تکمیل → ±۳/−۴ بدون وتو.
      */
     fun gate(
         verdict: NeoWaveVerdict?,
@@ -717,7 +1023,7 @@ object NeoWaveEngine {
         val dirFa = if (isLong) "خرید" else "فروش"
 
         return when {
-            verdict.isComplete && aligned && strong -> NeoWaveGate(
+            verdict.isComplete && aligned && strong && verdict.isConfirmed -> NeoWaveGate(
                 enabled = true,
                 veto = false,
                 confidenceDelta = 8.0,
@@ -729,15 +1035,16 @@ object NeoWaveEngine {
                 enabled = true,
                 veto = false,
                 confidenceDelta = 2.0,
-                noteFa = "🟡 نئوویو هم‌جهت است اما شمارش محکم نیست (${verdict.rulesPassed}/${verdict.rulesTotal} قاعده · ${verdict.confidencePct.toInt()}%)",
+                noteFa = "🟡 نئوویو هم‌جهت است اما شمارش محکم/تأییدشده نیست " +
+                    "(${verdict.rulesPassed}/${verdict.rulesTotal} قاعده · ${verdict.confidencePct.toInt()}%)",
                 verdict = verdict,
             )
 
-            verdict.isComplete && strong -> NeoWaveGate(
+            verdict.isComplete && strong && verdict.isConfirmed -> NeoWaveGate(
                 enabled = true,
                 veto = true,
                 confidenceDelta = -12.0,
-                noteFa = "⛔ نئوویو وتو کرد: ${verdict.badgeFa} مخالف $dirFa است",
+                noteFa = "⛔ نئوویو وتو کرد: ${verdict.badgeFa} با تأیید پس‌ساختاری مخالف $dirFa است",
                 verdict = verdict,
             )
 
@@ -745,7 +1052,7 @@ object NeoWaveEngine {
                 enabled = true,
                 veto = false,
                 confidenceDelta = -3.0,
-                noteFa = "⚠️ نئوویو مخالف $dirFa است ولی شمارش ضعیف است (${verdict.confidencePct.toInt()}%)",
+                noteFa = "⚠️ نئوویو مخالف $dirFa است ولی شمارش/تأیید کافی ندارد (${verdict.confidencePct.toInt()}%)",
                 verdict = verdict,
             )
 

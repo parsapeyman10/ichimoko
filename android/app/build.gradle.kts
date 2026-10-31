@@ -94,6 +94,17 @@ android {
         // channels + 15-minute automatic-check floor. See docs/RELEASE_3_0_FA.md and
         // CHANGELOG_FA.md. A versionCode must be bumped here before a release run, because the
         // workflow only publishes explicit tags / `release: publish` commits / approved dispatch.
+        // 3.9.31 (code 740) upgrades the NeoWave layer to the rule-complete Neely model described in
+        // "Mastering Elliott Wave": the m2/m1 ratio now selects one of the seven retracement rules and
+        // tells the app what the next wave must do; every monowave node carries a Neely structure label
+        // (:5, :F3, :c3, :L3, :L5, :s5); an impulse is audited against 12 rules (61.8% wave-2 limit,
+        // wave-4/wave-1 and wave-4/wave-2 non-overlap, wave-3 not shortest, 1.618 extension,
+        // subdivision, time alternation, 0-2 channel break, six-point channel touch rule), zigzag/flat
+        // against their 5-3-5 and 3-3-5 proportions, triangles via strict sequential overlap, and the
+        // 7/9-wave Diametric/Symmetrical formations by time symmetry. Hard-rule violations invalidate a
+        // count outright, and the post-constructive rule means a veto now requires the following wave to
+        // CONFIRM the count (>= 23.6% of the pattern height in the expected direction). Still optional
+        // and OFF by default; when off the engine output is bit-identical to 3.9.29.
         // 3.9.30 (code 739) adds NeoWave (Glenn Neely) as an OPTIONAL confirmation layer. It never
         // trades on its own: it decomposes price into ATR-adaptive monowaves, classifies the structure
         // (Impulse, Impulse-in-progress, ZigZag, Flat, Triangle, Extracting Triangle, Diametric) and
@@ -147,8 +158,8 @@ android {
         // stays at least 2.5R away. See docs/TRADE_PLAN_GUARD_FA.md. The same guard is surfaced in
         // the UI (settings audit panel, position card and journal) so an off-corridor plan is visible
         // before it is taken, not only after it fails.
-        versionCode = 739
-        versionName = "3.9.30"
+        versionCode = 740
+        versionName = "3.9.31"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
