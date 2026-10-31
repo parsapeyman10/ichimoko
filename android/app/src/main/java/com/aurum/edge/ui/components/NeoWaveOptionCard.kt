@@ -4,9 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -38,14 +36,6 @@ fun NeoWaveOptionCard(
     onToggle: (Boolean) -> Unit,
     onRulesChange: (Int) -> Unit,
     onConfidenceChange: (Double) -> Unit,
-    cryptoEntryEnabled: Boolean = true,
-    cryptoMinRulesPassed: Int = 8,
-    cryptoMinConfidencePct: Double = 65.0,
-    cryptoReadyCount: Int = 0,
-    cryptoTotalCount: Int = 0,
-    onCryptoEntryToggle: (Boolean) -> Unit = {},
-    onCryptoRulesChange: (Int) -> Unit = {},
-    onCryptoConfidenceChange: (Double) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -133,91 +123,6 @@ fun NeoWaveOptionCard(
                 color = AurumColors.TextSecondary,
             )
 
-            // ── مسیر ورود رمزارز بر پایهٔ نئوویو ─────────────────────────────
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 4.dp)
-                    .height(1.dp)
-                    .background(AurumColors.Border),
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "🌊 ورود رمزارز بر پایهٔ نئوویو",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (cryptoEntryEnabled) AurumColors.Gold else AurumColors.TextMuted,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = if (cryptoEntryEnabled) {
-                            "فعال · الگوی کامل و تأییدشدهٔ نئوویو خودش ماشهٔ ورود رمزارز است"
-                        } else {
-                            "خاموش · رمزارز هم مثل قبل فقط با عبور هر ۱۶ شرط وارد می‌شود"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.TextSecondary,
-                    )
-                }
-                Switch(checked = cryptoEntryEnabled, onCheckedChange = onCryptoEntryToggle)
-            }
-            Text(
-                text = "چرا؟ شرط «هم‌زمان هر ۱۶ شرط» در رمزارز می‌تواند روزها برقرار نشود و بازار را از دست بدهد. " +
-                    "در این مسیر همان روش نئوویو ورود را باز می‌کند، ولی حد ضرر/سود، R:R ≥ ۱:۱.۵ و حجم و لوریج همان قواعد قبلی را دارند.",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextSecondary,
-            )
-            if (cryptoEntryEnabled) {
-                Text(
-                    text = "حداقل قواعد نئوویو برای ورود رمزارز:",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.TextMuted,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(6, 8, 9).forEach { value ->
-                        Pill(
-                            text = "$value قاعده",
-                            color = if (cryptoMinRulesPassed == value) AurumColors.Gold else AurumColors.TextMuted,
-                            modifier = Modifier.clickable { onCryptoRulesChange(value) },
-                        )
-                    }
-                }
-                Text(
-                    text = "حداقل اطمینان برای ورود رمزارز:",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.TextMuted,
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(55, 65, 70).forEach { value ->
-                        Pill(
-                            text = "$value٪",
-                            color = if (cryptoMinConfidencePct.toInt() == value) AurumColors.Gold else AurumColors.TextMuted,
-                            modifier = Modifier.clickable { onCryptoConfidenceChange(value.toDouble()) },
-                        )
-                    }
-                }
-                Text(
-                    text = if (cryptoTotalCount > 0) {
-                        "هم‌اکنون $cryptoReadyCount از $cryptoTotalCount نماد رمزارز الگوی تأییدشده و هم‌جهت دارند."
-                    } else {
-                        "شمارش رمزارزها در حال آماده‌سازی است."
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (cryptoReadyCount > 0) AurumColors.Purple else AurumColors.TextMuted,
-                )
-                if (cryptoTotalCount > 0 && cryptoReadyCount == 0) {
-                    Text(
-                        text = "اگر شمارش صفر است، برنامه عمداً هیچ ورودی را به‌زور باز نمی‌کند؛ " +
-                            "یا آستانه را کمی نرم‌تر کن یا منتظر تکمیل الگو بمان.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.TextSecondary,
-                    )
-                }
-            }
         }
     }
 }

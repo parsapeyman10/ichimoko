@@ -29,6 +29,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aurum.edge.data.TradingViewSymbols
 import com.aurum.edge.ui.components.BitcoinIchimokuStrategyCard
+import com.aurum.edge.ui.components.CryptoEntryPathCard
 import com.aurum.edge.ui.theme.AurumColors
 
 @Composable
@@ -110,6 +111,8 @@ fun AurumRoot(viewModel: AurumViewModel) {
                                 .verticalScroll(rememberScrollState())
                                 .padding(bottom = 14.dp),
                         ) {
+                            // بخش مستقل «شرایط باز شدن ترید رمزارز» — بالای صفحه تا حتماً دیده شود.
+                            CryptoEntryPathCard(viewModel = viewModel)
                             BitcoinIchimokuStrategyCard(
                                 viewModel = viewModel,
                                 onOpenChartForSymbol = ::openChartFor,

@@ -168,8 +168,14 @@ android {
         // and no veto. The switch `neoWaveCryptoEntryEnabled` (ON by default) can turn the path off
         // at any moment; then crypto behaves exactly like 3.9.31 again. The NeoWave layer itself is
         // unchanged and still OFF by default, so a fresh install stays byte-identical in behaviour.
-        versionCode = 741
-        versionName = "3.9.32"
+        // 3.9.33 (code 742) is a pure visibility fix for 3.9.32: the crypto entry rules were
+        // rendered *inside* the NeoWave card and only while that layer was switched on, so the
+        // user never saw them. They now live in their own always-expanded section at the top of
+        // the strategy tab (CryptoEntryPathCard), independent of the NeoWave switch, with the
+        // switch, the seven entry conditions, the thresholds and a live count of crypto symbols
+        // that currently qualify. No engine logic changed in this version.
+        versionCode = 742
+        versionName = "3.9.33"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
