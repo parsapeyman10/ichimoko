@@ -103,7 +103,9 @@ android {
         // rebuilt from the journal whenever it drifts, and the journal's "کارنامه کلی" is redesigned
         // around one pure analytics engine (equity curve, drawdown, expectancy, R distribution and
         // per-class/symbol/timeframe/direction breakdowns). See docs/TRADING_HYGIENE_FA.md and
-        // docs/PERFORMANCE_SCORECARD_FA.md.
+        // docs/PERFORMANCE_SCORECARD_FA.md. Regression tests: TradingPerformanceAnalyticsTest
+        // (scorecard maths, corridor-free verdicts) plus the existing TradePlanGuard suite, which
+        // now also covers reviewStoredPlan repairing the legacy 5.66% stop without flipping direction.
         // 3.9.27 (code 736) ships the neural learning ledger: the self-learning brain now counts
         // every closed trade exactly once (a stable per-trade fingerprint instead of an ever-growing
         // counter), repairs the inflated legacy number without losing a single learned weight, and
