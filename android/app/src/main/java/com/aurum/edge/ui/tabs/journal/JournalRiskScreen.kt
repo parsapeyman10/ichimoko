@@ -86,6 +86,7 @@ import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.components.TradingViewPositionBox
 import com.aurum.edge.ui.components.formatDateTime
 import com.aurum.edge.ui.components.formatPrice
+import com.aurum.edge.ui.components.formatPriceFor
 import com.aurum.edge.ui.theme.AurumColors
 import java.time.Instant
 import java.time.YearMonth
@@ -115,6 +116,8 @@ fun JournalRiskScreen(
     val lastAiVerdict by viewModel.lastAiVerdict.collectAsStateWithLifecycle()
     val activeSymbol by viewModel.activeRiskSymbol.collectAsStateWithLifecycle()
     val now by viewModel.clock.collectAsStateWithLifecycle()
+    val sessionExitEstimates by viewModel.sessionExitEstimates.collectAsStateWithLifecycle()
+    val sessionExitNote by viewModel.sessionExitLearningNote.collectAsStateWithLifecycle()
 
     val openTrades = remember(trades) { trades.filter { it.isOpen } }
     val closedTrades = remember(trades) { trades.filter { !it.isOpen } }
@@ -204,6 +207,22 @@ fun JournalRiskScreen(
         )
     }
 
+    // ── کارنامهٔ کمّی (منبع واحد اعداد کارنامه) ──────────────────────────────
+    // همهٔ شاخص‌های کارنامه از یک موتور خالص می‌آید تا UI هیچ محاسبهٔ موازی و متناقضی نداشته باشد.
+    val performanceReport = remember(
+        filteredTrades.size,
+        filteredTrades.firstOrNull()?.id,
+        filteredTrades.firstOrNull()?.closedAt,
+        settings.initialCapital,
+        selectedStrategyFilter,
+    ) {
+        com.aurum.edge.core.TradingPerformanceAnalytics.analyze(
+            trades = filteredTrades,
+            nowMs = System.currentTimeMillis(),
+            startingBalanceUsd = settings.initialCapital,
+        )
+    }
+
     var showInteractiveTearSheetModal by rememberSaveable { mutableStateOf(false) }
     val savedJournalFiles by viewModel.savedJournalFiles.collectAsStateWithLifecycle()
     val lastExportStatusFa by viewModel.lastExportStatusFa.collectAsStateWithLifecycle()
@@ -253,175 +272,149 @@ fun JournalRiskScreen(
             .verticalScroll(rememberScrollState())
             .padding(bottom = 18.dp),
     ) {
-        // ── ۱. هدر مدرن کارنامه کلی ژورنال معاملاتی (Executive Journal Summary) ──
+        // ── ۱. کارنامهٔ کلی بازطراحی‌شده (تحلیل کمّی: منحنی سرمایه، ریسک، تفکیک گروه‌ها) ──
+        com.aurum.edge.ui.components.JournalPerformanceDashboard(
+            report = performanceReport,
+            scopeLabelFa = filterScopeLabelFa,
+            onOpenExport = { subPage = 3 },
+            onOpenArchive = { subPage = 4 },
+        )
+
+        // ── ۲. جعبه‌ابزار ژورنال: همهٔ خروجی‌ها/بکاپ/تنظیمات در یک کارت تاشو ──────────
+        // (در نسخهٔ قبل این ابزارها یک نوار افقی بلند همراه با اعداد تکراری کارنامه بودند که
+        // صفحه را شلوغ و «به‌هم‌ریخته» می‌کرد.)
+        var toolsExpanded by rememberSaveable { mutableStateOf(false) }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 6.dp)
-                .clip(RoundedCornerShape(16.dp))
+                .padding(horizontal = 10.dp, vertical = 4.dp)
+                .clip(RoundedCornerShape(12.dp))
                 .background(AurumColors.Surface)
-                .border(1.dp, AurumColors.Gold.copy(alpha = 0.35f), RoundedCornerShape(16.dp))
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .border(1.dp, AurumColors.Cyan.copy(alpha = 0.28f), RoundedCornerShape(12.dp)),
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { toolsExpanded = !toolsExpanded }
+                    .padding(horizontal = 10.dp, vertical = 9.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (selectedStrategyFilter == "ALL") "کارنامه کل استراتژی‌ها" else "کارنامه استراتژی انتخابی",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.TextSecondary,
-                    )
-                    val netSign = if (filteredStats.netPnl >= 0.0) "+" else "-"
-                    Text(
-                        text = "$netSign$${String.format(Locale.US, "%,.2f", abs(filteredStats.netPnl))}",
-                        style = MaterialTheme.typography.titleLarge,
-                        color = if (filteredStats.netPnl >= 0.0) AurumColors.Green else AurumColors.Red,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
+                Text(
+                    text = "🧰 ابزارها و خروجی ژورنال",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Cyan,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Pill(
-                        text = String.format(Locale.US, "%s%.2f R", if (totalR >= 0.0) "+" else "", totalR),
-                        color = if (totalR >= 0.0) AurumColors.Green else AurumColors.Red,
-                    )
-                    Pill(
-                        text = "📤 خروجی و کارنامه کوانت",
-                        color = AurumColors.Cyan,
+                        text = "📤 خروجی کوانت",
+                        color = AurumColors.Gold,
                         modifier = Modifier.clickable { subPage = 3 },
                     )
                     if (onOpenSettings != null) {
                         Pill(
                             text = "⚙️ تنظیمات",
-                            color = AurumColors.Gold,
+                            color = AurumColors.TextSecondary,
                             modifier = Modifier.clickable { onOpenSettings() },
                         )
                     }
+                    Text(
+                        text = if (toolsExpanded) "▲" else "▼",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                    )
                 }
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                StatTile(
-                    label = "نرخ برد (Win Rate)",
-                    value = filteredStats.winRate?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—",
-                    valueColor = AurumColors.Gold,
-                    modifier = Modifier.weight(1f),
-                )
-                StatTile(
-                    label = "برد / باخت",
-                    value = "${filteredStats.wins}W / ${filteredStats.losses}L",
-                    valueColor = AurumColors.Cyan,
-                    modifier = Modifier.weight(1f),
-                )
-                StatTile(
-                    label = "پرافیت فاکتور",
-                    value = filteredStats.profitFactor?.let { String.format(Locale.US, "%.2f", it) } ?: "—",
-                    valueColor = if ((filteredStats.profitFactor ?: 0.0) >= 1.2) AurumColors.Green else AurumColors.TextPrimary,
-                    modifier = Modifier.weight(1f),
-                )
-                StatTile(
-                    label = "امتیاز SQN",
-                    value = tearSheetReport.sqnScore?.let { String.format(Locale.US, "%.2f", it) } ?: "—",
-                    valueColor = if ((tearSheetReport.sqnScore ?: 0.0) >= 1.6) AurumColors.Green else AurumColors.Gold,
-                    modifier = Modifier.weight(0.95f),
-                )
-            }
-
-            // نوار دسترسی فوری به خروجی، ذخیره در حافظه گوشی و بازگردانی بکاپ
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(AurumColors.Background)
-                    .border(1.dp, AurumColors.Cyan.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
-                    .padding(horizontal = 10.dp, vertical = 8.dp)
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Pill(
-                    text = "📸📄 خروجی PDF آرشیو اسکرین‌شات‌ها",
-                    color = AurumColors.Gold,
-                    modifier = Modifier.clickable { viewModel.exportArchiveScreenshotsPdfNow(shareAfterExport = true) },
-                )
-                Pill(
-                    text = "🧠📄 خروجی PDF کامل هوش مصنوعی + رگرسیون",
-                    color = AurumColors.Cyan,
-                    modifier = Modifier.clickable { viewModel.exportFullAiAndNeuralDataPdf(shareAfterExport = true) },
-                )
-                Pill(
-                    text = "📊📄 ثبت تمام معاملات با اسکرین‌شات آرشیو + خروجی PDF",
-                    color = AurumColors.Green,
-                    modifier = Modifier.clickable { viewModel.recordAllTradesWithArchiveSnapshotsAndExportPdf() },
-                )
-                Pill(
-                    text = "🔍 بررسی تعاملی گزارش کامل",
-                    color = AurumColors.Gold,
-                    modifier = Modifier.clickable { showInteractiveTearSheetModal = true },
-                )
-                Pill(
-                    text = "💾 ذخیره مستقیم در پوشه Downloads",
-                    color = AurumColors.Green,
-                    modifier = Modifier.clickable {
-                        viewModel.saveJournalDirectToDownloads(tearSheetReport, JournalExportFormat.HTML_TEAR_SHEET)
-                        viewModel.saveJournalDirectToDownloads(tearSheetReport, JournalExportFormat.JSON_QUANT)
-                    },
-                )
-                Pill(
-                    text = "📂 انتخاب پوشه ذخیره (Save As)",
-                    color = AurumColors.Cyan,
-                    modifier = Modifier.clickable {
-                        pendingSaveAsFormat = JournalExportFormat.HTML_TEAR_SHEET
-                        saveAsLauncher.launch(
-                            JournalExportEngine.suggestedFileName(
-                                tearSheetReport,
-                                JournalExportFormat.HTML_TEAR_SHEET,
+            if (toolsExpanded) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Pill(
+                        text = "📸📄 PDF آرشیو اسکرین‌شات‌ها",
+                        color = AurumColors.Gold,
+                        modifier = Modifier.clickable { viewModel.exportArchiveScreenshotsPdfNow(shareAfterExport = true) },
+                    )
+                    Pill(
+                        text = "🧠📄 PDF هوش مصنوعی + رگرسیون",
+                        color = AurumColors.Cyan,
+                        modifier = Modifier.clickable { viewModel.exportFullAiAndNeuralDataPdf(shareAfterExport = true) },
+                    )
+                    Pill(
+                        text = "📊📄 ثبت همه با اسکرین‌شات + PDF",
+                        color = AurumColors.Green,
+                        modifier = Modifier.clickable { viewModel.recordAllTradesWithArchiveSnapshotsAndExportPdf() },
+                    )
+                    Pill(
+                        text = "🔍 گزارش تعاملی",
+                        color = AurumColors.Gold,
+                        modifier = Modifier.clickable { showInteractiveTearSheetModal = true },
+                    )
+                    Pill(
+                        text = "💾 ذخیره در Downloads",
+                        color = AurumColors.Green,
+                        modifier = Modifier.clickable {
+                            viewModel.saveJournalDirectToDownloads(tearSheetReport, JournalExportFormat.HTML_TEAR_SHEET)
+                            viewModel.saveJournalDirectToDownloads(tearSheetReport, JournalExportFormat.JSON_QUANT)
+                        },
+                    )
+                    Pill(
+                        text = "📂 Save As",
+                        color = AurumColors.Cyan,
+                        modifier = Modifier.clickable {
+                            pendingSaveAsFormat = JournalExportFormat.HTML_TEAR_SHEET
+                            saveAsLauncher.launch(
+                                JournalExportEngine.suggestedFileName(
+                                    tearSheetReport,
+                                    JournalExportFormat.HTML_TEAR_SHEET,
+                                )
                             )
-                        )
-                    },
-                )
-                Pill(
-                    text = "📥 بازگردانی بکاپ ژورنال (Import)",
-                    color = AurumColors.Gold,
-                    modifier = Modifier.clickable {
-                        replaceOnImport = false
-                        importBackupLauncher.launch(arrayOf("application/json", "text/*", "*/*"))
-                    },
-                )
-                Pill(
-                    text = "🌐 خروجی HTML5 تعاملی",
-                    color = AurumColors.Cyan,
-                    modifier = Modifier.clickable {
-                        viewModel.exportAndShareJournal(tearSheetReport, JournalExportFormat.HTML_TEAR_SHEET)
-                    },
-                )
-                Pill(
-                    text = "📄 خروجی PDF رسمی",
-                    color = AurumColors.Green,
-                    modifier = Modifier.clickable {
-                        viewModel.exportAndShareJournal(tearSheetReport, JournalExportFormat.PDF_REPORT)
-                    },
-                )
-                Pill(
-                    text = "📊 خروجی اکسل CSV",
-                    color = AurumColors.Gold,
-                    modifier = Modifier.clickable {
-                        viewModel.exportAndShareJournal(tearSheetReport, JournalExportFormat.CSV_EXCEL)
-                    },
-                )
-                Pill(
-                    text = "🧬 خروجی JSON کوانت",
-                    color = AurumColors.TextSecondary,
-                    modifier = Modifier.clickable {
-                        viewModel.exportAndShareJournal(tearSheetReport, JournalExportFormat.JSON_QUANT)
-                    },
-                )
+                        },
+                    )
+                    Pill(
+                        text = "📥 بازگردانی بکاپ",
+                        color = AurumColors.Gold,
+                        modifier = Modifier.clickable {
+                            replaceOnImport = false
+                            importBackupLauncher.launch(arrayOf("application/json", "text/*", "*/*"))
+                        },
+                    )
+                    Pill(
+                        text = "🌐 HTML5",
+                        color = AurumColors.Cyan,
+                        modifier = Modifier.clickable {
+                            viewModel.exportAndShareJournal(tearSheetReport, JournalExportFormat.HTML_TEAR_SHEET)
+                        },
+                    )
+                    Pill(
+                        text = "📄 PDF",
+                        color = AurumColors.Green,
+                        modifier = Modifier.clickable {
+                            viewModel.exportAndShareJournal(tearSheetReport, JournalExportFormat.PDF_REPORT)
+                        },
+                    )
+                    Pill(
+                        text = "📊 CSV",
+                        color = AurumColors.Gold,
+                        modifier = Modifier.clickable {
+                            viewModel.exportAndShareJournal(tearSheetReport, JournalExportFormat.CSV_EXCEL)
+                        },
+                    )
+                    Pill(
+                        text = "🧬 JSON کوانت",
+                        color = AurumColors.TextSecondary,
+                        modifier = Modifier.clickable {
+                            viewModel.exportAndShareJournal(tearSheetReport, JournalExportFormat.JSON_QUANT)
+                        },
+                    )
+                }
             }
 
             if (!lastExportStatusFa.isNullOrBlank()) {
@@ -430,11 +423,18 @@ fun JournalRiskScreen(
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.Green,
                     fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                 )
             }
         }
 
-        // ── ۲. نوار تب‌های داخلی صفحه ژورنال ────────────────────────────────
+        // ── ۲.۵. زمان‌بندی سشن و خروج هوشمند پیش از بسته شدن بازار ──────────────
+        com.aurum.edge.ui.components.SessionExitPanel(
+            estimates = sessionExitEstimates,
+            lastLearningNote = sessionExitNote,
+        )
+
+        // ── ۳. نوار تب‌های داخلی صفحه ژورنال ────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1249,6 +1249,21 @@ private fun RiskCalculatorAndAutoTradeCard(
                 takeProfit = tpVal,
                 preferredAction = direction,
                 fixedRiskUsdOverride = fixedRiskUsdOverride,
+                triggerInterval = com.aurum.edge.domain.Interval.M15,
+            )
+        } else null
+    }
+
+    // داوری پلن دستی: آیا حد ضرر متناسب با نوسان ۱۵ دقیقه است و حد سود در دسترس؟
+    val planAudit = remember(activeSymbol, entryVal, slVal, tpVal, direction) {
+        if (entryVal != null && slVal != null && tpVal != null) {
+            RiskAndCalendarEngine.auditTradePlan(
+                symbolInput = activeSymbol,
+                action = direction,
+                entry = entryVal,
+                stopLoss = slVal,
+                takeProfit = tpVal,
+                triggerInterval = com.aurum.edge.domain.Interval.M15,
             )
         } else null
     }
@@ -1565,6 +1580,29 @@ private fun RiskCalculatorAndAutoTradeCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextSecondary,
                 )
+
+                Text(
+                    text = "🔐 لیکوییدیشن: ${formatPriceFor(calcResult.symbol, calcResult.liquidationPrice)}" +
+                        " (${String.format(Locale.US, "%.1f", calcResult.liquidationBufferR)}R دورتر از حد ضرر)" +
+                        " · ۱R = ${String.format(Locale.US, "%.2f%%", calcResult.stopPctOfPrice * 100.0)} قیمت" +
+                        " · ${calcResult.leverageReasonFa}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.SemiBold,
+                )
+
+                if (planAudit != null) {
+                    Text(
+                        text = "${planAudit.verdict.badgeFa} اعتبارسنجی پلن: ${planAudit.lineFa()}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = when (planAudit.verdict) {
+                            com.aurum.edge.core.TradePlanVerdict.VALID -> AurumColors.Green
+                            com.aurum.edge.core.TradePlanVerdict.ADJUSTED -> AurumColors.Orange
+                            com.aurum.edge.core.TradePlanVerdict.REJECTED -> AurumColors.Red
+                        },
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
 
                 Text(
                     text = "🏦 ${calcResult.buildVenueRulesSummaryFa()}",

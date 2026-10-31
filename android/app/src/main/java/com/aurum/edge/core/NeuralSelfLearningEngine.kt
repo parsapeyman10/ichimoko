@@ -29,10 +29,15 @@ import kotlinx.serialization.json.Json
  * ۱. یادگیری مستمر و خودکار از تک‌تک معاملات بسته‌شده در هر دسته بازار (`CRYPTO` رمزارزها، `COMMODITY` طلا و نقره، `FOREX` فارکس، `STOCK` شاخص داوجونز)
  *    و هر ۱۵ ترکیب استراتژی در هر دو تایم‌فریم `15m` و `5m`.
  * ۲. تشخیص دقیق «شرایط فعلی بازار» و یادگیری «در چه شرایطی در هر دسته نباید معامله کند (No-Trade Regime Detection)».
- * ۳. قانون بلوغ ۱۰,۰۰۰ معامله (`WARMUP_TARGET_TRADES = 10_000`):
- *    - تا قبل از تکمیل `10,000` معامله یادگیری‌شده، شبکه عصبی در **حالت یادگیری خالص (Shadow Learning Mode)** کار می‌کند:
- *      با هر معامله آموزش می‌بیند و شرایط ممنوعه هر دسته را کشف و گزارش می‌کند اما مانع باز شدن معاملات نمی‌شود.
- *    - به محض عبور از مرز **۱۰,۰۰۰ معامله یادگیری‌شده**، گیت اجرایی شبکه عصبی به‌طور خودکار وارد مدار شده و از ورود در شرایطی که شبکه آن‌ها را پرخطر/ضررده تشخیص داده جلوگیری می‌کند.
+ * ۳. قانون دوشرطی بلوغ (`WARMUP_TARGET_TRADES = 10_000`):
+ *    - **شرط ۱**: رسیدن به `10,000` معاملهٔ یادگیری‌شده در «دفتر یادگیری» (نه یک شمارندهٔ افزایشی).
+ *    - **شرط ۲**: فعال‌سازی صریح و قابل‌برگشت گیت توسط خود کاربر (`gateUserActivationEnabled`).
+ *    - تا وقتی هر دو شرط کامل نشده‌اند، شبکه در **حالت یادگیری خالص (Shadow Learning Mode)** است:
+ *      آموزش می‌بیند و شرایط ممنوعه را کشف/گزارش می‌کند، اما مانع ورود نمی‌شود. عبور از ۱۰,۰۰۰
+ *      به‌تنهایی گیت را فعال **نمی‌کند**؛ خاموش‌کردن کلید کاربر هم گیت را حتی بالای ۱۰,۰۰۰ غیرفعال می‌کند.
+ * ۴. هر معامله فقط **یک‌بار** آموزش می‌دهد (`NeuralLearningLedger` + اثرانگشت یکتا) تا عدد یادگیری
+ *    همیشه با تعداد معامله‌های واقعی یکتا برابر بماند و اصلاحات شبکه در «کارنامهٔ تغییرات» و
+ *    «بستهٔ دانش» نسخه‌دار برای نسخه‌های بعدی اپ ثبت شوند.
  */
 @Serializable
 data class NeuralCategoryRegimeStats(
@@ -249,11 +254,34 @@ data class NeuralAutoTunedParameters(
 
 @Serializable
 data class NeuralNetworkPersistedState(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = NeuralLearningLedger.LEDGER_SCHEMA_VERSION,
     val architectureName: String = "FT-Attention + SwiGLU Residual + AdamW + Causal News + CEM Auto-Tuner (2026 SOTA)",
+    /** از نسخهٔ ۲ فقط یک عدد مشتق‌شده از «دفتر یادگیری» است و هیچ‌جا مستقیماً افزایش نمی‌یابد. */
     val totalLearnedTrades: Int = 0,
     val warmupTargetTrades: Int = NeuralSelfLearningEngine.WARMUP_TARGET_TRADES,
+    /**
+     * منسوخ (فقط برای سازگاری خواندن فایل قدیمی): قبلاً «فعال‌سازی زودهنگام گیت» بود.
+     * در مهاجرت به [gateUserActivationEnabled] منتقل می‌شود و دیگر به‌تنهایی گیت را فعال نمی‌کند.
+     */
     val forceActiveBeforeWarmup: Boolean = false,
+    // ── شرط دوم فعال‌سازی گیت: تصمیم صریح و قابل برگشت خود کاربر ──
+    val gateUserActivationEnabled: Boolean = false,
+    // ── دفتر یادگیری: هر معامله فقط یک‌بار (اثرانگشت یکتا) آموزش می‌دهد ──
+    val learnedLedger: List<NeuralLearningLedger.LearnedStamp> = emptyList(),
+    val learnedLedgerPrunedCount: Int = 0,
+    /**
+     * پس از مهاجرت از طرح ۱ مقدار `true` می‌شود: تاریخچهٔ ژورنال فقط در دفتر **ثبت** می‌شود تا عدد
+     * یادگیری با تعداد معامله‌های واقعی برابر شود، بدون آموزش دوبارهٔ معامله‌هایی که قبلاً آموخته
+     * شده‌اند. پس از اولین همگام‌سازی، خودکار خاموش می‌شود.
+     */
+    val ledgerBackfillPending: Boolean = false,
+    // ── کارنامهٔ اصلاحات شبکه با متن فارسی (قابل انتقال به نسخه‌های بعدی) ──
+    val knowledgeChangeLog: List<NeuralLearningLedger.KnowledgeChangeEntry> = emptyList(),
+    val knowledgeRevision: Int = 1,
+    val lastReconciliationSummaryFa: String = "",
+    val lastReconciliationAtMs: Long = 0L,
+    val journalClosedTradesSeen: Int = 0,
+    val duplicatesRepairedCount: Int = 0,
     val adamStepCount: Int = 0,
     val runningBceLoss: Double = 0.693,
     val runningAccuracyPct: Double = 50.0,
@@ -361,6 +389,21 @@ data class NeuralLearningStateSummary(
     val isWarmupCompleted: Boolean = false,
     val forceActiveBeforeWarmup: Boolean = false,
     val isActiveFilterEnabled: Boolean = false,
+    /** شرط ۲: فعال‌سازی صریح گیت توسط کاربر. */
+    val gateUserActivationEnabled: Boolean = false,
+    /** شرط ۱: رسیدن به سقف ۱۰,۰۰۰ معاملهٔ یادگیری‌شده. */
+    val volumeConditionMet: Boolean = false,
+    /** گیت فقط وقتی فعال است که هر دو شرط برقرار باشند. */
+    val isGateActive: Boolean = false,
+    val gatePolicySummaryFa: String = "",
+    val learnedLedgerRows: Int = 0,
+    val learnedLedgerPrunedCount: Int = 0,
+    val learnedSchemaVersion: Int = NeuralLearningLedger.LEDGER_SCHEMA_VERSION,
+    val journalClosedTradesSeen: Int = 0,
+    val duplicatesRepairedCount: Int = 0,
+    val ledgerReconciliationSummaryFa: String = "",
+    val knowledgeRevision: Int = 1,
+    val knowledgeChangeLog: List<NeuralLearningLedger.KnowledgeChangeEntry> = emptyList(),
     val discoveredNoTradeClustersCount: Int = 0,
     val categoryStats: List<NeuralCategorySummary> = emptyList(),
     val runningAccuracyPct: Double = 50.0,
@@ -476,6 +519,11 @@ class NeuralSelfLearningEngine(
         val total = cur.totalLearnedTrades
         val target = cur.warmupTargetTrades.coerceAtLeast(1)
         val warmupDone = total >= target
+        val gate = NeuralLearningLedger.gateState(
+            learnedTotal = total,
+            target = target,
+            userActivationEnabled = cur.gateUserActivationEnabled,
+        )
         val progressPct = ((total.toDouble() / target) * 100.0).coerceIn(0.0, 100.0)
         val allClusters = cur.conditionClusters.values.toList()
         val noTradeClusters = allClusters
@@ -770,7 +818,10 @@ class NeuralSelfLearningEngine(
         insightsFeed += "🎛️ تیونینگ خودکار پارامترها (نسل #${cur.autoTunedParameters.tuningGeneration} · ${cur.autoTunedParameters.methodBadgeFa}): ${cur.autoTunedParameters.tuningSummaryFa}"
 
         val phaseBadgeFa = when {
-            warmupDone -> "فاز ۴ (بلوغ کامل + تیونینگ خودکار فعال): اجرای معاملات با پارامترهای تیون‌شده CEM + Bayesian"
+            gate.isGateActive ->
+                "فاز ۵ (گیت اجرایی فعال — هر دو شرط کامل): ورود در شرایط پرخطر مسدود می‌شود · پارامترها با CEM + Bayesian تیون‌شده"
+            warmupDone ->
+                "فاز ۴ (شرط ۱ کامل شد — منتظر شرط ۲): شبکه آموزش‌دیده و آماده است؛ گیت فقط با فعال‌سازی شما وارد مدار می‌شود"
             cur.autoTunedParameters.samplesAnalyzed >= 5 -> "فاز ۳ (تیونینگ پس از آموزش — نسل #${cur.autoTunedParameters.tuningGeneration}): بهینه‌سازی مستمر پارامترها با CEM + Thompson Sampling"
             total >= 1 -> "فاز ۲ (کالیبراسیون علیت بازار و اخبار زنده): استخراج علت حرکت بازار و آماده‌سازی تیونینگ"
             else -> "فاز ۱ (درک علیت بازار + رصد اخبار + پیش‌تیونینگ بیزین)"
@@ -788,8 +839,20 @@ class NeuralSelfLearningEngine(
             warmupProgressPercent = round(progressPct * 100.0) / 100.0,
             remainingWarmupTrades = (target - total).coerceAtLeast(0),
             isWarmupCompleted = warmupDone,
-            forceActiveBeforeWarmup = cur.forceActiveBeforeWarmup,
-            isActiveFilterEnabled = warmupDone || cur.forceActiveBeforeWarmup,
+            forceActiveBeforeWarmup = cur.gateUserActivationEnabled,
+            isActiveFilterEnabled = gate.isGateActive,
+            gateUserActivationEnabled = cur.gateUserActivationEnabled,
+            volumeConditionMet = gate.volumeConditionMet,
+            isGateActive = gate.isGateActive,
+            gatePolicySummaryFa = gate.summaryFa,
+            learnedLedgerRows = cur.learnedLedger.size,
+            learnedLedgerPrunedCount = cur.learnedLedgerPrunedCount,
+            learnedSchemaVersion = cur.schemaVersion,
+            journalClosedTradesSeen = cur.journalClosedTradesSeen,
+            duplicatesRepairedCount = cur.duplicatesRepairedCount,
+            ledgerReconciliationSummaryFa = cur.lastReconciliationSummaryFa,
+            knowledgeRevision = cur.knowledgeRevision,
+            knowledgeChangeLog = cur.knowledgeChangeLog,
             discoveredNoTradeClustersCount = noTradeClusters.size,
             categoryStats = catSummaries,
             runningAccuracyPct = cur.runningAccuracyPct,
@@ -1006,10 +1069,123 @@ class NeuralSelfLearningEngine(
                 json.decodeFromString(NeuralNetworkPersistedState.serializer(), file.readText())
             }.getOrNull()
             if (loaded != null) {
-                return sanitizeLoadedState(loaded)
+                val migrated = migrateToLedgerSchema(loaded, file)
+                return sanitizeLoadedState(normalizeDerivedCounts(migrated))
             }
         }
         return createFreshInitializedState()
+    }
+
+    /**
+     * مهاجرت بی‌خطر وضعیت قدیمی (طرح ۱) به «دفتر یادگیری» (طرح ۲) بدون از دست رفتن هیچ آموخته‌ای.
+     *
+     * آموخته‌های اصلی (وزن‌های توجه، شبکهٔ SwiGLU، AdamW، خوشه‌های شرط، پارامترهای تیون‌شده و
+     * خرح‌های دسته‌ها) دست‌نخورده منتقل می‌شوند؛ فقط شمارندهٔ متورم با عدد واقعی دفتر جایگزین
+     * می‌شود. پیش از هر تغییر، یک نسخهٔ پشتیبان از فایل قدیمی روی دستگاه نوشته می‌شود.
+     */
+    private fun migrateToLedgerSchema(
+        loaded: NeuralNetworkPersistedState,
+        file: File?,
+    ): NeuralNetworkPersistedState {
+        if (loaded.schemaVersion >= NeuralLearningLedger.LEDGER_SCHEMA_VERSION &&
+            loaded.learnedLedger.isNotEmpty()
+        ) {
+            return loaded
+        }
+        val legacyTotal = loaded.totalLearnedTrades
+        val nowMs = System.currentTimeMillis()
+        // ۱. پشتیبان‌گیری فیزیکی از فایل قبلی (اگر ممکن بود) تا هیچ داده‌ای از دست نرود.
+        file?.let { f ->
+            runCatching {
+                val backup = File(f.parentFile, "${f.nameWithoutExtension}_pre_v2_${nowMs}.json")
+                if (!backup.exists()) f.copyTo(backup, overwrite = true)
+            }
+        }
+        // ۲. کاشت دفتر از حافظهٔ تجربهٔ موجود (هر نمونهٔ تجربه یک معاملهٔ واقعی است).
+        val seeded = LinkedHashMap<String, NeuralLearningLedger.LearnedStamp>()
+        for (sample in loaded.replayBuffer) {
+            val fingerprint = NeuralLearningLedger.tradeFingerprint(sample.tradeId, sample.timestampMs)
+            if (seeded.containsKey(fingerprint)) continue
+            seeded[fingerprint] = NeuralLearningLedger.LearnedStamp(
+                fingerprint = fingerprint,
+                tradeId = sample.tradeId,
+                categoryCode = sample.categoryCode,
+                won = sample.won,
+                achievedR = round(sample.achievedR * 100.0) / 100.0,
+                learnedAtMs = sample.timestampMs,
+            )
+        }
+        val ledger = seeded.values.sortedByDescending { it.learnedAtMs }
+        val newTotal = NeuralLearningLedger.learnedTotal(ledger.size, 0)
+        // ۳. «فعال‌سازی زودهنگام» قدیمی به «شرط دوم» جدید منتقل می‌شود؛ اما دیگر به‌تنهایی گیت را فعال نمی‌کند.
+        val consent = loaded.gateUserActivationEnabled || loaded.forceActiveBeforeWarmup
+        val changeEntry = NeuralLearningLedger.KnowledgeChangeEntry(
+            id = NeuralLearningLedger.shortId("MIGRATE", nowMs, "v2"),
+            atMs = nowMs,
+            kindCode = "SCHEMA_MIGRATION",
+            titleFa = "مهاجرت به دفتر یادگیری نسخهٔ ۲",
+            detailFa = buildString {
+                append("شمارندهٔ قبلی $legacyTotal معامله بود؛ ")
+                append("${ledger.size} معاملهٔ یکتا از حافظهٔ تجربه بازیابی شد و ")
+                append(if (legacyTotal > newTotal) {
+                    "${legacyTotal - newTotal} یادگیری تکراری (ناشی از تکرار آموزش یک معامله) از شمارنده حذف شد. "
+                } else {
+                    "شمارنده با دفتر هم‌تراز شد. "
+                })
+                append("تمام وزن‌ها، خوشه‌های شرط و پارامترهای تیون‌شده حفظ شدند. ")
+                append("با همگام‌سازی ژورنال، معامله‌های بسته‌شدهٔ باقی‌مانده هم یک‌بار و فقط یک‌بار یاد گرفته می‌شوند.")
+            },
+            learnedCountAtChange = newTotal,
+        )
+        return loaded.copy(
+            schemaVersion = NeuralLearningLedger.LEDGER_SCHEMA_VERSION,
+            learnedLedger = ledger,
+            learnedLedgerPrunedCount = 0,
+            ledgerBackfillPending = true,
+            totalLearnedTrades = newTotal,
+            gateUserActivationEnabled = consent,
+            forceActiveBeforeWarmup = false,
+            knowledgeChangeLog = NeuralLearningLedger.appendChange(loaded.knowledgeChangeLog, changeEntry),
+            knowledgeRevision = loaded.knowledgeRevision + 1,
+            duplicatesRepairedCount = (legacyTotal - newTotal).coerceAtLeast(0),
+            lastReconciliationSummaryFa = "🔄 مهاجرت نسخهٔ ۲: شمارندهٔ $legacyTotal ← $newTotal معاملهٔ یکتا (آموخته‌ها حفظ شد)",
+            lastReconciliationAtMs = nowMs,
+        )
+    }
+
+    /**
+     * بازمحاسبهٔ همهٔ اعداد مشتق‌شده از دفتر یادگیری.
+     *
+     * `totalLearnedTrades` هیچ‌گاه مستقیماً نوشته نمی‌شود؛ همیشه برابر
+     * «ردیف‌های زندهٔ دفتر + ردیف‌های هرس‌شده» است. همین‌طور آمار برد/باخت هر دسته از دفتر
+     * بازسازی می‌شود تا تورم قدیمی در آن‌ها باقی نماند.
+     */
+    private fun normalizeDerivedCounts(state: NeuralNetworkPersistedState): NeuralNetworkPersistedState {
+        val total = NeuralLearningLedger.learnedTotal(state.learnedLedger.size, state.learnedLedgerPrunedCount)
+        val rebuiltCategories = if (state.learnedLedger.isNotEmpty() && state.learnedLedgerPrunedCount == 0) {
+            val tally = NeuralLearningLedger.categoryWinsLosses(state.learnedLedger)
+            val codes = state.categoryStats.keys + tally.keys
+            codes.associateWith { code ->
+                val (wins, losses) = tally[code] ?: (0 to 0)
+                val existing = state.categoryStats[code]
+                if (existing != null) {
+                    existing.copy(learnedTrades = wins + losses, wins = wins, losses = losses)
+                } else {
+                    NeuralCategoryRegimeStats(
+                        categoryCode = code,
+                        categoryTitleFa = AssetClass.entries.firstOrNull { it.code == code }
+                            ?.let { categoryTitleFa(it) } ?: code,
+                        learnedTrades = wins + losses,
+                        wins = wins,
+                        losses = losses,
+                    )
+                }
+            }
+        } else {
+            state.categoryStats
+        }
+        if (total == state.totalLearnedTrades && rebuiltCategories == state.categoryStats) return state
+        return state.copy(totalLearnedTrades = total, categoryStats = rebuiltCategories)
     }
 
     private fun createFreshInitializedState(): NeuralNetworkPersistedState {
@@ -1072,7 +1248,8 @@ class NeuralSelfLearningEngine(
     }
 
     @Synchronized
-    private fun persistState(next: NeuralNetworkPersistedState) {
+    private fun persistState(rawNext: NeuralNetworkPersistedState) {
+        val next = normalizeDerivedCounts(rawNext)
         persistedState = next
         _stateFlow.value = next
         _summaryFlow.value = buildStateSummary(next)
@@ -1169,9 +1346,16 @@ class NeuralSelfLearningEngine(
                             val parsed = runCatching {
                                 json.decodeFromString(NeuralNetworkPersistedState.serializer(), raw)
                             }.getOrNull()
-                            if (parsed != null && parsed.totalLearnedTrades >= persistedState.totalLearnedTrades) {
-                                persistState(sanitizeLoadedState(parsed))
-                                return@runCatching true
+                            if (parsed != null) {
+                                // پشتیبان ممکن است با طرح قدیمی (بدون دفتر یادگیری) نوشته شده باشد؛
+                                // پیش از استفاده مهاجرت می‌شود تا شمارندهٔ متورم دوباره وارد نشود.
+                                val candidate = sanitizeLoadedState(normalizeDerivedCounts(migrateToLedgerSchema(parsed, null)))
+                                val isNewer = candidate.totalLearnedTrades >= persistedState.totalLearnedTrades ||
+                                    candidate.learnedLedger.size > persistedState.learnedLedger.size
+                                if (isNewer) {
+                                    persistState(candidate)
+                                    return@runCatching true
+                                }
                             }
                         }
                     }
@@ -1181,21 +1365,430 @@ class NeuralSelfLearningEngine(
         }.getOrDefault(false)
     }
 
+    // ─────────────────────── بستهٔ دانش: انتقال اصلاحات بین نسخه‌ها ───────────────────────
+
+    /**
+     * ساخت «بستهٔ دانش» از وضعیت فعلی.
+     *
+     * بسته یک JSON کامل و خودتوصیف است: وزن‌ها، خوشه‌های شرط، پارامترهای تیون‌شده، دفتر یادگیری و
+     * کارنامهٔ اصلاحات. با `payloadSha256` صحت محتوا تضمین می‌شود و `changeLog` توضیح فارسی هر
+     * اصلاح را همراه دارد؛ بنابراین نسخهٔ بعدی اپ (و هر بازبین انسانی) می‌فهمد شبکه چه چیزی را
+     * تغییر داده است.
+     */
+    @Synchronized
+    fun buildKnowledgeBundle(
+        appVersionName: String,
+        appVersionCode: Int,
+    ): NeuralLearningLedger.KnowledgeBundle {
+        val payload = json.encodeToString(NeuralNetworkPersistedState.serializer(), persistedState)
+        val gate = NeuralLearningLedger.gateState(
+            learnedTotal = persistedState.totalLearnedTrades,
+            target = persistedState.warmupTargetTrades,
+            userActivationEnabled = persistedState.gateUserActivationEnabled,
+        )
+        val noTradeCount = persistedState.conditionClusters.values.count { it.isFlaggedNoTradeRegime }
+        return NeuralLearningLedger.KnowledgeBundle(
+            appVersionName = appVersionName,
+            appVersionCode = appVersionCode,
+            createdAtMs = System.currentTimeMillis(),
+            learnedTotal = persistedState.totalLearnedTrades,
+            learnedStampRows = persistedState.learnedLedger.size,
+            learnedPrunedCount = persistedState.learnedLedgerPrunedCount,
+            adamStepCount = persistedState.adamStepCount,
+            tuningGeneration = persistedState.autoTunedParameters.tuningGeneration,
+            gateUserActivationEnabled = persistedState.gateUserActivationEnabled,
+            summaryFa = buildString {
+                appendLine(gate.summaryFa)
+                appendLine()
+                appendLine("معماری: ${persistedState.architectureName}")
+                appendLine(
+                    "دقت جاری: ${persistedState.runningAccuracyPct}% · BCE: ${persistedState.runningBceLoss} · " +
+                        "گام‌های AdamW: ${persistedState.adamStepCount}",
+                )
+                appendLine(
+                    "خوشه‌های شرط: ${persistedState.conditionClusters.size} · " +
+                        "شرایط ممنوعهٔ کشف‌شده: $noTradeCount · " +
+                        "استراتژی‌های تیون‌شده: ${persistedState.autoTunedParameters.perStrategyProfiles.size}",
+                )
+                appendLine("نسخهٔ طرح داده: ${persistedState.schemaVersion} · بازبینی دانش: ${persistedState.knowledgeRevision}")
+                if (persistedState.lastReconciliationSummaryFa.isNotBlank()) {
+                    appendLine(persistedState.lastReconciliationSummaryFa)
+                }
+            }.trim(),
+            payloadSha256 = NeuralLearningLedger.sha256(payload),
+            payloadJson = payload,
+            changeLog = persistedState.knowledgeChangeLog,
+        )
+    }
+
+    /** خروجی JSON کامل بستهٔ دانش (برای اشتراک‌گذاری یا تست). */
+    fun knowledgeBundleJson(appVersionName: String, appVersionCode: Int): String =
+        NeuralLearningLedger.encodeBundle(buildKnowledgeBundle(appVersionName, appVersionCode))
+
+    /** منیفست فارسی خوانا از دانش فعلی. */
+    fun knowledgeManifestFa(appVersionName: String, appVersionCode: Int): String =
+        NeuralLearningLedger.buildManifestFa(buildKnowledgeBundle(appVersionName, appVersionCode))
+
+    /**
+     * ذخیرهٔ بستهٔ دانش + منیفست فارسی در `Download/AurumEdge/Archive` گوشی.
+     * @return نام فایل‌های ذخیره‌شده یا `null` در صورت شکست
+     */
+    @Synchronized
+    fun exportKnowledgeBundleToPhoneStorage(
+        context: Context,
+        appVersionName: String,
+        appVersionCode: Int,
+    ): String? {
+        val bundle = buildKnowledgeBundle(appVersionName, appVersionCode)
+        val bundleName = NeuralLearningLedger.bundleFileName(appVersionCode)
+        val manifestName = NeuralLearningLedger.manifestFileName(appVersionCode)
+        val bundleOk = writeArchiveFile(
+            context = context,
+            fileName = bundleName,
+            mimeType = "application/json",
+            content = NeuralLearningLedger.encodeBundle(bundle),
+        )
+        val manifestOk = writeArchiveFile(
+            context = context,
+            fileName = manifestName,
+            mimeType = "text/markdown",
+            content = NeuralLearningLedger.buildManifestFa(bundle),
+        )
+        if (!bundleOk && !manifestOk) return null
+        return if (bundleOk && manifestOk) "$bundleName + $manifestName" else if (bundleOk) bundleName else manifestName
+    }
+
+    /**
+     * بازخوانی یک بستهٔ دانش از متن JSON با ادغام ایمن (merge).
+     *
+     * قاعدهٔ ادغام:
+     * ۱. دفتر یادگیری همیشه «اتحاد» می‌شود؛ هیچ یادگیری‌ای گم نمی‌شود و هیچ‌کدام دو بار شمرده نمی‌شود.
+     * ۲. اگر بستهٔ ورودی دانش جدیدتری داشته باشد (`adamStepCount` بیشتر یا مساوی)، وزن‌ها و
+     *    خوشه‌های آن پذیرفته می‌شود؛ در غیر این صورت دانش محلی حفظ می‌شود.
+     * ۳. تصمیم «شرط دوم» (فعال‌سازی گیت) همیشه محلی باقی می‌ماند و از فایل بازخوانی نمی‌شود.
+     */
+    @Synchronized
+    fun importKnowledgeBundleJson(raw: String): NeuralLearningLedger.BundleImportResult {
+        val bundle = NeuralLearningLedger.decodeBundle(raw)
+            ?: return NeuralLearningLedger.BundleImportResult(
+                isAccepted = false,
+                importedLearnedTotal = 0,
+                mergedLearnedTotal = persistedState.totalLearnedTrades,
+                addedRows = 0,
+                bundleCreatedAtMs = 0L,
+                bundleAppVersion = "",
+                summaryFa = "⛔ فایل بستهٔ دانش معتبر نیست (نوع، نسخه یا چک‌سام مطابقت ندارد)",
+            )
+        val rawImported = runCatching {
+            json.decodeFromString(NeuralNetworkPersistedState.serializer(), bundle.payloadJson)
+        }.getOrNull()
+        // بستهٔ دست‌کاری‌شده یا ناقص نباید بتواند وزن‌های خالی/نامعتبر وارد کند؛ وضعیت ورودی
+        // پیش از ادغام با همان قواعد ایمن‌سازی وضعیت محلی پاک‌سازی می‌شود.
+        val importedState = rawImported?.let { sanitizeLoadedState(normalizeDerivedCounts(it)) }
+            ?: return NeuralLearningLedger.BundleImportResult(
+                isAccepted = false,
+                importedLearnedTotal = bundle.learnedTotal,
+                mergedLearnedTotal = persistedState.totalLearnedTrades,
+                addedRows = 0,
+                bundleCreatedAtMs = bundle.createdAtMs,
+                bundleAppVersion = bundle.appVersionName,
+                summaryFa = "⛔ محتوای بستهٔ دانش قابل خواندن نبود",
+            )
+
+        val beforeRows = persistedState.learnedLedger.size
+        val mergedLedger = NeuralLearningLedger.merge(persistedState.learnedLedger, importedState.learnedLedger)
+        val addedRows = (mergedLedger.size - beforeRows).coerceAtLeast(0)
+        val importedIsNewer = importedState.adamStepCount >= persistedState.adamStepCount
+        val mergedLog = importedState.knowledgeChangeLog.fold(persistedState.knowledgeChangeLog) { acc, entry ->
+            if (acc.any { it.id == entry.id }) acc else NeuralLearningLedger.appendChange(acc, entry)
+        }
+        val nowMs = System.currentTimeMillis()
+        val base = if (importedIsNewer) {
+            importedState.copy(
+                learnedLedger = mergedLedger,
+                learnedLedgerPrunedCount = persistedState.learnedLedgerPrunedCount + importedState.learnedLedgerPrunedCount,
+                gateUserActivationEnabled = persistedState.gateUserActivationEnabled,
+                forceActiveBeforeWarmup = false,
+                ledgerBackfillPending = persistedState.ledgerBackfillPending,
+                schemaVersion = NeuralLearningLedger.LEDGER_SCHEMA_VERSION,
+                knowledgeChangeLog = mergedLog,
+            )
+        } else {
+            persistedState.copy(
+                learnedLedger = mergedLedger,
+                knowledgeChangeLog = mergedLog,
+            )
+        }
+        val mergedTotal = NeuralLearningLedger.learnedTotal(base.learnedLedger.size, base.learnedLedgerPrunedCount)
+        val log = NeuralLearningLedger.appendChange(
+            mergedLog,
+            NeuralLearningLedger.KnowledgeChangeEntry(
+                id = NeuralLearningLedger.shortId("IMPORT", nowMs, bundle.payloadSha256.take(8)),
+                atMs = nowMs,
+                kindCode = "KNOWLEDGE_IMPORTED",
+                titleFa = "بازخوانی بستهٔ دانش",
+                detailFa = "از نسخهٔ ${bundle.appVersionName.ifBlank { "?" }} (کد ${bundle.appVersionCode}) · " +
+                    "${bundle.learnedTotal} معاملهٔ آموخته‌شده · $addedRows ردیف تازه به دفتر اضافه شد · " +
+                    (if (importedIsNewer) "وزن‌ها و پارامترهای بسته جایگزین شدند" else "دانش محلی جدیدتر بود و حفظ شد"),
+                learnedCountAtChange = mergedTotal,
+                autoDetected = false,
+            ),
+        )
+        persistState(
+            base.copy(
+                totalLearnedTrades = mergedTotal,
+                knowledgeChangeLog = log,
+                knowledgeRevision = persistedState.knowledgeRevision + 1,
+                lastReconciliationSummaryFa = "📥 بستهٔ دانش نسخهٔ ${bundle.appVersionName} بازخوانی شد · $addedRows یادگیری تازه",
+                lastReconciliationAtMs = nowMs,
+            ),
+        )
+        return NeuralLearningLedger.BundleImportResult(
+            isAccepted = true,
+            importedLearnedTotal = bundle.learnedTotal,
+            mergedLearnedTotal = mergedTotal,
+            addedRows = addedRows,
+            bundleCreatedAtMs = bundle.createdAtMs,
+            bundleAppVersion = bundle.appVersionName,
+            summaryFa = "✅ بستهٔ دانش (${bundle.appVersionName.ifBlank { "?" }} · ${bundle.learnedTotal} معامله) بازخوانی شد؛ " +
+                "$addedRows یادگیری تازه اضافه شد و مجموع دفتر به $mergedTotal رسید",
+        )
+    }
+
+    /** بازخوانی جدیدترین بستهٔ دانش موجود در `Download/AurumEdge/Archive` گوشی. */
+    @Synchronized
+    fun restoreKnowledgeBundleFromPhoneStorage(context: Context): NeuralLearningLedger.BundleImportResult? {
+        val raw = readNewestArchiveFile(context, "AurumNeuralKnowledge_v%") ?: return null
+        val result = importKnowledgeBundleJson(raw.second)
+        return result.copy(
+            summaryFa = "${result.summaryFa} · فایل: ${raw.first}",
+        )
+    }
+
+    /** نوشتن یک فایل متنی در پوشهٔ آرشیو دانلود (اندروید ۱۰ به بالا). */
+    private fun writeArchiveFile(
+        context: Context,
+        fileName: String,
+        mimeType: String,
+        content: String,
+    ): Boolean = runCatching {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return@runCatching false
+        val resolver = context.contentResolver
+        runCatching {
+            resolver.delete(
+                android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+                arrayOf(fileName),
+            )
+        }
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, fileName)
+            put(android.provider.MediaStore.Downloads.MIME_TYPE, mimeType)
+            put(
+                android.provider.MediaStore.Downloads.RELATIVE_PATH,
+                android.os.Environment.DIRECTORY_DOWNLOADS + "/AurumEdge/Archive",
+            )
+            put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            ?: return@runCatching false
+        resolver.openOutputStream(uri)?.use { it.write(content.toByteArray(Charsets.UTF_8)) }
+        values.clear()
+        values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+        resolver.update(uri, values, null, null)
+        true
+    }.getOrDefault(false)
+
+    /** خواندن جدیدترین فایل متنی آرشیو که نامش با الگو مطابقت دارد: (نام فایل، محتوا). */
+    private fun readNewestArchiveFile(context: Context, displayNameLike: String): Pair<String, String>? {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return null
+        return runCatching {
+            val resolver = context.contentResolver
+            val projection = arrayOf(
+                android.provider.MediaStore.MediaColumns._ID,
+                android.provider.MediaStore.MediaColumns.DISPLAY_NAME,
+            )
+            val selection = "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME} LIKE ?"
+            val sortOrder = "${android.provider.MediaStore.MediaColumns.DATE_MODIFIED} DESC"
+            var found: Pair<String, String>? = null
+            resolver.query(
+                android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                arrayOf(displayNameLike),
+                sortOrder,
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns._ID)
+                val nameCol = cursor.getColumnIndexOrThrow(android.provider.MediaStore.MediaColumns.DISPLAY_NAME)
+                while (cursor.moveToNext() && found == null) {
+                    val id = cursor.getLong(idCol)
+                    val name = cursor.getString(nameCol) ?: continue
+                    val itemUri = android.content.ContentUris.withAppendedId(
+                        android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                        id,
+                    )
+                    val content = resolver.openInputStream(itemUri)
+                        ?.use { it.readBytes().toString(Charsets.UTF_8) }
+                    if (!content.isNullOrBlank()) found = name to content
+                }
+            }
+            found
+        }.getOrNull()
+    }
+
     /**
      * همگام‌سازی اولیه با تاریخچه ژورنال در زمان شروع برنامه تا اگر معاملاتی از قبل بسته شده‌اند، شبکه عصبی آن‌ها را یاد بگیرد.
      */
     @Synchronized
-    fun syncWithClosedJournalTrades(closedTrades: List<PaperTrade>) {
+    fun syncWithClosedJournalTrades(closedTrades: List<PaperTrade>): NeuralLearningLedger.Reconciliation {
         val validClosed = closedTrades.filter { !it.isOpen && it.pnlUsd != null }
-        if (validClosed.isEmpty()) return
-        val seenIds = persistedState.replayBuffer.map { it.tradeId }.toSet()
-        val unseen = validClosed.filterNot { it.id in seenIds }.sortedBy { it.closedAt ?: it.openedAt }
-        if (unseen.isEmpty() && persistedState.totalLearnedTrades >= validClosed.size) return
-        unseen.forEach { trade ->
-            learnFromClosedTradeInternal(trade, report = null, persistImmediately = false)
+        val distinctJournal = validClosed.distinctBy { it.id }
+        val legacyTotal = persistedState.totalLearnedTrades
+        // تشخیص «قبلاً یاد گرفته شده» فقط از روی دفتر انجام می‌شود، نه حافظهٔ تکرار ۳۲۰تایی؛
+        // بنابراین معامله‌های قدیمی هرگز دوباره آموزش داده نمی‌شوند.
+        val seen = persistedState.learnedLedger.mapTo(HashSet()) { it.fingerprint }
+        val backfillMode = persistedState.ledgerBackfillPending
+        var newlyLearned = 0
+        var backfilled = 0
+        distinctJournal.sortedBy { it.closedAt ?: it.openedAt }.forEach { trade ->
+            val fingerprint = NeuralLearningLedger.tradeFingerprint(trade.id, trade.closedAt)
+            if (fingerprint in seen) return@forEach
+            if (backfillMode) {
+                // ثبت بدون آموزش دوباره: آموخته‌های قبلی دست‌نخورده می‌مانند، فقط عدد دفتر درست می‌شود.
+                val pnl = trade.pnlUsd ?: return@forEach
+                val rMultiple = trade.rMultiple
+                    ?: (pnl / (trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0))
+                val (withStamp, prunedNow) = NeuralLearningLedger.append(
+                    persistedState.learnedLedger,
+                    NeuralLearningLedger.LearnedStamp(
+                        fingerprint = fingerprint,
+                        tradeId = trade.id,
+                        categoryCode = AssetClass.of(trade.symbol).code,
+                        won = pnl > 0.0,
+                        achievedR = round(rMultiple.coerceIn(-1.5, 4.5) * 100.0) / 100.0,
+                        learnedAtMs = trade.closedAt ?: trade.openedAt,
+                    ),
+                )
+                persistedState = persistedState.copy(
+                    learnedLedger = withStamp,
+                    learnedLedgerPrunedCount = persistedState.learnedLedgerPrunedCount + prunedNow,
+                )
+                seen += fingerprint
+                backfilled++
+            } else {
+                learnFromClosedTradeInternal(trade, report = null, persistImmediately = false)
+                seen += fingerprint
+                newlyLearned++
+            }
         }
-        persistState(persistedState)
+        // تضمین نهایی «عدد یادگیری = تعداد معامله‌های واقعی»: اگر شمارنده از تعداد معامله‌های یکتای
+        // ژورنال بیشتر باشد (باقی‌ماندهٔ باگ نسخه‌های قبل یا پشتیبان قدیمی)، دفتر از ژورنال بازسازی
+        // می‌شود. وزن‌ها، خوشه‌های شرط و پارامترهای تیون‌شده دست‌نخورده می‌مانند.
+        var rebuiltFromJournal = false
+        var rebuiltRemoved = 0
+        val tolerance = max(3, distinctJournal.size / 50)
+        if (!backfillMode && distinctJournal.isNotEmpty() &&
+            persistedState.totalLearnedTrades > distinctJournal.size + tolerance
+        ) {
+            val before = persistedState.totalLearnedTrades
+            val rebuiltLedger = distinctJournal.map { trade ->
+                val pnl = trade.pnlUsd ?: 0.0
+                val rMultiple = trade.rMultiple
+                    ?: (pnl / (trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0))
+                NeuralLearningLedger.LearnedStamp(
+                    fingerprint = NeuralLearningLedger.tradeFingerprint(trade.id, trade.closedAt),
+                    tradeId = trade.id,
+                    categoryCode = AssetClass.of(trade.symbol).code,
+                    won = pnl > 0.0,
+                    achievedR = round(rMultiple.coerceIn(-1.5, 4.5) * 100.0) / 100.0,
+                    learnedAtMs = trade.closedAt ?: trade.openedAt,
+                )
+            }.sortedByDescending { it.learnedAtMs }
+            rebuiltRemoved = (before - rebuiltLedger.size).coerceAtLeast(0)
+            persistedState = persistedState.copy(
+                learnedLedger = rebuiltLedger,
+                learnedLedgerPrunedCount = 0,
+                totalLearnedTrades = rebuiltLedger.size,
+                duplicatesRepairedCount = maxOf(persistedState.duplicatesRepairedCount, rebuiltRemoved),
+            )
+            rebuiltFromJournal = true
+        }
+        val reconciliation = NeuralLearningLedger.reconcile(
+            journalClosedTrades = validClosed.size,
+            distinctJournalTrades = distinctJournal.size,
+            ledger = persistedState.learnedLedger,
+            prunedCount = persistedState.learnedLedgerPrunedCount,
+            legacyStoredTotal = legacyTotal,
+            newlyLearnedThisRun = newlyLearned,
+        )
+        val nowMs = System.currentTimeMillis()
+        var log = persistedState.knowledgeChangeLog
+        if (rebuiltFromJournal) {
+            log = NeuralLearningLedger.appendChange(
+                log,
+                NeuralLearningLedger.KnowledgeChangeEntry(
+                    id = NeuralLearningLedger.shortId("REBUILD", nowMs, "${reconciliation.learnedTotal}"),
+                    atMs = nowMs,
+                    kindCode = "LEDGER_REBUILT_FROM_JOURNAL",
+                    titleFa = "بازسازی دفتر یادگیری از ژورنال",
+                    detailFa = "شمارندهٔ یادگیری از تعداد معامله‌های واقعی ژورنال بیشتر بود؛ " +
+                        "$rebuiltRemoved یادگیری مازاد حذف و عدد روی ${reconciliation.learnedTotal} " +
+                        "معاملهٔ یکتا تنظیم شد. وزن‌ها و خوشه‌های آموخته‌شده حفظ شدند.",
+                    learnedCountAtChange = reconciliation.learnedTotal,
+                ),
+            )
+        } else if (backfillMode) {
+            log = NeuralLearningLedger.appendChange(
+                log,
+                NeuralLearningLedger.KnowledgeChangeEntry(
+                    id = NeuralLearningLedger.shortId("BACKFILL", nowMs, "$backfilled"),
+                    atMs = nowMs,
+                    kindCode = "LEDGER_BACKFILLED",
+                    titleFa = "تکمیل دفتر یادگیری از تاریخچهٔ ژورنال",
+                    detailFa = "$backfilled معاملهٔ بسته‌شدهٔ قدیمی فقط در دفتر ثبت شد (بدون آموزش دوباره) " +
+                        "تا عدد یادگیری دقیقاً با تعداد معاملات واقعی برابر شود و آموخته‌های فعلی شبکه دست‌نخورده بماند.",
+                    learnedCountAtChange = reconciliation.learnedTotal,
+                ),
+            )
+        } else if (newlyLearned > 0 || reconciliation.duplicatesRepaired > 0) {
+            log = NeuralLearningLedger.appendChange(
+                log,
+                NeuralLearningLedger.KnowledgeChangeEntry(
+                    id = NeuralLearningLedger.shortId("RECONCILE", nowMs, "${reconciliation.learnedTotal}"),
+                    atMs = nowMs,
+                    kindCode = "LEDGER_RECONCILED",
+                    titleFa = "تطبیق دفتر یادگیری با ژورنال",
+                    detailFa = reconciliation.summaryFa,
+                    learnedCountAtChange = reconciliation.learnedTotal,
+                ),
+            )
+        }
+        val nothingChanged = !backfillMode &&
+            newlyLearned == 0 &&
+            backfilled == 0 &&
+            reconciliation.duplicatesRepaired == 0 &&
+            persistedState.journalClosedTradesSeen == distinctJournal.size
+        if (nothingChanged) return reconciliation
+        persistState(
+            persistedState.copy(
+                lastReconciliationSummaryFa = reconciliation.summaryFa,
+                lastReconciliationAtMs = nowMs,
+                journalClosedTradesSeen = distinctJournal.size,
+                duplicatesRepairedCount = maxOf(persistedState.duplicatesRepairedCount, reconciliation.duplicatesRepaired),
+                learnedLedgerPrunedCount = persistedState.learnedLedgerPrunedCount,
+                // اگر ژورنال در این اجرا خالی بود ولی شمارندهٔ قدیمی عدد داشت، حالت پُرکردن باز می‌ماند
+                // تا در اولین همگام‌سازی واقعی، تاریخچه بدون آموزش دوباره ثبت شود.
+                ledgerBackfillPending = backfillMode && distinctJournal.isEmpty() && legacyTotal > 0,
+                knowledgeChangeLog = log,
+            ),
+        )
+        return reconciliation
     }
+
+    /** اجرای دستی تطبیق دفتر با ژورنال فعلی (دکمهٔ «بازبینی دفتر یادگیری» در رابط کاربری). */
+    @Synchronized
+    fun auditLearningLedger(closedTrades: List<PaperTrade>): NeuralLearningLedger.Reconciliation =
+        syncWithClosedJournalTrades(closedTrades)
 
     /**
      * استخراج کامل بردار ۱۶ ویژگی و امضای شرایط برای معاملات بسته‌شده با ترکیب تمام متدهای اصلی:
@@ -1431,9 +2024,9 @@ class NeuralSelfLearningEngine(
      * ارزیابی لحظه‌ای شرایط بازار توسط شبکه عصبی خودآموز:
      * - تشخیص می‌دهد شرایط فعلی در این دسته (`CRYPTO`, `COMMODITY`, `FOREX`, `STOCK`) چگونه است.
      * - تشخیص می‌دهد آیا این شرایط جزو «شرایطی است که نباید معامله کند» (`isNoTradeConditionDetected`).
-     * - طبق دستور کاربر: تا قبل از رسیدن به `10,000` معامله یادگیری‌شده (`totalLearnedTrades < 10_000`)،
-     *   فقط یاد می‌گیرد و هشدار/تحلیل می‌دهد (`isBlockingTradeNow = false`)، و از معامله ۱۰,۰۰۰ به بعد (یا در صورت فعال‌سازی دستی)،
-     *   به‌صورت خودکار مانع ورود در شرایط پرخطر می‌شود!
+     * - قانون دوشرطی: تا زمانی که **هر دو** شرط (۱: رسیدن به `10,000` معاملهٔ یادگیری‌شده و
+     *   ۲: فعال‌سازی صریح گیت توسط کاربر) کامل نشده باشند، شبکه فقط یاد می‌گیرد و هشدار/تحلیل
+     *   می‌دهد (`isBlockingTradeNow = false`). فقط با کامل‌شدن هر دو شرط، ورود در شرایط پرخطر مسدود می‌شود.
      */
     @Synchronized
     fun evaluateMarketConditions(
@@ -1489,7 +2082,13 @@ class NeuralSelfLearningEngine(
             cluster?.isFlaggedNoTradeRegime == true ||
             (persistedState.latestNewsSnapshot.isHighImpactNewsWindow && newsDirectionFactor < -0.35)
 
-        val isWarmupComplete = persistedState.totalLearnedTrades >= persistedState.warmupTargetTrades || persistedState.forceActiveBeforeWarmup
+        // قانون دوشرطی: (۱) رسیدن به ۱۰,۰۰۰ معاملهٔ یادگیری‌شده و (۲) فعال‌سازی صریح خود کاربر.
+        val gate = NeuralLearningLedger.gateState(
+            learnedTotal = persistedState.totalLearnedTrades,
+            target = persistedState.warmupTargetTrades,
+            userActivationEnabled = persistedState.gateUserActivationEnabled,
+        )
+        val isWarmupComplete = gate.isGateActive
         val isBlockingNow = isWarmupComplete && isNoTradeDetected
 
         val topFeatureNamesFa = listOf(
@@ -1519,7 +2118,7 @@ class NeuralSelfLearningEngine(
             isBlockingNow ->
                 "🧠⛔ گیت شبکه عصبی (پس از ${persistedState.totalLearnedTrades} معامله): این شرایط در ${categoryTitleFa(assetClass)} پرخطر تشخیص داده شد (${causalAttr.primaryCauseBadgeFa} · احتمال برد ${winProbPct}% · امید ریاضی ${String.format(Locale.US, "%+.2fR", blendedExpectedR)}) — ورود ممنوع."
             isNoTradeDetected && !isWarmupComplete ->
-                "🧠⚠️ تشخیص شبکه عصبی (فاز یادگیری ${persistedState.totalLearnedTrades}/${persistedState.warmupTargetTrades}): این شرایط در ${categoryTitleFa(assetClass)} مستعد استاپ خوردن است (${causalAttr.primaryCauseBadgeFa} · احتمال برد ${winProbPct}%)؛ در حال یادگیری تا ۱۰,۰۰۰ معامله."
+                "🧠⚠️ تشخیص شبکه عصبی (${if (gate.volumeConditionMet) "شرط ۱ کامل شده اما گیت با درخواست شما فعال نشده" else "فاز یادگیری ${persistedState.totalLearnedTrades}/${persistedState.warmupTargetTrades}"}): این شرایط در ${categoryTitleFa(assetClass)} مستعد استاپ خوردن است (${causalAttr.primaryCauseBadgeFa} · احتمال برد ${winProbPct}%)؛ فعلاً فقط هشدار داده می‌شود."
             else ->
                 "🧠✅ شرایط مساعد در ${categoryTitleFa(assetClass)} (علت حرکت: ${causalAttr.primaryCauseBadgeFa} · احتمال برد: ${winProbPct}% · امید ریاضی: ${String.format(Locale.US, "%+.2fR", blendedExpectedR)} · فاکتور کلیدی: $topAttentionFactorFa)"
         }
@@ -1600,7 +2199,12 @@ class NeuralSelfLearningEngine(
         val isNoTrade = blendedWinProb < 0.44 ||
             blendedExpectedR < 0.05 ||
             cluster?.isFlaggedNoTradeRegime == true
-        val isWarmupDone = persistedState.totalLearnedTrades >= persistedState.warmupTargetTrades || persistedState.forceActiveBeforeWarmup
+        val gate = NeuralLearningLedger.gateState(
+            learnedTotal = persistedState.totalLearnedTrades,
+            target = persistedState.warmupTargetTrades,
+            userActivationEnabled = persistedState.gateUserActivationEnabled,
+        )
+        val isWarmupDone = gate.isGateActive
         val isBlocking = isWarmupDone && isNoTrade
 
         val summaryFa = "احتمال برد شبکه عصبی: ${(blendedWinProb * 100).toInt()}% · امید ریاضی: ${String.format(Locale.US, "%+.2fR", blendedExpectedR)}"
@@ -1642,10 +2246,39 @@ class NeuralSelfLearningEngine(
         )
     }
 
+    /**
+     * شرط دوم فعال‌سازی گیت: تصمیم صریح کاربر.
+     * این کلید هیچ‌گاه شرط اول (۱۰,۰۰۰ معاملهٔ یادگیری‌شده) را دور نمی‌زند؛ فقط به آن اجازهٔ اجرا می‌دهد.
+     */
     @Synchronized
-    fun setForceActiveBeforeWarmup(enabled: Boolean) {
-        persistState(persistedState.copy(forceActiveBeforeWarmup = enabled))
+    fun setGateUserActivation(enabled: Boolean) {
+        if (persistedState.gateUserActivationEnabled == enabled) return
+        val nowMs = System.currentTimeMillis()
+        val entry = NeuralLearningLedger.KnowledgeChangeEntry(
+            id = NeuralLearningLedger.shortId("GATE", nowMs, enabled.toString()),
+            atMs = nowMs,
+            kindCode = if (enabled) "GATE_USER_ENABLED" else "GATE_USER_DISABLED",
+            titleFa = if (enabled) "فعال‌سازی گیت توسط کاربر" else "غیرفعال‌سازی گیت توسط کاربر",
+            detailFa = if (enabled) {
+                "شما اجازهٔ اجرای گیت را دادید. گیت فقط پس از رسیدن به ${persistedState.warmupTargetTrades} معاملهٔ یادگیری‌شده (شرط ۱) وارد مدار می‌شود."
+            } else {
+                "گیت تا اطلاع بعدی فقط یاد می‌گیرد و هشدار می‌دهد؛ ورودی مسدود نمی‌شود."
+            },
+            learnedCountAtChange = persistedState.totalLearnedTrades,
+            autoDetected = false,
+        )
+        persistState(
+            persistedState.copy(
+                gateUserActivationEnabled = enabled,
+                forceActiveBeforeWarmup = false,
+                knowledgeChangeLog = NeuralLearningLedger.appendChange(persistedState.knowledgeChangeLog, entry),
+            ),
+        )
     }
+
+    @Deprecated("از setGateUserActivation استفاده کنید؛ فعال‌سازی زودهنگام دیگر شرط ۱۰,۰۰۰ معامله را دور نمی‌زند.")
+    @Synchronized
+    fun setForceActiveBeforeWarmup(enabled: Boolean) = setGateUserActivation(enabled)
 
     private fun learnFromClosedTradeInternal(
         trade: PaperTrade,
@@ -1655,6 +2288,10 @@ class NeuralSelfLearningEngine(
         conditionKeyOverride: String? = null,
     ) {
         val pnl = trade.pnlUsd ?: return
+        // «یادگیری دقیقاً یک‌بار»: اگر اثر این معامله قبلاً در دفتر ثبت شده باشد،
+        // هیچ گام آموزشی/آماری دوباره اجرا نمی‌شود (منبع اصلی تورم شمارندهٔ قبلی همین بود).
+        val tradeFingerprint = NeuralLearningLedger.tradeFingerprint(trade.id, trade.closedAt)
+        if (persistedState.learnedLedger.any { it.fingerprint == tradeFingerprint }) return
         val won = pnl > 0.0
         val achievedR = (trade.rMultiple ?: (pnl / (trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0))).coerceIn(-1.5, 4.5)
         val assetClass = AssetClass.of(trade.symbol)
@@ -1776,8 +2413,22 @@ class NeuralSelfLearningEngine(
             discoveredNoTradeRulesFa = catNoTradeRules,
         )
 
+        // ثبت اثر این معامله در دفتر یادگیری؛ عدد نمایش‌داده‌شده از همین دفتر مشتق می‌شود.
+        val stamp = NeuralLearningLedger.LearnedStamp(
+            fingerprint = tradeFingerprint,
+            tradeId = trade.id,
+            categoryCode = catCode,
+            won = won,
+            achievedR = round(achievedR * 100.0) / 100.0,
+            learnedAtMs = sample.timestampMs,
+        )
+        val (nextLedger, prunedNow) = NeuralLearningLedger.append(nextState.learnedLedger, stamp)
+        val nextPrunedCount = nextState.learnedLedgerPrunedCount + prunedNow
+        val learnedTotalNow = NeuralLearningLedger.learnedTotal(nextLedger.size, nextPrunedCount)
         val preTunedState = nextState.copy(
-            totalLearnedTrades = nextState.totalLearnedTrades + 1,
+            totalLearnedTrades = learnedTotalNow,
+            learnedLedger = nextLedger,
+            learnedLedgerPrunedCount = nextPrunedCount,
             replayBuffer = updatedBuffer,
             conditionClusters = nextClusters,
             categoryStats = nextState.categoryStats + (catCode to updatedCat),
@@ -1788,7 +2439,19 @@ class NeuralSelfLearningEngine(
         } else {
             preTunedState.autoTunedParameters
         }
-        val finalState = preTunedState.copy(autoTunedParameters = autoTuned)
+        val changeLog = buildPostLearningChangeLog(
+            state = preTunedState,
+            previousParams = nextState.autoTunedParameters,
+            tunedParams = autoTuned,
+            clusterBefore = existingCluster,
+            clusterAfter = updatedCluster,
+            won = won,
+            achievedR = achievedR,
+        )
+        val finalState = preTunedState.copy(
+            autoTunedParameters = autoTuned,
+            knowledgeChangeLog = changeLog,
+        )
 
         if (persistImmediately) {
             persistState(finalState)
@@ -1797,6 +2460,80 @@ class NeuralSelfLearningEngine(
             _stateFlow.value = finalState
             _summaryFlow.value = buildStateSummary(finalState)
         }
+    }
+
+    /**
+     * ثبت تغییرات معنادار شبکه در «کارنامهٔ اصلاحات» با متن فارسی.
+     *
+     * این کارنامه همراه بستهٔ دانش ذخیره و به نسخهٔ بعدی اپ منتقل می‌شود؛ بنابراین هر اصلاحی که
+     * شبکه انجام داده (تیونینگ پارامترها، کشف شرایط ممنوعه) بعداً قابل خواندن و مقایسه است.
+     */
+    private fun buildPostLearningChangeLog(
+        state: NeuralNetworkPersistedState,
+        previousParams: NeuralAutoTunedParameters,
+        tunedParams: NeuralAutoTunedParameters,
+        clusterBefore: ConditionClusterRecord,
+        clusterAfter: ConditionClusterRecord,
+        won: Boolean,
+        achievedR: Double,
+    ): List<NeuralLearningLedger.KnowledgeChangeEntry> {
+        var log = state.knowledgeChangeLog
+        val nowMs = System.currentTimeMillis()
+        val learned = state.totalLearnedTrades
+        if (tunedParams.tuningGeneration > previousParams.tuningGeneration) {
+            log = NeuralLearningLedger.appendChange(
+                log,
+                NeuralLearningLedger.KnowledgeChangeEntry(
+                    id = NeuralLearningLedger.shortId("TUNE", nowMs, "g${tunedParams.tuningGeneration}"),
+                    atMs = nowMs,
+                    kindCode = "PARAM_TUNE",
+                    titleFa = "تیونینگ خودکار نسل ${tunedParams.tuningGeneration}",
+                    detailFa = buildString {
+                        append("R:R حداقل ${round(tunedParams.minRiskReward * 100.0) / 100.0} · ")
+                        append("بافر ATR حد ضرر ${round(tunedParams.slBufferAtr * 100.0) / 100.0} · ")
+                        append("سقف کشیدگی کیجون ${round(tunedParams.maxKijunExtensionAtr * 100.0) / 100.0}ATR · ")
+                        append("حداقل کارایی روند ${round(tunedParams.minEfficiencyRatio * 100.0) / 100.0} · ")
+                        append("آستانهٔ احتمال برد گیت ${round(tunedParams.neuralWinProbGatePct * 10.0) / 10.0}% · ")
+                        append("${tunedParams.samplesAnalyzed} نمونه (Ridge L2 + Huber IRLS + CEM).")
+                    },
+                    learnedCountAtChange = learned,
+                ),
+            )
+        }
+        val becameNoTrade = !clusterBefore.isFlaggedNoTradeRegime && clusterAfter.isFlaggedNoTradeRegime
+        if (becameNoTrade) {
+            log = NeuralLearningLedger.appendChange(
+                log,
+                NeuralLearningLedger.KnowledgeChangeEntry(
+                    id = NeuralLearningLedger.shortId("NOTRADE", nowMs, clusterAfter.signatureKey),
+                    atMs = nowMs,
+                    kindCode = "NO_TRADE_DISCOVERED",
+                    titleFa = "کشف شرایط ممنوعه در ${clusterAfter.categoryCode}",
+                    detailFa = buildString {
+                        append(clusterAfter.conditionDescriptionFa.take(220))
+                        append(" · احتمال برد ${(clusterAfter.posteriorWinProb * 100).toInt()}% · ")
+                        append("میانگین ${String.format(Locale.US, "%+.2fR", clusterAfter.avgR)} در ")
+                        append("${clusterAfter.totalCount} معامله — این شرایط به فهرست «ورود ممنوع» اضافه شد.")
+                    },
+                    learnedCountAtChange = learned,
+                ),
+            )
+        }
+        if (!won && clusterAfter.lossCount == 3 && clusterAfter.avgR < -0.2) {
+            log = NeuralLearningLedger.appendChange(
+                log,
+                NeuralLearningLedger.KnowledgeChangeEntry(
+                    id = NeuralLearningLedger.shortId("LOSS3", nowMs, clusterAfter.signatureKey),
+                    atMs = nowMs,
+                    kindCode = "LOSS_PATTERN",
+                    titleFa = "الگوی باخت تکرارشونده ثبت شد",
+                    detailFa = "سه باخت در شرایط «${clusterAfter.conditionDescriptionFa.take(160)}» " +
+                        "(آخرین R: ${String.format(Locale.US, "%+.2f", achievedR)}) — وزن دفاعی این شرایط تقویت شد.",
+                    learnedCountAtChange = learned,
+                ),
+            )
+        }
+        return log
     }
 
     /**

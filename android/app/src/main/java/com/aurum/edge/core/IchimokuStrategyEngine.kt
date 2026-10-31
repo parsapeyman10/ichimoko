@@ -426,6 +426,20 @@ data class BaseStrategyConfig(
     val minFutureKumoThicknessAtr: Double = 0.05,
     val minSniperDistanceAtr: Double = 0.65,
     val minDriveBooksConsensus: Int = 6,
+    /** لایهٔ اختیاری نئوویو (NeoWave). پیش‌فرض خاموش ⇒ خروجی موتور بدون تغییر. */
+    val neoWaveEnabled: Boolean = false,
+    /** حداقل قواعد نیلی که باید پاس شود تا شمارش «معتبر» شمرده شود. */
+    val neoWaveMinRulesPassed: Int = NeoWaveEngine.MIN_RULE_PASS,
+    /** حداقل درصد اطمینان برای اینکه نئوویو اجازهٔ وتو داشته باشد. */
+    val neoWaveMinConfidencePct: Double = NeoWaveEngine.MIN_CONFIDENCE_PCT,
+    /** دامنهٔ زیگزاگ مونوویو بر حسب ATR. */
+    val neoWaveAmplitudeAtr: Double = NeoWaveEngine.DEFAULT_AMPLITUDE_ATR,
+    /** مسیر ورود رمزارز بر پایهٔ نئوویو (الگوی کامل و تأییدشده = ماشهٔ ورود). */
+    val neoWaveCryptoEntryEnabled: Boolean = true,
+    /** حداقل قواعد پاس‌شده برای ورود کریپتو (سخت‌گیرانه‌تر از آستانهٔ وتو). */
+    val neoWaveCryptoMinRulesPassed: Int = 8,
+    /** حداقل اطمینان شمارش برای ورود کریپتو. */
+    val neoWaveCryptoMinConfidencePct: Double = 65.0,
     val autoTunedGeneration: Int = 0,
     val perStrategyOverrides: Map<String, PerStrategyConfigOverride> = emptyMap(),
 ) {
@@ -936,6 +950,24 @@ data class StrategyEvaluationReport(
     val isSniperArmedPendingRetest: Boolean = false,
     val optimalRiskReward: Double? = riskReward,
     val rrBreakdown: RrCalculationBreakdown? = null,
+    /** درصد فاصلهٔ حد ضرر از قیمت ورود (1R) پس از عبور از موتور Trade Plan Guard. */
+    val planStopPct: Double = 0.0,
+    /** درصد فاصلهٔ حد سود از قیمت ورود پس از عبور از موتور Trade Plan Guard. */
+    val planTargetPct: Double = 0.0,
+    /** اهرم متناسب با فاصلهٔ حد ضرر (لیکوییدیشن حداقل ۲.۵R دورتر از حد ضرر). */
+    val planRecommendedLeverage: Int = 0,
+    /** نشان داوری پلن: تأییدشده / اصلاح‌شده / رد شد. */
+    val planVerdictFa: String = "",
+    /** خلاصهٔ فارسی داوری پلن (دلیل اصلاح حد ضرر، حد سود و اهرم). */
+    val planGuardNoteFa: String = "",
+    /** نشان لایهٔ نئوویو (خالی = لایه خاموش است). */
+    val neoWaveBadgeFa: String = "",
+    /** آیا نئوویو این ورود را وتو کرده است. */
+    val neoWaveVeto: Boolean = false,
+    /** آیا این ورود از «مسیر ورود رمزارز بر پایهٔ نئوویو» آمده است. */
+    val cryptoNeoWaveEntry: Boolean = false,
+    /** توضیح فارسی مسیر ورود (برای نمایش در چک‌لیست و ژورنال). */
+    val entryPathFa: String = "",
 ) {
     val entryTimeframeBadgeFa: String
         get() = "تایم ورود: ${triggerInterval.label}"
@@ -983,6 +1015,7 @@ data class StrategyEvaluationReport(
         val passedCount = conditions.count { it.passed }
         append("شروط برقرار: ").append(passedCount).append("/").append(conditions.size).append(" — ")
         append(conditions.joinToString("؛ ") { "${it.titleFa}: ${if (it.passed) "تایید" else "رد"} (${it.detailFa})" })
+        if (entryPathFa.isNotBlank()) append(" | مسیر ورود: ").append(entryPathFa)
     }
 }
 
@@ -1780,16 +1813,39 @@ object IchimokuStrategyEngine {
         slBufferAtr: Double,
         triggerInterval: Interval,
     ): Double {
-        val atr = trigSnap.atr14.coerceAtLeast(referenceEntry * 0.0004)
-        val minSafeDist = minSafeStructuralStopDistance(
+        // ATR مقاوم (برش ATR های گلِیچ‌خورده) تا یک کندل خراب کل ۱R را متورم نکند
+        val atr = TradePlanGuard.robustAtr(
             symbol = symbol,
-            referencePrice = referenceEntry,
-            trigAtr14 = atr,
-            stratAtr14 = stratSnap.atr14,
-            triggerInterval = triggerInterval,
+            price = referenceEntry,
+            atrValue = trigSnap.atr14.coerceAtLeast(referenceEntry * 0.0004),
+            interval = triggerInterval,
+        )
+        val stratAtrSafe = TradePlanGuard.robustAtr(
+            symbol = symbol,
+            price = referenceEntry,
+            atrValue = stratSnap.atr14,
+            interval = triggerInterval,
+        )
+        val minSafeDist = TradePlanGuard.stopDistanceFloor(
+            symbol = symbol,
+            price = referenceEntry,
+            atr = atr,
+            interval = triggerInterval,
+            structuralFloorOverride = minSafeStructuralStopDistance(
+                symbol = symbol,
+                referencePrice = referenceEntry,
+                trigAtr14 = atr,
+                stratAtr14 = stratAtrSafe,
+                triggerInterval = triggerInterval,
+            ),
         )
         // سقف فاصله مجاز ساختاری تا ۱R بیش از حد متورم نشود و تارگت ۱.۵R..۳.۰R کاملاً در دسترس بماند
-        val maxStructuralDist = max(minSafeDist * 1.45, atr * 2.10)
+        val maxStructuralDist = TradePlanGuard.stopDistanceCeiling(
+            symbol = symbol,
+            price = referenceEntry,
+            atr = atr,
+            interval = triggerInterval,
+        )
         val adverseWick = if (isLong) trigSnap.lowerWickRatio else trigSnap.upperWickRatio
         val sweepShieldBuffer = atr * (slBufferAtr.coerceIn(0.18, 0.42) + 0.16 * adverseWick.coerceIn(0.0, 0.65))
 
@@ -1808,22 +1864,15 @@ object IchimokuStrategyEngine {
                 anchorWaveC,
             ).filter { it.isFinite() && it > 0.0 && it < referenceEntry }
 
-            // کاندیداهایی که در دالان طلایی [minSafeDist .. maxStructuralDist] قرار دارند
-            val inCorridor = rawCandidates.filter { cand ->
-                val dist = referenceEntry - cand
-                dist in minSafeDist..maxStructuralDist
-            }
-            val chosenSl = when {
-                inCorridor.isNotEmpty() -> {
-                    // انتخاب امن‌ترین سنگر ساختاری داخل دالان (که پشت هم فرکتال و هم کیجون در دالان باشد)
-                    inCorridor.minOrNull()!!
-                }
-                else -> {
-                    val primaryCluster = min(anchorFractal5, anchorKijun26)
-                    val clampedDist = (referenceEntry - primaryCluster).coerceIn(minSafeDist, maxStructuralDist)
-                    referenceEntry - clampedDist
-                }
-            }
+            // نزدیک‌ترین سنگر ابطال ساختاری بیرون از کف نویز و داخل دالان نوسان انتخاب می‌شود؛
+            // انتخاب «دورترین سنگر» (رفتار قبلی) باعث تورم مصنوعی ۱R و دور شدن حد سود می‌شد.
+            val chosenSl = TradePlanGuard.chooseStructuralAnchor(
+                isLong = true,
+                referenceEntry = referenceEntry,
+                candidates = rawCandidates,
+                floorDist = minSafeDist,
+                ceilingDist = maxStructuralDist,
+            ) ?: min(referenceEntry - minSafeDist, referenceEntry - atr * 0.5)
             round2(chosenSl.coerceAtLeast(0.00001))
         } else {
             val anchorFractal5 = max(trigSnap.lastUpFractalHigh, trigSnap.high) + sweepShieldBuffer
@@ -1840,18 +1889,13 @@ object IchimokuStrategyEngine {
                 anchorWaveC,
             ).filter { it.isFinite() && it > referenceEntry }
 
-            val inCorridor = rawCandidates.filter { cand ->
-                val dist = cand - referenceEntry
-                dist in minSafeDist..maxStructuralDist
-            }
-            val chosenSl = when {
-                inCorridor.isNotEmpty() -> inCorridor.maxOrNull()!!
-                else -> {
-                    val primaryCluster = max(anchorFractal5, anchorKijun26)
-                    val clampedDist = (primaryCluster - referenceEntry).coerceIn(minSafeDist, maxStructuralDist)
-                    referenceEntry + clampedDist
-                }
-            }
+            val chosenSl = TradePlanGuard.chooseStructuralAnchor(
+                isLong = false,
+                referenceEntry = referenceEntry,
+                candidates = rawCandidates,
+                floorDist = minSafeDist,
+                ceilingDist = maxStructuralDist,
+            ) ?: max(referenceEntry + minSafeDist, referenceEntry + atr * 0.5)
             round2(chosenSl)
         }
     }
@@ -2542,29 +2586,57 @@ object IchimokuStrategyEngine {
             round2(unclampedTp.coerceIn(min(minAllowedTp, maxAllowedTp), minAllowedTp))
         }
 
-        val rrFromLive = abs(effectiveTp - livePrice) / abs(livePrice - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.25)
-        val rrFromSniper = abs(effectiveTp - sniperOptimal) / abs(sniperOptimal - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.25)
-        val rr = round2(min(rrFromLive, rrFromSniper).coerceIn(1.50, 3.00))
+        // ── موتور واحد ایمن‌سازی پلن (Trade Plan Guard) ─────────────────────────
+        // حد ضرر ساختاری و هدف موج هوسودا داخل «دالان نوسان تایم‌فریم» قفل می‌شوند؛ بنابراین
+        // ۱R هرگز از نوسان واقعی همان تایم‌فریم بزرگ‌تر نمی‌شود و هدف هم روی کاغذ باقی نمی‌ماند.
+        val guardedPlan = TradePlanGuard.sanitizePlan(
+            symbol = normalizedSymbol,
+            action = if (isLong) SignalAction.BUY else SignalAction.SELL,
+            entryPrice = sniperOptimal,
+            candidateStopLoss = technicalSl,
+            candidateTakeProfit = effectiveTp,
+            desiredRiskReward = computedOptimalRr,
+            referenceAtr = trigSnap.atr14,
+            triggerInterval = effectiveConfig.triggerInterval,
+            strategyAtr = stratSnap.atr14,
+        )
+        // در گزارش‌های بدون سیگنال (NO_TRADE) اعداد ساختاری خام برای نمایش حفظ می‌شوند؛
+        // اما هر گزارش قابل‌اجرا فقط با پلن ایمن‌شده ساخته می‌شود.
+        val finalStopLoss = if (guardedPlan.isUsable) guardedPlan.stopLoss else round2(technicalSl)
+        val finalTakeProfit = if (guardedPlan.isUsable) guardedPlan.takeProfit else round2(effectiveTp)
+        val finalStopDist = if (guardedPlan.isUsable) {
+            guardedPlan.stopDistance.coerceAtLeast(trigSnap.atr14 * 0.25)
+        } else {
+            abs(sniperOptimal - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.25)
+        }
+        val finalTargetDist = if (guardedPlan.isUsable) guardedPlan.targetDistance else abs(effectiveTp - sniperOptimal)
+
+        val rr = if (guardedPlan.isUsable) {
+            round2(guardedPlan.riskReward.coerceIn(1.50, 3.00))
+        } else {
+            round2(computedOptimalRr.coerceIn(1.50, 3.00))
+        }
         val effectiveOptimalRr = round2(max(computedOptimalRr, rr).coerceIn(1.50, 3.00))
         val obstacleClear = if (nearestObstacle == null) {
             true
         } else {
-            (min(abs(nearestObstacle - livePrice), abs(nearestObstacle - sniperOptimal)) / stopDist) >= requiredMinRr
+            (min(abs(nearestObstacle - livePrice), abs(nearestObstacle - sniperOptimal)) / finalStopDist) >= requiredMinRr
         }
         val cond12Passed = rr in requiredMinRr..maxAllowedRr && obstacleClear
 
-        val rewardDistSniper = round2(abs(effectiveTp - sniperOptimal))
-        val riskDistSniper = round2(abs(sniperOptimal - technicalSl).coerceAtLeast(trigSnap.atr14 * 0.25))
+        val rewardDistSniper = round2(finalTargetDist)
+        val riskDistSniper = round2(finalStopDist)
         val slBasisTextFa = buildString {
             append("هم‌پوشانی فرکتال ۵ کندلی بیل ویلیامز + کیجون۲۶ (${round2(trigSnap.kijun)}) + کیجون۳۰/EMA34 + لبه کومو")
             if (activeModel == BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER) {
                 append(" + ۹ کتاب درایو (هم‌تراز جامع بیس)")
             }
             append(String.format(Locale.US, " + سپر ضد شدو (%.2f ATR) در دالان [0.80..2.10 ATR]", slBuffer))
+            append(" + قفل سقف درصدی نوسان " + effectiveConfig.triggerInterval.label)
         }
         val tpBasisTextFa = buildString {
             append(selectedWaveLabel)
-            append(" (${round2(effectiveTp)}) · قفل در بازه [1:1.50 .. 1:3.00]")
+            append(" (${round2(finalTakeProfit)}) · قفل در بازه [1:1.50 .. 1:3.00]")
             if (nearestObstacle != null) {
                 append(" · قبل از دیوار فلت تایم بالاتر ($nearestObstacle)")
             }
@@ -2582,11 +2654,12 @@ object IchimokuStrategyEngine {
             append(" + ${trendPhase.badgeFa}")
             append(" + کارایی ER=${(erStrat * 100).toInt()}%")
             append(" ← هدف: $selectedWaveLabel · 🔒 حد ضرر ساختاری کاملاً ثابت و غیرپله‌ای)")
+            append(" · 🛡️ ${guardedPlan.summaryFa()}")
         }
         val rrBreakdownObj = RrCalculationBreakdown(
             entryPrice = round2(sniperOptimal),
-            stopLossPrice = round2(technicalSl),
-            takeProfitPrice = round2(effectiveTp),
+            stopLossPrice = round2(finalStopLoss),
+            takeProfitPrice = round2(finalTakeProfit),
             riskDistance1R = riskDistSniper,
             rewardDistance = rewardDistSniper,
             actualRiskReward = rr,
@@ -2603,6 +2676,7 @@ object IchimokuStrategyEngine {
             append(String.format(Locale.US, "عدد مناسب R:R = 1:%.2f (%s · بازه مجاز 1.5..3.0)", rr, selectedWaveLabel))
             append(" · فرمول: $rewardDistSniper ÷ $riskDistSniper")
             append(" · 🔒 حد ضرر ثابت ساختاری")
+            append(" · 🛡️ ${guardedPlan.verdict.badgeFa}")
         }
 
         // ── Check 13: Directional Efficiency Ratio (Kaufman ER) & Anti-Chop Filter ──
@@ -2722,27 +2796,92 @@ object IchimokuStrategyEngine {
         val confidence = round2(((passedCount.toDouble() / conditions.size.toDouble()) * 84.0 + if (triggerFired) 16.0 else 0.0).coerceIn(0.0, 100.0))
         val coreTrendScore = round2((confidence * 0.74 + phaseBonus + erBonus + rrBonus + sniperBonus).coerceIn(0.0, 100.0))
 
+        // ── لایهٔ اختیاری نئوویو (NeoWave Gate) ────────────────────────────────
+        // قانون صفر-اثر: وقتی `neoWaveEnabled = false` باشد هیچ محاسبه‌ای انجام نمی‌شود و
+        // خروجی این تابع بیت‌به‌بیت مثل نسخهٔ قبل از نئوویو می‌ماند.
+        val neoWaveOn = effectiveConfig.neoWaveEnabled
+        val neoWaveVerdict = if (neoWaveOn) {
+            NeoWaveEngine.analyze(
+                candles = alignedStrategyCandles,
+                amplitudeAtr = effectiveConfig.neoWaveAmplitudeAtr,
+            )
+        } else {
+            null
+        }
+        val neoWaveGate = if (neoWaveOn) {
+            NeoWaveEngine.gate(
+                verdict = neoWaveVerdict,
+                isLong = isLong,
+                minRulesPassed = effectiveConfig.neoWaveMinRulesPassed,
+                minConfidencePct = effectiveConfig.neoWaveMinConfidencePct,
+            )
+        } else {
+            NeoWaveEngine.NeoWaveGate.OFF
+        }
+        val gatedConfidence = if (neoWaveOn) {
+            round2((confidence + neoWaveGate.confidenceDelta).coerceIn(0.0, 100.0))
+        } else {
+            confidence
+        }
+        val gatedTrendScore = if (neoWaveOn) {
+            round2((coreTrendScore + neoWaveGate.confidenceDelta * 0.5).coerceIn(0.0, 100.0))
+        } else {
+            coreTrendScore
+        }
+
         val sniperArmedPendingRetest = firstFifteenPassed && triggerFired && !cond16Passed
 
-        val readiness = when {
+        val baseReadiness = when {
+            neoWaveGate.veto -> StrategyReadinessState.BLOCKED
             allSixteenPassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY
             allSixteenPassed && triggerFired && !isLong -> StrategyReadinessState.SIGNAL_SELL
             sniperArmedPendingRetest || passedCount >= 11 -> StrategyReadinessState.WATCH_SETUP
             else -> StrategyReadinessState.BLOCKED
         }
 
-        val finalAction = when (readiness) {
-            StrategyReadinessState.SIGNAL_BUY -> SignalAction.BUY
-            StrategyReadinessState.SIGNAL_SELL -> SignalAction.SELL
-            else -> if (sniperArmedPendingRetest) {
-                if (isLong) SignalAction.BUY else SignalAction.SELL
-            } else {
-                SignalAction.NO_TRADE
+        // ── مسیر ورود رمزارز بر پایهٔ نئوویو ─────────────────────────────────
+        // شرط عمومی (هر ۱۶ شرط هم‌زمان) در رمزارز می‌تواند روزها برقرار نشود. در این مسیر
+        // الگوی کامل، تأییدشده و هم‌جهتِ نئوویو ماشهٔ ورود است؛ کنترل‌های ریسک دست‌نخورده‌اند
+        // (R:R ≥ ۱.۵، پلن معتبر، بدون وتو، بدون بازار بسته).
+        val isCryptoClass = AssetClass.of(normalizedSymbol) == AssetClass.CRYPTO
+        val cryptoEntryDecision = NeoWaveEngine.cryptoEntryDecision(
+            enabled = neoWaveOn && effectiveConfig.neoWaveCryptoEntryEnabled && !neoWaveGate.veto,
+            isCrypto = isCryptoClass,
+            verdict = neoWaveVerdict,
+            isLong = isLong,
+            minRulesPassed = effectiveConfig.neoWaveCryptoMinRulesPassed,
+            minConfidencePct = effectiveConfig.neoWaveCryptoMinConfidencePct,
+            riskReward = rr,
+            hasValidPlan = finalStopLoss != null && finalTakeProfit != null && sniperOptimal != null &&
+                rr >= 1.5,
+        )
+        val cryptoNeoWaveEntry = cryptoEntryDecision.eligible &&
+            baseReadiness != StrategyReadinessState.SIGNAL_BUY &&
+            baseReadiness != StrategyReadinessState.SIGNAL_SELL
+        val readiness = when {
+            cryptoNeoWaveEntry && isLong -> StrategyReadinessState.SIGNAL_BUY
+            cryptoNeoWaveEntry -> StrategyReadinessState.SIGNAL_SELL
+            else -> baseReadiness
+        }
+
+        val finalAction = if (neoWaveGate.veto) {
+            SignalAction.NO_TRADE
+        } else if (cryptoNeoWaveEntry) {
+            if (isLong) SignalAction.BUY else SignalAction.SELL
+        } else {
+            when (readiness) {
+                StrategyReadinessState.SIGNAL_BUY -> SignalAction.BUY
+                StrategyReadinessState.SIGNAL_SELL -> SignalAction.SELL
+                else -> if (sniperArmedPendingRetest) {
+                    if (isLong) SignalAction.BUY else SignalAction.SELL
+                } else {
+                    SignalAction.NO_TRADE
+                }
             }
         }
 
         val tfTag = "[تایم ${config.triggerInterval.label}]"
-        val summaryFa = when {
+        val baseSummaryFa = when {
             readiness == StrategyReadinessState.SIGNAL_BUY ->
                 "$tfTag 🎯 خرید نقطه‌زنی ($normalizedSymbol · $effectiveTitle · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
             readiness == StrategyReadinessState.SIGNAL_SELL ->
@@ -2757,6 +2896,38 @@ object IchimokuStrategyEngine {
             }
             else -> "$tfTag در حال دریافت کندل‌های $normalizedSymbol..."
         }
+        val neoWaveSuffix = when {
+            !neoWaveOn || neoWaveGate.noteFa.isBlank() -> ""
+            else -> " · ${neoWaveGate.noteFa}"
+        }
+        val summaryFa = when {
+            neoWaveGate.veto ->
+                "$tfTag ⛔ ورود وتو شد · $normalizedSymbol · $effectiveTitle · ${neoWaveGate.noteFa}"
+            cryptoNeoWaveEntry ->
+                "$tfTag 🌊 ورود رمزارز بر پایهٔ نئوویو · $normalizedSymbol · $effectiveTitle · " +
+                    "${cryptoEntryDecision.reasonFa} · R:R ۱:${round2(rr)}"
+            else -> baseSummaryFa + neoWaveSuffix
+        }
+        val entryPathFa = when {
+            cryptoNeoWaveEntry -> "🌊 مسیر نئوویو (کریپتو): ${cryptoEntryDecision.reasonFa}"
+            neoWaveOn && isCryptoClass && neoWaveVerdict != null ->
+                "🌊 کریپتو: ${cryptoEntryDecision.reasonFa}"
+            else -> ""
+        }
+
+        // شرایط نئوویو فقط برای نمایش به چک‌لیست اضافه می‌شوند (در محاسبهٔ امتیاز دخالت ندارند).
+        val displayConditions = if (neoWaveOn && neoWaveVerdict != null) {
+            conditions + neoWaveVerdict.rules.map { rule ->
+                StrategyConditionCheck(
+                    index = 16 + rule.index,
+                    titleFa = "🌊 نئوویو ${rule.index}. ${rule.titleFa}",
+                    passed = rule.passed,
+                    detailFa = rule.detailFa,
+                )
+            }
+        } else {
+            conditions
+        }
 
         return StrategyEvaluationReport(
             symbol = normalizedSymbol,
@@ -2769,25 +2940,25 @@ object IchimokuStrategyEngine {
             readiness = readiness,
             action = finalAction,
             triggerType = triggerType,
-            confidence = confidence,
+            confidence = gatedConfidence,
             livePrice = round2(livePrice),
             suggestedEntry = sniperOptimal,
-            suggestedStopLoss = technicalSl,
+            suggestedStopLoss = finalStopLoss,
             targetV = wave?.targetV,
             targetN = wave?.targetN,
             targetE = wave?.targetE,
-            primaryTakeProfit = round2(effectiveTp),
+            primaryTakeProfit = finalTakeProfit,
             riskReward = rr,
             macroSnapshot = macroSnap,
             strategySnapshot = stratSnap,
             triggerSnapshot = trigSnap,
             waveProjection = wave,
-            conditions = conditions,
+            conditions = displayConditions,
             summaryFa = summaryFa,
             triggerBarTime = trigSnap.time,
             evaluatedAt = nowMillis,
             trendPhase = trendPhase,
-            coreTrendScore = coreTrendScore,
+            coreTrendScore = gatedTrendScore,
             sniperOptimalEntry = sniperOptimal,
             sniperZoneLow = sniperLow,
             sniperZoneHigh = sniperHigh,
@@ -2795,6 +2966,15 @@ object IchimokuStrategyEngine {
             isSniperArmedPendingRetest = sniperArmedPendingRetest,
             optimalRiskReward = effectiveOptimalRr,
             rrBreakdown = rrBreakdownObj,
+            planStopPct = guardedPlan.stopPct,
+            planTargetPct = guardedPlan.targetPct,
+            planRecommendedLeverage = guardedPlan.recommendedLeverage,
+            planVerdictFa = guardedPlan.verdict.badgeFa,
+            planGuardNoteFa = guardedPlan.summaryFa(),
+            neoWaveBadgeFa = if (neoWaveOn) neoWaveGate.noteFa else "",
+            neoWaveVeto = neoWaveGate.veto,
+            cryptoNeoWaveEntry = cryptoNeoWaveEntry,
+            entryPathFa = entryPathFa,
         )
     }
 

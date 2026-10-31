@@ -148,7 +148,17 @@ object TradeSnapshotArchiveManager {
     fun init(context: Context) {
         runCatching {
             val loaded = loadIndexFromDisk(context)
-            _records.value = loaded.sortedByDescending { it.effectiveTimestampMs }
+            // رکوردهای «شبح» (تصویری که فایلش پاک شده و نسخهٔ گالری هم ندارد) در گالری
+            // نمایش داده نمی‌شوند؛ این رکوردها همان چیزی بودند که آرشیو را خراب نشان می‌دادند.
+            val healthy = loaded.filter { rec ->
+                val local = rec.localImagePath
+                val hasLocalImage = local.isNotBlank() && File(local).exists()
+                hasLocalImage || rec.phoneGalleryUri.isNotBlank()
+            }
+            _records.value = healthy.sortedByDescending { it.effectiveTimestampMs }
+            if (healthy.size != loaded.size) {
+                saveIndexToDisk(context, _records.value)
+            }
         }
     }
 
@@ -163,11 +173,49 @@ object TradeSnapshotArchiveManager {
      * تضمین ثبت و ساخت اسکرین‌شات آرشیو تصویری (`OPEN` و در صورت بسته بودن `CLOSE`) برای معاملات موجود در ژورنال
      * بدون قفل طولانی‌مدت MediaStore و با ذخیره یکپارچه ایندکس در پایان حلقه.
      */
+    /**
+     * قفل رندر: ساخت تصویر برای هر معامله یک `Bitmap` چند مگابایتی می‌خواهد. اگر چند رندر
+     * هم‌زمان اجرا شود (گالری + ثبت خودکار + خروجی PDF)، heap روی گوشی‌های کم‌حافظه پر می‌شود و
+     * برنامه با `OutOfMemoryError` کرش می‌کند. این قفل، رندرها را پشت سر هم اجرا می‌کند.
+     */
+    private val renderLock = Any()
+
+    /**
+     * پاک‌سازی بودجه‌ای آرشیو (Memory/Storage budget).
+     *
+     * بودجه از حافظهٔ واقعی دستگاه گرفته می‌شود (`AppResourceGovernor`) و قدیمی‌ترین رکوردها
+     * (هم فایل تصویر و هم ردیف ایندکس) حذف می‌شوند تا آرشیو بی‌پایان رشد نکند و برنامه سنگین نشود.
+     */
+    @Synchronized
+    fun pruneToBudget(context: Context): Int {
+        if (_records.value.isEmpty()) init(context)
+        val budget = com.aurum.edge.core.AppResourceGovernor.current()
+        val ordered = _records.value.sortedByDescending { it.effectiveTimestampMs }
+        val keep = com.aurum.edge.core.AppResourceGovernor.recordsToKeep(
+            recordSizesBytes = ordered.map { it.imageSizeBytes.coerceAtLeast(1L) },
+            budget = budget,
+        )
+        if (keep >= ordered.size) return 0
+        val keepIds = ordered.take(keep).map { "${it.tradeId}_${it.snapshotPhase}" }.toSet()
+        val pruned = _records.value.filter { "${it.tradeId}_${it.snapshotPhase}" !in keepIds }
+        if (pruned.isEmpty()) return 0
+        pruned.forEach { rec ->
+            rec.localImagePath.takeIf { it.isNotBlank() }?.let { path ->
+                runCatching { File(path).delete() }
+            }
+        }
+        val kept = _records.value.filter { "${it.tradeId}_${it.snapshotPhase}" in keepIds }
+            .sortedByDescending { it.effectiveTimestampMs }
+        _records.value = kept
+        saveIndexToDisk(context, kept)
+        return pruned.size
+    }
+
     @Synchronized
     fun ensureAllTradesHaveArchiveSnapshots(
         context: Context,
         trades: List<PaperTrade>,
-        maxTrades: Int = 120,
+        maxTrades: Int = com.aurum.edge.core.AppResourceGovernor.current().maxArchiveRecords,
         saveToPhoneGallery: Boolean = false,
     ): List<ArchivedTradeSnapshotRecord> {
         if (_records.value.isEmpty()) {
@@ -177,6 +225,20 @@ object TradeSnapshotArchiveManager {
         val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
         val currentMap = _records.value.associateBy { "${it.tradeId}_${it.snapshotPhase}" }.toMutableMap()
         var modified = false
+        // رکوردهای معاملاتی که دیگر در ژورنال نیستند (حذف‌شده) از آرشیو هم پاک می‌شوند تا
+        // گالری تصویری هرگز رکورد بی‌معامله (phantom) نشان ندهد.
+        val liveTradeIds = trades.map { it.id }.toSet()
+        val phantomKeys = currentMap.keys.filter { key -> key.substringBeforeLast('_') !in liveTradeIds }
+        if (phantomKeys.isNotEmpty()) {
+            phantomKeys.forEach { key ->
+                currentMap.remove(key)?.let { rec ->
+                    rec.localImagePath.takeIf { it.isNotBlank() }?.let { path ->
+                        runCatching { File(path).delete() }
+                    }
+                }
+            }
+            modified = true
+        }
 
         val targetTrades = trades.sortedByDescending { it.openedAt }.take(maxTrades).reversed()
         for (trade in targetTrades) {
@@ -185,7 +247,7 @@ object TradeSnapshotArchiveManager {
             if (existingOpen == null || existingOpen.localImagePath.isBlank() || !File(existingOpen.localImagePath).exists()) {
                 runCatching {
                     val rec = buildSyntheticSnapshotRecordForTrade(trade, isClosePhase = false)
-                    val bmp = renderTradeIchimokuSnapshotBitmap(rec)
+                    val bmp = synchronized(renderLock) { renderTradeIchimokuSnapshotBitmap(rec) }
                     val webpBytes = compressBitmapToCompactWebp(bmp, quality = 78)
                     bmp.recycle()
                     val embedded = attachEmbeddedJsonToImageBytes(webpBytes, rec)
@@ -210,7 +272,7 @@ object TradeSnapshotArchiveManager {
                 if (existingClose == null || existingClose.localImagePath.isBlank() || !File(existingClose.localImagePath).exists()) {
                     runCatching {
                         val rec = buildSyntheticSnapshotRecordForTrade(trade, isClosePhase = true)
-                        val bmp = renderTradeIchimokuSnapshotBitmap(rec)
+                        val bmp = synchronized(renderLock) { renderTradeIchimokuSnapshotBitmap(rec) }
                         val webpBytes = compressBitmapToCompactWebp(bmp, quality = 78)
                         bmp.recycle()
                         val embedded = attachEmbeddedJsonToImageBytes(webpBytes, rec)
@@ -244,6 +306,22 @@ object TradeSnapshotArchiveManager {
         trade: PaperTrade,
         isClosePhase: Boolean = !trade.isOpen,
     ): ArchivedTradeSnapshotRecord {
+        // ── کندل واقعی، نه ساختگی ──────────────────────────────────────────────
+        // تصویر آرشیو فقط وقتی «درست» است که با کندل واقعی همان نماد/تایم‌فریم در همان لحظه
+        // رسم شود. منبع: کش زندهٔ اپ و سپس خزانهٔ ۱ ماههٔ گوشی (`LiveQuoteFetcher` خودش
+        // fallback می‌زند). اگر هیچ کندلی موجود نباشد، تصویر بازسازی‌شده با برچسب صریح
+        // «تخمینی» ثبت می‌شود تا با تصویر واقعی اشتباه گرفته نشود.
+        val cutOffMs = if (isClosePhase) (trade.closedAt ?: trade.openedAt) else trade.openedAt
+        val recordedCandles = runCatching {
+            LiveQuoteFetcher.peekCachedCandles(trade.symbol, trade.interval)
+                .filter { it.time <= cutOffMs }
+                .takeLast(90)
+        }.getOrDefault(emptyList())
+        val recordedSnapshot = if (recordedCandles.size >= 26) {
+            runCatching { IchimokuStrategyEngine.computeSnapshot(recordedCandles) }.getOrNull()
+        } else {
+            null
+        }
         val fixedSl = trade.initialStopLoss ?: trade.stopLoss
         val fixedRisk = trade.fixedRiskUsd.takeIf { it > 0.0 } ?: 5.0
         val expectedWin = round2(fixedRisk * trade.riskReward)
@@ -281,17 +359,24 @@ object TradeSnapshotArchiveManager {
             rrFormulaFa = trade.buildRrFormulaSummaryFa(),
             slBasisFa = "سنگر ساختاری ثابت (غیرپله‌ای)",
             tpBasisFa = "موج هوسودا (R:R اولیه ثابت)",
-            tenkan = trade.entry,
-            kijun = fixedSl,
-            currentSpanA = trade.entry,
-            currentSpanB = fixedSl,
-            futureSpanA = trade.takeProfit,
-            futureSpanB = trade.entry,
-            atr14 = abs(trade.entry - fixedSl) * 0.5,
+            tenkan = recordedSnapshot?.tenkan ?: trade.entry,
+            kijun = recordedSnapshot?.kijun ?: fixedSl,
+            currentSpanA = recordedSnapshot?.currentSpanA ?: trade.entry,
+            currentSpanB = recordedSnapshot?.currentSpanB ?: fixedSl,
+            futureSpanA = recordedSnapshot?.futureSpanA ?: trade.takeProfit,
+            futureSpanB = recordedSnapshot?.futureSpanB ?: trade.entry,
+            atr14 = recordedSnapshot?.atr14 ?: (abs(trade.entry - fixedSl) * 0.5),
             conditionsSummary = trade.entryConditions,
             fullPaperTrade = trade,
-            candleSourceNote = "تصویر بازسازی‌شده؛ کندل و اندیکاتور ثبت نشده",
-            indicatorsAvailable = false,
+            recentCandles = recordedCandles.map { c ->
+                ArchivedCandlePoint(t = c.time, o = c.open, h = c.high, l = c.low, c = c.close)
+            },
+            candleSourceNote = if (recordedCandles.isNotEmpty()) {
+                "کندل واقعی ثبت‌شده (${recordedCandles.size} کندل تا لحظهٔ ${if (isClosePhase) "بسته شدن" else "ورود"})"
+            } else {
+                "تصویر بازسازی‌شده؛ کندل و اندیکاتور ثبت نشده"
+            },
+            indicatorsAvailable = recordedSnapshot != null,
         )
     }
 

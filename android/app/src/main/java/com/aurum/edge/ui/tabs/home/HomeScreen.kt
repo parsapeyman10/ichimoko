@@ -296,7 +296,8 @@ fun HomeScreen(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "🧠 شبکه عصبی خودآموز (FT-Attention + SwiGLU): ${neuralState.totalLearnedTrades}/10,000 معامله",
+                        text = "🧠 شبکه عصبی خودآموز (FT-Attention + SwiGLU): ${neuralState.totalLearnedTrades}/10,000 معامله" +
+                            (if (neuralState.isGateActive) " · گیت فعال" else if (neuralState.volumeConditionMet) " · منتظر اجازهٔ شما" else ""),
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.Cyan,
                         fontWeight = FontWeight.Bold,

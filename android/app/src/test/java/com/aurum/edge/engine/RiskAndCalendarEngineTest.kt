@@ -6,6 +6,7 @@ import com.aurum.edge.core.BaseStrategyConfig
 import com.aurum.edge.core.BitcoinStrategyModel
 import com.aurum.edge.core.CustomStrategySlot
 import com.aurum.edge.core.IchimokuStrategyEngine
+import com.aurum.edge.core.NeuralLearningLedger
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.RiskAndCalendarEngine
 import com.aurum.edge.core.Smart15mSyncPlanner
@@ -774,9 +775,38 @@ class RiskAndCalendarEngineTest {
             )
         }
         assertEquals(6, neuralEngine.state.value.totalLearnedTrades)
+        assertEquals(6, neuralEngine.state.value.learnedLedgerRows)
         assertTrue("Must detect high-risk no-trade cluster after repeated losses", neuralEngine.state.value.discoveredNoTradeClustersCount >= 1)
 
-        // Before 10,000 trades (with forceActiveBeforeWarmup = false), it must NOT block trades even when no-trade condition is detected
+        // همگام‌سازی مکرر ژورنال نباید عدد یادگیری را متورم کند (باگ نسخهٔ قبل: تکرار آموزش یک معامله).
+        val closedJournalTrades = (1..6).map { i ->
+            com.aurum.edge.core.PaperTrade(
+                id = "nn_loss_$i",
+                symbol = "BTC/USDT",
+                action = SignalAction.BUY,
+                interval = Interval.M5,
+                entry = 90_000.0,
+                stopLoss = 89_400.0,
+                takeProfit = 91_200.0,
+                riskReward = 2.0,
+                confidence = 68.0,
+                openedAt = 1_760_100_000_000L + i * 60_000L,
+                closedAt = 1_760_100_030_000L + i * 60_000L,
+                exitPrice = 89_400.0,
+                pnlUsd = -5.0,
+                fixedRiskUsd = 5.0,
+                strategyId = BitcoinStrategyModel.BASE_ICHIMOKU.id,
+            )
+        }
+        val reconciliation = neuralEngine.syncWithClosedJournalTrades(closedJournalTrades)
+        assertEquals(6, reconciliation.learnedTotal)
+        assertEquals(6, reconciliation.journalClosedTrades)
+        assertEquals(6, neuralEngine.state.value.totalLearnedTrades)
+        neuralEngine.syncWithClosedJournalTrades(closedJournalTrades)
+        neuralEngine.syncWithClosedJournalTrades(closedJournalTrades)
+        assertEquals("repeated journal sync must stay idempotent", 6, neuralEngine.state.value.totalLearnedTrades)
+
+        // Two-condition rule: below 10,000 learned trades the gate must stay open even when a no-trade regime is detected
         val evalDuringWarmup = neuralEngine.evaluateFeatures(
             symbol = "BTC/USDT",
             features = badCryptoFeatures,
@@ -786,8 +816,53 @@ class RiskAndCalendarEngineTest {
         assertFalse(evalDuringWarmup.isBlockingTradeNow)
         assertTrue(evalDuringWarmup.shouldAllowTrade)
 
-        // When forceActiveBeforeWarmup is enabled (or after 10,000 trades), it actively blocks the no-trade condition
-        neuralEngine.setForceActiveBeforeWarmup(true)
+        // قانون دوشرطی: فعال‌سازی کاربر (شرط ۲) به‌تنهایی گیت را فعال نمی‌کند؛ شرط ۱ (۱۰,۰۰۰ معامله) هم لازم است.
+        neuralEngine.setGateUserActivation(true)
+        assertTrue(neuralEngine.state.value.gateUserActivationEnabled)
+        assertFalse(neuralEngine.state.value.volumeConditionMet)
+        assertFalse(neuralEngine.state.value.isGateActive)
+        val evalConsentOnly = neuralEngine.evaluateFeatures(
+            symbol = "BTC/USDT",
+            features = badCryptoFeatures,
+            conditionKey = "CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED",
+        )
+        assertTrue(evalConsentOnly.isNoTradeCondition)
+        assertFalse(evalConsentOnly.isBlockingTradeNow)
+        assertTrue(evalConsentOnly.shouldAllowTrade)
+
+        // هر دو شرط با هم ⇒ گیت فعال: با وارد کردن یک بستهٔ دانش که شرط اول را کامل می‌کند بررسی می‌شود.
+        val bigLedger = (1..10_000).map { i ->
+            NeuralLearningLedger.LearnedStamp(
+                fingerprint = NeuralLearningLedger.tradeFingerprint("seed-$i", i.toLong()),
+                tradeId = "seed-$i",
+                categoryCode = "CRYPTO",
+                won = i % 2 == 0,
+                achievedR = 0.4,
+                learnedAtMs = i.toLong(),
+            )
+        }
+        val payload = com.aurum.edge.core.NeuralNetworkPersistedState(
+            totalLearnedTrades = 10_000,
+            learnedLedger = bigLedger,
+        ).let { state ->
+            kotlinx.serialization.json.Json { encodeDefaults = true }
+                .encodeToString(com.aurum.edge.core.NeuralNetworkPersistedState.serializer(), state)
+        }
+        val bundle = NeuralLearningLedger.KnowledgeBundle(
+            appVersionName = "test",
+            appVersionCode = 736,
+            createdAtMs = 1_760_000_000_000L,
+            learnedTotal = 10_000,
+            learnedStampRows = bigLedger.size,
+            adamStepCount = 10_000,
+            payloadSha256 = NeuralLearningLedger.sha256(payload),
+            payloadJson = payload,
+        )
+        val imported = neuralEngine.importKnowledgeBundleJson(NeuralLearningLedger.encodeBundle(bundle))
+        assertTrue(imported.isAccepted)
+        assertTrue(imported.mergedLearnedTotal >= 10_000)
+        assertTrue(neuralEngine.state.value.volumeConditionMet)
+        assertTrue(neuralEngine.state.value.isGateActive)
         val evalWhenActive = neuralEngine.evaluateFeatures(
             symbol = "BTC/USDT",
             features = badCryptoFeatures,
@@ -795,6 +870,16 @@ class RiskAndCalendarEngineTest {
         )
         assertTrue(evalWhenActive.isBlockingTradeNow)
         assertFalse(evalWhenActive.shouldAllowTrade)
+
+        // خاموش‌کردن شرط ۲ (تصمیم کاربر) گیت را حتی بالای ۱۰,۰۰۰ معامله غیرفعال می‌کند.
+        neuralEngine.setGateUserActivation(false)
+        assertFalse(neuralEngine.state.value.isGateActive)
+        val evalAfterUserDisable = neuralEngine.evaluateFeatures(
+            symbol = "BTC/USDT",
+            features = badCryptoFeatures,
+            conditionKey = "CRYPTO|5m|BUY|BASE_ICHIMOKU|WEAK_CHOP|THIN_KUMO|OVEREXTENDED",
+        )
+        assertFalse(evalAfterUserDisable.isBlockingTradeNow)
 
         // Verify Neural Brain explainability fields (learnedInsightsFeedFa, featureInsights, recentLessons)
         val brainSummary = neuralEngine.state.value

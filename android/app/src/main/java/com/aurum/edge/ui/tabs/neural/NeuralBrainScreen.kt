@@ -152,6 +152,20 @@ fun NeuralBrainScreen(
             }
         }
 
+        // ── پنل «زمان‌بندی سشن و خروج هوشمند» — یادگیری چقدر زودتر بستن ──────────────
+        SectionCard(
+            title = "🕒 زمان‌بندی سشن و یادگیری زمان خروج (چقدر زودتر ببندیم؟)",
+            subtitle = "باندیت چندبازویی ε-greedy روی گزینه‌های ۰ تا ۴۵ دقیقه؛ پاداش = دلار نجات‌یافته نسبت به نگه‌داشتن پوزیشن تا بازگشایی بازار",
+            initiallyExpanded = false,
+        ) {
+            val sessionEstimates by viewModel.sessionExitEstimates.collectAsStateWithLifecycle()
+            val sessionNote by viewModel.sessionExitLearningNote.collectAsStateWithLifecycle()
+            com.aurum.edge.ui.components.SessionExitPanel(
+                estimates = sessionEstimates,
+                lastLearningNote = sessionNote,
+            )
+        }
+
         // ── پنل رگرسیون ماتریسی پارامترها با بهترین متود روز دنیا (Ridge L2 + Huber Robust IRLS + Walk-Forward CV) ──
         SectionCard(
             title = "📐 پنل رگرسیون ماتریسی پارامترها (بهترین متود روز دنیا: Ridge L2 + Huber IRLS)",
@@ -804,13 +818,16 @@ fun NeuralBrainScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = if (neuralState.isWarmupCompleted) {
-                                "✅ بلوغ ۱۰,۰۰۰ معامله تکمیل شده — فیلتر هوشمند ترید فعال است"
-                            } else {
-                                "⏳ فاز یادگیری عمیق تا ۱۰,۰۰۰ معامله (${String.format(Locale.US, "%.2f%%", neuralState.warmupProgressPercent)})"
+                            text = when {
+                                neuralState.isGateActive ->
+                                    "✅ گیت اجرایی فعال است — هر دو شرط کامل (۱۰,۰۰۰ معامله + اجازهٔ شما)"
+                                neuralState.volumeConditionMet ->
+                                    "🟡 شرط ۱ کامل شد (۱۰,۰۰۰ معامله) — منتظر فعال‌سازی شما (شرط ۲)"
+                                else ->
+                                    "⏳ فاز یادگیری عمیق تا ۱۰,۰۰۰ معامله (${String.format(Locale.US, "%.2f%%", neuralState.warmupProgressPercent)})"
                             },
                             style = MaterialTheme.typography.labelMedium,
-                            color = if (neuralState.isWarmupCompleted) AurumColors.Green else AurumColors.Gold,
+                            color = if (neuralState.isGateActive) AurumColors.Green else AurumColors.Gold,
                             fontWeight = FontWeight.Bold,
                         )
                         Pill(
@@ -824,7 +841,7 @@ fun NeuralBrainScreen(
                             .fillMaxWidth()
                             .height(8.dp)
                             .clip(RoundedCornerShape(4.dp)),
-                        color = if (neuralState.isWarmupCompleted) AurumColors.Green else AurumColors.Gold,
+                        color = if (neuralState.isGateActive) AurumColors.Green else AurumColors.Gold,
                         trackColor = AurumColors.Bg,
                     )
                     Row(
@@ -833,20 +850,25 @@ fun NeuralBrainScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = "فعال‌سازی زودهنگام فیلتر مسدودسازی تله‌های ضررده (قبل از ۱۰,۰۰۰ معامله)",
+                            text = "شرط ۲ — فعال‌سازی گیت مسدودسازی تله‌های ضررده توسط من (هر زمان قابل خاموش‌کردن)",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.TextSecondary,
                             modifier = Modifier.weight(1f),
                         )
                         Switch(
-                            checked = neuralState.forceActiveBeforeWarmup,
-                            onCheckedChange = { viewModel.setNeuralForceActiveBeforeWarmup(it) },
+                            checked = neuralState.gateUserActivationEnabled,
+                            onCheckedChange = { viewModel.setNeuralGateUserActivation(it) },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = AurumColors.Green,
                                 checkedTrackColor = AurumColors.Green.copy(alpha = 0.35f),
                             ),
                         )
                     }
+                    Text(
+                        text = neuralState.gatePolicySummaryFa,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (neuralState.isGateActive) AurumColors.Green else AurumColors.TextSecondary,
+                    )
                 }
 
                 Row(
@@ -868,6 +890,120 @@ fun NeuralBrainScreen(
                         modifier = Modifier.weight(1f),
                     ) {
                         Text("📂 بازخوانی دیتا و آرشیو از گوشی", fontSize = 11.sp, color = AurumColors.Cyan)
+                    }
+                }
+            }
+        }
+
+        // ── ۱-ب. دفتر یادگیری، دو شرط فعال‌سازی گیت و انتقال دانش بین نسخه‌ها ──────
+        SectionCard(
+            title = "🧾 دفتر یادگیری و انتقال دانش بین نسخه‌ها",
+            subtitle = "عدد یادگیری از دفتر معامله‌های یکتا محاسبه می‌شود (نه شمارندهٔ افزایشی)؛ هر اصلاح شبکه با متن فارسی ثبت و همراه «بستهٔ دانش» برای نسخه‌های بعدی ذخیره می‌شود",
+            initiallyExpanded = false,
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    StatTile(
+                        label = "معامله‌های ژورنال",
+                        value = String.format(Locale.US, "%,d", neuralState.journalClosedTradesSeen),
+                        valueColor = AurumColors.Cyan,
+                        modifier = Modifier.weight(1f),
+                    )
+                    StatTile(
+                        label = "ردیف دفتر یادگیری",
+                        value = String.format(Locale.US, "%,d", neuralState.learnedLedgerRows),
+                        valueColor = AurumColors.Gold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    StatTile(
+                        label = "یادگیری تکراری حذف‌شده",
+                        value = String.format(Locale.US, "%,d", neuralState.duplicatesRepairedCount),
+                        valueColor = if (neuralState.duplicatesRepairedCount > 0) AurumColors.Red else AurumColors.Green,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Text(
+                    text = neuralState.ledgerReconciliationSummaryFa.ifBlank {
+                        "برای تطبیق دفتر با ژورنال، دکمهٔ «بازبینی دفتر یادگیری» را بزنید."
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                )
+                Text(
+                    text = "نسخهٔ طرح داده: ${neuralState.learnedSchemaVersion} · " +
+                        "ردیف هرس‌شده: ${String.format(Locale.US, "%,d", neuralState.learnedLedgerPrunedCount)} · " +
+                        "بازبینی دانش: #${neuralState.knowledgeRevision}",
+                    fontSize = 10.sp,
+                    color = AurumColors.TextSecondary,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = { viewModel.auditNeuralLearningLedgerNow() },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("🔍 بازبینی دفتر یادگیری", fontSize = 10.sp, color = AurumColors.Cyan)
+                    }
+                    Button(
+                        onClick = { viewModel.exportNeuralKnowledgeBundleNow() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = AurumColors.Gold,
+                            contentColor = Color.Black,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("🧾 ذخیرهٔ بستهٔ دانش", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                OutlinedButton(
+                    onClick = { viewModel.restoreNeuralKnowledgeBundleFromPhoneNow() },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        "📥 بازخوانی بستهٔ دانش از گوشی (انتقال آموخته‌ها به این نسخه)",
+                        fontSize = 10.sp,
+                        color = AurumColors.Gold,
+                    )
+                }
+                if (neuralState.knowledgeChangeLog.isEmpty()) {
+                    Text(
+                        text = "هنوز اصلاحی ثبت نشده است؛ پس از چند معامله، تیونینگ‌ها و شرایط ممنوعهٔ کشف‌شده اینجا فهرست می‌شوند.",
+                        fontSize = 10.sp,
+                        color = AurumColors.TextSecondary,
+                    )
+                } else {
+                    Text(
+                        text = "🗂️ آخرین اصلاحات ثبت‌شدهٔ شبکه (قابل فهم در نسخهٔ بعدی):",
+                        fontSize = 11.sp,
+                        color = AurumColors.Gold,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    neuralState.knowledgeChangeLog.take(8).forEach { entry ->
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(AurumColors.SurfaceAlt)
+                                .padding(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            Text(
+                                text = "${entry.titleFa} · ${entry.kindCode} · در ${String.format(Locale.US, "%,d", entry.learnedCountAtChange)} معاملهٔ آموخته‌شده",
+                                fontSize = 10.sp,
+                                color = AurumColors.Cyan,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = entry.detailFa,
+                                fontSize = 10.sp,
+                                color = AurumColors.TextSecondary,
+                            )
+                        }
                     }
                 }
             }

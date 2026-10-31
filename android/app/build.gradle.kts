@@ -94,8 +94,88 @@ android {
         // channels + 15-minute automatic-check floor. See docs/RELEASE_3_0_FA.md and
         // CHANGELOG_FA.md. A versionCode must be bumped here before a release run, because the
         // workflow only publishes explicit tags / `release: publish` commits / approved dispatch.
-        versionCode = 734
-        versionName = "3.9.25"
+        // 3.9.31 (code 740) upgrades the NeoWave layer to the rule-complete Neely model described in
+        // "Mastering Elliott Wave": the m2/m1 ratio now selects one of the seven retracement rules and
+        // tells the app what the next wave must do; every monowave node carries a Neely structure label
+        // (:5, :F3, :c3, :L3, :L5, :s5); an impulse is audited against 12 rules (61.8% wave-2 limit,
+        // wave-4/wave-1 and wave-4/wave-2 non-overlap, wave-3 not shortest, 1.618 extension,
+        // subdivision, time alternation, 0-2 channel break, six-point channel touch rule), zigzag/flat
+        // against their 5-3-5 and 3-3-5 proportions, triangles via strict sequential overlap, and the
+        // 7/9-wave Diametric/Symmetrical formations by time symmetry. Hard-rule violations invalidate a
+        // count outright, and the post-constructive rule means a veto now requires the following wave to
+        // CONFIRM the count (>= 23.6% of the pattern height in the expected direction). Still optional
+        // and OFF by default; when off the engine output is bit-identical to 3.9.29.
+        // 3.9.30 (code 739) adds NeoWave (Glenn Neely) as an OPTIONAL confirmation layer. It never
+        // trades on its own: it decomposes price into ATR-adaptive monowaves, classifies the structure
+        // (Impulse, Impulse-in-progress, ZigZag, Flat, Triangle, Extracting Triangle, Diametric) and
+        // audits the mechanical Neely rules (wave-2 retracement limit, wave-3 not shortest, wave-4 /
+        // wave-1 non-overlap, time limits, wave-2/4 alternation, 0-2 channel, Fibonacci projection).
+        // A complete, high-confidence pattern that ALIGNS with the entry adds +8 confidence; a complete
+        // pattern that OPPOSES the entry vetoes it outright (readiness BLOCKED, action NO_TRADE).
+        // The switch lives in the strategy card (BaseStrategyConfig.neoWaveEnabled) and defaults to
+        // OFF; when it is off no NeoWave maths runs and the engine output is bit-identical to 3.9.29
+        // (covered by a regression test). Thresholds are user-tunable (min rules, min confidence).
+        // See docs/NEOWAVE_OPTION_FA.md. Publish stamp: 3.9.31 / code 740 (rule-complete Neely model:
+        // retracement rules 1-7, structure labels, 12-rule impulse audit, strict-overlap triangles,
+        // post-constructive confirmation), released from the arena/f97d4078-ichimoko branch with the
+        // pinned updater signing key.
+        // 3.9.29 (code 738) corrects the session policy and adds the timing learner. 3.9.28 closed a
+        // position as soon as its market was shut, using the last stale price; that trade could never
+        // have been executed. The engine now (a) never closes on a closed market, (b) exits inside the
+        // pre-close window while the market is still live, and (c) exits a carried-over position at the
+        // first valid tick after the reopen. How early that window starts is learned per asset class by
+        // an epsilon-greedy multi-armed bandit with a lower-confidence-bound guard, rewarded by the real
+        // dollars a pre-close exit saved versus holding to the reopen (SessionExitPlanner,
+        // SessionExitLearning, SessionExitLearningStore). The release also ships the stability pack:
+        // coalesced UI publishing (250 ms), a memory-aware resource governor for the snapshot archive,
+        // serialized bitmap rendering and a compact tabbed journal scorecard. See
+        // docs/SESSION_TIMING_LEARNING_FA.md and docs/APP_PERFORMANCE_BUDGET_FA.md.
+        // 3.9.28 (code 737) is the trading-hygiene + scorecard release: no trade may open on a
+        // symbol whose session is closed (the DOW case), any open position left on a closed market
+        // is flattened at its last valid price, and stale/open plans (the BNB 5m 1R = 5.66% case)
+        // are re-anchored into the volatility corridor of their own timeframe by TradePlanGuard
+        // without changing direction or R:R. The snapshot archive stops showing phantom records and
+        // renders reconstructed charts from real recorded candles, the learned-trade counter is
+        // rebuilt from the journal whenever it drifts, and the journal's "کارنامه کلی" is redesigned
+        // around one pure analytics engine (equity curve, drawdown, expectancy, R distribution and
+        // per-class/symbol/timeframe/direction breakdowns). See docs/TRADING_HYGIENE_FA.md and
+        // docs/PERFORMANCE_SCORECARD_FA.md. Regression tests: TradingPerformanceAnalyticsTest
+        // (scorecard maths, corridor-free verdicts) plus the existing TradePlanGuard suite, which
+        // now also covers reviewStoredPlan repairing the legacy 5.66% stop without flipping direction.
+        // 3.9.27 (code 736) ships the neural learning ledger: the self-learning brain now counts
+        // every closed trade exactly once (a stable per-trade fingerprint instead of an ever-growing
+        // counter), repairs the inflated legacy number without losing a single learned weight, and
+        // activates its execution gate only when BOTH conditions hold — 10,000 learned trades AND the
+        // user's explicit switch. Every correction the brain makes is written to a Persian knowledge
+        // changelog and exported with a checksummed "knowledge bundle" (JSON + FA manifest) so the next
+        // app version can read, restore and audit what the previous one learned.
+        // See docs/NEURAL_LEARNING_LEDGER_FA.md. The ledger is authoritative for the gate: reaching
+        // 10,000 learned trades never activates the block by itself — the user's own switch must be on
+        // as well, and switching it off deactivates the gate immediately.
+        // 3.9.26 (code 735) is the trade-plan guard release: stop-loss, take-profit and leverage are
+        // no longer produced by arbitrary anchors. Every plan (strategy report, auto entry, sniper
+        // fill and the manual calculator) passes one engine — TradePlanGuard — that keeps 1R inside
+        // the volatility corridor of the entry timeframe, keeps the target reachable, re-anchors
+        // stale plans (or rejects them) and derives leverage from the stop distance so liquidation
+        // stays at least 2.5R away. See docs/TRADE_PLAN_GUARD_FA.md. The same guard is surfaced in
+        // the UI (settings audit panel, position card and journal) so an off-corridor plan is visible
+        // before it is taken, not only after it fails.
+        // 3.9.32 (code 741) revisits *when* a crypto trade may open. The generic gate still needs
+        // all 16 structural conditions, which on 24/7 crypto can stay unfulfilled for days (the
+        // "no signals for a day" report). While the NeoWave layer is ON, a complete + confirmed +
+        // direction-aligned NeoWave count is itself the crypto entry trigger — with the same
+        // TradePlanGuard risk controls (R:R >= 1.5, valid stop/target, leverage from stop distance)
+        // and no veto. The switch `neoWaveCryptoEntryEnabled` (ON by default) can turn the path off
+        // at any moment; then crypto behaves exactly like 3.9.31 again. The NeoWave layer itself is
+        // unchanged and still OFF by default, so a fresh install stays byte-identical in behaviour.
+        // 3.9.33 (code 742) is a pure visibility fix for 3.9.32: the crypto entry rules were
+        // rendered *inside* the NeoWave card and only while that layer was switched on, so the
+        // user never saw them. They now live in their own always-expanded section at the top of
+        // the strategy tab (CryptoEntryPathCard), independent of the NeoWave switch, with the
+        // switch, the seven entry conditions, the thresholds and a live count of crypto symbols
+        // that currently qualify. No engine logic changed in this version.
+        versionCode = 742
+        versionName = "3.9.33"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

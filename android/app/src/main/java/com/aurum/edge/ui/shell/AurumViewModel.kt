@@ -21,10 +21,12 @@ import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.PriceTick
 import com.aurum.edge.core.RiskAndCalendarEngine
 import com.aurum.edge.core.RiskCalculationResult
+import com.aurum.edge.core.SessionExitPlanner
 import com.aurum.edge.core.Smart15mSyncPlanner
 import com.aurum.edge.core.StrategyEvaluationReport
 import com.aurum.edge.core.StrategyReadinessState
 import com.aurum.edge.core.SymbolPollTier
+import com.aurum.edge.core.TradePlanGuard
 import com.aurum.edge.core.V1Universe
 import com.aurum.edge.domain.Interval
 import com.aurum.edge.domain.SignalAction
@@ -38,6 +40,7 @@ import com.aurum.edge.data.LiveQuoteFetcher
 import com.aurum.edge.data.OpenPositionDisplay
 import com.aurum.edge.data.PairScanState
 import com.aurum.edge.data.PairScanStatus
+import com.aurum.edge.data.SessionExitLearningStore
 import com.aurum.edge.service.BackgroundTradingService
 import java.util.Locale
 import java.util.UUID
@@ -120,9 +123,19 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private var lastScanned5mBucket: Long = -1L
     private var lastMidBarCheckedBucket: Long = -1L
     private var lastAutoFiredBarTimeByKey: Map<String, Long> = emptyMap()
+    /** پلن‌های کهنه/نامعتبری که یک بار به کاربر گزارش شده‌اند تا پیام تکراری ساخته نشود. */
+    private val rejectedPlanKeys = mutableSetOf<String>()
+
+    /** زمان سربارِ آموخته‌شدهٔ خروج پیش از سشن برای هر دستهٔ دارایی (پنل فارسی). */
+    val sessionExitEstimates: StateFlow<List<com.aurum.edge.core.SessionExitLearning.Estimate>> =
+        SessionExitLearningStore.estimates
+
+    /** آخرین نتیجهٔ سنجش «خروج زودتر بهتر بود یا نگه‌داشتن» پس از بازگشایی بازار. */
+    val sessionExitLearningNote: StateFlow<String> = SessionExitLearningStore.lastResolvedFa
 
     init {
         container.settingsStore.ensureBalance100kMigrated()
+        runCatching { SessionExitLearningStore.init(container.appContext) }
         container.appScope.launch {
             container.journalStore.trades.collect { currentTrades ->
                 _stats.value = container.journalStore.stats()
@@ -139,6 +152,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         container.settingsStore.ensureBalance100kMigrated()
         com.aurum.edge.data.PhoneStorageVaultManager.attachContext(container.appContext)
         com.aurum.edge.data.TradeSnapshotArchiveManager.init(container.appContext)
+        com.aurum.edge.data.SessionExitLearningStore.init(container.appContext)
+        // بودجهٔ حافظهٔ آرشیو: قدیمی‌ترین تصاویر حذف می‌شوند تا حافظه بی‌پایان رشد نکند.
+        runCatching { com.aurum.edge.data.TradeSnapshotArchiveManager.pruneToBudget(container.appContext) }
         com.aurum.edge.core.MasterIchimokuTradingAssistant.init(container.appContext)
         container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
@@ -194,11 +210,178 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         )
     }
 
+    /**
+     * آخرین تیک **هر** نماد، مستقل از نرخ انتشار به UI.
+     *
+     * منطق معاملاتی (حد ضرر/حد سود، سشن، پلن) همیشه روی تازه‌ترین قیمت کار می‌کند؛ فقط نمایش
+     * با نرخ محدود به‌روز می‌شود تا بازسازی مکرر صفحه روی گوشی‌های ضعیف باعث لگ/ANR نشود.
+     */
+    private val latestTicks = java.util.concurrent.ConcurrentHashMap<String, PriceTick>()
+
+    /** هم‌گراسازی انتشار وضعیت به UI (حداکثر ۴ بار در ثانیه برای هر کلید). */
+    private val uiCoalescer = com.aurum.edge.core.UiUpdateCoalescer(minIntervalMs = 250L)
+
+    /** پوزیشن‌هایی که پلن‌شان یک‌بار اصلاح شده است. */
+    private val repairedPlanTradeIds = mutableSetOf<String>()
+
+    /** پوزیشن‌هایی که در بازار بسته باز مانده‌اند و باید در اولین تیک بازگشایی بسته شوند. */
+    private val carriedOverClosureIds = mutableSetOf<String>()
+
+    /** آخرین سشنی که برای هر نماد دیده‌ایم؛ برای تشخیص «بازگشایی» بدون نگاه به ساعت. */
+    private val lastClosedStateBySymbol = mutableMapOf<String, Boolean>()
+
+    /** زمان سربار آموخته‌شده برای هر نماد (کش تا از محاسبهٔ تکراری در هر تیک جلوگیری شود). */
+    private val leadMinutesCache = mutableMapOf<String, Int>()
+
+    private fun learnedLeadMinutes(symbol: String): Int = leadMinutesCache.getOrPut(symbol) {
+        runCatching { SessionExitLearningStore.leadMinutesFor(symbol) }
+            .getOrElse { 0 }
+    }
+
+    /**
+     * «بهداشت معاملات» — تصمیم‌های زمانی بازار، دقیقاً همان‌طور که کاربر خواست:
+     *
+     * ۱. **هیچ معامله‌ای به‌صرف بسته بودن بازار بسته نمی‌شود.** پوزیشن باز در بازار بسته فقط
+     *    علامت‌گذاری می‌شود و تا **بازگشایی** صبر می‌شود (نسخهٔ ۳.۹.۲۸ با قیمت کهنه می‌بست که غلط بود).
+     * ۲. **پیش از پایان سشن، در بازار زنده و با قیمت واقعی** بسته می‌شود: در فاصلهٔ
+     *    `بسته‌شدن − زمان سربار` که از `SessionExitLearning` می‌آید (پیش‌فرض سهام ۱۲ دقیقه).
+     * ۳. پوزیشنی که از سشن قبل باز مانده، در **اولین تیک معتبر پس از بازگشایی** بسته می‌شود؛
+     *    قیمت همان تیک در ژورنال ثبت و پاداش واقعی به موتور یادگیری داده می‌شود.
+     * ۴. پلن قدیمی و متورم (نمونهٔ BNB 5m با ۱R = ۵.۶۶٪) با `TradePlanGuard` اصلاح می‌شود.
+     */
+    private fun maintainTradingHygiene(now: Long) {
+        val openTrades = trades.value.filter { it.isOpen }
+        if (openTrades.isEmpty()) {
+            repairedPlanTradeIds.clear()
+            carriedOverClosureIds.clear()
+            lastClosedStateBySymbol.clear()
+            leadMinutesCache.clear()
+            return
+        }
+        for (trade in openTrades) {
+            val symbol = V1Universe.normalize(trade.symbol)
+            val lastTick = latestTicks[symbol] ?: _liveTicks.value[symbol]
+            val lastPrice = lastTick?.price?.takeIf { it.isFinite() && it > 0.0 }
+            val tickIsFresh = lastTick?.let { now - it.at < 15 * 60_000L } == true
+            val plan = SessionExitPlanner.plan(
+                symbol = symbol,
+                now = now,
+                learnedLeadMinutes = learnedLeadMinutes(symbol),
+                hasOpenPosition = true,
+                carriedOverClosure = trade.id in carriedOverClosureIds,
+            )
+
+            // قاعدهٔ ۱: بازار بسته = هرگز بستن با قیمت کهنه؛ فقط انتظار برای بازگشایی.
+            if (plan.closed) {
+                if (carriedOverClosureIds.add(trade.id)) {
+                    _toast.value = "🕒 بازار $symbol بسته است — پوزیشن #${trade.displayTradeNumber} " +
+                        "بدون دست‌کاری تا بازگشایی می‌ماند و در اولین قیمت معتبر بسته می‌شود"
+                }
+                lastClosedStateBySymbol[symbol] = true
+                continue
+            }
+
+            // قاعدهٔ ۳: بازار تازه باز شد و پوزیشن از سشن قبل باز مانده → خروج با قیمت واقعی.
+            val reopened = lastClosedStateBySymbol[symbol] == true
+            if (trade.id in carriedOverClosureIds) {
+                if (lastPrice == null || !tickIsFresh) {
+                    _toast.value = "⏳ بازار $symbol باز شد؛ منتظر اولین قیمت معتبر برای بستن پوزیشن #${trade.displayTradeNumber}"
+                    continue
+                }
+                val closed = container.journalStore.closeTradeAtPrice(
+                    tradeId = trade.id,
+                    exitPrice = lastPrice,
+                    reason = "🕒 خروج در اولین قیمت معتبر پس از بازگشایی سشن $symbol (پوزیشن از سشن قبل باز مانده بود)",
+                    now = now,
+                )
+                if (closed != null) {
+                    carriedOverClosureIds.remove(trade.id)
+                    _toast.value = String.format(
+                        Locale.US,
+                        "🕒 معاملهٔ #%d %s پس از بازگشایی بازار با قیمت واقعی %,.4f بسته شد (P/L %+.2f$)",
+                        closed.displayTradeNumber,
+                        symbol,
+                        lastPrice,
+                        closed.pnlUsd ?: 0.0,
+                    )
+                }
+                lastClosedStateBySymbol[symbol] = false
+                continue
+            }
+            if (reopened) {
+                // یادگیری: پاداش واقعی خروج پیش از سشن با قیمت بازگشایی سنجیده می‌شود.
+                SessionExitLearningStore.resolveReopen(symbol, lastPrice ?: 0.0, now)
+                    ?.let { _toast.value = it }
+                lastClosedStateBySymbol[symbol] = false
+            }
+
+            // قاعدهٔ ۲: خروج خودکار پیش از پایان سشن، در بازار زنده.
+            if (plan.shouldCloseNow && lastPrice != null && tickIsFresh) {
+                val reason = SessionExitPlanner.exitReasonFa(plan, lastPrice)
+                val closed = container.journalStore.closeTradeAtPrice(
+                    tradeId = trade.id,
+                    exitPrice = lastPrice,
+                    reason = reason,
+                    now = now,
+                )
+                if (closed != null) {
+                    SessionExitLearningStore.recordPreCloseExit(
+                        trade = closed,
+                        exitPrice = lastPrice,
+                        leadMinutes = plan.leadMinutes,
+                        now = now,
+                    )
+                    _toast.value = String.format(
+                        Locale.US,
+                        "⏱️ معاملهٔ #%d %s %d دقیقه پیش از پایان سشن بسته شد (P/L %+.2f$)",
+                        closed.displayTradeNumber,
+                        symbol,
+                        plan.leadMinutes,
+                        closed.pnlUsd ?: 0.0,
+                    )
+                }
+                continue
+            }
+
+            // قاعدهٔ ۴: اصلاح پلن قدیمی و متورم.
+            if (trade.id in repairedPlanTradeIds) continue
+            val report = _allSymbolStrategyReports.value[symbol]
+                ?.takeIf { it.triggerInterval == trade.interval }
+            val atr = report?.triggerSnapshot?.atr14 ?: 0.0
+            val review = TradePlanGuard.reviewStoredPlan(
+                symbol = symbol,
+                action = trade.action,
+                entryPrice = trade.entry,
+                stopLoss = trade.initialStopLoss ?: trade.stopLoss,
+                takeProfit = trade.takeProfit,
+                triggerInterval = trade.interval,
+                referenceAtr14 = atr,
+                strategyAtr = report?.strategySnapshot?.atr14 ?: atr,
+            )
+            if (!review.needsRepair) {
+                repairedPlanTradeIds.add(trade.id)
+                continue
+            }
+            val repaired = container.journalStore.repairOpenTradePlan(
+                tradeId = trade.id,
+                newStopLoss = review.guarded.stopLoss,
+                newTakeProfit = review.guarded.takeProfit,
+                reasonFa = "🛡️ ${review.reasonFa}",
+            )
+            if (repaired != null) {
+                repairedPlanTradeIds.add(trade.id)
+                _toast.value = "🛡️ پلن معاملهٔ #${repaired.displayTradeNumber} $symbol (${trade.interval.label}) اصلاح شد — ${review.reasonFa}"
+            }
+        }
+    }
+
     private fun startLiveMonitor() {
         if (liveMonitorJob?.isActive == true) return
         liveMonitorJob = container.appScope.launch {
             while (isActive) {
                 val now = System.currentTimeMillis()
+                // بهداشت پوزیشن‌ها: بستن پوزیشن بازارِ بسته + اصلاح پلن‌های متورم قدیمی
+                runCatching { maintainTradingHygiene(now) }
                 val openSymbolSet = trades.value
                     .filter { it.isOpen }
                     .map { V1Universe.normalize(it.symbol) }
@@ -403,14 +586,20 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     private fun applyIncomingTick(symbolInput: String, tick: PriceTick) {
         val symbol = V1Universe.normalize(symbolInput)
-        _liveTicks.value = _liveTicks.value + (symbol to tick)
+        latestTicks[symbol] = tick
+        val coalesceAt = if (tick.at > 0L) tick.at else System.currentTimeMillis()
+        if (uiCoalescer.shouldPublish("tick:$symbol", coalesceAt)) {
+            _liveTicks.value = _liveTicks.value + (symbol to tick)
+        }
 
         // Update display marks for open trades of this symbol
-        var marks = _lastDisplayMarks.value
-        trades.value.filter { it.isOpen && V1Universe.normalize(it.symbol) == symbol }.forEach { trade ->
-            marks = OpenPositionDisplay.record(marks, trade, tick, tick.at)
+        if (uiCoalescer.shouldPublish("marks:$symbol", coalesceAt)) {
+            var marks = _lastDisplayMarks.value
+            trades.value.filter { it.isOpen && V1Universe.normalize(it.symbol) == symbol }.forEach { trade ->
+                marks = OpenPositionDisplay.record(marks, trade, tick, tick.at)
+            }
+            _lastDisplayMarks.value = marks
         }
-        _lastDisplayMarks.value = marks
 
         // Automatically evaluate TP / SL hits and close triggered trades
         val autoClosed = container.journalStore.onLiveTick(symbol, tick)
@@ -431,7 +620,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         val armedCandidates = dualReport?.sniperArmedReports
             ?.sortedByDescending { it.coreTrendScore }
             ?: listOfNotNull(_allSymbolStrategyReports.value[symbol]).filter { it.isActionable || it.isSniperArmedPendingRetest }
-        if (cfg.autoPaperTrading && !com.aurum.edge.core.MarketHours.closedFor(symbol, tick.at)) {
+        if (cfg.autoPaperTrading && !SessionExitPlanner.plan(symbol, tick.at, learnedLeadMinutes(symbol)).shouldBlockEntry) {
             for (armedReport in armedCandidates.filter { it.isPriceInSniperWindow(tick.price) }) {
                 val openAll = trades.value.filter { it.isOpen }
                 val hasOpenSameStrategyTf = openAll.any {
@@ -447,23 +636,35 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     val sl = armedReport.suggestedStopLoss
                     val rawTp = armedReport.primaryTakeProfit
                     if (sl != null && rawTp != null) {
-                        val enforcedTp = RiskAndCalendarEngine.enforceMinimumRiskReward(
-                            symbolInput = symbol,
-                            entryPrice = tick.price,
-                            stopLoss = sl,
-                            takeProfit = rawTp,
+                        // لنگر انداختن پلن گزارش روی قیمت لحظه‌ای + کهنگی‌سنجی + دالان نوسان تایم‌فریم
+                        val guarded = TradePlanGuard.rebaseToLive(
+                            symbol = symbol,
                             action = armedReport.action,
-                            minRiskReward = RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD,
+                            liveEntryPrice = tick.price,
+                            planAnchorEntry = armedReport.suggestedEntry ?: armedReport.livePrice,
+                            planStopLoss = sl,
+                            planTakeProfit = rawTp,
+                            referenceAtr = armedReport.triggerSnapshot?.atr14 ?: 0.0,
+                            triggerInterval = armedReport.triggerInterval,
+                            strategyAtr = armedReport.strategySnapshot?.atr14 ?: 0.0,
+                            desiredRiskReward = (armedReport.optimalRiskReward ?: RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD)
+                                .coerceAtLeast(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD),
                         )
+                        if (!guarded.isUsable) {
+                            lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
+                            continue
+                        }
                         val calc = RiskAndCalendarEngine.calculatePosition(
                             symbolInput = symbol,
                             accountBalance = cfg.accountBalance,
                             riskPercent = cfg.riskPercent,
                             entry = tick.price,
-                            stopLoss = sl,
-                            takeProfit = enforcedTp,
+                            stopLoss = guarded.stopLoss,
+                            takeProfit = guarded.takeProfit,
                             preferredAction = armedReport.action,
                             fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
+                            triggerInterval = armedReport.triggerInterval,
+                            referenceAtr14 = armedReport.triggerSnapshot?.atr14 ?: 0.0,
                         )
                         if (calc != null && calc.riskReward >= RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD) {
                             lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to armedReport.triggerBarTime)
@@ -746,13 +947,32 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     ) {
         val now = System.currentTimeMillis()
         val normSym = V1Universe.normalize(calc.symbol)
+        // ورود روی نمادی که بازارش بسته است ممنوع می‌شود: قیمت‌ها کهنه‌اند و گپ بازگشایی سشن
+        // می‌تواند حد ضرر را بدون امکان خروج رد کند (گزارش کاربر: معاملهٔ DOW در بازار بسته).
+        // ورود در بازار بسته و همچنین در «پنجرهٔ خروج پیش از سشن» ممنوع است: معامله‌ای که تا پایان
+        // سشن فرصت کارکردن ندارد، فقط ریسک گپ شبانه می‌خرد. پنجره با زمان سربارِ آموخته‌شده تعیین می‌شود.
+        val sessionPlan = SessionExitPlanner.plan(
+            symbol = normSym,
+            now = now,
+            learnedLeadMinutes = learnedLeadMinutes(normSym),
+            hasOpenPosition = false,
+        )
+        if (sessionPlan.shouldBlockEntry) {
+            _toast.value = "⛔ ورود به ${calc.symbol} در این لحظه مجاز نیست — " + sessionPlan.badgeFa +
+                " · معامله باز نشد"
+            return
+        }
+        val sessionWarningFa = if ((sessionPlan.minutesToExit ?: Long.MAX_VALUE) <= 45L) {
+            "⏳ " + sessionPlan.badgeFa
+        } else ""
+        val effectiveNote = if (sessionWarningFa.isBlank()) note else "$note · $sessionWarningFa".trim(' ', '·')
         val matchedReport = _dualSymbolStrategyReports.value[normSym]
             ?.reportFor(entryInterval, strategyId)
         val matchedBreakdown = matchedReport?.rrBreakdown
         val entryCandles = LiveQuoteFetcher.peekCachedCandles(normSym, entryInterval)
         val openedRaw = container.journalStore.openTrade(
             calc = calc,
-            note = note,
+            note = effectiveNote,
             now = now,
             entryInterval = entryInterval,
             strategyId = strategyId,
@@ -1366,43 +1586,45 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                         val rawSl = report.suggestedStopLoss
                         val rawTp = report.primaryTakeProfit
                         if (rawEntry != null && rawSl != null && rawTp != null) {
-                            // لنگر انداختن نقطهٔ ورود، حد ضرر و حد سود به قیمت لحظه‌ای اجرا (جلوگیری از استاپ فوری در ارزهای کریپتو)
+                            // لنگر انداختن نقطهٔ ورود، حد ضرر و حد سود به قیمت لحظه‌ای اجرا + دالان نوسان تایم‌فریم
                             val liveTickPrice = _liveTicks.value[symbol]?.price?.takeIf { it.isFinite() && it > 0.0 }
                             val executionEntry = liveTickPrice
                                 ?: report.livePrice?.takeIf { it.isFinite() && it > 0.0 }
                                 ?: rawEntry
-                            val entryDelta = executionEntry - rawEntry
-                            val shiftedSl = rawSl + entryDelta
-                            val shiftedTp = rawTp + entryDelta
                             val desiredRr = (report.optimalRiskReward ?: RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD)
                                 .coerceAtLeast(RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD)
-                            val (safeSl, safeTp) = RiskAndCalendarEngine.sanitizeEntryStopAndTarget(
-                                symbolInput = symbol,
+                            val guarded = TradePlanGuard.rebaseToLive(
+                                symbol = symbol,
                                 action = report.action,
                                 liveEntryPrice = executionEntry,
-                                candidateStopLoss = shiftedSl,
-                                candidateTakeProfit = shiftedTp,
-                                desiredRiskReward = desiredRr,
-                                trigAtr14 = report.triggerSnapshot?.atr14 ?: 0.0,
+                                planAnchorEntry = rawEntry,
+                                planStopLoss = rawSl,
+                                planTakeProfit = rawTp,
+                                referenceAtr = report.triggerSnapshot?.atr14 ?: 0.0,
                                 triggerInterval = report.triggerInterval,
+                                strategyAtr = report.strategySnapshot?.atr14 ?: 0.0,
+                                desiredRiskReward = desiredRr,
                             )
-                            val enforcedTp = RiskAndCalendarEngine.enforceMinimumRiskReward(
-                                symbolInput = symbol,
-                                entryPrice = executionEntry,
-                                stopLoss = safeSl,
-                                takeProfit = safeTp,
-                                action = report.action,
-                                minRiskReward = desiredRr,
-                            )
+                            if (!guarded.isUsable) {
+                                // پلن کهنه/غیرمعتبر است: با اعداد قدیمی معامله باز نمی‌شود و پیام تکراری هم ساخته نمی‌شود
+                                val rejectKey = "$fireKey|${report.triggerBarTime}"
+                                if (rejectedPlanKeys.add(rejectKey)) {
+                                    _toast.value = "🛡️ ورود ${report.symbol} (${report.triggerInterval.label}) انجام نشد: " +
+                                        (guarded.reasonsFa.firstOrNull() ?: "پلن نامعتبر")
+                                }
+                                continue
+                            }
                             val calc = RiskAndCalendarEngine.calculatePosition(
                                 symbolInput = symbol,
                                 accountBalance = cfg.accountBalance,
                                 riskPercent = cfg.riskPercent,
                                 entry = executionEntry,
-                                stopLoss = safeSl,
-                                takeProfit = enforcedTp,
+                                stopLoss = guarded.stopLoss,
+                                takeProfit = guarded.takeProfit,
                                 preferredAction = report.action,
                                 fixedRiskUsdOverride = if (cfg.useFixedDollarRisk) cfg.fixedRiskUsd else null,
+                                triggerInterval = report.triggerInterval,
+                                referenceAtr14 = report.triggerSnapshot?.atr14 ?: 0.0,
                             )
                             if (calc != null && calc.riskReward >= RiskAndCalendarEngine.MIN_REQUIRED_RISK_REWARD) {
                                 lastAutoFiredBarTimeByKey = lastAutoFiredBarTimeByKey + (fireKey to report.triggerBarTime)
@@ -1552,12 +1774,56 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun evaluateReportWithNeuralEngine(report: StrategyEvaluationReport): NeuralSignalEvaluation =
         container.neuralEngine.evaluateReport(report)
 
-    fun setNeuralForceActiveBeforeWarmup(enabled: Boolean) {
-        container.neuralEngine.setForceActiveBeforeWarmup(enabled)
-        _toast.value = if (enabled) {
-            "🧠 فیلتر شبکه عصبی خودآموز پیش از ۱۰,۰۰۰ معامله نیز فعال شد"
-        } else {
-            "🧠 شبکه عصبی تا تکمیل ۱۰,۰۰۰ معامله در حالت یادگیری خالص (بدون بلاک) قرار گرفت"
+    /**
+     * شرط دوم فعال‌سازی گیت شبکهٔ عصبی: تصمیم صریح کاربر.
+     * شرط اول همیشه «۱۰,۰۰۰ معاملهٔ یادگیری‌شده» است و با این کلید دور زده نمی‌شود.
+     */
+    fun setNeuralGateUserActivation(enabled: Boolean) {
+        container.neuralEngine.setGateUserActivation(enabled)
+        val st = container.neuralEngine.state.value
+        _toast.value = when {
+            st.isGateActive ->
+                "🧠🟢 گیت شبکه عصبی فعال شد (هر دو شرط کامل): ورود در شرایط پرخطر مسدود می‌شود"
+            enabled ->
+                "🧠 شرط ۲ ثبت شد · گیت پس از رسیدن به ${st.warmupTargetTrades} معاملهٔ یادگیری‌شده " +
+                    "خودکار وارد مدار می‌شود (اکنون ${st.totalLearnedTrades}/${st.warmupTargetTrades})"
+            else ->
+                "🧠 گیت شبکه عصبی غیرفعال شد؛ شبکه فقط یاد می‌گیرد و هشدار می‌دهد"
+        }
+    }
+
+    fun setNeuralForceActiveBeforeWarmup(enabled: Boolean) = setNeuralGateUserActivation(enabled)
+
+    /** بازبینی دستی دفتر یادگیری و تطبیق عدد یادگیری با معامله‌های واقعی ژورنال. */
+    fun auditNeuralLearningLedgerNow() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val reconciliation = container.neuralEngine.auditLearningLedger(trades.value)
+            _toast.value = reconciliation.summaryFa
+        }
+    }
+
+    /** ذخیرهٔ بستهٔ دانش شبکه (JSON) + منیفست فارسی در Download/AurumEdge/Archive. */
+    fun exportNeuralKnowledgeBundleNow() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val files = container.neuralEngine.exportKnowledgeBundleToPhoneStorage(
+                context = container.appContext,
+                appVersionName = com.aurum.edge.BuildConfig.VERSION_NAME,
+                appVersionCode = com.aurum.edge.BuildConfig.VERSION_CODE,
+            )
+            _toast.value = if (files != null) {
+                "🧾 بستهٔ دانش ذخیره شد: $files (پوشهٔ Download/AurumEdge/Archive)"
+            } else {
+                "🧾 بستهٔ دانش در حافظهٔ داخلی اپ آماده شد؛ برای ذخیره در پوشهٔ دانلود دسترسی لازم است"
+            }
+        }
+    }
+
+    /** بازخوانی جدیدترین بستهٔ دانش از Download/AurumEdge/Archive با ادغام ایمن. */
+    fun restoreNeuralKnowledgeBundleFromPhoneNow() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val result = container.neuralEngine.restoreKnowledgeBundleFromPhoneStorage(container.appContext)
+            _toast.value = result?.summaryFa
+                ?: "📥 هیچ بستهٔ دانش (AurumNeuralKnowledge) در Download/AurumEdge/Archive پیدا نشد"
         }
     }
 
