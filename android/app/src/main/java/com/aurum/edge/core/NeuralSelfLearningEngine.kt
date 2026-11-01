@@ -582,10 +582,23 @@ class NeuralSelfLearningEngine(
 
         // تولید گزارش تحلیلی فارسی از تمام چیزهایی که شبکه عصبی تا این لحظه فهمیده و یاد گرفته است
         val insightsFeed = mutableListOf<String>()
-        val topAttn1 = featInsights.getOrNull(0)
-        val topAttn2 = featInsights.getOrNull(1)
+        // اگر توجه هنوز یکنواخت باشد (تفاوت کمتر از ۱ واحد درصد)، ادعای «تمرکز» گمراه‌کننده است؛
+        // در این حالت رتبه‌بندی را از روی اثر خالص وزن‌ها می‌گوییم که واقعاً تفکیک دارد.
+        val attnSpread = (featInsights.maxOfOrNull { it.attentionPercent } ?: 0.0) -
+            (featInsights.minOfOrNull { it.attentionPercent } ?: 0.0)
+        val attentionStillUniform = featInsights.isNotEmpty() && attnSpread < 1.0
+        val rankedByWeight = featInsights.sortedByDescending { abs(it.netWeightImpact) }
+        val topAttn1 = if (attentionStillUniform) rankedByWeight.getOrNull(0) else featInsights.getOrNull(0)
+        val topAttn2 = if (attentionStillUniform) rankedByWeight.getOrNull(1) else featInsights.getOrNull(1)
         if (topAttn1 != null && topAttn2 != null) {
-            insightsFeed += "🧠 تمرکز اصلی شبکه عصبی (FT-Attention): بیشترین وزن تصمیم‌گیری شبکه در حال حاضر روی «${topAttn1.titleFa}» (${topAttn1.attentionPercent}%) و «${topAttn2.titleFa}» (${topAttn2.attentionPercent}%) متمرکز شده است."
+            insightsFeed += if (attentionStillUniform) {
+                "🧠 توزیع توجه (FT-Attention) هنوز یکنواخت است: هر ۱۶ ویژگی سهم برابر " +
+                    "${topAttn1.attentionPercent}% دارند، پس هیچ ویژگی‌ای بر دیگری ترجیح داده نشده است. " +
+                    "بیشترین اثر واقعی روی تصمیم‌گیری از نظر وزن، «${topAttn1.titleFa}» (${String.format(Locale.US, "%+.2f", topAttn1.netWeightImpact)}) " +
+                    "و «${topAttn2.titleFa}» (${String.format(Locale.US, "%+.2f", topAttn2.netWeightImpact)}) است."
+            } else {
+                "🧠 تمرکز اصلی شبکه عصبی (FT-Attention): بیشترین وزن تصمیم‌گیری شبکه در حال حاضر روی «${topAttn1.titleFa}» (${topAttn1.attentionPercent}%) و «${topAttn2.titleFa}» (${topAttn2.attentionPercent}%) متمرکز شده است."
+            }
         }
         if (total == 0) {
             insightsFeed += "📚 وضعیت پایه (دانش اولیه ۲۴ استراتژی): شبکه عصبی با دانش پایه ایچیموکو (تقویت کارایی روند ER14، ضخامت ابر آینده ۲۶ کندلی و جریمه کشیدگی C-Clamp و شدوهای فیک‌بریک‌اوت) مقداردهی شده و به محض بسته شدن اولین معامله، وزن‌ها را با الگوریتم AdamW به‌روزرسانی می‌کند."

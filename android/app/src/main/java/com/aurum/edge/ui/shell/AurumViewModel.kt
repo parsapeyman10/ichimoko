@@ -2693,6 +2693,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 )
                 add(R.label("دالان حد ضرر", reg.optimalStopLossCorridorFa))
                 add(R.label("قفل R:R", reg.optimalRrCorridorFa))
+                add(
+                    "ℹ️ سه عدد R:R در این گزارش با هم فرق دارند و هر سه درست‌اند: کف مطلق قانون ۱.۵۰ (هرگز پایین‌تر نمی‌رود)، " +
+                        "کف پیشنهادی رگرسیون (ردیف ۲ پایین) و کف تیونینگ خودکار (بخش «تیونینگ خودکار پارامترها»). " +
+                        "عددی که موتور ورود واقعاً اعمال می‌کند همان کف تیونینگ است و همیشه داخل بازهٔ قفل‌شدهٔ ۱.۵ تا ۳.۰ می‌ماند.",
+                )
                 if (reg.parameterRows.isNotEmpty()) {
                     add("")
                     add("پارامترهای رگرسیون‌شده:")
@@ -2852,7 +2857,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 add(R.label("معاملات برندهٔ تحلیل‌شده", R.number(f.totalWinsAnalyzed.toDouble(), 0)))
                 add(R.label("معاملات بازندهٔ تحلیل‌شده", R.number(f.totalLossesAnalyzed.toDouble(), 0)))
                 add(R.label("میانگین برد", R.rMultiple(f.avgWinR)))
-                add(R.label("میانگین باخت", R.rMultiple(f.avgLossR)))
+                add(R.label("میانگین باخت", R.rMultiple(-kotlin.math.abs(f.avgLossR))))
                 add(R.label("پروفیت فاکتور", R.number(f.profitFactor, 2)))
                 add(R.label("امید ریاضی هر معامله", R.rMultiple(f.expectancyPerTradeR)))
                 add(R.label("بهترین تایم‌فریم", f.bestTimeframeSummaryFa))
@@ -2922,16 +2927,22 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             key = "clusters",
             titleFa = "تله‌های ممنوعه و الگوهای طلایی",
             lines = buildList {
+                add(
+                    "ℹ️ «مشاهده» یعنی هر باری که یک معاملهٔ بسته‌شده در این خوشه ثبت شده است (تجمعی). " +
+                        "این عدد با شمارندهٔ معاملات یکتا یکی نیست؛ شمارندهٔ یکتا و تطبیق‌شده با ژورنال در بخش «دفتر یادگیری» است " +
+                        "(${R.number(s.totalLearnedTrades.toDouble(), 0)} معاملهٔ یکتا).",
+                )
+                add("")
                 add("⛔ تله‌های ممنوعه (${s.noTradeClusters.size}):")
                 if (s.noTradeClusters.isEmpty()) add("• هنوز خوشهٔ ضرردهٔ پرتکراری ثبت نشده است.")
                 s.noTradeClusters.take(20).forEach { c ->
-                    add("• ${c.conditionDescriptionFa} — نمونه ${c.totalCount} | برد ${c.winCount} | باخت ${c.lossCount} | احتمال برد ${R.pct(c.posteriorWinProb * 100.0)} | میانگین ${R.rMultiple(c.avgR)}")
+                    add("• ${c.conditionDescriptionFa} — مشاهده ${c.totalCount} | برد ${c.winCount} | باخت ${c.lossCount} | احتمال برد ${R.pct(c.posteriorWinProb * 100.0)} | میانگین ${R.rMultiple(c.avgR)}")
                 }
                 add("")
                 add("🎯 الگوهای طلایی (${s.winningClusters.size}):")
                 if (s.winningClusters.isEmpty()) add("• هنوز الگوی پرتکرار سوددهی ثبت نشده است.")
                 s.winningClusters.take(20).forEach { c ->
-                    add("• ${c.conditionDescriptionFa} — نمونه ${c.totalCount} | برد ${c.winCount} | احتمال برد ${R.pct(c.posteriorWinProb * 100.0)} | میانگین ${R.rMultiple(c.avgR)}")
+                    add("• ${c.conditionDescriptionFa} — مشاهده ${c.totalCount} | برد ${c.winCount} | احتمال برد ${R.pct(c.posteriorWinProb * 100.0)} | میانگین ${R.rMultiple(c.avgR)}")
                 }
             },
         )
@@ -2941,10 +2952,24 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             titleFa = "وزن ۱۶ ویژگی ایچیموکو در مغز شبکه",
             lines = buildList {
                 if (s.featureInsights.isEmpty()) add("وزن ویژگی‌ها هنوز محاسبه نشده است.")
-                s.featureInsights.sortedByDescending { it.attentionPercent }.forEach { f ->
-                    add("• #${f.index} ${f.titleFa} — سهم توجه ${R.pct(f.attentionPercent)} | اثر خالص وزن ${R.number(f.netWeightImpact, 3)} | ${f.impactLabelFa}")
-                    if (f.explanationFa.isNotBlank()) add("   ${f.explanationFa}")
+                val attnSpread = (s.featureInsights.maxOfOrNull { it.attentionPercent } ?: 0.0) -
+                    (s.featureInsights.minOfOrNull { it.attentionPercent } ?: 0.0)
+                val uniformAttention = s.featureInsights.isNotEmpty() && attnSpread < 1.0
+                if (uniformAttention) {
+                    add(
+                        "ℹ️ سهم توجه (Self-Attention) در حال حاضر یکنواخت است: هر یک از ۱۶ ویژگی " +
+                            "${R.pct(s.featureInsights.first().attentionPercent)} — یعنی شبکه هنوز هیچ ویژگی را بر دیگری ترجیح نداده است. " +
+                            "برای دیدن تفکیک واقعی، ستون «اثر خالص وزن» را بخوانید؛ این فهرست بر اساس همان اثر مرتب شده است.",
+                    )
+                    add("")
                 }
+                s.featureInsights
+                    .sortedByDescending { if (uniformAttention) kotlin.math.abs(it.netWeightImpact) else it.attentionPercent }
+                    .forEach { f ->
+                        val attnPart = if (uniformAttention) "" else "سهم توجه ${R.pct(f.attentionPercent)} | "
+                        add("• #${f.index} ${f.titleFa} — ${attnPart}اثر خالص وزن ${R.number(f.netWeightImpact, 3)} | ${f.impactLabelFa}")
+                        if (f.explanationFa.isNotBlank()) add("   ${f.explanationFa}")
+                    }
             },
         )
 
@@ -2958,7 +2983,12 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     val d = dual[sym] ?: return@forEach
                     listOfNotNull(d.report15m, d.report5m).forEach { rep ->
                         val ev = runCatching { evaluateReportWithNeuralEngine(rep) }.getOrNull() ?: return@forEach
-                        add("• ${ev.symbol} [${rep.triggerInterval.label}] — احتمال برد ${R.pct(ev.predictedWinProb * 100.0)} | امید ریاضی ${R.rMultiple(ev.expectedR)} | ${if (ev.shouldAllowTrade) "اجازهٔ ورود" else "ممنوع"}")
+                        val decisionFa = when {
+                            ev.isBlockingTradeNow -> "⛔ ممنوع (گیت عصبی فعال است)"
+                            ev.isNoTradeCondition -> "⚠️ شرایط پرخطر — گیت خاموش، تصمیم نهایی با موتور قواعد"
+                            else -> "✅ اجازهٔ ورود"
+                        }
+                        add("• ${ev.symbol} [${rep.triggerInterval.label}] — احتمال برد ${R.pct(ev.predictedWinProb * 100.0)} | امید ریاضی ${R.rMultiple(ev.expectedR)} | $decisionFa")
                         if (ev.summaryFa.isNotBlank()) add("   ${ev.summaryFa}")
                         if (!ev.noTradeWarningFa.isNullOrBlank()) add("   ⛔ ${ev.noTradeWarningFa}")
                         if (ev.causalAttributionFa.isNotBlank()) add("   علت: ${ev.causalAttributionFa}")
