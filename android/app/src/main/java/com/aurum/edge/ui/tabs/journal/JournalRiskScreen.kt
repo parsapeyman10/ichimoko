@@ -11,6 +11,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -2090,8 +2091,8 @@ private fun MonthlyPnlCalendarSection(
 
         // ── راهنمای خواندن تقویم ────────────────────────────────────────────
         Text(
-            text = "سبز = سود · قرمز = ضرر · رنگ و ارتفاع هر خانه به بزرگی سود/زیان همان روز بستگی دارد · " +
-                "حلقهٔ فیروزه‌ای = امروز",
+            text = "سبز = سود · قرمز = ضرر · شدت رنگ هر خانه به بزرگی سود/زیان همان روز بستگی دارد · " +
+                "همهٔ خانه‌ها مربعی و هم‌اندازه‌اند · حلقهٔ فیروزه‌ای = امروز",
             style = MaterialTheme.typography.labelSmall,
             color = AurumColors.TextMuted,
             modifier = Modifier.padding(top = 8.dp),
@@ -2124,24 +2125,14 @@ private fun MonthlyPnlCalendarSection(
             }
         }
 
-        // ── شبکهٔ تقویم (داینامیک: ارتفاع خانه با بزرگی سود/زیان روز) ─────────
+        // ── شبکهٔ تقویم (خانه‌های مربعی و کاملاً هم‌اندازه) ───────────────────
+        // در نسخه‌های قبل ارتفاع خانه با بزرگی سود/زیان روز تغییر می‌کرد و اندازهٔ عدد داخل خانه
+        // هم ثابت نبود؛ نتیجه «به‌هم‌ریختگی» بود. حالا هر خانه با aspectRatio(1f) مربع می‌شود،
+        // همهٔ ردیف‌ها ارتفاع یکسان دارند و اندازهٔ همهٔ عددها ثابت است (۹sp برای مبلغ).
         val totalCells = calendar.firstDayOffsetSaturdayStart + calendar.daysInMonth
         val rowCount = (totalCells + 6) / 7
-        // ارتفاع خانه‌ها «داینامیک» است ولی داخل هر ردیف یکسان می‌ماند؛ وگرنه ردیف‌ها دندانه‌دار
-        // و صفحه به‌هم‌ریخته دیده می‌شود.
-        fun rowIntensity(row: Int): Double {
-            var maxValue = 0.0
-            for (col in 0 until 7) {
-                val dayNumber = row * 7 + col - calendar.firstDayOffsetSaturdayStart + 1
-                if (dayNumber !in 1..calendar.daysInMonth) continue
-                val value = abs(calendar.days[dayNumber - 1].netPnlUsd)
-                if (value > maxValue) maxValue = value
-            }
-            return if (maxAbsDayPnl <= 0.0) 0.0 else (maxValue / maxAbsDayPnl).coerceIn(0.0, 1.0)
-        }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             for (r in 0 until rowCount) {
-                val rowHeight = (56 + (rowIntensity(r) * 24.0)).dp
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -2155,7 +2146,7 @@ private fun MonthlyPnlCalendarSection(
                         } else null
                         if (daySummary == null) {
                             // خانهٔ خالی هم‌ارتفاع ردیف می‌ماند تا شبکه دندانه‌دار نشود.
-                            Box(modifier = Modifier.weight(1f).height(rowHeight))
+                            Box(modifier = Modifier.weight(1f).aspectRatio(1f))
                         } else {
                             val intensity = if (maxAbsDayPnl <= 0.0) {
                                 0.0
@@ -2167,8 +2158,7 @@ private fun MonthlyPnlCalendarSection(
                                 isSelected = selectedDayOfMonth == daySummary.dayOfMonth,
                                 isToday = isCurrentMonth && todayZoned.dayOfMonth == daySummary.dayOfMonth,
                                 intensity = intensity,
-                                cellHeight = rowHeight,
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.weight(1f).aspectRatio(1f),
                                 onClick = {
                                     selectedDayOfMonth = if (selectedDayOfMonth == daySummary.dayOfMonth) {
                                         0
@@ -2349,7 +2339,6 @@ private fun CalendarDayCell(
     isSelected: Boolean,
     isToday: Boolean,
     intensity: Double,
-    cellHeight: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -2376,61 +2365,71 @@ private fun CalendarDayCell(
 
     Column(
         modifier = modifier
-            .height(cellHeight)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(9.dp))
             .background(background)
             .border(
                 width = if (isSelected || isToday) 2.dp else 1.dp,
                 color = borderColor,
-                shape = RoundedCornerShape(10.dp),
+                shape = RoundedCornerShape(9.dp),
             )
             .clickable { onClick() }
-            .padding(horizontal = 4.dp, vertical = 5.dp),
+            .padding(horizontal = 2.dp, vertical = 3.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = summary.dayOfMonth.toString(),
-                style = MaterialTheme.typography.labelSmall,
                 color = if (hasTrades) AurumColors.TextPrimary else AurumColors.TextMuted,
                 fontWeight = FontWeight.Bold,
+                // اندازهٔ ثابت و یکسان برای شمارهٔ روز در همهٔ خانه‌ها
+                fontSize = 11.sp,
+                lineHeight = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (hasTrades) {
                 Text(
                     text = "${summary.closedTradesCount}",
-                    style = MaterialTheme.typography.labelSmall,
                     color = accent.copy(alpha = 0.9f),
                     fontWeight = FontWeight.Bold,
+                    fontSize = 9.sp,
+                    lineHeight = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
         if (hasTrades) {
             Text(
                 text = compactSignedUsd(summary.netPnlUsd),
-                style = MaterialTheme.typography.labelSmall,
                 color = accent,
                 fontWeight = FontWeight.Bold,
+                // همان اندازهٔ ثابت ۹sp برای مبلغ روز؛ softWrap خاموش است تا عدد هرگز نشکند
+                fontSize = 9.sp,
+                lineHeight = 11.sp,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
                 softWrap = false,
+                overflow = TextOverflow.Visible,
+                modifier = Modifier.fillMaxWidth(),
             )
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 2.dp)
-                    .height(3.dp)
+                    .padding(horizontal = 1.dp)
+                    .height(2.dp)
                     .clip(RoundedCornerShape(2.dp))
                     .background(accent.copy(alpha = 0.18f)),
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth(intensity.toFloat().coerceIn(0.08f, 1f))
-                        .height(3.dp)
+                        .height(2.dp)
                         .clip(RoundedCornerShape(2.dp))
                         .background(accent),
                 )
@@ -2438,8 +2437,10 @@ private fun CalendarDayCell(
         } else {
             Text(
                 text = "—",
-                style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted.copy(alpha = 0.55f),
+                fontSize = 9.sp,
+                lineHeight = 11.sp,
+                maxLines = 1,
             )
         }
     }

@@ -93,18 +93,32 @@ fun HomeScreen(
     val displayPrices = frozenPrices + freshPrices
     val displayPnl = LiveTradeValuation.total(openTradesList, displayPrices)
     val totalMarginUsed = openTradesList.sumOf { it.effectiveMarginUsd }
-    val equity = displayPnl?.let { settings.accountBalance + it }
-    val freeMargin = equity?.let { (it - totalMarginUsed).coerceAtLeast(0.0) }
     val readyCount = dualReports.values.sumOf { it.actionableReports.size }.takeIf { it > 0 }
         ?: strategyReports.values.count { it.isActionable }
 
-    val balanceStr = String.format(Locale.US, "$%,.2f", settings.accountBalance)
-    val equityStr = equity?.let { String.format(Locale.US, "$%,.2f", it) } ?: balanceStr
-    val freeMarginStr = freeMargin?.let { String.format(Locale.US, "$%,.2f", it) } ?: balanceStr
-    val netPnlStr = (if (stats.netPnl >= 0) "+" else "") + String.format(Locale.US, "$%,.2f", stats.netPnl)
-    val floatingPnlStr = displayPnl?.let {
-        (if (it >= 0) "+" else "-") + String.format(Locale.US, "$%,.2f", abs(it))
-    } ?: "$0.00"
+    // ── دفتر واحد حساب: هر عددی که در این کارت دیده می‌شود از همین یک شیء ساخته می‌شود تا
+    //    «موجودی + تحققیافته + شناور = اکوئیتی» همیشه با هم بخواند (راهنمای تفصیلی: docs/HOME_NUMBERS_FA.md).
+    val unpricedOpenTrades = openTradesList.count { trade -> displayPrices[trade.symbol] == null }
+    val ledger = com.aurum.edge.core.AccountReconciliation.snapshot(
+        baseBalanceUsd = settings.accountBalance,
+        initialCapitalUsd = settings.initialCapital,
+        realizedNetPnlUsd = stats.netPnl,
+        floatingNetPnlUsd = displayPnl,
+        marginInUseUsd = totalMarginUsed,
+        usesFixedDollarRisk = settings.useFixedDollarRisk,
+        fixedRiskUsd = settings.fixedRiskUsd,
+        riskPercent = settings.riskPercent,
+        unpricedOpenTrades = unpricedOpenTrades,
+    )
+    val balanceStr = com.aurum.edge.core.AccountLedgerSnapshot.money(ledger.baseBalanceUsd)
+    val equityStr = com.aurum.edge.core.AccountLedgerSnapshot.money(ledger.equityUsd)
+    val freeMarginStr = com.aurum.edge.core.AccountLedgerSnapshot.money(ledger.freeMarginUsd)
+    val marginInUseStr = com.aurum.edge.core.AccountLedgerSnapshot.money(ledger.marginInUseUsd)
+    val realizedStr = com.aurum.edge.core.AccountLedgerSnapshot.signed(ledger.realizedNetPnlUsd)
+    val floatingPnlStr = com.aurum.edge.core.AccountLedgerSnapshot.signed(ledger.floatingOrZeroUsd)
+    val netPnlStr = realizedStr
+    val riskStr = com.aurum.edge.core.AccountLedgerSnapshot.money(ledger.riskPerTradeUsd)
+    val openTradesStr = openTradesList.size.toString()
 
     Column(
         Modifier
@@ -159,36 +173,63 @@ fun HomeScreen(
                 }
             }
 
+            // ردیف ۱ — پولِ لحظه‌ای
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 StatTile(
-                    label = "اکوئیتی لحظه‌ای",
+                    label = "اکوئیتی",
                     value = equityStr,
-                    valueColor = if (displayPnl == null) AurumColors.TextPrimary else if (displayPnl >= 0) AurumColors.Green else AurumColors.Red,
+                    valueColor = if (ledger.floatingOrZeroUsd >= 0.0) AurumColors.Green else AurumColors.Red,
                     modifier = Modifier.weight(1f),
                 )
                 StatTile(
-                    label = "سود/زیان شناور",
+                    label = "شناور",
                     value = floatingPnlStr,
-                    valueColor = if ((displayPnl ?: 0.0) >= 0.0) AurumColors.Green else AurumColors.Red,
+                    valueColor = if (ledger.floatingOrZeroUsd >= 0.0) AurumColors.Green else AurumColors.Red,
                     modifier = Modifier.weight(1f),
                 )
                 StatTile(
                     label = "مارجین آزاد",
                     value = freeMarginStr,
-                    valueColor = AurumColors.Cyan,
+                    valueColor = if (ledger.isMarginExceeded) AurumColors.Red else AurumColors.Cyan,
                     modifier = Modifier.weight(1f),
                 )
             }
 
+            // ردیف ۲ — دفتر تحقق‌یافته و ریسک
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 StatTile(
-                    label = "برآیند کل ژورنال",
+                    label = "تحقق‌یافته (ژورنال)",
+                    value = realizedStr,
+                    valueColor = if (ledger.realizedNetPnlUsd >= 0.0) AurumColors.Green else AurumColors.Red,
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "مارجین درگیر",
+                    value = marginInUseStr,
+                    valueColor = AurumColors.Gold,
+                    modifier = Modifier.weight(1f),
+                )
+                StatTile(
+                    label = "ریسک هر معامله",
+                    value = riskStr,
+                    valueColor = AurumColors.Cyan,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            // ردیف ۳ — آمار ژورنال
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                StatTile(
+                    label = "برآیند ژورنال",
                     value = netPnlStr,
                     valueColor = if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red,
                     modifier = Modifier.weight(1f),
@@ -200,11 +241,69 @@ fun HomeScreen(
                     modifier = Modifier.weight(1f),
                 )
                 StatTile(
-                    label = "ریسک هر معامله",
-                    value = "-$${settings.fixedRiskUsd.toInt()} / +$${settings.fixedRiskUsd.toInt()}×R:R",
-                    valueColor = AurumColors.Cyan,
+                    label = "معاملات باز",
+                    value = openTradesStr,
+                    valueColor = AurumColors.TextPrimary,
                     modifier = Modifier.weight(1f),
                 )
+            }
+
+            // ── معادلهٔ حساب: دقیقاً نشان می‌دهد هر عدد از کدام عدد ساخته شده ──
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AurumColors.SurfaceAlt.copy(alpha = 0.55f))
+                    .padding(horizontal = 9.dp, vertical = 7.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    text = ledger.equationFa(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextSecondary,
+                    lineHeight = 16.sp,
+                )
+                Text(
+                    text = "🧮 قاعدهٔ ریسک: ${ledger.riskModeFa()} · سرمایهٔ پایه: " +
+                        com.aurum.edge.core.AccountLedgerSnapshot.money(ledger.initialCapitalUsd),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                    lineHeight = 16.sp,
+                )
+                Text(
+                    text = ledger.alignmentFa(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (ledger.isAligned) AurumColors.Green else AurumColors.Gold,
+                    lineHeight = 16.sp,
+                )
+                if (!ledger.isAligned) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        Pill(
+                            text = "🔄 هم‌ترازسازی موجودی با ژورنال",
+                            color = AurumColors.Gold,
+                            modifier = Modifier.clickable { viewModel.alignAccountBalanceWithJournal() },
+                        )
+                    }
+                }
+                ledger.floatingNoteFa()?.let { note ->
+                    Text(
+                        text = "ℹ️ $note",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                        lineHeight = 16.sp,
+                    )
+                }
+                ledger.marginNoteFa()?.let { note ->
+                    Text(
+                        text = "⛔ $note",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Red,
+                        lineHeight = 16.sp,
+                    )
+                }
             }
         }
 

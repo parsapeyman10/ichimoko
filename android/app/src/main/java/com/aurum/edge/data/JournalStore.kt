@@ -237,7 +237,9 @@ class JournalStore(
 
     @Synchronized
     fun addTrade(trade: PaperTrade) {
+        val previous = _trades.value.firstOrNull { it.id == trade.id }
         persist(listOf(trade) + _trades.value.filterNot { it.id == trade.id })
+        applyBalanceDelta(previous, trade)
     }
 
     @Synchronized
@@ -520,7 +522,23 @@ class JournalStore(
 
     @Synchronized
     fun deleteTrade(tradeId: String) {
+        val target = _trades.value.firstOrNull { it.id == tradeId }
         persist(_trades.value.filterNot { it.id == tradeId })
+        applyBalanceDelta(target, null)
+    }
+
+    /**
+     * اثر مالیِ اضافه/حذف/ویرایش یک معاملهٔ **بسته‌شده** را روی موجودی حساب اعمال می‌کند.
+     *
+     * پیش از این، `deleteTrade` معامله را پاک می‌کرد ولی سود/زیانش در موجودی می‌ماند و
+     * `addTrade` هم معاملهٔ بستهٔ دستی را به موجودی اضافه نمی‌کرد؛ نتیجه‌اش همان اختلافی بود
+     * که کاربر در صفحهٔ نخست می‌دید (موجودی ≠ سرمایهٔ پایه + سود/زیان تحققیافته).
+     */
+    private fun applyBalanceDelta(previous: PaperTrade?, next: PaperTrade?) {
+        val previousPnl = previous?.takeIf { !it.isOpen }?.pnlUsd ?: 0.0
+        val nextPnl = next?.takeIf { !it.isOpen }?.pnlUsd ?: 0.0
+        val delta = nextPnl - previousPnl
+        if (delta.isFinite() && abs(delta) >= 0.01) settingsStore?.adjustBalance(delta)
     }
 
     @Synchronized

@@ -2414,6 +2414,26 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
      * کپی متن در کلیپ‌بورد با پیام فارسی.
      * همهٔ دکمه‌های «کپی» هوش عصبی و دستیار ایچیموکو از همین مسیر می‌گذرند.
      */
+    /**
+     * «هم‌ترازسازی» موجودی حساب با دفتر ژورنال:
+     * موجودی = سرمایهٔ پایه + مجموع سود/زیان معاملات بسته‌شده.
+     * فقط با زدن دکمه توسط کاربر اجرا می‌شود؛ هیچ عددی خودکار تغییر نمی‌کند.
+     */
+    fun alignAccountBalanceWithJournal() {
+        val realized = container.journalStore.stats().netPnl
+        val current = container.settingsStore.read()
+        val target = (current.initialCapital + realized).coerceAtLeast(10.0)
+        if (kotlin.math.abs(current.accountBalance - target) < 0.01) {
+            _toast.value = "✅ موجودی حساب از قبل با ژورنال هم‌تراز است"
+            return
+        }
+        container.settingsStore.update { it.copy(accountBalance = kotlin.math.round(target * 100.0) / 100.0) }
+        _toast.value = "🔄 موجودی حساب با ژورنال هم‌تراز شد: " +
+            com.aurum.edge.core.AccountLedgerSnapshot.money(current.initialCapital) + " + تحقق‌یافته " +
+            com.aurum.edge.core.AccountLedgerSnapshot.signed(realized) + " = " +
+            com.aurum.edge.core.AccountLedgerSnapshot.money(target)
+    }
+
     fun copyTextToClipboard(
         labelFa: String,
         text: String,
