@@ -68,6 +68,21 @@ object CrashReporter {
         }
     }
 
+    /**
+     * ثبت «توقف رشتهٔ اصلی» (ANR): وقتی رابط کاربری بیش از [threshold] میلی‌ثانیه پاسخ نمی‌دهد،
+     * متن stack رشتهٔ اصلی ذخیره می‌شود تا معلوم شود کدام تابع رابط کاربری را قفل کرده است.
+     */
+    fun recordMainThreadStall(context: Context, stalledMillis: Long, stackText: String) {
+        runCatching {
+            writeRaw(
+                context = context.applicationContext,
+                kind = "STALL",
+                where = "main-thread blocked ${stalledMillis}ms",
+                body = stackText,
+            )
+        }
+    }
+
     /** فهرست گزارش‌ها از جدید به قدیم. */
     fun list(context: Context): List<CrashEntry> = runCatching {
         val dir = File(context.filesDir, DIR_NAME)
@@ -104,20 +119,7 @@ object CrashReporter {
     }
 
     private fun write(context: Context, kind: String, where: String, throwable: Throwable) {
-        val dir = File(context.filesDir, DIR_NAME).apply { mkdirs() }
-        prune(dir)
-        val now = System.currentTimeMillis()
-        val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(now))
-        val fileStamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date(now))
         val body = buildString {
-            appendLine("Aurum Edge — گزارش $kind")
-            appendLine("زمان: $stamp")
-            appendLine("نسخه: ${com.aurum.edge.BuildConfig.VERSION_NAME} (کد ${com.aurum.edge.BuildConfig.VERSION_CODE})")
-            appendLine("آخرین صفحه: $lastBreadcrumb")
-            appendLine("محل: $where")
-            appendLine("دستگاه: ${Build.MANUFACTURER} ${Build.MODEL} · اندروید ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
-            appendLine("حافظهٔ مجاز برنامه: ${Runtime.getRuntime().maxMemory() / (1024 * 1024)} مگابایت")
-            appendLine("──────────────")
             appendLine(throwable.javaClass.name + ": " + (throwable.message ?: ""))
             appendLine("──────────────")
             appendLine(throwable.stackTraceToString())
@@ -131,8 +133,28 @@ object CrashReporter {
                 depth++
             }
         }
+        writeRaw(context = context, kind = kind, where = where, body = body)
+    }
+
+    private fun writeRaw(context: Context, kind: String, where: String, body: String) {
+        val dir = File(context.filesDir, DIR_NAME).apply { mkdirs() }
+        prune(dir)
+        val now = System.currentTimeMillis()
+        val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date(now))
+        val fileStamp = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date(now))
+        val full = buildString {
+            appendLine("Aurum Edge — گزارش $kind")
+            appendLine("زمان: $stamp")
+            appendLine("نسخه: ${com.aurum.edge.BuildConfig.VERSION_NAME} (کد ${com.aurum.edge.BuildConfig.VERSION_CODE})")
+            appendLine("آخرین صفحه: $lastBreadcrumb")
+            appendLine("محل: $where")
+            appendLine("دستگاه: ${Build.MANUFACTURER} ${Build.MODEL} · اندروید ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})")
+            appendLine("حافظهٔ مجاز برنامه: ${Runtime.getRuntime().maxMemory() / (1024 * 1024)} مگابایت")
+            appendLine("──────────────")
+            appendLine(body)
+        }
         val target = File(dir, "crash_$fileStamp.txt")
-        runCatching { target.writeText(body, Charsets.UTF_8) }
+        runCatching { target.writeText(full, Charsets.UTF_8) }
     }
 
     private fun prune(dir: File) {
@@ -150,13 +172,28 @@ object CrashReporter {
         val errorLine = lines.firstOrNull { Regex("""^[\w.$]+(Error|Exception):""").containsMatchIn(it) }.orEmpty()
         val deviceLine = lines.firstOrNull { it.startsWith("دستگاه: ") }.orEmpty()
         val headline = buildString {
-            append(if (kind == "FATAL") "💥 کرش" else "⚠️ خطای ثبت‌شده")
+            append(
+                when (kind) {
+                    "FATAL" -> "💥 کرش"
+                    "STALL" -> "🐌 توقف رشتهٔ اصلی (ANR)"
+                    else -> "⚠️ خطای ثبت‌شده"
+                }
+            )
             append(" · ")
             append(whenLine.removePrefix("زمان: ").ifBlank { "—" })
             append(" · ")
             append(screenLine.removePrefix("آخرین صفحه: ").ifBlank { "نامشخص" })
         }
-        val detail = listOf(errorLine, deviceLine).filter { it.isNotBlank() }.joinToString("\n")
+        val stallTop = if (kind == "STALL") {
+            lines.dropWhile { !it.startsWith("──────") }.drop(1).take(6).joinToString("\n")
+        } else {
+            ""
+        }
+        val detail = if (stallTop.isNotBlank()) {
+            stallTop
+        } else {
+            listOf(errorLine, deviceLine).filter { it.isNotBlank() }.joinToString("\n")
+        }
         return CrashEntry(
             fileName = file.name,
             atMs = file.lastModified(),

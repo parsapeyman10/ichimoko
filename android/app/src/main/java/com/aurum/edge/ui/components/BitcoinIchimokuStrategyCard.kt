@@ -243,6 +243,12 @@ fun BitcoinIchimokuStrategyCard(
         }
 
         // ── لایهٔ اختیاری نئوویو (NeoWave) ─────────────────────────────────────
+        Text(
+            "توجه: لایهٔ نئوویو–الیوت فقط در «استراتژی ۱۶» ادغام می‌شود؛ استراتژی‌های ۱ تا ۱۵ هیچ محاسبهٔ نئوویو ندارند.",
+            style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.TextMuted,
+            modifier = Modifier.padding(bottom = 4.dp),
+        )
         val focusedReportForNeoWave = dualReports[focusedSymbol]?.reportFor(focusedInterval, selectedId) ?: report
         NeoWaveOptionCard(
             enabled = settings.baseStrategyConfig.neoWaveEnabled,

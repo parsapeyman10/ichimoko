@@ -233,6 +233,13 @@ enum class BitcoinStrategyModel(
     val isDrivePdfStrategy: Boolean
         get() = this == DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER
 
+    /**
+     * تنها استراتژی‌ای که لایهٔ **نئوویو–الیوت** در آن ادغام می‌شود: استراتژی جایگاه ۱۶.
+     * بقیهٔ استراتژی‌ها (۱ تا ۱۵) هیچ محاسبهٔ نئوویو ندارند.
+     */
+    val isNeoWaveElliottStrategy: Boolean
+        get() = this == entries.last()
+
     val combinationCount: Int
         get() = listOf(hasPatel, hasTuttle, hasHosoda, hasPeloille).count { it }
 
@@ -1864,6 +1871,11 @@ object IchimokuStrategyEngine {
         wave: HosodaWaveProjection?,
         slBufferAtr: Double,
         triggerInterval: Interval,
+        /**
+         * استراتژی فعال — ترتیب اعتبار سنگرها بر اساس کتاب پایهٔ همان استراتژی تعیین می‌شود
+         * (پاتل: کیجون، تاتل: کومو/چیکو، هوسودا: نقطه S، پلویل: فلت/کومو، درایو: ریبون نهادی).
+         */
+        activeModel: BitcoinStrategyModel = BitcoinStrategyModel.BASE_ICHIMOKU,
     ): Double {
         // ATR مقاوم (برش ATR های گلِیچ‌خورده) تا یک کندل خراب کل ۱R را متورم نکند
         val atr = TradePlanGuard.robustAtr(
@@ -1908,20 +1920,21 @@ object IchimokuStrategyEngine {
             val anchorKumoEdge = trigSnap.kumoBottom - sweepShieldBuffer * 0.85
             val anchorWaveC = (wave?.pointC ?: trigSnap.kijun) - sweepShieldBuffer
 
-            val rawCandidates = listOf(
-                anchorFractal5,
-                anchorKijun26,
-                anchorKijun30Ema34,
-                anchorKumoEdge,
-                anchorWaveC,
-            ).filter { it.isFinite() && it > 0.0 && it < referenceEntry }
+            val anchors = listOf(
+                StopAnchorKind.FRACTAL_5BAR to anchorFractal5,
+                StopAnchorKind.KIJUN_26 to anchorKijun26,
+                StopAnchorKind.RIBBON_KIJUN30_EMA34 to anchorKijun30Ema34,
+                StopAnchorKind.KUMO_EDGE to anchorKumoEdge,
+                StopAnchorKind.WAVE_S_POINT to anchorWaveC,
+            ).filter { (_, price) -> price.isFinite() && price > 0.0 && price < referenceEntry }
 
-            // نزدیک‌ترین سنگر ابطال ساختاری بیرون از کف نویز و داخل دالان نوسان انتخاب می‌شود؛
-            // انتخاب «دورترین سنگر» (رفتار قبلی) باعث تورم مصنوعی ۱R و دور شدن حد سود می‌شد.
-            val chosenSl = TradePlanGuard.chooseStructuralAnchor(
+            // «مطمئن‌ترین» سنگرِ همان استراتژی که بیرون از کف نویز و داخل دالان نوسان باشد؛
+            // اگر هیچ سنگر مورد اعتماد استراتژی در دالان نبود، نزدیک‌ترین سنگر ساختاری انتخاب می‌شود.
+            val chosenSl = chooseStrategyStopAnchor(
                 isLong = true,
                 referenceEntry = referenceEntry,
-                candidates = rawCandidates,
+                anchors = anchors,
+                preferredOrder = stopAnchorPriorityFor(activeModel),
                 floorDist = minSafeDist,
                 ceilingDist = maxStructuralDist,
             ) ?: min(referenceEntry - minSafeDist, referenceEntry - atr * 0.5)
@@ -1933,23 +1946,120 @@ object IchimokuStrategyEngine {
             val anchorKumoEdge = trigSnap.kumoTop + sweepShieldBuffer * 0.85
             val anchorWaveC = (wave?.pointC ?: trigSnap.kijun) + sweepShieldBuffer
 
-            val rawCandidates = listOf(
-                anchorFractal5,
-                anchorKijun26,
-                anchorKijun30Ema34,
-                anchorKumoEdge,
-                anchorWaveC,
-            ).filter { it.isFinite() && it > referenceEntry }
+            val anchors = listOf(
+                StopAnchorKind.FRACTAL_5BAR to anchorFractal5,
+                StopAnchorKind.KIJUN_26 to anchorKijun26,
+                StopAnchorKind.RIBBON_KIJUN30_EMA34 to anchorKijun30Ema34,
+                StopAnchorKind.KUMO_EDGE to anchorKumoEdge,
+                StopAnchorKind.WAVE_S_POINT to anchorWaveC,
+            ).filter { (_, price) -> price.isFinite() && price > referenceEntry }
 
-            val chosenSl = TradePlanGuard.chooseStructuralAnchor(
+            val chosenSl = chooseStrategyStopAnchor(
                 isLong = false,
                 referenceEntry = referenceEntry,
-                candidates = rawCandidates,
+                anchors = anchors,
+                preferredOrder = stopAnchorPriorityFor(activeModel),
                 floorDist = minSafeDist,
                 ceilingDist = maxStructuralDist,
             ) ?: max(referenceEntry + minSafeDist, referenceEntry + atr * 0.5)
             round2(chosenSl)
         }
+    }
+
+    /** سنگرهای ابطال ساختاری؛ هر استراتژی «مطمئن‌ترین» سنگر خودش را دارد. */
+    enum class StopAnchorKind(val labelFa: String) {
+        FRACTAL_5BAR("فرکتال ۵ کندلی (بیل ویلیامز/فوکا)"),
+        KIJUN_26("کیجون‌سن ۲۶ (تعادل پاتل)"),
+        RIBBON_KIJUN30_EMA34("ریبون نهادی کیجون۳۰/EMA34 (کونیتز/درایو)"),
+        KUMO_EDGE("لبهٔ کومو / SSB فلت (تاتل و پلویل)"),
+        WAVE_S_POINT("نقطهٔ S موج هوسودا/الیوت"),
+    }
+
+    /**
+     * ترتیب اعتبار سنگرها بر اساس کتاب‌های پایه‌ای که هر استراتژی از آن‌ها ساخته شده است.
+     *
+     * این همان «حد ضرر متناسب هر استراتژی» است: مثلاً استراتژی پاتل روی تعادل کیجون بنا شده،
+     * پس کیجون‌سن معتبرترین ابطال آن است؛ استراتژی تاتل روی شکست کومو/چیکو بنا شده، پس لبهٔ کومو؛
+     * استراتژی هوسودا/الیوت روی ساختار موج بنا شده، پس نقطهٔ S؛ و متود جامع درایو روی ریبون نهادی.
+     */
+    fun stopAnchorPriorityFor(model: BitcoinStrategyModel): List<StopAnchorKind> {
+        if (model == BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER) {
+            return listOf(
+                StopAnchorKind.RIBBON_KIJUN30_EMA34,
+                StopAnchorKind.KIJUN_26,
+                StopAnchorKind.FRACTAL_5BAR,
+                StopAnchorKind.KUMO_EDGE,
+                StopAnchorKind.WAVE_S_POINT,
+            )
+        }
+        val order = LinkedHashSet<StopAnchorKind>()
+        if (model.hasPatel) {
+            order += listOf(
+                StopAnchorKind.KIJUN_26,
+                StopAnchorKind.RIBBON_KIJUN30_EMA34,
+                StopAnchorKind.FRACTAL_5BAR,
+                StopAnchorKind.KUMO_EDGE,
+                StopAnchorKind.WAVE_S_POINT,
+            )
+        }
+        if (model.hasTuttle) {
+            order += listOf(
+                StopAnchorKind.KUMO_EDGE,
+                StopAnchorKind.FRACTAL_5BAR,
+                StopAnchorKind.KIJUN_26,
+                StopAnchorKind.RIBBON_KIJUN30_EMA34,
+                StopAnchorKind.WAVE_S_POINT,
+            )
+        }
+        if (model.hasHosoda) {
+            order += listOf(
+                StopAnchorKind.WAVE_S_POINT,
+                StopAnchorKind.KIJUN_26,
+                StopAnchorKind.FRACTAL_5BAR,
+                StopAnchorKind.KUMO_EDGE,
+                StopAnchorKind.RIBBON_KIJUN30_EMA34,
+            )
+        }
+        if (model.hasPeloille) {
+            order += listOf(
+                StopAnchorKind.KUMO_EDGE,
+                StopAnchorKind.RIBBON_KIJUN30_EMA34,
+                StopAnchorKind.KIJUN_26,
+                StopAnchorKind.FRACTAL_5BAR,
+                StopAnchorKind.WAVE_S_POINT,
+            )
+        }
+        if (order.isEmpty()) {
+            order += StopAnchorKind.entries.toList()
+        }
+        return order.toList()
+    }
+
+    /**
+     * انتخاب سنگر حد ضرر: اول معتبرترین سنگرِ همان استراتژی که داخل دالان مجاز
+     * `[floorDist .. ceilingDist]` باشد؛ در غیر این صورت نزدیک‌ترین سنگر ساختاری.
+     */
+    private fun chooseStrategyStopAnchor(
+        isLong: Boolean,
+        referenceEntry: Double,
+        anchors: List<Pair<StopAnchorKind, Double>>,
+        preferredOrder: List<StopAnchorKind>,
+        floorDist: Double,
+        ceilingDist: Double,
+    ): Double? {
+        val byKind = anchors.toMap()
+        for (kind in preferredOrder) {
+            val price = byKind[kind] ?: continue
+            val distance = abs(price - referenceEntry)
+            if (distance in floorDist..ceilingDist) return price
+        }
+        return TradePlanGuard.chooseStructuralAnchor(
+            isLong = isLong,
+            referenceEntry = referenceEntry,
+            candidates = anchors.map { it.second },
+            floorDist = floorDist,
+            ceilingDist = ceilingDist,
+        )
     }
 
     /**
@@ -2121,6 +2231,7 @@ object IchimokuStrategyEngine {
             wave = null,
             slBufferAtr = 0.25,
             triggerInterval = Interval.M5,
+            activeModel = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER,
         )
 
         val dynamicRr = when {
@@ -2465,6 +2576,7 @@ object IchimokuStrategyEngine {
             wave = wave,
             slBufferAtr = effectiveConfig.slBufferAtr,
             triggerInterval = effectiveConfig.triggerInterval,
+            activeModel = activeModel,
         )
 
         val rawStopDist = max(
@@ -2851,7 +2963,9 @@ object IchimokuStrategyEngine {
         // ── لایهٔ اختیاری نئوویو (NeoWave Gate) ────────────────────────────────
         // قانون صفر-اثر: وقتی `neoWaveEnabled = false` باشد هیچ محاسبه‌ای انجام نمی‌شود و
         // خروجی این تابع بیت‌به‌بیت مثل نسخهٔ قبل از نئوویو می‌ماند.
-        val neoWaveOn = effectiveConfig.neoWaveEnabled
+        // نئوویو–الیوت فقط در استراتژی جایگاه ۱۶ ادغام می‌شود؛ برای استراتژی‌های ۱ تا ۱۵
+        // هیچ محاسبه‌ای انجام نمی‌شود (قانون صفر-اثر).
+        val neoWaveOn = effectiveConfig.neoWaveEnabled && activeModel.isNeoWaveElliottStrategy
         // دامنهٔ زیگزاگ داینامیک: با رژیم نوسان همان نماد/تایم‌فریم مقیاس می‌گیرد (قاعدهٔ درجه/دامنهٔ نیلی).
         val neoWaveAmplitude = if (neoWaveOn) {
             NeoWaveEngine.dynamicAmplitudeAtr(alignedStrategyCandles, effectiveConfig.neoWaveAmplitudeAtr)

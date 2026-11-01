@@ -54,6 +54,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
+import com.aurum.edge.core.CrashReporter
 
 /**
  * وضعیت کارت «بکاپ اسکرین‌شات‌ها» در تب آپدیت.
@@ -67,6 +69,14 @@ data class ScreenshotBackupUiState(
 )
 
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
+
+    companion object {
+        /** در هر بار اجرا حداکثر چند تصویر آرشیو ساخته شود (بار پردازشی سبک بماند). */
+        private const val STARTUP_ARCHIVE_SNAPSHOTS_PER_PASS = 1
+
+        /** چند بار (با فاصله) تلاش شود تا تصاویر آرشیوِ جامانده تکمیل شوند. */
+        private const val STARTUP_ARCHIVE_SNAPSHOT_PASSES = 2
+    }
 
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
     val market: StateFlow<MarketState> = container.verifiedMarket
@@ -162,34 +172,57 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun startApp(@Suppress("UNUSED_PARAMETER") context: Context) {
         container.settingsStore.ensureBalance100kMigrated()
-        com.aurum.edge.data.PhoneStorageVaultManager.attachContext(container.appContext)
-        com.aurum.edge.data.TradeSnapshotArchiveManager.init(container.appContext)
-        com.aurum.edge.data.SessionExitLearningStore.init(container.appContext)
-        // بودجهٔ حافظهٔ آرشیو: قدیمی‌ترین تصاویر حذف می‌شوند تا حافظه بی‌پایان رشد نکند.
-        runCatching { com.aurum.edge.data.TradeSnapshotArchiveManager.pruneToBudget(container.appContext) }
-        com.aurum.edge.core.MasterIchimokuTradingAssistant.init(container.appContext)
+        CrashReporter.breadcrumb("app:start")
+        // ── سبک‌سازی راه‌اندازی ────────────────────────────────────────────────
+        // همهٔ کارهای دیسکی/سنگینِ شروع، مرحله‌به‌مرحله و روی IO اجرا می‌شوند. پیش‌تر همین کارها
+        // پشت‌سرهم روی رشتهٔ اصلی اجرا می‌شدند و فریم اول UI را قفل می‌کردند (لگ و «اپ پاسخ نمی‌دهد»).
         container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { com.aurum.edge.data.PhoneStorageVaultManager.attachContext(container.appContext) }
+            runCatching { com.aurum.edge.data.SessionExitLearningStore.init(container.appContext) }
+            yield()
+            runCatching { com.aurum.edge.data.TradeSnapshotArchiveManager.init(container.appContext) }
+            // بودجهٔ حافظهٔ آرشیو: قدیمی‌ترین تصاویر حذف می‌شوند تا حافظه بی‌پایان رشد نکند.
+            runCatching { com.aurum.edge.data.TradeSnapshotArchiveManager.pruneToBudget(container.appContext) }
+            yield()
+            runCatching { com.aurum.edge.core.MasterIchimokuTradingAssistant.init(container.appContext) }
+
+            // فرصت دادن به اولین فریم و اولین تیک قیمت تا کارهای سنگین با نمایش اولیه رقابت نکنند.
+            delay(1_500L)
             runCatching {
                 val shardTrades = com.aurum.edge.data.PhoneStorageVaultManager.loadAllTradesFromPhoneShards(container.appContext)
                 if (shardTrades.isNotEmpty()) {
                     container.journalStore.importTrades(shardTrades, replaceExisting = false)
                 }
+                yield()
                 com.aurum.edge.data.PhoneStorageVaultManager.syncTradesToShardsAndDailyBackup(
                     context = container.appContext,
                     trades = trades.value,
                     forceAllShards = true,
                 )
+                yield()
                 com.aurum.edge.data.TradeSnapshotArchiveManager.scanAndRestoreFromPhoneStorage(
                     context = container.appContext,
                     journalStore = container.journalStore,
                 )
+                yield()
                 container.neuralEngine.restoreBrainBackupFromPhoneStorage(container.appContext)
-                // ساخت تصویر آرشیو برای معاملاتی که از قبل باز یا بسته شده‌اند ولی هنوز تصویر ندارند
-                com.aurum.edge.data.TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(
-                    context = container.appContext,
-                    trades = trades.value,
-                )
             }
+
+            // ساخت تصویر آرشیو برای معاملاتی که تصویر ندارند — به‌صورت تدریجی (حداکثر ۲ تصویر در
+            // هر بار اجرا) تا پردازش تصویر، پردازنده و حافظهٔ گوشی را در لحظهٔ استفاده از UI نخورد.
+            delay(3_000L)
+            runCatching {
+                val pendingTrades = trades.value
+                repeat(STARTUP_ARCHIVE_SNAPSHOT_PASSES) { pass ->
+                    com.aurum.edge.data.TradeSnapshotArchiveManager.ensureAllTradesHaveArchiveSnapshots(
+                        context = container.appContext,
+                        trades = pendingTrades,
+                        maxTrades = STARTUP_ARCHIVE_SNAPSHOTS_PER_PASS,
+                    )
+                    if (pass < STARTUP_ARCHIVE_SNAPSHOT_PASSES - 1) delay(2_500L)
+                }
+            }
+            CrashReporter.breadcrumb("app:startup-work-done")
         }
         if (!updateCheckStarted) {
             updateCheckStarted = true
@@ -496,7 +529,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     )
                 }
 
-                delay(4_000L)
+                // «سبک‌سازی»: وقتی پوزیشن بازی نیست و معاملهٔ خودکار هم خاموش است، حلقهٔ پایش
+                // با فاصلهٔ بیشتری اجرا می‌شود تا پردازنده/باتری و رشتهٔ اصلی آزاد بمانند.
+                val idleLight = openSymbolSet.isEmpty() && !settings.value.autoPaperTrading
+                delay(if (idleLight) 12_000L else 4_000L)
             }
         }
     }
@@ -509,7 +545,9 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         hoursOverride: Int? = null,
         notifyOnSuccess: Boolean = true,
     ) {
-        viewModelScope.launch {
+        // بازیابی کندل‌های جامانده، بازپخش ژورنال و نوشتن JSON است؛ اجرای آن روی رشتهٔ اصلی
+        // باعث توقف رابط کاربری (ANR) می‌شد.
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             _isBackfilling.value = true
             try {
                 val openSymbols = trades.value.filter { it.isOpen }.map { V1Universe.normalize(it.symbol) }
@@ -703,7 +741,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         _activeRiskSymbol.value = normalized
         refreshSymbolLivePrice(normalized)
         if (_backfillSummaries.value[normalized] == null) {
-            viewModelScope.launch {
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
                 backfillSingleSymbolInternal(normalized, hoursOverride = 6)
             }
         }
@@ -711,7 +749,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun refreshSymbolLivePrice(symbolInput: String = _activeRiskSymbol.value, onLoaded: ((PriceTick?) -> Unit)? = null) {
         val normalized = V1Universe.normalize(symbolInput)
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val tick = LiveQuoteFetcher.fetchLiveTick(normalized)
             if (tick != null) {
                 applyIncomingTick(normalized, tick)
@@ -2109,7 +2147,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun runNeuralParameterAutoTuningNow() {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             val baseCfg = settings.value.baseStrategyConfig
             val tuned = container.neuralEngine.runPostTrainingParameterAutoTuning(baseCfg)
             val updatedCfg = container.neuralEngine.applyAutoTunedParametersToConfig(baseCfg)
@@ -2122,7 +2160,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun runSingleStrategyAutoTuningNow(strategyId: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             val baseCfg = settings.value.baseStrategyConfig
             val prof = container.neuralEngine.runAutoTuningForSingleStrategy(strategyId, baseCfg)
             val updatedCfg = container.neuralEngine.applyAutoTunedParametersToConfig(baseCfg)
@@ -2141,7 +2179,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         learnedWeight: Double? = null,
         minThresholdNorm: Double? = null,
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             val prof = container.neuralEngine.tuneStrategyFeature(
                 strategyId = strategyId,
                 featureIndex = featureIndex,
@@ -2171,7 +2209,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         minDriveBooksConsensus: Int? = null,
         neuralWinProbGatePct: Double? = null,
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             val prof = container.neuralEngine.tuneStrategyParameters(
                 strategyId = strategyId,
                 minRiskReward = minRiskReward,
@@ -2451,7 +2489,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         report: com.aurum.edge.data.InstitutionalTearSheetReport,
         format: com.aurum.edge.data.JournalExportFormat,
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             com.aurum.edge.data.JournalExportEngine.writeExportToUri(
                 context = container.appContext,
                 uri = uri,
@@ -2472,7 +2510,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         uri: android.net.Uri,
         replaceExisting: Boolean,
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             com.aurum.edge.data.JournalExportEngine.readAndParseBackupUri(
                 context = container.appContext,
                 uri = uri,
@@ -2495,7 +2533,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         saved: com.aurum.edge.data.SavedJournalExportFile,
         replaceExisting: Boolean,
     ) {
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
                 val raw = saved.file.readText(Charsets.UTF_8)
                 val parsed = com.aurum.edge.data.JournalExportEngine.parseBackupContent(raw).getOrThrow()

@@ -122,6 +122,11 @@ fun CryptoEntryPathCard(
             }
 
             Text(
+                text = "این مسیر هم مثل خود لایهٔ نئوویو فقط در «استراتژی ۱۶» اثر دارد؛ در استراتژی‌های ۱ تا ۱۵ رمزارز با همان ۱۶ شرط عمومی سنجیده می‌شود.",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+            )
+            Text(
                 text = if (cfg.neoWaveCryptoEntryEnabled && cfg.neoWaveEnabled) {
                     "✅ فعال: ورود رمزارز با الگوی کامل و تأییدشدهٔ نئوویو باز می‌شود."
                 } else if (cfg.neoWaveCryptoEntryEnabled) {
