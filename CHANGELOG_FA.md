@@ -4,7 +4,7 @@
 
 ---
 
-## ۳.۹.۳۸ — کد ۷۴۷ · **در انتظار انتشار**
+## ۳.۹.۳۸ — کد ۷۴۷ · **منتشرشده** (۲۰۲۶-۱۱-۰۱)
 
 - **کارت «بکاپ اسکرین‌شات‌های آرشیو» در تب آپدیت (`ui/tabs/update/UpdateScreen.kt`):**
   - همهٔ تصاویر آرشیو معاملات (لحظهٔ ورود و لحظهٔ خروج، همان اسکرین‌شات‌های چارت که از همهٔ بخش‌های اپ ساخته می‌شوند) در **یک فایل ZIP** جمع می‌شوند و از همین صفحه گرفتنِ فایل ممکن است.
@@ -16,7 +16,7 @@
   - 📄 `docs/SCREENSHOT_BACKUP_FA.md`
 - **پشتهٔ فایل ZIP (`data/TradeSnapshotArchiveManager.kt`):** توابع جدید `archiveBasket`، `buildSnapshotZipBundle`، `saveSnapshotZipToDownloads`، `shareSnapshotZip` و `importSnapshotZip`؛ محتوای ZIP: `screenshots/*.webp` + `trade_snapshots_index_v1.json` + `README_FA.txt`.
 - **راهنمای PDF (`docs/AURUM_EDGE_GUIDE_FA.pdf`):** بِهنگام نسخهٔ ۳.۹.۳۸ با بخش تازهٔ «کارت بکاپ اسکرین‌شات‌ها» در تب آپدیت و ردیف تاریخچهٔ نسخه‌ها به‌روز شد.
-- **بستهٔ انتشار:** `AurumEdge-v3.9.38.apk` — حجم و SHA-256 پس از انتشار در `update/aurum-edge.json` ثبت می‌شود.
+- **بستهٔ انتشار:** `AurumEdge-v3.9.38.apk` — حجم `12,087,425` بایت · `SHA-256: a6f9e23066ed441d6e45076979e1eea1e3433f91d2e2c18f7892351516d7ae98` · نصب روی ۳.۹.۳۷ بدون پاک شدن ژورنال، آرشیو تصاویر و آموخته‌های شبکه.
 
 ---
 
