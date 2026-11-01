@@ -55,6 +55,17 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+/**
+ * وضعیت کارت «بکاپ اسکرین‌شات‌ها» در تب آپدیت.
+ */
+data class ScreenshotBackupUiState(
+    val imageCount: Int = 0,
+    val imageBytes: Long = 0L,
+    val recordCount: Int = 0,
+    val lastZipName: String = "",
+    val lastZipBytes: Long = 0L,
+)
+
 class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     val settings: StateFlow<AppSettings> = container.settingsStore.settings
@@ -1237,6 +1248,107 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     fun deleteJournalTrade(tradeId: String) {
         container.journalStore.deleteTrade(tradeId)
         _toast.value = "معامله از ژورنال حذف شد"
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // بکاپ اسکرین‌شات‌های آرشیو (تب آپدیت)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private val _screenshotBackup = MutableStateFlow(ScreenshotBackupUiState())
+    val screenshotBackup: StateFlow<ScreenshotBackupUiState> = _screenshotBackup.asStateFlow()
+
+    /** تازه‌سازی تعداد/حجم تصاویر آرشیو برای نمایش در تب آپدیت. */
+    fun refreshScreenshotBackupStats() {
+        val basket = runCatching {
+            com.aurum.edge.data.TradeSnapshotArchiveManager.archiveBasket(container.appContext)
+        }.getOrDefault(com.aurum.edge.data.ArchivedSnapshotBasket())
+        _screenshotBackup.value = _screenshotBackup.value.copy(
+            imageCount = basket.imageCount,
+            imageBytes = basket.imageBytes,
+            recordCount = basket.recordCount,
+        )
+    }
+
+    /** ساخت ZIP از تصاویر آرشیو و ذخیرهٔ آن در پوشهٔ دانلود گوشی. */
+    fun saveScreenshotBackupToDownloads() {
+        _toast.value = "⏳ در حال ساخت بکاپ تصاویر…"
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val bundle = com.aurum.edge.data.TradeSnapshotArchiveManager
+                .buildSnapshotZipBundle(container.appContext)
+            val zip = bundle.zipFile
+            if (zip == null) {
+                _toast.value = "⚠️ " + (bundle.errorFa ?: "ساخت بکاپ تصاویر ناموفق بود")
+                return@launch
+            }
+            val saved = com.aurum.edge.data.TradeSnapshotArchiveManager
+                .saveSnapshotZipToDownloads(container.appContext, zip)
+            _screenshotBackup.value = _screenshotBackup.value.copy(
+                lastZipName = bundle.fileName,
+                lastZipBytes = bundle.zipBytes,
+            )
+            refreshScreenshotBackupStats()
+            _toast.value = saved.fold(
+                onSuccess = { path ->
+                    "💾 بکاپ " + bundle.imageCount + " تصویر (" + humanKbFa(bundle.zipBytes) + ") در " + path + " ذخیره شد"
+                },
+                onFailure = { err ->
+                    "⚠️ ذخیره در پوشهٔ دانلود نشد: " + (err.message ?: "خطای نامشخص")
+                },
+            )
+        }
+    }
+
+    /** ارسال ZIP تصاویر آرشیو با Share Sheet اندروید (تلگرام/واتساپ/ایمیل/درایو). */
+    fun shareScreenshotBackup() {
+        _toast.value = "⏳ در حال ساخت بکاپ تصاویر…"
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val bundle = com.aurum.edge.data.TradeSnapshotArchiveManager
+                .buildSnapshotZipBundle(container.appContext)
+            val zip = bundle.zipFile
+            if (zip == null) {
+                _toast.value = "⚠️ " + (bundle.errorFa ?: "ساخت بکاپ تصاویر ناموفق بود")
+                return@launch
+            }
+            _screenshotBackup.value = _screenshotBackup.value.copy(
+                lastZipName = bundle.fileName,
+                lastZipBytes = bundle.zipBytes,
+            )
+            val shared = com.aurum.edge.data.TradeSnapshotArchiveManager
+                .shareSnapshotZip(container.appContext, zip)
+            _toast.value = shared.fold(
+                onSuccess = { "📤 پنجرهٔ ارسال باز شد — " + bundle.imageCount + " تصویر (" + humanKbFa(bundle.zipBytes) + ")" },
+                onFailure = { err -> "⚠️ ارسال ممکن نشد: " + (err.message ?: "خطای نامشخص") },
+            )
+            refreshScreenshotBackupStats()
+        }
+    }
+
+    /** بازگردانی تصاویر و فهرست از یک فایل ZIP انتخابی کاربر. */
+    fun restoreScreenshotBackupFromZip(uri: android.net.Uri?) {
+        if (uri == null) return
+        _toast.value = "⏳ در حال بازخوانی فایل بکاپ…"
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val count = runCatching {
+                com.aurum.edge.data.TradeSnapshotArchiveManager
+                    .importSnapshotZip(container.appContext, uri)
+            }.getOrElse { err ->
+                _toast.value = "⚠️ بازخوانی فایل ZIP ناموفق بود: " + (err.message ?: "خطای نامشخص")
+                return@launch
+            }
+            _toast.value = if (count > 0) {
+                "✅ " + count + " تصویر از فایل بکاپ بازگردانی شد"
+            } else {
+                "⚠️ در این فایل تصویری پیدا نشد"
+            }
+            refreshScreenshotBackupStats()
+        }
+    }
+
+    /** اندازهٔ خوانا برای گزارش‌های فارسی (کیلوبایت/مگابایت). */
+    private fun humanKbFa(bytes: Long): String = when {
+        bytes >= 1_048_576L -> String.format(Locale.US, "%.1f", bytes / 1_048_576.0) + " مگابایت"
+        bytes >= 1_024L -> String.format(Locale.US, "%.0f", bytes / 1_024.0) + " کیلوبایت"
+        else -> bytes.toString() + " بایت"
     }
 
     fun clearAllJournalTrades() {

@@ -1,6 +1,8 @@
 package com.aurum.edge.ui
 
 import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +21,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -39,6 +42,12 @@ fun UpdateScreen(viewModel: AurumViewModel) {
     // The signature of THIS installation does not change while the screen is open; reading the
     // package manager on every recomposition would be wasteful and could show a half-written value.
     val signing = remember { viewModel.updateSigningSummary }
+    val screenshotBackup by viewModel.screenshotBackup.collectAsStateWithLifecycle()
+    // انتخاب فایل ZIP بکاپ تصاویر برای بازگردانی (فقط ZIP؛ هر جای گوشی یا درایو)
+    val restoreZipLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri -> viewModel.restoreScreenshotBackupFromZip(uri) }
+    LaunchedEffect(Unit) { viewModel.refreshScreenshotBackupStats() }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -146,6 +155,67 @@ fun UpdateScreen(viewModel: AurumViewModel) {
                     Text("اجازه نصب از Aurum Edge در Android")
                 }
             }
+        }
+
+        SectionCard(
+            "بکاپ اسکرین‌شات‌های آرشیو",
+            "تمام تصاویر ثبت‌شده از معاملات (باز و بسته) در یک فایل ZIP",
+        ) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                StatTile("تعداد تصویر", screenshotBackup.imageCount.toString(), AurumColors.Gold, Modifier.weight(1f))
+                StatTile("حجم تصاویر", formatUpdateBytes(screenshotBackup.imageBytes), AurumColors.Cyan, Modifier.weight(1f))
+                StatTile("رکورد فهرست", screenshotBackup.recordCount.toString(), AurumColors.TextSecondary, Modifier.weight(1f))
+            }
+            Text(
+                "هر معامله دو تصویر دارد (لحظهٔ ورود و لحظهٔ بسته شدن) و هر تصویر، قیمت ورود/حد ضرر/حد سود و نتیجه را " +
+                    "به‌صورت دادهٔ خواندنی داخل خودش نگه می‌دارد. این بکاپ همهٔ آن‌ها را در یک فایل ZIP جمع می‌کند " +
+                    "تا از گوشی بیرون ببرید یا جای دیگری نگه دارید.",
+                style = MaterialTheme.typography.bodySmall,
+                color = AurumColors.TextSecondary,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = viewModel::saveScreenshotBackupToDownloads,
+                    modifier = Modifier.weight(1f),
+                ) { Text("💾 ذخیره در دانلود", style = MaterialTheme.typography.labelMedium) }
+                OutlinedButton(
+                    onClick = viewModel::shareScreenshotBackup,
+                    modifier = Modifier.weight(1f),
+                ) { Text("📤 ارسال", style = MaterialTheme.typography.labelMedium) }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = { restoreZipLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
+                    modifier = Modifier.weight(1f),
+                ) { Text("📥 بازخوانی از فایل ZIP", style = MaterialTheme.typography.labelMedium) }
+                OutlinedButton(
+                    onClick = viewModel::refreshScreenshotBackupStats,
+                    modifier = Modifier.weight(1f),
+                ) { Text("🔄 تازه‌سازی آمار", style = MaterialTheme.typography.labelMedium) }
+            }
+            if (screenshotBackup.lastZipName.isNotBlank()) {
+                Text(
+                    "آخرین بکاپ ساخته‌شده: ${screenshotBackup.lastZipName} · ${formatUpdateBytes(screenshotBackup.lastZipBytes)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Gold,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            Text(
+                "مسیر ذخیره: Download/AurumEdge/Screenshots · تصاویر جداگانه هم در گالری (Pictures/AurumEdge/TradeArchive) هستند؛ " +
+                    "پس حتی اگر این فایل را پاک کنید، آرشیو داخل اپ دست‌نخورده می‌ماند. «بازخوانی از فایل ZIP» تصاویر و فهرست را " +
+                    "بدون پاک کردن آرشیو فعلی با آن ادغام می‌کند.",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 8.dp),
+            )
         }
 
         SectionCard("سازگاری و محدودیت Android", "برای بیشترین سازگاری، اپ چند مسیر بروزرسانی را امتحان می‌کند") {

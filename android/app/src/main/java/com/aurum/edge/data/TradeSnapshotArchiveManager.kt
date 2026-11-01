@@ -24,6 +24,7 @@ import com.aurum.edge.core.PaperTrade
 import com.aurum.edge.core.StrategyEvaluationReport
 import com.aurum.edge.domain.Candle
 import com.aurum.edge.domain.SignalAction
+import java.io.BufferedOutputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.text.SimpleDateFormat
@@ -32,6 +33,8 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -128,6 +131,29 @@ data class ArchivedTradeSnapshotRecord(
  * - با فرمت `WebP` باکیفیت و بسیار کم‌حجم (`~35KB..65KB`) هم در آرشیو اپ و هم در حافظه گوشی (`Pictures/AurumEdge` و `Download/AurumEdge/Archive`) ذخیره می‌کند.
  * - دیتای کامل معامله و شرایط ایچیموکو را هم در انتهای خود فایل تصویر و هم در فایل JSON آرشیو گوشی ذخیره می‌کند تا اپ بتواند بعداً از روی عکس‌ها یا فایل‌های گوشی کل دیتای خود را بازخوانی کند.
  */
+/**
+ * وضعیت فشردهٔ آرشیو تصاویر برای نمایش در رابط کاربری (تب آپدیت).
+ */
+data class ArchivedSnapshotBasket(
+    val imageCount: Int = 0,
+    val imageBytes: Long = 0L,
+    val recordCount: Int = 0,
+    val oldestMs: Long = 0L,
+    val newestMs: Long = 0L,
+)
+
+/**
+ * نتیجهٔ ساخت فایل ZIP بکاپ اسکرین‌شات‌ها.
+ */
+data class ArchivedSnapshotBundle(
+    val zipFile: File?,
+    val fileName: String,
+    val imageCount: Int,
+    val zipBytes: Long,
+    val sourceBytes: Long,
+    val errorFa: String?,
+)
+
 object TradeSnapshotArchiveManager {
 
     private const val ARCHIVE_DIR_NAME = "trade_snapshots_v1"
@@ -1382,6 +1408,209 @@ object TradeSnapshotArchiveManager {
             file.writeText(json.encodeToString(list), Charsets.UTF_8)
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // بکاپ آرشیو تصاویر (اسکرین‌شات‌های معاملات) در یک فایل ZIP
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /** تعداد و حجم تصاویر آرشیو داخل حافظهٔ اپ (بدون نیاز به بازسازی ZIP). */
+    @Synchronized
+    fun archiveBasket(context: Context): ArchivedSnapshotBasket {
+        val dir = File(context.filesDir, ARCHIVE_DIR_NAME)
+        val files = dir.listFiles()?.filter { it.isFile && it.length() > 0L }.orEmpty()
+        val imageFiles = files.filter { it.extension.lowercase(Locale.ROOT) in setOf("webp", "png", "jpg", "jpeg") }
+        return ArchivedSnapshotBasket(
+            imageCount = imageFiles.size,
+            imageBytes = imageFiles.sumOf { it.length() },
+            recordCount = if (_records.value.isEmpty()) loadIndexFromDisk(context).size else _records.value.size,
+            oldestMs = imageFiles.minOfOrNull { it.lastModified() } ?: 0L,
+            newestMs = imageFiles.maxOfOrNull { it.lastModified() } ?: 0L,
+        )
+    }
+
+    /**
+     * ساخت یک فایل ZIP از **همهٔ** تصاویر آرشیو + فهرست JSON + راهنمای متنی.
+     *
+     * خروجی در `cacheDir/exports` نوشته می‌شود تا هم FileProvider آن را برای اشتراک‌گذاری
+     * ببیند و هم بدون اجازهٔ حافظه به پوشهٔ دانلود منتقل شود.
+     */
+    @Synchronized
+    fun buildSnapshotZipBundle(context: Context, stampMs: Long = System.currentTimeMillis()): ArchivedSnapshotBundle {
+        return runCatching {
+            val sourceDir = File(context.filesDir, ARCHIVE_DIR_NAME)
+            val sourceFiles = sourceDir.listFiles()
+                ?.filter { it.isFile && it.length() > 0L }
+                ?.sortedBy { it.name }
+                .orEmpty()
+            val indexFile = File(context.filesDir, INDEX_FILE_NAME)
+            if (sourceFiles.isEmpty() && !indexFile.exists()) {
+                return ArchivedSnapshotBundle(
+                    zipFile = null,
+                    fileName = "",
+                    imageCount = 0,
+                    zipBytes = 0L,
+                    sourceBytes = 0L,
+                    errorFa = "هنوز هیچ تصویری در آرشیو ساخته نشده است",
+                )
+            }
+            val outDir = File(context.cacheDir, "exports").apply { mkdirs() }
+            // فایل‌های قدیمی همین بسته پاک می‌شوند تا حافظهٔ کش بی‌دلیل بزرگ نشود.
+            outDir.listFiles()?.filter { it.name.startsWith("AurumScreenshots_") }?.forEach { it.delete() }
+            val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(stampMs))
+            val fileName = "AurumScreenshots_$stamp.zip"
+            val zipFile = File(outDir, fileName)
+            var written = 0
+            ZipOutputStream(BufferedOutputStream(zipFile.outputStream())).use { zip ->
+                zip.setLevel(6)
+                sourceFiles.forEach { file ->
+                    runCatching {
+                        zip.putNextEntry(ZipEntry("screenshots/${file.name}"))
+                        file.inputStream().use { input -> input.copyTo(zip) }
+                        zip.closeEntry()
+                        written++
+                    }
+                }
+                if (indexFile.exists()) {
+                    runCatching {
+                        zip.putNextEntry(ZipEntry(INDEX_FILE_NAME))
+                        zip.write(indexFile.readBytes())
+                        zip.closeEntry()
+                    }
+                }
+                runCatching {
+                    val basket = archiveBasket(context)
+                    val readme = buildString {
+                        appendLine("Aurum Edge — بکاپ آرشیو اسکرین‌شات معاملات")
+                        appendLine("تاریخ ساخت: " + formatStampFa(stampMs))
+                        appendLine("تعداد تصویر: " + basket.imageCount)
+                        appendLine("تعداد رکورد فهرست: " + basket.recordCount)
+                        appendLine("نسخهٔ اپ: " + com.aurum.edge.BuildConfig.VERSION_NAME + " (کد " + com.aurum.edge.BuildConfig.VERSION_CODE + ")")
+                        appendLine()
+                        appendLine("پوشهٔ screenshots/ تصاویر WebP هر معامله را دارد (باز شدن و بسته شدن).")
+                        appendLine("فایل " + INDEX_FILE_NAME + " فهرست کامل رکوردها با قیمت ورود، حد ضرر، حد سود و نتیجه است.")
+                        appendLine("برای بازگردانی: در تب آپدیت → «بکاپ اسکرین‌شات‌ها» → بازخوانی از فایل ZIP یا بازخوانی از حافظهٔ گوشی.")
+                    }
+                    zip.putNextEntry(ZipEntry("README_FA.txt"))
+                    zip.write(readme.toByteArray(Charsets.UTF_8))
+                    zip.closeEntry()
+                }
+            }
+            ArchivedSnapshotBundle(
+                zipFile = zipFile,
+                fileName = fileName,
+                imageCount = written,
+                zipBytes = zipFile.length(),
+                sourceBytes = sourceFiles.sumOf { it.length() },
+                errorFa = null,
+            )
+        }.getOrElse { err ->
+            ArchivedSnapshotBundle(
+                zipFile = null,
+                fileName = "",
+                imageCount = 0,
+                zipBytes = 0L,
+                sourceBytes = 0L,
+                errorFa = err.message ?: "ساخت فایل ZIP ناموفق بود",
+            )
+        }
+    }
+
+    /** ارسال فایل ZIP از طریق Share Sheet اندروید (تلگرام، واتساپ، ایمیل، درایو و ...). */
+    fun shareSnapshotZip(context: Context, zipFile: File): Result<Unit> = runCatching {
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context,
+            context.packageName + ".updateprovider",
+            zipFile,
+        )
+        val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "application/zip"
+            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+            putExtra(android.content.Intent.EXTRA_SUBJECT, "Aurum Edge — بکاپ اسکرین‌شات‌ها")
+            putExtra(android.content.Intent.EXTRA_TEXT, "آرشیو اسکرین‌شات معاملات Aurum Edge (" + zipFile.name + ")")
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = android.content.Intent.createChooser(shareIntent, "ارسال بکاپ اسکرین‌شات‌ها").apply {
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(chooser)
+    }
+
+    /**
+     * ذخیرهٔ فایل ZIP در پوشهٔ دانلود گوشی («Download/AurumEdge/Screenshots»)
+     * تا کاربر بتواند با فایل‌منیجر هم آن را بردارد.
+     */
+    fun saveSnapshotZipToDownloads(context: Context, zipFile: File): Result<String> = runCatching {
+        val relativeFolder = Environment.DIRECTORY_DOWNLOADS + "/AurumEdge/Screenshots"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val resolver = context.contentResolver
+            runCatching {
+                resolver.delete(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    MediaStore.MediaColumns.DISPLAY_NAME + " = ?",
+                    arrayOf(zipFile.name),
+                )
+            }
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, zipFile.name)
+                put(MediaStore.Downloads.MIME_TYPE, "application/zip")
+                put(MediaStore.Downloads.RELATIVE_PATH, relativeFolder)
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: error("ساخت فایل در پوشهٔ دانلود ممکن نشد")
+            resolver.openOutputStream(uri)?.use { out -> zipFile.inputStream().use { it.copyTo(out) } }
+                ?: error("نوشتن فایل در پوشهٔ دانلود ممکن نشد")
+            values.clear()
+            values.put(MediaStore.Downloads.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            "Download/AurumEdge/Screenshots/" + zipFile.name
+        } else {
+            @Suppress("DEPRECATION")
+            val dlRoot = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val folder = File(dlRoot, "AurumEdge/Screenshots").apply { mkdirs() }
+            val target = File(folder, zipFile.name)
+            zipFile.inputStream().use { input -> target.outputStream().use { out -> input.copyTo(out) } }
+            "Download/AurumEdge/Screenshots/" + zipFile.name
+        }
+    }
+
+    /** بازگردانی رکوردها از یک فایل ZIP بکاپ که کاربر انتخاب کرده است. */
+    @Synchronized
+    fun importSnapshotZip(context: Context, uri: Uri): Int {
+        val dir = File(context.filesDir, ARCHIVE_DIR_NAME).apply { mkdirs() }
+        var imported = 0
+        context.contentResolver.openInputStream(uri)?.use { raw ->
+            java.util.zip.ZipInputStream(raw.buffered()).use { zip ->
+                var entry = zip.nextEntry
+                while (entry != null) {
+                    val name = entry.name
+                    if (!entry.isDirectory) {
+                        if (name.endsWith(".webp", true) || name.endsWith(".png", true) || name.endsWith(".jpg", true)) {
+                            val target = File(dir, name.substringAfterLast('/'))
+                            target.outputStream().use { out -> zip.copyTo(out) }
+                            imported++
+                        } else if (name.endsWith(INDEX_FILE_NAME, true)) {
+                            runCatching {
+                                val text = zip.readBytes().toString(Charsets.UTF_8)
+                                val parsed = json.decodeFromString<List<ArchivedTradeSnapshotRecord>>(text)
+                                if (parsed.isNotEmpty()) {
+                                    val merged = (parsed + loadIndexFromDisk(context)).distinctBy { it.tradeId + "_" + it.snapshotPhase }
+                                    saveIndexToDisk(context, merged)
+                                    _records.value = merged
+                                }
+                            }
+                        }
+                    }
+                    zip.closeEntry()
+                    entry = zip.nextEntry
+                }
+            }
+        }
+        return imported
+    }
+
+    private fun formatStampFa(ms: Long): String =
+        SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(ms))
 
     private fun fmtPrice(v: Double): String {
         val a = abs(v)
