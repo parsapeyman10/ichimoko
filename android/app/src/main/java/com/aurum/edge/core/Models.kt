@@ -248,6 +248,15 @@ data class PaperTrade(
     val preEntry3CandleSummaryFa: String = "",
     val preEntry3Candles: List<PreEntryCandleSlot> = emptyList(),
     val tradeNumber: Int = 0,
+    /** الگوی نئوویوی لحظهٔ ورود (برای آموزش هوش عصبی؛ خالی = بدون شمارش). */
+    val neoWavePatternId: String = "",
+    val neoWaveRulesPassed: Int = 0,
+    val neoWaveRulesTotal: Int = 0,
+    val neoWaveConfidencePct: Double = 0.0,
+    /** شمارهٔ قاعده‌های نیلی که در لحظهٔ ورود شکسته بودند. */
+    val neoWaveFailedRuleIds: List<Int> = emptyList(),
+    /** مسیر ورود: `CRYPTO_NW` (ورود با نئوویو در رمزارز) یا `CLASSIC`. */
+    val neoWaveEntryPathTag: String = "",
 ) {
     val displayTradeNumber: Int
         get() = if (tradeNumber > 0) tradeNumber else ((kotlin.math.abs(id.hashCode()) % 9000) + 1)

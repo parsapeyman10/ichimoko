@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -1934,71 +1935,52 @@ private fun MonthlyPnlCalendarSection(
     onClearAll: () -> Unit,
     onOpenChart: (String) -> Unit,
 ) {
-    val hourBucket = now / 3_600_000L
-    val latestTradeInstant = remember(closedTrades.firstOrNull()?.id, closedTrades.firstOrNull()?.closedAt, hourBucket) {
-        val latestMs = closedTrades.maxOfOrNull { it.closedAt ?: it.openedAt } ?: now
-        Instant.ofEpochMilli(latestMs).atZone(ZoneId.systemDefault())
-    }
-    val currentYm = remember(latestTradeInstant) {
-        YearMonth.from(latestTradeInstant)
-    }
-    var selectedYear by rememberSaveable { mutableIntStateOf(currentYm.year) }
-    var selectedMonth by rememberSaveable { mutableIntStateOf(currentYm.monthValue) }
-    // -1 = حالت پیش‌فرض سریع: فقط معاملات روز آخر (Latest Active Day Only)
-    //  0 = نمایش کل معاملات ماه (به درخواست کاربر)
-    // 1..31 = نمایش روز انتخاب‌شده از تقویم
-    var selectedDayOfMonth by rememberSaveable { mutableIntStateOf(-1) }
-    var visibleTradesCap by rememberSaveable(selectedYear, selectedMonth, selectedDayOfMonth) {
-        mutableIntStateOf(20)
-    }
+    val todayZoned = remember(now) { Instant.ofEpochMilli(now).atZone(ZoneId.systemDefault()) }
+    val todayYm = remember(todayZoned) { YearMonth.from(todayZoned) }
+    var selectedYear by rememberSaveable { mutableIntStateOf(todayYm.year) }
+    var selectedMonth by rememberSaveable { mutableIntStateOf(todayYm.monthValue) }
+    // ۰ = کل ماه، ۱..۳۱ = معاملات همان روز
+    var selectedDayOfMonth by rememberSaveable { mutableIntStateOf(0) }
 
-    val calendar = remember(selectedYear, selectedMonth, trades.size, trades.firstOrNull()?.id, trades.firstOrNull()?.closedAt) {
+    val calendar = remember(selectedYear, selectedMonth, trades.size, closedTrades.size, closedTrades.firstOrNull()?.id) {
         RiskAndCalendarEngine.buildMonthlyCalendar(
             year = selectedYear,
             month = selectedMonth,
             trades = trades,
         )
     }
-
-    val activeTradingDaysInMonth = remember(calendar) {
-        calendar.days.filter { it.closedTradesCount > 0 }.map { it.dayOfMonth }.sorted()
+    val tradingDays = remember(calendar) { calendar.days.filter { it.closedTradesCount > 0 } }
+    val maxAbsDayPnl = remember(tradingDays) { tradingDays.maxOfOrNull { abs(it.netPnlUsd) } ?: 0.0 }
+    val lastTradingMonth = remember(closedTrades) {
+        closedTrades.maxOfOrNull { it.closedAt ?: it.openedAt }?.let {
+            YearMonth.from(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()))
+        }
     }
-    val latestActiveDayInMonth = remember(activeTradingDaysInMonth, latestTradeInstant) {
-        activeTradingDaysInMonth.lastOrNull() ?: latestTradeInstant.dayOfMonth.coerceIn(1, calendar.daysInMonth)
-    }
-    val effectiveSelectedDay = when {
-        selectedDayOfMonth == -1 -> latestActiveDayInMonth
-        selectedDayOfMonth in 1..calendar.daysInMonth -> selectedDayOfMonth
-        else -> 0 // کل ماه
-    }
+    val isCurrentMonth = selectedYear == todayYm.year && selectedMonth == todayYm.monthValue
+    val monthLabel = calendar.monthTitleFa
 
     SectionCard(
-        title = "📅 تقویم ماهانه سود و زیان (روزشمار)",
-        subtitle = "برآیند روزانه و ماهانه معاملات بسته‌شده بر اساس روز؛ برای فیلتر روی هر روز کلیک کنید",
+        title = "📅 تقویم معاملات",
+        subtitle = "نمای تقویمی ژورنال — هر خانه یک روز با سود/زیان همان روز؛ روی روز بزن تا معاملاتش باز شود",
+        collapsible = false,
         trailing = {
-            val monthColor = when {
-                calendar.monthNetPnlUsd > 0.0 -> AurumColors.Green
-                calendar.monthNetPnlUsd < 0.0 -> AurumColors.Red
-                else -> AurumColors.Gold
-            }
             Pill(
-                text = String.format(
-                    Locale.US,
-                    "%s$%.2f",
-                    if (calendar.monthNetPnlUsd >= 0.0) "+" else "",
-                    calendar.monthNetPnlUsd,
-                ),
-                color = monthColor,
+                text = formatUsdExact(calendar.monthNetPnlUsd),
+                color = when {
+                    calendar.monthNetPnlUsd > 0.0 -> AurumColors.Green
+                    calendar.monthNetPnlUsd < 0.0 -> AurumColors.Red
+                    else -> AurumColors.Gold
+                },
             )
         },
     ) {
-        // Month navigation bar
+        // ── نوار ناوبری ماه ──────────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .clip(RoundedCornerShape(10.dp))
+                .background(AurumColors.SurfaceAlt)
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -2006,34 +1988,60 @@ private fun MonthlyPnlCalendarSection(
                 style = MaterialTheme.typography.labelMedium,
                 color = AurumColors.Cyan,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable {
-                    val prev = YearMonth.of(selectedYear, selectedMonth).minusMonths(1)
-                    selectedYear = prev.year
-                    selectedMonth = prev.monthValue
-                    selectedDayOfMonth = 0
-                },
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                        val prev = YearMonth.of(selectedYear, selectedMonth).minusMonths(1)
+                        selectedYear = prev.year
+                        selectedMonth = prev.monthValue
+                        selectedDayOfMonth = 0
+                    }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
             )
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    text = calendar.monthTitleFa,
+                    text = monthLabel,
                     style = MaterialTheme.typography.titleMedium,
                     color = AurumColors.Gold,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                if (selectedYear != currentYm.year || selectedMonth != currentYm.monthValue) {
-                    Text(
-                        text = "(امروز)",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.Cyan,
-                        modifier = Modifier.clickable {
-                            selectedYear = currentYm.year
-                            selectedMonth = currentYm.monthValue
-                            selectedDayOfMonth = 0
-                        },
-                    )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (!isCurrentMonth) {
+                        Text(
+                            text = "برگرد به ماه جاری",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Cyan,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable {
+                                    selectedYear = todayYm.year
+                                    selectedMonth = todayYm.monthValue
+                                    selectedDayOfMonth = 0
+                                }
+                                .padding(horizontal = 4.dp, vertical = 1.dp),
+                        )
+                    }
+                    val lastMonth = lastTradingMonth
+                    if (lastMonth != null && (lastMonth.year != selectedYear || lastMonth.monthValue != selectedMonth)) {
+                        Text(
+                            text = "آخرین ماه معاملاتی",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextMuted,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable {
+                                    selectedYear = lastMonth.year
+                                    selectedMonth = lastMonth.monthValue
+                                    selectedDayOfMonth = 0
+                                }
+                                .padding(horizontal = 4.dp, vertical = 1.dp),
+                        )
+                    }
                 }
             }
             Text(
@@ -2041,59 +2049,66 @@ private fun MonthlyPnlCalendarSection(
                 style = MaterialTheme.typography.labelMedium,
                 color = AurumColors.Cyan,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.clickable {
-                    val next = YearMonth.of(selectedYear, selectedMonth).plusMonths(1)
-                    selectedYear = next.year
-                    selectedMonth = next.monthValue
-                    selectedDayOfMonth = 0
-                },
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable {
+                        val next = YearMonth.of(selectedYear, selectedMonth).plusMonths(1)
+                        selectedYear = next.year
+                        selectedMonth = next.monthValue
+                        selectedDayOfMonth = 0
+                    }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
 
-        // Monthly KPI tiles
+        // ── کارت‌های خلاصهٔ ماه ──────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 6.dp),
+                .padding(top = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             StatTile(
                 label = "برآیند ماه",
-                value = String.format(
-                    Locale.US,
-                    "%s$%.2f",
-                    if (calendar.monthNetPnlUsd >= 0.0) "+" else "",
-                    calendar.monthNetPnlUsd,
-                ),
+                value = formatUsdExact(calendar.monthNetPnlUsd),
                 valueColor = if (calendar.monthNetPnlUsd >= 0.0) AurumColors.Green else AurumColors.Red,
                 modifier = Modifier.weight(1f),
             )
             StatTile(
-                label = "روزهای سودده / ضررده",
-                value = "${calendar.winningDays} سبز / ${calendar.losingDays} قرمز",
+                label = "روزهای سبز / قرمز",
+                value = "${calendar.winningDays} / ${calendar.losingDays}",
                 valueColor = AurumColors.Gold,
                 modifier = Modifier.weight(1f),
             )
             StatTile(
-                label = "وین‌ریت ماه (${calendar.totalClosedTrades})",
+                label = "وین‌ریت (${calendar.totalClosedTrades})",
                 value = calendar.monthWinRate?.let { String.format(Locale.US, "%.0f%%", it) } ?: "—",
                 valueColor = AurumColors.Cyan,
                 modifier = Modifier.weight(1f),
             )
         }
 
-        // Weekday header row (Saturday to Friday)
+        // ── راهنمای خواندن تقویم ────────────────────────────────────────────
+        Text(
+            text = "سبز = سود · قرمز = ضرر · رنگ و ارتفاع هر خانه به بزرگی سود/زیان همان روز بستگی دارد · " +
+                "حلقهٔ فیروزه‌ای = امروز",
+            style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.TextMuted,
+            modifier = Modifier.padding(top = 8.dp),
+        )
+
+        // ── سرستون روزهای هفته ───────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 8.dp),
+                .padding(top = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             WEEKDAY_HEADERS_FA.forEach { dayName ->
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .padding(vertical = 4.dp),
+                        .padding(vertical = 3.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -2106,15 +2121,15 @@ private fun MonthlyPnlCalendarSection(
             }
         }
 
-        // Calendar grid (rows of 7 cells)
+        // ── شبکهٔ تقویم (داینامیک: ارتفاع خانه با بزرگی سود/زیان روز) ─────────
         val totalCells = calendar.firstDayOffsetSaturdayStart + calendar.daysInMonth
-        val rows = (totalCells + 6) / 7
-
+        val rowCount = (totalCells + 6) / 7
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            for (r in 0 until rows) {
+            for (r in 0 until rowCount) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.Top,
                 ) {
                     for (c in 0 until 7) {
                         val cellIndex = r * 7 + c
@@ -2122,21 +2137,28 @@ private fun MonthlyPnlCalendarSection(
                         val daySummary = if (dayNumber in 1..calendar.daysInMonth) {
                             calendar.days[dayNumber - 1]
                         } else null
-
                         if (daySummary == null) {
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(54.dp),
-                            )
+                            Box(modifier = Modifier.weight(1f).height(58.dp))
                         } else {
+                            val intensity = if (maxAbsDayPnl <= 0.0) {
+                                0.0
+                            } else {
+                                (abs(daySummary.netPnlUsd) / maxAbsDayPnl).coerceIn(0.0, 1.0)
+                            }
+                            val cellHeight = (56 + (intensity * 24.0)).dp
                             CalendarDayCell(
                                 summary = daySummary,
-                                isSelected = effectiveSelectedDay == daySummary.dayOfMonth,
+                                isSelected = selectedDayOfMonth == daySummary.dayOfMonth,
+                                isToday = isCurrentMonth && todayZoned.dayOfMonth == daySummary.dayOfMonth,
+                                intensity = intensity,
+                                cellHeight = cellHeight,
                                 modifier = Modifier.weight(1f),
                                 onClick = {
-                                    selectedDayOfMonth = if (effectiveSelectedDay == daySummary.dayOfMonth) 0
-                                    else daySummary.dayOfMonth
+                                    selectedDayOfMonth = if (selectedDayOfMonth == daySummary.dayOfMonth) {
+                                        0
+                                    } else {
+                                        daySummary.dayOfMonth
+                                    }
                                 },
                             )
                         }
@@ -2145,12 +2167,107 @@ private fun MonthlyPnlCalendarSection(
             }
         }
 
-        // Overall Journal Stats Summary
+        if (calendar.totalClosedTrades == 0) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AurumColors.SurfaceAlt)
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = "در $monthLabel معاملهٔ بسته‌شده‌ای ثبت نشده است.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AurumColors.TextSecondary,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "معاملات باز در بخش «معاملات باز» بالا دیده می‌شوند و با بسته‌شدن (TP/SL) به همین تقویم اضافه می‌شوند.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                )
+            }
+        }
+
+        // ── پنل روز انتخاب‌شده ──────────────────────────────────────────────
+        val panelTrades = remember(calendar, selectedDayOfMonth) {
+            if (selectedDayOfMonth in 1..calendar.daysInMonth) {
+                calendar.days[selectedDayOfMonth - 1].trades.sortedByDescending { it.closedAt ?: it.openedAt }
+            } else {
+                emptyList()
+            }
+        }
+        val monthTrades = remember(calendar) {
+            calendar.days.flatMap { it.trades }.sortedByDescending { it.closedAt ?: it.openedAt }
+        }
+        val shownTrades = if (selectedDayOfMonth in 1..calendar.daysInMonth) panelTrades else monthTrades
+        val shownNet = remember(shownTrades) { shownTrades.sumOf { it.pnlUsd ?: 0.0 } }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (selectedDayOfMonth in 1..calendar.daysInMonth) {
+                        "معاملات روز $selectedDayOfMonth"
+                    } else {
+                        "معاملات $monthLabel"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    text = "${shownTrades.size} معامله · برآیند ${formatUsdExact(shownNet)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (shownNet >= 0.0) AurumColors.Green else AurumColors.Red,
+                )
+            }
+            if (selectedDayOfMonth != 0) {
+                Pill(
+                    text = "نمایش کل ماه",
+                    color = AurumColors.Cyan,
+                    modifier = Modifier.clickable { selectedDayOfMonth = 0 },
+                )
+            }
+        }
+
+        if (shownTrades.isEmpty()) {
+            Text(
+                text = if (selectedDayOfMonth == 0) {
+                    "در این ماه معاملهٔ بسته‌شده‌ای نیست؛ برای دیدن معاملات یک روز، خانهٔ آن روز را انتخاب کن."
+                } else {
+                    "در این روز معامله‌ای بسته نشده است؛ برای بستن انتخاب، دوباره روی همان روز بزن."
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 6.dp),
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                shownTrades.forEach { trade ->
+                    ClosedJournalTradeRow(
+                        trade = trade,
+                        onDelete = { onDeleteTrade(trade.id) },
+                        onOpenChart = { onOpenChart(trade.symbol) },
+                    )
+                }
+            }
+        }
+
+        // ── آمار کل ژورنال ─────────────────────────────────────────────────
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 12.dp)
-                .background(AurumColors.SurfaceAlt, RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(10.dp))
+                .background(AurumColors.SurfaceAlt)
                 .padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -2163,7 +2280,7 @@ private fun MonthlyPnlCalendarSection(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatTile(
                     label = "برآیند کل",
-                    value = String.format(Locale.US, "%s$%.2f", if (stats.netPnl >= 0) "+" else "", stats.netPnl),
+                    value = formatUsdExact(stats.netPnl),
                     valueColor = if (stats.netPnl >= 0) AurumColors.Green else AurumColors.Red,
                     modifier = Modifier.weight(1f),
                 )
@@ -2181,382 +2298,129 @@ private fun MonthlyPnlCalendarSection(
                 )
             }
         }
-
-        // نوار هوشمند «فقط معاملات روز آخر» (پیش‌فرض سریع) + تفکیک فوری معاملات سودده و ضررده
-        var outcomeFilter by rememberSaveable { mutableIntStateOf(0) } // 0 = همه, 1 = فقط سودده, 2 = فقط ضررده
-        val rawDayTrades = remember(calendar, effectiveSelectedDay) {
-            if (effectiveSelectedDay in 1..calendar.daysInMonth) {
-                calendar.days[effectiveSelectedDay - 1].trades
-            } else {
-                calendar.days.flatMap { it.trades }.sortedByDescending { it.closedAt ?: 0L }
-            }
-        }
-        val winningDayTrades = remember(rawDayTrades) { rawDayTrades.filter { (it.pnlUsd ?: 0.0) > 0.0 } }
-        val losingDayTrades = remember(rawDayTrades) { rawDayTrades.filter { (it.pnlUsd ?: 0.0) <= 0.0 } }
-        val winningDaySumUsd = remember(winningDayTrades) { winningDayTrades.sumOf { it.pnlUsd ?: 0.0 } }
-        val losingDaySumUsd = remember(losingDayTrades) { losingDayTrades.sumOf { it.pnlUsd ?: 0.0 } }
-        val displayedTrades = remember(rawDayTrades, winningDayTrades, losingDayTrades, outcomeFilter) {
-            when (outcomeFilter) {
-                1 -> winningDayTrades
-                2 -> losingDayTrades
-                else -> rawDayTrades
-            }
-        }
-
-        val currentActiveIdx = activeTradingDaysInMonth.indexOf(effectiveSelectedDay)
-        val prevTradingDay = if (currentActiveIdx > 0) activeTradingDaysInMonth[currentActiveIdx - 1]
-        else if (effectiveSelectedDay == 0 && activeTradingDaysInMonth.isNotEmpty()) activeTradingDaysInMonth.last()
-        else null
-        val nextTradingDay = if (currentActiveIdx >= 0 && currentActiveIdx < activeTradingDaysInMonth.lastIndex) {
-            activeTradingDaysInMonth[currentActiveIdx + 1]
-        } else null
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 10.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(AurumColors.SurfaceAlt)
-                .border(1.dp, AurumColors.Gold.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
-                .padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = when {
-                            selectedDayOfMonth == -1 -> "⚡ حالت سریع: نمایش معاملات روز آخر (روز $effectiveSelectedDay ${calendar.monthTitleFa})"
-                            effectiveSelectedDay > 0 -> "📅 معاملات روز $effectiveSelectedDay ${calendar.monthTitleFa} (${rawDayTrades.size} معامله)"
-                            else -> "📂 کل معاملات ماه ${calendar.monthTitleFa} (${rawDayTrades.size} معامله)"
-                        },
-                        style = MaterialTheme.typography.titleSmall,
-                        color = AurumColors.Gold,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = "معاملات سودده با کادر سبز زمردی (✅ سودده) و معاملات ضررده با کادر قرمز یاقوتی (❌ ضررده) در یک نگاه مشخص شده‌اند.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.TextSecondary,
-                    )
-                }
-                if (closedTrades.isNotEmpty()) {
-                    Pill(
-                        text = "پاک کردن تاریخچه",
-                        color = AurumColors.Red,
-                        modifier = Modifier.clickable { onClearAll() },
-                    )
-                }
-            }
-
-            // ── تابلو تفکیک فوری سودده در برابر ضررده (High-Contrast Win vs Loss Scoreboard) ──
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(AurumColors.Green.copy(alpha = 0.14f))
-                        .border(
-                            width = if (outcomeFilter == 1) 2.dp else 1.dp,
-                            color = AurumColors.Green.copy(alpha = if (outcomeFilter == 1) 0.95f else 0.55f),
-                            shape = RoundedCornerShape(10.dp),
-                        )
-                        .clickable {
-                            outcomeFilter = if (outcomeFilter == 1) 0 else 1
-                            visibleTradesCap = 20
-                        }
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        text = "✅ معاملات سودده (WIN)",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = AurumColors.Green,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "${winningDayTrades.size} معامله",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = AurumColors.TextPrimary,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                            Text(
-                                text = String.format(Locale.US, "+$%.2f", winningDaySumUsd),
-                                style = MaterialTheme.typography.titleSmall,
-                                color = AurumColors.Green,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false,
-                            )
-                        }
-                    }
-                }
-
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(AurumColors.Red.copy(alpha = 0.14f))
-                        .border(
-                            width = if (outcomeFilter == 2) 2.dp else 1.dp,
-                            color = AurumColors.Red.copy(alpha = if (outcomeFilter == 2) 0.95f else 0.55f),
-                            shape = RoundedCornerShape(10.dp),
-                        )
-                        .clickable {
-                            outcomeFilter = if (outcomeFilter == 2) 0 else 2
-                            visibleTradesCap = 20
-                        }
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Text(
-                        text = "❌ معاملات ضررده (LOSS)",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = AurumColors.Red,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        softWrap = false,
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = "${losingDayTrades.size} معامله",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = AurumColors.TextPrimary,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                            Text(
-                                text = String.format(Locale.US, "%s$%.2f", if (losingDaySumUsd < 0) "-" else "", abs(losingDaySumUsd)),
-                                style = MaterialTheme.typography.titleSmall,
-                                color = AurumColors.Red,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                softWrap = false,
-                            )
-                        }
-                    }
-                }
-            }
-
-            // نوار فیلتر سریع وضعیت معامله (همه / فقط سودده / فقط ضررده)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Pill(
-                    text = "📊 همه معاملات (${rawDayTrades.size})",
-                    color = if (outcomeFilter == 0) AurumColors.Gold else AurumColors.TextMuted,
-                    modifier = Modifier.clickable {
-                        outcomeFilter = 0
-                        visibleTradesCap = 20
-                    },
-                )
-                Pill(
-                    text = "✅ فقط سودده‌ها (${winningDayTrades.size})",
-                    color = if (outcomeFilter == 1) AurumColors.Green else AurumColors.TextMuted,
-                    modifier = Modifier.clickable {
-                        outcomeFilter = 1
-                        visibleTradesCap = 20
-                    },
-                )
-                Pill(
-                    text = "❌ فقط ضررده‌ها (${losingDayTrades.size})",
-                    color = if (outcomeFilter == 2) AurumColors.Red else AurumColors.TextMuted,
-                    modifier = Modifier.clickable {
-                        outcomeFilter = 2
-                        visibleTradesCap = 20
-                    },
-                )
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Pill(
-                    text = "📌 فقط روز آخر ($latestActiveDayInMonth ${calendar.monthTitleFa})",
-                    color = if (selectedDayOfMonth == -1 || effectiveSelectedDay == latestActiveDayInMonth) AurumColors.Gold else AurumColors.TextMuted,
-                    modifier = Modifier.clickable {
-                        selectedDayOfMonth = -1
-                        visibleTradesCap = 20
-                    },
-                )
-                if (prevTradingDay != null) {
-                    Pill(
-                        text = "⏮ روز معاملاتی قبل (روز $prevTradingDay)",
-                        color = AurumColors.Cyan,
-                        modifier = Modifier.clickable {
-                            selectedDayOfMonth = prevTradingDay
-                            visibleTradesCap = 20
-                        },
-                    )
-                }
-                if (nextTradingDay != null) {
-                    Pill(
-                        text = "⏭ روز معاملاتی بعد (روز $nextTradingDay)",
-                        color = AurumColors.Cyan,
-                        modifier = Modifier.clickable {
-                            selectedDayOfMonth = nextTradingDay
-                            visibleTradesCap = 20
-                        },
-                    )
-                }
-                Pill(
-                    text = if (effectiveSelectedDay == 0) "📂 کل ماه فعال است (${calendar.totalClosedTrades})" else "📂 بارگذاری بقیه روزهای ماه (${calendar.totalClosedTrades})",
-                    color = if (effectiveSelectedDay == 0) AurumColors.Green else AurumColors.TextMuted,
-                    modifier = Modifier.clickable {
-                        selectedDayOfMonth = if (effectiveSelectedDay == 0) -1 else 0
-                        visibleTradesCap = 20
-                    },
-                )
-            }
-        }
-
-        if (displayedTrades.isEmpty()) {
-            Text(
-                text = if (effectiveSelectedDay > 0) {
-                    "در روز $effectiveSelectedDay ${calendar.monthTitleFa} معاملهٔ بسته‌شده‌ای ثبت نشده است؛ برای دیدن روزهای قبلی روی «بارگذاری بقیه روزهای ماه» یا روزهای تقویم بزنید."
-                } else {
-                    "در این ماه هنوز معاملهٔ بسته‌شده‌ای ثبت نشده است."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = AurumColors.TextSecondary,
-                modifier = Modifier.padding(top = 6.dp),
-            )
-        } else {
-            val pagedTrades = remember(displayedTrades, visibleTradesCap) {
-                displayedTrades.take(visibleTradesCap)
-            }
-            Column(
-                modifier = Modifier.padding(top = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                pagedTrades.forEach { trade ->
-                    ClosedJournalTradeRow(
-                        trade = trade,
-                        onDelete = { onDeleteTrade(trade.id) },
-                        onOpenChart = { onOpenChart(trade.symbol) },
-                    )
-                }
-                if (displayedTrades.size > visibleTradesCap) {
-                    val remaining = displayedTrades.size - visibleTradesCap
-                    OutlinedButton(
-                        onClick = { visibleTradesCap += 25 },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            text = "▼ بارگذاری ۲۵ معامله دیگر از این بخش ($remaining معامله باقی‌مانده)",
-                            color = AurumColors.Gold,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-                }
-            }
-        }
     }
+}
+
+/** قالب کوتاه و خوانا برای مبلغ دلاری با علامت (مثلاً `+$12.4` یا `−$1.2k`). */
+private fun formatUsdExact(value: Double): String {
+    val sign = if (value >= 0.0) "+" else "−"
+    return sign + "$" + String.format(Locale.US, "%.2f", abs(value))
 }
 
 @Composable
 private fun CalendarDayCell(
     summary: DayPnlSummary,
     isSelected: Boolean,
+    isToday: Boolean,
+    intensity: Double,
+    cellHeight: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     val hasTrades = summary.closedTradesCount > 0
-    val bgColor = when {
-        !hasTrades -> AurumColors.SurfaceAlt.copy(alpha = 0.45f)
-        summary.netPnlUsd > 0.0 -> AurumColors.Green.copy(alpha = 0.20f)
-        summary.netPnlUsd < 0.0 -> AurumColors.Red.copy(alpha = 0.20f)
-        else -> AurumColors.Gold.copy(alpha = 0.15f)
+    val positive = summary.netPnlUsd > 0.0
+    val negative = summary.netPnlUsd < 0.0
+    val accent = when {
+        !hasTrades -> AurumColors.TextMuted
+        positive -> AurumColors.Green
+        negative -> AurumColors.Red
+        else -> AurumColors.Gold
+    }
+    val background = if (hasTrades) {
+        accent.copy(alpha = (0.10 + 0.30 * intensity).toFloat())
+    } else {
+        AurumColors.SurfaceAlt.copy(alpha = 0.40f)
     }
     val borderColor = when {
         isSelected -> AurumColors.Gold
-        !hasTrades -> AurumColors.Line.copy(alpha = 0.5f)
-        summary.netPnlUsd > 0.0 -> AurumColors.Green.copy(alpha = 0.65f)
-        summary.netPnlUsd < 0.0 -> AurumColors.Red.copy(alpha = 0.65f)
-        else -> AurumColors.Gold.copy(alpha = 0.5f)
-    }
-    val pnlTextColor = when {
-        !hasTrades -> AurumColors.TextMuted
-        summary.netPnlUsd > 0.0 -> AurumColors.Green
-        summary.netPnlUsd < 0.0 -> AurumColors.Red
-        else -> AurumColors.Gold
+        isToday -> AurumColors.Cyan
+        !hasTrades -> AurumColors.Line.copy(alpha = 0.45f)
+        else -> accent.copy(alpha = 0.60f)
     }
 
     Column(
         modifier = modifier
-            .height(54.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(bgColor)
-            .border(if (isSelected) 2.dp else 1.dp, borderColor, RoundedCornerShape(8.dp))
+            .height(cellHeight)
+            .clip(RoundedCornerShape(10.dp))
+            .background(background)
+            .border(
+                width = if (isSelected || isToday) 2.dp else 1.dp,
+                color = borderColor,
+                shape = RoundedCornerShape(10.dp),
+            )
             .clickable { onClick() }
-            .padding(horizontal = 3.dp, vertical = 4.dp),
+            .padding(horizontal = 4.dp, vertical = 5.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(
-            text = summary.dayOfMonth.toString(),
-            style = MaterialTheme.typography.labelSmall,
-            color = if (hasTrades) AurumColors.TextPrimary else AurumColors.TextMuted,
-            fontWeight = FontWeight.Bold,
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = summary.dayOfMonth.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (hasTrades) AurumColors.TextPrimary else AurumColors.TextMuted,
+                fontWeight = FontWeight.Bold,
+            )
+            if (hasTrades) {
+                Text(
+                    text = "${summary.closedTradesCount}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = accent.copy(alpha = 0.9f),
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
         if (hasTrades) {
             Text(
-                text = String.format(
-                    Locale.US,
-                    "%s%.1f$",
-                    if (summary.netPnlUsd >= 0.0) "+" else "",
-                    summary.netPnlUsd,
-                ),
+                text = compactSignedUsd(summary.netPnlUsd),
                 style = MaterialTheme.typography.labelSmall,
-                color = pnlTextColor,
+                color = accent,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
+                softWrap = false,
             )
-            Text(
-                text = "${summary.closedTradesCount} معامله",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextSecondary,
-                maxLines = 1,
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 2.dp)
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(accent.copy(alpha = 0.18f)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(intensity.toFloat().coerceIn(0.08f, 1f))
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(accent),
+                )
+            }
         } else {
             Text(
                 text = "—",
                 style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted.copy(alpha = 0.5f),
+                color = AurumColors.TextMuted.copy(alpha = 0.55f),
             )
         }
     }
+}
+
+/** قالب فشردهٔ مبلغ برای داخل خانهٔ تقویم (بدون شکستن عدد در عرض کم). */
+private fun compactSignedUsd(value: Double): String {
+    val sign = if (value >= 0.0) "+" else "−"
+    val amount = abs(value)
+    val body = when {
+        amount >= 10_000 -> String.format(Locale.US, "%.0fk", amount / 1_000.0)
+        amount >= 1_000 -> String.format(Locale.US, "%.1fk", amount / 1_000.0)
+        amount >= 100 -> String.format(Locale.US, "%.0f", amount)
+        amount >= 10 -> String.format(Locale.US, "%.1f", amount)
+        else -> String.format(Locale.US, "%.2f", amount)
+    }
+    return sign + "$" + body
 }
 
 @Composable

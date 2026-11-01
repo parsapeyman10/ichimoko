@@ -440,9 +440,51 @@ data class BaseStrategyConfig(
     val neoWaveCryptoMinRulesPassed: Int = 8,
     /** حداقل اطمینان شمارش برای ورود کریپتو. */
     val neoWaveCryptoMinConfidencePct: Double = 65.0,
+    /** تنظیمات نئوویو به هوش عصبی سپرده شود (آستانه‌ها از معاملات واقعی آموخته می‌شوند). */
+    val neoWaveAutoTuneEnabled: Boolean = true,
+    /** آستانهٔ قواعدِ آموخته‌شده توسط هوش عصبی (۰ = استفاده از مقدار دستی). */
+    val neoWaveAutoRules: Int = 0,
+    /** آستانهٔ اطمینانِ آموخته‌شده توسط هوش عصبی (۰ = استفاده از مقدار دستی). */
+    val neoWaveAutoConfidencePct: Double = 0.0,
+    /** تعداد نمونه‌ای که هوش عصبی بر پایهٔ آن تصمیم گرفته است. */
+    val neoWaveAutoSamples: Int = 0,
+    /** دلیل فارسی تصمیم هوش عصبی. */
+    val neoWaveAutoBasisFa: String = "",
+    /** زمان آخرین به‌روزرسانی تنظیمات توسط هوش عصبی. */
+    val neoWaveAutoUpdatedAt: Long = 0L,
+    /** وزن آموخته‌شدهٔ ۱۲ قاعدهٔ نیلی (خالی = وزن خنثی). */
+    val neoWaveAutoRuleWeights: List<Double> = emptyList(),
     val autoTunedGeneration: Int = 0,
     val perStrategyOverrides: Map<String, PerStrategyConfigOverride> = emptyMap(),
 ) {
+    /** آیا آستانه‌های نئوویو همین حالا از هوش عصبی می‌آیند. */
+    val neoWaveAutoTuningActive: Boolean
+        get() = neoWaveAutoTuneEnabled && neoWaveAutoRules in 1..12 && neoWaveAutoConfidencePct > 0.0
+
+    /** آستانهٔ مؤثر قواعد نیلی (هوش عصبی → دستی → پیش‌فرض کلاس دارایی). */
+    fun resolvedNeoWaveRules(isCrypto: Boolean): Int = when {
+        neoWaveAutoTuningActive -> neoWaveAutoRules.coerceIn(1, 12)
+        isCrypto -> neoWaveCryptoMinRulesPassed.coerceIn(1, 12)
+        else -> neoWaveMinRulesPassed.coerceIn(1, 12)
+    }
+
+    /** آستانهٔ مؤثر اطمینان نیلی. */
+    fun resolvedNeoWaveConfidence(isCrypto: Boolean): Double = when {
+        neoWaveAutoTuningActive -> neoWaveAutoConfidencePct.coerceIn(35.0, 95.0)
+        isCrypto -> neoWaveCryptoMinConfidencePct.coerceIn(35.0, 95.0)
+        else -> neoWaveMinConfidencePct.coerceIn(35.0, 95.0)
+    }
+
+    /** وزن‌های آموخته‌شدهٔ قواعد به‌صورت نقشه (خالی = بدون وزن‌دهی). */
+    fun neoWaveWeightsMap(): Map<Int, Double> =
+        if (!neoWaveAutoTuningActive) {
+            emptyMap()
+        } else {
+            neoWaveAutoRuleWeights.mapIndexedNotNull { index, w ->
+                if (w > 0.0 && index in 0 until 12) (index + 1) to w else null
+            }.toMap()
+        }
+
     val macroInterval: Interval get() = Interval.fromLabel(macroIntervalLabel)
     val strategyInterval: Interval get() = Interval.fromLabel(strategyIntervalLabel)
     val triggerInterval: Interval get() = Interval.fromLabel(triggerIntervalLabel)
@@ -966,6 +1008,12 @@ data class StrategyEvaluationReport(
     val neoWaveVeto: Boolean = false,
     /** آیا این ورود از «مسیر ورود رمزارز بر پایهٔ نئوویو» آمده است. */
     val cryptoNeoWaveEntry: Boolean = false,
+    /** الگوی نئوویو در این ارزیابی (برای آموزش هوش عصبی). */
+    val neoWavePatternId: String = "",
+    val neoWaveRulesPassed: Int = 0,
+    val neoWaveRulesTotal: Int = 0,
+    val neoWaveConfidencePct: Double = 0.0,
+    val neoWaveFailedRuleIds: List<Int> = emptyList(),
     /** توضیح فارسی مسیر ورود (برای نمایش در چک‌لیست و ژورنال). */
     val entryPathFa: String = "",
 ) {
@@ -2808,12 +2856,16 @@ object IchimokuStrategyEngine {
         } else {
             null
         }
+        // آستانه‌ها: اگر تنظیمات به هوش عصبی سپرده شده باشد، همان مقادیر آموخته‌شده اعمال می‌شوند.
+        val neoWaveRulesThreshold = effectiveConfig.resolvedNeoWaveRules(isCrypto = false)
+        val neoWaveConfidenceThreshold = effectiveConfig.resolvedNeoWaveConfidence(isCrypto = false)
         val neoWaveGate = if (neoWaveOn) {
             NeoWaveEngine.gate(
                 verdict = neoWaveVerdict,
                 isLong = isLong,
-                minRulesPassed = effectiveConfig.neoWaveMinRulesPassed,
-                minConfidencePct = effectiveConfig.neoWaveMinConfidencePct,
+                minRulesPassed = neoWaveRulesThreshold,
+                minConfidencePct = neoWaveConfidenceThreshold,
+                ruleWeights = effectiveConfig.neoWaveWeightsMap(),
             )
         } else {
             NeoWaveEngine.NeoWaveGate.OFF
@@ -2849,8 +2901,8 @@ object IchimokuStrategyEngine {
             isCrypto = isCryptoClass,
             verdict = neoWaveVerdict,
             isLong = isLong,
-            minRulesPassed = effectiveConfig.neoWaveCryptoMinRulesPassed,
-            minConfidencePct = effectiveConfig.neoWaveCryptoMinConfidencePct,
+            minRulesPassed = effectiveConfig.resolvedNeoWaveRules(isCrypto = true),
+            minConfidencePct = effectiveConfig.resolvedNeoWaveConfidence(isCrypto = true),
             riskReward = rr,
             hasValidPlan = finalStopLoss != null && finalTakeProfit != null && sniperOptimal != null &&
                 rr >= 1.5,
@@ -2973,6 +3025,15 @@ object IchimokuStrategyEngine {
             planGuardNoteFa = guardedPlan.summaryFa(),
             neoWaveBadgeFa = if (neoWaveOn) neoWaveGate.noteFa else "",
             neoWaveVeto = neoWaveGate.veto,
+            neoWavePatternId = if (neoWaveOn) neoWaveVerdict?.pattern?.name.orEmpty() else "",
+            neoWaveRulesPassed = if (neoWaveOn) neoWaveVerdict?.rulesPassed ?: 0 else 0,
+            neoWaveRulesTotal = if (neoWaveOn) neoWaveVerdict?.rulesTotal ?: 0 else 0,
+            neoWaveConfidencePct = if (neoWaveOn) neoWaveVerdict?.confidencePct ?: 0.0 else 0.0,
+            neoWaveFailedRuleIds = if (neoWaveOn) {
+                neoWaveVerdict?.rules?.filter { !it.passed }?.map { it.index }.orEmpty()
+            } else {
+                emptyList()
+            },
             cryptoNeoWaveEntry = cryptoNeoWaveEntry,
             entryPathFa = entryPathFa,
         )

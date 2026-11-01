@@ -141,6 +141,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 _stats.value = container.journalStore.stats()
                 _lastDisplayMarks.value = OpenPositionDisplay.onlyOpen(_lastDisplayMarks.value, currentTrades)
                 container.neuralEngine.syncWithClosedJournalTrades(currentTrades)
+                runCatching { refreshNeoWaveNeuralTuning(currentTrades) }
                 syncBackgroundServiceState()
             }
         }
@@ -988,12 +989,38 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 detail = c.detailFa,
             )
         }.orEmpty()
-        val trade = if (condRecords.isNotEmpty()) {
-            val enriched = openedRaw.copy(entryConditions = condRecords)
+        // شمارش نئوویو همان لحظهٔ ورود روی معامله ثبت می‌شود تا هوش عصبی بعداً با نتیجهٔ واقعی
+        // همین معامله، آستانه‌ها و وزن قواعد را یاد بگیرد (بدون دادهٔ ساختگی).
+        val neoWaveTag = matchedReport?.let { rep ->
+            NeoWaveTradeTag(
+                patternId = rep.neoWavePatternId,
+                rulesPassed = rep.neoWaveRulesPassed,
+                rulesTotal = rep.neoWaveRulesTotal,
+                confidencePct = rep.neoWaveConfidencePct,
+                failedRuleIds = rep.neoWaveFailedRuleIds,
+                entryPathTag = if (rep.cryptoNeoWaveEntry) "CRYPTO_NW" else "CLASSIC",
+            )
+        }
+        val taggedRaw = if (neoWaveTag != null && neoWaveTag.rulesTotal > 0) {
+            openedRaw.copy(
+                neoWavePatternId = neoWaveTag.patternId,
+                neoWaveRulesPassed = neoWaveTag.rulesPassed,
+                neoWaveRulesTotal = neoWaveTag.rulesTotal,
+                neoWaveConfidencePct = neoWaveTag.confidencePct,
+                neoWaveFailedRuleIds = neoWaveTag.failedRuleIds,
+                neoWaveEntryPathTag = neoWaveTag.entryPathTag,
+            )
+        } else {
+            openedRaw
+        }
+        val trade = if (condRecords.isNotEmpty() || taggedRaw != openedRaw) {
+            val enriched = taggedRaw.copy(
+                entryConditions = if (condRecords.isNotEmpty()) condRecords else taggedRaw.entryConditions,
+            )
             container.journalStore.addTrade(enriched)
             enriched
         } else {
-            openedRaw
+            taggedRaw
         }
         _liveTicks.value[trade.symbol]?.let { tick ->
             _lastDisplayMarks.value = OpenPositionDisplay.record(_lastDisplayMarks.value, trade, tick, now)
@@ -1012,6 +1039,87 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         syncBackgroundServiceState()
         val msg = "⚡ معامله ${trade.symbol} [تایم ${trade.interval.label}] · [${trade.strategyTitleFa}] (${if (trade.action == com.aurum.edge.domain.SignalAction.BUY) "خرید" else "فروش"}) باز شد · ${trade.preEntry3CandleCategoryFa}"
         _toast.value = msg
+    }
+
+    /** شمارش نئوویوی لحظهٔ ورود، برای ثبت روی معامله و آموزش هوش عصبی. */
+    private data class NeoWaveTradeTag(
+        val patternId: String,
+        val rulesPassed: Int,
+        val rulesTotal: Int,
+        val confidencePct: Double,
+        val failedRuleIds: List<Int>,
+        val entryPathTag: String,
+    )
+
+    /**
+     * به‌روزرسانی تنظیمات نئوویو توسط «هوش عصبی».
+     *
+     * از معاملات بسته‌شده‌ای که در لحظهٔ ورودشان شمارش نئوویو داشته‌اند، آستانهٔ قواعد/اطمینان و
+     * وزن قواعد آموخته می‌شود. اگر نمونه کافی نباشد، هیچ تغییری اعمال نمی‌شود.
+     */
+    private fun refreshNeoWaveNeuralTuning(closedTrades: List<com.aurum.edge.core.PaperTrade>) {
+        val cfg = settings.value.baseStrategyConfig
+        if (!cfg.neoWaveAutoTuneEnabled) return
+        val samples = closedTrades.mapNotNull { t ->
+            if (t.closedAt == null || t.neoWaveRulesTotal <= 0) return@mapNotNull null
+            val pnl = t.pnlUsd ?: return@mapNotNull null
+            val riskUsd = t.fixedRiskUsd.takeIf { it > 0.0 }
+                ?: (kotlin.math.abs(t.entry - (t.initialStopLoss ?: t.stopLoss)) * t.positionOz)
+            val achievedR = if (riskUsd > 0.0) {
+                pnl / riskUsd
+            } else if (pnl > 0.0) {
+                1.0
+            } else {
+                -1.0
+            }
+            com.aurum.edge.core.NeoWaveNeuralAdvisor.Sample(
+                patternId = t.neoWavePatternId,
+                rulesPassed = t.neoWaveRulesPassed,
+                rulesTotal = t.neoWaveRulesTotal,
+                confidencePct = t.neoWaveConfidencePct,
+                failedRuleIndexes = t.neoWaveFailedRuleIds,
+                won = pnl > 0.0,
+                achievedR = achievedR,
+            )
+        }
+        // قفل ضد حلقهٔ بی‌پایان: اگر تعداد نمونه و مبنای تصمیم عوض نشده، دوباره نمی‌نویسیم.
+        if (samples.size == cfg.neoWaveAutoSamples && cfg.neoWaveAutoBasisFa.isNotBlank()) return
+        val tuning = com.aurum.edge.core.NeoWaveNeuralAdvisor.advise(
+            samples = samples,
+            fallbackRules = cfg.neoWaveMinRulesPassed,
+            fallbackConfidence = cfg.neoWaveMinConfidencePct,
+        )
+        val weights = (1..12).map { index -> tuning.ruleWeights[index] ?: 1.0 }
+        val next = cfg.copy(
+            neoWaveAutoRules = if (tuning.isActive) tuning.rulesThreshold else cfg.neoWaveAutoRules,
+            neoWaveAutoConfidencePct = if (tuning.isActive) {
+                tuning.confidenceThresholdPct
+            } else {
+                cfg.neoWaveAutoConfidencePct
+            },
+            neoWaveAutoSamples = tuning.samples,
+            neoWaveAutoBasisFa = tuning.basisFa,
+            neoWaveAutoUpdatedAt = if (tuning.isActive) System.currentTimeMillis() else cfg.neoWaveAutoUpdatedAt,
+            neoWaveAutoRuleWeights = if (tuning.isActive) weights else cfg.neoWaveAutoRuleWeights,
+        )
+        if (next != cfg) updateBaseStrategyConfig(next)
+    }
+
+    /** اجرای دستیِ «مشورت با هوش عصبی» از دکمهٔ پنل نئوویو. */
+    fun retrainNeoWaveNeuralTuningNow() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            val closed = trades.value.filter { !it.isOpen }
+            // قفل موقت را باز می‌کنیم تا حتی با نمونهٔ ثابت هم محاسبهٔ دوباره انجام شود.
+            val cfg = settings.value.baseStrategyConfig
+            updateBaseStrategyConfig(cfg.copy(neoWaveAutoBasisFa = ""))
+            refreshNeoWaveNeuralTuning(closed)
+            val after = settings.value.baseStrategyConfig
+            _toast.value = if (after.neoWaveAutoBasisFa.isNotBlank()) {
+                "🤖 " + after.neoWaveAutoBasisFa
+            } else {
+                "🤖 داده‌ای برای آموزش تنظیمات نئوویو موجود نیست."
+            }
+        }
     }
 
     fun triggerManualDailyBackupNow() {

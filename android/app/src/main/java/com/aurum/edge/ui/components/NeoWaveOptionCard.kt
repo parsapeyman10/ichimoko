@@ -36,6 +36,13 @@ fun NeoWaveOptionCard(
     onToggle: (Boolean) -> Unit,
     onRulesChange: (Int) -> Unit,
     onConfidenceChange: (Double) -> Unit,
+    autoTuneEnabled: Boolean = true,
+    autoRules: Int = 0,
+    autoConfidencePct: Double = 0.0,
+    autoSamples: Int = 0,
+    autoBasisFa: String = "",
+    onAutoTuneToggle: (Boolean) -> Unit = {},
+    onRetrainNeural: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -89,6 +96,61 @@ fun NeoWaveOptionCard(
         }
 
         if (enabled) {
+            // ── سپردن تنظیمات به هوش عصبی ─────────────────────────────────────
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "🤖 تنظیمات به هوش عصبی سپرده شود",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (autoTuneEnabled) AurumColors.Purple else AurumColors.TextMuted,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = if (autoTuneEnabled) {
+                            "آستانه‌ها و وزن قواعد از نتیجهٔ واقعی معاملات آموخته می‌شود"
+                        } else {
+                            "خاموش · آستانه‌ها را خودت با پیل‌های زیر تعیین می‌کنی"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                }
+                Switch(checked = autoTuneEnabled, onCheckedChange = onAutoTuneToggle)
+            }
+
+            if (autoTuneEnabled) {
+                val rulesText = if (autoRules > 0) "$autoRules قاعده" else "در انتظار داده"
+                val confText = if (autoConfidencePct > 0.0) "${autoConfidencePct.toInt()}٪" else "در انتظار داده"
+                Text(
+                    text = "آستانهٔ آموخته‌شده: $rulesText · اطمینان $confText" +
+                        if (autoSamples > 0) " · $autoSamples نمونه" else "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Purple,
+                    fontWeight = FontWeight.Bold,
+                )
+                if (autoBasisFa.isNotBlank()) {
+                    Text(
+                        text = autoBasisFa,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                }
+                Text(
+                    text = "🔄 آموزش دوباره با داده‌های فعلی",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Cyan,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onRetrainNeural() }
+                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                )
+            }
+
             Text(
                 text = "حداقل قواعد نیلی برای پذیرش شمارش:",
                 style = MaterialTheme.typography.labelSmall,
@@ -116,6 +178,13 @@ fun NeoWaveOptionCard(
                         modifier = Modifier.clickable { onConfidenceChange(value.toDouble()) },
                     )
                 }
+            }
+            if (autoTuneEnabled) {
+                Text(
+                    text = "این پیل‌ها فقط وقتی اثر دارند که کلید «هوش عصبی» بالا خاموش باشد.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                )
             }
             Text(
                 text = "نکتهٔ ریسک: نئوویو داورِ قاعده‌محور است، نه تحلیلگر ذهنی. با آستانهٔ پایین‌تر، وتوهای بیشتری رخ می‌دهد.",

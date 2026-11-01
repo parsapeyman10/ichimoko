@@ -258,6 +258,15 @@ fun BitcoinIchimokuStrategyCard(
             onConfidenceChange = { pct ->
                 viewModel.updateBaseStrategyConfig(settings.baseStrategyConfig.copy(neoWaveMinConfidencePct = pct))
             },
+            autoTuneEnabled = settings.baseStrategyConfig.neoWaveAutoTuneEnabled,
+            autoRules = settings.baseStrategyConfig.neoWaveAutoRules,
+            autoConfidencePct = settings.baseStrategyConfig.neoWaveAutoConfidencePct,
+            autoSamples = settings.baseStrategyConfig.neoWaveAutoSamples,
+            autoBasisFa = settings.baseStrategyConfig.neoWaveAutoBasisFa,
+            onAutoTuneToggle = { on ->
+                viewModel.updateBaseStrategyConfig(settings.baseStrategyConfig.copy(neoWaveAutoTuneEnabled = on))
+            },
+            onRetrainNeural = { viewModel.retrainNeoWaveNeuralTuningNow() },
         )
     }
 }

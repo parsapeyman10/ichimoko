@@ -155,15 +155,58 @@ fun CryptoEntryPathCard(
             ConditionLine("۴", "جهت الگو با جهت ورود یکی باشد", "الزامی")
             ConditionLine(
                 "۵",
-                "قواعد پاس‌شده ≥ ${cfg.neoWaveCryptoMinRulesPassed} و ≥ ۷۵٪ قواعد همان الگو",
-                "${cfg.neoWaveCryptoMinRulesPassed} قاعده",
+                "قواعد پاس‌شده ≥ ${cfg.resolvedNeoWaveRules(isCrypto = true)} و ≥ ۷۵٪ قواعد همان الگو",
+                "${cfg.resolvedNeoWaveRules(isCrypto = true)} قاعده",
             )
             ConditionLine(
                 "۶",
-                "اطمینان شمارش ≥ ${cfg.neoWaveCryptoMinConfidencePct.toInt()}٪",
-                "${cfg.neoWaveCryptoMinConfidencePct.toInt()}٪",
+                "اطمینان شمارش ≥ ${cfg.resolvedNeoWaveConfidence(isCrypto = true).toInt()}٪",
+                "${cfg.resolvedNeoWaveConfidence(isCrypto = true).toInt()}٪",
             )
             ConditionLine("۷", "پلن معتبر با R:R ≥ ۱:۱.۵ و بدون وتوی نئوویو", "الزامی")
+
+            // ── هوش عصبی: صاحب تنظیمات این بخش ─────────────────────────────
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AurumColors.Purple.copy(alpha = 0.10f))
+                    .border(1.dp, AurumColors.Purple.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                    .padding(10.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        text = if (cfg.neoWaveAutoTuningActive) {
+                            "🤖 تنظیمات این بخش به هوش عصبی سپرده شده است"
+                        } else if (cfg.neoWaveAutoTuneEnabled) {
+                            "🤖 هوش عصبی در حال یادگیری است"
+                        } else {
+                            "🤖 هوش عصبی خاموش است؛ آستانه‌ها دستی هستند"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Purple,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = cfg.neoWaveAutoBasisFa.ifBlank {
+                            "برای سپردن تنظیمات به هوش عصبی، باید چند معاملهٔ بسته‌شده با شمارش نئوویو ثبت شود؛ " +
+                                "تا آن زمان آستانه‌های محافظه‌کارانهٔ بالا اعمال می‌شوند."
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                    Text(
+                        text = "🔄 آموزش دوباره با داده‌های فعلی",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Cyan,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { viewModel.retrainNeoWaveNeuralTuningNow() }
+                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                    )
+                }
+            }
 
             // ── آستانه‌ها ────────────────────────────────────────────────────
             Text(
@@ -175,7 +218,7 @@ fun CryptoEntryPathCard(
                 listOf(6, 8, 9).forEach { value ->
                     Pill(
                         text = "$value قاعده",
-                        color = if (cfg.neoWaveCryptoMinRulesPassed == value) AurumColors.Gold else AurumColors.TextMuted,
+                        color = if (cfg.resolvedNeoWaveRules(isCrypto = true) == value) AurumColors.Gold else AurumColors.TextMuted,
                         modifier = Modifier.clickable {
                             viewModel.updateBaseStrategyConfig(cfg.copy(neoWaveCryptoMinRulesPassed = value))
                         },
@@ -191,7 +234,7 @@ fun CryptoEntryPathCard(
                 listOf(55, 65, 70).forEach { value ->
                     Pill(
                         text = "$value٪",
-                        color = if (cfg.neoWaveCryptoMinConfidencePct.toInt() == value) AurumColors.Gold else AurumColors.TextMuted,
+                        color = if (cfg.resolvedNeoWaveConfidence(isCrypto = true).toInt() == value) AurumColors.Gold else AurumColors.TextMuted,
                         modifier = Modifier.clickable {
                             viewModel.updateBaseStrategyConfig(cfg.copy(neoWaveCryptoMinConfidencePct = value.toDouble()))
                         },

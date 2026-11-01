@@ -174,8 +174,21 @@ android {
         // the strategy tab (CryptoEntryPathCard), independent of the NeoWave switch, with the
         // switch, the seven entry conditions, the thresholds and a live count of crypto symbols
         // that currently qualify. No engine logic changed in this version.
-        versionCode = 742
-        versionName = "3.9.33"
+        // 3.9.34 (code 743) brings two things the user asked for:
+        // 1) The journal is now calendar-first again. The 3.9.26-3.9.33 calendar card had grown a
+        //    scoreboard, a second filter bar and a "latest active day" mode on top of the grid; the
+        //    grid itself is what the user liked in earlier versions. MonthlyPnlCalendarSection is
+        //    rebuilt around that: month navigation, three KPI tiles, a readable dynamic grid (cell
+        //    colour AND height scale with that day's |PnL|, today ring, compact `+$12.4` labels,
+        //    per-day bar) and the selected day's trades. No data or trade row was removed.
+        // 2) NeoWave settings are delegated to the neural layer (NeoWaveNeuralAdvisor). Every closed
+        //    trade now stores the NeoWave count it was opened with (pattern, rules passed/total,
+        //    confidence, failed rule indexes). The advisor sweeps rule/confidence thresholds on that
+        //    real outcome data, penalises small samples, prefers the stricter of near-equal
+        //    candidates and learns per-rule weights that the gate uses. With fewer than 20 samples
+        //    nothing changes; `neoWaveAutoTuneEnabled` can hand control back to the manual pills.
+        versionCode = 743
+        versionName = "3.9.34"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

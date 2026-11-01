@@ -1089,6 +1089,8 @@ object NeoWaveEngine {
         isLong: Boolean,
         minRulesPassed: Int = MIN_RULE_PASS,
         minConfidencePct: Double = MIN_CONFIDENCE_PCT,
+        /** وزن آموخته‌شدهٔ هوش عصبی برای هر قاعده (خالی = بدون وزن‌دهی، رفتار قبلی). */
+        ruleWeights: Map<Int, Double> = emptyMap(),
     ): NeoWaveGate {
         if (verdict == null || !verdict.isUsable) {
             return NeoWaveGate(
@@ -1101,7 +1103,17 @@ object NeoWaveEngine {
         }
         val minRules = minRulesPassed.coerceIn(1, 12)
         val minConf = minConfidencePct.coerceIn(35.0, 95.0)
-        val strong = verdict.rulesPassed >= minRules && verdict.confidencePct >= minConf
+        // امتیاز قواعد: اگر هوش عصبی وزن داده باشد، قاعده‌های سودآور وزن بیشتری در «قوی‌بودن» دارند.
+        val weightedPassed = if (ruleWeights.isEmpty()) {
+            verdict.rulesPassed.toDouble()
+        } else {
+            NeoWaveNeuralAdvisor.weightedPassScore(
+                rulesTotal = verdict.rulesTotal,
+                failedRuleIndexes = verdict.rules.filter { !it.passed }.map { it.index },
+                ruleWeights = ruleWeights,
+            ).first
+        }
+        val strong = weightedPassed >= minRules && verdict.confidencePct >= minConf
         val aligned = verdict.isAlignedWith(isLong)
         val dirFa = if (isLong) "خرید" else "فروش"
 
