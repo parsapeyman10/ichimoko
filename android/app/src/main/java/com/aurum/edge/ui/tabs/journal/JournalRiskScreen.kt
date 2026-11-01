@@ -56,9 +56,11 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -96,7 +98,7 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
 
-private val WEEKDAY_HEADERS_FA = listOf("ش", "ی", "د", "س", "چ", "پ", "ج")
+private val WEEKDAY_HEADERS_FA = listOf("شنبه", "یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه")
 private val RISK_PRESETS = listOf(0.5, 1.0, 1.5, 2.0, 3.0, 5.0)
 private val RR_PRESETS = listOf(1.5, 2.0, 3.0)
 
@@ -273,6 +275,43 @@ fun JournalRiskScreen(
             .verticalScroll(rememberScrollState())
             .padding(bottom = 18.dp),
     ) {
+        // ── ۳. نوار تب‌های داخلی صفحه ژورنال ────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 4.dp)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            // ترتیب تب‌ها = ترتیب منطقی کار: تقویم ← معاملات باز ← ماشین‌حساب ← خروجی ← آرشیو
+            listOf(
+                0 to "📅 تقویم ژورنال (${filteredClosedTrades.size})",
+                1 to "📜 معاملات باز (${filteredOpenTrades.size})",
+                2 to "🧮 ماشین‌حساب حجم",
+                3 to "📊 خروجی و بکاپ",
+                4 to "📸 آرشیو تصویری",
+            ).forEach { (idx, label) ->
+                Pill(
+                    text = label,
+                    color = if (subPage == idx) AurumColors.Gold else AurumColors.TextMuted,
+                    modifier = Modifier.clickable { subPage = idx },
+                )
+            }
+        }
+
+        when (subPage) {
+            0 -> {
+                // تقویم، اولین چیزِ صفحهٔ ژورنال (خواستهٔ صریح: ژورنال در حالت تقویم)
+                MonthlyPnlCalendarSection(
+                    trades = filteredTrades,
+                    closedTrades = filteredClosedTrades,
+                    stats = filteredStats,
+                    now = now,
+                    onDeleteTrade = viewModel::deleteJournalTrade,
+                    onClearAll = viewModel::clearAllJournalTrades,
+                    onOpenChart = onChartSymbol,
+                )
+
         // ── ۱. کارنامهٔ کلی بازطراحی‌شده (تحلیل کمّی: منحنی سرمایه، ریسک، تفکیک گروه‌ها) ──
         com.aurum.edge.ui.components.JournalPerformanceDashboard(
             report = performanceReport,
@@ -435,29 +474,6 @@ fun JournalRiskScreen(
             lastLearningNote = sessionExitNote,
         )
 
-        // ── ۳. نوار تب‌های داخلی صفحه ژورنال ────────────────────────────────
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 4.dp)
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            listOf(
-                0 to "📅 تقویم و دسته‌بندی (${filteredClosedTrades.size})",
-                4 to "📸 آرشیو تصویری معاملات",
-                3 to "📊 خروجی، ذخیره و بکاپ ژورنال",
-                1 to "📜 معاملات باز (${filteredOpenTrades.size})",
-                2 to "🧮 ماشین‌حساب حجم",
-            ).forEach { (idx, label) ->
-                Pill(
-                    text = label,
-                    color = if (subPage == idx) AurumColors.Gold else AurumColors.TextMuted,
-                    modifier = Modifier.clickable { subPage = idx },
-                )
-            }
-        }
-
         // ── ۳. فیلتر و دسته‌بندی استراتژی‌ها ───────────────────────────────
         StrategyJournalCategorizationCard(
             categories = strategyCategories,
@@ -471,21 +487,6 @@ fun JournalRiskScreen(
             trades = filteredTrades,
         )
 
-        when (subPage) {
-            0 -> {
-                MonthlyPnlCalendarSection(
-                    trades = filteredTrades,
-                    closedTrades = filteredClosedTrades,
-                    stats = filteredStats,
-                    now = now,
-                    onDeleteTrade = viewModel::deleteJournalTrade,
-                    onClearAll = viewModel::clearAllJournalTrades,
-                    onOpenChart = onChartSymbol,
-                )
-                com.aurum.edge.ui.components.TradeSnapshotArchiveGallerySection(
-                    viewModel = viewModel,
-                    initiallyExpanded = false,
-                )
             }
 
             4 -> {
@@ -2113,9 +2114,12 @@ private fun MonthlyPnlCalendarSection(
                 ) {
                     Text(
                         text = dayName,
-                        style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.TextMuted,
                         fontWeight = FontWeight.Bold,
+                        fontSize = 8.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        textAlign = TextAlign.Center,
                     )
                 }
             }
@@ -2124,8 +2128,21 @@ private fun MonthlyPnlCalendarSection(
         // ── شبکهٔ تقویم (داینامیک: ارتفاع خانه با بزرگی سود/زیان روز) ─────────
         val totalCells = calendar.firstDayOffsetSaturdayStart + calendar.daysInMonth
         val rowCount = (totalCells + 6) / 7
+        // ارتفاع خانه‌ها «داینامیک» است ولی داخل هر ردیف یکسان می‌ماند؛ وگرنه ردیف‌ها دندانه‌دار
+        // و صفحه به‌هم‌ریخته دیده می‌شود.
+        fun rowIntensity(row: Int): Double {
+            var maxValue = 0.0
+            for (col in 0 until 7) {
+                val dayNumber = row * 7 + col - calendar.firstDayOffsetSaturdayStart + 1
+                if (dayNumber !in 1..calendar.daysInMonth) continue
+                val value = abs(calendar.days[dayNumber - 1].netPnlUsd)
+                if (value > maxValue) maxValue = value
+            }
+            return if (maxAbsDayPnl <= 0.0) 0.0 else (maxValue / maxAbsDayPnl).coerceIn(0.0, 1.0)
+        }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             for (r in 0 until rowCount) {
+                val rowHeight = (56 + (rowIntensity(r) * 24.0)).dp
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -2138,20 +2155,20 @@ private fun MonthlyPnlCalendarSection(
                             calendar.days[dayNumber - 1]
                         } else null
                         if (daySummary == null) {
-                            Box(modifier = Modifier.weight(1f).height(58.dp))
+                            // خانهٔ خالی هم‌ارتفاع ردیف می‌ماند تا شبکه دندانه‌دار نشود.
+                            Box(modifier = Modifier.weight(1f).height(rowHeight))
                         } else {
                             val intensity = if (maxAbsDayPnl <= 0.0) {
                                 0.0
                             } else {
                                 (abs(daySummary.netPnlUsd) / maxAbsDayPnl).coerceIn(0.0, 1.0)
                             }
-                            val cellHeight = (56 + (intensity * 24.0)).dp
                             CalendarDayCell(
                                 summary = daySummary,
                                 isSelected = selectedDayOfMonth == daySummary.dayOfMonth,
                                 isToday = isCurrentMonth && todayZoned.dayOfMonth == daySummary.dayOfMonth,
                                 intensity = intensity,
-                                cellHeight = cellHeight,
+                                cellHeight = rowHeight,
                                 modifier = Modifier.weight(1f),
                                 onClick = {
                                     selectedDayOfMonth = if (selectedDayOfMonth == daySummary.dayOfMonth) {
@@ -2250,14 +2267,28 @@ private fun MonthlyPnlCalendarSection(
                 modifier = Modifier.padding(top = 6.dp),
             )
         } else {
+            val visibleTrades = if (selectedDayOfMonth in 1..calendar.daysInMonth) {
+                shownTrades
+            } else {
+                shownTrades.take(10)
+            }
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                shownTrades.forEach { trade ->
+                visibleTrades.forEach { trade ->
                     ClosedJournalTradeRow(
                         trade = trade,
                         onDelete = { onDeleteTrade(trade.id) },
                         onOpenChart = { onOpenChart(trade.symbol) },
                     )
                 }
+            }
+            if (visibleTrades.size < shownTrades.size) {
+                Text(
+                    text = "برای دیدن بقیه، روی خانهٔ همان روز بزن — " +
+                        "${shownTrades.size - visibleTrades.size} معاملهٔ دیگر در این ماه هست.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
             }
         }
 
@@ -2304,8 +2335,14 @@ private fun MonthlyPnlCalendarSection(
 /** قالب کوتاه و خوانا برای مبلغ دلاری با علامت (مثلاً `+$12.4` یا `−$1.2k`). */
 private fun formatUsdExact(value: Double): String {
     val sign = if (value >= 0.0) "+" else "−"
-    return sign + "$" + String.format(Locale.US, "%.2f", abs(value))
+    return ltrIsolated(sign + "$" + String.format(Locale.US, "%.2f", abs(value)))
 }
+
+/**
+ * مبالغ و اعداد در متن فارسی نباید جابه‌جا شوند. با ایزوله‌کردن جهت (U+202A…U+202C) علامت و عدد
+ * همیشه چپ‌به‌راست و به همان ترتیب دیده می‌شوند — ریشهٔ بخشی از «به‌هم‌ریختگی» گزارش‌شده.
+ */
+private fun ltrIsolated(text: String): String = "\u202A$text\u202C"
 
 @Composable
 private fun CalendarDayCell(
@@ -2380,6 +2417,7 @@ private fun CalendarDayCell(
                 color = accent,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
+                textDirection = TextDirection.Ltr,
                 maxLines = 1,
                 softWrap = false,
             )
@@ -2420,7 +2458,7 @@ private fun compactSignedUsd(value: Double): String {
         amount >= 10 -> String.format(Locale.US, "%.1f", amount)
         else -> String.format(Locale.US, "%.2f", amount)
     }
-    return sign + "$" + body
+    return ltrIsolated(sign + "$" + body)
 }
 
 @Composable
@@ -2523,16 +2561,25 @@ private fun ClosedJournalTradeRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+            // نام شاخص (فارسی) بالا، کد دقیق نماد پایین — به‌جای کد تکی/دوتایی تنها.
+            Column(modifier = Modifier.clickable { onOpenChart() }) {
                 Text(
-                    text = trade.symbol,
-                    style = MaterialTheme.typography.titleMedium,
+                    text = com.aurum.edge.core.SymbolDisplay.nameFa(trade.symbol),
+                    style = MaterialTheme.typography.titleSmall,
                     color = AurumColors.Gold,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
-                    softWrap = false,
-                    modifier = Modifier.clickable { onOpenChart() },
+                    overflow = TextOverflow.Ellipsis,
                 )
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Text(
+                        text = trade.symbol,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                }
             }
             Pill(
                 text = "${if (isBuy) "🟢 خرید" else "🔴 فروش"} · ${trade.interval.label}",

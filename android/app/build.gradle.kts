@@ -187,8 +187,20 @@ android {
         //    real outcome data, penalises small samples, prefers the stricter of near-equal
         //    candidates and learns per-rule weights that the gate uses. With fewer than 20 samples
         //    nothing changes; `neoWaveAutoTuneEnabled` can hand control back to the manual pills.
-        versionCode = 743
-        versionName = "3.9.34"
+        // 3.9.35 (code 744) is a structural cleanup of the journal page plus a crypto upgrade.
+        // Journal: the tabs row is now first and the calendar is the first section of its tab; the
+        // dashboard/tools/session/filter/vault cards moved *below* it (they used to sit above and
+        // bury the calendar), the duplicated archive gallery inside the calendar tab is gone (its
+        // own tab stays), calendar rows share one height per row so the grid is not ragged, money
+        // strings are bidi-isolated (U+202A/U+202C + TextDirection.Ltr), weekday headers are full
+        // names instead of single letters, and symbols show an index name with their exact code
+        // (core/SymbolDisplay.kt) instead of a bare ticker.
+        // Crypto: NeoWave now scales its zigzag amplitude with the ATR regime
+        // (NeoWaveEngine.dynamicAmplitudeAtr) and applies Neely's higher-degree rule across
+        // timeframes (NeoWaveEngine.mtfConfluence): a confirmed opposing 4H pattern vetoes the
+        // entry, alignment adds confidence. Off by default with the NeoWave switch, as always.
+        versionCode = 744
+        versionName = "3.9.35"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

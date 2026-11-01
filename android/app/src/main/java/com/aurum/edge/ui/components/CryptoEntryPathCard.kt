@@ -141,6 +141,12 @@ fun CryptoEntryPathCard(
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextSecondary,
             )
+            Text(
+                text = "قواعد نیلی که پویایی سیستم را می‌سازند: دامنهٔ زیگزاگ با رژیم نوسان (ATR) مقیاس می‌گیرد، " +
+                    "تأیید پس‌ساختاری الزامی است، قاعدهٔ درجهٔ بالاتر حاکم است و هم‌گرایی تایم‌فریم‌ها اطمینان را بالا می‌برد.",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextSecondary,
+            )
 
             // ── جدول شروطِ باز شدن ───────────────────────────────────────────
             Text(
@@ -164,6 +170,11 @@ fun CryptoEntryPathCard(
                 "${cfg.resolvedNeoWaveConfidence(isCrypto = true).toInt()}٪",
             )
             ConditionLine("۷", "پلن معتبر با R:R ≥ ۱:۱.۵ و بدون وتوی نئوویو", "الزامی")
+            ConditionLine(
+                "۸",
+                "تایم‌فریم بالاتر (۴ ساعته) الگوی تأییدشدهٔ مخالف نداشته باشد",
+                "قاعدهٔ درجهٔ بالاتر",
+            )
 
             // ── هوش عصبی: صاحب تنظیمات این بخش ─────────────────────────────
             Box(

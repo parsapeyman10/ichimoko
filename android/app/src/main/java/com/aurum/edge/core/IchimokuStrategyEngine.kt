@@ -1014,6 +1014,10 @@ data class StrategyEvaluationReport(
     val neoWaveRulesTotal: Int = 0,
     val neoWaveConfidencePct: Double = 0.0,
     val neoWaveFailedRuleIds: List<Int> = emptyList(),
+    /** داوری چندتایم‌فریمی نئوویو (بالاتر + جاری) برای نمایش. */
+    val neoWaveMtfFa: String = "",
+    /** دامنهٔ زیگزاگِ داینامیک استفاده‌شده (بر پایهٔ رژیم نوسان). */
+    val neoWaveAmplitudeAtr: Double = 0.0,
     /** توضیح فارسی مسیر ورود (برای نمایش در چک‌لیست و ژورنال). */
     val entryPathFa: String = "",
 ) {
@@ -2848,13 +2852,27 @@ object IchimokuStrategyEngine {
         // قانون صفر-اثر: وقتی `neoWaveEnabled = false` باشد هیچ محاسبه‌ای انجام نمی‌شود و
         // خروجی این تابع بیت‌به‌بیت مثل نسخهٔ قبل از نئوویو می‌ماند.
         val neoWaveOn = effectiveConfig.neoWaveEnabled
+        // دامنهٔ زیگزاگ داینامیک: با رژیم نوسان همان نماد/تایم‌فریم مقیاس می‌گیرد (قاعدهٔ درجه/دامنهٔ نیلی).
+        val neoWaveAmplitude = if (neoWaveOn) {
+            NeoWaveEngine.dynamicAmplitudeAtr(alignedStrategyCandles, effectiveConfig.neoWaveAmplitudeAtr)
+        } else {
+            effectiveConfig.neoWaveAmplitudeAtr
+        }
         val neoWaveVerdict = if (neoWaveOn) {
-            NeoWaveEngine.analyze(
-                candles = alignedStrategyCandles,
-                amplitudeAtr = effectiveConfig.neoWaveAmplitudeAtr,
-            )
+            NeoWaveEngine.analyze(candles = alignedStrategyCandles, amplitudeAtr = neoWaveAmplitude)
         } else {
             null
+        }
+        // ساختار درجهٔ بالاتر (تایم‌فریم ماکرو): بر درجهٔ پایین‌تر حکومت می‌کند.
+        val neoWaveHigherVerdict = if (neoWaveOn) {
+            NeoWaveEngine.analyze(candles = alignedMacroCandles, amplitudeAtr = neoWaveAmplitude)
+        } else {
+            null
+        }
+        val neoWaveMtf = if (neoWaveOn) {
+            NeoWaveEngine.mtfConfluence(neoWaveVerdict, neoWaveHigherVerdict, isLong)
+        } else {
+            NeoWaveEngine.MtfConfluence.NEUTRAL
         }
         // آستانه‌ها: اگر تنظیمات به هوش عصبی سپرده شده باشد، همان مقادیر آموخته‌شده اعمال می‌شوند.
         val neoWaveRulesThreshold = effectiveConfig.resolvedNeoWaveRules(isCrypto = false)
@@ -2870,13 +2888,14 @@ object IchimokuStrategyEngine {
         } else {
             NeoWaveEngine.NeoWaveGate.OFF
         }
+        val neoWaveTotalDelta = neoWaveGate.confidenceDelta + neoWaveMtf.deltaConfidence
         val gatedConfidence = if (neoWaveOn) {
-            round2((confidence + neoWaveGate.confidenceDelta).coerceIn(0.0, 100.0))
+            round2((confidence + neoWaveTotalDelta).coerceIn(0.0, 100.0))
         } else {
             confidence
         }
         val gatedTrendScore = if (neoWaveOn) {
-            round2((coreTrendScore + neoWaveGate.confidenceDelta * 0.5).coerceIn(0.0, 100.0))
+            round2((coreTrendScore + neoWaveTotalDelta * 0.5).coerceIn(0.0, 100.0))
         } else {
             coreTrendScore
         }
@@ -2884,7 +2903,7 @@ object IchimokuStrategyEngine {
         val sniperArmedPendingRetest = firstFifteenPassed && triggerFired && !cond16Passed
 
         val baseReadiness = when {
-            neoWaveGate.veto -> StrategyReadinessState.BLOCKED
+            neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto) -> StrategyReadinessState.BLOCKED
             allSixteenPassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY
             allSixteenPassed && triggerFired && !isLong -> StrategyReadinessState.SIGNAL_SELL
             sniperArmedPendingRetest || passedCount >= 11 -> StrategyReadinessState.WATCH_SETUP
@@ -2897,7 +2916,8 @@ object IchimokuStrategyEngine {
         // (R:R ≥ ۱.۵، پلن معتبر، بدون وتو، بدون بازار بسته).
         val isCryptoClass = AssetClass.of(normalizedSymbol) == AssetClass.CRYPTO
         val cryptoEntryDecision = NeoWaveEngine.cryptoEntryDecision(
-            enabled = neoWaveOn && effectiveConfig.neoWaveCryptoEntryEnabled && !neoWaveGate.veto,
+            enabled = neoWaveOn && effectiveConfig.neoWaveCryptoEntryEnabled &&
+                !neoWaveGate.veto && !neoWaveMtf.veto,
             isCrypto = isCryptoClass,
             verdict = neoWaveVerdict,
             isLong = isLong,
@@ -2916,7 +2936,7 @@ object IchimokuStrategyEngine {
             else -> baseReadiness
         }
 
-        val finalAction = if (neoWaveGate.veto) {
+        val finalAction = if (neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto)) {
             SignalAction.NO_TRADE
         } else if (cryptoNeoWaveEntry) {
             if (isLong) SignalAction.BUY else SignalAction.SELL
@@ -2950,10 +2970,11 @@ object IchimokuStrategyEngine {
         }
         val neoWaveSuffix = when {
             !neoWaveOn || neoWaveGate.noteFa.isBlank() -> ""
-            else -> " · ${neoWaveGate.noteFa}"
+            neoWaveMtf.noteFa.isBlank() -> " · ${neoWaveGate.noteFa}"
+            else -> " · ${neoWaveGate.noteFa} · ${neoWaveMtf.noteFa}"
         }
         val summaryFa = when {
-            neoWaveGate.veto ->
+            neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto) ->
                 "$tfTag ⛔ ورود وتو شد · $normalizedSymbol · $effectiveTitle · ${neoWaveGate.noteFa}"
             cryptoNeoWaveEntry ->
                 "$tfTag 🌊 ورود رمزارز بر پایهٔ نئوویو · $normalizedSymbol · $effectiveTitle · " +
@@ -3034,6 +3055,8 @@ object IchimokuStrategyEngine {
             } else {
                 emptyList()
             },
+            neoWaveMtfFa = if (neoWaveOn) neoWaveMtf.noteFa else "",
+            neoWaveAmplitudeAtr = if (neoWaveOn) neoWaveAmplitude else 0.0,
             cryptoNeoWaveEntry = cryptoNeoWaveEntry,
             entryPathFa = entryPathFa,
         )

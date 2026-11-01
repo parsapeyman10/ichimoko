@@ -991,6 +991,90 @@ object NeoWaveEngine {
     // ────────────────────────────────────────────────────────────────────────
 
     /**
+     * دامنهٔ زیگزاگِ **داینامیک** بر پایهٔ رژیم نوسان.
+     *
+     * نیلی روی «درجه» و «دامنهٔ» موج تأکید دارد: در بازار پرنوسان، زیگزاگ ثابت باعث می‌شود
+     * نویز به‌جای موج شمرده شود و در بازار آرام، موج‌های واقعی حذف شوند. پس دامنه را با نسبت
+     * ATR کوتاه‌مدت به ATR بلندمدت مقیاس می‌دهیم (۰.۸۵ تا ۱.۲۰ برابر).
+     *
+     * @param candles کندل‌های همان تایم‌فریمی که شمارش روی آن انجام می‌شود.
+     * @param baseAmplitude دامنهٔ پایه (پیش‌فرض [DEFAULT_AMPLITUDE_ATR]).
+     */
+    fun dynamicAmplitudeAtr(candles: List<Candle>, baseAmplitude: Double = DEFAULT_AMPLITUDE_ATR): Double {
+        val closed = candles.filter { it.closed }.ifEmpty { candles }
+        if (closed.size < 60) return baseAmplitude.coerceIn(0.35, 1.2)
+        val shortAtr = atr(closed.takeLast(minOf(40, closed.size)))
+        val longAtr = atr(closed.takeLast(minOf(160, closed.size)))
+        if (shortAtr <= 0.0 || longAtr <= 0.0) return baseAmplitude.coerceIn(0.35, 1.2)
+        val regime = (shortAtr / longAtr).coerceIn(0.85, 1.20)
+        return (baseAmplitude * regime).coerceIn(0.35, 1.2)
+    }
+
+    /**
+     * هم‌گرایی چندتایم‌فریمیِ نئوویو (بالاتر + جاری).
+     *
+     * قاعدهٔ نیلی: ساختار **درجهٔ بالاتر** بر درجهٔ پایین‌تر حکومت می‌کند. پس اگر ساختار
+     * تایم‌فریم بالاتر کامل و تأییدشده و **مخالف** جهت ورود باشد، ورود بسته می‌شود؛ اگر هم‌جهت
+     * باشد اطمینان بالا می‌رود.
+     *
+     * @property deltaConfidence تغییر اطمینان (مثبت = تقویت).
+     * @property veto آیا ورود وِتو می‌شود.
+     * @property alignedCount چند تایم‌فریم هم‌جهت‌اند (۰..۲).
+     */
+    data class MtfConfluence(
+        val deltaConfidence: Double = 0.0,
+        val veto: Boolean = false,
+        val alignedCount: Int = 0,
+        val noteFa: String = "",
+    ) {
+        companion object {
+            val NEUTRAL = MtfConfluence(noteFa = "")
+        }
+    }
+
+    fun mtfConfluence(
+        strategyVerdict: NeoWaveVerdict?,
+        higherVerdict: NeoWaveVerdict?,
+        isLong: Boolean,
+    ): MtfConfluence {
+        val dirFa = if (isLong) "خرید" else "فروش"
+        if (higherVerdict == null || !higherVerdict.isUsable) {
+            return MtfConfluence(noteFa = "ساختار تایم‌فریم بالاتر برای داوری چندتایم‌فریمی در دسترس نیست.")
+        }
+        val higherAligned = higherVerdict.isAlignedWith(isLong)
+        val higherConfirmed = higherVerdict.isComplete && higherVerdict.isConfirmed
+        if (higherConfirmed && !higherAligned) {
+            return MtfConfluence(
+                deltaConfidence = -6.0,
+                veto = true,
+                alignedCount = 0,
+                noteFa = "⛔ الگوی تأییدشدهٔ تایم‌فریم بالاتر " +
+                    "(${higherVerdict.pattern.badgeFa}) مخالف $dirFa است (قاعدهٔ درجهٔ بالاتر نیلی).",
+            )
+        }
+        var delta = 0.0
+        var count = 0
+        if (higherConfirmed && higherAligned) {
+            delta += 3.0
+            count++
+        } else if (higherAligned) {
+            delta += 1.0
+        }
+        if (strategyVerdict != null && strategyVerdict.isUsable &&
+            strategyVerdict.isComplete && strategyVerdict.isConfirmed && strategyVerdict.isAlignedWith(isLong)
+        ) {
+            if (count > 0) delta += 2.0
+            count++
+        }
+        val noteFa = when {
+            count >= 2 -> "🌐 هم‌گرایی دو تایم‌فریمی نئوویو هم‌جهت $dirFa (+${delta.toInt()} اطمینان)."
+            count == 1 -> "🌐 تنها یک تایم‌فریم ساختار هم‌جهت دارد (+${delta.toInt()} اطمینان)."
+            else -> "🌐 هم‌گرایی چندتایم‌فریمی هنوز شکل نگرفته است."
+        }
+        return MtfConfluence(delta, false, count, noteFa)
+    }
+
+    /**
      * تصمیم **مسیر ورود کریپتو بر پایهٔ نئوویو**.
      *
      * چرا این مسیر وجود دارد؟ شرط ورود عمومی موتور، عبور **هم‌زمان هر ۱۶ شرط** است؛ در رمزارز
