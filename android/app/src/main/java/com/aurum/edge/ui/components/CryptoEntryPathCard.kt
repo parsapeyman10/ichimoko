@@ -88,51 +88,41 @@ fun CryptoEntryPathCard(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // ── کلید لازم: لایهٔ نئوویو ──────────────────────────────────────
-            if (!cfg.neoWaveEnabled) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(AurumColors.Orange.copy(alpha = 0.12f))
-                        .border(1.dp, AurumColors.Orange.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
-                        .padding(10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "لایهٔ نئوویو خاموش است",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = AurumColors.Orange,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = "این مسیر تا روشن‌شدن لایهٔ نئوویو کاری نمی‌کند. با کلید روبه‌رو روشنش کن؟",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = AurumColors.TextSecondary,
-                        )
-                    }
-                    Switch(
-                        checked = false,
-                        onCheckedChange = { on ->
-                            viewModel.updateBaseStrategyConfig(cfg.copy(neoWaveEnabled = on))
-                        },
+            // ── وضعیت لایهٔ ادغام‌شده (بدون کلید کاربر) ──────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(AurumColors.Purple.copy(alpha = 0.10f))
+                    .border(1.dp, AurumColors.Purple.copy(alpha = 0.40f), RoundedCornerShape(10.dp))
+                    .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "🔒 نئوویو–الیوت در «استراتژی ۱۶» ادغام شده و کلید کاربر ندارد",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = AurumColors.Purple,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "در استراتژی‌های ۱ تا ۱۵ هیچ محاسبهٔ نئوویو انجام نمی‌شود.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
                     )
                 }
             }
 
             Text(
-                text = "این مسیر هم مثل خود لایهٔ نئوویو فقط در «استراتژی ۱۶» اثر دارد؛ در استراتژی‌های ۱ تا ۱۵ رمزارز با همان ۱۶ شرط عمومی سنجیده می‌شود.",
+                text = "این مسیر فقط داخل استراتژی ۱۶ اثر دارد؛ در بقیهٔ استراتژی‌ها رمزارز با همان ۱۶ شرط عمومی سنجیده می‌شود.",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
             )
             Text(
-                text = if (cfg.neoWaveCryptoEntryEnabled && cfg.neoWaveEnabled) {
-                    "✅ فعال: ورود رمزارز با الگوی کامل و تأییدشدهٔ نئوویو باز می‌شود."
-                } else if (cfg.neoWaveCryptoEntryEnabled) {
-                    "⏸ روشن است ولی بی‌اثر: اول لایهٔ نئوویو را روشن کن."
+                text = if (cfg.neoWaveCryptoEntryEnabled) {
+                    "✅ فعال در استراتژی ۱۶: ورود رمزارز با الگوی کامل و تأییدشدهٔ نئوویو باز می‌شود."
                 } else {
-                    "⏹ خاموش: رمزارز هم مثل قبل فقط با عبور هم‌زمان هر ۱۶ شرط وارد می‌شود."
+                    "⏹ مسیر نئوویوی رمزارز خاموش است: رمزارز فقط با عبور هم‌زمان هر ۱۶ شرط وارد می‌شود."
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextPrimary,
@@ -270,7 +260,7 @@ fun CryptoEntryPathCard(
             Text(
                 text = if (totalCrypto == 0) {
                     "شمارش رمزارزها هنوز آماده نیست (منتظر کندل‌ها)."
-                } else if (!cfg.neoWaveEnabled || !cfg.neoWaveCryptoEntryEnabled) {
+                } else if (!cfg.neoWaveCryptoEntryEnabled) {
                     "$totalCrypto نماد رمزارز زیر نظر است؛ برای شمارش زنده این مسیر را روشن کن."
                 } else {
                     "هم‌اکنون ${readyRows.size} از $totalCrypto نماد رمزارز واجد شرط است."
@@ -283,7 +273,7 @@ fun CryptoEntryPathCard(
             readyRows.take(6).forEach { (symbol, hint) ->
                 SymbolLine(symbol, "✅ واجد شرط", hint, AurumColors.Green)
             }
-            if (readyRows.isEmpty() && cfg.neoWaveEnabled && cfg.neoWaveCryptoEntryEnabled) {
+            if (readyRows.isEmpty() && cfg.neoWaveCryptoEntryEnabled) {
                 blockedRows.take(4).forEach { (symbol, hint) ->
                     SymbolLine(symbol, "⏳ در انتظار", hint, AurumColors.TextMuted)
                 }

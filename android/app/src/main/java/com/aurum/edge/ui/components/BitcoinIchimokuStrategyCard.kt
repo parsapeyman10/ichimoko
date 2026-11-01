@@ -251,7 +251,8 @@ fun BitcoinIchimokuStrategyCard(
         )
         val focusedReportForNeoWave = dualReports[focusedSymbol]?.reportFor(focusedInterval, selectedId) ?: report
         NeoWaveOptionCard(
-            enabled = settings.baseStrategyConfig.neoWaveEnabled,
+            // لایهٔ نئوویو–الیوت به‌صورت داخلی در استراتژی ۱۶ ادغام شده و کلید کاربر ندارد.
+            enabled = true,
             minRulesPassed = settings.baseStrategyConfig.neoWaveMinRulesPassed,
             minConfidencePct = settings.baseStrategyConfig.neoWaveMinConfidencePct,
             statusBadge = focusedReportForNeoWave?.neoWaveBadgeFa.orEmpty(),

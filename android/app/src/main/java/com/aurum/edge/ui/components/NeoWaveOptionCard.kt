@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -18,14 +17,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.aurum.edge.core.NeoWaveEngine
 import com.aurum.edge.ui.theme.AurumColors
 
 /**
- * کارت «🌊 نئوویو (NeoWave)» — لایهٔ تأییدِ اختیاری گلن نیلی.
+ * کارت «🌊 نئوویو–الیوت» — **فقط نمایش وضعیت، بدون کلید کاربر**.
  *
- * این کارت فقط یک کلید روشن/خاموش + دو آستانهٔ حساسیت را در اختیار کاربر می‌گذارد.
- * وقتی خاموش باشد، موتور استراتژی هیچ محاسبه‌ای انجام نمی‌دهد و رفتار برنامه دقیقاً مثل قبل است.
+ * نئوویو–الیوت در «استراتژی ۱۶» ادغام شده است و همیشه در همان استراتژی اجرا می‌شود؛ در
+ * استراتژی‌های ۱ تا ۱۵ هیچ محاسبه‌ای ندارد. آستانه‌های این لایه با هوش عصبی از نتیجهٔ واقعی
+ * معاملات آموخته می‌شود، بنابراین کلید روشن/خاموش یا پیل تنظیم دستی وجود ندارد.
  */
 @Composable
 fun NeoWaveOptionCard(
@@ -45,6 +44,8 @@ fun NeoWaveOptionCard(
     onRetrainNeural: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    // پارامترهای کلید/تنظیم دستی برای سازگاری امضا نگه داشته شده‌اند ولی هیچ‌کدام کلید کاربر
+    // نمی‌سازند: لایهٔ نئوویو فقط داخل استراتژی ۱۶ و با آستانه‌های آموخته‌شده کار می‌کند.
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -53,7 +54,7 @@ fun NeoWaveOptionCard(
             .background(AurumColors.Surface)
             .border(
                 width = 1.dp,
-                color = if (enabled) AurumColors.Gold.copy(alpha = 0.55f) else AurumColors.Border,
+                color = AurumColors.Gold.copy(alpha = 0.55f),
                 shape = RoundedCornerShape(14.dp),
             )
             .padding(12.dp),
@@ -66,23 +67,33 @@ fun NeoWaveOptionCard(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "🌊 نئوویو (NeoWave) — لایهٔ تأیید",
+                    text = "🌊 نئوویو–الیوت — ادغام‌شده در استراتژی ۱۶",
                     style = MaterialTheme.typography.labelMedium,
-                    color = if (enabled) AurumColors.Gold else AurumColors.TextMuted,
+                    color = AurumColors.Gold,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = if (enabled) "فعال · شمارش امواج نیلی روی ورودها داوری می‌کند" else "خاموش · رفتار برنامه کاملاً بدون تغییر",
+                    text = if (enabled) {
+                        "فعال · فقط در استراتژی ۱۶ اجرا می‌شود؛ استراتژی‌های ۱ تا ۱۵ هیچ محاسبهٔ نئوویو ندارند"
+                    } else {
+                        "در استراتژی ۱۶ فعال است"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextSecondary,
                 )
             }
-            Switch(checked = enabled, onCheckedChange = onToggle)
+            Text(
+                text = "🔒 بدون کلید",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                fontWeight = FontWeight.Bold,
+            )
         }
 
         Text(
-            text = "این ماژول مستقل معامله نمی‌کند؛ فقط ورودهای ۱۶ استراتژی را تقویت یا وتو می‌کند: " +
-                "الگوی هم‌جهت و تکمیل‌شده اطمینان را بالا می‌برد و الگوی مخالفِ معتبر ورود را می‌بندد.",
+            text = "این لایه به‌تنهایی معامله نمی‌کند و روی بقیهٔ استراتژی‌ها اثری ندارد: در استراتژی ۱۶، " +
+                "الگوی هم‌جهت و تکمیل‌شدهٔ نئوویو اطمینان ورود را بالا می‌برد، الگوی مخالفِ معتبر ورود را " +
+                "می‌بندد و اهداف موجی الیوت به تارگت‌گذاری همان استراتژی اضافه می‌شود.",
             style = MaterialTheme.typography.labelSmall,
             color = AurumColors.TextSecondary,
         )
@@ -95,103 +106,36 @@ fun NeoWaveOptionCard(
             )
         }
 
-        if (enabled) {
-            // ── سپردن تنظیمات به هوش عصبی ─────────────────────────────────────
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "🤖 تنظیمات به هوش عصبی سپرده شود",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (autoTuneEnabled) AurumColors.Purple else AurumColors.TextMuted,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = if (autoTuneEnabled) {
-                            "آستانه‌ها و وزن قواعد از نتیجهٔ واقعی معاملات آموخته می‌شود"
-                        } else {
-                            "خاموش · آستانه‌ها را خودت با پیل‌های زیر تعیین می‌کنی"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.TextSecondary,
-                    )
-                }
-                Switch(checked = autoTuneEnabled, onCheckedChange = onAutoTuneToggle)
-            }
-
-            if (autoTuneEnabled) {
-                val rulesText = if (autoRules > 0) "$autoRules قاعده" else "در انتظار داده"
-                val confText = if (autoConfidencePct > 0.0) "${autoConfidencePct.toInt()}٪" else "در انتظار داده"
-                Text(
-                    text = "آستانهٔ آموخته‌شده: $rulesText · اطمینان $confText" +
-                        if (autoSamples > 0) " · $autoSamples نمونه" else "",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.Purple,
-                    fontWeight = FontWeight.Bold,
-                )
-                if (autoBasisFa.isNotBlank()) {
-                    Text(
-                        text = autoBasisFa,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = AurumColors.TextSecondary,
-                    )
-                }
-                Text(
-                    text = "🔄 آموزش دوباره با داده‌های فعلی",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.Cyan,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable { onRetrainNeural() }
-                        .padding(horizontal = 6.dp, vertical = 3.dp),
-                )
-            }
-
+        val rulesText = if (autoRules > 0) "$autoRules قاعده" else "در انتظار داده"
+        val confText = if (autoConfidencePct > 0.0) "${autoConfidencePct.toInt()}٪" else "در انتظار داده"
+        Text(
+            text = "آستانهٔ آموخته‌شده: $rulesText · اطمینان $confText · نمونه: $autoSamples" +
+                if (autoTuneEnabled) " · تنظیم خودکار روشن" else "",
+            style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.Purple,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = "آستانه‌های پیش‌فرض موتور: $minRulesPassed قاعده · ${minConfidencePct.toInt()}٪ اطمینان",
+            style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.TextMuted,
+        )
+        if (autoBasisFa.isNotBlank()) {
             Text(
-                text = "حداقل قواعد نیلی برای پذیرش شمارش:",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(4, NeoWaveEngine.MIN_RULE_PASS, 8).distinct().forEach { value ->
-                    Pill(
-                        text = "$value قاعده",
-                        color = if (minRulesPassed == value) AurumColors.Gold else AurumColors.TextMuted,
-                        modifier = Modifier.clickable { onRulesChange(value) },
-                    )
-                }
-            }
-            Text(
-                text = "حداقل اطمینان برای اجازهٔ وتو:",
-                style = MaterialTheme.typography.labelSmall,
-                color = AurumColors.TextMuted,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(50, 55, 65).forEach { value ->
-                    Pill(
-                        text = "$value٪",
-                        color = if (minConfidencePct.toInt() == value) AurumColors.Gold else AurumColors.TextMuted,
-                        modifier = Modifier.clickable { onConfidenceChange(value.toDouble()) },
-                    )
-                }
-            }
-            if (autoTuneEnabled) {
-                Text(
-                    text = "این پیل‌ها فقط وقتی اثر دارند که کلید «هوش عصبی» بالا خاموش باشد.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AurumColors.TextMuted,
-                )
-            }
-            Text(
-                text = "نکتهٔ ریسک: نئوویو داورِ قاعده‌محور است، نه تحلیلگر ذهنی. با آستانهٔ پایین‌تر، وتوهای بیشتری رخ می‌دهد.",
+                text = autoBasisFa,
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextSecondary,
             )
-
         }
+        Text(
+            text = "🔄 آموزش دوباره با داده‌های فعلی",
+            style = MaterialTheme.typography.labelSmall,
+            color = AurumColors.Cyan,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { onRetrainNeural() }
+                .padding(horizontal = 6.dp, vertical = 3.dp),
+        )
     }
 }
