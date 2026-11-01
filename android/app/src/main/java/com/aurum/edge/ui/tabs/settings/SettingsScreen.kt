@@ -791,6 +791,7 @@ private fun PhoneStyleTradeAlarmsCard(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
+                        modifier = Modifier.weight(1f).padding(end = 6.dp),
                         text = "🔊 بلندی صدای آلارم: $volPct%",
                         style = MaterialTheme.typography.labelLarge,
                         color = AurumColors.Gold,

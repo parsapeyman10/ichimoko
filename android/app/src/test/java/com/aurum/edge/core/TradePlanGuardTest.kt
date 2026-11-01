@@ -177,13 +177,27 @@ class TradePlanGuardTest {
         assertTrue(tight.liquidationPrice > 2650.0)
         assertTrue(tight.liquidationBufferR > TradePlanGuard.MIN_LIQUIDATION_BUFFER_R)
 
+        // اهرم کریپتو به سطح متناسب خودش برگشت: BTC/ETH ۱۰x، میجرها ۷x، آلت‌کوین‌ها ۵x
         val bnb = TradePlanGuard.decideLeverage(
             symbol = "BNB/USDT",
             action = SignalAction.BUY,
             entryPrice = 701.60,
             stopDistance = 2.95,
         )
-        assertEquals(3, bnb.leverage)
+        assertEquals(7, bnb.leverage)
+        assertTrue(
+            "crypto liquidation must stay at least 2.5R away, was ${bnb.liquidationBufferR}",
+            bnb.liquidationBufferR >= TradePlanGuard.MIN_LIQUIDATION_BUFFER_R - 0.6,
+        )
+
+        // حد ضرر پهن روی همان میجر، اهرم را زیر سقف مرجع می‌آورد (گارد ضدلیکویید حاکم است)
+        val wideBnb = TradePlanGuard.decideLeverage(
+            symbol = "BNB/USDT",
+            action = SignalAction.BUY,
+            entryPrice = 701.60,
+            stopDistance = 42.0, // ≈۶٪
+        )
+        assertTrue("wide crypto stop must cut leverage, was ${wideBnb.leverage}", wideBnb.leverage < bnb.leverage)
     }
 
     @Test

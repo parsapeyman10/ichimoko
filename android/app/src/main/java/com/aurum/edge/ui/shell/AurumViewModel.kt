@@ -2409,6 +2409,449 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         _toast.value = "📋 تمام نکات اصلاحی دستیار ایچیموکو کپی و در حافظه گوشی ذخیره شد"
     }
 
+    // ── کپی توضیحات هوش عصبی ──────────────────────────────────────────────────
+    /**
+     * کپی متن در کلیپ‌بورد با پیام فارسی.
+     * همهٔ دکمه‌های «کپی» هوش عصبی و دستیار ایچیموکو از همین مسیر می‌گذرند.
+     */
+    fun copyTextToClipboard(
+        labelFa: String,
+        text: String,
+        successToastFa: String? = null,
+    ) {
+        val safeText = text.trim()
+        if (safeText.isBlank()) {
+            _toast.value = "⚠️ متنی برای کپی پیدا نشد"
+            return
+        }
+        val clipboard = container.appContext
+            .getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+        if (clipboard == null) {
+            _toast.value = "⚠️ کلیپ‌بورد در این گوشی در دسترس نیست"
+            return
+        }
+        runCatching {
+            clipboard.setPrimaryClip(
+                android.content.ClipData.newPlainText(labelFa.ifBlank { "Aurum Edge" }, safeText),
+            )
+        }.onFailure { err ->
+            _toast.value = "⚠️ کپی نشد: ${err.message}"
+        }.onSuccess {
+            _toast.value = successToastFa
+                ?: "📋 «$labelFa» کپی شد (${safeText.length} کاراکتر)"
+        }
+    }
+
+    /** کپی کامل تمام توضیحات هوش عصبی (همهٔ بخش‌ها در یک متن). */
+    fun copyNeuralBrainFullReport() {
+        val sections = neuralCopySections().map {
+            com.aurum.edge.core.NeuralReportSection(titleFa = it.titleFa, lines = it.lines)
+        }
+        val text = com.aurum.edge.core.NeuralReportText.render(
+            headerFa = "🧠 گزارش کامل توضیحات هوش عصبی Aurum Edge",
+            generatedAtFa = com.aurum.edge.core.NeuralReportText.timestamp(),
+            sections = sections,
+            footerFa = neuralReportFooter(),
+        )
+        copyTextToClipboard("گزارش کامل هوش عصبی", text, "📋 تمام توضیحات هوش عصبی کپی شد (${text.length} کاراکتر)")
+    }
+
+    /** کپی خلاصهٔ کوتاه وضعیت (برای اشتراک سریع). */
+    fun copyNeuralBrainQuickSummary() {
+        val s = neuralState.value
+        val lines = ArrayList<String>()
+        lines += com.aurum.edge.core.NeuralReportText.label(
+            "معاملات یادگیری‌شده",
+            com.aurum.edge.core.NeuralReportText.number(s.totalLearnedTrades.toDouble(), 0) +
+                " از " + com.aurum.edge.core.NeuralReportText.number(s.warmupTargetTrades.toDouble(), 0),
+        )
+        lines += com.aurum.edge.core.NeuralReportText.label(
+            "پیشرفت گرم‌کردن",
+            com.aurum.edge.core.NeuralReportText.pct(s.warmupProgressPercent),
+        )
+        lines += com.aurum.edge.core.NeuralReportText.label("وضعیت گیت", if (s.isGateActive) "فعال" else "غیرفعال")
+        lines += com.aurum.edge.core.NeuralReportText.label(
+            "دقت جاری",
+            com.aurum.edge.core.NeuralReportText.pct(s.runningAccuracyPct),
+        )
+        lines += com.aurum.edge.core.NeuralReportText.label(
+            "خطای BCE",
+            com.aurum.edge.core.NeuralReportText.number(s.runningBceLoss, 4),
+        )
+        lines += com.aurum.edge.core.NeuralReportText.label(
+            "خوشه‌های طلایی / ممنوعه",
+            "${s.winningClusters.size} / ${s.noTradeClusters.size}",
+        )
+        if (s.gatePolicySummaryFa.isNotBlank()) lines += s.gatePolicySummaryFa
+        val text = com.aurum.edge.core.NeuralReportText.renderSummary(
+            headerFa = "🧠 خلاصهٔ وضعیت هوش عصبی Aurum Edge",
+            generatedAtFa = com.aurum.edge.core.NeuralReportText.timestamp(),
+            lines = lines,
+            footerFa = neuralReportFooter(),
+        )
+        copyTextToClipboard("خلاصهٔ هوش عصبی", text, "📋 خلاصهٔ وضعیت هوش عصبی کپی شد")
+    }
+
+    /** کپی توضیحات یک بخش مشخص (دکمهٔ کپی کنار عنوان همان کارت). */
+    fun copyNeuralBrainSection(sectionKey: String) {
+        val key = sectionKey.trim().lowercase(java.util.Locale.ROOT)
+        val section = neuralCopySections().firstOrNull { it.key == key }
+        if (section == null) {
+            _toast.value = "⚠️ بخش «$sectionKey» برای کپی پیدا نشد"
+            return
+        }
+        val text = com.aurum.edge.core.NeuralReportText.renderSection(
+            titleFa = section.titleFa,
+            lines = section.lines,
+            versionFa = com.aurum.edge.BuildConfig.VERSION_NAME,
+        )
+        copyTextToClipboard(section.titleFa, text, "📋 توضیحات «${section.titleFa}» کپی شد")
+    }
+
+    private fun neuralReportFooter(): String =
+        "Aurum Edge ${com.aurum.edge.BuildConfig.VERSION_NAME} · تولید‌شده توسط موتور هوش عصبی ایچیموکو"
+
+    private fun neuralCopySections(): List<NeuralCopySection> {
+        val s = neuralState.value
+        val R = com.aurum.edge.core.NeuralReportText
+        val sections = ArrayList<NeuralCopySection>()
+
+        sections += NeuralCopySection(
+            key = "sessionexit",
+            titleFa = "زمان‌بندی سشن و یادگیری زمان خروج",
+            lines = buildList {
+                val note = sessionExitLearningNote.value
+                if (note.isNotBlank()) add("آخرین یادگیری: $note")
+                val estimates = sessionExitEstimates.value
+                if (estimates.isEmpty()) {
+                    add("هنوز تخمینی برای خروج پیش از بسته‌شدن بازار ثبت نشده است.")
+                } else {
+                    estimates.forEach { e ->
+                        add(
+                            "• ${e.labelFa}: خروج ${e.leadMinutes} دقیقه پیش از بستهٔ بازار | نمونه ${e.samples} | " +
+                                "نرخ موفقیت ${R.pct(e.hitRatePct)} | دلار نجات/زیان ${R.number(e.savedUsd)} | " +
+                                "اطمینان ${e.confidencePct}% | ${e.noteFa}",
+                        )
+                    }
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "regression",
+            titleFa = "پنل رگرسیون ماتریسی پارامترها",
+            lines = buildList {
+                val reg = s.autoTunedParameters.latestRegressionReport
+                add(R.label("استراتژی هدف", reg.strategyTitleFa))
+                add(R.label("متد", reg.regressionMethodFa))
+                add(R.label("تعداد نمونه", R.number(reg.samplesCount.toDouble(), 0)))
+                add(
+                    R.inline(
+                        "R²" to R.number(reg.rSquared, 3),
+                        "R² تعدیل‌شده" to R.number(reg.adjustedRSquared, 3),
+                        "RMSE" to R.number(reg.walkForwardRmse, 3),
+                        "MAE" to R.number(reg.walkForwardMae, 3),
+                    ),
+                )
+                add(
+                    R.inline(
+                        "لیفت نرخ برد" to R.pct(reg.expectedWinRateLiftPct),
+                        "لیفت R هر معامله" to R.rMultiple(reg.expectedRLiftPerTrade),
+                    ),
+                )
+                add(R.label("دالان حد ضرر", reg.optimalStopLossCorridorFa))
+                add(R.label("قفل R:R", reg.optimalRrCorridorFa))
+                if (reg.parameterRows.isNotEmpty()) {
+                    add("")
+                    add("پارامترهای رگرسیون‌شده:")
+                    reg.parameterRows.forEach { row ->
+                        add(
+                            "• ${row.paramTitleFa}: ${R.number(row.priorValue, 3)} → ${R.number(row.regressedValue, 3)} ${row.unitLabel} | " +
+                                "β=${R.number(row.slopeBeta, 3)} | t=${R.number(row.tStat, 2)} | CI ${row.confidenceIntervalLabel} | ${row.impactVerdictFa}",
+                        )
+                    }
+                }
+                if (reg.featureSlopes.isNotEmpty()) {
+                    add("")
+                    add("شیب ۱۶ ویژگی (بر اساس اهمیت):")
+                    reg.featureSlopes.sortedByDescending { it.importancePct }.take(16).forEach { f ->
+                        add(
+                            "• ${f.featureTitleFa} — اهمیت ${R.pct(f.importancePct)} | β برد ${R.number(f.ridgeBetaWin, 3)} | " +
+                                "Huber β ${R.number(f.huberBetaR, 3)} | t=${R.number(f.tStat, 2)}",
+                        )
+                    }
+                }
+                if (reg.regressionDiagnosticNotesFa.isNotEmpty()) {
+                    add("")
+                    reg.regressionDiagnosticNotesFa.forEach { add("• $it") }
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "brain",
+            titleFa = "مغز شبکه عصبی و وضعیت یادگیری",
+            lines = buildList {
+                add(R.label("معماری", s.architectureNameFa))
+                add(R.label("فاز جاری", s.currentTrainingPhaseBadgeFa))
+                add(R.label("معاملات یادگیری‌شده", R.number(s.totalLearnedTrades.toDouble(), 0)))
+                add(R.label("هدف گرم‌کردن", R.number(s.warmupTargetTrades.toDouble(), 0)))
+                add(R.label("پیشرفت گرم‌کردن", R.pct(s.warmupProgressPercent)))
+                add(R.label("باقی‌مانده تا هدف", R.number(s.remainingWarmupTrades.toDouble(), 0)))
+                add(R.label("گرم‌کردن کامل شده", if (s.isWarmupCompleted) "بله" else "نه"))
+                add(R.label("گیت فعال", if (s.isGateActive) "بله" else "نه"))
+                add(R.label("شرط حجم (۱۰٬۰۰۰ معامله)", if (s.volumeConditionMet) "برقرار" else "برقرار نشده"))
+                add(R.label("فعال‌سازی دستی کاربر", if (s.gateUserActivationEnabled) "روشن" else "خاموش"))
+                add(R.label("اجبار فعال‌سازی پیش از گرم‌کردن", if (s.forceActiveBeforeWarmup) "بله" else "نه"))
+                add(R.label("دقت جاری", R.pct(s.runningAccuracyPct)))
+                add(R.label("خطای BCE", R.number(s.runningBceLoss, 4)))
+                add(R.label("گام‌های AdamW", R.number(s.adamStepCount.toDouble(), 0)))
+                add(R.label("خوشه‌های طلایی کشف‌شده", R.number(s.winningClusters.size.toDouble(), 0)))
+                add(R.label("تله‌های ممنوعه کشف‌شده", R.number(s.noTradeClusters.size.toDouble(), 0)))
+                if (s.gatePolicySummaryFa.isNotBlank()) {
+                    add("")
+                    add(s.gatePolicySummaryFa)
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "ledger",
+            titleFa = "دفتر یادگیری و انتقال دانش بین نسخه‌ها",
+            lines = buildList {
+                add(R.label("ردیف‌های دفتر", R.number(s.learnedLedgerRows.toDouble(), 0)))
+                add(R.label("ردیف‌های حذف‌شده (پیرایش)", R.number(s.learnedLedgerPrunedCount.toDouble(), 0)))
+                add(R.label("نسخهٔ ساختار دفتر", R.number(s.learnedSchemaVersion.toDouble(), 0)))
+                add(R.label("معاملات بسته‌شدهٔ دیده‌شده در ژورنال", R.number(s.journalClosedTradesSeen.toDouble(), 0)))
+                add(R.label("اصلاح ردیف‌های تکراری", R.number(s.duplicatesRepairedCount.toDouble(), 0)))
+                add(R.label("نسخهٔ دانش", R.number(s.knowledgeRevision.toDouble(), 0)))
+                if (s.ledgerReconciliationSummaryFa.isNotBlank()) add(s.ledgerReconciliationSummaryFa)
+                if (s.knowledgeChangeLog.isNotEmpty()) {
+                    add("")
+                    add("تغییرهای ثبت‌شدهٔ دانش:")
+                    s.knowledgeChangeLog.takeLast(12).reversed().forEach { entry ->
+                        add("• ${entry.titleFa} — ${entry.detailFa}")
+                    }
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "market",
+            titleFa = "درک زندهٔ وضعیت بازارها و علت حرکت",
+            lines = buildList {
+                if (s.liveMarketAttributions.isEmpty()) add("هنوز داده‌ای از وضعیت زندهٔ بازارها ثبت نشده است.")
+                s.liveMarketAttributions.forEach { a ->
+                    add("• ${a.symbol} [${a.timeframeLabel}] — ${a.categoryTitleFa} | رژیم: ${a.marketRegimeStateFa} | علت اصلی: ${a.primaryCauseBadgeFa} (${a.causalConfidencePct}%)")
+                    add("   چه اتفاقی افتاده: ${a.whatIsHappeningFa}")
+                    add("   چرا: ${a.whyItIsHappeningFa}")
+                    if (a.newsImpactSummaryFa.isNotBlank()) add("   خبر: ${a.newsImpactSummaryFa}")
+                    if (a.unified9BookSummaryFa.isNotBlank()) add("   ۹ کتاب درایو: ${a.unified9BookSummaryFa}")
+                    if (a.recommendedTacticalActionFa.isNotBlank()) add("   تاکتیک پیشنهادی: ${a.recommendedTacticalActionFa}")
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "news",
+            titleFa = "هوش خبری کلان و تقویم اقتصادی",
+            lines = buildList {
+                val n = s.latestNewsSnapshot
+                add(R.label("سنتیمنت کلان", R.number(n.overallMacroSentiment, 2)))
+                add(R.label("شدت شوک", R.number(n.shockIntensity, 2)))
+                add(R.label("پنجرهٔ خبری پرتأثیر", if (n.isHighImpactNewsWindow) "بله" else "نه"))
+                add(R.label("کاتالیزور فعال", n.activeMacroCatalystFa))
+                n.categoryNewsSummaryFa.forEach { (code, summary) ->
+                    if (summary.isNotBlank()) add("• $code: $summary")
+                }
+                n.headlines.take(12).forEach { h ->
+                    add("• [${h.source}] ${h.title} — ${h.causeTagFa} | سنتیمنت ${R.number(h.sentimentScore, 2)} | اثر ${h.impactLevel}")
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "autotune",
+            titleFa = "تیونینگ خودکار پارامترها (CEM + Bayesian)",
+            lines = buildList {
+                val a = s.autoTunedParameters
+                add(R.label("نسل تیونینگ", R.number(a.tuningGeneration.toDouble(), 0)))
+                add(R.label("متد", a.methodBadgeFa))
+                add(R.label("نمونه‌های تحلیل‌شده", R.number(a.samplesAnalyzed.toDouble(), 0)))
+                add(R.label("حداقل R:R", R.number(a.minRiskReward, 2)))
+                add(R.label("سقف کشش کیجون (ATR)", R.number(a.maxKijunExtensionAtr, 2)))
+                add(R.label("بافر حد ضرر (ATR)", R.number(a.slBufferAtr, 2)))
+                add(R.label("بافر شکست (ATR)", R.number(a.breakoutBufferAtr, 2)))
+                add(R.label("حداقل کارایی روند", R.number(a.minEfficiencyRatio, 2)))
+                add(R.label("حداقل نسبت حجم ۲۰", R.number(a.minVolumeRatio20, 2)))
+                add(R.label("توافق حداقلی ۹ کتاب", R.number(a.minDriveBooksConsensus.toDouble(), 0)))
+                add(R.label("گیت احتمال برد شبکه", R.pct(a.neuralWinProbGatePct)))
+                add(R.label("نرخ برد انتظاری", R.pct(a.expectedWinRatePct)))
+                add(R.label("پروفیت فاکتور انتظاری", R.number(a.expectedProfitFactor, 2)))
+                add(R.label("کاهش سیگنال کاذب", R.pct(a.falsePositiveReductionPct)))
+                if (a.tuningSummaryFa.isNotBlank()) add(a.tuningSummaryFa)
+                a.bestStrategyByCategory.forEach { (code, title) -> add("• بهترین استراتژی $code: $title") }
+                if (a.parameterChangeLogFa.isNotEmpty()) {
+                    add("")
+                    add("تغییرهای اعمال‌شده:")
+                    a.parameterChangeLogFa.takeLast(12).reversed().forEach { add("• $it") }
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "perstrategy",
+            titleFa = "تیونینگ اختصاصی هر استراتژی",
+            lines = buildList {
+                val profiles = s.autoTunedParameters.perStrategyProfiles.values
+                if (profiles.isEmpty()) add("هنوز پروفایل اختصاصی استراتژی‌ها ساخته نشده است.")
+                profiles.sortedByDescending { it.samplesAnalyzed }.take(16).forEach { p ->
+                    add("• ${p.strategyTitleFa} (${p.strategyBadgeFa}) — نمونه ${p.samplesAnalyzed} | نرخ برد ${R.pct(p.winRatePct)} | PF ${R.number(p.expectedProfitFactor, 2)} | R:R≥${R.number(p.minRiskReward, 2)} | بافر SL ${R.number(p.slBufferAtr, 2)}ATR | گیت ${R.pct(p.neuralWinProbGatePct)}")
+                    if (p.tuningSummaryFa.isNotBlank()) add("   ${p.tuningSummaryFa}")
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "forensics",
+            titleFa = "کالبدشکافی تریدهای تارگت و استاپ",
+            lines = buildList {
+                val f = s.tradeForensics
+                add(R.label("معاملات برندهٔ تحلیل‌شده", R.number(f.totalWinsAnalyzed.toDouble(), 0)))
+                add(R.label("معاملات بازندهٔ تحلیل‌شده", R.number(f.totalLossesAnalyzed.toDouble(), 0)))
+                add(R.label("میانگین برد", R.rMultiple(f.avgWinR)))
+                add(R.label("میانگین باخت", R.rMultiple(f.avgLossR)))
+                add(R.label("پروفیت فاکتور", R.number(f.profitFactor, 2)))
+                add(R.label("امید ریاضی هر معامله", R.rMultiple(f.expectancyPerTradeR)))
+                add(R.label("بهترین تایم‌فریم", f.bestTimeframeSummaryFa))
+                if (f.topWinDriversFa.isNotEmpty()) {
+                    add("")
+                    add("محرک‌های اصلی برد:")
+                    f.topWinDriversFa.forEach { add("• $it") }
+                }
+                if (f.topLossCausesFa.isNotEmpty()) {
+                    add("")
+                    add("علت‌های اصلی استاپ:")
+                    f.topLossCausesFa.forEach { add("• $it") }
+                }
+                if (f.actionableTradingRulesFa.isNotEmpty()) {
+                    add("")
+                    add("قوانین طلایی استخراج‌شده:")
+                    f.actionableTradingRulesFa.forEach { add("• $it") }
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "matrix",
+            titleFa = "ماتریس برتری استراتژی‌ها",
+            lines = buildList {
+                if (s.strategyEdgeMatrix.isEmpty()) add("هنوز معاملهٔ بسته‌شده‌ای برای رتبه‌بندی استراتژی‌ها ثبت نشده است.")
+                s.strategyEdgeMatrix.sortedByDescending { it.edgeScore }.forEach { e ->
+                    add("• ${e.strategyTitleFa} (${e.strategyBadgeFa}) — امتیاز لبه ${e.edgeScore} | معامله ${e.tradesCount} | نرخ برد ${R.pct(e.winRatePercent)} | PF ${R.number(e.profitFactor, 2)} | E[R] ${R.rMultiple(e.expectancyR)} | بهترین TF ${e.bestTimeframeLabel} | بهترین نماد ${e.bestSymbol} | ${e.tradingVerdictFa}")
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "sessions",
+            titleFa = "هوش سشن‌های معاملاتی",
+            lines = buildList {
+                if (s.sessionEdges.isEmpty()) add("هنوز داده‌ای برای سشن‌های معاملاتی جمع نشده است.")
+                s.sessionEdges.forEach { e ->
+                    add("• ${e.sessionTitleFa} (${e.utcHoursLabel}) — معامله ${e.tradesCount} | نرخ برد ${R.pct(e.winRatePercent)} | میانگین ${R.rMultiple(e.avgR)} | ${e.sessionAdviceFa}")
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "insights",
+            titleFa = "خلاصهٔ آموخته‌ها به زبان ساده",
+            lines = buildList {
+                if (s.learnedInsightsFeedFa.isEmpty()) add("هنوز درسی از معاملات بسته‌شده استخراج نشده است.")
+                s.learnedInsightsFeedFa.forEach { add("• $it") }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "categories",
+            titleFa = "دانش شبکه به تفکیک دستهٔ بازار",
+            lines = buildList {
+                if (s.categoryStats.isEmpty()) add("آمار دسته‌های بازار هنوز ساخته نشده است.")
+                s.categoryStats.forEach { c ->
+                    add("• ${c.categoryTitleFa} — یادگرفته ${c.learnedTrades} | نرخ برد ${R.pct(c.winRatePercent)} | تله‌های ثبت‌شده ${c.noTradeConditionCount}")
+                    if (c.bestConditionSummaryFa.isNotBlank()) add("   بهترین رژیم سودده: ${c.bestConditionSummaryFa}")
+                    if (c.worstNoTradeConditionSummaryFa.isNotBlank()) add("   بدترین تله: ${c.worstNoTradeConditionSummaryFa}")
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "clusters",
+            titleFa = "تله‌های ممنوعه و الگوهای طلایی",
+            lines = buildList {
+                add("⛔ تله‌های ممنوعه (${s.noTradeClusters.size}):")
+                if (s.noTradeClusters.isEmpty()) add("• هنوز خوشهٔ ضرردهٔ پرتکراری ثبت نشده است.")
+                s.noTradeClusters.take(20).forEach { c ->
+                    add("• ${c.conditionDescriptionFa} — نمونه ${c.totalCount} | برد ${c.winCount} | باخت ${c.lossCount} | احتمال برد ${R.pct(c.posteriorWinProb * 100.0)} | میانگین ${R.rMultiple(c.avgR)}")
+                }
+                add("")
+                add("🎯 الگوهای طلایی (${s.winningClusters.size}):")
+                if (s.winningClusters.isEmpty()) add("• هنوز الگوی پرتکرار سوددهی ثبت نشده است.")
+                s.winningClusters.take(20).forEach { c ->
+                    add("• ${c.conditionDescriptionFa} — نمونه ${c.totalCount} | برد ${c.winCount} | احتمال برد ${R.pct(c.posteriorWinProb * 100.0)} | میانگین ${R.rMultiple(c.avgR)}")
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "features",
+            titleFa = "وزن ۱۶ ویژگی ایچیموکو در مغز شبکه",
+            lines = buildList {
+                if (s.featureInsights.isEmpty()) add("وزن ویژگی‌ها هنوز محاسبه نشده است.")
+                s.featureInsights.sortedByDescending { it.attentionPercent }.forEach { f ->
+                    add("• #${f.index} ${f.titleFa} — سهم توجه ${R.pct(f.attentionPercent)} | اثر خالص وزن ${R.number(f.netWeightImpact, 3)} | ${f.impactLabelFa}")
+                    if (f.explanationFa.isNotBlank()) add("   ${f.explanationFa}")
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "live15",
+            titleFa = "ارزیابی لحظه‌ای نمادها",
+            lines = buildList {
+                val dual = dualSymbolStrategyReports.value
+                if (dual.isEmpty()) add("گزارش زندهٔ نمادها هنوز آماده نیست.")
+                dual.keys.sorted().forEach { sym ->
+                    val d = dual[sym] ?: return@forEach
+                    listOfNotNull(d.report15m, d.report5m).forEach { rep ->
+                        val ev = runCatching { evaluateReportWithNeuralEngine(rep) }.getOrNull() ?: return@forEach
+                        add("• ${ev.symbol} [${rep.triggerInterval.label}] — احتمال برد ${R.pct(ev.predictedWinProb * 100.0)} | امید ریاضی ${R.rMultiple(ev.expectedR)} | ${if (ev.shouldAllowTrade) "اجازهٔ ورود" else "ممنوع"}")
+                        if (ev.summaryFa.isNotBlank()) add("   ${ev.summaryFa}")
+                        if (!ev.noTradeWarningFa.isNullOrBlank()) add("   ⛔ ${ev.noTradeWarningFa}")
+                        if (ev.causalAttributionFa.isNotBlank()) add("   علت: ${ev.causalAttributionFa}")
+                        if (ev.newsCatalystFa.isNotBlank()) add("   خبر: ${ev.newsCatalystFa}")
+                    }
+                }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "lessons",
+            titleFa = "درس‌های استخراج‌شده از معاملات",
+            lines = buildList {
+                if (s.recentLessons.isEmpty()) add("هنوز معاملهٔ بسته‌شده‌ای در حافظهٔ تجربه ثبت نشده است.")
+                s.recentLessons.forEach { l ->
+                    add("• ${l.symbol} [${l.timeframeLabel}] ${if (l.won) "برد ✅" else "باخت ❌"} (${R.rMultiple(l.achievedR)}) — ${l.strategyId}")
+                    if (l.conditionDescriptionFa.isNotBlank()) add("   شرایط: ${l.conditionDescriptionFa}")
+                    if (l.lessonLearnedFa.isNotBlank()) add("   درس: ${l.lessonLearnedFa}")
+                }
+            },
+        )
+
+        return sections
+    }
+
     fun applyAssistantNoteConfigPatch(note: com.aurum.edge.core.IchimokuImprovementNote) {
         container.settingsStore.update { cur ->
             val oldCfg = cur.baseStrategyConfig
@@ -2433,3 +2876,11 @@ class AurumViewModelFactory(private val container: AppContainer) : ViewModelProv
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = AurumViewModel(container) as T
 }
+
+
+/** یک بخش از توضیحات هوش عصبی که دکمهٔ کپی دارد. */
+private data class NeuralCopySection(
+    val key: String,
+    val titleFa: String,
+    val lines: List<String>,
+)

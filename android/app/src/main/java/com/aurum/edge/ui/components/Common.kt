@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,6 +43,12 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
 
+/**
+ * متن را داخل کاراکترهای ایزولهٔ جهت‌دهی می‌گذارد تا عدد/قیمت در جملهٔ فارسی راست‌به‌چپ به‌هم نریزد.
+ * (U+202A … U+202C — همان روشی که در تقویم ژورنال استفاده شده است.)
+ */
+fun bidiIsolated(text: String): String = "\u202A$text\u202C"
+
 fun formatPrice(value: Double?): String {
     if (value == null) return "—"
     val absVal = abs(value)
@@ -53,7 +61,7 @@ fun formatPrice(value: Double?): String {
         absVal > 0.0 -> 6
         else -> 2
     }
-    return String.format(Locale.US, "%,.${digits}f", value)
+    return bidiIsolated(String.format(Locale.US, "%,.${digits}f", value))
 }
 
 /**
@@ -62,7 +70,7 @@ fun formatPrice(value: Double?): String {
  */
 fun formatPriceFor(symbol: String, value: Double?): String =
     if (value == null) "—"
-    else String.format(Locale.US, "%,.${com.aurum.edge.data.CryptoCatalog.digitsFor(symbol)}f", value)
+    else bidiIsolated(String.format(Locale.US, "%,.${com.aurum.edge.data.CryptoCatalog.digitsFor(symbol)}f", value))
 
 fun formatTime(millis: Long?): String {
     if (millis == null || millis <= 0) return "—"
@@ -90,12 +98,15 @@ fun SectionCard(
     title: String,
     subtitle: String? = null,
     trailing: @Composable (() -> Unit)? = null,
+    /** اگر مقدار بگیرد، دکمهٔ «کپی» کنار عنوان کارت نمایش داده می‌شود. */
+    onCopy: (() -> Unit)? = null,
+    onCopyLabel: String = "📋 کپی",
     modifier: Modifier = Modifier,
     collapsible: Boolean = true,
     initiallyExpanded: Boolean = false,
     content: @Composable () -> Unit,
 ) {
-    var expanded by rememberSaveable(title) { mutableStateOf(false) }
+    var expanded by rememberSaveable(title) { mutableStateOf(!collapsible || initiallyExpanded) }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -136,7 +147,8 @@ fun SectionCard(
                         text = title,
                         style = MaterialTheme.typography.titleSmall,
                         color = AurumColors.TextPrimary,
-                        maxLines = 1,
+                        maxLines = 2,
+                        lineHeight = 18.sp,
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (!subtitle.isNullOrBlank()) {
@@ -156,6 +168,9 @@ fun SectionCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 trailing?.invoke()
+                if (onCopy != null) {
+                    CopyTextPill(label = onCopyLabel, onClick = onCopy)
+                }
                 if (collapsible) {
                     Box(
                         modifier = Modifier
@@ -166,7 +181,7 @@ fun SectionCard(
                             .padding(horizontal = 7.dp, vertical = 3.dp),
                     ) {
                         Text(
-                            text = if (expanded) "▲ بستن" else "▼ باز کردن",
+                            text = if (expanded) "▲ بستن" else "▼ باز",
                             color = AurumColors.Gold,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
@@ -183,6 +198,33 @@ fun SectionCard(
     }
 }
 
+/**
+ * دکمهٔ کوچک «کپی» برای سرصفحهٔ کارت‌ها.
+ * متن توضیحی همان بخش را در کلیپ‌بورد می‌گذارد تا کاربر بتواند در جای دیگر بچسباند.
+ */
+@Composable
+fun CopyTextPill(
+    onClick: () -> Unit,
+    label: String = "📋 کپی",
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(AurumColors.Bg.copy(alpha = 0.7f))
+            .border(0.8.dp, AurumColors.Gold.copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 7.dp, vertical = 3.dp),
+    ) {
+        Text(
+            text = label,
+            color = AurumColors.Gold,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+        )
+    }
+}
+
 @Composable
 fun StatTile(
     label: String,
@@ -195,14 +237,17 @@ fun StatTile(
             .clip(RoundedCornerShape(10.dp))
             .background(AurumColors.SurfaceAlt)
             .border(1.dp, AurumColors.Line, RoundedCornerShape(10.dp))
+            .heightIn(min = 50.dp)
             .padding(horizontal = 8.dp, vertical = 7.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
             color = AurumColors.TextMuted,
             maxLines = 1,
+            textAlign = TextAlign.Center,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
@@ -210,7 +255,9 @@ fun StatTile(
             style = MaterialTheme.typography.labelMedium,
             color = valueColor,
             fontWeight = FontWeight.Bold,
-            maxLines = 1,
+            maxLines = 2,
+            lineHeight = 14.sp,
+            textAlign = TextAlign.Center,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 3.dp),
         )

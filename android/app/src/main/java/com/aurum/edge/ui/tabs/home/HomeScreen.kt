@@ -132,7 +132,7 @@ fun HomeScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                     Text(
                         text = "موجودی کل حساب (Account Balance)",
                         style = MaterialTheme.typography.labelSmall,
@@ -220,12 +220,19 @@ fun HomeScreen(
                 )
             },
         ) {
-            Row(
+            // دو ردیف مستقل: پیل‌های وضعیت در یک ردیف و وضعیت سشن سه بازار در ردیف بعدی
+            // (قبلاً هر پنج پیل در یک ردیف بودند و در عرض گوشی از کادر بیرون می‌زدند)
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Pill(
                         text = if (settings.backgroundMonitor) "🟢 پایش ۲۴/۷" else "⚪ بک‌گراند خاموش",
                         color = if (settings.backgroundMonitor) AurumColors.Cyan else AurumColors.TextMuted,
@@ -237,7 +244,13 @@ fun HomeScreen(
                         modifier = Modifier.clickable { onOpenSettings() },
                     )
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     listOf("BTC/USDT" to "رمزارز", "XAU/USD" to "طلا", "EUR/USD" to "فارکس").forEach { (sym, lbl) ->
                         val closed = MarketHours.sessionWindowFor(sym, now).closed
                         Pill("$lbl: ${if (closed) "بسته" else "باز"}", if (closed) AurumColors.Red else AurumColors.Green)
@@ -246,15 +259,14 @@ fun HomeScreen(
             }
 
             // نوار ۳ آلارم صوتی مجزا (ورود، حد سود TP، حد ضرر SL) با نمایش ولوم و قابلیت تست سریع
-            Row(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 6.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(AurumColors.SurfaceAlt.copy(alpha = 0.7f))
                     .padding(horizontal = 8.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 Text(
                     text = if (settings.notifyOnSignal) "🔔 صدا (${settings.alarmVolumePercent}%):" else "🔕 آلارم خاموش:",
@@ -263,7 +275,13 @@ fun HomeScreen(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.clickable { onOpenSettings() },
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Pill(
                         text = "⚡ تست ورود",
                         color = AurumColors.Cyan,
@@ -391,6 +409,7 @@ fun HomeScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
+                                modifier = Modifier.weight(1f).padding(end = 6.dp),
                                 text = "${c.symbol} [${c.timeframeLabel}] · ${c.masterGradeFa}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = AurumColors.Gold,
@@ -409,6 +428,7 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
+                        modifier = Modifier.weight(1f).padding(end = 6.dp),
                         text = "🛠️ نکات قابل اصلاح برای ارتقای بعدی:",
                         style = MaterialTheme.typography.labelMedium,
                         color = AurumColors.Gold,
@@ -688,6 +708,7 @@ private fun LiveOpenTradesTrackingSection(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
+                        modifier = Modifier.weight(1f).padding(end = 6.dp),
                         text = "در حال حاضر معامله بازی وجود ندارد",
                         style = MaterialTheme.typography.bodyMedium,
                         color = AurumColors.TextPrimary,
@@ -931,6 +952,7 @@ private fun LiveTradeGaugeCard(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
+                        modifier = Modifier.weight(1f).padding(end = 6.dp),
                         text = "SL (-$${String.format(Locale.US, "%.1f", riskBudget)})",
                         style = MaterialTheme.typography.labelSmall,
                         color = if (lockedProfitR > 0.05) AurumColors.Green else AurumColors.Red,
@@ -1086,6 +1108,7 @@ private fun LiveTradeGaugeCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
+                            modifier = Modifier.weight(1f).padding(end = 6.dp),
                             text = "📐 بررسی فرمول R:R و عدد مناسب این معامله",
                             style = MaterialTheme.typography.labelMedium,
                             color = AurumColors.Gold,
@@ -1157,6 +1180,7 @@ private fun LiveTradeGaugeCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
+                            modifier = Modifier.weight(1f).padding(end = 6.dp),
                             text = "🕯️ دسته‌بندی ۳ کندل قبل از ورود به معامله",
                             style = MaterialTheme.typography.labelMedium,
                             color = AurumColors.Cyan,
@@ -1189,6 +1213,7 @@ private fun LiveTradeGaugeCard(
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(
+                                        modifier = Modifier.weight(1f).padding(end = 6.dp),
                                         text = "${slot.slotTitleFa} · ${slot.roleInSetupFa}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = if (slot.isBullish) AurumColors.Green else AurumColors.Red,
@@ -1234,6 +1259,7 @@ private fun LiveTradeGaugeCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
+                            modifier = Modifier.weight(1f).padding(end = 6.dp),
                             text = "🧭 بررسی ادامه روند و خروج هوشمند در سود",
                             style = MaterialTheme.typography.labelMedium,
                             color = trendColor,
@@ -1278,6 +1304,7 @@ private fun LiveTradeGaugeCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
+                            modifier = Modifier.weight(1f).padding(end = 6.dp),
                             text = "🏦 قوانین خرید، کمیسیون و کارمزد مرجع دیتا",
                             style = MaterialTheme.typography.labelMedium,
                             color = AurumColors.Cyan,

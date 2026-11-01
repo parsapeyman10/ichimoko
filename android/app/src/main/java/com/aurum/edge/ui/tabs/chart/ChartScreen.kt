@@ -591,6 +591,7 @@ private fun NativeIchimokuCanvasChart(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
+                    modifier = Modifier.weight(1f).padding(end = 6.dp),
                     text = "$symbol · $timeframe · ${formatPriceFor(symbol, livePrice ?: sel.candle.close)}",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.Bold,
@@ -678,6 +679,7 @@ private fun NativeIchimokuCanvasChart(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
+                        modifier = Modifier.weight(1f).padding(end = 6.dp),
                         text = "☁️ ابر آینده ($stepLabel): ${if (inspectedFk.spanA >= inspectedFk.spanB) "🟢 صعودی" else "🔴 نزولی"}${futureTwistStep?.let { " · ⚡ پیچش در +$it" } ?: ""}",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,

@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -123,8 +124,12 @@ internal fun AurumBottomBar(
                     style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                     color = if (isSelected) AurumColors.Gold else AurumColors.TextSecondary,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                    maxLines = 1,
-                    softWrap = false,
+                    // برچسب‌های دو کلمه‌ای («هوش عصبی»، «تنظیمات») در ۷ تب پایین صفحه
+                    // قبلاً با softWrap = false بریده می‌شدند؛ حالا در صورت نیاز دو خطی می‌شوند.
+                    maxLines = 2,
+                    softWrap = true,
+                    lineHeight = 12.sp,
+                    textAlign = TextAlign.Center,
                     overflow = TextOverflow.Ellipsis,
                 )
             }

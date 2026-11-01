@@ -346,10 +346,12 @@ private fun EquityCurveStrip(report: TradingPerformanceAnalytics.PerformanceRepo
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
+                modifier = Modifier.weight(1f).padding(end = 6.dp),
                 text = String.format(Locale.US, "کمترین %+,.0f$", minV),
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = String.format(Locale.US, "بیشترین %+,.0f$", maxV),

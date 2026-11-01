@@ -52,11 +52,13 @@ fun SessionExitPanel(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
+                modifier = Modifier.weight(1f).padding(end = 6.dp),
                 text = "🕒 زمان‌بندی سشن و خروج هوشمند",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.Purple,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             Pill(text = "یادگیری فعال", color = AurumColors.Green)
         }

@@ -640,6 +640,7 @@ private fun Live12ConditionChecklistPage(
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text("🎯 Sniper Entry: ${formatPrice(report.suggestedEntry)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Gold, fontWeight = FontWeight.Bold)
+                        modifier = Modifier.weight(1f).padding(end = 6.dp),
                     Text("SL ساختاری: ${formatPrice(report.suggestedStopLoss)}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Red, fontWeight = FontWeight.Bold)
                     Text("R:R = 1:${report.riskReward ?: 0.0}", style = MaterialTheme.typography.labelSmall, color = AurumColors.Green, fontWeight = FontWeight.Bold)
                 }
@@ -687,6 +688,7 @@ private fun Live12ConditionChecklistPage(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
+                                modifier = Modifier.weight(1f).padding(end = 6.dp),
                                 text = "📐 نحوه محاسبه R:R و عدد مناسب این ستاپ",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.Gold,
@@ -834,6 +836,7 @@ internal fun ExclusiveStrategySelectorPage(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
+                modifier = Modifier.weight(1f).padding(end = 6.dp),
                 text = if (runAllSimultaneously) "همه استراتژی‌های تیک‌خورده هم‌زمان فعال‌اند" else "فقط ۱ استراتژی همزمان فعال است",
                 style = MaterialTheme.typography.labelMedium,
                 color = AurumColors.Gold,

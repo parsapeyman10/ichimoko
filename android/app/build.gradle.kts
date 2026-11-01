@@ -199,8 +199,8 @@ android {
         // (NeoWaveEngine.dynamicAmplitudeAtr) and applies Neely's higher-degree rule across
         // timeframes (NeoWaveEngine.mtfConfluence): a confirmed opposing 4H pattern vetoes the
         // entry, alignment adds confidence. Off by default with the NeoWave switch, as always.
-        versionCode = 744
-        versionName = "3.9.35"
+        versionCode = 745
+        versionName = "3.9.36"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")
