@@ -76,7 +76,10 @@ fun AurumRoot(viewModel: AurumViewModel) {
     var chartTicker by rememberSaveable { mutableStateOf(TradingViewSymbols.find(settings.symbol) ?: "BINANCE:BTCUSDT") }
 
     fun open(destination: AurumTab) {
-        if (destination in primaryTabs) tab = destination.name
+        if (destination in primaryTabs) {
+            tab = destination.name
+            com.aurum.edge.core.CrashReporter.breadcrumb("tab:" + destination.name)
+        }
     }
     fun openChartFor(symbol: String) {
         chartTicker = TradingViewSymbols.find(symbol) ?: symbol

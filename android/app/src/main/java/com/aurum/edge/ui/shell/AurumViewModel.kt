@@ -1257,16 +1257,77 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     private val _screenshotBackup = MutableStateFlow(ScreenshotBackupUiState())
     val screenshotBackup: StateFlow<ScreenshotBackupUiState> = _screenshotBackup.asStateFlow()
 
-    /** تازه‌سازی تعداد/حجم تصاویر آرشیو برای نمایش در تب آپدیت. */
+    /**
+     * تازه‌سازی تعداد/حجم تصاویر آرشیو برای نمایش در تب آپدیت.
+     *
+     * این کار فهرست فایل‌های آرشیو را از دیسک می‌خواند؛ اجرای آن روی رشتهٔ اصلی می‌توانست
+     * در گوشی‌های پر از تصویر باعث لگ یا بسته شدن اپ شود، پس همیشه روی IO اجرا می‌شود.
+     */
     fun refreshScreenshotBackupStats() {
-        val basket = runCatching {
-            com.aurum.edge.data.TradeSnapshotArchiveManager.archiveBasket(container.appContext)
-        }.getOrDefault(com.aurum.edge.data.ArchivedSnapshotBasket())
-        _screenshotBackup.value = _screenshotBackup.value.copy(
-            imageCount = basket.imageCount,
-            imageBytes = basket.imageBytes,
-            recordCount = basket.recordCount,
-        )
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val basket = runCatching {
+                com.aurum.edge.data.TradeSnapshotArchiveManager.archiveBasket(container.appContext)
+            }.getOrElse { err ->
+                com.aurum.edge.core.CrashReporter.recordNonFatal(container.appContext, "archiveBasket", err)
+                com.aurum.edge.data.ArchivedSnapshotBasket()
+            }
+            _screenshotBackup.value = _screenshotBackup.value.copy(
+                imageCount = basket.imageCount,
+                imageBytes = basket.imageBytes,
+                recordCount = basket.recordCount,
+            )
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // عیب‌یابی: گزارش کرش‌های ثبت‌شده داخل اپ
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private val _crashReports = MutableStateFlow<List<com.aurum.edge.core.CrashReporter.CrashEntry>>(emptyList())
+    val crashReports: StateFlow<List<com.aurum.edge.core.CrashReporter.CrashEntry>> = _crashReports.asStateFlow()
+
+    /** خواندن فهرست گزارش‌های کرش از حافظهٔ اپ (روی IO). */
+    fun refreshCrashReports() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val entries = runCatching {
+                com.aurum.edge.core.CrashReporter.list(container.appContext)
+            }.getOrDefault(emptyList())
+            _crashReports.value = entries
+        }
+    }
+
+    /** کپی متن کامل جدیدترین گزارش کرش در کلیپ‌بورد (با پیام فارسی). */
+    fun copyLatestCrashReport() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val latest = runCatching {
+                com.aurum.edge.core.CrashReporter.latest(container.appContext)
+            }.getOrNull()
+            if (latest == null) {
+                _toast.value = "⚠️ هیچ گزارش کرشی ثبت نشده است"
+                return@launch
+            }
+            val text = com.aurum.edge.core.CrashReporter.readFull(container.appContext, latest)
+            if (text.isBlank()) {
+                _toast.value = "⚠️ فایل گزارش خالی بود"
+                return@launch
+            }
+            copyTextToClipboard(
+                labelFa = "گزارش کرش",
+                text = text,
+                successToastFa = "📋 گزارش کرش کپی شد — برای بررسی بفرستید",
+            )
+        }
+    }
+
+    /** پاک کردن گزارش‌های کرش. */
+    fun clearCrashReports() {
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val removed = runCatching {
+                com.aurum.edge.core.CrashReporter.clear(container.appContext)
+            }.getOrDefault(0)
+            _crashReports.value = emptyList()
+            _toast.value = if (removed > 0) "🗑️ $removed گزارش کرش پاک شد" else "ℹ️ گزارشی برای پاک کردن نبود"
+        }
     }
 
     /** ساخت ZIP از تصاویر آرشیو و ذخیرهٔ آن در پوشهٔ دانلود گوشی. */

@@ -43,11 +43,15 @@ fun UpdateScreen(viewModel: AurumViewModel) {
     // package manager on every recomposition would be wasteful and could show a half-written value.
     val signing = remember { viewModel.updateSigningSummary }
     val screenshotBackup by viewModel.screenshotBackup.collectAsStateWithLifecycle()
+    val crashReports by viewModel.crashReports.collectAsStateWithLifecycle()
     // انتخاب فایل ZIP بکاپ تصاویر برای بازگردانی (فقط ZIP؛ هر جای گوشی یا درایو)
     val restoreZipLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri -> viewModel.restoreScreenshotBackupFromZip(uri) }
-    LaunchedEffect(Unit) { viewModel.refreshScreenshotBackupStats() }
+    LaunchedEffect(Unit) {
+        viewModel.refreshScreenshotBackupStats()
+        viewModel.refreshCrashReports()
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -155,6 +159,71 @@ fun UpdateScreen(viewModel: AurumViewModel) {
                     Text("اجازه نصب از Aurum Edge در Android")
                 }
             }
+        }
+
+        SectionCard(
+            "🩺 عیب‌یابی کرش و بسته شدن برنامه",
+            "اگر اپ بسته شد، متن خطا همین‌جا ذخیره می‌شود",
+        ) {
+            if (crashReports.isEmpty()) {
+                Text(
+                    "هیچ گزارش کرشی ثبت نشده است. اگر برنامه بسته شد، دوباره اپ را باز کنید و همین کارت را ببینید؛ " +
+                        "گزارش با نام صفحه‌ای که در آن بودید ذخیره می‌شود.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = AurumColors.TextSecondary,
+                )
+            } else {
+                val latest = crashReports.first()
+                Text(
+                    latest.headlineFa,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                )
+                if (latest.detailFa.isNotBlank()) {
+                    Text(
+                        latest.detailFa,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextSecondary,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+                Text(
+                    "تعداد گزارش‌های نگه‌داری‌شده: ${crashReports.size} (حداکثر ۸ مورد، قدیمی‌ترها خودکار پاک می‌شوند)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = viewModel::copyLatestCrashReport,
+                    modifier = Modifier.weight(1f),
+                ) { Text("📋 کپی گزارش", style = MaterialTheme.typography.labelMedium) }
+                OutlinedButton(
+                    onClick = viewModel::refreshCrashReports,
+                    modifier = Modifier.weight(1f),
+                ) { Text("🔄 تازه‌سازی", style = MaterialTheme.typography.labelMedium) }
+            }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedButton(
+                    onClick = viewModel::clearCrashReports,
+                    modifier = Modifier.weight(1f),
+                ) { Text("🗑️ پاک کردن گزارش‌ها", style = MaterialTheme.typography.labelMedium) }
+            }
+            Text(
+                "گزارش شامل نوع خطا، stack trace، نام صفحه (تب)، نسخهٔ اپ، مدل گوشی و حافظهٔ مجاز برنامه است؛ " +
+                    "هیچ داده‌ای از ژورنال، حساب یا تصاویر در آن نوشته نمی‌شود.",
+                style = MaterialTheme.typography.labelSmall,
+                color = AurumColors.TextMuted,
+                modifier = Modifier.padding(top = 8.dp),
+            )
         }
 
         SectionCard(
