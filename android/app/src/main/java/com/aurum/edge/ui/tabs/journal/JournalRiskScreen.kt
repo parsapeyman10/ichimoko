@@ -56,7 +56,6 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -2417,7 +2416,6 @@ private fun CalendarDayCell(
                 color = accent,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
-                textDirection = TextDirection.Ltr,
                 maxLines = 1,
                 softWrap = false,
             )
