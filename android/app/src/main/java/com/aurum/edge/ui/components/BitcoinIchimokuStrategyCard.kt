@@ -68,6 +68,8 @@ internal data class SelectableStrategyItem(
     val authorRefFa: String,
     val summaryFa: String,
     val isCustom: Boolean,
+    /** استراتژی‌های موقتاً خاموش (فعلاً جایگاه ۱۶) در فهرست دیده می‌شوند ولی گزارش/معامله ندارند. */
+    val isTemporarilyDisabled: Boolean = false,
 )
 
 @Composable
@@ -122,6 +124,7 @@ fun BitcoinIchimokuStrategyCard(
                 authorRefFa = m.authorRefFa,
                 summaryFa = m.summaryFa,
                 isCustom = false,
+                isTemporarilyDisabled = m.isTemporarilyDisabled,
             )
         }
         val customs = settings.customStrategies.map { c ->
@@ -132,6 +135,7 @@ fun BitcoinIchimokuStrategyCard(
                 authorRefFa = BitcoinStrategyModel.fromId(c.baseModelId).badgeFa,
                 summaryFa = c.summaryFa,
                 isCustom = true,
+                isTemporarilyDisabled = false,
             )
         }
         builtIns + customs
