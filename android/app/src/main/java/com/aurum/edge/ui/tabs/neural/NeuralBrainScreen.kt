@@ -58,6 +58,7 @@ fun NeuralBrainScreen(
     viewModel: AurumViewModel,
 ) {
     val neuralState by viewModel.neuralState.collectAsStateWithLifecycle()
+    val allStrategyLearningFa by viewModel.allStrategyLearningFa.collectAsStateWithLifecycle()
     val dualReports by viewModel.dualSymbolStrategyReports.collectAsStateWithLifecycle()
     val trades by viewModel.trades.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -1345,6 +1346,34 @@ fun NeuralBrainScreen(
                     Text(
                         text = "🎛️ اجرای تیونینگ خودکار پارامترها و ۱۶ ویژگی برای تمام ۱۶ استراتژی",
                         fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Button(
+                    onClick = { viewModel.trainNeuralOnAllStrategies() },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = AurumColors.Purple,
+                        contentColor = Color.White,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        text = "🧠 آموزش یک‌جای شبکه روی همهٔ ۱۶ استراتژی (یادگیری انتقالی)",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Text(
+                    text = "هر استراتژی از معاملات خودش یاد می‌گیرد؛ اگر دادهٔ خودش کم باشد، تجربهٔ بقیهٔ " +
+                        "استراتژی‌ها هم به آموزشش اضافه می‌شود. با هر معاملهٔ بسته‌شده، این آموزش خودکار تکرار می‌شود.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.TextMuted,
+                )
+                if (allStrategyLearningFa.isNotBlank()) {
+                    Text(
+                        text = allStrategyLearningFa,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Green,
                         fontWeight = FontWeight.Bold,
                     )
                 }

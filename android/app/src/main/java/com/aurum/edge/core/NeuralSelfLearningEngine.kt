@@ -467,6 +467,12 @@ class NeuralSelfLearningEngine(
         const val WARMUP_TARGET_TRADES: Int = 10_000
         const val INPUT_DIM: Int = 16
         const val HIDDEN_DIM: Int = 16
+
+        /**
+         * حداقل نمونهٔ آموزشی برای هر استراتژی؛ اگر دادهٔ اختصاصی کمتر بود، از تجربهٔ بقیهٔ
+         * استراتژی‌ها پر می‌شود تا هیچ استراتژی «آموزش‌ندیده» نماند.
+         */
+        const val MIN_CROSS_STRATEGY_SAMPLES: Int = 6
         private const val MAX_REPLAY_BUFFER: Int = 320
         private const val MAX_CONDITION_CLUSTERS: Int = 240
         private const val BASE_LR: Double = 0.018
@@ -1795,6 +1801,11 @@ class NeuralSelfLearningEngine(
                 knowledgeChangeLog = log,
             ),
         )
+        // هر معاملهٔ تازه‌ای که یاد گرفته شد، یک دور «آموزش روی همهٔ ۱۶ استراتژی» را هم اجرا می‌کند
+        // تا تجربهٔ همان معامله به همهٔ استراتژی‌ها (نه فقط استراتژی خودش) برسد.
+        if (newlyLearned > 0) {
+            runCatching { learnAllStrategiesNow(nowMs = nowMs) }
+        }
         return reconciliation
     }
 
@@ -3430,6 +3441,88 @@ class NeuralSelfLearningEngine(
         return tunedSingle
     }
 
+    /** گزارش یک دور «آموزش روی همهٔ ۱۶ استراتژی». */
+    data class AllStrategyLearningReport(
+        val strategiesTotal: Int,
+        val strategiesWithOwnSamples: Int,
+        val strategiesTrained: Int,
+        val totalSamples: Int,
+        val generation: Int,
+        val trainedAtMs: Long,
+        val perStrategySamples: Map<String, Int>,
+        val summaryFa: String,
+    )
+
+    /**
+     * آموزش یک‌جای شبکهٔ عصبی روی **همهٔ ۱۶ استراتژی**.
+     *
+     * برای هر استراتژی، پروفایل ۱۶ ویژگی + پارامترها دوباره محاسبه می‌شود؛ دادهٔ اختصاصی همان
+     * استراتژی اولویت دارد و در صورت کمبود، از تجربهٔ بقیهٔ استراتژی‌ها (یادگیری انتقالی) پر می‌شود.
+     * خروجی: تعداد نمونه به‌ازای هر استراتژی و نسل تیونینگ.
+     */
+    @Synchronized
+    fun learnAllStrategiesNow(
+        baseConfig: BaseStrategyConfig = BaseStrategyConfig(),
+        nowMs: Long = System.currentTimeMillis(),
+    ): AllStrategyLearningReport {
+        val cur = persistedState
+        val ensuredParams = ensurePerStrategyProfiles(cur.autoTunedParameters, cur)
+        val newMap = LinkedHashMap<String, PerStrategyNeuralTuningProfile>()
+        val perStrategySamples = LinkedHashMap<String, Int>()
+        var withOwnSamples = 0
+        for (model in BitcoinStrategyModel.entries) {
+            val ownCount = cur.replayBuffer.count {
+                BitcoinStrategyModel.normalizeStrategyId(it.strategyId) == model.id
+            }
+            perStrategySamples[model.id] = ownCount
+            if (ownCount > 0) withOwnSamples++
+            newMap[model.id] = computeAutoTunedProfileForModel(
+                model = model,
+                cur = cur,
+                existingProfile = ensuredParams.perStrategyProfiles[model.id],
+            )
+        }
+        val generation = ensuredParams.tuningGeneration + 1
+        val nextAuto = ensuredParams.copy(
+            tuningGeneration = generation,
+            tunedAtMs = nowMs,
+            samplesAnalyzed = cur.replayBuffer.size,
+            perStrategyProfiles = newMap,
+            tuningSummaryFa = "آموزش هم‌زمان روی ${BitcoinStrategyModel.entries.size} استراتژی (نسل #$generation): " +
+                "${cur.replayBuffer.size} نمونهٔ تجربه، ${perStrategySamples.count { it.value > 0 }} استراتژی با دادهٔ اختصاصی.",
+        )
+        // پارامترهای عمومی (R:R، بافر حد ضرر، گیت) هم یک‌بار از کل داده بازمحاسبه می‌شوند تا
+        // استراتژی‌ها با دو منبع متناقض کار نکنند.
+        val tunedGeneral = computeAutoTunedParametersInternal(cur, baseConfig, nowMs)
+        persistState(
+            cur.copy(
+                autoTunedParameters = nextAuto.copy(
+                    minRiskReward = max(tunedGeneral.minRiskReward, 1.5),
+                    maxKijunExtensionAtr = tunedGeneral.maxKijunExtensionAtr,
+                    slBufferAtr = tunedGeneral.slBufferAtr,
+                    breakoutBufferAtr = tunedGeneral.breakoutBufferAtr,
+                    minEfficiencyRatio = tunedGeneral.minEfficiencyRatio,
+                    minVolumeRatio20 = tunedGeneral.minVolumeRatio20,
+                    minDriveBooksConsensus = tunedGeneral.minDriveBooksConsensus,
+                    neuralWinProbGatePct = tunedGeneral.neuralWinProbGatePct,
+                    expectedWinRatePct = tunedGeneral.expectedWinRatePct,
+                    expectedProfitFactor = tunedGeneral.expectedProfitFactor,
+                ),
+            ),
+        )
+        return AllStrategyLearningReport(
+            strategiesTotal = BitcoinStrategyModel.entries.size,
+            strategiesWithOwnSamples = withOwnSamples,
+            strategiesTrained = newMap.size,
+            totalSamples = cur.replayBuffer.size,
+            generation = generation,
+            trainedAtMs = nowMs,
+            perStrategySamples = perStrategySamples,
+            summaryFa = "🧠 آموزش هم‌زمان روی ${newMap.size} استراتژی انجام شد (نسل #$generation) · " +
+                "${cur.replayBuffer.size} نمونهٔ تجربه · $withOwnSamples استراتژی دادهٔ اختصاصی دارد.",
+        )
+    }
+
     fun applyAutoTunedParametersToConfig(baseConfig: BaseStrategyConfig): BaseStrategyConfig {
         val t = ensurePerStrategyProfiles(persistedState.autoTunedParameters, persistedState)
         val overrides = t.perStrategyProfiles.mapValues { (_, prof) -> prof.toConfigOverride() }
@@ -3455,7 +3548,20 @@ class NeuralSelfLearningEngine(
         val stratSamples = cur.replayBuffer.filter {
             BitcoinStrategyModel.normalizeStrategyId(it.strategyId) == model.id
         }
-        val effectiveSamples = stratSamples.ifEmpty { cur.replayBuffer }
+        // ── یادگیری روی «همهٔ استراتژی‌ها» ──────────────────────────────────
+        // دادهٔ اختصاصی همین استراتژی اولویت دارد؛ ولی اگر کم بود، تجربهٔ بقیهٔ استراتژی‌ها
+        // هم به مجموعهٔ آموزشی اضافه می‌شود تا هر استراتژی از کل آموخته‌های شبکه بهره ببرد
+        // (یادگیری انتقالی). سهم دادهٔ اختصاصی هرگز حذف نمی‌شود.
+        val crossStrategyQuota = max(0, MIN_CROSS_STRATEGY_SAMPLES - stratSamples.size)
+        val crossStrategySamples = if (crossStrategyQuota > 0) {
+            cur.replayBuffer
+                .filter { BitcoinStrategyModel.normalizeStrategyId(it.strategyId) != model.id }
+                .sortedByDescending { it.achievedR }
+                .take(crossStrategyQuota * 3)
+        } else {
+            emptyList()
+        }
+        val effectiveSamples = (stratSamples + crossStrategySamples).ifEmpty { cur.replayBuffer }
         val wins = effectiveSamples.filter { it.won }
         val losses = effectiveSamples.filter { !it.won }
         val eliteWins = wins.sortedByDescending { it.achievedR }.take(max(3, wins.size / 2))

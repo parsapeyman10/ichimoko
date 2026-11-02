@@ -222,6 +222,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     if (pass < STARTUP_ARCHIVE_SNAPSHOT_PASSES - 1) delay(2_500L)
                 }
             }
+            // ── آموزش شبکهٔ عصبی روی همهٔ ۱۶ استراتژی در هر اجرا ──────────────────
+            // بعد از بارگذاری ژورنال/دفتر یادگیری و با فاصله از فریم اول اجرا می‌شود تا UI سبک بماند.
+            delay(1_200L)
+            runCatching { container.neuralEngine.learnAllStrategiesNow(settings.value.baseStrategyConfig) }
             CrashReporter.breadcrumb("app:startup-work-done")
         }
         if (!updateCheckStarted) {
@@ -1681,7 +1685,8 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun scanAndEvaluateBitcoinStrategyNow(userInitiated: Boolean = true) {
-        viewModelScope.launch {
+        // اسکن ۱۵ نماد، محاسبهٔ سنگین موتور است؛ روی رشتهٔ اصلی اجرا نمی‌شود (جلوگیری از ANR).
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             evaluateAll15SymbolsStrategyInternal(
                 userInitiated = userInitiated,
                 fullSweep = true,
@@ -2156,6 +2161,29 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             }
             _toast.value = "🎛️ تیونینگ خودکار پارامترها و ۱۶ ویژگی هر ۱۶ استراتژی (نسل #${tuned.tuningGeneration} · CEM + Bayesian) اعمال شد"
             scanAndEvaluateBitcoinStrategyNow(userInitiated = false)
+        }
+    }
+
+    /** متن وضعیت «آموزش روی همهٔ ۱۶ استراتژی» (یادگیری انتقالی). */
+    private val _allStrategyLearningFa = MutableStateFlow("")
+    val allStrategyLearningFa: StateFlow<String> = _allStrategyLearningFa.asStateFlow()
+
+    /**
+     * آموزش یک‌جای شبکهٔ عصبی روی **همهٔ ۱۶ استراتژی**.
+     *
+     * هر استراتژی پروفایل ۱۶ ویژگی و پارامترهای خودش را از دادهٔ اختصاصی‌اش می‌گیرد و در صورت
+     * کمبود داده، از تجربهٔ بقیهٔ استراتژی‌ها (یادگیری انتقالی) پر می‌شود.
+     */
+    fun trainNeuralOnAllStrategies() {
+        _toast.value = "🧠 آموزش روی همهٔ ۱۶ استراتژی شروع شد…"
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            val report = runCatching {
+                container.neuralEngine.learnAllStrategiesNow(settings.value.baseStrategyConfig)
+            }.getOrNull()
+            val text = report?.summaryFa ?: "⚠️ آموزش روی همهٔ استراتژی‌ها انجام نشد"
+            _allStrategyLearningFa.value = text
+            _toast.value = text
+            runCatching { scanAndEvaluateBitcoinStrategyNow(userInitiated = false) }
         }
     }
 
