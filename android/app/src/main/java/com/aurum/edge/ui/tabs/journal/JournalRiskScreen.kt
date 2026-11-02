@@ -1866,7 +1866,7 @@ private fun AutoMonitoredOpenTradesCard(
                                 color = AurumColors.Cyan,
                             )
                             Text(
-                                text = "🧭 خروج هوشمند در سود (اتمام روند): شکست کیجون/TK، شدوی بازگشتی C-Clamp، چرخه هوسودا (9/17/26) با تنکان فلت، یا قفل چیکو و افت ER<20%",
+                                text = "🧭 خروج هوشمند فقط بالای +۲R: تا سود معامله به ۲ برابر ریسک نرسد هیچ خروج هوشمندی اجرا نمی‌شود. بالای +۲R: شکست کیجون/TK، شدوی بازگشتی C-Clamp، چرخه هوسودا (9/17/26) با تنکان فلت، یا قفل چیکو و افت ER<20%",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.Gold,
                             )

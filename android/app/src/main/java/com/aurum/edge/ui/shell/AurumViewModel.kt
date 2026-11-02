@@ -1538,6 +1538,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
      * استراتژی قبلی بلافاصله غیرفعال می‌شود.
      */
     fun activateSingleBitcoinStrategy(strategyId: String, enableExecution: Boolean = true) {
+        if (strategyId in BitcoinStrategyModel.temporarilyDisabledIds) {
+            _toast.value = "⏸ استراتژی پیمان (الیوت–نئوویو) موقتاً غیرفعال است و فعلاً قابل فعال‌سازی نیست"
+            return
+        }
         container.settingsStore.update {
             val nextEnabled = it.enabledStrategyIds + strategyId
             it.copy(
@@ -1557,7 +1561,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setRunAllStrategiesSimultaneously(enabled: Boolean) {
         container.settingsStore.update { current ->
-            val allIds = (BitcoinStrategyModel.entries.map { it.id } + current.customStrategies.map { it.id }).toSet()
+            val allIds = (BitcoinStrategyModel.activeStrategyIds + current.customStrategies.map { it.id }).toSet()
             current.copy(
                 runAllStrategiesSimultaneously = enabled,
                 enabledStrategyIds = if (enabled && current.enabledStrategyIds.isEmpty()) allIds else current.enabledStrategyIds,
@@ -1572,6 +1576,10 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     fun toggleStrategyEnabledInMultiMode(strategyId: String, enabled: Boolean) {
+        if (strategyId in BitcoinStrategyModel.temporarilyDisabledIds) {
+            _toast.value = "⏸ استراتژی پیمان (الیوت–نئوویو) موقتاً غیرفعال است و فعلاً قابل فعال‌سازی نیست"
+            return
+        }
         container.settingsStore.update { current ->
             val updated = if (enabled) {
                 current.enabledStrategyIds + strategyId

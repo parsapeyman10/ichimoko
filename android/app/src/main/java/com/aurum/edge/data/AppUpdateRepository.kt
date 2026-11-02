@@ -44,11 +44,21 @@ class DataFeedException(message: String) : Exception(message)
  */
 class AppUpdateRepository(
     private val context: Context,
-    private val client: OkHttpClient = AppNetwork.builder().followRedirects(true)
-        .callTimeout(10, java.util.concurrent.TimeUnit.MINUTES).build(),
+    providedClient: OkHttpClient? = null,
     /** Minimum gap between *automatic* checks. Tapping the check button always bypasses it. */
     private val autoCheckIntervalMillis: Long = MIN_AUTO_CHECK_INTERVAL_MS,
 ) {
+    /**
+     * ساخت `OkHttpClient` روی اندروید گران است: نخستین ساخت کلاس `Platform` را مقداردهی می‌کند
+     * (اسکن Providerهای TLS و کوکی) و روی برخی گوشی‌ها چند ثانیه طول می‌کشد. چون این ریپازیتوری
+     * در `AppContainer` و همان `Application.onCreate` ساخته می‌شود، ساختِ زودهنگام باعث
+     * «main-thread blocked» و صفحهٔ سفید/ANR می‌شد. حالا تنبل و فقط در اولین درخواست شبکه ساخته
+     * می‌شود (گزارش STALL نسخهٔ ۳.۹.۴۶ همین مسیر را نشان می‌داد).
+     */
+    private val client: OkHttpClient by lazy {
+        providedClient ?: AppNetwork.builder().followRedirects(true)
+            .callTimeout(10, java.util.concurrent.TimeUnit.MINUTES).build()
+    }
     companion object {
         // This is deliberately narrower than "any .apk". It prevents a debug APK, a random
         // third-party asset, or a similarly named file from becoming an install candidate.

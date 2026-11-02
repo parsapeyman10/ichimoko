@@ -216,35 +216,28 @@ enum class BitcoinStrategyModel(
         baseOptimalRr = 2.40,
     ),
 
-    // ── ۵. متود جامع یکپارچه لایه‌های ساختاری (Unified 9-Layer Master Method — تنها استراتژی جامع ۹ لایه) ──
+    // ── ۵. استراتژی پیمان — نسخهٔ الیوت–نئوویو (موقتاً غیرفعال) ─────────────────
+    // بنا به درخواست کاربر، از متود جامع قبلی فقط «لایهٔ الیوت–نئوویو» باقی مانده است؛ بقیهٔ
+    // لایه‌ها (اجماع لایه‌های ساختاری، گیت کیجون و …) حذف شده و خود استراتژی هم تا اطلاع بعدی
+    // خاموش است تا معامله‌ای با آن باز نشود. شناسهٔ داخلی برای حفظ آموخته‌های شبکه تغییر نکرده.
     DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER(
         id = "DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER",
-        titleFa = "استراتژی ۱۶ · استراتژی پیمان (متود جامع ۹ لایهٔ ساختاری + نئوویو–الیوت)",
-        badgeFa = "استراتژی پیمان · جایگاه ۱۶",
-        authorRefFa = "World-Class Regime-Gated Ichimoku & 9-Layer Quantitative Synthesis (Hosoda + Patel + Tuttle + Péloille + 9 Structural Layers)",
-        summaryFa = "استراتژی پیمان — نسخهٔ کامل و مستند. " +
-            "۱) پایه: متود جامع یکپارچهٔ ۹ لایهٔ ساختاری (۴ ستون نهادی ۷‑۲۲‑۴۴ / ۹‑۲۶‑۵۲ / ۱۰‑۳۰‑۶۰، " +
-            "ریبون EMA 13/21/34/89، ماشهٔ رژیم بازار و تأیید DMI/ADX + MACD + Kelly) روی بیس جامع ایچیموکو. " +
-            "۲) نئوویو–الیوت: این لایه فقط داخل همین استراتژی ادغام شده و کلید کاربر ندارد؛ الگوی هم‌جهت و " +
-            "تکمیل‌شدهٔ نئوویو اطمینان ورود را بالا می‌برد، الگوی مخالفِ معتبر ورود را می‌بندد و اهداف موجی " +
-            "الیوت به تارگت‌گذاری اضافه می‌شود. " +
-            "۳) گیت کیجون: کراس تنکان ۹ و کیجون ۲۶ همیشه در جهت معامله بررسی می‌شود (با ثبت تعداد کندل از کراس)، " +
-            "خطوط پیش‌بینی ۸/۲۵ و ۷/۲۴ و ۶/۲۳ باید جهت را تأیید کنند (حداقل ۲ از ۳) و وضعیت ابر بررسی می‌شود " +
-            "(قیمت بیرون ابر، جهت ابر آینده هم‌سو و ضخامت حداقل ۰.۰۸ ATR). " +
-            "۴) حد ضرر: بالای خط دورهٔ ۲۶ برای خرید و پایین آن برای فروش، با بافر ۰.۱۰ ATR از خط و فاصلهٔ " +
-            "«ATR × (۰.۲۲ + ۰.۱۵ × سهم سایه)» از کندل تا حد ضرر به کندل نچسبد؛ اگر این دو با هم جمع نشوند " +
-            "پلن مسدود می‌شود و ورود انجام نمی‌شود. " +
-            "۵) حد ضرر ساختاری از سنگرهای نام‌دار (فرکتال ۵ کندلی، کیجون ۲۶، ریبون نهادی کیجون۳۰/EMA34، " +
-            "لبهٔ کومو/SSB فلت، نقطهٔ S موج) انتخاب می‌شود و برای همین استراتژی ترتیب اعتبار با ریبون نهادی " +
-            "آغاز می‌شود. " +
-            "۶) هوش عصبی: پروفایل ۱۶ ویژگی و پارامترهای این استراتژی هم از معاملات خودش و هم از تجربهٔ بقیهٔ " +
-            "استراتژی‌ها آموزش می‌بیند (یادگیری انتقالی) و هر معاملهٔ بسته‌شده یک دور آموزش روی همهٔ ۱۶ " +
-            "استراتژی اجرا می‌کند. " +
-            "۷) ریسک: R:R داخل بازهٔ قفل‌شدهٔ ۱.۵ تا ۳.۰، اهرم متناسب نماد و TradePlanGuard دست‌نخورده است.",
-        hasPatel = true,
-        hasTuttle = true,
+        titleFa = "استراتژی ۱۶ · استراتژی پیمان (الیوت–نئوویو) · موقتاً غیرفعال",
+        badgeFa = "استراتژی پیمان · الیوت · غیرفعال",
+        authorRefFa = "Elliott Wave + NeoWave (Glenn Neely) — هندسهٔ موجی",
+        summaryFa = "استراتژی پیمان — نسخهٔ الیوت‌محور و موقتاً غیرفعال. " +
+            "۱) تنها لایهٔ باقی‌مانده، هندسهٔ امواج الیوت و قواعد نئوویو است: جهت موج جاری، " +
+            "معتبر بودن نقطهٔ چرخش (S)، تکمیل‌نشدن موج مخالف و فضای اهداف موجی V/N/E. " +
+            "۲) ورود فقط وقتی مجاز است که موج جهت‌دار تأییدشده باشد، نقطهٔ S نشکسته باشد و " +
+            "چرخهٔ زمانی در نقطهٔ تغییر نباشد. " +
+            "۳) خروج بر پایهٔ اتمام موج/ابطال شمارش انجام می‌شود. " +
+            "۴) لایه‌های ساختاری، اجماع چندلایه و گیت کیجونِ نسخهٔ قبلی از این استراتژی حذف شده‌اند. " +
+            "۵) این استراتژی فعلاً در هیچ ارزیابی و معامله‌ای شرکت نمی‌کند؛ با روشن‌کردن دوباره از " +
+            "تنظیمات، فقط همان لایهٔ الیوت فعال می‌شود.",
+        hasPatel = false,
+        hasTuttle = false,
         hasHosoda = true,
-        hasPeloille = true,
+        hasPeloille = false,
         baseOptimalRr = 2.25,
     );
 
@@ -258,12 +251,19 @@ enum class BitcoinStrategyModel(
     val isNeoWaveElliottStrategy: Boolean
         get() = this == entries.last()
 
+    /**
+     * استراتژی‌هایی که کاربر موقتاً خاموش کرده است. شناسه و آموخته‌های شبکه‌شان حفظ می‌شود،
+     * اما در هیچ ارزیابی/معامله‌ای شرکت نمی‌کنند تا با روشن‌شدن دوباره از صفر شروع نشوند.
+     */
+    val isTemporarilyDisabled: Boolean
+        get() = id in temporarilyDisabledIds
+
     val combinationCount: Int
         get() = listOf(hasPatel, hasTuttle, hasHosoda, hasPeloille).count { it }
 
     val combinationCategoryFa: String
         get() = if (this == DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER) {
-            "متود جامع یکپارچهٔ ۹ لایه"
+            "الیوت–نئوویو (موقتاً غیرفعال)"
         } else {
             when (combinationCount) {
                 1 -> "تک‌استراتژی (۱گانه)"
@@ -285,6 +285,13 @@ enum class BitcoinStrategyModel(
             "KOONITZ_5RULES_DMI_MACD_EMA34",
             "KOONITZ_TRIPLE_SCREEN_FAST_7_22_44",
         )
+
+        /** استراتژی‌های موقتاً خاموش (فعلاً فقط استراتژی پیمان / جایگاه ۱۶). */
+        val temporarilyDisabledIds: Set<String> = setOf(DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
+
+        /** شناسهٔ استراتژی‌هایی که واقعاً باید ارزیابی/معامله شوند (همه، منهای خاموش‌ها). */
+        val activeStrategyIds: Set<String>
+            get() = entries.filterNot { it.isTemporarilyDisabled }.map { it.id }.toSet()
 
         val drivePdfStrategies: List<BitcoinStrategyModel>
             get() = listOf(DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER)
@@ -326,19 +333,21 @@ data class DriveBookPlaybookSpec(
 fun BitcoinStrategyModel.driveBookPlaybook(): DriveBookPlaybookSpec = when (this) {
     BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> DriveBookPlaybookSpec(
         strategyId = id,
-        bookFileTitle = "Unified 9-Layer Master Method (تلفیق جامع ۹ لایهٔ تحلیلی)",
-        authorAndEdition = "Adaptive Bayesian Log-Odds 9-Layer Consensus — TuAnh + Foka + Keenbase + Mukherjee ×2 + HowToTrade + TSG + Koonitz ×2",
-        ichimokuSettingsFa = "ابرچنگال سه‌گانه ایچیموکو: استاندارد (9,26,52) + نهادی Keenbase (10,30,60) + سریع کونیتز (7,22,44)",
-        auxiliaryIndicatorsFa = "EMA Ribbon (13, 21, 34, 48, 89, SMA200) + BB(20,2) Squeeze + RSI(7)/RSI(14) 50-Bounce + DMI/ADX(14) + MACD + 5-Bar Fractals + Kelly Win%",
+        bookFileTitle = "Elliott Wave + NeoWave Geometry — استراتژی پیمان (نسخهٔ الیوت)",
+        authorAndEdition = "Elliott Wave Theory + NeoWave (Glenn Neely) — فقط لایهٔ موجی",
+        ichimokuSettingsFa = "ایچیموکوی استاندارد (9, 26, 52) فقط به‌عنوان مرجع ساختار موج و تعیین نقطهٔ پایان اصلاح",
+        auxiliaryIndicatorsFa = "شمارش امواج الیوت (Impulse/Corrective) + قواعد نئوویو + نقطهٔ چرخش S + اهداف موجی V/N/E + چرخهٔ زمانی هوسودا",
         entryChecklistStepsFa = listOf(
-            "۱. فیلتر صفحه سه‌گانه کونیتز و هم‌جهتی هر ۳ ابر ایچیموکو (9-26-52 ، 10-30-60 و 7-22-44) همراه با ریبون EMA(13/21/34/89)",
-            "۲. اجماع بیزین تطبیقی حداقل ۶ از ۹ لایهٔ ساختاری با احتمال برد ترکیبی ≥ ۷۸٪ و امتیاز معیار کلی (Kelly ≥ 69%)",
-            "۳. تایید هم‌زمان ماشه‌های شکار سود: فشردگی بولینگر (TuAnh)، پرش RSI(7) از خط ۵۰ (Foka)، کراس 10/30 و 7/22 و تایید DMI/MACD",
-            "۴. آزادی سه‌بعدی Chikou Span بالای/زیر کومو در ۲۶ دوره قبل (لایه‌های ۵، ۷ و ۸) و عدم وجود کیجون فلت رِنج",
+            "۱. شمارش موج جهت‌دار کامل و تأییدشده باشد (Impulse معتبر یا پایان اصلاح مشخص)",
+            "۲. جهت موج جاری هم‌سو با جهت معامله باشد و نقطهٔ چرخش S نشکسته باشد",
+            "۳. هدف موجی بعدی (V/N/E) فضای کافی برای حداقل ۱:۱.۵ فراهم کند",
+            "۴. چرخهٔ زمانی در نقطهٔ تغییر نباشد و ناحیهٔ ورود هم‌تراز با مرز موج باشد",
         ),
-        stopLossFormulaFa = "سنگر ترکیبی ضد استاپ‌هانت: قوی‌ترین سطح بین فرکتال ۵ کندلی بیل ویلیامز (Foka) + Kijun(30)±0.40ATR (Keenbase) + EMA(34) کونیتز + BB Middle(20)",
-        takeProfitAndExitRulesFa = "تارگت پویا تا سقف ۳R (تلفیق هدف 3R سیستم Keenbase/Foka با امواج N/E هوسودا و هدف MA200 روش TuAnh) و بستن کامل معامله در رسیدن به 3R",
-        specialEdgeAdvantageFa = "با ادغام ریاضی هر ۹ لایه در یک متود جامع بیزین، خطاهای تک‌استراتژی حذف شده و فقط معاملات اسنایپر با بالاترین امید ریاضی شکار می‌شوند.",
+        stopLossFormulaFa = "حد ضرر ساختاری پشت نقطهٔ ابطال شمارش موج (S-Point / انتهای موج قبلی) با بافر ATR",
+        takeProfitAndExitRulesFa = "خروج روی هدف موجی بعدی؛ اگر شمارش موج باطل شود یا خروج هوشمند مجاز باشد " +
+            "(فقط بالای +۲R) معامله بسته می‌شود",
+        specialEdgeAdvantageFa = "تمرکز کامل روی هندسهٔ موج: بدون اجماع چندلایه، بدون گیت کیجون و بدون " +
+            "تأییدهای شاخصی اضافه. این استراتژی فعلاً غیرفعال است و فقط با روشن‌کردن دوباره از تنظیمات کار می‌کند.",
     )
 
     else -> DriveBookPlaybookSpec(
@@ -371,27 +380,12 @@ fun BitcoinStrategyModel.formatLiveBookTelemetryFa(
 ): String {
     if (trigSnap == null) return "در حال دریافت کندل‌ها برای محاسبه اندیکاتورهای اختصاصی روش..."
     return when (this) {
-        BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> {
-            val consensus = IchimokuStrategyEngine.evaluateUnified9BookConsensus(
-                isLong = isLong,
-                trigSnap = trigSnap,
-                stratSnap = stratSnap ?: trigSnap,
-                macroSnap = null,
-            )
-            String.format(
-                Locale.US,
-                "اجماع ۹ لایهٔ ساختاری: %d/9 لایه تایید · احتمال برد بیزین=%.1f%% · Kelly=%d%% · Fast(7/22)=%s/%s · Keenbase(10/30)=%s/%s · ADX=%.1f · RSI7=%.1f",
-                consensus.confirmedBooksCount,
-                consensus.bayesianWinProbabilityPct,
-                trigSnap.kellyWinProbabilityPercent,
-                IchimokuStrategyEngine.round2(trigSnap.tenkan7).toString(),
-                IchimokuStrategyEngine.round2(trigSnap.kijun22).toString(),
-                IchimokuStrategyEngine.round2(trigSnap.tenkan10).toString(),
-                IchimokuStrategyEngine.round2(trigSnap.kijun30).toString(),
-                trigSnap.adx14,
-                trigSnap.rsi7,
-            )
-        }
+        BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> String.format(
+            Locale.US,
+            "استراتژی پیمان (الیوت–نئوویو) · فقط لایهٔ موج فعال است · ADX=%.1f · RSI7=%.1f · این استراتژی موقتاً غیرفعال است",
+            trigSnap.adx14,
+            trigSnap.rsi7,
+        )
 
         else -> String.format(
             Locale.US,
@@ -1192,6 +1186,19 @@ data class DualTimeframeSymbolReport(
 object IchimokuStrategyEngine {
 
     const val BTC_SYMBOL = "BTC/USDT"
+
+    /**
+     * کف سود لازم برای «خروج هوشمند»: تا وقتی معامله به **۲R** نرسیده باشد، هیچ استراتژی حق
+     * بستن زودهنگام با خروج هوشمند را ندارد (دستور صریح کاربر). بالای ۲R، اگر روند تمام شود
+     * خروج هوشمند آزاد است.
+     */
+    const val MIN_SMART_EXIT_PROFIT_R: Double = 2.0
+
+    /**
+     * استراتژی ۱۶ در نسخهٔ الیوت‌محور: گیت و قاعدهٔ حد ضرر کیجون (که از لایه‌های ساختاری
+     * می‌آمدند) خاموش است و فقط هندسهٔ موج باقی می‌ماند.
+     */
+    const val KIJUN_LAYER_IN_STRATEGY_16_ENABLED: Boolean = false
 
     /** اعداد پایه و ترکیبی چرخه زمانی گوایچی هوسودا (Jikan Ron / Kihon Suchi) */
     val HOSODA_TIME_CYCLES = listOf(9, 17, 26, 33, 42, 65, 76, 129, 172)
@@ -2170,7 +2177,8 @@ object IchimokuStrategyEngine {
     }
 
     /**
-     * گیت کیجون برای استراتژی ۱۶ (متود جامع ۹ لایهٔ ساختاری + نئوویو–الیوت).
+     * گیت کیجون برای استراتژی ۱۶. طبق درخواست کاربر (نسخهٔ ۳.۹.۴۷) این گیت موقتاً کنار گذاشته شده
+     * است تا استراتژی فقط لایهٔ الیوت را داشته باشد؛ با `KIJUN_LAYER_IN_STRATEGY_16_ENABLED` قابل بازگشت است.
      *
      * منطق «خطوط پیش‌بینی»: هر جفت (۸/۲۵)، (۷/۲۴) و (۶/۲۳) همان میانگین سقف/کف است با پنجرهٔ
      * یک، دو و سه دوره کوتاه‌تر از جفت ۹/۲۶؛ چون پنجرهٔ کوتاه‌تر زودتر واکنش می‌دهد، جهت این سه
@@ -2693,12 +2701,6 @@ object IchimokuStrategyEngine {
         }
 
         val isLong = candidateDirection == SignalAction.BUY
-        val unified9BookConsensus = evaluateUnified9BookConsensus(
-            isLong = isLong,
-            trigSnap = trigSnap,
-            stratSnap = stratSnap,
-            macroSnap = macroSnap,
-        )
 
         // ── Check 1: 3-TF Kumo Regime Alignment (4H / 1H / 15m) ───────────────
         val stratKumoOk = if (isLong) stratSnap.isPriceAboveKumo else stratSnap.isPriceBelowKumo
@@ -2897,7 +2899,7 @@ object IchimokuStrategyEngine {
 
         // حد ضرر ساختاری (Kijun / Senkou B / 5-Bar Fractal + ATR Buffer) کاملاً ثابت و غیرپله‌ای است
         // قاعدهٔ تازهٔ استراتژی ۱۶: حد ضرر بالای خط ۲۶ (برای خرید) و با فاصله از کندل؛ اگر جمع نشود، پلن مسدود می‌شود.
-        val kijunStopRule = if (activeModel.isNeoWaveElliottStrategy) {
+        val kijunStopRule = if (KIJUN_LAYER_IN_STRATEGY_16_ENABLED && activeModel.isNeoWaveElliottStrategy) {
             applyKijunStopRules(
                 isLong = isLong,
                 candidateStop = rawTechnicalSl,
@@ -2930,25 +2932,10 @@ object IchimokuStrategyEngine {
             trigSnap.close < trigSnap.open && trigSnap.closeLocationValue <= 0.55 && trigSnap.candleBodyRatio >= 0.22
         }
         val volumeMomentumOk = trigSnap.volumeRatio20 >= effectiveConfig.minVolumeRatio20
-        val reqConsensusCount = effectiveConfig.minDriveBooksConsensus.coerceIn(4, 9)
-        val driveBookRuleOk = when (activeModel) {
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER ->
-                unified9BookConsensus.confirmedBooksCount >= reqConsensusCount &&
-                    unified9BookConsensus.bayesianWinProbabilityPct >= 76.0
-            else -> true
-        }
+        // استراتژی ۱۶ در نسخهٔ الیوت‌محور دیگر شرط اجماع چندلایه ندارد.
+        val driveBookRuleOk = true
         val cond11Passed = directionalCandleOk && volumeMomentumOk && driveBookRuleOk
-        val driveBookExtraDetail = when (activeModel) {
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER ->
-                String.format(
-                    Locale.US,
-                    " · اجماع %d/9 لایهٔ ساختاری (برد بیزین=%.1f%% · Kelly=%d%%)",
-                    unified9BookConsensus.confirmedBooksCount,
-                    unified9BookConsensus.bayesianWinProbabilityPct,
-                    trigSnap.kellyWinProbabilityPercent,
-                )
-            else -> ""
-        }
+        val driveBookExtraDetail = ""
         val cond11Detail = String.format(
             Locale.US,
             "بدنه کندل: %.0f%% · CLV: %.0f%% · حجم به میانگین ۲۰: %.2fx%s",
@@ -3114,7 +3101,7 @@ object IchimokuStrategyEngine {
         val slBasisTextFa = buildString {
             append("هم‌پوشانی فرکتال ۵ کندلی بیل ویلیامز + کیجون۲۶ (${round2(trigSnap.kijun)}) + کیجون۳۰/EMA34 + لبه کومو")
             if (activeModel == BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER) {
-                append(" + ۹ لایهٔ ساختاری (هم‌تراز جامع بیس)")
+                append(" + هندسهٔ الیوت–نئوویو (نسخهٔ پیمان، هم‌تراز جامع بیس)")
             }
             append(String.format(Locale.US, " + سپر ضد شدو (%.2f ATR) در دالان [0.80..2.10 ATR]", slBuffer))
             append(" + قفل سقف درصدی نوسان " + effectiveConfig.triggerInterval.label)
@@ -3223,38 +3210,17 @@ object IchimokuStrategyEngine {
         )
 
         val conditions = if (activeModel.isDrivePdfStrategy) {
-            buildDriveBookConditions(
-                model = activeModel,
+            buildElliottWaveConditions(
                 isLong = isLong,
-                config = effectiveConfig,
-                macroSnap = macroSnap,
-                stratSnap = stratSnap,
-                trigSnap = trigSnap,
                 wave = wave,
-                rr = rr,
                 selectedWaveLabel = selectedWaveLabel,
                 rewardDistSniper = rewardDistSniper,
-                riskDistSniper = riskDistSniper,
-                cond1Passed = cond1Passed,
-                cond1Detail = cond1Detail,
-                cond4Detail = cond4Detail,
-                cond5Passed = futureThicknessOk,
-                cond5Detail = cond5Detail,
-                cond6Passed = chikouOk,
-                cond6Detail = cond6Detail,
-                cond7Passed = chikouPeakClear,
-                cond8Passed = notOverextended,
-                cond9Passed = flatSsbGravityCleared,
-                cond10Passed = cond10Passed,
-                cond10Detail = cond10Detail,
                 cond12Passed = cond12Passed,
                 cond12Detail = cond12Detail,
                 cond13Passed = cond13Passed,
                 cond13Detail = cond13Detail,
                 cond14Passed = cond14Passed,
                 cond14Detail = cond14Detail,
-                cond15Passed = cond15Passed,
-                cond15Detail = cond15Detail,
                 cond16Passed = cond16Passed,
                 cond16Detail = cond16Detail,
             )
@@ -3268,7 +3234,7 @@ object IchimokuStrategyEngine {
         val allSixteenPassed = modelCoreConditions.all { it.passed }
 
         // ── گیت کیجون (فقط استراتژی ۱۶): کراس ۹/۲۶ + خطوط پیش‌بینی ۸/۲۵، ۷/۲۴، ۶/۲۳ + وضعیت ابر ──
-        val kijunGate = if (activeModel.isNeoWaveElliottStrategy) {
+        val kijunGate = if (KIJUN_LAYER_IN_STRATEGY_16_ENABLED && activeModel.isNeoWaveElliottStrategy) {
             evaluateKijunPredictiveGate(
                 candlesInput = alignedStrategyCandles,
                 isLong = isLong,
@@ -3559,8 +3525,11 @@ object IchimokuStrategyEngine {
         val map5m = LinkedHashMap<String, StrategyEvaluationReport>()
 
         if (runAllSimultaneously) {
-            val activeBuiltIns = BitcoinStrategyModel.entries.filter { it.id in enabledStrategyIds }
-                .ifEmpty { BitcoinStrategyModel.entries }
+            // استراتژی‌های موقتاً خاموش (فعلاً جایگاه ۱۶) حتی اگر در تنظیمات روشن باشند
+            // ارزیابی نمی‌شوند؛ شناسه و آموخته‌هایشان حفظ می‌شود تا بعداً از صفر شروع نشوند.
+            val activeBuiltIns = BitcoinStrategyModel.entries
+                .filter { it.id in enabledStrategyIds && !it.isTemporarilyDisabled }
+                .ifEmpty { BitcoinStrategyModel.entries.filterNot { it.isTemporarilyDisabled } }
             for (model in activeBuiltIns) {
                 map15m[model.id] = evaluateBitcoinStrategy(
                     activeModel = model,
@@ -3664,181 +3633,90 @@ object IchimokuStrategyEngine {
     }
 
     /**
-     * ساخت چک‌لیست اختصاصی ۱۶ شرطی برای هر یک از ۹ لایهٔ تحلیلی طبق قوانین خط‌به‌خط هر لایه.
+     * چک‌لیست اختصاصی استراتژی پیمان در نسخهٔ **الیوت–نئوویو**.
+     *
+     * بنا به درخواست کاربر فقط لایهٔ موجی باقی مانده است؛ شرط‌های اجماع چندلایه، گیت کیجون و
+     * تأییدهای DMI/MACD/Kelly حذف شده‌اند. هشت شرط زیر مستقیماً از هندسهٔ موج و کیفیت ورود
+     * ساخته می‌شوند و `confidence` موتور مثل قبل از نسبت شرط‌های پاس‌شده محاسبه می‌شود.
      */
-    private fun buildDriveBookConditions(
-        model: BitcoinStrategyModel,
+    private fun buildElliottWaveConditions(
         isLong: Boolean,
-        config: BaseStrategyConfig,
-        macroSnap: IchimokuBarSnapshot?,
-        stratSnap: IchimokuBarSnapshot,
-        trigSnap: IchimokuBarSnapshot,
         wave: HosodaWaveProjection?,
-        rr: Double,
         selectedWaveLabel: String,
         rewardDistSniper: Double,
-        riskDistSniper: Double,
-        cond1Passed: Boolean,
-        cond1Detail: String,
-        cond4Detail: String,
-        cond5Passed: Boolean,
-        cond5Detail: String,
-        cond6Passed: Boolean,
-        cond6Detail: String,
-        cond7Passed: Boolean,
-        cond8Passed: Boolean,
-        cond9Passed: Boolean,
-        cond10Passed: Boolean,
-        cond10Detail: String,
         cond12Passed: Boolean,
         cond12Detail: String,
         cond13Passed: Boolean,
         cond13Detail: String,
         cond14Passed: Boolean,
         cond14Detail: String,
-        cond15Passed: Boolean,
-        cond15Detail: String,
         cond16Passed: Boolean,
         cond16Detail: String,
     ): List<StrategyConditionCheck> {
-        val dirCandle = if (isLong) trigSnap.close >= trigSnap.open else trigSnap.close <= trigSnap.open
-        return when (model) {
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> {
-                val consensus = evaluateUnified9BookConsensus(isLong, trigSnap, stratSnap, macroSnap)
-                val reqBooks = config.minDriveBooksConsensus.coerceIn(4, 9)
-                val cConsensus = consensus.confirmedBooksCount >= reqBooks && consensus.bayesianWinProbabilityPct >= 76.0
-                val cTripleKumo = if (isLong) {
-                    trigSnap.isPriceAboveKumo && trigSnap.close > trigSnap.kumoTop103060 && trigSnap.close > trigSnap.kumoTop72244
+        val waveAligned = wave != null &&
+            ((wave.direction == SignalAction.BUY) == isLong)
+        val sPointHeld = wave?.sPointHeld == true
+        val waveRoomOk = selectedWaveLabel.isNotBlank() && rewardDistSniper > 0.0
+        val timeCycleClear = wave?.isNearTimeCycleChangeDay != true
+        return listOf(
+            StrategyConditionCheck(
+                1,
+                "۱. جهت موج الیوت هم‌سو با جهت معامله",
+                waveAligned,
+                if (wave == null) {
+                    "شمارش موج هنوز کامل نیست"
                 } else {
-                    trigSnap.isPriceBelowKumo && trigSnap.close < trigSnap.kumoBottom103060 && trigSnap.close < trigSnap.kumoBottom72244
-                }
-                val cSanyakuAndRibbon = if (isLong) {
-                    stratSnap.sanyakuBullishOrder && trigSnap.sanyakuBullishOrder &&
-                        trigSnap.close >= trigSnap.ema21 - trigSnap.atr14 * 0.15 &&
-                        trigSnap.close >= trigSnap.ema34 - trigSnap.atr14 * 0.20
-                } else {
-                    stratSnap.sanyakuBearishOrder && trigSnap.sanyakuBearishOrder &&
-                        trigSnap.close <= trigSnap.ema21 + trigSnap.atr14 * 0.15 &&
-                        trigSnap.close <= trigSnap.ema34 + trigSnap.atr14 * 0.20
-                }
-                val cMultiSpeedTk = !trigSnap.isKijunFlat && consensus.book3KeenbasePassed && consensus.book9KoonitzTripleScreenPassed
-                val cRegimeTriggerOrPullback = consensus.book1TuAnhPassed || consensus.book2FokaPassed
-                val cRsiNotExhausted = if (isLong) {
-                    trigSnap.rsi14 in 48.0..76.0 && trigSnap.rsiPeakDropLong < 10.5
-                } else {
-                    trigSnap.rsi14 in 24.0..52.0 && trigSnap.rsiTroughRiseShort < 11.5
-                }
-                listOf(
-                    StrategyConditionCheck(
-                        1,
-                        "۱. رژیم کوموی ۳ تایم‌فریم + هم‌فازی هر ۳ ابر (9,26,52 + 10,30,60 + 7,22,44)",
-                        cond1Passed && cTripleKumo,
-                        String.format(
-                            Locale.US,
-                            "%s · Kumo(52)=%s · Kumo(60)=%s · Kumo(44)=%s",
-                            cond1Detail,
-                            round2(if (isLong) trigSnap.kumoTop else trigSnap.kumoBottom).toString(),
-                            round2(if (isLong) trigSnap.kumoTop103060 else trigSnap.kumoBottom103060).toString(),
-                            round2(if (isLong) trigSnap.kumoTop72244 else trigSnap.kumoBottom72244).toString(),
-                        ),
-                    ),
-                    StrategyConditionCheck(
-                        2,
-                        "۲. چیدمان ۵ خط سانیاکو (Sanyaku) + حمایت ریبون نهایی EMA(21/34/89)",
-                        cSanyakuAndRibbon,
-                        String.format(
-                            Locale.US,
-                            "Tenkan=%s · Kijun=%s · EMA21=%s · EMA34=%s",
-                            round2(trigSnap.tenkan).toString(),
-                            round2(trigSnap.kijun).toString(),
-                            round2(trigSnap.ema21).toString(),
-                            round2(trigSnap.ema34).toString(),
-                        ),
-                    ),
-                    StrategyConditionCheck(
-                        3,
-                        "۳. کراس و شیب فعال ۳ سرعته Tenkan/Kijun (7/22, 9/26, 10/30) و کیجون غیرفلت",
-                        cMultiSpeedTk,
-                        String.format(
-                            Locale.US,
-                            "TK(7/22)=%s/%s · TK(10/30)=%s/%s · شیب کیجون=%+.2f ATR",
-                            round2(trigSnap.tenkan7).toString(),
-                            round2(trigSnap.kijun22).toString(),
-                            round2(trigSnap.tenkan10).toString(),
-                            round2(trigSnap.kijun30).toString(),
-                            trigSnap.kijunSlopeAtrPerBar,
-                        ),
-                    ),
-                    StrategyConditionCheck(
-                        4,
-                        "۴. جهت و شیب ابر آینده (۲۶ کندل جلوتر) + تایید Kumo Twist (لایهٔ ۶)",
-                        consensus.book6HowToTradePassed,
-                        cond4Detail,
-                    ),
-                    StrategyConditionCheck(
-                        5,
-                        "۵. ضخامت ابر آینده و ایمنی از پیچش (الیوت + پلویل + Keenbase 60)",
-                        cond5Passed,
-                        cond5Detail,
-                    ),
-                    StrategyConditionCheck(
-                        6,
-                        "۶. رهایی سه‌بعدی Chikou Span بیرون کندل‌ها و ابر ۲۶ دوره قبل (لایهٔ ۵ و ۷)",
-                        cond6Passed && consensus.book5MukherjeeChikouPassed && consensus.book7Tsg4StepPassed,
-                        cond6Detail,
-                    ),
-                    StrategyConditionCheck(
-                        7,
-                        "۷. شکست سقف/کف ساختاری چیکو اسپن (فیلتر مارک تاتل — ضد معامله در مقاومت)",
-                        cond7Passed,
-                        if (isLong) "عبور کلوز از سقف ساختاری چیکو (${round2(trigSnap.chikouResistancePeak)})" else "عبور کلوز از کف ساختاری چیکو (${round2(trigSnap.chikouSupportTrough)})",
-                    ),
-                    StrategyConditionCheck(
-                        8,
-                        "۸. قانون کش لاستیکی کیجون، نبود C-Clamp و سلامت قله RSI (ضد ورود در اشباع)",
-                        cond8Passed && cRsiNotExhausted,
-                        String.format(Locale.US, "فاصله کیجون=%.2f ATR · RSI14=%.1f (افت قله=%.1f)", stratSnap.distanceToKijunAtr, trigSnap.rsi14, if (isLong) trigSnap.rsiPeakDropLong else trigSnap.rsiTroughRiseShort),
-                    ),
-                    StrategyConditionCheck(
-                        9,
-                        "۹. فیلتر جاذبه فلت SSB، تعادل کاتانا و عبور امن از دیوار افقی",
-                        cond9Passed,
-                        "عبور ایمن از جاذبه فلت Senkou Span B",
-                    ),
-                    StrategyConditionCheck(
-                        10,
-                        "۱۰. هندسه موج N هوسودا، نقطه S، چرخه زمانی و فرکتال ۵ کندلی بیل ویلیامز",
-                        cond10Passed,
-                        "$cond10Detail · فرکتال=${round2(if (isLong) trigSnap.lastDownFractalLow else trigSnap.lastUpFractalHigh)}",
-                    ),
-                    StrategyConditionCheck(
-                        11,
-                        "۱۱. ماشه تطبیقی رژیم بازار (فوران بولینگر TuAnh یا پولبک EMA21/RSI7 فکا) + تایید DMI/MACD و Kelly (اجماع ≥ $reqBooks/9)",
-                        cRegimeTriggerOrPullback && consensus.book8Koonitz5RulesPassed && consensus.book4MukherjeeKellyPassed && cConsensus && dirCandle,
-                        String.format(
-                            Locale.US,
-                            "اجماع %d/9 لایه (برد بیزین=%.1f%% · Kelly=%d%% · ADX=%.1f)",
-                            consensus.confirmedBooksCount,
-                            consensus.bayesianWinProbabilityPct,
-                            trigSnap.kellyWinProbabilityPercent,
-                            trigSnap.adx14,
-                        ),
-                    ),
-                    StrategyConditionCheck(12, "۱۲. فرمول و عدد مناسب R:R منطبق بر «جامع بیس» (حداقل ۱:۱.۵ روی امواج هوسودا)", cond12Passed, cond12Detail),
-                    StrategyConditionCheck(13, "۱۳. کارایی جهت‌دار روند کافمن (ER14) و فیلتر ضد رِنج", cond13Passed, cond13Detail),
-                    StrategyConditionCheck(14, "۱۴. فیلتر ضد فیک‌بریک‌اوت، الگوی شمعی تایید و رد شدوی معکوس", cond14Passed && dirCandle, cond14Detail),
-                    StrategyConditionCheck(15, "۱۵. شکار اصل روند (فاز Genesis / Core Expansion و عدم اشباع)", cond15Passed, cond15Detail),
-                    StrategyConditionCheck(16, "۱۶. نقطه‌زنی میلی‌متری ورود اسنایپر (هم‌تراز جامع بیس)", cond16Passed, cond16Detail),
-                )
-            }
-
-            else -> emptyList()
-        }
+                    "جهت موج: " + if (wave.direction == SignalAction.BUY) "صعودی" else "نزولی"
+                },
+            ),
+            StrategyConditionCheck(
+                2,
+                "۲. معتبر بودن نقطهٔ چرخش (S-Point) و شکسته‌نشدن آن",
+                sPointHeld,
+                if (wave == null) "نقطهٔ S در دسترس نیست" else "نقطهٔ S: ${round2(wave.pointC)}",
+            ),
+            StrategyConditionCheck(
+                3,
+                "۳. فضای هدف موجی (V/N/E) برای ادامهٔ حرکت",
+                waveRoomOk,
+                if (wave == null) "هدف موجی محاسبه نشده" else "هدف انتخابی: $selectedWaveLabel",
+            ),
+            StrategyConditionCheck(
+                4,
+                "۴. چرخهٔ زمانی هوسودا در نقطهٔ تغییر نباشد",
+                timeCycleClear,
+                if (wave == null) "چرخهٔ زمانی نامشخص" else "چرخهٔ نزدیک: ${wave.nearestTimeCycleNumber}",
+            ),
+            StrategyConditionCheck(
+                5,
+                "۵. عدد مناسب R:R (حداقل ۱:۱.۵) روی اهداف موجی",
+                cond12Passed,
+                cond12Detail,
+            ),
+            StrategyConditionCheck(
+                6,
+                "۶. کارایی روند کافمن (ER14) برای موج جهت‌دار",
+                cond13Passed,
+                cond13Detail,
+            ),
+            StrategyConditionCheck(
+                7,
+                "۷. نبود شدوی معکوس و فیک‌بریک‌اوت در موج جاری",
+                cond14Passed,
+                cond14Detail,
+            ),
+            StrategyConditionCheck(
+                8,
+                "۸. نقطه‌زنی ورود در ناحیهٔ موج (Sniper)",
+                cond16Passed,
+                cond16Detail,
+            ),
+        )
     }
 
     /**
      * تشخیص ۴ ماشه ورود برای شکار اصل روند از لحظه تولد (`EARLY_KATANA_GENESIS`) تا قلب موج (`PULLBACK / BREAKOUT / SANYAKU`)
-     * + ماشه‌های اختصاصی استراتژی جامع ۹ لایهٔ ساختاری (`DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER`).
+     * استراتژی ۱۶ (پیمان) ماشهٔ اختصاصی ندارد و از همین ماشه‌های استاندارد استفاده می‌کند.
      */
     private fun detectEntryTrigger(
         direction: SignalAction,
@@ -3861,44 +3739,8 @@ object IchimokuStrategyEngine {
             trigSnap.atr14 * 0.03
         }
 
-        // ── ماشه‌های اختصاصی متود جامع ۹ لایهٔ ساختاری ────────────────────────────
-        when (activeModel) {
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> {
-                val consensus = evaluateUnified9BookConsensus(isLong, trigSnap, stratSnap, null)
-                val reqBooks = config.minDriveBooksConsensus.coerceIn(4, 9)
-                if (consensus.confirmedBooksCount >= reqBooks) {
-                    if (isLong && cur.close > cur.open && cur.close > trigSnap.kumoTop) {
-                        if ((trigSnap.isBollingerSqueeze && trigSnap.isMarubozuBreakoutBull) || trigSnap.recentKatanaRelease) {
-                            return StrategyTriggerType.EARLY_KATANA_GENESIS
-                        }
-                        val touchedAnchor = listOf(prev1, prev2, prev3, cur).any { b ->
-                            b.low <= max(consensus.compositeSniperAnchor, trigSnap.kijun) + trigSnap.atr14 * 0.35
-                        }
-                        if (touchedAnchor && cur.close >= min(trigSnap.tenkan7, trigSnap.tenkan)) {
-                            return StrategyTriggerType.PULLBACK_BOUNCE
-                        }
-                        if (cur.close >= trigSnap.chikouResistancePeak + breakoutBuf) {
-                            return StrategyTriggerType.VALIDATED_BREAKOUT
-                        }
-                    } else if (!isLong && cur.close < cur.open && cur.close < trigSnap.kumoBottom) {
-                        if ((trigSnap.isBollingerSqueeze && trigSnap.isMarubozuBreakoutBear) || trigSnap.recentKatanaRelease) {
-                            return StrategyTriggerType.EARLY_KATANA_GENESIS
-                        }
-                        val touchedAnchor = listOf(prev1, prev2, prev3, cur).any { b ->
-                            b.high >= min(consensus.compositeSniperAnchor, trigSnap.kijun) - trigSnap.atr14 * 0.35
-                        }
-                        if (touchedAnchor && cur.close <= max(trigSnap.tenkan7, trigSnap.tenkan)) {
-                            return StrategyTriggerType.PULLBACK_BOUNCE
-                        }
-                        if (cur.close <= trigSnap.chikouSupportTrough - breakoutBuf) {
-                            return StrategyTriggerType.VALIDATED_BREAKOUT
-                        }
-                    }
-                }
-            }
-
-            else -> Unit
-        }
+        // ماشه‌های اختصاصی متود جامع ۹ لایه حذف شدند: استراتژی ۱۶ فقط لایهٔ الیوت را دارد و از
+        // ماشه‌های استاندارد پایین استفاده می‌کند (و فعلاً غیرفعال است).
 
         if (isLong) {
             // Trigger 0: Early Katana Genesis (captures the very birth of the core trend right as TK compression releases)
@@ -4015,7 +3857,9 @@ object IchimokuStrategyEngine {
 
         val trigSnap = report?.triggerSnapshot
         val stratSnap = report?.strategySnapshot ?: trigSnap
-        val rulesSummary = "شروط خروج فوری در سود: ۱) کلوز کندل پشت کیجون یا کراس معکوس TK · ۲) شدوی بازگشتی C-Clamp زیر تنکان · ۳) اتمام چرخه زمانی هوسودا (9/17/26) با تنکان فلت · ۴) برخورد به دیوار فلت MTF و افت کارایی (ER<20%)"
+        val rulesSummary = "شروط خروج هوشمند: فقط وقتی معامله به +۲R رسیده باشد و یکی از این‌ها رخ دهد: " +
+            "۱) کلوز کندل پشت کیجون یا کراس معکوس TK · ۲) شدوی بازگشتی C-Clamp زیر تنکان · " +
+            "۳) اتمام چرخه زمانی هوسودا (9/17/26) با تنکان فلت · ۴) برخورد به دیوار فلت MTF و افت کارایی (ER<20%)"
 
         if (trigSnap == null || stratSnap == null) {
             return OpenTradeTrendHealthReport(
@@ -4123,7 +3967,8 @@ object IchimokuStrategyEngine {
             }
         }
 
-        val shouldExitInProfit = inProfit && fatalProfitTriggers.isNotEmpty()
+        // قانون کاربر: خروج هوشمند فقط وقتی مجاز است که معامله دست‌کم +۲R در سود باشد.
+        val shouldExitInProfit = inProfit && currentR >= MIN_SMART_EXIT_PROFIT_R && fatalProfitTriggers.isNotEmpty()
         val rawScore = 92 - (warnings.size * 18) - (fatalProfitTriggers.size * 35) + (if (currentR >= 1.5) 8 else 0)
         val score = rawScore.coerceIn(10, 99)
 
@@ -4176,7 +4021,7 @@ object IchimokuStrategyEngine {
 
         // ── ۱. تشخیص از دست رفتن قطعی روند ایچیموکو در سود و بستن مستقیم در سود (بدون جابجایی پله‌ای حد ضرر) ──
         val trendHealth = evaluateTrendHealthAndProfitExit(trade, report, livePrice)
-        if (trendHealth.shouldExitNowInProfit && currentRMultiple > 0.35) {
+        if (trendHealth.shouldExitNowInProfit && currentRMultiple >= MIN_SMART_EXIT_PROFIT_R) {
             return PreserveModeEvaluation(
                 tradeId = trade.id,
                 newStopLoss = fixedStopLoss,

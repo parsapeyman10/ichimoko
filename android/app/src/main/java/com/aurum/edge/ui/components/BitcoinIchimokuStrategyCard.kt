@@ -478,8 +478,9 @@ private fun Live12ConditionChecklistPage(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             allItems.forEach { item ->
-                val repStrat = dualReport?.reportFor(focusedInterval, item.id)
-                val shortState = repStrat?.readinessShortFa() ?: ""
+                // استراتژی ۱۶ (پیمان) موقتاً غیرفعال است؛ گزارش جایگزین اشتباه نمایش داده نمی‌شود.
+                val repStrat = if (item.isTemporarilyDisabled) null else dualReport?.reportFor(focusedInterval, item.id)
+                val shortState = if (item.isTemporarilyDisabled) "موقتاً غیرفعال" else repStrat?.readinessShortFa() ?: ""
                 Pill(
                     text = if (shortState.isNotBlank()) "${item.titleFa.substringBefore('(').trim()} ($shortState)" else item.titleFa.substringBefore('(').trim(),
                     color = if (item.id == selectedStrategyId) AurumColors.Cyan else AurumColors.TextMuted,

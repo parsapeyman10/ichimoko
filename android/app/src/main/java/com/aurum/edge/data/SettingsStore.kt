@@ -135,12 +135,16 @@ class SettingsStore(context: Context) {
             storedBtcStrategyId
         }
         val validStrategyId = if (
-            BitcoinStrategyModel.entries.any { it.id == normalizedStoredBtcId } ||
+            (
+                BitcoinStrategyModel.entries.any { it.id == normalizedStoredBtcId } &&
+                    normalizedStoredBtcId !in BitcoinStrategyModel.temporarilyDisabledIds
+                ) ||
             storedCustomStrategies.any { it.id == normalizedStoredBtcId }
         ) {
             normalizedStoredBtcId
         } else {
-            BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id
+            // استراتژی پیش‌فرض انتخاب‌شده وقتی شناسهٔ ذخیره‌شده معتبر نیست؛ ۱۶ موقتاً خاموش است.
+            BitcoinStrategyModel.BASE_ICHIMOKU.id
         }
         val categoryStrategies = AssetClass.entries.associateWith { category ->
             CategoryStrategy.fromStored(prefs.getString("v1_strategy_${category.name}", null))
@@ -166,11 +170,14 @@ class SettingsStore(context: Context) {
                 .toSet()
             cleaned.ifEmpty { defaultAllIds }
         }
-        val storedEnabledIds = if (runAllSim && rawParsedEnabledIds.size >= 15) {
+        val storedEnabledIds = (if (runAllSim && rawParsedEnabledIds.size >= 15) {
             rawParsedEnabledIds + BitcoinStrategyModel.drivePdfStrategyIds
         } else {
             rawParsedEnabledIds
-        }
+        })
+            // استراتژی‌های موقتاً خاموش (فعلاً جایگاه ۱۶) هرگز به‌صورت خودکار روشن نمی‌شوند؛
+            // کاربر می‌تواند بعداً از تنظیمات دوباره فعالشان کند.
+            .minus(BitcoinStrategyModel.temporarilyDisabledIds)
         return AppSettings(
         apiKey = storedApiKey?.takeIf { it.isNotBlank() }
             ?: com.aurum.edge.BuildConfig.DEFAULT_TD_API_KEY.trim(),
@@ -461,7 +468,8 @@ class SettingsStore(context: Context) {
                     tpAlarmSoundName = it.tpAlarmSoundName.ifBlank { "Red Dwarf" },
                     slAlarmSoundName = it.slAlarmSoundName.ifBlank { "Latch" },
                     newsAiApiKey = if (it.newsAiApiKey.isBlank()) com.aurum.edge.data.AvalAiAdvisor.PRECONFIGURED_USER_KEY else it.newsAiApiKey,
-                    enabledStrategyIds = if (it.runAllStrategiesSimultaneously) (it.enabledStrategyIds + all24StrategyIds) else it.enabledStrategyIds,
+                    enabledStrategyIds = (if (it.runAllStrategiesSimultaneously) (it.enabledStrategyIds + all24StrategyIds) else it.enabledStrategyIds)
+                        .minus(BitcoinStrategyModel.temporarilyDisabledIds),
                 )
             }
         }

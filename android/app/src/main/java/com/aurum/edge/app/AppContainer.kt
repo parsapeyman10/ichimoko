@@ -33,8 +33,17 @@ class AppContainer(context: Context) {
     val appContext: Context = context.applicationContext
 
     init {
-        purgeLegacyData(appContext)
-        AppNetwork.start(appContext)
+        // سبک‌سازی راه‌اندازی (رفع گزارش STALL «main-thread blocked»): پاک‌سازی فایل‌های قدیمی و
+        // ثبت شنوندهٔ شبکه هر دو کار دیسک/سیستمی‌اند و نباید داخل `Application.onCreate` روی
+        // رشتهٔ اصلی اجرا شوند؛ وگرنه فریم اول UI و باز شدن صفحه قفل می‌شود.
+        kotlin.concurrent.thread(
+            start = true,
+            isDaemon = true,
+            name = "aurum-bootstrap-io",
+        ) {
+            runCatching { purgeLegacyData(appContext) }
+            runCatching { AppNetwork.start(appContext) }
+        }
     }
 
     val settingsStore = SettingsStore(appContext)

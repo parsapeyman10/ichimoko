@@ -1360,7 +1360,7 @@ private fun LiveTradeGaugeCard(
                     ) {
                         Text(
                             modifier = Modifier.weight(1f).padding(end = 6.dp),
-                            text = "🧭 بررسی ادامه روند و خروج هوشمند در سود",
+                            text = "🧭 بررسی ادامه روند و خروج هوشمند در سود (فقط بالای +۲R)",
                             style = MaterialTheme.typography.labelMedium,
                             color = trendColor,
                             fontWeight = FontWeight.Bold,

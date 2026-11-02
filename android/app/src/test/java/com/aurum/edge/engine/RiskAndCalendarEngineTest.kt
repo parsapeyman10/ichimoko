@@ -498,13 +498,19 @@ class RiskAndCalendarEngineTest {
         assertEquals(16, BitcoinStrategyModel.entries.size)
         assertEquals(1, BitcoinStrategyModel.drivePdfStrategies.size)
         assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER, BitcoinStrategyModel.drivePdfStrategies.single())
-        assertEquals(16, dualReport.reports15mByStrategy.size)
-        assertEquals(16, dualReport.reports5mByStrategy.size)
+        // v3.9.47: استراتژی ۱۶ (پیمان) موقتاً غیرفعال است، پس فقط ۱۵ استراتژی ارزیابی می‌شوند.
+        assertEquals(15, dualReport.reports15mByStrategy.size)
+        assertEquals(15, dualReport.reports5mByStrategy.size)
         BitcoinStrategyModel.legacyIndividualDriveIds.forEach { legacyId ->
             assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER, BitcoinStrategyModel.fromId(legacyId))
             assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id, BitcoinStrategyModel.normalizeStrategyId(legacyId))
         }
-        BitcoinStrategyModel.entries.forEach { model ->
+        assertTrue(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.isTemporarilyDisabled)
+        assertEquals(15, BitcoinStrategyModel.activeStrategyIds.size)
+        assertFalse(
+            dualReport.reports15mByStrategy.containsKey(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
+        )
+        BitcoinStrategyModel.entries.filterNot { it.isTemporarilyDisabled }.forEach { model ->
             val rep15 = dualReport.reportFor(Interval.M15, model.id)
             val rep5 = dualReport.reportFor(Interval.M5, model.id)
             assertNotNull(rep15)
@@ -527,29 +533,32 @@ class RiskAndCalendarEngineTest {
         assertTrue(snap.tenkan7 > 0.0 && snap.kijun22 > 0.0 && snap.senkouB44 > 0.0)
         assertTrue(snap.adx14 > 0.0 && snap.kellySignalCount in 1..5 && snap.kellyWinProbabilityPercent in 48..76)
 
-        val unifiedDriveRep = dualReport.reportFor(Interval.M15, BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)!!
-        assertTrue(unifiedDriveRep.rrBreakdown!!.slBasisFa.contains("۹ لایهٔ ساختاری"))
+        // v3.9.47: پیمان فقط لایهٔ الیوت/نئوویو را نگه داشته و بقیهٔ لایه‌ها پاک شده‌اند.
+        val paymanPlaybook = BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.driveBookPlaybook()
+        assertTrue(paymanPlaybook.authorAndEdition.contains("Elliott"))
+        assertTrue(paymanPlaybook.entryChecklistStepsFa.none { it.contains("لایه") })
+        assertTrue(paymanPlaybook.strategyId == BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
 
-        // Verify Trend Loss In Profit Detector (when an open trade in profit loses its trend, close immediately in profit)
+        // Verify Trend Loss In Profit Detector (v3.9.47: خروج هوشمند فقط بالای +۲R مجاز است)
         val tradeInProfitAt63k = calc.copy(
             entry = 62_500.0,
             stopLoss = 62_000.0,
-            takeProfit = 64_500.0,
+            takeProfit = 66_500.0,
         ).toPaperTrade(id = "T_TREND_LOSS")
         val brokenKijunSnap = report.triggerSnapshot!!.copy(
-            close = 63_050.0,
-            kijun = 63_250.0, // Price fell below Kijun while still in profit (+1.1R above 62,500)
-            tenkan = 63_150.0,
+            close = 63_800.0,
+            kijun = 64_000.0, // Price fell below Kijun while still in profit (+2.6R above 62,500)
+            tenkan = 63_900.0,
             tenkanSlopeAtrPerBar = -0.08,
         )
         val brokenReport = report.copy(
-            livePrice = 63_050.0,
+            livePrice = 63_800.0,
             triggerSnapshot = brokenKijunSnap,
         )
         val trendHealth = IchimokuStrategyEngine.evaluateTrendHealthAndProfitExit(
             trade = tradeInProfitAt63k,
             report = brokenReport,
-            livePriceOverride = 63_050.0,
+            livePriceOverride = 63_800.0,
         )
         assertTrue(trendHealth.shouldExitNowInProfit)
         val immediateExitEval = IchimokuStrategyEngine.evaluateOpenTradeManagement(
@@ -559,7 +568,18 @@ class RiskAndCalendarEngineTest {
         )
         assertNotNull(immediateExitEval)
         assertTrue(immediateExitEval!!.shouldCloseImmediatelyInProfit)
-        assertEquals(63_050.0, immediateExitEval.closePrice ?: 0.0, 1e-2)
+        assertEquals(63_800.0, immediateExitEval.closePrice ?: 0.0, 1e-2)
+
+        // زیر +۲R هیچ خروج هوشمندی مجاز نیست، حتی اگر روند شکسته باشد.
+        val belowTwoRSnap = brokenKijunSnap.copy(close = 63_050.0, kijun = 63_250.0, tenkan = 63_150.0)
+        val belowTwoRReport = report.copy(livePrice = 63_050.0, triggerSnapshot = belowTwoRSnap)
+        assertFalse(
+            IchimokuStrategyEngine.evaluateOpenTradeManagement(
+                trade = tradeInProfitAt63k,
+                report = belowTwoRReport,
+                config = config,
+            )?.shouldCloseImmediatelyInProfit == true
+        )
 
         // 6. Verify $1,000 -> $100,000 fixed $5 risk rule: loss = -$5.00, win = +$5.00 * R:R, and Journal strategy categorization
         val calcFixed5 = RiskAndCalendarEngine.calculatePosition(

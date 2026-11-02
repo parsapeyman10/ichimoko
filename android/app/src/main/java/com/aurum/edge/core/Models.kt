@@ -400,7 +400,7 @@ data class AppSettings(
     val activeStrategy: StrategyKind = StrategyKind.ICHIMOKU_PRICE_ACTION,
     val selectedBitcoinStrategyId: String = BitcoinStrategyModel.BASE_ICHIMOKU.id,
     val runAllStrategiesSimultaneously: Boolean = true,
-    val enabledStrategyIds: Set<String> = BitcoinStrategyModel.entries.map { it.id }.toSet(),
+    val enabledStrategyIds: Set<String> = BitcoinStrategyModel.activeStrategyIds,
     val baseStrategyConfig: BaseStrategyConfig = BaseStrategyConfig(),
     val customStrategies: List<CustomStrategySlot> = emptyList(),
     val categoryStrategies: Map<AssetClass, CategoryStrategy> = AssetClass.entries.associateWith { CategoryStrategy.HYBRID },
