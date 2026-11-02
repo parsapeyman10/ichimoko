@@ -424,6 +424,26 @@ data class PerStrategyConfigOverride(
 )
 
 /**
+ * اوررایدهای اختصاصی **هر نماد بازار** که شبکهٔ عصبی از تجربهٔ همان نماد یاد گرفته است
+ * (شخصیت نماد: نویز شدوی، پیوستگی روند، اعتبار شکست و …).
+ *
+ * قانون ایمنی: هیچ‌کدام از این مقادیر نمی‌تواند `R:R` را زیر ۱.۵ ببرد یا حد ضرر را از بازهٔ
+ * مجاز قبلی تنگ‌تر کند؛ فقط «شخصی‌سازی» در همان بازه‌های مجاز است.
+ */
+@Serializable
+data class PerSymbolConfigOverride(
+    val symbol: String,
+    val minRiskReward: Double = 1.60,
+    val maxKijunExtensionAtr: Double = 1.65,
+    val slBufferAtr: Double = 0.26,
+    val breakoutBufferAtr: Double = 0.16,
+    val minEfficiencyRatio: Double = 0.22,
+    val minVolumeRatio20: Double = 0.62,
+    val neuralWinProbGatePct: Double = 56.0,
+    val minDriveBooksConsensus: Int = 6,
+)
+
+/**
  * پارامترهای قابل تنظیم و ترمیم برای «استراتژی بیس» (Base Strategy) و مدل‌های مشتق‌شده.
  */
 @Serializable
@@ -481,6 +501,8 @@ data class BaseStrategyConfig(
     val neoWaveAutoRuleWeights: List<Double> = emptyList(),
     val autoTunedGeneration: Int = 0,
     val perStrategyOverrides: Map<String, PerStrategyConfigOverride> = emptyMap(),
+    /** شخصیت آموخته‌شدهٔ هر نماد؛ کلید = نماد نرمال‌شده مثل `BTC/USDT`. */
+    val perSymbolOverrides: Map<String, PerSymbolConfigOverride> = emptyMap(),
 ) {
     /** آیا آستانه‌های نئوویو همین حالا از هوش عصبی می‌آیند. */
     val neoWaveAutoTuningActive: Boolean
@@ -514,20 +536,36 @@ data class BaseStrategyConfig(
     val strategyInterval: Interval get() = Interval.fromLabel(strategyIntervalLabel)
     val triggerInterval: Interval get() = Interval.fromLabel(triggerIntervalLabel)
 
-    fun resolveForStrategy(strategyId: String): BaseStrategyConfig {
+    /** اورراید شخصیت نماد (اگر شبکه برای این نماد دادهٔ واقعی داشته باشد). */
+    fun resolveForSymbol(rawSymbol: String?): PerSymbolConfigOverride? {
+        val sym = rawSymbol?.trim()?.uppercase(Locale.ROOT)?.takeIf { it.isNotEmpty() } ?: return null
+        return perSymbolOverrides[sym] ?: perSymbolOverrides[V1Universe.normalize(sym)]
+    }
+
+    fun resolveForStrategy(strategyId: String, rawSymbol: String? = null): BaseStrategyConfig {
         val normId = BitcoinStrategyModel.normalizeStrategyId(strategyId)
-        val ov = perStrategyOverrides[normId] ?: perStrategyOverrides[strategyId] ?: return this
+        val symOv = resolveForSymbol(rawSymbol)
+        val ov = perStrategyOverrides[normId] ?: perStrategyOverrides[strategyId]
+        if (ov == null && symOv == null) return this
+        // دقیق‌ترین سطح یادگیری، اولویت دارد: شخصیت نماد ← پروفایل استراتژی ← مقدار پایه.
+        // برای R:R همیشه سخت‌گیرانه‌ترین مقدار انتخاب می‌شود تا هیچ نمادی ریسک را کم نکند.
         return copy(
-            minRiskReward = max(1.5, ov.minRiskReward),
-            maxKijunExtensionAtr = ov.maxKijunExtensionAtr.coerceIn(1.25, 2.40),
-            slBufferAtr = ov.slBufferAtr.coerceIn(0.15, 0.50),
-            breakoutBufferAtr = ov.breakoutBufferAtr.coerceIn(0.08, 0.35),
-            minEfficiencyRatio = ov.minEfficiencyRatio.coerceIn(0.14, 0.42),
-            minVolumeRatio20 = ov.minVolumeRatio20.coerceIn(0.45, 1.10),
-            maxAdverseWickRatio = ov.maxAdverseWickRatio.coerceIn(0.28, 0.58),
-            minFutureKumoThicknessAtr = ov.minFutureKumoThicknessAtr.coerceIn(0.02, 0.16),
-            minSniperDistanceAtr = ov.minSniperDistanceAtr.coerceIn(0.35, 1.05),
-            minDriveBooksConsensus = ov.minDriveBooksConsensus.coerceIn(4, 9),
+            minRiskReward = max(1.5, max(symOv?.minRiskReward ?: 0.0, ov?.minRiskReward ?: minRiskReward)),
+            maxKijunExtensionAtr = (symOv?.maxKijunExtensionAtr ?: ov?.maxKijunExtensionAtr ?: maxKijunExtensionAtr)
+                .coerceIn(1.25, 2.40),
+            slBufferAtr = (symOv?.slBufferAtr ?: ov?.slBufferAtr ?: slBufferAtr).coerceIn(0.15, 0.50),
+            breakoutBufferAtr = (symOv?.breakoutBufferAtr ?: ov?.breakoutBufferAtr ?: breakoutBufferAtr)
+                .coerceIn(0.08, 0.35),
+            minEfficiencyRatio = (symOv?.minEfficiencyRatio ?: ov?.minEfficiencyRatio ?: minEfficiencyRatio)
+                .coerceIn(0.14, 0.42),
+            minVolumeRatio20 = (symOv?.minVolumeRatio20 ?: ov?.minVolumeRatio20 ?: minVolumeRatio20)
+                .coerceIn(0.45, 1.10),
+            maxAdverseWickRatio = (ov?.maxAdverseWickRatio ?: maxAdverseWickRatio).coerceIn(0.28, 0.58),
+            minFutureKumoThicknessAtr = (ov?.minFutureKumoThicknessAtr ?: minFutureKumoThicknessAtr)
+                .coerceIn(0.02, 0.16),
+            minSniperDistanceAtr = (ov?.minSniperDistanceAtr ?: minSniperDistanceAtr).coerceIn(0.35, 1.05),
+            minDriveBooksConsensus = (symOv?.minDriveBooksConsensus ?: ov?.minDriveBooksConsensus
+                ?: minDriveBooksConsensus).coerceIn(4, 9),
         )
     }
 }
@@ -2608,7 +2646,12 @@ object IchimokuStrategyEngine {
         // Apply model-specific & per-strategy neural-tuned overrides onto config for all 16 strategies
         // قانون قطعی سیستم: حداقل R:R تمام استراتژی‌ها و معاملات همیشه حداقل 1:1.5 (1.5R) و بالاتر است
         val stratOverride = config.perStrategyOverrides[activeModel.id]
-        val baseMinRr = stratOverride?.minRiskReward ?: config.minRiskReward
+        // شخصیت آموخته‌شدهٔ همین نماد: دقیق‌ترین لایهٔ یادگیری؛ در بازه‌های مجاز و بدون کاهش R:R.
+        val symbolOverride = config.resolveForSymbol(normalizedSymbol)
+        val baseMinRr = max(
+            stratOverride?.minRiskReward ?: config.minRiskReward,
+            symbolOverride?.minRiskReward ?: 0.0,
+        )
         val minAllowedRr = max(baseMinRr, 1.5)
         val effectiveConfig = config.copy(
             enablePullbackTrigger = activeModel.hasPatel || activeModel.hasHosoda || activeModel.hasPeloille || !activeModel.hasTuttle,
@@ -2617,15 +2660,21 @@ object IchimokuStrategyEngine {
             requireChikouOpenSpace = activeModel.hasTuttle || activeModel.hasPeloille || activeModel.combinationCount >= 2 || config.requireChikouOpenSpace,
             requireFutureKumoSlope = activeModel.hasPatel || activeModel.hasTuttle || activeModel.combinationCount >= 2 || config.requireFutureKumoSlope,
             minRiskReward = if (activeModel.hasHosoda && activeModel.combinationCount == 1) max(minAllowedRr, 1.8) else minAllowedRr,
-            maxKijunExtensionAtr = (stratOverride?.maxKijunExtensionAtr ?: config.maxKijunExtensionAtr).coerceIn(1.25, 2.50),
-            slBufferAtr = (stratOverride?.slBufferAtr ?: config.slBufferAtr).coerceIn(0.15, 0.55),
-            breakoutBufferAtr = (stratOverride?.breakoutBufferAtr ?: config.breakoutBufferAtr).coerceIn(0.05, 0.35),
-            minEfficiencyRatio = (stratOverride?.minEfficiencyRatio ?: config.minEfficiencyRatio).coerceIn(0.14, 0.45),
-            minVolumeRatio20 = (stratOverride?.minVolumeRatio20 ?: config.minVolumeRatio20).coerceIn(0.40, 1.15),
+            maxKijunExtensionAtr = (symbolOverride?.maxKijunExtensionAtr
+                ?: stratOverride?.maxKijunExtensionAtr ?: config.maxKijunExtensionAtr).coerceIn(1.25, 2.50),
+            slBufferAtr = (symbolOverride?.slBufferAtr
+                ?: stratOverride?.slBufferAtr ?: config.slBufferAtr).coerceIn(0.15, 0.55),
+            breakoutBufferAtr = (symbolOverride?.breakoutBufferAtr
+                ?: stratOverride?.breakoutBufferAtr ?: config.breakoutBufferAtr).coerceIn(0.05, 0.35),
+            minEfficiencyRatio = (symbolOverride?.minEfficiencyRatio
+                ?: stratOverride?.minEfficiencyRatio ?: config.minEfficiencyRatio).coerceIn(0.14, 0.45),
+            minVolumeRatio20 = (symbolOverride?.minVolumeRatio20
+                ?: stratOverride?.minVolumeRatio20 ?: config.minVolumeRatio20).coerceIn(0.40, 1.15),
             maxAdverseWickRatio = (stratOverride?.maxAdverseWickRatio ?: config.maxAdverseWickRatio).coerceIn(0.28, 0.60),
             minFutureKumoThicknessAtr = (stratOverride?.minFutureKumoThicknessAtr ?: config.minFutureKumoThicknessAtr).coerceIn(0.02, 0.18),
             minSniperDistanceAtr = (stratOverride?.minSniperDistanceAtr ?: config.minSniperDistanceAtr).coerceIn(0.35, 1.10),
-            minDriveBooksConsensus = (stratOverride?.minDriveBooksConsensus ?: config.minDriveBooksConsensus).coerceIn(4, 9),
+            minDriveBooksConsensus = (symbolOverride?.minDriveBooksConsensus
+                ?: stratOverride?.minDriveBooksConsensus ?: config.minDriveBooksConsensus).coerceIn(4, 9),
         )
 
         val livePrice = livePriceOverride?.takeIf { it.isFinite() && it > 0.0 } ?: trigSnap.close

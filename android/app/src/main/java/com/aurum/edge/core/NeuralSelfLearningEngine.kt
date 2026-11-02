@@ -181,6 +181,62 @@ data class PerStrategyNeuralTuningProfile(
     )
 }
 
+/**
+ * پروفایل اختصاصی هر **نماد بازار** («شخصیت آموخته‌شدهٔ نماد»).
+ *
+ * شبکه عصبی برای هر نماد جداگانه یاد می‌گیرد: چقدر روندسوار است، چقدر شدوی مزاحم می‌زند،
+ * شکست‌هایش چقدر قابل‌اعتماد است، کدام استراتژی روی آن بیشترین برد را دارد و حد ضرر/سقف
+ * کشیدگی کیجونش باید چقدر باشد. این پروفایل هم در تصمیم‌گیری موتور اعمال می‌شود و هم در
+ * تب هوش عصبی نمایش داده می‌شود.
+ */
+@Serializable
+data class PerSymbolNeuralTuningProfile(
+    val symbol: String,
+    val symbolTitleFa: String = "",
+    val categoryCode: String = "",
+    val tuningGeneration: Int = 1,
+    /** تعداد معامله‌ای که واقعاً روی همین نماد بسته شده است. */
+    val ownSamples: Int = 0,
+    /** تعداد نمونه‌ای که برای آموزش شخصیت این نماد استفاده شده (خودش + انتقالی). */
+    val samplesAnalyzed: Int = 0,
+    val winRatePct: Double = 0.0,
+    val expectedProfitFactor: Double = 2.20,
+    val avgRMultiple: Double = 0.0,
+    val posteriorWinProbPct: Double = 50.0,
+    val minRiskReward: Double = 1.60,
+    val maxKijunExtensionAtr: Double = 1.65,
+    val slBufferAtr: Double = 0.26,
+    val breakoutBufferAtr: Double = 0.16,
+    val minEfficiencyRatio: Double = 0.22,
+    val minVolumeRatio20: Double = 0.62,
+    val neuralWinProbGatePct: Double = 56.0,
+    val minDriveBooksConsensus: Int = 6,
+    val bestStrategyId: String = "",
+    val bestStrategyTitleFa: String = "",
+    val trendPersistencePct: Double = 50.0,
+    val wickNoisePct: Double = 50.0,
+    val breakoutReliabilityPct: Double = 50.0,
+    /** ضریب اهمیت آموخته‌شدهٔ هر ۱۶ ویژگی برای این نماد (خالی = خنثی). */
+    val featureMultipliers: List<Double> = emptyList(),
+    /** میانگین بردار ۱۶ ویژگی در معاملات برندهٔ همین نماد (اثر انگشت رفتاری). */
+    val winningFingerprint: List<Double> = emptyList(),
+    val decisionStyleFa: String = "در انتظار داده",
+    val personalityFa: String = "",
+    val updatedAtMs: Long = 0L,
+) {
+    fun toConfigOverride(): PerSymbolConfigOverride = PerSymbolConfigOverride(
+        symbol = symbol,
+        minRiskReward = max(1.5, minRiskReward),
+        maxKijunExtensionAtr = maxKijunExtensionAtr.coerceIn(1.25, 2.40),
+        slBufferAtr = slBufferAtr.coerceIn(0.15, 0.50),
+        breakoutBufferAtr = breakoutBufferAtr.coerceIn(0.08, 0.35),
+        minEfficiencyRatio = minEfficiencyRatio.coerceIn(0.14, 0.42),
+        minVolumeRatio20 = minVolumeRatio20.coerceIn(0.45, 1.10),
+        neuralWinProbGatePct = neuralWinProbGatePct.coerceIn(45.0, 75.0),
+        minDriveBooksConsensus = minDriveBooksConsensus.coerceIn(4, 9),
+    )
+}
+
 @Serializable
 data class NeuralRegressedParameterRow(
     val paramKey: String,
@@ -249,6 +305,8 @@ data class NeuralAutoTunedParameters(
     val tuningSummaryFa: String = "پارامترهای استراتژی، حد ضرر ساختاری و گیت شبکه عصبی با رگرسیون Ridge L2 + Huber IRLS + بیزین کالیبره شدند.",
     val parameterChangeLogFa: List<String> = emptyList(),
     val perStrategyProfiles: Map<String, PerStrategyNeuralTuningProfile> = emptyMap(),
+    /** شخصیت آموخته‌شدهٔ هر نماد (کلید = نماد نرمال‌شده مثل `BTC/USDT`). */
+    val perSymbolProfiles: Map<String, PerSymbolNeuralTuningProfile> = emptyMap(),
     val latestRegressionReport: NeuralParameterRegressionReport = NeuralParameterRegressionReport(),
 )
 
@@ -473,6 +531,12 @@ class NeuralSelfLearningEngine(
          * استراتژی‌ها پر می‌شود تا هیچ استراتژی «آموزش‌ندیده» نماند.
          */
         const val MIN_CROSS_STRATEGY_SAMPLES: Int = 6
+
+        /**
+         * حداقل نمونهٔ اختصاصی هر **نماد**؛ اگر تجربهٔ خود نماد کمتر بود، از تجربهٔ نمادهای
+         * هم‌دسته و سپس کل بازار (با اولویت بالاترین `R`) پر می‌شود تا شخصیت هر نماد هم شکل بگیرد.
+         */
+        const val MIN_CROSS_SYMBOL_SAMPLES: Int = 4
         private const val MAX_REPLAY_BUFFER: Int = 320
         private const val MAX_CONDITION_CLUSTERS: Int = 240
         private const val BASE_LR: Double = 0.018
@@ -849,7 +913,9 @@ class NeuralSelfLearningEngine(
         val sortedAttributions = cur.liveMarketAttributions.values
             .sortedWith(compareBy<NeuralMarketCausalAttribution> { it.categoryCode }.thenBy { it.symbol })
 
-        val ensuredAutoTuned = ensurePerStrategyProfiles(cur.autoTunedParameters, cur)
+        val ensuredAutoTuned = ensurePerSymbolProfiles(
+            ensurePerStrategyProfiles(cur.autoTunedParameters, cur),
+        )
 
         return NeuralLearningStateSummary(
             architectureNameFa = cur.architectureName,
@@ -1262,6 +1328,9 @@ class NeuralSelfLearningEngine(
             categoryStats = defaultCats,
             autoTunedParameters = NeuralAutoTunedParameters(
                 perStrategyProfiles = defaultProfiles,
+                perSymbolProfiles = V1Universe.allSymbols.associateWith { sym ->
+                    buildDefaultSymbolProfile(sym, NeuralAutoTunedParameters(), 0L)
+                },
             ),
         )
     }
@@ -1971,8 +2040,9 @@ class NeuralSelfLearningEngine(
         features: List<Double>,
         cur: NeuralNetworkPersistedState = persistedState,
         strategyId: String? = null,
+        symbol: String? = null,
     ): Pair<Double, Double> {
-        val (winProb, expectedR, _) = forwardPassWithInternals(features, cur, strategyId)
+        val (winProb, expectedR, _) = forwardPassWithInternals(features, cur, strategyId, symbol)
         return winProb to expectedR
     }
 
@@ -1980,26 +2050,35 @@ class NeuralSelfLearningEngine(
         features: List<Double>,
         cur: NeuralNetworkPersistedState = persistedState,
         strategyId: String? = null,
+        symbol: String? = null,
     ): Triple<Double, Double, List<Double>> {
         val normStratId = strategyId?.let { BitcoinStrategyModel.normalizeStrategyId(it) }
         val stratProfile = if (normStratId != null) {
             cur.autoTunedParameters.perStrategyProfiles[normStratId]
         } else null
         val stratFeats = stratProfile?.featureTunings
+        // شخصیت آموخته‌شدهٔ همان نماد: ضریب اهمیت ۱۶ ویژگی مخصوص این نماد روی ضریب استراتژی
+        // ضرب می‌شود تا شبکه برای هر نماد جداگانه «توجه» کند (بدون تغییر ابعاد یا ترتیب ویژگی‌ها).
+        val symbolProfile = symbol?.let { cur.autoTunedParameters.perSymbolProfiles[V1Universe.normalize(it)] }
+        val symbolMults = symbolProfile?.featureMultipliers?.takeIf { it.size == INPUT_DIM }
+        val featureMultAt: (Int) -> Double = { i ->
+            val stratMult = stratFeats?.getOrNull(i)?.tuningMultiplier ?: 1.0
+            val symMult = symbolMults?.getOrNull(i) ?: 1.0
+            (stratMult * symMult).coerceIn(0.20, 2.60)
+        }
 
-        // 1. Feature Self-Attention scaling + Per-Strategy Feature Multiplier
+        // 1. Feature Self-Attention scaling + Per-Strategy + Per-Symbol Feature Multiplier
         val effectiveAttn = List(INPUT_DIM) { i ->
             val baseA = cur.attentionWeights.getOrElse(i) { 0.15 }
-            val mult = stratFeats?.getOrNull(i)?.tuningMultiplier ?: 1.0
-            baseA * mult
+            baseA * featureMultAt(i)
         }
         val maxAttn = effectiveAttn.maxOrNull() ?: 0.0
         val expAttn = effectiveAttn.map { exp((it - maxAttn).coerceIn(-10.0, 10.0)) }
         val sumExp = expAttn.sum().coerceAtLeast(1e-8)
         val attnProbs = expAttn.map { it / sumExp }
         val attendedInput = List(INPUT_DIM) { i ->
-            val mult = stratFeats?.getOrNull(i)?.tuningMultiplier ?: 1.0
-            features.getOrElse(i) { 0.0 } * mult.coerceIn(0.20, 2.50) * (0.65 + 0.35 * INPUT_DIM * attnProbs.getOrElse(i) { 1.0 / INPUT_DIM })
+            features.getOrElse(i) { 0.0 } * featureMultAt(i) *
+                (0.65 + 0.35 * INPUT_DIM * attnProbs.getOrElse(i) { 1.0 / INPUT_DIM })
         }
 
         // 2. SwiGLU Gated Residual Block: h_j = x_j + Swish(x * W_gate + b_gate) * (x * W_up + b_up)
@@ -2076,7 +2155,7 @@ class NeuralSelfLearningEngine(
 
         val normStratId = BitcoinStrategyModel.normalizeStrategyId(strategyId)
         val stratProfile = persistedState.autoTunedParameters.perStrategyProfiles[normStratId]
-        val (neuralWinProb, neuralExpectedR) = forwardPass(features, persistedState, normStratId)
+        val (neuralWinProb, neuralExpectedR) = forwardPass(features, persistedState, normStratId, symbol)
         val cluster = persistedState.conditionClusters[sigKey]
 
         // Blend neural network output with Contextual Bandit posterior for this exact condition cluster
@@ -2091,15 +2170,30 @@ class NeuralSelfLearningEngine(
         } else {
             neuralExpectedR
         }
+        // شخصیت آموخته‌شدهٔ همین نماد (بیزین تامسون) با خروجی شبکه ترکیب می‌شود؛ فقط اگر
+        // دست‌کم ۳ معاملهٔ واقعی از خود این نماد داشته باشیم (وگرنه وزن صفر است و رفتار قبلی حفظ می‌شود).
+        val symbolProfile = persistedState.autoTunedParameters.perSymbolProfiles[symbol]
+        val symbolBlendWeight = symbolProfile
+            ?.takeIf { it.ownSamples >= 3 }
+            ?.let { it.ownSamples.toDouble() / (it.ownSamples + 9.0) }
+            ?.coerceIn(0.0, 0.40) ?: 0.0
+        val symbolAdjustedWinProb = if (symbolProfile != null && symbolBlendWeight > 0.0) {
+            (1.0 - symbolBlendWeight) * blendedWinProb +
+                symbolBlendWeight * (symbolProfile.posteriorWinProbPct / 100.0)
+        } else {
+            blendedWinProb
+        }
 
         val causalAttr = computeMarketCausalAttribution(symbol, report, System.currentTimeMillis())
         val newsBias = persistedState.latestNewsSnapshot.categoryNewsBias[assetClass.code] ?: 0.0
         val newsDirectionFactor = if (action == SignalAction.BUY) newsBias else -newsBias
-        val newsAdjustedWinProb = (blendedWinProb + newsDirectionFactor * 0.06).coerceIn(0.02, 0.98)
+        val newsAdjustedWinProb = (symbolAdjustedWinProb + newsDirectionFactor * 0.06).coerceIn(0.02, 0.98)
         val winProbPct = round(newsAdjustedWinProb * 1000.0) / 10.0
         val dangerScorePct = round(((1.0 - newsAdjustedWinProb) * 100.0).coerceIn(0.0, 100.0) * 10.0) / 10.0
 
-        val gatePct = stratProfile?.neuralWinProbGatePct ?: persistedState.autoTunedParameters.neuralWinProbGatePct
+        val gatePct = symbolProfile?.takeIf { it.ownSamples > 0 }?.neuralWinProbGatePct
+            ?: stratProfile?.neuralWinProbGatePct
+            ?: persistedState.autoTunedParameters.neuralWinProbGatePct
         val tunedGateProb = (gatePct / 100.0).coerceIn(0.42, 0.72)
         val isNoTradeDetected = newsAdjustedWinProb < min(0.46, tunedGateProb * 0.84) ||
             blendedExpectedR < 0.05 ||
@@ -2205,7 +2299,7 @@ class NeuralSelfLearningEngine(
     ): NeuralSignalEvaluation {
         val normSym = V1Universe.normalize(symbol)
         val featList = features.toList()
-        val (neuralWinProb, neuralExpectedR) = forwardPass(featList, persistedState)
+        val (neuralWinProb, neuralExpectedR) = forwardPass(featList, persistedState, symbol = normSym)
         val cluster = persistedState.conditionClusters[conditionKey]
 
         val blendedWinProb = if (cluster != null && cluster.totalCount >= 2) {
@@ -2219,8 +2313,20 @@ class NeuralSelfLearningEngine(
         } else {
             neuralExpectedR
         }
+        // وزن شخصیت همین نماد (اگر دادهٔ اختصاصی کافی داشته باشد) روی احتمال برد
+        val symbolProfile = persistedState.autoTunedParameters.perSymbolProfiles[normSym]
+        val symbolBlendWeight = symbolProfile
+            ?.takeIf { it.ownSamples >= 3 }
+            ?.let { it.ownSamples.toDouble() / (it.ownSamples + 9.0) }
+            ?.coerceIn(0.0, 0.40) ?: 0.0
+        val effectiveWinProb = if (symbolProfile != null && symbolBlendWeight > 0.0) {
+            (1.0 - symbolBlendWeight) * blendedWinProb +
+                symbolBlendWeight * (symbolProfile.posteriorWinProbPct / 100.0)
+        } else {
+            blendedWinProb
+        }
 
-        val isNoTrade = blendedWinProb < 0.44 ||
+        val isNoTrade = effectiveWinProb < 0.44 ||
             blendedExpectedR < 0.05 ||
             cluster?.isFlaggedNoTradeRegime == true
         val gate = NeuralLearningLedger.gateState(
@@ -2231,7 +2337,7 @@ class NeuralSelfLearningEngine(
         val isWarmupDone = gate.isGateActive
         val isBlocking = isWarmupDone && isNoTrade
 
-        val summaryFa = "احتمال برد شبکه عصبی: ${(blendedWinProb * 100).toInt()}% · امید ریاضی: ${String.format(Locale.US, "%+.2fR", blendedExpectedR)}"
+        val summaryFa = "احتمال برد شبکه عصبی: ${(effectiveWinProb * 100).toInt()}% · امید ریاضی: ${String.format(Locale.US, "%+.2fR", blendedExpectedR)}"
         val warningFa = if (isNoTrade) {
             "شرایط پرخطر/ممنوعه تشخیص داده شد ($summaryFa)"
         } else {
@@ -2240,7 +2346,7 @@ class NeuralSelfLearningEngine(
         return NeuralSignalEvaluation(
             symbol = normSym,
             conditionKey = conditionKey,
-            predictedWinProb = blendedWinProb.coerceIn(0.01, 0.99),
+            predictedWinProb = effectiveWinProb.coerceIn(0.01, 0.99),
             expectedR = blendedExpectedR,
             isNoTradeCondition = isNoTrade,
             isBlockingTradeNow = isBlocking,
@@ -2374,7 +2480,7 @@ class NeuralSelfLearningEngine(
             val candidates = updatedBuffer.drop(1)
             val prioritizedBatch = candidates
                 .map { s ->
-                    val (pw, pr) = forwardPass(s.features, nextState)
+                    val (pw, pr) = forwardPass(s.features, nextState, s.strategyId, s.symbol)
                     val targetW = if (s.won) 1.0 else 0.0
                     val tdErr = abs(pw - targetW) + 0.35 * abs(pr - s.achievedR)
                     s to tdErr
@@ -3450,6 +3556,9 @@ class NeuralSelfLearningEngine(
         val generation: Int,
         val trainedAtMs: Long,
         val perStrategySamples: Map<String, Int>,
+        val symbolsTotal: Int,
+        val symbolsWithOwnSamples: Int,
+        val perSymbolSamples: Map<String, Int>,
         val summaryFa: String,
     )
 
@@ -3482,14 +3591,32 @@ class NeuralSelfLearningEngine(
                 existingProfile = ensuredParams.perStrategyProfiles[model.id],
             )
         }
+        // ── شخصیت هر نماد بازار ──────────────────────────────────────────────
+        val symbolMap = LinkedHashMap<String, PerSymbolNeuralTuningProfile>()
+        val perSymbolSamples = LinkedHashMap<String, Int>()
+        var symbolsWithOwnSamples = 0
+        val allSymbols = (V1Universe.allSymbols + cur.replayBuffer.map { V1Universe.normalize(it.symbol) }).distinct()
+        for (symbol in allSymbols) {
+            val ownCount = cur.replayBuffer.count { V1Universe.normalize(it.symbol) == symbol }
+            perSymbolSamples[symbol] = ownCount
+            if (ownCount > 0) symbolsWithOwnSamples++
+            symbolMap[symbol] = computePerSymbolProfileForSymbol(
+                symbol = symbol,
+                cur = cur,
+                existingProfile = ensuredParams.perSymbolProfiles[symbol],
+                nowMs = nowMs,
+            )
+        }
         val generation = ensuredParams.tuningGeneration + 1
         val nextAuto = ensuredParams.copy(
             tuningGeneration = generation,
             tunedAtMs = nowMs,
             samplesAnalyzed = cur.replayBuffer.size,
             perStrategyProfiles = newMap,
-            tuningSummaryFa = "آموزش هم‌زمان روی ${BitcoinStrategyModel.entries.size} استراتژی (نسل #$generation): " +
-                "${cur.replayBuffer.size} نمونهٔ تجربه، ${perStrategySamples.count { it.value > 0 }} استراتژی با دادهٔ اختصاصی.",
+            perSymbolProfiles = symbolMap,
+            tuningSummaryFa = "آموزش هم‌زمان روی ${BitcoinStrategyModel.entries.size} استراتژی و " +
+                "${symbolMap.size} نماد (نسل #$generation): ${cur.replayBuffer.size} نمونهٔ تجربه، " +
+                "${perStrategySamples.count { it.value > 0 }} استراتژی و $symbolsWithOwnSamples نماد با دادهٔ اختصاصی.",
         )
         // پارامترهای عمومی (R:R، بافر حد ضرر، گیت) هم یک‌بار از کل داده بازمحاسبه می‌شوند تا
         // استراتژی‌ها با دو منبع متناقض کار نکنند.
@@ -3518,14 +3645,317 @@ class NeuralSelfLearningEngine(
             generation = generation,
             trainedAtMs = nowMs,
             perStrategySamples = perStrategySamples,
-            summaryFa = "🧠 آموزش هم‌زمان روی ${newMap.size} استراتژی انجام شد (نسل #$generation) · " +
-                "${cur.replayBuffer.size} نمونهٔ تجربه · $withOwnSamples استراتژی دادهٔ اختصاصی دارد.",
+            symbolsTotal = symbolMap.size,
+            symbolsWithOwnSamples = symbolsWithOwnSamples,
+            perSymbolSamples = perSymbolSamples,
+            summaryFa = "🧠 آموزش هم‌زمان روی ${newMap.size} استراتژی و ${symbolMap.size} نماد انجام شد " +
+                "(نسل #$generation) · ${cur.replayBuffer.size} نمونهٔ تجربه · " +
+                "$withOwnSamples استراتژی و $symbolsWithOwnSamples نماد دادهٔ اختصاصی دارند.",
+        )
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // شخصیت آموخته‌شدهٔ هر نماد بازار (Per-Symbol Neural Personality)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /** نام فارسی نماد برای نمایش در رابط کاربری و متن‌های قابل کپی. */
+    fun symbolTitleFa(symbol: String): String = when (V1Universe.normalize(symbol)) {
+        "BTC/USDT" -> "بیت‌کوین"
+        "ETH/USDT" -> "اتریوم"
+        "SOL/USDT" -> "سولانا"
+        "BNB/USDT" -> "بایننس‌کوین"
+        "XRP/USDT" -> "ریپل"
+        "XAU/USD" -> "اونس طلا"
+        "XAG/USD" -> "نقره"
+        "EUR/USD" -> "یورو/دلار"
+        "GBP/USD" -> "پوند/دلار"
+        "USD/JPY" -> "دلار/ین"
+        "EUR/JPY" -> "یورو/ین"
+        "GBP/JPY" -> "پوند/ین"
+        "AUD/USD" -> "دلار استرالیا/دلار"
+        "USD/CHF" -> "دلار/فرانک"
+        "DOW" -> "داوجونز"
+        else -> V1Universe.normalize(symbol)
+    }
+
+    /** پروفایل پیش‌فرض یک نماد پیش از رسیدن داده (پیش‌فرض بر اساس کلاس دارایی). */
+    private fun buildDefaultSymbolProfile(
+        symbol: String,
+        auto: NeuralAutoTunedParameters,
+        updatedAtMs: Long,
+    ): PerSymbolNeuralTuningProfile {
+        val assetClass = AssetClass.of(symbol)
+        val wrDefault = when (assetClass) {
+            AssetClass.CRYPTO -> 64.0
+            AssetClass.COMMODITY -> 66.0
+            AssetClass.FOREX -> 58.0
+            AssetClass.STOCK -> 60.0
+        }
+        val trendDefault = when (assetClass) {
+            AssetClass.CRYPTO -> 58.0
+            AssetClass.COMMODITY -> 62.0
+            AssetClass.FOREX -> 46.0
+            AssetClass.STOCK -> 54.0
+        }
+        val wickDefault = when (assetClass) {
+            AssetClass.CRYPTO -> 52.0
+            AssetClass.COMMODITY -> 46.0
+            AssetClass.FOREX -> 38.0
+            AssetClass.STOCK -> 44.0
+        }
+        // پیش‌فرض هر کلاس دارایی روی پارامترهای عمومیِ آموخته‌شده اعمال می‌شود تا از روز اول
+        // رفتار هر کلاس (نوسان کریپتو، روند طلا، رنج فارکس) لحاظ شود.
+        val volAdd = when (assetClass) {
+            AssetClass.CRYPTO -> 0.05
+            AssetClass.COMMODITY -> 0.02
+            AssetClass.FOREX -> -0.03
+            AssetClass.STOCK -> 0.0
+        }
+        val kijunAdd = when (assetClass) {
+            AssetClass.CRYPTO -> 0.10
+            AssetClass.COMMODITY -> 0.05
+            AssetClass.FOREX -> -0.08
+            AssetClass.STOCK -> 0.0
+        }
+        val erAdd = when (assetClass) {
+            AssetClass.CRYPTO -> 0.01
+            AssetClass.COMMODITY -> 0.0
+            AssetClass.FOREX -> -0.03
+            AssetClass.STOCK -> -0.01
+        }
+        return PerSymbolNeuralTuningProfile(
+            symbol = symbol,
+            symbolTitleFa = symbolTitleFa(symbol),
+            categoryCode = assetClass.code,
+            tuningGeneration = 1,
+            ownSamples = 0,
+            samplesAnalyzed = 0,
+            winRatePct = wrDefault,
+            expectedProfitFactor = 2.20,
+            avgRMultiple = 0.0,
+            posteriorWinProbPct = 50.0,
+            minRiskReward = max(1.5, auto.minRiskReward),
+            maxKijunExtensionAtr = round((auto.maxKijunExtensionAtr + kijunAdd).coerceIn(1.25, 2.40) * 100.0) / 100.0,
+            slBufferAtr = round((auto.slBufferAtr + volAdd).coerceIn(0.15, 0.50) * 100.0) / 100.0,
+            breakoutBufferAtr = round((auto.breakoutBufferAtr + volAdd * 0.5).coerceIn(0.08, 0.35) * 100.0) / 100.0,
+            minEfficiencyRatio = round((auto.minEfficiencyRatio + erAdd).coerceIn(0.14, 0.42) * 100.0) / 100.0,
+            minVolumeRatio20 = auto.minVolumeRatio20.coerceIn(0.45, 1.10),
+            neuralWinProbGatePct = auto.neuralWinProbGatePct.coerceIn(45.0, 75.0),
+            minDriveBooksConsensus = auto.minDriveBooksConsensus.coerceIn(4, 9),
+            trendPersistencePct = trendDefault,
+            wickNoisePct = wickDefault,
+            breakoutReliabilityPct = wrDefault,
+            decisionStyleFa = when (assetClass) {
+                AssetClass.CRYPTO -> "پرنوسان (پیش‌فرض کلاس رمزارز)"
+                AssetClass.COMMODITY -> "پناهگاه امن روندی (پیش‌فرض فلزات)"
+                AssetClass.FOREX -> "رِنج‌زن سشن‌محور (پیش‌فرض فارکس)"
+                AssetClass.STOCK -> "مومنتوم شاخص (پیش‌فرض وال‌استریت)"
+            },
+            personalityFa = "شخصیت ${symbolTitleFa(symbol)} هنوز از معاملهٔ بسته‌شدهٔ خودش یاد نگرفته است؛ " +
+                "فعلاً با پیش‌فرض کلاس دارایی (${categoryTitleFa(assetClass)}) و آموخته‌های بقیهٔ نمادها کار می‌کند.",
+            updatedAtMs = updatedAtMs,
+        )
+    }
+
+    /** همهٔ نمادهای بازار (۱۵ نماد) پروفایل شخصیت دارند؛ نمادهای بدون داده پیش‌فرض می‌گیرند. */
+    @Synchronized
+    fun ensurePerSymbolProfiles(
+        auto: NeuralAutoTunedParameters = persistedState.autoTunedParameters,
+    ): NeuralAutoTunedParameters {
+        val symbols = (V1Universe.allSymbols + auto.perSymbolProfiles.keys).distinct()
+        val missing = symbols.filter { auto.perSymbolProfiles[it] == null }
+        if (missing.isEmpty()) return auto
+        val filled = LinkedHashMap(auto.perSymbolProfiles)
+        missing.forEach { sym -> filled[sym] = buildDefaultSymbolProfile(sym, auto, System.currentTimeMillis()) }
+        return auto.copy(perSymbolProfiles = filled)
+    }
+
+    /**
+     * محاسبهٔ شخصیت یک نماد از تجربه‌های واقعی.
+     *
+     * ترتیب اولویت داده: ① معاملات خود همان نماد → ② معاملات نمادهای هم‌دسته (بالاترین `R`)
+     * → ③ کل بازار. اگر هیچ داده‌ای نبود، پروفایل پیش‌فرض کلاس دارایی برمی‌گردد.
+     */
+    private fun computePerSymbolProfileForSymbol(
+        symbol: String,
+        cur: NeuralNetworkPersistedState,
+        existingProfile: PerSymbolNeuralTuningProfile?,
+        nowMs: Long,
+    ): PerSymbolNeuralTuningProfile {
+        val normalized = V1Universe.normalize(symbol)
+        val assetClass = AssetClass.of(normalized)
+        val default = buildDefaultSymbolProfile(normalized, cur.autoTunedParameters, nowMs)
+        val own = cur.replayBuffer.filter { V1Universe.normalize(it.symbol) == normalized }
+        if (own.isEmpty() && cur.replayBuffer.isEmpty()) {
+            return default.copy(tuningGeneration = (existingProfile?.tuningGeneration ?: 1))
+        }
+        val quota = max(0, MIN_CROSS_SYMBOL_SAMPLES - own.size)
+        val transfer = if (quota > 0) {
+            val sameClass = cur.replayBuffer
+                .filter { V1Universe.normalize(it.symbol) != normalized && it.categoryCode == assetClass.code }
+                .sortedByDescending { it.achievedR }
+            val others = cur.replayBuffer
+                .filter { V1Universe.normalize(it.symbol) != normalized && it.categoryCode != assetClass.code }
+                .sortedByDescending { it.achievedR }
+            (sameClass + others).distinctBy { it.tradeId }.take(quota * 4)
+        } else {
+            emptyList()
+        }
+        val effective = (own + transfer).ifEmpty { cur.replayBuffer }
+        val wins = effective.filter { it.won }
+        val losses = effective.filter { !it.won }
+        val eliteWins = wins.sortedByDescending { it.achievedR }.take(max(3, wins.size / 2))
+
+        // ── شاخص‌های رفتاری نماد ──
+        // feature 10 = ER14 (پیوستگی روند) · feature 13 = شدوی مخالف/نویز · feature 7 = شکست چیکو/SSB
+        val trendRaw = if (eliteWins.isNotEmpty()) {
+            eliteWins.map { it.features.getOrElse(10) { 0.0 } }.average()
+        } else {
+            effective.map { it.features.getOrElse(10) { 0.0 } }.average()
+        }
+        val trendPct = (((trendRaw + 1.0) / 2.0) * 100.0).coerceIn(15.0, 92.0)
+        val wickRaw = if (losses.isNotEmpty()) {
+            losses.map { it.features.getOrElse(13) { 0.0 } }.average()
+        } else {
+            effective.map { it.features.getOrElse(13) { 0.0 } }.average()
+        }
+        val wickPct = (abs(wickRaw) * 100.0).coerceIn(5.0, 88.0)
+        val breakoutPool = effective.filter { it.features.getOrElse(7) { 0.0 } >= 0.35 }
+        val breakoutPct = if (breakoutPool.size >= 3) {
+            (breakoutPool.count { it.won }.toDouble() / breakoutPool.size) * 100.0
+        } else {
+            if (effective.isNotEmpty()) (effective.count { it.won }.toDouble() / effective.size) * 100.0 else 50.0
+        }
+
+        // ── آمار برد/باخت خود نماد (با انتقال تجربه در صورت کمبود) ──
+        val statPool = if (own.size >= 3) own else effective
+        val statWins = statPool.count { it.won }
+        val statN = statPool.size.coerceAtLeast(1)
+        val wrPct = (statWins.toDouble() / statN) * 100.0
+        val avgR = if (statPool.isNotEmpty()) statPool.map { it.achievedR }.average() else 0.0
+        val winRSum = statPool.filter { it.won }.sumOf { it.achievedR }
+        val lossRSum = abs(statPool.filter { !it.won }.sumOf { it.achievedR })
+        val profitFactor = if (lossRSum > 1e-6) (winRSum / lossRSum).coerceIn(0.4, 6.0) else if (winRSum > 0) 6.0 else 1.0
+        val posteriorPct = ((statWins + 1.0) / (statN + 2.0)) * 100.0
+
+        // ── پارامترهای اختصاصی نماد: پیش‌فرض کلاس دارایی + اصلاح بر اساس رفتار واقعی ──
+        val auto = cur.autoTunedParameters
+        val slBuffer = (default.slBufferAtr * (1.0 + 0.55 * (wickPct / 100.0 - 0.35))).coerceIn(0.15, 0.48)
+        val maxKijun = (default.maxKijunExtensionAtr * (1.0 + 0.24 * (0.55 - trendPct / 100.0))).coerceIn(1.25, 2.35)
+        val breakoutBuffer = (default.breakoutBufferAtr * (1.0 + 0.45 * (wickPct / 100.0 - 0.35))).coerceIn(0.08, 0.34)
+        val minEr = (auto.minEfficiencyRatio * (1.0 + 0.45 * (0.55 - trendPct / 100.0))).coerceIn(0.14, 0.40)
+        val minVol = (auto.minVolumeRatio20 * (1.0 + 0.20 * (wickPct / 100.0 - 0.35))).coerceIn(0.45, 1.05)
+        val gatePct = (auto.neuralWinProbGatePct + (if (statPool.size >= 4 && wrPct < 52.0) 3.0 else 0.0))
+            .coerceIn(45.0, 72.0)
+        val consensus = if (statPool.size >= 5 && wrPct < 50.0) {
+            (auto.minDriveBooksConsensus + 1).coerceIn(4, 9)
+        } else {
+            auto.minDriveBooksConsensus.coerceIn(4, 9)
+        }
+
+        // ── ضریب اهمیت ۱۶ ویژگی مخصوص همین نماد ──
+        val multipliers = if (effective.size >= 4) {
+            (0 until INPUT_DIM).map { idx ->
+                val winMean = if (wins.isNotEmpty()) wins.map { it.features.getOrElse(idx) { 0.0 } }.average() else 0.0
+                val lossMean = if (losses.isNotEmpty()) losses.map { it.features.getOrElse(idx) { 0.0 } }.average() else 0.0
+                val separation = abs(winMean - lossMean).coerceIn(0.0, 1.2)
+                round((0.92 + 0.30 * separation).coerceIn(0.45, 2.20) * 100.0) / 100.0
+            }
+        } else {
+            existingProfile?.featureMultipliers ?: emptyList()
+        }
+        val fingerprint = if (eliteWins.isNotEmpty()) {
+            (0 until INPUT_DIM).map { idx ->
+                round(eliteWins.map { it.features.getOrElse(idx) { 0.0 } }.average() * 1000.0) / 1000.0
+            }
+        } else {
+            existingProfile?.winningFingerprint ?: emptyList()
+        }
+
+        // ── بهترین استراتژی برای این نماد (Thompson Sampling روی همان نماد) ──
+        val bestModel = effective
+            .groupBy { BitcoinStrategyModel.normalizeStrategyId(it.strategyId) }
+            .maxByOrNull { (_, list) ->
+                val w = list.count { it.won }
+                val l = list.size - w
+                ((w + 2.0) / (w + l + 3.0)) * (1.0 + list.map { it.achievedR }.average().coerceAtLeast(-0.5) * 0.35)
+            }
+            ?.key
+            ?.let { BitcoinStrategyModel.fromId(it) }
+
+        val styleFa = when {
+            trendPct >= 62.0 && wickPct < 50.0 -> "روندسوار پیوستهٔ کم‌نویز"
+            trendPct >= 62.0 -> "روندسوار پرنوسان با استاپ‌هانت بالا"
+            trendPct < 45.0 && wickPct >= 50.0 -> "رِنج‌زن پرنویز (نیازمند تأیید شکست)"
+            trendPct < 45.0 -> "رِنج‌زن آرام (شکار از لبهٔ ابر)"
+            else -> "ترکیبی/خودکار"
+        }
+
+        val generation = (existingProfile?.tuningGeneration ?: 1) + 1
+        val personalityFa = buildString {
+            append("${symbolTitleFa(normalized)} ($normalized) در دستهٔ ${categoryTitleFa(assetClass)}: ")
+            append("پیوستگی روند ${trendPct.toInt()}٪ · نویز شدوی ${wickPct.toInt()}٪ · ")
+            append("اعتبار شکست ${breakoutPct.toInt()}٪ · سبک «$styleFa». ")
+            if (own.size >= 3) {
+                append("از ${own.size} معاملهٔ خودش: نرخ برد ${wrPct.toInt()}٪ و میانگین ")
+                append(String.format(Locale.US, "%.2fR", avgR))
+                append(". ")
+            } else {
+                append("دادهٔ اختصاصی‌اش ${own.size} معامله است، پس با تجربهٔ نمادهای هم‌دسته + کل بازار ")
+                append("(${statPool.size} نمونه) آموزش دید. ")
+            }
+            if (bestModel != null) append("سازگارترین استراتژی با این نماد: ${bestModel.titleFa}. ")
+            append("پارامترهای آموخته‌شده: بافر حد ضرر ")
+            append(String.format(Locale.US, "%.2f", slBuffer))
+            append("ATR · سقف کشیدگی کیجون ")
+            append(String.format(Locale.US, "%.2f", maxKijun))
+            append("ATR · حداقل کارایی روند ")
+            append(String.format(Locale.US, "%.2f", minEr))
+            append(" · گیت احتمال برد ${gatePct.toInt()}٪.")
+        }
+
+        return PerSymbolNeuralTuningProfile(
+            symbol = normalized,
+            symbolTitleFa = symbolTitleFa(normalized),
+            categoryCode = assetClass.code,
+            tuningGeneration = generation,
+            ownSamples = own.size,
+            samplesAnalyzed = statPool.size,
+            winRatePct = round(wrPct * 10.0) / 10.0,
+            expectedProfitFactor = round(profitFactor * 100.0) / 100.0,
+            avgRMultiple = round(avgR * 100.0) / 100.0,
+            posteriorWinProbPct = round(posteriorPct * 10.0) / 10.0,
+            minRiskReward = max(1.5, auto.minRiskReward),
+            maxKijunExtensionAtr = round(maxKijun * 100.0) / 100.0,
+            slBufferAtr = round(slBuffer * 100.0) / 100.0,
+            breakoutBufferAtr = round(breakoutBuffer * 100.0) / 100.0,
+            minEfficiencyRatio = round(minEr * 100.0) / 100.0,
+            minVolumeRatio20 = round(minVol * 100.0) / 100.0,
+            neuralWinProbGatePct = round(gatePct * 10.0) / 10.0,
+            minDriveBooksConsensus = consensus,
+            bestStrategyId = bestModel?.id ?: "",
+            bestStrategyTitleFa = bestModel?.titleFa ?: "",
+            trendPersistencePct = round(trendPct * 10.0) / 10.0,
+            wickNoisePct = round(wickPct * 10.0) / 10.0,
+            breakoutReliabilityPct = round(breakoutPct * 10.0) / 10.0,
+            featureMultipliers = multipliers,
+            winningFingerprint = fingerprint,
+            decisionStyleFa = styleFa,
+            personalityFa = personalityFa,
+            updatedAtMs = nowMs,
         )
     }
 
     fun applyAutoTunedParametersToConfig(baseConfig: BaseStrategyConfig): BaseStrategyConfig {
-        val t = ensurePerStrategyProfiles(persistedState.autoTunedParameters, persistedState)
+        val t = ensurePerSymbolProfiles(
+            ensurePerStrategyProfiles(persistedState.autoTunedParameters, persistedState),
+        )
         val overrides = t.perStrategyProfiles.mapValues { (_, prof) -> prof.toConfigOverride() }
+        // فقط نمادهایی که دادهٔ واقعی دارند پارامتر موتور را تغییر می‌دهند؛ بقیه با پیش‌فرض کلاس
+        // دارایی کار می‌کنند و از این‌که ناخواسته رفتار استراتژی‌های ۱..۱۵ عوض شود جلوگیری می‌شود.
+        val symbolOverrides = t.perSymbolProfiles
+            .filterValues { it.samplesAnalyzed > 0 }
+            .mapValues { (_, prof) -> prof.toConfigOverride() }
         return baseConfig.copy(
             minRiskReward = max(1.5, t.minRiskReward),
             maxKijunExtensionAtr = t.maxKijunExtensionAtr.coerceIn(1.35, 2.20),
@@ -3536,6 +3966,7 @@ class NeuralSelfLearningEngine(
             minDriveBooksConsensus = t.minDriveBooksConsensus.coerceIn(5, 8),
             autoTunedGeneration = t.tuningGeneration,
             perStrategyOverrides = overrides,
+            perSymbolOverrides = symbolOverrides,
         )
     }
 
@@ -3771,6 +4202,9 @@ class NeuralSelfLearningEngine(
             tuningSummaryFa = summaryFa,
             parameterChangeLogFa = changeLog,
             perStrategyProfiles = perStratTuned,
+            // شخصیت نمادها در این مسیر بازمحاسبه نمی‌شود؛ پروفایل‌های آموخته‌شده حفظ می‌شوند
+            // (بازمحاسبه در `learnAllStrategiesNow` انجام می‌شود).
+            perSymbolProfiles = cur.autoTunedParameters.perSymbolProfiles,
             latestRegressionReport = regressionRep,
         )
     }
@@ -3781,7 +4215,7 @@ class NeuralSelfLearningEngine(
         lrScale: Double = 1.0,
     ): NeuralNetworkPersistedState {
         val normStratId = BitcoinStrategyModel.normalizeStrategyId(sample.strategyId)
-        val (predWin, predR, normHidden) = forwardPassWithInternals(sample.features, cur, normStratId)
+        val (predWin, predR, normHidden) = forwardPassWithInternals(sample.features, cur, normStratId, sample.symbol)
         val targetWin = if (sample.won) 1.0 else 0.0
         val targetR = sample.achievedR.coerceIn(-1.5, 4.5)
 

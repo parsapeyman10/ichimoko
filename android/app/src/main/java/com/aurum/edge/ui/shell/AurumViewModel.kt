@@ -161,7 +161,16 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             container.journalStore.trades.collect { currentTrades ->
                 _stats.value = container.journalStore.stats()
                 _lastDisplayMarks.value = OpenPositionDisplay.onlyOpen(_lastDisplayMarks.value, currentTrades)
-                container.neuralEngine.syncWithClosedJournalTrades(currentTrades)
+                val reconciliation = container.neuralEngine.syncWithClosedJournalTrades(currentTrades)
+                // بعد از یادگیری معامله‌های تازه، شخصیت نمادها/استراتژی‌ها در پیکربندی موتور
+                // تازه‌سازی می‌شود تا ارزیابی‌های بعدی از آموخته‌های جدید استفاده کنند.
+                if (reconciliation.newlyLearnedThisRun > 0) {
+                    runCatching {
+                        val refreshed = container.neuralEngine
+                            .applyAutoTunedParametersToConfig(settings.value.baseStrategyConfig)
+                        container.settingsStore.update { cur -> cur.copy(baseStrategyConfig = refreshed) }
+                    }
+                }
                 runCatching { refreshNeoWaveNeuralTuning(currentTrades) }
                 syncBackgroundServiceState()
             }
@@ -225,7 +234,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             // ── آموزش شبکهٔ عصبی روی همهٔ ۱۶ استراتژی در هر اجرا ──────────────────
             // بعد از بارگذاری ژورنال/دفتر یادگیری و با فاصله از فریم اول اجرا می‌شود تا UI سبک بماند.
             delay(1_200L)
-            runCatching { container.neuralEngine.learnAllStrategiesNow(settings.value.baseStrategyConfig) }
+            runCatching {
+                container.neuralEngine.learnAllStrategiesNow(settings.value.baseStrategyConfig)
+                val refreshed = container.neuralEngine.applyAutoTunedParametersToConfig(settings.value.baseStrategyConfig)
+                container.settingsStore.update { cur -> cur.copy(baseStrategyConfig = refreshed) }
+            }
             CrashReporter.breadcrumb("app:startup-work-done")
         }
         if (!updateCheckStarted) {
@@ -2169,18 +2182,29 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
     val allStrategyLearningFa: StateFlow<String> = _allStrategyLearningFa.asStateFlow()
 
     /**
-     * آموزش یک‌جای شبکهٔ عصبی روی **همهٔ ۱۶ استراتژی**.
+     * آموزش یک‌جای شبکهٔ عصبی روی **همهٔ ۱۶ استراتژی و همهٔ نمادها**.
      *
      * هر استراتژی پروفایل ۱۶ ویژگی و پارامترهای خودش را از دادهٔ اختصاصی‌اش می‌گیرد و در صورت
-     * کمبود داده، از تجربهٔ بقیهٔ استراتژی‌ها (یادگیری انتقالی) پر می‌شود.
+     * کمبود داده، از تجربهٔ بقیهٔ استراتژی‌ها (یادگیری انتقالی) پر می‌شود. هم‌زمان «شخصیت» هر
+     * نماد (روندسواری، نویز شدوی، اعتبار شکست، بهترین استراتژی و حد ضرر مناسبش) ساخته می‌شود و
+     * در پیکربندی موتور اعمال می‌گردد.
      */
     fun trainNeuralOnAllStrategies() {
-        _toast.value = "🧠 آموزش روی همهٔ ۱۶ استراتژی شروع شد…"
+        _toast.value = "🧠 آموزش روی همهٔ استراتژی‌ها و نمادها شروع شد…"
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+            val baseCfg = settings.value.baseStrategyConfig
             val report = runCatching {
-                container.neuralEngine.learnAllStrategiesNow(settings.value.baseStrategyConfig)
+                container.neuralEngine.learnAllStrategiesNow(baseCfg)
             }.getOrNull()
-            val text = report?.summaryFa ?: "⚠️ آموزش روی همهٔ استراتژی‌ها انجام نشد"
+            // پیکربندی موتور با شخصیت آموخته‌شدهٔ نمادها به‌روز می‌شود تا تصمیم‌های بعدی
+            // از همین حالا بر پایهٔ آموخته‌های جدید گرفته شوند.
+            val updatedCfg = runCatching {
+                container.neuralEngine.applyAutoTunedParametersToConfig(baseCfg)
+            }.getOrNull()
+            if (updatedCfg != null) {
+                container.settingsStore.update { cur -> cur.copy(baseStrategyConfig = updatedCfg) }
+            }
+            val text = report?.summaryFa ?: "⚠️ آموزش روی همهٔ استراتژی‌ها و نمادها انجام نشد"
             _allStrategyLearningFa.value = text
             _toast.value = text
             runCatching { scanAndEvaluateBitcoinStrategyNow(userInitiated = false) }
@@ -2973,6 +2997,26 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                     add("• ${p.strategyTitleFa} (${p.strategyBadgeFa}) — نمونه ${p.samplesAnalyzed} | نرخ برد ${R.pct(p.winRatePct)} | PF ${R.number(p.expectedProfitFactor, 2)} | R:R≥${R.number(p.minRiskReward, 2)} | بافر SL ${R.number(p.slBufferAtr, 2)}ATR | گیت ${R.pct(p.neuralWinProbGatePct)}")
                     if (p.tuningSummaryFa.isNotBlank()) add("   ${p.tuningSummaryFa}")
                 }
+            },
+        )
+
+        sections += NeuralCopySection(
+            key = "persymbol",
+            titleFa = "شخصیت آموخته‌شدهٔ هر نماد بازار",
+            lines = buildList {
+                val profiles = s.autoTunedParameters.perSymbolProfiles.values
+                if (profiles.isEmpty()) {
+                    add("هنوز شخصیت نمادها ساخته نشده است؛ با یک‌بار آموزش (یا اولین معاملهٔ بسته‌شده) ساخته می‌شود.")
+                }
+                profiles.sortedWith(compareByDescending<com.aurum.edge.core.PerSymbolNeuralTuningProfile> { it.ownSamples }
+                    .thenByDescending { it.samplesAnalyzed })
+                    .forEach { p ->
+                        add("• ${p.symbolTitleFa} (${p.symbol}) — سبک: ${p.decisionStyleFa} | معاملهٔ خودش ${p.ownSamples} | نمونهٔ آموزشی ${p.samplesAnalyzed}")
+                        add("   نرخ برد ${R.pct(p.winRatePct)} | PF ${R.number(p.expectedProfitFactor, 2)} | میانگین ${R.rMultiple(p.avgRMultiple)} | احتمال برد بیزین ${R.pct(p.posteriorWinProbPct)} | اعتبار شکست ${R.pct(p.breakoutReliabilityPct)}")
+                        add("   پارامترها: بافر SL ${R.number(p.slBufferAtr, 2)}ATR | سقف کیجون ${R.number(p.maxKijunExtensionAtr, 2)}ATR | بافر شکست ${R.number(p.breakoutBufferAtr, 2)}ATR | حداقل کارایی ${R.number(p.minEfficiencyRatio, 2)} | حجم ${R.number(p.minVolumeRatio20, 2)} | اجماع ${p.minDriveBooksConsensus}/9 | گیت ${R.pct(p.neuralWinProbGatePct)}")
+                        if (p.bestStrategyTitleFa.isNotBlank()) add("   سازگارترین استراتژی: ${p.bestStrategyTitleFa}")
+                        if (p.personalityFa.isNotBlank()) add("   ${p.personalityFa}")
+                    }
             },
         )
 

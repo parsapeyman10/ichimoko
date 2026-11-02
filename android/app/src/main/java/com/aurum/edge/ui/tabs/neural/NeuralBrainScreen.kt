@@ -1358,14 +1358,16 @@ fun NeuralBrainScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = "🧠 آموزش یک‌جای شبکه روی همهٔ ۱۶ استراتژی (یادگیری انتقالی)",
+                        text = "🧠 آموزش یک‌جای شبکه روی ۱۶ استراتژی و ۱۵ نماد (یادگیری انتقالی)",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                     )
                 }
                 Text(
-                    text = "هر استراتژی از معاملات خودش یاد می‌گیرد؛ اگر دادهٔ خودش کم باشد، تجربهٔ بقیهٔ " +
-                        "استراتژی‌ها هم به آموزشش اضافه می‌شود. با هر معاملهٔ بسته‌شده، این آموزش خودکار تکرار می‌شود.",
+                    text = "هر استراتژی و هر نماد از معاملات خودش یاد می‌گیرد؛ اگر دادهٔ خودش کم باشد، تجربهٔ " +
+                        "بقیهٔ استراتژی‌ها و نمادهای هم‌دسته هم به آموزشش اضافه می‌شود. شخصیت هر نماد " +
+                        "(روندسواری، نویز شدوی، اعتبار شکست و حد ضرر مناسبش) جداگانه آموخته و در تصمیم‌گیری اعمال می‌شود. " +
+                        "با هر معاملهٔ بسته‌شده، این آموزش خودکار تکرار می‌شود.",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                 )
@@ -1381,6 +1383,116 @@ fun NeuralBrainScreen(
         }
 
         // ── ۱-پ-۲. تیونینگ اختصاصی تمام ۱۶ ویژگی یادگرفته‌شده شبکه عصبی به تفکیک هر استراتژی ──
+        SectionCard(
+            title = "🧬 شخصیت آموخته‌شدهٔ هر نماد بازار (۱۵ نماد)",
+            onCopy = { viewModel.copyNeuralBrainSection("persymbol") },
+            subtitle = "شبکه عصبی برای هر نماد جداگانه یاد می‌گیرد: پیوستگی روند، نویز شدوی، اعتبار شکست، سازگارترین استراتژی و پارامترهای حد ضرر/کیجونِ مخصوص همان نماد",
+            initiallyExpanded = false,
+        ) {
+            val symbolProfiles = neuralState.autoTunedParameters.perSymbolProfiles.values
+                .sortedWith(
+                    compareByDescending<com.aurum.edge.core.PerSymbolNeuralTuningProfile> { it.ownSamples }
+                        .thenByDescending { it.samplesAnalyzed },
+                )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "نمادهایی که دادهٔ اختصاصی دارند: ${symbolProfiles.count { it.ownSamples > 0 }} از ${symbolProfiles.size} — " +
+                        "نمادهای کم‌داده با تجربهٔ نمادهای هم‌دسته و سپس کل بازار آموزش می‌بینند (یادگیری انتقالی).",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AurumColors.Gold,
+                    fontWeight = FontWeight.Bold,
+                )
+                if (symbolProfiles.isEmpty()) {
+                    Text(
+                        text = "هنوز پروفایل نمادی ساخته نشده است؛ با یک‌بار آموزش روی همهٔ استراتژی‌ها (دکمهٔ بالا) ساخته می‌شود.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                    )
+                }
+                symbolProfiles.forEach { p ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(AurumColors.SurfaceAlt)
+                            .border(
+                                0.8.dp,
+                                if (p.ownSamples > 0) AurumColors.Green else AurumColors.Gold,
+                                RoundedCornerShape(10.dp),
+                            )
+                            .padding(9.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "🪙 ${p.symbolTitleFa} (${p.symbol})",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = AurumColors.Gold,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                text = "${p.ownSamples} معاملهٔ خودش",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (p.ownSamples > 0) AurumColors.Green else AurumColors.TextMuted,
+                            )
+                        }
+                        Text(
+                            text = "سبک: ${p.decisionStyleFa} · نمونهٔ آموزشی: ${p.samplesAnalyzed}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Cyan,
+                        )
+                        if (p.samplesAnalyzed > 0) {
+                            Text(
+                                text = String.format(
+                                    Locale.US,
+                                    "نرخ برد %.1f%% · PF %.2f · میانگین %+.2fR · روند %.0f%% · نویز شدوی %.0f%% · اعتبار شکست %.0f%%",
+                                    p.winRatePct,
+                                    p.expectedProfitFactor,
+                                    p.avgRMultiple,
+                                    p.trendPersistencePct,
+                                    p.wickNoisePct,
+                                    p.breakoutReliabilityPct,
+                                ),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextPrimary,
+                            )
+                        }
+                        Text(
+                            text = String.format(
+                                Locale.US,
+                                "بافر SL %.2fATR · سقف کیجون %.2fATR · بافر شکست %.2fATR · حداقل کارایی %.2f · اجماع %d/9",
+                                p.slBufferAtr,
+                                p.maxKijunExtensionAtr,
+                                p.breakoutBufferAtr,
+                                p.minEfficiencyRatio,
+                                p.minDriveBooksConsensus,
+                            ),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.TextMuted,
+                        )
+                        if (p.bestStrategyTitleFa.isNotBlank()) {
+                            Text(
+                                text = "سازگارترین استراتژی: ${p.bestStrategyTitleFa}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.Green,
+                            )
+                        }
+                        if (p.personalityFa.isNotBlank()) {
+                            Text(
+                                text = p.personalityFa,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AurumColors.TextMuted,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         SectionCard(
             title = "🧬 تیونینگ اختصاصی تمام ۱۶ ویژگی شبکه عصبی برای هر استراتژی",
             onCopy = { viewModel.copyNeuralBrainSection("perstrategy") },
