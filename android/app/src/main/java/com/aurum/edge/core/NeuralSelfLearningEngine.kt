@@ -537,6 +537,12 @@ class NeuralSelfLearningEngine(
          * هم‌دسته و سپس کل بازار (با اولویت بالاترین `R`) پر می‌شود تا شخصیت هر نماد هم شکل بگیرد.
          */
         const val MIN_CROSS_SYMBOL_SAMPLES: Int = 4
+
+        /**
+         * نمادی که «درک زندهٔ بازار» برایش ساخته می‌شود. به درخواست کاربر این بخش فقط برای
+         * بیت‌کوین و هنگام بررسی معاملهٔ بیت‌کوین پر می‌شود؛ بقیهٔ نمادها علیت را در کارت خودشان دارند.
+         */
+        const val LIVE_ATTRIBUTION_SYMBOL: String = "BTC/USDT"
         private const val MAX_REPLAY_BUFFER: Int = 320
         private const val MAX_CONDITION_CLUSTERS: Int = 240
         private const val BASE_LR: Double = 0.018
@@ -582,7 +588,7 @@ class NeuralSelfLearningEngine(
         13 -> "۱۴. کیفیت بدنه کندل و شدوی مخالف (Wick/CLV)" to "تشخیص تله فیک‌بریک‌اوت و رد شدوی معکوس"
         14 -> "۱۵. عدد مناسب R:R معامله (Optimal R:R)" to "نسبت پاداش به ریسک بهینه در ساختار فعلی"
         15 -> "۱۶. دقت نقطه‌زنی ورود (Sniper Score & Phase)" to "ورود در ناحیه طلایی تنکان بدون تعقیب قیمت"
-        else -> "۱۰. ستون پلاتوهای کارن پلویل / کتاب‌های درایو" to "وزن سطوح فلت، بولینگر، فرکتال و RSI/DMI"
+        else -> "۱۰. ستون پلاتوهای کارن پلویل / لایه‌های ساختاری" to "وزن سطوح فلت، بولینگر، فرکتال و RSI/DMI"
     }
 
     private fun buildStateSummary(cur: NeuralNetworkPersistedState): NeuralLearningStateSummary {
@@ -829,10 +835,10 @@ class NeuralSelfLearningEngine(
                 else -> 0.45
             }
             val advice = when (code) {
-                "OVERLAP_LDN_NY" -> "بهترین سشن برای شکست کومو (تاتل، درایو ۱ بولینگر و درایو ۸ کونیتز) روی طلا، فارکس و بیت‌کوین"
-                "LONDON" -> "بهترین سشن برای موج N هوسودا و سیستم سریع 7-22-44 (درایو ۹) در شروع روند روزانه"
-                "NEW_YORK" -> "بهترین سشن برای پولبک کیجون پاتل و درایو ۲ (EMA21+RSI7+Fractal) روی طلا، داوجونز و کریپتو"
-                else -> "در سشن آسیا از استراتژی‌های شکست پرهیز کنید و فقط پولبک‌های دقیق کیجون و درایو ۳ (10,30,60) را شکار کنید"
+                "OVERLAP_LDN_NY" -> "بهترین سشن برای شکست کومو (تاتل، لایهٔ ۱ بولینگر و لایهٔ ۸) روی طلا، فارکس و بیت‌کوین"
+                "LONDON" -> "بهترین سشن برای موج N هوسودا و سیستم سریع 7-22-44 (لایهٔ ۹) در شروع روند روزانه"
+                "NEW_YORK" -> "بهترین سشن برای پولبک کیجون پاتل و لایهٔ ۲ (EMA21+RSI7+Fractal) روی طلا، داوجونز و کریپتو"
+                else -> "در سشن آسیا از استراتژی‌های شکست پرهیز کنید و فقط پولبک‌های دقیق کیجون و لایهٔ ۳ (10,30,60) را شکار کنید"
             }
             NeuralTradingSessionEdge(
                 sessionCode = code,
@@ -1886,7 +1892,7 @@ class NeuralSelfLearningEngine(
     /**
      * استخراج کامل بردار ۱۶ ویژگی و امضای شرایط برای معاملات بسته‌شده با ترکیب تمام متدهای اصلی:
      * ۱. ۴ ستون اصیل هوسودا (تعادل کومو/کیجون/چیکو، امواج I/V/N/P/S، چرخه زمان 9/17/26/33، اهداف V/N/E/NT)
-     * ۲. هر ۲۴ استراتژی (۱۵ ترکیب ۴ کتاب + ۹ کتاب PDF درایو)
+     * ۲. هر ۲۴ استراتژی (۱۵ ترکیب ۴ مکتب + ۹ لایهٔ تحلیلی)
      * ۳. دسته‌بندی ۳ کندل قبل از ورود (`PRE3_*` و کیفیت بدنه/شدوی ۳ کندل قبل)
      * ۴. بازسازی دقیق اسنپ‌شات ایچیموکو در لحظه ورود از خزانه کندل ۱ ماهه (`PhoneStorageVaultManager`)
      */
@@ -2216,10 +2222,10 @@ class NeuralSelfLearningEngine(
             "رژیم دسته شاخص",
             "تایم‌فریم ورود (15m/5m)",
             "جهت خرید/فروش",
-            "موتور پاتل (کتاب ۱)",
-            "موتور تاتل (کتاب ۲)",
-            "موتور هوسودا (کتاب ۳)",
-            "موتور پلویل و کتاب‌های درایو ۱ تا ۹",
+            "موتور پاتل",
+            "موتور تاتل",
+            "موتور هوسودا",
+            "موتور پلویل و لایه‌های ساختاری ۱ تا ۹",
             "کارایی جهت‌دار روند (ER14)",
             "ضخامت کومو به ATR",
             "فاصله کشسانی از کیجون",
@@ -2668,14 +2674,26 @@ class NeuralSelfLearningEngine(
 
     /**
      * درک عمیق وضعیت هر بازار و تشخیص علت وقوع حرکت فعلی (`Causal Market Attribution`):
-     * شبکه عصبی با ترکیب داده‌های ریزساختار کندلی، ۹ کتاب درایو، سشن معاملاتی و اخبار کلان مشخص می‌کند:
+     * شبکه عصبی با ترکیب داده‌های ریزساختار کندلی، ۹ لایهٔ ساختاری، سشن معاملاتی و اخبار کلان مشخص می‌کند:
      * ۱) وضعیت فعلی بازار چیست؟ ۲) این اتفاق مربوط به چه عاملی است؟ ۳) اخبار چه تاثیری روی این دسته دارند؟
      */
     @Synchronized
     fun updateLiveMarketCausalAttribution(report: StrategyEvaluationReport): NeuralMarketCausalAttribution {
         val nowMs = System.currentTimeMillis()
         val attr = computeMarketCausalAttribution(report.symbol, report, nowMs)
+        // فقط بیت‌کوین در بخش «درک زندهٔ بازار» نگه داشته می‌شود؛ بقیهٔ نمادها همان‌جا که
+        // ارزیابی می‌شوند متن علیت خودشان را می‌گیرند و در حافظهٔ شبکه ذخیره نمی‌شوند.
+        if (V1Universe.normalize(report.symbol) != LIVE_ATTRIBUTION_SYMBOL) {
+            val pruned = persistedState.liveMarketAttributions.filterKeys { it == LIVE_ATTRIBUTION_SYMBOL }
+            if (pruned.size != persistedState.liveMarketAttributions.size) {
+                persistedState = persistedState.copy(liveMarketAttributions = pruned)
+                _stateFlow.value = persistedState
+                _summaryFlow.value = buildStateSummary(persistedState)
+            }
+            return attr
+        }
         val updatedMap = (persistedState.liveMarketAttributions + (attr.symbol to attr))
+            .filterKeys { it == LIVE_ATTRIBUTION_SYMBOL }
             .entries
             .sortedByDescending { it.value.updatedAtMs }
             .take(20)
@@ -2726,7 +2744,7 @@ class NeuralSelfLearningEngine(
                 whatIsHappeningFa = "بازار $symbol در حال شکل‌دهی تعادل قیمت حول میانگین‌های ایچیموکو است.",
                 whyItIsHappeningFa = "مربوط به چرخش نقدینگی بین‌بانکی در سشن جاری و واکنش به سطوح تعادل کیجون.",
                 newsImpactSummaryFa = catNewsText,
-                unified9BookSummaryFa = "در انتظار تکمیل کندل‌های ۳ تایم‌فریم برای محاسبه اجماع ۹ کتاب درایو",
+                unified9BookSummaryFa = "در انتظار تکمیل کندل‌های ۳ تایم‌فریم برای محاسبه اجماع ۹ لایهٔ ساختاری",
                 recommendedTacticalActionFa = "صبر تا تثبیت کامل کندل بیرون ابر کومو",
                 causalConfidencePct = 74.0,
                 newsSentimentScore = catNewsScore,
@@ -2761,7 +2779,7 @@ class NeuralSelfLearningEngine(
                     "🛡️🥇 جریان پول امن نهادی روی طلا و نقره",
                     "روند جهت‌دار قوی در $symbol با ADX=${String.format(Locale.US, "%.1f", trigSnap.adx14)} و کارایی روند ${(trigSnap.efficiencyRatio14 * 100).toInt()}%.",
                     "مربوط به ورود سرمایه‌های پناهگاه امن (Safe-Haven Inflow)، نوسان شاخص دلار (DXY) و بازده اوراق خزانه‌داری آمریکا.",
-                    "شکار پولبک به EMA(21) / Tenkan(10) با متود جامع ۹ کتاب درایو و هدف حداقل 2.85R.",
+                    "شکار پولبک به EMA(21) / Tenkan(10) با متود جامع ۹ لایهٔ ساختاری و هدف حداقل 2.85R.",
                 )
             }
             assetClass == AssetClass.CRYPTO && trigSnap.volumeRatio20 >= 1.55 && (adverseWick >= 0.38 || favorableTail >= 0.38) -> {
@@ -2778,8 +2796,8 @@ class NeuralSelfLearningEngine(
                     "VOLATILITY_SQUEEZE_BREAKOUT",
                     "🚀💥 فوران فشردگی بولینگر و رهایی کاتانا (Squeeze Breakout)",
                     "فشردگی نوسان (BB Width=${String.format(Locale.US, "%.2f%%", trigSnap.bbBandwidthRatio * 100.0)}) و شلیک موج جدید بیرون ابر کومو.",
-                    "مربوط به انباشت سفارشات نهادی در فاز تراکم و شکست هم‌زمان مقاومت/حمایت کومو و باند بولینگر (کتاب درایو ۱ و ۹).",
-                    "بهترین نقطه برای شکار تولد روند (Genesis) با متود جامع کتاب‌های درایو ۱ تا ۹.",
+                    "مربوط به انباشت سفارشات نهادی در فاز تراکم و شکست هم‌زمان مقاومت/حمایت کومو و باند بولینگر (لایهٔ ساختاری ۱ و ۹).",
+                    "بهترین نقطه برای شکار تولد روند (Genesis) با متود جامع لایه‌های ساختاری ۱ تا ۹.",
                 )
             }
             trigSnap.distanceToKijunAtr >= 1.65 || trigSnap.isCClampWarning -> {
@@ -2797,7 +2815,7 @@ class NeuralSelfLearningEngine(
                     "🪤 شکار نقدینگی (Stop-Hunt) و رد قیمت با شدوی مخالف",
                     "ثبت شدوی مخالف ${(adverseWick * 100).toInt()}% در برخورد به سطح کلیدی.",
                     "مربوط به تله شکست کاذب (Fakeout) توسط بازارگردان‌ها برای فعال کردن استاپ‌های خرد قبل از حرکت اصلی.",
-                    "اجتناب از ورود روی کندل شدودار؛ صبر برای الگوی شمعی تایید موکرجی (کتاب درایو ۴).",
+                    "اجتناب از ورود روی کندل شدودار؛ صبر برای الگوی شمعی تایید موکرجی (لایهٔ ساختاری ۴).",
                 )
             }
             trigSnap.isKijunFlat && trigSnap.isCurrentSpanBFlat && trigSnap.efficiencyRatio14 < 0.22 -> {
@@ -2805,15 +2823,15 @@ class NeuralSelfLearningEngine(
                     "EQUILIBRIUM_RANGE_CHOP",
                     "⏳🧱 قفل تعادل افقی کیجون/کومو و بازار رِنج",
                     "خطوط کیجون و Senkou B هر دو افقی شده‌اند و کارایی روند به ${(trigSnap.efficiencyRatio14 * 100).toInt()}% کاهش یافته است.",
-                    "مربوط به تعادل موقت خریداران و فروشندگان و نبود کاتالیزور خبری جدید (قانون ضد رِنج کتاب درایو ۵ موکرجی).",
+                    "مربوط به تعادل موقت خریداران و فروشندگان و نبود کاتالیزور خبری جدید (قانون ضد رِنج لایهٔ ساختاری ۵ موکرجی).",
                     "عدم معامله در داخل باکس رِنج تا شکست کامل کانال کومو با حجم بالا.",
                 )
             }
             isLondonOrNyOpen && consensus9.confirmedBooksCount >= 6 -> {
                 Quintuple(
                     "INSTITUTIONAL_SESSION_IMPULSE",
-                    "🏛️🔥 موج نهادی سشن لندن/نیویورک با اجماع ${consensus9.confirmedBooksCount}/9 کتاب درایو",
-                    "همگرایی قدرتمند ۳ تایم‌فریم همراه با تایید ${consensus9.confirmedBooksCount} کتاب از ۹ کتاب درایو.",
+                    "🏛️🔥 موج نهادی سشن لندن/نیویورک با اجماع ${consensus9.confirmedBooksCount}/9 لایهٔ ساختاری",
+                    "همگرایی قدرتمند ۳ تایم‌فریم همراه با تایید ${consensus9.confirmedBooksCount} لایه از ۹ لایهٔ ساختاری.",
                     "مربوط به ورود حجم اصلی بانک‌ها در بازگشایی سشن و هم‌جهتی ریبون EMA(13/21/34/89) با هر ۳ ابر ایچیموکو.",
                     "ستاپ طلایی ورود اسنایپر با احتمال برد بیزین ${consensus9.bayesianWinProbabilityPct}% و تارگت ${consensus9.dynamicOptimalRr}R.",
                 )
@@ -2822,18 +2840,18 @@ class NeuralSelfLearningEngine(
                 Quintuple(
                     "STRUCTURAL_ICHIMOKU_FLOW",
                     "📈 جریان ساختاری ایچیموکو (${report.trendPhase.badgeFa})",
-                    "حرکت قیمت در فاز «${report.trendPhase.badgeFa}» با اجماع ${consensus9.confirmedBooksCount}/9 کتاب درایو.",
+                    "حرکت قیمت در فاز «${report.trendPhase.badgeFa}» با اجماع ${consensus9.confirmedBooksCount}/9 لایهٔ ساختاری.",
                     "مربوط به چرخه طبیعی موج هوسودا و تعادل پویا بین Tenkan(9/10/7) و Kijun(26/30/22).",
                     if (consensus9.confirmedBooksCount >= 6) {
                         "تایید ورود در ناحیه اسنایپر (${consensus9.compositeSniperAnchor}) با حد ضرر ترکیبی ${consensus9.compositeFortressStopLoss}"
                     } else {
-                        "رصد ستاپ تا رسیدن اجماع ۹ کتاب درایو به حداقل ۶ کتاب"
+                        "رصد ستاپ تا رسیدن اجماع ساختاری به حداقل ۶ لایه"
                     },
                 )
             }
         }
 
-        val regimeFa = "${report.trendPhase.badgeFa} · ER=${(trigSnap.efficiencyRatio14 * 100).toInt()}% · ADX=${String.format(Locale.US, "%.0f", trigSnap.adx14)} · اجماع ${consensus9.confirmedBooksCount}/9 کتاب"
+        val regimeFa = "${report.trendPhase.badgeFa} · ER=${(trigSnap.efficiencyRatio14 * 100).toInt()}% · ADX=${String.format(Locale.US, "%.0f", trigSnap.adx14)} · اجماع ${consensus9.confirmedBooksCount}/9 لایه"
         val confPct = round((consensus9.bayesianWinProbabilityPct * 0.65 + report.confidence * 0.35).coerceIn(35.0, 98.5) * 10.0) / 10.0
 
         return NeuralMarketCausalAttribution(
@@ -3016,7 +3034,7 @@ class NeuralSelfLearningEngine(
         }
         val catalystFa = when {
             isMacroReleaseWindow -> "⚠️ پنجره انتشار داده‌های کلان اقتصادی آمریکا (12:30–14:30 UTC): گیت ضد شوک خبری شبکه عصبی فعال است."
-            utcHour in 12..15 -> "🔥 هم‌پوشانی سشن لندن و نیویورک: بالاترین حجم سفارشات نهادی و بهترین دقت برای متود جامع ۹ کتاب درایو."
+            utcHour in 12..15 -> "🔥 هم‌پوشانی سشن لندن و نیویورک: بالاترین حجم سفارشات نهادی و بهترین دقت برای متود جامع ۹ لایهٔ ساختاری."
             utcHour in 7..11 -> "🇬🇧 سشن فعال لندن: شکل‌گیری موج‌های اصلی روزانه در طلا، فارکس و بیت‌کوین."
             else -> "🌊 جریان آرام بین‌بانکی: تمرکز شبکه عصبی روی شکار پولبک‌های کم‌ریسک کیجون و فرکتال."
         }
@@ -4112,11 +4130,11 @@ class NeuralSelfLearningEngine(
         val avgEliteR = if (eliteWins.isNotEmpty()) eliteWins.map { it.achievedR }.average() else 2.25
         val tunedMinRr = round(avgEliteR.coerceIn(1.65, 2.20) * 100.0) / 100.0
 
-        // ۵. تیونینگ حد نصاب اجماع ۹ کتاب درایو (minDriveBooksConsensus)
+        // ۵. تیونینگ حد نصاب اجماع ۹ لایهٔ ساختاری (minDriveBooksConsensus)
         val wrPct = if (samples.isNotEmpty()) (wins.size.toDouble() / samples.size.toDouble()) * 100.0 else 66.0
         val tunedConsensus = when {
-            samples.size >= 8 && wrPct < 55.0 -> 7 // سخت‌گیری بیشتر (۷ از ۹ کتاب) وقتی بازار پرنوسان است
-            else -> 6 // اجماع استاندارد ۶ از ۹ کتاب درایو
+            samples.size >= 8 && wrPct < 55.0 -> 7 // سخت‌گیری بیشتر (۷ از ۹ لایه) وقتی بازار پرنوسان است
+            else -> 6 // اجماع استاندارد ۶ از ۹ لایهٔ ساختاری
         }
 
         // ۶. انتخاب بهترین استراتژی برای هر دسته بازار با Thompson Sampling Posterior
@@ -4150,13 +4168,13 @@ class NeuralSelfLearningEngine(
             "🎯 حداقل R:R بهینه روی 1:${String.format(Locale.US, "%.2f", tunedMinRr)} تنظیم شد (حداقل قانون پایه 1:1.5 حفظ و بهینه گردید).",
             "🧲 سقف فاصله مجاز از کیجون (ضد C-Clamp) از ${baseConfig.maxKijunExtensionAtr} به ${String.format(Locale.US, "%.2f ATR", tunedMaxKijunExt)} تیون شد.",
             "🛡️ بافر امن حد ضرر ساختاری روی ${String.format(Locale.US, "%.2f ATR", tunedSlBuffer)} تنظیم شد تا شدوهای استاپ‌هانت فیلتر شوند.",
-            "📚 حد نصاب «متود جامع کتاب‌های درایو ۱ تا ۹» روی حداقل $tunedConsensus از ۹ کتاب (احتمال برد بیزین ≥ ۷۶٪) قفل شد.",
+            "📚 حد نصاب «متود جامع لایه‌های ساختاری ۱ تا ۹» روی حداقل $tunedConsensus از ۹ لایه (احتمال برد بیزین ≥ ۷۶٪) قفل شد.",
             "⚡ کف کارایی روند کافمن (ER14) روی ${(tunedMinEr * 100).toInt()}% و گیت احتمال برد شبکه عصبی روی ${tunedGatePct.toInt()}% کالیبره گردید.",
         )
 
         val summaryFa = String.format(
             Locale.US,
-            "نسل #%d تیونینگ خودکار (CEM + Bayesian): R:R≥1:%.2f · سقف کیجون=%.2f ATR · بافر استاپ=%.2f ATR · اجماع درایو=%d/9 کتاب · امید برد=%.1f%%",
+            "نسل #%d تیونینگ خودکار (CEM + Bayesian): R:R≥1:%.2f · سقف کیجون=%.2f ATR · بافر استاپ=%.2f ATR · اجماع ساختاری=%d/9 لایه · امید برد=%.1f%%",
             nextGen,
             tunedMinRr,
             tunedMaxKijunExt,

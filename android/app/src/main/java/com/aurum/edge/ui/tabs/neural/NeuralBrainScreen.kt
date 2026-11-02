@@ -66,7 +66,7 @@ fun NeuralBrainScreen(
 
     var assistantSymbol by rememberSaveable { mutableStateOf(V1Universe.allSymbols.first()) }
     var assistantTfLabel by rememberSaveable { mutableStateOf(Interval.M15.label) }
-    var matrixFilter by rememberSaveable { mutableIntStateOf(0) } // 0 = همه ۲۴ استراتژی, 1 = ۹ کتاب درایو, 2 = ۱۵ ترکیب پایه
+    var matrixFilter by rememberSaveable { mutableIntStateOf(0) } // 0 = همه ۲۴ استراتژی, 1 = ۹ لایهٔ ساختاری, 2 = ۱۵ ترکیب پایه
 
     val assistantInterval = if (assistantTfLabel == Interval.M5.label) Interval.M5 else Interval.M15
     val coaching = remember(assistantSymbol, assistantInterval, dualReports) {
@@ -553,11 +553,11 @@ fun NeuralBrainScreen(
             }
         }
 
-        // ── ۰. دستیار ترید با بهترین متود ایچیموکو جهان (گوایچی هوسودا + ۹ کتاب درایو) ──────
+        // ── ۰. دستیار ترید با بهترین متود ایچیموکو جهان (گوایچی هوسودا + ۹ لایهٔ ساختاری) ──────
         SectionCard(
-            title = "🧭 دستیار ترید با بهترین متود ایچیموکو جهان (هوسودا + پاتل + ۹ کتاب درایو)",
+            title = "🧭 دستیار ترید با بهترین متود ایچیموکو جهان (هوسودا + پاتل + ۹ لایهٔ ساختاری)",
             onCopy = { viewModel.copyTextToClipboard("دستیار ایچیموکو", buildAssistantCopyText(coaching), "📋 توضیحات دستیار ایچیموکو کپی شد") },
-            subtitle = "تحلیل ۴ ستون اصیل گوایچی هوسودا (تعادل، امواج I/V/N/P/S، چرخه زمان 9/17/26/33 و اهداف V/N/E/NT) + تله‌متری زنده ۹ کتاب درایو",
+            subtitle = "تحلیل ۴ ستون اصیل گوایچی هوسودا (تعادل، امواج I/V/N/P/S، چرخه زمان 9/17/26/33 و اهداف V/N/E/NT) + تله‌متری زنده ۹ لایهٔ ساختاری",
             initiallyExpanded = false,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -692,7 +692,7 @@ fun NeuralBrainScreen(
 
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "📚 خلاصه تله‌متری زنده استراتژی‌های درایو روی ${coaching.symbol}:",
+                            text = "📚 خلاصه تله‌متری زندهٔ لایه‌های ساختاری روی ${coaching.symbol}:",
                             style = MaterialTheme.typography.labelMedium,
                             color = AurumColors.Cyan,
                             fontWeight = FontWeight.Bold,
@@ -1061,9 +1061,9 @@ fun NeuralBrainScreen(
 
         // ── ۱-الف. درک زنده وضعیت هر بازار و تشخیص علت وقوع حرکت فعلی (Causal Market Attribution) ──
         SectionCard(
-            title = "🌍 درک زنده وضعیت هر بازار و علت حرکت فعلی (Causal Market Attribution)",
+            title = "🌍 درک زندهٔ وضعیت بیت‌کوین و علت حرکت فعلی (Causal Market Attribution)",
             onCopy = { viewModel.copyNeuralBrainSection("market") },
-            subtitle = "تشخیص لحظه‌ای این‌که در طلا، نقره، کریپتو، فارکس و داوجونز چه اتفاقی در جریان است و علت آن مربوط به چیست",
+            subtitle = "این بخش طبق درخواست کاربر فقط برای بیت‌کوین ساخته می‌شود و زمانی پر می‌شود که موتور در حال بررسی/معاملهٔ بیت‌کوین است",
             initiallyExpanded = false,
         ) {
             val focusedReport = dualReports[assistantSymbol]?.primaryReport
@@ -1072,29 +1072,24 @@ fun NeuralBrainScreen(
             }
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
+                    modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    V1Universe.allSymbols.forEach { sym ->
-                        Pill(
-                            text = sym,
-                            color = if (sym == assistantSymbol) AurumColors.Gold else AurumColors.TextMuted,
-                            modifier = Modifier.clickable { assistantSymbol = sym },
-                        )
-                    }
+                    Pill(text = "🟠 BTC/USDT", color = AurumColors.Gold)
+                    Text(
+                        text = "فقط بیت‌کوین — علیت هر نماد دیگر داخل کارت همان نماد نمایش داده می‌شود.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.TextMuted,
+                    )
                 }
 
-                val attributionsToShow = if (neuralState.liveMarketAttributions.isNotEmpty()) {
-                    neuralState.liveMarketAttributions
-                } else {
-                    emptyList()
-                }
+                val attributionsToShow = neuralState.liveMarketAttributions
+                    .filter { it.symbol == "BTC/USDT" }
 
                 if (attributionsToShow.isEmpty()) {
                     Text(
-                        text = "در حال دریافت کندل‌ها برای استخراج علیت بازار؛ دکمه اسکن یا به‌روزرسانی اخبار را بزنید.",
+                        text = "در حال حاضر بررسی معاملهٔ بیت‌کوین فعال نیست؛ به‌محض اسکن بیت‌کوین این بخش پر می‌شود.",
                         style = MaterialTheme.typography.bodySmall,
                         color = AurumColors.TextMuted,
                     )
@@ -1153,7 +1148,7 @@ fun NeuralBrainScreen(
                                 color = AurumColors.TextSecondary,
                             )
                             Text(
-                                text = "📚 متود جامع ۹ کتاب درایو: ${attr.unified9BookSummaryFa}",
+                                text = "📚 متود جامع ۹ لایهٔ ساختاری: ${attr.unified9BookSummaryFa}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.Green,
                             )
@@ -1283,8 +1278,8 @@ fun NeuralBrainScreen(
                         modifier = Modifier.weight(1f),
                     )
                     StatTile(
-                        label = "اجماع ۹ کتاب درایو",
-                        value = "${tuned.minDriveBooksConsensus}/9 کتاب",
+                        label = "اجماع ۹ لایهٔ ساختاری",
+                        value = "${tuned.minDriveBooksConsensus}/9 لایه",
                         valueColor = AurumColors.Cyan,
                         modifier = Modifier.weight(1f),
                     )
@@ -1940,11 +1935,11 @@ fun NeuralBrainScreen(
             }
         }
 
-        // ── ۱-ج. ماتریس برتری ترید به تفکیک ۱۶ استراتژی (درایو جامع + ۱۵ ترکیب پایه) ──
+        // ── ۱-ج. ماتریس برتری ترید به تفکیک ۱۶ استراتژی (متود جامع + ۱۵ ترکیب پایه) ──
         SectionCard(
             title = "🏆 ماتریس برتری ترید ۱۶ استراتژی (نرخ برد، Profit Factor و امید ریاضی E[R])",
             onCopy = { viewModel.copyNeuralBrainSection("matrix") },
-            subtitle = "رتبه‌بندی تریدی تمام ۱۵ ترکیب ایچیموکو و استراتژی درایو جامع بر اساس بازدهی واقعی و امتیاز لبه ترید",
+            subtitle = "رتبه‌بندی تریدی تمام ۱۵ ترکیب ایچیموکو و استراتژی پیمان بر اساس بازدهی واقعی و امتیاز لبه ترید",
             initiallyExpanded = false,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1958,7 +1953,7 @@ fun NeuralBrainScreen(
                         modifier = Modifier.clickable { matrixFilter = 0 },
                     )
                     Pill(
-                        text = "📚 درایو جامع",
+                        text = "📚 متود جامع",
                         color = if (matrixFilter == 1) AurumColors.Cyan else AurumColors.TextMuted,
                         modifier = Modifier.clickable { matrixFilter = 1 },
                     )
@@ -2470,7 +2465,7 @@ private fun buildAssistantCopyText(coaching: com.aurum.edge.core.MasterIchimokuS
             }
             if (coaching.driveBooksTelemetryFa.isNotEmpty()) {
                 add("")
-                add("تله‌متری ۹ کتاب درایو:")
+                add("تله‌متری ۹ لایهٔ ساختاری:")
                 coaching.driveBooksTelemetryFa.forEach { add("• $it") }
             }
         },

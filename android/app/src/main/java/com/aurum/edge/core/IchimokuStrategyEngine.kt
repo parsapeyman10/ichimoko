@@ -216,14 +216,14 @@ enum class BitcoinStrategyModel(
         baseOptimalRr = 2.40,
     ),
 
-    // ── ۵. متود جامع یکپارچه کتاب‌های درایو (Unified Drive Master Method — تنها استراتژی جامع درایو) ──
+    // ── ۵. متود جامع یکپارچه لایه‌های ساختاری (Unified 9-Layer Master Method — تنها استراتژی جامع ۹ لایه) ──
     DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER(
         id = "DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER",
-        titleFa = "استراتژی ۱۶ · استراتژی پیمان (متود جامع ۹ کتاب درایو + نئوویو–الیوت)",
+        titleFa = "استراتژی ۱۶ · استراتژی پیمان (متود جامع ۹ لایهٔ ساختاری + نئوویو–الیوت)",
         badgeFa = "استراتژی پیمان · جایگاه ۱۶",
-        authorRefFa = "World-Class Regime-Gated Ichimoku & 9-Book Quantitative Synthesis (Hosoda + Patel + Tuttle + Péloille + 9 Drive Books)",
+        authorRefFa = "World-Class Regime-Gated Ichimoku & 9-Layer Quantitative Synthesis (Hosoda + Patel + Tuttle + Péloille + 9 Structural Layers)",
         summaryFa = "استراتژی پیمان — نسخهٔ کامل و مستند. " +
-            "۱) پایه: متود جامع یکپارچهٔ ۹ کتاب درایو (۴ ستون نهادی ۷‑۲۲‑۴۴ / ۹‑۲۶‑۵۲ / ۱۰‑۳۰‑۶۰، " +
+            "۱) پایه: متود جامع یکپارچهٔ ۹ لایهٔ ساختاری (۴ ستون نهادی ۷‑۲۲‑۴۴ / ۹‑۲۶‑۵۲ / ۱۰‑۳۰‑۶۰، " +
             "ریبون EMA 13/21/34/89، ماشهٔ رژیم بازار و تأیید DMI/ADX + MACD + Kelly) روی بیس جامع ایچیموکو. " +
             "۲) نئوویو–الیوت: این لایه فقط داخل همین استراتژی ادغام شده و کلید کاربر ندارد؛ الگوی هم‌جهت و " +
             "تکمیل‌شدهٔ نئوویو اطمینان ورود را بالا می‌برد، الگوی مخالفِ معتبر ورود را می‌بندد و اهداف موجی " +
@@ -263,7 +263,7 @@ enum class BitcoinStrategyModel(
 
     val combinationCategoryFa: String
         get() = if (this == DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER) {
-            "متود جامع یکپارچه درایو"
+            "متود جامع یکپارچهٔ ۹ لایه"
         } else {
             when (combinationCount) {
                 1 -> "تک‌استراتژی (۱گانه)"
@@ -309,7 +309,7 @@ enum class BitcoinStrategyModel(
 }
 
 /**
- * شناسنامه فنی و دفترچه قوانین متود جامع یکپارچه درایو و ۱۵ ترکیب پایه.
+ * شناسنامه فنی و دفترچه قوانین متود جامع یکپارچهٔ ۹ لایه و ۱۵ ترکیب پایه.
  */
 data class DriveBookPlaybookSpec(
     val strategyId: String,
@@ -326,19 +326,19 @@ data class DriveBookPlaybookSpec(
 fun BitcoinStrategyModel.driveBookPlaybook(): DriveBookPlaybookSpec = when (this) {
     BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> DriveBookPlaybookSpec(
         strategyId = id,
-        bookFileTitle = "Unified Drive Books 1–9 Master Method (تلفیق جامع هر ۹ کتاب PDF گوگل درایو)",
-        authorAndEdition = "Adaptive Bayesian Log-Odds 9-Book Consensus — TuAnh + Foka + Keenbase + Mukherjee ×2 + HowToTrade + TSG + Koonitz ×2",
+        bookFileTitle = "Unified 9-Layer Master Method (تلفیق جامع ۹ لایهٔ تحلیلی)",
+        authorAndEdition = "Adaptive Bayesian Log-Odds 9-Layer Consensus — TuAnh + Foka + Keenbase + Mukherjee ×2 + HowToTrade + TSG + Koonitz ×2",
         ichimokuSettingsFa = "ابرچنگال سه‌گانه ایچیموکو: استاندارد (9,26,52) + نهادی Keenbase (10,30,60) + سریع کونیتز (7,22,44)",
         auxiliaryIndicatorsFa = "EMA Ribbon (13, 21, 34, 48, 89, SMA200) + BB(20,2) Squeeze + RSI(7)/RSI(14) 50-Bounce + DMI/ADX(14) + MACD + 5-Bar Fractals + Kelly Win%",
         entryChecklistStepsFa = listOf(
             "۱. فیلتر صفحه سه‌گانه کونیتز و هم‌جهتی هر ۳ ابر ایچیموکو (9-26-52 ، 10-30-60 و 7-22-44) همراه با ریبون EMA(13/21/34/89)",
-            "۲. اجماع بیزین تطبیقی حداقل ۶ از ۹ کتاب درایو با احتمال برد ترکیبی ≥ ۷۸٪ و امتیاز معیار کلی (Kelly ≥ 69%)",
+            "۲. اجماع بیزین تطبیقی حداقل ۶ از ۹ لایهٔ ساختاری با احتمال برد ترکیبی ≥ ۷۸٪ و امتیاز معیار کلی (Kelly ≥ 69%)",
             "۳. تایید هم‌زمان ماشه‌های شکار سود: فشردگی بولینگر (TuAnh)، پرش RSI(7) از خط ۵۰ (Foka)، کراس 10/30 و 7/22 و تایید DMI/MACD",
-            "۴. آزادی سه‌بعدی Chikou Span بالای/زیر کومو در ۲۶ دوره قبل (کتاب‌های ۵، ۷ و ۸) و عدم وجود کیجون فلت رِنج",
+            "۴. آزادی سه‌بعدی Chikou Span بالای/زیر کومو در ۲۶ دوره قبل (لایه‌های ۵، ۷ و ۸) و عدم وجود کیجون فلت رِنج",
         ),
         stopLossFormulaFa = "سنگر ترکیبی ضد استاپ‌هانت: قوی‌ترین سطح بین فرکتال ۵ کندلی بیل ویلیامز (Foka) + Kijun(30)±0.40ATR (Keenbase) + EMA(34) کونیتز + BB Middle(20)",
-        takeProfitAndExitRulesFa = "تارگت پویا تا سقف ۳R (تلفیق هدف 3R سیستم Keenbase/Foka با امواج N/E هوسودا و هدف MA200 کتاب TuAnh) و بستن کامل معامله در رسیدن به 3R",
-        specialEdgeAdvantageFa = "با ادغام ریاضی هر ۹ کتاب در یک متود جامع بیزین، خطاهای تک‌استراتژی حذف شده و فقط معاملات اسنایپر با بالاترین امید ریاضی شکار می‌شوند.",
+        takeProfitAndExitRulesFa = "تارگت پویا تا سقف ۳R (تلفیق هدف 3R سیستم Keenbase/Foka با امواج N/E هوسودا و هدف MA200 روش TuAnh) و بستن کامل معامله در رسیدن به 3R",
+        specialEdgeAdvantageFa = "با ادغام ریاضی هر ۹ لایه در یک متود جامع بیزین، خطاهای تک‌استراتژی حذف شده و فقط معاملات اسنایپر با بالاترین امید ریاضی شکار می‌شوند.",
     )
 
     else -> DriveBookPlaybookSpec(
@@ -369,7 +369,7 @@ fun BitcoinStrategyModel.formatLiveBookTelemetryFa(
     stratSnap: IchimokuBarSnapshot? = trigSnap,
     isLong: Boolean = true,
 ): String {
-    if (trigSnap == null) return "در حال دریافت کندل‌ها برای محاسبه اندیکاتورهای اختصاصی کتاب..."
+    if (trigSnap == null) return "در حال دریافت کندل‌ها برای محاسبه اندیکاتورهای اختصاصی روش..."
     return when (this) {
         BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> {
             val consensus = IchimokuStrategyEngine.evaluateUnified9BookConsensus(
@@ -380,7 +380,7 @@ fun BitcoinStrategyModel.formatLiveBookTelemetryFa(
             )
             String.format(
                 Locale.US,
-                "اجماع ۹ کتاب درایو: %d/9 کتاب تایید · احتمال برد بیزین=%.1f%% · Kelly=%d%% · Fast(7/22)=%s/%s · Keenbase(10/30)=%s/%s · ADX=%.1f · RSI7=%.1f",
+                "اجماع ۹ لایهٔ ساختاری: %d/9 لایه تایید · احتمال برد بیزین=%.1f%% · Kelly=%d%% · Fast(7/22)=%s/%s · Keenbase(10/30)=%s/%s · ADX=%.1f · RSI7=%.1f",
                 consensus.confirmedBooksCount,
                 consensus.bayesianWinProbabilityPct,
                 trigSnap.kellyWinProbabilityPercent,
@@ -571,8 +571,8 @@ data class BaseStrategyConfig(
 }
 
 /**
- * خروجی موتور «اجماع بیزین تطبیقی ۹ کتاب درایو» (Adaptive Bayesian Log-Odds 9-Book Consensus):
- * ارزیابی هم‌زمان هر ۹ کتاب PDF گوگل درایو و استخراج احتمال برد بیزین، سنگر حد ضرر ترکیبی و تارگت بهینه.
+ * خروجی موتور «اجماع بیزین تطبیقی ۹ لایهٔ ساختاری» (Adaptive Bayesian Log-Odds 9-Book Consensus):
+ * ارزیابی هم‌زمان هر ۹ لایهٔ تحلیلی و استخراج احتمال برد بیزین، سنگر حد ضرر ترکیبی و تارگت بهینه.
  */
 data class Unified9BookConsensusResult(
     val isLong: Boolean,
@@ -608,7 +608,7 @@ data class CustomStrategySlot(
 )
 
 /**
- * خروجی محاسبه دقیق ۵ خط ایچیموکو + اندیکاتورهای ۹ کتاب PDF گوگل درایو روی یک تایم‌فریم مشخص.
+ * خروجی محاسبه دقیق ۵ خط ایچیموکو + اندیکاتورهای ۹ لایهٔ تحلیلی روی یک تایم‌فریم مشخص.
  */
 data class IchimokuBarSnapshot(
     val time: Long,
@@ -650,7 +650,7 @@ data class IchimokuBarSnapshot(
     val upperWickRatio: Double = 0.1,
     val lowerWickRatio: Double = 0.1,
     val recentKatanaRelease: Boolean = false,
-    // ── اندیکاتورهای استخراج‌شده از ۹ کتاب PDF گوگل درایو ──
+    // ── اندیکاتورهای استخراج‌شده از ۹ لایهٔ تحلیلی ──
     val bbMiddle20: Double = close,
     val bbUpper20: Double = close + atr14 * 2.0,
     val bbLower20: Double = close - atr14 * 2.0,
@@ -1365,7 +1365,7 @@ object IchimokuStrategyEngine {
             abs(tenkanAt(prev3Idx) - kijunAt(prev3Idx)) <= atr14 * 0.18
         val katanaRelease = compressedRecently && abs(tenkan - kijun) >= abs(prevTenkan - prevKijun) && bodyRatio >= 0.32
 
-        // ── ۱. بولینگر باند (20, 2.0) و فشردگی Squeeze (کتاب درایو ۱ — TuAnh و کتاب ۴ — Mukherjee) ──
+        // ── ۱. بولینگر باند (20, 2.0) و فشردگی Squeeze (لایهٔ ساختاری ۱ — TuAnh و لایهٔ ۴ — Mukherjee) ──
         fun bbAt(idx: Int): Triple<Double, Double, Double> {
             val start = (idx - 19).coerceAtLeast(0)
             val slice = closedBars.subList(start, idx + 1)
@@ -1397,7 +1397,7 @@ object IchimokuStrategyEngine {
         val marubozuBull = cur.close > cur.open && bodyRatio >= 0.42 && upperWick <= 0.32
         val marubozuBear = cur.close < cur.open && bodyRatio >= 0.42 && lowerWick <= 0.32
 
-        // ── ۲. میانگین‌های متحرک EMA 13, 21, 34, 48, 89 و SMA 200 (کتاب‌های ۱، ۲، ۸ و ۹) ──
+        // ── ۲. میانگین‌های متحرک EMA 13, 21, 34, 48, 89 و SMA 200 (لایه‌های ۱، ۲، ۸ و ۹) ──
         fun computeEmaSeries(period: Int): DoubleArray {
             val out = DoubleArray(closedBars.size)
             val k = 2.0 / (period + 1.0)
@@ -1423,7 +1423,7 @@ object IchimokuStrategyEngine {
         val sma200 = closedBars.subList(sma200Start, lastIdx + 1).map { it.close }.average()
         val ema21SlopeAtr = (ema21 - ema21Arr[(lastIdx - 3).coerceAtLeast(0)]) / (3.0 * atr14)
 
-        // ── ۳. محاسبه RSI(14) و RSI(7) سریع + پرش از خط ۵۰ و قله/دره RSI (کتاب‌های ۱، ۲ و ۴) ──
+        // ── ۳. محاسبه RSI(14) و RSI(7) سریع + پرش از خط ۵۰ و قله/دره RSI (لایه‌های ۱، ۲ و ۴) ──
         fun computeRsiSeries(period: Int): DoubleArray {
             val out = DoubleArray(closedBars.size) { 50.0 }
             if (closedBars.size < 2) return out
@@ -1473,7 +1473,7 @@ object IchimokuStrategyEngine {
         val rsi7BullBounce = rsi7 >= 50.0 && (rsi7 >= prevRsi7 - 1.5 || minRsi7Recent <= 58.0)
         val rsi7BearBounce = rsi7 <= 50.0 && (rsi7 <= prevRsi7 + 1.5 || maxRsi7Recent >= 42.0)
 
-        // ── ۴. فرکتال‌های ۵ کندلی بیل ویلیامز (کتاب درایو ۲ — 15minstrategy.pdf) ──
+        // ── ۴. فرکتال‌های ۵ کندلی بیل ویلیامز (لایهٔ ساختاری ۲ — 15minstrategy.pdf) ──
         var downFractal = closedBars.subList((lastIdx - 8).coerceAtLeast(0), lastIdx + 1).minOf { it.low }
         var upFractal = closedBars.subList((lastIdx - 8).coerceAtLeast(0), lastIdx + 1).maxOf { it.high }
         for (i in (lastIdx - 2) downTo max(2, lastIdx - 28)) {
@@ -1495,7 +1495,7 @@ object IchimokuStrategyEngine {
             }
         }
 
-        // ── ۵. تنظیمات ایچیموکو (10,30,60) کتاب Keenbase و تنظیمات سریع (7,22,44) کتاب Koonitz ──
+        // ── ۵. تنظیمات ایچیموکو (10,30,60) روش Keenbase و تنظیمات سریع (7,22,44) روش Koonitz ──
         val tenkan10 = midpoint(lastIdx - 9, lastIdx)
         val kijun30 = midpoint(lastIdx - 29, lastIdx)
         val src30 = (lastIdx - 29).coerceAtLeast(0)
@@ -1508,7 +1508,7 @@ object IchimokuStrategyEngine {
         val senkouA72244 = (midpoint(src22 - 6, src22) + midpoint(src22 - 21, src22)) / 2.0
         val senkouB44 = midpoint(src22 - 43, src22)
 
-        // ── ۶. اندیکاتورهای MACD (12, 26, 9) و DMI/ADX (14) (کتاب‌های ۸ و ۹ — Charles G. Koonitz) ──
+        // ── ۶. اندیکاتورهای MACD (12, 26, 9) و DMI/ADX (14) (لایه‌های ۸ و ۹ — Charles G. Koonitz) ──
         val macdSeries = DoubleArray(closedBars.size) { idx -> ema12Arr[idx] - ema26Arr[idx] }
         val macdSigArr = DoubleArray(closedBars.size)
         val kMacd = 2.0 / 10.0
@@ -1550,7 +1550,7 @@ object IchimokuStrategyEngine {
         val rawAdx = if (dxList.isNotEmpty()) dxList.takeLast(14).average() else 25.0
         val adx14 = max(rawAdx, er14 * 45.0)
 
-        // ── ۷. عبور چیکو از کومو، الگوهای کندل‌استیک ژاپنی و امتیاز معیار کلی (کتاب‌های ۴، ۵، ۶، ۷ و ۸) ──
+        // ── ۷. عبور چیکو از کومو، الگوهای کندل‌استیک ژاپنی و امتیاز معیار کلی (لایه‌های ۴، ۵، ۶، ۷ و ۸) ──
         val kumoTopAtChikou = max(currentSpanAAt(chikouIdx), currentSpanBAt(chikouIdx))
         val kumoBotAtChikou = min(currentSpanAAt(chikouIdx), currentSpanBAt(chikouIdx))
         val chikouAboveCloud26 = closeNow > kumoTopAtChikou
@@ -1932,8 +1932,8 @@ object IchimokuStrategyEngine {
         slBufferAtr: Double,
         triggerInterval: Interval,
         /**
-         * استراتژی فعال — ترتیب اعتبار سنگرها بر اساس کتاب پایهٔ همان استراتژی تعیین می‌شود
-         * (پاتل: کیجون، تاتل: کومو/چیکو، هوسودا: نقطه S، پلویل: فلت/کومو، درایو: ریبون نهادی).
+         * استراتژی فعال — ترتیب اعتبار سنگرها بر اساس مکتب پایهٔ همان استراتژی تعیین می‌شود
+         * (پاتل: کیجون، تاتل: کومو/چیکو، هوسودا: نقطه S، پلویل: فلت/کومو، لایه‌های ۱ تا ۹: ریبون نهادی).
          */
         activeModel: BitcoinStrategyModel = BitcoinStrategyModel.BASE_ICHIMOKU,
     ): Double {
@@ -2030,17 +2030,17 @@ object IchimokuStrategyEngine {
     enum class StopAnchorKind(val labelFa: String) {
         FRACTAL_5BAR("فرکتال ۵ کندلی (بیل ویلیامز/فوکا)"),
         KIJUN_26("کیجون‌سن ۲۶ (تعادل پاتل)"),
-        RIBBON_KIJUN30_EMA34("ریبون نهادی کیجون۳۰/EMA34 (کونیتز/درایو)"),
+        RIBBON_KIJUN30_EMA34("ریبون نهادی کیجون۳۰/EMA34 (کونیتز)"),
         KUMO_EDGE("لبهٔ کومو / SSB فلت (تاتل و پلویل)"),
         WAVE_S_POINT("نقطهٔ S موج هوسودا/الیوت"),
     }
 
     /**
-     * ترتیب اعتبار سنگرها بر اساس کتاب‌های پایه‌ای که هر استراتژی از آن‌ها ساخته شده است.
+     * ترتیب اعتبار سنگرها بر اساس مکتب‌های پایه‌ای که هر استراتژی از آن‌ها ساخته شده است.
      *
      * این همان «حد ضرر متناسب هر استراتژی» است: مثلاً استراتژی پاتل روی تعادل کیجون بنا شده،
      * پس کیجون‌سن معتبرترین ابطال آن است؛ استراتژی تاتل روی شکست کومو/چیکو بنا شده، پس لبهٔ کومو؛
-     * استراتژی هوسودا/الیوت روی ساختار موج بنا شده، پس نقطهٔ S؛ و متود جامع درایو روی ریبون نهادی.
+     * استراتژی هوسودا/الیوت روی ساختار موج بنا شده، پس نقطهٔ S؛ و متود جامع ۹ لایه روی ریبون نهادی.
      */
     fun stopAnchorPriorityFor(model: BitcoinStrategyModel): List<StopAnchorKind> {
         if (model == BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER) {
@@ -2123,7 +2123,7 @@ object IchimokuStrategyEngine {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // گیت کیجون — سه شرط تازهٔ استراتژی ۱۶ (۹ کتاب درایو)
+    // گیت کیجون — سه شرط تازهٔ استراتژی ۱۶ (۹ لایهٔ ساختاری)
     // ۱) کراس ۹ و ۲۶ همیشه در جهت معامله بررسی شود
     // ۲) خطوط پیش‌بینی ۸/۲۵ · ۷/۲۴ · ۶/۲۳ جهت ۹/۲۶ را تأیید کنند
     // ۳) وضعیت ابرها (قیمت نسبت به کومو + جهت ابر آینده) تأیید کند
@@ -2170,7 +2170,7 @@ object IchimokuStrategyEngine {
     }
 
     /**
-     * گیت کیجون برای استراتژی ۱۶ (متود جامع ۹ کتاب درایو + نئوویو–الیوت).
+     * گیت کیجون برای استراتژی ۱۶ (متود جامع ۹ لایهٔ ساختاری + نئوویو–الیوت).
      *
      * منطق «خطوط پیش‌بینی»: هر جفت (۸/۲۵)، (۷/۲۴) و (۶/۲۳) همان میانگین سقف/کف است با پنجرهٔ
      * یک، دو و سه دوره کوتاه‌تر از جفت ۹/۲۶؛ چون پنجرهٔ کوتاه‌تر زودتر واکنش می‌دهد، جهت این سه
@@ -2363,9 +2363,9 @@ object IchimokuStrategyEngine {
     }
 
     /**
-     * موتور «متود جامع یکپارچه کتاب‌های درایو ۱ تا ۹» با الگوریتم روز
+     * موتور «متود جامع یکپارچه لایه‌های ساختاری ۱ تا ۹» با الگوریتم روز
      * `Adaptive Bayesian Log-Odds 9-Book Consensus + Regime-Weighted Stacking`:
-     * ارزیابی هم‌زمان هر ۹ کتاب PDF گوگل درایو و استخراج احتمال برد بیزین، سنگر حد ضرر ترکیبی و تارگت بهینه.
+     * ارزیابی هم‌زمان هر ۹ لایهٔ تحلیلی و استخراج احتمال برد بیزین، سنگر حد ضرر ترکیبی و تارگت بهینه.
      */
     fun evaluateUnified9BookConsensus(
         isLong: Boolean,
@@ -2375,7 +2375,7 @@ object IchimokuStrategyEngine {
     ): Unified9BookConsensusResult {
         val atr = trigSnap.atr14.coerceAtLeast(1e-8)
 
-        // ۱. کتاب درایو ۱ (TuAnh): BB(20,2) Squeeze/Band + EMA(89)/SMA(200) + RSI(14) > 50
+        // ۱. لایهٔ ساختاری ۱ (TuAnh): BB(20,2) Squeeze/Band + EMA(89)/SMA(200) + RSI(14) > 50
         val book1 = if (isLong) {
             trigSnap.close >= trigSnap.bbMiddle20 &&
                 trigSnap.close >= trigSnap.ema89 - atr * 0.15 &&
@@ -2388,7 +2388,7 @@ object IchimokuStrategyEngine {
                 (trigSnap.isBollingerSqueeze || trigSnap.isMarubozuBreakoutBear || trigSnap.close < trigSnap.kumoBottom)
         }
 
-        // ۲. کتاب درایو ۲ (Foka 15m/Day): بیرون کومو + شیب EMA(21) و کیجون + پرش RSI(7) از خط ۵۰ + فرکتال ۵ کندلی
+        // ۲. لایهٔ ساختاری ۲ (Foka 15m/Day): بیرون کومو + شیب EMA(21) و کیجون + پرش RSI(7) از خط ۵۰ + فرکتال ۵ کندلی
         val book2 = if (isLong) {
             trigSnap.close > trigSnap.kumoTop &&
                 trigSnap.close >= trigSnap.ema21 - atr * 0.12 &&
@@ -2403,7 +2403,7 @@ object IchimokuStrategyEngine {
                 trigSnap.lastUpFractalHigh > trigSnap.close
         }
 
-        // ۳. کتاب درایو ۳ (Keenbase 10-30-60): کراس نهادی Tenkan(10)/Kijun(30) + بیرون Kumo(60)
+        // ۳. لایهٔ ساختاری ۳ (Keenbase 10-30-60): کراس نهادی Tenkan(10)/Kijun(30) + بیرون Kumo(60)
         val book3 = if (isLong) {
             trigSnap.tenkan10 >= trigSnap.kijun30 &&
                 trigSnap.close > trigSnap.kumoTop103060 &&
@@ -2414,7 +2414,7 @@ object IchimokuStrategyEngine {
                 stratSnap.close <= stratSnap.kumoTop103060
         }
 
-        // ۴. کتاب درایو ۴ (Mukherjee Kelly & RSI): حداقل ۳ سیگنال طوفان کامل (Kelly >= 62%) + الگوی شمعی + سلامت RSI
+        // ۴. لایهٔ ساختاری ۴ (Mukherjee Kelly & RSI): حداقل ۳ سیگنال طوفان کامل (Kelly >= 62%) + الگوی شمعی + سلامت RSI
         val book4 = trigSnap.kellySignalCount >= 3 && if (isLong) {
             trigSnap.tenkan >= trigSnap.kijun &&
                 trigSnap.rsi14 >= 50.0 &&
@@ -2427,7 +2427,7 @@ object IchimokuStrategyEngine {
                 (trigSnap.hasBearishCandlestickPattern || trigSnap.candleBodyRatio >= 0.30)
         }
 
-        // ۵. کتاب درایو ۵ (Mukherjee Clouds & Chikou Filter): خط ماشه تنکان + کیجون غیرفلت + آزادی چیکو
+        // ۵. لایهٔ ساختاری ۵ (Mukherjee Clouds & Chikou Filter): خط ماشه تنکان + کیجون غیرفلت + آزادی چیکو
         val book5 = !trigSnap.isKijunFlat && if (isLong) {
             trigSnap.close >= trigSnap.tenkan &&
                 trigSnap.kijunSlopeAtrPerBar >= -0.01 &&
@@ -2438,7 +2438,7 @@ object IchimokuStrategyEngine {
                 trigSnap.chikouBearishOpenSpace
         }
 
-        // ۶. کتاب درایو ۶ (HowToTrade Key Level & Kumo Twist): شکست کامل کانال کومو + Twist هم‌جهت ابر آینده
+        // ۶. لایهٔ ساختاری ۶ (HowToTrade Key Level & Kumo Twist): شکست کامل کانال کومو + Twist هم‌جهت ابر آینده
         val book6 = if (isLong) {
             trigSnap.close > trigSnap.kumoTop &&
                 stratSnap.close > stratSnap.kumoTop &&
@@ -2451,7 +2451,7 @@ object IchimokuStrategyEngine {
                 stratSnap.isFutureKumoBearish
         }
 
-        // ۷. کتاب درایو ۷ (TSG 4-Step Quick Profit): کلوز بیرون کومو + کراس TK + چیکو بالای/زیر کومو ۲۶ دوره قبل
+        // ۷. لایهٔ ساختاری ۷ (TSG 4-Step Quick Profit): کلوز بیرون کومو + کراس TK + چیکو بالای/زیر کومو ۲۶ دوره قبل
         val book7 = if (isLong) {
             trigSnap.close > trigSnap.kumoTop &&
                 trigSnap.tenkan >= trigSnap.kijun &&
@@ -2462,7 +2462,7 @@ object IchimokuStrategyEngine {
                 trigSnap.chikouBelowCloud26
         }
 
-        // ۸. کتاب درایو ۸ (Koonitz 5 Golden Rules + DMI/MACD + EMA34): ۵ قانون کونیتز با ADX/DMI یا MACD
+        // ۸. لایهٔ ساختاری ۸ (Koonitz 5 Golden Rules + DMI/MACD + EMA34): ۵ قانون کونیتز با ADX/DMI یا MACD
         val book8 = if (isLong) {
             trigSnap.close > trigSnap.kijun &&
                 trigSnap.close > trigSnap.kumoTop &&
@@ -2477,7 +2477,7 @@ object IchimokuStrategyEngine {
                 (trigSnap.isDmiBearish || trigSnap.isMacdBearish)
         }
 
-        // ۹. کتاب درایو ۹ (Koonitz Triple Screen 7-22-44 + EMA 13/34/48): هم‌جهتی ۳ تایم‌فریم و ایچیموکوی سریع
+        // ۹. لایهٔ ساختاری ۹ (Koonitz Triple Screen 7-22-44 + EMA 13/34/48): هم‌جهتی ۳ تایم‌فریم و ایچیموکوی سریع
         val macroTripleOk = if (macroSnap == null) {
             true
         } else if (isLong) {
@@ -2543,20 +2543,20 @@ object IchimokuStrategyEngine {
         }.coerceIn(1.50, 3.00)
 
         val badges = buildList {
-            if (book1) add("درایو ۱ (TuAnh BB)")
-            if (book2) add("درایو ۲ (Foka 15m)")
-            if (book3) add("درایو ۳ (Keenbase 10-30-60)")
-            if (book4) add("درایو ۴ (Mukherjee Kelly)")
-            if (book5) add("درایو ۵ (Chikou Filter)")
-            if (book6) add("درایو ۶ (HowToTrade)")
-            if (book7) add("درایو ۷ (TSG 4-Step)")
-            if (book8) add("درایو ۸ (Koonitz DMI/MACD)")
-            if (book9) add("درایو ۹ (Triple Screen 7-22-44)")
+            if (book1) add("لایهٔ ۱ (فشردگی بولینگر)")
+            if (book2) add("لایهٔ ۲ (EMA21 + RSI7 + فرکتال)")
+            if (book3) add("لایهٔ ۳ (ایچیموکو ۱۰/۳۰/۶۰)")
+            if (book4) add("لایهٔ ۴ (معیار کلی + RSI)")
+            if (book5) add("لایهٔ ۵ (فیلتر چیکو)")
+            if (book6) add("لایهٔ ۶ (سطح کلیدی + کومو تویست)")
+            if (book7) add("لایهٔ ۷ (۴ گام سریع)")
+            if (book8) add("لایهٔ ۸ (DMI/MACD + EMA34)")
+            if (book9) add("لایهٔ ۹ (سه‌صفحهٔ ۷‑۲۲‑۴۴)")
         }
 
         val summary = String.format(
             Locale.US,
-            "اجماع %d/9 کتاب درایو · احتمال برد بیزین %.1f%% · تارگت بهینه 1:%.2f",
+            "اجماع %d/9 لایهٔ ساختاری · احتمال برد بیزین %.1f%% · تارگت بهینه 1:%.2f",
             count,
             bayesianProb,
             dynamicRr,
@@ -2942,7 +2942,7 @@ object IchimokuStrategyEngine {
             BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER ->
                 String.format(
                     Locale.US,
-                    " · اجماع %d/9 کتاب درایو (برد بیزین=%.1f%% · Kelly=%d%%)",
+                    " · اجماع %d/9 لایهٔ ساختاری (برد بیزین=%.1f%% · Kelly=%d%%)",
                     unified9BookConsensus.confirmedBooksCount,
                     unified9BookConsensus.bayesianWinProbabilityPct,
                     trigSnap.kellyWinProbabilityPercent,
@@ -3114,7 +3114,7 @@ object IchimokuStrategyEngine {
         val slBasisTextFa = buildString {
             append("هم‌پوشانی فرکتال ۵ کندلی بیل ویلیامز + کیجون۲۶ (${round2(trigSnap.kijun)}) + کیجون۳۰/EMA34 + لبه کومو")
             if (activeModel == BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER) {
-                append(" + ۹ کتاب درایو (هم‌تراز جامع بیس)")
+                append(" + ۹ لایهٔ ساختاری (هم‌تراز جامع بیس)")
             }
             append(String.format(Locale.US, " + سپر ضد شدو (%.2f ATR) در دالان [0.80..2.10 ATR]", slBuffer))
             append(" + قفل سقف درصدی نوسان " + effectiveConfig.triggerInterval.label)
@@ -3664,7 +3664,7 @@ object IchimokuStrategyEngine {
     }
 
     /**
-     * ساخت چک‌لیست اختصاصی ۱۶ شرطی برای هر یک از ۹ کتاب PDF گوگل درایو طبق قوانین خط‌به‌خط هر کتاب.
+     * ساخت چک‌لیست اختصاصی ۱۶ شرطی برای هر یک از ۹ لایهٔ تحلیلی طبق قوانین خط‌به‌خط هر لایه.
      */
     private fun buildDriveBookConditions(
         model: BitcoinStrategyModel,
@@ -3771,7 +3771,7 @@ object IchimokuStrategyEngine {
                     ),
                     StrategyConditionCheck(
                         4,
-                        "۴. جهت و شیب ابر آینده (۲۶ کندل جلوتر) + تایید Kumo Twist (کتاب ۶)",
+                        "۴. جهت و شیب ابر آینده (۲۶ کندل جلوتر) + تایید Kumo Twist (لایهٔ ۶)",
                         consensus.book6HowToTradePassed,
                         cond4Detail,
                     ),
@@ -3783,7 +3783,7 @@ object IchimokuStrategyEngine {
                     ),
                     StrategyConditionCheck(
                         6,
-                        "۶. رهایی سه‌بعدی Chikou Span بیرون کندل‌ها و ابر ۲۶ دوره قبل (کتاب ۵ و ۷)",
+                        "۶. رهایی سه‌بعدی Chikou Span بیرون کندل‌ها و ابر ۲۶ دوره قبل (لایهٔ ۵ و ۷)",
                         cond6Passed && consensus.book5MukherjeeChikouPassed && consensus.book7Tsg4StepPassed,
                         cond6Detail,
                     ),
@@ -3817,7 +3817,7 @@ object IchimokuStrategyEngine {
                         cRegimeTriggerOrPullback && consensus.book8Koonitz5RulesPassed && consensus.book4MukherjeeKellyPassed && cConsensus && dirCandle,
                         String.format(
                             Locale.US,
-                            "اجماع %d/9 کتاب (برد بیزین=%.1f%% · Kelly=%d%% · ADX=%.1f)",
+                            "اجماع %d/9 لایه (برد بیزین=%.1f%% · Kelly=%d%% · ADX=%.1f)",
                             consensus.confirmedBooksCount,
                             consensus.bayesianWinProbabilityPct,
                             trigSnap.kellyWinProbabilityPercent,
@@ -3838,7 +3838,7 @@ object IchimokuStrategyEngine {
 
     /**
      * تشخیص ۴ ماشه ورود برای شکار اصل روند از لحظه تولد (`EARLY_KATANA_GENESIS`) تا قلب موج (`PULLBACK / BREAKOUT / SANYAKU`)
-     * + ماشه‌های اختصاصی استراتژی جامع ۹ کتاب درایو (`DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER`).
+     * + ماشه‌های اختصاصی استراتژی جامع ۹ لایهٔ ساختاری (`DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER`).
      */
     private fun detectEntryTrigger(
         direction: SignalAction,
@@ -3861,7 +3861,7 @@ object IchimokuStrategyEngine {
             trigSnap.atr14 * 0.03
         }
 
-        // ── ماشه‌های اختصاصی متود جامع ۹ کتاب درایو ────────────────────────────
+        // ── ماشه‌های اختصاصی متود جامع ۹ لایهٔ ساختاری ────────────────────────────
         when (activeModel) {
             BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> {
                 val consensus = evaluateUnified9BookConsensus(isLong, trigSnap, stratSnap, null)
@@ -3991,7 +3991,7 @@ object IchimokuStrategyEngine {
      * بررسی دقیق زمان از دست رفتن روند در یک معامله باز که در سود است (`Trend Loss In Profit Detector`):
      * تشخیص می‌دهد کی معامله باز روند خود را از دست داده و دیگر ادامه نمی‌دهد تا همان‌جا که در سود است بسته شود.
      *
-     * ۵ نشانه قطعی مرگ روند در سود بر اساس ۴ کتاب ایچیموکو:
+     * ۵ نشانه قطعی مرگ روند در سود بر اساس ۴ مکتب ایچیموکو:
      * ۱. شکست خط تعادل کیجون‌سن یا کراس معکوس تنکان/کیجون (`Kijun Breakdown / TK Counter-Cross`)
      * ۲. تخلیه کشیدگی C-Clamp با کندل بازگشتی و شدوی معکوس سنگین زیر/بالای تنکان (`C-Clamp Climax Rejection`)
      * ۳. تکمیل چرخه زمانی هوسودا (9, 17, 26, 33) همراه با فلت شدن تنکان و کندل خلاف جهت (`Hosoda Time Exhaustion`)
@@ -4091,7 +4091,7 @@ object IchimokuStrategyEngine {
                 fatalProfitTriggers += "قفل شدن چیکو و سقوط کارایی روند به ${(trigSnap.efficiencyRatio14 * 100).toInt()}%"
             }
 
-            // ۵. تکنیک خروج محرمانه RSI موکرجی (کتاب درایو ۴ — comic 3): افت بیش از ۱۰ واحد از قله RSI یا شکست قله همراه با کلوز پشت تنکان
+            // ۵. تکنیک خروج محرمانه RSI موکرجی (لایهٔ ساختاری ۴ — comic 3): افت بیش از ۱۰ واحد از قله RSI یا شکست قله همراه با کلوز پشت تنکان
             val mukherjeeRsiFailure = if (isBuy) {
                 trigSnap.rsiPeakDropLong >= 11.5 && closedBeyondTenkan && oppositeCandle
             } else {
@@ -4110,7 +4110,7 @@ object IchimokuStrategyEngine {
                 )
             }
 
-            // ۶. سیستم ۴ قانون خروج کونیتز (کتاب‌های ۸ و ۹): شکست هم‌زمان کیجون و EMA34 همراه با برگشت MACD/DMI
+            // ۶. سیستم ۴ قانون خروج کونیتز (لایه‌های ۸ و ۹): شکست هم‌زمان کیجون و EMA34 همراه با برگشت MACD/DMI
             val koonitz4RuleExit = if (isBuy) {
                 trigSnap.close < trigSnap.ema34 && trigSnap.close < trigSnap.kijun &&
                     (trigSnap.isMacdBearish || trigSnap.isDmiBearish)

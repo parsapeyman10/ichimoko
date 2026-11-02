@@ -558,7 +558,7 @@ private fun Live12ConditionChecklistPage(
             }
         }
 
-        // ── کارت شناسنامه کامل استراتژی کتاب و تله‌متری زنده اندیکاتورهای اختصاصی ──
+        // ── کارت شناسنامه کامل استراتژی و تله‌متری زنده اندیکاتورهای اختصاصی ──
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -586,13 +586,13 @@ private fun Live12ConditionChecklistPage(
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = "📊 تله‌متری زنده کتاب: $liveBookTelemetry",
+                        text = "📊 تله‌متری زندهٔ روش: $liveBookTelemetry",
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.TextPrimary,
                     )
                 }
                 Pill(
-                    text = if (showBookSpecDetails) "▲ بستن قوانین" else "▼ قوانین کتاب",
+                    text = if (showBookSpecDetails) "▲ بستن قوانین" else "▼ قوانین روش",
                     color = AurumColors.Gold,
                 )
             }

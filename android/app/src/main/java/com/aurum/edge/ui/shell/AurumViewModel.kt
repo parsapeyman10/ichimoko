@@ -1785,8 +1785,11 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         val updatedMap = _allSymbolStrategyReports.value.toMutableMap()
         updatedMap[symbol] = dualReport.primaryReport
         _allSymbolStrategyReports.value = updatedMap
-        runCatching {
-            container.neuralEngine.updateLiveMarketCausalAttribution(dualReport.primaryReport)
+        // «درک زندهٔ بازار» فقط برای بیت‌کوین ساخته می‌شود.
+        if (V1Universe.normalize(symbol) == NeuralSelfLearningEngine.LIVE_ATTRIBUTION_SYMBOL) {
+            runCatching {
+                container.neuralEngine.updateLiveMarketCausalAttribution(dualReport.primaryReport)
+            }
         }
         return dualReport
     }
@@ -2926,15 +2929,21 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
 
         sections += NeuralCopySection(
             key = "market",
-            titleFa = "درک زندهٔ وضعیت بازارها و علت حرکت",
+            titleFa = "درک زندهٔ وضعیت بیت‌کوین و علت حرکت",
             lines = buildList {
-                if (s.liveMarketAttributions.isEmpty()) add("هنوز داده‌ای از وضعیت زندهٔ بازارها ثبت نشده است.")
-                s.liveMarketAttributions.forEach { a ->
+                add("این بخش فقط برای بیت‌کوین ساخته می‌شود و هنگام بررسی/معاملهٔ بیت‌کوین پر می‌شود.")
+                val bitcoinAttributions = s.liveMarketAttributions.filter {
+                    it.symbol == NeuralSelfLearningEngine.LIVE_ATTRIBUTION_SYMBOL
+                }
+                if (bitcoinAttributions.isEmpty()) {
+                    add("در حال حاضر بررسی معاملهٔ بیت‌کوین فعال نیست؛ به‌محض اسکن بیت‌کوین این بخش پر می‌شود.")
+                }
+                bitcoinAttributions.forEach { a ->
                     add("• ${a.symbol} [${a.timeframeLabel}] — ${a.categoryTitleFa} | رژیم: ${a.marketRegimeStateFa} | علت اصلی: ${a.primaryCauseBadgeFa} (${a.causalConfidencePct}%)")
                     add("   چه اتفاقی افتاده: ${a.whatIsHappeningFa}")
                     add("   چرا: ${a.whyItIsHappeningFa}")
                     if (a.newsImpactSummaryFa.isNotBlank()) add("   خبر: ${a.newsImpactSummaryFa}")
-                    if (a.unified9BookSummaryFa.isNotBlank()) add("   ۹ کتاب درایو: ${a.unified9BookSummaryFa}")
+                    if (a.unified9BookSummaryFa.isNotBlank()) add("   ۹ لایهٔ ساختاری: ${a.unified9BookSummaryFa}")
                     if (a.recommendedTacticalActionFa.isNotBlank()) add("   تاکتیک پیشنهادی: ${a.recommendedTacticalActionFa}")
                 }
             },
@@ -2972,7 +2981,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
                 add(R.label("بافر شکست (ATR)", R.number(a.breakoutBufferAtr, 2)))
                 add(R.label("حداقل کارایی روند", R.number(a.minEfficiencyRatio, 2)))
                 add(R.label("حداقل نسبت حجم ۲۰", R.number(a.minVolumeRatio20, 2)))
-                add(R.label("توافق حداقلی ۹ کتاب", R.number(a.minDriveBooksConsensus.toDouble(), 0)))
+                add(R.label("توافق حداقلی ۹ لایه", R.number(a.minDriveBooksConsensus.toDouble(), 0)))
                 add(R.label("گیت احتمال برد شبکه", R.pct(a.neuralWinProbGatePct)))
                 add(R.label("نرخ برد انتظاری", R.pct(a.expectedWinRatePct)))
                 add(R.label("پروفیت فاکتور انتظاری", R.number(a.expectedProfitFactor, 2)))

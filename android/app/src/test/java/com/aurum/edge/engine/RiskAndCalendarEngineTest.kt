@@ -279,7 +279,7 @@ class RiskAndCalendarEngineTest {
                     stopLoss = 67650.0,
                     takeProfit = 68700.0,
                     riskReward = 2.0,
-                    strategyContext = "مدل استراتژی: استراتژی بیس (۴ کتاب ایچیموکو) · تایم‌فریم 15m · ۱۶ شرط تایید شده",
+                    strategyContext = "مدل استراتژی: استراتژی بیس (۴ مکتب ایچیموکو) · تایم‌فریم 15m · ۱۶ شرط تایید شده",
                 )
                 liveProbe.onSuccess { v ->
                     println("::notice title=AvalAI Key Check::LIVE OK -> ${v.yesNoLabelFa} | ${v.summaryFa} | ${v.reasonFa}")
@@ -528,7 +528,7 @@ class RiskAndCalendarEngineTest {
         assertTrue(snap.adx14 > 0.0 && snap.kellySignalCount in 1..5 && snap.kellyWinProbabilityPercent in 48..76)
 
         val unifiedDriveRep = dualReport.reportFor(Interval.M15, BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)!!
-        assertTrue(unifiedDriveRep.rrBreakdown!!.slBasisFa.contains("۹ کتاب درایو"))
+        assertTrue(unifiedDriveRep.rrBreakdown!!.slBasisFa.contains("۹ لایهٔ ساختاری"))
 
         // Verify Trend Loss In Profit Detector (when an open trade in profit loses its trend, close immediately in profit)
         val tradeInProfitAt63k = calc.copy(
