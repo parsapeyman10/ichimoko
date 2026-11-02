@@ -1027,6 +1027,10 @@ data class StrategyEvaluationReport(
     val neoWaveAmplitudeAtr: Double = 0.0,
     /** توضیح فارسی مسیر ورود (برای نمایش در چک‌لیست و ژورنال). */
     val entryPathFa: String = "",
+    /** متن گیت کیجون (استراتژی ۱۶): کراس ۹/۲۶ + خطوط پیش‌بینی ۸/۲۵، ۷/۲۴، ۶/۲۳ + وضعیت ابر. */
+    val kijunGateFa: String = "",
+    /** متن قاعدهٔ حد ضرر استراتژی ۱۶: بالای خط ۲۶ و با فاصله از کندل. */
+    val kijunStopRuleFa: String = "",
 ) {
     val entryTimeframeBadgeFa: String
         get() = "تایم ورود: ${triggerInterval.label}"
@@ -2062,6 +2066,246 @@ object IchimokuStrategyEngine {
         )
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // گیت کیجون — سه شرط تازهٔ استراتژی ۱۶ (۹ کتاب درایو)
+    // ۱) کراس ۹ و ۲۶ همیشه در جهت معامله بررسی شود
+    // ۲) خطوط پیش‌بینی ۸/۲۵ · ۷/۲۴ · ۶/۲۳ جهت ۹/۲۶ را تأیید کنند
+    // ۳) وضعیت ابرها (قیمت نسبت به کومو + جهت ابر آینده) تأیید کند
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /** خروجی گیت کیجون/ابر/خطوط پیش‌بینی برای استراتژی ۱۶. */
+    data class KijunPredictiveGate(
+        /** کراس تنکان ۹ و کیجون ۲۶ در جهت معامله برقرار است. */
+        val tkAligned: Boolean,
+        /** چند کندل پیش آخرین کراس در جهت معامله رخ داده (‑۱ = در پنجرهٔ بررسی نبود). */
+        val crossBarsAgo: Int,
+        /** فاصلهٔ تنکان از کیجون بر حسب ATR (قدرمطلق، در جهت معامله مثبت). */
+        val tkSpreadAtr: Double,
+        /** چند جفت از خطوط پیش‌بینی (۸/۲۵، ۷/۲۴، ۶/۲۳) جهت را تأیید کردند. */
+        val predictiveAligned: Int,
+        val predictiveTotal: Int,
+        /** وضعیت ابر تأییدکننده است. */
+        val cloudAligned: Boolean,
+        val cloudLabelFa: String,
+        val passed: Boolean,
+        val summaryFa: String,
+    )
+
+    /**
+     * محاسبهٔ میانگین سقف/کف برای یک دوره (همان تعریف تنکان/کیجون در ایچیموکو).
+     * خروجی، سریِ مقدار خط از کندلِ `period‑1` تا آخرین کندل است.
+     */
+    private fun midpointSeries(candles: List<Candle>, period: Int): List<Double> {
+        if (period < 2 || candles.size < period) return emptyList()
+        val out = ArrayList<Double>(candles.size - period + 1)
+        for (i in (period - 1) until candles.size) {
+            var highest = Double.NEGATIVE_INFINITY
+            var lowest = Double.POSITIVE_INFINITY
+            for (j in (i - period + 1)..i) {
+                val bar = candles[j]
+                if (bar.high > highest) highest = bar.high
+                if (bar.low < lowest) lowest = bar.low
+            }
+            if (highest.isFinite() && lowest.isFinite() && highest > 0.0) {
+                out.add((highest + lowest) / 2.0)
+            }
+        }
+        return out
+    }
+
+    /**
+     * گیت کیجون برای استراتژی ۱۶ (متود جامع ۹ کتاب درایو + نئوویو–الیوت).
+     *
+     * منطق «خطوط پیش‌بینی»: هر جفت (۸/۲۵)، (۷/۲۴) و (۶/۲۳) همان میانگین سقف/کف است با پنجرهٔ
+     * یک، دو و سه دوره کوتاه‌تر از جفت ۹/۲۶؛ چون پنجرهٔ کوتاه‌تر زودتر واکنش می‌دهد، جهت این سه
+     * جفت *قبل از* کراس ۹/۲۶ برمی‌گردد و می‌تواند کراس آینده را پیش‌بینی کند. شرط اجرا:
+     * کراس ۹/۲۶ هم‌جهت + حداقل دو جفت از سه جفت پیش‌بینی هم‌جهت و در حال باز شدن + ابر هم‌جهت.
+     */
+    fun evaluateKijunPredictiveGate(
+        candlesInput: List<Candle>,
+        isLong: Boolean,
+        strategySnapshot: IchimokuBarSnapshot,
+    ): KijunPredictiveGate {
+        val bars = candlesInput.filter { it.closed }.ifEmpty { candlesInput }.takeLast(140)
+        val signed = if (isLong) 1.0 else -1.0
+        val pairs = listOf(9 to 26, 8 to 25, 7 to 24, 6 to 23)
+
+        fun pairAligned(shortPeriod: Int, longPeriod: Int): Boolean {
+            val shortSeries = midpointSeries(bars, shortPeriod)
+            val longSeries = midpointSeries(bars, longPeriod)
+            val size = min(shortSeries.size, longSeries.size)
+            if (size < 4) return false
+            val diffNow = shortSeries[size - 1] - longSeries[size - 1]
+            val diffBefore = shortSeries[size - 4] - longSeries[size - 4]
+            val rightSide = diffNow * signed > 0.0
+            val opening = (diffNow - diffBefore) * signed > 0.0
+            return rightSide && opening
+        }
+
+        val tkAligned = pairAligned(pairs[0].first, pairs[0].second)
+        val predictiveAligned = pairs.drop(1).count { pairAligned(it.first, it.second) }
+
+        // کراس تازهٔ ۹/۲۶: چند کندل پیش علامتِ اختلاف عوض شده است؟
+        val nine = midpointSeries(bars, 9)
+        val twentySix = midpointSeries(bars, 26)
+        val size = min(nine.size, twentySix.size)
+        val spreadNow = if (size > 0) nine[size - 1] - twentySix[size - 1] else 0.0
+        var crossBarsAgo = -1
+        if (size > 1 && tkAligned) {
+            var idx = size - 1
+            val lookback = min(size - 1, 13)
+            while (idx > size - 1 - lookback) {
+                val prev = nine[idx - 1] - twentySix[idx - 1]
+                if (prev * signed <= 0.0) {
+                    crossBarsAgo = (size - 1) - (idx - 1)
+                    break
+                }
+                idx--
+            }
+        }
+        val atrRef = strategySnapshot.atr14.takeIf { it.isFinite() && it > 0.0 }
+            ?: (strategySnapshot.close * 0.001)
+        val tkSpreadAtr = if (atrRef > 0.0) abs(spreadNow) / atrRef else 0.0
+
+        // ابر: قیمت بیرون از کومو، ضخامت کافی، و جهت ابر آینده هم‌سو
+        val close = strategySnapshot.close
+        val kumoTopValue = strategySnapshot.kumoTop
+        val kumoBottomValue = strategySnapshot.kumoBottom
+        val thicknessAtr = strategySnapshot.currentKumoThicknessAtr
+        val futureBullish = strategySnapshot.futureSpanA >= strategySnapshot.futureSpanB
+        val priceAboveCloud = close > kumoTopValue
+        val priceBelowCloud = close < kumoBottomValue
+        val insideCloud = !priceAboveCloud && !priceBelowCloud
+        val cloudAligned = if (isLong) {
+            priceAboveCloud && futureBullish && thicknessAtr >= 0.08
+        } else {
+            priceBelowCloud && !futureBullish && thicknessAtr >= 0.08
+        }
+        val cloudLabelFa = when {
+            insideCloud -> "قیمت داخل ابر است (بی‌تصمیم) — جهت ابر: ${if (futureBullish) "صعودی" else "نزولی"}"
+            priceAboveCloud && isLong -> "قیمت بالای ابر · ابر آینده ${if (futureBullish) "صعودی" else "نزولی"} · ضخامت ${round2(thicknessAtr)} ATR"
+            priceBelowCloud && !isLong -> "قیمت زیر ابر · ابر آینده ${if (futureBullish) "صعودی" else "نزولی"} · ضخامت ${round2(thicknessAtr)} ATR"
+            priceAboveCloud -> "قیمت بالای ابر ولی معامله فروش است (ناسازگار)"
+            else -> "قیمت زیر ابر ولی معامله خرید است (ناسازگار)"
+        }
+
+        val passed = tkAligned && predictiveAligned >= 2 && cloudAligned
+        val crossTextFa = when {
+            crossBarsAgo >= 0 -> "کراس ۹/۲۶ در جهت معامله، ${crossBarsAgo} کندل پیش"
+            tkAligned -> "تنکان بالاتر/پایین‌تر از کیجون در جهت معامله است ولی کراس تازه‌ای در ۱۳ کندل اخیر نبود"
+            else -> "کراس ۹/۲۶ در جهت معامله نیست"
+        }
+        val predictiveTextFa = "خطوط پیش‌بینی: $predictiveAligned از ۳ تأیید (۸/۲۵ · ۷/۲۴ · ۶/۲۳)"
+        val summaryFa = when {
+            passed -> "✅ گیت کیجون تأیید شد · $crossTextFa · $predictiveTextFa · $cloudLabelFa"
+            !tkAligned && predictiveAligned < 2 ->
+                "🛑 نه کراس ۹/۲۶ هم‌جهت است و نه خطوط پیش‌بینی تأیید می‌کنند · $predictiveTextFa · $cloudLabelFa"
+            !cloudAligned ->
+                "🛑 ابر هم‌جهت نیست · $crossTextFa · $predictiveTextFa · $cloudLabelFa"
+            else ->
+                "🛑 $crossTextFa · $predictiveTextFa · $cloudLabelFa"
+        }
+        return KijunPredictiveGate(
+            tkAligned = tkAligned,
+            crossBarsAgo = crossBarsAgo,
+            tkSpreadAtr = round2(tkSpreadAtr),
+            predictiveAligned = predictiveAligned,
+            predictiveTotal = pairs.size - 1,
+            cloudAligned = cloudAligned,
+            cloudLabelFa = cloudLabelFa,
+            passed = passed,
+            summaryFa = summaryFa,
+        )
+    }
+
+    /** خروجی قاعدهٔ حد ضرر کیجون. */
+    data class KijunStopRule(
+        /** حد ضرر نهایی پس از قاعده. */
+        val stop: Double,
+        /** آیا مقدار اولیه تغییر کرد؟ */
+        val adjusted: Boolean,
+        /** آیا شرایط (بالای خط ۲۶ + فاصله از کندل) با هم جمع نمی‌شوند؟ */
+        val blocked: Boolean,
+        val noteFa: String,
+    )
+
+    /**
+     * قاعدهٔ حد ضرر استراتژی ۱۶:
+     *  - برای خرید، حد ضرر باید **بالای خط دورهٔ ۲۶** باشد (تا حد ضرر قبل از شکست خط تعادل فعال شود)
+     *    و برای فروش **پایین همان خط**؛
+     *  - حد ضرر نباید به کندل بچسبد؛ حداقل فاصله = `ATR × (۰.۲۲ + ۰.۱۵ × سهم سایه)` از سقف/کف کندل.
+     * اگر این دو شرط با هم جمع نشوند (قیمت چسبیده به خط ۲۶)، پلن «مسدود» اعلام می‌شود تا معاملهٔ
+     * بی‌کیفیت باز نشود.
+     */
+    fun applyKijunStopRules(
+        isLong: Boolean,
+        candidateStop: Double,
+        triggerSnapshot: IchimokuBarSnapshot,
+    ): KijunStopRule {
+        val atr = triggerSnapshot.atr14.takeIf { it.isFinite() && it > 0.0 }
+            ?: (triggerSnapshot.close * 0.001)
+        val kijunValue = triggerSnapshot.kijun
+        if (!kijunValue.isFinite() || kijunValue <= 0.0) {
+            return KijunStopRule(
+                stop = candidateStop,
+                adjusted = false,
+                blocked = false,
+                noteFa = "خط ۲۶ خوانده نشد؛ قاعدهٔ حد ضرر کیجون اعمال نشد",
+            )
+        }
+        val wickRatio = if (isLong) triggerSnapshot.lowerWickRatio else triggerSnapshot.upperWickRatio
+        val candleGap = atr * (0.22 + 0.15 * wickRatio.coerceIn(0.0, 0.6))
+        val kijunGap = atr * 0.10
+        val safeCandidate = candidateStop.takeIf { it.isFinite() && it > 0.0 } ?: return KijunStopRule(
+            stop = candidateStop,
+            adjusted = false,
+            blocked = true,
+            noteFa = "حد ضرر محاسبه‌شده معتبر نبود؛ ورود مسدود شد",
+        )
+
+        return if (isLong) {
+            val floor = kijunValue + kijunGap
+            val ceiling = triggerSnapshot.low - candleGap
+            if (floor >= ceiling) {
+                KijunStopRule(
+                    stop = safeCandidate,
+                    adjusted = false,
+                    blocked = true,
+                    noteFa = "فضای بین خط ۲۶ (${round2(kijunValue)}) و کف کندل (${round2(triggerSnapshot.low)}) کمتر از " +
+                        "بافر لازم است؛ حد ضرر هم‌زمان «بالای خط ۲۶» و «دور از کندل» نمی‌شود",
+                )
+            } else {
+                val stop = safeCandidate.coerceIn(floor, ceiling)
+                KijunStopRule(
+                    stop = round2(stop),
+                    adjusted = abs(stop - safeCandidate) > 1e-9,
+                    blocked = false,
+                    noteFa = "حد ضرر بالای خط ۲۶ (${round2(kijunValue)}) و با فاصلهٔ ${round2((triggerSnapshot.low - stop) / atr)} ATR از کف کندل",
+                )
+            }
+        } else {
+            val floor = triggerSnapshot.high + candleGap
+            val ceiling = kijunValue - kijunGap
+            if (floor >= ceiling) {
+                KijunStopRule(
+                    stop = safeCandidate,
+                    adjusted = false,
+                    blocked = true,
+                    noteFa = "فضای بین خط ۲۶ (${round2(kijunValue)}) و سقف کندل (${round2(triggerSnapshot.high)}) کمتر از " +
+                        "بافر لازم است؛ حد ضرر هم‌زمان «پایین خط ۲۶» و «دور از کندل» نمی‌شود",
+                )
+            } else {
+                val stop = safeCandidate.coerceIn(floor, ceiling)
+                KijunStopRule(
+                    stop = round2(stop),
+                    adjusted = abs(stop - safeCandidate) > 1e-9,
+                    blocked = false,
+                    noteFa = "حد ضرر پایین خط ۲۶ (${round2(kijunValue)}) و با فاصلهٔ ${round2((stop - triggerSnapshot.high) / atr)} ATR از سقف کندل",
+                )
+            }
+        }
+    }
+
     /**
      * موتور «متود جامع یکپارچه کتاب‌های درایو ۱ تا ۹» با الگوریتم روز
      * `Adaptive Bayesian Log-Odds 9-Book Consensus + Regime-Weighted Stacking`:
@@ -2585,7 +2829,17 @@ object IchimokuStrategyEngine {
         ).coerceAtLeast(minSafeStopDist)
 
         // حد ضرر ساختاری (Kijun / Senkou B / 5-Bar Fractal + ATR Buffer) کاملاً ثابت و غیرپله‌ای است
-        val technicalSl = rawTechnicalSl
+        // قاعدهٔ تازهٔ استراتژی ۱۶: حد ضرر بالای خط ۲۶ (برای خرید) و با فاصله از کندل؛ اگر جمع نشود، پلن مسدود می‌شود.
+        val kijunStopRule = if (activeModel.isNeoWaveElliottStrategy) {
+            applyKijunStopRules(
+                isLong = isLong,
+                candidateStop = rawTechnicalSl,
+                triggerSnapshot = trigSnap,
+            )
+        } else {
+            null
+        }
+        val technicalSl = kijunStopRule?.stop ?: rawTechnicalSl
 
         val stopDist = max(
             abs(sniperOptimal - technicalSl),
@@ -2945,6 +3199,18 @@ object IchimokuStrategyEngine {
         val requiredIndicesForModel: Set<Int> = (1..16).toSet()
         val modelCoreConditions = conditions.filter { it.index in requiredIndicesForModel }
         val allSixteenPassed = modelCoreConditions.all { it.passed }
+
+        // ── گیت کیجون (فقط استراتژی ۱۶): کراس ۹/۲۶ + خطوط پیش‌بینی ۸/۲۵، ۷/۲۴، ۶/۲۳ + وضعیت ابر ──
+        val kijunGate = if (activeModel.isNeoWaveElliottStrategy) {
+            evaluateKijunPredictiveGate(
+                candlesInput = alignedStrategyCandles,
+                isLong = isLong,
+                strategySnapshot = stratSnap,
+            )
+        } else {
+            null
+        }
+        val kijunGatePassed = (kijunGate?.passed ?: true) && (kijunStopRule?.blocked != true)
         val firstFifteenPassed = modelCoreConditions.filter { it.index != 16 }.all { it.passed }
         val triggerFired = triggerType != StrategyTriggerType.NONE
         val passedCount = conditions.count { it.passed }
@@ -3018,8 +3284,9 @@ object IchimokuStrategyEngine {
 
         val baseReadiness = when {
             neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto) -> StrategyReadinessState.BLOCKED
-            allSixteenPassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY
-            allSixteenPassed && triggerFired && !isLong -> StrategyReadinessState.SIGNAL_SELL
+            allSixteenPassed && kijunGatePassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY
+            allSixteenPassed && kijunGatePassed && triggerFired && !isLong -> StrategyReadinessState.SIGNAL_SELL
+            allSixteenPassed && !kijunGatePassed -> StrategyReadinessState.BLOCKED
             sniperArmedPendingRetest || passedCount >= 11 -> StrategyReadinessState.WATCH_SETUP
             else -> StrategyReadinessState.BLOCKED
         }
@@ -3052,6 +3319,9 @@ object IchimokuStrategyEngine {
 
         val finalAction = if (neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto)) {
             SignalAction.NO_TRADE
+        } else if (!kijunGatePassed && !cryptoNeoWaveEntry) {
+            // استراتژی ۱۶ فقط با تأیید کراس ۹/۲۶، خطوط پیش‌بینی و ابر معامله می‌کند.
+            SignalAction.NO_TRADE
         } else if (cryptoNeoWaveEntry) {
             if (isLong) SignalAction.BUY else SignalAction.SELL
         } else {
@@ -3077,8 +3347,17 @@ object IchimokuStrategyEngine {
             readiness == StrategyReadinessState.WATCH_SETUP ->
                 "$tfTag ⏳ $passedCount/۱۶ شرط (${trendPhase.badgeFa})؛ منتظر ماشه در ${config.triggerInterval.label}"
             readiness == StrategyReadinessState.BLOCKED -> {
-                val firstFailed = modelCoreConditions.firstOrNull { !it.passed } ?: conditions.firstOrNull { !it.passed }
-                "$tfTag 🛑 $passedCount/۱۶ شرط · مانع: ${firstFailed?.titleFa ?: ""}"
+                if (!kijunGatePassed) {
+                    val why = when {
+                        kijunStopRule?.blocked == true -> kijunStopRule.noteFa
+                        kijunGate != null -> kijunGate.summaryFa
+                        else -> ""
+                    }
+                    "$tfTag 🛑 گیت کیجون اجازه نداد · $why"
+                } else {
+                    val firstFailed = modelCoreConditions.firstOrNull { !it.passed } ?: conditions.firstOrNull { !it.passed }
+                    "$tfTag 🛑 $passedCount/۱۶ شرط · مانع: ${firstFailed?.titleFa ?: ""}"
+                }
             }
             else -> "$tfTag در حال دریافت کندل‌های $normalizedSymbol..."
         }
@@ -3173,6 +3452,8 @@ object IchimokuStrategyEngine {
             neoWaveAmplitudeAtr = if (neoWaveOn) neoWaveAmplitude else 0.0,
             cryptoNeoWaveEntry = cryptoNeoWaveEntry,
             entryPathFa = entryPathFa,
+            kijunGateFa = kijunGate?.summaryFa.orEmpty(),
+            kijunStopRuleFa = kijunStopRule?.noteFa.orEmpty(),
         )
     }
 

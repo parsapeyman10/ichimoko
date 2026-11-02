@@ -668,6 +668,21 @@ private fun Live12ConditionChecklistPage(
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
+                if (report.kijunGateFa.isNotBlank()) {
+                    Text(
+                        text = "🎯 گیت کیجون (استراتژی ۱۶): ${report.kijunGateFa}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (report.kijunGateFa.startsWith("✅")) AurumColors.Green else AurumColors.Orange,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                if (report.kijunStopRuleFa.isNotBlank()) {
+                    Text(
+                        text = "📏 قاعدهٔ حد ضرر کیجون: ${report.kijunStopRuleFa}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AurumColors.Cyan,
+                    )
+                }
                 report.waveProjection?.let { w ->
                     Text(
                         text = "TP1(V): ${formatPrice(w.targetV)} · TP2(N): ${formatPrice(w.targetN)} · TP3(E): ${formatPrice(w.targetE)} · NT: ${formatPrice(w.targetNT)}",
