@@ -1414,6 +1414,46 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    /** ذخیرهٔ نسخهٔ ZIP در مقصدی که کاربر با پنجرهٔ رسمی Android انتخاب می‌کند (از جمله Drive). */
+    fun saveScreenshotBackupToUri(uri: android.net.Uri?, stampMs: Long) {
+        if (uri == null) return
+        _toast.value = "⏳ در حال ساخت بکاپ برای مقصد انتخاب‌شده…"
+        container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val actualStampMs = stampMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+            val bundle = com.aurum.edge.data.TradeSnapshotArchiveManager
+                .buildSnapshotZipBundle(container.appContext, actualStampMs)
+            val zip = bundle.zipFile
+            if (zip == null) {
+                runCatching { container.appContext.contentResolver.delete(uri, null, null) }
+                _toast.value = "⚠️ " + (bundle.errorFa ?: "ساخت بکاپ تصاویر ناموفق بود")
+                return@launch
+            }
+            var destinationWritten = false
+            try {
+                val output = container.appContext.contentResolver.openOutputStream(uri, "wt")
+                    ?: error("باز کردن مقصد انتخاب‌شده ممکن نشد")
+                output.use { stream ->
+                    zip.inputStream().buffered().use { input -> input.copyTo(stream) }
+                }
+                destinationWritten = true
+                _screenshotBackup.value = _screenshotBackup.value.copy(
+                    lastZipName = bundle.fileName,
+                    lastZipBytes = bundle.zipBytes,
+                )
+                refreshScreenshotBackupStats()
+                _toast.value = "✅ بکاپ " + bundle.imageCount + " تصویر ذخیره شد؛ اصل آرشیو خصوصی داخل اپ باقی ماند"
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                if (!destinationWritten) runCatching { container.appContext.contentResolver.delete(uri, null, null) }
+                throw cancelled
+            } catch (err: Exception) {
+                if (!destinationWritten) runCatching { container.appContext.contentResolver.delete(uri, null, null) }
+                _toast.value = "⚠️ ذخیره در مقصد انتخاب‌شده ناموفق بود: " + (err.message ?: "خطای نامشخص")
+            } finally {
+                runCatching { zip.delete() }
+            }
+        }
+    }
+
     /** ارسال ZIP تصاویر آرشیو با Share Sheet اندروید (تلگرام/واتساپ/ایمیل/درایو). */
     fun shareScreenshotBackup() {
         _toast.value = "⏳ در حال ساخت بکاپ تصاویر…"

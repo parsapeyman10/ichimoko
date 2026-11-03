@@ -199,8 +199,11 @@ android {
         // (NeoWaveEngine.dynamicAmplitudeAtr) and applies Neely's higher-degree rule across
         // timeframes (NeoWaveEngine.mtfConfluence): a confirmed opposing 4H pattern vetoes the
         // entry, alignment adds confidence. Off by default with the NeoWave switch, as always.
-        versionCode = 757
-        versionName = "3.9.48"
+        // 3.9.49 adds explicit SAF export for the private trade-snapshot archive: the user chooses
+        // Google Drive or another document provider, original images remain app-private, and no
+        // Drive token, storage permission, or automatic Gallery copy is introduced.
+        versionCode = 758
+        versionName = "3.9.49"
         resourceConfigurations += listOf("en", "fa")
         buildConfigField("String", "DEFAULT_TD_API_KEY", "\"\"")
         buildConfigField("String", "GIT_SHA", "\"$gitSha\"")

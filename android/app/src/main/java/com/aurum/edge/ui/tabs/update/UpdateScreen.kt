@@ -34,6 +34,10 @@ import com.aurum.edge.data.AppUpdateRepository
 import com.aurum.edge.ui.components.SectionCard
 import com.aurum.edge.ui.components.StatTile
 import com.aurum.edge.ui.theme.AurumColors
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.atomic.AtomicLong
 
 @Composable
 fun UpdateScreen(viewModel: AurumViewModel) {
@@ -44,10 +48,15 @@ fun UpdateScreen(viewModel: AurumViewModel) {
     val signing = remember { viewModel.updateSigningSummary }
     val screenshotBackup by viewModel.screenshotBackup.collectAsStateWithLifecycle()
     val crashReports by viewModel.crashReports.collectAsStateWithLifecycle()
-    // انتخاب فایل ZIP بکاپ تصاویر برای بازگردانی (فقط ZIP؛ هر جای گوشی یا درایو)
+    // انتخاب فایل ZIP بکاپ تصاویر برای بازگردانی (فقط ZIP؛ هر جای گوشی یا Drive)
     val restoreZipLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri -> viewModel.restoreScreenshotBackupFromZip(uri) }
+    // انتخاب مقصد توسط خود کاربر؛ مجوز/توکن حساب Drive در اپ ذخیره نمی‌شود.
+    val pendingBackupStampMs = remember { AtomicLong(0L) }
+    val saveBackupToLocationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri -> viewModel.saveScreenshotBackupToUri(uri, pendingBackupStampMs.get()) }
     LaunchedEffect(Unit) {
         viewModel.refreshScreenshotBackupStats()
         viewModel.refreshCrashReports()
@@ -253,22 +262,31 @@ fun UpdateScreen(viewModel: AurumViewModel) {
                     modifier = Modifier.weight(1f),
                 ) { Text("💾 ذخیره در دانلود", style = MaterialTheme.typography.labelMedium) }
                 OutlinedButton(
-                    onClick = viewModel::shareScreenshotBackup,
+                    onClick = {
+                        val stamp = System.currentTimeMillis()
+                        pendingBackupStampMs.set(stamp)
+                        val label = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(stamp))
+                        saveBackupToLocationLauncher.launch("AurumScreenshots_$label.zip")
+                    },
                     modifier = Modifier.weight(1f),
-                ) { Text("📤 ارسال", style = MaterialTheme.typography.labelMedium) }
+                ) { Text("☁️ Drive / حافظه", style = MaterialTheme.typography.labelMedium) }
             }
             Row(
                 Modifier.fillMaxWidth().padding(top = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 OutlinedButton(
+                    onClick = viewModel::shareScreenshotBackup,
+                    modifier = Modifier.weight(1f),
+                ) { Text("📤 ارسال", style = MaterialTheme.typography.labelSmall) }
+                OutlinedButton(
                     onClick = { restoreZipLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
                     modifier = Modifier.weight(1f),
-                ) { Text("📥 بازخوانی از فایل ZIP", style = MaterialTheme.typography.labelMedium) }
+                ) { Text("📥 بازخوانی ZIP", style = MaterialTheme.typography.labelSmall) }
                 OutlinedButton(
                     onClick = viewModel::refreshScreenshotBackupStats,
                     modifier = Modifier.weight(1f),
-                ) { Text("🔄 تازه‌سازی آمار", style = MaterialTheme.typography.labelMedium) }
+                ) { Text("🔄 آمار", style = MaterialTheme.typography.labelSmall) }
             }
             if (screenshotBackup.lastZipName.isNotBlank()) {
                 Text(
@@ -279,9 +297,9 @@ fun UpdateScreen(viewModel: AurumViewModel) {
                 )
             }
             Text(
-                "تصاویر تازه فقط در آرشیو خصوصی اپ هستند و در گالری گوشی ظاهر نمی‌شوند. فایل ZIP در Download/AurumEdge/Screenshots ذخیره می‌شود؛ " +
-                    "پس حتی اگر ZIP را پاک کنید، آرشیو داخل اپ دست‌نخورده می‌ماند. «بازخوانی از فایل ZIP» تصاویر و فهرست را " +
-                    "بدون پاک کردن آرشیو فعلی با آن ادغام می‌کند.",
+                "تصاویر تازه فقط در آرشیو خصوصی اپ می‌مانند و وارد گالری نمی‌شوند. «ذخیره در دانلود» یک نسخهٔ ZIP می‌سازد؛ " +
+                    "«Drive / حافظه» پنجرهٔ امن Android را باز می‌کند تا خودتان Google Drive یا پوشهٔ دیگری را انتخاب کنید. " +
+                    "اصل تصاویر در اپ باقی می‌ماند؛ «ارسال» هم Share Sheet را باز می‌کند. بازخوانی ZIP فقط با انتخاب خودتان انجام می‌شود.",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
                 modifier = Modifier.padding(top = 8.dp),
