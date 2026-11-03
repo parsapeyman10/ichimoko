@@ -29,7 +29,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,20 +73,44 @@ fun NeuralBrainScreen(
     var matrixFilter by rememberSaveable { mutableIntStateOf(0) } // 0 = همه ۲۴ استراتژی, 1 = ۹ لایهٔ ساختاری, 2 = ۱۵ ترکیب پایه
 
     val assistantInterval = if (assistantTfLabel == Interval.M5.label) Interval.M5 else Interval.M15
-    val coaching = remember(assistantSymbol, assistantInterval, dualReports) {
-        MasterIchimokuTradingAssistant.analyzeSymbolWithMasterMethod(
-            symbol = assistantSymbol,
-            dualReport = dualReports[assistantSymbol],
-            focusedInterval = assistantInterval,
-        )
+
+    // This tab derives live coaching and post-trade lessons from large candle/trade histories.
+    // In particular, generating improvement notes reads the on-device CandleVault. Never run
+    // either calculation from composition: on mid-range devices this used to freeze the UI.
+    val coaching by produceState<com.aurum.edge.core.MasterIchimokuSymbolCoaching?>(
+        initialValue = null,
+        assistantSymbol,
+        assistantInterval,
+        dualReports,
+    ) {
+        delay(120L) // coalesce bursts of live report updates before starting CPU work
+        value = withContext(Dispatchers.Default) {
+            MasterIchimokuTradingAssistant.analyzeSymbolWithMasterMethod(
+                symbol = assistantSymbol,
+                dualReport = dualReports[assistantSymbol],
+                focusedInterval = assistantInterval,
+            )
+        }
     }
-    val improvementNotes = remember(trades, dualReports, settings.baseStrategyConfig, pinnedNotes) {
-        MasterIchimokuTradingAssistant.generateActionableImprovementNotes(
-            trades = trades,
-            dualReports = dualReports,
-            currentConfig = settings.baseStrategyConfig,
-        )
+    val improvementNotes by produceState<List<com.aurum.edge.core.IchimokuImprovementNote>?>(
+        initialValue = null,
+        trades,
+        dualReports,
+        settings.baseStrategyConfig,
+        pinnedNotes,
+    ) {
+        delay(250L) // debounce frequent journal/live-state emissions
+        value = withContext(Dispatchers.IO) {
+            MasterIchimokuTradingAssistant.generateActionableImprovementNotes(
+                trades = trades,
+                dualReports = dualReports,
+                currentConfig = settings.baseStrategyConfig,
+            )
+        }
     }
+
+    val visibleImprovementNotes = improvementNotes.orEmpty()
+    val coachingResult = coaching
 
     Column(
         modifier = Modifier
@@ -556,7 +584,7 @@ fun NeuralBrainScreen(
         // ── ۰. دستیار ترید با بهترین متود ایچیموکو جهان (گوایچی هوسودا + ۹ لایهٔ ساختاری) ──────
         SectionCard(
             title = "🧭 دستیار ترید با بهترین متود ایچیموکو جهان (هوسودا + پاتل + ۹ لایهٔ ساختاری)",
-            onCopy = { viewModel.copyTextToClipboard("دستیار ایچیموکو", buildAssistantCopyText(coaching), "📋 توضیحات دستیار ایچیموکو کپی شد") },
+            onCopy = { viewModel.copyTextToClipboard("دستیار ایچیموکو", buildAssistantCopyText(coachingResult), "📋 توضیحات دستیار ایچیموکو کپی شد") },
             subtitle = "تحلیل ۴ ستون اصیل گوایچی هوسودا (تعادل، امواج I/V/N/P/S، چرخه زمان 9/17/26/33 و اهداف V/N/E/NT) + تله‌متری زنده ۹ لایهٔ ساختاری",
             initiallyExpanded = false,
         ) {
@@ -593,7 +621,7 @@ fun NeuralBrainScreen(
                     )
                 }
 
-                if (coaching == null) {
+                if (coachingResult == null) {
                     Text(
                         text = "در حال دریافت کندل‌های $assistantSymbol برای تحلیل دستیار استاد ایچیموکو...",
                         style = MaterialTheme.typography.bodySmall,
@@ -601,8 +629,8 @@ fun NeuralBrainScreen(
                     )
                 } else {
                     val gradeColor = when {
-                        coaching.worldClassIchimokuScore >= 76 -> AurumColors.Green
-                        coaching.worldClassIchimokuScore >= 60 -> AurumColors.Gold
+                        coachingResult.worldClassIchimokuScore >= 76 -> AurumColors.Green
+                        coachingResult.worldClassIchimokuScore >= 60 -> AurumColors.Gold
                         else -> AurumColors.Red
                     }
                     Column(
@@ -620,42 +648,42 @@ fun NeuralBrainScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Pill(
-                                text = "${coaching.symbol} [${coaching.timeframeLabel}] · ${if (coaching.direction == SignalAction.BUY) "سوگیری خرید (LONG)" else "سوگیری فروش (SHORT)"}",
-                                color = if (coaching.direction == SignalAction.BUY) AurumColors.Green else AurumColors.Red,
+                                text = "${coachingResult.symbol} [${coachingResult.timeframeLabel}] · ${if (coachingResult.direction == SignalAction.BUY) "سوگیری خرید (LONG)" else "سوگیری فروش (SHORT)"}",
+                                color = if (coachingResult.direction == SignalAction.BUY) AurumColors.Green else AurumColors.Red,
                             )
                             Pill(
-                                text = "امتیاز متود جهانی: ${coaching.worldClassIchimokuScore}/100",
+                                text = "امتیاز متود جهانی: ${coachingResult.worldClassIchimokuScore}/100",
                                 color = gradeColor,
                             )
                         }
                         Text(
-                            text = coaching.masterGradeFa,
+                            text = coachingResult.masterGradeFa,
                             style = MaterialTheme.typography.bodySmall,
                             color = gradeColor,
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = coaching.masterVerdictFa,
+                            text = coachingResult.masterVerdictFa,
                             style = MaterialTheme.typography.bodySmall,
                             color = AurumColors.TextPrimary,
                         )
                         Text(
-                            text = "🌊 نظریه امواج هوسودا (Hado Ron): ${coaching.hosodaWaveTypeFa}",
+                            text = "🌊 نظریه امواج هوسودا (Hado Ron): ${coachingResult.hosodaWaveTypeFa}",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.Cyan,
                         )
                         Text(
-                            text = "⏳ نظریه زمان هوسودا (Kihon Suchi): ${coaching.hosodaTimeCycleStatusFa}",
+                            text = "⏳ نظریه زمان هوسودا (Kihon Suchi): ${coachingResult.hosodaTimeCycleStatusFa}",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.Gold,
                         )
                         Text(
-                            text = "🎯 نظریه اهداف قیمتی (Keisanchi): ${coaching.keisanchiTargetsSummaryFa}",
+                            text = "🎯 نظریه اهداف قیمتی (Keisanchi): ${coachingResult.keisanchiTargetsSummaryFa}",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.Green,
                         )
                         Text(
-                            text = "🤝 ${coaching.multiStrategyAgreementSummaryFa}",
+                            text = "🤝 ${coachingResult.multiStrategyAgreementSummaryFa}",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.TextSecondary,
                         )
@@ -667,7 +695,7 @@ fun NeuralBrainScreen(
                             color = AurumColors.Gold,
                             fontWeight = FontWeight.Bold,
                         )
-                        coaching.executionPlanStepsFa.forEach { step ->
+                        coachingResult.executionPlanStepsFa.forEach { step ->
                             Text(
                                 text = "• $step",
                                 style = MaterialTheme.typography.labelSmall,
@@ -682,7 +710,7 @@ fun NeuralBrainScreen(
                             color = AurumColors.Red,
                             fontWeight = FontWeight.Bold,
                         )
-                        coaching.activePitfallsFa.forEach { p ->
+                        coachingResult.activePitfallsFa.forEach { p ->
                             Text(
                                 text = "• $p",
                                 style = MaterialTheme.typography.labelSmall,
@@ -692,12 +720,12 @@ fun NeuralBrainScreen(
 
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "📚 خلاصه تله‌متری زندهٔ لایه‌های ساختاری روی ${coaching.symbol}:",
+                            text = "📚 خلاصه تله‌متری زندهٔ لایه‌های ساختاری روی ${coachingResult.symbol}:",
                             style = MaterialTheme.typography.labelMedium,
                             color = AurumColors.Cyan,
                             fontWeight = FontWeight.Bold,
                         )
-                        coaching.driveBooksTelemetryFa.forEach { line ->
+                        coachingResult.driveBooksTelemetryFa.forEach { line ->
                             Text(
                                 text = line,
                                 style = MaterialTheme.typography.labelSmall,
@@ -711,8 +739,8 @@ fun NeuralBrainScreen(
 
         // ── ۰-ب. لیست نکات قابل اصلاح و ارتقاء بعدی دستیار ایچیموکو ("بتونه نکاتی بگه که بشه بعدا درستش کرد") ──
         SectionCard(
-            title = "🛠️ نکات قابل اصلاح و ارتقاء بعدی از نگاه دستیار ایچیموکو (${improvementNotes.size} نکته)",
-            onCopy = { viewModel.copyAssistantImprovementNotes(improvementNotes) },
+            title = "🛠️ نکات قابل اصلاح و ارتقاء بعدی از نگاه دستیار ایچیموکو (${visibleImprovementNotes.size} نکته)",
+            onCopy = { viewModel.copyAssistantImprovementNotes(visibleImprovementNotes) },
             subtitle = "عیب‌یابی خودکار معاملات، استاپ‌ها و گلوگاه‌های ۲۴ استراتژی به همراه دستور دقیق اصلاح برای آپدیت‌های بعدی یا اعمال فوری",
             initiallyExpanded = false,
         ) {
@@ -722,7 +750,7 @@ fun NeuralBrainScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Button(
-                        onClick = { viewModel.copyAssistantImprovementNotes(improvementNotes) },
+                        onClick = { viewModel.copyAssistantImprovementNotes(visibleImprovementNotes) },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = AurumColors.Gold,
                             contentColor = Color.Black,
@@ -733,7 +761,20 @@ fun NeuralBrainScreen(
                     }
                 }
 
-                improvementNotes.forEach { note ->
+                if (improvementNotes == null) {
+                    Text(
+                        text = "⏳ در حال کالبدشکافی معاملات و خواندن خزانهٔ کندل‌ها در پس‌زمینه…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AurumColors.TextMuted,
+                    )
+                } else if (visibleImprovementNotes.isEmpty()) {
+                    Text(
+                        text = "✅ در داده‌های فعلی نکتهٔ اصلاحی تازه‌ای پیدا نشد.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AurumColors.TextSecondary,
+                    )
+                }
+                visibleImprovementNotes.forEach { note ->
                     val prColor = when (note.priority) {
                         ImprovementNotePriority.CRITICAL -> AurumColors.Red
                         ImprovementNotePriority.HIGH -> AurumColors.Gold

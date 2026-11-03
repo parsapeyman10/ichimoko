@@ -1091,7 +1091,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
         _liveTicks.value[trade.symbol]?.let { tick ->
             _lastDisplayMarks.value = OpenPositionDisplay.record(_lastDisplayMarks.value, trade, tick, now)
         }
-        // ثبت فوری اسکرین‌شات ایچیموکو (کندل + کومو + آینده ۲۶ کندلی + باکس SL/TP + شروط ۱۶گانه) در آرشیو اپ و حافظه گوشی
+        // رندر و ثبت تصویر در فضای خصوصی آرشیو اپ، روی Dispatchers.IO تا رشتهٔ اصلی آزاد بماند.
         container.appScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val cachedCandles = LiveQuoteFetcher.peekCachedCandles(normSym, entryInterval)
             com.aurum.edge.data.TradeSnapshotArchiveManager.captureAndArchiveTradeOpen(
@@ -1224,7 +1224,7 @@ class AurumViewModel(private val container: AppContainer) : ViewModel() {
             val activeRec = closeRec ?: openRec
             if (activeRec != null) {
                 val kb = (activeRec.imageSizeBytes / 1024L).coerceAtLeast(1L)
-                _toast.value = "📸 تصویر چارت معامله #${trade.displayTradeNumber} (${trade.symbol} · ${kb}KB WebP) در آرشیو و حافظه گوشی ذخیره شد"
+                _toast.value = "🔒 تصویر چارت معامله #${trade.displayTradeNumber} (${trade.symbol} · ${kb}KB WebP) در آرشیو خصوصی اپ ثبت شد و از داخل Aurum Edge باز می‌شود"
             }
         }
     }

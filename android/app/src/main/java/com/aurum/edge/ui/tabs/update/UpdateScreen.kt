@@ -279,8 +279,8 @@ fun UpdateScreen(viewModel: AurumViewModel) {
                 )
             }
             Text(
-                "مسیر ذخیره: Download/AurumEdge/Screenshots · تصاویر جداگانه هم در گالری (Pictures/AurumEdge/TradeArchive) هستند؛ " +
-                    "پس حتی اگر این فایل را پاک کنید، آرشیو داخل اپ دست‌نخورده می‌ماند. «بازخوانی از فایل ZIP» تصاویر و فهرست را " +
+                "تصاویر تازه فقط در آرشیو خصوصی اپ هستند و در گالری گوشی ظاهر نمی‌شوند. فایل ZIP در Download/AurumEdge/Screenshots ذخیره می‌شود؛ " +
+                    "پس حتی اگر ZIP را پاک کنید، آرشیو داخل اپ دست‌نخورده می‌ماند. «بازخوانی از فایل ZIP» تصاویر و فهرست را " +
                     "بدون پاک کردن آرشیو فعلی با آن ادغام می‌کند.",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,

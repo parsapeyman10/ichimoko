@@ -1146,6 +1146,13 @@ class RiskAndCalendarEngineTest {
         )
         assertTrue(ensuredSnaps.any { it.tradeId == "PDF_ARCH_1" && !it.isCloseSnapshot })
         assertTrue(ensuredSnaps.any { it.tradeId == "PDF_ARCH_1" && it.isCloseSnapshot })
+        val generatedArchiveSnaps = ensuredSnaps.filter { it.tradeId == "PDF_ARCH_1" }
+        assertTrue("New screenshots must stay private to the app", generatedArchiveSnaps.all { it.phoneGalleryUri.isBlank() })
+        val archiveRoot = File(context.filesDir, "trade_snapshots_v1").canonicalPath + File.separator
+        assertTrue(
+            "New screenshot files must be written under the app-private archive",
+            generatedArchiveSnaps.all { File(it.localImagePath).canonicalPath.startsWith(archiveRoot) },
+        )
 
         // 2. Full PDF export embeds visual Ichimoku archive screenshots for all trades
         val tearSheetForPdf = com.aurum.edge.data.JournalExportEngine.buildInstitutionalTearSheet(

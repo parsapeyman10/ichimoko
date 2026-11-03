@@ -186,10 +186,10 @@ class JournalStore(
         rrBreakdownFa: String = "",
         preEntryCandles: List<Candle> = emptyList(),
     ): PaperTrade {
+        // This synchronous API can be called from a UI action. Use memory-only candles here;
+        // parsing the on-device CandleVault is disk I/O and used to freeze the main thread on entry.
         val effectiveCandles = preEntryCandles.ifEmpty {
-            LiveQuoteFetcher.peekCachedCandles(calc.symbol, entryInterval).ifEmpty {
-                PhoneStorageVaultManager.loadPersistedCandles(calc.symbol, entryInterval, now)
-            }
+            LiveQuoteFetcher.peekCachedCandles(calc.symbol, entryInterval)
         }
         val activeModel = com.aurum.edge.core.BitcoinStrategyModel.fromId(strategyId)
         val pre3Context = com.aurum.edge.core.IchimokuStrategyEngine.buildPreEntry3CandleContext(
@@ -215,16 +215,8 @@ class JournalStore(
             preEntry3Candles = pre3Context.candles,
         )
         persist( listOf(trade) + _trades.value )
-        if (isDefaultJournalFile) {
-            runCatching {
-                TradeSnapshotArchiveManager.captureAndArchiveTradeOpen(
-                    context = appContext,
-                    trade = trade,
-                    report = null,
-                    triggerCandles = effectiveCandles,
-                )
-            }
-        }
+        // OPEN snapshot generation is scheduled by the ViewModel after this synchronous journal
+        // write returns. Do not render charts or touch MediaStore from this call path.
         val cfg = settingsStore?.read()
         com.aurum.edge.notify.TradeEventAlarmManager.triggerEntryAlarm(
             context = appContext,
@@ -374,9 +366,9 @@ class JournalStore(
             closedTradesForAlarm.forEach { (closedTrade, isProfit) ->
                 if (isDefaultJournalFile) {
                     runCatching {
-                        TradeSnapshotArchiveManager.captureAndArchiveTradeClose(
+                        TradeSnapshotArchiveManager.enqueueTradeSnapshotClose(
                             context = appContext,
-                            closedTrade = closedTrade,
+                            trade = closedTrade,
                         )
                     }
                 }
@@ -445,9 +437,9 @@ class JournalStore(
             closedTradesForAlarm.forEach { (closedTrade, isProfit) ->
                 if (isDefaultJournalFile) {
                     runCatching {
-                        TradeSnapshotArchiveManager.captureAndArchiveTradeClose(
+                        TradeSnapshotArchiveManager.enqueueTradeSnapshotClose(
                             context = appContext,
-                            closedTrade = closedTrade,
+                            trade = closedTrade,
                             closeCandles = candles,
                         )
                     }
@@ -493,9 +485,9 @@ class JournalStore(
         settingsStore?.adjustBalance(roundedNet)
         if (isDefaultJournalFile) {
             runCatching {
-                TradeSnapshotArchiveManager.captureAndArchiveTradeClose(
+                TradeSnapshotArchiveManager.enqueueTradeSnapshotClose(
                     context = appContext,
-                    closedTrade = closed,
+                    trade = closed,
                 )
             }
         }

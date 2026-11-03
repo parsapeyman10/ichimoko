@@ -55,20 +55,33 @@ object MainThreadWatchdog {
             while (true) {
                 try {
                     Thread.sleep(500L)
-                    val blockedFor = SystemClock.uptimeMillis() - lastHeartbeat
+                    val heartbeatAtDetection = lastHeartbeat
+                    val blockedFor = SystemClock.uptimeMillis() - heartbeatAtDetection
                     if (blockedFor < STALL_THRESHOLD_MS) continue
-                    val now = SystemClock.uptimeMillis()
-                    if (now - lastReportAt < MIN_REPORT_INTERVAL_MS) continue
-                    lastReportAt = now
+                    if (SystemClock.uptimeMillis() - lastReportAt < MIN_REPORT_INTERVAL_MS) continue
+
+                    // Give a recovered main looper one short chance to deliver its overdue heartbeat.
+                    // The prior implementation could report a 30s stall after the UI had already
+                    // resumed, leaving only MessageQueue.nativePollOnce in the captured stack.
+                    Thread.sleep(150L)
+                    if (lastHeartbeat != heartbeatAtDetection) continue
                     val main = Looper.getMainLooper().thread
                     val stack = main.stackTrace
+                    if (stack.any { it.className == "android.os.MessageQueue" && it.methodName == "nativePollOnce" }) {
+                        continue // an idle Looper is not blocked; avoid false-positive ANR reports
+                    }
+                    val confirmedHeartbeat = lastHeartbeat
+                    val confirmedBlockedFor = SystemClock.uptimeMillis() - confirmedHeartbeat
+                    if (confirmedBlockedFor < STALL_THRESHOLD_MS) continue
+                    val now = SystemClock.uptimeMillis()
+                    lastReportAt = now
                     val text = buildString {
-                        appendLine("رشتهٔ اصلی «${main.name}» بیش از ${blockedFor / 1000} ثانیه پاسخ نداده است.")
+                        appendLine("رشتهٔ اصلی «${main.name}» بیش از ${confirmedBlockedFor / 1000} ثانیه پاسخ نداده است.")
                         appendLine("وضعیت: ${main.state}")
-                        appendLine("── stack رشتهٔ اصلی (لحظهٔ قفل) ──")
+                        appendLine("── stack رشتهٔ اصلی (تأیید پس از مهلت کوتاه) ──")
                         stack.forEach { appendLine("    at $it") }
                     }
-                    CrashReporter.recordMainThreadStall(app, blockedFor, text)
+                    CrashReporter.recordMainThreadStall(app, confirmedBlockedFor, text)
                 } catch (_: InterruptedException) {
                     return@Thread
                 } catch (_: Throwable) {

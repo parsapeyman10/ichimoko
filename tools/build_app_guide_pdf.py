@@ -908,7 +908,7 @@ def build(font_dir: str, out_path: str, toc_map: dict | None = None, total_pages
     pdf.bullets([
         "منبع اعداد کارت: `TradeSnapshotArchiveManager.archiveBasket` (تعداد تصویر، حجم خام تصاویر و تعداد رکورد فهرست).",
         "ساخت ZIP: `buildSnapshotZipBundle` — تصاویر در پوشهٔ `screenshots/`، فهرست رکوردها و یک `README_FA.txt`.",
-        "تصاویر جداگانه از قبل در گالری (`Pictures/AurumEdge/TradeArchive`) و `Download/AurumEdge/Archive` هم هستند؛ کارت آپدیت فقط آن‌ها را یک‌جا جمع می‌کند.",
+        "از نسخهٔ ۳.۹.۴۸ به بعد تصاویر تازه فقط در فضای خصوصی اپ می‌مانند و از گالری داخل Aurum Edge باز می‌شوند؛ ZIP/PDF فقط با درخواست شما برای انتقال دستی ساخته می‌شود.",
     ])
     pdf.callout(
         "هشدار",
