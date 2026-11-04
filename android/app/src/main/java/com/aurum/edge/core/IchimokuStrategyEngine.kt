@@ -1428,8 +1428,8 @@ object IchimokuStrategyEngine {
         val prior52Start = (lastIdx - 52).coerceAtLeast(0)
         val has52PriorBars = lastIdx >= 52
         val prior52Bars = closedBars.subList(prior52Start, lastIdx)
-        val prior52High = prior52Bars.maxOfOrNull { it.high } ?: cur.high
-        val prior52Low = prior52Bars.minOfOrNull { it.low } ?: cur.low
+        val prior52High = prior52Bars.maxOfOrNull { it.high } ?: closedBars[lastIdx].high
+        val prior52Low = prior52Bars.minOfOrNull { it.low } ?: closedBars[lastIdx].low
         val range52Atr = (prior52High - prior52Low) / atr14
         val closeChange52Atr = if (has52PriorBars) {
             (closeNow - closedBars[prior52Start].close) / atr14
