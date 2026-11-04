@@ -279,7 +279,7 @@ fun NeuralBrainScreen(
                             color = if (isAllSel) Color.Black else AurumColors.TextPrimary,
                         )
                     }
-                    BitcoinStrategyModel.entries.forEach { model ->
+                    BitcoinStrategyModel.neuralLearningModels.forEach { model ->
                         val isSel = regStrategyId == model.id
                         Box(
                             modifier = Modifier
@@ -1380,7 +1380,7 @@ fun NeuralBrainScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = "🎛️ اجرای تیونینگ خودکار پارامترها و ۱۶ ویژگی برای تمام ۱۶ استراتژی",
+                        text = "🎛️ تیونینگ ۱۶ مدلِ مشمول یادگیری عصبی (روش‌های BTC و پارسا مستثنا هستند)",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                     )
@@ -1394,16 +1394,16 @@ fun NeuralBrainScreen(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(
-                        text = "🧠 آموزش یک‌جای شبکه روی ۱۶ استراتژی و ۱۵ نماد (یادگیری انتقالی)",
+                        text = "🧠 آموزش روی ۱۶ مدلِ مشمول یادگیری و ۱۵ نماد · BTC/پارسا مستثنا هستند",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                     )
                 }
                 Text(
-                    text = "هر استراتژی و هر نماد از معاملات خودش یاد می‌گیرد؛ اگر دادهٔ خودش کم باشد، تجربهٔ " +
+                    text = "هر روشِ مشمول یادگیری عصبی و هر نماد از معاملات خودش یاد می‌گیرد؛ اگر دادهٔ خودش کم باشد، تجربهٔ " +
                         "بقیهٔ استراتژی‌ها و نمادهای هم‌دسته هم به آموزشش اضافه می‌شود. شخصیت هر نماد " +
                         "(روندسواری، نویز شدوی، اعتبار شکست و حد ضرر مناسبش) جداگانه آموخته و در تصمیم‌گیری اعمال می‌شود. " +
-                        "با هر معاملهٔ بسته‌شده، این آموزش خودکار تکرار می‌شود.",
+                        "با هر معاملهٔ بسته‌شده، این آموزش خودکار تکرار می‌شود. روش مستقل BTC و استراتژی پارسا عمداً از شمارش، یادگیری، پیش‌بینی و تیونینگ عصبی بیرون هستند.",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextMuted,
                 )
@@ -1541,7 +1541,7 @@ fun NeuralBrainScreen(
             var showParamsDrawer by rememberSaveable { mutableStateOf(false) }
             var showFeaturesDrawer by rememberSaveable { mutableStateOf(false) }
 
-            val allStrategies = BitcoinStrategyModel.entries
+            val allStrategies = BitcoinStrategyModel.neuralLearningModels
             val selectedModel = BitcoinStrategyModel.fromId(selectedStratId)
             val stratProfile = neuralState.autoTunedParameters.perStrategyProfiles[selectedModel.id]
 

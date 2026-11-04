@@ -149,7 +149,8 @@ class SettingsStore(context: Context) {
         val categoryStrategies = AssetClass.entries.associateWith { category ->
             CategoryStrategy.fromStored(prefs.getString("v1_strategy_${category.name}", null))
         }
-        val defaultAllIds = (BitcoinStrategyModel.entries.map { it.id } + storedCustomStrategies.map { it.id }).toSet()
+        val allKnownIds = (BitcoinStrategyModel.entries.map { it.id } + storedCustomStrategies.map { it.id }).toSet()
+        val defaultAllIds = (BitcoinStrategyModel.activeStrategyIds + storedCustomStrategies.map { it.id }).toSet()
         val storedEnabledIdsRaw = prefs.getString(KEY_ENABLED_STRATEGY_IDS, null)?.trim().orEmpty()
         val runAllSim = prefs.getBoolean(KEY_RUN_ALL_STRATEGIES, true)
         val rawParsedEnabledIds = if (storedEnabledIdsRaw.isBlank()) {
@@ -166,7 +167,7 @@ class SettingsStore(context: Context) {
                         id
                     }
                 }
-                .filter { id -> id in defaultAllIds }
+                .filter { id -> id in allKnownIds }
                 .toSet()
             cleaned.ifEmpty { defaultAllIds }
         }
@@ -442,7 +443,7 @@ class SettingsStore(context: Context) {
         val cur = read()
         val needsBalanceUpgrade = !prefs.getBoolean(KEY_BALANCE_100K_MIGRATED_V3903, false) && cur.accountBalance < 50_000.0
         val needsKeyPreload = cur.newsAiApiKey.isBlank()
-        val all24StrategyIds = (BitcoinStrategyModel.entries.map { it.id } + cur.customStrategies.map { it.id }).toSet()
+        val allDefaultStrategyIds = (BitcoinStrategyModel.activeStrategyIds + cur.customStrategies.map { it.id }).toSet()
         val needsAll15StrategiesMigration = !prefs.getBoolean(KEY_ALL_15_COMBOS_MIGRATED_V3908, false)
         val needsCleanAlarmMigration = !prefs.getBoolean(KEY_CLEAN_ALARM_V3915, false)
         if (!prefs.getBoolean(KEY_BALANCE_100K_MIGRATED_V3903, false)) {
@@ -468,7 +469,7 @@ class SettingsStore(context: Context) {
                     tpAlarmSoundName = it.tpAlarmSoundName.ifBlank { "Red Dwarf" },
                     slAlarmSoundName = it.slAlarmSoundName.ifBlank { "Latch" },
                     newsAiApiKey = if (it.newsAiApiKey.isBlank()) com.aurum.edge.data.AvalAiAdvisor.PRECONFIGURED_USER_KEY else it.newsAiApiKey,
-                    enabledStrategyIds = (if (it.runAllStrategiesSimultaneously) (it.enabledStrategyIds + all24StrategyIds) else it.enabledStrategyIds)
+                    enabledStrategyIds = (if (it.runAllStrategiesSimultaneously) (it.enabledStrategyIds + allDefaultStrategyIds) else it.enabledStrategyIds)
                         .minus(BitcoinStrategyModel.temporarilyDisabledIds),
                 )
             }

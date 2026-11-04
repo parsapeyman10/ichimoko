@@ -759,7 +759,7 @@ class NeuralSelfLearningEngine(
 
         // ── ۱. ماتریس برتری ترید به تفکیک ۲۴ استراتژی (Strategy × Timeframe × Symbol Edge Matrix) ──
         val samplesByStrategy = cur.replayBuffer.groupBy { it.strategyId.ifBlank { BitcoinStrategyModel.BASE_ICHIMOKU.id } }
-        val strategyEdgeMatrix = BitcoinStrategyModel.entries.map { model ->
+        val strategyEdgeMatrix = BitcoinStrategyModel.neuralLearningModels.map { model ->
             val samples = samplesByStrategy[model.id] ?: emptyList()
             val count = samples.size
             val wins = samples.filter { it.won }
@@ -1081,14 +1081,14 @@ class NeuralSelfLearningEngine(
         cur: NeuralNetworkPersistedState,
     ): NeuralAutoTunedParameters {
         val currentMap = params.perStrategyProfiles
-        val validIds = BitcoinStrategyModel.entries.map { it.id }.toSet()
+        val validIds = BitcoinStrategyModel.neuralLearningModels.map { it.id }.toSet()
         if (currentMap.keys.containsAll(validIds) &&
             currentMap.values.all { it.featureTunings.size == INPUT_DIM }
         ) {
             return params
         }
         val updated = LinkedHashMap<String, PerStrategyNeuralTuningProfile>()
-        for (model in BitcoinStrategyModel.entries) {
+        for (model in BitcoinStrategyModel.neuralLearningModels) {
             val existing = currentMap[model.id]
             if (existing != null && existing.featureTunings.size == INPUT_DIM) {
                 updated[model.id] = existing.copy(
@@ -1146,6 +1146,9 @@ class NeuralSelfLearningEngine(
             vHeadWin = safeVHeadWin,
             mGate = safeMGate,
             vGate = safeVGate,
+            replayBuffer = loaded.replayBuffer.filter {
+                BitcoinStrategyModel.fromId(it.strategyId).neuralLearningEnabled
+            },
         )
         return baseSanitized.copy(
             autoTunedParameters = ensurePerStrategyProfiles(baseSanitized.autoTunedParameters, baseSanitized),
@@ -1314,7 +1317,7 @@ class NeuralSelfLearningEngine(
                 categoryTitleFa = categoryTitleFa(ac),
             )
         }
-        val defaultProfiles = BitcoinStrategyModel.entries.associate { model ->
+        val defaultProfiles = BitcoinStrategyModel.neuralLearningModels.associate { model ->
             model.id to buildDefaultProfileForStrategy(model, attn, headWinW)
         }
         return NeuralNetworkPersistedState(
@@ -1735,7 +1738,11 @@ class NeuralSelfLearningEngine(
      */
     @Synchronized
     fun syncWithClosedJournalTrades(closedTrades: List<PaperTrade>): NeuralLearningLedger.Reconciliation {
-        val validClosed = closedTrades.filter { !it.isOpen && it.pnlUsd != null }
+        // دو روش opt-in تازه از شبکهٔ عصبی مستثنا هستند؛ نه نمونهٔ replay، نه شمارندهٔ یادگیری.
+        val validClosed = closedTrades.filter {
+            !it.isOpen && it.pnlUsd != null &&
+                BitcoinStrategyModel.fromId(it.strategyId).neuralLearningEnabled
+        }
         val distinctJournal = validClosed.distinctBy { it.id }
         val legacyTotal = persistedState.totalLearnedTrades
         // تشخیص «قبلاً یاد گرفته شده» فقط از روی دفتر انجام می‌شود، نه حافظهٔ تکرار ۳۲۰تایی؛
@@ -2148,6 +2155,29 @@ class NeuralSelfLearningEngine(
         report: StrategyEvaluationReport? = null,
     ): NeuralMarketInference {
         val symbol = V1Universe.normalize(symbolInput)
+        val normStratId = BitcoinStrategyModel.normalizeStrategyId(strategyId)
+        val model = BitcoinStrategyModel.fromId(normStratId)
+        if (!model.neuralLearningEnabled) {
+            val note = "این روش طبق تنظیمش از پیش‌بینی، گیت و تیونینگ شبکهٔ عصبی مستثناست؛ تصمیم فقط از قواعد خودش می‌آید."
+            return NeuralMarketInference(
+                symbol = symbol,
+                categoryCode = AssetClass.of(symbol).code,
+                categoryTitleFa = categoryTitleFa(AssetClass.of(symbol)),
+                timeframeLabel = interval.label,
+                strategyId = normStratId,
+                winProbabilityPct = 50.0,
+                expectedRMultiple = 0.0,
+                dangerScorePct = 0.0,
+                isNoTradeConditionDetected = false,
+                isBlockingTradeNow = false,
+                totalLearnedTrades = persistedState.totalLearnedTrades,
+                warmupTargetTrades = persistedState.warmupTargetTrades,
+                warmupProgressPct = (persistedState.totalLearnedTrades.toDouble() / persistedState.warmupTargetTrades.coerceAtLeast(1) * 100.0).coerceIn(0.0, 100.0),
+                currentConditionSummaryFa = note,
+                whyAvoidOrAllowFa = note,
+                topAttentionFactorFa = "یادگیری عصبی برای این روش خاموش است",
+            )
+        }
         val assetClass = AssetClass.of(symbol)
         val (features, sigKey, condDescFa) = extractConditionFeatures(
             symbolInput = symbol,
@@ -2159,7 +2189,6 @@ class NeuralSelfLearningEngine(
             report = report,
         )
 
-        val normStratId = BitcoinStrategyModel.normalizeStrategyId(strategyId)
         val stratProfile = persistedState.autoTunedParameters.perStrategyProfiles[normStratId]
         val (neuralWinProb, neuralExpectedR) = forwardPass(features, persistedState, normStratId, symbol)
         val cluster = persistedState.conditionClusters[sigKey]
@@ -2275,6 +2304,19 @@ class NeuralSelfLearningEngine(
 
     @Synchronized
     fun evaluateReport(report: StrategyEvaluationReport): NeuralSignalEvaluation {
+        if (!BitcoinStrategyModel.fromId(report.strategyId).neuralLearningEnabled) {
+            val note = "این استراتژی از ارزیابی و گیت شبکهٔ عصبی مستثناست؛ قواعد مستقل آن تعیین‌کننده‌اند."
+            return NeuralSignalEvaluation(
+                symbol = V1Universe.normalize(report.symbol),
+                conditionKey = "NEURAL_EXEMPT:${BitcoinStrategyModel.normalizeStrategyId(report.strategyId)}",
+                predictedWinProb = 0.5,
+                expectedR = 0.0,
+                isNoTradeCondition = false,
+                isBlockingTradeNow = false,
+                shouldAllowTrade = true,
+                summaryFa = note,
+            )
+        }
         val causalAttr = updateLiveMarketCausalAttribution(report)
         val (features, sigKey, _) = extractConditionFeatures(
             symbolInput = report.symbol,
@@ -2423,6 +2465,7 @@ class NeuralSelfLearningEngine(
         featuresOverride: DoubleArray? = null,
         conditionKeyOverride: String? = null,
     ) {
+        if (!BitcoinStrategyModel.fromId(trade.strategyId).neuralLearningEnabled) return
         val pnl = trade.pnlUsd ?: return
         // «یادگیری دقیقاً یک‌بار»: اگر اثر این معامله قبلاً در دفتر ثبت شده باشد،
         // هیچ گام آموزشی/آماری دوباره اجرا نمی‌شود (منبع اصلی تورم شمارندهٔ قبلی همین بود).
@@ -2680,6 +2723,29 @@ class NeuralSelfLearningEngine(
     @Synchronized
     fun updateLiveMarketCausalAttribution(report: StrategyEvaluationReport): NeuralMarketCausalAttribution {
         val nowMs = System.currentTimeMillis()
+        val model = BitcoinStrategyModel.fromId(report.strategyId)
+        if (!model.neuralLearningEnabled) {
+            val symbol = V1Universe.normalize(report.symbol)
+            val assetClass = AssetClass.of(symbol)
+            val note = "علیت‌سنجی و تفسیر عصبی برای این استراتژی خاموش است؛ روش با قواعد مستقل خود ارزیابی می‌شود."
+            return NeuralMarketCausalAttribution(
+                symbol = symbol,
+                categoryCode = assetClass.code,
+                categoryTitleFa = categoryTitleFa(assetClass),
+                timeframeLabel = report.triggerInterval.label,
+                marketRegimeStateFa = note,
+                primaryCauseCode = "NEURAL_EXEMPT",
+                primaryCauseBadgeFa = "بدون ارزیابی عصبی",
+                whatIsHappeningFa = note,
+                whyItIsHappeningFa = note,
+                newsImpactSummaryFa = "برای این استراتژی اثر خبریِ عصبی محاسبه نمی‌شود.",
+                unified9BookSummaryFa = "یادگیری عصبی خاموش",
+                recommendedTacticalActionFa = "پیروی از شروط مستقل استراتژی و پلن ریسک ایمن.",
+                causalConfidencePct = 0.0,
+                newsSentimentScore = 0.0,
+                updatedAtMs = nowMs,
+            )
+        }
         val attr = computeMarketCausalAttribution(report.symbol, report, nowMs)
         // فقط بیت‌کوین در بخش «درک زندهٔ بازار» نگه داشته می‌شود؛ بقیهٔ نمادها همان‌جا که
         // ارزیابی می‌شوند متن علیت خودشان را می‌گیرند و در حافظهٔ شبکه ذخیره نمی‌شوند.
@@ -3090,6 +3156,10 @@ class NeuralSelfLearningEngine(
     ): PerStrategyNeuralTuningProfile {
         val normId = BitcoinStrategyModel.normalizeStrategyId(strategyId)
         val model = BitcoinStrategyModel.fromId(normId)
+        if (!model.neuralLearningEnabled) {
+            return persistedState.autoTunedParameters.perStrategyProfiles[model.id]
+                ?: buildDefaultProfileForStrategy(model, persistedState.attentionWeights, persistedState.headWinWeights)
+        }
         val ensuredParams = ensurePerStrategyProfiles(persistedState.autoTunedParameters, persistedState)
         val currentProfile = ensuredParams.perStrategyProfiles[model.id]
             ?: buildDefaultProfileForStrategy(model, persistedState.attentionWeights, persistedState.headWinWeights)
@@ -3148,6 +3218,10 @@ class NeuralSelfLearningEngine(
     ): PerStrategyNeuralTuningProfile {
         val normId = BitcoinStrategyModel.normalizeStrategyId(strategyId)
         val model = BitcoinStrategyModel.fromId(normId)
+        if (!model.neuralLearningEnabled) {
+            return persistedState.autoTunedParameters.perStrategyProfiles[model.id]
+                ?: buildDefaultProfileForStrategy(model, persistedState.attentionWeights, persistedState.headWinWeights)
+        }
         val ensuredParams = ensurePerStrategyProfiles(persistedState.autoTunedParameters, persistedState)
         val curProf = ensuredParams.perStrategyProfiles[model.id]
             ?: buildDefaultProfileForStrategy(model, persistedState.attentionWeights, persistedState.headWinWeights)
@@ -3200,6 +3274,9 @@ class NeuralSelfLearningEngine(
             huberDelta = safeDelta,
             nowMs = nowMs,
         )
+        if (!strategyId.equals("ALL", ignoreCase = true) &&
+            !BitcoinStrategyModel.fromId(strategyId).neuralLearningEnabled
+        ) return report
         val rowMap = report.parameterRows.associateBy { it.paramKey }
         val regMinRr = (rowMap["minRiskReward"]?.regressedValue ?: 1.65).coerceIn(1.50, 2.60)
         val regSlBuf = (rowMap["slBufferAtr"]?.regressedValue ?: 0.26).coerceIn(0.18, 0.45)
@@ -3214,7 +3291,7 @@ class NeuralSelfLearningEngine(
         val ensured = ensurePerStrategyProfiles(persistedState.autoTunedParameters, persistedState)
         val updatedProfiles = LinkedHashMap(ensured.perStrategyProfiles)
         val targetModels = if (strategyId.equals("ALL", ignoreCase = true)) {
-            BitcoinStrategyModel.entries
+            BitcoinStrategyModel.neuralLearningModels
         } else {
             listOf(BitcoinStrategyModel.fromId(BitcoinStrategyModel.normalizeStrategyId(strategyId)))
         }
@@ -3548,6 +3625,10 @@ class NeuralSelfLearningEngine(
     ): PerStrategyNeuralTuningProfile {
         val normId = BitcoinStrategyModel.normalizeStrategyId(strategyId)
         val model = BitcoinStrategyModel.fromId(normId)
+        if (!model.neuralLearningEnabled) {
+            return persistedState.autoTunedParameters.perStrategyProfiles[model.id]
+                ?: buildDefaultProfileForStrategy(model, persistedState.attentionWeights, persistedState.headWinWeights)
+        }
         val ensuredParams = ensurePerStrategyProfiles(persistedState.autoTunedParameters, persistedState)
         val tunedSingle = computeAutoTunedProfileForModel(
             model = model,
@@ -3597,7 +3678,7 @@ class NeuralSelfLearningEngine(
         val newMap = LinkedHashMap<String, PerStrategyNeuralTuningProfile>()
         val perStrategySamples = LinkedHashMap<String, Int>()
         var withOwnSamples = 0
-        for (model in BitcoinStrategyModel.entries) {
+        for (model in BitcoinStrategyModel.neuralLearningModels) {
             val ownCount = cur.replayBuffer.count {
                 BitcoinStrategyModel.normalizeStrategyId(it.strategyId) == model.id
             }
@@ -3632,7 +3713,7 @@ class NeuralSelfLearningEngine(
             samplesAnalyzed = cur.replayBuffer.size,
             perStrategyProfiles = newMap,
             perSymbolProfiles = symbolMap,
-            tuningSummaryFa = "آموزش هم‌زمان روی ${BitcoinStrategyModel.entries.size} استراتژی و " +
+            tuningSummaryFa = "آموزش هم‌زمان روی ${BitcoinStrategyModel.neuralLearningModels.size} استراتژی و " +
                 "${symbolMap.size} نماد (نسل #$generation): ${cur.replayBuffer.size} نمونهٔ تجربه، " +
                 "${perStrategySamples.count { it.value > 0 }} استراتژی و $symbolsWithOwnSamples نماد با دادهٔ اختصاصی.",
         )
@@ -3656,7 +3737,7 @@ class NeuralSelfLearningEngine(
             ),
         )
         return AllStrategyLearningReport(
-            strategiesTotal = BitcoinStrategyModel.entries.size,
+            strategiesTotal = BitcoinStrategyModel.neuralLearningModels.size,
             strategiesWithOwnSamples = withOwnSamples,
             strategiesTrained = newMap.size,
             totalSamples = cur.replayBuffer.size,
@@ -4184,7 +4265,7 @@ class NeuralSelfLearningEngine(
         )
 
         val existingMap = ensurePerStrategyProfiles(cur.autoTunedParameters, cur).perStrategyProfiles
-        val perStratTuned = BitcoinStrategyModel.entries.associate { model ->
+        val perStratTuned = BitcoinStrategyModel.neuralLearningModels.associate { model ->
             model.id to computeAutoTunedProfileForModel(
                 model = model,
                 cur = cur,

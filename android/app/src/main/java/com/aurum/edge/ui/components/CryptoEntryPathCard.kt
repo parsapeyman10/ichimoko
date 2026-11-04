@@ -106,7 +106,7 @@ fun CryptoEntryPathCard(
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = "در استراتژی‌های ۱ تا ۱۵ هیچ محاسبهٔ نئوویو انجام نمی‌شود.",
+                        text = "در هیچ روشی جز استراتژی ۱۶ محاسبهٔ نئوویو انجام نمی‌شود.",
                         style = MaterialTheme.typography.labelSmall,
                         color = AurumColors.TextSecondary,
                     )
@@ -114,7 +114,7 @@ fun CryptoEntryPathCard(
             }
 
             Text(
-                text = "این مسیر فقط داخل استراتژی ۱۶ اثر دارد؛ در بقیهٔ استراتژی‌ها رمزارز با همان ۱۶ شرط عمومی سنجیده می‌شود.",
+                text = "این مسیر فقط داخل استراتژی ۱۶ اثر دارد؛ سایر روش‌ها با شروط اختصاصی خودشان سنجیده می‌شوند.",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
             )
@@ -122,7 +122,7 @@ fun CryptoEntryPathCard(
                 text = if (cfg.neoWaveCryptoEntryEnabled) {
                     "✅ فعال در استراتژی ۱۶: ورود رمزارز با الگوی کامل و تأییدشدهٔ نئوویو باز می‌شود."
                 } else {
-                    "⏹ مسیر نئوویوی رمزارز خاموش است: رمزارز فقط با عبور هم‌زمان هر ۱۶ شرط وارد می‌شود."
+                    "⏹ مسیر نئوویوی رمزارز خاموش است: روش‌های معمول فقط پس از تکمیل شروط تعریف‌شدهٔ خودشان وارد می‌شوند."
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextPrimary,
@@ -130,7 +130,7 @@ fun CryptoEntryPathCard(
             )
 
             Text(
-                text = "چرا این بخش وجود دارد؟ شرط عمومی «هم‌زمان هر ۱۶ شرط» در رمزارزِ ۲۴ ساعته می‌تواند " +
+                text = "چرا این بخش وجود دارد؟ شرط‌های هم‌زمان روش‌های عمومی در رمزارزِ ۲۴ ساعته می‌تواند " +
                     "روزها برقرار نشود و بازار از دست برود. در این مسیر، شمارش نئوویو خودش ماشهٔ ورود است؛ " +
                     "حد ضرر، حد سود، حجم و لوریج همان قواعد قبلی را دارند.",
                 style = MaterialTheme.typography.labelSmall,

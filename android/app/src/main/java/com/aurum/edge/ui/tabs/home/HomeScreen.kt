@@ -597,7 +597,7 @@ private fun LiveMetalsCryptoForexRadarCard(
 
     SectionCard(
         title = "🥇 رادار زنده طلا، نقره، کریپتو و فارکس (15m + 5m)",
-        subtitle = "قیمت اسپات هم‌تراز، وضعیت ۱۶ استراتژی ایچیموکو (۱۵ ترکیب + متود جامع) و اسکن فوری تمام بازارها",
+        subtitle = "قیمت اسپات هم‌تراز، رصد روش‌های فعال ایچیموکو و اسکن فوری بازارها · روش BTC و پارسا فقط با انتخاب صریح",
         trailing = {
             Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                 Pill(
@@ -821,7 +821,7 @@ private fun LiveOpenTradesTrackingSection(
                     )
                 }
                 Text(
-                    text = "رادار ۱۵ نماد در تایم‌فریم‌های 15m و 5m در حال اسکن ۱۶ شرط ایچیموکو است؛ به محض تکمیل شروط و تایید عدد مناسب R:R (حداقل ۱:۱.۵)، معامله خودکار باز می‌شود.",
+                    text = "رادار ۱۵ نماد در تایم‌فریم‌های 15m و 5m قواعد اختصاصی روش منتخب را می‌سنجد؛ معامله فقط پس از تکمیل شروط و تأیید R:R حداقل ۱:۱.۵ مجاز است.",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.TextSecondary,
                 )

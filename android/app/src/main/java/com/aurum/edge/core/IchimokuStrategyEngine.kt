@@ -27,6 +27,10 @@ enum class BitcoinStrategyModel(
     val hasHosoda: Boolean = true,
     val hasPeloille: Boolean = true,
     val baseOptimalRr: Double = 2.15,
+    /** این روش فقط با انتخاب صریح کاربر به فهرست ارزیابی اضافه می‌شود. */
+    val requiresExplicitOptIn: Boolean = false,
+    /** روش‌های تازهٔ BTC و پارسا از یادگیری، گیت و تیونینگ عصبی مستثنا هستند. */
+    val neuralLearningEnabled: Boolean = true,
 ) {
     // ── ۱. ترکیب کامل ۴گانه (Quad Master: C(4,4) = 1) ────────────────────────
     BASE_ICHIMOKU(
@@ -239,6 +243,34 @@ enum class BitcoinStrategyModel(
         hasHosoda = true,
         hasPeloille = false,
         baseOptimalRr = 2.25,
+    ),
+    BTC_52_CANDLE_REGIME(
+        id = "BTC_52_CANDLE_REGIME",
+        titleFa = "بیت‌کوین · ساختار ۵۲ کندلی و شکست/بازآزمایی",
+        badgeFa = "BTC · پنجرهٔ ۵۲ کندل",
+        authorRefFa = "روش مستقل بیت‌کوین · ساختار روند/فشردگی/شکست ۵۲ کندلی",
+        summaryFa = "فقط برای BTC/USDT: سه کندل آخر الگوی تصمیم نیستند. روش، پنجرهٔ ۵۲ کندل بسته را برای جهت و جایگاه قیمت می‌سنجد؛ پس از فشردگی یا همگرایی، شکست معتبر سقف/کف ۵۲ کندلی یا بازآزمایی همان مرز را با شیب‌های ایچیموکو، ابر، آزادی چیکو، حجم و گسترش نوسان تأیید می‌کند. ورودِ تعقیبیِ بیش‌ازحد دور از کیجون رد می‌شود.",
+        hasPatel = false,
+        hasTuttle = false,
+        hasHosoda = false,
+        hasPeloille = false,
+        baseOptimalRr = 2.20,
+        requiresExplicitOptIn = true,
+        neuralLearningEnabled = false,
+    ),
+    PARSA_52_LINE_TURN(
+        id = "PARSA_52_LINE_TURN",
+        titleFa = "استراتژی پارسا · چرخش ابر پس از فلت ۵۲",
+        badgeFa = "پارسا · فلت >۱۷ + چرخش + کراس",
+        authorRefFa = "روش مستقل پارسا · ایچیموکو ۹/۲۶/۵۲",
+        summaryFa = "«خط ۵۲» در این روش صریحاً Senkou Span B (SSB، خط دورهٔ ۵۲) است. فقط پس از تخت‌ماندن SSB دست‌کم ۱۸ کندل بسته، چرخش Senkou Span A و کراس هم‌جهت تنکان/کیجون بررسی می‌شوند؛ سپس شیب و فاصلهٔ خطوط، آزادی Chikou، کیفیت شکست و نشانه‌های حرکت شارپ فیلتر می‌شوند. روش به یادگیری و تیونینگ عصبی وصل نیست.",
+        hasPatel = false,
+        hasTuttle = false,
+        hasHosoda = false,
+        hasPeloille = false,
+        baseOptimalRr = 2.15,
+        requiresExplicitOptIn = true,
+        neuralLearningEnabled = false,
     );
 
     val isDrivePdfStrategy: Boolean
@@ -246,10 +278,10 @@ enum class BitcoinStrategyModel(
 
     /**
      * تنها استراتژی‌ای که لایهٔ **نئوویو–الیوت** در آن ادغام می‌شود: استراتژی جایگاه ۱۶.
-     * بقیهٔ استراتژی‌ها (۱ تا ۱۵) هیچ محاسبهٔ نئوویو ندارند.
+     * تمام روش‌های دیگر، ازجمله دو روش مستقل BTC و پارسا، هیچ محاسبهٔ نئوویو ندارند.
      */
     val isNeoWaveElliottStrategy: Boolean
-        get() = this == entries.last()
+        get() = this == DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER
 
     /**
      * استراتژی‌هایی که کاربر موقتاً خاموش کرده است. شناسه و آموخته‌های شبکه‌شان حفظ می‌شود،
@@ -289,9 +321,13 @@ enum class BitcoinStrategyModel(
         /** استراتژی‌های موقتاً خاموش (فعلاً فقط استراتژی پیمان / جایگاه ۱۶). */
         val temporarilyDisabledIds: Set<String> = setOf(DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
 
-        /** شناسهٔ استراتژی‌هایی که واقعاً باید ارزیابی/معامله شوند (همه، منهای خاموش‌ها). */
+        /** مدل‌هایی که یادگیری آنلاین و تیونینگ عصبی برایشان مجاز است. */
+        val neuralLearningModels: List<BitcoinStrategyModel>
+            get() = entries.filter { it.neuralLearningEnabled }
+
+        /** شناسهٔ مدل‌های پیش‌فرض ارزیابی؛ روش‌های opt-in فقط پس از انتخاب صریح کاربر فعال می‌شوند. */
         val activeStrategyIds: Set<String>
-            get() = entries.filterNot { it.isTemporarilyDisabled }.map { it.id }.toSet()
+            get() = entries.filterNot { it.isTemporarilyDisabled || it.requiresExplicitOptIn }.map { it.id }.toSet()
 
         val drivePdfStrategies: List<BitcoinStrategyModel>
             get() = listOf(DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER)
@@ -331,6 +367,44 @@ data class DriveBookPlaybookSpec(
 )
 
 fun BitcoinStrategyModel.driveBookPlaybook(): DriveBookPlaybookSpec = when (this) {
+    BitcoinStrategyModel.BTC_52_CANDLE_REGIME -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = "روش مستقل بیت‌کوین بر پایهٔ زمینهٔ ۵۲ کندلی",
+        authorAndEdition = "قواعد اختصاصی این اپ · Ichimoku 9/26/52",
+        ichimokuSettingsFa = "پنجرهٔ ۵۲ کندل بسته در تایم‌فریم راهبرد و ماشه؛ کندل جاری فقط برای عبورِ بسته‌شده از مرز به‌کار می‌رود. سه کندل آخر هیچ الگوی مستقلی برای رأی‌دادن ندارند.",
+        auxiliaryIndicatorsFa = "رگرسیون و تغییر قیمت ۵۲ کندلی، دامنه/فشردگی نیمهٔ اخیر نسبت به نیمهٔ قبل، شیب TK و Senkou A، فاصله از Kijun، آزادی Chikou، ATR(14)/میانگین دامنهٔ ۵۲ کندلی و حجم نسبی.",
+        entryChecklistStepsFa = listOf(
+            "۱. نماد باید BTC/USDT باشد و دادهٔ بسته‌شدهٔ کافی برای پنجرهٔ ۵۲ کندلی موجود باشد.",
+            "۲. جهت باید با شیب رگرسیون ۵۲ کندلی و جایگاه قیمت نسبت به میانهٔ دامنهٔ قبلی همسو باشد؛ سه کندل اخیر به‌تنهایی جهت نمی‌سازند.",
+            "۳. ورود فقط روی شکست بسته‌شدهٔ سقف/کف ۵۲ کندل قبل یا بازآزمایی معتبر همان مرز است؛ عبورِ شدویی کافی نیست.",
+            "۴. شیب Tenkan/Kijun و Senkou A نباید با جهت مخالف باشند؛ فاصلهٔ قیمت از Kijun باید در محدودهٔ قابل‌تعقیب بماند.",
+            "۵. Chikou باید از کندل، خطوط TK و ابر در مسیر معامله آزاد باشد؛ حجم/بدنه و گسترش ATR حرکت را تأیید کنند.",
+            "۶. در فشردگی بدون شکست، حجم ضعیف، شدوی مخالف بزرگ، ورود بیش‌ازحد کشیده یا فضای ناکافی تا مانع، فقط انتظار؛ بدون ورود.",
+        ),
+        stopLossFormulaFa = "پشت مرز شکست/کف یا سقف ساختاری ۵۲ کندلی با بافر ATR؛ سپس اعتبارسنجی اجباری TradePlanGuard.",
+        takeProfitAndExitRulesFa = "هدف بر پایهٔ نوسان و مانع ساختاری نزدیک، با R:R هرگز کمتر از ۱:۱.۵؛ خروج هوشمند فقط پس از عبور سود باز از ۲R.",
+        specialEdgeAdvantageFa = "روش مستقل و BTC-only؛ با زمینهٔ ۵۲ کندلی تصمیم می‌گیرد، از الگوی سه کندل آخر استفاده نمی‌کند و از یادگیری/تیونینگ عصبی مستثناست.",
+    )
+
+    BitcoinStrategyModel.PARSA_52_LINE_TURN -> DriveBookPlaybookSpec(
+        strategyId = id,
+        bookFileTitle = "استراتژی پارسا · فلت SSB و چرخش ابر",
+        authorAndEdition = "قواعد اختصاصی پارسا · Ichimoku 9/26/52",
+        ichimokuSettingsFa = "خط ۵۲ در این روش دقیقاً Senkou Span B (SSB) است؛ تخت‌ماندن یعنی دامنهٔ SSB در دست‌کم ۱۸ کندل بسته از بزرگ‌ترِ ۰٫۰۴ ATR یا ۰٫۰۳٪ قیمت بیشتر نشود.",
+        auxiliaryIndicatorsFa = "چرخش شیب Senkou Span A محاسبه‌شده برای ابر آینده، سن کراس Tenkan/Kijun، شیب TK/ابر، فاصلهٔ TK و قیمت از Kijun، آزادی Chikou، ATR و حجم نسبی.",
+        entryChecklistStepsFa = listOf(
+            "۱. پیش‌شرط قطعی: SSB/خط دورهٔ ۵۲ حداقل ۱۸ کندل بسته تخت مانده باشد؛ ۱۷ کندل کافی نیست.",
+            "۲. Senkou Span A محاسبه‌شده برای ابر آینده باید از شیب مخالف به چرخش هم‌جهت برسد؛ صرفاً صاف‌شدن خط، چرخش محسوب نمی‌شود.",
+            "۳. کراس Tenkan/Kijun هم‌جهت باید در پنجرهٔ حداکثر ۸ کندل بسته رخ داده باشد؛ الگوی سه کندلی شرط نیست.",
+            "۴. شیب Tenkan و Senkou A باید همسو، شیب Kijun نباید به‌شدت مخالف و فاصلهٔ TK باید در حال بازشدن اما نه بیش‌ازحد باشد.",
+            "۵. Chikou باید از قیمت/کندل‌های متناظر، TK و ابر آزاد باشد؛ بدنه، حجم و گسترش ATR باید شکست/حرکت شارپ را تأیید کنند.",
+            "۶. ورود تعقیبی دور از Kijun، کراس کهنه، ابر/چیکوی مسدود، یا پلن فاقد R:R≥۱٫۵ ممنوع است.",
+        ),
+        stopLossFormulaFa = "پشت SSB تخت یا ساختار اخیرِ همسو با ATR؛ عبور از TradePlanGuard الزامی است.",
+        takeProfitAndExitRulesFa = "هدف در محدودهٔ ۱٫۵R تا ۳R و پیش از مانع ساختاری؛ خروج هوشمند فقط پس از عبور سود باز از ۲R.",
+        specialEdgeAdvantageFa = "شرط ۱۸+ کندلی SSB، چرخش Senkou A و کراس TK همگی لازم‌اند؛ روش از یادگیری، گیت و تیونینگ عصبی مستثناست.",
+    )
+
     BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER -> DriveBookPlaybookSpec(
         strategyId = id,
         bookFileTitle = "Elliott Wave + NeoWave Geometry — استراتژی پیمان (نسخهٔ الیوت)",
@@ -385,6 +459,23 @@ fun BitcoinStrategyModel.formatLiveBookTelemetryFa(
             "استراتژی پیمان (الیوت–نئوویو) · فقط لایهٔ موج فعال است · ADX=%.1f · RSI7=%.1f · این استراتژی موقتاً غیرفعال است",
             trigSnap.adx14,
             trigSnap.rsi7,
+        )
+        BitcoinStrategyModel.BTC_52_CANDLE_REGIME -> String.format(
+            Locale.US,
+            "پنجرهٔ ۵۲ کندل · شیب=%+.2f ATR/کندل · دامنه=%.1f ATR · فشردگی نیمه=%.2f · Chikou=%s",
+            trigSnap.regressionSlope52AtrPerBar,
+            trigSnap.range52Atr,
+            trigSnap.compressionRatio26,
+            if (if (isLong) trigSnap.chikouBullishOpenSpace else trigSnap.chikouBearishOpenSpace) "آزاد" else "درگیر",
+        )
+        BitcoinStrategyModel.PARSA_52_LINE_TURN -> String.format(
+            Locale.US,
+            "SSB فلت=%d کندل · شیب SSA=%+.2f ATR · کراس TK=%s · فاصله TK=%.2f ATR · Chikou=%s",
+            trigSnap.senkouSpanBFlatBars,
+            trigSnap.senkouSpanASlopeAtrPerBar,
+            if (isLong) trigSnap.bullishTenkanKijunCrossAgeBars else trigSnap.bearishTenkanKijunCrossAgeBars,
+            trigSnap.tenkanKijunGapAtr,
+            if (if (isLong) trigSnap.chikouBullishOpenSpace else trigSnap.chikouBearishOpenSpace) "آزاد" else "درگیر",
         )
 
         else -> String.format(
@@ -626,6 +717,24 @@ data class IchimokuBarSnapshot(
     val chikouResistancePeak: Double,
     val chikouSupportTrough: Double,
     val isCurrentSpanBFlat: Boolean,
+    /** تعداد کندل‌های بستهٔ متوالی که Senkou Span B (خط دورهٔ ۵۲) در آن‌ها تخت مانده است. */
+    val senkouSpanBFlatBars: Int = 0,
+    /** شیب Span A دورهٔ جاری و قبلی بر حسب ATR در هر کندل. */
+    val senkouSpanASlopeAtrPerBar: Double = 0.0,
+    val previousSenkouSpanASlopeAtrPerBar: Double = 0.0,
+    /** سن آخرین کراس Tenkan/Kijun؛ مقدار پیش‌فرض یعنی کراسی در پنجره پیدا نشده است. */
+    val bullishTenkanKijunCrossAgeBars: Int = Int.MAX_VALUE,
+    val bearishTenkanKijunCrossAgeBars: Int = Int.MAX_VALUE,
+    /** آمار جهت/دامنهٔ پنجرهٔ قبلی ۵۲ کندلی؛ کندل جاری داخل سطح شکست محاسبه نمی‌شود. */
+    val closeChange52Atr: Double = 0.0,
+    val regressionSlope52AtrPerBar: Double = 0.0,
+    val prior52High: Double = 0.0,
+    val prior52Low: Double = 0.0,
+    val range52Atr: Double = 0.0,
+    val compressionRatio26: Double = 1.0,
+    val atrExpansionRatio52: Double = 1.0,
+    val tenkanKijunGapAtr: Double = 0.0,
+    val tenkanKijunGapExpansionAtr: Double = 0.0,
     val isKijunFlat: Boolean,
     val isTenkanFlat: Boolean,
     val flatEquilibriumLevels: List<Double>,
@@ -772,7 +881,9 @@ enum class StrategyTriggerType(val titleFa: String) {
     PULLBACK_BOUNCE("ماشه ۱: پولبک به تعادل (Kijun/Tenkan/S-Point) و کلوز بالای تنکان"),
     VALIDATED_BREAKOUT("ماشه ۲: شکست معتبر کومو/کیجون با عبور از سقف/کف چیکو و بافر فلت SSB"),
     SANYAKU_TK_CONTINUATION("ماشه ۳: ادامه موج سوم سانیاکو با تایید ۳ کندلی کارن پلویل"),
-    NONE("در انتظار کندل بسته ماشه"),
+    BTC_52_STRUCTURE_BREAK("شکست/بازآزمایی ساختار ۵۲ کندلی بیت‌کوین"),
+    PARSA_52_LINE_TURN("چرخش Senkou A پس از فلت ۱۸+ کندلی SSB و کراس Tenkan/Kijun"),
+    NONE("در انتظار ماشهٔ بسته‌شده"),
 }
 
 enum class StrategyReadinessState(val labelFa: String) {
@@ -1313,6 +1424,80 @@ object IchimokuStrategyEngine {
         val isKijunFlat = abs(kijun - prevKijun) <= flatTol
         val isTenkanFlat = abs(tenkan - prevTenkan) <= flatTol
 
+        // مشخصات افق ۵۲ کندلی: سطح شکست از ۵۲ کندل کاملِ قبل از کندل جاری ساخته می‌شود.
+        val prior52Start = (lastIdx - 52).coerceAtLeast(0)
+        val has52PriorBars = lastIdx >= 52
+        val prior52Bars = closedBars.subList(prior52Start, lastIdx)
+        val prior52High = prior52Bars.maxOfOrNull { it.high } ?: cur.high
+        val prior52Low = prior52Bars.minOfOrNull { it.low } ?: cur.low
+        val range52Atr = (prior52High - prior52Low) / atr14
+        val closeChange52Atr = if (has52PriorBars) {
+            (closeNow - closedBars[prior52Start].close) / atr14
+        } else 0.0
+        val regressionBars = closedBars.subList((lastIdx - 51).coerceAtLeast(0), lastIdx + 1)
+        val regressionMeanX = (regressionBars.size - 1) / 2.0
+        val regressionMeanY = regressionBars.map { it.close }.average()
+        var regressionNumerator = 0.0
+        var regressionDenominator = 0.0
+        regressionBars.forEachIndexed { index, bar ->
+            val dx = index - regressionMeanX
+            regressionNumerator += dx * (bar.close - regressionMeanY)
+            regressionDenominator += dx * dx
+        }
+        val regressionSlope52AtrPerBar = if (regressionDenominator > 0.0) {
+            regressionNumerator / regressionDenominator / atr14
+        } else 0.0
+        val older26 = if (lastIdx >= 52) closedBars.subList(lastIdx - 52, lastIdx - 26) else emptyList()
+        val recent26 = if (lastIdx >= 52) closedBars.subList(lastIdx - 26, lastIdx) else emptyList()
+        fun candleRange(bars: List<Candle>): Double =
+            if (bars.isEmpty()) 0.0 else (bars.maxOf { it.high } - bars.minOf { it.low })
+        val compressionRatio26 = if (older26.isNotEmpty() && candleRange(older26) > 0.0) {
+            candleRange(recent26) / candleRange(older26)
+        } else 1.0
+        val meanTr52 = if (has52PriorBars) {
+            (lastIdx - 51..lastIdx).map { i ->
+                val bar = closedBars[i]
+                val previousClose = closedBars[(i - 1).coerceAtLeast(0)].close
+                maxOf(bar.high - bar.low, abs(bar.high - previousClose), abs(bar.low - previousClose))
+            }.average()
+        } else atr14
+        val atrExpansionRatio52 = if (meanTr52 > 0.0) atr14 / meanTr52 else 1.0
+
+        val firstValidSpanBIndex = (config.senkouBPeriod - 1 + disp).coerceAtLeast(0)
+        var senkouSpanBFlatBars = if (lastIdx >= firstValidSpanBIndex) 1 else 0
+        var flatSpanBMin = currentSpanB
+        var flatSpanBMax = currentSpanB
+        for (i in (lastIdx - 1) downTo firstValidSpanBIndex) {
+            val value = currentSpanBAt(i)
+            val nextMin = min(flatSpanBMin, value)
+            val nextMax = max(flatSpanBMax, value)
+            if (nextMax - nextMin <= flatTol) {
+                senkouSpanBFlatBars++
+                flatSpanBMin = nextMin
+                flatSpanBMax = nextMax
+            } else break
+        }
+
+        var bullishTenkanKijunCrossAgeBars = Int.MAX_VALUE
+        var bearishTenkanKijunCrossAgeBars = Int.MAX_VALUE
+        for (age in 0..min(12, lastIdx - 1)) {
+            val currentIndex = lastIdx - age
+            val currentGap = tenkanAt(currentIndex) - kijunAt(currentIndex)
+            val priorGap = tenkanAt(currentIndex - 1) - kijunAt(currentIndex - 1)
+            if (bullishTenkanKijunCrossAgeBars == Int.MAX_VALUE && currentGap > 0.0 && priorGap <= 0.0) {
+                bullishTenkanKijunCrossAgeBars = age
+            }
+            if (bearishTenkanKijunCrossAgeBars == Int.MAX_VALUE && currentGap < 0.0 && priorGap >= 0.0) {
+                bearishTenkanKijunCrossAgeBars = age
+            }
+        }
+        val senkouSpanASlopeAtrPerBar = (futureSpanA - prevFutureSpanA) / atr14
+        val prevPreviousSpanA = spanAAtCreation((lastIdx - 2).coerceAtLeast(0))
+        val previousSenkouSpanASlopeAtrPerBar = (prevFutureSpanA - prevPreviousSpanA) / atr14
+        val tenkanKijunGapAtr = abs(tenkan - kijun) / atr14
+        val previousTenkanKijunGapAtr = abs(prevTenkan - prevKijun) / atr14
+        val tenkanKijunGapExpansionAtr = tenkanKijunGapAtr - previousTenkanKijunGapAtr
+
         // Extract horizontal equilibrium plateaus (Kijun & SSB flat for >= 3 bars) — Karen Péloille
         val rawPlateaus = mutableListOf<Double>()
         for (i in max(3, lastIdx - 80)..lastIdx) {
@@ -1610,6 +1795,20 @@ object IchimokuStrategyEngine {
             chikouResistancePeak = round2(chikouPeak),
             chikouSupportTrough = round2(chikouTrough),
             isCurrentSpanBFlat = isCurrentSpanBFlat,
+            senkouSpanBFlatBars = senkouSpanBFlatBars,
+            senkouSpanASlopeAtrPerBar = round2(senkouSpanASlopeAtrPerBar),
+            previousSenkouSpanASlopeAtrPerBar = round2(previousSenkouSpanASlopeAtrPerBar),
+            bullishTenkanKijunCrossAgeBars = bullishTenkanKijunCrossAgeBars,
+            bearishTenkanKijunCrossAgeBars = bearishTenkanKijunCrossAgeBars,
+            closeChange52Atr = round2(closeChange52Atr),
+            regressionSlope52AtrPerBar = round2(regressionSlope52AtrPerBar),
+            prior52High = round2(prior52High),
+            prior52Low = round2(prior52Low),
+            range52Atr = round2(range52Atr),
+            compressionRatio26 = round2(compressionRatio26),
+            atrExpansionRatio52 = round2(atrExpansionRatio52),
+            tenkanKijunGapAtr = round2(tenkanKijunGapAtr),
+            tenkanKijunGapExpansionAtr = round2(tenkanKijunGapExpansionAtr),
             isKijunFlat = isKijunFlat,
             isTenkanFlat = isTenkanFlat,
             flatEquilibriumLevels = mergedPlateaus.map(::round2),
@@ -2619,6 +2818,44 @@ object IchimokuStrategyEngine {
         val stratSnap = computeSnapshot(alignedStrategyCandles, config)
         val trigSnap = computeSnapshot(alignedTriggerCandles, config)
 
+        if (activeModel == BitcoinStrategyModel.BTC_52_CANDLE_REGIME && normalizedSymbol != BTC_SYMBOL) {
+            val condition = StrategyConditionCheck(
+                index = 1,
+                titleFa = "محدودیت نماد",
+                passed = false,
+                detailFa = "این روش فقط برای BTC/USDT تعریف شده است؛ برای $normalizedSymbol هیچ معامله‌ای صادر نمی‌شود.",
+            )
+            return StrategyEvaluationReport(
+                symbol = normalizedSymbol,
+                strategyId = effectiveId,
+                strategyTitleFa = effectiveTitle,
+                strategyBadgeFa = activeModel.badgeFa,
+                macroInterval = config.macroInterval,
+                strategyInterval = config.strategyInterval,
+                triggerInterval = config.triggerInterval,
+                readiness = StrategyReadinessState.BLOCKED,
+                action = SignalAction.NO_TRADE,
+                triggerType = StrategyTriggerType.NONE,
+                confidence = 0.0,
+                livePrice = livePriceOverride ?: trigSnap?.close ?: 0.0,
+                suggestedEntry = null,
+                suggestedStopLoss = null,
+                targetV = null,
+                targetN = null,
+                targetE = null,
+                primaryTakeProfit = null,
+                riskReward = null,
+                macroSnapshot = macroSnap,
+                strategySnapshot = stratSnap,
+                triggerSnapshot = trigSnap,
+                waveProjection = null,
+                conditions = listOf(condition),
+                summaryFa = "روش ۵۲ کندلی بیت‌کوین فقط روی BTC/USDT ارزیابی می‌شود.",
+                triggerBarTime = trigSnap?.time ?: 0L,
+                evaluatedAt = nowMillis,
+            )
+        }
+
         if (stratSnap == null || trigSnap == null) {
             return StrategyEvaluationReport(
                 symbol = normalizedSymbol,
@@ -2651,17 +2888,36 @@ object IchimokuStrategyEngine {
             )
         }
 
-        // Apply model-specific & per-strategy neural-tuned overrides onto config for all 16 strategies
-        // قانون قطعی سیستم: حداقل R:R تمام استراتژی‌ها و معاملات همیشه حداقل 1:1.5 (1.5R) و بالاتر است
-        val stratOverride = config.perStrategyOverrides[activeModel.id]
-        // شخصیت آموخته‌شدهٔ همین نماد: دقیق‌ترین لایهٔ یادگیری؛ در بازه‌های مجاز و بدون کاهش R:R.
-        val symbolOverride = config.resolveForSymbol(normalizedSymbol)
+        // روش‌های BTC/پارسا از هر اورراید عصبی (حتی پروفایل عمومی نماد) جدا می‌مانند؛
+        // فقط بازه‌های تایم‌فریم کاربر حفظ می‌شود و تنظیمات ثابت زیر مبنای ایمن آن‌هاست.
+        val modelConfig = if (activeModel.neuralLearningEnabled) config else config.copy(
+            maxKijunExtensionAtr = 1.8,
+            slBufferAtr = 0.25,
+            breakoutBufferAtr = 0.15,
+            minRiskReward = 1.5,
+            minEfficiencyRatio = 0.20,
+            minVolumeRatio20 = 0.60,
+            maxAdverseWickRatio = 0.45,
+            minFutureKumoThicknessAtr = 0.05,
+            minSniperDistanceAtr = 0.65,
+            minDriveBooksConsensus = 6,
+            perStrategyOverrides = emptyMap(),
+            perSymbolOverrides = emptyMap(),
+            neoWaveAutoTuneEnabled = false,
+            neoWaveAutoRules = 0,
+            neoWaveAutoConfidencePct = 0.0,
+            neoWaveAutoSamples = 0,
+            neoWaveAutoBasisFa = "",
+        )
+        // قانون قطعی سیستم: حداقل R:R تمام استراتژی‌ها و معاملات همیشه حداقل 1:1.5 و بالاتر است.
+        val stratOverride = modelConfig.perStrategyOverrides[activeModel.id]
+        val symbolOverride = modelConfig.resolveForSymbol(normalizedSymbol)
         val baseMinRr = max(
-            stratOverride?.minRiskReward ?: config.minRiskReward,
+            stratOverride?.minRiskReward ?: modelConfig.minRiskReward,
             symbolOverride?.minRiskReward ?: 0.0,
         )
         val minAllowedRr = max(baseMinRr, 1.5)
-        val effectiveConfig = config.copy(
+        val effectiveConfig = modelConfig.copy(
             enablePullbackTrigger = activeModel.hasPatel || activeModel.hasHosoda || activeModel.hasPeloille || !activeModel.hasTuttle,
             enableBreakoutTrigger = activeModel.hasTuttle || activeModel.hasHosoda || activeModel.hasPeloille || !activeModel.hasPatel,
             requireHigherTfAlignment = activeModel.hasPeloille || activeModel.combinationCount >= 2 || config.requireHigherTfAlignment,
@@ -2669,20 +2925,20 @@ object IchimokuStrategyEngine {
             requireFutureKumoSlope = activeModel.hasPatel || activeModel.hasTuttle || activeModel.combinationCount >= 2 || config.requireFutureKumoSlope,
             minRiskReward = if (activeModel.hasHosoda && activeModel.combinationCount == 1) max(minAllowedRr, 1.8) else minAllowedRr,
             maxKijunExtensionAtr = (symbolOverride?.maxKijunExtensionAtr
-                ?: stratOverride?.maxKijunExtensionAtr ?: config.maxKijunExtensionAtr).coerceIn(1.25, 2.50),
+                ?: stratOverride?.maxKijunExtensionAtr ?: modelConfig.maxKijunExtensionAtr).coerceIn(1.25, 2.50),
             slBufferAtr = (symbolOverride?.slBufferAtr
-                ?: stratOverride?.slBufferAtr ?: config.slBufferAtr).coerceIn(0.15, 0.55),
+                ?: stratOverride?.slBufferAtr ?: modelConfig.slBufferAtr).coerceIn(0.15, 0.55),
             breakoutBufferAtr = (symbolOverride?.breakoutBufferAtr
-                ?: stratOverride?.breakoutBufferAtr ?: config.breakoutBufferAtr).coerceIn(0.05, 0.35),
+                ?: stratOverride?.breakoutBufferAtr ?: modelConfig.breakoutBufferAtr).coerceIn(0.05, 0.35),
             minEfficiencyRatio = (symbolOverride?.minEfficiencyRatio
-                ?: stratOverride?.minEfficiencyRatio ?: config.minEfficiencyRatio).coerceIn(0.14, 0.45),
+                ?: stratOverride?.minEfficiencyRatio ?: modelConfig.minEfficiencyRatio).coerceIn(0.14, 0.45),
             minVolumeRatio20 = (symbolOverride?.minVolumeRatio20
-                ?: stratOverride?.minVolumeRatio20 ?: config.minVolumeRatio20).coerceIn(0.40, 1.15),
-            maxAdverseWickRatio = (stratOverride?.maxAdverseWickRatio ?: config.maxAdverseWickRatio).coerceIn(0.28, 0.60),
-            minFutureKumoThicknessAtr = (stratOverride?.minFutureKumoThicknessAtr ?: config.minFutureKumoThicknessAtr).coerceIn(0.02, 0.18),
-            minSniperDistanceAtr = (stratOverride?.minSniperDistanceAtr ?: config.minSniperDistanceAtr).coerceIn(0.35, 1.10),
+                ?: stratOverride?.minVolumeRatio20 ?: modelConfig.minVolumeRatio20).coerceIn(0.40, 1.15),
+            maxAdverseWickRatio = (stratOverride?.maxAdverseWickRatio ?: modelConfig.maxAdverseWickRatio).coerceIn(0.28, 0.60),
+            minFutureKumoThicknessAtr = (stratOverride?.minFutureKumoThicknessAtr ?: modelConfig.minFutureKumoThicknessAtr).coerceIn(0.02, 0.18),
+            minSniperDistanceAtr = (stratOverride?.minSniperDistanceAtr ?: modelConfig.minSniperDistanceAtr).coerceIn(0.35, 1.10),
             minDriveBooksConsensus = (symbolOverride?.minDriveBooksConsensus
-                ?: stratOverride?.minDriveBooksConsensus ?: config.minDriveBooksConsensus).coerceIn(4, 9),
+                ?: stratOverride?.minDriveBooksConsensus ?: modelConfig.minDriveBooksConsensus).coerceIn(4, 9),
         )
 
         val livePrice = livePriceOverride?.takeIf { it.isFinite() && it > 0.0 } ?: trigSnap.close
@@ -2693,7 +2949,21 @@ object IchimokuStrategyEngine {
         val bearishBias = stratSnap.isPriceBelowKumo ||
             (macroSnap?.isPriceBelowKumo == true && trigSnap.isPriceBelowKumo)
 
+        val isBtc52Model = activeModel == BitcoinStrategyModel.BTC_52_CANDLE_REGIME
+        val isParsaModel = activeModel == BitcoinStrategyModel.PARSA_52_LINE_TURN
+        val long52Context = trigSnap.regressionSlope52AtrPerBar >= 0.025 &&
+            trigSnap.closeChange52Atr >= 1.0 && trigSnap.close >= (trigSnap.prior52High + trigSnap.prior52Low) / 2.0
+        val short52Context = trigSnap.regressionSlope52AtrPerBar <= -0.025 &&
+            trigSnap.closeChange52Atr <= -1.0 && trigSnap.close <= (trigSnap.prior52High + trigSnap.prior52Low) / 2.0
+        val parsaBullishStructure = trigSnap.senkouSpanASlopeAtrPerBar >= 0.025 &&
+            trigSnap.tenkan > trigSnap.kijun && trigSnap.bullishTenkanKijunCrossAgeBars <= 8
+        val parsaBearishStructure = trigSnap.senkouSpanASlopeAtrPerBar <= -0.025 &&
+            trigSnap.tenkan < trigSnap.kijun && trigSnap.bearishTenkanKijunCrossAgeBars <= 8
         val candidateDirection = when {
+            isBtc52Model && long52Context -> SignalAction.BUY
+            isBtc52Model && short52Context -> SignalAction.SELL
+            isParsaModel && parsaBullishStructure -> SignalAction.BUY
+            isParsaModel && parsaBearishStructure -> SignalAction.SELL
             bullishBias && !bearishBias -> SignalAction.BUY
             bearishBias && !bullishBias -> SignalAction.SELL
             stratSnap.tenkan >= stratSnap.kijun -> SignalAction.BUY
@@ -2829,16 +3099,92 @@ object IchimokuStrategyEngine {
             "بدون تله جاذبه SSB فلت (${if (trigSnap.isKatanaEquilibrium) "هم‌پوشانی کاتانا" else "تفکیک استاندارد TK"})"
         }
 
-        // ── Detect Trigger on 15m/5m (Pullback / Breakout / 3-Candle Sanyaku / 9 Drive PDF Books) ────
+        // سه کندل پایانی برای این دو روش الگوی تصمیم نیستند؛ منطقشان صرفاً از پنجرهٔ بلند و بسته می‌آید.
         val closedTriggerBars = alignedTriggerCandles.filter { it.closed }.ifEmpty { alignedTriggerCandles }
-        val triggerType = detectEntryTrigger(
-            direction = candidateDirection,
-            bars = closedTriggerBars,
-            trigSnap = trigSnap,
-            stratSnap = stratSnap,
-            config = effectiveConfig,
-            activeModel = activeModel,
-        )
+        val isDirectionalLong = isLong
+        val previousBarIndex = closedTriggerBars.lastIndex - 1
+        val priorRangeBeforePrevious = if (closedTriggerBars.size >= 54) {
+            closedTriggerBars.subList(closedTriggerBars.size - 54, closedTriggerBars.size - 2)
+        } else emptyList()
+        val previousBar = closedTriggerBars.getOrNull(previousBarIndex)
+        val priorHighBeforePrevious = priorRangeBeforePrevious.maxOfOrNull { it.high }
+        val priorLowBeforePrevious = priorRangeBeforePrevious.minOfOrNull { it.low }
+        val btc52RetestOk = if (isDirectionalLong) {
+            val priorHigh = priorHighBeforePrevious
+            priorHigh != null && previousBar != null &&
+                previousBar.close > priorHigh + trigSnap.atr14 * 0.05 &&
+                trigSnap.low <= priorHigh + trigSnap.atr14 * 0.30 &&
+                trigSnap.close >= priorHigh - trigSnap.atr14 * 0.08
+        } else {
+            val priorLow = priorLowBeforePrevious
+            priorLow != null && previousBar != null &&
+                previousBar.close < priorLow - trigSnap.atr14 * 0.05 &&
+                trigSnap.high >= priorLow - trigSnap.atr14 * 0.30 &&
+                trigSnap.close <= priorLow + trigSnap.atr14 * 0.08
+        }
+        val btc52BreakoutOk = if (isDirectionalLong) {
+            trigSnap.close > trigSnap.prior52High + trigSnap.atr14 * 0.05 || btc52RetestOk
+        } else {
+            trigSnap.close < trigSnap.prior52Low - trigSnap.atr14 * 0.05 || btc52RetestOk
+        }
+        val btc52TrendOk = if (isDirectionalLong) {
+            long52Context && trigSnap.tenkanSlopeAtrPerBar > 0.0 &&
+                trigSnap.senkouSpanASlopeAtrPerBar >= -0.02 &&
+                (macroSnap == null || !macroSnap.isPriceBelowKumo)
+        } else {
+            short52Context && trigSnap.tenkanSlopeAtrPerBar < 0.0 &&
+                trigSnap.senkouSpanASlopeAtrPerBar <= 0.02 &&
+                (macroSnap == null || !macroSnap.isPriceAboveKumo)
+        }
+        val btc52SharpMoveOk = trigSnap.candleBodyRatio >= 0.38 &&
+            (trigSnap.volumeRatio20 >= 1.05 || trigSnap.atrExpansionRatio52 >= 1.08) &&
+            (if (isDirectionalLong) trigSnap.closeLocationValue >= 0.62 else trigSnap.closeLocationValue <= 0.38)
+        val btc52ChikouOk = if (isDirectionalLong) trigSnap.chikouBullishOpenSpace else trigSnap.chikouBearishOpenSpace
+        val btc52Ready = closedTriggerBars.size >= 53 && btc52TrendOk && btc52BreakoutOk &&
+            btc52SharpMoveOk && btc52ChikouOk && trigSnap.distanceToKijunAtr <= 1.65 &&
+            trigSnap.range52Atr >= 2.0
+
+        val parsaSpanATurnOk = if (isDirectionalLong) {
+            trigSnap.previousSenkouSpanASlopeAtrPerBar <= 0.0 && trigSnap.senkouSpanASlopeAtrPerBar >= 0.025
+        } else {
+            trigSnap.previousSenkouSpanASlopeAtrPerBar >= 0.0 && trigSnap.senkouSpanASlopeAtrPerBar <= -0.025
+        }
+        val parsaCrossAge = if (isDirectionalLong) trigSnap.bullishTenkanKijunCrossAgeBars else trigSnap.bearishTenkanKijunCrossAgeBars
+        val parsaFlatOk = trigSnap.senkouSpanBFlatBars >= 18
+        val parsaSlopeOk = if (isDirectionalLong) {
+            trigSnap.tenkanSlopeAtrPerBar > 0.015 && trigSnap.kijunSlopeAtrPerBar >= -0.04 &&
+                trigSnap.senkouSpanASlopeAtrPerBar > 0.0
+        } else {
+            trigSnap.tenkanSlopeAtrPerBar < -0.015 && trigSnap.kijunSlopeAtrPerBar <= 0.04 &&
+                trigSnap.senkouSpanASlopeAtrPerBar < 0.0
+        }
+        val parsaLineSpacingOk = trigSnap.tenkanKijunGapAtr in 0.02..0.75 &&
+            trigSnap.tenkanKijunGapExpansionAtr >= -0.02 && trigSnap.distanceToKijunAtr <= 1.50
+        val parsaChikouOk = if (isDirectionalLong) trigSnap.chikouBullishOpenSpace else trigSnap.chikouBearishOpenSpace
+        val parsaSharpMoveOk = trigSnap.candleBodyRatio >= 0.35 &&
+            (trigSnap.volumeRatio20 >= 1.10 || trigSnap.atrExpansionRatio52 >= 1.05) &&
+            (if (isDirectionalLong) trigSnap.closeLocationValue >= 0.60 else trigSnap.closeLocationValue <= 0.40)
+        val parsaCloudOk = if (isDirectionalLong) {
+            trigSnap.close > trigSnap.kijun && (macroSnap == null || !macroSnap.isPriceBelowKumo)
+        } else {
+            trigSnap.close < trigSnap.kijun && (macroSnap == null || !macroSnap.isPriceAboveKumo)
+        }
+        val parsaReady = parsaFlatOk && parsaSpanATurnOk && parsaCrossAge <= 8 &&
+            parsaSlopeOk && parsaLineSpacingOk && parsaChikouOk && parsaSharpMoveOk && parsaCloudOk
+
+        val triggerType = when {
+            isBtc52Model && btc52Ready -> StrategyTriggerType.BTC_52_STRUCTURE_BREAK
+            isParsaModel && parsaReady -> StrategyTriggerType.PARSA_52_LINE_TURN
+            isBtc52Model || isParsaModel -> StrategyTriggerType.NONE
+            else -> detectEntryTrigger(
+                direction = candidateDirection,
+                bars = closedTriggerBars,
+                trigSnap = trigSnap,
+                stratSnap = stratSnap,
+                config = effectiveConfig,
+                activeModel = activeModel,
+            )
+        }
 
         // ── Compute Sniper Entry Zone & Tight Structural SL (متود یکپارچه با جامع بیس) ──
         val slBuffer = trigSnap.atr14 * effectiveConfig.slBufferAtr
@@ -2880,7 +3226,7 @@ object IchimokuStrategyEngine {
 
         // متود روز دنیا برای حد ضرر: هم‌پوشانی ۵ سنگر ابطال ساختاری (فرکتال ۵ کندلی بیل ویلیامز، کیجون۲۶، کیجون۳۰/EMA34، لبه کومو و نقطه S هوسودا)
         // به‌علاوه بافر تطبیقی ضد استاپ‌هانت و محصور در دالان طلایی نوسان [minSafeStopDist .. 2.10 * ATR14]
-        val rawTechnicalSl = computeOptimalStructuralStopLoss(
+        val baseTechnicalSl = computeOptimalStructuralStopLoss(
             symbol = normalizedSymbol,
             isLong = isLong,
             referenceEntry = referenceEntryForSl,
@@ -2891,6 +3237,18 @@ object IchimokuStrategyEngine {
             triggerInterval = effectiveConfig.triggerInterval,
             activeModel = activeModel,
         )
+        val specialStopAnchor = when {
+            isBtc52Model && isLong -> trigSnap.prior52Low - trigSnap.atr14 * effectiveConfig.slBufferAtr
+            isBtc52Model -> trigSnap.prior52High + trigSnap.atr14 * effectiveConfig.slBufferAtr
+            isParsaModel && isLong && trigSnap.currentSpanB < referenceEntryForSl ->
+                trigSnap.currentSpanB - trigSnap.atr14 * effectiveConfig.slBufferAtr
+            isParsaModel && !isLong && trigSnap.currentSpanB > referenceEntryForSl ->
+                trigSnap.currentSpanB + trigSnap.atr14 * effectiveConfig.slBufferAtr
+            else -> null
+        }
+        val rawTechnicalSl = specialStopAnchor?.let { structural ->
+            if (isLong) min(baseTechnicalSl, structural) else max(baseTechnicalSl, structural)
+        } ?: baseTechnicalSl
 
         val rawStopDist = max(
             abs(sniperOptimal - rawTechnicalSl),
@@ -3010,12 +3368,23 @@ object IchimokuStrategyEngine {
         val maxTpDist = stopDist * maxAllowedRr
         val optTpDist = stopDist * computedOptimalRr.coerceIn(requiredMinRr, maxAllowedRr)
 
-        val rawPrimaryTp = chosenWavePair?.second ?: if (isLong) {
-            entryAnchorForTp + optTpDist
-        } else {
-            (entryAnchorForTp - optTpDist).coerceAtLeast(0.00001)
+        val btc52TargetDistance = (trigSnap.range52Atr * trigSnap.atr14 * 0.35)
+            .coerceIn(minTpDist, maxTpDist)
+        val rawPrimaryTp = when {
+            isBtc52Model && isLong -> entryAnchorForTp + btc52TargetDistance
+            isBtc52Model -> (entryAnchorForTp - btc52TargetDistance).coerceAtLeast(0.00001)
+            isParsaModel && isLong -> entryAnchorForTp + optTpDist
+            isParsaModel -> (entryAnchorForTp - optTpDist).coerceAtLeast(0.00001)
+            chosenWavePair != null -> chosenWavePair.second
+            isLong -> entryAnchorForTp + optTpDist
+            else -> (entryAnchorForTp - optTpDist).coerceAtLeast(0.00001)
         }
-        val selectedWaveLabel = chosenWavePair?.first ?: String.format(Locale.US, "موج بهینه هوسودا (%.2fR)", computedOptimalRr)
+        val selectedWaveLabel = when {
+            isBtc52Model -> "امتداد دامنهٔ ساختار ۵۲ کندلی"
+            isParsaModel -> "هدف حرکتی پس از چرخش Senkou A"
+            chosenWavePair != null -> chosenWavePair.first
+            else -> String.format(Locale.US, "موج بهینه هوسودا (%.2fR)", computedOptimalRr)
+        }
 
         // Check nearest HTF horizontal plateau (Karen Péloille's Flat SSB/Kijun wall)
         val allPlateaus = ((macroSnap?.flatEquilibriumLevels ?: emptyList()) + stratSnap.flatEquilibriumLevels).distinct().sorted()
@@ -3209,8 +3578,33 @@ object IchimokuStrategyEngine {
             StrategyConditionCheck(16, "۱۶. نقطه‌زنی میلی‌متری ورود (Sniper Entry Pocket)", cond16Passed, cond16Detail),
         )
 
-        val conditions = if (activeModel.isDrivePdfStrategy) {
-            buildElliottWaveConditions(
+        val btc52Conditions = listOf(
+            StrategyConditionCheck(1, "۱. دادهٔ بستهٔ کامل پنجرهٔ ۵۲ کندلی", closedTriggerBars.size >= 53, "${closedTriggerBars.size} کندل بسته؛ برای سطح شکست به ۵۲ کندل قبل + کندل جاری نیاز است."),
+            StrategyConditionCheck(2, "۲. جهت و جایگاه ساختاری ۵۲ کندلی", if (isLong) long52Context else short52Context, String.format(Locale.US, "شیب رگرسیون=%+.2f ATR/کندل · تغییر=%+.2f ATR · دامنه=%.1f ATR", trigSnap.regressionSlope52AtrPerBar, trigSnap.closeChange52Atr, trigSnap.range52Atr)),
+            StrategyConditionCheck(3, "۳. شکست بسته‌شده یا بازآزمایی مرز ۵۲ کندلی", btc52BreakoutOk, "مرز قبلی: ${if (isLong) trigSnap.prior52High else trigSnap.prior52Low} · کندل جاری در محاسبهٔ مرز وارد نشده است."),
+            StrategyConditionCheck(4, "۴. فشردگی/همگرایی پیش از گسترش", trigSnap.compressionRatio26 <= 1.20 || trigSnap.isBollingerSqueeze, String.format(Locale.US, "نسبت دامنهٔ ۲۶ کندل اخیر به ۲۶ کندل قبل=%.2f · فشردگی بولینگر=%s", trigSnap.compressionRatio26, trigSnap.isBollingerSqueeze)),
+            StrategyConditionCheck(5, "۵. همسویی ابر و تایم‌فریم بالاتر", if (isLong) trigSnap.isFutureKumoBullish && (macroSnap == null || !macroSnap.isPriceBelowKumo) else trigSnap.isFutureKumoBearish && (macroSnap == null || !macroSnap.isPriceAboveKumo), "ابر آینده و تایم‌فریم بالاتر نباید جهت معامله را نقض کنند."),
+            StrategyConditionCheck(6, "۶. شیب Tenkan/Kijun و Senkou A", if (isLong) trigSnap.tenkanSlopeAtrPerBar > 0.0 && trigSnap.kijunSlopeAtrPerBar >= -0.05 && trigSnap.senkouSpanASlopeAtrPerBar >= -0.02 else trigSnap.tenkanSlopeAtrPerBar < 0.0 && trigSnap.kijunSlopeAtrPerBar <= 0.05 && trigSnap.senkouSpanASlopeAtrPerBar <= 0.02, String.format(Locale.US, "شیب TK=%+.2f/%+.2f ATR · شیب SSA=%+.2f ATR", trigSnap.tenkanSlopeAtrPerBar, trigSnap.kijunSlopeAtrPerBar, trigSnap.senkouSpanASlopeAtrPerBar)),
+            StrategyConditionCheck(7, "۷. آزادی Chikou در مسیر معامله", btc52ChikouOk, if (btc52ChikouOk) "چیکو از قیمت/کندل متناظر، TK و ابر آزاد است." else "چیکو با کندل‌ها یا ابر برخورد دارد."),
+            StrategyConditionCheck(8, "۸. کیفیت حرکت شارپ (بدنه، حجم یا گسترش ATR)", btc52SharpMoveOk, String.format(Locale.US, "بدنه=%.0f%% · حجم=%.2fx · ATR گسترش=%.2fx", trigSnap.candleBodyRatio * 100.0, trigSnap.volumeRatio20, trigSnap.atrExpansionRatio52)),
+            StrategyConditionCheck(9, "۹. فاصلهٔ قابل‌تعقیب از Kijun", trigSnap.distanceToKijunAtr <= 1.65, String.format(Locale.US, "%.2f ATR (حداکثر ۱٫۶۵)", trigSnap.distanceToKijunAtr)),
+            StrategyConditionCheck(10, "۱۰. پلن نهایی و R:R حداقل ۱:۱٫۵", cond12Passed && guardedPlan.isUsable, cond12Detail),
+        )
+        val parsaConditions = listOf(
+            StrategyConditionCheck(1, "۱. فلت واقعی Senkou Span B (خط دورهٔ ۵۲)", parsaFlatOk, "SSB به‌مدت ${trigSnap.senkouSpanBFlatBars} کندل بسته تخت؛ حد لازم ۱۸ کندل (بیش از ۱۷)."),
+            StrategyConditionCheck(2, "۲. چرخش Senkou Span A برای ابر آینده", parsaSpanATurnOk, String.format(Locale.US, "شیب قبلی=%+.2f ATR، اکنون=%+.2f ATR در جهت معامله.", trigSnap.previousSenkouSpanASlopeAtrPerBar, trigSnap.senkouSpanASlopeAtrPerBar)),
+            StrategyConditionCheck(3, "۳. کراس هم‌جهت Tenkan/Kijun در ۸ کندل", parsaCrossAge <= 8, "سن کراس: ${if (parsaCrossAge == Int.MAX_VALUE) "یافت نشد" else "$parsaCrossAge کندل"}؛ مهلت مجاز ۸ کندل بسته."),
+            StrategyConditionCheck(4, "۴. شیب همسو و نبود مخالفت شدید Kijun", parsaSlopeOk, String.format(Locale.US, "شیب Tenkan=%+.2f · Kijun=%+.2f · Senkou A=%+.2f ATR/کندل", trigSnap.tenkanSlopeAtrPerBar, trigSnap.kijunSlopeAtrPerBar, trigSnap.senkouSpanASlopeAtrPerBar)),
+            StrategyConditionCheck(5, "۵. فاصله و گسترش سنجیدهٔ Tenkan/Kijun", parsaLineSpacingOk, String.format(Locale.US, "فاصله=%.2f ATR · تغییر فاصله=%+.2f ATR · قیمت تا Kijun=%.2f ATR", trigSnap.tenkanKijunGapAtr, trigSnap.tenkanKijunGapExpansionAtr, trigSnap.distanceToKijunAtr)),
+            StrategyConditionCheck(6, "۶. آزادی Chikou", parsaChikouOk, if (parsaChikouOk) "چیکو از کندل، TK و ابر در مسیر معامله آزاد است." else "چیکو هنوز درگیر ساختار متناظر است."),
+            StrategyConditionCheck(7, "۷. کیفیت حرکت شارپ و تأیید حجم/ATR", parsaSharpMoveOk, String.format(Locale.US, "بدنه=%.0f%% · حجم=%.2fx · گسترش ATR=%.2fx", trigSnap.candleBodyRatio * 100.0, trigSnap.volumeRatio20, trigSnap.atrExpansionRatio52)),
+            StrategyConditionCheck(8, "۸. سمت قیمت و نبود تضاد تایم‌فریم بالاتر", parsaCloudOk, "قیمت نسبت به Kijun و تایم‌فریم بالاتر با جهت معامله سنجیده شد."),
+            StrategyConditionCheck(9, "۹. پلن نهایی و R:R حداقل ۱:۱٫۵", cond12Passed && guardedPlan.isUsable, cond12Detail),
+        )
+        val conditions = when {
+            isBtc52Model -> btc52Conditions
+            isParsaModel -> parsaConditions
+            activeModel.isDrivePdfStrategy -> buildElliottWaveConditions(
                 isLong = isLong,
                 wave = wave,
                 selectedWaveLabel = selectedWaveLabel,
@@ -3224,12 +3618,14 @@ object IchimokuStrategyEngine {
                 cond16Passed = cond16Passed,
                 cond16Detail = cond16Detail,
             )
-        } else {
-            baseSixteenConditions
+            else -> baseSixteenConditions
         }
 
-        // ارتقای دقت تمام ۵ مدل استراتژی: تمام ۱۶ شرط ساختاری، مومنتوم، چیکو، هوسودا و نقطه‌زنی برای همه مدل‌ها الزامی است
-        val requiredIndicesForModel: Set<Int> = (1..16).toSet()
+        val requiredIndicesForModel: Set<Int> = when {
+            isBtc52Model -> btc52Conditions.indices.map { it + 1 }.toSet()
+            isParsaModel -> parsaConditions.indices.map { it + 1 }.toSet()
+            else -> (1..16).toSet()
+        }
         val modelCoreConditions = conditions.filter { it.index in requiredIndicesForModel }
         val allSixteenPassed = modelCoreConditions.all { it.passed }
 
@@ -3263,7 +3659,7 @@ object IchimokuStrategyEngine {
         // قانون صفر-اثر: وقتی `neoWaveEnabled = false` باشد هیچ محاسبه‌ای انجام نمی‌شود و
         // خروجی این تابع بیت‌به‌بیت مثل نسخهٔ قبل از نئوویو می‌ماند.
         // نئوویو–الیوت فقط و فقط در استراتژی جایگاه ۱۶ ادغام شده است و همیشه در همان استراتژی
-        // روشن است (کلید کاربر ندارد). برای استراتژی‌های ۱ تا ۱۵ هیچ محاسبه‌ای انجام نمی‌شود.
+        // روشن است (کلید کاربر ندارد). برای هیچ روش دیگری محاسبه‌ای انجام نمی‌شود.
         val neoWaveOn = activeModel.isNeoWaveElliottStrategy
         // دامنهٔ زیگزاگ داینامیک: با رژیم نوسان همان نماد/تایم‌فریم مقیاس می‌گیرد (قاعدهٔ درجه/دامنهٔ نیلی).
         val neoWaveAmplitude = if (neoWaveOn) {
@@ -3313,14 +3709,19 @@ object IchimokuStrategyEngine {
             coreTrendScore
         }
 
-        val sniperArmedPendingRetest = firstFifteenPassed && triggerFired && !cond16Passed
+        val customWatchSetup = when {
+            isBtc52Model -> closedTriggerBars.size >= 53 && (long52Context || short52Context)
+            isParsaModel -> parsaFlatOk && (parsaSpanATurnOk || parsaCrossAge <= 8)
+            else -> false
+        }
+        val sniperArmedPendingRetest = !isBtc52Model && !isParsaModel && firstFifteenPassed && triggerFired && !cond16Passed
 
         val baseReadiness = when {
             neoWaveGate.veto || (neoWaveOn && neoWaveMtf.veto) -> StrategyReadinessState.BLOCKED
             allSixteenPassed && kijunGatePassed && triggerFired && isLong -> StrategyReadinessState.SIGNAL_BUY
             allSixteenPassed && kijunGatePassed && triggerFired && !isLong -> StrategyReadinessState.SIGNAL_SELL
             allSixteenPassed && !kijunGatePassed -> StrategyReadinessState.BLOCKED
-            sniperArmedPendingRetest || passedCount >= 11 -> StrategyReadinessState.WATCH_SETUP
+            customWatchSetup || sniperArmedPendingRetest || (!isBtc52Model && !isParsaModel && passedCount >= 11) -> StrategyReadinessState.WATCH_SETUP
             else -> StrategyReadinessState.BLOCKED
         }
 
@@ -3371,14 +3772,23 @@ object IchimokuStrategyEngine {
 
         val tfTag = "[تایم ${config.triggerInterval.label}]"
         val baseSummaryFa = when {
-            readiness == StrategyReadinessState.SIGNAL_BUY ->
-                "$tfTag 🎯 خرید نقطه‌زنی ($normalizedSymbol · $effectiveTitle · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
-            readiness == StrategyReadinessState.SIGNAL_SELL ->
-                "$tfTag 🎯 فروش نقطه‌زنی ($normalizedSymbol · $effectiveTitle · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
+            readiness == StrategyReadinessState.SIGNAL_BUY -> when {
+                isBtc52Model -> "$tfTag 🟠 خرید BTC بر پایهٔ شکست/بازآزمایی ۵۲ کندلی · بدون الگوی سه کندل آخر · R:R=1:${round2(rr)}"
+                isParsaModel -> "$tfTag 🟢 خرید پارسا · فلت SSB ${trigSnap.senkouSpanBFlatBars} کندل + چرخش Senkou A + کراس TK · R:R=1:${round2(rr)}"
+                else -> "$tfTag 🎯 خرید نقطه‌زنی ($normalizedSymbol · $effectiveTitle · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
+            }
+            readiness == StrategyReadinessState.SIGNAL_SELL -> when {
+                isBtc52Model -> "$tfTag 🟠 فروش BTC بر پایهٔ شکست/بازآزمایی ۵۲ کندلی · بدون الگوی سه کندل آخر · R:R=1:${round2(rr)}"
+                isParsaModel -> "$tfTag 🔴 فروش پارسا · فلت SSB ${trigSnap.senkouSpanBFlatBars} کندل + چرخش Senkou A + کراس TK · R:R=1:${round2(rr)}"
+                else -> "$tfTag 🎯 فروش نقطه‌زنی ($normalizedSymbol · $effectiveTitle · دقت ${sniperEntryScore.toInt()}% · ${trendPhase.badgeFa})"
+            }
             sniperArmedPendingRetest ->
                 "$tfTag 🎯 مسلح برای نقطه‌زنی ($normalizedSymbol · $effectiveTitle): در کمین لمس $sniperOptimal"
-            readiness == StrategyReadinessState.WATCH_SETUP ->
-                "$tfTag ⏳ $passedCount/۱۶ شرط (${trendPhase.badgeFa})؛ منتظر ماشه در ${config.triggerInterval.label}"
+            readiness == StrategyReadinessState.WATCH_SETUP -> when {
+                isBtc52Model -> "$tfTag ⏳ ساختار ۵۲ کندلی هم‌جهت است؛ منتظر شکست بسته‌شده/بازآزمایی و تأیید حجم/چیکو (${passedCount}/${conditions.size})"
+                isParsaModel -> "$tfTag ⏳ SSB ${trigSnap.senkouSpanBFlatBars} کندل تخت؛ منتظر چرخش Senkou A، کراس TK و تأیید شارپ (${passedCount}/${conditions.size})"
+                else -> "$tfTag ⏳ $passedCount/${conditions.size} شرط (${trendPhase.badgeFa})؛ منتظر ماشه در ${config.triggerInterval.label}"
+            }
             readiness == StrategyReadinessState.BLOCKED -> {
                 if (!kijunGatePassed) {
                     val why = when {
@@ -3389,7 +3799,7 @@ object IchimokuStrategyEngine {
                     "$tfTag 🛑 گیت کیجون اجازه نداد · $why"
                 } else {
                     val firstFailed = modelCoreConditions.firstOrNull { !it.passed } ?: conditions.firstOrNull { !it.passed }
-                    "$tfTag 🛑 $passedCount/۱۶ شرط · مانع: ${firstFailed?.titleFa ?: ""}"
+                    "$tfTag 🛑 $passedCount/${conditions.size} شرط · مانع: ${firstFailed?.titleFa ?: ""}"
                 }
             }
             else -> "$tfTag در حال دریافت کندل‌های $normalizedSymbol..."
@@ -3408,6 +3818,8 @@ object IchimokuStrategyEngine {
             else -> baseSummaryFa + neoWaveSuffix
         }
         val entryPathFa = when {
+            isBtc52Model -> "روش مستقل بیت‌کوین با زمینهٔ ۵۲ کندل بسته؛ سه کندل آخر الگوی تصمیم نیستند؛ یادگیری عصبی خاموش"
+            isParsaModel -> "پارسا: SSB/خط دورهٔ ۵۲ تخت ≥۱۸ کندل + چرخش Senkou A + کراس TK؛ شیب/فاصله، چیکو و حرکت شارپ سنجیده شد؛ یادگیری عصبی خاموش"
             cryptoNeoWaveEntry -> "🌊 مسیر نئوویو (کریپتو): ${cryptoEntryDecision.reasonFa}"
             neoWaveOn && isCryptoClass && neoWaveVerdict != null ->
                 "🌊 کریپتو: ${cryptoEntryDecision.reasonFa}"
@@ -3507,7 +3919,7 @@ object IchimokuStrategyEngine {
         nowMillis: Long = System.currentTimeMillis(),
         symbolInput: String = BTC_SYMBOL,
         runAllSimultaneously: Boolean = true,
-        enabledStrategyIds: Set<String> = BitcoinStrategyModel.entries.map { it.id }.toSet(),
+        enabledStrategyIds: Set<String> = BitcoinStrategyModel.activeStrategyIds,
         customStrategies: List<CustomStrategySlot> = emptyList(),
     ): DualTimeframeSymbolReport {
         val config15m = config.copy(
@@ -3529,7 +3941,11 @@ object IchimokuStrategyEngine {
             // ارزیابی نمی‌شوند؛ شناسه و آموخته‌هایشان حفظ می‌شود تا بعداً از صفر شروع نشوند.
             val activeBuiltIns = BitcoinStrategyModel.entries
                 .filter { it.id in enabledStrategyIds && !it.isTemporarilyDisabled }
-                .ifEmpty { BitcoinStrategyModel.entries.filterNot { it.isTemporarilyDisabled } }
+                .ifEmpty {
+                    BitcoinStrategyModel.entries.filterNot {
+                        it.isTemporarilyDisabled || it.requiresExplicitOptIn
+                    }
+                }
             for (model in activeBuiltIns) {
                 map15m[model.id] = evaluateBitcoinStrategy(
                     activeModel = model,

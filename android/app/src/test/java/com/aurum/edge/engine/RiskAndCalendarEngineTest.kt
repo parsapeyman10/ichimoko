@@ -495,7 +495,8 @@ class RiskAndCalendarEngineTest {
         assertEquals(15_000L, openTier.tickIntervalMs)
 
         // 5. Verify all 16 strategies (15 original 4-book combinations + ONLY Unified 9-Book Drive Master Method; individual Drive 1..9 strategies removed) evaluate simultaneously on 15m and 5m + R:R Breakdown & Optimal R:R
-        assertEquals(16, BitcoinStrategyModel.entries.size)
+        assertEquals(18, BitcoinStrategyModel.entries.size)
+        assertEquals(16, BitcoinStrategyModel.neuralLearningModels.size)
         assertEquals(1, BitcoinStrategyModel.drivePdfStrategies.size)
         assertEquals(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER, BitcoinStrategyModel.drivePdfStrategies.single())
         // v3.9.47: استراتژی ۱۶ (پیمان) موقتاً غیرفعال است، پس فقط ۱۵ استراتژی ارزیابی می‌شوند.
@@ -510,7 +511,7 @@ class RiskAndCalendarEngineTest {
         assertFalse(
             dualReport.reports15mByStrategy.containsKey(BitcoinStrategyModel.DRIVE_BOOKS_1_TO_9_UNIFIED_MASTER.id)
         )
-        BitcoinStrategyModel.entries.filterNot { it.isTemporarilyDisabled }.forEach { model ->
+        BitcoinStrategyModel.entries.filter { it.id in BitcoinStrategyModel.activeStrategyIds }.forEach { model ->
             val rep15 = dualReport.reportFor(Interval.M15, model.id)
             val rep5 = dualReport.reportFor(Interval.M5, model.id)
             assertNotNull(rep15)
@@ -1098,7 +1099,7 @@ class RiskAndCalendarEngineTest {
         )
         // 2. All 16 learned neural features (0..15) are tunable specifically per strategy across all 16 strategies
         assertEquals(16, tunedParams.perStrategyProfiles.size)
-        BitcoinStrategyModel.entries.forEach { stratModel ->
+        BitcoinStrategyModel.neuralLearningModels.forEach { stratModel ->
             val prof = tunedParams.perStrategyProfiles[stratModel.id]
             assertNotNull("Missing profile for ${stratModel.id}", prof)
             assertEquals(16, prof!!.featureTunings.size)

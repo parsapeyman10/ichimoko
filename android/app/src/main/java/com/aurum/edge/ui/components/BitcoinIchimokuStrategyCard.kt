@@ -70,6 +70,8 @@ internal data class SelectableStrategyItem(
     val isCustom: Boolean,
     /** استراتژی‌های موقتاً خاموش (فعلاً جایگاه ۱۶) در فهرست دیده می‌شوند ولی گزارش/معامله ندارند. */
     val isTemporarilyDisabled: Boolean = false,
+    val requiresExplicitOptIn: Boolean = false,
+    val neuralLearningEnabled: Boolean = true,
 )
 
 @Composable
@@ -96,6 +98,13 @@ fun BitcoinIchimokuStrategyCard(
     var showAddModelForm by rememberSaveable { mutableStateOf(false) }
 
     val selectedId = settings.selectedBitcoinStrategyId
+    val selectedChecklistCount = dualReports[focusedSymbol]
+        ?.reportFor(focusedInterval, selectedId)?.conditions?.size
+        ?: when (selectedId) {
+            BitcoinStrategyModel.BTC_52_CANDLE_REGIME.id -> 10
+            BitcoinStrategyModel.PARSA_52_LINE_TURN.id -> 9
+            else -> 16
+        }
     val executionEnabled = settings.autoPaperTrading
     val activeTitle = settings.activeBitcoinStrategyTitleFa()
     val currentConfig = settings.activeBitcoinStrategyConfig()
@@ -125,6 +134,8 @@ fun BitcoinIchimokuStrategyCard(
                 summaryFa = m.summaryFa,
                 isCustom = false,
                 isTemporarilyDisabled = m.isTemporarilyDisabled,
+                requiresExplicitOptIn = m.requiresExplicitOptIn,
+                neuralLearningEnabled = m.neuralLearningEnabled,
             )
         }
         val customs = settings.customStrategies.map { c ->
@@ -142,7 +153,7 @@ fun BitcoinIchimokuStrategyCard(
     }
 
     SectionCard(
-        title = "رادار هم‌زمان 15m و 5m · استراتژی ۱۶ شرطی نقطه‌زنی",
+        title = "رادار هم‌زمان 15m و 5m · قواعد اختصاصی هر روش",
         subtitle = "$activeTitle · کندل 15m: $countdown15m · کندل 5m: $countdown5m · کش: ${bandwidthStats.totalRequestsSaved}",
         trailing = {
             Pill(
@@ -170,7 +181,7 @@ fun BitcoinIchimokuStrategyCard(
         ) {
             listOf(
                 0 to "📡 رادار 15m + 5m (${allReports.size}/15)",
-                1 to "🎯 چک‌لیست ۱۶ شرط ($focusedSymbol · ${focusedInterval.label})",
+                1 to "🎯 چک‌لیست $selectedChecklistCount شرط ($focusedSymbol · ${focusedInterval.label})",
             ).forEach { (idx, title) ->
                 Pill(
                     text = title,
@@ -248,7 +259,7 @@ fun BitcoinIchimokuStrategyCard(
 
         // ── لایهٔ اختیاری نئوویو (NeoWave) ─────────────────────────────────────
         Text(
-            "توجه: لایهٔ نئوویو–الیوت فقط در «استراتژی ۱۶» ادغام می‌شود؛ استراتژی‌های ۱ تا ۱۵ هیچ محاسبهٔ نئوویو ندارند.",
+            "توجه: لایهٔ نئوویو–الیوت فقط در «استراتژی ۱۶» ادغام می‌شود؛ هیچ روش دیگری محاسبهٔ نئوویو ندارد.",
             style = MaterialTheme.typography.labelSmall,
             color = AurumColors.TextMuted,
             modifier = Modifier.padding(bottom = 4.dp),
@@ -514,8 +525,13 @@ private fun Live12ConditionChecklistPage(
         }
 
         if (report == null) {
+            val expectedChecklistCount = when (selectedStrategyId) {
+                BitcoinStrategyModel.BTC_52_CANDLE_REGIME.id -> 10
+                BitcoinStrategyModel.PARSA_52_LINE_TURN.id -> 9
+                else -> 16
+            }
             Text(
-                text = "در حال محاسبه چک‌لیست ۱۶ شرطی $focusedSymbol (${focusedInterval.label})...",
+                text = "در حال محاسبه چک‌لیست $expectedChecklistCount شرطی $focusedSymbol (${focusedInterval.label})...",
                 style = MaterialTheme.typography.labelSmall,
                 color = AurumColors.TextMuted,
             )
@@ -634,6 +650,11 @@ private fun Live12ConditionChecklistPage(
                     text = "🎯 فرمول حد سود (TP) و خروج: ${playbook.takeProfitAndExitRulesFa}",
                     style = MaterialTheme.typography.labelSmall,
                     color = AurumColors.Green,
+                )
+                Text(
+                    text = "ℹ️ ${playbook.specialEdgeAdvantageFa}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = AurumColors.Cyan,
                 )
             }
         }
@@ -884,7 +905,9 @@ internal fun ExclusiveStrategySelectorPage(
         allItems.forEach { item ->
             var descExpanded by rememberSaveable(item.id) { mutableStateOf(false) }
             val isSelected = item.id == selectedId
-            val isEnabledInMulti = if (runAllSimultaneously) (item.id in enabledStrategyIds || enabledStrategyIds.isEmpty()) else isSelected
+            val isEnabledInMulti = if (runAllSimultaneously) {
+                item.id in enabledStrategyIds || (enabledStrategyIds.isEmpty() && !item.requiresExplicitOptIn)
+            } else isSelected
             val isRunning = isEnabledInMulti && executionEnabled
             val borderColor = when {
                 isRunning -> AurumColors.Green
@@ -940,7 +963,11 @@ internal fun ExclusiveStrategySelectorPage(
                                 color = if (isEnabledInMulti) AurumColors.Gold else AurumColors.TextPrimary,
                             )
                             Text(
-                                text = "${item.badgeFa} · ${item.authorRefFa}",
+                                text = buildString {
+                                    append(item.badgeFa).append(" · ").append(item.authorRefFa)
+                                    if (item.requiresExplicitOptIn) append(" · فقط با انتخاب صریح")
+                                    if (!item.neuralLearningEnabled) append(" · بدون یادگیری/تیون عصبی")
+                                },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = AurumColors.Cyan,
                             )
@@ -964,6 +991,7 @@ internal fun ExclusiveStrategySelectorPage(
                             text = when {
                                 isRunning -> "🟢 فعال هم‌زمان"
                                 isEnabledInMulti -> "🟢 آماده رصد"
+                                item.requiresExplicitOptIn -> "انتخاب صریح لازم"
                                 else -> "غیرفعال"
                             },
                             color = when {
@@ -1028,6 +1056,11 @@ internal fun ExclusiveStrategySelectorPage(
                             text = "🎯 حد سود و خروج (TP): ${modelSpec.takeProfitAndExitRulesFa}",
                             style = MaterialTheme.typography.labelSmall,
                             color = AurumColors.Green,
+                        )
+                        Text(
+                            text = "ℹ️ ${modelSpec.specialEdgeAdvantageFa}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AurumColors.Cyan,
                         )
                     }
                 }

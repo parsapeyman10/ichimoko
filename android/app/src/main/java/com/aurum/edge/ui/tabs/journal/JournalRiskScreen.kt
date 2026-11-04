@@ -183,7 +183,7 @@ fun JournalRiskScreen(
 
     val filterScopeLabelFa = remember(selectedStrategyFilter, strategyCategories) {
         if (selectedStrategyFilter == "ALL") {
-            "تمام ۱۶ استراتژی و ۱۵ نماد (15m + 5m)"
+            "همهٔ روش‌های ژورنال در ۱۵ نماد (15m + 5m)"
         } else {
             strategyCategories.firstOrNull { it.strategyId == selectedStrategyFilter }?.strategyTitleFa
                 ?: selectedStrategyFilter

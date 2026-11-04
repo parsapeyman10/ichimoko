@@ -428,7 +428,7 @@ data class AppSettings(
         val allKnownIds = BitcoinStrategyModel.entries.map { it.id } + customStrategies.map { it.id }
         return if (runAllStrategiesSimultaneously) {
             val matched = allKnownIds.count { it in enabledStrategyIds }
-            if (matched > 0) matched else allKnownIds.size
+            if (matched > 0) matched else BitcoinStrategyModel.activeStrategyIds.size + customStrategies.size
         } else 1
     }
 

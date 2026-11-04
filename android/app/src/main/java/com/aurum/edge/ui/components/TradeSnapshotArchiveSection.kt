@@ -507,7 +507,7 @@ fun TradeSnapshotViewerDialog(
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Text(
-                        text = "✅ چک‌لیست ۱۶ شرط ایچیموکو در لحظه ورود:",
+                        text = "✅ چک‌لیست ${record.conditionsSummary.size} شرطی روش در لحظهٔ ورود:",
                         style = MaterialTheme.typography.labelMedium,
                         color = AurumColors.Green,
                         fontWeight = FontWeight.Bold,
